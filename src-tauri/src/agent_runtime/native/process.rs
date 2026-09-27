@@ -502,10 +502,38 @@ fn spawn_local_process_with_scope_native(
     if let Some(cwd) = cwd {
         child.current_dir(cwd);
     }
-    child
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    child.stdin(Stdio::piped());
+    spawn_local_child_native(
+        task_id,
+        request_id,
+        owner_target_id,
+        child,
+        sandbox_temp,
+        timeout,
+    )
+}
+
+pub(crate) fn spawn_reviewed_local_process_native(
+    task_id: String,
+    request_id: String,
+    owner_target_id: String,
+    plan: &super::ReviewedReadCommand,
+    timeout: Duration,
+) -> Result<Arc<ManagedProcessNative>, String> {
+    // No shell, caller PATH, startup scripts or fallback to unrestricted execution.
+    let child = plan.command()?;
+    spawn_local_child_native(task_id, request_id, owner_target_id, child, None, timeout)
+}
+
+fn spawn_local_child_native(
+    task_id: String,
+    request_id: String,
+    owner_target_id: String,
+    mut child: Command,
+    sandbox_temp: Option<tempfile::TempDir>,
+    timeout: Duration,
+) -> Result<Arc<ManagedProcessNative>, String> {
+    child.stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;

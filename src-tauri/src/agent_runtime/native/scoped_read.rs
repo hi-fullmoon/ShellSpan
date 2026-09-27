@@ -138,6 +138,25 @@ pub(crate) struct LocalScopedReader {
     _ancestors: Vec<File>,
 }
 impl LocalScopedReader {
+    #[cfg(unix)]
+    pub(super) fn open_command_directory(&self, path: &str) -> Result<File, ScopeReadError> {
+        self.check_root()?;
+        let handle = self.open_relative(path, true)?;
+        self.check_root()?;
+        Ok(handle)
+    }
+
+    #[cfg(unix)]
+    pub(super) fn open_command_file(&self, path: &str) -> Result<File, ScopeReadError> {
+        self.check_root()?;
+        let handle = self.open_relative(path, false)?;
+        let metadata = handle.metadata()?;
+        if !metadata.is_file() || metadata.len() > 1024 * 1024 {
+            return Err(ScopeReadError::Limit);
+        }
+        self.check_root()?;
+        Ok(handle)
+    }
     pub(crate) fn open(root: &str) -> Result<Self, ScopeReadError> {
         let (directory, ancestors, normalized) = open_root_chain(Path::new(root))?;
         let root = normalized
@@ -658,6 +677,21 @@ fn opened_identity(file: &File) -> Result<String, ScopeReadError> {
 }
 
 fn open_root_chain(path: &Path) -> Result<(File, Vec<File>, PathBuf), ScopeReadError> {
+    // macOS exposes these OS-owned aliases. Resolve only their exact, expected
+    // prefix; all user-controlled descendants still go through no-follow opens.
+    #[cfg(target_os = "macos")]
+    for (alias, destination) in [
+        ("/var", "/private/var"),
+        ("/tmp", "/private/tmp"),
+        ("/etc", "/private/etc"),
+    ] {
+        if let Ok(relative) = path.strip_prefix(alias) {
+            if fs::canonicalize(alias).ok().as_deref() != Some(Path::new(destination)) {
+                return Err(ScopeReadError::Denied);
+            }
+            return open_root_chain_with(&Path::new(destination).join(relative), |_| {});
+        }
+    }
     open_root_chain_with(path, |_| {})
 }
 fn open_root_chain_with(
