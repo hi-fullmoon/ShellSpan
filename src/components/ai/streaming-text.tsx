@@ -1,5 +1,5 @@
 /// <reference lib="es2022.intl" />
-import { createContext, useContext, useState } from 'react';
+import { createContext, useContext, useRef, useState } from 'react';
 import type { ExtraProps } from 'react-markdown';
 
 export const StreamingTextContext = createContext(false);
@@ -39,6 +39,7 @@ function lastGraphemeStart(text: string, from = 0): number {
 export function StreamingText({ children, sourceStart = 0 }: { children: string; sourceStart?: number }) {
   const streaming = useContext(StreamingTextContext) && segmenter !== null;
   const revealFrom = useContext(StreamingTextBoundaryContext);
+  const firstFragment = useRef<HTMLSpanElement>(null);
   const revealInitial = streaming && sourceStart >= revealFrom && children.length > 0;
   const [state, setState] = useState(() => ({
     text: children,
@@ -67,7 +68,15 @@ export function StreamingText({ children, sourceStart = 0 }: { children: string;
         fragment(children.slice(state.text.length), state.text.length, streaming)];
       // A final delta may add one fragment; keep existing nodes intact while
       // settling so a selected earlier fragment remains copyable.
-      const retired = streaming
+      // Moving fragments into the prefix replaces native text nodes. Defer it
+      // while a selection is active, including selections spanning Markdown
+      // nodes; the next append after deselection restores the normal bound.
+      const selection = typeof window === 'undefined' ? null : window.getSelection();
+      const parent = firstFragment.current?.parentNode;
+      const selected = selection && !selection.isCollapsed && parent
+        && Array.from({ length: selection.rangeCount }, (_, index) => selection.getRangeAt(index))
+          .some((range) => range.intersectsNode(parent));
+      const retired = streaming && !selected
         ? fragments.splice(0, Math.max(0, fragments.length - MAX_FRAGMENTS))
         : [];
       setState({
@@ -80,8 +89,9 @@ export function StreamingText({ children, sourceStart = 0 }: { children: string;
     }
   }
 
-  return <>{state.prefix}{state.fragments.map((fragment) => (
+  return <>{state.prefix}{state.fragments.map((fragment, index) => (
     <span key={fragment.offset} className="ai-stream-text-fragment"
+      ref={index === 0 ? firstFragment : undefined}
       data-streaming={streaming || undefined} data-reveal={fragment.reveal || undefined}
       data-staggered={fragment.runs.length > 0 || undefined}>
       {fragment.runs.length > 0 ? fragment.runs.map((run, index) => (

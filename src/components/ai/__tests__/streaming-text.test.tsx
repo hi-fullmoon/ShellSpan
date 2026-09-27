@@ -109,6 +109,50 @@ describe('streaming text reveal', () => {
     }
   });
 
+  it('preserves selected repository text through fragment retirement and resumes compaction after deselection', () => {
+    const source = readFileSync('AGENTS.md', 'utf8');
+    const { container, rerender } = render(<Text text={source.slice(0, 8)} />);
+    const textNode = container.querySelector('span')!.firstChild!;
+    const selection = window.getSelection()!;
+    const range = document.createRange();
+    range.selectNodeContents(textNode);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    try {
+      for (let length = 9; length <= 80; length++) {
+        rerender(<Text text={source.slice(0, length)} />);
+        expect(selection.toString()).toBe(source.slice(0, 8));
+        expect(selection.anchorNode).toBe(textNode);
+        expect(container.textContent).toBe(source.slice(0, length));
+      }
+      selection.removeAllRanges();
+      rerender(<Text text={source.slice(0, 81)} />);
+      expect(container.querySelectorAll('.ai-stream-text-fragment').length).toBeLessThanOrEqual(24);
+      expect(container.textContent).toBe(source.slice(0, 81));
+    } finally {
+      selection.removeAllRanges();
+    }
+  });
+
+  it('keeps unrelated streaming text bounded while another paragraph is selected', () => {
+    const source = readFileSync('AGENTS.md', 'utf8');
+    const view = (length: number) => <><p>{source.slice(0, 8)}</p><div><Text text={source.slice(0, length)} /></div></>;
+    const { container, rerender } = render(view(1));
+    const selection = window.getSelection()!;
+    const range = document.createRange();
+    range.selectNodeContents(container.querySelector('p')!);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    try {
+      for (let length = 2; length <= 80; length++) rerender(view(length));
+      expect(selection.toString()).toBe(source.slice(0, 8));
+      expect(container.querySelectorAll('.ai-stream-text-fragment').length).toBeLessThanOrEqual(24);
+      expect(container.querySelector('div')?.textContent).toBe(source.slice(0, 80));
+    } finally {
+      selection.removeAllRanges();
+    }
+  });
+
   it.each([
     ['👩', '👩‍💻'],
     ['e', 'e\u0301'],
