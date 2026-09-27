@@ -63,6 +63,12 @@ export interface AiQuestionPanelProps {
 
 const recommendedSuffix = /\s+\(Recommended\)$/i;
 
+function isAnswerInvalid(answer: QuestionAnswer): boolean {
+  return (!answer.selected.length && !answer.custom?.trim()) ||
+    (answer.custom !== undefined && !answer.custom.trim()) ||
+    new TextEncoder().encode(answer.custom ?? '').length > 8192;
+}
+
 export function AiQuestionPanel({
   question,
   onAnswer,
@@ -82,12 +88,7 @@ export function AiQuestionPanel({
   const inputId = `${question.identity.questionRequestId}-${currentIndex}`;
   const tooLong =
     new TextEncoder().encode(currentAnswer.custom ?? '').length > 8192;
-  const invalid = answers.some(
-    (a) =>
-      (!a.selected.length && !a.custom?.trim()) ||
-      (a.custom !== undefined && !a.custom.trim()) ||
-      new TextEncoder().encode(a.custom ?? '').length > 8192,
-  );
+  const invalid = answers.some(isAnswerInvalid);
   const update = (answer: QuestionAnswer): void => {
     useAgentQuestionStore
       .getState()
@@ -112,16 +113,16 @@ export function AiQuestionPanel({
       setCurrentIndex((index) => index + 1);
     }
   };
-  const submit = async (): Promise<void> => {
-    if (pending || invalid || !onAnswer) return;
-    const input = draft?.submission ?? {
+  const submit = async (nextAnswers = answers): Promise<void> => {
+    if (pending || nextAnswers.some(isAnswerInvalid) || !onAnswer) return;
+    const input = (nextAnswers === answers ? draft?.submission : undefined) ?? {
       identity: question.identity,
       clientOperationId: crypto.randomUUID(),
-      answers,
+      answers: nextAnswers,
     };
     useAgentQuestionStore
       .getState()
-      .setDraft(key, { answers, submission: input });
+      .setDraft(key, { answers: nextAnswers, submission: input });
     setPending(true);
     setError(null);
     try {
@@ -132,9 +133,23 @@ export function AiQuestionPanel({
       setError(t('ai.workspace.question.submitFailed'));
     }
   };
+  const decline = (): void => {
+    if (pending || !onAnswer || draft?.submission) return;
+    const nextAnswers = answers.map((answer) => answer.id === currentQuestion.id
+      ? { id: answer.id, selected: [], custom: t('ai.workspace.question.declinedAnswer') }
+      : answer);
+    const nextIndex = nextAnswers.findIndex(isAnswerInvalid);
+    if (nextIndex < 0) {
+      void submit(nextAnswers);
+    } else {
+      useAgentQuestionStore.getState().setDraft(key, { answers: nextAnswers });
+      setError(null);
+      setCurrentIndex(nextIndex);
+    }
+  };
   return (
     <Card
-      className="ai-question-panel max-h-[min(600px,72vh)] gap-0 py-0 max-[421px]:max-h-[72vh]"
+      className="ai-question-panel min-h-0 max-h-[min(440px,40dvh)] shrink-0 gap-0 py-0"
       data-slot="ai-question-panel"
       data-question-id={question.identity.questionRequestId}
       data-collapsed={collapsed || undefined}
@@ -320,16 +335,10 @@ export function AiQuestionPanel({
                 type="button"
                 variant="outline"
                 size="sm"
-                disabled={pending}
-                onClick={() => {
-                  if (currentIndex < question.questions.length - 1) {
-                    setCurrentIndex((index) => index + 1);
-                  } else {
-                    setCollapsed(true);
-                  }
-                }}
+                disabled={pending || !onAnswer || !!draft?.submission}
+                onClick={decline}
               >
-                {t('ai.workspace.question.skip')}
+                {t('ai.workspace.question.decline')}
               </Button>
               <Button
                 className="min-w-[68px] max-[421px]:min-w-auto"

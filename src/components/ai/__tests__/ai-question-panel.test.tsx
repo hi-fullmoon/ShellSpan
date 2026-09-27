@@ -14,7 +14,7 @@ import {
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
-import type { AgentQuestionView } from '@/types/agent-question';
+import type { AgentQuestionView, AnswerQuestionInput } from '@/types/agent-question';
 import '@/components/ai/styles/styles.css';
 
 const question: AgentQuestionView = {
@@ -51,6 +51,49 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('Stage 6A question form', () => {
+  it('records a refusal per question and submits when every question is resolved', async () => {
+    const submissions: AnswerQuestionInput[] = [];
+    const user = userEvent.setup();
+    render(<AiQuestionPanel question={{
+      ...question,
+      questions: [...question.questions, { id: 'second', question: 'Anything else?', multi_select: false }],
+    }} onAnswer={async (input) => { submissions.push(input); }} />);
+    await user.click(screen.getByRole('button', { name: 'Decline to answer' }));
+    expect(submissions).toHaveLength(0);
+    expect(screen.getAllByText('Anything else?')[0]).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Decline to answer' }));
+    await waitFor(() => expect(submissions).toHaveLength(1));
+    expect(submissions[0].answers.map((answer) => answer.id)).toEqual(['choice', 'second']);
+    for (const answer of submissions[0].answers) {
+      expect(answer.selected).toEqual([]);
+      expect(answer.custom).toContain('The user declined to answer this question.');
+    }
+    expect(useAgentQuestionStore.getState().drafts).toEqual({});
+  });
+
+  it('preserves answered questions and retries a failed refusal with the same operation', async () => {
+    const submissions: AnswerQuestionInput[] = [];
+    const user = userEvent.setup();
+    const onAnswer = async (input: AnswerQuestionInput): Promise<void> => {
+      submissions.push(input);
+      if (submissions.length === 1) throw new Error('Submission not confirmed');
+    };
+    const props = { question: {
+      ...question,
+      questions: [...question.questions, { id: 'second', question: 'Anything else?', multi_select: false }],
+    }, onAnswer };
+    const first = render(<AiQuestionPanel {...props} />);
+    await user.click(screen.getByRole('button', { name: 'B' }));
+    await user.click(screen.getByRole('button', { name: 'Decline to answer' }));
+    await screen.findByRole('alert');
+    expect(submissions[0].answers[0]).toEqual({ id: 'choice', selected: ['B'] });
+    first.unmount();
+    render(<AiQuestionPanel {...props} />);
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    await waitFor(() => expect(submissions).toHaveLength(2));
+    expect(submissions[1]).toEqual(submissions[0]);
+  });
+
   it('never auto-selects recommendations; failed IPC retries identical operation and payload after remount', async () => {
     const user = userEvent.setup();
     const onAnswer = vi

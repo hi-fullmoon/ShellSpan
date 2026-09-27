@@ -6,6 +6,7 @@ import { listProjectDirectories as readProjectDirectories } from '@/lib/ai/proje
 import { questionKey } from '@/types/agent-question';
 import { useImageDraft } from './use-image-draft';
 import { sessionProviderConfig } from '@/lib/ai/session-settings';
+import { initialSessionIntent } from '@/lib/ai/session-intent';
 import { isTopLevelAiSession, listAllAiSessions } from '@/lib/ai/session-list';
 import type { AiProviderConfig } from '@/types/ai';
 import { requireVision } from '@/lib/ai/vision-contract';
@@ -531,6 +532,7 @@ export function useAiSessionController({
     content: string,
     workspaceRoot?: string,
   ): Extract<AiCreateSessionInput, { kind: 'agent' }> => {
+    const intent = initialSessionIntent(content, t('ai.workspace.images.noTextGoal'));
     if (scope === 'workbench') {
       const sessionId = `ask-workbench-${operationId()}`;
       return {
@@ -538,7 +540,7 @@ export function useAiSessionController({
         request: {
           sessionId,
           taskId: `conversation-${sessionId}`,
-          goal: content,
+          goal: intent.goal,
           target: {
             kind: 'local',
             targetId: WORKBENCH_AI_TARGET_ID,
@@ -564,15 +566,13 @@ export function useAiSessionController({
       request: {
         sessionId,
         taskId: `task-${sessionId}`,
-        goal: content,
+        goal: intent.goal,
         target: runtimeTarget(activeTerminal, workspaceRoot),
         permissionMode: permissionMode(
           useAgentPermissionStore.getState().getMode(activeTerminal.sessionId),
         ),
         executionSurface: newExecutionSurface,
-        // Native tool policy bounds each criterion to 2 KiB, even when the
-        // session goal and first human message contain more context.
-        successCriteria: [content.length > 512 ? `${content.slice(0, 511)}…` : content],
+        successCriteria: intent.successCriteria,
       },
     };
   }, [activeTerminal, newExecutionSurface, operationId, scope, t]);
@@ -718,6 +718,9 @@ export function useAiSessionController({
       : viewRef.current.throughSeq + 1;
     const submission: AiOptimisticSubmission = {
       ...payload,
+      startsTurn: composerRef.current.pendingSubmissions.find(
+        item => item.clientOperationId === payload.clientOperationId,
+      )?.startsTurn,
       scopeKey: workspaceScopeKey,
       expectedNextSeq,
       delivery: 'pending',
@@ -1569,7 +1572,7 @@ export function useAiSessionController({
           const cold = await coldSkillSession.current;
           const sessionId = composer.sessionId ?? cold?.summary.id;
           const create = sessionId ? undefined : await createInputWithFrozenTargetRoot(
-            composerRef.current.draft.trim() || t('ai.workspace.images.add'),
+            composerRef.current.draft.trim(),
           );
           return { id: operationId(), sessionId: sessionId ?? create!.request.sessionId, mode: decision.mode, create };
         }, async value => {

@@ -203,6 +203,7 @@ function toolTitle(
   variant: AiToolVariant,
   t: ReturnType<typeof useI18n>['t'],
 ): string {
+  if (node.name === 'skill' || node.nativeName === 'skill') return t('ai.workspace.tool.title.skill');
   if (node.name === 'trash_file') return t('ai.workspace.approval.action.trashFile');
   if (node.title === 'Agent orchestration') return t('ai.workspace.tool.title.orchestration');
   if (variant !== 'generic' || !node.title || node.title === node.name || node.title === node.nativeName) {
@@ -295,7 +296,7 @@ function TerminalSurface({ node, compact, showCopyActions }: { node: ToolNode; c
     ?? '$';
   return (
     <div className="ai-terminal-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="terminal" data-running={node.state === 'running' || undefined}>
-      <div className="ai-terminal-header flex min-w-0 items-start gap-2 py-[9px] pr-1 pl-3.5">
+      <div className="ai-terminal-header flex min-w-0 items-start gap-2 py-[9px] pr-1 pl-3.5 [@media(hover:hover)]:relative">
         <span className={cn(AI_STATE_DOT_CLASS, 'mt-1.5')} data-state={node.state} aria-hidden="true" />
         <span className="ai-terminal-cwd shrink-0">{cwd}</span>
         <button
