@@ -213,13 +213,13 @@ export function AiComposerSeat({
     rawDraft, updateRawDraft, terminal || waitingApproval || waitingQuestion || unavailable || submitting || imageLocked,
   );
   const empty = draft.trim().length === 0 && !hasImages && !message.documents.length;
-  const stopPrimary = running && empty;
+  const stopPrimary = running && (empty || unavailable || waitingApproval || waitingQuestion || (mode === 'ask'));
   const submitDisabled = terminal
     || stopping
     || submitting
     || documents.busy
     || (!stopPrimary && (waitingQuestion || waitingApproval))
-    || (mode === 'ask' && running && !empty)
+    || (!stopPrimary && mode === 'ask' && running && !empty)
     || (stopPrimary
       ? onStop === undefined
       : unavailable || empty || (onSubmitGesture === undefined && onSubmit === undefined));
@@ -237,7 +237,7 @@ export function AiComposerSeat({
     // Internal context (for example after-tool verification reminders) is
     // consumed between steps and must not briefly expand the user's queue.
     const items = inbox.filter((item) => (
-      item.source === 'user' && item.state !== 'claimed' && !item.startsTurn
+      item.source === 'user' && !item.consumed && !item.startsTurn
     ));
     for (const pending of composerState?.pendingSubmissions ?? []) {
       if (pending.mode === 'start' || pending.startsTurn) continue;
@@ -358,6 +358,42 @@ export function AiComposerSeat({
   });
   const skillCompletion = useSkillCompletion({ text: draft, update: updateDraft, query: mode === 'agent' ? onListSkills : undefined, scopeKey: skillsScopeKey, editor: completion.editor, disabled: Boolean(terminal || waitingApproval || waitingQuestion || unavailable || imageLocked || submitting) });
   const wasStopping = useRef(false);
+  useEffect(() => {
+    if (!running || stopping || terminal || !onStop) return;
+    let previous: { target: EventTarget | null; time: number } | null = null;
+    const reset = () => { previous = null; };
+    const keyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      const scope = cardRef.current?.closest('[data-slot="ai-workspace-root"]') ?? cardRef.current;
+      if (!(target instanceof HTMLElement) || !scope?.contains(target)
+        || target.closest('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], .xterm, [data-slot="ai-approval-overlay"]')
+        || document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]')
+        || event.defaultPrevented || event.isComposing || composingRef.current
+        || Date.now() < composingUntilRef.current || event.repeat
+        || event.key !== 'Escape' || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) {
+        reset();
+        return;
+      }
+      const now = performance.now();
+      if (previous?.target === target && now - previous.time <= 500) {
+        reset();
+        event.preventDefault();
+        onStop();
+      } else previous = { target, time: now };
+    };
+    document.addEventListener('keydown', keyDown);
+    document.addEventListener('focusin', reset);
+    document.addEventListener('pointerdown', reset);
+    document.addEventListener('compositionstart', reset);
+    window.addEventListener('blur', reset);
+    return () => {
+      document.removeEventListener('keydown', keyDown);
+      document.removeEventListener('focusin', reset);
+      document.removeEventListener('pointerdown', reset);
+      document.removeEventListener('compositionstart', reset);
+      window.removeEventListener('blur', reset);
+    };
+  }, [running, stopping, terminal, onStop, attachmentOwner]);
   const blockedSubmitReason = submitting ? 'ai.workspace.announce.submitting'
     : mode === 'ask' && running ? 'ai.workspace.announce.askRunning' : null;
   const announcedBlock = useRef<string | null>(null);
@@ -403,6 +439,7 @@ export function AiComposerSeat({
         <AiTaskStrip steps={taskSteps} active={status === 'running' || status === 'waiting'} />
       )}
       {completion.dialog}
+      {pendingQuestion && <AiQuestionPanel key={questionKey(pendingQuestion.identity)} question={pendingQuestion} onAnswer={onAnswerQuestion} />}
       {mode === 'agent' && <AiQueueDock
         items={queueItems}
         mutation={queueMutation}
@@ -414,7 +451,6 @@ export function AiComposerSeat({
         onResume={onResumeQueueItem}
         onReorder={onReorderQueueLane}
       />}
-      {pendingQuestion && <AiQuestionPanel key={questionKey(pendingQuestion.identity)} question={pendingQuestion} onAnswer={onAnswerQuestion} />}
       {
         <div ref={completionAnchor} className="ai-composer-input-anchor relative min-w-0">
           <InputGroup ref={cardRef} className={cn(
@@ -608,25 +644,7 @@ export function AiComposerSeat({
                   </Button>
                 ))}
                 <AiContextMeter usage={contextUsage} />
-                {running && !stopping && !stopPrimary && onStop && (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={(
-                        <InputGroupButton
-                          variant="ghost"
-                          size="icon-sm"
-                          className="ai-composer-primary ai-composer-stop size-7 shrink-0"
-                          onClick={onStop}
-                          aria-label={t('ai.workspace.stop')}
-                        />
-                      )}
-                    >
-                      <SquareIcon className="ai-composer-stop-icon" fill="currentColor" />
-                    </TooltipTrigger>
-                    <TooltipContent>{t('ai.workspace.stopTooltip')}</TooltipContent>
-                  </Tooltip>
-                )}
-                <Tooltip>
+                <Tooltip disabled={submitDisabled}>
                   <TooltipTrigger
                     render={(
                       <InputGroupButton
@@ -648,7 +666,9 @@ export function AiComposerSeat({
                       : <ArrowUpIcon />}
                   </TooltipTrigger>
                   <TooltipContent>
-                    {waitingApproval
+                    {stopPrimary
+                      ? t('ai.workspace.stopTooltip')
+                      : waitingApproval
                       ? t('ai.workspace.approvalWaiting')
                       : unavailableReason
                         ? unavailableReason

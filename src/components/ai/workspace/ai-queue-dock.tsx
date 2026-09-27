@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import {
   ArrowDownUpIcon,
+  ArrowDownIcon,
   ArrowUpIcon,
   CheckIcon,
   ChevronDownIcon,
@@ -18,6 +19,7 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
@@ -30,7 +32,7 @@ import type { AiInboxItem } from '@/lib/ai/session-adapter';
 import { decodeDocumentMessage, documentMessageSummary, encodeDocumentMessage } from '@/lib/ai/document-message';
 import { DOCUMENT_LIMITS, documentErrorKey } from '@/lib/ai/document-import';
 import type { LocaleKey } from '@/locales';
-import { AiErrorNotice } from './ai-error-notice';
+import { AiQueueNotice } from './ai-queue-notice';
 import type { AiQueueMutationState } from './use-ai-session-controller';
 
 export interface AiQueueDockProps {
@@ -146,10 +148,14 @@ export function AiQueueDock({
   };
 
   return (
-    <section
+    <div className="flex w-full min-w-0 shrink-0 flex-col gap-3">
+      {mutation?.status === 'failed' && (
+        <AiQueueNotice conflict={mutation.conflict} error={mutation.error} />
+      )}
+      {items.length > 0 && <section
       data-slot="ai-queue-dock"
       aria-label={t('ai.workspace.queue.title')}
-      className="ai-queue-dock relative mx-auto mb-[calc(0px-var(--ai-composer-stack-gap)-3px)] w-[calc(100%-32px)] min-w-0 max-w-[calc(var(--ai-composer-card-max-width)-32px)] overflow-hidden box-border py-0.5 @max-[400px]/ai-workspace:w-[calc(100%-20px)]"
+      className="ai-queue-dock relative w-full min-w-0 shrink-0 overflow-hidden box-border pb-0.5"
     >
       {items.length > 1 && (
         <Button
@@ -166,7 +172,7 @@ export function AiQueueDock({
           {expanded ? <ChevronDownIcon aria-hidden="true" /> : <ChevronUpIcon aria-hidden="true" />}
         </Button>
       )}
-      {expanded && <ul className="ai-queue-list m-0 max-h-[180px] list-none overflow-y-auto p-0">
+      {expanded && <ul className="ai-queue-list m-0 max-h-[min(108px,16dvh)] list-none overflow-y-auto p-0">
         {items.map((item) => {
           const documentMessage = decodeDocumentMessage(item.content);
           const canSave = Boolean(editValue.trim() || documentMessage.documents.length);
@@ -194,7 +200,7 @@ export function AiQueueDock({
               {items.length === 1 && <ListEndIcon aria-hidden="true" />}
               {editing ? (
                 <form
-                  className="ai-queue-editor flex w-full min-w-0 items-center gap-2.5"
+                  className="ai-queue-editor flex w-full min-w-0 items-center gap-1"
                   onSubmit={(event) => {
                     event.preventDefault();
                     save();
@@ -207,6 +213,7 @@ export function AiQueueDock({
                       </FieldLabel>
                       <Input
                         id={`queue-edit-${item.id}`}
+                        className="h-6 px-2 py-0"
                         value={editValue}
                         aria-invalid={!canSave}
                         maxLength={documentMessage.documents.length ? DOCUMENT_LIMITS.maxDraftCharacters - documentMessage.documents.reduce((sum, document) => sum + document.text.length, 0) : undefined}
@@ -237,7 +244,8 @@ export function AiQueueDock({
                 <div className="ai-queue-row-content flex w-full min-w-0 items-center gap-2.5">
                   <span className="min-w-0 flex-1 truncate">{documentMessageSummary(item.content)}</span>
                   {item.paused && <Badge variant="secondary">{t('ai.workspace.queue.paused')}</Badge>}
-                  {item.lane === 'nextStep' && <Badge variant="secondary">{t('ai.workspace.queue.lane.nextStep')}</Badge>}
+                  {item.lane === 'nextStep' && <Badge variant="secondary">{t(item.state === 'pending'
+                    ? 'ai.workspace.queue.lane.nextStep' : 'ai.workspace.queue.waitingNextStep')}</Badge>}
                   {item.state === 'pending' && (
                     <Spinner aria-label={t('ai.workspace.queue.state.pending')} />
                   )}
@@ -255,13 +263,14 @@ export function AiQueueDock({
                         )}>
                           <ArrowDownUpIcon data-icon="inline-start" />
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
+                        <DropdownMenuContent align="end" side="top" className="w-40 max-w-(--available-width)">
                           <DropdownMenuGroup>
-                            <DropdownMenuItem disabled={pending || laneIndex <= 0} onClick={() => move(item, -1)}>
-                              <ChevronUpIcon />{t('ai.workspace.queue.moveUp')}
+                            <DropdownMenuLabel>{t(`ai.workspace.queue.lane.${item.lane}` as LocaleKey)}</DropdownMenuLabel>
+                            <DropdownMenuItem className="whitespace-nowrap" disabled={pending || laneIndex <= 0} onClick={() => move(item, -1)}>
+                              <ArrowUpIcon />{t('ai.workspace.queue.moveUp')}
                             </DropdownMenuItem>
-                            <DropdownMenuItem disabled={pending || laneIndex < 0 || laneIndex >= laneItems.length - 1} onClick={() => move(item, 1)}>
-                              <ChevronDownIcon />{t('ai.workspace.queue.moveDown')}
+                            <DropdownMenuItem className="whitespace-nowrap" disabled={pending || laneIndex < 0 || laneIndex >= laneItems.length - 1} onClick={() => move(item, 1)}>
+                              <ArrowDownIcon />{t('ai.workspace.queue.moveDown')}
                             </DropdownMenuItem>
                           </DropdownMenuGroup>
                         </DropdownMenuContent>
@@ -308,16 +317,7 @@ export function AiQueueDock({
           );
         })}
       </ul>}
-      {mutation?.status === 'failed' && (
-        <AiErrorNotice
-          title={t('ai.workspace.recovery.title')}
-          label={mutation.conflict
-            ? t('ai.workspace.queue.conflict')
-            : t('ai.workspace.queue.failure')}
-        >
-          {mutation.error}
-        </AiErrorNotice>
-      )}
-    </section>
+      </section>}
+    </div>
   );
 }
