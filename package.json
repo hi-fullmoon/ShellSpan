@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:credential-refresh": "node scripts/verify-credential-refresh.mjs",
     "test:ai-streaming": "node scripts/verify-ai-streaming.mjs",
+    "test:ai-session-stream": "node scripts/verify-ai-session-stream.mjs",
     "test:image-draft-indexeddb": "node scripts/verify-image-draft-indexeddb.mjs",
     "test:document-upload": "node scripts/verify-document-upload.mjs",
     "test:terminal-geometry": "node src/components/terminal/__tests__/terminal-geometry.browser.mjs",
