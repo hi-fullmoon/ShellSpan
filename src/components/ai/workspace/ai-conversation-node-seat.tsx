@@ -16,24 +16,11 @@ import { StreamingText, StreamingTextContext } from '@/components/ai/streaming-t
 import { Bubble, Message, MessageActions } from '@/components/ai/chat-primitives';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Spinner } from '@/components/ui/spinner';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible';
-import {
-  Marker as MarkerPrimitive,
-  MarkerContent,
-  MarkerIcon,
-} from '@/components/ui/marker';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Marker as MarkerPrimitive, MarkerContent, MarkerIcon } from '@/components/ui/marker';
 import { Separator } from '@/components/ui/separator';
 import { useI18n } from '@/hooks/useI18n';
-import type {
-  AiConversationNode,
-  AiConversationNodeOf,
-  AiTurnProcessStatus,
-} from '@/lib/ai/conversation-node';
+import type { AiConversationNode, AiConversationNodeOf, AiTurnProcessStatus } from '@/lib/ai/conversation-node';
 import type { LocaleKey } from '@/locales';
 import { cn } from '@/lib/utils';
 import { createStreamingMarkdownSplitter } from '@/lib/streaming-markdown';
@@ -41,6 +28,7 @@ import { taskBudgetArtifactTitleKey } from '@/lib/ai/task-token-budget';
 import { requestErrorMessageKey } from '@/lib/ai/request-error';
 import { AiToolRow } from './ai-tool-presentation';
 import { AiTurnFooter } from './ai-turn-footer';
+import { AiProcessingStatus } from './ai-processing-status';
 import { AiQuestionHistory } from './ai-question-panel';
 import {
   AI_DISCLOSURE_LEADING_CLASS,
@@ -60,13 +48,11 @@ type AiConversationNodeRendererProps<Kind extends AiConversationNode['kind']> = 
 };
 
 export type AiConversationNodeRendererMap = {
-  readonly [Kind in AiConversationNode['kind']]: React.ComponentType<
-    AiConversationNodeRendererProps<Kind>
-  >;
+  readonly [Kind in AiConversationNode['kind']]: React.ComponentType<AiConversationNodeRendererProps<Kind>>;
 };
 
 function assistantText(node: AiConversationNodeOf<'assistantMessage'>): string {
-  return node.blocks.flatMap((block) => block.type === 'text' ? [block.text] : []).join('');
+  return node.blocks.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('');
 }
 
 function SemanticNoteDisclosure({
@@ -86,7 +72,7 @@ function SemanticNoteDisclosure({
       <div className="ai-semantic-note min-w-0 max-w-full" data-expanded={open || undefined}>
         <MarkerPrimitive className="ai-semantic-note-marker min-w-0">
           <CollapsibleTrigger
-            render={(
+            render={
               <Button
                 type="button"
                 variant="plain"
@@ -95,7 +81,7 @@ function SemanticNoteDisclosure({
                 aria-label={label}
                 aria-expanded={open}
               />
-            )}
+            }
           >
             <MarkerIcon className={AI_DISCLOSURE_LEADING_CLASS}>
               {icon}
@@ -114,7 +100,9 @@ function SemanticNoteDisclosure({
         </MarkerPrimitive>
         <CollapsibleContent>
           <Separator className="ai-semantic-note-separator" />
-          <div className="ai-semantic-note-body mt-1 ml-[22px] box-border max-h-[141px] w-[calc(100%-22px)] overflow-auto pt-2.5 pr-4 pb-3 pl-3 whitespace-pre-wrap [overflow-wrap:anywhere]">{body}</div>
+          <div className="ai-semantic-note-body mt-1 ml-[22px] box-border max-h-[141px] w-[calc(100%-22px)] overflow-auto pt-2.5 pr-4 pb-3 pl-3 whitespace-pre-wrap [overflow-wrap:anywhere]">
+            {body}
+          </div>
         </CollapsibleContent>
       </div>
     </Collapsible>
@@ -123,48 +111,44 @@ function SemanticNoteDisclosure({
 
 function SystemPromptRow({ node }: { readonly node: AiConversationNodeOf<'systemPrompt'> }) {
   const { t } = useI18n();
-  return (
-    <SemanticNoteDisclosure
-      body={node.content}
-      icon={<NotebookTextIcon />}
-      label={t('ai.workspace.systemPrompt')}
-    />
-  );
+  return <SemanticNoteDisclosure body={node.content} icon={<NotebookTextIcon />} label={t('ai.workspace.systemPrompt')} />;
 }
 
-function contextLabelKey(
-  kind: AiConversationNodeOf<'contextInjection'>['provenance']['kind'],
-): LocaleKey {
+function contextLabelKey(kind: AiConversationNodeOf<'contextInjection'>['provenance']['kind']): LocaleKey {
   switch (kind) {
-    case 'runtime': return 'ai.workspace.context.runtime';
-    case 'plugin': return 'ai.workspace.context.plugin';
-    case 'skill-catalog': return 'ai.workspace.context.skillCatalog';
-    case 'agent-instructions': return 'ai.workspace.context.agentInstructions';
-    case 'skill-invocation': return 'ai.workspace.context.skillInvocation';
-    case 'session-reference': return 'ai.workspace.context.sessionReference';
-    case 'form': return 'ai.workspace.context.form';
-    case 'user': return 'ai.workspace.context.user';
+    case 'runtime':
+      return 'ai.workspace.context.runtime';
+    case 'plugin':
+      return 'ai.workspace.context.plugin';
+    case 'skill-catalog':
+      return 'ai.workspace.context.skillCatalog';
+    case 'agent-instructions':
+      return 'ai.workspace.context.agentInstructions';
+    case 'skill-invocation':
+      return 'ai.workspace.context.skillInvocation';
+    case 'session-reference':
+      return 'ai.workspace.context.sessionReference';
+    case 'form':
+      return 'ai.workspace.context.form';
+    case 'user':
+      return 'ai.workspace.context.user';
   }
 }
 
-export function isUserVisibleContextInjection(
-  node: AiConversationNodeOf<'contextInjection'>,
-): boolean {
-  return node.provenance.kind !== 'runtime'
-    && node.provenance.kind !== 'agent-instructions'
-    && node.provenance.kind !== 'skill-catalog';
+export function isUserVisibleContextInjection(node: AiConversationNodeOf<'contextInjection'>): boolean {
+  return node.provenance.kind !== 'runtime' && node.provenance.kind !== 'agent-instructions' && node.provenance.kind !== 'skill-catalog';
 }
 
-function ContextInjectionRow({
-  node,
-}: { readonly node: AiConversationNodeOf<'contextInjection'> }) {
+function ContextInjectionRow({ node }: { readonly node: AiConversationNodeOf<'contextInjection'> }) {
   const { t } = useI18n();
   if (!isUserVisibleContextInjection(node)) return null;
   return (
     <SemanticNoteDisclosure
-      body={node.loadedSkill
-        ? `${t('ai.workspace.skills.instructions')}\n${node.loadedSkill.instructions}\n\n${t('ai.workspace.skills.source')}\n${JSON.stringify(node.loadedSkill.provenance, null, 2)}\nrenderedHash: ${node.loadedSkill.renderedHash}`
-        : node.content}
+      body={
+        node.loadedSkill
+          ? `${t('ai.workspace.skills.instructions')}\n${node.loadedSkill.instructions}\n\n${t('ai.workspace.skills.source')}\n${JSON.stringify(node.loadedSkill.provenance, null, 2)}\nrenderedHash: ${node.loadedSkill.renderedHash}`
+          : node.content
+      }
       icon={<FileInputIcon />}
       label={t(contextLabelKey(node.provenance.kind))}
       summary={node.provenance.label}
@@ -182,17 +166,21 @@ function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'us
   const message = decodeDocumentMessage(node.content);
   return (
     <Message role="user">
-      {node.inputKind === 'steer' && <Badge variant="secondary" className="self-end">
-        {t('ai.workspace.messageSteering')}
-      </Badge>}
-      {Boolean(node.images?.length || message.documents.length) && <div className="w-max min-w-0 max-w-full">
-        <UnifiedAttachmentContext value={true}>
-          <AiDraftAttachmentRail unified count={(node.images?.length ?? 0) + message.documents.length}>
-            <AiCommittedImages sessionId={node.sessionId} images={node.images} />
-            <AiDocumentAttachments composer documents={message.documents} />
-          </AiDraftAttachmentRail>
-        </UnifiedAttachmentContext>
-      </div>}
+      {node.inputKind === 'steer' && (
+        <Badge variant="secondary" className="self-end">
+          {t('ai.workspace.messageSteering')}
+        </Badge>
+      )}
+      {Boolean(node.images?.length || message.documents.length) && (
+        <div className="w-max min-w-0 max-w-full">
+          <UnifiedAttachmentContext value={true}>
+            <AiDraftAttachmentRail unified count={(node.images?.length ?? 0) + message.documents.length}>
+              <AiCommittedImages sessionId={node.sessionId} images={node.images} />
+              <AiDocumentAttachments composer documents={message.documents} />
+            </AiDraftAttachmentRail>
+          </UnifiedAttachmentContext>
+        </div>
+      )}
       {(message.text || node.delivery === 'failed') && (
         <Bubble role="user">
           <span className="ai-user-message-text">{message.text}</span>
@@ -208,11 +196,7 @@ function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'us
   );
 }
 
-function AssistantMessageNodeView({
-  node,
-  inTurnProcess = false,
-  deferMessageActions = false,
-}: AiConversationNodeRendererProps<'assistantMessage'>) {
+function AssistantMessageNodeView({ node, inTurnProcess = false, deferMessageActions = false }: AiConversationNodeRendererProps<'assistantMessage'>) {
   const { t } = useI18n();
   const text = assistantText(node);
   if (!text) return null;
@@ -231,12 +215,7 @@ function AssistantMessageNodeView({
         )}
       </Bubble>
       {!inTurnProcess && !deferMessageActions && !node.hasTurnTail && node.state !== 'streaming' && (
-        <MessageActions
-          text={text}
-          timestamp={node.timestamp}
-          align="start"
-          className="ai-assistant-actions -ml-1.5 mt-2.5"
-        />
+        <MessageActions text={text} timestamp={node.timestamp} align="start" className="ai-assistant-actions -ml-1.5 mt-2.5" />
       )}
     </Message>
   );
@@ -248,7 +227,9 @@ function ReasoningContent({ children, streaming }: { readonly children: string; 
   const chunks = useMemo(() => splitMarkdown(children), [children, splitMarkdown]);
   const previousSource = useRef('');
   const previous = children.startsWith(previousSource.current) ? previousSource.current : '';
-  useLayoutEffect(() => { previousSource.current = children; }, [children]);
+  useLayoutEffect(() => {
+    previousSource.current = children;
+  }, [children]);
   let offset = 0;
   return (
     <div className="ai-reasoning-body min-w-0 py-1 pl-[22px] whitespace-normal [overflow-wrap:anywhere]">
@@ -281,11 +262,7 @@ function ReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reas
   const isStreaming = node.state === 'streaming';
   const lines = node.content.trim().split('\n');
   const summary = (isStreaming ? lines[lines.length - 1] : lines[0]) || node.summary.trim();
-  const title = isStreaming
-    ? t('ai.thinking.inProgress')
-    : node.state === 'interrupted'
-      ? t('ai.thinking.interrupted')
-      : t('ai.workspace.reasoning');
+  const title = isStreaming ? t('ai.thinking.inProgress') : node.state === 'interrupted' ? t('ai.thinking.interrupted') : t('ai.workspace.reasoning');
 
   useLayoutEffect(() => {
     const element = summaryRef.current;
@@ -303,7 +280,7 @@ function ReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reas
         role={isStreaming ? 'status' : undefined}
       >
         <CollapsibleTrigger
-          render={(
+          render={
             <Button
               type="button"
               variant="plain"
@@ -312,7 +289,7 @@ function ReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reas
               aria-label={summary ? `${title} ${summary}` : title}
               aria-expanded={open}
             />
-          )}
+          }
         >
           <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
             <BrainIcon />
@@ -343,11 +320,7 @@ function AskReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'r
   const [open, setOpen] = useState(node.state === 'streaming');
   const previousStateRef = useRef(node.state);
   const isStreaming = node.state === 'streaming';
-  const title = isStreaming
-    ? t('ai.thinking.inProgress')
-    : node.state === 'interrupted'
-      ? t('ai.thinking.interrupted')
-      : t('ai.thinking');
+  const title = isStreaming ? t('ai.thinking.inProgress') : node.state === 'interrupted' ? t('ai.thinking.interrupted') : t('ai.thinking');
 
   useLayoutEffect(() => {
     const previousState = previousStateRef.current;
@@ -368,16 +341,7 @@ function AskReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'r
         role={isStreaming ? 'status' : undefined}
       >
         <CollapsibleTrigger
-          render={(
-            <Button
-              type="button"
-              variant="plain"
-              size="sm"
-              className={AI_DISCLOSURE_ROW_CLASS}
-              aria-label={title}
-              aria-expanded={open}
-            />
-          )}
+          render={<Button type="button" variant="plain" size="sm" className={AI_DISCLOSURE_ROW_CLASS} aria-label={title} aria-expanded={open} />}
         >
           <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
             <BrainIcon />
@@ -400,9 +364,7 @@ function ToolNodeView({
   readonly node: AiConversationNodeOf<'tool'>;
   readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
 }) {
-  return (
-    <AiToolRow node={node} onInspect={onOpenTool} />
-  );
+  return <AiToolRow node={node} onInspect={onOpenTool} />;
 }
 
 function ArtifactNodeView({
@@ -437,9 +399,7 @@ function ArtifactNodeView({
   );
 }
 
-function ApprovalMarkerNodeView({
-  node,
-}: { readonly node: AiConversationNodeOf<'approvalMarker'> }) {
+function ApprovalMarkerNodeView({ node }: { readonly node: AiConversationNodeOf<'approvalMarker'> }) {
   const { t } = useI18n();
   return (
     <div className="ai-transcript-notice flex h-6 min-w-0 items-center gap-0" data-variant="approval" data-state={node.status}>
@@ -460,16 +420,17 @@ function RetryNodeView({ node }: { readonly node: AiConversationNodeOf<'retry'> 
       <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
         <RefreshCwIcon />
       </span>
-      <span className={AI_DISCLOSURE_TITLE_CLASS}>{t(outputRecovery ? 'ai.workspace.outputLimitContinuation' : 'ai.workspace.retry', { attempt: node.attempt })}</span>
-      <span className="ai-transcript-notice-detail ml-1 min-w-0 flex-1 truncate">{outputRecovery ? t('ai.workspace.outputLimitContinuationDetail') : node.reason}</span>
+      <span className={AI_DISCLOSURE_TITLE_CLASS}>
+        {t(outputRecovery ? 'ai.workspace.outputLimitContinuation' : 'ai.workspace.retry', { attempt: node.attempt })}
+      </span>
+      <span className="ai-transcript-notice-detail ml-1 min-w-0 flex-1 truncate">
+        {outputRecovery ? t('ai.workspace.outputLimitContinuationDetail') : node.reason}
+      </span>
     </div>
   );
 }
 
-function errorNodeMessage(
-  node: AiConversationNodeOf<'error'>,
-  t: (key: LocaleKey) => string,
-): string {
+function errorNodeMessage(node: AiConversationNodeOf<'error'>, t: (key: LocaleKey) => string): string {
   if (node.message.startsWith('taskTokenBudgetExceeded:')) return t('ai.workspace.tokenBudget.title');
   return node.message === 'outputLimit' || node.message.startsWith('outputLimit:') || node.message.includes('code=OUTPUT_LIMIT')
     ? t('ai.error.outputLimit')
@@ -495,9 +456,7 @@ function ErrorNodeView({ node }: { readonly node: AiConversationNodeOf<'error'> 
         <span className="ai-turn-error-title mr-1.5">{t('ai.requestFailed')}</span>
         <span>{errorNodeMessage(node, t)}</span>
         <Collapsible>
-          <CollapsibleTrigger className="text-muted-foreground underline underline-offset-4">
-            {t('ai.error.details')}
-          </CollapsibleTrigger>
+          <CollapsibleTrigger className="text-muted-foreground underline underline-offset-4">{t('ai.error.details')}</CollapsibleTrigger>
           <CollapsibleContent>
             <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">
               {node.message}
@@ -524,10 +483,7 @@ function turnProcessDisclosureKey(node: AiConversationNodeOf<'turnProcess'>): st
   return JSON.stringify([node.sessionId, node.key]);
 }
 
-function storeTurnProcessDisclosure(
-  key: string,
-  value: StoredTurnProcessDisclosure,
-): void {
+function storeTurnProcessDisclosure(key: string, value: StoredTurnProcessDisclosure): void {
   turnProcessDisclosures.delete(key);
   turnProcessDisclosures.set(key, value);
   if (turnProcessDisclosures.size <= TURN_PROCESS_DISCLOSURE_LIMIT) return;
@@ -541,20 +497,24 @@ function isSettledTurnProcess(status: AiTurnProcessStatus): boolean {
 
 function turnProcessLabelKey(status: AiTurnProcessStatus): LocaleKey {
   switch (status) {
-    case 'running': return 'ai.workspace.turnProcess.running';
-    case 'waiting': return 'ai.workspace.turnProcess.waiting';
-    case 'completed': return 'ai.workspace.turnProcess.completed';
-    case 'incomplete': return 'ai.workspace.turnProcess.incomplete';
-    case 'failed': return 'ai.workspace.turnProcess.failed';
-    case 'cancelled': return 'ai.workspace.turnProcess.cancelled';
-    case 'partial': return 'ai.workspace.turnProcess.partial';
+    case 'running':
+      return 'ai.workspace.turnProcess.running';
+    case 'waiting':
+      return 'ai.workspace.turnProcess.waiting';
+    case 'completed':
+      return 'ai.workspace.turnProcess.completed';
+    case 'incomplete':
+      return 'ai.workspace.turnProcess.incomplete';
+    case 'failed':
+      return 'ai.workspace.turnProcess.failed';
+    case 'cancelled':
+      return 'ai.workspace.turnProcess.cancelled';
+    case 'partial':
+      return 'ai.workspace.turnProcess.partial';
   }
 }
 
-function turnProcessSummary(
-  node: AiConversationNodeOf<'turnProcess'>,
-  t: ReturnType<typeof useI18n>['t'],
-): string {
+function turnProcessSummary(node: AiConversationNodeOf<'turnProcess'>, t: ReturnType<typeof useI18n>['t']): string {
   const counts = new Map<AiConversationNodeOf<'turnProcess'>['children'][number]['kind'], number>();
   for (const child of node.children) {
     const kind = child.kind === 'question' ? 'tool' : child.kind;
@@ -565,10 +525,12 @@ function turnProcessSummary(
     ['retry', 'ai.workspace.turnProcess.retryCount'],
     ['error', 'ai.workspace.turnProcess.errorCount'],
   ] as const;
-  return parts.flatMap(([kind, key]) => {
-    const count = counts.get(kind) ?? 0;
-    return count === 0 ? [] : [t(key, { count })];
-  }).join(t('ai.workspace.turnProcess.separator'));
+  return parts
+    .flatMap(([kind, key]) => {
+      const count = counts.get(kind) ?? 0;
+      return count === 0 ? [] : [t(key, { count })];
+    })
+    .join(t('ai.workspace.turnProcess.separator'));
 }
 
 function TurnProcessDisclosure({
@@ -607,26 +569,25 @@ function TurnProcessDisclosure({
         data-answer-generation={node.answerGeneration}
       >
         <CollapsibleTrigger
-          render={(
+          render={
             <Button
               type="button"
               variant="plain"
               size="sm"
-              className={cn(
-                AI_DISCLOSURE_ROW_CLASS,
-                'ai-turn-process-trigger h-auto min-h-6 px-0 py-1',
-              )}
+              className={cn(AI_DISCLOSURE_ROW_CLASS, 'ai-turn-process-trigger h-auto min-h-6 px-0 py-1')}
               aria-label={label}
               aria-expanded={open}
             />
-          )}
+          }
         >
-          <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
-            {node.status === 'running'
-              ? <Spinner aria-hidden="true" />
-              : <ChevronDownIcon className="ai-disclosure-chevron" />}
-          </span>
-          <span className={AI_DISCLOSURE_TITLE_CLASS}>{label}</span>
+          {node.status === 'running' ? (
+            <AiProcessingStatus iconClassName={AI_DISCLOSURE_LEADING_CLASS} labelClassName={AI_DISCLOSURE_TITLE_CLASS} />
+          ) : <>
+            <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
+              <ChevronDownIcon className="ai-disclosure-chevron" />
+            </span>
+            <span className={AI_DISCLOSURE_TITLE_CLASS}>{label}</span>
+          </>}
           {summary && (
             <>
               <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
@@ -644,13 +605,7 @@ function TurnProcessDisclosure({
                 data-ai-process-child={child.kind}
                 data-ai-process-child-key={child.key}
               >
-                <ConversationNodeContent
-                  node={child}
-                  renderers={renderers}
-                  onOpenTool={onOpenTool}
-                  onOpenArtifact={onOpenArtifact}
-                  inTurnProcess
-                />
+                <ConversationNodeContent node={child} renderers={renderers} onOpenTool={onOpenTool} onOpenArtifact={onOpenArtifact} inTurnProcess />
               </div>
             ))}
           </div>
@@ -666,19 +621,9 @@ function TurnProcessRow({
   onOpenTool,
   renderers = aiConversationNodeRenderers,
 }: AiConversationNodeRendererProps<'turnProcess'>) {
-  if (!node.children.some((child) => (
-    child.kind !== 'contextInjection' || isUserVisibleContextInjection(child)
-  ))) return null;
+  if (!node.children.some((child) => child.kind !== 'contextInjection' || isUserVisibleContextInjection(child))) return null;
   const key = turnProcessDisclosureKey(node);
-  return (
-    <TurnProcessDisclosure
-      key={key}
-      node={node}
-      renderers={renderers}
-      onOpenTool={onOpenTool}
-      onOpenArtifact={onOpenArtifact}
-    />
-  );
+  return <TurnProcessDisclosure key={key} node={node} renderers={renderers} onOpenTool={onOpenTool} onOpenArtifact={onOpenArtifact} />;
 }
 
 export const aiConversationNodeRenderers = {
@@ -715,22 +660,39 @@ function renderNode(
   deferMessageActions = false,
 ): React.ReactNode {
   switch (node.kind) {
-    case 'systemPrompt': return React.createElement(renderers.systemPrompt, { node, renderers });
-    case 'contextInjection': return React.createElement(renderers.contextInjection, { node, renderers });
-    case 'userMessage': return React.createElement(renderers.userMessage, { node });
-    case 'assistantMessage': return React.createElement(renderers.assistantMessage, { node, inTurnProcess, deferMessageActions });
-    case 'reasoning': return React.createElement(renderers.reasoning, { node });
-    case 'tool': return React.createElement(renderers.tool, { node, onOpenTool });
-    case 'question': return React.createElement(renderers.question, { node });
-    case 'artifact': return React.createElement(renderers.artifact, { node, onOpenArtifact });
-    case 'approvalMarker': return React.createElement(renderers.approvalMarker, { node });
-    case 'retry': return React.createElement(renderers.retry, { node });
-    case 'error': return React.createElement(renderers.error, { node });
-    case 'turnProcess': return React.createElement(renderers.turnProcess, {
-      node, renderers, onOpenTool, onOpenArtifact,
-    });
-    case 'turnTail': return React.createElement(renderers.turnTail, { node, renderers });
-    default: return assertNever(node);
+    case 'systemPrompt':
+      return React.createElement(renderers.systemPrompt, { node, renderers });
+    case 'contextInjection':
+      return React.createElement(renderers.contextInjection, { node, renderers });
+    case 'userMessage':
+      return React.createElement(renderers.userMessage, { node });
+    case 'assistantMessage':
+      return React.createElement(renderers.assistantMessage, { node, inTurnProcess, deferMessageActions });
+    case 'reasoning':
+      return React.createElement(renderers.reasoning, { node });
+    case 'tool':
+      return React.createElement(renderers.tool, { node, onOpenTool });
+    case 'question':
+      return React.createElement(renderers.question, { node });
+    case 'artifact':
+      return React.createElement(renderers.artifact, { node, onOpenArtifact });
+    case 'approvalMarker':
+      return React.createElement(renderers.approvalMarker, { node });
+    case 'retry':
+      return React.createElement(renderers.retry, { node });
+    case 'error':
+      return React.createElement(renderers.error, { node });
+    case 'turnProcess':
+      return React.createElement(renderers.turnProcess, {
+        node,
+        renderers,
+        onOpenTool,
+        onOpenArtifact,
+      });
+    case 'turnTail':
+      return React.createElement(renderers.turnTail, { node, renderers });
+    default:
+      return assertNever(node);
   }
 }
 
@@ -739,82 +701,99 @@ export function aiConversationNodeRevision(node: AiConversationNode): string {
   switch (node.kind) {
     // Committed node content is immutable for a given lastSeq. Only optimistic
     // delivery and local presentation state can change without a new event.
-    case 'userMessage': return `${base}:${node.delivery}:${node.inputKind ?? 'initial'}`;
-    case 'assistantMessage': return `${base}:${node.state}:${node.hasTurnTail ?? false}`;
-    case 'reasoning': return `${base}:${node.state}`;
-    case 'tool': return `${base}:${node.state}`;
-    case 'question': return `${base}:${node.question.status}:${node.lastSeq}`;
-    case 'approvalMarker': return `${base}:${node.status}`;
-    case 'error': return `${base}:${node.state}`;
-    case 'turnProcess': return `${base}:${node.status}:${node.answerGeneration}:${node.hasStartBoundary}:${node.hasEndBoundary}:${node.children.length}`;
-    case 'turnTail': return `${base}:${node.status}`;
+    case 'userMessage':
+      return `${base}:${node.delivery}:${node.inputKind ?? 'initial'}`;
+    case 'assistantMessage':
+      return `${base}:${node.state}:${node.hasTurnTail ?? false}`;
+    case 'reasoning':
+      return `${base}:${node.state}`;
+    case 'tool':
+      return `${base}:${node.state}`;
+    case 'question':
+      return `${base}:${node.question.status}:${node.lastSeq}`;
+    case 'approvalMarker':
+      return `${base}:${node.status}`;
+    case 'error':
+      return `${base}:${node.state}`;
+    case 'turnProcess':
+      return `${base}:${node.status}:${node.answerGeneration}:${node.hasStartBoundary}:${node.hasEndBoundary}:${node.children.length}`;
+    case 'turnTail':
+      return `${base}:${node.status}`;
     case 'systemPrompt':
     case 'contextInjection':
     case 'artifact':
     case 'retry':
       return base;
-    default: return assertNever(node);
+    default:
+      return assertNever(node);
   }
 }
 
-const ConversationNodeContent = React.memo(function ConversationNodeContent({
-  node, renderers, onOpenTool, onOpenArtifact, inTurnProcess,
-}: {
-  readonly node: AiConversationNode;
-  readonly renderers: AiConversationNodeRendererMap;
-  readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
-  readonly onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void;
-  readonly inTurnProcess?: boolean;
-}) {
-  return renderNode(node, renderers, onOpenTool, onOpenArtifact, inTurnProcess);
-}, (previous, next) => (
-  previous.renderers === next.renderers
-  && previous.onOpenTool === next.onOpenTool
-  && previous.onOpenArtifact === next.onOpenArtifact
-  && previous.inTurnProcess === next.inTurnProcess
-  && sameConversationNode(previous.node, next.node)
-));
+const ConversationNodeContent = React.memo(
+  function ConversationNodeContent({
+    node,
+    renderers,
+    onOpenTool,
+    onOpenArtifact,
+    inTurnProcess,
+  }: {
+    readonly node: AiConversationNode;
+    readonly renderers: AiConversationNodeRendererMap;
+    readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
+    readonly onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void;
+    readonly inTurnProcess?: boolean;
+  }) {
+    return renderNode(node, renderers, onOpenTool, onOpenArtifact, inTurnProcess);
+  },
+  (previous, next) =>
+    previous.renderers === next.renderers &&
+    previous.onOpenTool === next.onOpenTool &&
+    previous.onOpenArtifact === next.onOpenArtifact &&
+    previous.inTurnProcess === next.inTurnProcess &&
+    sameConversationNode(previous.node, next.node),
+);
 
 function sameConversationNode(previous: AiConversationNode, next: AiConversationNode): boolean {
   // An earlier turn can receive late usage without changing this tail's seq.
-  if (previous.kind === 'turnTail' && next.kind === 'turnTail'
-    && previous.sessionStats !== next.sessionStats) return false;
+  if (previous.kind === 'turnTail' && next.kind === 'turnTail' && previous.sessionStats !== next.sessionStats) return false;
   return aiConversationNodeRevision(previous) === aiConversationNodeRevision(next);
 }
 
-export const AiConversationNodeSeat = React.memo(function AiConversationNodeSeat({
-  node,
-  renderers = aiConversationNodeRenderers,
-  onOpenTool,
-  onOpenArtifact,
-  deferMessageActions = false,
-}: {
-  readonly node: AiConversationNode;
-  readonly renderers?: AiConversationNodeRendererMap;
-  readonly scrollAnchor?: boolean;
-  readonly scrollItemId?: string;
-  readonly scrollItemClassName?: string;
-  readonly deferMessageActions?: boolean;
-  readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
-  readonly onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void;
-}) {
-  return (
-    <div
-      className="ai-transcript-flow-item min-w-0 max-w-full"
-      data-ai-node-key={node.key}
-      data-ai-node-kind={node.kind}
-      data-ai-turn-id={node.turnId ?? undefined}
-    >
-      {renderNode(node, renderers, onOpenTool, onOpenArtifact, false, deferMessageActions)}
-    </div>
-  );
-}, (previous, next) => (
-  previous.renderers === next.renderers
-  && previous.onOpenTool === next.onOpenTool
-  && previous.onOpenArtifact === next.onOpenArtifact
-  && previous.deferMessageActions === next.deferMessageActions
-  && sameConversationNode(previous.node, next.node)
-));
+export const AiConversationNodeSeat = React.memo(
+  function AiConversationNodeSeat({
+    node,
+    renderers = aiConversationNodeRenderers,
+    onOpenTool,
+    onOpenArtifact,
+    deferMessageActions = false,
+  }: {
+    readonly node: AiConversationNode;
+    readonly renderers?: AiConversationNodeRendererMap;
+    readonly scrollAnchor?: boolean;
+    readonly scrollItemId?: string;
+    readonly scrollItemClassName?: string;
+    readonly deferMessageActions?: boolean;
+    readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
+    readonly onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void;
+  }) {
+    return (
+      <div
+        className="ai-transcript-flow-item min-w-0 max-w-full"
+        data-ai-node-key={node.key}
+        data-ai-node-kind={node.kind}
+        data-ai-turn-id={node.turnId ?? undefined}
+      >
+        {renderNode(node, renderers, onOpenTool, onOpenArtifact, false, deferMessageActions)}
+      </div>
+    );
+  },
+  (previous, next) =>
+    previous.renderers === next.renderers &&
+    previous.onOpenTool === next.onOpenTool &&
+    previous.onOpenArtifact === next.onOpenArtifact &&
+    previous.deferMessageActions === next.deferMessageActions &&
+    sameConversationNode(previous.node, next.node),
+);
 AiConversationNodeSeat.displayName = 'AiConversationNodeSeat';
 
 export function AiConversationNodeList({
