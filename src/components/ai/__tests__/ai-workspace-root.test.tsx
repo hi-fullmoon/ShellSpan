@@ -654,7 +654,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(container.querySelector('[data-ai-node-key="test:additional-flow-node"]')).toBeInTheDocument();
   });
 
-  it('anchors a new user message and preserves its row on commit', async () => {
+  it('does not anchor a new user message and preserves its row on commit', async () => {
     const view = agentView('running');
     const previousUser = view.nodes.find((node) => node.kind === 'userMessage');
     if (!previousUser) throw new Error('Agent fixture has no user message');
@@ -686,17 +686,16 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     rerender(<AiWorkspaceRoot view={{ ...view, nodes: [...view.nodes, nextUser] }} scope="terminal" />);
     const optimisticItem = container.querySelector(`[data-ai-node-key="${nextUser.key}"]`)
       ?.closest('[data-slot="message-scroller-item"]');
-    expect(optimisticItem).toHaveAttribute('data-scroll-anchor', 'true');
+    expect(optimisticItem).toHaveAttribute('data-scroll-anchor', 'false');
     expect(optimisticItem).toHaveAttribute('data-message-id', 'user:next-submission');
-    // Browser coverage checks actual top alignment and spacer geometry.
-    expect(container.querySelectorAll('[data-scroll-anchor="true"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-scroll-anchor="true"]')).toHaveLength(0);
 
     const committedUser = { ...nextUser, key: 'user:next-submission', clientSubmissionId: undefined, delivery: 'committed' as const };
     rerender(<AiWorkspaceRoot view={{ ...view, nodes: [...view.nodes, committedUser] }} scope="terminal" />);
     const committedItem = container.querySelector(`[data-ai-node-key="${committedUser.key}"]`)
       ?.closest('[data-slot="message-scroller-item"]');
     expect(committedItem).toBe(optimisticItem);
-    expect(committedItem).toHaveAttribute('data-scroll-anchor', 'true');
+    expect(committedItem).toHaveAttribute('data-scroll-anchor', 'false');
     expect(committedItem).toHaveAttribute('data-message-id', 'user:next-submission');
   });
 
@@ -714,7 +713,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(reasoning).toHaveAttribute('aria-expanded', 'false');
     expect(reasoning.querySelector('.lucide-brain')).toBeInTheDocument();
     expect(container.querySelector('[data-ai-node-kind="userMessage"]')?.closest('[data-slot="message-scroller-item"]'))
-      .toHaveAttribute('data-scroll-anchor', 'true');
+      .toHaveAttribute('data-scroll-anchor', 'false');
     expect(container.querySelector('[data-ai-node-kind="turnProcess"]')).toBeNull();
     const turnTail = container.querySelector('[data-ai-node-kind="turnTail"]');
     expect(turnTail).toBeInTheDocument();

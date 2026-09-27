@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import { AiWorkspaceRoot } from '../workspace/ai-workspace-root';
 import { AiConversation } from '../workspace/ai-conversation';
+import { AiConversationNodeList } from '../workspace/ai-conversation-node-seat';
 import { createAiComposerState } from '@/lib/ai/composer-machine';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { taskTokenBudgetView } from '@/test/fixtures/task-token-budget';
@@ -20,6 +21,9 @@ export async function mount(host: HTMLElement) {
   if (!user) throw new Error('Recorded user input is required');
   const events = capture as unknown as AgentSessionEvent[];
   return {
+    delivery(delivery: 'pending' | 'committed' | 'failed') {
+      flushSync(() => root.render(<AiConversationNodeList nodes={[{ ...user, delivery }]} />));
+    },
     session(stage: 'pending' | 'receipt' | 'committed' | 'navigation') {
       flushSync(() => root.render(<AiWorkspaceRoot scope="workbench"
         submissionContext={stage === 'navigation' ? {} : context}
@@ -37,5 +41,6 @@ export async function mount(host: HTMLElement) {
     firstVisibleProcess: events.findIndex((_, index) => projectAgentChatNodes(events.slice(0, index + 1))
       .some(node => node.kind === 'turnProcess' && node.children.some(child => child.kind === 'contextInjection'
         && child.provenance.kind === 'skill-invocation'))),
+    completedProcess: events.findIndex(event => event.type === 'turn/end') + 1,
   };
 }
