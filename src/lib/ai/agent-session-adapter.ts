@@ -201,14 +201,17 @@ function inboxSource(source: import('@/types/agent-session').AgentSessionMessage
 
 export function projectAgentInbox(events: readonly AgentSessionEvent[]): readonly AiInboxItem[] {
   const items = new Map<string, AiInboxItem>();
+  const closedTurns = new Set<string>();
   let activeTurnId: string | undefined;
   for (const event of events) {
+    if (event.turnId && !closedTurns.has(event.turnId) && event.type !== 'turn/end') {
+      activeTurnId = event.turnId;
+    }
     if (event.type === 'session/resumed') {
       activeTurnId = undefined;
-    } else if (event.type === 'turn/start') {
-      activeTurnId = event.turnId;
-    } else if (event.type === 'turn/end' && event.turnId === activeTurnId) {
-      activeTurnId = undefined;
+    } else if (event.type === 'turn/end') {
+      if (event.turnId) closedTurns.add(event.turnId);
+      if (event.turnId === activeTurnId) activeTurnId = undefined;
     } else if (event.type === 'agent/inbox/spliced') {
       for (const message of event.data.messages) {
         if (event.data.operation === 'enqueued') {
@@ -235,6 +238,9 @@ export function projectAgentInbox(events: readonly AgentSessionEvent[]): readonl
           items.delete(message.messageId);
         }
       }
+    } else if (event.type === 'user/message') {
+      const previous = items.get(event.data.message.messageId);
+      if (previous) items.set(previous.id, { ...previous, consumed: true });
     } else if (event.type === 'agent/inbox/paused') {
       for (const id of event.data.itemIds) {
         const previous = items.get(id);

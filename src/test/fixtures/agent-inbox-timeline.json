@@ -1,0 +1,895 @@
+{
+  "events": [
+    {
+      "data": {
+        "executionSurface": "direct",
+        "goal": "Inspect nginx",
+        "taskId": "task-1"
+      },
+      "seq": 0,
+      "sessionId": "session-1",
+      "timeUnixMs": 1790494504034,
+      "type": "session/created",
+      "version": 5
+    },
+    {
+      "data": {
+        "agentId": "session-1"
+      },
+      "seq": 1,
+      "sessionId": "session-1",
+      "timeUnixMs": 1790494504034,
+      "type": "agent/created",
+      "version": 5
+    },
+    {
+      "data": {
+        "lane": "nextTurn",
+        "messages": [
+          {
+            "clientSubmissionId": "initial",
+            "content": "initial",
+            "messageId": "initial",
+            "source": {
+              "kind": "user",
+              "label": "User",
+              "producerId": "shellspan-user"
+            }
+          }
+        ],
+        "operation": "enqueued"
+      },
+      "seq": 2,
+      "sessionId": "session-1",
+      "timeUnixMs": 1790494504063,
+      "type": "agent/inbox/spliced",
+      "version": 5
+    },
+    {
+      "data": {
+        "startTurn": true,
+        "stepMessages": [],
+        "turnMessages": [
+          {
+            "clientSubmissionId": "initial",
+            "content": "initial",
+            "messageId": "initial",
+            "source": {
+              "kind": "user",
+              "label": "User",
+              "producerId": "shellspan-user"
+            }
+          }
+        ]
+      },
+      "seq": 3,
+      "sessionId": "session-1",
+      "stepId": "step-1",
+      "timeUnixMs": 1790494504074,
+      "turnId": "turn-1",
+      "type": "step/input_claim",
+      "version": 5
+    },
+    {
+      "data": {
+        "lane": "nextTurn",
+        "messages": [
+          {
+            "clientSubmissionId": "initial",
+            "content": "initial",
+            "messageId": "initial",
+            "source": {
+              "kind": "user",
+              "label": "User",
+              "producerId": "shellspan-user"
+            }
+          }
+        ],
+        "operation": "claimed"
+      },
+      "seq": 4,
+      "sessionId": "session-1",
+      "timeUnixMs": 1790494504074,
+      "type": "agent/inbox/spliced",
+      "version": 5
+    },
+    {
+      "seq": 5,
+      "sessionId": "session-1",
+      "timeUnixMs": 1790494504074,
+      "turnId": "turn-1",
+      "type": "turn/start",
+      "version": 5
+    },
+    {
+      "seq": 6,
+      "sessionId": "session-1",
+      "stepId": "step-1",
+      "timeUnixMs": 1790494504074,
+      "turnId": "turn-1",
+      "type": "step/start",
+      "version": 5
+    },
+    {
+      "data": {
+        "message": {
+          "clientSubmissionId": "initial",
+          "content": "initial",
+          "messageId": "initial",
+          "source": {
+            "kind": "user",
+            "label": "User",
+            "producerId": "shellspan-user"
+          }
+        }
+      },
+      "seq": 7,
+      "sessionId": "session-1",
+      "stepId": "step-1",
+      "timeUnixMs": 1790494504074,
+      "turnId": "turn-1",
+      "type": "user/message",
+      "version": 5
+    },
+    {
+      "data": {
+        "status": "running"
+      },
+      "seq": 8,
+      "sessionId": "session-1",
+      "timeUnixMs": 1790494504095,
+      "type": "agent/status",
+      "version": 5
+    },
+    {
+      "data": {
+        "lane": "nextTurn",
+        "messages": [
+          {
+            "clientSubmissionId": "queued",
+            "content": "下一步\nfull content\n",
+            "messageId": "queued",
+            "source": {
+              "kind": "user",
+              "label": "User",
+              "producerId": "shellspan-user"
+            }
+          }
+        ],
+        "operation": "enqueued"
+      },
+      "seq": 9,
+      "sessionId": "session-1",
+      "timeUnixMs": 1790494504110,
+      "type": "agent/inbox/spliced",
+      "version": 5
+    },
+    {
+      "data": {
+        "call": {
+          "arguments": {
+            "path": "Cargo.toml"
+          },
+          "callId": "read-step-1",
+          "name": "read_file"
+        }
+      },
+      "seq": 10,
+      "sessionId": "session-1",
+      "stepId": "step-1",
+      "timeUnixMs": 1790494504115,
+      "turnId": "turn-1",
+      "type": "tool/call",
+      "version": 5
+    },
+    {
+      "data": {
+        "callId": "read-step-1",
+        "reason": "sessionRuntimeAuthorized",
+        "requestId": "request-step-1",
+        "status": "approved"
+      },
+      "seq": 11,
+      "sessionId": "session-1",
+      "stepId": "step-1",
+      "timeUnixMs": 1790494504120,
+      "turnId": "turn-1",
+      "type": "tool/approval",
+      "version": 5
+    },
+    {
+      "data": {
+        "callId": "read-step-1",
+        "idempotency": "yes",
+        "status": "dispatched"
+      },
+      "seq": 12,
+      "sessionId": "session-1",
+      "stepId": "step-1",
+      "timeUnixMs": 1790494504125,
+      "turnId": "turn-1",
+      "type": "tool/execution",
+      "version": 5
+    },
+    {
+      "data": {
+        "callId": "read-step-1",
+        "data": {
+          "content": "[package]\nname = \"ShellSpan\"\nversion = \"2.1.1\"\ndescription = \"ShellSpan desktop SSH client\""
+        },
+        "name": "read_file",
+        "status": "completed",
+        "summary": "Read Cargo.toml (2782 bytes)"
+      },
+      "seq": 13,
+      "sessionId": "session-1",
+      "stepId": "step-1",
+      "timeUnixMs": 1790494504128,
+      "turnId": "turn-1",
+      "type": "tool/result",
+      "version": 5
+    },
+    {
+      "data": {
+        "reason": "completed"
+      },
+      "seq": 14,
+      "sessionId": "session-1",
+      "stepId": "step-1",
+      "timeUnixMs": 1790494504132,
+      "turnId": "turn-1",
+      "type": "step/end",
+      "version": 5
+    },
+    {
+      "data": {
+        "lane": "nextStep",
+        "messages": [
+          {
+            "clientSubmissionId": "correction",
+            "content": "只检查依赖版本，保留现有配置。",
+            "messageId": "correction",
+            "source": {
+              "kind": "user",
+              "label": "User",
+              "producerId": "shellspan-user"
+            }
+          }
+        ],
+        "operation": "enqueued"
+      },
+      "seq": 15,
+      "sessionId": "session-1",
+      "timeUnixMs": 1790494504135,
+      "type": "agent/inbox/spliced",
+      "version": 5
+    },
+    {
+      "data": {
+        "startTurn": false,
+        "stepMessages": [
+          {
+            "clientSubmissionId": "correction",
+            "content": "只检查依赖版本，保留现有配置。",
+            "messageId": "correction",
+            "source": {
+              "kind": "user",
+              "label": "User",
+              "producerId": "shellspan-user"
+            }
+          }
+        ],
+        "turnMessages": []
+      },
+      "seq": 16,
+      "sessionId": "session-1",
+      "stepId": "step-2",
+      "timeUnixMs": 1790494504139,
+      "turnId": "turn-1",
+      "type": "step/input_claim",
+      "version": 5
+    },
+    {
+      "data": {
+        "lane": "nextStep",
+        "messages": [
+          {
+            "clientSubmissionId": "correction",
+            "content": "只检查依赖版本，保留现有配置。",
+            "messageId": "correction",
+            "source": {
+              "kind": "user",
+              "label": "User",
+              "producerId": "shellspan-user"
+            }
+          }
+        ],
+        "operation": "claimed"
+      },
+      "seq": 17,
+      "sessionId": "session-1",
+      "timeUnixMs": 1790494504139,
+      "type": "agent/inbox/spliced",
+      "version": 5
+    },
+    {
+      "seq": 18,
+      "sessionId": "session-1",
+      "stepId": "step-2",
+      "timeUnixMs": 1790494504140,
+      "turnId": "turn-1",
+      "type": "step/start",
+      "version": 5
+    },
+    {
+      "data": {
+        "message": {
+          "clientSubmissionId": "correction",
+          "content": "只检查依赖版本，保留现有配置。",
+          "messageId": "correction",
+          "source": {
+            "kind": "user",
+            "label": "User",
+            "producerId": "shellspan-user"
+          }
+        }
+      },
+      "seq": 19,
+      "sessionId": "session-1",
+      "stepId": "step-2",
+      "timeUnixMs": 1790494504140,
+      "turnId": "turn-1",
+      "type": "user/message",
+      "version": 5
+    },
+    {
+      "data": {
+        "call": {
+          "arguments": {
+            "path": "Cargo.toml"
+          },
+          "callId": "read-step-2",
+          "name": "read_file"
+        }
+      },
+      "seq": 20,
+      "sessionId": "session-1",
+      "stepId": "step-2",
+      "timeUnixMs": 1790494504145,
+      "turnId": "turn-1",
+      "type": "tool/call",
+      "version": 5
+    },
+    {
+      "data": {
+        "callId": "read-step-2",
+        "reason": "sessionRuntimeAuthorized",
+        "requestId": "request-step-2",
+        "status": "approved"
+      },
+      "seq": 21,
+      "sessionId": "session-1",
+      "stepId": "step-2",
+      "timeUnixMs": 1790494504150,
+      "turnId": "turn-1",
+      "type": "tool/approval",
+      "version": 5
+    },
+    {
+      "data": {
+        "callId": "read-step-2",
+        "idempotency": "yes",
+        "status": "dispatched"
+      },
+      "seq": 22,
+      "sessionId": "session-1",
+      "stepId": "step-2",
+      "timeUnixMs": 1790494504155,
+      "turnId": "turn-1",
+      "type": "tool/execution",
+      "version": 5
+    },
+    {
+      "data": {
+        "callId": "read-step-2",
+        "data": {
+          "content": "[package]\nname = \"ShellSpan\"\nversion = \"2.1.1\"\ndescription = \"ShellSpan desktop SSH client\""
+        },
+        "name": "read_file",
+        "status": "completed",
+        "summary": "Read Cargo.toml (2782 bytes)"
+      },
+      "seq": 23,
+      "sessionId": "session-1",
+      "stepId": "step-2",
+      "timeUnixMs": 1790494504160,
+      "turnId": "turn-1",
+      "type": "tool/result",
+      "version": 5
+    },
+    {
+      "data": {
+        "reason": "completed"
+      },
+      "seq": 24,
+      "sessionId": "session-1",
+      "stepId": "step-2",
+      "timeUnixMs": 1790494504165,
+      "turnId": "turn-1",
+      "type": "step/end",
+      "version": 5
+    },
+    {
+      "data": {
+        "lane": "nextTurn",
+        "messages": [
+          {
+            "clientSubmissionId": "converted",
+            "content": "补充检查工具版本是否一致。",
+            "messageId": "converted",
+            "source": {
+              "kind": "user",
+              "label": "User",
+              "producerId": "shellspan-user"
+            }
+          }
+        ],
+        "operation": "enqueued"
+      },
+      "seq": 25,
+      "sessionId": "session-1",
+      "timeUnixMs": 1790494504169,
+      "type": "agent/inbox/spliced",
+      "version": 5
+    },
+    {
+      "data": {
+        "clientOperationId": "convert-to-steer",
+        "itemId": "converted",
+        "previousRevision": 26
+      },
+      "seq": 26,
+      "sessionId": "session-1",
+      "timeUnixMs": 1790494504175,
+      "type": "agent/inbox/item_steered",
+      "version": 5
+    },
+    {
+      "data": {
+        "startTurn": false,
+        "stepMessages": [
+          {
+            "clientSubmissionId": "converted",
+            "content": "补充检查工具版本是否一致。",
+            "messageId": "converted",
+            "source": {
+              "kind": "user",
+              "label": "User",
+              "producerId": "shellspan-user"
+            }
+          }
+        ],
+        "turnMessages": []
+      },
+      "seq": 27,
+      "sessionId": "session-1",
+      "stepId": "step-3",
+      "timeUnixMs": 1790494504180,
+      "turnId": "turn-1",
+      "type": "step/input_claim",
+      "version": 5
+    },
+    {
+      "data": {
+        "lane": "nextStep",
+        "messages": [
+          {
+            "clientSubmissionId": "converted",
+            "content": "补充检查工具版本是否一致。",
+            "messageId": "converted",
+            "source": {
+              "kind": "user",
+              "label": "User",
+              "producerId": "shellspan-user"
+            }
+          }
+        ],
+        "operation": "claimed"
+      },
+      "seq": 28,
+      "sessionId": "session-1",
+      "timeUnixMs": 1790494504181,
+      "type": "agent/inbox/spliced",
+      "version": 5
+    },
+    {
+      "seq": 29,
+      "sessionId": "session-1",
+      "stepId": "step-3",
+      "timeUnixMs": 1790494504181,
+      "turnId": "turn-1",
+      "type": "step/start",
+      "version": 5
+    },
+    {
+      "data": {
+        "message": {
+          "clientSubmissionId": "converted",
+          "content": "补充检查工具版本是否一致。",
+          "messageId": "converted",
+          "source": {
+            "kind": "user",
+            "label": "User",
+            "producerId": "shellspan-user"
+          }
+        }
+      },
+      "seq": 30,
+      "sessionId": "session-1",
+      "stepId": "step-3",
+      "timeUnixMs": 1790494504181,
+      "turnId": "turn-1",
+      "type": "user/message",
+      "version": 5
+    },
+    {
+      "data": {
+        "call": {
+          "arguments": {
+            "path": "Cargo.toml"
+          },
+          "callId": "read-step-3",
+          "name": "read_file"
+        }
+      },
+      "seq": 31,
+      "sessionId": "session-1",
+      "stepId": "step-3",
+      "timeUnixMs": 1790494504187,
+      "turnId": "turn-1",
+      "type": "tool/call",
+      "version": 5
+    },
+    {
+      "data": {
+        "callId": "read-step-3",
+        "reason": "sessionRuntimeAuthorized",
+        "requestId": "request-step-3",
+        "status": "approved"
+      },
+      "seq": 32,
+      "sessionId": "session-1",
+      "stepId": "step-3",
+      "timeUnixMs": 1790494504193,
+      "turnId": "turn-1",
+      "type": "tool/approval",
+      "version": 5
+    },
+    {
+      "data": {
+        "callId": "read-step-3",
+        "idempotency": "yes",
+        "status": "dispatched"
+      },
+      "seq": 33,
+      "sessionId": "session-1",
+      "stepId": "step-3",
+      "timeUnixMs": 1790494504198,
+      "turnId": "turn-1",
+      "type": "tool/execution",
+      "version": 5
+    },
+    {
+      "data": {
+        "callId": "read-step-3",
+        "data": {
+          "content": "[package]\nname = \"ShellSpan\"\nversion = \"2.1.1\"\ndescription = \"ShellSpan desktop SSH client\""
+        },
+        "name": "read_file",
+        "status": "completed",
+        "summary": "Read Cargo.toml (2782 bytes)"
+      },
+      "seq": 34,
+      "sessionId": "session-1",
+      "stepId": "step-3",
+      "timeUnixMs": 1790494504202,
+      "turnId": "turn-1",
+      "type": "tool/result",
+      "version": 5
+    },
+    {
+      "data": {
+        "reason": "completed"
+      },
+      "seq": 35,
+      "sessionId": "session-1",
+      "stepId": "step-3",
+      "timeUnixMs": 1790494504206,
+      "turnId": "turn-1",
+      "type": "step/end",
+      "version": 5
+    },
+    {
+      "data": {
+        "reason": "completed"
+      },
+      "seq": 36,
+      "sessionId": "session-1",
+      "timeUnixMs": 1790494504210,
+      "turnId": "turn-1",
+      "type": "turn/end",
+      "version": 5
+    },
+    {
+      "data": {
+        "lane": "nextStep",
+        "messages": [
+          {
+            "clientSubmissionId": "new-turn-step",
+            "content": "在新一轮继续检查。",
+            "messageId": "new-turn-step",
+            "source": {
+              "kind": "user",
+              "label": "User",
+              "producerId": "shellspan-user"
+            }
+          }
+        ],
+        "operation": "enqueued"
+      },
+      "seq": 37,
+      "sessionId": "session-1",
+      "timeUnixMs": 1790494504214,
+      "type": "agent/inbox/spliced",
+      "version": 5
+    },
+    {
+      "data": {
+        "startTurn": true,
+        "stepMessages": [
+          {
+            "clientSubmissionId": "new-turn-step",
+            "content": "在新一轮继续检查。",
+            "messageId": "new-turn-step",
+            "source": {
+              "kind": "user",
+              "label": "User",
+              "producerId": "shellspan-user"
+            }
+          }
+        ],
+        "turnMessages": [
+          {
+            "clientSubmissionId": "queued",
+            "content": "下一步\nfull content\n",
+            "messageId": "queued",
+            "source": {
+              "kind": "user",
+              "label": "User",
+              "producerId": "shellspan-user"
+            }
+          }
+        ]
+      },
+      "seq": 38,
+      "sessionId": "session-1",
+      "stepId": "step-4",
+      "timeUnixMs": 1790494504219,
+      "turnId": "turn-2",
+      "type": "step/input_claim",
+      "version": 5
+    },
+    {
+      "data": {
+        "lane": "nextTurn",
+        "messages": [
+          {
+            "clientSubmissionId": "queued",
+            "content": "下一步\nfull content\n",
+            "messageId": "queued",
+            "source": {
+              "kind": "user",
+              "label": "User",
+              "producerId": "shellspan-user"
+            }
+          }
+        ],
+        "operation": "claimed"
+      },
+      "seq": 39,
+      "sessionId": "session-1",
+      "timeUnixMs": 1790494504219,
+      "type": "agent/inbox/spliced",
+      "version": 5
+    },
+    {
+      "seq": 40,
+      "sessionId": "session-1",
+      "timeUnixMs": 1790494504219,
+      "turnId": "turn-2",
+      "type": "turn/start",
+      "version": 5
+    },
+    {
+      "data": {
+        "lane": "nextStep",
+        "messages": [
+          {
+            "clientSubmissionId": "new-turn-step",
+            "content": "在新一轮继续检查。",
+            "messageId": "new-turn-step",
+            "source": {
+              "kind": "user",
+              "label": "User",
+              "producerId": "shellspan-user"
+            }
+          }
+        ],
+        "operation": "claimed"
+      },
+      "seq": 41,
+      "sessionId": "session-1",
+      "timeUnixMs": 1790494504219,
+      "type": "agent/inbox/spliced",
+      "version": 5
+    },
+    {
+      "seq": 42,
+      "sessionId": "session-1",
+      "stepId": "step-4",
+      "timeUnixMs": 1790494504219,
+      "turnId": "turn-2",
+      "type": "step/start",
+      "version": 5
+    },
+    {
+      "data": {
+        "message": {
+          "clientSubmissionId": "queued",
+          "content": "下一步\nfull content\n",
+          "messageId": "queued",
+          "source": {
+            "kind": "user",
+            "label": "User",
+            "producerId": "shellspan-user"
+          }
+        }
+      },
+      "seq": 43,
+      "sessionId": "session-1",
+      "stepId": "step-4",
+      "timeUnixMs": 1790494504219,
+      "turnId": "turn-2",
+      "type": "user/message",
+      "version": 5
+    },
+    {
+      "data": {
+        "message": {
+          "clientSubmissionId": "new-turn-step",
+          "content": "在新一轮继续检查。",
+          "messageId": "new-turn-step",
+          "source": {
+            "kind": "user",
+            "label": "User",
+            "producerId": "shellspan-user"
+          }
+        }
+      },
+      "seq": 44,
+      "sessionId": "session-1",
+      "stepId": "step-4",
+      "timeUnixMs": 1790494504219,
+      "turnId": "turn-2",
+      "type": "user/message",
+      "version": 5
+    }
+  ],
+  "snapshot": {
+    "archived": false,
+    "ended": false,
+    "eventCount": 45,
+    "header": {
+      "createdAtUnixMs": 1790494504034,
+      "executionSurface": "direct",
+      "goal": "Inspect nginx",
+      "sessionId": "session-1",
+      "taskId": "task-1"
+    },
+    "inbox": {
+      "nextStep": [],
+      "nextTurn": [],
+      "pausedIds": []
+    },
+    "recovery": {
+      "kind": "idle",
+      "lastCommittedSeq": 44,
+      "status": "none",
+      "stepId": "step-4",
+      "summary": "No recovery action is pending.",
+      "turnId": "turn-2"
+    },
+    "status": "running",
+    "surface": {
+      "generation": 0,
+      "messages": [
+        {
+          "content": "initial",
+          "messageId": "initial",
+          "role": "user",
+          "source": {
+            "kind": "user",
+            "label": "User",
+            "producerId": "shellspan-user"
+          }
+        },
+        {
+          "callId": "read-step-1",
+          "content": "{\"data\":{\"content\":\"[package]\\nname = \\\"ShellSpan\\\"\\nversion = \\\"2.1.1\\\"\\ndescription = \\\"ShellSpan desktop SSH client\\\"\"},\"status\":\"completed\",\"summary\":\"Read Cargo.toml (2782 bytes)\"}",
+          "name": "read_file",
+          "role": "tool",
+          "status": "completed"
+        },
+        {
+          "content": "只检查依赖版本，保留现有配置。",
+          "messageId": "correction",
+          "role": "user",
+          "source": {
+            "kind": "user",
+            "label": "User",
+            "producerId": "shellspan-user"
+          }
+        },
+        {
+          "callId": "read-step-2",
+          "content": "{\"data\":{\"content\":\"[package]\\nname = \\\"ShellSpan\\\"\\nversion = \\\"2.1.1\\\"\\ndescription = \\\"ShellSpan desktop SSH client\\\"\"},\"status\":\"completed\",\"summary\":\"Read Cargo.toml (2782 bytes)\"}",
+          "name": "read_file",
+          "role": "tool",
+          "status": "completed"
+        },
+        {
+          "content": "补充检查工具版本是否一致。",
+          "messageId": "converted",
+          "role": "user",
+          "source": {
+            "kind": "user",
+            "label": "User",
+            "producerId": "shellspan-user"
+          }
+        },
+        {
+          "callId": "read-step-3",
+          "content": "{\"data\":{\"content\":\"[package]\\nname = \\\"ShellSpan\\\"\\nversion = \\\"2.1.1\\\"\\ndescription = \\\"ShellSpan desktop SSH client\\\"\"},\"status\":\"completed\",\"summary\":\"Read Cargo.toml (2782 bytes)\"}",
+          "name": "read_file",
+          "role": "tool",
+          "status": "completed"
+        },
+        {
+          "content": "下一步\nfull content\n",
+          "messageId": "queued",
+          "role": "user",
+          "source": {
+            "kind": "user",
+            "label": "User",
+            "producerId": "shellspan-user"
+          }
+        },
+        {
+          "content": "在新一轮继续检查。",
+          "messageId": "new-turn-step",
+          "role": "user",
+          "source": {
+            "kind": "user",
+            "label": "User",
+            "producerId": "shellspan-user"
+          }
+        }
+      ]
+    },
+    "task": {
+      "evidence": [],
+      "goal": "Inspect nginx",
+      "taskId": "task-1"
+    }
+  }
+}
