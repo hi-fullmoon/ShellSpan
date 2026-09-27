@@ -193,14 +193,12 @@ function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'us
           </AiDraftAttachmentRail>
         </UnifiedAttachmentContext>
       </div>}
-      {(message.text || node.delivery !== 'committed') && (
+      {(message.text || node.delivery === 'failed') && (
         <Bubble role="user">
           <span className="ai-user-message-text">{message.text}</span>
-          {node.delivery !== 'committed' && (
+          {node.delivery === 'failed' && (
             <span className="ai-user-delivery mt-0.5 block" data-state={node.delivery}>
-              {node.delivery === 'failed'
-                ? t('ai.workspace.messageNotSent')
-                : t('ai.workspace.messagePending')}
+              {t('ai.workspace.messageNotSent')}
             </span>
           )}
         </Bubble>

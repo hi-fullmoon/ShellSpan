@@ -25,7 +25,8 @@ const PendingResponseIndicator = memo(function PendingResponseIndicator({ proces
   const { t } = useI18n();
   return (
     <Marker
-      className="ai-turn-status inline-flex min-h-6.5 w-fit self-start items-center gap-1 whitespace-nowrap"
+      className={cn('ai-turn-status inline-flex w-fit self-start items-center gap-1 whitespace-nowrap',
+        processing ? 'min-h-8' : 'min-h-6.5')}
       role="status"
       aria-live="polite"
       data-ai-thinking-indicator=""
@@ -161,12 +162,6 @@ export const AiConversation = memo(function AiConversation({
     && !visibleResponseStarted
     && !processResponseStarted
     && !latestProcess?.hasEndBoundary;
-  // Corrections continue the active turn. Only a new turn's input may request
-  // top alignment; steering must preserve detached reading or live-tail follow.
-  const latestTurnInput = [...allNodes].reverse().find(node => (
-    node.kind === 'userMessage' && node.inputKind !== 'steer'
-  ));
-  const turnInputKey = latestTurnInput ? conversationItemId(latestTurnInput) : undefined;
   // Keep the trailing status in the last message row. A separate status item
   // would hide an inserted user row from the primitive's append detection.
   const indicator = showAskThinking || showAgentThinking
@@ -200,9 +195,7 @@ export const AiConversation = memo(function AiConversation({
           deferMessageActions={node.kind === 'assistantMessage'
             && (running || pending)
             && footerTurns.has(`${node.sessionId}:${node.turnId}`)}
-          // The primitive owns turn alignment, shrinking its spacer as output
-          // grows. Stable submission IDs keep acknowledgement from reanchoring.
-          scrollAnchor={conversationItemId(node) === turnInputKey}
+          scrollAnchor={false}
           scrollItemId={conversationItemId(node)}
           scrollItemClassName={cn(
             'flex flex-col gap-4',
