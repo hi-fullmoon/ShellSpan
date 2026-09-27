@@ -216,14 +216,17 @@ describe('AssistantMessageContent', () => {
     );
 
     const copyButton = screen.getByRole('button', { name: 'common.copy' });
-    expect(copyButton).toHaveClass('ai-code-block-copy');
+    expect(copyButton).toHaveClass('ai-markdown-code-copy');
+    expect(copyButton.textContent).toBe('');
+    expect(copyButton.querySelector('svg')).toBeInTheDocument();
     expect(copyButton.closest('.ai-code-block')).toHaveAttribute('data-language', 'bash');
 
     fireEvent.click(copyButton);
 
     expect(writeText).toHaveBeenCalledWith('df -h');
     const copiedButton = await screen.findByRole('button', { name: 'common.copied' });
-    expect(copiedButton).toHaveTextContent('common.copied');
+    expect(copiedButton.textContent).toBe('');
+    expect(copiedButton).toHaveAttribute('title', 'common.copied');
   });
 
   it('renders fenced code blocks without actions when disabled', () => {

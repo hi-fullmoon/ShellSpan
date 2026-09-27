@@ -46,6 +46,9 @@
 
 .ai-question-panel-actions [data-slot='button'] {
   color: var(--ai-text-secondary);
+  padding: 4px;
+  background-clip: content-box;
+  border-radius: calc(var(--radius-md) + 4px);
 }
 
 .ai-question-panel-actions [data-slot='button']:first-child svg {

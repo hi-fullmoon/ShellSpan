@@ -39,6 +39,7 @@ interface MessageScrollerProps {
   children: React.ReactNode;
   header?: React.ReactNode;
   followKey: string;
+  generating?: boolean;
   turnAnchorKey?: string;
   /** New local submission/message identities resume following once per identity. */
   scrollToBottomKeys?: readonly string[];
@@ -104,6 +105,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
   children,
   header,
   followKey,
+  generating = false,
   turnAnchorKey,
   scrollToBottomKeys,
   className,
@@ -155,6 +157,28 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
     cancelRestore();
     setPositionReady(true);
   }, [cancelRestore]);
+
+  const preserveHistoryPosition = useCallback(() => {
+    const viewport = viewportRef.current;
+    const content = contentRef.current;
+    if (!viewport || !content) return;
+    const viewportTop = viewport.getBoundingClientRect().top;
+    const item = Array.from(content.children).find((row) => (
+      row instanceof HTMLElement && row.dataset.messageId && row.getBoundingClientRect().bottom > viewportTop
+    ));
+    if (!(item instanceof HTMLElement) || !item.dataset.messageId) return;
+    interruptRestore();
+    followIntentRef.current = false;
+    suppressProgrammaticFollowRef.current = true;
+    // Loading history is explicit reading intent, even when a short current
+    // page fits the viewport. The public API also reserves the space needed
+    // to keep that row in place when older rows arrive.
+    const paddingTop = Number.parseFloat(getComputedStyle(content).paddingBlockStart) || 0;
+    scrollToMessage(item.dataset.messageId, {
+      align: 'start', behavior: 'instant',
+      scrollMargin: item.getBoundingClientRect().top - viewportTop - paddingTop,
+    });
+  }, [interruptRestore, scrollToMessage]);
 
   useLayoutEffect(() => {
     let requested = false;
@@ -273,25 +297,27 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
   const commitMessageLayout = useCallback(() => {
     // A throttled child can commit without changing children/followKey here.
     // Use the recorded user intent, not geometry after the text has grown.
-    if (positionReady && followIntentRef.current && !suppressProgrammaticFollowRef.current) {
-      scrollToEnd();
+    const viewport = viewportRef.current;
+    if (positionReady && viewport && followIntentRef.current && !suppressProgrammaticFollowRef.current
+      && distanceToBottom(viewport) > 0.5) {
+      // Layout compensation must finish before paint, even while a submission
+      // transition has temporarily enabled native smooth scrolling. Checking
+      // geometry also makes child and parent commits share one correction.
+      scrollToEnd({ behavior: 'instant' });
     }
   }, [positionReady, scrollToEnd]);
 
   useLayoutEffect(() => {
-    const viewport = viewportRef.current;
     for (const [index, child] of childItems.entries()) {
       if (!wantsScrollAnchor(child)) continue;
       const id = messageItemId(child, index);
       if (!observedAnchorItemsRef.current.has(id)) followIntentRef.current = false;
       observedAnchorItemsRef.current.add(id);
     }
-    if (!positionReady || !viewport || !followIntentRef.current || suppressProgrammaticFollowRef.current) return;
-    // Markdown can gain a line or change block type during a stream. The
-    // primitive corrects resized content on a later animation frame; align in
-    // this commit so the old bottom is never painted between stream updates.
-    if (!viewport.dataset.scrollable?.split(' ').includes('end')) scrollToEnd();
-  }, [children, followKey, positionReady, scrollToEnd]);
+    // data-scrollable is published by the primitive on a later frame. It can
+    // describe the previous layout during a burst of Markdown updates.
+    commitMessageLayout();
+  }, [children, followKey, commitMessageLayout]);
 
   const readAnchor = useCallback(() => {
     const scrollport = viewportRef.current;
@@ -383,8 +409,8 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
       aria-label={ariaLabel}
       onPointerDownCapture={handlePointerDown}
     >
-      {header && <div className="shrink-0">{header}</div>}
       <MessageScrollerViewport
+        className="flex flex-col"
         ref={viewportRef}
         onScrollCapture={handleScrollCapture}
         onScroll={readAnchor}
@@ -421,7 +447,10 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
           interruptRestore();
         }}
       >
-        <MessageScrollerContent ref={contentRef} className={cn('gap-4 px-3 py-4', contentClassName)}>
+        {/* The primitive detects prepends from its first content child. Keep
+            history controls in the viewport, outside the message sequence. */}
+        {header && <div className="shrink-0 pt-5" onClickCapture={preserveHistoryPosition}>{header}</div>}
+        <MessageScrollerContent ref={contentRef} className={cn('min-h-0 grow shrink-0 gap-4 px-3 py-4', contentClassName)}>
           <MessageLayoutContext.Provider value={commitMessageLayout}>
             {messageItems}
           </MessageLayoutContext.Provider>
@@ -436,7 +465,11 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
             onFollowLatest?.();
           }}
         />}>
-          <ArrowDownIcon />
+          {generating ? (
+            <span className="ai-scroll-loading inline-flex size-5 items-center justify-center gap-[3px]" aria-hidden="true">
+              <span /><span /><span />
+            </span>
+          ) : <ArrowDownIcon />}
         </TooltipTrigger>
         <TooltipContent>{t('ai.scrollToLatest')}</TooltipContent>
       </Tooltip>

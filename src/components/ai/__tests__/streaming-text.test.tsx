@@ -19,7 +19,7 @@ describe('streaming text reveal', () => {
     expect(runs.length).toBeGreaterThan(1);
     expect(runs.length).toBeLessThanOrEqual(8);
     expect(container.textContent).toBe(text);
-    expect(runs[runs.length - 1]).toHaveStyle({ animationDelay: `${(runs.length - 1) * 24}ms` });
+    expect(runs[runs.length - 1]).toHaveStyle({ animationDelay: `${(runs.length - 1) * 12}ms` });
     rerender(<Text text={text} streaming={false} />);
     expect([...container.querySelectorAll('.ai-stream-text-run')]).toEqual(runs);
     expect(container.querySelector('.ai-stream-text-fragment')).toHaveAttribute('data-reveal');

@@ -1,3 +1,23 @@
+.ai-scroll-loading > span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: ai-scroll-loading-bounce 1.2s ease-in-out infinite;
+}
+
+.ai-scroll-loading > span:nth-child(2) { animation-delay: 150ms; }
+.ai-scroll-loading > span:nth-child(3) { animation-delay: 300ms; }
+
+@keyframes ai-scroll-loading-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-scroll-loading > span { animation: none; }
+}
+
 .ai-transcript-flow-item:empty,
 [data-slot='message-scroller-item']:has(> .ai-transcript-flow-item:only-child:empty) {
   display: none;
@@ -76,6 +96,12 @@
 .ai-assistant-markdown {
   font: var(--ai-font-markdown-base);
   color: var(--ai-text);
+}
+
+/* A heading keeps its 32px block spacing when it moves to a new chunk:
+   the answer's 16px gap supplies the other half. */
+.ai-assistant-answer > .ai-assistant-markdown + .ai-assistant-markdown:has(> :is(h1, h2, h3):first-child) {
+  margin-top: 16px;
 }
 
 .ai-assistant-markdown strong {
@@ -217,6 +243,46 @@
   font: inherit;
 }
 
+/* Message code uses a single quiet surface; tool result cards keep their layout. */
+.ai-markdown-code-block {
+  border: 1px solid var(--ai-border-soft);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--muted) 30%, var(--card));
+}
+
+.ai-markdown-code-toolbar {
+  color: var(--ai-text-muted);
+  font: 12px/18px var(--ai-font-family-code);
+}
+
+.ai-markdown-code-block .ai-code-block-pre {
+  background: transparent;
+  overflow-wrap: normal;
+  word-break: normal;
+  tab-size: 2;
+}
+
+.ai-markdown-code-toolbar + .ai-code-block-pre {
+  padding-top: 8px;
+}
+
+.ai-markdown-code-block:not([data-language]) > .ai-markdown-code-toolbar {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  padding: 0;
+}
+
+.ai-markdown-code-block:not([data-language]) > .ai-markdown-code-toolbar + .ai-code-block-pre {
+  margin-right: 44px;
+  padding-top: 12px;
+}
+
+.ai-markdown-code-block .ai-code-block-pre:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
 .ai-markdown-table-scroll table {
   width: max-content;
   min-width: 100%;
@@ -260,7 +326,7 @@
 
 .ai-stream-text-fragment[data-reveal]:not([data-staggered]),
 .ai-stream-text-fragment[data-reveal] > .ai-stream-text-run {
-  animation: ai-stream-text-reveal 420ms cubic-bezier(0.22, 0.1, 0.35, 1) backwards;
+  animation: ai-stream-text-reveal 180ms cubic-bezier(0.22, 0.1, 0.35, 1) backwards;
 }
 
 @media (prefers-reduced-motion: reduce) {

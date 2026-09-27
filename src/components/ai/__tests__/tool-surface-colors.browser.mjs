@@ -58,6 +58,9 @@ try {
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
     for (const width of [380, 529, 720]) {
       await page.setViewportSize({ width, height: 720 });
+      assert.equal(await page.locator('.ai-terminal-header').evaluate(element =>
+        getComputedStyle(element).position), 'relative',
+      'Hover-capable command headers must contain the absolutely positioned copy button');
       const styles = await page.evaluate(() => {
         const get = selector => getComputedStyle(document.querySelector(selector));
         const surface = selector => {

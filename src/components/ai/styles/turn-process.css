@@ -91,6 +91,7 @@
 
 .ai-turn-process-trigger > .ai-disclosure-leading > .ai-disclosure-chevron {
   opacity: 1;
+  translate: 0 -1px;
 }
 
 .ai-turn-process-trigger[aria-expanded='false'] > .ai-disclosure-leading > .ai-disclosure-chevron {
@@ -104,6 +105,10 @@
 
 .ai-disclosure-row[aria-expanded]:is([aria-expanded='true'], :hover, :focus-visible) > .ai-disclosure-leading > .ai-disclosure-chevron,
 .ai-tool-row[aria-expanded]:is([aria-expanded='true'], :hover, :focus-visible) > .ai-disclosure-leading > .ai-disclosure-chevron {
+  opacity: 1;
+}
+
+.ai-turn-process[data-status='running'] .ai-turn-process-trigger .ai-disclosure-leading > [data-slot='spinner'] {
   opacity: 1;
 }
 

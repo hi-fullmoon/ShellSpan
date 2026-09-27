@@ -126,6 +126,7 @@ describe('AI Phase 4 Turn Process renderer', () => {
     expect(getComputedStyle(process.querySelector('.ai-disclosure-leading')!).translate).toBe('none');
     expect(process.querySelector('.ai-disclosure-leading')).toHaveClass('mr-1');
     expect(getComputedStyle(process.querySelector('.ai-disclosure-leading > svg')!).width).toBe('14px');
+    expect(getComputedStyle(process.querySelector('.ai-disclosure-chevron')!).translate).toBe('0 -1px');
     expect(processSeparator).not.toHaveClass('ml-[22px]');
     const reasoning = screen.getByRole('button', {
       name: 'Reasoning Read the frozen context. Answer directly.',
@@ -222,7 +223,7 @@ describe('AI Phase 4 Turn Process renderer', () => {
     expect(updatedTrigger).toHaveFocus();
   });
 
-  it('keeps the streaming reasoning preview on the newest line and newest text', () => {
+  it('previews the latest reasoning line while streaming and the first line on completion', () => {
     const firstReasoning = reasoningNode({
       state: 'streaming',
       content: 'Earlier reasoning.\nThe current reasoning starts here',
@@ -244,8 +245,6 @@ describe('AI Phase 4 Turn Process renderer', () => {
     const summary = container.querySelector<HTMLElement>(
       '.ai-reasoning-row .ai-disclosure-summary',
     )!;
-    Object.defineProperty(summary, 'scrollWidth', { configurable: true, value: 360 });
-
     const updatedContent = `${firstReasoning.content} and keeps receiving newer text`;
     rerender(<AiConversationNodeList nodes={[{
       ...running,
@@ -257,7 +256,6 @@ describe('AI Phase 4 Turn Process renderer', () => {
       name: 'Thinking… The current reasoning starts here and keeps receiving newer text',
     })).toBe(reasoning);
     expect(summary).toHaveTextContent('The current reasoning starts here and keeps receiving newer text');
-    expect(summary.scrollLeft).toBe(360);
 
     rerender(<AiConversationNodeList nodes={[{
       ...running,
@@ -273,6 +271,7 @@ describe('AI Phase 4 Turn Process renderer', () => {
     }]} />);
 
     expect(screen.getByRole('button', { name: 'Reasoning Earlier reasoning.' })).toBe(reasoning);
+    expect(summary).toHaveTextContent('Earlier reasoning.');
     expect(summary.scrollLeft).toBe(0);
   });
 

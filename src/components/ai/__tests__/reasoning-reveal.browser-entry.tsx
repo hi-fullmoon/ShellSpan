@@ -3,12 +3,22 @@ import { flushSync } from 'react-dom';
 import { AiConversationNodeList, aiAskConversationNodeRenderers } from '../workspace/ai-conversation-node-seat';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { initI18n } from '@/locales';
+import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
+import type { AgentSessionEvent } from '@/types/agent-session';
 import '@/styles/base.css';
 import '../styles/styles.css';
 
 await initI18n('en-US');
 const root = createRoot(document.getElementById('root')!);
 let revision = 1;
+export function showProcess(events: AgentSessionEvent[]) {
+  flushSync(() => root.render(
+    <main className="ai-panel-shell min-h-dvh w-full min-w-0 p-3" data-ai-scope="workbench">
+      <AiConversationNodeList nodes={projectAgentChatNodes(events).filter(node => node.kind === 'turnProcess')} />
+    </main>,
+  ));
+}
+
 export function show(content: string, mode: 'agent' | 'ask', streaming: boolean, key: number) {
   const node: AiConversationNodeOf<'reasoning'> = {
     kind: 'reasoning', key: 'reasoning-reveal', sourceKind: 'agent',

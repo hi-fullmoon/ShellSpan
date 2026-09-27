@@ -25,10 +25,6 @@
 }
 
 @media (hover: hover) {
-  .ai-terminal-header {
-    position: relative;
-  }
-
   .ai-terminal-header .ai-tool-copy-button {
     position: absolute;
     inset-inline-end: var(--spacing);

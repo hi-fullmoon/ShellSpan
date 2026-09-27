@@ -37,6 +37,56 @@ try {
             if (await button.getAttribute('aria-expanded') === 'false') await button.click();
             await page.locator('.ai-reasoning-body').waitFor();
           };
+          if (mode === 'agent') {
+            const longLine = content.split('\n').sort((a, b) => b.length - a.length)[0];
+            await show(longLine.slice(0, 20), true, -1);
+            const summary = page.locator('.ai-reasoning-row .ai-disclosure-summary');
+            const height = await summary.evaluate(element => element.getBoundingClientRect().height);
+            const prefix = await summary.locator('.ai-stream-text-fragment').elementHandle();
+            for (const [text, streaming] of [[longLine, true], [longLine + '\n' + paragraph, true], [longLine + '\n' + paragraph, false]]) {
+              await show(text, streaming, -1);
+              if (streaming) {
+                assert.ok(await summary.locator('[data-reveal]').count() > 0,
+                  'New reasoning preview text must use the incremental reveal');
+                if (text === longLine) {
+                  assert.ok(await summary.locator('.ai-stream-text-fragment').first().evaluate(
+                    (element, previous) => element === previous, prefix),
+                  'Appending a batch must preserve the previously displayed text node');
+                  const reveal = await summary.evaluate(element => {
+                    const animations = element.getAnimations({ subtree: true });
+                    const latest = animations.at(-1);
+                    latest.pause();
+                    latest.currentTime = 60;
+                    const target = latest.effect.target;
+                    const opacity = Number(getComputedStyle(target).opacity);
+                    latest.finish();
+                    return { opacity, count: animations.length };
+                  });
+                  assert.ok(reveal.count > 1 && reveal.opacity < 1,
+                    'A received batch must reveal gradually instead of appearing fully opaque');
+                }
+              }
+              const geometry = await summary.evaluate(element => ({
+                text: element.textContent,
+                left: element.scrollLeft,
+                end: element.scrollWidth - element.clientWidth,
+                height: element.getBoundingClientRect().height,
+                overflowing: element.scrollWidth > element.clientWidth,
+                overflowStyle: getComputedStyle(element).textOverflow,
+              }));
+              assert.equal(geometry.text, streaming ? text.trim().split('\n').at(-1) : longLine);
+              assert.ok(Math.abs(geometry.left - (streaming ? geometry.end : 0)) <= 1,
+                `Streaming must reveal the newest text; completion must restore the leading summary: ${engine.name()}/${width}/${streaming} ${JSON.stringify(geometry)}`);
+              assert.equal(geometry.height, height, 'The reasoning preview must stay on one line');
+              assert.equal(geometry.overflowStyle, streaming ? 'clip' : 'ellipsis',
+                'Live preview must not hide scrolled text behind an ellipsis');
+              if (text === longLine || !streaming) {
+                assert.equal(geometry.overflowing, true, 'The long repository paragraph must exercise scrolling');
+              }
+            }
+            await show(longLine, true, -1);
+            await page.screenshot({ path: `/tmp/reasoning-preview-${engine.name()}-${width}.png` });
+          }
           await show(paragraph.slice(0, 6), true);
           await open();
           const reveal = await page.evaluate(async ({ entry, paragraph, mode }) => {
@@ -53,7 +103,7 @@ try {
               overflow: body.scrollWidth > body.clientWidth };
           }, { entry, paragraph, mode });
           assert.ok(reveal.count > 0);
-          assert.equal(reveal.duration, 420);
+          assert.equal(reveal.duration, 180);
           assert.equal(reveal.filter, 'none');
           assert.ok(reveal.opacity >= 0 && reveal.opacity < 1);
           assert.equal(reveal.overflow, false);
