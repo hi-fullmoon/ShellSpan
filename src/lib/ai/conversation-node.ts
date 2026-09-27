@@ -30,6 +30,8 @@ export interface AiUserMessageNode extends AiConversationNodeBase {
   readonly clientSubmissionId?: string;
   readonly content: string;
   readonly delivery: 'committed' | 'pending' | 'failed';
+  /** Guidance consumed within the active turn rather than starting a new one. */
+  readonly inputKind?: 'steer';
 }
 
 export interface AiSystemPromptNode extends AiConversationNodeBase {

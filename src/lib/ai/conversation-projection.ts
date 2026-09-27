@@ -1,6 +1,7 @@
 import { skillContexts } from './skill-projection';
 import { createCommittedEventProjection } from './committed-event-projection';
 import { createQuestionProjector } from './question-projection';
+import { conversationTurnTimeline } from './conversation-turn-timeline';
 import { questionKey } from '@/types/agent-question';
 import {
   agentEventTimestamp,
@@ -291,6 +292,8 @@ function createChatProjection() {
     previousStats: AiDurableSessionStats | undefined;
   }>();
   const userMessages = new Map<string, AiUserMessageNode>();
+  const inputKinds = new Map<string, 'initial' | 'steer'>();
+  let activeTurnId: string | null = null;
   const systemPrompts = new Map<string, AiSystemPromptNode>();
   let latestPromptKey: string | undefined;
   let previousPromptContent: string | undefined;
@@ -548,7 +551,10 @@ function createChatProjection() {
   };
 
   const apply = (event: AgentSessionEvent): void => {
-    if (event.turnId) ensureTurn(event);
+    if (event.turnId) {
+      const turn = ensureTurn(event);
+      if (turn?.endSeq === undefined) activeTurnId = event.turnId;
+    }
     // Usage can arrive after turn/end, without a turnId on the envelope.
     if (event.data && 'requestId' in event.data && typeof event.data.requestId === 'string') {
       const requestTurn = requests.get(event.data.requestId)?.turnId;
@@ -560,12 +566,9 @@ function createChatProjection() {
     }
     switch (event.type) {
       case 'session/created':
-      case 'session/resumed':
-      case 'agent/inbox/paused':
       case 'agent/inbox/item_resumed':
       case 'agent/created':
       case 'agent/inbox/reordered':
-      case 'agent/inbox/item_steered':
       case 'session/model_selected':
       case 'session/permission_changed':
       case 'session/execution_surface_changed':
@@ -605,11 +608,17 @@ function createChatProjection() {
       case 'agent/inbox/spliced':
         for (const message of event.data.messages) {
           if (message.source.kind !== 'user') continue;
+          if (event.data.lane === 'nextStep' && !inputKinds.has(message.messageId)) {
+            inputKinds.set(message.messageId, 'steer');
+          }
           if (event.data.operation === 'discarded') {
             userMessages.delete(message.messageId);
             continue;
           }
-          if (event.data.lane !== 'nextTurn') continue;
+          // Busy input stays exclusively in the queue until user/message records
+          // its consumption. Immediate idle submissions retain their startup row.
+          if (event.data.operation !== 'enqueued' || event.data.lane !== 'nextTurn'
+            || activeTurnId !== null) continue;
           const key = `user:${message.messageId}`;
           const previous = userMessages.get(message.messageId);
           userMessages.set(message.messageId, {
@@ -626,8 +635,27 @@ function createChatProjection() {
             ...(message.clientSubmissionId ? { clientSubmissionId: message.clientSubmissionId } : {}),
             content: message.content,
             images: message.images,
-            delivery: 'committed',
+            delivery: 'pending',
           });
+        }
+        break;
+      case 'session/resumed':
+        activeTurnId = null;
+        break;
+      case 'agent/inbox/paused':
+        for (const id of event.data.itemIds) {
+          if (userMessages.get(id)?.delivery === 'pending') userMessages.delete(id);
+        }
+        break;
+      case 'agent/inbox/item_steered':
+        inputKinds.set(event.data.itemId, 'steer');
+        if (userMessages.get(event.data.itemId)?.delivery === 'pending') {
+          userMessages.delete(event.data.itemId);
+        }
+        break;
+      case 'step/input_claim':
+        for (const message of [...event.data.turnMessages, ...event.data.stepMessages]) {
+          inputKinds.set(message.messageId, event.data.startTurn ? 'initial' : 'steer');
         }
         break;
       case 'agent/inbox/item_updated': {
@@ -645,6 +673,7 @@ function createChatProjection() {
         userMessages.delete(event.data.itemId);
         break;
       case 'turn/start': {
+        activeTurnId = eventTurnId(event);
         const turn = ensureTurn(event);
         if (turn) {
           turn.startSeq = event.seq;
@@ -653,6 +682,7 @@ function createChatProjection() {
         break;
       }
       case 'turn/end': {
+        if (event.turnId === activeTurnId) activeTurnId = null;
         const turn = ensureTurn(event);
         if (!turn) break;
         turn.endSeq = event.seq;
@@ -728,6 +758,7 @@ function createChatProjection() {
             content: message.content,
             images: message.images,
             delivery: 'committed',
+            ...(inputKinds.get(message.messageId) === 'steer' ? { inputKind: 'steer' as const } : {}),
           });
         } else {
           const node: AiContextInjectionNode = {
@@ -1192,10 +1223,11 @@ function createChatProjection() {
 
   const snapshot = (events: readonly AgentSessionEvent[]): readonly AiConversationNode[] => {
     const projectedUnscoped = new Map(unscopedNodes);
+    const pendingUsers: AiUserMessageNode[] = [];
     const scopedUsers = new Map<string, AiUserMessageNode[]>();
     for (const node of userMessages.values()) {
       if (node.turnId === null) {
-        projectedUnscoped.set(node.key, node);
+        pendingUsers.push(node);
         continue;
       }
       const values = scopedUsers.get(node.turnId) ?? [];
@@ -1248,12 +1280,11 @@ function createChatProjection() {
     let sessionStats: AiDurableSessionStats | undefined;
     for (const turn of orderedTurns) {
       nodes.push(...(scopedPrompts.get(turn.id) ?? []).sort(topLevelSort));
-      nodes.push(...(scopedUsers.get(turn.id) ?? []).sort(topLevelSort));
+      const users = (scopedUsers.get(turn.id) ?? []).sort(topLevelSort);
 
       const cached = turnSnapshots.get(turn.id);
       if (cached && !dirtyTurns.has(turn.id) && cached.previousStats === sessionStats) {
-        nodes.push(cached.process);
-        if (cached.closing) nodes.push(cached.closing);
+        nodes.push(...conversationTurnTimeline(users, cached.process, cached.closing));
         nodes.push(...(scopedArtifacts.get(turn.id) ?? []).sort(topLevelSort));
         if (cached.tail) {
           nodes.push(cached.tail);
@@ -1296,11 +1327,10 @@ function createChatProjection() {
         childKeys: children.map((child) => child.key),
         children,
       };
-      nodes.push(process);
       const hasTurnTail = turn.startSeq !== undefined && turn.endSeq !== undefined
         && Boolean(turn.endReason && turn.endTimestamp);
       const closingNode = closing && (hasTurnTail ? { ...closing, hasTurnTail: true } : closing);
-      if (closingNode) nodes.push(closingNode);
+      nodes.push(...conversationTurnTimeline(users, process, closingNode));
       nodes.push(...(scopedArtifacts.get(turn.id) ?? []).sort(topLevelSort));
 
       let tail: AiTurnTailNode | undefined;
@@ -1347,6 +1377,7 @@ function createChatProjection() {
     }
 
     dirtyTurns.clear();
+    nodes.push(...pendingUsers.sort(topLevelSort));
     return nodes;
   };
   return { apply, snapshot };

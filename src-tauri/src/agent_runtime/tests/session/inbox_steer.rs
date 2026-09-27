@@ -368,3 +368,156 @@ fn inbox_steer_removed_during_step_preparation_closes_turn_without_an_empty_mode
         .iter()
         .any(|event| event.step_id.as_deref() == Some("unused-step")));
 }
+
+#[test]
+fn inbox_conversation_timeline_preserves_consumption_order_after_restart() {
+    let (root, store) = running_steer_store();
+    // Record actual local reads in the real session store. This exercises the
+    // transcript lifecycle without a model transport or invented model output.
+    let read_manifest = |step: &str| {
+        let call_id = format!("read-{step}");
+        store
+            .append(
+                "session-1",
+                Some("turn-1".into()),
+                Some(step.into()),
+                AgentSessionEventPayload::ToolCall {
+                    call: super::super::recorded_tool_call(crate::llm::types::ModelToolCall {
+                        call_id: call_id.clone(),
+                        provider_call_id: None,
+                        name: "read_file".into(),
+                        arguments: serde_json::json!({"path":"Cargo.toml"}),
+                    }),
+                },
+            )
+            .unwrap();
+        store
+            .append(
+                "session-1",
+                Some("turn-1".into()),
+                Some(step.into()),
+                AgentSessionEventPayload::ToolApproval {
+                    request_id: format!("request-{step}"),
+                    call_id: call_id.clone(),
+                    approval_id: None,
+                    status: crate::agent_runtime::AgentToolApprovalStatus::Approved,
+                    risk: None,
+                    reason: Some("sessionRuntimeAuthorized".into()),
+                    expires_at_unix_ms: None,
+                    prompt: None,
+                },
+            )
+            .unwrap();
+        store
+            .append(
+                "session-1",
+                Some("turn-1".into()),
+                Some(step.into()),
+                AgentSessionEventPayload::ToolExecution {
+                    call_id: call_id.clone(),
+                    status: crate::agent_runtime::AgentToolExecutionStatus::Dispatched,
+                    idempotency: "yes".into(),
+                },
+            )
+            .unwrap();
+        let content =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).unwrap();
+        store.append("session-1", Some("turn-1".into()), Some(step.into()),
+            AgentSessionEventPayload::ToolResult {
+                call_id, name: "read_file".into(), status: crate::agent_runtime::AgentToolResultStatus::Completed,
+                summary: format!("Read Cargo.toml ({} bytes)", content.len()),
+                data: Some(serde_json::json!({"content":content.lines().take(4).collect::<Vec<_>>().join("\n")})),
+                duration_ms: None, evidence_refs: Vec::new(),
+            }).unwrap();
+        store
+            .append(
+                "session-1",
+                Some("turn-1".into()),
+                Some(step.into()),
+                AgentSessionEventPayload::StepEnd {
+                    reason: "completed".into(),
+                },
+            )
+            .unwrap();
+    };
+    read_manifest("step-1");
+    store
+        .enqueue(
+            "session-1",
+            AgentInboxLane::NextStep,
+            message("correction", "只检查依赖版本，保留现有配置。"),
+        )
+        .unwrap();
+    store
+        .begin_continuation_step("session-1", "turn-1".into(), "step-2".into())
+        .unwrap();
+    read_manifest("step-2");
+    store
+        .enqueue(
+            "session-1",
+            AgentInboxLane::NextTurn,
+            message("converted", "补充检查工具版本是否一致。"),
+        )
+        .unwrap();
+    let revision = store.snapshot("session-1").unwrap().event_count;
+    store
+        .mutate_inbox(AgentInboxMutationInput {
+            session_id: "session-1".into(),
+            expected_revision: revision,
+            client_operation_id: "convert-to-steer".into(),
+            mutation: AgentInboxMutation::Steer {
+                item_id: "converted".into(),
+            },
+        })
+        .unwrap();
+    store
+        .begin_continuation_step("session-1", "turn-1".into(), "step-3".into())
+        .unwrap();
+    read_manifest("step-3");
+    assert!(store
+        .end_turn_if_no_step_input("session-1", "turn-1", "completed")
+        .unwrap());
+    // A next-step input racing the turn boundary can be consumed by a new
+    // turn's initial claim. Its presentation must follow that actual claim.
+    store
+        .enqueue(
+            "session-1",
+            AgentInboxLane::NextStep,
+            message("new-turn-step", "在新一轮继续检查。"),
+        )
+        .unwrap();
+    store
+        .begin_turn_step("session-1", "turn-2".into(), "step-4".into())
+        .unwrap();
+    let events = store.all_events("session-1").unwrap();
+    let users: Vec<_> = events
+        .iter()
+        .filter_map(|event| match &event.payload {
+            AgentSessionEventPayload::UserMessage { message } => Some(message.message_id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        users,
+        [
+            "initial",
+            "correction",
+            "converted",
+            "queued",
+            "new-turn-step"
+        ]
+    );
+    let reopened = AgentSessionStore::default();
+    reopened.configure(root.path().to_path_buf()).unwrap();
+    assert_eq!(reopened.all_events("session-1").unwrap(), events);
+    if let Some(path) = std::env::var_os("SHELLSPAN_INBOX_TIMELINE_EVIDENCE") {
+        std::fs::write(
+            path,
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "events": events, "snapshot": reopened.snapshot("session-1").unwrap(),
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    }
+}

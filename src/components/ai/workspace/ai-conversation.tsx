@@ -1,5 +1,6 @@
-import { memo, type ComponentProps, type ReactNode } from 'react';
+import { memo, useMemo, type ComponentProps, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { Marker, MarkerContent, MarkerIcon } from '@/components/ui/marker';
 import { BrainIcon } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
@@ -10,13 +11,17 @@ import { useConversationHistory } from './use-conversation-history';
 import { MessageScroller } from '../chat-primitives';
 import {
   AiConversationNodeSeat,
+  isUserVisibleContextInjection,
   type AiConversationNodeRendererMap,
 } from './ai-conversation-node-seat';
 
 const statusItemClassName = '[content-visibility:visible] [contain-intrinsic-size:none]';
 const HISTORY_PAGE_SIZE = 80;
 
-const AskThinkingIndicator = memo(function AskThinkingIndicator(_: { scrollItemClassName: string }) {
+const PendingResponseIndicator = memo(function PendingResponseIndicator({ processing }: {
+  scrollItemClassName: string;
+  processing: boolean;
+}) {
   const { t } = useI18n();
   return (
     <Marker
@@ -26,17 +31,14 @@ const AskThinkingIndicator = memo(function AskThinkingIndicator(_: { scrollItemC
       data-ai-thinking-indicator=""
     >
       <MarkerIcon>
-        <BrainIcon aria-hidden="true" />
+        {processing ? <Spinner aria-hidden="true" /> : <BrainIcon aria-hidden="true" />}
       </MarkerIcon>
-      <MarkerContent className="shimmer">{t('ai.thinking.inProgress')}</MarkerContent>
+      <MarkerContent className="shimmer">{t(processing ? 'ai.workspace.processing' : 'ai.thinking.inProgress')}</MarkerContent>
     </Marker>
   );
 });
 
-const AgentRunningIndicator = memo(function AgentRunningIndicator({
-  status,
-}: {
-  readonly status: AiSessionStatus;
+const AgentWaitingIndicator = memo(function AgentWaitingIndicator(_: {
   readonly scrollItemClassName: string;
 }) {
   const { t } = useI18n();
@@ -48,7 +50,7 @@ const AgentRunningIndicator = memo(function AgentRunningIndicator({
       data-ai-running-indicator=""
     >
       <MarkerContent className="shimmer">
-        {status === 'waiting' ? t('agent.session.status.waiting') : t('ai.workspace.processing')}
+        {t('agent.session.status.waiting')}
       </MarkerContent>
     </Marker>
   );
@@ -97,7 +99,7 @@ export interface AiConversationProps {
 }
 
 export const AiConversation = memo(function AiConversation({
-  nodes: allNodes,
+  nodes: projectedNodes,
   renderers,
   runningIndicator = 'agent',
   pending = false,
@@ -112,6 +114,17 @@ export const AiConversation = memo(function AiConversation({
   onLoadOlder,
 }: AiConversationProps): React.ReactNode {
   const { t } = useI18n();
+  // A streamed opening message may later acquire tool calls. Keep all visible
+  // assistant text in sibling rows so that projection changes cannot move it
+  // into a disclosure, remount Markdown or restart its reveal animation.
+  const allNodes = useMemo(() => projectedNodes.flatMap((node): AiConversationNode[] => {
+    if (node.kind !== 'turnProcess') return [node];
+    const children = node.children.filter(child => child.kind !== 'assistantMessage');
+    const messages = node.children.filter(child => child.kind === 'assistantMessage'
+      && child.blocks.some(block => block.type === 'text' && block.text.trim().length > 0));
+    if (children.length === node.children.length) return [node];
+    return [{ ...node, children, childKeys: children.map(child => child.key) }, ...messages];
+  }), [projectedNodes]);
   const { nodes, startIndex, saveAnchor, revealOlder, resumeFollowing } = useConversationHistory(
     allNodes, HISTORY_PAGE_SIZE, initialAnchor, onAnchorChange, onLoadOlder,
   );
@@ -130,23 +143,43 @@ export const AiConversation = memo(function AiConversation({
     || (node.kind === 'assistantMessage'
       && node.blocks.some((block) => block.type === 'text' && block.text.length > 0))
   ));
+  const latestProcess = [...allNodes.slice(latestUserIndex + 1)].reverse()
+    .find((node) => node.kind === 'turnProcess');
+  const footerTurns = new Set(allNodes.flatMap((node) => (
+    node.kind === 'turnProcess' && node.hasStartBoundary
+      ? [`${node.sessionId}:${node.turnId}`] : []
+  )));
   const showAskThinking = (running || pending)
     && runningIndicator === 'ask'
     && !visibleResponseStarted;
-  const latestUser = latestUserIndex >= 0 ? allNodes[latestUserIndex] : undefined;
-  const latestUserKey = latestUser ? conversationItemId(latestUser) : undefined;
+  const processResponseStarted = latestProcess?.children.some((node) => (
+    node.kind !== 'contextInjection' || isUserVisibleContextInjection(node)
+  ));
+  const showAgentThinking = (pending || status === 'running')
+    && runningIndicator === 'agent'
+    && status !== 'waiting'
+    && !visibleResponseStarted
+    && !processResponseStarted
+    && !latestProcess?.hasEndBoundary;
+  // Corrections continue the active turn. Only a new turn's input may request
+  // top alignment; steering must preserve detached reading or live-tail follow.
+  const latestTurnInput = [...allNodes].reverse().find(node => (
+    node.kind === 'userMessage' && node.inputKind !== 'steer'
+  ));
+  const turnInputKey = latestTurnInput ? conversationItemId(latestTurnInput) : undefined;
   // Keep the trailing status in the last message row. A separate status item
   // would hide an inserted user row from the primitive's append detection.
-  const indicator = showAskThinking
-    ? <AskThinkingIndicator scrollItemClassName={statusItemClassName} />
-    : (running || pending) && runningIndicator === 'agent'
-      ? <AgentRunningIndicator status={status} scrollItemClassName={statusItemClassName} />
+  const indicator = showAskThinking || showAgentThinking
+    ? <PendingResponseIndicator processing={showAgentThinking} scrollItemClassName={statusItemClassName} />
+    : status === 'waiting' && runningIndicator === 'agent'
+      ? <AgentWaitingIndicator scrollItemClassName={statusItemClassName} />
       : null;
   return (
     <MessageScroller
       className="min-h-0 flex-1"
       contentClassName="ai-conversation-content mx-auto min-w-0 w-[min(calc(100%-var(--ai-shell-clearance)-var(--ai-transcript-extra-inset)-var(--ai-shell-clearance)-var(--ai-transcript-extra-inset)),var(--ai-chat-content-max-width))] gap-4 px-0 pt-5 pb-7"
       followKey={followKey(nodes, throughSeq)}
+      generating={pending || (status === 'running' && !latestProcess?.hasEndBoundary)}
       ariaLabel={t('ai.conversation')}
       initialAnchor={initialAnchor}
       onAnchorChange={saveAnchor}
@@ -164,9 +197,12 @@ export const AiConversation = memo(function AiConversation({
           key={conversationItemId(node)}
           node={node}
           renderers={renderers}
+          deferMessageActions={node.kind === 'assistantMessage'
+            && (running || pending)
+            && footerTurns.has(`${node.sessionId}:${node.turnId}`)}
           // The primitive owns turn alignment, shrinking its spacer as output
           // grows. Stable submission IDs keep acknowledgement from reanchoring.
-          scrollAnchor={conversationItemId(node) === latestUserKey}
+          scrollAnchor={conversationItemId(node) === turnInputKey}
           scrollItemId={conversationItemId(node)}
           scrollItemClassName={cn(
             'flex flex-col gap-4',

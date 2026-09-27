@@ -12,8 +12,11 @@ import {
 } from 'lucide-react';
 
 import { AssistantMessageContent, StreamingMarkdownContent } from '@/components/ai/assistant-message-content';
+import { StreamingText, StreamingTextContext } from '@/components/ai/streaming-text';
 import { Bubble, Message, MessageActions } from '@/components/ai/chat-primitives';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Spinner } from '@/components/ui/spinner';
 import {
   Collapsible,
   CollapsibleContent,
@@ -50,6 +53,7 @@ import {
 type AiConversationNodeRendererProps<Kind extends AiConversationNode['kind']> = {
   readonly node: AiConversationNodeOf<Kind>;
   readonly inTurnProcess?: boolean;
+  readonly deferMessageActions?: boolean;
   readonly renderers?: AiConversationNodeRendererMap;
   readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
   readonly onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void;
@@ -143,7 +147,7 @@ function contextLabelKey(
   }
 }
 
-function isUserVisibleContextInjection(
+export function isUserVisibleContextInjection(
   node: AiConversationNodeOf<'contextInjection'>,
 ): boolean {
   return node.provenance.kind !== 'runtime'
@@ -178,6 +182,9 @@ function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'us
   const message = decodeDocumentMessage(node.content);
   return (
     <Message role="user">
+      {node.inputKind === 'steer' && <Badge variant="secondary" className="self-end">
+        {t('ai.workspace.messageSteering')}
+      </Badge>}
       {Boolean(node.images?.length || message.documents.length) && <div className="w-max min-w-0 max-w-full">
         <UnifiedAttachmentContext value={true}>
           <AiDraftAttachmentRail unified count={(node.images?.length ?? 0) + message.documents.length}>
@@ -206,6 +213,7 @@ function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'us
 function AssistantMessageNodeView({
   node,
   inTurnProcess = false,
+  deferMessageActions = false,
 }: AiConversationNodeRendererProps<'assistantMessage'>) {
   const { t } = useI18n();
   const text = assistantText(node);
@@ -224,7 +232,7 @@ function AssistantMessageNodeView({
           </span>
         )}
       </Bubble>
-      {!inTurnProcess && !node.hasTurnTail && node.state !== 'streaming' && (
+      {!inTurnProcess && !deferMessageActions && !node.hasTurnTail && node.state !== 'streaming' && (
         <MessageActions
           text={text}
           timestamp={node.timestamp}
@@ -284,9 +292,7 @@ function ReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reas
   useLayoutEffect(() => {
     const element = summaryRef.current;
     if (!element) return;
-    // A reasoning paragraph can stream for a long time without a newline. Keep
-    // the visible one-line preview pinned to its newest text while it grows,
-    // then restore the usual leading summary when the reasoning settles.
+    // Only move the one-line preview; the transcript keeps its reading anchor.
     element.scrollLeft = isStreaming ? element.scrollWidth : 0;
   }, [isStreaming, summary]);
 
@@ -318,7 +324,11 @@ function ReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reas
           {summary && (
             <>
               <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
-              <span ref={summaryRef} className={AI_DISCLOSURE_SUMMARY_CLASS}>{summary}</span>
+              <span ref={summaryRef} className={cn(AI_DISCLOSURE_SUMMARY_CLASS, isStreaming && 'overflow-hidden whitespace-nowrap text-clip')}>
+                <StreamingTextContext.Provider value={isStreaming}>
+                  <StreamingText key={isStreaming ? lines.length - 1 : 0}>{summary}</StreamingText>
+                </StreamingTextContext.Provider>
+              </span>
             </>
           )}
         </CollapsibleTrigger>
@@ -614,7 +624,9 @@ function TurnProcessDisclosure({
           )}
         >
           <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
-            <ChevronDownIcon className="ai-disclosure-chevron" />
+            {node.status === 'running'
+              ? <Spinner aria-hidden="true" />
+              : <ChevronDownIcon className="ai-disclosure-chevron" />}
           </span>
           <span className={AI_DISCLOSURE_TITLE_CLASS}>{label}</span>
           {summary && (
@@ -702,12 +714,13 @@ function renderNode(
   onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void,
   onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void,
   inTurnProcess = false,
+  deferMessageActions = false,
 ): React.ReactNode {
   switch (node.kind) {
     case 'systemPrompt': return React.createElement(renderers.systemPrompt, { node, renderers });
     case 'contextInjection': return React.createElement(renderers.contextInjection, { node, renderers });
     case 'userMessage': return React.createElement(renderers.userMessage, { node });
-    case 'assistantMessage': return React.createElement(renderers.assistantMessage, { node, inTurnProcess });
+    case 'assistantMessage': return React.createElement(renderers.assistantMessage, { node, inTurnProcess, deferMessageActions });
     case 'reasoning': return React.createElement(renderers.reasoning, { node });
     case 'tool': return React.createElement(renderers.tool, { node, onOpenTool });
     case 'question': return React.createElement(renderers.question, { node });
@@ -728,7 +741,7 @@ export function aiConversationNodeRevision(node: AiConversationNode): string {
   switch (node.kind) {
     // Committed node content is immutable for a given lastSeq. Only optimistic
     // delivery and local presentation state can change without a new event.
-    case 'userMessage': return `${base}:${node.delivery}`;
+    case 'userMessage': return `${base}:${node.delivery}:${node.inputKind ?? 'initial'}`;
     case 'assistantMessage': return `${base}:${node.state}:${node.hasTurnTail ?? false}`;
     case 'reasoning': return `${base}:${node.state}`;
     case 'tool': return `${base}:${node.state}`;
@@ -776,12 +789,14 @@ export const AiConversationNodeSeat = React.memo(function AiConversationNodeSeat
   renderers = aiConversationNodeRenderers,
   onOpenTool,
   onOpenArtifact,
+  deferMessageActions = false,
 }: {
   readonly node: AiConversationNode;
   readonly renderers?: AiConversationNodeRendererMap;
   readonly scrollAnchor?: boolean;
   readonly scrollItemId?: string;
   readonly scrollItemClassName?: string;
+  readonly deferMessageActions?: boolean;
   readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
   readonly onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void;
 }) {
@@ -792,13 +807,14 @@ export const AiConversationNodeSeat = React.memo(function AiConversationNodeSeat
       data-ai-node-kind={node.kind}
       data-ai-turn-id={node.turnId ?? undefined}
     >
-      {renderNode(node, renderers, onOpenTool, onOpenArtifact)}
+      {renderNode(node, renderers, onOpenTool, onOpenArtifact, false, deferMessageActions)}
     </div>
   );
 }, (previous, next) => (
   previous.renderers === next.renderers
   && previous.onOpenTool === next.onOpenTool
   && previous.onOpenArtifact === next.onOpenArtifact
+  && previous.deferMessageActions === next.deferMessageActions
   && sameConversationNode(previous.node, next.node)
 ));
 AiConversationNodeSeat.displayName = 'AiConversationNodeSeat';
