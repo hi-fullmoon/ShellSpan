@@ -104,8 +104,8 @@
   justify-content: center;
 }
 
-.ai-turn-status[data-ai-thinking-indicator] [data-slot='marker-icon'],
-.ai-turn-status[data-ai-thinking-indicator] [data-slot='marker-icon'] > svg {
+.ai-turn-status[data-ai-thinking-indicator]:not([data-ai-processing]) [data-slot='marker-icon'],
+.ai-turn-status[data-ai-thinking-indicator]:not([data-ai-processing]) [data-slot='marker-icon'] > svg {
   width: 14px;
   height: 14px;
 }

@@ -18,10 +18,11 @@ const PendingResponseIndicator = memo(function PendingResponseIndicator({ proces
   const { t } = useI18n();
   return (
     <Marker
-      className={cn('ai-turn-status inline-flex w-fit self-start items-center gap-1 whitespace-nowrap', processing ? 'min-h-8' : 'min-h-8')}
+      className={cn('ai-turn-status inline-flex min-h-8 w-fit self-start items-center whitespace-nowrap', processing ? 'gap-0' : 'gap-1')}
       role="status"
       aria-live="polite"
       data-ai-thinking-indicator=""
+      data-ai-processing={processing || undefined}
     >
       {processing ? <AiProcessingStatus /> : <>
         <MarkerIcon><BrainIcon aria-hidden="true" /></MarkerIcon>

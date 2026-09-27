@@ -6,6 +6,19 @@ import tailwindcss from '@tailwindcss/vite';
 import { chromium, webkit } from 'playwright';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
+function statusGeometry(element) {
+  const row = element.getBoundingClientRect();
+  return ['[data-slot="marker-icon"]', '[data-slot="marker-content"]'].map(selector => {
+    const target = element.querySelector(selector);
+    const rect = target.getBoundingClientRect();
+    const style = getComputedStyle(target);
+    const svg = target.querySelector('svg');
+    const iconStyle = svg ? getComputedStyle(svg) : null;
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+      font: selector === '[data-slot="marker-content"]' ? style.font : undefined, rowHeight: row.height,
+      icon: iconStyle ? { width: iconStyle.width, height: iconStyle.height, translate: iconStyle.translate } : null };
+  });
+}
 const server = await createServer({ root, configFile: false, appType: 'custom', logLevel: 'error',
   cacheDir: `/tmp/shellspan-startup-continuity-${process.pid}`,
   plugins: [react(), tailwindcss()], resolve: { alias: { '@': `${root}src` } },
@@ -27,7 +40,7 @@ try {
         await page.evaluate(async () => {
           const { mount } = await import('/src/components/ai/__tests__/ai-startup-continuity.browser.tsx');
           const host = document.createElement('main');
-          host.className = 'ai-panel-shell @container/ai-workspace';
+          host.className = 'ai-panel-shell ai-workspace-root @container/ai-workspace';
           host.style.cssText = 'position:fixed;inset:0;display:flex;flex-direction:column';
           document.body.append(host);
           window.startup = await mount(host);
@@ -51,6 +64,7 @@ try {
         await page.locator('[data-ai-thinking-indicator]').waitFor({ state: 'visible' });
         assert.equal(await page.locator('.ai-turn-process').count(), 0);
         const pendingLabel = await page.locator('[data-ai-thinking-indicator] .shimmer').textContent();
+        const initialStatusGeometry = await page.locator('[data-ai-thinking-indicator]').evaluate(statusGeometry);
         const pendingGeometry = await page.locator('[data-ai-thinking-indicator]').evaluate(element => {
           const row = element.getBoundingClientRect();
           const label = element.querySelector('[data-slot="marker-content"]').getBoundingClientRect();
@@ -60,6 +74,8 @@ try {
         await page.locator('.ai-turn-process').waitFor({ state: 'visible' });
         assert.equal(await page.locator('[data-ai-thinking-indicator]').count(), 0);
         assert.equal(await page.locator('.ai-turn-process-trigger [data-slot="spinner"]').count(), 1);
+        assert.deepEqual(await page.locator('.ai-turn-process-trigger').evaluate(statusGeometry), initialStatusGeometry,
+          'Processing icon and text must not move or resize when process output starts');
         const processLabel = page.locator('.ai-turn-process-trigger .shimmer');
         assert.equal(await processLabel.textContent(), pendingLabel, 'Processing text must stay consistent after the first output');
         assert.notEqual(await processLabel.evaluate(element => getComputedStyle(element).animationName), 'none');
