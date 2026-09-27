@@ -156,6 +156,7 @@ export function AiWorkspaceController({
       historicalContinuationError={controller.historicalContinuationError}
       onBusyPreferenceChange={controller.setBusyPreference}
       onDismissError={controller.dismissError}
+      onRetrySync={controller.retrySync}
       onOpenModel={openAiSettings}
       onHistory={controller.openSessions}
       onRefreshSessions={controller.refreshSessions}

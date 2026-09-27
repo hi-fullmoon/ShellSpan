@@ -270,6 +270,7 @@ export interface AiWorkspaceRootProps {
   readonly historicalContinuationError?: string | null;
   readonly onBusyPreferenceChange?: (value: 'queue' | 'steer') => void;
   readonly onDismissError?: () => void;
+  readonly onRetrySync?: () => Promise<void>;
   readonly onOpenModel?: () => void;
   readonly onNewSession?: () => void;
   readonly onHistory?: () => void;
@@ -351,6 +352,7 @@ export function AiWorkspaceRoot({
   historicalContinuationError = null,
   onBusyPreferenceChange,
   onDismissError,
+  onRetrySync,
   onOpenModel,
   onNewSession,
   onHistory,
@@ -557,6 +559,9 @@ export function AiWorkspaceRoot({
 
       <AiWorkspaceErrorNotices
         composerState={activeComposerState}
+        syncError={view?.syncError}
+        syncRecovery={view?.syncRecovery}
+        onRetrySync={onRetrySync}
         onDismissError={onDismissError}
       />
 

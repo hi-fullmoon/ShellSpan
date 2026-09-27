@@ -317,23 +317,13 @@ function ReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reas
 
 function AskReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reasoning'> }) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(node.state === 'streaming');
-  const previousStateRef = useRef(node.state);
+  const [manualOpen, setManualOpen] = useState<boolean>();
   const isStreaming = node.state === 'streaming';
+  const open = manualOpen ?? isStreaming;
   const title = isStreaming ? t('ai.thinking.inProgress') : node.state === 'interrupted' ? t('ai.thinking.interrupted') : t('ai.thinking');
 
-  useLayoutEffect(() => {
-    const previousState = previousStateRef.current;
-    if (previousState === 'streaming' && node.state !== 'streaming') {
-      setOpen(false);
-    } else if (previousState !== 'streaming' && node.state === 'streaming') {
-      setOpen(true);
-    }
-    previousStateRef.current = node.state;
-  }, [node.state]);
-
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
+    <Collapsible open={open} onOpenChange={setManualOpen}>
       <div
         className="ai-reasoning-row ai-ask-reasoning-row flex min-w-0 flex-col"
         data-state={isStreaming ? 'running' : node.state === 'interrupted' ? 'interrupted' : 'ok'}
