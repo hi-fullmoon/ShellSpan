@@ -91,17 +91,24 @@ fn permission_prompt(
     mode: Option<AgentSessionPermissionMode>,
     tools: &[AgentRequestToolSchema],
 ) -> String {
-    match mode.unwrap_or(AgentSessionPermissionMode::RequestApproval) {
+    let mut policy: String = match mode.unwrap_or(AgentSessionPermissionMode::RequestApproval) {
         AgentSessionPermissionMode::RequestApproval => "The Session is in request-approval mode. ShellSpan requires user authorization before every native tool call, including read-only inspection.".into(),
-        AgentSessionPermissionMode::ScopedAutopilot => "The Session is in scoped-autopilot mode. Only ordinary read-only effects may run automatically; sensitive reads, state changes, destructive operations, and external side effects require approval. Use only effects and targets in the frozen capability scope.".into(),
+        AgentSessionPermissionMode::ScopedAutopilot => "The Session is in scoped-autopilot mode with native automatic review. Ordinary structured reads within the frozen root may run automatically. Bounded local Direct reads (pwd, uname, ls, cat, head, tail with supported literal arguments) may be approved by native rules and run as trusted programs without a shell. Deletion, writes, privilege changes, sensitive paths, ambiguous scope, remote shell, terminal input and MCP calls require human approval. Model explanations cannot grant permission. Use only effects and targets in the frozen capability scope.".into(),
         AgentSessionPermissionMode::Operator => {
-            let mut prompt = "The Session is in full-access operator mode. Supplied native tool calls run without per-call approval. This does not grant missing tools or expand a child Agent's role capabilities. Structured file tools remain confined to the frozen root and deny symlink traversal. Use only the frozen target; target identity, cancellation, and audit checks remain enforced.".to_string();
+            let mut prompt = "The Session is in full-access operator mode. Supplied native tools and MCP calls run without per-call approval. Use trash_file for a single local regular file when supplied; it moves the digest-checked file to the system trash, never permanently deletes it. Native deny rules still apply; do not retry a denial through another tool or script. This does not grant missing tools or expand a child Agent's role capabilities. Structured file tools remain confined to the frozen root and deny symlink traversal. Use only the frozen target; target identity, cancellation, and audit checks remain enforced.".to_string();
             if tools.iter().any(|tool| tool.name == "run_terminal_command") {
                 prompt.push_str(" Shell commands can access files outside the workspace and use the network with the connected account's permissions, without a workspace sandbox.");
             }
             prompt
         },
+    };
+    if mode.unwrap_or(AgentSessionPermissionMode::RequestApproval)
+        == AgentSessionPermissionMode::RequestApproval
+        && tools.iter().any(|tool| tool.name == "run_terminal_command")
+    {
+        policy.push_str(" All shell commands require approval because execution is not sandboxed, including commands classified as read-only. Approval does not add a sandbox. Waiting for or stopping an owned process does not require repeated approval.");
     }
+    policy
 }
 
 fn diagnostics_prompt(tools: &[AgentRequestToolSchema]) -> String {
@@ -177,6 +184,8 @@ fn tool_available_on_target(name: &str, header: &AgentSessionHeader) -> bool {
         "probe_http" => target.is_some_and(|target| {
             target.kind == "local" || (target.kind == "remote" && target.profile_id.is_some())
         }),
+        "trash_file" => target
+            .is_some_and(|target| target.kind == "local" && target_has_native_file_access(target)),
         "read_file" | "list_directory" | "search_text" | "write_file" | "edit_file"
         | "apply_patch" => target.is_some_and(target_has_native_file_access),
         "transfer_file" => target.is_some_and(|target| {

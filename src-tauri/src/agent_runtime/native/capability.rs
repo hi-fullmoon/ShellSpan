@@ -18,6 +18,7 @@ type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Debug, Clone)]
 pub(crate) struct CapabilityIssueRequestNative {
+    pub(crate) reviewed_command: Option<super::ReviewedReadCommand>,
     pub(crate) request_id: String,
     pub(crate) user_session_id: String,
     pub(crate) call_id: String,
@@ -37,6 +38,7 @@ pub(crate) struct IssuedCapabilityNative {
 
 #[derive(Debug, Clone)]
 struct CapabilityRecordNative {
+    reviewed_command: Option<super::ReviewedReadCommand>,
     capability_id: String,
     request_id: String,
     user_session_id: String,
@@ -124,6 +126,7 @@ impl NativeCapabilityStoreNative {
         let capability_id = format!("cap-{nonce}-{mac}");
         let expires_at_unix_ms = now_unix_ms.saturating_add(request.ttl_ms);
         let record = CapabilityRecordNative {
+            reviewed_command: request.reviewed_command,
             capability_id: capability_id.clone(),
             request_id: request.request_id,
             user_session_id: request.user_session_id,
@@ -155,6 +158,20 @@ impl NativeCapabilityStoreNative {
             capability_id,
             expires_at_unix_ms,
         })
+    }
+
+    pub(crate) fn reviewed_command(
+        &self,
+        capability_id: &str,
+    ) -> Result<Option<super::ReviewedReadCommand>, CapabilityStoreErrorNative> {
+        let records = self
+            .records
+            .lock()
+            .map_err(|_| CapabilityStoreErrorNative::Unavailable)?;
+        let record = records
+            .get(capability_id)
+            .ok_or(CapabilityStoreErrorNative::Unknown)?;
+        Ok(record.reviewed_command.clone())
     }
 
     pub(crate) fn revoke(&self, capability_id: &str) -> Result<(), CapabilityStoreErrorNative> {
@@ -338,6 +355,7 @@ mod tests {
         store
             .issue(
                 CapabilityIssueRequestNative {
+                    reviewed_command: None,
                     request_id: "req-1".into(),
                     user_session_id: "user-1".into(),
                     call_id: "call-1".into(),

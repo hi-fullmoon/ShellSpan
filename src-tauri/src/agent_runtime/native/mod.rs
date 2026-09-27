@@ -1,4 +1,5 @@
 mod ansi;
+mod auto_review;
 mod call_policy;
 mod capability;
 mod checkpoint;
@@ -10,12 +11,14 @@ mod process;
 mod registry;
 mod runtime;
 pub(crate) mod scoped_read;
+mod shell_guard;
 mod shell_policy;
 mod terminal_execute;
 mod terminal_interactive;
 mod terminal_lease;
 
 pub(crate) use ansi::*;
+pub(crate) use auto_review::*;
 pub(crate) use call_policy::*;
 pub(crate) use capability::*;
 pub(crate) use checkpoint::*;
