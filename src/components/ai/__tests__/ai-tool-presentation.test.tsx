@@ -27,6 +27,45 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('AI tool presentation', () => {
+  it.each(['zh-CN', 'en-US'] as const)('shows system-trash recovery without promising in-app undo in %s', async (locale) => {
+    useAppStore.setState({ locale });
+    await initI18n(locale);
+    const trashNode: AiConversationNodeOf<'tool'> = {
+      ...node, name: 'trash_file', effect: 'destructive',
+      input: { path: 'old-config.json' },
+      output: { path: 'old-config.json', trashed: true, recovery: 'systemTrash' },
+    };
+    render(<AiToolRow node={trashNode} />);
+    const label = locale === 'zh-CN' ? '移入系统回收站' : 'Move to system trash';
+    const row = screen.getByRole('button', { name: new RegExp(label) });
+    expect(row).toHaveTextContent('old-config.json');
+    await userEvent.setup().click(row);
+    expect(screen.getByText(locale === 'zh-CN'
+      ? '已移入系统回收站。请在系统回收站中恢复；当前不支持应用内一键撤销。'
+      : 'Moved to the system trash. Restore it there; in-app undo is not available.')).toBeVisible();
+    expect(screen.queryByRole('button', { name: /撤销删除|Undo deletion/u })).not.toBeInTheDocument();
+  });
+
+  it('does not report recovery success when trashing fails', () => {
+    render(<AiToolExpandedContent node={{ ...node, name: 'trash_file', state: 'failed', output: 'trash unavailable', error: 'trash unavailable' }} />);
+    expect(screen.queryByText(/Moved to the system trash/u)).not.toBeInTheDocument();
+    expect(screen.getByText('trash unavailable')).toBeVisible();
+  });
+
+  it('explains a protected operation denial while retaining the original diagnostic', async () => {
+    const error = 'AGENT_CRITICAL_OPERATION_DENIED: protected system resource';
+    render(<AiToolRow node={{ ...node, state: 'failed', error, output: error }} />);
+    const row = screen.getByRole('button', { name: /Not executed: this action affects protected system resources/u });
+    expect(row).not.toHaveTextContent('AGENT_CRITICAL_OPERATION_DENIED');
+    await userEvent.setup().click(row);
+    expect(screen.getByText(error)).toBeVisible();
+  });
+
+  it('explains a changed automatic review without implying a shell fallback', () => {
+    const error = 'AUTO_REVIEW_CHANGED: reviewed root identity changed';
+    render(<AiToolRow node={{ ...node, state: 'failed', error, output: error }} />);
+    expect(screen.getByRole('button', { name: /no ordinary shell fallback was run/u })).toBeVisible();
+  });
   it.each([
     { locale: 'zh-CN' as const, label: '查看详情', accessibleName: '打开 run_terminal_command 的详情' },
     { locale: 'en-US' as const, label: 'View details', accessibleName: 'Open details for run_terminal_command' },
@@ -39,6 +78,7 @@ describe('AI tool presentation', () => {
     await user.click(screen.getByRole('button'));
     const details = screen.getByRole('button', { name: accessibleName });
     expect(details).toHaveTextContent(label);
+    expect(details).toHaveClass('ml-1', 'self-start');
     await user.click(details);
     expect(opened).toEqual([node]);
   });

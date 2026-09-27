@@ -17,8 +17,10 @@ import {
   ShieldAlertIcon,
   SparklesIcon,
   SquareTerminalIcon,
+  Trash2Icon,
 } from 'lucide-react';
 
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
   Collapsible,
@@ -175,6 +177,7 @@ function toolSummary(node: ToolNode, variant: AiToolVariant): string {
     if (failure) return failure.split('\n')[0] ?? failure;
   }
   const input = asRecord(node.input);
+  if (node.name === 'trash_file') return firstString(input, ['path']) ?? node.name;
   const path = variant === 'write' || variant === 'edit' ? toolFilePath(node) : null;
   if (path) return path.split('\n')[0] ?? path;
   const keys: Record<AiToolVariant, readonly string[]> = {
@@ -200,6 +203,7 @@ function toolTitle(
   variant: AiToolVariant,
   t: ReturnType<typeof useI18n>['t'],
 ): string {
+  if (node.name === 'trash_file') return t('ai.workspace.approval.action.trashFile');
   if (node.title === 'Agent orchestration') return t('ai.workspace.tool.title.orchestration');
   if (variant !== 'generic' || !node.title || node.title === node.name || node.title === node.nativeName) {
     return t(titleKey(variant));
@@ -328,7 +332,7 @@ function ReadSurface({ node, compact, showCopyActions }: { node: ToolNode; compa
     : lines;
   return (
     <div className="ai-read-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="read">
-      <div className="ai-block-banner flex min-w-0 items-start gap-2 py-[9px] pr-1 pl-3.5">
+      <div className="ai-block-banner flex min-w-0 items-center gap-2 py-[9px] pr-1 pl-3.5">
         <span className="min-w-0 flex-1 truncate">{label}</span>
         {showCopyActions && node.state !== 'running' && output && <AiToolCopyButton text={output} label={t('ai.workspace.tool.copyOutput')} />}
       </div>
@@ -684,6 +688,17 @@ function IoSurface({ node, compact }: { node: ToolNode; compact: boolean }) {
   );
 }
 
+function TrashSurface({ node }: { readonly node: ToolNode }) {
+  const { t } = useI18n();
+  if (node.state !== 'succeeded') return <IoSurface node={node} compact={false} />;
+  return (
+    <Alert variant="subtle" size="sm">
+      <Trash2Icon />
+      <AlertDescription>{t('ai.workspace.tool.trashRecovery')}</AlertDescription>
+    </Alert>
+  );
+}
+
 export function AiToolExpandedContent({
   node,
   compact = false,
@@ -696,6 +711,7 @@ export function AiToolExpandedContent({
   readonly diffModel?: DiffModel;
 }) {
   const variant = classifyAiTool(node.name, node.nativeName);
+  if (node.name === 'trash_file') return <TrashSurface node={node} />;
   switch (variant) {
     case 'terminal': return <TerminalSurface node={node} compact={compact} showCopyActions={showCopyActions} />;
     case 'read': return <ReadSurface node={node} compact={compact} showCopyActions={showCopyActions} />;
@@ -719,7 +735,7 @@ export function AiToolRow({
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const variant = classifyAiTool(node.name, node.nativeName);
-  const Icon = iconFor(variant);
+  const Icon = node.name === 'trash_file' ? Trash2Icon : iconFor(variant);
   const stateKey = `ai.workspace.tool.${node.state}` as LocaleKey;
   const rawSummary = toolSummary(node, variant);
   const summary = node.state === 'failed' || node.state === 'rejected'
@@ -785,7 +801,7 @@ export function AiToolRow({
                       type="button"
                       variant="outline"
                       size="xs"
-                      className="ai-tool-inspect mt-1 mr-1 mb-0.5 w-fit min-h-5 self-start px-2 py-0.5"
+                      className="ai-tool-inspect mt-1 mr-1 mb-0.5 ml-1 w-fit min-h-5 self-start px-2 py-0.5"
                       onClick={() => onInspect(node)}
                       aria-label={t('ai.workspace.details.openTool', { tool: node.name })}
                     />

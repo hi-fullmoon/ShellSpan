@@ -41,17 +41,26 @@ export function AiComposerAddMenu({
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const pendingFolder = useRef(false);
-  const groups = useComposerMenuGroups({ agent, onAddFile, onSkill,
-    onAddFolder: () => { pendingFolder.current = true; setOpen(false); },
+  const groups = useComposerMenuGroups({
+    agent,
+    onAddFile,
+    onSkill,
+    onAddFolder: () => {
+      pendingFolder.current = true;
+      setOpen(false);
+    },
   });
   return (
-    <DropdownMenu open={open && !disabled} onOpenChange={setOpen}
-      onOpenChangeComplete={value => {
+    <DropdownMenu
+      open={open && !disabled}
+      onOpenChange={setOpen}
+      onOpenChangeComplete={(value) => {
         if (!value && pendingFolder.current) {
           pendingFolder.current = false;
           if (!disabled) onAddFolder();
         }
-      }}>
+      }}
+    >
       <DropdownMenuTrigger
         render={
           <InputGroupButton
@@ -81,18 +90,29 @@ export function AiComposerAddMenu({
       >
         <div className="min-h-0 flex-1 overflow-y-auto" data-composer-menu-scroll="">
           <div className="flex flex-col gap-1 p-2">
-            {groups.map(group => <DropdownMenuGroup key={group.label}>
-              <DropdownMenuLabel className="py-0.5">{group.label}</DropdownMenuLabel>
-              {group.options.map(option => <DropdownMenuItem key={option.key} className="min-h-7 gap-1"
-                onClick={option.choose}
-                aria-label={option.key.startsWith('skill:') ? option.detail : option.label}
-                aria-description={option.key === 'upload'
-                  ? `${t('ai.workspace.documents.hint')} ${t('ai.workspace.documents.limits')} ${t('ai.workspace.documents.imageHint')}`
-                  : option.key === 'project' ? t('ai.workspace.attachments.projectHint') : option.label}>
-                <AiComposerMenuRow option={option} />
-              </DropdownMenuItem>)}
-              {group.notice && <p className="px-1.5 py-1 text-xs text-muted-foreground">{group.notice}</p>}
-            </DropdownMenuGroup>)}
+            {groups.map((group) => (
+              <DropdownMenuGroup key={group.label}>
+                <DropdownMenuLabel className="py-0.5">{group.label}</DropdownMenuLabel>
+                {group.options.map((option) => (
+                  <DropdownMenuItem
+                    key={option.key}
+                    className="min-h-7 gap-1"
+                    onClick={option.choose}
+                    aria-label={option.key.startsWith('skill:') ? option.detail : option.label}
+                    aria-description={
+                      option.key === 'upload'
+                        ? `${t('ai.workspace.documents.hint')} ${t('ai.workspace.documents.limits')} ${t('ai.workspace.documents.imageHint')}`
+                        : option.key === 'project'
+                          ? t('ai.workspace.attachments.projectHint')
+                          : option.label
+                    }
+                  >
+                    <AiComposerMenuRow option={option} />
+                  </DropdownMenuItem>
+                ))}
+                {group.notice && <p className="px-1.5 py-1 text-xs text-muted-foreground">{group.notice}</p>}
+              </DropdownMenuGroup>
+            ))}
           </div>
         </div>
       </DropdownMenuContent>

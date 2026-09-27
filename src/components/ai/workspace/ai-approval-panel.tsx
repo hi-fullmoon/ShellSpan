@@ -68,6 +68,7 @@ const APPROVAL_ACTION_KEYS: Readonly<Record<string, LocaleKey>> = {
   write_file: 'ai.workspace.approval.action.writeFile',
   edit_file: 'ai.workspace.approval.action.editFile',
   search_text: 'ai.workspace.approval.action.searchText',
+  trash_file: 'ai.workspace.approval.action.trashFile',
 };
 
 const APPROVAL_RISK_KEYS = {
@@ -175,7 +176,8 @@ export function AiApprovalPanel({
   const titleKey = approvalTitleKey(approval, command);
   const descriptionKey = approvalDescriptionKey(approval, command);
   const riskKeys = APPROVAL_RISK_KEYS[approval.risk];
-  const destructive = approval.risk === 'destructive';
+  const recoverableDeletion = approval.toolName === 'trash_file';
+  const destructive = approval.risk === 'destructive' && !recoverableDeletion;
 
   useEffect(() => {
     headingRef.current?.focus({ preventScroll: true });
@@ -208,7 +210,7 @@ export function AiApprovalPanel({
           </div>
         </div>
         <CardAction className="col-start-1 row-span-1 row-start-auto justify-self-start pl-9 @min-[480px]/ai-workspace:col-start-2 @min-[480px]/ai-workspace:row-start-1 @min-[480px]/ai-workspace:pl-0">
-          <Badge variant={destructive ? 'destructive' : 'outline'}>{t(riskKeys.label)}</Badge>
+          <Badge variant={destructive ? 'destructive' : 'outline'}>{t(recoverableDeletion ? 'ai.workspace.approval.trashRecoveryLabel' : riskKeys.label)}</Badge>
         </CardAction>
       </CardHeader>
 
@@ -273,7 +275,8 @@ export function AiApprovalPanel({
               <ShieldAlertIcon />
               <AlertDescription className="flex flex-wrap items-center gap-x-1">
                 <span className="font-medium">{t('ai.workspace.approval.impact')}</span>
-                <span>{t(riskKeys.description)}</span>
+                <span>{t(approval.toolName === 'trash_file' ? 'ai.workspace.approval.trashImpact' : riskKeys.description)}</span>
+                {command && <span>{t('ai.workspace.approval.unsandboxedImpact')}</span>}
               </AlertDescription>
             </Alert>
 
@@ -296,9 +299,9 @@ export function AiApprovalPanel({
           {decision === 'reject' && <Spinner data-icon="inline-start" />}
           {t('ai.workspace.approval.reject')}
         </Button>
-        <Button size="sm" variant="warning" disabled={pending || volatileArgumentsMissing} aria-busy={argumentsLoading || undefined} onClick={onApprove} aria-label={t('ai.workspace.approval.approveOnce')}>
+        <Button size="sm" variant="warning" disabled={pending || volatileArgumentsMissing} aria-busy={argumentsLoading || undefined} onClick={onApprove} aria-label={t(approval.toolName === 'trash_file' ? 'ai.workspace.approval.action.trashFile' : 'ai.workspace.approval.approveOnce')}>
           {decision === 'approve' && <Spinner data-icon="inline-start" />}
-          {t('ai.workspace.approval.approveOnce')}
+          {t(approval.toolName === 'trash_file' ? 'ai.workspace.approval.action.trashFile' : 'ai.workspace.approval.approveOnce')}
         </Button>
       </CardFooter>
       <span className="sr-only" aria-live="polite">

@@ -60,6 +60,19 @@ try {
         await show({ toolName: 'run_terminal_command', arguments: { command: 'pwd' } });
         assert.equal(await action.count(), 0);
         assert.ok(await page.getByText('pwd', { exact: true }).isVisible());
+        assert.ok(await page.getByText('此命令尚无沙箱隔离，将以当前账户权限执行，可能影响工作目录之外的数据。', { exact: true }).isVisible());
+        await show({ toolName: 'trash_file', risk: 'destructive', effect: 'destructive',
+          target: { kind: 'local', targetId: 'local', sessionId: 'terminal', label: '本机' },
+          arguments: { path: '/workspace/old-config.json', expectedSha256: 'a'.repeat(64) } });
+        const trashButton = page.getByRole('button', { name: '移入系统回收站', exact: true });
+        assert.ok(await trashButton.isVisible());
+        assert.ok(await page.getByText('可从回收站恢复', { exact: true }).isVisible());
+        assert.equal(await page.getByText('可能造成数据丢失', { exact: true }).count(), 0);
+        assert.ok(await page.getByText('仅移动此普通文件，执行前会重新核对内容。可从系统回收站恢复；失败不会改用永久删除。', { exact: true }).isVisible());
+        assert.equal(await page.getByText('这项操作可能删除或覆盖数据，执行后可能难以撤销。', { exact: true }).count(), 0);
+        await trashButton.click();
+        assert.equal(await page.locator('body').getAttribute('data-action'), 'approve');
+        await page.screenshot({ path: `/tmp/ai-trash-approval-${engine.name()}-${width}.png` });
         await show({ toolName: 'write_terminal_input', arguments: { inputKind: 'text', contentPersisted: false } });
         assert.equal(await page.getByRole('button', { name: '允许执行一次', exact: true }).isDisabled(), true);
         const longPath = '/apps/' + 'directory/'.repeat(100);

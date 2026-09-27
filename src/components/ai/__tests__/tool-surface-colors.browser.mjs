@@ -42,19 +42,21 @@ try {
     const { default: ReactDOM } = await import('/node_modules/.vite/deps/react-dom_client.js');
     await import('/src/styles/base.css');
     await import('/src/components/ai/styles/styles.css');
-    const { AiToolExpandedContent } = await import('/src/components/ai/workspace/ai-tool-presentation.tsx');
+    const { AiToolRow } = await import('/src/components/ai/workspace/ai-tool-presentation.tsx');
     const { initI18n } = await import('/src/locales/index.ts');
     await initI18n('zh-CN');
     const shared = { kind: 'tool', nativeName: null, state: 'succeeded', error: null, target: null };
     ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(React.Fragment, null,
-      React.createElement(AiToolExpandedContent, { compact: true, node: { ...shared, name: 'exec_command', input: { command: `cat ${path}`, cwd: '~' }, output: commandOutput } }),
-      React.createElement(AiToolExpandedContent, { compact: true, node: { ...shared, name: 'read_file', input: { path }, output: fileOutput } }),
+      React.createElement(AiToolRow, { onInspect: () => {}, node: { ...shared, name: 'exec_command', input: { command: `cat ${path}`, cwd: '~' }, output: commandOutput } }),
+      React.createElement(AiToolRow, { onInspect: () => {}, node: { ...shared, name: 'read_file', input: { path }, output: fileOutput } }),
     ));
   }, { path, commandOutput, fileOutput });
+  await page.locator('.ai-tool-row').first().click();
+  await page.locator('.ai-tool-row').nth(1).click();
   await page.locator('.ai-read-block').waitFor();
   for (const theme of ['light', 'dark']) {
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
-    for (const width of [380, 720]) {
+    for (const width of [380, 529, 720]) {
       await page.setViewportSize({ width, height: 720 });
       const styles = await page.evaluate(() => {
         const get = selector => getComputedStyle(document.querySelector(selector));
@@ -75,8 +77,15 @@ try {
       assert.equal(new Set(styles.dividers).size, 1, `${theme}/${width}: divider colors`);
       for (const selector of ['.ai-terminal-block', '.ai-read-block']) {
         const surface = page.locator(selector);
+        const details = surface.locator('..').locator('.ai-tool-inspect');
+        assert.equal((await details.boundingBox()).x, (await surface.boundingBox()).x,
+          `${theme}/${width}: details action must align with the card's left edge`);
         const copy = surface.locator('.ai-tool-copy-button');
         assert.equal(await copy.count(), 1);
+        const command = surface.locator('.ai-terminal-command');
+        if (await command.count() && await command.getAttribute('aria-expanded') !== 'true') {
+          await command.click();
+        }
         await page.mouse.move(width - 1, 719);
         await page.evaluate(() => document.activeElement?.blur());
         assert.equal(await copy.evaluate(element => getComputedStyle(element).opacity), '0');
@@ -91,23 +100,55 @@ try {
         const header = await surface.locator('.ai-terminal-header, .ai-block-banner').boundingBox();
         const button = await copy.boundingBox();
         const hoverTitle = await title.boundingBox();
-        assert.ok(idleTitle.width - hoverTitle.width >= button.width,
+        if (selector === '.ai-read-block') assert.ok(idleTitle.width - hoverTitle.width >= button.width,
           `${theme}/${width}: title reclaims hidden button width`);
+        else assert.deepEqual(hoverTitle, idleTitle, 'Expanded command geometry must remain stable on hover');
         assert.equal(header.height, idleHeader.height, 'Hover must not change header height');
-        assert.ok(hoverTitle.x + hoverTitle.width <= button.x, 'Copy must not overlap title');
+        if (selector === '.ai-read-block') assert.ok(hoverTitle.x + hoverTitle.width <= button.x, 'Copy must not overlap title');
+        else assert.equal(await copy.evaluate(element => getComputedStyle(element).position), 'absolute');
         assert.ok(button.x + button.width <= header.x + header.width && button.y >= header.y);
+        if (selector === '.ai-terminal-block') {
+          assert.ok(Math.abs(button.y + button.height / 2 - header.y - header.height / 2) <= 1,
+            'Copy button must be vertically centered in the expanded command header');
+        } else {
+          assert.ok(Math.abs(button.y + button.height / 2 - hoverTitle.y - hoverTitle.height / 2) <= 1,
+            'Read path and copy button must share the same vertical center');
+          assert.ok(Math.abs(hoverTitle.y + hoverTitle.height / 2 - header.y - header.height / 2) <= 1,
+            'Read path must be vertically centered in its header');
+        }
+        await surface.screenshot({ path: join(screenshots, `${theme}-${width}-${selector.slice(1)}-hover.png`) });
         await page.mouse.move(width - 1, 719);
         await copy.focus();
         assert.equal(await copy.evaluate(element => getComputedStyle(element).opacity), '1');
+        if (selector === '.ai-terminal-block') {
+          assert.deepEqual(await title.boundingBox(), idleTitle, 'Keyboard focus must not reflow the command');
+          assert.deepEqual(await surface.locator('.ai-terminal-header').boundingBox(), idleHeader);
+        }
         await copy.press('Enter');
         await page.waitForFunction(() => document.querySelector('button[aria-label="已复制"]'));
         assert.equal(await page.evaluate(() => navigator.clipboard.readText()), fileOutput);
         await page.waitForFunction(() => !document.querySelector('button[aria-label="已复制"]'));
+        if (selector === '.ai-terminal-block') {
+          await command.click();
+          await page.mouse.move(width - 1, 719);
+          await command.blur();
+          const collapsedTitle = await title.boundingBox();
+          const collapsedSurface = await surface.boundingBox();
+          assert.ok(idleHeader.x + idleHeader.width - collapsedTitle.x - collapsedTitle.width <= 5,
+            'Collapsed command must use the full header width');
+          await surface.hover();
+          assert.deepEqual(await title.boundingBox(), collapsedTitle);
+          assert.deepEqual(await surface.boundingBox(), collapsedSurface);
+          const collapsedHeader = await surface.locator('.ai-terminal-header').boundingBox();
+          const collapsedButton = await copy.boundingBox();
+          assert.ok(Math.abs(collapsedButton.y + collapsedButton.height / 2 - collapsedHeader.y - collapsedHeader.height / 2) <= 1,
+            'Copy button must be vertically centered in the collapsed command header');
+        }
       }
       await page.screenshot({ path: join(screenshots, `${theme}-${width}.png`) });
     }
   }
-  console.log(`Tool surface colors passed in light/dark themes at 380px and 720px. Screenshots: ${screenshots}`);
+  console.log(`Tool surface colors and hover geometry passed in light/dark themes at 380px, 529px and 720px. Screenshots: ${screenshots}`);
 } finally {
   await browser?.close();
   await server.close();

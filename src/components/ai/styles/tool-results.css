@@ -25,18 +25,36 @@
 }
 
 @media (hover: hover) {
+  .ai-terminal-header {
+    position: relative;
+  }
+
+  .ai-terminal-header .ai-tool-copy-button {
+    position: absolute;
+    inset-inline-end: var(--spacing);
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--ai-code-block);
+  }
+
   :is(.ai-terminal-block, .ai-read-block) .ai-tool-copy-button {
     opacity: 0;
+    pointer-events: none;
+  }
+
+  .ai-read-block .ai-tool-copy-button {
     max-width: 0;
     margin-inline-start: calc(-2 * var(--spacing));
-    pointer-events: none;
   }
 
   :is(.ai-terminal-block, .ai-read-block):is(:hover, :focus-within) .ai-tool-copy-button {
     opacity: 1;
+    pointer-events: auto;
+  }
+
+  .ai-read-block:is(:hover, :focus-within) .ai-tool-copy-button {
     max-width: none;
     margin-inline-start: 0;
-    pointer-events: auto;
   }
 }
 
