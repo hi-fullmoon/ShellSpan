@@ -140,6 +140,14 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
             ),
         },
         ModelToolDefinition {
+            name: "trash_file".into(),
+            description: "Move one regular LOCAL file within the frozen workspace to the system trash, never permanently delete it. First use read_file with metadataOnly to obtain its SHA-256, then pass expectedSha256. Directories, symlinks, system resources and remote targets are rejected. Use this for local deletion instead of rm or scripts. A failure never authorizes permanent deletion. Recovery is through the system trash; do not promise an in-app undo or secure erasure.".into(),
+            input_schema: object_schema(
+                &["path", "expectedSha256"],
+                json!({"path": bounded_string(4096), "expectedSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}),
+            ),
+        },
+        ModelToolDefinition {
             name: "read_file".into(),
             description: "Read a bounded file from the frozen target through ShellSpan's native filesystem runtime.".into(),
             input_schema: object_schema(

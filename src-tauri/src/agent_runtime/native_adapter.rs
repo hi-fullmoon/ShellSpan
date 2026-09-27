@@ -752,6 +752,7 @@ fn normalize_arguments(
         | "write_file"
         | "edit_file"
         | "apply_patch"
+        | "trash_file"
         | "transfer_file" => Ok((
             request.model_call.name.clone(),
             request.model_call.arguments.clone(),

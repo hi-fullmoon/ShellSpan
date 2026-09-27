@@ -323,7 +323,7 @@ fn command_executable_names(command: &str) -> Vec<String> {
     names
 }
 
-fn segment_executable_index(words: &[&str]) -> Option<usize> {
+pub(super) fn segment_executable_index(words: &[&str]) -> Option<usize> {
     const WRAPPERS: &[&str] = &[
         "command", "doas", "env", "exec", "nice", "nohup", "sudo", "time", "timeout", "watch",
         "xargs",
