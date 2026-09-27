@@ -8,6 +8,7 @@ export interface AiOptimisticSubmission extends AiDetachedSubmission {
   readonly scopeKey: string;
   readonly expectedNextSeq: number | null;
   readonly delivery: AiOptimisticDelivery;
+  readonly startsTurn?: boolean;
   readonly error?: string;
 }
 
@@ -87,6 +88,8 @@ export function withOptimisticConversationNodes(
   const deduplicated = [...new Map(committedNodes.map((node) => [node.key, node])).values()];
   const visible = submissions.filter((submission) => (
     submission.scopeKey === scopeKey
+    && (submission.mode === 'start' || submission.startsTurn
+      || submission.delivery === 'failed' || submission.delivery === 'timedOut')
     && (submission.sessionId === null || sessionId === null || submission.sessionId === sessionId)
     && !committedInbox.some((item) => (
       item.clientSubmissionId === submission.clientOperationId
