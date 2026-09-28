@@ -19,6 +19,7 @@ import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Marker as MarkerPrimitive, MarkerContent, MarkerIcon } from '@/components/ui/marker';
 import { Separator } from '@/components/ui/separator';
+import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNode, AiConversationNodeOf, AiTurnProcessStatus } from '@/lib/ai/conversation-node';
 import type { LocaleKey } from '@/locales';
@@ -164,6 +165,9 @@ import { decodeDocumentMessage } from '@/lib/ai/document-message';
 function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'userMessage'> }) {
   const { t } = useI18n();
   const message = decodeDocumentMessage(node.content);
+  const pendingIndicator = node.delivery === 'pending' ? (
+    <Spinner className="ai-user-sending" aria-label={t('ai.workspace.messagePending')} />
+  ) : null;
   return (
     <Message role="user">
       {node.inputKind === 'steer' && (
@@ -172,7 +176,8 @@ function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'us
         </Badge>
       )}
       {Boolean(node.images?.length || message.documents.length) && (
-        <div className="w-max min-w-0 max-w-full">
+        <div className="relative w-max min-w-0 max-w-full">
+          {!message.text && pendingIndicator}
           <UnifiedAttachmentContext value={true}>
             <AiDraftAttachmentRail unified count={(node.images?.length ?? 0) + message.documents.length}>
               <AiCommittedImages sessionId={node.sessionId} images={node.images} />
@@ -183,6 +188,7 @@ function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'us
       )}
       {(message.text || node.delivery === 'failed') && (
         <Bubble role="user">
+          {pendingIndicator}
           <span className="ai-user-message-text">{message.text}</span>
           {node.delivery === 'failed' && (
             <span className="ai-user-delivery mt-0.5 block" data-state={node.delivery}>

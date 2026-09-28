@@ -50,6 +50,22 @@
   line-height: 16px;
 }
 
+.ai-message-bubble-content:has(> .ai-user-sending) {
+  position: relative;
+}
+
+.ai-user-sending {
+  position: absolute;
+  right: calc(100% + 4px);
+  top: 50%;
+  translate: 0 -50%;
+  width: 12px;
+  height: 12px;
+  color: var(--ai-text-muted);
+  opacity: 0.6;
+  pointer-events: none;
+}
+
 .ai-user-delivery[data-state='failed'] {
   color: var(--ai-error);
 }
