@@ -1,5 +1,6 @@
 use super::*;
 include!("inbox_steer.rs");
+include!("reliable_submission.rs");
 include!("stream_performance.rs");
 
 #[test]

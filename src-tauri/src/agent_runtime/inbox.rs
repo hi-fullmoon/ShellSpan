@@ -16,8 +16,13 @@ pub(crate) struct AgentInbox {
 impl AgentInbox {
     pub(crate) fn replay(events: &[AgentSessionEvent]) -> Result<Self, String> {
         let mut inbox = Self::default();
+        let mut failed = false;
         for event in events {
             match &event.payload {
+                AgentSessionEventPayload::SessionEnded { status, .. } => {
+                    failed = *status == super::AgentSessionStatus::Failed;
+                }
+                AgentSessionEventPayload::SessionResumed {} => failed = false,
                 AgentSessionEventPayload::InboxPaused { item_ids } => inbox.pause(item_ids)?,
                 AgentSessionEventPayload::InboxItemResumed { item_id, .. } => {
                     inbox.resume(item_id)?
@@ -26,7 +31,20 @@ impl AgentInbox {
                     operation,
                     lane,
                     messages,
-                } => inbox.apply(*operation, *lane, messages)?,
+                } => {
+                    inbox.apply(*operation, *lane, messages)?;
+                    // Older writers used a second pause event. A complete late
+                    // enqueue after failure is already a paused admission, even
+                    // if a crash removed that trailing pause event.
+                    if failed && *operation == AgentInboxOperation::Enqueued {
+                        inbox.pause(
+                            &messages
+                                .iter()
+                                .map(|message| message.message_id.clone())
+                                .collect::<Vec<_>>(),
+                        )?;
+                    }
+                }
                 AgentSessionEventPayload::InboxItemUpdated {
                     item_id,
                     lane,
@@ -81,6 +99,19 @@ impl AgentInbox {
         self.seen_message_ids
             .extend(messages.iter().map(|message| message.message_id.clone()));
         self.queue_mut(lane).extend(messages.iter().cloned());
+        self.paused_ids.extend(
+            messages
+                .iter()
+                .filter(|message| {
+                    message
+                        .source
+                        .metadata
+                        .get("admissionPaused")
+                        .and_then(serde_json::Value::as_bool)
+                        == Some(true)
+                })
+                .map(|message| message.message_id.clone()),
+        );
         Ok(())
     }
 

@@ -117,6 +117,7 @@ impl AgentRuntimeBuilder {
             sessions: self.sessions,
             agents,
             handles: Arc::new(Mutex::new(HashMap::new())),
+            restored_inputs_paused: Arc::new(Mutex::new(false)),
             models: self.models,
             hooks: self.hooks,
             tools: tool_pipeline,
@@ -136,6 +137,7 @@ pub(crate) struct AgentRuntime {
     sessions: AgentSessionStore,
     agents: AgentRegistry,
     handles: Arc<Mutex<HashMap<String, super::AgentHandle>>>,
+    restored_inputs_paused: Arc<Mutex<bool>>,
     models: ModelRegistry,
     hooks: AgentHookBus,
     tools: AgentToolPipeline,
@@ -202,9 +204,19 @@ impl AgentRuntime {
         .await
         .map_err(|e| e.to_string())?
     }
+    #[cfg(test)]
     pub(crate) async fn submit_images(
         &self,
         input: super::images::ImageSubmission,
+    ) -> Result<AgentSessionSnapshot, String> {
+        self.submit_images_with_admission(input, false, None).await
+    }
+
+    pub(crate) async fn submit_images_with_admission(
+        &self,
+        input: super::images::ImageSubmission,
+        paused: bool,
+        target_turn_id: Option<&str>,
     ) -> Result<AgentSessionSnapshot, String> {
         use super::images::{digest, ImageOperation};
         super::images::validate_upload_envelope(&input.images)?;
@@ -237,6 +249,12 @@ impl AgentRuntime {
                         .get("imageFingerprint")
                         .and_then(serde_json::Value::as_str)
                         == Some(&fingerprint)
+                        && message
+                            .source
+                            .metadata
+                            .get("targetTurnId")
+                            .and_then(serde_json::Value::as_str)
+                            == target_turn_id
                     {
                         self.sessions.snapshot(&input.session_id)
                     } else {
@@ -288,6 +306,15 @@ impl AgentRuntime {
                         .and_then(serde_json::Value::as_str)
                         == Some(&fingerprint)
                     {
+                        if message
+                            .source
+                            .metadata
+                            .get("targetTurnId")
+                            .and_then(serde_json::Value::as_str)
+                            != target_turn_id
+                        {
+                            return Err("IMAGE_SUBMISSION_CONFLICT".into());
+                        }
                         self.sessions.snapshot(&input.session_id)
                     } else {
                         Err("IMAGE_SUBMISSION_CONFLICT".into())
@@ -348,7 +375,7 @@ impl AgentRuntime {
         source
             .metadata
             .insert("imageFingerprint".into(), fingerprint.into());
-        let snapshot = self.sessions.enqueue(
+        let snapshot = self.sessions.enqueue_submission(
             &input.session_id,
             input.lane,
             AgentInboxMessage {
@@ -359,11 +386,15 @@ impl AgentRuntime {
                 source,
                 terminal_context,
             },
+            paused,
+            target_turn_id,
         )?;
         drop(gate);
         let _ = self.models.images.boundary("afterInbox", &token);
         // Inbox commit is the acknowledgement. A wake failure cannot undo acceptance.
-        let _ = self.wake(&input.session_id);
+        if !paused {
+            let _ = self.wake(&input.session_id);
+        }
         Ok(snapshot)
     }
 
@@ -759,6 +790,16 @@ impl AgentRuntime {
             })?;
         self.tools.configure_parallelism(parallelism.as_deref())?;
         self.sessions.configure(app_data_root.clone())?;
+        {
+            let mut restored = self
+                .restored_inputs_paused
+                .lock()
+                .map_err(|_| "Agent recovery gate unavailable")?;
+            if !*restored {
+                self.sessions.pause_restored_inputs()?;
+                *restored = true;
+            }
+        }
         self.models.images.configure(&app_data_root)?;
         self.artifacts.configure(&app_data_root)?;
         self.reconcile_artifacts()
@@ -1120,6 +1161,7 @@ impl AgentRuntime {
         Ok(Some(context))
     }
 
+    #[cfg(test)]
     pub(crate) fn followup_submission(
         &self,
         session_id: &str,
@@ -1128,10 +1170,34 @@ impl AgentRuntime {
         content: String,
         terminal_context: Option<super::AgentTerminalContextSnapshot>,
     ) -> Result<AgentSessionSnapshot, String> {
-        let terminal_context = self.prepare_terminal_context(session_id, terminal_context)?;
-        let snapshot = self.sessions.enqueue(
+        self.receive_submission(
             session_id,
+            message_id,
+            client_submission_id,
+            content,
+            terminal_context,
             AgentInboxLane::NextTurn,
+            false,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn receive_submission(
+        &self,
+        session_id: &str,
+        message_id: String,
+        client_submission_id: String,
+        content: String,
+        terminal_context: Option<super::AgentTerminalContextSnapshot>,
+        lane: AgentInboxLane,
+        paused: bool,
+        target_turn_id: Option<&str>,
+    ) -> Result<AgentSessionSnapshot, String> {
+        let terminal_context = self.prepare_terminal_context(session_id, terminal_context)?;
+        let snapshot = self.sessions.enqueue_submission(
+            session_id,
+            lane,
             AgentInboxMessage {
                 images: Vec::new(),
                 message_id,
@@ -1140,8 +1206,19 @@ impl AgentRuntime {
                 source: AgentMessageSource::user(),
                 terminal_context,
             },
+            paused,
+            target_turn_id,
         )?;
-        self.wake(session_id)?;
+        // Admission is durable. Scheduling failure cannot turn this receipt into
+        // a failed send; the input remains available for explicit continuation.
+        if !paused && !snapshot.ended {
+            if let Err(error) = self.wake(session_id) {
+                log::warn!(
+                    "Agent input accepted but scheduling failed: {}",
+                    crate::redaction::redact_sensitive_text(&error)
+                );
+            }
+        }
         Ok(snapshot)
     }
 
@@ -1156,6 +1233,7 @@ impl AgentRuntime {
         self.followup_submission(session_id, message_id, client_submission_id, content, None)
     }
 
+    #[cfg(test)]
     pub(crate) fn steer_submission(
         &self,
         session_id: &str,
@@ -1164,21 +1242,16 @@ impl AgentRuntime {
         content: String,
         terminal_context: Option<super::AgentTerminalContextSnapshot>,
     ) -> Result<AgentSessionSnapshot, String> {
-        let terminal_context = self.prepare_terminal_context(session_id, terminal_context)?;
-        let snapshot = self.sessions.enqueue(
+        self.receive_submission(
             session_id,
+            message_id,
+            client_submission_id,
+            content,
+            terminal_context,
             AgentInboxLane::NextStep,
-            AgentInboxMessage {
-                images: Vec::new(),
-                message_id,
-                client_submission_id: Some(client_submission_id),
-                content,
-                source: AgentMessageSource::user(),
-                terminal_context,
-            },
-        )?;
-        self.wake(session_id)?;
-        Ok(snapshot)
+            false,
+            None,
+        )
     }
 
     #[cfg(test)]

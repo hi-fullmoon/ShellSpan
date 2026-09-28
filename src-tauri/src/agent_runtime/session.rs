@@ -500,6 +500,53 @@ impl AgentSessionStore {
         Ok(())
     }
 
+    pub(crate) fn pause_restored_inputs(&self) -> Result<(), String> {
+        // Finish already committed claim intents before pausing unclaimed work.
+        // Otherwise a torn claim batch would try to claim a now-paused item.
+        let ids = self
+            .lock_configured()?
+            .sessions
+            .iter()
+            .filter(|(_, record)| !record.ended && !record.archived)
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>();
+        for id in ids {
+            self.repair_step_claims(&id)?;
+        }
+        let mut inner = self.lock_configured()?;
+        let pending = inner
+            .sessions
+            .iter()
+            .filter(|(_, record)| {
+                !record.ended && !record.archived && record.header.subagent.is_none()
+            })
+            .filter_map(|(id, record)| {
+                let paused = record.inbox.paused_ids();
+                let item_ids: Vec<_> = record
+                    .inbox
+                    .next_turn()
+                    .iter()
+                    .chain(&record.inbox.next_step())
+                    .filter(|message| !paused.contains(&message.message_id))
+                    .map(|message| message.message_id.clone())
+                    .collect();
+                (!item_ids.is_empty()).then(|| (id.clone(), item_ids))
+            })
+            .collect::<Vec<_>>();
+        for (id, item_ids) in pending {
+            append_payloads_locked(
+                &mut inner,
+                &id,
+                vec![(
+                    None,
+                    None,
+                    AgentSessionEventPayload::InboxPaused { item_ids },
+                )],
+            )?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn create(
         &self,
         request: CreateAgentSessionRequest,
@@ -507,8 +554,14 @@ impl AgentSessionStore {
         validate_create_request(&request)?;
 
         let mut inner = self.lock_configured()?;
-        if inner.sessions.contains_key(&request.session_id) {
-            return Err("Agent session already exists".into());
+        if let Some(record) = inner.sessions.get(&request.session_id) {
+            let proposed = create_session_events(&request, record.header.created_at_unix_ms)?;
+            if proposed.first().map(|event| &event.payload)
+                == record.events.first().map(|event| &event.payload)
+            {
+                return record.snapshot();
+            }
+            return Err("Agent session already exists with a different payload".into());
         }
         if let Some(source_id) = request.continued_from_session_id.as_deref() {
             let source = inner
@@ -1261,6 +1314,28 @@ impl AgentSessionStore {
         lane: AgentInboxLane,
         message: AgentInboxMessage,
     ) -> Result<AgentSessionSnapshot, String> {
+        self.enqueue_submission(session_id, lane, message, false, None)
+    }
+
+    pub(crate) fn enqueue_submission(
+        &self,
+        session_id: &str,
+        lane: AgentInboxLane,
+        mut message: AgentInboxMessage,
+        paused: bool,
+        target_turn_id: Option<&str>,
+    ) -> Result<AgentSessionSnapshot, String> {
+        if let Some(turn_id) = target_turn_id {
+            validate_identifier(turn_id, "targetTurnId")?;
+            message
+                .source
+                .metadata
+                .insert("targetTurnId".into(), turn_id.into());
+            message.source.metadata.insert(
+                "submissionLane".into(),
+                serde_json::to_value(lane).map_err(|error| error.to_string())?,
+            );
+        }
         validate_inbox_message(&message)?;
         let mut inner = self.lock_configured()?;
         let record = inner
@@ -1272,11 +1347,17 @@ impl AgentSessionStore {
                 // The first captured terminal snapshot belongs to the durable
                 // submission. A retry may observe newer output, but must not
                 // change the already committed user message or its context.
-                if previous_lane != lane
+                let mut previous_source = previous.source.clone();
+                let mut incoming_source = message.source.clone();
+                // Admission state is assigned by the store, not part of the
+                // caller's immutable payload. It survives an identical retry.
+                previous_source.metadata.remove("admissionPaused");
+                incoming_source.metadata.remove("admissionPaused");
+                if (previous_lane != lane && target_turn_id.is_none())
                     || previous.message_id != message.message_id
                     || previous.content != message.content
                     || previous.images != message.images
-                    || previous.source != message.source
+                    || previous_source != incoming_source
                 {
                     return Err(
                         "client submission id was already committed with a different payload"
@@ -1286,19 +1367,44 @@ impl AgentSessionStore {
                 return record.snapshot();
             }
         }
-        let (events, publisher) = append_payloads_locked(
-            &mut inner,
-            session_id,
-            vec![(
-                None,
-                None,
-                AgentSessionEventPayload::InboxSpliced {
-                    operation: AgentInboxOperation::Enqueued,
-                    lane,
-                    messages: vec![message],
-                },
-            )],
-        )?;
+        let active_turn = record
+            .events
+            .iter()
+            .rev()
+            .find_map(|event| match &event.payload {
+                AgentSessionEventPayload::TurnStart => Some(event.turn_id.as_deref()),
+                AgentSessionEventPayload::TurnEnd { .. } => Some(None),
+                _ => None,
+            })
+            .flatten();
+        let lane = if lane == AgentInboxLane::NextStep
+            && target_turn_id.is_some_and(|target| Some(target) != active_turn)
+        {
+            AgentInboxLane::NextTurn
+        } else {
+            lane
+        };
+        let failed_root = record.ended
+            && record.status == AgentSessionStatus::Failed
+            && record.header.subagent.is_none()
+            && !record.archived;
+        let mut payloads = Vec::new();
+        if paused || failed_root {
+            message
+                .source
+                .metadata
+                .insert("admissionPaused".into(), true.into());
+        }
+        payloads.push((
+            None,
+            None,
+            AgentSessionEventPayload::InboxSpliced {
+                operation: AgentInboxOperation::Enqueued,
+                lane,
+                messages: vec![message],
+            },
+        ));
+        let (events, publisher) = append_payloads_locked(&mut inner, session_id, payloads)?;
         let snapshot = inner
             .sessions
             .get(session_id)
@@ -1906,16 +2012,27 @@ impl AgentSessionStore {
             return Err("Agent Session already ended with another status".into());
         }
         let mut payloads = Vec::new();
+        let retain_inputs =
+            status == AgentSessionStatus::Failed && record.header.subagent.is_none();
         for lane in [AgentInboxLane::NextTurn, AgentInboxLane::NextStep] {
             let messages = record.inbox.discard(lane);
             if !messages.is_empty() {
                 payloads.push((
                     None,
                     None,
-                    AgentSessionEventPayload::InboxSpliced {
-                        operation: AgentInboxOperation::Discarded,
-                        lane,
-                        messages,
+                    if retain_inputs {
+                        AgentSessionEventPayload::InboxPaused {
+                            item_ids: messages
+                                .iter()
+                                .map(|message| message.message_id.clone())
+                                .collect(),
+                        }
+                    } else {
+                        AgentSessionEventPayload::InboxSpliced {
+                            operation: AgentInboxOperation::Discarded,
+                            lane,
+                            messages,
+                        }
                     },
                 ));
             }
@@ -2675,10 +2792,22 @@ fn validate_event_transition(
             Err("session/resumed requires an ended unarchived root Session".into())
         };
     }
-    if record.ended {
+    let failed_admission = record.ended
+        && record.status == AgentSessionStatus::Failed
+        && !record.archived
+        && record.header.subagent.is_none()
+        && matches!(
+            event.payload,
+            AgentSessionEventPayload::InboxSpliced {
+                operation: AgentInboxOperation::Enqueued,
+                ..
+            } | AgentSessionEventPayload::InboxPaused { .. }
+        );
+    if record.ended && !failed_admission {
         return Err("ended Agent session does not accept new events".into());
     }
     if record.status.is_terminal()
+        && !failed_admission
         && !matches!(event.payload, AgentSessionEventPayload::SessionEnded { .. })
     {
         return Err("terminal Agent status must be followed by session/ended".into());
@@ -2776,7 +2905,7 @@ fn validate_event_transition(
             if !status.is_terminal() {
                 return Err("session/ended requires a terminal status".into());
             }
-            if !record.inbox.is_empty() {
+            if !record.inbox.is_empty() && !retains_paused_inputs(record, *status) {
                 return Err("session/ended requires an empty Inbox".into());
             }
             if record.status.is_terminal() && record.status != *status {
@@ -3256,10 +3385,17 @@ fn validate_tool_result_transition(
 }
 
 fn validate_record_final(record: &AgentSessionRecord) -> Result<(), String> {
-    if record.ended && !record.inbox.is_empty() {
+    if record.ended && !record.inbox.is_empty() && !retains_paused_inputs(record, record.status) {
         return Err("ended Agent session retained unclaimed Inbox messages".into());
     }
     Ok(())
+}
+
+fn retains_paused_inputs(record: &AgentSessionRecord, status: AgentSessionStatus) -> bool {
+    status == AgentSessionStatus::Failed
+        && record.header.subagent.is_none()
+        && record.inbox.turn_claim().is_empty()
+        && record.inbox.step_claim().is_empty()
 }
 
 fn observe_event(record: &mut AgentSessionRecord, event: &AgentSessionEvent) {
@@ -3288,7 +3424,20 @@ fn apply_event(record: &mut AgentSessionRecord, event: &AgentSessionEvent) -> Re
             operation,
             lane,
             messages,
-        } => record.inbox.apply(*operation, *lane, messages)?,
+        } => {
+            record.inbox.apply(*operation, *lane, messages)?;
+            if record.ended
+                && record.status == AgentSessionStatus::Failed
+                && *operation == AgentInboxOperation::Enqueued
+            {
+                record.inbox.pause(
+                    &messages
+                        .iter()
+                        .map(|message| message.message_id.clone())
+                        .collect::<Vec<_>>(),
+                )?;
+            }
+        }
         AgentSessionEventPayload::InboxItemUpdated {
             item_id,
             lane,
