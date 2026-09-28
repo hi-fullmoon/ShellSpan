@@ -110,6 +110,18 @@ the prompt. Session summaries use the prompt or file names. Conversation renderi
 shows the prompt and attachment cards separately.
 Native slash-skill detection examines only the envelope's user prompt; skill names
 inside extracted document text are data and cannot invoke skills.
+For plain text, only the first whitespace-delimited token (after optional leading whitespace) can
+invoke a slash skill, and its name must match a user-invocable entry in the current
+skill snapshot. Unknown or user-disabled names remain ordinary text and produce no
+invocation outcome or invocation-limit usage. Tokens elsewhere in the prompt,
+including filesystem paths, do not invoke skills. Errors loading a matched skill
+remain visible as invocation failures.
+Explicit selections from the add menu, slash completion or @ menu are persisted
+in the envelope's optional `skills` string array (including with an empty documents
+array). They may invoke skills anywhere in the prompt, but require both a matching
+whole `/name` token in the prompt and a user-invocable catalog entry. Editing out a
+command retires its selection. Selected and leading commands are deduplicated and
+share the existing invocation limit. Document bodies cannot supply these selections.
 
 Providers receive this structured content in the user message through the existing
 text protocol. No original document is uploaded to a provider Files API. This
