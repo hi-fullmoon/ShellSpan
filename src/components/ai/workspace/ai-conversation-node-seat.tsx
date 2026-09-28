@@ -165,7 +165,9 @@ import { decodeDocumentMessage } from '@/lib/ai/document-message';
 function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'userMessage'> }) {
   const { t } = useI18n();
   const message = decodeDocumentMessage(node.content);
-  const pendingIndicator = node.delivery === 'pending' ? (
+  const pendingIndicator = node.delivery === 'confirming' ? (
+    <Badge variant="secondary">{t('ai.workspace.messageConfirming')}</Badge>
+  ) : node.delivery === 'pending' ? (
     <Spinner className="ai-user-sending" aria-label={t('ai.workspace.messagePending')} />
   ) : null;
   return (

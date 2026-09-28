@@ -784,6 +784,8 @@ export interface AgentRecoveryReconcileInput {
 }
 
 export interface AgentSessionMessageInput {
+  readonly paused?: boolean;
+  readonly targetTurnId?: string;
   readonly sessionId: string;
   readonly messageId: string;
   readonly clientSubmissionId?: string;
