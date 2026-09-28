@@ -12,9 +12,9 @@ export function TerminalScrollButton({ terminal }: { terminal: Terminal }) {
   if (!history) return null;
   return (
     <Button
-      variant="outline"
-      size="sm"
-      className="absolute bottom-2 right-4 z-20 max-w-[calc(100%-2rem)]"
+      variant="secondary"
+      size="xs"
+      className="absolute bottom-4 right-4 z-20 max-w-[calc(100%-2rem)] rounded-full text-[11px] shadow-sm"
       onClick={() => { terminal.scrollToBottom(); terminal.focus(); }}
     >
       <ArrowDownIcon data-icon="inline-start" />
