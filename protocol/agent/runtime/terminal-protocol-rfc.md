@@ -392,6 +392,12 @@ external-side-effecting operations and is the safe default for every visible
 command. Uncertain operations MUST NOT be replayed automatically. Resumption
 requires explicit reconciliation under the existing Agent recovery policy.
 
+Terminal closure may retire the execution registration before its waiter returns.
+The waiter still returns the operation's captured output and `uncertain` outcome
+with `noAutoReplay`, without requiring that registration to remain present.
+Cleanup and capture finalization must not affect a replacement operation or use
+output sequence numbers from a reconnected terminal generation.
+
 ## Reconnect behavior
 
 Reconnect performs this order atomically from the broker's point of view:

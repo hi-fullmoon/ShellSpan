@@ -77,8 +77,13 @@ and supersedes only the current macOS status, not the historical results below.
   `contentPersisted = false`; turn/session boundaries and restart discard the
   transient value. Raw terminal input and wait-search text is also excluded
   from durable Assistant, ToolCall, approval, replay, and result records.
-  Later model-history projection uses schema-valid omission markers for that
-  text and strips persistence-only receipt fields before adapter serialization.
+  Successful input arguments are retained only in the bounded, session- and
+  turn-scoped in-memory observation registry and restored into model history
+  for subsequent requests in that same turn. Turn/session boundaries and
+  restart discard them; durable history retains non-executable privacy receipts.
+  Input acceptance does not mean command completion: text/paste do not press
+  Enter. At a shell prompt, prefer `run_terminal_command`; interactive typing
+  requires a separate `key=enter` input and subsequent observation.
   While approval is pending, the UI may retrieve the exact arguments only from
   the identity-bound in-memory pending-call registry so the user can review the
   action; that preview never enters durable events or ordinary logs. Approval
