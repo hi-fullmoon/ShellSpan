@@ -109,7 +109,7 @@ describe('reduceAiComposer', () => {
     expect(duplicate.effects).toEqual([{ type: 'announce', reason: 'submitting' }]);
   });
 
-  it('restores a failed detached draft only when the editor has no newer input', () => {
+  it('preserves failed operation identity without replacing the editor', () => {
     const started = dispatch(runningState('original'), {
       type: 'submit.requested', gesture: 'keyboard', accelerated: false,
       clientOperationId: 'operation-1', now: 100, hasProvider: true, canCreateSession: true,
@@ -117,8 +117,8 @@ describe('reduceAiComposer', () => {
     const restored = dispatch(started, {
       type: 'submit.failed', clientOperationId: 'operation-1', error: retryableError,
     });
-    expect(restored.state.draft).toBe('original');
-    expect(restored.state.failedDrafts).toEqual([]);
+    expect(restored.state.draft).toBe('');
+    expect(restored.state.failedDrafts).toEqual([expect.objectContaining({ id: 'operation-1', content: 'original' })]);
 
     const withNewDraft = dispatch(started, { type: 'draft.changed', value: 'new input' }).state;
     const retained = dispatch(withNewDraft, {
@@ -206,13 +206,16 @@ describe('reduceAiComposer', () => {
       type: 'submit.timedOut', clientOperationId: 'operation-1', error: retryableError,
     }).state;
     expect(firstFailed.phase).toBe('submitting');
-    expect(firstFailed.pendingSubmissions.map((item) => item.clientOperationId)).toEqual(['operation-2']);
-    expect(firstFailed.draft).toBe('first');
+    expect(firstFailed.pendingSubmissions.map((item) => item.clientOperationId)).toEqual(['operation-1', 'operation-2']);
+    expect(firstFailed.pendingSubmissions[0].state).toBe('confirming');
+    expect(firstFailed.failedDrafts).toEqual([]);
+    expect(firstFailed.draft).toBe('');
     const secondAccepted = dispatch(firstFailed, {
       type: 'submit.accepted',
       receipt: { sessionId: 'session-1', clientOperationId: 'operation-2', mode: 'nextStep' },
     }).state;
     expect(secondAccepted.pendingSubmissions).toEqual([
+      expect.objectContaining({ clientOperationId: 'operation-1', state: 'confirming' }),
       expect.objectContaining({ clientOperationId: 'operation-2', state: 'accepted' }),
     ]);
   });

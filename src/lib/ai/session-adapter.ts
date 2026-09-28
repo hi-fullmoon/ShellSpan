@@ -43,6 +43,9 @@ export type AiSessionSourceSnapshot = Readonly<{
 }>;
 
 export interface AiInboxItem {
+  readonly hasImages?: boolean;
+  readonly confirming?: boolean;
+  readonly redirected?: boolean;
   readonly paused?: boolean;
   readonly id: string;
   readonly clientSubmissionId?: string;
@@ -156,6 +159,9 @@ export type AiCreateSessionInput = Readonly<{
 export type AiSubmissionMode = 'start' | 'nextTurn' | 'nextStep';
 
 export interface AiSubmitInput<Kind extends AiSessionKind = AiSessionKind> {
+  readonly paused?: boolean;
+  readonly targetTurnId?: string;
+  readonly queued?: boolean;
   readonly images?: readonly import('@/types/agent-image').AgentImageUpload[];
   readonly content: string;
   readonly mode: AiSubmissionMode;
@@ -166,6 +172,7 @@ export interface AiSubmitInput<Kind extends AiSessionKind = AiSessionKind> {
 }
 
 export interface AiSubmitReceipt {
+  readonly paused?: boolean;
   readonly sessionId: string;
   readonly clientOperationId: string;
   readonly mode: AiSubmissionMode;

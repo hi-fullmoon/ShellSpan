@@ -53,7 +53,7 @@ describe('document import policy', () => {
     expect(() => encodeDocumentMessage('Summarize', documents)).toThrow('DOCUMENT_MESSAGE_LIMIT');
     expect(decodeDocumentMessage(encodeDocumentMessage('Summarize', documents, false)).documents).toEqual(documents);
   });
-  it('keeps documents with the detached message and restores them after submission failure', () => {
+  it('keeps documents in a retryable failed message without replacing the editor', () => {
     const documents = [{ id: 'readme', name: 'README.md', size: 10, text: 'SSH client' }];
     const content = encodeDocumentMessage('Summarize', documents);
     const sent = reduceAiComposer(createAiComposerState({ draft: content }), {
@@ -64,6 +64,7 @@ describe('document import policy', () => {
     expect(sent.state.detached?.content).toBe(content);
     const failed = reduceAiComposer(sent.state, { type: 'submit.failed', clientOperationId: 'upload',
       error: { kind: 'offline', message: 'Disconnected', retryable: true } });
-    expect(decodeDocumentMessage(failed.state.draft)).toEqual({ text: 'Summarize', documents });
+    expect(failed.state.draft).toBe('');
+    expect(decodeDocumentMessage(failed.state.failedDrafts[0].content)).toEqual({ text: 'Summarize', documents });
   });
 });

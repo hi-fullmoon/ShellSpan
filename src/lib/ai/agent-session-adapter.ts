@@ -205,12 +205,16 @@ export function projectAgentInbox(events: readonly AgentSessionEvent[]): readonl
   const items = new Map<string, AiInboxItem>();
   const closedTurns = new Set<string>();
   let activeTurnId: string | undefined;
+  let failed = false;
   for (const event of events) {
     if (event.turnId && !closedTurns.has(event.turnId) && event.type !== 'turn/end') {
       activeTurnId = event.turnId;
     }
     if (event.type === 'session/resumed') {
+      failed = false;
       activeTurnId = undefined;
+    } else if (event.type === 'session/ended') {
+      failed = event.data.status === 'failed';
     } else if (event.type === 'turn/end') {
       if (event.turnId) closedTurns.add(event.turnId);
       if (event.turnId === activeTurnId) activeTurnId = undefined;
@@ -223,13 +227,19 @@ export function projectAgentInbox(events: readonly AgentSessionEvent[]): readonl
               ? { clientSubmissionId: message.clientSubmissionId }
               : {}),
             lane: event.data.lane,
+            ...(event.data.lane === 'nextTurn' && typeof message.source.metadata?.targetTurnId === 'string' ? { redirected: true } : {}),
             content: message.content,
             ...(message.images ? { images: message.images } : {}),
             state: 'queued',
+            ...((failed || message.source.metadata?.admissionPaused === true) ? { paused: true } : {}),
             // Runtime briefly enqueues even an immediate send before claiming it.
             // Keep its presentation stable when agent/status becomes running.
             startsTurn: message.source.kind === 'user'
-              && event.data.lane === 'nextTurn' && activeTurnId === undefined,
+              && !failed && message.source.metadata?.admissionPaused !== true
+              && event.data.lane === 'nextTurn' && activeTurnId === undefined
+              && ![...items.values()].some(item => item.source === 'user' && item.lane === 'nextTurn'
+                && item.state === 'queued' && !item.paused && !item.consumed)
+              && typeof message.source.metadata?.targetTurnId !== 'string',
             source: inboxSource(message.source),
             provenance: message.source,
           });
@@ -594,6 +604,40 @@ export function createAgentSessionAdapter(
     return openEntry(input.request.sessionId);
   };
 
+  const admit = async (sessionId: string, input: AiSubmitInput<'agent'>,
+    command: () => Promise<AgentSessionSnapshot>): Promise<boolean> => {
+    const entry = ensureEntry(sessionId);
+    const confirmed = (events: readonly AgentSessionEvent[]): boolean => events.some(event => (
+      event.type === 'agent/inbox/spliced' && event.data.operation === 'enqueued'
+      && event.data.messages.some(message => message.clientSubmissionId === input.clientOperationId)
+    ));
+    const isPaused = (snapshot: AgentSessionSnapshot | null | undefined): boolean => snapshot?.status === 'failed'
+      || Boolean(snapshot?.inbox.pausedIds?.includes(input.clientOperationId));
+    const request = command().then(snapshot => ({ kind: 'accepted' as const, snapshot }), error => ({ kind: 'error' as const, error: error as unknown }));
+    // A missing IPC reply does not mean that the durable write failed. Reconcile
+    // independently, so an already accepted input cannot block later messages.
+    for (;;) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const result = await Promise.race([request, new Promise<{ kind: 'pending' }>(resolve => {
+        timer = setTimeout(() => resolve({ kind: 'pending' }), 3000);
+      })]);
+      clearTimeout(timer);
+      if (result.kind === 'accepted') return isPaused(result.snapshot);
+      if (result.kind === 'error' && /different payload|SUBMISSION_CONFLICT/.test(String(result.error))) throw result.error;
+      try {
+        const state = await entry.client.reconnect();
+        entry.view = entry.project(state);
+        for (const listener of entry.listeners) listener(entry.view);
+        if (confirmed(state.events)) return isPaused(state.snapshot);
+      } catch {
+        // An unknown receipt remains unknown; don't invent a failed delivery.
+        if (result.kind === 'error') await new Promise(resolve => setTimeout(resolve, 3000));
+        continue;
+      }
+      if (result.kind === 'error') throw result.error;
+    }
+  };
+
   return {
     kind: 'agent',
     async list(input: ListSessionsInput): Promise<AiSessionSummaryPage> {
@@ -682,8 +726,29 @@ export function createAgentSessionAdapter(
         resolvedSessionId = (await createSession(input.create)).summary.id;
       }
       let view = await openEntry(resolvedSessionId);
+      const committed = ensureEntry(resolvedSessionId).client.state().events.find(event => (
+        event.type === 'agent/inbox/spliced' && event.data.operation === 'enqueued'
+        && event.data.messages.some(message => message.clientSubmissionId === input.clientOperationId)
+      ));
+      if (committed?.type === 'agent/inbox/spliced' && !hasImages && !view.snapshot.value.header.subagent) {
+        const message = { sessionId: resolvedSessionId, messageId: input.clientOperationId,
+          clientSubmissionId: input.clientOperationId, content,
+          ...(input.targetTurnId ? { targetTurnId: input.targetTurnId } : {}),
+          ...(input.terminalContext ? { terminalContext: input.terminalContext } : {}) };
+        const paused = await admit(resolvedSessionId, input, () => input.mode === 'nextStep'
+          ? dependencies.steer(message) : dependencies.followup(message));
+        return { sessionId: resolvedSessionId, clientOperationId: input.clientOperationId, mode: input.mode, ...(paused ? { paused: true } : {}) };
+      }
       if (view.summary.archived) {
         throw new Error('This conversation cannot accept human follow-up messages');
+      }
+      if (committed && hasImages && dependencies.submitImages) {
+        const submitImages = dependencies.submitImages;
+        const paused = await admit(resolvedSessionId, input, () => submitImages({ sessionId: resolvedSessionId,
+          clientOperationId: input.clientOperationId, content, images: input.images!,
+          lane: input.mode === 'nextStep' ? 'nextStep' : 'nextTurn',
+          ...(input.targetTurnId ? { targetTurnId: input.targetTurnId } : {}) }));
+        return { sessionId: resolvedSessionId, clientOperationId: input.clientOperationId, mode: input.mode, ...(paused ? { paused: true } : {}) };
       }
       const child = view.snapshot.value.header.subagent;
       if (child) {
@@ -717,13 +782,14 @@ export function createAgentSessionAdapter(
           mode: 'nextTurn',
         };
       }
-      view = await resumeEndedSession(resolvedSessionId, view);
+      const paused = input.paused || (input.queued && view.status === 'failed');
+      if (!paused || hasImages) view = await resumeEndedSession(resolvedSessionId, view);
       // An idle restored Session needs an owning runtime before its next input. start is idempotent.
       // A text follow-up still sends retained image bytes. Reattach after process restart
       // and apply the same vision preflight before accepting more Inbox content.
       const retainedImages = view.snapshot.value.surface.messages.some(m => m.role === 'userImages');
       if (retainedImages) requireVision(input.provider);
-      if (input.mode === 'start' || view.status === 'idle' || hasImages || retainedImages) {
+      if (hasImages || (!paused && (input.mode === 'start' || view.status === 'idle' || retainedImages))) {
         await dependencies.start({ sessionId: resolvedSessionId, selection: { routeId: input.provider.id, modelId: input.provider.model, reasoningEffort: input.provider.reasoningEffort } });
       }
       const message = {
@@ -731,26 +797,27 @@ export function createAgentSessionAdapter(
         messageId: input.clientOperationId,
         clientSubmissionId: input.clientOperationId,
         content,
+        ...(paused ? { paused: true } : {}),
+        ...(input.targetTurnId ? { targetTurnId: input.targetTurnId } : {}),
         ...(input.terminalContext ? { terminalContext: input.terminalContext } : {}),
       };
+      let admittedPaused = Boolean(paused);
       if (hasImages) {
         if (!dependencies.submitImages) throw new Error('Image transport is unavailable');
-        await dependencies.submitImages({ sessionId: resolvedSessionId, clientOperationId: input.clientOperationId,
+        const submitImages = dependencies.submitImages;
+        admittedPaused = await admit(resolvedSessionId, input, () => submitImages({ sessionId: resolvedSessionId, clientOperationId: input.clientOperationId,
           content, images: input.images!, lane: input.mode === 'nextStep' ? 'nextStep' : 'nextTurn',
-          ...(input.terminalContext ? { terminalContext: input.terminalContext } : {}) });
-        // Backfill lost events before the durable draft can be acknowledged and removed.
-        const state = await ensureEntry(resolvedSessionId).client.reconnect();
-        if (!state.events.some(e => e.type === 'agent/inbox/spliced' && e.data.operation === 'enqueued'
-          && e.data.messages.some(m => m.clientSubmissionId === input.clientOperationId))) {
-          throw new Error('Image submission is not confirmed; retry the same draft');
-        }
+          ...(paused ? { paused: true } : {}),
+          ...(input.targetTurnId ? { targetTurnId: input.targetTurnId } : {}),
+          ...(input.terminalContext ? { terminalContext: input.terminalContext } : {}) }));
       }
-      else if (input.mode === 'nextStep') await dependencies.steer(message);
-      else await dependencies.followup(message);
+      else admittedPaused = await admit(resolvedSessionId, input, () => input.mode === 'nextStep'
+        ? dependencies.steer(message) : dependencies.followup(message));
       return {
         sessionId: resolvedSessionId,
         clientOperationId: input.clientOperationId,
         mode: input.mode,
+        ...(admittedPaused || paused ? { paused: true } : {}),
       };
     },
     async stop(sessionId: string): Promise<void> {
@@ -790,14 +857,15 @@ export function createAgentSessionAdapter(
           ? { type, itemId: input.itemId }
           : { type, lane: input.lane, orderedItemIds: input.orderedItemIds };
       if (type === 'resume') {
-        const view = await openEntry(sessionId);
+        const view = await resumeEndedSession(sessionId);
         const selection = view.snapshot.value.header.modelSelection;
         if (!selection) throw new Error('Select a model before resuming queued input');
         await dependencies.start({ sessionId, selection });
       }
+      const revision = type === 'resume' ? ensureEntry(sessionId).view?.revision ?? expectedRevision : expectedRevision;
       await waitForCommittedOperation(sessionId, clientOperationId, () => dependencies.mutateInbox({
         sessionId,
-        expectedRevision,
+        expectedRevision: revision,
         clientOperationId,
         mutation,
       }));

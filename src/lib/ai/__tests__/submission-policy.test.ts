@@ -38,6 +38,9 @@ describe('resolveAiSubmission', () => {
     ['running steer Enter', { sessionStatus: 'running', preferredBusyMode: 'steer' }, { kind: 'submit', mode: 'nextStep' }],
     ['running steer accelerated', { sessionStatus: 'running', preferredBusyMode: 'steer', accelerated: true }, { kind: 'submit', mode: 'nextTurn' }],
     ['waiting runtime queues', { sessionStatus: 'waiting' }, { kind: 'submit', mode: 'nextTurn' }],
+    ['pending receipt permits another message', { submitting: true }, { kind: 'submit', mode: 'nextTurn' }],
+    ['approval queues ordinary input', { waitingApproval: true }, { kind: 'submit', mode: 'nextTurn' }],
+    ['question queues ordinary input', { sessionStatus: 'waiting', waitingQuestion: true, preferredBusyMode: 'steer' }, { kind: 'submit', mode: 'nextTurn' }],
   ] as const)('%s', (_label, changes, expected) => {
     expect(resolveAiSubmission({ ...base, ...changes })).toEqual(expected);
   });
@@ -45,13 +48,12 @@ describe('resolveAiSubmission', () => {
   it.each([
     ['whitespace', { draft: '  ' }, 'empty'],
     ['keyboard empty while running', { draft: '', sessionStatus: 'running' }, 'empty'],
-    ['approval', { waitingApproval: true }, 'waitingApproval'],
     ['terminal completed', { sessionStatus: 'completed', terminal: true }, 'terminal'],
     ['terminal failed', { sessionStatus: 'failed', terminal: true }, 'terminal'],
     ['provider', { hasProvider: false }, 'providerUnavailable'],
     ['cannot create', { sessionId: null, canCreateSession: false }, 'sessionUnavailable'],
     ['running without session', { sessionStatus: 'running', sessionId: null }, 'sessionUnavailable'],
-    ['submitting', { submitting: true }, 'submitting'],
+    ['empty duplicate while submitting', { submitting: true, draft: '' }, 'submitting'],
   ] as const)('rejects %s', (_label, changes, reason) => {
     expect(resolveAiSubmission({ ...base, ...changes })).toEqual({ kind: 'reject', reason });
   });
