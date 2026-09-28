@@ -1,5 +1,7 @@
 # ShellSpan
 
+简体中文 · [English](./README.en.md)
+
 ShellSpan 是一款面向远程运维的桌面 SSH 客户端，集成终端、文件管理、监控和 AI 助手。
 
 [下载安装](https://github.com/hi-fullmoon/ShellSpan/releases/latest) · [问题反馈](https://github.com/hi-fullmoon/ShellSpan/issues) · [贡献指南](./CONTRIBUTING.md)
