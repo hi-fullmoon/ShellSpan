@@ -3,6 +3,31 @@
     include!("task_token_budget.rs");
 
     #[test]
+    fn diagnostic_transport_metadata_does_not_reset_progress_but_evidence_does() {
+        let observed = serde_json::json!({
+            "collectedAtUnixMs": 1, "collectionStartedAtUnixMs": 1,
+            "collectionCompletedAtUnixMs": 2, "evidenceRef": "first", "nativeCallId": "native-first",
+            "data": {"status": "active", "timestampUnixUs": 100, "durationMs": 1}
+        });
+        let mut repeated = observed.clone();
+        repeated["collectedAtUnixMs"] = 3.into();
+        repeated["collectionStartedAtUnixMs"] = 3.into();
+        repeated["collectionCompletedAtUnixMs"] = 4.into();
+        repeated["evidenceRef"] = "next".into();
+        repeated["nativeCallId"] = "native-next".into();
+        repeated["data"]["durationMs"] = 2.into();
+        assert_eq!(
+            normalize_tool_data(&observed),
+            normalize_tool_data(&repeated)
+        );
+        repeated["data"]["timestampUnixUs"] = 200.into();
+        assert_ne!(
+            normalize_tool_data(&observed),
+            normalize_tool_data(&repeated)
+        );
+    }
+
+    #[test]
     fn output_recovery_count_survives_successful_steps_but_is_scoped_to_turn() {
         let events = [
             ("turn-1", "outputLimitContinuation"),

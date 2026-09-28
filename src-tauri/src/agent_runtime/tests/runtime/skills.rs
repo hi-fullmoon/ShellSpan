@@ -233,11 +233,7 @@ async fn skill_runtime_slash_model_complete_large_body_and_replay() {
     );
     assert_eq!(model.request_count(), 0);
     runtime
-        .followup(
-            "skills",
-            "user".into(),
-            "Use /user-only and /user-only".into(),
-        )
+        .followup("skills", "user".into(), "/user-only and /user-only".into())
         .unwrap();
     runtime.start("skills", provider(), None).unwrap();
     idle_skill(&runtime, "skills").await;
@@ -480,7 +476,7 @@ async fn skill_real_runtime_http_wire_catalog_slash_and_model_tool_body() {
         "direct user instructions",
     );
     runtime
-        .followup("wire-skill", "ingress".into(), "please /user".into())
+        .followup("wire-skill", "ingress".into(), r#"{"shellspanDocumentMessage":1,"text":"please /user","documents":[],"skills":["user"]}"#.into())
         .unwrap();
     runtime
         .start(
@@ -632,8 +628,7 @@ async fn skill_retry_preparation_unknown_name_is_not_reloaded_and_form_is_ignore
         })
         .collect();
     assert_eq!(prepared.len(), 1);
-    assert_eq!(prepared[0].outcomes.len(), 1);
-    assert_eq!(prepared[0].outcomes[0].name, "missing");
+    assert!(prepared[0].outcomes.is_empty());
     assert_eq!(model.request_count(), 2);
 }
 

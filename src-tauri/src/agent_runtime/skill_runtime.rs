@@ -435,36 +435,29 @@ impl SkillRuntime {
             .sessions
             .claimed_step(&entry.session_id, step_id)?
             .messages;
-        let candidates = slash_candidates(&messages)?;
         self.observe(&entry.session_id, entry.cancellation())
             .await?;
         let snapshot = self.last_good(&entry.session_id)?;
+        let candidates = slash_candidates(
+            &messages,
+            snapshot.as_ref().map_or(&[], |s| s.entries.as_slice()),
+        )?;
         let catalog = self.publication(&entry.session_id, snapshot.as_ref())?;
         let mut outcomes = Vec::new();
         for (name, message_ids) in candidates {
-            let (loaded, error) = if snapshot
-                .as_ref()
-                .is_some_and(|s| s.entries.iter().any(|e| e.name == name && e.user_invocable))
-            {
-                match self
-                    .load(
-                        &entry.session_id,
-                        &name,
-                        SkillInvocationKind::User,
-                        message_ids.clone(),
-                        None,
-                        entry.cancellation(),
-                    )
-                    .await
-                {
-                    Ok(loaded) => (Some(loaded), None),
-                    Err(e) => (None, Some(e)),
-                }
-            } else {
-                (
+            let (loaded, error) = match self
+                .load(
+                    &entry.session_id,
+                    &name,
+                    SkillInvocationKind::User,
+                    message_ids.clone(),
                     None,
-                    Some("unknown or user-disabled Skill; text preserved".into()),
+                    entry.cancellation(),
                 )
+                .await
+            {
+                Ok(loaded) => (Some(loaded), None),
+                Err(e) => (None, Some(e)),
             };
             outcomes.push(SkillSlashOutcome {
                 name,
