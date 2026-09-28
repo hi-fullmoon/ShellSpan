@@ -401,7 +401,7 @@ pub(crate) fn model_tools_with_terminal_interaction(
         },
         ModelToolDefinition {
             name: "write_terminal_input".into(),
-            description: "Send one explicit text, key, paste, or interrupt input to the bound terminal under ShellSpan's exclusive Agent lease. Never use it to enter passwords, tokens, one-time codes, or other credentials.".into(),
+            description: "Send one explicit text, key, paste, or interrupt input to the bound terminal under ShellSpan's exclusive Agent lease. For a shell command at a prompt (including cd ~), prefer run_terminal_command, which submits and observes the command. Text and paste only insert content: they do not press Enter. To submit typed input, make a separate call with inputKind=key and key=enter, then observe with read_terminal or wait_terminal. An accepted input receipt is not command completion; never retype accepted text merely because its historical arguments are omitted. Never use it to enter passwords, tokens, one-time codes, or other credentials.".into(),
             input_schema: interactive_terminal_input_schema(),
         },
         ModelToolDefinition {
