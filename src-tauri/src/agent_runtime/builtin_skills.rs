@@ -27,6 +27,11 @@ pub(crate) fn definitions() -> Vec<SkillDefinition> {
                     "docker-diagnosis" => include_str!("../../skills/docker-diagnosis.md"),
                     "log-triage" => include_str!("../../skills/log-triage.md"),
                     "incident-triage" => include_str!("../../skills/incident-triage.md"),
+                    "deployment-preflight" => include_str!("../../skills/deployment-preflight.md"),
+                    "deployment-verification" => {
+                        include_str!("../../skills/deployment-verification.md")
+                    }
+                    "tls-diagnosis" => include_str!("../../skills/tls-diagnosis.md"),
                     _ => panic!("bundled skill has no instructions"),
                 };
                 SkillDefinition {

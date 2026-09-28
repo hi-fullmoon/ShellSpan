@@ -7,7 +7,11 @@ use crate::agent_runtime::{
     AgentToolEffectModeNative, AGENT_TOOL_MANIFEST, NATIVE_TOOL_CONTRACT_VERSION,
 };
 
-const IMPLEMENTED_NATIVE_TOOLS: [&str; 17] = [
+const IMPLEMENTED_NATIVE_TOOLS: [&str; 21] = [
+    "inspect_host",
+    "inspect_service",
+    "query_logs",
+    "diagnose_endpoint",
     "trash_file",
     "exec_command",
     "terminal_execute",

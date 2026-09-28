@@ -116,6 +116,21 @@ impl CaptureBufferNative {
         redact_known_secrets(&String::from_utf8_lossy(&bytes), secrets)
     }
 
+    fn json_text(&self, secrets: &[String]) -> String {
+        if self.truncated() {
+            return String::new();
+        }
+        let mut bytes = self.head.clone();
+        bytes.extend_from_slice(&self.tail);
+        // Incomplete/invalid JSON never falls back to unsanitized text. The
+        // diagnostic caller reports invalid output once the process completes.
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+            return String::new();
+        };
+        let value = crate::execution::redact_known_json_values(&value, secrets);
+        serde_json::to_string(&crate::redaction::redact_json_value(&value)).unwrap_or_default()
+    }
+
     fn truncated(&self) -> bool {
         self.bytes_read > self.limit as u64
     }
@@ -159,6 +174,8 @@ pub(crate) struct ManagedProcessNative {
     channel: AgentExecutionChannelNative,
     started_at_unix_ms: u64,
     secrets: Vec<String>,
+    json_stdout: bool,
+    io_cancellation: Option<tokio_util::sync::CancellationToken>,
     state: Mutex<ProcessStateNative>,
     changed: Condvar,
     controls: mpsc::Sender<ProcessControlNative>,
@@ -184,6 +201,8 @@ impl ManagedProcessNative {
             channel,
             started_at_unix_ms: current_unix_ms(),
             secrets,
+            json_stdout: false,
+            io_cancellation: None,
             state: Mutex::new(ProcessStateNative {
                 lifecycle: ProcessLifecycleNative::Running,
                 exit_code: None,
@@ -248,7 +267,7 @@ impl ManagedProcessNative {
             channel: self.channel,
             state: state.lifecycle,
             exit_code: state.exit_code,
-            stdout: state.stdout.text(&self.secrets),
+            stdout: self.stdout_text(&state),
             stderr: state.stderr.text(&self.secrets),
             stdout_bytes_read: state.stdout.bytes_read,
             stderr_bytes_read: state.stderr.bytes_read,
@@ -279,7 +298,7 @@ impl ManagedProcessNative {
             channel: self.channel,
             state: state.lifecycle,
             exit_code: state.exit_code,
-            stdout: state.stdout.text(&self.secrets),
+            stdout: self.stdout_text(&state),
             stderr: state.stderr.text(&self.secrets),
             stdout_bytes_read: state.stdout.bytes_read,
             stderr_bytes_read: state.stderr.bytes_read,
@@ -290,6 +309,14 @@ impl ManagedProcessNative {
             completed_at_unix_ms: state.completed_at_unix_ms,
             error: state.error.clone(),
         })
+    }
+
+    fn stdout_text(&self, state: &ProcessStateNative) -> String {
+        if self.json_stdout {
+            state.stdout.json_text(&self.secrets)
+        } else {
+            state.stdout.text(&self.secrets)
+        }
     }
 
     pub(crate) fn write_stdin(&self, input: String, close: bool) -> Result<usize, String> {
@@ -320,6 +347,9 @@ impl ManagedProcessNative {
         self.controls
             .send(ProcessControlNative::Kill { signal })
             .map_err(|_| "process control channel is unavailable".to_string())?;
+        if let Some(cancellation) = &self.io_cancellation {
+            cancellation.cancel();
+        }
         self.wait(timeout)
     }
 }
@@ -513,6 +543,18 @@ fn spawn_local_process_with_scope_native(
     )
 }
 
+/// Application-owned collectors use argv directly and never source a login shell.
+pub(super) fn spawn_fixed_local_process_native(
+    task_id: String,
+    request_id: String,
+    owner_target_id: String,
+    mut command: Command,
+    timeout: Duration,
+) -> Result<Arc<ManagedProcessNative>, String> {
+    command.stdin(Stdio::null());
+    spawn_local_child_native(task_id, request_id, owner_target_id, command, None, timeout)
+}
+
 pub(crate) fn spawn_reviewed_local_process_native(
     task_id: String,
     request_id: String,
@@ -690,9 +732,36 @@ pub(crate) struct RemoteProcessStartNative {
 pub(crate) fn spawn_remote_process_native(
     start: RemoteProcessStartNative,
 ) -> Result<Arc<ManagedProcessNative>, String> {
+    spawn_remote_process_with_io(start, None)
+}
+
+struct DiagnosticProcessIo {
+    cancellation: tokio_util::sync::CancellationToken,
+    deadline: Instant,
+    runtime: tokio::runtime::Handle,
+}
+
+pub(super) fn spawn_remote_diagnostic_process_native(
+    start: RemoteProcessStartNative,
+    cancellation: &tokio_util::sync::CancellationToken,
+    deadline: Instant,
+) -> Result<Arc<ManagedProcessNative>, String> {
+    let io = DiagnosticProcessIo {
+        cancellation: cancellation.child_token(),
+        deadline,
+        runtime: tokio::runtime::Handle::try_current()
+            .map_err(|_| "remote diagnostics require the native async runtime")?,
+    };
+    spawn_remote_process_with_io(start, Some(io))
+}
+
+fn spawn_remote_process_with_io(
+    start: RemoteProcessStartNative,
+    io: Option<DiagnosticProcessIo>,
+) -> Result<Arc<ManagedProcessNative>, String> {
     let secrets = known_connection_secret_values(&start.connection);
     let (control_tx, control_rx) = mpsc::channel();
-    let process = ManagedProcessNative::new(
+    let mut process = ManagedProcessNative::new(
         start.task_id.clone(),
         start.request_id.clone(),
         start.owner_target_id.clone(),
@@ -700,8 +769,24 @@ pub(crate) fn spawn_remote_process_native(
         secrets,
         control_tx,
     );
+    if let Some(io) = &io {
+        let process = Arc::get_mut(&mut process).expect("new unshared diagnostic process");
+        process.json_stdout = true;
+        process.io_cancellation = Some(io.cancellation.clone());
+    }
     let worker = Arc::clone(&process);
-    thread::spawn(move || run_remote_worker(worker, start, control_rx));
+    thread::spawn(move || {
+        if let Some(io) = io {
+            let _entered = io.runtime.enter();
+            crate::connection::with_scoped_connection_io(
+                io.cancellation.clone(),
+                io.deadline,
+                || run_remote_worker(worker, start, control_rx, Some(&io)),
+            );
+        } else {
+            run_remote_worker(worker, start, control_rx, None);
+        }
+    });
     Ok(process)
 }
 
@@ -1023,11 +1108,20 @@ fn run_remote_worker(
     process: Arc<ManagedProcessNative>,
     start: RemoteProcessStartNative,
     controls: mpsc::Receiver<ProcessControlNative>,
+    io: Option<&DiagnosticProcessIo>,
 ) {
-    let deadline = Instant::now() + start.timeout;
+    let deadline = io.map_or_else(|| Instant::now() + start.timeout, |io| io.deadline);
+    if remote_diagnostic_interrupted(&process, io)
+        || remote_start_interrupted(&process, &controls, deadline)
+    {
+        return;
+    }
     let session = match open_ssh_execution_session(&start.connection, &start.known_hosts_path) {
         Ok(session) => session,
         Err(error) => {
+            if remote_diagnostic_interrupted(&process, io) {
+                return;
+            }
             process.finish(
                 ProcessLifecycleNative::Failed,
                 None,
@@ -1037,12 +1131,17 @@ fn run_remote_worker(
             return;
         }
     };
-    if remote_start_interrupted(&process, &controls, deadline) {
+    if remote_diagnostic_interrupted(&process, io)
+        || remote_start_interrupted(&process, &controls, deadline)
+    {
         return;
     }
     let mut channel = match session.target.channel_session() {
         Ok(channel) => channel,
         Err(error) => {
+            if remote_diagnostic_interrupted(&process, io) {
+                return;
+            }
             process.finish(
                 ProcessLifecycleNative::Failed,
                 None,
@@ -1052,10 +1151,15 @@ fn run_remote_worker(
             return;
         }
     };
-    if remote_start_interrupted(&process, &controls, deadline) {
+    if remote_diagnostic_interrupted(&process, io)
+        || remote_start_interrupted(&process, &controls, deadline)
+    {
         return;
     }
     if let Err(error) = crate::execution::start_ssh_exec_channel(&mut channel, &start.command) {
+        if remote_diagnostic_interrupted(&process, io) {
+            return;
+        }
         process.finish(
             ProcessLifecycleNative::Failed,
             None,
@@ -1067,6 +1171,10 @@ fn run_remote_worker(
     // Restore blocking mode before the channel is freed on every exit path.
     let _blocking_mode = RemoteBlockingModeGuard::nonblocking(&session.target);
     loop {
+        if remote_diagnostic_interrupted(&process, io) {
+            let _ = channel.close();
+            return;
+        }
         while let Ok(control) = controls.try_recv() {
             match control {
                 ProcessControlNative::Write {
@@ -1091,15 +1199,21 @@ fn run_remote_worker(
             return;
         }
         if let Err(error) = read_remote_stream(&mut channel, &process, true) {
+            if remote_diagnostic_interrupted(&process, io) {
+                return;
+            }
             process.finish(ProcessLifecycleNative::Failed, None, false, Some(error));
             return;
         }
         if let Err(error) = read_remote_stream(&mut channel.stderr(), &process, false) {
+            if remote_diagnostic_interrupted(&process, io) {
+                return;
+            }
             process.finish(ProcessLifecycleNative::Failed, None, false, Some(error));
             return;
         }
         if channel.eof() {
-            finish_remote_channel(&process, &mut channel, &controls, deadline);
+            finish_remote_channel(&process, &mut channel, &controls, deadline, io);
             return;
         }
         if Instant::now() >= deadline {
@@ -1109,6 +1223,24 @@ fn run_remote_worker(
         }
         thread::sleep(PROCESS_POLL_INTERVAL);
     }
+}
+
+fn remote_diagnostic_interrupted(
+    process: &ManagedProcessNative,
+    io: Option<&DiagnosticProcessIo>,
+) -> bool {
+    let Some(io) = io else {
+        return false;
+    };
+    let lifecycle = if io.cancellation.is_cancelled() {
+        ProcessLifecycleNative::Cancelled
+    } else if Instant::now() >= io.deadline {
+        ProcessLifecycleNative::TimedOut
+    } else {
+        return false;
+    };
+    process.finish(lifecycle, None, false, None);
+    true
 }
 
 fn remote_start_interrupted(
@@ -1139,9 +1271,12 @@ fn finish_remote_channel(
     channel: &mut ssh2::Channel,
     controls: &mpsc::Receiver<ProcessControlNative>,
     deadline: Instant,
+    io: Option<&DiagnosticProcessIo>,
 ) {
     loop {
-        if remote_finalization_interrupted(process, channel, controls, deadline) {
+        if remote_diagnostic_interrupted(process, io)
+            || remote_finalization_interrupted(process, channel, controls, deadline)
+        {
             return;
         }
         match channel.wait_close() {
@@ -1150,6 +1285,9 @@ fn finish_remote_channel(
                 thread::sleep(PROCESS_POLL_INTERVAL);
             }
             Err(error) => {
+                if remote_diagnostic_interrupted(process, io) {
+                    return;
+                }
                 process.finish(
                     ProcessLifecycleNative::Failed,
                     None,
@@ -1161,7 +1299,9 @@ fn finish_remote_channel(
         }
     }
     loop {
-        if remote_finalization_interrupted(process, channel, controls, deadline) {
+        if remote_diagnostic_interrupted(process, io)
+            || remote_finalization_interrupted(process, channel, controls, deadline)
+        {
             return;
         }
         match channel.exit_status() {
@@ -1173,6 +1313,9 @@ fn finish_remote_channel(
                 thread::sleep(PROCESS_POLL_INTERVAL);
             }
             Err(error) => {
+                if remote_diagnostic_interrupted(process, io) {
+                    return;
+                }
                 process.finish(
                     ProcessLifecycleNative::Failed,
                     None,
@@ -1255,6 +1398,10 @@ fn current_unix_ms() -> u64 {
         .try_into()
         .unwrap_or(u64::MAX)
 }
+
+#[cfg(test)]
+#[path = "__tests__/diagnostic_transport.rs"]
+mod diagnostic_transport_tests;
 
 #[cfg(test)]
 mod tests {

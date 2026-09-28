@@ -5,5 +5,8 @@
   { "name": "disk-cleanup", "description": "Analyze disk usage and propose a cleanup plan", "descriptionZh": "磁盘清理分析：定位占用并提出清理方案" },
   { "name": "docker-diagnosis", "description": "Inspect containers, logs and resource usage", "descriptionZh": "Docker 排查：容器状态、日志和资源占用" },
   { "name": "log-triage", "description": "Correlate bounded application and system logs", "descriptionZh": "日志排查：限定范围并关联错误时间线" },
-  { "name": "incident-triage", "description": "Triage an outage and organize read-only evidence", "descriptionZh": "故障分诊：评估影响并组织只读证据" }
+  { "name": "incident-triage", "description": "Triage an outage and organize read-only evidence", "descriptionZh": "故障分诊：评估影响并组织只读证据" },
+  { "name": "deployment-preflight", "description": "Assess release readiness with evidence, explicit blockers and unverified requirements; never deploy implicitly", "descriptionZh": "发布前检查：核对资源、依赖与恢复条件，明确阻塞项和未验证项" },
+  { "name": "deployment-verification", "description": "Verify deployed identity, service stability and expected application behavior against release criteria", "descriptionZh": "发布后验收：核对实际版本、服务稳定性与业务验收条件" },
+  { "name": "tls-diagnosis", "description": "Locate DNS, TCP, certificate identity/trust/expiry and HTTPS failures from an explicit vantage point", "descriptionZh": "域名与证书排查：区分解析、连接、证书校验与 HTTPS 故障" }
 ]

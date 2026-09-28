@@ -504,7 +504,7 @@ impl NativeToolRuntime for NativeToolAdapter {
                     target: native_target,
                     capability_id: grant.capability_id,
                 };
-                let result = runtime.execute_tool(
+                let mut result = runtime.execute_tool(
                     &prepared.context,
                     call,
                     &sessions,
@@ -513,6 +513,15 @@ impl NativeToolRuntime for NativeToolAdapter {
                     &known_hosts_path,
                     &cancellation,
                 )?;
+                if matches!(
+                    result.tool_name.as_str(),
+                    "inspect_host" | "inspect_service" | "query_logs" | "diagnose_endpoint"
+                ) {
+                    if let Some(data) = result.data.as_mut() {
+                        data["nativeCallId"] = json!(result.call_id);
+                        data["evidenceRef"] = json!(stored.public_call_id);
+                    }
+                }
                 let result_effect = result
                     .effects
                     .first()
@@ -741,6 +750,10 @@ fn normalize_arguments(
             Err("interactive terminal tools require a bound-terminal Session".into())
         }
         "exec_command"
+        | "inspect_host"
+        | "inspect_service"
+        | "query_logs"
+        | "diagnose_endpoint"
         | "terminal_execute"
         | "probe_http"
         | "read_terminal"
