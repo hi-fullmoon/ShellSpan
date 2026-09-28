@@ -19,6 +19,8 @@ struct DocumentMessage {
     shellspan_document_message: u8,
     text: String,
     documents: Vec<DocumentPart>,
+    #[serde(default)]
+    skills: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -46,7 +48,11 @@ pub(crate) fn user_prompt(content: &str) -> Cow<'_, str> {
         return plain;
     };
     if message.shellspan_document_message != 1
-        || message.documents.is_empty()
+        || (message.documents.is_empty() && message.skills.is_empty())
+        || message
+            .skills
+            .iter()
+            .any(|name| !crate::agent_runtime::skills::valid_name(name))
         || message.documents.len() > limits.max_files
     {
         return plain;
@@ -79,6 +85,26 @@ pub(crate) fn user_prompt(content: &str) -> Cow<'_, str> {
         return plain;
     }
     Cow::Owned(message.text)
+}
+
+pub(crate) fn selected_skills(content: &str) -> Vec<String> {
+    if !matches!(user_prompt(content), Cow::Owned(_)) {
+        return Vec::new();
+    }
+    serde_json::from_str::<DocumentMessage>(content)
+        .map(|message| {
+            message
+                .skills
+                .into_iter()
+                .filter(|name| {
+                    message
+                        .text
+                        .split_whitespace()
+                        .any(|token| token.strip_prefix('/') == Some(name.as_str()))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[derive(Serialize)]
