@@ -1599,7 +1599,10 @@ fn canonical_local_root(root: &Path) -> Result<PathBuf, String> {
         LocalScopedReader::open(root.to_str().ok_or("invalid local root")?).map_err(|error| {
             format!("AGENT_UNSAFE_FILE_ROOT: local file root must be a real directory without symlink ancestors: {error}")
         })?;
-    Ok(PathBuf::from(reader.root()))
+    // Compare roots and resolved children in the same representation, including
+    // the verbatim path prefix returned by canonicalize on Windows.
+    fs::canonicalize(reader.root())
+        .map_err(|error| format!("failed to canonicalize local root: {error}"))
 }
 
 fn resolve_local_existing(
@@ -2473,7 +2476,15 @@ mod tests {
             let items: Vec<_> = trash::os_limited::list()
                 .unwrap()
                 .into_iter()
-                .filter(|item| item.original_path() == original)
+                .filter(|item| {
+                    let path = item.original_path();
+                    path.file_name() == original.file_name()
+                        && path
+                            .parent()
+                            .and_then(|parent| fs::canonicalize(parent).ok())
+                            .as_deref()
+                            == original.parent()
+                })
                 .collect();
             assert_eq!(items.len(), 1);
             trash::os_limited::restore_all(items).unwrap();
@@ -2585,6 +2596,26 @@ mod tests {
                 .unwrap();
             assert!(resolve_local_destination(root.path(), "link/file").is_err());
         }
+    }
+
+    #[test]
+    fn local_scope_resolves_files_under_a_noncanonical_root() {
+        let workspace = tempfile::tempdir().unwrap();
+        fs::write(
+            workspace.path().join("source.rs"),
+            include_bytes!("filesystem.rs"),
+        )
+        .unwrap();
+        let root = canonical_local_root(workspace.path()).unwrap();
+        assert_eq!(root, fs::canonicalize(workspace.path()).unwrap());
+        assert_eq!(
+            resolve_local_existing(&root, "source.rs", false).unwrap(),
+            fs::canonicalize(workspace.path().join("source.rs")).unwrap()
+        );
+        assert_eq!(
+            resolve_local_destination(&root, "new.rs").unwrap(),
+            root.join("new.rs")
+        );
     }
 
     #[test]
