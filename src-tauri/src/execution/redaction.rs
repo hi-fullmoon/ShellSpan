@@ -1,5 +1,35 @@
 const REDACTION_MARKER: &str = "[REDACTED]";
 
+/// Decode structured output before comparing credential values. Replacing text in
+/// serialized JSON misses escaped secrets and can corrupt keys/numeric fields.
+pub(crate) fn redact_known_json_values(
+    value: &serde_json::Value,
+    secrets: &[String],
+) -> serde_json::Value {
+    use serde_json::Value;
+    match value {
+        Value::String(text) => Value::String(redact_known_secrets(text, secrets)),
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| redact_known_json_values(item, secrets))
+                .collect(),
+        ),
+        Value::Object(fields) => Value::Object(
+            fields
+                .iter()
+                .map(|(key, value)| {
+                    (
+                        redact_known_secrets(key, secrets),
+                        redact_known_json_values(value, secrets),
+                    )
+                })
+                .collect(),
+        ),
+        _ => value.clone(),
+    }
+}
+
 /// Replaces exact secret values in one pass over the original input.
 ///
 /// Longest matches win at the same position. A single pass prevents a shorter

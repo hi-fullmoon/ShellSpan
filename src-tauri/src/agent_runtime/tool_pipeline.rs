@@ -647,9 +647,17 @@ impl AgentToolPipeline {
         entry: &Arc<AgentEntry>,
         message: &str,
     ) -> Result<(), String> {
+        if self
+            .sessions
+            .snapshot(&entry.session_id)?
+            .uncertain_native_effects
+        {
+            return self.mark_tool_recovery(entry, message, "ephemeralInputRecoveryRequired");
+        }
         entry.set_phase(AgentLifecyclePhase::Waiting)?;
-        super::driver::close_open_scope(&self.sessions, entry, "ephemeralInputRecoveryRequired")?;
-        self.mark_tool_recovery(entry, message, "ephemeralInputRecoveryRequired")
+        self.sessions.pause_for_input(&entry.session_id, message)?;
+        entry.set_scope(None)?;
+        entry.set_phase(AgentLifecyclePhase::Idle)
     }
 
     fn mark_tool_recovery(
@@ -3109,6 +3117,14 @@ mod ephemeral_terminal_result_tests {
             execution_surface: super::super::AgentExecutionSurface::BoundTerminal,
         };
         // The real admission guard runs before the unconfigured native runtime.
+        sessions
+            .append(
+                &request.session_id,
+                Some(request.turn_id.clone()),
+                None,
+                AgentSessionEventPayload::TurnStart,
+            )
+            .unwrap();
         let error = pipeline.prepare_native(&request).unwrap_err();
         assert!(error.starts_with("ephemeralInputUnavailable:"));
         assert_eq!(
@@ -3180,6 +3196,20 @@ mod ephemeral_terminal_result_tests {
             )
             .unwrap();
         let entry = handle.entry();
+        sessions
+            .enqueue(
+                &request.session_id,
+                AgentInboxLane::NextTurn,
+                AgentInboxMessage {
+                    message_id: "queued-before-pause".into(),
+                    client_submission_id: Some("queued-before-pause".into()),
+                    content: "Inspect the directory after the current task".into(),
+                    source: AgentMessageSource::user(),
+                    terminal_context: None,
+                    images: Vec::new(),
+                },
+            )
+            .unwrap();
         entry
             .set_scope(Some(AgentActiveScope {
                 turn_id: request.turn_id.clone(),
@@ -3190,17 +3220,45 @@ mod ephemeral_terminal_result_tests {
             .mark_ephemeral_input_failure(&entry, EPHEMERAL_INPUT_RECOVERY_REQUIRED)
             .unwrap();
         let snapshot = sessions.snapshot(&request.session_id).unwrap();
-        assert_eq!(snapshot.status, AgentSessionStatus::Waiting);
+        assert_eq!(snapshot.status, AgentSessionStatus::Idle);
         assert!(!snapshot.ended);
         assert_eq!(
             snapshot.task.recovery.unwrap().status,
-            AgentRecoveryStatus::Required
+            AgentRecoveryStatus::None
         );
-        assert_eq!(entry.phase().unwrap(), AgentLifecyclePhase::Waiting);
+        assert_eq!(entry.phase().unwrap(), AgentLifecyclePhase::Idle);
+        assert!(!sessions.has_ready_input(&request.session_id).unwrap());
+        assert_eq!(snapshot.inbox.paused_ids, vec!["queued-before-pause"]);
         assert!(entry.scope().unwrap().is_none());
         assert!(sessions.all_events(&request.session_id).unwrap().iter().any(|event| matches!(
-            &event.payload, AgentSessionEventPayload::TurnEnd { reason } if reason == "ephemeralInputRecoveryRequired"
+            &event.payload, AgentSessionEventPayload::TurnEnd { reason } if reason == EPHEMERAL_INPUT_RECOVERY_REQUIRED
         )));
+        let reopened = AgentSessionStore::default();
+        reopened.configure(root.path().to_path_buf()).unwrap();
+        assert_eq!(
+            reopened.snapshot(&request.session_id).unwrap().status,
+            AgentSessionStatus::Idle
+        );
+        sessions
+            .enqueue(
+                &request.session_id,
+                AgentInboxLane::NextTurn,
+                AgentInboxMessage {
+                    message_id: "clarified-input".into(),
+                    client_submission_id: Some("clarified-input".into()),
+                    content: "Run pwd in the current terminal".into(),
+                    source: AgentMessageSource::user(),
+                    terminal_context: None,
+                    images: Vec::new(),
+                },
+            )
+            .unwrap();
+        assert!(sessions.has_ready_input(&request.session_id).unwrap());
+        assert!(entry.try_acquire_driver().unwrap());
+        entry.release_driver();
+        let claimed = sessions.claim_turn(&request.session_id).unwrap();
+        assert_eq!(claimed.len(), 1);
+        assert_eq!(claimed[0].message_id, "clarified-input");
         request.turn_id = "turn-2".into();
         request.step_id = "step-3".into();
         request.model_call.call_id = "call-3".into();

@@ -31,7 +31,7 @@ mod target;
 #[cfg(test)]
 pub(crate) use cancellation::ExecutionCancellationErrorKind;
 pub(crate) use cancellation::ExecutionCancellationRegistry;
-pub(crate) use redaction::redact_known_secrets;
+pub(crate) use redaction::{redact_known_json_values, redact_known_secrets};
 pub(crate) use request::known_connection_secret_values;
 #[cfg(test)]
 pub(crate) use request::DEFAULT_TOTAL_READ_HARD_LIMIT_BYTES;

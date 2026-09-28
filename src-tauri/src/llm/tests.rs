@@ -101,6 +101,7 @@ fn model_exposes_only_strict_runtime_pipeline_tools() {
             "wait_process",
             "kill_process",
             "probe_http",
+            "trash_file",
             "read_file",
             "list_directory",
             "search_text",
@@ -121,6 +122,10 @@ fn model_exposes_only_strict_runtime_pipeline_tools() {
             "fleet_resume",
             "fleet_abort",
             "fleet_reconcile",
+            "inspect_host",
+            "inspect_service",
+            "query_logs",
+            "diagnose_endpoint",
         ]
     );
     assert!(tools.iter().all(|tool| {
