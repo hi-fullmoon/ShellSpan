@@ -221,19 +221,36 @@ pub(crate) fn validate_host(host: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct NetworkDestinationDenyList {
+    hosts: Vec<String>,
+    addresses: Vec<IpAddr>,
+}
+
+pub(crate) fn network_destination_deny_list() -> &'static NetworkDestinationDenyList {
+    static POLICY: std::sync::LazyLock<NetworkDestinationDenyList> =
+        std::sync::LazyLock::new(|| {
+            serde_json::from_str(include_str!(
+                "../../protocol/agent/runtime/blocked-network-destinations.json"
+            ))
+            .expect("valid bundled network destination deny list")
+        });
+    &POLICY
+}
+
 fn is_blocked_host(host: &str) -> bool {
     let lower = host.to_ascii_lowercase();
-    if lower == "metadata.google.internal" {
-        return true;
-    }
     let candidate = lower
         .trim_start_matches("http://")
         .trim_start_matches("https://");
     let candidate = candidate.split('/').next().unwrap_or(candidate);
     let candidate = strip_port(candidate);
-    // AWS metadata endpoint: an IPv6 unique-local address that falls outside
-    // the standard blocked ranges below.
-    if candidate == "fd00:ec2::254" {
+    if network_destination_deny_list()
+        .hosts
+        .iter()
+        .any(|blocked| blocked == candidate.trim_end_matches('.'))
+    {
         return true;
     }
     match candidate.parse::<IpAddr>() {
@@ -255,6 +272,9 @@ fn normalize_ip(ip: IpAddr) -> IpAddr {
 }
 
 fn is_blocked_ip(ip: IpAddr) -> bool {
+    if network_destination_deny_list().addresses.contains(&ip) {
+        return true;
+    }
     // Link-local covers the cloud metadata endpoints (169.254.0.0/16,
     // fe80::/10). Loopback is intentionally allowed: this is a user-driven
     // desktop SSH/SFTP client, and connecting to 127.0.0.1 / ::1 is a
