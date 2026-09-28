@@ -339,13 +339,21 @@ describe('AiConversationNodeList', () => {
       state: 'completed',
     };
     const { rerender } = render(<AiConversationNodeList nodes={[
-      userNode, { ...assistantNode, state: 'streaming' },
+      { ...userNode, delivery: 'pending' }, { ...assistantNode, state: 'streaming' },
     ]} />);
+    expect(screen.getByRole('status', { name: 'Sending' })).toHaveClass('ai-user-sending');
+    expect(screen.getByRole('status', { name: 'Sending' })).toHaveClass('motion-reduce:animate-none');
     expect(within(screen.getByRole('article', { name: 'AI assistant message' }))
       .queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument();
     expect(within(screen.getByRole('article', { name: 'Your message' }))
       .getByRole('button', { name: 'Copy' })).toBeInTheDocument();
 
+    rerender(<AiConversationNodeList nodes={[userNode, assistantNode]} />);
+    expect(screen.queryByRole('status', { name: 'Sending' })).not.toBeInTheDocument();
+
+    rerender(<AiConversationNodeList nodes={[{ ...userNode, delivery: 'failed' }, assistantNode]} />);
+    expect(screen.queryByRole('status', { name: 'Sending' })).not.toBeInTheDocument();
+    expect(screen.getByText('Not sent')).toBeVisible();
     rerender(<AiConversationNodeList nodes={[userNode, assistantNode]} />);
 
     const userArticle = screen.getByRole('article', { name: 'Your message' });
