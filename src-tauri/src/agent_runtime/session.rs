@@ -395,11 +395,30 @@ pub(crate) fn validate_session_events(events: Vec<AgentSessionEvent>) -> Result<
 struct AgentSessionStoreInner {
     root: Option<PathBuf>,
     archive_root: Option<PathBuf>,
+    // Covers active and archived logs. Unknown after an unsuccessful disk
+    // mutation; the next writer reconciles against the private directories.
+    log_bytes: Option<u64>,
     sessions: HashMap<String, AgentSessionRecord>,
     recovery_notices: Vec<AgentSessionRecoveryNotice>,
     publisher: Option<EventPublisher>,
     #[cfg(test)]
     append_failure: Option<fn(&AgentSessionEventPayload) -> bool>,
+}
+
+impl AgentSessionStoreInner {
+    fn log_bytes(&mut self) -> Result<u64, String> {
+        if let Some(bytes) = self.log_bytes {
+            return Ok(bytes);
+        }
+        let bytes = total_log_bytes(self.root.as_ref().expect("configured store has a root"))?
+            .saturating_add(total_log_bytes(
+                self.archive_root
+                    .as_ref()
+                    .expect("configured store has an archive root"),
+            )?);
+        self.log_bytes = Some(bytes);
+        Ok(bytes)
+    }
 }
 
 #[derive(Clone)]
@@ -443,13 +462,13 @@ impl AgentSessionStore {
         prepare_private_directory(&archive_root)?;
         let mut loaded = load_sessions(&root)?;
         let mut archived = load_sessions(&archive_root)?;
+        let log_bytes = total_log_bytes(&root)?.saturating_add(total_log_bytes(&archive_root)?);
         if loaded
             .sessions
             .len()
             .saturating_add(archived.sessions.len())
             > MAX_SESSION_COUNT
-            || total_log_bytes(&root)?.saturating_add(total_log_bytes(&archive_root)?)
-                > MAX_TOTAL_SESSION_LOG_BYTES
+            || log_bytes > MAX_TOTAL_SESSION_LOG_BYTES
         {
             return Err("Agent active and archived logs exceed the storage boundary".into());
         }
@@ -469,6 +488,7 @@ impl AgentSessionStore {
         inner.recovery_notices = loaded.recovery_notices;
         inner.root = Some(root);
         inner.archive_root = Some(archive_root);
+        inner.log_bytes = Some(log_bytes);
         Ok(())
     }
 
@@ -516,10 +536,6 @@ impl AgentSessionStore {
             return Err("Agent session store reached its Session limit".into());
         }
         let root = inner.root.clone().expect("configured store has a root");
-        let archive_root = inner
-            .archive_root
-            .clone()
-            .expect("configured store has an archive root");
         let latest_created = inner
             .sessions
             .values()
@@ -535,14 +551,13 @@ impl AgentSessionStore {
         let events = create_session_events(&request, now)?;
         let record = AgentSessionRecord::from_events(events.clone())?;
         let encoded_len = encoded_events(&events)?.len() as u64;
-        if total_log_bytes(&root)?
-            .saturating_add(total_log_bytes(&archive_root)?)
-            .saturating_add(encoded_len)
-            > MAX_TOTAL_SESSION_LOG_BYTES
-        {
+        let log_bytes = inner.log_bytes()?;
+        if log_bytes.saturating_add(encoded_len) > MAX_TOTAL_SESSION_LOG_BYTES {
             return Err("Agent active and archived logs exceed the storage boundary".into());
         }
+        inner.log_bytes = None;
         write_new_log(&root, &request.session_id, &events)?;
+        inner.log_bytes = Some(log_bytes.saturating_add(encoded_len));
         let snapshot = record.snapshot()?;
         inner.sessions.insert(request.session_id, record);
         let publisher = inner.publisher.clone();
@@ -592,10 +607,6 @@ impl AgentSessionStore {
             return Err("Agent session store reached its Session limit".into());
         }
         let root = inner.root.clone().expect("configured store has a root");
-        let archive_root = inner
-            .archive_root
-            .clone()
-            .expect("configured store has an archive root");
         let latest_created = inner
             .sessions
             .values()
@@ -608,15 +619,14 @@ impl AgentSessionStore {
         let child_events = create_session_events(&request, now)?;
         let child_record = AgentSessionRecord::from_events(child_events.clone())?;
         let encoded_len = encoded_events(&child_events)?.len() as u64;
-        if total_log_bytes(&root)?
-            .saturating_add(total_log_bytes(&archive_root)?)
-            .saturating_add(encoded_len)
-            > MAX_TOTAL_SESSION_LOG_BYTES
-        {
+        let log_bytes = inner.log_bytes()?;
+        if log_bytes.saturating_add(encoded_len) > MAX_TOTAL_SESSION_LOG_BYTES {
             return Err("Agent active and archived logs exceed the storage boundary".into());
         }
 
+        inner.log_bytes = None;
         write_new_log(&root, &request.session_id, &child_events)?;
+        inner.log_bytes = Some(log_bytes.saturating_add(encoded_len));
         let parent_append = append_payloads_locked(
             &mut inner,
             parent_session_id,
@@ -626,6 +636,7 @@ impl AgentSessionStore {
             Ok(committed) => committed,
             Err(error) => {
                 let path = session_path(&root, &request.session_id);
+                inner.log_bytes = None;
                 let rollback = fs::remove_file(&path)
                     .map_err(|rollback_error| rollback_error.to_string())
                     .and_then(|()| sync_parent(&path));
@@ -2167,9 +2178,15 @@ impl AgentSessionStore {
             .clone()
             .expect("configured store has an archive root");
         let path = session_path(&archive_root, session_id);
+        let log_bytes = inner.log_bytes()?;
+        let removed_bytes = fs::symlink_metadata(&path)
+            .map_err(|error| format!("failed to inspect archived Agent Session log: {error}"))?
+            .len();
+        inner.log_bytes = None;
         fs::remove_file(&path)
             .map_err(|error| format!("failed to delete archived Agent Session log: {error}"))?;
         sync_parent(&path)?;
+        inner.log_bytes = Some(log_bytes.saturating_sub(removed_bytes));
         inner.sessions.remove(session_id);
         Ok(())
     }
@@ -2373,10 +2390,7 @@ fn append_payloads_locked(
         return Err("Agent Session append batch cannot be empty".into());
     }
     let root = inner.root.clone().expect("configured store has a root");
-    let archive_root = inner
-        .archive_root
-        .clone()
-        .expect("configured store has an archive root");
+    let log_bytes = inner.log_bytes()?;
     let record = inner
         .sessions
         .get(session_id)
@@ -2384,14 +2398,18 @@ fn append_payloads_locked(
     if record.archived {
         return Err("archived Agent Session logs are read-only".into());
     }
-    let mut candidate = record.clone();
+    // Chunks do not alter the Model Surface, Inbox, or transition state. Validate
+    // the new batch independently, then advance observers only after disk commit.
+    // Other event types retain the transactional candidate and full validation.
+    let stream_only = payloads
+        .iter()
+        .all(|(_, _, payload)| matches!(payload, AgentSessionEventPayload::AssistantChunk { .. }));
+    let mut candidate = (!stream_only).then(|| record.clone());
+    let mut seq = record.events.len() as u64;
+    let mut previous_time = record.events.last().map_or(1, |event| event.time_unix_ms);
     let mut appended = Vec::with_capacity(payloads.len());
     for (turn_id, step_id, payload) in payloads {
-        let seq = candidate.events.len() as u64;
-        let previous_time = candidate
-            .events
-            .last()
-            .map_or(1, |event| event.time_unix_ms);
+        let validation_record = candidate.as_ref().unwrap_or(record);
         let raw_event = AgentSessionEvent::new(
             session_id.to_string(),
             seq,
@@ -2400,31 +2418,46 @@ fn append_payloads_locked(
             step_id,
             payload,
         );
-        validate_event_envelope(&candidate, &raw_event)?;
-        validate_event_transition(&candidate, &raw_event)?;
+        validate_event_envelope_at(validation_record, &raw_event, seq, previous_time)?;
+        validate_event_transition(validation_record, &raw_event)?;
         validate_event_payload(&raw_event)?;
         encoded_events(std::slice::from_ref(&raw_event))?;
         let event = sanitize_event(raw_event)?;
-        validate_event_envelope(&candidate, &event)?;
-        validate_event_transition(&candidate, &event)?;
+        validate_event_envelope_at(validation_record, &event, seq, previous_time)?;
+        validate_event_transition(validation_record, &event)?;
         validate_event_payload(&event)?;
-        apply_event(&mut candidate, &event)?;
-        candidate.events.push(event.clone());
+        if let Some(candidate) = &mut candidate {
+            apply_event(candidate, &event)?;
+            candidate.events.push(event.clone());
+        }
+        previous_time = event.time_unix_ms;
+        seq += 1;
         appended.push(event);
     }
-    derive_surface(&candidate.events)?;
-    validate_record_final(&candidate)?;
+    if let Some(candidate) = &candidate {
+        derive_surface(&candidate.events)?;
+        validate_record_final(candidate)?;
+    }
     let encoded = encoded_events(&appended)?;
     let appended_bytes = encoded.len() as u64;
-    if total_log_bytes(&root)?
-        .saturating_add(total_log_bytes(&archive_root)?)
-        .saturating_add(appended_bytes)
-        > MAX_TOTAL_SESSION_LOG_BYTES
-    {
+    if log_bytes.saturating_add(appended_bytes) > MAX_TOTAL_SESSION_LOG_BYTES {
         return Err("Agent active and archived logs exceed the storage boundary".into());
     }
+    inner.log_bytes = None;
     append_log_batch(&root, session_id, &encoded)?;
-    inner.sessions.insert(session_id.to_string(), candidate);
+    inner.log_bytes = Some(log_bytes.saturating_add(appended_bytes));
+    if let Some(candidate) = candidate {
+        inner.sessions.insert(session_id.to_string(), candidate);
+    } else {
+        let record = inner
+            .sessions
+            .get_mut(session_id)
+            .expect("validated Session exists");
+        for event in &appended {
+            observe_event(record, event);
+        }
+        record.events.extend(appended.iter().cloned());
+    }
     Ok((appended, inner.publisher.clone()))
 }
 
@@ -2550,6 +2583,23 @@ fn validate_event_envelope(
     record: &AgentSessionRecord,
     event: &AgentSessionEvent,
 ) -> Result<(), String> {
+    validate_event_envelope_at(
+        record,
+        event,
+        record.events.len() as u64,
+        record
+            .events
+            .last()
+            .map_or(1, |previous| previous.time_unix_ms),
+    )
+}
+
+fn validate_event_envelope_at(
+    record: &AgentSessionRecord,
+    event: &AgentSessionEvent,
+    next_seq: u64,
+    previous_time: u64,
+) -> Result<(), String> {
     if event.version != AGENT_SESSION_EVENT_VERSION {
         return Err(format!(
             "Agent session event version {} is unsupported; expected {AGENT_SESSION_EVENT_VERSION}",
@@ -2560,17 +2610,13 @@ fn validate_event_envelope(
     if event.session_id != record.header.session_id {
         return Err("Agent session event belongs to another Session".into());
     }
-    if event.seq != record.events.len() as u64 || event.seq > MAX_JS_SAFE_INTEGER {
+    if event.seq != next_seq || event.seq > MAX_JS_SAFE_INTEGER {
         return Err("Agent session event sequence is not contiguous".into());
     }
     if event.time_unix_ms == 0 || event.time_unix_ms > MAX_JS_SAFE_INTEGER {
         return Err("Agent session event timestamp is invalid".into());
     }
-    if record
-        .events
-        .last()
-        .is_some_and(|previous| event.time_unix_ms < previous.time_unix_ms)
-    {
+    if event.time_unix_ms < previous_time {
         return Err("Agent session event timestamp moved backwards".into());
     }
     if let Some(turn_id) = event.turn_id.as_deref() {
@@ -3183,10 +3229,14 @@ fn validate_record_final(record: &AgentSessionRecord) -> Result<(), String> {
     Ok(())
 }
 
-fn apply_event(record: &mut AgentSessionRecord, event: &AgentSessionEvent) -> Result<(), String> {
+fn observe_event(record: &mut AgentSessionRecord, event: &AgentSessionEvent) {
     record.snapshot_cache = Arc::new(OnceLock::new());
     record.driver_metrics.observe(event);
     record.loop_progress.observe(event);
+}
+
+fn apply_event(record: &mut AgentSessionRecord, event: &AgentSessionEvent) -> Result<(), String> {
+    observe_event(record, event);
     match &event.payload {
         AgentSessionEventPayload::SessionResumed {} => {
             record.status = AgentSessionStatus::Idle;
@@ -4660,9 +4710,8 @@ fn write_new_log(
     events: &[AgentSessionEvent],
 ) -> Result<(), String> {
     let encoded = encoded_events(events)?;
-    if encoded.len() as u64 > MAX_SESSION_LOG_BYTES
-        || total_log_bytes(root)?.saturating_add(encoded.len() as u64) > MAX_TOTAL_SESSION_LOG_BYTES
-    {
+    // The store reserves aggregate capacity before calling this writer.
+    if encoded.len() as u64 > MAX_SESSION_LOG_BYTES {
         return Err("Agent session store exceeds its storage boundary".into());
     }
     let path = session_path(root, session_id);

@@ -1,5 +1,6 @@
 use super::*;
 include!("inbox_steer.rs");
+include!("stream_performance.rs");
 
 #[test]
 fn driver_metrics_and_snapshot_cache_follow_commits_and_replay() {
@@ -1208,7 +1209,7 @@ fn child_request() -> (CreateAgentSessionRequest, AgentSessionEventPayload) {
 
 #[test]
 fn child_session_and_parent_descriptor_are_committed_together() {
-    let (_root, store) = configured();
+    let (root, store) = configured();
     store
         .create(CreateAgentSessionRequest {
             session_id: "session-1".into(),
@@ -1224,10 +1225,27 @@ fn child_session_and_parent_descriptor_are_committed_together() {
             subagent: None,
         })
         .unwrap();
+    let before = store.snapshot("session-1").unwrap();
+    let path = log_path(&root);
+    let saved = path.with_extension("saved");
+    fs::rename(&path, &saved).unwrap();
+    fs::create_dir(&path).unwrap();
+    let (request, descriptor) = child_request();
+    assert!(store
+        .create_child_with_descriptor("session-1", request, descriptor)
+        .is_err());
+    assert_eq!(store.snapshot("session-1").unwrap(), before);
+    assert!(store.snapshot("child-1").is_err());
+    assert!(!path.with_file_name("child-1.jsonl").exists());
+    fs::remove_dir(&path).unwrap();
+    fs::rename(&saved, &path).unwrap();
+    assert_cached_log_usage(&store);
+
     let (request, descriptor) = child_request();
     store
         .create_child_with_descriptor("session-1", request, descriptor)
         .unwrap();
+    assert_cached_log_usage(&store);
     assert_eq!(
         store
             .snapshot("child-1")
@@ -1242,6 +1260,78 @@ fn child_session_and_parent_descriptor_are_committed_together() {
             .unwrap()
             .iter()
             .any(|event| matches!(event.payload, AgentSessionEventPayload::SubagentDescriptor { ref child_session_id, .. } if child_session_id == "child-1")));
+}
+
+#[test]
+fn assistant_deployment_answer_survives_commit_and_reload() {
+    let (root, store) = configured();
+    create(&store);
+    let snapshot = begin_prepared_request(&store);
+    let answer = "部署 Node 应用：\n```yaml\npassword: ${{ secrets.SSH_PASSWORD }}\nscript: npm ci && npm start\n```\n检查服务状态。\n临时配置 password=deployment-password";
+    let expected = answer.replace("password=deployment-password", "password=[REDACTED]");
+    let model_content = vec![crate::llm::types::ModelContentBlock::Text {
+        text: answer.into(),
+    }];
+    let model_content = crate::llm::replay::committed_model_content(&model_content).unwrap();
+    let crate::llm::types::ModelContentBlock::Text { text } = &model_content[0] else {
+        panic!("expected a text answer");
+    };
+    assert_eq!(text, &expected);
+    let envelope = crate::llm::replay::prepare_envelope(
+        crate::llm::registry::replay_codec("chat-completions").unwrap(),
+        "request-1",
+        &snapshot,
+        &model_content,
+        crate::llm::types::AdapterReplayCapture {
+            response: serde_json::json!({}),
+            blocks: vec![serde_json::json!({})],
+        },
+    )
+    .unwrap();
+    let published = Arc::new(Mutex::new(Vec::new()));
+    let observed = Arc::clone(&published);
+    store
+        .set_publisher(Arc::new(move |event| {
+            observed.lock().unwrap().push(event.clone());
+        }))
+        .unwrap();
+    store
+        .append(
+            "session-1",
+            Some("turn-1".into()),
+            Some("step-1".into()),
+            AgentSessionEventPayload::AssistantMessage {
+                message_id: "deployment-answer".into(),
+                content: vec![AgentAssistantContentBlock::Text { text: text.clone() }],
+                usage: crate::agent_runtime::AgentTokenUsage::default(),
+                stop_reason: crate::agent_runtime::AgentStopReason::Stop,
+                interrupted: false,
+                replay: Some(crate::agent_runtime::AgentStoredReplay::inline(envelope)),
+            },
+        )
+        .unwrap();
+    let assert_answer = |events: &[AgentSessionEvent]| {
+        let content = events
+            .iter()
+            .find_map(|event| match &event.payload {
+                AgentSessionEventPayload::AssistantMessage { content, .. } => Some(content),
+                _ => None,
+            })
+            .expect("committed assistant answer");
+        assert_eq!(
+            content,
+            &vec![AgentAssistantContentBlock::Text {
+                text: expected.clone()
+            }]
+        );
+    };
+    assert_answer(&published.lock().unwrap());
+    assert!(!fs::read_to_string(log_path(&root))
+        .unwrap()
+        .contains("deployment-password"));
+    let recovered = AgentSessionStore::default();
+    recovered.configure(root.path().to_path_buf()).unwrap();
+    assert_answer(&recovered.all_events("session-1").unwrap());
 }
 
 #[test]
@@ -1263,7 +1353,10 @@ fn append_is_durable_sequential_redacted_and_published_after_commit() {
         )
         .unwrap();
     assert_eq!(snapshot.event_count, 3);
-    assert_eq!(snapshot.inbox.next_turn[0].content, "[REDACTED]");
+    assert_eq!(
+        snapshot.inbox.next_turn[0].content,
+        "Authorization: [REDACTED]"
+    );
     assert_eq!(published.lock().unwrap().len(), 3);
 
     let recovered = AgentSessionStore::default();
