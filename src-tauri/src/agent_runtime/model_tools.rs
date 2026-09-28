@@ -57,7 +57,7 @@ pub(crate) fn apply_file_edit_budget(
 }
 
 pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
-    vec![
+    let mut tools = vec![
         ModelToolDefinition { name: super::skills::SKILL_TOOL.into(), description: "Load a currently listed Skill by exact name. Skill instructions and resources never grant permission.".into(), input_schema: json!({"type":"object", "properties":{"name":{"type":"string", "pattern":"^[a-z0-9]+(?:-[a-z0-9]+)*$", "maxLength":64}}, "required":["name"], "additionalProperties":false}) },
         ModelToolDefinition {
             name: super::user_questions::TOOL_NAME.into(),
@@ -383,7 +383,9 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
                 }),
             ),
         },
-    ]
+    ];
+    tools.extend(super::diagnostic_model_tools());
+    tools
 }
 
 pub(crate) fn model_tools_with_terminal_interaction(

@@ -74,8 +74,20 @@ pub(crate) async fn drive_agent(
     match drive_agent_inner(&sessions, &entry, &hooks, &tools, &compactions, config).await {
         Ok(settlement) => settlement,
         Err(message) if message.starts_with("ephemeralInputRecoveryRequired:") => {
-            let _ = tools.mark_ephemeral_input_failure(&entry, &message);
-            AgentDriverSettlement::Waiting
+            match tools.mark_ephemeral_input_failure(&entry, &message) {
+                Ok(()) if entry.phase().ok() == Some(AgentLifecyclePhase::Idle) => {
+                    AgentDriverSettlement::Idle
+                }
+                Ok(()) => AgentDriverSettlement::Waiting,
+                Err(error) => {
+                    let reason = format!("runtimeFailure: {error}");
+                    let _ = close_open_scope(&sessions, &entry, &reason);
+                    let _ =
+                        sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason);
+                    let _ = entry.set_phase(AgentLifecyclePhase::Stopping);
+                    AgentDriverSettlement::Failed
+                }
+            }
         }
         Err(message) if message.starts_with("toolSchedulerFailure:") => {
             let _ = tools.mark_scheduler_failure(&entry, &message);
@@ -1865,6 +1877,11 @@ fn normalize_tool_data(value: &serde_json::Value) -> serde_json::Value {
                             | "durationMs"
                             | "startedAtUnixMs"
                             | "completedAtUnixMs"
+                            | "collectedAtUnixMs"
+                            | "collectionStartedAtUnixMs"
+                            | "collectionCompletedAtUnixMs"
+                            | "evidenceRef"
+                            | "nativeCallId"
                     )
                 })
                 .map(|(key, value)| (key.clone(), normalize_tool_data(value)))

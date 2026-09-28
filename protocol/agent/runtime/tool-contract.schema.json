@@ -25,6 +25,10 @@
     },
     "toolName": {
       "enum": [
+        "inspect_host",
+        "inspect_service",
+        "query_logs",
+        "diagnose_endpoint",
         "exec_command",
         "terminal_execute",
         "probe_http",
@@ -589,8 +593,76 @@
       ],
       "unevaluatedProperties": false
     },
+    "diagnosticTimeout": { "type": "integer", "minimum": 100, "maximum": 30000 },
+    "diagnosticUnit": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[a-zA-Z0-9_.@:][a-zA-Z0-9_.@:-]*$" },
+    "inspectHostArguments": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "fields": { "type": "array", "maxItems": 5, "uniqueItems": true, "items": { "enum": ["system", "cpu", "memory", "disk", "capabilities"] } },
+        "timeoutMs": { "$ref": "#/$defs/diagnosticTimeout" }
+      }
+    },
+    "inspectServiceArguments": {
+      "type": "object", "additionalProperties": false, "required": ["service"],
+      "properties": { "service": { "$ref": "#/$defs/diagnosticUnit" }, "timeoutMs": { "$ref": "#/$defs/diagnosticTimeout" } }
+    },
+    "queryLogsArguments": {
+      "type": "object", "additionalProperties": false, "required": ["service", "sinceUnixMs", "untilUnixMs"],
+      "properties": {
+        "service": { "$ref": "#/$defs/diagnosticUnit" },
+        "sinceUnixMs": { "type": "integer", "minimum": 0 },
+        "untilUnixMs": { "type": "integer", "minimum": 1, "maximum": 253402300799000 },
+        "keyword": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "cursor": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "maxEntries": { "type": "integer", "minimum": 1, "maximum": 200 },
+        "timeoutMs": { "$ref": "#/$defs/diagnosticTimeout" }
+      }
+    },
+    "diagnoseEndpointArguments": {
+      "type": "object", "additionalProperties": false, "required": ["host", "port", "protocol"],
+      "properties": {
+        "host": { "type": "string", "minLength": 1, "maxLength": 253 },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "protocol": { "enum": ["tcp", "tls", "http", "https"] },
+        "path": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "timeoutMs": { "$ref": "#/$defs/diagnosticTimeout" }
+      }
+    },
+    "diagnosticCall": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/toolCallBase" },
+        { "properties": { "target": { "oneOf": [{ "$ref": "#/$defs/localTarget" }, { "$ref": "#/$defs/remoteTarget" }] } } },
+        { "oneOf": [
+          { "properties": { "toolName": { "const": "inspect_host" }, "arguments": { "$ref": "#/$defs/inspectHostArguments" } } },
+          { "properties": { "toolName": { "const": "inspect_service" }, "arguments": { "$ref": "#/$defs/inspectServiceArguments" } } },
+          { "properties": { "toolName": { "const": "query_logs" }, "arguments": { "$ref": "#/$defs/queryLogsArguments" } } },
+          { "properties": { "toolName": { "const": "diagnose_endpoint" }, "arguments": { "$ref": "#/$defs/diagnoseEndpointArguments" } } }
+        ] }
+      ],
+      "unevaluatedProperties": false
+    },
+    "diagnosticResult": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/toolResultBase" },
+        { "properties": {
+          "toolName": { "enum": ["inspect_host", "inspect_service", "query_logs", "diagnose_endpoint"] },
+          "data": { "type": "object", "required": ["status"], "properties": {
+            "schemaVersion": { "const": 1 },
+            "status": { "enum": ["ok", "unavailable", "timedOut", "cancelled"] },
+            "targetId": { "$ref": "#/$defs/identifier" },
+            "evidenceRef": { "$ref": "#/$defs/identifier" },
+            "collectedAtUnixMs": { "type": "integer", "minimum": 0 },
+            "truncated": { "type": "boolean" }
+          } }
+        } }
+      ],
+      "unevaluatedProperties": false
+    },
     "agentToolCall": {
       "oneOf": [
+        { "$ref": "#/$defs/diagnosticCall" },
         { "$ref": "#/$defs/execCommandCall" },
         { "$ref": "#/$defs/terminalExecuteCall" },
         { "$ref": "#/$defs/probeHttpCall" },
@@ -967,6 +1039,7 @@
     "trashFileResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "trash_file" }, "data": { "$ref": "#/$defs/trashFileResultData" } } }], "unevaluatedProperties": false },
     "agentToolResult": {
       "oneOf": [
+        { "$ref": "#/$defs/diagnosticResult" },
         { "$ref": "#/$defs/execCommandResult" },
         { "$ref": "#/$defs/terminalExecuteResult" },
         { "$ref": "#/$defs/probeHttpResult" },

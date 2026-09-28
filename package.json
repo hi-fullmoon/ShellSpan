@@ -9,6 +9,7 @@
     "build": "tsc && vite build",
     "test": "vitest run",
     "test:credential-refresh": "node scripts/verify-credential-refresh.mjs",
+    "test:agent-diagnostics": "node scripts/verify-agent-diagnostics.mjs",
     "test:ai-streaming": "node scripts/verify-ai-streaming.mjs",
     "test:ai-session-stream": "node scripts/verify-ai-session-stream.mjs",
     "test:image-draft-indexeddb": "node scripts/verify-image-draft-indexeddb.mjs",

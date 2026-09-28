@@ -56,6 +56,10 @@ describe('single Agent Runtime architecture', () => {
       await readFile(path.join(repositoryRoot, 'protocol/agent/runtime/built-in-tools.json'), 'utf8'),
     );
     expect(manifest.tools.map(({ name }) => name)).toEqual([
+      'inspect_host',
+      'inspect_service',
+      'query_logs',
+      'diagnose_endpoint',
       'exec_command',
       'terminal_execute',
       'probe_http',

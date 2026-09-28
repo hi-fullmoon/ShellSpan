@@ -147,6 +147,22 @@ pub(crate) fn inspect_call_policy_scope_native(
         })
         .collect();
     let network_destinations = match call.tool_name.as_str() {
+        "diagnose_endpoint" => {
+            let arguments: crate::agent_runtime::DiagnoseEndpointArguments =
+                serde_json::from_value(call.arguments.clone())
+                    .map_err(|_| "invalid diagnostic destination".to_string())?;
+            vec![AgentNetworkDestinationNative {
+                protocol: match arguments.protocol {
+                    crate::agent_runtime::EndpointProtocol::Tcp => "tcp",
+                    crate::agent_runtime::EndpointProtocol::Tls => "tls",
+                    crate::agent_runtime::EndpointProtocol::Http => "http",
+                    crate::agent_runtime::EndpointProtocol::Https => "https",
+                }
+                .into(),
+                host: arguments.host,
+                port: arguments.port,
+            }]
+        }
         "probe_http" => {
             let arguments =
                 serde_json::from_value::<ProbeHttpArgumentsNative>(call.arguments.clone())

@@ -821,6 +821,25 @@ impl NativeToolEngine {
             .map_err(|error| format!("native capability consumption failed: {error:?}"))?;
 
         match call.tool_name.as_str() {
+            "inspect_host" | "inspect_service" | "query_logs" | "diagnose_endpoint" => {
+                let remote = match &call.target {
+                    AgentToolTargetNative::Remote { .. } => Some(connection_for_remote_target(
+                        &call.target,
+                        database,
+                        credentials,
+                    )?),
+                    _ => None,
+                };
+                super::diagnostics::execute_diagnostic(
+                    &context.request,
+                    &call,
+                    &effect,
+                    remote,
+                    known_hosts_path,
+                    &self.processes,
+                    cancellation,
+                )
+            }
             "exec_command" => self.execute_command(
                 context,
                 &call,

@@ -3,6 +3,7 @@ mod auto_review;
 mod call_policy;
 mod capability;
 mod checkpoint;
+mod diagnostics;
 mod effect;
 mod filesystem;
 mod http_probe;
