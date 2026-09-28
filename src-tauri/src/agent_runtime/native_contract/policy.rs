@@ -47,7 +47,31 @@ const EXEC_EFFECTS: &[AgentEffectKindNative] = &[
     AgentEffectKindNative::ExternalSideEffect,
 ];
 
-pub const BUILTIN_TOOL_DESCRIPTORS: [AgentToolDescriptorNative; 17] = [
+pub const BUILTIN_TOOL_DESCRIPTORS: [AgentToolDescriptorNative; 21] = [
+    AgentToolDescriptorNative {
+        name: "inspect_host",
+        target_kinds: LOCAL_REMOTE,
+        effect_mode: AgentToolEffectModeNative::Fixed,
+        allowed_effects: SENSITIVE_READ,
+    },
+    AgentToolDescriptorNative {
+        name: "inspect_service",
+        target_kinds: LOCAL_REMOTE,
+        effect_mode: AgentToolEffectModeNative::Fixed,
+        allowed_effects: SENSITIVE_READ,
+    },
+    AgentToolDescriptorNative {
+        name: "query_logs",
+        target_kinds: LOCAL_REMOTE,
+        effect_mode: AgentToolEffectModeNative::Fixed,
+        allowed_effects: SENSITIVE_READ,
+    },
+    AgentToolDescriptorNative {
+        name: "diagnose_endpoint",
+        target_kinds: LOCAL_REMOTE,
+        effect_mode: AgentToolEffectModeNative::Fixed,
+        allowed_effects: &[AgentEffectKindNative::ExternalSideEffect],
+    },
     AgentToolDescriptorNative {
         name: "trash_file",
         target_kinds: &[AgentTargetKindNative::Local],
@@ -480,6 +504,9 @@ pub fn validate_tool_arguments_native(
             {
                 return Err("invalid terminal_execute arguments".into());
             }
+        }
+        "inspect_host" | "inspect_service" | "query_logs" | "diagnose_endpoint" => {
+            super::validate_diagnostic_arguments(tool_name, arguments)?;
         }
         "probe_http" => {
             let value = decode_arguments::<ProbeHttpArgumentsNative>(arguments)?;

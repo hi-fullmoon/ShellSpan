@@ -1,8 +1,10 @@
 //! Internal native-tool contract and policy boundary for the unified Agent runtime.
 
+mod diagnostics;
 mod policy;
 mod types;
 
+pub(crate) use diagnostics::*;
 pub(crate) use policy::*;
 pub(crate) use types::*;
 
