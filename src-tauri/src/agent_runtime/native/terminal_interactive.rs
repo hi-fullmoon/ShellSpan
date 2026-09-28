@@ -470,9 +470,7 @@ pub(crate) fn sanitize_terminal_screen(
             *first = "[credential-like terminal screen redacted]".into();
         }
     } else {
-        for row in &mut snapshot.content {
-            *row = crate::redaction::redact_sensitive_text(row);
-        }
+        crate::redaction::redact_terminal_rows(&mut snapshot.content);
     }
     (snapshot, credential_like)
 }
@@ -857,6 +855,34 @@ mod tests {
                 Some(TerminalKeyNative::Enter),
             );
         };
+
+        let cd_ready = format!("PHASE5_{label}_CD_READY");
+        send_script(&format!("cd /; printf '{cd_ready}\\n'"), &mut writer);
+        wait_for_text(&cd_ready);
+        deliver_macos_agent_input(
+            &registry,
+            &sessions,
+            &receiver,
+            &mut writer,
+            TerminalInteractiveInputKindNative::Text,
+            Some("cd ~"),
+            None,
+        );
+        deliver_macos_agent_input(
+            &registry,
+            &sessions,
+            &receiver,
+            &mut writer,
+            TerminalInteractiveInputKindNative::Key,
+            None,
+            Some(TerminalKeyNative::Enter),
+        );
+        let cd_home = format!("PHASE5_{label}_CD_HOME");
+        send_script(
+            &format!("test \"$PWD\" = \"$HOME\" && printf '{cd_home}\\n'"),
+            &mut writer,
+        );
+        wait_for_text(&cd_home);
 
         let repl_ready = format!("PHASE5_{label}_REPL_READY");
         let repl_echo = format!("PHASE5_{label}_REPL_ECHO=macos-value");
@@ -1395,6 +1421,80 @@ mod tests {
         assert!(!raw
             .windows("MUST_NOT_REACH_CONPTY".len())
             .any(|window| { window == "MUST_NOT_REACH_CONPTY".as_bytes() }));
+    }
+
+    #[test]
+    fn terminal_screen_redacts_real_private_keys_across_rows_and_wrapped_delimiters() {
+        use crate::terminal_broker::TerminalRawOutputFrame;
+        use crate::terminal_screen::TerminalScreenModel;
+
+        let directory = tempfile::tempdir().unwrap();
+        for (kind, format) in [("ed25519", "RFC4716"), ("rsa", "PEM")] {
+            let path = directory.path().join(kind);
+            let status = std::process::Command::new("ssh-keygen")
+                .args(["-q", "-t", kind, "-m", format, "-N", "", "-f"])
+                .arg(&path)
+                .status()
+                .expect("ssh-keygen is required for real private key redaction tests");
+            assert!(status.success());
+            let key = std::fs::read_to_string(path).unwrap();
+            for columns in [10, 11, 12, 16, 80] {
+                for complete in [true, false] {
+                    let mut model = TerminalScreenModel::new(TerminalGeometry::new(columns, 600));
+                    let visible_key = if complete {
+                        key.as_str()
+                    } else {
+                        &key[..key.rfind("-----END ").unwrap()]
+                    };
+                    let output = format!(
+                        "正常输出\r\n{}{}",
+                        visible_key.replace('\n', "\r\n"),
+                        if complete { "完成\r\n" } else { "" }
+                    );
+                    model
+                        .observe(&TerminalRawOutputFrame {
+                            protocol_version: 1,
+                            terminal_session_id: "redaction".into(),
+                            terminal_generation: 1,
+                            frame_type: "rawOutput",
+                            sequence: 1,
+                            byte_offset: 0,
+                            bytes: output.into_bytes(),
+                        })
+                        .unwrap();
+                    // Keep coverage of the snapshot-only fallback independently
+                    // of the streaming protection in TerminalScreenModel.
+                    let mut raw_parser = vt100::Parser::new(600, columns as u16, 0);
+                    raw_parser.process(
+                        format!(
+                            "正常输出\r\n{}{}",
+                            visible_key.replace('\n', "\r\n"),
+                            if complete { "完成\r\n" } else { "" }
+                        )
+                        .as_bytes(),
+                    );
+                    let mut original = model.snapshot("redaction", 1);
+                    original.content = raw_parser.screen().rows(0, columns as u16).collect();
+                    let (redacted, credential_like) = sanitize_terminal_screen(original.clone());
+                    assert!(!credential_like);
+                    assert_eq!(redacted.content.len(), original.content.len());
+                    assert_eq!(redacted.cursor, original.cursor);
+                    assert_eq!(redacted.rows, original.rows);
+                    assert_eq!(redacted.columns, original.columns);
+                    assert_eq!(redacted.content[0], "正常输出");
+                    for row in &redacted.content[1..] {
+                        assert!(
+                            row.is_empty() || row == "完成" || row == "[REDACTED PRIVATE KEY]",
+                            "private key material survived screen redaction"
+                        );
+                    }
+                    if complete {
+                        assert!(redacted.content.iter().any(|row| row == "完成"));
+                    }
+                    assert_eq!(sanitize_terminal_screen(redacted.clone()).0, redacted);
+                }
+            }
+        }
     }
 
     #[test]
