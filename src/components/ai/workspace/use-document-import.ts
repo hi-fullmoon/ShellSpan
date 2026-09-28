@@ -43,11 +43,11 @@ export function useDocumentImport(scope: string, draft: string, update: (text: s
         if (!isCurrent()) return false;
         // Enforce aggregate limits before parsing another file, without truncation.
         const current = decodeDocumentMessage(latest.current.draft);
-        encodeDocumentMessage(current.text, [...current.documents, ...documents]);
+        encodeDocumentMessage(current.text, [...current.documents, ...documents], true, current.skills);
       }
       const current = decodeDocumentMessage(latest.current.draft);
       if (chatTitle !== undefined && !current.text.includes(chatTitle)) return false;
-      latest.current.update(encodeDocumentMessage(current.text, [...current.documents, ...documents]));
+      latest.current.update(encodeDocumentMessage(current.text, [...current.documents, ...documents], true, current.skills));
       return true;
     } catch (error) {
       if (isCurrent()) toast.error(t(documentErrorKey(error)));

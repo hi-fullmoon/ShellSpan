@@ -19,7 +19,7 @@ import { useComposerMenuGroups } from './ai-composer-menu-content';
 import { isTopLevelAiSession } from '@/lib/ai/session-list';
 
 export function useFileCompletion({ text, update, query, listDirectories, scopeKey, needsRoot, targetLabel, disabled, context }: {
-  text: string; update: (value: string) => void; query?: ListFileReferences; scopeKey?: string;
+  text: string; update: (value: string, selectedSkill?: string) => void; query?: ListFileReferences; scopeKey?: string;
   needsRoot?: boolean; targetLabel?: string; disabled: boolean;
   listDirectories?: import('@/types/agent-file-reference').ListProjectDirectories;
   context?: MentionContext;
@@ -124,14 +124,14 @@ export function useFileCompletion({ text, update, query, listDirectories, scopeK
   const foldersOnly = browsing || queryText.includes('/');
   const candidates = (result?.entries ?? []).filter(candidate => !foldersOnly || candidate.kind === 'directory');
   const hasEntries = candidates.length > 0;
-  const replaceToken = (replacement: string) => {
+  const replaceToken = (replacement: string, selectedSkill?: string) => {
     if (!token) return;
     const suffix = text.slice(token.end);
     const inserted = /^\s/u.test(suffix) ? replacement.trimEnd() : replacement;
     const next = text.slice(0, token.start) + inserted + suffix;
     const caret = token.start + inserted.length;
     setDismissed(JSON.stringify([scopeKey, next, caret, caret]));
-    update(next);
+    update(next, selectedSkill);
     setSelection([caret, caret]);
     requestAnimationFrame(() => {
       if (editor.current?.value === next) { editor.current.focus(); editor.current.setSelectionRange(caret, caret); }
@@ -160,7 +160,7 @@ export function useFileCompletion({ text, update, query, listDirectories, scopeK
   const menuGroups = useComposerMenuGroups({ agent: Boolean(context?.agent),
     onAddFile: () => { replaceToken(''); context?.onUpload(); },
     onAddFolder: browse,
-    onSkill: name => replaceToken(`/${name} `),
+    onSkill: name => replaceToken(`/${name} `, name),
   });
   const groups: MentionGroup[] = context ? [
     ...(!browsing ? [
