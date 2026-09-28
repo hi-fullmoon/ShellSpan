@@ -659,6 +659,17 @@ async fn image_every_log_prefix_repairs_claim_once_and_preserves_actual_model_in
             restored.configure(dir.path().to_path_buf()).unwrap();
             restored.submit_images(input("prefix")).await.unwrap(); // receipt recovery works before attach
             restored.start("images", vision_provider(), None).unwrap();
+            let restored_snapshot = restored.session("images").unwrap();
+            for item_id in restored_snapshot.inbox.paused_ids {
+                restored
+                    .mutate_inbox(crate::agent_runtime::AgentInboxMutationInput {
+                        session_id: "images".into(),
+                        expected_revision: restored.session("images").unwrap().event_count,
+                        client_operation_id: format!("resume-{item_id}"),
+                        mutation: crate::agent_runtime::AgentInboxMutation::Resume { item_id },
+                    })
+                    .unwrap();
+            }
             restored.await_idle("images").await.unwrap();
             let log = all_events(&restored, "images");
             assert_eq!(log.iter().filter(|e|matches!(&e.payload,AgentSessionEventPayload::InboxSpliced {operation:crate::agent_runtime::AgentInboxOperation::Enqueued,messages,..}if messages.iter().any(|m|m.client_submission_id.as_deref()==Some("prefix")))).count(),1,"prefix {end}");

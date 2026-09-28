@@ -88,11 +88,15 @@ pub(crate) async fn agent_runtime_submit_images(
     app: AppHandle,
     runtime: State<'_, AgentRuntime>,
     input: super::images::ImageSubmission,
+    paused: Option<bool>,
+    target_turn_id: Option<String>,
 ) -> Result<AgentSessionSnapshot, String> {
     configure_runtime(&app, &runtime)?;
     let session_id = input.session_id.clone();
     let submission_id = input.client_operation_id.clone();
-    let snapshot = runtime.submit_images(input).await?;
+    let snapshot = runtime
+        .submit_images_with_admission(input, paused.unwrap_or(false), target_turn_id.as_deref())
+        .await?;
     runtime.generate_session_title(&session_id, submission_id);
     Ok(snapshot)
 }
@@ -148,6 +152,10 @@ pub(crate) struct AgentSessionInput {
     content: String,
     #[serde(default)]
     terminal_context: Option<super::AgentTerminalContextSnapshot>,
+    #[serde(default)]
+    paused: bool,
+    #[serde(default)]
+    target_turn_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -398,7 +406,7 @@ pub(crate) fn agent_runtime_answer_question(
 }
 
 #[tauri::command]
-pub(crate) fn agent_runtime_followup(
+pub(crate) async fn agent_runtime_followup(
     app: AppHandle,
     runtime: State<'_, AgentRuntime>,
     input: AgentSessionInput,
@@ -407,19 +415,22 @@ pub(crate) fn agent_runtime_followup(
     let client_submission_id = input
         .client_submission_id
         .unwrap_or_else(|| input.message_id.clone());
-    let snapshot = runtime.followup_submission(
+    let snapshot = runtime.receive_submission(
         &input.session_id,
         input.message_id,
         client_submission_id.clone(),
         input.content,
         input.terminal_context,
+        super::AgentInboxLane::NextTurn,
+        input.paused,
+        input.target_turn_id.as_deref(),
     )?;
     runtime.generate_session_title(&input.session_id, client_submission_id);
     Ok(snapshot)
 }
 
 #[tauri::command]
-pub(crate) fn agent_runtime_steer(
+pub(crate) async fn agent_runtime_steer(
     app: AppHandle,
     runtime: State<'_, AgentRuntime>,
     input: AgentSessionInput,
@@ -428,12 +439,15 @@ pub(crate) fn agent_runtime_steer(
     let client_submission_id = input
         .client_submission_id
         .unwrap_or_else(|| input.message_id.clone());
-    let snapshot = runtime.steer_submission(
+    let snapshot = runtime.receive_submission(
         &input.session_id,
         input.message_id,
         client_submission_id.clone(),
         input.content,
         input.terminal_context,
+        super::AgentInboxLane::NextStep,
+        input.paused,
+        input.target_turn_id.as_deref(),
     )?;
     runtime.generate_session_title(&input.session_id, client_submission_id);
     Ok(snapshot)
