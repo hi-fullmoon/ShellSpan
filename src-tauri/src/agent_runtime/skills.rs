@@ -444,14 +444,27 @@ pub(crate) fn parse_skill(
 
 pub(crate) fn slash_candidates(
     messages: &[AgentInboxMessage],
+    entries: &[SkillEntry],
 ) -> Result<Vec<(String, Vec<String>)>, String> {
     let mut candidates: Vec<(String, Vec<String>)> = Vec::new();
     for message in messages.iter().filter(|m| direct_skill_input(m)) {
         let prompt = crate::ai_attachment::user_prompt(&message.content);
-        for token in prompt.split_whitespace() {
-            let Some(name) = token.strip_prefix('/').filter(|name| valid_name(name)) else {
+        let selected = crate::ai_attachment::selected_skills(&message.content);
+        let leading = prompt
+            .split_whitespace()
+            .next()
+            .and_then(|token| token.strip_prefix('/'))
+            .filter(|name| valid_name(name));
+        for name in leading
+            .into_iter()
+            .chain(selected.iter().map(String::as_str))
+        {
+            if !entries
+                .iter()
+                .any(|entry| entry.name == name && entry.user_invocable)
+            {
                 continue;
-            };
+            }
             if let Some((_, ids)) = candidates.iter_mut().find(|(n, _)| n == name) {
                 if !ids.contains(&message.message_id) {
                     ids.push(message.message_id.clone());
@@ -563,22 +576,34 @@ mod tests {
     }
     #[test]
     fn skill_slash_exact_whitespace_identity_and_limit() {
+        let entries: Vec<_> = (0..17)
+            .map(|i| {
+                parse_skill(
+                    "SKILL.md",
+                    format!("---\nname: s-{i}\ndescription: useful\n---\ninstructions").as_bytes(),
+                )
+                .unwrap()
+                .0
+                .entry
+            })
+            .chain([parse("", "instructions").unwrap().0.entry])
+            .collect();
         let mut m = AgentInboxMessage {
             images: Vec::new(),
             message_id: "m".into(),
             client_submission_id: Some("ingress".into()),
-            content: "/first text\u{2003}/second /first /not. path/a /absolute/path 1/2 /third"
+            content: "  /sample text\u{2003}/s-0 /sample /not. path/a /absolute/path 1/2 /s-1"
                 .into(),
             source: super::super::AgentMessageSource::user(),
             terminal_context: None,
         };
         assert_eq!(
-            slash_candidates(&[m.clone()])
+            slash_candidates(&[m.clone()], &entries)
                 .unwrap()
                 .iter()
                 .map(|v| v.0.as_str())
                 .collect::<Vec<_>>(),
-            ["first", "second", "third"]
+            ["sample"]
         );
         for kind in [
             AgentMessageSourceKind::Runtime,
@@ -588,14 +613,65 @@ mod tests {
             AgentMessageSourceKind::SessionReference,
         ] {
             m.source.kind = kind;
-            assert!(slash_candidates(&[m.clone()]).unwrap().is_empty());
+            assert!(slash_candidates(&[m.clone()], &entries).unwrap().is_empty());
         }
         m.source = super::super::AgentMessageSource::user();
         m.client_submission_id = None;
-        assert!(slash_candidates(&[m.clone()]).unwrap().is_empty());
+        assert!(slash_candidates(&[m.clone()], &entries).unwrap().is_empty());
         m.client_submission_id = Some("i".into());
-        m.content = (0..17).map(|i| format!("/s-{i} ")).collect();
-        assert!(slash_candidates(&[m]).is_err());
+        for content in [
+            "/tmp 目录里有很多垃圾文件",
+            "检查 /sample",
+            "/missing 清理",
+            "/sample/path",
+            "`/sample`",
+            "普通请求\n/sample",
+        ] {
+            m.content = content.into();
+            assert!(
+                slash_candidates(&[m.clone()], &entries).unwrap().is_empty(),
+                "{content}"
+            );
+        }
+        m.content = "/sample 清理 /tmp".into();
+        assert!(slash_candidates(&[m.clone()], &[]).unwrap().is_empty());
+        let disabled = parse("user-invocable: false\n", "instructions")
+            .unwrap()
+            .0
+            .entry;
+        assert!(slash_candidates(&[m.clone()], &[disabled])
+            .unwrap()
+            .is_empty());
+        let mut second = m.clone();
+        second.message_id = "second".into();
+        assert_eq!(
+            slash_candidates(&[m.clone(), m.clone(), second], &entries).unwrap(),
+            vec![("sample".into(), vec!["m".into(), "second".into()])]
+        );
+        let messages: Vec<_> = (0..17)
+            .map(|i| {
+                let mut message = m.clone();
+                message.message_id = format!("m-{i}");
+                message.content = format!("/s-{i}");
+                message
+            })
+            .collect();
+        assert!(slash_candidates(&messages[..16], &entries).is_ok());
+        assert!(slash_candidates(&messages, &entries).is_err());
+        assert!(slash_candidates(&messages, &[]).unwrap().is_empty());
+        m.content = r#"{"shellspanDocumentMessage":1,"text":"Inspect /sample and /tmp","documents":[],"skills":["sample","tmp","sample"]}"#.into();
+        assert_eq!(
+            slash_candidates(&[m.clone()], &entries).unwrap(),
+            vec![("sample".into(), vec!["m".into()])]
+        );
+        m.content = r#"{"shellspanDocumentMessage":1,"text":"Inspect /tmp","documents":[],"skills":["sample"]}"#.into();
+        assert!(slash_candidates(&[m.clone()], &entries).unwrap().is_empty());
+        m.content = r#"{"shellspanDocumentMessage":1,"text":"Inspect /sample","documents":[],"skills":["sample"]}"#.into();
+        let disabled = parse("user-invocable: false\n", "instructions")
+            .unwrap()
+            .0
+            .entry;
+        assert!(slash_candidates(&[m], &[disabled]).unwrap().is_empty());
     }
     #[test]
     fn skill_document_attachments_only_invoke_explicit_prompt_commands() {
@@ -608,7 +684,17 @@ mod tests {
             terminal_context: None,
         };
         assert_eq!(
-            slash_candidates(&[message]).unwrap(),
+            slash_candidates(
+                &[message],
+                &[parse_skill(
+                    "SKILL.md",
+                    b"---\nname: review\ndescription: useful\n---\ninstructions"
+                )
+                .unwrap()
+                .0
+                .entry]
+            )
+            .unwrap(),
             vec![("review".into(), vec!["document-message".into()])]
         );
     }
