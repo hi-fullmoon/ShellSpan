@@ -156,7 +156,18 @@ struct EphemeralTerminalResult {
     session_id: String,
     turn_id: String,
     call_id: String,
-    content: String,
+    content: Option<String>,
+    input: Option<ModelToolCall>,
+}
+
+impl EphemeralTerminalResult {
+    fn byte_length(&self) -> usize {
+        self.content.as_ref().map_or(0, String::len)
+            + self
+                .input
+                .as_ref()
+                .map_or(0, |call| call.arguments.to_string().len())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -167,17 +178,17 @@ struct EphemeralTerminalResultStore {
 
 impl EphemeralTerminalResultStore {
     fn record(&mut self, entry: EphemeralTerminalResult) -> Result<(), String> {
-        if entry.content.len() > MAX_EPHEMERAL_TERMINAL_BYTES {
+        if entry.byte_length() > MAX_EPHEMERAL_TERMINAL_BYTES {
             return Err("TERMINAL_OBSERVATION_TOO_LARGE".into());
         }
         if let Some(index) = self.entries.iter().position(|candidate| {
             candidate.session_id == entry.session_id && candidate.call_id == entry.call_id
         }) {
             if let Some(replaced) = self.entries.remove(index) {
-                self.total_bytes = self.total_bytes.saturating_sub(replaced.content.len());
+                self.total_bytes = self.total_bytes.saturating_sub(replaced.byte_length());
             }
         }
-        self.total_bytes = self.total_bytes.saturating_add(entry.content.len());
+        self.total_bytes = self.total_bytes.saturating_add(entry.byte_length());
         self.entries.push_back(entry);
         while self.entries.len() > MAX_EPHEMERAL_TERMINAL_RESULTS
             || self.total_bytes > MAX_EPHEMERAL_TERMINAL_BYTES
@@ -185,13 +196,41 @@ impl EphemeralTerminalResultStore {
             let Some(removed) = self.entries.pop_front() else {
                 break;
             };
-            self.total_bytes = self.total_bytes.saturating_sub(removed.content.len());
+            self.total_bytes = self.total_bytes.saturating_sub(removed.byte_length());
         }
         Ok(())
     }
 
     fn apply(&self, session_id: &str, turn_id: &str, request: &mut ModelRequest) {
         for message in &mut request.messages {
+            if let ModelMessage::Assistant {
+                content,
+                replay,
+                native_replay,
+            } = message
+            {
+                for block in content {
+                    if let super::ModelContentBlock::ToolCall { call } = block {
+                        if let Some(input) = self
+                            .entries
+                            .iter()
+                            .rev()
+                            .find(|entry| {
+                                entry.session_id == session_id
+                                    && entry.turn_id == turn_id
+                                    && entry.call_id == call.call_id
+                            })
+                            .and_then(|entry| entry.input.as_ref())
+                            .filter(|input| input.name == call.name)
+                        {
+                            call.arguments = input.arguments.clone();
+                            *replay = None;
+                            *native_replay = None;
+                        }
+                    }
+                }
+                continue;
+            }
             let ModelMessage::Tool {
                 call_id, content, ..
             } = message
@@ -203,7 +242,9 @@ impl EphemeralTerminalResultStore {
                     && entry.turn_id == turn_id
                     && entry.call_id == *call_id
             }) {
-                *content = entry.content.clone();
+                if let Some(observation) = &entry.content {
+                    *content = observation.clone();
+                }
             }
         }
     }
@@ -211,7 +252,7 @@ impl EphemeralTerminalResultStore {
     fn clear_session(&mut self, session_id: &str) {
         self.entries.retain(|entry| {
             if entry.session_id == session_id {
-                self.total_bytes = self.total_bytes.saturating_sub(entry.content.len());
+                self.total_bytes = self.total_bytes.saturating_sub(entry.byte_length());
                 false
             } else {
                 true
@@ -1978,7 +2019,13 @@ impl AgentToolPipeline {
             }
         }
         self.sessions.append_batch(&request.session_id, payloads)?;
-        if let Some(content) = ephemeral_terminal_content {
+        let ephemeral_input = (result.status == AgentToolResultStatus::Completed
+            && super::model::tool_call_arguments_are_ephemeral(
+                &request.model_call.name,
+                &request.model_call.arguments,
+            ))
+        .then(|| request.model_call.clone());
+        if ephemeral_terminal_content.is_some() || ephemeral_input.is_some() {
             self.ephemeral_terminal_results
                 .lock()
                 .map_err(|_| "ephemeral terminal result registry is unavailable".to_string())?
@@ -1986,7 +2033,8 @@ impl AgentToolPipeline {
                     session_id: request.session_id.clone(),
                     turn_id: request.turn_id.clone(),
                     call_id: request.model_call.call_id.clone(),
-                    content,
+                    content: ephemeral_terminal_content,
+                    input: ephemeral_input,
                 })?;
         }
         if let Some(error) = terminal_target_failure {
@@ -2913,6 +2961,104 @@ mod ephemeral_terminal_result_tests {
     use super::*;
 
     #[test]
+    fn terminal_input_history_survives_only_in_the_current_live_turn() {
+        use super::super::{
+            AgentAssistantContentBlock, AgentSurfaceMessage, AgentSurfaceSnapshot,
+            ModelContentBlock,
+        };
+
+        let calls = [
+            ModelToolCall {
+                call_id: "type-command".into(),
+                provider_call_id: None,
+                name: "write_terminal_input".into(),
+                arguments: serde_json::json!({"inputKind": "text", "text": "cd ~"}),
+            },
+            ModelToolCall {
+                call_id: "submit-command".into(),
+                provider_call_id: None,
+                name: "write_terminal_input".into(),
+                arguments: serde_json::json!({"inputKind": "key", "key": "enter"}),
+            },
+        ];
+        let mut store = EphemeralTerminalResultStore::default();
+        let mut messages = Vec::new();
+        for call in &calls {
+            let recorded = super::super::model::recorded_tool_call(call.clone());
+            assert!(recorded.arguments.get("text").is_none());
+            messages.push(AgentSurfaceMessage::Assistant {
+                message_id: call.call_id.clone(),
+                content: vec![AgentAssistantContentBlock::ToolCall {
+                    call: Box::new(recorded),
+                }],
+                interrupted: false,
+                replay: None,
+            });
+            messages.push(AgentSurfaceMessage::Tool {
+                call_id: call.call_id.clone(),
+                name: call.name.clone(),
+                status: AgentToolResultStatus::Completed,
+                content: "input accepted".into(),
+            });
+            store
+                .record(EphemeralTerminalResult {
+                    session_id: "session-1".into(),
+                    turn_id: "turn-1".into(),
+                    call_id: call.call_id.clone(),
+                    content: None,
+                    input: Some(call.clone()),
+                })
+                .unwrap();
+        }
+        let surface = AgentSurfaceSnapshot {
+            generation: 1,
+            replaced_through_seq: None,
+            messages,
+        };
+        let project =
+            || ModelRequest::from_surface("request".into(), &surface, String::new(), Vec::new());
+        let persisted = project();
+        assert!(!serde_json::to_string(&persisted.messages)
+            .unwrap()
+            .contains("cd ~"));
+        let mut live = project();
+        store.apply("session-1", "turn-1", &mut live);
+        for (index, expected) in calls.iter().enumerate() {
+            let ModelMessage::Assistant { content, .. } = &live.messages[index * 2] else {
+                panic!("assistant history missing")
+            };
+            let ModelContentBlock::ToolCall { call } = &content[0] else {
+                panic!("input call missing")
+            };
+            assert_eq!(call.arguments, expected.arguments);
+            assert!(
+                super::super::model::reject_omitted_input_replay(&call.name, &call.arguments)
+                    .is_ok()
+            );
+            assert!(
+                matches!(&live.messages[index * 2 + 1], ModelMessage::Tool { content, .. } if content == "input accepted")
+            );
+        }
+        for (session, turn) in [("session-2", "turn-1"), ("session-1", "turn-2")] {
+            let mut isolated = project();
+            store.apply(session, turn, &mut isolated);
+            assert_eq!(
+                serde_json::to_value(&isolated.messages).unwrap(),
+                serde_json::to_value(&persisted.messages).unwrap()
+            );
+        }
+        store.clear_session("session-1");
+        assert_eq!(store.total_bytes, 0);
+        let mut cleared = project();
+        store.apply("session-1", "turn-1", &mut cleared);
+        assert_eq!(
+            serde_json::to_value(&cleared.messages).unwrap(),
+            serde_json::to_value(&persisted.messages).unwrap()
+        );
+        assert!(!serde_json::to_string(&surface).unwrap().contains("cd ~"));
+    }
+
+    #[test]
     fn ephemeral_input_recovery_stops_repeat_and_resets_for_new_turn() {
         let root = tempfile::tempdir().unwrap();
         let sessions = AgentSessionStore::default();
@@ -3103,7 +3249,8 @@ mod ephemeral_terminal_result_tests {
                 session_id: "session-1".into(),
                 turn_id: "turn-1".into(),
                 call_id: "call-1".into(),
-                content,
+                content: Some(content),
+                input: None,
             })
             .unwrap();
         let mut request = ModelRequest {
