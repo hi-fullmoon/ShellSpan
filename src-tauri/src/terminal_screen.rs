@@ -310,7 +310,7 @@ mod tests {
                     for bytes in [
                         b"\x1b[?1049hALTERNATE".as_slice(),
                         b"\x1b[?1049l",
-                        output[end_marker..].as_bytes(),
+                        &output.as_bytes()[end_marker..],
                         b"\r\nSAFE_OUTPUT\r\n",
                     ] {
                         sequence += 1;
