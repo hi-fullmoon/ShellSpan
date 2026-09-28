@@ -14,6 +14,7 @@ export interface AiWorkspaceErrorNoticesProps {
   readonly syncRecovery?: AiSessionSyncRecovery;
   readonly onRetrySync?: () => Promise<void>;
   readonly onDismissError?: () => void;
+  readonly onRetryFailedDraft?: (id: string) => void;
 }
 
 /** Workspace-level operation errors displayed below the session header. */
@@ -23,6 +24,7 @@ export function AiWorkspaceErrorNotices({
   syncRecovery,
   onRetrySync,
   onDismissError,
+  onRetryFailedDraft,
 }: AiWorkspaceErrorNoticesProps): React.ReactNode {
   const { t, locale } = useI18n();
   if (!syncError && !composerState?.lastError && !composerState?.failedDrafts.length) return null;
@@ -74,8 +76,12 @@ export function AiWorkspaceErrorNotices({
           key={failed.id}
           title={t('ai.workspace.recovery.title')}
           label={t('ai.workspace.failedDraft')}
+          action={onRetryFailedDraft && <Button type="button" variant="outline" size="sm"
+            disabled={composerState.phase === 'stopping'} onClick={() => onRetryFailedDraft(failed.id)}>
+            <RefreshCwIcon data-icon="inline-start" />{t('common.retry')}
+          </Button>}
         >
-          {failed.content}
+          {failed.content || (failed.hasImages ? t('ai.workspace.images.attachments') : '')}
         </AiErrorNotice>
       ))}
     </div>

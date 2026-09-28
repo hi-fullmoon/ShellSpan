@@ -39,6 +39,7 @@ export interface AiQueueDockProps {
   readonly items: readonly AiInboxItem[];
   readonly running?: boolean;
   readonly mutable?: boolean;
+  readonly resumeOnly?: boolean;
   readonly mutation?: AiQueueMutationState | null;
   readonly onUpdate?: (item: AiInboxItem, content: string) => void;
   readonly onRemove?: (item: AiInboxItem) => void;
@@ -96,6 +97,7 @@ export function AiQueueDock({
   items,
   running = false,
   mutable = true,
+  resumeOnly = false,
   mutation = null,
   onUpdate,
   onRemove,
@@ -194,7 +196,7 @@ export function AiQueueDock({
             candidate.lane === item.lane && candidate.state === 'queued'
           ));
           const laneIndex = laneItems.findIndex((candidate) => candidate.id === item.id);
-          const editable = mutable && item.state === 'queued' && item.source === 'user';
+          const editable = mutable && !resumeOnly && item.state === 'queued' && item.source === 'user';
           const steering = pending && mutation.intent.type === 'steer' && mutation.intent.itemId === item.id;
           const editing = editingId === item.id;
           return (
@@ -244,8 +246,11 @@ export function AiQueueDock({
                 </form>
               ) : (
                 <div className="ai-queue-row-content flex w-full min-w-0 items-center gap-2.5">
-                  <span className="min-w-0 flex-1 truncate">{documentMessageSummary(item.content)}</span>
+                  <span className="min-w-0 flex-1 truncate">{documentMessageSummary(item.content)
+                    || ((item.hasImages || item.images?.length) ? t('ai.workspace.images.attachments') : '')}</span>
                   {item.paused && <Badge variant="secondary">{t('ai.workspace.queue.paused')}</Badge>}
+                  {item.confirming && <Badge variant="secondary">{t('ai.workspace.messageConfirming')}</Badge>}
+                  {item.redirected && <Badge variant="secondary" title={t('ai.workspace.queue.redirectedDescription')}>{t('ai.workspace.queue.redirected')}</Badge>}
                   {item.lane === 'nextStep' && <Badge variant="secondary">{t(item.state === 'pending'
                     ? 'ai.workspace.queue.lane.nextStep' : 'ai.workspace.queue.waitingNextStep')}</Badge>}
                   {item.state === 'pending' && (

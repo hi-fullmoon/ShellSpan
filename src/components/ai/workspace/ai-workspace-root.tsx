@@ -270,6 +270,7 @@ export interface AiWorkspaceRootProps {
   readonly historicalContinuationError?: string | null;
   readonly onBusyPreferenceChange?: (value: 'queue' | 'steer') => void;
   readonly onDismissError?: () => void;
+  readonly onRetryFailedDraft?: (id: string) => void;
   readonly onRetrySync?: () => Promise<void>;
   readonly onOpenModel?: () => void;
   readonly onNewSession?: () => void;
@@ -352,6 +353,7 @@ export function AiWorkspaceRoot({
   historicalContinuationError = null,
   onBusyPreferenceChange,
   onDismissError,
+  onRetryFailedDraft,
   onRetrySync,
   onOpenModel,
   onNewSession,
@@ -563,6 +565,7 @@ export function AiWorkspaceRoot({
         syncRecovery={view?.syncRecovery}
         onRetrySync={onRetrySync}
         onDismissError={onDismissError}
+        onRetryFailedDraft={onRetryFailedDraft}
       />
 
       <div
@@ -697,7 +700,7 @@ export function AiWorkspaceRoot({
           inbox={surfaceMode === 'agent' && !readOnlySession ? view?.inbox : undefined}
           taskSteps={surfaceMode === 'agent' && !readOnlySession ? taskSteps : undefined}
           queueMutation={surfaceMode === 'agent' && !readOnlySession ? queueMutation : undefined}
-          queueMutable={Boolean(view && !readOnlySession && !view.summary.archived && !view.snapshot.value.ended)}
+          queueMutable={Boolean(view && !readOnlySession && !view.summary.archived && (!view.snapshot.value.ended || view.status === 'failed'))}
           announcement={announcement}
           pendingApproval={surfaceMode === 'agent' && !readOnlySession ? view?.pendingApproval : undefined}
           pendingQuestion={readOnlySession ? undefined : view?.pendingQuestion}
