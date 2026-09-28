@@ -3,6 +3,74 @@ use serde::Serialize;
 use crate::terminal_broker::{TerminalGeometry, TerminalRawOutputFrame};
 
 const MAX_TITLE_BYTES: usize = 4_096;
+const PRIVATE_KEY_BOUNDARY_BYTES: usize = 64;
+
+#[derive(Default)]
+struct PrivateKeyScreenFilter {
+    parser: vte::Parser,
+    state: PrivateKeyScreenState,
+}
+
+#[derive(Default)]
+struct PrivateKeyScreenState {
+    boundary: String,
+    inside_private_key: bool,
+    mask_ascii: bool,
+}
+
+impl vte::Perform for PrivateKeyScreenState {
+    fn print(&mut self, character: char) {
+        // PEM/OpenSSH delimiters and encoded key material are ASCII. VTE
+        // identifies printable characters so escape sequences stay untouched.
+        self.mask_ascii = self.inside_private_key && character.is_ascii();
+        if character.is_ascii_whitespace() {
+            return;
+        }
+        if !character.is_ascii() {
+            self.boundary.clear();
+            return;
+        }
+        self.boundary.push(character);
+        if self.boundary.len() > PRIVATE_KEY_BOUNDARY_BYTES {
+            self.boundary.remove(0);
+        }
+        if character != '-' {
+            return;
+        }
+        match crate::redaction::terminal_private_key_boundary(&self.boundary) {
+            Some(crate::redaction::PrivateKeyBoundary::Begin) => {
+                self.inside_private_key = true;
+                // Also break the opening delimiter in the safe screen, so a
+                // later snapshot sanitizer cannot hide ordinary output after END.
+                self.mask_ascii = true;
+                self.boundary.clear();
+            }
+            Some(crate::redaction::PrivateKeyBoundary::End) => {
+                self.inside_private_key = false;
+                self.boundary.clear();
+            }
+            None => {}
+        }
+    }
+}
+
+impl PrivateKeyScreenFilter {
+    fn filter(&mut self, bytes: &[u8]) -> Vec<u8> {
+        bytes
+            .iter()
+            .map(|byte| {
+                self.state.mask_ascii = false;
+                self.parser
+                    .advance(&mut self.state, std::slice::from_ref(byte));
+                if self.state.mask_ascii {
+                    b'*'
+                } else {
+                    *byte
+                }
+            })
+            .collect()
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,6 +118,7 @@ impl vt100::Callbacks for TerminalScreenCallbacks {
 
 pub(crate) struct TerminalScreenModel {
     parser: vt100::Parser<TerminalScreenCallbacks>,
+    private_key_filter: PrivateKeyScreenFilter,
     version: u64,
     through_output_sequence: u64,
 }
@@ -73,6 +142,7 @@ impl TerminalScreenModel {
                 0,
                 TerminalScreenCallbacks::default(),
             ),
+            private_key_filter: PrivateKeyScreenFilter::default(),
             version: 1,
             through_output_sequence: 0,
         }
@@ -83,7 +153,10 @@ impl TerminalScreenModel {
             .version
             .checked_add(1)
             .ok_or_else(|| "TERMINAL_SCREEN_COUNTER_EXHAUSTED".to_string())?;
-        self.parser.process(&frame.bytes);
+        // Only the headless Agent screen is filtered; raw transport frames and
+        // the user's terminal display retain their original bytes.
+        self.parser
+            .process(&self.private_key_filter.filter(&frame.bytes));
         self.version = next;
         self.through_output_sequence = frame.sequence;
         Ok(())
@@ -189,6 +262,93 @@ mod tests {
         assert_eq!((snapshot.cursor.row, snapshot.cursor.column), (1, 2));
         assert_eq!(snapshot.content.len(), 3);
         assert!(snapshot.content.iter().any(|row| row.contains("menu")));
+    }
+
+    #[test]
+    fn private_keys_stay_masked_after_scrolling_chunking_resize_and_buffer_switch() {
+        let directory = tempfile::tempdir().unwrap();
+        for (kind, format) in [("ed25519", "RFC4716"), ("rsa", "PEM")] {
+            let path = directory.path().join(kind);
+            assert!(std::process::Command::new("ssh-keygen")
+                .args(["-q", "-t", kind, "-m", format, "-N", "", "-f"])
+                .arg(&path)
+                .status()
+                .expect("ssh-keygen is required for real private key screen tests")
+                .success());
+            let key = std::fs::read_to_string(path).unwrap();
+            let body = key
+                .lines()
+                .filter(|line| !line.starts_with("-----"))
+                .collect::<String>();
+            for columns in [12, 80] {
+                for chunk_size in [1, 37, usize::MAX] {
+                    let mut model = TerminalScreenModel::new(TerminalGeometry::new(columns, 24));
+                    let mut raw = vt100::Parser::new(24, columns as u16, 0);
+                    let output = key.replace('\n', "\r\n\x1b[32m");
+                    let end_marker = output.rfind("-----END ").unwrap();
+                    let mut sequence = 0;
+                    for chunk in output.as_bytes()[..end_marker].chunks(chunk_size) {
+                        sequence += 1;
+                        model.observe(&frame(sequence, chunk)).unwrap();
+                        raw.process(chunk);
+                        if chunk_size != 1 || sequence % 61 == 0 {
+                            assert_private_key_screen_masked(&model, &raw, &body);
+                        }
+                    }
+                    assert_private_key_screen_masked(&model, &raw, &body);
+                    if kind == "rsa" {
+                        assert!(!raw.screen().contents().contains("BEGIN"));
+                        assert!(raw
+                            .screen()
+                            .rows(0, columns as u16)
+                            .any(|row| row.len() >= 8 && body.contains(&row)));
+                    }
+
+                    model.resize(TerminalGeometry::new(100, 30)).unwrap();
+                    raw.screen_mut().set_size(30, 100);
+                    assert_private_key_screen_masked(&model, &raw, &body);
+                    for bytes in [
+                        b"\x1b[?1049hALTERNATE".as_slice(),
+                        b"\x1b[?1049l",
+                        output[end_marker..].as_bytes(),
+                        b"\r\nSAFE_OUTPUT\r\n",
+                    ] {
+                        sequence += 1;
+                        model.observe(&frame(sequence, bytes)).unwrap();
+                        raw.process(bytes);
+                        assert_private_key_screen_masked(&model, &raw, &body);
+                    }
+                    assert!(model
+                        .snapshot("terminal-1", 1)
+                        .content
+                        .iter()
+                        .any(|row| row == "SAFE_OUTPUT"));
+                }
+            }
+        }
+    }
+
+    fn assert_private_key_screen_masked(
+        model: &TerminalScreenModel,
+        raw: &vt100::Parser,
+        body: &str,
+    ) {
+        let snapshot = model.snapshot("terminal-1", 1);
+        let (rows, columns) = raw.screen().size();
+        assert_eq!((snapshot.rows, snapshot.columns), (rows, columns));
+        assert_eq!(
+            (snapshot.cursor.row, snapshot.cursor.column),
+            raw.screen().cursor_position()
+        );
+        assert_eq!(snapshot.content.len(), usize::from(rows));
+        for (original, safe) in raw.screen().rows(0, columns).zip(&snapshot.content) {
+            if original.len() >= 8 && body.contains(&original) {
+                assert!(
+                    safe.chars().all(|character| character == '*'),
+                    "private key body survived screen filtering"
+                );
+            }
+        }
     }
 
     #[test]
