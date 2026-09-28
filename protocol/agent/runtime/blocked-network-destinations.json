@@ -1,0 +1,4 @@
+{
+  "hosts": ["metadata.google.internal"],
+  "addresses": ["fd00:ec2::254"]
+}
