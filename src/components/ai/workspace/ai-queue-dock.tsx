@@ -182,7 +182,7 @@ export function AiQueueDock({
             if (!canSave) return;
             let content: string;
             try {
-              content = encodeDocumentMessage(editValue.trim(), documentMessage.documents);
+              content = encodeDocumentMessage(editValue.trim(), documentMessage.documents, true, documentMessage.skills);
             } catch (error) {
               toast.error(t(documentErrorKey(error)));
               return;

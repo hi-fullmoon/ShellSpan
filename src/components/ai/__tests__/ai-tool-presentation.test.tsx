@@ -100,16 +100,27 @@ describe('AI tool presentation', () => {
     expect(opened).toEqual([node]);
   });
 
-  it('explains rejected historical input while preserving the diagnostic in details', async () => {
-    await initI18n('zh-CN');
-    useAppStore.setState({ locale: 'zh-CN' });
+  it.each(['zh-CN', 'en-US'] as const)('explains rejected historical input with structured output in %s', async (locale) => {
+    await initI18n(locale);
+    useAppStore.setState({ locale });
     const diagnostic = 'ephemeralInputUnavailable: no input was executed; historical input is unavailable.';
-    const rejected: AiConversationNodeOf<'tool'> = { ...node, state: 'rejected', error: diagnostic, output: diagnostic };
+    // Rejected tool results carry their diagnostic in summary; their output is
+    // the structured receipt and the projected error field is null.
+    const receipt = {
+      code: 'ephemeralInputUnavailable', executed: false,
+      recoveryAction: 'readCurrentStateAndReconstructInput', retryable: false,
+    };
+    const rejected: AiConversationNodeOf<'tool'> = {
+      ...node, state: 'rejected', error: null, summary: diagnostic, output: receipt,
+    };
     render(<AiToolRow node={rejected} />);
-    const row = screen.getByRole('button', { name: /未执行：Agent 使用了已省略的历史输入，需要重新生成命令。/u });
+    const row = screen.getByRole('button', { name: locale === 'zh-CN'
+      ? /未执行：Agent 使用了已省略的历史输入，需要重新生成命令。/u
+      : /Not executed: the Agent used omitted historical input/u });
     expect(row).not.toHaveTextContent('ephemeralInputUnavailable');
+    expect(row).not.toHaveTextContent('{');
     await userEvent.setup().click(row);
-    expect(screen.getByText(diagnostic)).toBeInTheDocument();
+    expect(screen.getByText(/"code": "ephemeralInputUnavailable"/u)).toBeInTheDocument();
   });
 
   it('shows update_plan as a localized task plan with a list icon', async () => {
