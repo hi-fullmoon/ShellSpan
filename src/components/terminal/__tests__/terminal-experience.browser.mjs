@@ -287,9 +287,37 @@ try {
   await latest.waitFor();
   const iconGap = await latest.evaluate((button) => getComputedStyle(button).columnGap);
   assert.equal(iconGap, '4px');
-  await latest.click();
+  for (const width of [900, 320]) {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.evaluate((width) => { document.getElementById('pane').style.width = `${width}px`; }, width);
+    const geometry = await latest.evaluate((button) => {
+      const bounds = button.getBoundingClientRect();
+      const pane = document.getElementById('pane').getBoundingClientRect();
+      const style = getComputedStyle(button);
+      return {
+        height: bounds.height,
+        bottom: pane.bottom - bounds.bottom,
+        right: pane.right - bounds.right,
+        inside: bounds.left >= pane.left && button.scrollWidth <= button.clientWidth,
+        border: style.borderTopWidth,
+        radius: style.borderTopLeftRadius,
+        fontSize: style.fontSize,
+      };
+    });
+    assert.equal(geometry.height, 24);
+    assert.equal(geometry.fontSize, '11px');
+    assert.equal(geometry.bottom, 16);
+    assert.equal(geometry.right, 16);
+    assert.equal(geometry.border, '0px');
+    assert.ok(parseFloat(geometry.radius) >= 12, JSON.stringify(geometry));
+    assert.ok(geometry.inside, JSON.stringify(geometry));
+    await page.screenshot({ path: `/tmp/shellspan-terminal-scroll-${width}.png` });
+  }
+  await latest.focus();
+  await latest.press('Enter');
   await page.waitForFunction(() => window.terminal.buffer.active.viewportY === window.terminal.buffer.active.baseY);
   assert.equal(await latest.count(), 0);
+  assert.ok(await page.locator('.xterm-helper-textarea').evaluate((element) => element === document.activeElement));
   // Also track output that first arrives while the pane is unmounted.
   await page.evaluate(() => window.terminal.scrollToTop());
   await page.getByRole('button', { name: '回到最新输出' }).waitFor();
