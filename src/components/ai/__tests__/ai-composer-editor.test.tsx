@@ -5,8 +5,10 @@ import { AiComposerSeat } from '../workspace/ai-composer-seat';
 import { initI18n } from '@/locales';
 import { builtinSkillPreview } from '@/lib/ai/builtin-skills';
 import { createAiComposerState } from '@/lib/ai/composer-machine';
+import { decodeDocumentMessage, encodeDocumentMessage } from '@/lib/ai/document-message';
+import { useAppStore } from '@/stores/appStore';
 
-beforeEach(async () => { await initI18n('en-US'); Element.prototype.scrollIntoView = vi.fn(); });
+beforeEach(async () => { useAppStore.setState({ locale: 'en-US' }); await initI18n('en-US'); Element.prototype.scrollIntoView = vi.fn(); });
 afterEach(cleanup);
 
 describe('composer layout', () => {
@@ -109,7 +111,7 @@ describe('rich composer commands', () => {
     expect(editor.textContent).toBe('same');
   });
 
-  it('renders selected commands as tokens, then submits the unchanged plain-text draft', async () => {
+  it('renders selected commands as tokens and submits their explicit selection with the text', async () => {
     const user = userEvent.setup(), submit = vi.fn();
     render(<AiComposerSeat phase="hero" status="idle" onListSkills={async () => builtinSkillPreview} onSubmit={submit} />);
     const editor = screen.getByRole('textbox');
@@ -119,20 +121,26 @@ describe('rich composer commands', () => {
     expect(editor.querySelector('[data-composer-command="system-status"]')).toHaveTextContent('/system-status');
     await user.type(editor, '检查服务');
     await user.keyboard('{Enter}');
-    expect(submit).toHaveBeenCalledExactlyOnceWith('/system-status 检查服务');
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(decodeDocumentMessage(submit.mock.calls[0][0])).toMatchObject({ text: '/system-status 检查服务', skills: ['system-status'] });
   });
 
   it('deletes a selected command and restores it with undo', async () => {
     const user = userEvent.setup();
-    render(<AiComposerSeat phase="hero" status="idle" defaultDraft="before /system-status after" />);
+    let submitted = '';
+    render(<AiComposerSeat phase="hero" status="idle" defaultDraft={encodeDocumentMessage('before /system-status after', [], true, ['system-status'])} onSubmit={value => { submitted = value; }} />);
     const editor = screen.getByRole('textbox');
     await user.click(editor);
     await act(async () => selectEditorText(editor, 'before '.length, 'before /system-status'.length));
     await user.keyboard('{Backspace}');
     expect(editor.textContent).toBe('before  after');
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    expect(decodeDocumentMessage(submitted).skills).toBeUndefined();
     await user.keyboard('{Control>}z{/Control}');
     expect(editor.textContent).toBe('before /system-status after');
     expect(editor.querySelector('[data-composer-command]')).not.toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    expect(decodeDocumentMessage(submitted).skills).toEqual(['system-status']);
   });
 
   it('does not decorate paths, URLs or unknown commands', () => {
@@ -149,6 +157,7 @@ describe('rich composer commands', () => {
     await user.type(editor, 'first\n/sys');
     await user.click(await screen.findByRole('option', { name: /system-status/ }));
     await user.keyboard('{Enter}');
-    expect(submit).toHaveBeenCalledExactlyOnceWith('first\n/system-status ');
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(decodeDocumentMessage(submit.mock.calls[0][0])).toMatchObject({ text: 'first\n/system-status ', skills: ['system-status'] });
   });
 });

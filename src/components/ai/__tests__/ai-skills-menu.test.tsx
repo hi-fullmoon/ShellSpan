@@ -4,6 +4,7 @@ import userEvent from '@/test/composer-editor-user';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { AiComposerSeat } from '../workspace/ai-composer-seat';
 import { builtinSkillPreview } from '@/lib/ai/builtin-skills';
+import { decodeDocumentMessage } from '@/lib/ai/document-message';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import type { SkillUserList } from '@/types/agent-skill';
@@ -54,11 +55,13 @@ describe('slash skill menu', () => {
     expect(screen.getAllByRole('option')).toHaveLength(1); expect(query).toHaveBeenCalledTimes(1);
     await user.keyboard('{Enter}');
     expect(editor.textContent).toBe('/network-diagnosis '); expect(submit).not.toHaveBeenCalled();
-    await user.keyboard('{Enter}'); expect(submit).toHaveBeenCalledExactlyOnceWith('/network-diagnosis ');
+    await user.keyboard('{Enter}'); expect(submit).toHaveBeenCalledTimes(1);
+    expect(decodeDocumentMessage(submit.mock.calls[0][0])).toMatchObject({ text: '/network-diagnosis ', skills: ['network-diagnosis'] });
   });
   it('replaces the token at the caret and keeps surrounding text and paths', async () => {
     const user = userEvent.setup(); const query = vi.fn(async () => builtinSkillPreview);
-    render(<AiComposerSeat phase="hero" status="idle" defaultDraft="check /syszzz then /var/log" onListSkills={query} />);
+    let submitted = '';
+    render(<AiComposerSeat phase="hero" status="idle" defaultDraft="check /syszzz then /var/log" onListSkills={query} onSubmit={value => { submitted = value; }} />);
     const editor = screen.getByRole('textbox') as HTMLDivElement;
     await user.click(editor); await act(async () => selectEditorText(editor, 10, 10));
     const frames: FrameRequestCallback[] = [];
@@ -70,6 +73,8 @@ describe('slash skill menu', () => {
     expect(screen.queryByRole('listbox')).toBeNull();
     await act(async () => selectEditorText(editor, editor.textContent!.length, editor.textContent!.length));
     expect(screen.queryByRole('listbox')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    expect(decodeDocumentMessage(submitted)).toMatchObject({ text: 'check /system-status then /var/log', skills: ['system-status'] });
   });
   it('supports arrow keys, Tab, Escape and reopening after editing', async () => {
     const user = userEvent.setup(); render(<AiComposerSeat phase="hero" status="idle" onListSkills={async () => builtinSkillPreview} />);

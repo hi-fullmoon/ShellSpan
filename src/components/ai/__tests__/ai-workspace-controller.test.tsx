@@ -4,6 +4,7 @@ import userEvent from '@/test/composer-editor-user';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiWorkspaceController } from '@/components/ai/workspace/ai-workspace-controller';
+import { encodeDocumentMessage } from '@/lib/ai/document-message';
 import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
 import {
   useAiSessionController,
@@ -1956,7 +1957,7 @@ describe('Stage 6B cold Session Skills consumer', () => {
     expect(screen.getByRole('textbox').textContent).toBe('/system-status ');
     expect(screen.queryByRole('dialog')).toBeNull();
     await user.keyboard('{Enter}');
-    await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(null, expect.objectContaining({ content: '/system-status ', mode: 'start' })));
+    await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(null, expect.objectContaining({ content: encodeDocumentMessage('/system-status ', [], true, ['system-status']), mode: 'start' })));
     expect(agent.create).not.toHaveBeenCalled();
     const request = vi.mocked(agent.submit).mock.calls[0][1].create;
     expect(request?.kind === 'agent' && request.request.target?.rootPath).toBeUndefined();

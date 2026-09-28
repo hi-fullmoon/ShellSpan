@@ -3,6 +3,7 @@ import userEvent from '@/test/composer-editor-user';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AiComposerSeat } from '../workspace/ai-composer-seat';
 import { builtinSkills } from '@/lib/ai/builtin-skills';
+import { decodeDocumentMessage } from '@/lib/ai/document-message';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 
@@ -13,6 +14,15 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('composer grouped add menu', () => {
+  it('persists an inline skill selected through the mention menu', async () => {
+    const user = userEvent.setup();
+    let submitted = '';
+    render(<AiComposerSeat phase="active" status="idle" onSubmit={value => { submitted = value; }} />);
+    await user.type(screen.getByRole('textbox'), 'Inspect @network');
+    await user.click(await screen.findByRole('option', { name: builtinSkills.find(skill => skill.name === 'network-diagnosis')!.description }));
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    expect(decodeDocumentMessage(submitted)).toMatchObject({ text: 'Inspect /network-diagnosis ', skills: ['network-diagnosis'] });
+  });
   it('shows a search hint and only requests history after entering a keyword', async () => {
     const user = userEvent.setup();
     let refreshes = 0;
@@ -35,7 +45,8 @@ describe('composer grouped add menu', () => {
   it('searches the builtin catalog and inserts a skill without submitting', async () => {
     const user = userEvent.setup();
     let submissions = 0;
-    render(<AiComposerSeat phase="active" status="idle" defaultDraft="Inspect this host" onSubmit={() => { submissions++; }} />);
+    let submitted = '';
+    render(<AiComposerSeat phase="active" status="idle" defaultDraft="Inspect this host" onSubmit={value => { submissions++; submitted = value; }} />);
     await user.click(screen.getByRole('button', { name: 'Add file or folder' }));
     expect((await screen.findAllByRole('menuitem')).length).toBe(builtinSkills.length + 2);
     for (const item of screen.getAllByRole('menuitem')) expect(item).toHaveClass('min-h-7', 'gap-1');
@@ -43,6 +54,8 @@ describe('composer grouped add menu', () => {
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
     expect(screen.getByRole('textbox')).toHaveTextContent('Inspect this host /network-diagnosis');
     expect(submissions).toBe(0);
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    expect(decodeDocumentMessage(submitted)).toMatchObject({ text: 'Inspect this host /network-diagnosis ', skills: ['network-diagnosis'] });
   });
 
   it('shows an empty search and restores the plus button on Escape', async () => {

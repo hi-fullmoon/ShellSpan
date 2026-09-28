@@ -178,6 +178,11 @@ export function AiComposerSeat({
   const attachmentOwnerRef = useRef(attachmentOwner);
   attachmentOwnerRef.current = attachmentOwner;
   const message = useMemo(() => decodeDocumentMessage(rawDraft), [rawDraft]);
+  const skillHistory = useRef({ owner: attachmentOwner, selections: new Map<string, readonly string[]>() });
+  if (skillHistory.current.owner !== attachmentOwner) {
+    skillHistory.current = { owner: attachmentOwner, selections: new Map() };
+  }
+  if (message.skills?.length) skillHistory.current.selections.set(message.text, message.skills);
   const chatReferences = useRef({ owner: attachmentOwner, documents: new Map<string, (typeof message.documents)[number]>() });
   if (chatReferences.current.owner !== attachmentOwner) {
     chatReferences.current = { owner: attachmentOwner, documents: new Map() };
@@ -200,11 +205,14 @@ export function AiComposerSeat({
     if (composerState === undefined && controlledDraft === undefined) setLocalDraft(value);
     onDraftChange?.(value);
   };
-  const updateDraft = (value: string): void => {
+  const updateDraft = (value: string, selectedSkill?: string): void => {
     try {
-      const files = decodeDocumentMessage(rawDraftRef.current).documents.filter(document => document.chatTitle === undefined);
+      const current = decodeDocumentMessage(rawDraftRef.current);
+      const files = current.documents.filter(document => document.chatTitle === undefined);
       const references = [...chatReferences.current.documents.values()].filter(document => document.chatTitle && value.includes(document.chatTitle));
-      updateRawDraft(encodeDocumentMessage(value, [...files, ...references], false));
+      const skills = selectedSkill ? [...(current.skills ?? []), selectedSkill]
+        : skillHistory.current.selections.get(value) ?? current.skills;
+      updateRawDraft(encodeDocumentMessage(value, [...files, ...references], false, skills));
     }
     catch (error) { toast.error(t(documentErrorKey(error))); }
   };
@@ -417,7 +425,7 @@ export function AiComposerSeat({
       if (gesture === 'primary') onStop?.();
       return;
     }
-    try { encodeDocumentMessage(draft, message.documents); }
+    try { encodeDocumentMessage(draft, message.documents, true, message.skills); }
     catch (error) { toast.error(t(documentErrorKey(error))); return; }
     // Focus synchronously while the user's gesture still owns focus. A later
     // receipt must never pull focus away from another control or the terminal.
@@ -541,7 +549,7 @@ export function AiComposerSeat({
               <AiDraftAttachmentRail unified count={fileDocuments.length + documents.pending.length}>
               {imageControls}
               <AiDocumentAttachments composer documents={fileDocuments} pending={documents.pending} locked={!attachmentsEnabled} onCancel={documents.cancel}
-                onRemove={id => updateRawDraft(encodeDocumentMessage(draft, message.documents.filter(document => document.id !== id)))} />
+                onRemove={id => updateRawDraft(encodeDocumentMessage(draft, message.documents.filter(document => document.id !== id), true, message.skills))} />
               </AiDraftAttachmentRail>
               </UnifiedAttachmentContext>
             </InputGroupAddon>}
@@ -561,7 +569,7 @@ export function AiComposerSeat({
                   onAddFolder={() => completion.browse()}
                   onSkill={name => {
                     const current = decodeDocumentMessage(rawDraftRef.current).text;
-                    updateDraft(`${current}${current && !/\s$/u.test(current) ? ' ' : ''}/${name} `);
+                    updateDraft(`${current}${current && !/\s$/u.test(current) ? ' ' : ''}/${name} `, name);
                     requestAnimationFrame(() => { completion.editor.current?.focus(); completion.editor.current?.setSelectionRange(completion.editor.current.value.length, completion.editor.current.value.length); });
                   }}
                 />
