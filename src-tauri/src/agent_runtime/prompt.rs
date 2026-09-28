@@ -181,9 +181,11 @@ fn tool_available_on_target(name: &str, header: &AgentSessionHeader) -> bool {
         "write_process_input" | "wait_process" | "kill_process" => target.is_some_and(|target| {
             target.kind == "local" || (target.kind == "remote" && target.profile_id.is_some())
         }),
-        "probe_http" => target.is_some_and(|target| {
-            target.kind == "local" || (target.kind == "remote" && target.profile_id.is_some())
-        }),
+        "probe_http" | "inspect_host" | "inspect_service" | "query_logs" | "diagnose_endpoint" => {
+            target.is_some_and(|target| {
+                target.kind == "local" || (target.kind == "remote" && target.profile_id.is_some())
+            })
+        }
         "trash_file" => target
             .is_some_and(|target| target.kind == "local" && target_has_native_file_access(target)),
         "read_file" | "list_directory" | "search_text" | "write_file" | "edit_file"
