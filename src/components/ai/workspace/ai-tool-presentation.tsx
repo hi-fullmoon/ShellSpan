@@ -173,7 +173,7 @@ function titleKey(variant: AiToolVariant): LocaleKey {
 
 function toolSummary(node: ToolNode, variant: AiToolVariant): string {
   if (node.state === 'failed' || node.state === 'rejected') {
-    const failure = node.error ?? outputText(node);
+    const failure = node.error || node.summary || outputText(node);
     if (failure) return failure.split('\n')[0] ?? failure;
   }
   const input = asRecord(node.input);
