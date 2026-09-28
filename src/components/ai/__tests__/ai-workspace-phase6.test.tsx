@@ -41,6 +41,15 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('Phase 6 Queue Dock', () => {
+  it('shows receipt uncertainty and image-only inputs without offering unsafe edits', () => {
+    render(<AiQueueDock items={[{ ...queue[0], state: 'pending', confirming: true,
+      content: '', hasImages: true }]} />);
+    expect(screen.getByText('Confirming receipt')).toBeVisible();
+    expect(screen.getByText('Attached images')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Edit queued input' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Remove queued input' })).toBeNull();
+  });
+
   it('keeps compact single-row queue chrome without a redundant direction icon', () => {
     const { container } = render(<AiQueueDock items={[queue[0]]} />);
     const row = container.querySelector('.ai-queue-row');

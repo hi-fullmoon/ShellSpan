@@ -41,6 +41,7 @@ describe('image draft controls', () => {
       add: async () => {},
       remove: async () => {},
       send: async () => {},
+      detach: async () => null,
       cancel,
       reportError: () => {},
     };

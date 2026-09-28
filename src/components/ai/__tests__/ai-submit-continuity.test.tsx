@@ -8,6 +8,7 @@ import { useToastStore } from '@/stores/toastStore';
 import { useAppStore } from '@/stores/appStore';
 import { AiComposerSeat } from '../workspace/ai-composer-seat';
 import { AiConversation } from '../workspace/ai-conversation';
+import { AiWorkspaceErrorNotices } from '../workspace/ai-workspace-error-notices';
 
 beforeEach(async () => {
   useAppStore.setState({ locale: 'en-US' });
@@ -15,6 +16,21 @@ beforeEach(async () => {
   useToastStore.setState({ toasts: [] });
 });
 afterEach(() => { cleanup(); useToastStore.setState({ toasts: [] }); });
+
+it('offers a retry for the original failed identity without replacing a newer draft', async () => {
+  const started = reduceAiComposer(createAiComposerState({ draft: 'first message' }), {
+    type: 'submit.requested', gesture: 'keyboard', accelerated: false,
+    clientOperationId: 'original-operation', now: 1, hasProvider: true, canCreateSession: true,
+  }).state;
+  const editing = reduceAiComposer(started, { type: 'draft.changed', value: 'newer draft' }).state;
+  const failed = reduceAiComposer(editing, { type: 'submit.failed', clientOperationId: 'original-operation',
+    error: { kind: 'offline', message: 'Disconnected', retryable: true } }).state;
+  const retried: string[] = [];
+  render(<AiWorkspaceErrorNotices composerState={failed} onRetryFailedDraft={id => retried.push(id)} />);
+  await userEvent.setup().click(screen.getByRole('button', { name: 'Retry' }));
+  expect(retried).toEqual(['original-operation']);
+  expect(failed.draft).toBe('newer draft');
+});
 
 it.each(['keyboard', 'primary'] as const)('keeps editing the next draft after a %s submission', async gesture => {
   function Composer() {
@@ -38,13 +54,14 @@ it.each(['keyboard', 'primary'] as const)('keeps editing the next draft after a 
   else await user.click(screen.getByRole('button', { name: 'Send' }));
   await waitFor(() => expect(editor.textContent).toBe(''));
   expect(editor).toHaveFocus();
-  expect(screen.getByRole('button', { name: 'Sending' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
   await user.paste('Also explain the scripts');
+  expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
   await user.keyboard('{Enter}{Enter}');
-  expect(editor).toHaveTextContent('Also explain the scripts');
+  expect(editor.textContent).toBe('');
   expect(editor).toHaveFocus();
   expect(useToastStore.getState().toasts.map(toast => toast.message))
-    .toEqual(['The previous input is still being submitted.']);
+    .toEqual([]);
 });
 
 it('explains blocked Ask submission once and preserves the draft until the reply finishes', async () => {

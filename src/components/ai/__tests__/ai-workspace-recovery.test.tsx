@@ -11,7 +11,9 @@ import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useAppStore } from '@/stores/appStore';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import { useTerminalStore } from '@/stores/terminalStore';
-import * as vision from '@/lib/ai/vision-contract';
+import { AiSubmissionQueue } from '@/lib/ai/submission-queue';
+import type { AiSubmitInput } from '@/lib/ai/session-adapter';
+import { readFile } from 'node:fs/promises';
 import type { ModelDefinition } from '@/lib/ai/provider-contract';
 
 const storage = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn() }));
@@ -96,40 +98,25 @@ it('shows model-change failures in the rendered panel', async () => {
   expect(screen.queryByText('Provider unavailable')).toBeNull();
 });
 
-it('keeps the original image provider while navigating during session creation', async () => {
-  vi.spyOn(vision, 'requireVision').mockImplementation(() => {});
-  storage.read.mockImplementation(async owner => owner.startsWith('new:') ? { owner, revision: 1, text: 'private image', images: [{ name: 'a.png', mediaType: 'image/png', data: 'aA==' }] } : null);
-  const rawOther = view('session-b');
-  const other: AiSessionView = {
-    ...rawOther,
-    snapshot: {
-      kind: 'agent',
-      value: {
-        ...rawOther.snapshot.value,
-        header: {
-          ...rawOther.snapshot.value.header,
-          modelSelection: { routeId: providerB.id, modelId: providerB.model },
-        },
-      },
-    },
-  };
-  let finishCreate!: (value: AiSessionView) => void;
-  const creation = new Promise<AiSessionView>(resolve => { finishCreate = resolve; });
-  const agent = adapter({
-    open: vi.fn(id => id === 'session-b' ? Promise.resolve(other) : Promise.reject(new Error('not yet created'))),
-    create: vi.fn(() => creation),
+it('keeps a captured image submission provider while admission waits and settings change', async () => {
+  const png = await readFile('src-tauri/icons/32x32.png');
+  const captured: AiSubmitInput = { clientOperationId: 'image-operation', content: 'inspect attachment',
+    mode: 'nextTurn', provider: providerA, images: [{ name: '32x32.png', mediaType: 'image/png', data: png.toString('base64') }] };
+  let finishPreparation!: () => void;
+  const preparation = new Promise<void>(resolve => { finishPreparation = resolve; });
+  const received: AiSubmitInput[] = [];
+  const queue = new AiSubmissionQueue('session-a', async (sessionId, input) => {
+    received.push(input);
+    return { sessionId: sessionId!, clientOperationId: input.clientOperationId, mode: input.mode };
   });
-  const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent, operationId: () => 'review-operation' }));
-  await waitFor(() => expect(result.current.imageDraft.draft?.images).toHaveLength(1));
-  act(() => result.current.submit('primary'));
-  await waitFor(() => expect(agent.create).toHaveBeenCalled());
-  act(() => result.current.openSession(other.summary));
-  await waitFor(() => expect(result.current.view?.summary.id).toBe('session-b'));
-  await act(async () => {
-    finishCreate(view('agent-terminal-1-review-operation'));
-  });
-  await waitFor(() => expect(agent.submit).toHaveBeenCalled());
-  expect(vi.mocked(agent.submit).mock.calls[0][1].provider.id).toBe(providerA.id);
+  const submitted = queue.enqueue(captured.clientOperationId, async () => { await preparation; return captured; });
+  useAiSettingsStore.setState({ defaultProviderId: providerB.id });
+  finishPreparation();
+  await submitted;
+  expect(received).toHaveLength(1);
+  expect(received[0].provider).toBe(providerA);
+  expect(received[0].clientOperationId).toBe('image-operation');
+  expect(received[0].images).toEqual(captured.images);
 });
 
 it('loads all history pages, including an empty filtered page', async () => {

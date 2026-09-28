@@ -599,7 +599,7 @@ it('does not mount an empty image addon for stale image errors', () => {
   const imageDraft = vi.spyOn(imageDraftModule, 'useImageDraft').mockReturnValue({
     owner: 'test', draft: { owner: 'test', revision: 1, text: '', images: [] },
     pendingFiles: [], busy: false, submittedOperationId: undefined, locked: false, error: 'IMAGE_CANCELLED',
-    send: vi.fn(), reportError: vi.fn(), add: vi.fn(), remove: vi.fn(), cancel: vi.fn(),
+    send: vi.fn(), detach: async () => null, reportError: vi.fn(), add: vi.fn(), remove: vi.fn(), cancel: vi.fn(),
   });
   try {
     const { container } = render(<AiWorkspaceController scope="terminal" adapter={adapter()} />);
@@ -612,12 +612,12 @@ it('does not mount an empty image addon for stale image errors', () => {
 
 it.each(['', ' \n\t '])('routes image-only text %j through image submission', async draft => {
   connectedTerminal();
-  const send = vi.fn(async () => undefined), reportError = vi.fn();
+  const send = vi.fn(async () => null), reportError = vi.fn();
   const imageDraft = vi.spyOn(imageDraftModule, 'useImageDraft').mockReturnValue({
     owner: 'test', draft: { owner: 'test', revision: 1, text: draft,
       images: [{ name: 'fixture.png', mediaType: 'image/png', data: 'aGVsbG8=' }] },
     pendingFiles: [], busy: false, submittedOperationId: undefined, locked: false, error: null,
-    send, reportError, add: vi.fn(), remove: vi.fn(), cancel: vi.fn(),
+    send: async () => {}, detach: send, reportError, add: vi.fn(), remove: vi.fn(), cancel: vi.fn(),
   });
   const vision = vi.spyOn(visionContract, 'requireVision').mockImplementation(() => undefined);
   try {
@@ -718,7 +718,11 @@ describe('AiWorkspaceController', () => {
       expect(result.current.view?.summary.id ?? null).toBe(expectedSession);
       expect(result.current.navigation.route).toEqual({ kind: 'conversation', sessionId: expectedSession });
       expect(result.current.composer.draft).toBe('draft for the current conversation');
-      expect(result.current.composer.pendingSubmissions).toEqual([]);
+      if (destination === 'roundTrip') {
+        expect(result.current.composer.pendingSubmissions).toEqual([
+          expect.objectContaining({ clientOperationId: input.clientOperationId, state: 'accepted' }),
+        ]);
+      } else expect(result.current.composer.pendingSubmissions).toEqual([]);
       expect(result.current.pendingNodes).toEqual([]);
       if (expectedSession) {
         const callsBeforeSubmit = vi.mocked(agent.submit).mock.calls.length;
@@ -727,9 +731,9 @@ describe('AiWorkspaceController', () => {
           expect(result.current.readOnlySession).toBe(true);
           expect(agent.submit).toHaveBeenCalledTimes(callsBeforeSubmit);
         } else {
-          expect(agent.submit).toHaveBeenLastCalledWith(expectedSession, expect.objectContaining({
+          await waitFor(() => expect(agent.submit).toHaveBeenLastCalledWith(expectedSession, expect.objectContaining({
             content: 'draft for the current conversation',
-          }));
+          })));
         }
       }
     },
