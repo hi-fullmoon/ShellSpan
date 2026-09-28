@@ -1393,7 +1393,7 @@ describe('AiWorkspaceController', () => {
 
     expect(textbox.textContent).toBe('');
     expect(screen.getByText('first input')).toBeVisible();
-    expect(screen.getByText('Sending')).toBeVisible();
+    expect(screen.getByRole('status', { name: 'Sending' })).toBeVisible();
     await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(null, expect.objectContaining({
       content: 'first input',
       mode: 'start',
@@ -1410,6 +1410,7 @@ describe('AiWorkspaceController', () => {
     rejectSubmit?.(new Error('Network disconnected'));
     await waitFor(() => expect(screen.getAllByRole('alert')).toHaveLength(2));
     expect(screen.getByText('Network disconnected')).toBeVisible();
+    expect(screen.queryByRole('status', { name: 'Sending' })).not.toBeInTheDocument();
     expect(textbox.textContent).toBe('newer draft');
     expect(screen.getAllByText('first input')).toHaveLength(2);
   });

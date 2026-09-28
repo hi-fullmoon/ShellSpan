@@ -24,13 +24,13 @@ it('keeps waiting input in its queue and shows an accepted correction between pr
   expect(screen.getByText('Added to this turn')).toBeInTheDocument();
   const correction = container.querySelector('[data-ai-node-key="user:correction"]');
   expect(correction).toBeInTheDocument();
-  expect(first!.closest('[data-slot="message-scroller-item"]')).toHaveAttribute('data-scroll-anchor', 'true');
-  expect(correction!.closest('[data-slot="message-scroller-item"]')).not.toHaveAttribute('data-scroll-anchor', 'true');
+  expect(first!.closest('[data-slot="message-scroller-item"]')).toHaveAttribute('data-scroll-anchor', 'false');
+  expect(correction!.closest('[data-slot="message-scroller-item"]')).toHaveAttribute('data-scroll-anchor', 'false');
   expect(process!.compareDocumentPosition(correction!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   await act(async () => rerender(<AiWorkspaceRoot scope="workbench" view={inboxTimelineView()} />));
   expect(container.querySelector('[data-ai-node-key="user:correction"]')).toBe(correction);
   expect(container.querySelectorAll('[data-ai-node-kind="turnTail"]')).toHaveLength(1);
   expect(screen.queryByRole('region', { name: 'Queued input' })).toBeNull();
   const nextTurnInput = container.querySelector('[data-ai-node-key="user:new-turn-step"]');
-  expect(nextTurnInput!.closest('[data-slot="message-scroller-item"]')).toHaveAttribute('data-scroll-anchor', 'true');
+  expect(nextTurnInput!.closest('[data-slot="message-scroller-item"]')).toHaveAttribute('data-scroll-anchor', 'false');
 });

@@ -68,7 +68,8 @@ describe('terminal reasoning display', () => {
     expect(body.querySelector('p')!.querySelector('br')).toBeNull();
     expect(body.querySelectorAll('ul > li')).toHaveLength(2);
     expect(body.querySelector('pre code')!.textContent).toBe('vm_stat\nsysctl hw.memsize\n');
-    expect(body.querySelector('pre')).toHaveClass('whitespace-pre-wrap');
+    expect(body.querySelector('pre')).toHaveClass('whitespace-pre', 'overflow-x-auto');
+    expect(body.querySelector('pre')).not.toHaveClass('whitespace-pre-wrap');
     expect(body.querySelectorAll('br')).toHaveLength(1);
     expect(body.querySelectorAll('p')).toHaveLength(3);
     view.rerender(<AiConversationNodeList nodes={[{ ...node, content, lastSeq: 4, state: 'completed' }]} renderers={renderers} />);
