@@ -1597,6 +1597,24 @@ impl AgentSessionStore {
     /// Stop a turn after its worker and tools have settled. Queue entries stay
     /// durable but cannot be claimed until explicitly resumed by the user.
     pub(crate) fn interrupt(&self, session_id: &str) -> Result<AgentSessionSnapshot, String> {
+        self.pause_input(session_id, "cancelled", "stoppedByUser", false)
+    }
+
+    pub(crate) fn pause_for_input(
+        &self,
+        session_id: &str,
+        reason: &str,
+    ) -> Result<AgentSessionSnapshot, String> {
+        self.pause_input(session_id, reason, reason, true)
+    }
+
+    fn pause_input(
+        &self,
+        session_id: &str,
+        turn_reason: &str,
+        status_reason: &str,
+        clear_recovery: bool,
+    ) -> Result<AgentSessionSnapshot, String> {
         let mut inner = self.lock_configured()?;
         let record = inner
             .sessions
@@ -1624,7 +1642,7 @@ impl AgentSessionStore {
                     Some(turn_id.clone()),
                     Some(step_id),
                     AgentSessionEventPayload::StepEnd {
-                        reason: "cancelled".into(),
+                        reason: turn_reason.into(),
                     },
                 ));
             }
@@ -1632,7 +1650,7 @@ impl AgentSessionStore {
                 Some(turn_id),
                 None,
                 AgentSessionEventPayload::TurnEnd {
-                    reason: "cancelled".into(),
+                    reason: turn_reason.into(),
                 },
             ));
         }
@@ -1655,9 +1673,25 @@ impl AgentSessionStore {
             None,
             AgentSessionEventPayload::AgentStatus {
                 status: AgentSessionStatus::Idle,
-                reason: Some("stoppedByUser".into()),
+                reason: Some(status_reason.into()),
             },
         ));
+        if clear_recovery {
+            payloads.push((
+                None,
+                None,
+                AgentSessionEventPayload::TaskState {
+                    status: "idle".into(),
+                    phase: Some("inputRequired".into()),
+                    progress: None,
+                    fleet: None,
+                    recovery: Some(super::AgentRecoveryState {
+                        status: super::AgentRecoveryStatus::None,
+                        summary: Some(status_reason.into()),
+                    }),
+                },
+            ));
+        }
         let (events, publisher) = append_payloads_locked(&mut inner, session_id, payloads)?;
         let snapshot = inner.sessions[session_id].snapshot()?;
         drop(inner);
