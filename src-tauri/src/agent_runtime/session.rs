@@ -2439,10 +2439,10 @@ fn append_payloads_locked(
         .iter()
         .all(|(_, _, payload)| matches!(payload, AgentSessionEventPayload::AssistantChunk { .. }));
     let mut candidate = (!stream_only).then(|| record.clone());
-    let mut seq = record.events.len() as u64;
+    let first_seq = record.events.len() as u64;
     let mut previous_time = record.events.last().map_or(1, |event| event.time_unix_ms);
     let mut appended = Vec::with_capacity(payloads.len());
-    for (turn_id, step_id, payload) in payloads {
+    for (seq, (turn_id, step_id, payload)) in (first_seq..).zip(payloads) {
         let validation_record = candidate.as_ref().unwrap_or(record);
         let raw_event = AgentSessionEvent::new(
             session_id.to_string(),
@@ -2465,7 +2465,6 @@ fn append_payloads_locked(
             candidate.events.push(event.clone());
         }
         previous_time = event.time_unix_ms;
-        seq += 1;
         appended.push(event);
     }
     if let Some(candidate) = &candidate {

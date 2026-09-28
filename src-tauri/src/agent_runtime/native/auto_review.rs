@@ -188,8 +188,8 @@ fn review_local_command(call: &AgentToolCallNative) -> Option<ReviewedReadComman
         "ls" => {
             let mut path = None;
             for word in operands {
-                if word.starts_with('-') {
-                    if word.len() < 2 || !word[1..].chars().all(|c| "alhA1n".contains(c)) {
+                if let Some(flags) = word.strip_prefix('-') {
+                    if flags.is_empty() || !flags.chars().all(|c| "alhA1n".contains(c)) {
                         return None;
                     }
                     plan.arguments.push((*word).into());
