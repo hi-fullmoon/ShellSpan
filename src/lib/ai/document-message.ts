@@ -8,6 +8,7 @@ export interface DocumentAttachment {
   readonly chatTitle?: string;
 }
 export interface DocumentMessage {
+  readonly skills?: readonly string[];
   readonly text: string;
   readonly documents: readonly DocumentAttachment[];
 }
@@ -18,14 +19,16 @@ const PREFIX = '{"shellspanDocumentMessage":1,';
  * Plain messages remain byte-for-byte unchanged. Providers receive the extracted
  * documents as structured user content, not instructions or local filesystem paths.
  */
-export function encodeDocumentMessage(text: string, documents: readonly DocumentAttachment[], enforceTextLimit = true): string {
-  if (!documents.length) return text;
+export function encodeDocumentMessage(text: string, documents: readonly DocumentAttachment[], enforceTextLimit = true, selectedSkills: readonly string[] = []): string {
+  const tokens = new Set(text.split(/\s/u));
+  const skills = [...new Set(selectedSkills)].filter(name => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name) && name.length <= 64 && tokens.has(`/${name}`));
+  if (!documents.length && !skills.length) return text;
   validateDocumentBatch(documents);
   documents.forEach(document => validateDocumentText(document.text));
   if (enforceTextLimit && text.length + documents.reduce((sum, document) => sum + document.text.length, 0) > DOCUMENT_LIMITS.maxDraftCharacters) {
     throw new Error('DOCUMENT_TEXT_LIMIT');
   }
-  const encoded = JSON.stringify({ shellspanDocumentMessage: 1, text, documents });
+  const encoded = JSON.stringify({ shellspanDocumentMessage: 1, text, documents, ...(skills.length ? { skills } : {}) });
   if (enforceTextLimit && new TextEncoder().encode(encoded).byteLength > DOCUMENT_LIMITS.maxMessageBytes) {
     throw new Error('DOCUMENT_MESSAGE_LIMIT');
   }
@@ -38,8 +41,11 @@ export function decodeDocumentMessage(content: string): DocumentMessage {
   try {
     const parsed: unknown = JSON.parse(content);
     if (!parsed || typeof parsed !== 'object' || !('text' in parsed) || typeof parsed.text !== 'string'
-      || !('documents' in parsed) || !Array.isArray(parsed.documents) || !parsed.documents.length
+      || !('documents' in parsed) || !Array.isArray(parsed.documents)
       || parsed.documents.length > DOCUMENT_LIMITS.maxFiles) return plain;
+    const skills = 'skills' in parsed ? parsed.skills : undefined;
+    if (skills !== undefined && (!Array.isArray(skills) || !skills.every((name: unknown) => typeof name === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name) && name.length <= 64))) return plain;
+    if (!parsed.documents.length && !skills?.length) return plain;
     const documents: DocumentAttachment[] = [];
     const values: readonly unknown[] = parsed.documents;
     for (const value of values) {
@@ -53,7 +59,7 @@ export function decodeDocumentMessage(content: string): DocumentMessage {
     }
     if (new Set(documents.map(document => document.id)).size !== documents.length) return plain;
     encodeDocumentMessage(parsed.text, documents, false);
-    return { text: parsed.text, documents };
+    return { text: parsed.text, documents, ...(skills?.length ? { skills } : {}) };
   } catch { return plain; }
 }
 

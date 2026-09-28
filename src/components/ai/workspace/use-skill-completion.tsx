@@ -12,7 +12,7 @@ import type { SkillEntry, SkillUserList } from '@/types/agent-skill';
 import { AiErrorNotice } from './ai-error-notice';
 
 export function useSkillCompletion({ text, update, query, scopeKey, disabled, editor }: {
-  text: string; update: (value: string) => void; query?: () => Promise<SkillUserList>;
+  text: string; update: (value: string, selectedSkill?: string) => void; query?: () => Promise<SkillUserList>;
   scopeKey?: string; disabled: boolean; editor: React.RefObject<ComposerEditorHandle | null>;
 }) {
   const { t, locale } = useI18n();
@@ -70,7 +70,7 @@ export function useSkillCompletion({ text, update, query, scopeKey, disabled, ed
     if (!token || !open || loading) return;
     const next = insertSkill(text, token, skill.name);
     setDismissed(JSON.stringify([scopeKey, next.text, next.caret, next.caret]));
-    update(next.text);
+    update(next.text, skill.name);
     setSelection([next.caret, next.caret]);
     requestAnimationFrame(() => {
       if (editor.current?.value === next.text) {

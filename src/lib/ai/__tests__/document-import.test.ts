@@ -4,6 +4,14 @@ import { decodeDocumentMessage, encodeDocumentMessage } from '../document-messag
 import { createAiComposerState, reduceAiComposer } from '../composer-machine';
 
 describe('document import policy', () => {
+  it('persists selected inline skills and retires deleted commands', () => {
+    const text = 'Inspect /system-status and /tmp';
+    const encoded = encodeDocumentMessage(text, [], true, ['system-status']);
+    expect(decodeDocumentMessage(encoded)).toEqual({ text, documents: [], skills: ['system-status'] });
+    const restored = decodeDocumentMessage(encoded);
+    expect(encodeDocumentMessage('Inspect /tmp', [], true, restored.skills)).toBe('Inspect /tmp');
+    expect(encodeDocumentMessage(text, [])).toBe(text);
+  });
   it('accepts supported extensions regardless of case or missing browser MIME', () => {
     for (const name of ['Report.PDF', '报告.docx', 'table.xlsx', 'README.md', 'app.tsx', 'logs.LOG']) {
       expect(isDocumentName(name)).toBe(true);
