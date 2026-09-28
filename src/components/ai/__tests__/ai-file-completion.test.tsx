@@ -26,18 +26,19 @@ describe('composer path completion', () => {
     await user.type(editor, '@');
     await user.click(await screen.findByRole('option', { name: 'Add folder' }));
     expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(editor).toHaveFocus());
     await user.type(editor, 'src');
-    await screen.findByRole('option', { name: 'src/' });
+    await waitFor(() => expect(screen.getByRole('option', { name: 'src/' })).toHaveAttribute('aria-selected', 'true'));
     await user.keyboard('{Tab}');
-    expect(editor.textContent).toBe('@src/');
+    await waitFor(() => expect(editor.textContent).toBe('@src/'));
     const children = await screen.findAllByRole('option');
     const child = children[0].getAttribute('aria-label')!;
     await user.keyboard('{Tab}');
-    expect(editor.textContent).toBe(`@${child}`);
+    await waitFor(() => expect(editor.textContent).toBe(`@${child}`));
     const descendants = await screen.findAllByRole('option');
     const selected = descendants[0].getAttribute('aria-label')!;
     await user.keyboard('{Enter}');
-    expect(editor.textContent).toBe(`@${selected} `);
+    await waitFor(() => expect(editor.textContent).toBe(`@${selected} `));
     expect(screen.queryByRole('listbox')).toBeNull();
   });
   it('reopens a dismissed query after editing away and returning to the same text', async () => {
@@ -61,14 +62,36 @@ describe('composer path completion', () => {
     expect(editor.textContent).toBe('hello @"space dir/" check'); await user.keyboard('{Enter}');
     expect(submit).toHaveBeenCalledExactlyOnceWith('hello @"space dir/" check');
   });
-  it('does not send during loading, empty/error results, or IME, and Escape dismisses', async () => {
-    const user=userEvent.setup(); const pending=deferred<FileReferenceList>(); const submit=vi.fn(); const query=vi.fn(()=>pending.promise);
-    render(<AiComposerSeat phase="hero" status="idle" onListFileReferences={query} onSubmit={submit}/>);
-    const editor=screen.getByRole('textbox'); await user.type(editor,'@x'); await waitFor(()=>expect(query).toHaveBeenCalled());
-    await user.keyboard('{Enter}'); expect(submit).not.toHaveBeenCalled();
-    fireEvent.compositionStart(editor); fireEvent.keyDown(editor,{key:'Enter',isComposing:true,keyCode:229}); expect(submit).not.toHaveBeenCalled(); fireEvent.compositionEnd(editor);
-    await act(async()=>pending.resolve({...result,entries:[]})); await screen.findByText('No matching files or directories');
-    await user.keyboard('{Enter}'); expect(submit).not.toHaveBeenCalled(); await user.keyboard('{Escape}'); expect(screen.queryByRole('listbox')).toBeNull();
+  it('does not send during directory loading, empty results, or IME, and Escape dismisses', async () => {
+    const user = userEvent.setup();
+    const pending = deferred<void>();
+    const submissions: string[] = [];
+    const query = async (value: string): Promise<FileReferenceList> => {
+      await pending.promise;
+      const entries = await readdir(process.cwd(), { withFileTypes: true });
+      return { entries: entries.filter(entry => entry.isDirectory() && entry.name.startsWith(value))
+        .map(entry => ({ path: entry.name, kind: 'directory' })), scope: null, status: 'ready', code: null, excluded: 0 };
+    };
+    render(<AiComposerSeat phase="hero" status="idle" onListFileReferences={query} onSubmit={text => { submissions.push(text); }} />);
+    const editor = screen.getByRole('textbox');
+    await user.type(editor, '@');
+    await user.click(await screen.findByRole('option', { name: 'Add folder' }));
+    await waitFor(() => expect(editor).toHaveFocus());
+    await user.type(editor, 'no-such-project-directory');
+    await screen.findByText('Listing paths…');
+    await user.keyboard('{Enter}');
+    expect(submissions).toHaveLength(0);
+    expect(editor).toHaveTextContent('@no-such-project-directory');
+    fireEvent.compositionStart(editor);
+    fireEvent.keyDown(editor, { key: 'Enter', isComposing: true, keyCode: 229 });
+    expect(submissions).toHaveLength(0);
+    fireEvent.compositionEnd(editor);
+    await act(async () => pending.resolve());
+    await screen.findByText('No matching files or directories');
+    await user.keyboard('{Enter}');
+    expect(submissions).toHaveLength(0);
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('listbox')).toBeNull();
   });
   it('cancels deletion and scope navigation including ABA; stale success/finally never clears new query', async () => {
     const user=userEvent.setup(); const calls:{signal:AbortSignal,work:ReturnType<typeof deferred<FileReferenceList>>}[]=[];
