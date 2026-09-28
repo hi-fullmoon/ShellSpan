@@ -196,7 +196,7 @@ export function AiComposerSeat({
   const running = status === 'running' || status === 'waiting';
   const waitingApproval = mode === 'agent' && composerState?.phase === 'waitingApproval';
   const waitingQuestion = Boolean(pendingQuestion) || composerState?.phase === 'waitingQuestion';
-  const submitting = composerState?.phase === 'submitting' || imageBusy;
+  const submitting = imageBusy;
   const terminal = composerState?.terminal ?? false;
   const stopping = composerState?.phase === 'stopping';
   const unavailable = unavailableReason !== null;
@@ -218,15 +218,14 @@ export function AiComposerSeat({
   };
   const documents = useDocumentImport(
     attachmentOwner,
-    rawDraft, updateRawDraft, terminal || waitingApproval || waitingQuestion || unavailable || submitting || imageLocked,
+    rawDraft, updateRawDraft, terminal || unavailable || submitting || imageLocked,
   );
   const empty = draft.trim().length === 0 && !hasImages && !message.documents.length;
-  const stopPrimary = running && (empty || unavailable || waitingApproval || waitingQuestion || (mode === 'ask'));
+  const stopPrimary = running && (empty || unavailable || (mode === 'ask'));
   const submitDisabled = terminal
     || stopping
     || submitting
     || documents.busy
-    || (!stopPrimary && (waitingQuestion || waitingApproval))
     || (!stopPrimary && mode === 'ask' && running && !empty)
     || (stopPrimary
       ? onStop === undefined
@@ -258,14 +257,16 @@ export function AiComposerSeat({
         clientSubmissionId: pending.clientOperationId,
         lane: pending.mode === 'nextStep' ? 'nextStep' : 'nextTurn',
         content: pending.content,
+        hasImages: pending.hasImages,
         state: 'pending',
+        confirming: pending.state === 'confirming',
         source: 'user',
       });
     }
     return items;
   }, [composerState?.pendingSubmissions, inbox]);
 
-  const attachmentsEnabled = !terminal && !waitingApproval && !waitingQuestion && !unavailable && !submitting && !imageLocked && !documents.busy;
+  const attachmentsEnabled = !terminal && !unavailable && !submitting && !imageLocked && !documents.busy;
   const addPaths = async (paths: readonly string[], kind?: 'file' | 'directory'): Promise<void> => {
     if (!attachmentsEnabled || !paths.length || attachmentOwnerRef.current !== attachmentOwner) return;
     try {
@@ -452,7 +453,8 @@ export function AiComposerSeat({
         items={queueItems}
         mutation={queueMutation}
         running={status === 'running'}
-        mutable={!stopping && queueMutable && !['completed', 'cancelled', 'failed'].includes(status)}
+        mutable={!stopping && queueMutable && !['completed', 'cancelled'].includes(status)}
+        resumeOnly={status === 'failed'}
         onUpdate={onUpdateQueueItem}
         onRemove={onRemoveQueueItem}
         onSteer={onSteerQueueItem}

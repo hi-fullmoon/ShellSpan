@@ -2,7 +2,7 @@ import type { AiConversationNode, AiUserMessageNode } from './conversation-node'
 import type { AiDetachedSubmission } from './composer-machine';
 import type { AiInboxItem } from './session-adapter';
 
-export type AiOptimisticDelivery = 'pending' | 'accepted' | 'failed' | 'timedOut';
+export type AiOptimisticDelivery = 'pending' | 'accepted' | 'confirming' | 'failed' | 'timedOut';
 
 export interface AiOptimisticSubmission extends AiDetachedSubmission {
   readonly scopeKey: string;
@@ -74,7 +74,7 @@ function optimisticNode(submission: AiOptimisticSubmission): AiUserMessageNode {
     content: submission.content,
     delivery: submission.delivery === 'failed' || submission.delivery === 'timedOut'
       ? 'failed'
-      : 'pending',
+      : submission.delivery === 'confirming' ? 'confirming' : 'pending',
   };
 }
 

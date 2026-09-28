@@ -711,7 +711,7 @@ describe('AgentSessionAdapter', () => {
     ];
     expect(projectAgentInbox(events)).toEqual([{
       id: 'b', clientSubmissionId: 'submission-b', lane: 'nextTurn',
-      content: 'B updated', state: 'queued', source: 'user', startsTurn: true,
+      content: 'B updated', state: 'queued', source: 'user', startsTurn: false,
       provenance: { kind: 'user', label: 'User', producerId: 'shellspan-user' },
     }]);
   });

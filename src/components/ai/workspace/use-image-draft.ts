@@ -1,13 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useToast } from '@/hooks/useToast';
 import { t } from '@/locales';
-import { readImageDraft, writeImageDraft, type ImageDraft } from '@/lib/ai/image-drafts';
+import { detachImageDraft, readImageDraft, restoreCancelledImageDraft, writeImageDraft, type ImageDraft } from '@/lib/ai/image-drafts';
 import { imageErrorKey } from '@/lib/ai/image-error';
 import { IMAGE_LIMITS } from '@/lib/ai/vision-contract';
 import { invokeCancelAgentImageSubmission, invokePrepareAgentImages } from '@/lib/ipc/tauri';
 import type { AgentImageUpload } from '@/types/agent-image';
 
-export function useImageDraft(owner: string, text: string, restoreText: (text: string) => void) {
+async function bindImageOperation(
+  bind: () => Promise<NonNullable<ImageDraft['operation']>>, signal: AbortSignal,
+): Promise<NonNullable<ImageDraft['operation']>> {
+  signal.throwIfAborted();
+  let abort!: () => void;
+  const cancelled = new Promise<never>((_, reject) => {
+    abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+  });
+  try {
+    return await Promise.race([Promise.resolve().then(() => { signal.throwIfAborted(); return bind(); }), cancelled]);
+  } finally { signal.removeEventListener('abort', abort); }
+}
+
+export function useImageDraft(owner: string, text: string, restoreText: (text: string) => void,
+  isManagedSubmission?: (operationId: string) => boolean) {
   const toast = useToast();
   const [draft, setDraft] = useState<ImageDraft | null>(null);
   const [pendingFiles, setPendingFiles] = useState<readonly File[]>([]);
@@ -21,18 +36,23 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
   const ownerRef = useRef(owner); ownerRef.current = owner;
   const textRef = useRef(text); textRef.current = text;
   const restoreRef = useRef(restoreText); restoreRef.current = restoreText;
+  const managedRef = useRef(isManagedSubmission); managedRef.current = isManagedSubmission;
   const current = useRef<ImageDraft | null>(null);
   const epoch = useRef(0);
   const running = useRef(false);
   const cancelling = useRef<number | null>(null);
   const ready = useRef(false);
   const saving = useRef<{ generation: number; promise: Promise<void> } | null>(null);
+  const detaching = useRef<AbortController | null>(null);
   useEffect(() => {
     const generation = ++epoch.current;
     setSubmittedOperationId(undefined);
     current.current = null; setDraft(null); setPendingFiles([]); setError(null); setBusy(false); running.current = false; ready.current = false;
     if (typeof indexedDB === 'undefined') { ready.current = true; return; }
-    void readImageDraft(owner).then(value => {
+    void readImageDraft(owner).then(async value => {
+      // A restored queue already exposes this operation and its retry action.
+      // Do not also put its old text/images over the user's newer editor draft.
+      if (value?.operation && managedRef.current?.(value.operation.id)) value = await readImageDraft(owner, true);
       if (epoch.current !== generation) return;
       ready.current = true; current.current = value; setDraft(value);
       if (value?.images.length) restoreRef.current(value.text);
@@ -125,7 +145,7 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
       if (saving.current?.generation === generation) await saving.current.promise;
       if (!isCurrent(generation)) return;
       const previous = base();
-      const operation = previous.operation ?? await bind();
+      const operation = previous.operation ?? { ...await bind(), createdAtUnixMs: Date.now() };
       if (!isCurrent(generation)) return;
       const value = { ...previous, revision: previous.revision + 1, text: previous.operation ? previous.text : textRef.current, operation };
       await persist(value, generation); // operation identity is durable BEFORE any create/send IPC
@@ -140,7 +160,54 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
     } catch (e) { if (isCurrent(generation) && cancelling.current !== generation) reportError(String(e)); }
     finally { if (isCurrent(generation)) { running.current = false; setBusy(false); } }
   }
-  async function cancel(): Promise<void> {
+  async function detach(bind: () => Promise<NonNullable<ImageDraft['operation']>>): Promise<ImageDraft | null> {
+    if (running.current || !ready.current || !current.current?.images.length) return null;
+    const generation = epoch.current;
+    const capturedText = textRef.current;
+    const cancellation = new AbortController();
+    detaching.current = cancellation;
+    let bound: ImageDraft | undefined;
+    let keepOperation = false;
+    running.current = true; setBusy(true); setError(null);
+    try {
+      if (saving.current?.generation === generation) await saving.current.promise;
+      if (!isCurrent(generation)) return null;
+      const previous = base();
+      keepOperation = Boolean(previous.operation);
+      const operation = previous.operation ?? { ...await bindImageOperation(bind, cancellation.signal), createdAtUnixMs: Date.now() };
+      cancellation.signal.throwIfAborted();
+      const value = { ...previous, revision: previous.revision + 1, text: previous.operation ? previous.text : capturedText, operation };
+      await persist(value, generation);
+      bound = value;
+      cancellation.signal.throwIfAborted();
+      const editor = value.owner === owner ? value : await readImageDraft(owner, true);
+      cancellation.signal.throwIfAborted();
+      const detached = await detachImageDraft(value, cancellation.signal);
+      cancellation.signal.throwIfAborted();
+      if (isCurrent(generation)) {
+        current.current = { owner, revision: value.owner === owner ? value.revision + 1 : editor?.revision ?? 0, text: '', images: [] };
+        setDraft(current.current);
+        setSubmittedOperationId(operation.id);
+      }
+      return detached;
+    } catch (error) {
+      if (cancellation.signal.aborted) {
+        if (bound) {
+          try {
+            const restored = await restoreCancelledImageDraft(bound, { editorOwner: owner, keepOperation });
+            if (restored && isCurrent(generation)) { current.current = restored; setDraft(restored); }
+          } catch (restoreError) { if (isCurrent(generation)) reportError(String(restoreError)); }
+        }
+      } else if (isCurrent(generation)) reportError(String(error));
+      return null;
+    } finally {
+      if (detaching.current === cancellation) detaching.current = null;
+      if (isCurrent(generation)) { running.current = false; setBusy(false); }
+    }
+  }
+  async function cancel(preparationOnly = false): Promise<void> {
+    if (detaching.current) { detaching.current.abort(); return; }
+    if (preparationOnly) return;
     const generation = epoch.current;
     const value = current.current;
     if (!value?.operation) { ++epoch.current; running.current = false; setBusy(false); setPendingFiles([]); return; }
@@ -158,5 +225,5 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
     } catch (e) { if (isCurrent(generation)) reportError(String(e)); }
     finally { if (cancelling.current === generation) cancelling.current = null; }
   }
-  return { owner, draft, pendingFiles, busy, submittedOperationId, error, add, remove, send, cancel, locked: Boolean(draft?.operation), reportError };
+  return { owner, draft, pendingFiles, busy, submittedOperationId, error, add, remove, send, detach, cancel, locked: Boolean(draft?.operation), reportError };
 }

@@ -9,6 +9,7 @@ import type { AiSessionError, AiSubmissionMode, AiSubmitReceipt } from './sessio
 export type AiComposerPhase = 'idle' | 'running' | 'waitingApproval' | 'waitingQuestion' | 'submitting' | 'stopping' | 'error';
 
 export interface AiDetachedSubmission {
+  readonly hasImages?: boolean;
   readonly clientOperationId: string;
   readonly sessionId: string | null;
   readonly content: string;
@@ -18,6 +19,7 @@ export interface AiDetachedSubmission {
 }
 
 export interface AiFailedDraft {
+  readonly hasImages?: boolean;
   readonly id: string;
   readonly content: string;
   readonly mode: AiSubmissionMode;
@@ -25,7 +27,7 @@ export interface AiFailedDraft {
 }
 
 export type AiPendingSubmission = AiDetachedSubmission & {
-  readonly state: 'sending' | 'accepted';
+  readonly state: 'sending' | 'accepted' | 'confirming';
   readonly startsTurn?: boolean;
 };
 
@@ -65,6 +67,7 @@ export type AiComposerEvent =
     }>
   | Readonly<{
       type: 'submit.requested';
+      hasImages?: boolean;
       content?: string;
       gesture: 'keyboard' | 'primary';
       accelerated: boolean;
@@ -143,6 +146,7 @@ function beginSubmission(
           state: 'sending',
           // Capture the gesture's intent before acceptance changes the runtime status.
           startsTurn: payload.mode !== 'nextStep'
+            && state.pendingSubmissions.length === 0
             && state.runtimeStatus !== 'running' && state.runtimeStatus !== 'waiting',
         },
       ],
@@ -160,12 +164,9 @@ function settleFailure(
 ): AiComposerTransition {
   const pending = state.pendingSubmissions.find((item) => item.clientOperationId === clientOperationId);
   if (!pending) return { state, effects: [] };
-  const restoresEditor = state.draft.length === 0;
-  const failedDrafts = restoresEditor
-    ? state.failedDrafts
-    : [
+  const failedDrafts = [
         ...state.failedDrafts.filter((entry) => entry.id !== clientOperationId),
-        { id: clientOperationId, content: pending.content, mode: pending.mode, error },
+        { id: clientOperationId, content: pending.content, mode: pending.mode, hasImages: pending.hasImages, error },
       ];
   return {
     state: {
@@ -173,8 +174,8 @@ function settleFailure(
       phase: state.phase === 'stopping' ? 'stopping' : state.detached !== null && state.detached.clientOperationId !== clientOperationId
         ? 'submitting'
         : 'error',
-      draft: restoresEditor ? pending.content : state.draft,
-      detached: null,
+      draft: state.draft,
+      detached: state.detached?.clientOperationId === clientOperationId ? null : state.detached,
       pendingSubmissions: state.pendingSubmissions.filter((item) => item.clientOperationId !== clientOperationId),
       failedDrafts,
       lastError: error,
@@ -232,6 +233,7 @@ export function reduceAiComposer(
     }
     case 'submit.requested': {
       if (state.phase === 'stopping') return rejected(state, 'stopping');
+      if (state.pendingSubmissions.some(item => item.clientOperationId === event.clientOperationId)) return { state, effects: [] };
       const content = event.content ?? state.draft;
       const decision = resolveAiSubmission({
         sessionStatus: state.runtimeStatus,
@@ -242,6 +244,7 @@ export function reduceAiComposer(
         hasProvider: event.hasProvider,
         canCreateSession: event.canCreateSession,
         draft: content,
+        hasImages: event.hasImages,
         gesture: event.gesture,
         accelerated: event.accelerated,
         preferredBusyMode: state.preferredBusyMode,
@@ -254,17 +257,17 @@ export function reduceAiComposer(
           : { state: { ...state, phase: 'stopping' }, effects: [{ type: 'stop', sessionId: state.sessionId }] };
       }
       const payload: AiDetachedSubmission = {
+        hasImages: event.hasImages,
         clientOperationId: event.clientOperationId,
         sessionId: state.sessionId,
         content,
-        mode: decision.mode,
+        mode: decision.mode === 'start' && state.pendingSubmissions.length > 0 ? 'nextTurn' : decision.mode,
         createdAtUnixMs: event.now,
       };
       return beginSubmission(state, payload, event.content === undefined ? '' : state.draft);
     }
     case 'retry.requested': {
       if (state.phase === 'stopping') return rejected(state, 'stopping');
-      if (state.detached !== null) return rejected(state, 'submitting');
       const failed = state.failedDrafts.find((entry) => entry.id === event.failedDraftId);
       if (!failed) return { state, effects: [] };
       const decision = resolveAiSubmission({
@@ -276,6 +279,7 @@ export function reduceAiComposer(
         hasProvider: event.hasProvider,
         canCreateSession: event.canCreateSession,
         draft: failed.content,
+        hasImages: failed.hasImages,
         gesture: 'retry',
         accelerated: failed.mode === 'nextStep',
         preferredBusyMode: failed.mode === 'nextStep' ? 'queue' : state.preferredBusyMode,
@@ -285,7 +289,8 @@ export function reduceAiComposer(
         return rejected(state, decision.kind === 'reject' ? decision.reason : 'sessionUnavailable');
       }
       const payload: AiDetachedSubmission = {
-        clientOperationId: event.clientOperationId,
+        clientOperationId: failed.id,
+        hasImages: failed.hasImages,
         sessionId: state.sessionId,
         content: failed.content,
         mode: failed.mode,
@@ -321,7 +326,7 @@ export function reduceAiComposer(
           pendingSubmissions: state.pendingSubmissions.map((item) => (
             item.clientOperationId === event.receipt.clientOperationId
               ? { ...item, sessionId: event.receipt.sessionId, state: 'accepted' }
-              : item
+              : item.sessionId === null ? { ...item, sessionId: event.receipt.sessionId } : item
           )),
         },
         effects: [],
@@ -346,8 +351,11 @@ export function reduceAiComposer(
         },
         effects: [],
       };
-    case 'submit.failed':
     case 'submit.timedOut':
+      return { state: { ...state, pendingSubmissions: state.pendingSubmissions.map(item => (
+        item.clientOperationId === event.clientOperationId ? { ...item, state: 'confirming' } : item
+      )) }, effects: [] };
+    case 'submit.failed':
       return settleFailure(state, event.clientOperationId, event.error);
     case 'stop.requested':
       if (state.phase === 'stopping') return { state, effects: [] };

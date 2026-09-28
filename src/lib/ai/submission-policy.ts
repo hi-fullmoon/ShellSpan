@@ -45,9 +45,7 @@ export function resolveAiSubmission(input: AiSubmissionPolicyInput): AiSubmissio
   const running = input.sessionStatus === 'running' || input.sessionStatus === 'waiting';
 
   if (input.stopping) return { kind: 'reject', reason: 'stopping' };
-  if (input.submitting) return { kind: 'reject', reason: 'submitting' };
-  if (input.waitingQuestion) return { kind: 'reject', reason: 'waitingQuestion' };
-  if (input.waitingApproval) return { kind: 'reject', reason: 'waitingApproval' };
+  if (input.submitting && empty) return { kind: 'reject', reason: 'submitting' };
   if (running && empty && input.gesture === 'primary') return { kind: 'stop' };
   if (empty) return { kind: 'reject', reason: 'empty' };
   if (input.terminal) return { kind: 'reject', reason: 'terminal' };
@@ -55,7 +53,7 @@ export function resolveAiSubmission(input: AiSubmissionPolicyInput): AiSubmissio
 
   if (running) {
     if (input.sessionId === null) return { kind: 'reject', reason: 'sessionUnavailable' };
-    const busyMode = input.accelerated
+    const busyMode = input.waitingApproval || input.waitingQuestion ? 'queue' : input.accelerated
       ? opposite(input.preferredBusyMode)
       : input.preferredBusyMode;
     return { kind: 'submit', mode: busyMode === 'queue' ? 'nextTurn' : 'nextStep' };

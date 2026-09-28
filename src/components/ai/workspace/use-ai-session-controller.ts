@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { createAgentSessionAdapter } from '@/lib/ai/agent-session-adapter';
+import { sharedAgentSessionAdapter, submissionMemoryFor } from '@/lib/ai/submission-memory';
+import { AiSubmissionQueue } from '@/lib/ai/submission-queue';
+import { acknowledgeDetachedImageDraft, holdDetachedImageDraft } from '@/lib/ai/image-drafts';
 import { builtinSkillPreview } from '@/lib/ai/builtin-skills';
 import { listProjectDirectories as readProjectDirectories } from '@/lib/ai/project-directory-completion';
 import { questionKey } from '@/types/agent-question';
@@ -242,13 +244,6 @@ function needsVolatileApprovalArguments(approval: AiPendingApproval): boolean {
   return arguments_.textProvided === true;
 }
 
-function sameTarget(left: AgentSessionTarget | undefined, right: AgentSessionTarget | undefined): boolean {
-  if (!left || !right) return left === right;
-  // IPC serialization can reorder fields in a restored target. Compare every value.
-  const keys = new Set([...Object.keys(left), ...Object.keys(right)] as (keyof AgentSessionTarget)[]);
-  return [...keys].every(key => left[key] === right[key]);
-}
-
 function sameOptimistic(
   left: readonly AiOptimisticSubmission[],
   right: readonly AiOptimisticSubmission[],
@@ -264,10 +259,8 @@ export function useAiSessionController({
   operationId = generateId,
   resolveTerminalDirectory = readTerminalCurrentDirectory,
 }: UseAiSessionControllerInput): AiSessionController {
-  const ownedAdapter = useMemo<AiSessionControllerAdapter | null>(() => (
-    providedAdapter ? null : createAgentSessionAdapter()
-  ), [providedAdapter]);
-  const adapter = providedAdapter ?? ownedAdapter!;
+  const [adapter] = useState(() => providedAdapter ?? sharedAgentSessionAdapter());
+  const submissionMemory = useMemo(() => submissionMemoryFor(adapter), [adapter]);
   const canRestoreWorkbench = providedAdapter !== undefined || isTauriRuntime();
   const terminalSessions = useTerminalStore((state) => state.sessions);
   const activeTerminalId = useTerminalStore((state) => state.activeSessionId);
@@ -411,7 +404,7 @@ export function useAiSessionController({
   const optimisticRef = useRef(optimistic);
   const mountedRef = useRef(true);
   const timeoutRef = useRef(new Map<string, number>());
-  const effectExecutorRef = useRef<(effect: AiComposerEffect) => void>(() => undefined);
+  const effectExecutorRef = useRef<(effect: AiComposerEffect, context?: { key: string }) => void>(() => undefined);
   const sessionListRequestRef = useRef(0);
 
   const workspaceScopeKey = scope === 'workbench'
@@ -420,6 +413,15 @@ export function useAiSessionController({
   const appliedWorkspaceRef = useRef(workspaceScopeKey);
   const workspaceChanging = appliedWorkspaceRef.current !== workspaceScopeKey;
   const submissionContextRef = useRef({ key: workspaceScopeKey });
+  // These handles point to application-owned state and survive panel unmounts.
+  const { submissionQueues, sessionSubmissionQueues, submissionLedger, sessionSubmissionStates, submissionInputs, creationInputs } = useMemo(() => ({
+    submissionQueues: { current: submissionMemory.queues },
+    sessionSubmissionQueues: { current: submissionMemory.sessionQueues },
+    submissionLedger: { current: submissionMemory.ledger },
+    sessionSubmissionStates: { current: submissionMemory.sessionStates },
+    submissionInputs: { current: submissionMemory.inputs },
+    creationInputs: { current: submissionMemory.creations },
+  }), [submissionMemory]);
   if (submissionContextRef.current.key !== workspaceScopeKey) {
     submissionContextRef.current = { key: workspaceScopeKey };
   }
@@ -453,11 +455,23 @@ export function useAiSessionController({
   }, []);
 
   const dispatch = useCallback((event: AiComposerEvent): void => {
-    const transition = reduceAiComposer(composerRef.current, event);
+    let previous = composerRef.current;
+    if (event.type === 'runtime.synchronized' && event.sessionId && event.sessionId !== previous.sessionId
+      && previous.pendingSubmissions.length === 0) {
+      const saved = sessionSubmissionStates.current.get(event.sessionId);
+      if (saved && (saved.pendingSubmissions.length || saved.failedDrafts.length)) {
+        previous = { ...saved, draft: previous.draft };
+        updateOptimistic(() => saved.pendingSubmissions.map(item => ({ ...item,
+          scopeKey: submissionContextRef.current.key, expectedNextSeq: null,
+          delivery: item.state === 'confirming' ? 'confirming' : 'pending' })));
+      }
+    }
+    const transition = reduceAiComposer(previous, event);
     composerRef.current = transition.state;
+    submissionMemory.remember(submissionContextRef.current, transition.state);
     setComposer(transition.state);
     for (const effect of transition.effects) effectExecutorRef.current(effect);
-  }, []);
+  }, [submissionMemory, updateOptimistic]);
 
   const navigationDraftKey = useCallback((sessionId: string | null): string => (
     sessionId
@@ -490,16 +504,19 @@ export function useAiSessionController({
     draftOwnerRef.current = key;
   }, [navigationDraftKey]);
 
-  const resetComposer = useCallback((summary?: AiSessionSummary): void => {
+  const resetComposer = useCallback((summary?: AiSessionSummary, restoreWorkspace = false): void => {
     saveCurrentDraft();
-    submissionContextRef.current = { key: workspaceScopeKey };
+    const recalled = restoreWorkspace ? submissionMemory.reopen(workspaceScopeKey) : undefined;
+    submissionContextRef.current = recalled?.context ?? { key: workspaceScopeKey };
     for (const timeout of timeoutRef.current.values()) window.clearTimeout(timeout);
     timeoutRef.current.clear();
     updateOptimistic(() => []);
-    const key = navigationDraftKey(summary?.id ?? null);
+    const key = navigationDraftKey(summary?.id ?? recalled?.state.sessionId ?? null);
     draftOwnerRef.current = key;
     const next = createAiComposerState({
-      sessionId: summary?.id ?? null,
+      ...(summary ? sessionSubmissionStates.current.get(summary.id) : undefined),
+      ...recalled?.state,
+      sessionId: summary?.id ?? recalled?.state.sessionId ?? null,
       runtimeStatus: summary?.status ?? 'idle',
       terminal: summary !== undefined && (
         summary.subagent?.continuable === false
@@ -510,9 +527,12 @@ export function useAiSessionController({
       preferredBusyMode: summary?.subagent ? 'queue' : composerRef.current.preferredBusyMode,
     });
     composerRef.current = next;
+    submissionMemory.remember(submissionContextRef.current, next);
+    updateOptimistic(() => next.pendingSubmissions.map(item => ({ ...item, scopeKey: workspaceScopeKey,
+      expectedNextSeq: null, delivery: item.state === 'confirming' ? 'confirming' : 'pending' })));
     setComposer(next);
     setAnnouncement(null);
-  }, [navigationDraftKey, saveCurrentDraft, updateOptimistic, workspaceScopeKey]);
+  }, [navigationDraftKey, saveCurrentDraft, submissionMemory, updateOptimistic, workspaceScopeKey]);
 
   const coldSkillSession = useRef<Promise<AiSessionView> | null>(null);
   const terminalDirectory = useRef<{
@@ -520,7 +540,8 @@ export function useAiSessionController({
     promise: Promise<string | null>;
   } | null>(null);
   const imageDraft = useImageDraft(navigationDraftKey(openedSessionId ?? view?.summary.id ?? null), composer.draft,
-    value => { claimWorkspace(); dispatch({ type: 'draft.changed', value }); });
+    value => { claimWorkspace(); dispatch({ type: 'draft.changed', value }); },
+    id => submissionInputs.current.has(id));
   const [skillNavigation, setSkillNavigation] = useState(0);
   const [skillRoot, setSkillRoot] = useState<string | null>(null);
   useEffect(() => {
@@ -697,8 +718,8 @@ export function useAiSessionController({
     return result;
   }, [activeTerminal, adapter, ensureProjectSession, resolveProjectRoot, scope, skillRoot, t]);
 
-  effectExecutorRef.current = (effect): void => {
-    const context = submissionContextRef.current;
+  effectExecutorRef.current = (effect, capturedContext): void => {
+    const context = capturedContext ?? submissionContextRef.current;
     const isCurrent = (): boolean => mountedRef.current && submissionContextRef.current === context;
     if (effect.type === 'focusEditor') return;
     if (effect.type === 'announce') {
@@ -706,6 +727,8 @@ export function useAiSessionController({
       return;
     }
     if (effect.type === 'stop') {
+      void imageDraft.cancel(true);
+      (submissionQueues.current.get(context) ?? sessionSubmissionQueues.current.get(effect.sessionId))?.pause();
       void adapter.stop(effect.sessionId).then(
         () => { if (isCurrent()) dispatch({ type: 'stop.succeeded' }); },
         (error: unknown) => { if (isCurrent()) dispatch({ type: 'stop.failed', error: normalizeAiSessionError(error) }); },
@@ -714,50 +737,97 @@ export function useAiSessionController({
     }
 
     const payload = effect.payload;
+    const settle = (event: AiComposerEvent): void => {
+      if (isCurrent() || (mountedRef.current && composerRef.current.pendingSubmissions.some(item => item.clientOperationId === payload.clientOperationId))) {
+        dispatch(event);
+        return;
+      }
+      const previous = (event.type === 'submit.accepted' ? sessionSubmissionStates.current.get(event.receipt.sessionId) : undefined)
+        ?? submissionMemory.stateFor(context);
+      if (!previous) return;
+      const next = reduceAiComposer(previous, event).state;
+      submissionMemory.remember(context, next);
+    };
     const expectedNextSeq = viewRef.current?.throughSeq === null || viewRef.current?.throughSeq === undefined
       ? null
       : viewRef.current.throughSeq + 1;
     const submission: AiOptimisticSubmission = {
       ...payload,
-      startsTurn: composerRef.current.pendingSubmissions.find(
+      startsTurn: (submissionLedger.current.get(context) ?? composerRef.current).pendingSubmissions.find(
         item => item.clientOperationId === payload.clientOperationId,
       )?.startsTurn,
       scopeKey: workspaceScopeKey,
       expectedNextSeq,
       delivery: 'pending',
     };
-    updateOptimistic((current) => [
+    if (isCurrent()) updateOptimistic((current) => [
       ...current.filter((item) => (
         item.clientOperationId !== payload.clientOperationId
         && item.clientOperationId !== payload.retryOf
-        && !(
-          (item.delivery === 'failed' || item.delivery === 'timedOut')
-          && item.scopeKey === workspaceScopeKey
-          && item.content.trim() === payload.content.trim()
-        )
       )),
       submission,
     ]);
 
-    void (async () => {
-      try {
+    let queue = (payload.sessionId ? sessionSubmissionQueues.current.get(payload.sessionId) : undefined)
+      ?? submissionQueues.current.get(context);
+    if (!queue) {
+      queue = new AiSubmissionQueue(payload.sessionId, (sessionId, input) => adapter.submit(sessionId, input), sessionId => adapter.stop(sessionId));
+    }
+    submissionQueues.current.set(context, queue);
+    if (payload.sessionId) sessionSubmissionQueues.current.set(payload.sessionId, queue);
+    // Capture provider, target and terminal context at the send gesture, before
+    // another draft or navigation can change them. Retry reuses the queue entry.
+    const prepared = (async (): Promise<AiSubmitInput<'agent'>> => {
+        const bound = submissionInputs.current.get(payload.clientOperationId);
+        if (bound) return bound;
         const currentProvider = currentProviderConfig();
         const terminalContext = captureTerminalContext(currentProvider, payload.sessionId);
+        const targetTurnId = [...(viewRef.current?.nodes ?? [])].reverse().find(node => node.turnId)?.turnId ?? undefined;
+        let creating = payload.sessionId === null && !coldSkillSession.current ? creationInputs.current.get(context) : undefined;
+        if (!creating && payload.sessionId === null && !coldSkillSession.current) {
+          creating = createInputWithFrozenTargetRoot(payload.content);
+          creationInputs.current.set(context, creating);
+          void creating.catch(() => { if (creationInputs.current.get(context) === creating) creationInputs.current.delete(context); });
+        }
         const base = {
           content: payload.content,
           mode: payload.mode,
           clientOperationId: payload.clientOperationId,
           provider: currentProvider,
           terminalContext,
+          queued: submission.startsTurn === false,
+          ...(payload.mode === 'nextStep' && targetTurnId ? { targetTurnId } : {}),
         };
         const cold = payload.sessionId === null ? await coldSkillSession.current : null;
-        const create = payload.sessionId === null && !cold
-          ? await createInputWithFrozenTargetRoot(payload.content)
-          : undefined;
-        const receipt = await adapter.submit(payload.sessionId ?? cold?.summary.id ?? null, {
+        if (cold) queue.bindSession(cold.summary.id);
+        const create = await creating;
+        return {
           ...base,
           ...(create ? { create } : {}),
-        } satisfies AiSubmitInput<'agent'>);
+        };
+    })();
+    void prepared.catch(() => undefined);
+    const releaseImage = payload.hasImages ? holdDetachedImageDraft(payload.clientOperationId) : undefined;
+    const confirming = window.setTimeout(() => {
+      settle({ type: 'submit.timedOut', clientOperationId: payload.clientOperationId,
+        error: normalizeAiSessionError(new Error(t('ai.workspace.error.commitTimeout'))) });
+      if (isCurrent()) {
+        updateOptimistic(current => current.map(item => item.clientOperationId === payload.clientOperationId
+          ? { ...item, delivery: 'confirming' } : item));
+      }
+    }, OPTIMISTIC_COMMIT_TIMEOUT_MS);
+    void (async () => {
+      try {
+        const receipt = await queue.enqueue(payload.clientOperationId, () => prepared);
+        window.clearTimeout(confirming);
+        sessionSubmissionQueues.current.set(receipt.sessionId, queue);
+        settle({ type: 'submit.accepted', receipt });
+        if (submissionInputs.current.get(payload.clientOperationId)?.images?.length) {
+          // A cleanup failure must not turn a durable admission into a failed send.
+          // The retained record can be reconciled with the same operation ID later.
+          await acknowledgeDetachedImageDraft(payload.clientOperationId).catch(() => undefined);
+          submissionInputs.current.delete(payload.clientOperationId);
+        }
         if (!isCurrent()) return;
         updateOptimistic((current) => current.map((item) => (
           item.clientOperationId === payload.clientOperationId
@@ -770,7 +840,6 @@ export function useAiSessionController({
           ...current,
           route: { kind: 'conversation', sessionId: receipt.sessionId },
         }) : current);
-        dispatch({ type: 'submit.accepted', receipt });
         const timeout = window.setTimeout(() => {
           timeoutRef.current.delete(payload.clientOperationId);
           if (!isCurrent()) return;
@@ -779,23 +848,24 @@ export function useAiSessionController({
           ));
           if (!pending || pending.delivery !== 'accepted') return;
           const error = normalizeAiSessionError(new Error(t('ai.workspace.error.commitTimeout')));
-          updateOptimistic((current) => current.map((item) => (
-            item.clientOperationId === payload.clientOperationId
-              ? { ...item, delivery: 'timedOut', error: error.message }
-              : item
-          )));
+          updateOptimistic(current => current.map(item => item.clientOperationId === payload.clientOperationId
+            ? { ...item, delivery: 'confirming' } : item));
           dispatch({ type: 'submit.timedOut', clientOperationId: payload.clientOperationId, error });
+          void adapter.refresh(receipt.sessionId).catch(() => undefined);
         }, OPTIMISTIC_COMMIT_TIMEOUT_MS);
         timeoutRef.current.set(payload.clientOperationId, timeout);
       } catch (error) {
-        if (!isCurrent()) return;
+        window.clearTimeout(confirming);
         const normalized = normalizeAiSessionError(error);
+        settle({ type: 'submit.failed', clientOperationId: payload.clientOperationId, error: normalized });
+        if (!isCurrent()) return;
         updateOptimistic((current) => current.map((item) => (
           item.clientOperationId === payload.clientOperationId
             ? { ...item, delivery: 'failed', error: normalized.message }
             : item
         )));
-        dispatch({ type: 'submit.failed', clientOperationId: payload.clientOperationId, error: normalized });
+      } finally {
+        releaseImage?.();
       }
     })();
   };
@@ -805,11 +875,33 @@ export function useAiSessionController({
     return () => {
       saveCurrentDraft();
       mountedRef.current = false;
+      submissionMemory.remember(submissionContextRef.current, composerRef.current);
       for (const timeout of timeoutRef.current.values()) window.clearTimeout(timeout);
       timeoutRef.current.clear();
-      ownedAdapter?.dispose();
+      submissionMemory.close(submissionContextRef.current);
     };
-  }, [ownedAdapter, saveCurrentDraft]);
+  }, [submissionMemory, saveCurrentDraft]);
+
+  useEffect(() => submissionMemory.subscribe((context, state) => {
+    if (!mountedRef.current || state === composerRef.current || context.key !== submissionContextRef.current.key) return;
+    if (context !== submissionContextRef.current
+      && (!state.sessionId || state.sessionId !== composerRef.current.sessionId)) return;
+    // Receipts can arrive from a worker created by a previous mounted panel.
+    // Keep the new editor draft while adopting that worker's admission state.
+    const previousSessionId = composerRef.current.sessionId;
+    const next = { ...state, draft: composerRef.current.draft };
+    composerRef.current = next;
+    setComposer(next);
+    updateOptimistic(() => next.pendingSubmissions.map(item => ({ ...item,
+      scopeKey: context.key, expectedNextSeq: null,
+      delivery: item.state === 'confirming' ? 'confirming' : item.state === 'accepted' ? 'accepted' : 'pending' })));
+    if (next.sessionId && previousSessionId !== next.sessionId) {
+      setOpenedSessionId(next.sessionId);
+      adoptDraft(next.sessionId);
+      setNavigation(current => current.route.kind === 'conversation'
+        ? { ...current, route: { kind: 'conversation', sessionId: next.sessionId } } : current);
+    }
+  }), [adoptDraft, submissionMemory, updateOptimistic]);
 
   useEffect(() => {
     const previous = viewRef.current;
@@ -820,11 +912,11 @@ export function useAiSessionController({
       setSkillNavigation((generation) => generation + 1);
       return;
     }
-    resetComposer();
+    resetComposer(undefined, true);
     setNewExecutionSurface(useAgentPermissionStore.getState().getExecutionSurface(activeTerminal?.sessionId ?? ''));
     appliedWorkspaceRef.current = workspaceScopeKey;
-    if (composerRef.current.draft) claimWorkspace();
-    setOpenedSessionId(null);
+    if (composerRef.current.draft || composerRef.current.pendingSubmissions.length || composerRef.current.failedDrafts.length) claimWorkspace();
+    setOpenedSessionId(composerRef.current.sessionId);
     setView(null);
     setQueueMutation(null);
     queueOperationRef.current = null;
@@ -888,7 +980,7 @@ export function useAiSessionController({
   useEffect(() => {
     // An explicit history selection already owns the composer. A missing view
     // here means its transcript is loading, not that a new session was opened.
-    if (!view && openedSessionId) return;
+    if (!view && (openedSessionId || composerRef.current.sessionId)) return;
     if (view && viewRef.current !== view) return;
     if (view && draftOwnerRef.current !== navigationDraftKey(view.summary.id)) {
       saveCurrentDraft();
@@ -1253,7 +1345,8 @@ export function useAiSessionController({
     const steerable = intent.type !== 'steer' || (current.status === 'running'
       && current.inbox.some((item) => item.id === intent.itemId && item.state === 'queued'
         && item.source === 'user' && item.lane === 'nextTurn'));
-    if (!previous && (current.summary.archived || current.snapshot.value.ended || terminal || !steerable)) {
+    const resumingFailure = intent.type === 'resume' && current.status === 'failed';
+    if (!previous && (current.summary.archived || (!resumingFailure && (current.snapshot.value.ended || terminal)) || !steerable)) {
       setQueueMutation({ intent, status: 'failed', error: t('ai.workspace.queue.errorNotActionable'), conflict: false });
       return;
     }
@@ -1557,6 +1650,7 @@ export function useAiSessionController({
         return;
       }
       if (imageDraft.draft?.images.length) {
+        const executeImageEffect = effectExecutorRef.current;
         const decision = resolveAiSubmission({ sessionId: composer.sessionId, sessionStatus: composer.runtimeStatus,
           terminal: composer.terminal, waitingApproval: composer.waitingApproval, waitingQuestion: composer.waitingQuestion,
           hasProvider, canCreateSession: canStartAgent, draft: composer.draft, hasImages: true, gesture,
@@ -1569,39 +1663,45 @@ export function useAiSessionController({
           imageProvider = currentProviderConfig();
         }
         catch (e) { imageDraft.reportError(String(e)); return; }
-        void imageDraft.send(async () => {
-          const cold = await coldSkillSession.current;
-          const sessionId = composer.sessionId ?? cold?.summary.id;
-          const create = sessionId ? undefined : await createInputWithFrozenTargetRoot(
-            composerRef.current.draft.trim(),
-          );
-          return { id: operationId(), sessionId: sessionId ?? create!.request.sessionId, mode: decision.mode, create };
-        }, async value => {
-          // Capability resolution can still be in flight when the user submits
-          // immediately after opening the panel. Await it instead of reporting
-          // MODEL_RESOLUTION_PENDING as a storage or connection failure.
+        const terminalContext = captureTerminalContext(imageProvider, composer.sessionId);
+        const imageTargetTurnId = decision.mode === 'nextStep'
+          ? [...(viewRef.current?.nodes ?? [])].reverse().find(node => node.turnId)?.turnId ?? undefined : undefined;
+        const capturedText = composerRef.current.draft;
+        const cold = coldSkillSession.current;
+        let creating = composer.sessionId === null && !cold ? creationInputs.current.get(context) : undefined;
+        if (!creating && composer.sessionId === null && !cold) {
+          creating = createInputWithFrozenTargetRoot(capturedText);
+          creationInputs.current.set(context, creating);
+        }
+        void imageDraft.detach(async () => {
           await loadResolvedModel(imageProvider);
           requireVision(imageProvider);
-          const terminalContext = captureTerminalContext(imageProvider, composer.sessionId);
-          const op = value.operation!;
-          if (op.create) {
-            let existing: AiSessionView | null = null;
-            try { existing = await adapter.open(op.sessionId); } catch { /* Not yet created. */ }
-            if (!existing) await adapter.create(op.create);
-            else if (existing.snapshot.kind !== 'agent'
-              || !sameTarget(existing.snapshot.value.header.target, op.create.request.target)) {
-              throw new Error('IMAGE_SESSION_TARGET_MISMATCH');
-            }
+          const sessionId = composer.sessionId ?? (await cold)?.summary.id;
+          const create = await creating;
+          return { id: operationId(), sessionId: sessionId ?? create!.request.sessionId, mode: decision.mode, create, targetTurnId: imageTargetTurnId };
+        }).then(value => {
+          if (!value?.operation) return;
+          const op = value.operation;
+          submissionInputs.current.set(op.id, { clientOperationId: op.id, mode: op.mode, content: value.text,
+            images: value.images, provider: imageProvider, terminalContext, create: op.create,
+            targetTurnId: op.targetTurnId,
+            queued: composer.runtimeStatus === 'running' || composer.runtimeStatus === 'waiting' });
+          if (!op.create) {
+            const queue = submissionQueues.current.get(context)
+              ?? new AiSubmissionQueue(op.sessionId, (sessionId, input) => adapter.submit(sessionId, input), sessionId => adapter.stop(sessionId));
+            queue.bindSession(op.sessionId);
+            submissionQueues.current.set(context, queue);
           }
-          await adapter.submit(op.sessionId, { clientOperationId: op.id, mode: op.mode, content: value.text,
-            images: value.images, provider: imageProvider, terminalContext });
-        }, value => {
-          if (!mountedRef.current || submissionContextRef.current !== context) return;
-          if (composerRef.current.draft === value.text) dispatch({ type: 'draft.changed', value: '' });
-          setOpenedSessionId(value.operation!.sessionId);
-          adoptDraft(value.operation!.sessionId);
-          setNavigation(current => current.route.kind === 'conversation'
-            ? { ...current, route: { kind: 'conversation', sessionId: value.operation!.sessionId } } : current);
+          const event: AiComposerEvent = { type: 'submit.requested', content: value.text, hasImages: true, gesture,
+            accelerated: effectiveAccelerated, clientOperationId: op.id, now: now(), hasProvider, canCreateSession: canStartAgent };
+          if (!mountedRef.current || submissionContextRef.current !== context) {
+            const transition = reduceAiComposer(submissionLedger.current.get(context) ?? composer, event);
+            submissionMemory.remember(context, transition.state);
+            for (const effect of transition.effects) if (effect.type === 'submit') executeImageEffect(effect, context);
+            return;
+          }
+          if (composerRef.current.draft === capturedText) dispatch({ type: 'draft.changed', value: '' });
+          dispatch(event);
         });
         return;
       }
