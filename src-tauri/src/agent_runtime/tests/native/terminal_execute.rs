@@ -225,6 +225,125 @@
     }
 
     #[test]
+    fn closed_terminal_returns_captured_uncertain_result_without_replay() {
+        let (broker, registry, sessions, receiver) = harness();
+        let operation = registry
+            .start(
+                &sessions,
+                "transport-1",
+                "agent-1",
+                "task-1",
+                "operation-1",
+                "sleep 60",
+                "\n",
+            )
+            .unwrap();
+        assert!(matches!(receiver.recv().unwrap(), SessionCommand::Write(_)));
+        command_start(&broker, "sleep 60");
+        broker
+            .observe_raw_output("transport-1", b"before close")
+            .unwrap();
+        assert!(registry.terminal_closed("transport-1").unwrap());
+        broker
+            .close_transport(
+                "transport-1",
+                crate::terminal_broker::TerminalGenerationCloseReason::UserClosed,
+            )
+            .unwrap();
+        assert!(!registry.has_operation("transport-1").unwrap());
+        let snapshot = registry
+            .wait(&sessions, "transport-1", &operation, Duration::from_secs(1))
+            .unwrap();
+        assert_eq!(snapshot.state, TerminalCommandState::Uncertain);
+        assert_eq!(snapshot.exit_code, None);
+        assert_eq!(snapshot.combined_output, "before close");
+        assert!(snapshot.no_auto_replay);
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn retired_waiter_and_cleanup_leave_new_command_registered() {
+        let (broker, registry, sessions, receiver) = harness();
+        let old = registry
+            .start(
+                &sessions,
+                "transport-1",
+                "agent-1",
+                "task-1",
+                "operation-1",
+                "sleep 60",
+                "\n",
+            )
+            .unwrap();
+        receiver.recv().unwrap();
+        command_start(&broker, "sleep 60");
+        registry.terminal_closed("transport-1").unwrap();
+        broker
+            .close_transport(
+                "transport-1",
+                crate::terminal_broker::TerminalGenerationCloseReason::UserClosed,
+            )
+            .unwrap();
+        broker
+            .attach_transport(
+                "transport-1",
+                Some("transport-1"),
+                TerminalTransportKind::LocalPty,
+                TerminalGeometry::new(80, 24),
+            )
+            .unwrap();
+        broker
+            .register_integration_channel("transport-1", "integration-1", TerminalShellKind::Zsh)
+            .unwrap();
+        for event in [
+            TerminalIntegrationControlEvent::Ready {
+                shell: TerminalShellKind::Zsh,
+            },
+            TerminalIntegrationControlEvent::PromptStart { cwd: "/tmp".into() },
+            TerminalIntegrationControlEvent::PromptEnd,
+        ] {
+            broker
+                .accept_integration_event("transport-1", "integration-1", event)
+                .unwrap();
+        }
+        let current = registry
+            .start(
+                &sessions,
+                "transport-1",
+                "agent-1",
+                "task-2",
+                "operation-2",
+                "pwd",
+                "\n",
+            )
+            .unwrap();
+        receiver.recv().unwrap();
+        registry
+            .finish_registration(
+                "transport-1",
+                "agent-1",
+                "task-1",
+                "operation-1",
+                TerminalLeaseReleaseReason::TerminalClosed,
+            )
+            .unwrap();
+        let old_snapshot = registry
+            .wait(&sessions, "transport-1", &old, Duration::from_secs(1))
+            .unwrap();
+        assert_eq!(old_snapshot.state, TerminalCommandState::Uncertain);
+        assert!(registry.has_operation("transport-1").unwrap());
+        command_start(&broker, "pwd");
+        command_end(&broker, 0);
+        let current_snapshot = registry
+            .wait(&sessions, "transport-1", &current, Duration::from_secs(1))
+            .unwrap();
+        assert_eq!(current_snapshot.state, TerminalCommandState::Completed);
+        assert_eq!(current_snapshot.exit_code, Some(0));
+        assert!(!registry.has_operation("transport-1").unwrap());
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
     fn missing_cooperative_end_is_uncertain_and_never_reported_as_timeout() {
         let (broker, registry, sessions, receiver) = harness();
         let operation = registry

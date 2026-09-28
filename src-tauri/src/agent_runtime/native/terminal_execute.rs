@@ -284,19 +284,33 @@ impl TerminalExecuteRegistry {
             .broker
             .snapshot(Some(session_id))?
             .session
+            .filter(|session| {
+                session.terminal_session_id == snapshot.terminal_session_id
+                    && session.terminal_generation == snapshot.terminal_generation
+            })
             .map(|session| session.next_output_sequence.saturating_sub(1))
             .unwrap_or(snapshot.capture_end_sequence.unwrap_or(0));
         operation.finalize_capture(through_sequence)?;
         snapshot = operation.snapshot()?;
         let reason = release_reason(snapshot.state);
-        let registration = self.registration(session_id, &snapshot.operation_id)?;
-        let _ = self.finish_registration(
-            session_id,
-            &registration.agent_session_id,
-            &registration.task_id,
-            &snapshot.operation_id,
-            reason,
-        );
+        // Closing a terminal may already have retired this registration. The
+        // operation still owns its final result, even if a new command exists.
+        let registration = self
+            .operations
+            .lock()
+            .map_err(|_| "TERMINAL_EXECUTE_REGISTRY_UNAVAILABLE".to_string())?
+            .get(session_id)
+            .filter(|registration| Arc::ptr_eq(&registration.operation, operation))
+            .cloned();
+        if let Some(registration) = registration {
+            let _ = self.finish_registration(
+                session_id,
+                &registration.agent_session_id,
+                &registration.task_id,
+                &snapshot.operation_id,
+                reason,
+            );
+        }
         Ok(snapshot)
     }
 
@@ -430,20 +444,24 @@ impl TerminalExecuteRegistry {
         operation_id: &str,
         reason: TerminalLeaseReleaseReason,
     ) -> Result<(), String> {
-        let command_id = self
+        let mut operations = self
             .operations
             .lock()
-            .ok()
-            .and_then(|operations| operations.get(session_id).cloned())
-            .filter(|registration| registration.operation_id == operation_id)
-            .and_then(|registration| registration.operation.command_id().ok());
-        if let Some(command_id) = command_id {
+            .map_err(|_| "TERMINAL_EXECUTE_REGISTRY_UNAVAILABLE".to_string())?;
+        if !operations.get(session_id).is_some_and(|registration| {
+            registration.operation_id == operation_id
+                && registration.agent_session_id == agent_session_id
+                && registration.task_id == task_id
+        }) {
+            return Ok(());
+        }
+        let registration = operations.remove(session_id);
+        drop(operations);
+        if let Some(command_id) =
+            registration.and_then(|registration| registration.operation.command_id().ok())
+        {
             let _ = self.broker.retire_command(session_id, &command_id);
         }
-        self.operations
-            .lock()
-            .map_err(|_| "TERMINAL_EXECUTE_REGISTRY_UNAVAILABLE".to_string())?
-            .remove(session_id);
         let _ = self
             .leases
             .release(session_id, agent_session_id, task_id, operation_id, reason);
