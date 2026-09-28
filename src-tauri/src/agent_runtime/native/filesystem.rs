@@ -1671,6 +1671,14 @@ fn resolve_local_destination(root: &Path, requested: &str) -> Result<PathBuf, St
 
 fn local_candidate(root: &Path, requested: &str) -> Result<PathBuf, String> {
     let requested = Path::new(requested);
+    // Joining onto a Windows verbatim root normalizes parent components away.
+    // Reject them in the original request before that normalization can occur.
+    if requested
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        return Err("local path traversal is denied".into());
+    }
     let candidate = if requested.is_absolute() {
         requested.to_path_buf()
     } else {
@@ -2577,6 +2585,41 @@ mod tests {
                 .unwrap();
             assert!(resolve_local_destination(root.path(), "link/file").is_err());
         }
+    }
+
+    #[test]
+    fn local_scope_rejects_parent_components_before_joining_canonical_root() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(workspace.path()).unwrap();
+        let source = include_str!("filesystem.rs");
+        fs::write(root.join("filesystem.rs"), source).unwrap();
+        fs::create_dir(root.join("nested")).unwrap();
+
+        let requests = [
+            "../outside",
+            "nested/../filesystem.rs",
+            "./nested/../../outside",
+            #[cfg(windows)]
+            r"..\outside",
+            #[cfg(windows)]
+            r"nested\..\filesystem.rs",
+        ];
+        for requested in requests {
+            assert_eq!(
+                resolve_local_search_path(&root, requested).unwrap_err(),
+                "local path traversal is denied",
+                "search accepted or misclassified {requested}"
+            );
+            assert_eq!(
+                resolve_local_destination(&root, requested).unwrap_err(),
+                "local path traversal is denied",
+                "destination accepted or misclassified {requested}"
+            );
+        }
+        assert_eq!(
+            fs::read(resolve_local_search_path(&root, "filesystem.rs").unwrap()).unwrap(),
+            source.as_bytes()
+        );
     }
 
     #[test]
