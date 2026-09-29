@@ -13,6 +13,8 @@
 
 ## 现有请求契约
 
+消息气泡属于待实施扩展，见[消息设计](../../docs/design/petdex-message-integration-design.md)、[阶段6–11计划](../../docs/design/petdex-message-integration-plan.md)、[气泡契约](bubble.md)及[消息验收](../../docs/design/petdex-message-integration-acceptance.md)。确认方案为AI按会话、SSH/SFTP按后端连接归属，最多三个固定槽，默认模板、另行开启有限详情，关闭只结算已用槽且共享1500ms预算。当前下述实现仍不调用 `/bubble`；不能将计划能力套用为已实现行为。阶段6已完成固定版本协议及限定范围的真实显示核验，具备阶段7交接条件；组合/计时和残留限制见消息验收。
+
 ShellSpan 的动作发送只向 `http://127.0.0.1:7777/state` 发出 JSON POST，凭证通过 `tokio::fs::read_to_string` 异步读取自 `~/.petdex/runtime/update-token`，使用标记为 sensitive 的 `X-Petdex-Update-Token` 请求头。客户端禁止代理，显式使用 `reqwest::redirect::Policy::none()` 禁止重定向，连接超时 250ms、单次请求超时 750ms。取消覆盖请求锁等待、异步读取和请求；重新读取后再次检查取消。阶段 4 另有用户主动触发的匿名只读 `GET /health`，见下文。
 
 阶段 5 在真实端口误接后增加匿名协议兼容门禁：读取 token（含401后的重新读取）前，以及每次认证 POST 前，依次检查固定 loopback 的 `/health` 和 `/whoami`。响应必须为 HTTP 200、最多1024字节且可由 serde_json 解析；health 要求 ok=true/port=7777，whoami 要求 ok=true/inProcess=true/有效正PID。检查与发送共用请求锁和取消代际，沿用单次网络超时，匿名探针不附带令牌、不更新成功发送时间。非兼容响应归为 rejected、传输失败归为 unreachable；metadata 可先检查凭证文件存在性，但兼容失败不读取凭证内容。
