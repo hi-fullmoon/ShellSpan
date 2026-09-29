@@ -38,8 +38,8 @@ vi.mock('@/lib/petdex/petdex', () => ({
   testPetdexConnection: petdexMocks.testConnection,
 }));
 
-vi.mock('@/lib/petdex/petdex-feedback', () => ({
-  openPetdexPhase3Feedback: petdexFeedbackMocks.open,
+vi.mock('@/lib/feedback', () => ({
+  openFeedback: petdexFeedbackMocks.open,
 }));
 
 vi.mock('@/hooks/useI18n', () => ({
@@ -93,6 +93,7 @@ describe('SettingsPanel', () => {
       'settings.ai.title',
       'settings.shortcuts.title',
       'settings.experimental.title',
+      'settings.feedback.title',
     ];
     for (const titleKey of sectionTitleKeys) {
       const tab = screen.getByRole('tab', { name: titleKey });
@@ -152,9 +153,15 @@ describe('SettingsPanel', () => {
     expect(screen.getByRole('status', {
       name: 'settings.experimental.petdex.statusAnnouncement',
     })).toHaveAttribute('aria-atomic', 'true');
+    expect(screen.queryByRole('button', {
+      name: 'settings.feedback.title',
+    })).not.toBeInTheDocument();
+    openSection('settings.feedback.title');
     expect(screen.getByRole('button', {
-      name: 'settings.experimental.petdex.feedbackAction',
-    })).toHaveAttribute('aria-describedby', 'petdex-feedback-description');
+      name: 'settings.feedback.title',
+    })).toHaveAttribute('aria-describedby', 'feedback-description');
+    expect(screen.getByText('settings.feedback.reportTitle')).toBeInTheDocument();
+    expect(screen.queryByText('settings.experimental.petdex.title')).not.toBeInTheDocument();
     expect(petdexFeedbackMocks.open).not.toHaveBeenCalled();
 
     openSection('settings.general.title');
@@ -281,13 +288,13 @@ describe('SettingsPanel', () => {
 
   it('opens voluntary feedback only after a user action and without reading the opt-in state', async () => {
     render(<SettingsPanel />);
-    openSection('settings.experimental.title');
+    openSection('settings.feedback.title');
 
     expect(useAppStore.getState().petdexEnabled).toBe(false);
     expect(petdexFeedbackMocks.open).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', {
-      name: 'settings.experimental.petdex.feedbackAction',
+      name: 'settings.feedback.title',
     }));
 
     expect(petdexFeedbackMocks.open).toHaveBeenCalledTimes(1);

@@ -24,6 +24,7 @@ import { cn } from '@/lib/utils';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { CompactDialogHeader } from '@/components/ui/compact-dialog';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
@@ -56,7 +57,7 @@ import { clearTerminalWorkspace } from '@/lib/terminal/terminal-workspace-persis
 import { clearSftpWorkspace } from '@/lib/sftp/sftp-workspace-persistence';
 import { checkPetdexHealth, getPetdexStatus, listenToPetdexStatus, testPetdexConnection } from '@/lib/petdex/petdex';
 import { PetdexDiagnostics } from './petdex-diagnostics';
-import { openPetdexPhase3Feedback } from '@/lib/petdex/petdex-feedback';
+import { openFeedback } from '@/lib/feedback';
 import type { PetdexCategories, PetdexDiagnostic, PetdexHealth } from '@/types';
 import { INITIAL_PETDEX_DIAGNOSTIC_VIEW, petdexDiagnosticStatus, reducePetdexDiagnosticView, PETDEX_STATUS_LABEL_KEYS, PETDEX_PREVIEW_LABEL_KEYS } from '@/lib/petdex/diagnostic';
 import { SettingRow, SettingsGroup } from './settings-layout';
@@ -115,6 +116,7 @@ const SETTINGS_SECTIONS: {
   { id: 'ai', icon: BotIcon, titleKey: 'settings.ai.title', descriptionKey: 'settings.ai.description' },
   { id: 'shortcuts', icon: KeyboardIcon, titleKey: 'settings.shortcuts.title', descriptionKey: 'settings.shortcuts.description' },
   { id: 'experimental', icon: FlaskConicalIcon, titleKey: 'settings.experimental.title', descriptionKey: 'settings.experimental.description' },
+  { id: 'feedback', icon: MessageSquareIcon, titleKey: 'settings.feedback.title', descriptionKey: 'settings.feedback.description' },
 ];
 
 interface SettingGroupLabelProps {
@@ -122,6 +124,20 @@ interface SettingGroupLabelProps {
 }
 
 const SettingGroupLabel: React.FC<SettingGroupLabelProps> = () => null;
+
+const IntegrationGroup: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => {
+  const titleId = React.useId();
+  return (
+    <section aria-labelledby={titleId} data-slot="integration-group" className="flex min-w-0 flex-col gap-1.5">
+      <div className="flex min-h-5 items-center gap-3 px-1">
+        <h3 id={titleId} className="text-xs font-medium text-muted-foreground">{title}</h3>
+      </div>
+      <Card size="sm" radius="compact" variant="outline">
+        {children}
+      </Card>
+    </section>
+  );
+};
 
 const SettingsGrid: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const groups: Array<{ rows: React.ReactNode[]; title?: React.ReactNode }> = [];
@@ -562,29 +578,28 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </TabsContent>
 
             <TabsContent value="experimental" className="w-full">
-              <SettingsGrid>
-                <SettingRow
-                  label={t('settings.experimental.petdex.title')}
-                  description={t('settings.experimental.petdex.description')}
-                  labelId="petdex-integration-label"
-                  descriptionId="petdex-integration-description"
-                >
-                  <div className="flex justify-end">
-                    <Switch
-                      aria-label={t('settings.experimental.petdex.enabled')}
-                      aria-describedby="petdex-integration-description petdex-privacy-description"
-                      aria-busy={petdexConfiguring}
-                      checked={displayedPetdexEnabled}
-                      onCheckedChange={(enabled) => handlePetdexEnabledChange(enabled)}
-                    />
-                  </div>
-                </SettingRow>
-                <SettingRow
-                  label={t('settings.experimental.petdex.categories')}
-                  description={t('settings.experimental.petdex.categoriesDescription')}
-                  descriptionId="petdex-categories-description"
-                >
-                  <div className="flex flex-col gap-3">
+              <div className="flex min-w-0 flex-col gap-3">
+                <IntegrationGroup title={t('settings.experimental.group.integration')}>
+                  <CardHeader>
+                    <CardTitle id="petdex-integration-label">{t('settings.experimental.petdex.title')}</CardTitle>
+                    <CardDescription id="petdex-integration-description">{t('settings.experimental.petdex.description')}</CardDescription>
+                    <CardAction>
+                      <Switch
+                        aria-label={t('settings.experimental.petdex.enabled')}
+                        aria-describedby="petdex-integration-description petdex-privacy-description"
+                        aria-busy={petdexConfiguring}
+                        checked={displayedPetdexEnabled}
+                        onCheckedChange={(enabled) => handlePetdexEnabledChange(enabled)}
+                      />
+                    </CardAction>
+                  </CardHeader>
+                </IntegrationGroup>
+                <IntegrationGroup title={t('settings.experimental.group.tasks')}>
+                  <CardHeader>
+                    <CardTitle>{t('settings.experimental.petdex.categories')}</CardTitle>
+                    <CardDescription id="petdex-categories-description">{t('settings.experimental.petdex.categoriesDescription')}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-3">
                     {(['ssh', 'sftp', 'ai'] as const).map((category) => (
                       <div key={category} className="flex items-center justify-between gap-3">
                         <Label htmlFor={`petdex-category-${category}`}>
@@ -599,77 +614,86 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         />
                       </div>
                     ))}
-                  </div>
-                </SettingRow>
-                <SettingRow
-                  label={t('settings.experimental.petdex.status')}
-                  description={`${t('settings.experimental.petdex.privacy')} ${t('settings.experimental.petdex.communicationNote')}${petdexView.subscriptionFailed ? ` ${t('settings.experimental.petdex.subscriptionError')}` : ''}`}
-                  labelId="petdex-status-label"
-                  descriptionId="petdex-privacy-description"
-                >
-                  <div
-                    className="flex flex-wrap items-center justify-end gap-2"
-                    role="status"
-                    aria-label={t('settings.experimental.petdex.statusAnnouncement', {
-                      status: t(PETDEX_STATUS_LABEL_KEYS[petdexStatus]),
-                    })}
-                    aria-live="polite"
-                    aria-atomic="true"
-                    aria-busy={testingPetdex || checkingPetdex || petdexConfiguring}
-                  >
-                    <Badge
-                      variant={petdexStatus === 'connected'
-                        ? 'default'
-                        : petdexStatus === 'connectionError'
-                          ? 'destructive'
-                          : 'outline'}
-                    >
-                      {t(PETDEX_STATUS_LABEL_KEYS[petdexStatus])}
-                    </Badge>
-                    <Button size="sm" variant="outline" type="button"
-                      disabled={!petdexEnabled || testingPetdex || checkingPetdex || petdexConfiguring}
-                      onClick={() => void handleTestPetdex(true)}>
-                      <RotateCcwIcon data-icon="inline-start" />
-                      {t(checkingPetdex ? 'settings.experimental.petdex.status.checking' : 'settings.experimental.petdex.recheck')}
-                    </Button>
+                  </CardContent>
+                </IntegrationGroup>
+                <IntegrationGroup title={t('settings.experimental.group.diagnostics')}>
+                  <CardHeader>
+                    <CardTitle id="petdex-status-label">{t('settings.experimental.petdex.status')}</CardTitle>
+                    <CardDescription>{t('settings.experimental.petdex.communicationNote')}</CardDescription>
+                    <CardAction>
+                      <div
+                        role="status"
+                        aria-label={t('settings.experimental.petdex.statusAnnouncement', {
+                          status: t(PETDEX_STATUS_LABEL_KEYS[petdexStatus]),
+                        })}
+                        aria-live="polite"
+                        aria-atomic="true"
+                        aria-busy={testingPetdex || checkingPetdex || petdexConfiguring}
+                      >
+                        <Badge
+                          variant={petdexStatus === 'connected'
+                            ? 'default'
+                            : petdexStatus === 'connectionError'
+                              ? 'destructive'
+                              : 'outline'}
+                        >
+                          {t(PETDEX_STATUS_LABEL_KEYS[petdexStatus])}
+                        </Badge>
+                      </div>
+                    </CardAction>
+                  </CardHeader>
+                  <CardContent className="flex min-w-0 flex-col gap-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button size="sm" variant="outline" type="button"
+                        disabled={!petdexEnabled || testingPetdex || checkingPetdex || petdexConfiguring}
+                        onClick={() => void handleTestPetdex(true)}>
+                        <RotateCcwIcon data-icon="inline-start" />
+                        {t(checkingPetdex ? 'settings.experimental.petdex.status.checking' : 'settings.experimental.petdex.recheck')}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        aria-describedby="petdex-privacy-description"
+                        disabled={!petdexEnabled || testingPetdex || checkingPetdex || petdexConfiguring}
+                        onClick={() => void handleTestPetdex()}
+                      >
+                        <FlaskConicalIcon data-icon="inline-start" />
+                        {testingPetdex
+                          ? t('settings.experimental.petdex.testing')
+                          : t('settings.experimental.petdex.testAction')}
+                      </Button>
+                    </div>
+                    <p id="petdex-privacy-description" className="text-xs leading-relaxed text-muted-foreground">
+                      {t('settings.experimental.petdex.privacy')}
+                      {petdexView.subscriptionFailed && ` ${t('settings.experimental.petdex.subscriptionError')}`}
+                    </p>
+                    <PetdexDiagnostics snapshot={petdexView.snapshot} status={petdexStatus} health={petdexHealth} />
+                  </CardContent>
+                </IntegrationGroup>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="feedback" className="w-full">
+              <Card size="sm" radius="compact" variant="outline">
+                <CardHeader>
+                  <CardTitle>{t('settings.feedback.reportTitle')}</CardTitle>
+                  <CardDescription id="feedback-description">{t('settings.feedback.privacy')}</CardDescription>
+                  <CardAction>
                     <Button
                       type="button"
                       size="sm"
                       variant="outline"
-                      aria-describedby="petdex-privacy-description"
-                      disabled={!petdexEnabled || testingPetdex || checkingPetdex || petdexConfiguring}
-                      onClick={() => void handleTestPetdex()}
-                    >
-                      <FlaskConicalIcon data-icon="inline-start" />
-                      {testingPetdex
-                        ? t('settings.experimental.petdex.testing')
-                        : t('settings.experimental.petdex.testAction')}
-                    </Button>
-                  </div>
-                </SettingRow>
-                <div className="min-w-0 px-3.5 py-2">
-                  <PetdexDiagnostics snapshot={petdexView.snapshot} status={petdexStatus} health={petdexHealth} />
-                </div>
-                <SettingRow
-                  label={t('settings.experimental.petdex.feedback')}
-                  description={t('settings.experimental.petdex.feedbackDescription')}
-                  descriptionId="petdex-feedback-description"
-                >
-                  <div className="flex justify-end">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      aria-describedby="petdex-feedback-description"
-                      onClick={() => void openPetdexPhase3Feedback().catch(() => toast.error(t('settings.experimental.petdex.operationError')))}
+                      aria-describedby="feedback-description"
+                      onClick={() => void openFeedback().catch(() => toast.error(t('settings.feedback.openError')))}
                     >
                       <MessageSquareIcon data-icon="inline-start" />
-                      {t('settings.experimental.petdex.feedbackAction')}
+                      {t('settings.feedback.title')}
                       <ExternalLinkIcon data-icon="inline-end" />
                     </Button>
-                  </div>
-                </SettingRow>
-              </SettingsGrid>
+                  </CardAction>
+                </CardHeader>
+              </Card>
             </TabsContent>
 
             <TabsContent value="general" className="w-full">
