@@ -420,7 +420,7 @@ impl PetdexAdapter {
                     result.diagnostic_category()
                 );
                 let completed_at = Instant::now();
-                delivery.record(command.state, result, completed_at);
+                delivery.record(command, result, completed_at);
                 self.update_diagnostic(&app, &cancellation, Some(result), false);
                 continue;
             }
@@ -481,7 +481,7 @@ impl PetdexAdapter {
                             if control.abandon_test_preview(test_started_at, &cancellation, previous_diagnostic) {
                                 let _ = app.emit(PETDEX_STATUS_EVENT, control.diagnostic);
                             }
-                            delivery.record(command.state, RequestResult::Expired, Instant::now());
+                            delivery.record(command, RequestResult::Expired, Instant::now());
                             continue;
                         },
                         result = self.apply_state(command, cancellation.clone()) => result,
@@ -508,7 +508,7 @@ impl PetdexAdapter {
                         "Petdex state update result={}",
                         result.diagnostic_category()
                     );
-                    delivery.record(command.state, result, Instant::now());
+                    delivery.record(command, result, Instant::now());
                     self.update_diagnostic(&app, &cancellation, Some(result), false);
                     let _ = reply.send(self.test_result(result, overridden, Some(&cancellation)));
                 }
