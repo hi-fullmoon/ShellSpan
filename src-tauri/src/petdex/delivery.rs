@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use super::{
     arbiter::ArbitrationTarget,
-    types::{PetdexState, RequestResult},
+    types::{PetdexState, RequestResult, StateCommand},
 };
 
 pub(super) const MIN_SEND_INTERVAL: Duration = Duration::from_millis(100);
@@ -15,8 +15,8 @@ pub(super) const IDLE_STEADY_RECOVERY_PROBE_INTERVAL: Duration = Duration::from_
 
 #[derive(Default)]
 pub(super) struct DeliveryPolicy {
-    last_sent: Option<PetdexState>,
-    last_attempted: Option<PetdexState>,
+    last_sent: Option<StateCommand>,
+    last_attempted: Option<StateCommand>,
     last_success_at: Option<Instant>,
     pub(super) last_attempt_at: Option<Instant>,
     pub(super) retry_at: Option<Instant>,
@@ -30,8 +30,11 @@ impl DeliveryPolicy {
         target: ArbitrationTarget,
         now: Instant,
     ) -> Option<Instant> {
-        let state_changed = self.last_attempted != Some(target.state);
-        if state_changed {
+        // A different absolute expiry is a new short prompt even when its
+        // animation is unchanged. Compare the deadline, not remaining time,
+        // so ordinary clock ticks cannot cause duplicate sends.
+        let command_changed = self.last_attempted != Some(target.command());
+        if command_changed {
             return Some(self.minimum_attempt_deadline(now));
         }
 
@@ -54,22 +57,22 @@ impl DeliveryPolicy {
         Some(self.minimum_attempt_deadline(now))
     }
 
-    pub(super) fn record(&mut self, state: PetdexState, result: RequestResult, now: Instant) {
+    pub(super) fn record(&mut self, command: StateCommand, result: RequestResult, now: Instant) {
         self.last_attempt_at = Some(now);
         if result == RequestResult::Expired {
             self.last_attempted = None;
             self.retry_at = None;
             return;
         }
-        self.last_attempted = Some(state);
+        self.last_attempted = Some(command);
         if result == RequestResult::Applied {
-            if self.last_sent == Some(state) {
+            if self.last_sent == Some(command) {
                 self.consecutive_same_state_successes =
                     self.consecutive_same_state_successes.saturating_add(1);
             } else {
                 self.consecutive_same_state_successes = 0;
             }
-            self.last_sent = Some(state);
+            self.last_sent = Some(command);
             self.last_success_at = Some(now);
             self.retry_at = None;
             self.consecutive_failures = 0;

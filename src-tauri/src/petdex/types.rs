@@ -210,7 +210,7 @@ impl PetdexDiagnostic {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) struct StateCommand {
     pub(super) state: PetdexState,
     pub(super) expires_at: Option<Instant>,

@@ -1,6 +1,111 @@
 use super::types::{WaitReason, FAILURE_TTL, SUCCESS_TTL};
 use super::*;
 
+fn assert_staggered_short_prompts_are_delivered(phase: ActivityPhase, state: PetdexState) {
+    let start = Instant::now();
+    let ttl = state.ttl().expect("short prompt duration");
+    let stagger = Duration::from_millis(500);
+    let mut arbiter = PetdexArbiter::default();
+    arbiter.set_categories(PetdexCategories {
+        ai: true,
+        ..Default::default()
+    });
+    for (source, run_id) in [(ActivitySource::Sftp, 1), (ActivitySource::Ai, 2)] {
+        arbiter.apply(
+            ActivityEvent::new(source, run_id, 0, ActivityPhase::Running, start),
+            start,
+        );
+    }
+    arbiter.apply(
+        ActivityEvent::new(ActivitySource::Sftp, 1, 1, phase, start),
+        start,
+    );
+    let mut delivery = DeliveryPolicy::default();
+    let first = arbiter.target(start);
+    assert_eq!(first.state, state);
+    delivery.record(first.command(), RequestResult::Applied, start);
+
+    let second_at = start + stagger;
+    arbiter.apply(
+        ActivityEvent::new(ActivitySource::Ai, 2, 1, phase, second_at),
+        second_at,
+    );
+    // The first prompt still wins. A shrinking remaining duration must not
+    // be mistaken for a new command on each coordinator wake.
+    assert_eq!(arbiter.target(second_at).expires_at, first.expires_at);
+    assert_eq!(
+        delivery.attempt_deadline(arbiter.target(second_at), second_at),
+        Some(start + INITIAL_RECOVERY_PROBE_INTERVAL)
+    );
+
+    let first_expired = start + ttl;
+    let remaining = arbiter.target(first_expired);
+    assert_eq!(remaining.state, state);
+    assert_eq!(remaining.expires_at, Some(second_at + ttl));
+    assert_eq!(
+        remaining.command().remaining_duration(first_expired).ok(),
+        Some(Some(stagger))
+    );
+    assert_eq!(
+        delivery.attempt_deadline(remaining, first_expired),
+        Some(first_expired),
+        "the remaining source must be sent when the first short prompt expires"
+    );
+    delivery.record(remaining.command(), RequestResult::Applied, first_expired);
+    assert_eq!(
+        delivery.attempt_deadline(remaining, first_expired + MIN_SEND_INTERVAL),
+        Some(first_expired + INITIAL_RECOVERY_PROBE_INTERVAL),
+        "the replacement prompt must not be repeatedly sent"
+    );
+    let finished_at = second_at + ttl;
+    let idle = arbiter.target(finished_at);
+    assert_eq!(idle.state, PetdexState::Idle);
+    assert_eq!(
+        delivery.attempt_deadline(idle, finished_at),
+        Some(finished_at)
+    );
+}
+
+#[test]
+fn staggered_source_failures_deliver_the_remaining_failure() {
+    assert_staggered_short_prompts_are_delivered(ActivityPhase::Failed, PetdexState::Failed);
+}
+
+#[test]
+fn staggered_source_successes_deliver_the_remaining_success() {
+    assert_staggered_short_prompts_are_delivered(ActivityPhase::Succeeded, PetdexState::Jumping);
+}
+
+#[test]
+fn expiry_changes_preserve_send_throttling_and_unchanged_command_backoff() {
+    let start = Instant::now();
+    let first = ArbitrationTarget {
+        state: PetdexState::Failed,
+        expires_at: Some(start + FAILURE_TTL),
+    };
+    let next = ArbitrationTarget {
+        expires_at: Some(start + FAILURE_TTL + Duration::from_secs(1)),
+        ..first
+    };
+    let mut delivery = DeliveryPolicy::default();
+    delivery.record(first.command(), RequestResult::Transport, start);
+    let shortly_after = start + Duration::from_millis(10);
+    assert_eq!(
+        delivery.attempt_deadline(first, shortly_after),
+        Some(start + INITIAL_FAILURE_BACKOFF)
+    );
+    assert_eq!(
+        delivery.attempt_deadline(next, shortly_after),
+        Some(start + MIN_SEND_INTERVAL)
+    );
+    let failed_at = start + MIN_SEND_INTERVAL;
+    delivery.record(next.command(), RequestResult::Transport, failed_at);
+    assert_eq!(
+        delivery.attempt_deadline(next, failed_at),
+        Some(failed_at + failure_backoff(2))
+    );
+}
+
 #[test]
 fn transport_commands_keep_absolute_expiry_across_checks_and_retries() {
     let start = Instant::now();
@@ -25,12 +130,8 @@ fn transport_commands_keep_absolute_expiry_across_checks_and_retries() {
         ));
     }
     let mut delivery = DeliveryPolicy::default();
-    delivery.record(PetdexState::Waving, RequestResult::Applied, start);
-    delivery.record(
-        PetdexState::Waving,
-        RequestResult::Expired,
-        start + SUCCESS_TTL,
-    );
+    delivery.record(command, RequestResult::Applied, start);
+    delivery.record(command, RequestResult::Expired, start + SUCCESS_TTL);
     let renewed = ArbitrationTarget {
         state: PetdexState::Waving,
         expires_at: Some(start + SUCCESS_TTL * 2),
@@ -388,7 +489,11 @@ fn recovery_after_failure_uses_current_activity_not_expired_terminal() {
         ActivityEvent::new(ActivitySource::Sftp, 2, 1, ActivityPhase::Failed, start),
         start,
     );
-    delivery.record(PetdexState::Failed, RequestResult::Transport, start);
+    delivery.record(
+        arbiter.target(start).command(),
+        RequestResult::Transport,
+        start,
+    );
     let shortly_after = start + INITIAL_FAILURE_BACKOFF;
     assert_eq!(
         arbiter

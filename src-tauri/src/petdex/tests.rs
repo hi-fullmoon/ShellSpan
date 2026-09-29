@@ -619,7 +619,7 @@ fn delivery_deduplicates_throttles_resyncs_and_bounds_backoff() {
     let mut delivery = DeliveryPolicy::default();
 
     assert_eq!(delivery.attempt_deadline(idle, start), Some(start));
-    delivery.record(PetdexState::Idle, RequestResult::Applied, start);
+    delivery.record(idle.command(), RequestResult::Applied, start);
     assert_eq!(
         delivery.attempt_deadline(idle, start),
         Some(start + INITIAL_RECOVERY_PROBE_INTERVAL)
@@ -630,14 +630,14 @@ fn delivery_deduplicates_throttles_resyncs_and_bounds_backoff() {
     );
 
     let failed_at = start + MIN_SEND_INTERVAL;
-    delivery.record(PetdexState::Running, RequestResult::Transport, failed_at);
+    delivery.record(running.command(), RequestResult::Transport, failed_at);
     assert_eq!(
         delivery.attempt_deadline(running, failed_at),
         Some(failed_at + INITIAL_FAILURE_BACKOFF)
     );
     for count in 2..=12 {
         let attempt_at = failed_at + Duration::from_secs(count.into());
-        delivery.record(PetdexState::Running, RequestResult::Transport, attempt_at);
+        delivery.record(running.command(), RequestResult::Transport, attempt_at);
         assert!(failure_backoff(count) <= MAX_FAILURE_BACKOFF);
     }
     let final_failure_at = failed_at + Duration::from_secs(12);
@@ -669,23 +669,19 @@ fn delivery_uses_activity_aware_probes_and_recovers_after_success_or_manual_rese
     };
     let mut delivery = DeliveryPolicy::default();
 
-    delivery.record(PetdexState::Running, RequestResult::Applied, start);
+    delivery.record(running.command(), RequestResult::Applied, start);
     assert_eq!(
         delivery.attempt_deadline(running, start),
         Some(start + INITIAL_RECOVERY_PROBE_INTERVAL)
     );
     let initial_probe_at = start + INITIAL_RECOVERY_PROBE_INTERVAL;
-    delivery.record(
-        PetdexState::Running,
-        RequestResult::Applied,
-        initial_probe_at,
-    );
+    delivery.record(running.command(), RequestResult::Applied, initial_probe_at);
     assert_eq!(
         delivery.attempt_deadline(running, initial_probe_at),
         Some(initial_probe_at + WARM_RECOVERY_PROBE_INTERVAL)
     );
     let warm_probe_at = initial_probe_at + WARM_RECOVERY_PROBE_INTERVAL;
-    delivery.record(PetdexState::Running, RequestResult::Applied, warm_probe_at);
+    delivery.record(running.command(), RequestResult::Applied, warm_probe_at);
     assert_eq!(
         delivery.attempt_deadline(running, warm_probe_at),
         Some(warm_probe_at + ACTIVE_STEADY_RECOVERY_PROBE_INTERVAL)
@@ -698,7 +694,7 @@ fn delivery_uses_activity_aware_probes_and_recovers_after_success_or_manual_rese
     let failed_at = warm_probe_at + MIN_SEND_INTERVAL;
     for count in 1_u32..=9 {
         delivery.record(
-            PetdexState::Idle,
+            idle.command(),
             RequestResult::Transport,
             failed_at + Duration::from_secs(count.into()),
         );
@@ -717,7 +713,7 @@ fn delivery_uses_activity_aware_probes_and_recovers_after_success_or_manual_rese
     );
 
     let recovered_at = failed_at + Duration::from_secs(70);
-    delivery.record(PetdexState::Idle, RequestResult::Applied, recovered_at);
+    delivery.record(idle.command(), RequestResult::Applied, recovered_at);
     assert_eq!(delivery.consecutive_failures, 0);
     assert!(delivery.retry_at.is_none());
     assert_eq!(
@@ -726,16 +722,12 @@ fn delivery_uses_activity_aware_probes_and_recovers_after_success_or_manual_rese
     );
     let initial_idle_probe_at = recovered_at + INITIAL_RECOVERY_PROBE_INTERVAL;
     delivery.record(
-        PetdexState::Idle,
+        idle.command(),
         RequestResult::Applied,
         initial_idle_probe_at,
     );
     let warm_idle_probe_at = initial_idle_probe_at + WARM_RECOVERY_PROBE_INTERVAL;
-    delivery.record(
-        PetdexState::Idle,
-        RequestResult::Applied,
-        warm_idle_probe_at,
-    );
+    delivery.record(idle.command(), RequestResult::Applied, warm_idle_probe_at);
     assert_eq!(
         delivery.attempt_deadline(idle, warm_idle_probe_at),
         Some(warm_idle_probe_at + IDLE_STEADY_RECOVERY_PROBE_INTERVAL)
