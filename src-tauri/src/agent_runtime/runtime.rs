@@ -846,6 +846,13 @@ impl AgentRuntime {
         }))
     }
 
+    pub(crate) fn attach_petdex(
+        &self,
+        adapter: crate::petdex::PetdexAdapter,
+    ) -> Result<(), String> {
+        self.sessions.attach_petdex(adapter)
+    }
+
     pub(crate) fn create_session(
         &self,
         request: CreateAgentSessionRequest,

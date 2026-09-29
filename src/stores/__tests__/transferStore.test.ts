@@ -25,6 +25,21 @@ describe('transferStore', () => {
     useTransferStore.setState({ operations: [] });
   });
 
+  it.each(['upload', 'download'] as const)('preserves %s cancellation when a failed batch subset is registered', (kind) => {
+    const cancelling: TransferOperation = { ...operation, kind, status: 'cancelling', processedBytes: 40 };
+    useTransferStore.getState().addOperation(cancelling);
+    useTransferStore.getState().addOperation({ ...operation, kind, status: 'running' });
+
+    expect(useTransferStore.getState().operations).toEqual([cancelling]);
+    expect(isTransferComplete(useTransferStore.getState().operations[0]!)).toBe(false);
+    useTransferStore.getState().markOperationCancelled(operation.operationId);
+    expect(useTransferStore.getState().operations[0]?.status).toBe('cancelled');
+    // An explicit later retry can still start after cancellation has settled.
+    useTransferStore.getState().markOperationRunning(operation.operationId);
+    useTransferStore.getState().addOperation({ ...operation, kind, status: 'running' });
+    expect(useTransferStore.getState().operations[0]?.status).toBe('running');
+  });
+
   it('marks a transfer as failed and clears the error when retrying', async () => {
     const retry = vi.fn().mockResolvedValue(undefined);
     useTransferStore.getState().addOperation({ ...operation, retry });

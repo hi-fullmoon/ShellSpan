@@ -381,6 +381,7 @@ pub fn run() {
             agent_runtime::agent_runtime_abort_recovery,
             petdex::petdex_set_enabled,
             petdex::petdex_get_status,
+            petdex::petdex_check_health,
             petdex::petdex_test_connection,
             commands::create_session,
             commands::create_local_session,

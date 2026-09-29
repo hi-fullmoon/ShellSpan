@@ -16,6 +16,7 @@ mod model_tools;
 mod native;
 mod native_adapter;
 mod native_contract;
+mod petdex;
 mod projection;
 mod prompt;
 pub(crate) mod provider;

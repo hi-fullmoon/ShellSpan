@@ -1,7 +1,9 @@
 import { invoke } from '@tauri-apps/api/core';
+import type { PetdexCategories, PetdexDiagnostic, PetdexTestResult, PetdexCheckResult } from '@/types';
 import { createLogger } from '@/lib/logger';
 import { createOperationId, findOperationId } from '@/lib/operation-id';
 import { listen, type EventCallback, type UnlistenFn } from '@tauri-apps/api/event';
+
 import type {
   AuthMethod,
   ClosedEvent,
@@ -118,6 +120,17 @@ import type {
 } from '@/types/agent-session';
 
 const logger = createLogger('ipc');
+
+export const invokePetdexSetEnabled = (enabled: boolean, categories?: PetdexCategories): Promise<PetdexDiagnostic> =>
+  invoke<PetdexDiagnostic>('petdex_set_enabled', categories ? { enabled, categories } : { enabled });
+export const invokePetdexGetStatus = (): Promise<PetdexDiagnostic> =>
+  invoke<PetdexDiagnostic>('petdex_get_status');
+export const invokePetdexCheckHealth = (): Promise<PetdexCheckResult> =>
+  invoke<PetdexCheckResult>('petdex_check_health');
+export const invokePetdexTestConnection = (): Promise<PetdexTestResult> =>
+  invoke<PetdexTestResult>('petdex_test_connection');
+export const listenPetdexStatus = (callback: (snapshot: PetdexDiagnostic) => void): Promise<UnlistenFn> =>
+  listen<PetdexDiagnostic>('petdex-status', (event) => callback(event.payload));
 const DIRECTORY_REQUEST_SUPERSEDED_MESSAGE = 'remote directory request superseded';
 const REMOTE_FILE_READ_CANCELLED_MESSAGE = 'remote file read cancelled';
 

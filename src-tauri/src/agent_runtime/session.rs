@@ -401,6 +401,7 @@ struct AgentSessionStoreInner {
     sessions: HashMap<String, AgentSessionRecord>,
     recovery_notices: Vec<AgentSessionRecoveryNotice>,
     publisher: Option<EventPublisher>,
+    petdex: super::petdex::PetdexActivities,
     #[cfg(test)]
     append_failure: Option<fn(&AgentSessionEventPayload) -> bool>,
 }
@@ -437,6 +438,39 @@ impl Default for AgentSessionStore {
 }
 
 impl AgentSessionStore {
+    pub(crate) fn begin_petdex_driver(&self, session_id: &str) -> u64 {
+        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        inner.petdex.begin_driver(session_id)
+    }
+
+    pub(crate) fn settle_petdex_driver(
+        &self,
+        session_id: &str,
+        generation: u64,
+        settlement: super::AgentDriverSettlement,
+    ) {
+        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        inner
+            .petdex
+            .settle_driver(session_id, generation, settlement);
+    }
+
+    pub(crate) fn attach_petdex(
+        &self,
+        adapter: crate::petdex::PetdexAdapter,
+    ) -> Result<(), String> {
+        let mut inner = self.lock_configured()?;
+        if !inner.petdex.attach(adapter) {
+            return Ok(());
+        }
+        let AgentSessionStoreInner {
+            sessions, petdex, ..
+        } = &mut *inner;
+        for (id, record) in sessions.iter().filter(|(_, r)| !r.ended && !r.archived) {
+            petdex.observe(id, &record.events, &[], record.status, true);
+        }
+        Ok(())
+    }
     #[cfg(test)]
     pub(crate) fn fail_appends_matching(&self, predicate: fn(&AgentSessionEventPayload) -> bool) {
         self.inner.lock().unwrap().append_failure = Some(predicate);
@@ -2608,6 +2642,10 @@ fn append_payloads_locked(
         }
         record.events.extend(appended.iter().cloned());
     }
+    let record = &inner.sessions[session_id];
+    inner
+        .petdex
+        .observe(session_id, &record.events, &appended, record.status, false);
     Ok((appended, inner.publisher.clone()))
 }
 

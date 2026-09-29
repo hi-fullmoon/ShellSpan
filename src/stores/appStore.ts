@@ -2,13 +2,16 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { shallow } from 'zustand/shallow';
 import { changeLocale } from '@/locales';
-import type { AppSection, Locale, PetdexConnectionStatus, SettingsSection, SftpConflictPolicy, ShortcutAction, ShortcutBindings, TerminalBellStyle, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily, TerminalRightClickBehavior, ThemeMode, WorkbenchTab } from '@/types';
+import type { AppSection, Locale, PetdexDiagnostic, SettingsSection, SftpConflictPolicy, ShortcutAction, ShortcutBindings, TerminalBellStyle, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily, TerminalRightClickBehavior, ThemeMode, WorkbenchTab } from '@/types';
 import {
   invokeLoadPreferences,
   invokeSavePreferences,
 } from '@/lib/ipc/tauri';
 import { createLogger } from '@/lib/logger';
 import { configurePetdex } from '@/lib/petdex/petdex';
+import { DEFAULT_PETDEX_CATEGORIES, normalizePetdexCategories, resolvePetdexConfiguration } from '@/lib/petdex/preferences';
+import type { PetdexConfigurationPatch } from '@/lib/petdex/preferences';
+import type { PetdexCategories } from '@/types';
 
 const logger = createLogger('appStore');
 
@@ -43,6 +46,7 @@ interface AppPreferences {
   profileAvatar: string;
   startupUpdateCheck: boolean;
   petdexEnabled: boolean;
+  petdexCategories: PetdexCategories;
   startupSection: AppSection;
   terminalFontSize: number;
   terminalFontFamily: TerminalFontFamily;
@@ -75,6 +79,8 @@ interface AppPreferences {
 interface AppState extends AppPreferences {
   initialized: boolean;
   petdexBackendEnabled: boolean;
+  petdexBackendCategories: PetdexCategories;
+  petdexRequestedCategories: PetdexCategories | null;
   petdexRequestedEnabled: boolean | null;
   petdexConfiguring: boolean;
   activeSection: AppSection;
@@ -95,7 +101,8 @@ interface AppState extends AppPreferences {
   setProfileName: (name: string) => void;
   setProfileAvatar: (avatar: string) => void;
   setStartupUpdateCheck: (enabled: boolean) => void;
-  setPetdexEnabled: (enabled: boolean) => Promise<PetdexConnectionStatus>;
+  setPetdexEnabled: (enabled: boolean) => Promise<PetdexDiagnostic>;
+  setPetdexCategory: (category: keyof PetdexCategories, enabled: boolean) => Promise<PetdexDiagnostic>;
   setStartupSection: (section: AppSection) => void;
   setTerminalFontSize: (fontSize: number) => void;
   setTerminalFontFamily: (fontFamily: TerminalFontFamily) => void;
@@ -128,7 +135,7 @@ interface AppState extends AppPreferences {
 }
 
 const PREFERENCE_KEYS: readonly (keyof AppPreferences)[] = [
-  'theme', 'locale', 'profileName', 'profileAvatar', 'startupUpdateCheck', 'petdexEnabled', 'startupSection',
+  'theme', 'locale', 'profileName', 'profileAvatar', 'startupUpdateCheck', 'petdexEnabled', 'petdexCategories', 'startupSection',
   'terminalFontSize', 'terminalFontFamily', 'terminalCursorBlink',
   'terminalCursorStyle', 'terminalCopyOnSelect', 'terminalScrollback',
   'terminalColorScheme', 'terminalMultiLinePasteWarning',
@@ -149,6 +156,7 @@ function getDefaultPreferences(): AppPreferences {
     profileAvatar: '',
     startupUpdateCheck: true,
     petdexEnabled: false,
+    petdexCategories: { ...DEFAULT_PETDEX_CATEGORIES },
     startupSection: 'workbench',
     terminalFontSize: 14,
     terminalFontFamily: 'system',
@@ -229,6 +237,7 @@ function entriesToPreferences(entries: [string, string][]): Partial<AppPreferenc
     profileAvatar: sanitizeProfileAvatar(prefs.profileAvatar),
     startupUpdateCheck: (prefs.startupUpdateCheck as boolean) ?? defaults.startupUpdateCheck,
     petdexEnabled: (prefs.petdexEnabled as boolean) ?? defaults.petdexEnabled,
+    petdexCategories: normalizePetdexCategories(prefs.petdexCategories),
     startupSection: (prefs.startupSection as AppSection) ?? defaults.startupSection,
     terminalFontSize: (prefs.terminalFontSize as number) ?? defaults.terminalFontSize,
     terminalFontFamily: (prefs.terminalFontFamily as TerminalFontFamily) ?? defaults.terminalFontFamily,
@@ -263,10 +272,50 @@ let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let petdexConfigurationRevision = 0;
 let petdexConfigurationQueue: Promise<void> = Promise.resolve();
 
-function enqueuePetdexConfiguration(enabled: boolean): Promise<PetdexConnectionStatus> {
-  const request = petdexConfigurationQueue.then(() => configurePetdex(enabled));
+function enqueuePetdexConfiguration(enabled: boolean, categories = DEFAULT_PETDEX_CATEGORIES): Promise<PetdexDiagnostic> {
+  const request = petdexConfigurationQueue.then(() => configurePetdex(enabled, categories));
   petdexConfigurationQueue = request.then(() => undefined, () => undefined);
   return request;
+}
+
+async function updatePetdexConfiguration(patch: PetdexConfigurationPatch): Promise<PetdexDiagnostic> {
+  const revision = ++petdexConfigurationRevision;
+  const current = useAppStore.getState();
+  useAppStore.setState({
+    petdexRequestedEnabled: patch.enabled ?? current.petdexRequestedEnabled ?? current.petdexEnabled,
+    petdexRequestedCategories: { ...(current.petdexRequestedCategories ?? current.petdexCategories), ...patch.categories },
+    petdexConfiguring: true,
+  });
+  // Compose each patch against the last backend acknowledgement, not a stale
+  // UI snapshot. Failed changes cannot leak into a subsequent category update.
+  const request = petdexConfigurationQueue.then(async () => {
+    const confirmed = useAppStore.getState();
+    const { enabled, categories } = resolvePetdexConfiguration({
+      enabled: confirmed.petdexBackendEnabled,
+      categories: confirmed.petdexBackendCategories,
+    }, patch);
+    const diagnostic = await configurePetdex(enabled, categories);
+    useAppStore.setState({ petdexBackendEnabled: enabled, petdexBackendCategories: categories });
+    return diagnostic;
+  });
+  petdexConfigurationQueue = request.then(() => undefined, () => undefined);
+  try {
+    return await request;
+  } catch (error) {
+    logger.warn('failed to update Petdex integration state');
+    throw error;
+  } finally {
+    if (revision === petdexConfigurationRevision) {
+      const confirmed = useAppStore.getState();
+      useAppStore.setState({
+        petdexEnabled: confirmed.petdexBackendEnabled,
+        petdexCategories: confirmed.petdexBackendCategories,
+        petdexRequestedEnabled: null,
+        petdexRequestedCategories: null,
+        petdexConfiguring: false,
+      });
+    }
+  }
 }
 
 function debouncedSaveToDb(state: AppPreferences) {
@@ -283,10 +332,12 @@ function debouncedSaveToDb(state: AppPreferences) {
 }
 
 export const useAppStore = create<AppState>()(
-  subscribeWithSelector((set, get) => ({
+  subscribeWithSelector((set) => ({
     ...defaults,
     initialized: false,
     petdexBackendEnabled: false,
+    petdexBackendCategories: { ...DEFAULT_PETDEX_CATEGORIES },
+    petdexRequestedCategories: null,
     petdexRequestedEnabled: null,
     petdexConfiguring: false,
     activeSection: defaults.startupSection,
@@ -302,8 +353,10 @@ export const useAppStore = create<AppState>()(
           const prefs = entriesToPreferences(entries);
           const requestedPetdexEnabled = prefs.petdexEnabled ?? false;
           let confirmedPetdexEnabled = requestedPetdexEnabled;
+          let confirmedPetdexCategories = { ...DEFAULT_PETDEX_CATEGORIES };
           try {
-            await enqueuePetdexConfiguration(requestedPetdexEnabled);
+            await enqueuePetdexConfiguration(requestedPetdexEnabled, prefs.petdexCategories);
+            confirmedPetdexCategories = prefs.petdexCategories ?? { ...DEFAULT_PETDEX_CATEGORIES };
           } catch {
             confirmedPetdexEnabled = false;
             logger.warn('failed to synchronize Petdex integration state');
@@ -311,7 +364,10 @@ export const useAppStore = create<AppState>()(
           set({
             ...prefs,
             petdexEnabled: confirmedPetdexEnabled,
+            petdexCategories: confirmedPetdexCategories,
             petdexBackendEnabled: confirmedPetdexEnabled,
+            petdexBackendCategories: confirmedPetdexCategories,
+            petdexRequestedCategories: null,
             petdexRequestedEnabled: null,
             petdexConfiguring: false,
             initialized: true,
@@ -373,37 +429,8 @@ export const useAppStore = create<AppState>()(
     setProfileName: (name) => set({ profileName: sanitizeProfileName(name) }),
     setProfileAvatar: (avatar) => set({ profileAvatar: sanitizeProfileAvatar(avatar) }),
     setStartupUpdateCheck: (startupUpdateCheck) => set({ startupUpdateCheck }),
-    setPetdexEnabled: async (requestedEnabled) => {
-      const revision = ++petdexConfigurationRevision;
-      set({
-        petdexRequestedEnabled: requestedEnabled,
-        petdexConfiguring: true,
-      });
-      try {
-        const status = await enqueuePetdexConfiguration(requestedEnabled);
-        if (revision === petdexConfigurationRevision) {
-          set({
-            petdexEnabled: requestedEnabled,
-            petdexBackendEnabled: requestedEnabled,
-            petdexRequestedEnabled: null,
-            petdexConfiguring: false,
-          });
-        } else {
-          set({ petdexBackendEnabled: requestedEnabled });
-        }
-        return status;
-      } catch (error) {
-        if (revision === petdexConfigurationRevision) {
-          set({
-            petdexEnabled: get().petdexBackendEnabled,
-            petdexRequestedEnabled: null,
-            petdexConfiguring: false,
-          });
-        }
-        logger.warn('failed to update Petdex integration state');
-        throw error;
-      }
-    },
+    setPetdexEnabled: (enabled) => updatePetdexConfiguration({ enabled }),
+    setPetdexCategory: (category, enabled) => updatePetdexConfiguration({ categories: { [category]: enabled } }),
     setStartupSection: (startupSection) => set({ startupSection }),
     setTerminalFontSize: (terminalFontSize) => set({ terminalFontSize }),
     setTerminalFontFamily: (terminalFontFamily) => set({ terminalFontFamily }),
@@ -453,6 +480,7 @@ useAppStore.subscribe(
     profileAvatar: state.profileAvatar,
     startupUpdateCheck: state.startupUpdateCheck,
     petdexEnabled: state.petdexEnabled,
+    petdexCategories: state.petdexCategories,
     startupSection: state.startupSection,
     terminalFontSize: state.terminalFontSize,
     terminalFontFamily: state.terminalFontFamily,
