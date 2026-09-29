@@ -663,3 +663,55 @@
         let error = process_profile_avatar(b"not an image").unwrap_err();
         assert!(error.contains("failed to decode avatar image"));
     }
+
+    #[test]
+    fn petdex_ssh_close_during_setup_is_neutral_but_open_channel_failure_is_not() {
+        use crate::petdex::ActivityPhase;
+        let (sender, receiver) = std::sync::mpsc::channel();
+        assert_eq!(
+            super::petdex_ssh_failure_phase(&receiver),
+            ActivityPhase::Failed
+        );
+        sender.send(SessionCommand::Close).unwrap();
+        assert_eq!(
+            super::petdex_ssh_failure_phase(&receiver),
+            ActivityPhase::Cancelled
+        );
+        drop(sender);
+        assert_eq!(
+            super::petdex_ssh_failure_phase(&receiver),
+            ActivityPhase::Cancelled
+        );
+    }
+
+    #[test]
+    fn petdex_transfer_results_keep_domain_cancellation_neutral() {
+        use crate::{models::RemoteFsError, petdex::ActivityPhase};
+        for message in [
+            "upload cancelled",
+            "download cancelled",
+            "remote copy cancelled",
+        ] {
+            let error = RemoteFsError::Other {
+                message: message.into(),
+            };
+            assert_eq!(
+                super::petdex_sftp_result(&Err(error)),
+                ActivityPhase::Cancelled
+            );
+            let error = RemoteFsError::Other {
+                message: message.into(),
+            };
+            assert_eq!(
+                super::petdex_sftp_batch_result(&Err(error)),
+                ActivityPhase::Cancelled
+            );
+        }
+        assert_eq!(super::petdex_sftp_result(&Ok(())), ActivityPhase::Succeeded);
+        assert_eq!(
+            super::petdex_sftp_result(&Err(RemoteFsError::Other {
+                message: "connection lost".into(),
+            })),
+            ActivityPhase::Failed
+        );
+    }

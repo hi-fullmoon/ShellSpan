@@ -126,7 +126,11 @@ export const useTransferStore = create<TransferState>()((set) => ({
         (o) => o.operationId === operation.operationId,
       )
         ? state.operations.map((o) =>
-            o.operationId === operation.operationId ? { ...o, ...operation } : o,
+            // A partial batch reply may re-register its failed subset before
+            // the retry gate runs. It must not erase an in-flight cancellation.
+            o.operationId === operation.operationId && o.status !== 'cancelling'
+              ? { ...o, ...operation }
+              : o,
           )
         : [operation, ...state.operations],
       pathOccupancyRevision: state.pathOccupancyRevision + 1,

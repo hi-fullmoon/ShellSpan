@@ -1,7 +1,19 @@
-name: Petdex Phase 3 voluntary feedback
-description: Voluntarily share whether the experimental Petdex integration improves background status awareness.
-title: "[Petdex Phase 3] "
+name: Petdex integration problem or feedback
+description: Report a Petdex integration problem or voluntarily share feedback without application data.
+title: "[Petdex] "
 body:
+  - type: dropdown
+    id: problem
+    attributes:
+      label: Problem category
+      options:
+        - Connection or authentication
+        - Recheck or diagnostics
+        - Incorrect or missing action
+        - Settings or accessibility
+        - General feedback
+    validations:
+      required: true
   - type: markdown
     attributes:
       value: |
@@ -12,10 +24,10 @@ body:
     id: consent
     attributes:
       label: Voluntary consent
-      description: Your responses may be counted only as de-identified aggregate Phase 3 evidence.
+      description: Reporting a problem does not require opting into aggregate evaluation.
       options:
         - label: I am submitting voluntarily and consent to these answers being included in de-identified aggregate results.
-          required: true
+          required: false
         - label: I understand this issue is public and can be withdrawn by closing it and asking maintainers to exclude it from later aggregates.
           required: true
         - label: I confirm that I did not include secrets, logs, host information, paths, file names, terminal/AI content, or tokens.

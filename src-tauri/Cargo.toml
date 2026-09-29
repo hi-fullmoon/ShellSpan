@@ -57,7 +57,7 @@ bytes = "1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
-tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time", "test-util"] }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt", "sync", "time", "test-util"] }
 tokio-util = "0.7"
 httpdate = "1"
 tempfile = "3.27.0"
@@ -94,6 +94,7 @@ windows-sys = { version = "0.61", features = [
 dbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
 
 [dev-dependencies]
+httparse = "1.10.1"
 
 [patch.crates-io]
 portable-pty = { path = "vendor/portable-pty" }

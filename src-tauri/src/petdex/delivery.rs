@@ -56,6 +56,11 @@ impl DeliveryPolicy {
 
     pub(super) fn record(&mut self, state: PetdexState, result: RequestResult, now: Instant) {
         self.last_attempt_at = Some(now);
+        if result == RequestResult::Expired {
+            self.last_attempted = None;
+            self.retry_at = None;
+            return;
+        }
         self.last_attempted = Some(state);
         if result == RequestResult::Applied {
             if self.last_sent == Some(state) {

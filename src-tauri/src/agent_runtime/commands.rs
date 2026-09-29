@@ -128,6 +128,7 @@ pub(crate) fn configure_runtime(app: &AppHandle, runtime: &AgentRuntime) -> Resu
         .app_data_dir()
         .map_err(|error| format!("failed to resolve Agent runtime root: {error}"))?;
     runtime.configure(root)?;
+    runtime.attach_petdex(app.state::<crate::petdex::PetdexAdapter>().inner().clone())?;
     runtime.configure_llm(
         app.state::<crate::llm::runtime::LlmRuntime>()
             .inner()
