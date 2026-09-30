@@ -369,7 +369,7 @@ impl OrchestrationToolRuntimeSlot {
         let mut inner = self
             .inner
             .lock()
-            .map_err(|_| "orchestration tool runtime slot is unavailable".to_string())?;
+            .map_err(|_| "Orchestration tool runtime slot is unavailable".to_string())?;
         *inner = Some(Arc::downgrade(runtime));
         Ok(())
     }
@@ -377,10 +377,10 @@ impl OrchestrationToolRuntimeSlot {
     fn runtime(&self) -> Result<Arc<dyn OrchestrationToolRuntime>, String> {
         self.inner
             .lock()
-            .map_err(|_| "orchestration tool runtime slot is unavailable".to_string())?
+            .map_err(|_| "Orchestration tool runtime slot is unavailable".to_string())?
             .as_ref()
             .and_then(Weak::upgrade)
-            .ok_or_else(|| "subagent orchestration runtime is not configured".to_string())
+            .ok_or_else(|| "Subagent orchestration runtime is not configured".to_string())
     }
 }
 
@@ -394,7 +394,7 @@ impl NativeToolRuntimeSlot {
         let mut inner = self
             .inner
             .lock()
-            .map_err(|_| "native tool runtime slot is unavailable".to_string())?;
+            .map_err(|_| "Native tool runtime slot is unavailable".to_string())?;
         if inner.is_none() {
             *inner = Some(native);
         }
@@ -404,7 +404,7 @@ impl NativeToolRuntimeSlot {
     fn runtime(&self) -> Result<Arc<dyn NativeToolRuntime>, String> {
         self.inner
             .lock()
-            .map_err(|_| "native tool runtime slot is unavailable".to_string())?
+            .map_err(|_| "Native tool runtime slot is unavailable".to_string())?
             .clone()
             .ok_or_else(|| "Agent Runtime native tool adapter is not configured".to_string())
     }
@@ -585,11 +585,11 @@ impl AgentToolPipeline {
             None => DEFAULT_PARALLEL_TOOL_CALLS,
             Some(value) if !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()) => value
                 .parse::<usize>()
-                .map_err(|_| "invalid parallel tool limit")?,
-            Some(_) => return Err("invalid parallel tool limit: expected integer 1–16".into()),
+                .map_err(|_| "Invalid parallel tool limit")?,
+            Some(_) => return Err("Invalid parallel tool limit: expected integer 1–16".into()),
         };
         if !(1..=MAX_PARALLEL_TOOL_CALLS).contains(&limit) {
-            return Err("invalid parallel tool limit: expected integer 1–16".into());
+            return Err("Invalid parallel tool limit: expected integer 1–16".into());
         }
         self.parallel_limit
             .store(limit, std::sync::atomic::Ordering::Release);
@@ -623,7 +623,7 @@ impl AgentToolPipeline {
     ) -> Result<(), String> {
         self.ephemeral_terminal_results
             .lock()
-            .map_err(|_| "ephemeral terminal result registry is unavailable".to_string())?
+            .map_err(|_| "Ephemeral terminal result registry is unavailable".to_string())?
             .apply(session_id, turn_id, request);
         Ok(())
     }
@@ -905,7 +905,7 @@ impl AgentToolPipeline {
                         }
                         self.commit_prepare_failure(
                             &request,
-                            "native policy changed during admission; request a fresh call",
+                            "Native policy changed during admission; request a fresh call",
                         )?;
                         next += 1;
                         committed += 1;
@@ -937,7 +937,7 @@ impl AgentToolPipeline {
                     running.push(async move {
                         let result = worker
                             .await
-                            .map_err(|error| format!("native tool worker failed: {error}"));
+                            .map_err(|error| format!("Native tool worker failed: {error}"));
                         (index, request, preparation, result)
                     });
                     next += 1;
@@ -1144,7 +1144,7 @@ impl AgentToolPipeline {
                 }
             }
             let args: SkillArguments = serde_json::from_value(call.arguments.clone())
-                .map_err(|e| format!("invalid skill arguments: {e}"))?;
+                .map_err(|e| format!("Invalid skill arguments: {e}"))?;
             self.skills
                 .load(
                     &entry.session_id,
@@ -1253,7 +1253,7 @@ impl AgentToolPipeline {
             target: Some(target),
         };
         let parsed = serde_json::from_value::<UpdatePlanArguments>(call.arguments.clone())
-            .map_err(|error| format!("invalid update_plan arguments: {error}"))
+            .map_err(|error| format!("Invalid update_plan arguments: {error}"))
             .and_then(|arguments| {
                 let previous_version = self
                     .sessions
@@ -1280,7 +1280,7 @@ impl AgentToolPipeline {
                     return Err("update_plan explanation is outside bounds".into());
                 }
                 super::session::validate_task_plan(next_version, &arguments.steps)
-                    .map_err(|error| format!("invalid update_plan arguments: {error}"))?;
+                    .map_err(|error| format!("Invalid update_plan arguments: {error}"))?;
                 Ok((next_version, arguments))
             });
         let mut payloads = vec![
@@ -1599,7 +1599,7 @@ impl AgentToolPipeline {
             )?;
             self.pending
                 .lock()
-                .map_err(|_| "native approval registry is unavailable".to_string())?
+                .map_err(|_| "Native approval registry is unavailable".to_string())?
                 .insert(
                     approval_key(
                         &request.session_id,
@@ -1686,7 +1686,7 @@ impl AgentToolPipeline {
             match &event.payload {
                 AgentSessionEventPayload::ToolCall { call } if call.call_id == prepared.call_id => {
                     if call != prepared {
-                        return Err("recovered native call drifted before authorization".into());
+                        return Err("Recovered native call drifted before authorization".into());
                     }
                     found = true;
                 }
@@ -1695,7 +1695,7 @@ impl AgentToolPipeline {
                 | AgentSessionEventPayload::ToolResult { call_id, .. }
                     if call_id == &prepared.call_id =>
                 {
-                    return Err("native call already admitted; use its recovery boundary".into());
+                    return Err("Native call already admitted; use its recovery boundary".into());
                 }
                 _ => {}
             }
@@ -1827,7 +1827,7 @@ impl AgentToolPipeline {
                     || preparation.idempotency != NativeToolIdempotency::Yes
                     || preparation.exclusive)
         {
-            return Err("native tool preparation violated its frozen contract".into());
+            return Err("Native tool preparation violated its frozen contract".into());
         }
         Ok(())
     }
@@ -1846,7 +1846,7 @@ impl AgentToolPipeline {
             native.execute(&token, approved, cancellation)
         })
         .await
-        .map_err(|error| format!("native tool worker failed: {error}"))
+        .map_err(|error| format!("Native tool worker failed: {error}"))
     }
 
     fn finish_native(
@@ -1886,7 +1886,7 @@ impl AgentToolPipeline {
                     .effect
                     .unwrap_or(AgentSessionEffect::Unknown),
                 status: AgentToolResultStatus::Failed,
-                summary: "native result evidence did not match the frozen call".into(),
+                summary: "Native result evidence did not match the frozen call".into(),
                 data: None,
                 duration_ms: None,
                 evidence_refs: Vec::new(),
@@ -1905,12 +1905,12 @@ impl AgentToolPipeline {
         let mut stored_data_artifact = None;
         if let Some(data) = result.data.as_ref() {
             let data_size = serde_json::to_vec(data)
-                .map_err(|error| format!("failed to measure native tool result: {error}"))?
+                .map_err(|error| format!("Failed to measure native tool result: {error}"))?
                 .len();
             let complete_skill = request.model_call.name == super::skills::SKILL_TOOL;
             if complete_skill {
                 let loaded: super::skills::LoadedSkill = serde_json::from_value(data.clone())
-                    .map_err(|e| format!("invalid complete Skill result: {e}"))?;
+                    .map_err(|e| format!("Invalid complete Skill result: {e}"))?;
                 loaded.validate()?;
                 super::skills::unchanged_by_redaction(&loaded)?;
             }
@@ -2036,7 +2036,7 @@ impl AgentToolPipeline {
         if ephemeral_terminal_content.is_some() || ephemeral_input.is_some() {
             self.ephemeral_terminal_results
                 .lock()
-                .map_err(|_| "ephemeral terminal result registry is unavailable".to_string())?
+                .map_err(|_| "Ephemeral terminal result registry is unavailable".to_string())?
                 .record(EphemeralTerminalResult {
                     session_id: request.session_id.clone(),
                     turn_id: request.turn_id.clone(),
@@ -2062,9 +2062,9 @@ impl AgentToolPipeline {
             let mut pending = self
                 .pending
                 .lock()
-                .map_err(|_| "native approval registry is unavailable".to_string())?;
+                .map_err(|_| "Native approval registry is unavailable".to_string())?;
             let record = pending.get_mut(&key).ok_or_else(|| {
-                "approval is unknown, terminal, or was recovered as uncertain".to_string()
+                "Approval is unknown, terminal, or was recovered as uncertain".to_string()
             })?;
             if record.status != PendingStatus::Requested
                 || record.approval_id != input.approval_id
@@ -2074,7 +2074,7 @@ impl AgentToolPipeline {
                 || record.request.request_id != input.request_id
                 || record.request.model_call.call_id != input.call_id
             {
-                return Err("approval identity or state is stale".into());
+                return Err("Approval identity or state is stale".into());
             }
             record.status = PendingStatus::Executing;
             record.clone()
@@ -2090,12 +2090,12 @@ impl AgentToolPipeline {
                 &pending,
                 AgentToolApprovalStatus::Expired,
                 AgentToolResultStatus::TimedOut,
-                "native approval expired before the decision was committed",
+                "Native approval expired before the decision was committed",
             )?;
             self.native.abandon(&pending.preparation.token);
             self.changed.notify_waiters();
             self.continue_after_pending(entry, &pending).await?;
-            return Err("approval expired".into());
+            return Err("Approval expired".into());
         }
 
         if decision == AgentToolDecision::Reject {
@@ -2103,7 +2103,7 @@ impl AgentToolPipeline {
                 &pending,
                 AgentToolApprovalStatus::Rejected,
                 AgentToolResultStatus::Rejected,
-                "native approval was rejected",
+                "Native approval was rejected",
             )?;
             self.native.abandon(&pending.preparation.token);
             self.changed.notify_waiters();
@@ -2140,7 +2140,7 @@ impl AgentToolPipeline {
             || refreshed.parallel != pending.preparation.parallel
             || refreshed.exclusive != pending.preparation.exclusive
         {
-            return Err("approval policy changed; explicit reconciliation is required".into());
+            return Err("Approval policy changed; explicit reconciliation is required".into());
         }
         pending.preparation = refreshed;
 
@@ -2167,7 +2167,7 @@ impl AgentToolPipeline {
         let still_executing = self
             .pending
             .lock()
-            .map_err(|_| "native approval registry is unavailable".to_string())?
+            .map_err(|_| "Native approval registry is unavailable".to_string())?
             .get(&key)
             .is_some_and(|record| record.status == PendingStatus::Executing);
         if still_executing {
@@ -2192,7 +2192,7 @@ impl AgentToolPipeline {
         let pending = self
             .pending
             .lock()
-            .map_err(|_| "native approval registry is unavailable".to_string())?;
+            .map_err(|_| "Native approval registry is unavailable".to_string())?;
         let Some(record) = pending.get(&key) else {
             return Ok(None);
         };
@@ -2204,7 +2204,7 @@ impl AgentToolPipeline {
             || record.request.request_id != input.request_id
             || record.request.model_call.call_id != input.call_id
         {
-            return Err("approval identity or state is stale".into());
+            return Err("Approval identity or state is stale".into());
         }
         Ok(super::model::tool_call_arguments_are_ephemeral(
             &record.request.model_call.name,
@@ -2338,7 +2338,7 @@ impl AgentToolPipeline {
             let _gate = self
                 .question_gate
                 .lock()
-                .map_err(|_| "question gate unavailable")?;
+                .map_err(|_| "Question gate unavailable")?;
             entry.cancel();
             self.cancel_questions(&entry.session_id)?;
         }
@@ -2346,7 +2346,7 @@ impl AgentToolPipeline {
         let keys = self
             .pending
             .lock()
-            .map_err(|_| "native approval registry is unavailable".to_string())?
+            .map_err(|_| "Native approval registry is unavailable".to_string())?
             .iter()
             .filter(|(_, record)| record.request.session_id == *session_id)
             .map(|(key, _)| key.clone())
@@ -2356,7 +2356,7 @@ impl AgentToolPipeline {
                 let mut records = self
                     .pending
                     .lock()
-                    .map_err(|_| "native approval registry is unavailable".to_string())?;
+                    .map_err(|_| "Native approval registry is unavailable".to_string())?;
                 let Some(record) = records.get_mut(&key) else {
                     continue;
                 };
@@ -2379,7 +2379,7 @@ impl AgentToolPipeline {
                 &pending,
                 AgentToolApprovalStatus::Cancelled,
                 AgentToolResultStatus::Cancelled,
-                "native tool call was cancelled",
+                "Native tool call was cancelled",
             )?;
             for call in &pending.remaining_calls {
                 let mut request = pending.request.clone();
@@ -2389,7 +2389,7 @@ impl AgentToolPipeline {
             self.native.abandon(&pending.preparation.token);
             self.pending
                 .lock()
-                .map_err(|_| "native approval registry is unavailable".to_string())?
+                .map_err(|_| "Native approval registry is unavailable".to_string())?
                 .remove(&key);
             self.changed.notify_waiters();
         }
@@ -2405,7 +2405,7 @@ impl AgentToolPipeline {
             let executing = self
                 .pending
                 .lock()
-                .map_err(|_| "native approval registry is unavailable".to_string())?
+                .map_err(|_| "Native approval registry is unavailable".to_string())?
                 .values()
                 .any(|record| {
                     record.request.session_id == entry.session_id
@@ -2423,7 +2423,7 @@ impl AgentToolPipeline {
             let candidate = self
                 .pending
                 .lock()
-                .map_err(|_| "native approval registry is unavailable".to_string())?
+                .map_err(|_| "Native approval registry is unavailable".to_string())?
                 .iter()
                 .filter(|(_, record)| {
                     record.request.session_id == entry.session_id
@@ -2439,7 +2439,7 @@ impl AgentToolPipeline {
             tokio::select! {
                 _ = tokio::time::sleep(std::time::Duration::from_millis(delay)) => {
                     let expired = {
-                        let mut records = self.pending.lock().map_err(|_| "native approval registry is unavailable".to_string())?;
+                        let mut records = self.pending.lock().map_err(|_| "Native approval registry is unavailable".to_string())?;
                         let Some(record) = records.get_mut(&key) else { continue };
                         if record.status != PendingStatus::Requested {
                             continue;
@@ -2454,10 +2454,10 @@ impl AgentToolPipeline {
                         &expired,
                         AgentToolApprovalStatus::Expired,
                         AgentToolResultStatus::TimedOut,
-                        "native approval expired",
+                        "Native approval expired",
                     )?;
                     self.native.abandon(&expired.preparation.token);
-                    self.pending.lock().map_err(|_| "native approval registry is unavailable".to_string())?.remove(&key);
+                    self.pending.lock().map_err(|_| "Native approval registry is unavailable".to_string())?.remove(&key);
                     match self.continue_after_pending(entry, &expired).await? {
                         ToolPipelineSettlement::Completed => return Ok(true),
                         ToolPipelineSettlement::Waiting => continue,
@@ -2521,12 +2521,12 @@ impl AgentToolPipeline {
             }
             let call = calls
                 .get(&(step_id.clone(), call_id.clone()))
-                .ok_or_else(|| "recovery found approval without durable tool call".to_string())?;
+                .ok_or_else(|| "Recovery found approval without durable tool call".to_string())?;
             let turn_id = events
                 .iter()
                 .find(|event| event.step_id.as_deref() == Some(&step_id))
                 .and_then(|event| event.turn_id.clone())
-                .ok_or_else(|| "recovery found an unscoped tool call".to_string())?;
+                .ok_or_else(|| "Recovery found an unscoped tool call".to_string())?;
             if call.name == super::skills::SKILL_TOOL {
                 continue;
             }
@@ -2561,14 +2561,14 @@ impl AgentToolPipeline {
             }
             let approval_id = match status {
                 AgentToolApprovalStatus::Requested => approval_id.ok_or_else(|| {
-                    "recovery found a requested approval without approvalId".to_string()
+                    "Recovery found a requested approval without approvalId".to_string()
                 })?,
                 AgentToolApprovalStatus::Approved => approval_id.unwrap_or_default(),
                 _ => unreachable!(),
             };
             let target =
                 snapshot.header.target.clone().ok_or_else(|| {
-                    "recovered tool call has no frozen Session target".to_string()
+                    "Recovered tool call has no frozen Session target".to_string()
                 })?;
             let raw_calls = events
                 .iter()
@@ -2584,12 +2584,12 @@ impl AgentToolPipeline {
                     _ => None,
                 })
                 .ok_or_else(|| {
-                    "recovery found no model call for the durable native call".to_string()
+                    "Recovery found no model call for the durable native call".to_string()
                 })?;
             let raw_index = raw_calls
                 .iter()
                 .position(|candidate| candidate.call_id == call_id)
-                .ok_or_else(|| "recovery lost the durable model call".to_string())?;
+                .ok_or_else(|| "Recovery lost the durable model call".to_string())?;
             let raw_call = &raw_calls[raw_index];
             let remaining_calls: Vec<ModelToolCall> = raw_calls
                 .iter()
@@ -2620,7 +2620,7 @@ impl AgentToolPipeline {
                 permission_mode: snapshot
                     .header
                     .permission_mode
-                    .ok_or_else(|| "recovered tool call has no Rust permission mode".to_string())?,
+                    .ok_or_else(|| "Recovered tool call has no Rust permission mode".to_string())?,
                 execution_surface: snapshot.header.execution_surface,
             };
             if super::model::recorded_tool_call_omits_replay(call) {
@@ -2679,7 +2679,7 @@ impl AgentToolPipeline {
             let lease = Arc::new(PreparedLease::new(self.native.clone(), &preparation.token));
             if preparation.call != *call {
                 self.native.abandon(&preparation.token);
-                return Err("recovered native preparation drifted from the durable call".into());
+                return Err("Recovered native preparation drifted from the durable call".into());
             }
             if let Err(error) = self.validate_preparation(&request, &preparation) {
                 self.native.abandon(&preparation.token);
@@ -2701,7 +2701,7 @@ impl AgentToolPipeline {
                     &pending,
                     AgentToolApprovalStatus::Expired,
                     AgentToolResultStatus::TimedOut,
-                    "native approval expired while the app was not running",
+                    "Native approval expired while the app was not running",
                 )?;
                 for call in &pending.remaining_calls {
                     let mut request = pending.request.clone();
@@ -2718,7 +2718,7 @@ impl AgentToolPipeline {
                 };
                 self.pending
                     .lock()
-                    .map_err(|_| "native approval registry is unavailable".to_string())?
+                    .map_err(|_| "Native approval registry is unavailable".to_string())?
                     .insert(
                         approval_key(&entry.session_id, &step_id, &call_id),
                         PendingTool {
@@ -2776,13 +2776,13 @@ impl AgentToolPipeline {
         if self.sessions.snapshot(&entry.session_id)?.recovery.status
             == AgentRecoveryStatus::Required
         {
-            return Err("unresolved tool execution requires reconciliation before resuming".into());
+            return Err("Unresolved tool execution requires reconciliation before resuming".into());
         }
         let candidate = {
             let mut records = self
                 .pending
                 .lock()
-                .map_err(|_| "native approval registry is unavailable".to_string())?;
+                .map_err(|_| "Native approval registry is unavailable".to_string())?;
             let candidate = records
                 .iter_mut()
                 .find(|(_, record)| {
@@ -2821,7 +2821,7 @@ impl AgentToolPipeline {
         };
         let _lease = PreparedLease::new(self.native.clone(), &refreshed.token);
         if refreshed.call != pending.preparation.call {
-            return Err("recovered authorization drifted before dispatch".into());
+            return Err("Recovered authorization drifted before dispatch".into());
         }
         pending.preparation = refreshed;
         self.ensure_capability(
@@ -2848,7 +2848,7 @@ impl AgentToolPipeline {
         }
         self.pending
             .lock()
-            .map_err(|_| "native approval registry is unavailable".to_string())?
+            .map_err(|_| "Native approval registry is unavailable".to_string())?
             .remove(&key);
         self.sessions.append(
             &entry.session_id,
@@ -2900,7 +2900,7 @@ fn split_terminal_observation_for_persistence(
         "summary": summary,
         "data": observation,
     }))
-    .map_err(|error| format!("failed to encode ephemeral terminal observation: {error}"))?;
+    .map_err(|error| format!("Failed to encode ephemeral terminal observation: {error}"))?;
     *data = Some(terminal_observation_metadata(observation));
     Ok(Some(content))
 }

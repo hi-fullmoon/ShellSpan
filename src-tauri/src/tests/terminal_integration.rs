@@ -320,15 +320,27 @@
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn run_native_visible_command_acceptance(shell_path: &str, shell: TerminalShellKind) {
+        run_native_visible_command_acceptance_with_screen(shell_path, shell, false);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn run_native_visible_command_acceptance_with_screen(
+        shell_path: &str,
+        shell: TerminalShellKind,
+        screen: bool,
+    ) {
         use crate::terminal_broker::{
             TerminalGeometry, TerminalSessionBroker, TerminalTransportKind,
         };
         use portable_pty::{native_pty_system, PtySize};
-        use std::io::Write;
         use std::sync::{Arc, Mutex};
         use std::time::Instant;
 
-        let broker = TerminalSessionBroker::phase3_enabled_for_test(4_096);
+        let broker = if screen {
+            TerminalSessionBroker::phase5_enabled_for_test(4_096)
+        } else {
+            TerminalSessionBroker::phase3_enabled_for_test(4_096)
+        };
         let transport_id = format!("native-{}", shell.protocol_name());
         broker
             .attach_transport(
@@ -370,7 +382,7 @@
         let closed_broker = broker.clone();
         let closed_transport = transport_id.clone();
         let closed_integration = integration_id.clone();
-        let _integration_control = integration.start_reader(
+        let mut integration_control = integration.start_reader(
             move |event| {
                 control_broker.accept_integration_event(
                     &control_transport,
@@ -378,14 +390,12 @@
                     event,
                 )
             },
-            move |error| {
-                if error.is_some() {
-                    let _ = closed_broker.integration_channel_closed(
-                        &closed_transport,
-                        &closed_integration,
-                        "controlChannelFailed",
-                    );
-                }
+            move |_| {
+                let _ = closed_broker.integration_channel_closed(
+                    &closed_transport,
+                    &closed_integration,
+                    "controlChannelClosed",
+                );
             },
         );
         let display = Arc::new(Mutex::new(Vec::<u8>::new()));
@@ -590,8 +600,37 @@
             display.lock().unwrap().len() >= before_large + 12_000
         });
 
-        writer.lock().unwrap().write_all(b"exit\n").unwrap();
-        writer.lock().unwrap().flush().unwrap();
+        let typing_display_start = display.lock().unwrap().len();
+        if screen {
+            // Exercise animated input across several actual terminal rows.
+            pair.master
+                .resize(PtySize {
+                    rows: 30,
+                    cols: 32,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                })
+                .unwrap();
+            broker
+                .resize(&transport_id, TerminalGeometry::new(32, 30))
+                .unwrap();
+            // The earlier lifecycle test intentionally uses raw ANSI in PS1.
+            // Use a width-correct prompt for the wrapping/display regression.
+            execute_visible(&broker, &writer, &transport_id, shell, "PS1='typing> '");
+            execute_visible(&broker, &writer, &transport_id, shell, "clear");
+        }
+        verify_native_command_typing(
+            &broker,
+            &writer,
+            &transport_id,
+            shell,
+            &mut integration_control,
+            &display,
+            typing_display_start,
+        );
+        // The final case intentionally loses integration while input is pending.
+        // Teardown must not bypass the recovery guard by injecting an exit line.
+        child.kill().unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
         while child.try_wait().unwrap().is_none() && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(10));
@@ -604,8 +643,352 @@
         output_thread.join().unwrap();
         let display_bytes = display.lock().unwrap();
         let display = String::from_utf8_lossy(&display_bytes);
-        assert!(!display.contains(&integration_root_text));
+        assert!(
+            !display.contains(&integration_root_text),
+            "{}",
+            display
+                .lines()
+                .filter(|line| line.contains(&integration_root_text))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
         assert!(!display.contains(integration_id.as_str()));
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn verify_native_command_typing(
+        broker: &crate::terminal_broker::TerminalSessionBroker,
+        writer: &std::sync::Arc<std::sync::Mutex<Box<dyn std::io::Write + Send>>>,
+        transport_id: &str,
+        shell: TerminalShellKind,
+        integration_control: &mut TerminalIntegrationControlHandle,
+        display: &std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+        typing_display_start: usize,
+    ) {
+        use crate::agent_runtime::{
+            TerminalCommandPhase, TerminalExecuteRegistry, TerminalExecuteValidationStage,
+            TerminalLeaseEventState, TerminalLeaseManager,
+        };
+        use crate::models::{
+            ManagedSession, SessionCommand, SessionCommandSender, SessionIdentity, SessionManager,
+            SessionStatus, SessionTerminalKind, StatusEvent,
+        };
+        use crate::terminal_broker::TerminalCommandState;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::{Arc, Mutex};
+        use std::time::Instant;
+
+        let leases = TerminalLeaseManager::new(broker.clone());
+        let acknowledger = leases.clone();
+        let reduced_motion = Arc::new(AtomicBool::new(false));
+        let preference = Arc::clone(&reduced_motion);
+        let phases = Arc::new(Mutex::new(Vec::new()));
+        let observed_phases = Arc::clone(&phases);
+        leases
+            .set_publisher(Arc::new(move |event| {
+                if event.state == TerminalLeaseEventState::Acquired {
+                    acknowledger
+                        .set_reduced_motion(
+                            &event.session_id,
+                            &event.agent_session_id,
+                            &event.operation_id,
+                            preference.load(Ordering::SeqCst),
+                        )
+                        .unwrap();
+                    acknowledger
+                        .acknowledge_frontend_ready(
+                            &event.session_id,
+                            &event.agent_session_id,
+                            &event.operation_id,
+                            true,
+                            true,
+                            false,
+                            false,
+                            false,
+                        )
+                        .unwrap();
+                }
+                if let Some(phase) = event.command_phase {
+                    observed_phases.lock().unwrap().push(phase);
+                }
+            }))
+            .unwrap();
+        let registry = TerminalExecuteRegistry::new(leases.clone(), broker.clone());
+        let sessions = SessionManager::default();
+        let (sender, receiver) = crossbeam_channel::unbounded();
+        sessions
+            .insert(
+                transport_id.into(),
+                ManagedSession {
+                    sender: SessionCommandSender::Event(sender),
+                    waker: None,
+                    output_state_sender: None,
+                    status: StatusEvent {
+                        session_id: transport_id.into(),
+                        status: SessionStatus::Connected,
+                        message: None,
+                    },
+                    output_ready: Arc::new(AtomicBool::new(true)),
+                    output_paused: Arc::new(AtomicBool::new(false)),
+                    terminal_kind: SessionTerminalKind::Local,
+                    identity: SessionIdentity {
+                        title: shell.protocol_name().into(),
+                        host: "local".into(),
+                        port: 0,
+                        username: "".into(),
+                    },
+                },
+            )
+            .unwrap();
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let observed_writes = Arc::clone(&writes);
+        let transport_writer = Arc::clone(writer);
+        let worker = thread::spawn(move || {
+            while let Ok(SessionCommand::Write(input)) = receiver.recv() {
+                let mut writer = transport_writer.lock().unwrap();
+                writer.write_all(input.as_bytes()).unwrap();
+                writer.flush().unwrap();
+                observed_writes
+                    .lock()
+                    .unwrap()
+                    .push((Instant::now(), input));
+            }
+        });
+        let output = tempfile::tempdir().unwrap();
+        for command in ["pwd\nls", "printf\tvalue", "echo\rnext", "echo \u{3}", ""] {
+            let arguments =
+                serde_json::json!({"command": command, "explanation": "verify input rejection"});
+            assert!(crate::agent_runtime::validate_tool_arguments_native(
+                "terminal_execute",
+                &arguments
+            )
+            .is_err());
+            assert!(registry
+                .start(
+                    &sessions,
+                    transport_id,
+                    "typing-agent",
+                    "typing-task",
+                    "rejected-input",
+                    command,
+                    shell.enter()
+                )
+                .is_err());
+            assert!(!leases.has_lease(transport_id).unwrap());
+            assert!(writes.lock().unwrap().is_empty());
+            assert!(phases.lock().unwrap().is_empty());
+        }
+        if broker
+            .snapshot(None)
+            .unwrap()
+            .interactive_tools_rollout
+            .enabled
+            && shell == TerminalShellKind::Zsh
+        {
+            wait_until(Duration::from_secs(2), || {
+                broker
+                    .bracketed_paste_enabled(transport_id)
+                    .unwrap_or(false)
+            });
+        }
+        for mode in [
+            "unicode",
+            "wrap",
+            "cancel",
+            "pause-cancel",
+            "takeover",
+            "reduced",
+            "integration-loss",
+        ] {
+            wait_for_prompt(broker, transport_id);
+            writes.lock().unwrap().clear();
+            phases.lock().unwrap().clear();
+            reduced_motion.store(mode == "reduced", Ordering::SeqCst);
+            let file = output.path().join(mode);
+            let quoted_file = shell_single_quote(file.to_str().unwrap());
+            let value = if mode == "wrap" {
+                "wrapped-command"
+            } else {
+                "终端e\u{301}👩‍💻"
+            };
+            let command = format!("printf '%s' '{value}' > {quoted_file}");
+            crate::agent_runtime::validate_tool_arguments_native("terminal_execute", &serde_json::json!({"command": &command, "explanation": "verify real terminal input"})).unwrap();
+            let operation_id = format!("typing-{}", Uuid::new_v4().simple());
+            let operation = thread::scope(|scope| {
+                let typing = scope.spawn(|| {
+                    registry.start_with_revalidation(
+                        &sessions,
+                        transport_id,
+                        "typing-agent",
+                        "typing-task",
+                        &operation_id,
+                        &command,
+                        shell.enter(),
+                        |stage| {
+                            if stage == TerminalExecuteValidationStage::InputWrite {
+                                assert!(!file.exists(), "{mode}: command executed before submit");
+                            }
+                            Ok(())
+                        },
+                    )
+                });
+                if matches!(
+                    mode,
+                    "cancel" | "pause-cancel" | "takeover" | "integration-loss"
+                ) {
+                    let deadline = Instant::now() + Duration::from_secs(5);
+                    while {
+                        let inputs = writes.lock().unwrap();
+                        if mode == "pause-cancel"
+                            || (mode == "integration-loss"
+                                && broker
+                                    .bracketed_paste_enabled(transport_id)
+                                    .unwrap_or(false))
+                        {
+                            inputs
+                                .iter()
+                                .map(|(_, input)| {
+                                    input
+                                        .strip_prefix("\u{1b}[200~")
+                                        .and_then(|text| text.strip_suffix("\u{1b}[201~"))
+                                        .unwrap_or(input.as_str())
+                                })
+                                .collect::<String>()
+                                != command
+                        } else {
+                            inputs.len() < 3
+                        }
+                    } {
+                        assert!(Instant::now() < deadline, "typing never reached transport");
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    assert!(!file.exists(), "command executed before submission");
+                    if mode == "integration-loss" {
+                        // Close the actual FIFO reader while the PTY stays open.
+                        integration_control.stop();
+                    } else if mode != "takeover" {
+                        registry.cancel_task(&sessions, "typing-task").unwrap();
+                    } else {
+                        registry
+                            .takeover(&sessions, transport_id, "typing-agent", &operation_id)
+                            .unwrap();
+                    }
+                }
+                typing.join().unwrap()
+            });
+            if mode == "integration-loss" {
+                assert!(operation
+                    .unwrap_err()
+                    .starts_with("TERMINAL_INPUT_RECOVERY_REQUIRED"));
+                assert!(!file.exists());
+                leases.release_turn("typing-agent").unwrap();
+                assert!(!leases.has_lease(transport_id).unwrap());
+                assert_eq!(
+                    sessions.target_state(transport_id).unwrap().status,
+                    SessionStatus::Connected
+                );
+                let error = leases
+                    .write(
+                        &sessions,
+                        transport_id,
+                        "\n".into(),
+                        crate::agent_runtime::TerminalInputSource::User,
+                    )
+                    .unwrap_err();
+                assert!(
+                    error.starts_with("TERMINAL_INPUT_RECOVERY_REQUIRED"),
+                    "{error}"
+                );
+                assert!(!writes
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|(_, input)| input == shell.enter()));
+                continue;
+            }
+            let operation = operation.unwrap();
+            let snapshot = registry
+                .wait(&sessions, transport_id, &operation, Duration::from_secs(5))
+                .unwrap();
+            let inputs = writes.lock().unwrap();
+            if matches!(mode, "cancel" | "pause-cancel" | "takeover") {
+                assert_eq!(
+                    snapshot.state,
+                    if mode == "takeover" {
+                        TerminalCommandState::TakenOver
+                    } else {
+                        TerminalCommandState::Cancelled
+                    }
+                );
+                assert!(!file.exists(), "cancelled typing executed a command");
+                assert_eq!(inputs.last().unwrap().1, "\u{3}");
+                assert!(!inputs.iter().any(|(_, input)| input == shell.enter()));
+                assert_eq!(*phases.lock().unwrap(), [TerminalCommandPhase::Typing]);
+            } else {
+                assert_eq!(
+                    snapshot.state,
+                    TerminalCommandState::Completed,
+                    "{mode}: {snapshot:?}"
+                );
+                assert_eq!(fs::read_to_string(&file).unwrap(), value);
+                if mode == "reduced" {
+                    assert_eq!(inputs.len(), 1);
+                    assert_eq!(*phases.lock().unwrap(), [TerminalCommandPhase::Running]);
+                } else {
+                    assert!(inputs.len() > 2 && inputs.len() <= 49);
+                    assert_eq!(
+                        inputs[..inputs.len() - 1]
+                            .iter()
+                            .map(|(_, input)| input.as_str())
+                            .collect::<String>(),
+                        command
+                    );
+                    assert!(
+                        inputs.iter().all(|(_, input)| !input.contains('\u{1b}')),
+                        "animated input must not toggle bracketed-paste highlighting"
+                    );
+                    assert_eq!(inputs.last().unwrap().1, shell.enter());
+                    assert!(
+                        inputs
+                            .last()
+                            .unwrap()
+                            .0
+                            .duration_since(inputs[inputs.len() - 2].0)
+                            >= Duration::from_millis(100)
+                    );
+                    assert_eq!(
+                        *phases.lock().unwrap(),
+                        [TerminalCommandPhase::Typing, TerminalCommandPhase::Running]
+                    );
+                    if mode == "wrap"
+                        && broker
+                            .bracketed_paste_enabled(transport_id)
+                            .unwrap_or(false)
+                    {
+                        if let Ok(path) = std::env::var("SHELLSPAN_TYPING_TRACE_PATH") {
+                            fs::write(path, &display.lock().unwrap()[typing_display_start..])
+                                .unwrap();
+                        }
+                    }
+                }
+            }
+            drop(inputs);
+            wait_for_prompt(broker, transport_id);
+            leases.release_turn("typing-agent").unwrap();
+            // A trusted prompt must release the recovery guard for normal use.
+            leases
+                .write(
+                    &sessions,
+                    transport_id,
+                    shell.enter().into(),
+                    crate::agent_runtime::TerminalInputSource::User,
+                )
+                .unwrap();
+            thread::sleep(Duration::from_millis(30));
+            wait_for_prompt(broker, transport_id);
+        }
+        sessions.remove(transport_id).unwrap();
+        worker.join().unwrap();
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
@@ -815,6 +1198,12 @@
     #[test]
     fn macos_native_zsh_visible_commands_preserve_shell_state_and_raw_display() {
         run_native_visible_command_acceptance("/bin/zsh", TerminalShellKind::Zsh);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_native_zsh_typing_with_negotiated_bracketed_paste() {
+        run_native_visible_command_acceptance_with_screen("/bin/zsh", TerminalShellKind::Zsh, true);
     }
 
     #[cfg(target_os = "linux")]

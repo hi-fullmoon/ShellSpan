@@ -67,9 +67,13 @@ const AgentTerminalLeaseBar: React.FC<{
     ? t('terminal.agentLease.turnRunning')
     : lease.inputBlocked
       ? t('terminal.agentLease.inputBlockedAccessibleHint')
-      : t('terminal.agentLease.inputLocked');
+      : t(lease.commandPhase === 'typing'
+        ? 'terminal.agentLease.commandTypingHint'
+        : 'terminal.agentLease.inputLocked');
   const activityLabel = lease.terminalOwned
-    ? t('terminal.agentLease.commandRunning')
+    ? t(lease.commandPhase === 'typing'
+      ? 'terminal.agentLease.commandTyping'
+      : 'terminal.agentLease.commandRunning')
     : t('terminal.agentLease.turnRunning');
   const inputLabel = t('terminal.agentLease.inputLockedLabel');
 

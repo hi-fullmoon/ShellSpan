@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use unicode_segmentation::UnicodeSegmentation;
 
+use crate::agent_runtime::validate_visible_command_input;
 use crate::models::{SessionManager, SessionStatus};
 use crate::terminal_broker::{
     TerminalCommandOperation, TerminalCommandRequestedSettlement, TerminalCommandSnapshot,
@@ -9,13 +11,17 @@ use crate::terminal_broker::{
 };
 
 use super::{
-    TerminalInputSource, TerminalLeaseError, TerminalLeaseManager, TerminalLeaseReleaseReason,
+    TerminalCommandPhase, TerminalInputSource, TerminalLeaseError, TerminalLeaseManager,
+    TerminalLeaseReleaseReason,
 };
 
 const FRONTEND_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const INTERRUPT_SETTLEMENT_TIMEOUT: Duration = Duration::from_secs(2);
 const CAPTURE_DRAIN_GRACE: Duration = Duration::from_millis(25);
 const WAIT_SLICE: Duration = Duration::from_millis(50);
+const TYPING_INTERVAL: Duration = Duration::from_millis(35);
+const TYPING_MAX_STEPS: usize = 48;
+const TYPING_SUBMIT_PAUSE: Duration = Duration::from_millis(150);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TerminalExecuteValidationStage {
@@ -30,6 +36,8 @@ struct TerminalExecuteRegistration {
     task_id: String,
     operation_id: String,
     operation: Arc<TerminalCommandOperation>,
+    // Serializes each enqueue with cancellation, but is never held while sleeping.
+    submitted: Arc<Mutex<bool>>,
 }
 
 #[derive(Clone)]
@@ -92,6 +100,9 @@ impl TerminalExecuteRegistry {
         enter: &str,
         mut revalidate: impl FnMut(TerminalExecuteValidationStage) -> Result<(), String>,
     ) -> Result<Arc<TerminalCommandOperation>, String> {
+        // Keep the transport boundary consistent with terminal_execute policy.
+        // Reject unsupported input before acquiring a lease or touching the PTY.
+        validate_visible_command_input(command)?;
         revalidate(TerminalExecuteValidationStage::LeaseAcquisition)?;
         self.leases
             .acquire(session_id, agent_session_id, task_id, operation_id, None)?;
@@ -158,6 +169,7 @@ impl TerminalExecuteRegistry {
                 return Err(error);
             }
         };
+        let submitted = Arc::new(Mutex::new(false));
         {
             let mut operations = match self.operations.lock() {
                 Ok(operations) => operations,
@@ -195,6 +207,7 @@ impl TerminalExecuteRegistry {
                     task_id: task_id.to_string(),
                     operation_id: operation_id.to_string(),
                     operation: Arc::clone(&operation),
+                    submitted: Arc::clone(&submitted),
                 },
             );
         }
@@ -211,19 +224,137 @@ impl TerminalExecuteRegistry {
             );
             return Err(error);
         }
-        let input = format!("{command}{enter}");
-        if let Err(error) = self.leases.write(
-            sessions,
-            session_id,
-            input,
-            TerminalInputSource::Agent {
+        let write_result = (|| {
+            let reduced_motion = self.leases.reduced_motion(session_id, operation_id)?;
+            let bracketed = self
+                .broker
+                .bracketed_paste_enabled(session_id)
+                .unwrap_or(false);
+            let input = command;
+            let chunks = typing_chunks(command, reduced_motion);
+            let animated = !reduced_motion && chunks.len() > 1;
+            if !animated {
+                let mut gate = submitted
+                    .lock()
+                    .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE".to_string())?;
+                if operation.snapshot()?.state != TerminalCommandState::Submitted {
+                    return interrupted_typing_result(operation.snapshot()?.state);
+                }
+                let data = if bracketed {
+                    format!("\u{1b}[200~{input}\u{1b}[201~{enter}")
+                } else {
+                    format!("{input}{enter}")
+                };
+                self.leases.write(
+                    sessions,
+                    session_id,
+                    data,
+                    TerminalInputSource::Agent {
+                        agent_session_id,
+                        task_id,
+                        operation_id,
+                    },
+                )?;
+                *gate = true;
+                self.leases.publish_command_phase(
+                    session_id,
+                    agent_session_id,
+                    operation_id,
+                    TerminalCommandPhase::Running,
+                )?;
+                return Ok(());
+            }
+            if animated {
+                self.leases.publish_command_phase(
+                    session_id,
+                    agent_session_id,
+                    operation_id,
+                    TerminalCommandPhase::Typing,
+                )?;
+            }
+            let started = Instant::now();
+            for (index, chunk) in chunks.iter().enumerate() {
+                if animated {
+                    std::thread::sleep(
+                        (started + TYPING_INTERVAL * index as u32)
+                            .saturating_duration_since(Instant::now()),
+                    );
+                }
+                let _gate = submitted
+                    .lock()
+                    .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE".to_string())?;
+                if operation.snapshot()?.state != TerminalCommandState::Submitted {
+                    return interrupted_typing_result(operation.snapshot()?.state);
+                }
+                // Animated input is ordinary typing. Repeated bracketed pastes
+                // toggle ZLE's paste highlight and repaint wrapped input lines.
+                // The shared command validator has already rejected all control
+                // characters, so no paste envelope is needed for these chunks.
+                self.leases.write(
+                    sessions,
+                    session_id,
+                    chunk.to_string(),
+                    TerminalInputSource::Agent {
+                        agent_session_id,
+                        task_id,
+                        operation_id,
+                    },
+                )?;
+            }
+            if animated {
+                std::thread::sleep(TYPING_SUBMIT_PAUSE);
+            }
+            let mut gate = submitted
+                .lock()
+                .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE".to_string())?;
+            if operation.snapshot()?.state != TerminalCommandState::Submitted {
+                return interrupted_typing_result(operation.snapshot()?.state);
+            }
+            revalidate(TerminalExecuteValidationStage::InputWrite)?;
+            self.leases.write(
+                sessions,
+                session_id,
+                enter.to_string(),
+                TerminalInputSource::Agent {
+                    agent_session_id,
+                    task_id,
+                    operation_id,
+                },
+            )?;
+            *gate = true;
+            self.leases.publish_command_phase(
+                session_id,
                 agent_session_id,
-                task_id,
                 operation_id,
-            },
-        ) {
+                TerminalCommandPhase::Running,
+            )?;
+            Ok::<(), String>(())
+        })();
+        if let Err(error) = write_result {
+            // Discard partially typed input before releasing ownership. Never
+            // touch a replacement operation or a terminal already taken over.
+            let _gate = submitted
+                .lock()
+                .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE".to_string())?;
             let command_id = operation.command_id()?;
             let _ = self.broker.mark_command_uncertain(session_id, &command_id);
+            if !*_gate {
+                let _ = self.broker.retire_command(session_id, &command_id);
+            }
+            if self
+                .leases
+                .validate_control_owner(session_id, agent_session_id, operation_id)
+                .is_ok()
+            {
+                let _ = self.leases.write(
+                    sessions,
+                    session_id,
+                    "\u{3}".into(),
+                    TerminalInputSource::System {
+                        operation_id: Some(operation_id),
+                    },
+                );
+            }
             let _ = self.finish_registration(
                 session_id,
                 agent_session_id,
@@ -336,9 +467,18 @@ impl TerminalExecuteRegistry {
         self.leases
             .validate_control_owner(session_id, agent_session_id, operation_id)?;
         let registration = self.registration(session_id, operation_id)?;
+        let submitted = registration
+            .submitted
+            .lock()
+            .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE".to_string())?;
         let send = registration
             .operation
             .request_settlement(TerminalCommandRequestedSettlement::TakenOver)?;
+        if !*submitted {
+            registration.operation.settle_unsubmitted()?;
+            self.broker
+                .retire_command(session_id, &registration.operation.command_id()?)?;
+        }
         if send {
             let _ = self.leases.write(
                 sessions,
@@ -402,7 +542,19 @@ impl TerminalExecuteRegistry {
             .collect::<Vec<_>>();
         let mut requested_count = 0;
         for (session_id, registration) in registrations {
+            let submitted = registration
+                .submitted
+                .lock()
+                .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE".to_string())?;
             let send = registration.operation.request_settlement(requested)?;
+            if !*submitted {
+                registration.operation.settle_unsubmitted()?;
+                // Bash emits a prompt-cycle lifecycle even when Ctrl-C only
+                // clears the edit buffer. Detach this never-submitted command
+                // before that lifecycle can be mistaken for its execution.
+                self.broker
+                    .retire_command(&session_id, &registration.operation.command_id()?)?;
+            }
             if send {
                 let _ = self.leases.write(
                     sessions,
@@ -466,6 +618,33 @@ impl TerminalExecuteRegistry {
             .leases
             .release(session_id, agent_session_id, task_id, operation_id, reason);
         Ok(())
+    }
+}
+
+fn typing_chunks(input: &str, reduced_motion: bool) -> Vec<&str> {
+    if reduced_motion || input.is_empty() {
+        return vec![input];
+    }
+    let boundaries = input
+        .grapheme_indices(true)
+        .map(|(index, _)| index)
+        .chain(std::iter::once(input.len()))
+        .collect::<Vec<_>>();
+    let count = boundaries.len() - 1;
+    let step = count.div_ceil(TYPING_MAX_STEPS);
+    (0..count)
+        .step_by(step)
+        .map(|index| &input[boundaries[index]..boundaries[(index + step).min(count)]])
+        .collect()
+}
+
+fn interrupted_typing_result(state: TerminalCommandState) -> Result<(), String> {
+    match state {
+        TerminalCommandState::Cancelled | TerminalCommandState::TakenOver => Ok(()),
+        _ => Err(
+            "TERMINAL_INPUT_RECOVERY_REQUIRED: command input was interrupted before submission"
+                .into(),
+        ),
     }
 }
 

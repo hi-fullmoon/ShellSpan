@@ -588,6 +588,24 @@ impl TerminalCommandOperation {
         Ok(changed)
     }
 
+    /// Called under the executor's input gate, only when no submit key was sent.
+    pub(crate) fn settle_unsubmitted(&self) -> Result<(), String> {
+        let mut data = self.lock()?;
+        if data.state != TerminalCommandState::CancelRequested {
+            return Ok(());
+        }
+        data.state = match data.requested_settlement {
+            Some(TerminalCommandRequestedSettlement::Cancelled) => TerminalCommandState::Cancelled,
+            Some(TerminalCommandRequestedSettlement::TakenOver) => TerminalCommandState::TakenOver,
+            Some(TerminalCommandRequestedSettlement::TimedOut) => TerminalCommandState::TimedOut,
+            None => return Ok(()),
+        };
+        data.revision = next_command_revision(data.revision)?;
+        drop(data);
+        self.notify();
+        Ok(())
+    }
+
     pub(crate) fn finalize_capture(&self, through_sequence: u64) -> Result<(), String> {
         let mut data = self.lock()?;
         data.capture_open = false;
@@ -877,6 +895,9 @@ struct SessionRecord {
     prompt_ready: bool,
     current_directory: Option<String>,
     active_command: Option<Arc<TerminalCommandOperation>>,
+    // Kept across lease release/retirement until a trusted shell event proves
+    // the edit buffer was submitted or cleared. Never cleared by raw output.
+    command_input_pending: bool,
     screen_model: Option<TerminalScreenModel>,
     last_output_at: Instant,
     lease: Option<TerminalLeaseSnapshot>,
@@ -919,6 +940,7 @@ impl SessionRecord {
             prompt_ready: false,
             current_directory: None,
             active_command: None,
+            command_input_pending: false,
             screen_model: interactive_tools_enabled.then(|| TerminalScreenModel::new(geometry)),
             last_output_at: Instant::now(),
             lease: Some(user_lease(1)),
@@ -1812,6 +1834,7 @@ impl TerminalSessionBroker {
                 }
                 record.prompt_started = false;
                 record.prompt_ready = true;
+                record.command_input_pending = false;
             }
             TerminalIntegrationControlEvent::CommandStart { command_line, cwd } => {
                 require_ready_integration(record)?;
@@ -1842,6 +1865,7 @@ impl TerminalSessionBroker {
                     if data.state == TerminalCommandState::Submitted {
                         data.state = TerminalCommandState::Running;
                     }
+                    record.command_input_pending = false;
                     data.revision = next_command_revision(data.revision)?;
                     data.cwd = Some(cwd);
                     data.capture_start_sequence = data
@@ -2102,6 +2126,31 @@ impl TerminalSessionBroker {
         F: FnOnce() -> Result<(), String>,
     {
         let mut state = self.lock()?;
+        // Even a lease release or trusted feature rollback must not expose a
+        // partially typed command to a later user Enter. A scoped interrupt is
+        // still allowed; only a trusted prompt or a new generation clears it.
+        if let Some(record) = state
+            .transports
+            .get(transport_session_id)
+            .and_then(|attachment| state.sessions.get(&attachment.terminal_session_id))
+        {
+            if record.command_input_pending && bytes != [3] {
+                let continuing_command = matches!(&source, TerminalBrokerInputSource::Agent { .. })
+                    && record
+                        .active_command
+                        .as_ref()
+                        .map(|command| {
+                            command
+                                .lock()
+                                .map(|data| data.state == TerminalCommandState::Submitted)
+                        })
+                        .transpose()?
+                        .unwrap_or(false);
+                if !continuing_command {
+                    return Err("TERMINAL_INPUT_RECOVERY_REQUIRED: command input was interrupted; wait for the shell prompt or reconnect the terminal".into());
+                }
+            }
+        }
         if !state.rollout.enabled {
             write()?;
             return Ok(None);
@@ -2146,10 +2195,25 @@ impl TerminalSessionBroker {
         if next_input_sequence > JAVASCRIPT_MAX_SAFE_INTEGER {
             return Err(counter_exhausted());
         }
+        let command_input_pending =
+            matches!(&request.source, TerminalBrokerInputSource::Agent { .. })
+                && record
+                    .active_command
+                    .as_ref()
+                    .map(|command| {
+                        command
+                            .lock()
+                            .map(|data| data.state == TerminalCommandState::Submitted)
+                    })
+                    .transpose()?
+                    .unwrap_or(false);
         // Authorization, transport admission, and input-sequence commit share
         // the broker lock. A rejected transport enqueue therefore consumes no
         // sequence and writes no partial input.
         write()?;
+        if command_input_pending {
+            record.command_input_pending = true;
+        }
         record.next_input_sequence = next_input_sequence;
         Ok(Some(receipt))
     }

@@ -251,6 +251,14 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
   return {
     async handle(lease) {
       if (disposed) return;
+      if (lease.state === 'activity') {
+        agentTerminalLeaseState.update(lease.sessionId, lease.operationId, (current) => (
+          current.terminalOwned && current.agentSessionId === lease.agentSessionId
+            ? { ...current, commandPhase: lease.commandPhase }
+            : current
+        ));
+        return;
+      }
       if (lease.state === 'acquired') {
         await pendingTurnBindings.get(lease.agentSessionId);
         if (disposed) return;
@@ -417,6 +425,8 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
           hasPendingUserInput: controller?.hasPendingUserInput() ?? false,
           hasUnverifiedUserSubmission: controller?.hasUnverifiedUserSubmission() ?? false,
           hasCredentialPrompt: controller?.hasKnownCredentialPrompt() ?? false,
+          reducedMotion: typeof window.matchMedia !== 'function'
+            || window.matchMedia('(prefers-reduced-motion: reduce)').matches,
         });
       } catch (error) {
         logger.warn(`Failed to acknowledge Agent terminal lease ${lease.operationId}`, error);

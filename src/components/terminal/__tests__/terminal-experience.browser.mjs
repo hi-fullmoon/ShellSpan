@@ -36,6 +36,7 @@ const server = await createServer({
         export { TerminalCloseDetails } from '/src/components/terminal/terminal-close-details.tsx';
         export { TerminalPane } from '/src/components/terminal/terminal-pane.tsx';
         export { agentTerminalLeaseState } from '/src/components/terminal/agent-terminal-lease-state.ts';
+        export { createAgentTerminalLeaseCoordinator } from '/src/components/terminal/terminal-controller-layer.tsx';
         export { FitAddon } from '@xterm/addon-fit';
         export { resolveTerminalTheme } from '/src/components/terminal/registry/terminal-registry.ts';
         export { TERMINAL_CONTAINER_CLASS } from '/src/components/terminal/registry/terminal-geometry.ts';
@@ -460,6 +461,76 @@ try {
   await page.getByRole('status', { name: '正在准备终端，暂时无法输入' }).waitFor();
   await page.evaluate(() => window.runtime.terminalInputReadiness.finish(window.identity.sessionId));
   await page.getByRole('status', { name: '正在准备终端，暂时无法输入' }).waitFor({ state: 'detached' });
+  // Render both command phases with the real lease store and production pane.
+  // Phase changes must preserve the status bar and takeover button geometry.
+  await page.evaluate(() => {
+    const { agentTerminalLeaseState } = window.runtime;
+    agentTerminalLeaseState.set({
+      sessionId: window.identity.sessionId, agentSessionId: crypto.randomUUID(), taskId: crypto.randomUUID(),
+      operationId: crypto.randomUUID(), acquiredAtUnixMs: Date.now(), state: 'acquired', commandPhase: 'typing',
+      terminalOwned: true, inputBlocked: false, takeoverRequested: false, takeoverFailed: false,
+      requestTakeover: () => agentTerminalLeaseState.clearAll(),
+    });
+  });
+  for (const width of [1280, 420]) {
+    await page.setViewportSize({ width, height: 800 });
+    const bar = page.getByTestId('agent-terminal-lease-bar');
+    await bar.getByText('正在输入命令…', { exact: true }).waitFor();
+    const typingBar = await bar.boundingBox();
+    const takeover = bar.getByRole('button', { name: '停止并接管', exact: true });
+    const typingButton = await takeover.boundingBox();
+    assert.ok(typingButton.x >= typingBar.x && typingButton.x + typingButton.width <= typingBar.x + typingBar.width);
+    await page.screenshot({ path: `/tmp/shellspan-terminal-typing-${width}.png` });
+    await page.evaluate(async () => {
+      const store = window.runtime.agentTerminalLeaseState;
+      const lease = store.get(window.identity.sessionId);
+      const coordinator = window.runtime.createAgentTerminalLeaseCoordinator();
+      await coordinator.handle({ ...lease, operationId: crypto.randomUUID(), state: 'activity', commandPhase: 'running' });
+      if (store.get(lease.sessionId).commandPhase !== 'typing') throw new Error('Stale activity changed the active lease');
+      await coordinator.handle({ ...lease, state: 'activity', commandPhase: 'running' });
+      coordinator.dispose();
+    });
+    await bar.getByText('Agent 正在此终端执行命令', { exact: true }).waitFor();
+    assert.deepEqual(await bar.boundingBox(), typingBar);
+    assert.deepEqual(await takeover.boundingBox(), typingButton);
+    await page.evaluate(async () => {
+      const store = window.runtime.agentTerminalLeaseState;
+      const lease = store.get(window.identity.sessionId);
+      const coordinator = window.runtime.createAgentTerminalLeaseCoordinator();
+      await coordinator.handle({ ...lease, state: 'activity', commandPhase: 'typing' });
+      coordinator.dispose();
+    });
+  }
+  await page.getByTestId('agent-terminal-lease-bar').getByRole('button', { name: '停止并接管', exact: true }).click();
+  await page.getByTestId('agent-terminal-lease-bar').waitFor({ state: 'detached' });
+  if (process.env.SHELLSPAN_TYPING_TRACE_PATH) {
+    const trace = readFileSync(process.env.SHELLSPAN_TYPING_TRACE_PATH, 'utf8');
+    const rendered = await page.evaluate(async (trace) => {
+      const host = document.createElement('div');
+      host.style.cssText = 'position:fixed;inset:0;background:#1e1e2e;padding:12px';
+      document.body.appendChild(host);
+      const terminal = new window.runtime.Terminal({ cols: 32, rows: 30, cursorBlink: false });
+      terminal.open(host);
+      await new Promise((resolve) => terminal.write(trace, resolve));
+      await new Promise(requestAnimationFrame);
+      const lines = Array.from({ length: terminal.buffer.active.length }, (_, index) => terminal.buffer.active.getLine(index));
+      return {
+        rows: lines.map((line) => line.translateToString(true)).filter((line) => line.trim()),
+        text: lines.map((line) => line.translateToString(true)).join(''),
+      };
+    }, trace);
+    await page.screenshot({ path: '/tmp/shellspan-terminal-typing-wrap.png' });
+    // ZLE emits explicit cursor/line controls when wrapping; xterm's isWrapped
+    // flag only describes its own automatic wrap, not the rendered Shell layout.
+    const commandStart = rendered.rows.findIndex((row) => row.includes("printf '%s' 'wrapped-com"));
+    assert.ok(commandStart >= 0, JSON.stringify(rendered));
+    const commandRows = rendered.rows.slice(commandStart);
+    const nextPrompt = commandRows.findIndex((row, index) => index > 0 && row.startsWith('typing>'));
+    assert.ok(nextPrompt >= 3, JSON.stringify(rendered));
+    const commandText = commandRows.slice(0, nextPrompt).join('');
+    assert.ok(commandText.includes("printf '%s' 'wrapped-command'"), commandText);
+    assert.ok(commandText.endsWith("/wrap'"), commandText);
+  }
   assert.deepEqual(errors, []);
   process.stdout.write('Terminal experience regressions passed with real xterm and WebKit at wide and narrow sizes.\n');
 } finally {
