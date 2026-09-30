@@ -9,6 +9,22 @@
     use std::sync::atomic::AtomicBool;
     use std::thread;
 
+    #[test]
+    fn typing_keeps_graphemes_intact_and_bounds_long_command_delay() {
+        let command = "终端e\u{301}👩‍💻";
+        assert_eq!(
+            typing_chunks(command, false),
+            ["终", "端", "e\u{301}", "👩‍💻"]
+        );
+        let long = command.repeat(2_000);
+        let chunks = typing_chunks(&long, false);
+        assert!(chunks.len() <= TYPING_MAX_STEPS);
+        assert_eq!(chunks.concat(), long);
+        assert!(TYPING_INTERVAL * chunks.len() as u32 <= Duration::from_millis(1_700));
+        assert_eq!(typing_chunks(command, true), [command]);
+        assert_eq!(typing_chunks("", false), [""]);
+    }
+
     fn harness() -> (
         TerminalSessionBroker,
         TerminalExecuteRegistry,

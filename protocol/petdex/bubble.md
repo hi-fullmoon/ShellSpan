@@ -4,6 +4,8 @@
 
 ## 固定依据
 
+客户端重试调度：动作与气泡均在共享退避截止时间之后进入发送尝试，退避期间仍处理取消、配置变化和内容到期。进入尝试后保留1500ms总预算及发送前的节流复查；若手动请求或并发请求在已有失败退避期间超时，不增加共享失败计数，也不推迟已有恢复截止时间。
+
 - 安装：`/Applications/Petdex.app`，Info.plist版本0.8.0，实际进程36116。二进制SHA-256：`878448e0e0a742608df3d9f7048796e7b362166a5a648d5c676c089dc0fa7522`。
 - 官方tag `desktop-v0.8.0`，commit `f2ea48aac6f89fbaeedd6a639faf4e208864ae5d`。
 - [hook_server.zig](https://github.com/crafter-station/petdex/blob/f2ea48aac6f89fbaeedd6a639faf4e208864ae5d/packages/petdex-desktop-native/src/hook_server.zig)：完整route、Bubble、setBubbleWithMetadata、jsonString、bubbleSessionKey、mirrorBubble。

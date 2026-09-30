@@ -36,7 +36,15 @@ pub(crate) enum TerminalLeaseReleaseReason {
 #[serde(rename_all = "camelCase")]
 pub(crate) enum TerminalLeaseEventState {
     Acquired,
+    Activity,
     Released,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum TerminalCommandPhase {
+    Typing,
+    Running,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -50,6 +58,8 @@ pub(crate) struct AgentTerminalLeaseEvent {
     pub(crate) state: TerminalLeaseEventState,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) command_display: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) command_phase: Option<TerminalCommandPhase>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) reason: Option<TerminalLeaseReleaseReason>,
 }
@@ -119,6 +129,7 @@ enum TerminalInputPayload {
 struct LeaseRecord {
     lease: AgentTerminalLease,
     frontend_ready: FrontendReadyState,
+    reduced_motion: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -259,6 +270,7 @@ impl TerminalLeaseManager {
                 LeaseRecord {
                     lease: lease.clone(),
                     frontend_ready: FrontendReadyState::Pending,
+                    reduced_motion: true,
                 },
             );
         }
@@ -277,6 +289,7 @@ impl TerminalLeaseManager {
             acquired_at_unix_ms: lease.acquired_at_unix_ms,
             state: TerminalLeaseEventState::Acquired,
             command_display,
+            command_phase: None,
             reason: None,
         });
         Ok(lease)
@@ -399,6 +412,67 @@ impl TerminalLeaseManager {
         } else {
             Ok(false)
         }
+    }
+
+    pub(crate) fn set_reduced_motion(
+        &self,
+        session_id: &str,
+        agent_session_id: &str,
+        operation_id: &str,
+        reduced_motion: bool,
+    ) -> Result<(), String> {
+        let mut leases = self
+            .leases
+            .lock()
+            .map_err(|_| TerminalLeaseError::Unavailable.to_string())?;
+        let record = leases
+            .get_mut(session_id)
+            .ok_or_else(|| TerminalLeaseError::NotFound.to_string())?;
+        validate_owner(&record.lease, agent_session_id, None, operation_id)?;
+        if record.frontend_ready == FrontendReadyState::Pending {
+            record.reduced_motion = reduced_motion;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn reduced_motion(
+        &self,
+        session_id: &str,
+        operation_id: &str,
+    ) -> Result<bool, String> {
+        let leases = self
+            .leases
+            .lock()
+            .map_err(|_| TerminalLeaseError::Unavailable.to_string())?;
+        let record = leases
+            .get(session_id)
+            .ok_or_else(|| TerminalLeaseError::NotFound.to_string())?;
+        if record.lease.operation_id != operation_id {
+            return Err(TerminalLeaseError::OperationMismatch.to_string());
+        }
+        Ok(record.reduced_motion)
+    }
+
+    pub(crate) fn publish_command_phase(
+        &self,
+        session_id: &str,
+        agent_session_id: &str,
+        operation_id: &str,
+        phase: TerminalCommandPhase,
+    ) -> Result<(), String> {
+        let lease = self.validate_control_owner(session_id, agent_session_id, operation_id)?;
+        self.publish(AgentTerminalLeaseEvent {
+            session_id: lease.session_id,
+            agent_session_id: lease.agent_session_id,
+            task_id: lease.task_id,
+            operation_id: lease.operation_id,
+            acquired_at_unix_ms: lease.acquired_at_unix_ms,
+            state: TerminalLeaseEventState::Activity,
+            command_display: None,
+            command_phase: Some(phase),
+            reason: None,
+        });
+        Ok(())
     }
 
     pub(crate) fn acknowledge_frontend_ready(
@@ -777,6 +851,7 @@ fn released_event(
         acquired_at_unix_ms: lease.acquired_at_unix_ms,
         state: TerminalLeaseEventState::Released,
         command_display: None,
+        command_phase: None,
         reason: Some(reason),
     }
 }

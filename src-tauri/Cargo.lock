@@ -64,6 +64,7 @@ dependencies = [
  "trash",
  "tree-sitter",
  "tree-sitter-bash",
+ "unicode-segmentation",
  "url",
  "uuid",
  "vt100",

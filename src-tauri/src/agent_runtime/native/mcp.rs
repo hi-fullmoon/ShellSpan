@@ -82,7 +82,7 @@ pub(super) fn load_mcp_server_native(
     let root = canonical_workspace_root(workspace_root)?;
     let config_path = root.join(".shellspan").join("mcp.json");
     let metadata = fs::symlink_metadata(&config_path)
-        .map_err(|error| format!("failed to inspect MCP config: {error}"))?;
+        .map_err(|error| format!("Failed to inspect MCP config: {error}"))?;
     if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() > MAX_CONFIG_BYTES
     {
         return Err("MCP config must be a bounded regular file".into());
@@ -90,12 +90,12 @@ pub(super) fn load_mcp_server_native(
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
     File::open(&config_path)
         .and_then(|file| file.take(MAX_CONFIG_BYTES + 1).read_to_end(&mut bytes))
-        .map_err(|error| format!("failed to read MCP config: {error}"))?;
+        .map_err(|error| format!("Failed to read MCP config: {error}"))?;
     if bytes.len() as u64 > MAX_CONFIG_BYTES {
         return Err("MCP config exceeded the native bound".into());
     }
     let config: McpConfigFileNative =
-        serde_json::from_slice(&bytes).map_err(|error| format!("invalid MCP config: {error}"))?;
+        serde_json::from_slice(&bytes).map_err(|error| format!("Invalid MCP config: {error}"))?;
     if config.version != 1 || config.servers.len() > MAX_SERVERS {
         return Err("MCP config has unsupported version or server count".into());
     }
@@ -143,7 +143,7 @@ pub(super) fn execute_mcp_tool_native(
 ) -> Result<(Value, bool), String> {
     if !arguments.is_object()
         || serde_json::to_vec(arguments)
-            .map_err(|error| format!("failed to encode MCP arguments: {error}"))?
+            .map_err(|error| format!("Failed to encode MCP arguments: {error}"))?
             .len()
             > MAX_ARGUMENT_BYTES
     {
@@ -159,7 +159,7 @@ pub(super) fn execute_mcp_tool_native(
         TIMEOUT,
     )?;
     let encoded = serde_json::to_vec(&result)
-        .map_err(|error| format!("failed to encode MCP result: {error}"))?;
+        .map_err(|error| format!("Failed to encode MCP result: {error}"))?;
     if encoded.len() > MAX_RESULT_BYTES {
         return Ok((
             json!({
@@ -174,14 +174,14 @@ pub(super) fn execute_mcp_tool_native(
 
 fn canonical_workspace_root(root: &Path) -> Result<PathBuf, String> {
     let metadata = fs::symlink_metadata(root)
-        .map_err(|error| format!("failed to inspect MCP workspace: {error}"))?;
+        .map_err(|error| format!("Failed to inspect MCP workspace: {error}"))?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Err("MCP workspace must be a real directory".into());
     }
     let root = fs::canonicalize(root)
-        .map_err(|error| format!("failed to canonicalize MCP workspace: {error}"))?;
+        .map_err(|error| format!("Failed to canonicalize MCP workspace: {error}"))?;
     if root.parent().is_none() {
-        return Err("filesystem roots cannot be MCP workspaces".into());
+        return Err("Filesystem roots cannot be MCP workspaces".into());
     }
     Ok(root)
 }
@@ -202,7 +202,7 @@ fn validate_server_config(root: &Path, server: &McpServerConfigNative) -> Result
     }
     if let Some(cwd) = &server.cwd {
         let canonical = fs::canonicalize(root.join(cwd))
-            .map_err(|error| format!("failed to canonicalize MCP cwd: {error}"))?;
+            .map_err(|error| format!("Failed to canonicalize MCP cwd: {error}"))?;
         if !canonical.starts_with(root) || !canonical.is_dir() {
             return Err("MCP cwd escaped the frozen workspace".into());
         }
@@ -256,7 +256,7 @@ fn parse_discovered_tools(result: &Value) -> Result<Vec<DiscoveredToolNative>, S
                 .unwrap_or_else(|| json!({"type":"object"}));
             if !schema.is_object()
                 || serde_json::to_vec(&schema)
-                    .map_err(|error| format!("failed to encode MCP schema: {error}"))?
+                    .map_err(|error| format!("Failed to encode MCP schema: {error}"))?
                     .len()
                     > MAX_SCHEMA_BYTES
             {
@@ -300,7 +300,7 @@ fn discover_and_invoke_stdio_tool(
     }
     let mut child = command
         .spawn()
-        .map_err(|error| format!("failed to start MCP stdio server: {error}"))?;
+        .map_err(|error| format!("Failed to start MCP stdio server: {error}"))?;
     let deadline = Instant::now() + timeout;
     let stdin = child
         .stdin
@@ -313,7 +313,7 @@ fn discover_and_invoke_stdio_tool(
             let outcome = stdin
                 .write_all(&bytes)
                 .and_then(|()| stdin.flush())
-                .map_err(|error| format!("failed to write MCP stdio request: {error}"));
+                .map_err(|error| format!("Failed to write MCP stdio request: {error}"));
             let failed = outcome.is_err();
             let _ = reply.send(outcome);
             if failed {
@@ -445,7 +445,7 @@ fn send_json(
     cancellation: &CancellationToken,
 ) -> Result<(), String> {
     let mut encoded = serde_json::to_vec(value)
-        .map_err(|error| format!("failed to encode MCP request: {error}"))?;
+        .map_err(|error| format!("Failed to encode MCP request: {error}"))?;
     if encoded.len() > MAX_ARGUMENT_BYTES {
         return Err("MCP request exceeded the native bound".into());
     }
@@ -488,7 +488,7 @@ fn wait_for_response(
         }
         let line = match receiver.recv_timeout(remaining.min(WAIT_POLL)) {
             Ok(line) => {
-                line.map_err(|error| format!("failed to read MCP stdio response: {error}"))?
+                line.map_err(|error| format!("Failed to read MCP stdio response: {error}"))?
             }
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -523,7 +523,7 @@ fn resolve_executable(config: &McpServerConfigNative, root: &Path) -> Result<Pat
         return Ok(path.to_path_buf());
     }
     let candidate = fs::canonicalize(root.join(path))
-        .map_err(|error| format!("failed to resolve MCP executable: {error}"))?;
+        .map_err(|error| format!("Failed to resolve MCP executable: {error}"))?;
     if !candidate.starts_with(root) {
         return Err("MCP executable escaped the frozen workspace".into());
     }
@@ -534,7 +534,7 @@ fn resolve_cwd(config: &McpServerConfigNative, root: &Path) -> Result<PathBuf, S
     match &config.cwd {
         Some(cwd) => {
             let canonical = fs::canonicalize(root.join(cwd))
-                .map_err(|error| format!("failed to resolve MCP cwd: {error}"))?;
+                .map_err(|error| format!("Failed to resolve MCP cwd: {error}"))?;
             if !canonical.starts_with(root) {
                 return Err("MCP cwd escaped the frozen workspace".into());
             }
@@ -749,6 +749,18 @@ fn validate_identifier(value: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn config_read_errors_use_sentence_case() {
+        let workspace = tempfile::tempdir().unwrap();
+        let error = load_mcp_server_native(workspace.path(), "server").unwrap_err();
+        assert!(error.starts_with("Failed to inspect MCP config:"), "{error}");
+
+        fs::create_dir(workspace.path().join(".shellspan")).unwrap();
+        fs::write(workspace.path().join(".shellspan/mcp.json"), b"{").unwrap();
+        let error = load_mcp_server_native(workspace.path(), "server").unwrap_err();
+        assert!(error.starts_with("Invalid MCP config:"), "{error}");
+    }
 
     #[cfg(unix)]
     fn stalled_stdio_server() -> McpServerConfigNative {

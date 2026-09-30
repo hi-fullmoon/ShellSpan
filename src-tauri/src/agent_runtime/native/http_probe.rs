@@ -56,7 +56,7 @@ pub(super) fn execute_http_probe_native(
         _ => return Err("probe_http requires a frozen local or remote host target".into()),
     };
     let arguments: ProbeHttpArgumentsNative = serde_json::from_value(call.arguments.clone())
-        .map_err(|error| format!("invalid probe_http arguments: {error}"))?;
+        .map_err(|error| format!("Invalid probe_http arguments: {error}"))?;
     let timeout_ms = arguments.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
     let max_bytes = arguments.max_bytes.unwrap_or(DEFAULT_BODY_BYTES);
     if timeout_ms == 0
@@ -125,7 +125,7 @@ fn send_http_probe(
         .timeout(timeout)
         .user_agent(concat!("ShellSpan/", env!("CARGO_PKG_VERSION")))
         .build()
-        .map_err(|error| format!("failed to create loopback HTTP client: {error}"))?;
+        .map_err(|error| format!("Failed to create loopback HTTP client: {error}"))?;
     let method = match arguments.method {
         HttpProbeMethodNative::Get => reqwest::Method::GET,
         HttpProbeMethodNative::Head => reqwest::Method::HEAD,
@@ -172,7 +172,7 @@ fn send_http_probe(
         response
             .take(max_bytes.saturating_add(1))
             .read_to_end(&mut body)
-            .map_err(|error| format!("failed to read loopback HTTP response: {error}"))?;
+            .map_err(|error| format!("Failed to read loopback HTTP response: {error}"))?;
     }
     if cancellation.is_cancelled() {
         return Err("probe_http was cancelled while reading the response".into());
@@ -200,21 +200,21 @@ fn send_http_probe_over_stream(
 ) -> Result<HttpProbeOutputNative, String> {
     stream
         .set_nonblocking(true)
-        .map_err(|error| format!("failed to configure target loopback HTTP transport: {error}"))?;
+        .map_err(|error| format!("Failed to configure target loopback HTTP transport: {error}"))?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_io()
         .enable_time()
         .build()
-        .map_err(|error| format!("failed to create target loopback HTTP runtime: {error}"))?;
+        .map_err(|error| format!("Failed to create target loopback HTTP runtime: {error}"))?;
     let timeout = remaining_probe_time(deadline)?;
     let response = runtime.block_on(async {
         tokio::time::timeout(timeout, async {
             let stream = tokio::net::TcpStream::from_std(stream).map_err(|error| {
-                format!("failed to adopt target loopback HTTP transport: {error}")
+                format!("Failed to adopt target loopback HTTP transport: {error}")
             })?;
             let (mut sender, connection) = http1::handshake(TokioIo::new(stream))
                 .await
-                .map_err(|error| format!("target loopback HTTP handshake failed: {error}"))?;
+                .map_err(|error| format!("Target loopback HTTP handshake failed: {error}"))?;
             tokio::task::spawn(async move {
                 let _ = connection.await;
             });
@@ -244,16 +244,16 @@ fn send_http_probe_over_stream(
                     arguments.body.clone().unwrap_or_default(),
                 )))
                 .map_err(|error| {
-                    format!("failed to build target loopback HTTP request: {error}")
+                    format!("Failed to build target loopback HTTP request: {error}")
                 })?;
             let response = sender
                 .send_request(request)
                 .await
-                .map_err(|error| format!("target loopback HTTP request failed: {error}"))?;
+                .map_err(|error| format!("Target loopback HTTP request failed: {error}"))?;
             collect_hyper_response(response, arguments.method, max_bytes).await
         })
         .await
-        .map_err(|_| "target loopback HTTP request exceeded its total deadline".to_string())?
+        .map_err(|_| "Target loopback HTTP request exceeded its total deadline".to_string())?
     })?;
     if cancellation.is_cancelled() {
         return Err("probe_http was cancelled while awaiting the response".into());
@@ -281,7 +281,7 @@ async fn collect_hyper_response(
     if method != HttpProbeMethodNative::Head {
         while let Some(frame) = response.body_mut().frame().await {
             let frame = frame.map_err(|error| {
-                format!("failed to read target loopback HTTP response: {error}")
+                format!("Failed to read target loopback HTTP response: {error}")
             })?;
             if let Some(data) = frame.data_ref() {
                 let remaining = max_bytes
@@ -390,11 +390,11 @@ fn loopback_url(arguments: &ProbeHttpArgumentsNative) -> Result<Url, String> {
 
 fn probe_transport_error(error: &reqwest::Error) -> String {
     if error.is_timeout() {
-        "loopback HTTP probe timed out".into()
+        "Loopback HTTP probe timed out".into()
     } else if error.is_connect() {
-        "could not connect to the loopback HTTP service".into()
+        "Could not connect to the loopback HTTP service".into()
     } else {
-        format!("loopback HTTP probe failed: {error}")
+        format!("Loopback HTTP probe failed: {error}")
     }
 }
 
@@ -612,7 +612,10 @@ mod tests {
             &CancellationToken::new(),
         )
         .unwrap_err();
-        assert!(error.contains("total deadline"));
+        assert_eq!(
+            error,
+            "Target loopback HTTP request exceeded its total deadline"
+        );
         assert!(started.elapsed() < Duration::from_millis(90));
         worker.join().unwrap();
     }

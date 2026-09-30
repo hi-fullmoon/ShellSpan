@@ -872,6 +872,8 @@ export default {
   'terminal.agentLease.agentIdentity': 'Agent · {id}',
   'terminal.agentLease.visibleCommandLabel': '可视命令',
   'terminal.agentLease.commandPending': '正在准备命令…',
+  'terminal.agentLease.commandTyping': '正在输入命令…',
+  'terminal.agentLease.commandTypingHint': '正在输入命令，尚未执行。键盘输入已锁定；按 Escape 或选择“停止并接管”可取消。',
   'terminal.agentLease.commandRunning': 'Agent 正在此终端执行命令',
   'terminal.agentLease.inputLocked': 'Agent 正在执行命令；键盘输入已锁定，仍可滚动、选择、复制和搜索。',
   'terminal.agentLease.inputLockedLabel': '键盘已锁定',

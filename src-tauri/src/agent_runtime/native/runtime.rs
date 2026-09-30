@@ -63,7 +63,7 @@ pub(crate) struct NativeExecutionContext {
 impl NativeExecutionContext {
     fn validate(&self) -> Result<(), String> {
         validate_agent_request_native(&self.request)
-            .map_err(|_| "invalid frozen Agent Session request".to_string())?;
+            .map_err(|_| "Invalid frozen Agent Session request".to_string())?;
         validate_identifier(&self.turn_id, "turn id")?;
         validate_identifier(&self.step_id, "step id")?;
         let host_targets = self
@@ -78,7 +78,7 @@ impl NativeExecutionContext {
             })
             .count();
         if host_targets != 1 {
-            return Err("native execution requires one frozen Session host target".into());
+            return Err("Native execution requires one frozen Session host target".into());
         }
         Ok(())
     }
@@ -381,7 +381,14 @@ impl NativeToolEngine {
         has_pending_user_input: bool,
         has_unverified_user_submission: bool,
         has_credential_prompt: bool,
+        reduced_motion: bool,
     ) -> Result<bool, String> {
+        self.terminal_leases.set_reduced_motion(
+            session_id,
+            agent_session_id,
+            operation_id,
+            reduced_motion,
+        )?;
         self.terminal_leases.acknowledge_frontend_ready(
             session_id,
             agent_session_id,
@@ -466,10 +473,10 @@ impl NativeToolEngine {
         let mut stored = self
             .checkpoint_root
             .lock()
-            .map_err(|_| "native checkpoint root is unavailable".to_string())?;
+            .map_err(|_| "Native checkpoint root is unavailable".to_string())?;
         if let Some(existing) = stored.as_ref() {
             if existing != &root {
-                return Err("native checkpoint root changed during a Session".into());
+                return Err("Native checkpoint root changed during a Session".into());
             }
         } else {
             *stored = Some(root);
@@ -500,7 +507,7 @@ impl NativeToolEngine {
                 .iter()
                 .any(|target| target == &input.target)
         {
-            return Err("native call is outside the frozen Agent Session request".into());
+            return Err("Native call is outside the frozen Agent Session request".into());
         }
         let tool = self
             .registry
@@ -522,7 +529,7 @@ impl NativeToolEngine {
         self.enforce_runtime_storage_policy(&call, &effect, &scope)?;
         let ttl_ms = input.ttl_ms.unwrap_or(DEFAULT_CAPABILITY_TTL_MS);
         if ttl_ms == 0 || ttl_ms > MAX_CAPABILITY_TTL_MS {
-            return Err("capability TTL is outside the native limit".into());
+            return Err("Capability TTL is outside the native limit".into());
         }
         let preview = preview_file_call_native(&call, database, credentials, known_hosts_path)?;
         let review = super::review_call(context.request.permission_mode, &call, &effect, &scope);
@@ -550,7 +557,7 @@ impl NativeToolEngine {
         approved: bool,
     ) -> Result<AgentCapabilityGrantNative, String> {
         if prepared.requires_native_confirmation && !approved {
-            return Err("native capability approval was denied".into());
+            return Err("Native capability approval was denied".into());
         }
         let IssuedCapabilityNative {
             capability_id,
@@ -572,7 +579,7 @@ impl NativeToolEngine {
                 },
                 current_unix_ms(),
             )
-            .map_err(|error| format!("native capability issuance failed: {error:?}"))?;
+            .map_err(|error| format!("Native capability issuance failed: {error:?}"))?;
         Ok(AgentCapabilityGrantNative {
             capability_id,
             effective_arguments: prepared.call.arguments.clone(),
@@ -582,7 +589,7 @@ impl NativeToolEngine {
     pub(crate) fn revoke_capability(&self, capability_id: &str) -> Result<(), String> {
         self.capabilities
             .revoke(capability_id)
-            .map_err(|error| format!("native capability revocation failed: {error:?}"))
+            .map_err(|error| format!("Native capability revocation failed: {error:?}"))
     }
 
     pub(crate) fn prepare_mcp_authorization(
@@ -774,7 +781,7 @@ impl NativeToolEngine {
                 .iter()
                 .any(|target| target == &call.target)
         {
-            return Err("dispatch target is outside the frozen Agent Session request".into());
+            return Err("Dispatch target is outside the frozen Agent Session request".into());
         }
         let tool = self
             .registry
@@ -798,7 +805,7 @@ impl NativeToolEngine {
                 &call_digest(&call)?,
                 current_unix_ms(),
             )
-            .map_err(|error| format!("native capability verification failed: {error:?}"))?;
+            .map_err(|error| format!("Native capability verification failed: {error:?}"))?;
         let decision = NativeContractPolicyEngine.evaluate(AgentPolicyEvaluationNative {
             request: &context.request,
             call: &call,
@@ -808,17 +815,17 @@ impl NativeToolEngine {
         });
         if decision.outcome != AgentPolicyOutcomeNative::Allow {
             return Err(format!(
-                "native contract policy denied dispatch: {:?}",
+                "Native contract policy denied dispatch: {:?}",
                 decision.reason
             ));
         }
         let reviewed_command = self
             .capabilities
             .reviewed_command(&call.capability_id)
-            .map_err(|error| format!("native execution review unavailable: {error:?}"))?;
+            .map_err(|error| format!("Native execution review unavailable: {error:?}"))?;
         self.capabilities
             .consume(&call.capability_id, current_unix_ms())
-            .map_err(|error| format!("native capability consumption failed: {error:?}"))?;
+            .map_err(|error| format!("Native capability consumption failed: {error:?}"))?;
 
         match call.tool_name.as_str() {
             "inspect_host" | "inspect_service" | "query_logs" | "diagnose_endpoint" => {
@@ -920,7 +927,7 @@ impl NativeToolEngine {
                 credentials,
                 known_hosts_path,
             ),
-            _ => Err("tool is outside the native execution kernel".into()),
+            _ => Err("Tool is outside the native execution kernel".into()),
         }
     }
 
@@ -987,9 +994,9 @@ impl NativeToolEngine {
     fn checkpoint_root(&self) -> Result<PathBuf, String> {
         self.checkpoint_root
             .lock()
-            .map_err(|_| "native checkpoint root is unavailable".to_string())?
+            .map_err(|_| "Native checkpoint root is unavailable".to_string())?
             .clone()
-            .ok_or_else(|| "native checkpoint root was not configured".into())
+            .ok_or_else(|| "Native checkpoint root was not configured".into())
     }
 
     fn enforce_runtime_storage_policy(
@@ -1013,7 +1020,7 @@ impl NativeToolEngine {
             } if call.tool_name == "transfer_file" => {
                 let arguments: crate::agent_runtime::TransferFileArgumentsNative =
                     serde_json::from_value(call.arguments.clone()).map_err(|_| {
-                        "invalid transfer_file storage policy arguments".to_string()
+                        "Invalid transfer_file storage policy arguments".to_string()
                     })?;
                 if arguments.direction != crate::agent_runtime::TransferDirectionNative::Download {
                     return Ok(());
@@ -1028,7 +1035,7 @@ impl NativeToolEngine {
         let stored = self
             .checkpoint_root
             .lock()
-            .map_err(|_| "native runtime storage policy is unavailable".to_string())?;
+            .map_err(|_| "Native runtime storage policy is unavailable".to_string())?;
         if let Some(root) = stored.as_ref() {
             let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.clone());
             if paths.iter().any(|path| {
@@ -1067,7 +1074,7 @@ impl NativeToolEngine {
                     || state.identity.host != "local"
                 {
                     return Err(terminal_target_unavailable(
-                        "the frozen local terminal is disconnected or its identity changed",
+                        "The frozen local terminal is disconnected or its identity changed",
                     ));
                 }
                 Ok(())
@@ -1090,19 +1097,19 @@ impl NativeToolEngine {
                     || state.identity.username != *username
                 {
                     return Err(terminal_target_unavailable(
-                        "the frozen remote terminal is disconnected or its identity changed",
+                        "The frozen remote terminal is disconnected or its identity changed",
                     ));
                 }
                 if let Some(profile_id) = profile_id {
                     let profile = database.get_profile(profile_id)?.ok_or_else(|| {
-                        terminal_target_unavailable("the frozen remote profile no longer exists")
+                        terminal_target_unavailable("The frozen remote profile no longer exists")
                     })?;
                     if profile.host != *host
                         || profile.port != *port
                         || profile.username != *username
                     {
                         return Err(terminal_target_unavailable(
-                            "the stored remote profile no longer matches the frozen target",
+                            "The stored remote profile no longer matches the frozen target",
                         ));
                     }
                 }
@@ -1119,7 +1126,7 @@ impl NativeToolEngine {
                     || snapshot.request_id != context.request.request_id
                     || snapshot.task_id != context.request.task_id
                 {
-                    return Err("process handle does not match its frozen Session owner".into());
+                    return Err("Process handle does not match its frozen Session owner".into());
                 }
                 Ok(())
             }
@@ -1141,7 +1148,7 @@ impl NativeToolEngine {
                     || state.identity.host != "local"
                 {
                     return Err(terminal_target_unavailable(
-                        "the frozen local terminal is disconnected or its identity changed",
+                        "The frozen local terminal is disconnected or its identity changed",
                     ));
                 }
                 Ok(session_id.clone())
@@ -1163,12 +1170,12 @@ impl NativeToolEngine {
                     || state.identity.username != *username
                 {
                     return Err(terminal_target_unavailable(
-                        "the frozen remote terminal is disconnected or its identity changed",
+                        "The frozen remote terminal is disconnected or its identity changed",
                     ));
                 }
                 Ok(session_id.clone())
             }
-            _ => Err("terminal tool requires a frozen terminal target".into()),
+            _ => Err("Terminal tool requires a frozen terminal target".into()),
         }
     }
 
@@ -1331,9 +1338,9 @@ impl NativeToolEngine {
         reviewed_command: Option<&super::ReviewedReadCommand>,
     ) -> Result<AgentToolResultNative, String> {
         let arguments: ExecCommandArgumentsNative = serde_json::from_value(call.arguments.clone())
-            .map_err(|error| format!("invalid exec_command arguments: {error}"))?;
+            .map_err(|error| format!("Invalid exec_command arguments: {error}"))?;
         if arguments.elevated.unwrap_or(false) {
-            return Err("elevated execution is unavailable in the native kernel".into());
+            return Err("Elevated execution is unavailable in the native kernel".into());
         }
         let timeout = Duration::from_millis(arguments.timeout_ms.unwrap_or(default_timeout_ms));
         let timeout = if reviewed_command.is_some() {
@@ -1408,7 +1415,7 @@ impl NativeToolEngine {
     ) -> Result<AgentToolResultNative, String> {
         let arguments: TerminalExecuteArgumentsNative =
             serde_json::from_value(call.arguments.clone())
-                .map_err(|error| format!("invalid terminal_execute arguments: {error}"))?;
+                .map_err(|error| format!("Invalid terminal_execute arguments: {error}"))?;
         let session_id = self.terminal_target_session_id(&call.target, sessions)?;
         let broker_snapshot = self
             .terminal_broker
@@ -1511,7 +1518,7 @@ impl NativeToolEngine {
         sessions: &SessionManager,
     ) -> Result<AgentToolResultNative, String> {
         let _: ReadTerminalArgumentsNative = serde_json::from_value(call.arguments.clone())
-            .map_err(|error| format!("invalid read_terminal arguments: {error}"))?;
+            .map_err(|error| format!("Invalid read_terminal arguments: {error}"))?;
         let session_id = self.interactive_terminal_session_id(context, call, sessions)?;
         let snapshot = self.terminal_interactive.read(&session_id)?;
         let (snapshot, credential_like_prompt) = super::sanitize_terminal_screen(snapshot);
@@ -1546,7 +1553,7 @@ impl NativeToolEngine {
     ) -> Result<AgentToolResultNative, String> {
         let arguments: WriteTerminalInputArgumentsNative =
             serde_json::from_value(call.arguments.clone())
-                .map_err(|error| format!("invalid write_terminal_input arguments: {error}"))?;
+                .map_err(|error| format!("Invalid write_terminal_input arguments: {error}"))?;
         let session_id = self.interactive_terminal_session_id(context, call, sessions)?;
         let broker_snapshot = self
             .terminal_broker
@@ -1602,7 +1609,7 @@ impl NativeToolEngine {
         cancellation: &CancellationToken,
     ) -> Result<AgentToolResultNative, String> {
         let arguments: WaitTerminalArgumentsNative = serde_json::from_value(call.arguments.clone())
-            .map_err(|error| format!("invalid wait_terminal arguments: {error}"))?;
+            .map_err(|error| format!("Invalid wait_terminal arguments: {error}"))?;
         let session_id = self.interactive_terminal_session_id(context, call, sessions)?;
         let timeout = Duration::from_millis(
             arguments
@@ -1689,7 +1696,7 @@ impl NativeToolEngine {
     ) -> Result<AgentToolResultNative, String> {
         let arguments: WriteStdinArgumentsNative =
             serde_json::from_value(call.arguments.clone())
-                .map_err(|error| format!("invalid write_stdin arguments: {error}"))?;
+                .map_err(|error| format!("Invalid write_stdin arguments: {error}"))?;
         let accepted = self
             .processes
             .get(process_handle(&call.target)?)?
@@ -1711,7 +1718,7 @@ impl NativeToolEngine {
         effect: &AgentObservedEffectNative,
     ) -> Result<AgentToolResultNative, String> {
         let arguments: WaitProcessArgumentsNative = serde_json::from_value(call.arguments.clone())
-            .map_err(|error| format!("invalid wait_process arguments: {error}"))?;
+            .map_err(|error| format!("Invalid wait_process arguments: {error}"))?;
         let handle = process_handle(&call.target)?;
         let snapshot = self.processes.get(handle)?.wait(Duration::from_millis(
             arguments.timeout_ms.unwrap_or(30_000),
@@ -1749,7 +1756,7 @@ impl NativeToolEngine {
         effect: &AgentObservedEffectNative,
     ) -> Result<AgentToolResultNative, String> {
         let arguments: KillProcessArgumentsNative = serde_json::from_value(call.arguments.clone())
-            .map_err(|error| format!("invalid kill_process arguments: {error}"))?;
+            .map_err(|error| format!("Invalid kill_process arguments: {error}"))?;
         let handle = process_handle(&call.target)?;
         let snapshot = self.processes.get(handle)?.kill(
             arguments.signal,
@@ -1845,11 +1852,11 @@ fn native_prompt(
 
 fn registry_error_message(error: ToolRegistryErrorNative) -> String {
     match error {
-        ToolRegistryErrorNative::UnregisteredTool => "tool is not registered".into(),
+        ToolRegistryErrorNative::UnregisteredTool => "Tool is not registered".into(),
         ToolRegistryErrorNative::ToolUnavailable => {
-            "tool is not implemented by the native kernel".into()
+            "Tool is not implemented by the native kernel".into()
         }
-        _ => "native tool registry rejected the tool".into(),
+        _ => "Native tool registry rejected the tool".into(),
     }
 }
 
@@ -1861,7 +1868,7 @@ fn call_digest(call: &AgentToolCallNative) -> Result<String, String> {
         &call.arguments,
         &call.target,
     ))
-    .map_err(|error| format!("failed to digest native call: {error}"))?;
+    .map_err(|error| format!("Failed to digest native call: {error}"))?;
     Ok(Sha256::digest(bytes)
         .iter()
         .map(|byte| format!("{byte:02x}"))
@@ -1875,7 +1882,7 @@ fn validate_identifier(value: &str, label: &str) -> Result<(), String> {
             .chars()
             .any(|character| character.is_control() || character.is_whitespace())
     {
-        Err(format!("invalid native {label}"))
+        Err(format!("Invalid native {label}"))
     } else {
         Ok(())
     }
@@ -1884,7 +1891,7 @@ fn validate_identifier(value: &str, label: &str) -> Result<(), String> {
 fn process_handle(target: &AgentToolTargetNative) -> Result<&str, String> {
     match target {
         AgentToolTargetNative::Process { process_handle, .. } => Ok(process_handle),
-        _ => Err("tool requires a frozen process target".into()),
+        _ => Err("Tool requires a frozen process target".into()),
     }
 }
 
@@ -1933,13 +1940,13 @@ pub(crate) fn connection_for_remote_target(
         ..
     } = target
     else {
-        return Err("remote execution requires a frozen profile id".into());
+        return Err("Remote execution requires a frozen profile id".into());
     };
     let profile = database
         .get_profile(profile_id)?
-        .ok_or_else(|| "remote execution profile was not found".to_string())?;
+        .ok_or_else(|| "Remote execution profile was not found".to_string())?;
     if profile.host != *host || profile.port != *port || profile.username != *username {
-        return Err("remote execution profile identity drifted".into());
+        return Err("Remote execution profile identity drifted".into());
     }
     let auth_method = match profile.auth_method {
         ProfileAuthMethod::Password => AuthMethod::Password,
@@ -1950,7 +1957,7 @@ pub(crate) fn connection_for_remote_target(
         .as_deref()
         .map(serde_json::from_str::<JumpHostConfig>)
         .transpose()
-        .map_err(|error| format!("stored jump-host identity is invalid: {error}"))?;
+        .map_err(|error| format!("Stored jump-host identity is invalid: {error}"))?;
     if let Some(jump) = jump_host.as_mut() {
         match jump.auth_method {
             AuthMethod::Password => {
@@ -1986,11 +1993,11 @@ pub(crate) fn connection_for_remote_target(
         jump_host,
     };
     if auth_method == AuthMethod::Password && connection.password.is_none() {
-        return Err("remote profile password is unavailable".into());
+        return Err("Remote profile password is unavailable".into());
     }
     crate::commands::resolve_keychain_key_for_remote(credentials, &mut connection)?;
     if auth_method == AuthMethod::Key && connection.private_key_data.is_none() {
-        return Err("remote profile private key is unavailable".into());
+        return Err("Remote profile private key is unavailable".into());
     }
     Ok(connection)
 }
@@ -2247,7 +2254,7 @@ mod tests {
             turn_id: "turn-a".into(),
             step_id: String::new(),
         };
-        assert_eq!(context.validate(), Err("invalid native step id".into()));
+        assert_eq!(context.validate(), Err("Invalid native step id".into()));
     }
 
     #[test]

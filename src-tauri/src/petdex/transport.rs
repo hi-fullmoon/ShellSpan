@@ -51,7 +51,10 @@ impl WritePolicy {
         if result == RequestResult::Applied {
             self.failures = 0;
             self.retry_at = None;
-        } else if result.should_retry() {
+        } else if result.should_retry() && !self.retry_at.is_some_and(|deadline| now < deadline) {
+            // Another channel or a bounded manual request can time out while
+            // waiting for this backoff. It has not made a new attempt and must
+            // not move the recovery deadline or increase the failure count.
             self.failures = self.failures.saturating_add(1);
             self.retry_at = Some(now + super::delivery::failure_backoff(self.failures));
         }
@@ -322,15 +325,19 @@ impl PetdexAdapter {
             .result(result, Instant::now());
     }
 
-    // Caller holds request_lock. Every authenticated write, including retries,
-    // shares this clock. Waiting is inside the caller's total attempt budget.
-    pub(super) async fn wait_write(&self) {
-        let deadline = self
-            .inner
+    pub(super) fn write_deadline(&self, now: Instant) -> Instant {
+        self.inner
             .write_policy
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .deadline(Instant::now());
+            .deadline(now)
+    }
+
+    // Caller holds request_lock. Recheck even after coordinator scheduling:
+    // a manual request may have changed the shared clock in the meantime.
+    // This final wait remains inside the caller's total attempt budget.
+    pub(super) async fn wait_write(&self) {
+        let deadline = self.write_deadline(Instant::now());
         tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
     }
 
@@ -464,13 +471,19 @@ mod protocol_tests {
             policy.deadline(now),
             now + std::time::Duration::from_secs(1)
         );
-        policy.result(RequestResult::Transport, now);
-        policy.result(RequestResult::Unauthorized, now);
-        policy.result(RequestResult::Rejected, now);
-        policy.result(RequestResult::Transport, now);
+        let mut attempt_at = now;
+        for result in [
+            RequestResult::Transport,
+            RequestResult::Unauthorized,
+            RequestResult::Rejected,
+            RequestResult::Transport,
+        ] {
+            attempt_at = policy.deadline(attempt_at);
+            policy.result(result, attempt_at);
+        }
         assert_eq!(
-            policy.deadline(now),
-            now + std::time::Duration::from_secs(2)
+            policy.deadline(attempt_at),
+            attempt_at + std::time::Duration::from_secs(2)
         );
         policy.observe(1);
         let generation = policy.generation;
@@ -478,6 +491,48 @@ mod protocol_tests {
         assert_eq!(policy.generation, generation);
         policy.observe(2);
         assert_eq!(policy.generation, generation + 1);
+    }
+
+    #[tokio::test]
+    async fn both_channels_timing_out_in_backoff_leave_recovery_deadline_unchanged() {
+        let root = tempfile::tempdir().unwrap();
+        let adapter = PetdexAdapter::new(root.path().to_owned());
+        adapter.set_enabled_for_io_test(true);
+        adapter.set_message_preferences(super::super::message_content::MessagePreferences {
+            petdex_messages_enabled: true,
+            petdex_message_details_enabled: false,
+        });
+        let recovery_at = {
+            let mut policy = adapter.inner.write_policy.lock().unwrap();
+            let elapsed: std::time::Duration =
+                (1..9).map(super::super::delivery::failure_backoff).sum();
+            let mut now = Instant::now() - elapsed;
+            for _ in 0..9 {
+                now = policy.deadline(now);
+                policy.result(RequestResult::Transport, now);
+            }
+            policy.deadline(now)
+        };
+        let command = StateCommand {
+            state: super::super::types::PetdexState::Running,
+            expires_at: None,
+        };
+        let (action, message) = tokio::join!(
+            adapter.apply_state(command, adapter.cancellation_token()),
+            adapter.test_message(),
+        );
+        assert_eq!(action, RequestResult::Transport);
+        assert_eq!(
+            message.outcome,
+            super::super::message_delivery::MessageTestOutcome::Failed
+        );
+        let mut policy = adapter.inner.write_policy.lock().unwrap();
+        assert_eq!(policy.deadline(Instant::now()), recovery_at);
+        assert_eq!(policy.failures, 9);
+        assert_eq!(policy.deadline(recovery_at), recovery_at);
+        policy.result(RequestResult::Applied, recovery_at);
+        assert_eq!(policy.failures, 0);
+        assert!(policy.retry_at.is_none());
     }
 
     #[test]

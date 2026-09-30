@@ -872,6 +872,8 @@ export default {
   'terminal.agentLease.agentIdentity': 'Agent · {id}',
   'terminal.agentLease.visibleCommandLabel': 'Visible command',
   'terminal.agentLease.commandPending': 'Preparing command…',
+  'terminal.agentLease.commandTyping': 'Typing command…',
+  'terminal.agentLease.commandTypingHint': 'Typing a command; it has not been submitted. Keyboard input is locked. Press Escape or choose Stop & take over to cancel.',
   'terminal.agentLease.commandRunning': 'Agent is running a command in this terminal',
   'terminal.agentLease.inputLocked': 'Agent is running a command; keyboard input is locked. You can still scroll, select, copy, and search.',
   'terminal.agentLease.inputLockedLabel': 'Keyboard locked',

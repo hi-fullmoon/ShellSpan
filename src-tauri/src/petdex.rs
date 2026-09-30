@@ -489,9 +489,17 @@ impl PetdexAdapter {
                 break;
             };
             self.update_diagnostic(&app, &cancellation, None, false);
-            let attempt_deadline = delivery.attempt_deadline(target, now);
+            // Backoff is scheduling time, not a failed 1500ms I/O attempt.
+            // Both channels use the same gate; expiries still wake separately
+            // so short-lived content is re-arbitrated before sending.
+            let write_deadline = self.write_deadline(now);
+            let attempt_deadline = delivery
+                .attempt_deadline(target, now)
+                .map(|deadline| deadline.max(write_deadline));
             let pending = self.next_message(now);
-            let message_deadline = pending.as_ref().map(Self::message_due);
+            let message_deadline = pending
+                .as_ref()
+                .map(|pending| Self::message_due(pending).max(write_deadline));
             // Alternate ready channels, so continuous action churn cannot starve
             // bubbles. Absolute action TTL is rechecked after every queue wait.
             if message_deadline.is_some_and(|d| d <= now)

@@ -1755,7 +1755,7 @@ async fn invalid_update_plan_is_a_tool_error_and_the_model_retries_in_turn() {
             summary,
             ..
         } if call_id == "call-invalid-plan"
-            && summary.contains("invalid update_plan arguments: evidenceId")
+            && summary.contains("Invalid update_plan arguments: evidenceId")
     )));
     assert!(events.iter().any(|event| matches!(
         &event.payload,
@@ -2561,18 +2561,20 @@ async fn approval_expiry_is_durable_and_late_decisions_are_rejected() {
     assert!(runtime.approve_tool(decision).await.is_err());
     let events = all_events(&runtime, "session-expired");
     assert!(events.iter().any(|event| matches!(
-        event.payload,
+        &event.payload,
         AgentSessionEventPayload::ToolApproval {
             status: AgentToolApprovalStatus::Expired,
+            reason: Some(reason),
             ..
-        }
+        } if reason == "Native approval expired"
     )));
     assert!(events.iter().any(|event| matches!(
-        event.payload,
+        &event.payload,
         AgentSessionEventPayload::ToolResult {
             status: AgentToolResultStatus::TimedOut,
+            summary,
             ..
-        }
+        } if summary == "Native approval expired"
     )));
 }
 
@@ -2604,18 +2606,20 @@ async fn cancellation_resolves_waiting_approval_and_rejects_late_execution() {
     assert!(runtime.approve_tool(decision).await.is_err());
     let events = all_events(&runtime, "session-cancelled-tool");
     assert!(events.iter().any(|event| matches!(
-        event.payload,
+        &event.payload,
         AgentSessionEventPayload::ToolApproval {
             status: AgentToolApprovalStatus::Cancelled,
+            reason: Some(reason),
             ..
-        }
+        } if reason == "Native tool call was cancelled"
     )));
     assert!(events.iter().any(|event| matches!(
-        event.payload,
+        &event.payload,
         AgentSessionEventPayload::ToolResult {
             status: AgentToolResultStatus::Cancelled,
+            summary,
             ..
-        }
+        } if summary == "Native tool call was cancelled"
     )));
 }
 

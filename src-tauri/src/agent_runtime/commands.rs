@@ -33,6 +33,8 @@ pub(crate) struct AgentTerminalLeaseControlInput {
     has_unverified_user_submission: bool,
     #[serde(default)]
     has_credential_prompt: bool,
+    #[serde(default)]
+    reduced_motion: Option<bool>,
 }
 
 #[tauri::command]
@@ -51,6 +53,7 @@ pub(crate) fn agent_runtime_terminal_lease_ready(
         input.has_pending_user_input,
         input.has_unverified_user_submission,
         input.has_credential_prompt,
+        input.reduced_motion.unwrap_or(true),
     )
 }
 
