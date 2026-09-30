@@ -1,6 +1,52 @@
 {
   "$id": "petdex",
   "$defs": {
+    "cleanup": { "enum": ["notNeeded", "accepted", "unconfirmed"] },
+    "settings": {
+      "type": "object", "additionalProperties": false,
+      "required": ["enabled", "categories", "petdexMessagesEnabled", "petdexMessageDetailsEnabled", "locale"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "categories": {
+          "type": "object", "additionalProperties": false, "required": ["ssh", "sftp", "ai"],
+          "properties": { "ssh": { "type": "boolean" }, "sftp": { "type": "boolean" }, "ai": { "type": "boolean" } }
+        },
+        "petdexMessagesEnabled": { "type": "boolean" },
+        "petdexMessageDetailsEnabled": { "type": "boolean" },
+        "locale": { "enum": ["zh-CN", "en-US"] }
+      }
+    },
+    "messageDiagnostic": {
+      "type": "object", "additionalProperties": false,
+      "required": ["revision", "status", "acceptedCount", "lastAcceptedAt", "usedSlotCount", "errorReason", "unsupported", "cleanupOutcome"],
+      "properties": {
+        "revision": { "$ref": "#/$defs/diagnostic/properties/revision" },
+        "status": { "enum": ["disabled", "ready", "unavailable", "unsupported", "error"] },
+        "acceptedCount": { "$ref": "#/$defs/diagnostic/properties/revision" },
+        "lastAcceptedAt": { "$ref": "#/$defs/diagnostic/properties/lastSuccessAt" },
+        "usedSlotCount": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "errorReason": { "$ref": "#/$defs/diagnostic/properties/errorReason" },
+        "unsupported": { "type": "boolean" },
+        "cleanupOutcome": { "$ref": "#/$defs/cleanup" }
+      }
+    },
+    "configurationResult": {
+      "type": "object", "additionalProperties": false,
+      "required": ["effective", "diagnostic", "messageDiagnostic", "cleanupOutcome"],
+      "properties": {
+        "effective": { "$ref": "#/$defs/settings" },
+        "diagnostic": { "$ref": "#/$defs/diagnostic" },
+        "messageDiagnostic": { "$ref": "#/$defs/messageDiagnostic" },
+        "cleanupOutcome": { "$ref": "#/$defs/cleanup" }
+      }
+    },
+    "messageTestResult": {
+      "type": "object", "additionalProperties": false, "required": ["diagnostic", "outcome"],
+      "properties": {
+        "diagnostic": { "$ref": "#/$defs/messageDiagnostic" },
+        "outcome": { "enum": ["accepted", "overridden", "failed", "disabled"] }
+      }
+    },
     "diagnostic": {
       "type": "object",
       "additionalProperties": false,

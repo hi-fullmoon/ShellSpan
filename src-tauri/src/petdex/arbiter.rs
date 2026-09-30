@@ -138,13 +138,20 @@ pub(super) struct PetdexArbiter {
     finished: VecDeque<(ActivitySource, u64)>,
     watermarks: HashMap<ActivitySource, u64>,
     next_run_id: u64,
-    categories: PetdexCategories,
+    pub(super) categories: PetdexCategories,
     success: HashMap<ActivitySource, TemporaryState>,
     failed: HashMap<ActivitySource, TemporaryState>,
     preview: Option<TemporaryState>,
+    message_results: Vec<ActivityEvent>,
+    pub(super) slots: super::slots::Slots,
+    pub(super) message_preferences: super::message_content::MessagePreferences,
+    pub(super) message_cancellation: tokio_util::sync::CancellationToken,
 }
 
 impl PetdexArbiter {
+    pub(super) fn discard_message_results(&mut self) {
+        self.message_results.clear();
+    }
     pub(super) fn allocate_run_id(&mut self) -> u64 {
         self.next_run_id = self
             .next_run_id
@@ -153,7 +160,7 @@ impl PetdexArbiter {
         self.next_run_id
     }
 
-    pub(super) fn apply(&mut self, event: ActivityEvent, now: Instant) {
+    pub(super) fn apply(&mut self, mut event: ActivityEvent, now: Instant) {
         let key = (event.source, event.run_id);
         if self.finished.contains(&key) {
             return;
@@ -162,6 +169,7 @@ impl PetdexArbiter {
             if event.revision <= current.revision {
                 return;
             }
+            event.details = current.details.clone();
         } else {
             let watermark = self.watermarks.entry(event.source).or_default();
             if event.run_id <= *watermark {
@@ -179,6 +187,42 @@ impl PetdexArbiter {
             {
                 return;
             }
+        }
+        if !self.message_preferences.petdex_messages_enabled
+            || !self.message_preferences.petdex_message_details_enabled
+            || !self.categories.includes(event.source)
+        {
+            event.details = Default::default();
+        }
+        if event.phase != ActivityPhase::Succeeded {
+            event.details.clear_reply();
+        }
+        self.message_results
+            .retain(|result| message_expiry(result).is_some_and(|deadline| deadline > now));
+        if matches!(
+            event.phase,
+            ActivityPhase::Cancelled | ActivityPhase::Succeeded | ActivityPhase::Failed
+        ) {
+            self.message_results
+                .retain(|result| (result.source, result.run_id) != key);
+        }
+        if event.revision == 0 && event.source == ActivitySource::Ai {
+            self.message_results
+                .retain(|result| result.owner != event.owner);
+        }
+        if self.categories.includes(event.source)
+            && event.owner.is_some()
+            && matches!(
+                event.phase,
+                ActivityPhase::Succeeded | ActivityPhase::Failed | ActivityPhase::Connected
+            )
+            && !self
+                .activities
+                .get(&key)
+                .is_some_and(|current| current.phase == event.phase)
+            && message_expiry(&event).is_some_and(|deadline| deadline > now)
+        {
+            self.message_results.push(event.clone());
         }
         match event.phase {
             ActivityPhase::Succeeded | ActivityPhase::Failed | ActivityPhase::Cancelled => {
@@ -247,6 +291,15 @@ impl PetdexArbiter {
             return false;
         }
         self.categories = categories;
+        for event in self
+            .activities
+            .values_mut()
+            .filter(|e| !categories.includes(e.source))
+        {
+            event.details = Default::default();
+        }
+        self.message_results
+            .retain(|event| categories.includes(event.source));
         self.success
             .retain(|source, _| categories.includes(*source));
         self.failed.retain(|source, _| categories.includes(*source));
@@ -256,9 +309,58 @@ impl PetdexArbiter {
     // Source state survives transport shutdown. Enabling reads it under the
     // same coordinator lock as every synchronous lifecycle publication.
     pub(super) fn clear_presentation(&mut self) {
+        self.clear_details();
+        self.message_results.clear();
         self.success.clear();
         self.failed.clear();
         self.preview = None;
+        self.project_slots(Instant::now());
+    }
+
+    pub(super) fn update_details(
+        &mut self,
+        source: ActivitySource,
+        run: u64,
+        update: impl FnOnce(&mut super::message_content::SafeDetails),
+    ) {
+        if !self.message_preferences.petdex_messages_enabled
+            || !self.message_preferences.petdex_message_details_enabled
+            || !self.categories.includes(source)
+        {
+            return;
+        }
+        if let Some(event) = self.activities.get_mut(&(source, run)) {
+            update(&mut event.details);
+        }
+        self.project_slots(Instant::now());
+    }
+
+    fn clear_details(&mut self) {
+        for event in self
+            .activities
+            .values_mut()
+            .chain(self.message_results.iter_mut())
+        {
+            event.details = Default::default();
+        }
+    }
+
+    pub(super) fn set_message_preferences(
+        &mut self,
+        preferences: super::message_content::MessagePreferences,
+    ) {
+        if self.message_preferences == preferences {
+            return;
+        }
+        self.message_preferences = preferences;
+        self.message_cancellation.cancel();
+        self.message_cancellation = tokio_util::sync::CancellationToken::new();
+        self.clear_details();
+        // Even toggling twice with no intervening snapshot invalidates pending work.
+        for slot in &mut self.slots.slots {
+            slot.revision += 1;
+        }
+        self.project_slots(Instant::now());
     }
 
     pub(super) fn start_preview(&mut self, now: Instant) {
@@ -300,6 +402,7 @@ impl PetdexArbiter {
 
     pub(super) fn target(&mut self, now: Instant) -> ArbitrationTarget {
         self.prune(now);
+        self.project_slots(now);
         let waiting = self.activities.values().any(|a| {
             self.categories.includes(a.source) && matches!(a.phase, ActivityPhase::Waiting(_))
         });
@@ -351,7 +454,25 @@ impl PetdexArbiter {
             .chain(self.failed.values())
             .chain(self.preview.iter())
             .map(|t| t.expires_at)
+            .chain(self.message_results.iter().filter_map(message_expiry))
             .min()
+    }
+
+    pub(super) fn project_slots(&mut self, now: Instant) {
+        self.message_results
+            .retain(|event| message_expiry(event).is_some_and(|deadline| deadline > now));
+        let events = self
+            .activities
+            .values()
+            .filter(|e| self.categories.includes(e.source) && e.phase != ActivityPhase::Connected)
+            .cloned()
+            .map(|e| (e, None))
+            .chain(self.message_results.iter().cloned().map(|e| {
+                let expiry = message_expiry(&e);
+                (e, expiry)
+            }))
+            .collect();
+        self.slots.project(events);
     }
 
     #[cfg(test)]
@@ -365,5 +486,15 @@ impl PetdexArbiter {
             .values()
             .filter(|a| a.source == ActivitySource::Sftp)
             .count()
+    }
+}
+
+fn message_expiry(event: &ActivityEvent) -> Option<Instant> {
+    match event.phase {
+        ActivityPhase::Failed => Some(event.occurred_at + super::types::FAILURE_TTL),
+        ActivityPhase::Succeeded | ActivityPhase::Connected => {
+            Some(event.occurred_at + super::types::SUCCESS_TTL)
+        }
+        _ => None,
     }
 }

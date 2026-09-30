@@ -1,0 +1,35 @@
+import { cleanup, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { StrictMode } from 'react';
+import { toast } from 'sonner';
+import { afterEach, expect, it } from 'vitest';
+import { PetdexMessageSettings } from '../petdex-message-settings';
+import { Card } from '@/components/ui/card';
+import { initI18n } from '@/locales';
+import { useAppStore } from '@/stores/appStore';
+import zhCN from '@/locales/zh-CN';
+import enUS from '@/locales/en-US';
+
+afterEach(cleanup);
+it.each(['zh-CN', 'en-US'] as const)('renders default gates, readable labels, keyboard focus and accepted wording in %s', async (locale) => {
+  useAppStore.setState({ locale, petdexEnabled: false, petdexMessagesEnabled: false, petdexMessageDetailsEnabled: false, petdexRequestedMessages: null });
+  await initI18n(locale);
+  const strings = locale === 'zh-CN' ? zhCN : enUS;
+  const history = toast.getHistory().length;
+  render(<StrictMode><Card><PetdexMessageSettings /></Card></StrictMode>);
+  const test = screen.getByRole('button', { name: strings['settings.experimental.petdex.messages.test'] });
+  expect(test).toBeDisabled();
+  expect(test.closest('[data-slot="card-action"]')).not.toBeNull();
+  const message = screen.getByRole('switch', { name: strings['settings.experimental.petdex.messages.enabled'] });
+  const details = screen.getByRole('switch', { name: strings['settings.experimental.petdex.messages.details'] });
+  expect(message).not.toBeChecked();
+  expect(details).not.toBeChecked();
+  expect(message).not.toBeDisabled();
+  expect(details).toHaveAttribute('aria-describedby', 'petdex-message-risk');
+  expect(screen.getByText(strings['settings.experimental.petdex.messages.risk'])).toBeVisible();
+  message.focus();
+  await userEvent.tab();
+  expect(details).toHaveFocus();
+  expect(screen.getAllByRole('definition')).toHaveLength(4);
+  expect(toast.getHistory()).toHaveLength(history);
+});

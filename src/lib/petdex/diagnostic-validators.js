@@ -488,3 +488,823 @@ return false;
 validate13.errors = vErrors;
 return errors === 0;
 }
+
+export const isPetdexConfigurationResult = validate14;
+const schema17 = {"type":"object","additionalProperties":false,"required":["effective","diagnostic","messageDiagnostic","cleanupOutcome"],"properties":{"effective":{"$ref":"#/$defs/settings"},"diagnostic":{"$ref":"#/$defs/diagnostic"},"messageDiagnostic":{"$ref":"#/$defs/messageDiagnostic"},"cleanupOutcome":{"$ref":"#/$defs/cleanup"}}};
+const schema18 = {"type":"object","additionalProperties":false,"required":["enabled","categories","petdexMessagesEnabled","petdexMessageDetailsEnabled","locale"],"properties":{"enabled":{"type":"boolean"},"categories":{"type":"object","additionalProperties":false,"required":["ssh","sftp","ai"],"properties":{"ssh":{"type":"boolean"},"sftp":{"type":"boolean"},"ai":{"type":"boolean"}}},"petdexMessagesEnabled":{"type":"boolean"},"petdexMessageDetailsEnabled":{"type":"boolean"},"locale":{"enum":["zh-CN","en-US"]}}};
+const schema25 = {"enum":["notNeeded","accepted","unconfirmed"]};
+const schema20 = {"type":"object","additionalProperties":false,"required":["revision","status","acceptedCount","lastAcceptedAt","usedSlotCount","errorReason","unsupported","cleanupOutcome"],"properties":{"revision":{"$ref":"#/$defs/diagnostic/properties/revision"},"status":{"enum":["disabled","ready","unavailable","unsupported","error"]},"acceptedCount":{"$ref":"#/$defs/diagnostic/properties/revision"},"lastAcceptedAt":{"$ref":"#/$defs/diagnostic/properties/lastSuccessAt"},"usedSlotCount":{"type":"integer","minimum":0,"maximum":3},"errorReason":{"$ref":"#/$defs/diagnostic/properties/errorReason"},"unsupported":{"type":"boolean"},"cleanupOutcome":{"$ref":"#/$defs/cleanup"}}};
+const schema21 = {"type":"integer","minimum":0,"maximum":9007199254740991};
+const schema23 = {"type":["integer","null"],"minimum":0,"maximum":8640000000000000};
+const schema24 = {"enum":[null,"tokenMissing","tokenUnreadable","tokenInvalid","transport","unauthorized","rejected"]};
+
+function validate15(data, {instancePath="", parentData, parentDataProperty, rootData=data}={}){
+let vErrors = null;
+let errors = 0;
+if(errors === 0){
+if(data && typeof data == "object" && !Array.isArray(data)){
+let missing0;
+if(((((((((data.revision === undefined) && (missing0 = "revision")) || ((data.status === undefined) && (missing0 = "status"))) || ((data.acceptedCount === undefined) && (missing0 = "acceptedCount"))) || ((data.lastAcceptedAt === undefined) && (missing0 = "lastAcceptedAt"))) || ((data.usedSlotCount === undefined) && (missing0 = "usedSlotCount"))) || ((data.errorReason === undefined) && (missing0 = "errorReason"))) || ((data.unsupported === undefined) && (missing0 = "unsupported"))) || ((data.cleanupOutcome === undefined) && (missing0 = "cleanupOutcome"))){
+validate15.errors = [{instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: missing0},message:"must have required property '"+missing0+"'"}];
+return false;
+}
+else {
+const _errs1 = errors;
+for(const key0 in data){
+if(!((((((((key0 === "revision") || (key0 === "status")) || (key0 === "acceptedCount")) || (key0 === "lastAcceptedAt")) || (key0 === "usedSlotCount")) || (key0 === "errorReason")) || (key0 === "unsupported")) || (key0 === "cleanupOutcome"))){
+validate15.errors = [{instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"}];
+return false;
+break;
+}
+}
+if(_errs1 === errors){
+if(data.revision !== undefined){
+let data0 = data.revision;
+const _errs2 = errors;
+const _errs3 = errors;
+if(!(((typeof data0 == "number") && (!(data0 % 1) && !isNaN(data0))) && (isFinite(data0)))){
+validate15.errors = [{instancePath:instancePath+"/revision",schemaPath:"#/$defs/diagnostic/properties/revision/type",keyword:"type",params:{type: "integer"},message:"must be integer"}];
+return false;
+}
+if(errors === _errs3){
+if((typeof data0 == "number") && (isFinite(data0))){
+if(data0 > 9007199254740991 || isNaN(data0)){
+validate15.errors = [{instancePath:instancePath+"/revision",schemaPath:"#/$defs/diagnostic/properties/revision/maximum",keyword:"maximum",params:{comparison: "<=", limit: 9007199254740991},message:"must be <= 9007199254740991"}];
+return false;
+}
+else {
+if(data0 < 0 || isNaN(data0)){
+validate15.errors = [{instancePath:instancePath+"/revision",schemaPath:"#/$defs/diagnostic/properties/revision/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"}];
+return false;
+}
+}
+}
+}
+var valid0 = _errs2 === errors;
+}
+else {
+var valid0 = true;
+}
+if(valid0){
+if(data.status !== undefined){
+let data1 = data.status;
+const _errs5 = errors;
+if(!(((((data1 === "disabled") || (data1 === "ready")) || (data1 === "unavailable")) || (data1 === "unsupported")) || (data1 === "error"))){
+validate15.errors = [{instancePath:instancePath+"/status",schemaPath:"#/properties/status/enum",keyword:"enum",params:{allowedValues: schema20.properties.status.enum},message:"must be equal to one of the allowed values"}];
+return false;
+}
+var valid0 = _errs5 === errors;
+}
+else {
+var valid0 = true;
+}
+if(valid0){
+if(data.acceptedCount !== undefined){
+let data2 = data.acceptedCount;
+const _errs6 = errors;
+const _errs7 = errors;
+if(!(((typeof data2 == "number") && (!(data2 % 1) && !isNaN(data2))) && (isFinite(data2)))){
+validate15.errors = [{instancePath:instancePath+"/acceptedCount",schemaPath:"#/$defs/diagnostic/properties/revision/type",keyword:"type",params:{type: "integer"},message:"must be integer"}];
+return false;
+}
+if(errors === _errs7){
+if((typeof data2 == "number") && (isFinite(data2))){
+if(data2 > 9007199254740991 || isNaN(data2)){
+validate15.errors = [{instancePath:instancePath+"/acceptedCount",schemaPath:"#/$defs/diagnostic/properties/revision/maximum",keyword:"maximum",params:{comparison: "<=", limit: 9007199254740991},message:"must be <= 9007199254740991"}];
+return false;
+}
+else {
+if(data2 < 0 || isNaN(data2)){
+validate15.errors = [{instancePath:instancePath+"/acceptedCount",schemaPath:"#/$defs/diagnostic/properties/revision/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"}];
+return false;
+}
+}
+}
+}
+var valid0 = _errs6 === errors;
+}
+else {
+var valid0 = true;
+}
+if(valid0){
+if(data.lastAcceptedAt !== undefined){
+let data3 = data.lastAcceptedAt;
+const _errs9 = errors;
+const _errs10 = errors;
+if((!(((typeof data3 == "number") && (!(data3 % 1) && !isNaN(data3))) && (isFinite(data3)))) && (data3 !== null)){
+validate15.errors = [{instancePath:instancePath+"/lastAcceptedAt",schemaPath:"#/$defs/diagnostic/properties/lastSuccessAt/type",keyword:"type",params:{type: schema23.type},message:"must be integer,null"}];
+return false;
+}
+if(errors === _errs10){
+if((typeof data3 == "number") && (isFinite(data3))){
+if(data3 > 8640000000000000 || isNaN(data3)){
+validate15.errors = [{instancePath:instancePath+"/lastAcceptedAt",schemaPath:"#/$defs/diagnostic/properties/lastSuccessAt/maximum",keyword:"maximum",params:{comparison: "<=", limit: 8640000000000000},message:"must be <= 8640000000000000"}];
+return false;
+}
+else {
+if(data3 < 0 || isNaN(data3)){
+validate15.errors = [{instancePath:instancePath+"/lastAcceptedAt",schemaPath:"#/$defs/diagnostic/properties/lastSuccessAt/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"}];
+return false;
+}
+}
+}
+}
+var valid0 = _errs9 === errors;
+}
+else {
+var valid0 = true;
+}
+if(valid0){
+if(data.usedSlotCount !== undefined){
+let data4 = data.usedSlotCount;
+const _errs12 = errors;
+if(!(((typeof data4 == "number") && (!(data4 % 1) && !isNaN(data4))) && (isFinite(data4)))){
+validate15.errors = [{instancePath:instancePath+"/usedSlotCount",schemaPath:"#/properties/usedSlotCount/type",keyword:"type",params:{type: "integer"},message:"must be integer"}];
+return false;
+}
+if(errors === _errs12){
+if((typeof data4 == "number") && (isFinite(data4))){
+if(data4 > 3 || isNaN(data4)){
+validate15.errors = [{instancePath:instancePath+"/usedSlotCount",schemaPath:"#/properties/usedSlotCount/maximum",keyword:"maximum",params:{comparison: "<=", limit: 3},message:"must be <= 3"}];
+return false;
+}
+else {
+if(data4 < 0 || isNaN(data4)){
+validate15.errors = [{instancePath:instancePath+"/usedSlotCount",schemaPath:"#/properties/usedSlotCount/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"}];
+return false;
+}
+}
+}
+}
+var valid0 = _errs12 === errors;
+}
+else {
+var valid0 = true;
+}
+if(valid0){
+if(data.errorReason !== undefined){
+let data5 = data.errorReason;
+const _errs14 = errors;
+if(!(((((((data5 === null) || (data5 === "tokenMissing")) || (data5 === "tokenUnreadable")) || (data5 === "tokenInvalid")) || (data5 === "transport")) || (data5 === "unauthorized")) || (data5 === "rejected"))){
+validate15.errors = [{instancePath:instancePath+"/errorReason",schemaPath:"#/$defs/diagnostic/properties/errorReason/enum",keyword:"enum",params:{allowedValues: schema24.enum},message:"must be equal to one of the allowed values"}];
+return false;
+}
+var valid0 = _errs14 === errors;
+}
+else {
+var valid0 = true;
+}
+if(valid0){
+if(data.unsupported !== undefined){
+const _errs16 = errors;
+if(typeof data.unsupported !== "boolean"){
+validate15.errors = [{instancePath:instancePath+"/unsupported",schemaPath:"#/properties/unsupported/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"}];
+return false;
+}
+var valid0 = _errs16 === errors;
+}
+else {
+var valid0 = true;
+}
+if(valid0){
+if(data.cleanupOutcome !== undefined){
+let data7 = data.cleanupOutcome;
+const _errs18 = errors;
+if(!(((data7 === "notNeeded") || (data7 === "accepted")) || (data7 === "unconfirmed"))){
+validate15.errors = [{instancePath:instancePath+"/cleanupOutcome",schemaPath:"#/$defs/cleanup/enum",keyword:"enum",params:{allowedValues: schema25.enum},message:"must be equal to one of the allowed values"}];
+return false;
+}
+var valid0 = _errs18 === errors;
+}
+else {
+var valid0 = true;
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+else {
+validate15.errors = [{instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"}];
+return false;
+}
+}
+validate15.errors = vErrors;
+return errors === 0;
+}
+
+
+function validate14(data, {instancePath="", parentData, parentDataProperty, rootData=data}={}){
+let vErrors = null;
+let errors = 0;
+if(errors === 0){
+if(data && typeof data == "object" && !Array.isArray(data)){
+let missing0;
+if(((((data.effective === undefined) && (missing0 = "effective")) || ((data.diagnostic === undefined) && (missing0 = "diagnostic"))) || ((data.messageDiagnostic === undefined) && (missing0 = "messageDiagnostic"))) || ((data.cleanupOutcome === undefined) && (missing0 = "cleanupOutcome"))){
+validate14.errors = [{instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: missing0},message:"must have required property '"+missing0+"'"}];
+return false;
+}
+else {
+const _errs1 = errors;
+for(const key0 in data){
+if(!((((key0 === "effective") || (key0 === "diagnostic")) || (key0 === "messageDiagnostic")) || (key0 === "cleanupOutcome"))){
+validate14.errors = [{instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"}];
+return false;
+break;
+}
+}
+if(_errs1 === errors){
+if(data.effective !== undefined){
+let data0 = data.effective;
+const _errs2 = errors;
+const _errs3 = errors;
+if(errors === _errs3){
+if(data0 && typeof data0 == "object" && !Array.isArray(data0)){
+let missing1;
+if((((((data0.enabled === undefined) && (missing1 = "enabled")) || ((data0.categories === undefined) && (missing1 = "categories"))) || ((data0.petdexMessagesEnabled === undefined) && (missing1 = "petdexMessagesEnabled"))) || ((data0.petdexMessageDetailsEnabled === undefined) && (missing1 = "petdexMessageDetailsEnabled"))) || ((data0.locale === undefined) && (missing1 = "locale"))){
+validate14.errors = [{instancePath:instancePath+"/effective",schemaPath:"#/$defs/settings/required",keyword:"required",params:{missingProperty: missing1},message:"must have required property '"+missing1+"'"}];
+return false;
+}
+else {
+const _errs5 = errors;
+for(const key1 in data0){
+if(!(((((key1 === "enabled") || (key1 === "categories")) || (key1 === "petdexMessagesEnabled")) || (key1 === "petdexMessageDetailsEnabled")) || (key1 === "locale"))){
+validate14.errors = [{instancePath:instancePath+"/effective",schemaPath:"#/$defs/settings/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key1},message:"must NOT have additional properties"}];
+return false;
+break;
+}
+}
+if(_errs5 === errors){
+if(data0.enabled !== undefined){
+const _errs6 = errors;
+if(typeof data0.enabled !== "boolean"){
+validate14.errors = [{instancePath:instancePath+"/effective/enabled",schemaPath:"#/$defs/settings/properties/enabled/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"}];
+return false;
+}
+var valid2 = _errs6 === errors;
+}
+else {
+var valid2 = true;
+}
+if(valid2){
+if(data0.categories !== undefined){
+let data2 = data0.categories;
+const _errs8 = errors;
+if(errors === _errs8){
+if(data2 && typeof data2 == "object" && !Array.isArray(data2)){
+let missing2;
+if((((data2.ssh === undefined) && (missing2 = "ssh")) || ((data2.sftp === undefined) && (missing2 = "sftp"))) || ((data2.ai === undefined) && (missing2 = "ai"))){
+validate14.errors = [{instancePath:instancePath+"/effective/categories",schemaPath:"#/$defs/settings/properties/categories/required",keyword:"required",params:{missingProperty: missing2},message:"must have required property '"+missing2+"'"}];
+return false;
+}
+else {
+const _errs10 = errors;
+for(const key2 in data2){
+if(!(((key2 === "ssh") || (key2 === "sftp")) || (key2 === "ai"))){
+validate14.errors = [{instancePath:instancePath+"/effective/categories",schemaPath:"#/$defs/settings/properties/categories/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key2},message:"must NOT have additional properties"}];
+return false;
+break;
+}
+}
+if(_errs10 === errors){
+if(data2.ssh !== undefined){
+const _errs11 = errors;
+if(typeof data2.ssh !== "boolean"){
+validate14.errors = [{instancePath:instancePath+"/effective/categories/ssh",schemaPath:"#/$defs/settings/properties/categories/properties/ssh/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"}];
+return false;
+}
+var valid3 = _errs11 === errors;
+}
+else {
+var valid3 = true;
+}
+if(valid3){
+if(data2.sftp !== undefined){
+const _errs13 = errors;
+if(typeof data2.sftp !== "boolean"){
+validate14.errors = [{instancePath:instancePath+"/effective/categories/sftp",schemaPath:"#/$defs/settings/properties/categories/properties/sftp/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"}];
+return false;
+}
+var valid3 = _errs13 === errors;
+}
+else {
+var valid3 = true;
+}
+if(valid3){
+if(data2.ai !== undefined){
+const _errs15 = errors;
+if(typeof data2.ai !== "boolean"){
+validate14.errors = [{instancePath:instancePath+"/effective/categories/ai",schemaPath:"#/$defs/settings/properties/categories/properties/ai/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"}];
+return false;
+}
+var valid3 = _errs15 === errors;
+}
+else {
+var valid3 = true;
+}
+}
+}
+}
+}
+}
+else {
+validate14.errors = [{instancePath:instancePath+"/effective/categories",schemaPath:"#/$defs/settings/properties/categories/type",keyword:"type",params:{type: "object"},message:"must be object"}];
+return false;
+}
+}
+var valid2 = _errs8 === errors;
+}
+else {
+var valid2 = true;
+}
+if(valid2){
+if(data0.petdexMessagesEnabled !== undefined){
+const _errs17 = errors;
+if(typeof data0.petdexMessagesEnabled !== "boolean"){
+validate14.errors = [{instancePath:instancePath+"/effective/petdexMessagesEnabled",schemaPath:"#/$defs/settings/properties/petdexMessagesEnabled/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"}];
+return false;
+}
+var valid2 = _errs17 === errors;
+}
+else {
+var valid2 = true;
+}
+if(valid2){
+if(data0.petdexMessageDetailsEnabled !== undefined){
+const _errs19 = errors;
+if(typeof data0.petdexMessageDetailsEnabled !== "boolean"){
+validate14.errors = [{instancePath:instancePath+"/effective/petdexMessageDetailsEnabled",schemaPath:"#/$defs/settings/properties/petdexMessageDetailsEnabled/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"}];
+return false;
+}
+var valid2 = _errs19 === errors;
+}
+else {
+var valid2 = true;
+}
+if(valid2){
+if(data0.locale !== undefined){
+let data8 = data0.locale;
+const _errs21 = errors;
+if(!((data8 === "zh-CN") || (data8 === "en-US"))){
+validate14.errors = [{instancePath:instancePath+"/effective/locale",schemaPath:"#/$defs/settings/properties/locale/enum",keyword:"enum",params:{allowedValues: schema18.properties.locale.enum},message:"must be equal to one of the allowed values"}];
+return false;
+}
+var valid2 = _errs21 === errors;
+}
+else {
+var valid2 = true;
+}
+}
+}
+}
+}
+}
+}
+}
+else {
+validate14.errors = [{instancePath:instancePath+"/effective",schemaPath:"#/$defs/settings/type",keyword:"type",params:{type: "object"},message:"must be object"}];
+return false;
+}
+}
+var valid0 = _errs2 === errors;
+}
+else {
+var valid0 = true;
+}
+if(valid0){
+if(data.diagnostic !== undefined){
+let data9 = data.diagnostic;
+const _errs22 = errors;
+const _errs23 = errors;
+if(errors === _errs23){
+if(data9 && typeof data9 == "object" && !Array.isArray(data9)){
+let missing3;
+if((((((data9.revision === undefined) && (missing3 = "revision")) || ((data9.status === undefined) && (missing3 = "status"))) || ((data9.errorReason === undefined) && (missing3 = "errorReason"))) || ((data9.targetAction === undefined) && (missing3 = "targetAction"))) || ((data9.lastSuccessAt === undefined) && (missing3 = "lastSuccessAt"))){
+validate14.errors = [{instancePath:instancePath+"/diagnostic",schemaPath:"#/$defs/diagnostic/required",keyword:"required",params:{missingProperty: missing3},message:"must have required property '"+missing3+"'"}];
+return false;
+}
+else {
+const _errs25 = errors;
+for(const key3 in data9){
+if(!(((((key3 === "revision") || (key3 === "status")) || (key3 === "errorReason")) || (key3 === "targetAction")) || (key3 === "lastSuccessAt"))){
+validate14.errors = [{instancePath:instancePath+"/diagnostic",schemaPath:"#/$defs/diagnostic/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key3},message:"must NOT have additional properties"}];
+return false;
+break;
+}
+}
+if(_errs25 === errors){
+if(data9.revision !== undefined){
+let data10 = data9.revision;
+const _errs26 = errors;
+if(!(((typeof data10 == "number") && (!(data10 % 1) && !isNaN(data10))) && (isFinite(data10)))){
+validate14.errors = [{instancePath:instancePath+"/diagnostic/revision",schemaPath:"#/$defs/diagnostic/properties/revision/type",keyword:"type",params:{type: "integer"},message:"must be integer"}];
+return false;
+}
+if(errors === _errs26){
+if((typeof data10 == "number") && (isFinite(data10))){
+if(data10 > 9007199254740991 || isNaN(data10)){
+validate14.errors = [{instancePath:instancePath+"/diagnostic/revision",schemaPath:"#/$defs/diagnostic/properties/revision/maximum",keyword:"maximum",params:{comparison: "<=", limit: 9007199254740991},message:"must be <= 9007199254740991"}];
+return false;
+}
+else {
+if(data10 < 0 || isNaN(data10)){
+validate14.errors = [{instancePath:instancePath+"/diagnostic/revision",schemaPath:"#/$defs/diagnostic/properties/revision/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"}];
+return false;
+}
+}
+}
+}
+var valid5 = _errs26 === errors;
+}
+else {
+var valid5 = true;
+}
+if(valid5){
+if(data9.status !== undefined){
+let data11 = data9.status;
+const _errs28 = errors;
+if(!((((((((((data11 === "disabled") || (data11 === "checking")) || (data11 === "notDetected")) || (data11 === "connected")) || (data11 === "unreachable")) || (data11 === "unauthorized")) || (data11 === "rejected")) || (data11 === "tokenUnreadable")) || (data11 === "tokenInvalid")) || (data11 === "connectionError"))){
+validate14.errors = [{instancePath:instancePath+"/diagnostic/status",schemaPath:"#/$defs/diagnostic/properties/status/enum",keyword:"enum",params:{allowedValues: schema12.properties.status.enum},message:"must be equal to one of the allowed values"}];
+return false;
+}
+var valid5 = _errs28 === errors;
+}
+else {
+var valid5 = true;
+}
+if(valid5){
+if(data9.errorReason !== undefined){
+let data12 = data9.errorReason;
+const _errs29 = errors;
+if(!(((((((data12 === null) || (data12 === "tokenMissing")) || (data12 === "tokenUnreadable")) || (data12 === "tokenInvalid")) || (data12 === "transport")) || (data12 === "unauthorized")) || (data12 === "rejected"))){
+validate14.errors = [{instancePath:instancePath+"/diagnostic/errorReason",schemaPath:"#/$defs/diagnostic/properties/errorReason/enum",keyword:"enum",params:{allowedValues: schema12.properties.errorReason.enum},message:"must be equal to one of the allowed values"}];
+return false;
+}
+var valid5 = _errs29 === errors;
+}
+else {
+var valid5 = true;
+}
+if(valid5){
+if(data9.targetAction !== undefined){
+let data13 = data9.targetAction;
+const _errs30 = errors;
+if(!(((((((data13 === null) || (data13 === "idle")) || (data13 === "waiting")) || (data13 === "waving")) || (data13 === "running")) || (data13 === "jumping")) || (data13 === "failed"))){
+validate14.errors = [{instancePath:instancePath+"/diagnostic/targetAction",schemaPath:"#/$defs/diagnostic/properties/targetAction/enum",keyword:"enum",params:{allowedValues: schema12.properties.targetAction.enum},message:"must be equal to one of the allowed values"}];
+return false;
+}
+var valid5 = _errs30 === errors;
+}
+else {
+var valid5 = true;
+}
+if(valid5){
+if(data9.lastSuccessAt !== undefined){
+let data14 = data9.lastSuccessAt;
+const _errs31 = errors;
+if((!(((typeof data14 == "number") && (!(data14 % 1) && !isNaN(data14))) && (isFinite(data14)))) && (data14 !== null)){
+validate14.errors = [{instancePath:instancePath+"/diagnostic/lastSuccessAt",schemaPath:"#/$defs/diagnostic/properties/lastSuccessAt/type",keyword:"type",params:{type: schema12.properties.lastSuccessAt.type},message:"must be integer,null"}];
+return false;
+}
+if(errors === _errs31){
+if((typeof data14 == "number") && (isFinite(data14))){
+if(data14 > 8640000000000000 || isNaN(data14)){
+validate14.errors = [{instancePath:instancePath+"/diagnostic/lastSuccessAt",schemaPath:"#/$defs/diagnostic/properties/lastSuccessAt/maximum",keyword:"maximum",params:{comparison: "<=", limit: 8640000000000000},message:"must be <= 8640000000000000"}];
+return false;
+}
+else {
+if(data14 < 0 || isNaN(data14)){
+validate14.errors = [{instancePath:instancePath+"/diagnostic/lastSuccessAt",schemaPath:"#/$defs/diagnostic/properties/lastSuccessAt/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"}];
+return false;
+}
+}
+}
+}
+var valid5 = _errs31 === errors;
+}
+else {
+var valid5 = true;
+}
+}
+}
+}
+}
+}
+}
+}
+else {
+validate14.errors = [{instancePath:instancePath+"/diagnostic",schemaPath:"#/$defs/diagnostic/type",keyword:"type",params:{type: "object"},message:"must be object"}];
+return false;
+}
+}
+var valid0 = _errs22 === errors;
+}
+else {
+var valid0 = true;
+}
+if(valid0){
+if(data.messageDiagnostic !== undefined){
+const _errs33 = errors;
+if(!(validate15(data.messageDiagnostic, {instancePath:instancePath+"/messageDiagnostic",parentData:data,parentDataProperty:"messageDiagnostic",rootData}))){
+vErrors = vErrors === null ? validate15.errors : vErrors.concat(validate15.errors);
+errors = vErrors.length;
+}
+var valid0 = _errs33 === errors;
+}
+else {
+var valid0 = true;
+}
+if(valid0){
+if(data.cleanupOutcome !== undefined){
+let data16 = data.cleanupOutcome;
+const _errs34 = errors;
+if(!(((data16 === "notNeeded") || (data16 === "accepted")) || (data16 === "unconfirmed"))){
+validate14.errors = [{instancePath:instancePath+"/cleanupOutcome",schemaPath:"#/$defs/cleanup/enum",keyword:"enum",params:{allowedValues: schema25.enum},message:"must be equal to one of the allowed values"}];
+return false;
+}
+var valid0 = _errs34 === errors;
+}
+else {
+var valid0 = true;
+}
+}
+}
+}
+}
+}
+}
+else {
+validate14.errors = [{instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"}];
+return false;
+}
+}
+validate14.errors = vErrors;
+return errors === 0;
+}
+
+export const isPetdexMessageDiagnostic = validate17;
+
+function validate17(data, {instancePath="", parentData, parentDataProperty, rootData=data}={}){
+let vErrors = null;
+let errors = 0;
+if(errors === 0){
+if(data && typeof data == "object" && !Array.isArray(data)){
+let missing0;
+if(((((((((data.revision === undefined) && (missing0 = "revision")) || ((data.status === undefined) && (missing0 = "status"))) || ((data.acceptedCount === undefined) && (missing0 = "acceptedCount"))) || ((data.lastAcceptedAt === undefined) && (missing0 = "lastAcceptedAt"))) || ((data.usedSlotCount === undefined) && (missing0 = "usedSlotCount"))) || ((data.errorReason === undefined) && (missing0 = "errorReason"))) || ((data.unsupported === undefined) && (missing0 = "unsupported"))) || ((data.cleanupOutcome === undefined) && (missing0 = "cleanupOutcome"))){
+validate17.errors = [{instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: missing0},message:"must have required property '"+missing0+"'"}];
+return false;
+}
+else {
+const _errs1 = errors;
+for(const key0 in data){
+if(!((((((((key0 === "revision") || (key0 === "status")) || (key0 === "acceptedCount")) || (key0 === "lastAcceptedAt")) || (key0 === "usedSlotCount")) || (key0 === "errorReason")) || (key0 === "unsupported")) || (key0 === "cleanupOutcome"))){
+validate17.errors = [{instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"}];
+return false;
+break;
+}
+}
+if(_errs1 === errors){
+if(data.revision !== undefined){
+let data0 = data.revision;
+const _errs2 = errors;
+const _errs3 = errors;
+if(!(((typeof data0 == "number") && (!(data0 % 1) && !isNaN(data0))) && (isFinite(data0)))){
+validate17.errors = [{instancePath:instancePath+"/revision",schemaPath:"#/$defs/diagnostic/properties/revision/type",keyword:"type",params:{type: "integer"},message:"must be integer"}];
+return false;
+}
+if(errors === _errs3){
+if((typeof data0 == "number") && (isFinite(data0))){
+if(data0 > 9007199254740991 || isNaN(data0)){
+validate17.errors = [{instancePath:instancePath+"/revision",schemaPath:"#/$defs/diagnostic/properties/revision/maximum",keyword:"maximum",params:{comparison: "<=", limit: 9007199254740991},message:"must be <= 9007199254740991"}];
+return false;
+}
+else {
+if(data0 < 0 || isNaN(data0)){
+validate17.errors = [{instancePath:instancePath+"/revision",schemaPath:"#/$defs/diagnostic/properties/revision/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"}];
+return false;
+}
+}
+}
+}
+var valid0 = _errs2 === errors;
+}
+else {
+var valid0 = true;
+}
+if(valid0){
+if(data.status !== undefined){
+let data1 = data.status;
+const _errs5 = errors;
+if(!(((((data1 === "disabled") || (data1 === "ready")) || (data1 === "unavailable")) || (data1 === "unsupported")) || (data1 === "error"))){
+validate17.errors = [{instancePath:instancePath+"/status",schemaPath:"#/properties/status/enum",keyword:"enum",params:{allowedValues: schema20.properties.status.enum},message:"must be equal to one of the allowed values"}];
+return false;
+}
+var valid0 = _errs5 === errors;
+}
+else {
+var valid0 = true;
+}
+if(valid0){
+if(data.acceptedCount !== undefined){
+let data2 = data.acceptedCount;
+const _errs6 = errors;
+const _errs7 = errors;
+if(!(((typeof data2 == "number") && (!(data2 % 1) && !isNaN(data2))) && (isFinite(data2)))){
+validate17.errors = [{instancePath:instancePath+"/acceptedCount",schemaPath:"#/$defs/diagnostic/properties/revision/type",keyword:"type",params:{type: "integer"},message:"must be integer"}];
+return false;
+}
+if(errors === _errs7){
+if((typeof data2 == "number") && (isFinite(data2))){
+if(data2 > 9007199254740991 || isNaN(data2)){
+validate17.errors = [{instancePath:instancePath+"/acceptedCount",schemaPath:"#/$defs/diagnostic/properties/revision/maximum",keyword:"maximum",params:{comparison: "<=", limit: 9007199254740991},message:"must be <= 9007199254740991"}];
+return false;
+}
+else {
+if(data2 < 0 || isNaN(data2)){
+validate17.errors = [{instancePath:instancePath+"/acceptedCount",schemaPath:"#/$defs/diagnostic/properties/revision/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"}];
+return false;
+}
+}
+}
+}
+var valid0 = _errs6 === errors;
+}
+else {
+var valid0 = true;
+}
+if(valid0){
+if(data.lastAcceptedAt !== undefined){
+let data3 = data.lastAcceptedAt;
+const _errs9 = errors;
+const _errs10 = errors;
+if((!(((typeof data3 == "number") && (!(data3 % 1) && !isNaN(data3))) && (isFinite(data3)))) && (data3 !== null)){
+validate17.errors = [{instancePath:instancePath+"/lastAcceptedAt",schemaPath:"#/$defs/diagnostic/properties/lastSuccessAt/type",keyword:"type",params:{type: schema23.type},message:"must be integer,null"}];
+return false;
+}
+if(errors === _errs10){
+if((typeof data3 == "number") && (isFinite(data3))){
+if(data3 > 8640000000000000 || isNaN(data3)){
+validate17.errors = [{instancePath:instancePath+"/lastAcceptedAt",schemaPath:"#/$defs/diagnostic/properties/lastSuccessAt/maximum",keyword:"maximum",params:{comparison: "<=", limit: 8640000000000000},message:"must be <= 8640000000000000"}];
+return false;
+}
+else {
+if(data3 < 0 || isNaN(data3)){
+validate17.errors = [{instancePath:instancePath+"/lastAcceptedAt",schemaPath:"#/$defs/diagnostic/properties/lastSuccessAt/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"}];
+return false;
+}
+}
+}
+}
+var valid0 = _errs9 === errors;
+}
+else {
+var valid0 = true;
+}
+if(valid0){
+if(data.usedSlotCount !== undefined){
+let data4 = data.usedSlotCount;
+const _errs12 = errors;
+if(!(((typeof data4 == "number") && (!(data4 % 1) && !isNaN(data4))) && (isFinite(data4)))){
+validate17.errors = [{instancePath:instancePath+"/usedSlotCount",schemaPath:"#/properties/usedSlotCount/type",keyword:"type",params:{type: "integer"},message:"must be integer"}];
+return false;
+}
+if(errors === _errs12){
+if((typeof data4 == "number") && (isFinite(data4))){
+if(data4 > 3 || isNaN(data4)){
+validate17.errors = [{instancePath:instancePath+"/usedSlotCount",schemaPath:"#/properties/usedSlotCount/maximum",keyword:"maximum",params:{comparison: "<=", limit: 3},message:"must be <= 3"}];
+return false;
+}
+else {
+if(data4 < 0 || isNaN(data4)){
+validate17.errors = [{instancePath:instancePath+"/usedSlotCount",schemaPath:"#/properties/usedSlotCount/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"}];
+return false;
+}
+}
+}
+}
+var valid0 = _errs12 === errors;
+}
+else {
+var valid0 = true;
+}
+if(valid0){
+if(data.errorReason !== undefined){
+let data5 = data.errorReason;
+const _errs14 = errors;
+if(!(((((((data5 === null) || (data5 === "tokenMissing")) || (data5 === "tokenUnreadable")) || (data5 === "tokenInvalid")) || (data5 === "transport")) || (data5 === "unauthorized")) || (data5 === "rejected"))){
+validate17.errors = [{instancePath:instancePath+"/errorReason",schemaPath:"#/$defs/diagnostic/properties/errorReason/enum",keyword:"enum",params:{allowedValues: schema24.enum},message:"must be equal to one of the allowed values"}];
+return false;
+}
+var valid0 = _errs14 === errors;
+}
+else {
+var valid0 = true;
+}
+if(valid0){
+if(data.unsupported !== undefined){
+const _errs16 = errors;
+if(typeof data.unsupported !== "boolean"){
+validate17.errors = [{instancePath:instancePath+"/unsupported",schemaPath:"#/properties/unsupported/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"}];
+return false;
+}
+var valid0 = _errs16 === errors;
+}
+else {
+var valid0 = true;
+}
+if(valid0){
+if(data.cleanupOutcome !== undefined){
+let data7 = data.cleanupOutcome;
+const _errs18 = errors;
+if(!(((data7 === "notNeeded") || (data7 === "accepted")) || (data7 === "unconfirmed"))){
+validate17.errors = [{instancePath:instancePath+"/cleanupOutcome",schemaPath:"#/$defs/cleanup/enum",keyword:"enum",params:{allowedValues: schema25.enum},message:"must be equal to one of the allowed values"}];
+return false;
+}
+var valid0 = _errs18 === errors;
+}
+else {
+var valid0 = true;
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+}
+else {
+validate17.errors = [{instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"}];
+return false;
+}
+}
+validate17.errors = vErrors;
+return errors === 0;
+}
+
+export const isPetdexMessageTestResult = validate18;
+const schema33 = {"type":"object","additionalProperties":false,"required":["diagnostic","outcome"],"properties":{"diagnostic":{"$ref":"#/$defs/messageDiagnostic"},"outcome":{"enum":["accepted","overridden","failed","disabled"]}}};
+
+function validate18(data, {instancePath="", parentData, parentDataProperty, rootData=data}={}){
+let vErrors = null;
+let errors = 0;
+if(errors === 0){
+if(data && typeof data == "object" && !Array.isArray(data)){
+let missing0;
+if(((data.diagnostic === undefined) && (missing0 = "diagnostic")) || ((data.outcome === undefined) && (missing0 = "outcome"))){
+validate18.errors = [{instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: missing0},message:"must have required property '"+missing0+"'"}];
+return false;
+}
+else {
+const _errs1 = errors;
+for(const key0 in data){
+if(!((key0 === "diagnostic") || (key0 === "outcome"))){
+validate18.errors = [{instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"}];
+return false;
+break;
+}
+}
+if(_errs1 === errors){
+if(data.diagnostic !== undefined){
+const _errs2 = errors;
+if(!(validate15(data.diagnostic, {instancePath:instancePath+"/diagnostic",parentData:data,parentDataProperty:"diagnostic",rootData}))){
+vErrors = vErrors === null ? validate15.errors : vErrors.concat(validate15.errors);
+errors = vErrors.length;
+}
+var valid0 = _errs2 === errors;
+}
+else {
+var valid0 = true;
+}
+if(valid0){
+if(data.outcome !== undefined){
+let data1 = data.outcome;
+const _errs3 = errors;
+if(!((((data1 === "accepted") || (data1 === "overridden")) || (data1 === "failed")) || (data1 === "disabled"))){
+validate18.errors = [{instancePath:instancePath+"/outcome",schemaPath:"#/properties/outcome/enum",keyword:"enum",params:{allowedValues: schema33.properties.outcome.enum},message:"must be equal to one of the allowed values"}];
+return false;
+}
+var valid0 = _errs3 === errors;
+}
+else {
+var valid0 = true;
+}
+}
+}
+}
+}
+else {
+validate18.errors = [{instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"}];
+return false;
+}
+}
+validate18.errors = vErrors;
+return errors === 0;
+}

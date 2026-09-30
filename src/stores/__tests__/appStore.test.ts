@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, beforeEach, vi } from 'vitest';
 import type { PetdexDiagnostic } from '@/types';
+import type { PetdexSettings } from '@/lib/petdex/messages';
 
 const disabled: PetdexDiagnostic = { revision: 0, status: 'disabled', errorReason: null, targetAction: null, lastSuccessAt: null };
 
@@ -9,8 +10,13 @@ const mocks = vi.hoisted(() => ({
   savePreferences: vi.fn(),
 }));
 
-vi.mock('@/lib/petdex/petdex', () => ({ configurePetdex: mocks.configurePetdex }));
 vi.mock('@/lib/ipc/tauri', () => ({
+  invokePetdexConfigure: async (configuration: PetdexSettings) => ({
+    effective: configuration,
+    diagnostic: await mocks.configurePetdex(configuration.enabled, configuration.categories),
+    cleanupOutcome: 'notNeeded',
+    messageDiagnostic: { revision: 1, status: 'disabled', acceptedCount: 0, lastAcceptedAt: null, usedSlotCount: 0, errorReason: null, unsupported: false, cleanupOutcome: 'notNeeded' },
+  }),
   invokeLoadPreferences: mocks.loadPreferences,
   invokeSavePreferences: mocks.savePreferences,
 }));
@@ -158,7 +164,7 @@ describe('appStore', () => {
     });
   });
 
-  it('hydrates and persists the Petdex opt-in as a boolean preference', async () => {
+  it('migrates the legacy opt-in through the configuration command without debounced overwrites', async () => {
     mocks.loadPreferences.mockResolvedValue([['petdexEnabled', 'true']]);
 
     await useAppStore.getState().hydrateFromDb();
@@ -170,7 +176,7 @@ describe('appStore', () => {
     await useAppStore.getState().setPetdexEnabled(false);
     await vi.advanceTimersByTimeAsync(500);
 
-    expect(mocks.savePreferences).toHaveBeenCalledWith(
+    expect(mocks.savePreferences).not.toHaveBeenCalledWith(
       expect.arrayContaining([['petdexEnabled', 'false']]),
     );
   });

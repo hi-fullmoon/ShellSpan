@@ -79,6 +79,9 @@ pub(crate) enum ActivityPhase {
 
 #[derive(Clone)]
 pub(crate) struct ActivityEvent {
+    pub details: super::message_content::SafeDetails,
+    pub owner: Option<ActivityOwner>,
+    pub kind: ActivityKind,
     pub source: ActivitySource,
     pub run_id: u64,
     pub revision: u64,
@@ -95,6 +98,13 @@ impl ActivityEvent {
         occurred_at: std::time::Instant,
     ) -> Self {
         Self {
+            owner: None,
+            details: Default::default(),
+            kind: match source {
+                ActivitySource::Ssh => ActivityKind::Connect,
+                ActivitySource::Sftp => ActivityKind::Copy,
+                ActivitySource::Ai => ActivityKind::Ai,
+            },
             source,
             run_id,
             revision,
@@ -102,6 +112,26 @@ impl ActivityEvent {
             occurred_at,
         }
     }
+}
+
+// Deliberately neither Debug nor Serialize: business identities never cross
+// the presentation/transport boundary or enter diagnostic output.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub(crate) enum ActivityOwner {
+    Ai(String),
+    Connection(std::sync::Arc<uuid::Uuid>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ActivityKind {
+    Connect,
+    Upload,
+    Download,
+    Copy,
+    CrossCopy,
+    AiPreparing,
+    Ai,
+    Tool(super::message_content::ToolStage),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

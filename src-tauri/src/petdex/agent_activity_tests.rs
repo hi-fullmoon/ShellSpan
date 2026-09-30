@@ -66,6 +66,228 @@ fn current(adapter: &PetdexAdapter) -> PetdexState {
         .state
 }
 
+// These are durable store lifecycle regressions, not model requests or responses
+// from a substitute provider. No network, model service or tool is executed.
+fn message_wire(adapter: &PetdexAdapter) -> Option<serde_json::Value> {
+    adapter
+        .message_snapshot(Instant::now(), 1, slots::MessageLocale::EnUs)
+        .message(0)
+        .map(|message| {
+            serde_json::from_slice(&message.encode("shellspan-test-slot-1").unwrap()).unwrap()
+        })
+}
+
+fn finish_turn(store: &AgentSessionStore, turn: &str) {
+    store
+        .append(
+            "session",
+            Some(turn.into()),
+            Some(format!("step-{turn}")),
+            AgentSessionEventPayload::StepEnd {
+                reason: "completed".into(),
+            },
+        )
+        .unwrap();
+    assert!(store
+        .end_turn_if_no_step_input("session", turn, "completed")
+        .unwrap());
+}
+
+#[test]
+fn generated_title_and_turn_boundaries_follow_the_durable_store() {
+    let root = tempfile::tempdir().unwrap();
+    let store = AgentSessionStore::default();
+    store.configure(root.path().into()).unwrap();
+    let adapter = PetdexAdapter::new(root.path().into());
+    adapter.set_categories(PetdexCategories {
+        ai: true,
+        ..Default::default()
+    });
+    let (_receiver, _) = adapter.prepare_coordinator().unwrap();
+    adapter.set_message_preferences(message_content::MessagePreferences {
+        petdex_messages_enabled: true,
+        petdex_message_details_enabled: true,
+    });
+    store.attach_petdex(adapter.clone()).unwrap();
+    create_session(&store, "session");
+    begin_turn(&store, "session", "first");
+    assert_eq!(
+        message_wire(&adapter).unwrap()["title"],
+        "ShellSpan",
+        "goal is not an allowed title"
+    );
+    store
+        .set_generated_title("session", "Review workspace".into())
+        .unwrap();
+    assert_eq!(message_wire(&adapter).unwrap()["title"], "Review workspace");
+    assert_eq!(
+        message_wire(&adapter).unwrap()["text"],
+        "Preparing an AI response"
+    );
+    finish_turn(&store, "first");
+    let completed = message_wire(&adapter).unwrap();
+    assert_eq!(completed["text"], "Task completed");
+    assert_eq!(completed["busy"], false);
+    let old = adapter.message_snapshot(Instant::now(), 1, slots::MessageLocale::EnUs);
+    begin_turn(&store, "session", "second");
+    assert!(!adapter.message_snapshot_is_current(&old, 0, 1, Instant::now()));
+    assert_eq!(
+        message_wire(&adapter).unwrap()["text"],
+        "Preparing an AI response"
+    );
+    // A completed turn with no new assistant message cannot reuse the old one.
+    finish_turn(&store, "second");
+    assert_eq!(message_wire(&adapter).unwrap()["text"], "Task completed");
+    begin_turn(&store, "session", "cancelled");
+    store.interrupt("session").unwrap();
+    assert!(message_wire(&adapter).is_none());
+}
+
+#[test]
+fn committed_tool_dispatch_has_specific_stage_and_tool_results_are_not_content() {
+    use crate::agent_runtime::{AgentToolExecutionStatus, AgentToolResultStatus, RecordedToolCall};
+    let root = tempfile::tempdir().unwrap();
+    let store = AgentSessionStore::default();
+    store.configure(root.path().into()).unwrap();
+    let adapter = PetdexAdapter::new(root.path().into());
+    adapter.set_categories(PetdexCategories {
+        ai: true,
+        ..Default::default()
+    });
+    let (_receiver, _) = adapter.prepare_coordinator().unwrap();
+    adapter.set_message_preferences(message_content::MessagePreferences {
+        petdex_messages_enabled: true,
+        petdex_message_details_enabled: true,
+    });
+    store.attach_petdex(adapter.clone()).unwrap();
+    create_session(&store, "session");
+    begin_turn(&store, "session", "first");
+    store
+        .append(
+            "session",
+            Some("first".into()),
+            Some("step-first".into()),
+            AgentSessionEventPayload::ToolCall {
+                call: RecordedToolCall {
+                    call_id: "read".into(),
+                    provider_call_id: None,
+                    name: "read_file".into(),
+                    native_name: None,
+                    arguments: serde_json::json!({"path":"/private/hidden.txt"}),
+                    title: Some("unselected tool title".into()),
+                    effect: None,
+                    target: None,
+                },
+            },
+        )
+        .unwrap();
+    store
+        .append(
+            "session",
+            Some("first".into()),
+            Some("step-first".into()),
+            AgentSessionEventPayload::ToolApproval {
+                request_id: "approval-read".into(),
+                call_id: "read".into(),
+                approval_id: None,
+                status: crate::agent_runtime::AgentToolApprovalStatus::Approved,
+                risk: None,
+                reason: None,
+                expires_at_unix_ms: None,
+                prompt: None,
+            },
+        )
+        .unwrap();
+    store
+        .append(
+            "session",
+            Some("first".into()),
+            Some("step-first".into()),
+            AgentSessionEventPayload::ToolExecution {
+                call_id: "read".into(),
+                status: AgentToolExecutionStatus::Dispatched,
+                idempotency: "yes".into(),
+            },
+        )
+        .unwrap();
+    assert_eq!(message_wire(&adapter).unwrap()["text"], "Reading files");
+    assert_eq!(message_wire(&adapter).unwrap()["title"], "ShellSpan");
+    store
+        .append(
+            "session",
+            Some("first".into()),
+            Some("step-first".into()),
+            AgentSessionEventPayload::ToolResult {
+                call_id: "read".into(),
+                name: "read_file".into(),
+                status: AgentToolResultStatus::Completed,
+                summary: "Private tool result".into(),
+                data: None,
+                duration_ms: None,
+                evidence_refs: Vec::new(),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        message_wire(&adapter).unwrap()["text"],
+        "Preparing an AI response"
+    );
+    finish_turn(&store, "first");
+    assert_eq!(message_wire(&adapter).unwrap()["text"], "Task completed");
+}
+
+#[test]
+fn committed_turns_keep_session_binding_and_reject_old_driver_settlement() {
+    use super::{slots::MessageLocale, types::ActivityOwner};
+    let root = tempfile::tempdir().unwrap();
+    let store = AgentSessionStore::default();
+    store.configure(root.path().to_owned()).unwrap();
+    let adapter = PetdexAdapter::new(root.path().to_owned());
+    adapter.set_categories(PetdexCategories {
+        ai: true,
+        ..Default::default()
+    });
+    store.attach_petdex(adapter.clone()).unwrap();
+    let (_receiver, _) = adapter.prepare_coordinator().unwrap();
+    create_session(&store, "session");
+    let old_driver = store.begin_petdex_driver("session");
+    begin_turn(&store, "session", "first");
+    let first = adapter.message_snapshot(Instant::now(), 1, MessageLocale::EnUs);
+    store
+        .append(
+            "session",
+            Some("first".into()),
+            Some("step-first".into()),
+            AgentSessionEventPayload::StepEnd {
+                reason: "completed".into(),
+            },
+        )
+        .unwrap();
+    assert!(store
+        .end_turn_if_no_step_input("session", "first", "completed")
+        .unwrap());
+    let new_driver = store.begin_petdex_driver("session");
+    begin_turn(&store, "session", "second");
+    store.settle_petdex_driver("session", old_driver, AgentDriverSettlement::Failed);
+    let second = adapter.message_snapshot(Instant::now(), 1, MessageLocale::EnUs);
+    assert_eq!(
+        first.slots[0].binding_generation,
+        second.slots[0].binding_generation
+    );
+    assert!(second.slots[0].revision > first.slots[0].revision);
+    assert!(!adapter.message_snapshot_is_current(&first, 0, 1, Instant::now()));
+    let content = second.slots[0].content.as_ref().unwrap();
+    assert!(content.members == vec![ActivityOwner::Ai("session".into())]);
+    assert_eq!(content.active_run_count, 1);
+    assert_eq!(content.phase, ActivityPhase::Running);
+    store.settle_petdex_driver("session", new_driver, AgentDriverSettlement::Cancelled);
+    assert!(adapter
+        .message_snapshot(Instant::now(), 1, MessageLocale::EnUs)
+        .slots
+        .iter()
+        .all(|s| s.content.is_none()));
+}
+
 #[test]
 fn agent_committed_turns_survive_driver_wait_and_isolate_concurrent_sessions() {
     let root = tempfile::tempdir().unwrap();
@@ -368,6 +590,15 @@ fn committed_approval_survives_driver_release_and_store_reconstruction() {
         current(&adapter),
         PetdexState::Waiting,
         "only the current pending approval is restored"
+    );
+    let snapshot = adapter.message_snapshot(Instant::now(), 1, super::slots::MessageLocale::EnUs);
+    let content = snapshot.slots[0].content.as_ref().unwrap();
+    assert!(content.members == vec![super::types::ActivityOwner::Ai("approval".into())]);
+    assert_eq!(content.active_run_count, 1);
+    assert!(content.busy);
+    assert_eq!(
+        content.phase,
+        ActivityPhase::Waiting(super::types::WaitReason::Approval)
     );
     restored
         .append(

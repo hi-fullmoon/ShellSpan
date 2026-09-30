@@ -12,7 +12,18 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio_util::sync::CancellationToken;
 
 mod arbiter;
+pub(crate) mod configuration;
 mod delivery;
+// Stage 9 consumes these persistence operations when /bubble is enabled.
+#[allow(dead_code)]
+mod installation;
+#[allow(dead_code)] // Safe wire content is consumed by stage 9, preferences by stage 10.
+pub(crate) mod message_content;
+mod message_delivery;
+#[allow(dead_code)] // Transport consumes the versioned handoff in stage 9.
+mod message_snapshot;
+#[allow(dead_code)] // Content/receipt consumers land in stages 8/9; projection runs now.
+mod slots;
 mod transport;
 pub(crate) mod types;
 
@@ -61,6 +72,9 @@ struct CoordinatorControl {
     arbiter: PetdexArbiter,
     wake_queued: bool,
     diagnostic: PetdexDiagnostic,
+    configuration_epoch: u64,
+    cleanup_cancellation: CancellationToken,
+    cleanup_pending: bool,
 }
 
 struct PetdexAdapterInner {
@@ -70,6 +84,12 @@ struct PetdexAdapterInner {
     enabled: AtomicBool,
     coordinator: StdMutex<CoordinatorControl>,
     request_lock: Mutex<()>,
+    write_policy: StdMutex<transport::WritePolicy>,
+    configuration_lock: Mutex<()>,
+    configuration_command_lock: Mutex<()>,
+    messages: StdMutex<message_delivery::MessageDelivery>,
+    write_epoch: std::sync::atomic::AtomicU64,
+    message_installation: StdMutex<Option<installation::Installation>>,
 }
 
 #[derive(Clone)]
@@ -78,6 +98,38 @@ pub(crate) struct PetdexAdapter {
 }
 
 impl PetdexAdapter {
+    pub(crate) fn initialize_messages(&self, directory: &std::path::Path) {
+        let mut installation = self
+            .inner
+            .message_installation
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        if installation.is_some() {
+            return;
+        }
+        match installation::Installation::open(directory) {
+            Ok(value) => {
+                let mut messages = self
+                    .inner
+                    .messages
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner());
+                messages.usage = value.usage();
+                messages.writer_ready = true;
+                *installation = Some(value);
+            }
+            Err(_) => log::warn!("Petdex message writer unavailable; messages remain disabled"),
+        }
+        drop(installation);
+        let control = self
+            .inner
+            .coordinator
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        if let Some(sender) = &control.sender {
+            let _ = sender.try_send(CoordinatorMessage::Wake);
+        }
+    }
     pub(crate) fn new(home_dir: PathBuf) -> Self {
         Self::build(
             Url::parse(PETDEX_STATE_ENDPOINT).ok(),
@@ -108,8 +160,17 @@ impl PetdexAdapter {
                     arbiter: PetdexArbiter::default(),
                     wake_queued: false,
                     diagnostic: PetdexDiagnostic::default(),
+                    configuration_epoch: 0,
+                    cleanup_cancellation: CancellationToken::new(),
+                    cleanup_pending: false,
                 }),
                 request_lock: Mutex::new(()),
+                write_policy: StdMutex::new(Default::default()),
+                configuration_lock: Mutex::new(()),
+                configuration_command_lock: Mutex::new(()),
+                messages: StdMutex::new(Default::default()),
+                write_epoch: std::sync::atomic::AtomicU64::new(0),
+                message_installation: StdMutex::new(None),
             }),
         }
     }
@@ -134,11 +195,13 @@ impl PetdexAdapter {
             .diagnostic
     }
 
-    fn set_enabled(&self, app: &AppHandle, enabled: bool) -> PetdexDiagnostic {
+    async fn set_enabled(&self, app: &AppHandle, enabled: bool) -> PetdexDiagnostic {
         if enabled {
-            self.start_coordinator(app.clone());
+            let (epoch, _) = self.begin_message_configuration();
+            let _configuration = self.inner.configuration_lock.lock().await;
+            self.start_coordinator(app.clone(), epoch);
         } else {
-            self.stop_coordinator();
+            self.shutdown_messages().await;
         }
         let snapshot = self.status();
         let _ = app.emit(PETDEX_STATUS_EVENT, snapshot);
@@ -164,8 +227,8 @@ impl PetdexAdapter {
         }
     }
 
-    fn start_coordinator(&self, app: AppHandle) {
-        let Some((receiver, cancellation)) = self.prepare_coordinator() else {
+    fn start_coordinator(&self, app: AppHandle, epoch: u64) {
+        let Some((receiver, cancellation)) = self.prepare_coordinator_epoch(Some(epoch)) else {
             return;
         };
         let _ = app.emit(PETDEX_STATUS_EVENT, self.status());
@@ -175,14 +238,25 @@ impl PetdexAdapter {
         });
     }
 
+    #[cfg(test)]
     fn prepare_coordinator(
         &self,
+    ) -> Option<(mpsc::Receiver<CoordinatorMessage>, CancellationToken)> {
+        self.prepare_coordinator_epoch(None)
+    }
+
+    fn prepare_coordinator_epoch(
+        &self,
+        epoch: Option<u64>,
     ) -> Option<(mpsc::Receiver<CoordinatorMessage>, CancellationToken)> {
         let mut control = self
             .inner
             .coordinator
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if epoch.is_some_and(|epoch| control.configuration_epoch != epoch) {
+            return None;
+        }
         if self.inner.enabled.load(Ordering::Acquire) && control.sender.is_some() {
             return None;
         }
@@ -191,6 +265,7 @@ impl PetdexAdapter {
         let cancellation = CancellationToken::new();
         let (sender, receiver) = mpsc::channel(COORDINATOR_QUEUE_CAPACITY);
         control.cancellation = cancellation.clone();
+        control.arbiter.message_cancellation = CancellationToken::new();
         control.sender = Some(sender);
         if !self.inner.enabled.load(Ordering::Acquire) {
             control.arbiter.clear_presentation();
@@ -204,12 +279,17 @@ impl PetdexAdapter {
         Some((receiver, cancellation))
     }
 
+    #[cfg(test)]
     fn stop_coordinator(&self) {
         let mut control = self
             .inner
             .coordinator
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.stop_coordinator_locked(&mut control);
+    }
+
+    fn stop_coordinator_locked(&self, control: &mut CoordinatorControl) {
         self.inner.enabled.store(false, Ordering::Release);
         control.cancellation.cancel();
         control.sender = None;
@@ -397,6 +477,7 @@ impl PetdexAdapter {
         cancellation: CancellationToken,
     ) {
         let mut delivery = DeliveryPolicy::default();
+        let mut last_was_message = false;
 
         loop {
             if cancellation.is_cancelled() || !self.inner.enabled.load(Ordering::Acquire) {
@@ -409,7 +490,19 @@ impl PetdexAdapter {
             };
             self.update_diagnostic(&app, &cancellation, None, false);
             let attempt_deadline = delivery.attempt_deadline(target, now);
+            let pending = self.next_message(now);
+            let message_deadline = pending.as_ref().map(Self::message_due);
+            // Alternate ready channels, so continuous action churn cannot starve
+            // bubbles. Absolute action TTL is rechecked after every queue wait.
+            if message_deadline.is_some_and(|d| d <= now)
+                && (!last_was_message || !attempt_deadline.is_some_and(|d| d <= now))
+            {
+                self.deliver_message(pending.unwrap()).await;
+                last_was_message = true;
+                continue;
+            }
             if attempt_deadline.is_some_and(|deadline| deadline <= now) {
+                last_was_message = false;
                 let command = target.command();
                 let result = self.apply_state(command, cancellation.clone()).await;
                 if cancellation.is_cancelled() || !self.inner.enabled.load(Ordering::Acquire) {
@@ -421,11 +514,15 @@ impl PetdexAdapter {
                 );
                 let completed_at = Instant::now();
                 delivery.record(command, result, completed_at);
+                self.reconcile_message_connection(result);
                 self.update_diagnostic(&app, &cancellation, Some(result), false);
                 continue;
             }
 
-            let deadline = [attempt_deadline, next_expiry].into_iter().flatten().min();
+            let deadline = [attempt_deadline, next_expiry, message_deadline]
+                .into_iter()
+                .flatten()
+                .min();
             let message = if let Some(deadline) = deadline {
                 tokio::select! {
                     biased;
@@ -450,6 +547,12 @@ impl PetdexAdapter {
                         continue;
                     }
                     delivery.reset_backoff();
+                    self.inner
+                        .messages
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .diagnostic
+                        .unsupported = false;
                     if let Some(send_at) = delivery
                         .last_attempt_at
                         .map(|last_attempt| last_attempt + MIN_SEND_INTERVAL)
@@ -509,6 +612,7 @@ impl PetdexAdapter {
                         result.diagnostic_category()
                     );
                     delivery.record(command, result, Instant::now());
+                    self.reconcile_message_connection(result);
                     self.update_diagnostic(&app, &cancellation, Some(result), false);
                     let _ = reply.send(self.test_result(result, overridden, Some(&cancellation)));
                 }
@@ -603,24 +707,82 @@ pub(crate) struct ActivityGuard {
 }
 
 impl ActivityGuard {
-    pub(crate) fn start(app: &AppHandle, source: ActivitySource, phase: ActivityPhase) -> Self {
-        Self::new(
+    /// Evaluate candidates lazily under the same preference/lifecycle lock.
+    /// Guards retain no business text, so disabling details clears every owner.
+    pub(crate) fn details(&self, update: impl FnOnce(&mut message_content::SafeDetails)) {
+        if self.finished {
+            return;
+        }
+        if let Some(adapter) = &self.adapter {
+            let mut control = adapter
+                .inner
+                .coordinator
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            if adapter.inner.enabled.load(Ordering::Acquire) {
+                control
+                    .arbiter
+                    .update_details(self.event.source, self.event.run_id, update);
+                if !control.wake_queued {
+                    if let Some(sender) = &control.sender {
+                        if sender.try_send(CoordinatorMessage::Wake).is_ok() {
+                            control.wake_queued = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub(crate) fn owned(
+        adapter: Option<PetdexAdapter>,
+        source: ActivitySource,
+        phase: ActivityPhase,
+        owner: types::ActivityOwner,
+        kind: types::ActivityKind,
+    ) -> Self {
+        Self::create(adapter, source, phase, Some(owner), kind)
+    }
+
+    pub(crate) fn start_owned(
+        app: &AppHandle,
+        source: ActivitySource,
+        phase: ActivityPhase,
+        owner: types::ActivityOwner,
+        kind: types::ActivityKind,
+    ) -> Self {
+        Self::owned(
             app.try_state::<PetdexAdapter>().map(|s| s.inner().clone()),
             source,
             phase,
+            owner,
+            kind,
         )
     }
-
+    #[cfg(test)]
     pub(crate) fn new(
         adapter: Option<PetdexAdapter>,
         source: ActivitySource,
         phase: ActivityPhase,
+    ) -> Self {
+        let kind = ActivityEvent::new(source, 0, 0, phase, Instant::now()).kind;
+        Self::create(adapter, source, phase, None, kind)
+    }
+
+    fn create(
+        adapter: Option<PetdexAdapter>,
+        source: ActivitySource,
+        phase: ActivityPhase,
+        owner: Option<types::ActivityOwner>,
+        kind: types::ActivityKind,
     ) -> Self {
         let mut guard = Self {
             adapter,
             event: ActivityEvent::new(source, 0, 0, phase, Instant::now()),
             finished: false,
         };
+        guard.event.owner = owner;
+        guard.event.kind = kind;
         if let Some(adapter) = &guard.adapter {
             let mut control = adapter
                 .inner
@@ -640,11 +802,16 @@ impl ActivityGuard {
     }
 
     pub(crate) fn transition(&mut self, phase: ActivityPhase) {
+        self.transition_with_kind(phase, self.event.kind);
+    }
+
+    pub(crate) fn transition_with_kind(&mut self, phase: ActivityPhase, kind: types::ActivityKind) {
         if self.finished {
             return;
         }
         self.event.revision += 1;
         self.event.phase = phase;
+        self.event.kind = kind;
         self.event.occurred_at = Instant::now();
         self.finished = matches!(
             phase,
@@ -663,16 +830,16 @@ impl Drop for ActivityGuard {
 }
 
 #[tauri::command]
-pub(crate) fn petdex_set_enabled(
+pub(crate) async fn petdex_set_enabled(
     app: AppHandle,
     adapter: State<'_, PetdexAdapter>,
     enabled: bool,
     categories: Option<PetdexCategories>,
-) -> PetdexDiagnostic {
+) -> Result<PetdexDiagnostic, &'static str> {
     if let Some(categories) = categories {
         adapter.set_categories(categories);
     }
-    adapter.set_enabled(&app, enabled)
+    Ok(adapter.set_enabled(&app, enabled).await)
 }
 
 #[tauri::command]
@@ -711,5 +878,7 @@ pub(crate) async fn petdex_check_health(
 mod activity_tests;
 #[cfg(test)]
 mod agent_activity_tests;
+#[cfg(test)]
+mod slot_tests;
 #[cfg(test)]
 mod tests;

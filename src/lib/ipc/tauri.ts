@@ -121,6 +121,13 @@ import type {
 
 const logger = createLogger('ipc');
 
+export const invokePetdexConfigure = (configuration: import('@/lib/petdex/messages').PetdexSettings) =>
+  invoke<import('@/lib/petdex/messages').PetdexConfigurationResult>('petdex_configure', { configuration });
+export const invokePetdexMessageDiagnostic = () =>
+  invoke<import('@/lib/petdex/messages').PetdexMessageDiagnostic>('petdex_message_diagnostic');
+export const invokePetdexTestMessage = () =>
+  invoke<import('@/lib/petdex/messages').PetdexMessageTestResult>('petdex_test_message');
+
 export const invokePetdexSetEnabled = (enabled: boolean, categories?: PetdexCategories): Promise<PetdexDiagnostic> =>
   invoke<PetdexDiagnostic>('petdex_set_enabled', categories ? { enabled, categories } : { enabled });
 export const invokePetdexGetStatus = (): Promise<PetdexDiagnostic> =>

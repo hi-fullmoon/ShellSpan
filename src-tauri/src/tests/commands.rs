@@ -665,6 +665,37 @@
     }
 
     #[test]
+    fn petdex_cross_copy_uses_destination_backend_identity() {
+        use crate::models::{CopyRemoteToRemoteRequest, RemoteConnectionRequest};
+        use crate::sftp_pool::SftpPool;
+        let connection = |host: &str| RemoteConnectionRequest {
+            host: host.into(),
+            port: 22,
+            username: "user".into(),
+            auth_method: crate::models::AuthMethod::Password,
+            password: None,
+            keychain_key_id: None,
+            private_key_data: None,
+            passphrase: None,
+            jump_host: None,
+        };
+        let pool = SftpPool::default();
+        let request = CopyRemoteToRemoteRequest {
+            source_connection: connection("source"),
+            destination_connection: connection("destination"),
+            source_paths: Vec::new(),
+            destination_directory: String::new(),
+            conflict_policies: Vec::new(),
+            operation_id: String::new(),
+        };
+        let source = pool.activity_owner(&request.source_connection);
+        let destination = pool.activity_owner(&request.destination_connection);
+        assert!(super::petdex_cross_copy_owner(&pool, &request) == destination);
+        assert!(source != destination);
+        assert!(pool.clone().activity_owner(&request.destination_connection) == destination);
+    }
+
+    #[test]
     fn petdex_ssh_close_during_setup_is_neutral_but_open_channel_failure_is_not() {
         use crate::petdex::ActivityPhase;
         let (sender, receiver) = std::sync::mpsc::channel();
