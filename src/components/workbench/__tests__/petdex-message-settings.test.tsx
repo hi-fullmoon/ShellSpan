@@ -9,8 +9,27 @@ import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import zhCN from '@/locales/zh-CN';
 import enUS from '@/locales/en-US';
+import { SettingsPanel } from '../settings-panel';
 
 afterEach(cleanup);
+it.each([
+  ['zh-CN', '桌面宠物', '实验性集成'],
+  ['en-US', 'Desktop pets', 'Experimental integrations'],
+] as const)('opens the pet settings through a readable menu in %s', async (locale, title, previousTitle) => {
+  useAppStore.setState({ locale, activeSettingsSection: 'general', petdexEnabled: false });
+  await initI18n(locale);
+  render(<SettingsPanel />);
+  const tab = await screen.findByRole('tab', { name: title });
+  expect(tab.querySelector('.lucide-paw-print')).not.toBeNull();
+  expect(screen.queryByRole('tab', { name: previousTitle })).not.toBeInTheDocument();
+  await userEvent.click(tab);
+  expect(tab).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('heading', { name: title, level: 2 })).toBeVisible();
+  const strings = locale === 'zh-CN' ? zhCN : enUS;
+  expect(screen.getByText(strings['settings.experimental.description'])).toBeVisible();
+  expect(screen.getByRole('switch', { name: strings['settings.experimental.petdex.messages.enabled'] })).toBeVisible();
+});
+
 it.each(['zh-CN', 'en-US'] as const)('renders default gates, readable labels, keyboard focus and accepted wording in %s', async (locale) => {
   useAppStore.setState({ locale, petdexEnabled: false, petdexMessagesEnabled: false, petdexMessageDetailsEnabled: false, petdexRequestedMessages: null });
   await initI18n(locale);

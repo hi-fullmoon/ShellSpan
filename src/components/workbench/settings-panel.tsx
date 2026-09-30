@@ -10,6 +10,7 @@ import {
   KeyboardIcon,
   MessageSquareIcon,
   PaletteIcon,
+  PawPrintIcon,
   RotateCcwIcon,
   Settings2Icon,
   SquareTerminalIcon,
@@ -116,7 +117,7 @@ const SETTINGS_SECTIONS: {
   { id: 'sftp', icon: FolderCogIcon, titleKey: 'settings.sftp.title', descriptionKey: 'settings.sftp.description' },
   { id: 'ai', icon: BotIcon, titleKey: 'settings.ai.title', descriptionKey: 'settings.ai.description' },
   { id: 'shortcuts', icon: KeyboardIcon, titleKey: 'settings.shortcuts.title', descriptionKey: 'settings.shortcuts.description' },
-  { id: 'experimental', icon: FlaskConicalIcon, titleKey: 'settings.experimental.title', descriptionKey: 'settings.experimental.description' },
+  { id: 'experimental', icon: PawPrintIcon, titleKey: 'settings.experimental.title', descriptionKey: 'settings.experimental.description' },
   { id: 'feedback', icon: MessageSquareIcon, titleKey: 'settings.feedback.title', descriptionKey: 'settings.feedback.description' },
 ];
 

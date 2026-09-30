@@ -115,8 +115,13 @@ try {
 
     await openSection('experimental');
     const panel = page.getByRole('tabpanel');
-    assert.equal(await panel.locator('[data-slot="card"]').count(), 3);
-    assert.equal(await panel.getByRole('switch').count(), 4);
+    const petTab = page.getByRole('tab', { name: '桌面宠物', exact: true });
+    assert.equal(await petTab.getAttribute('aria-selected'), 'true');
+    assert.equal(await petTab.locator('.lucide-paw-print').count(), 1);
+    assert.equal(await page.getByRole('tab', { name: '实验性集成', exact: true }).count(), 0);
+    assert.equal(await page.getByRole('heading', { name: '桌面宠物', level: 2 }).count(), 1);
+    assert.equal(await panel.locator('[data-slot="card"]').count(), 4);
+    assert.equal(await panel.getByRole('switch').count(), 6);
     assert.equal(await panel.locator('[data-slot="card-action"] [role="switch"]').count(), 1);
     assert.equal(await panel.locator('#feedback-description').count(), 0);
     const geometry = await panel.evaluate((element) => {
@@ -128,8 +133,8 @@ try {
       };
     });
     assert.ok(geometry.overflow <= 0, `integration overflow at ${viewport.width}`);
-    assert.deepEqual(geometry.gaps, [12, 12]);
-    assert.deepEqual(await panel.getByRole('heading', { level: 3 }).allTextContents(), ['桌宠联动', '任务提醒', '连接与诊断']);
+    assert.deepEqual(geometry.gaps, [12, 12, 12]);
+    assert.deepEqual(await panel.getByRole('heading', { level: 3 }).allTextContents(), ['桌宠联动', '任务提醒', '消息气泡', '连接与诊断']);
     assert.ok(await panel.locator('[data-slot="integration-group"]').evaluateAll((groups) => groups.every((group) => {
       const title = group.querySelector('h3');
       const card = group.querySelector('[data-slot="card"]');
