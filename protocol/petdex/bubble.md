@@ -1,6 +1,6 @@
 # Petdex 0.8.0 气泡契约
 
-核验日期：2026-09-29。此为阶段6协议记录，不是已实现产品接口。ShellSpan当前仍只发动作；确认产品范围见[设计](../../docs/design/petdex-message-integration-design.md)，真实操作与显示缺口见[验收](../../docs/design/petdex-message-integration-acceptance.md)。
+契约核验日期：2026-09-29；阶段9生产传输及阶段10原生设置复验：2026-09-30。下文保留阶段6真实协议和显示证据。ShellSpan已实现默认禁用的消息发送、有限结算与原生设置入口；确认产品范围见[设计](../../docs/design/petdex-message-integration-design.md)，真实操作与显示边界见[验收](../../docs/design/petdex-message-integration-acceptance.md)。
 
 ## 固定依据
 
@@ -70,6 +70,14 @@ busy=false不提供删除保证；寿命0或waiting时可长期残留。不能�
 
 ## 安全和未来客户端约束
 
+阶段11可靠性续验：同一生产客户端对真实Petdex测得关闭墙钟1502ms，以及1500ms内两个槽结算成功、第三槽未完成，返回unconfirmed但消息关闭，之后己方三槽全部正常结算。名义1500ms deadline不意味着操作系统调度零误差；没有按槽重开预算。官方受控重启前后令牌只在内存比较，确认变化，未输出令牌或哈希。Disabled无通信仍按生产门禁/请求锁与有限日志证据说明，网络级抓包受当前BPF权限限制。
+
+阶段11复验补充（2026-09-30）：真实SSH/SFTP/AI已触发生产通道，用户截图确认三张等待气泡；CUA原生窗口确认“另有 2 个会话或连接，2 项任务进行中”摘要、摘要退出及活动退出后三条“ShellSpan 活动已结束”。追加单/双传输、有限标题/基本名、关闭详情回固定模板、英文等待、规范化最终回复及固定测试文字实际显示。部分英文及测试文字被当前气泡宽度省略，AX完整不等于全部文字均在截图可读。退出后卡片可残留且有等待标记，再次支持busy=false不等于删除。真实Petdex不可用时总开关仍关闭，恢复后持续开启能自动连通；精确预算、其他客户端共存及未补播内容等仍按[阶段11审计](../../docs/design/petdex-message-integration-acceptance.md#阶段11检查与待续审计)限定证据，不扩大协议保证。
+
 固定loopback、禁代理/重定向、有界响应与超时。复用现有匿名health/whoami兼容门禁、取消/请求锁；真实探针额外核对whoami PID对应官方可执行路径，token读取前及认证请求前再次核查。不输出token或摘要。这仍不是原子服务身份绑定，TOCTOU保留。
 
-动作/消息共享100ms写入间隔及429退避；每槽最新版本、普通300ms合并。关闭消息/总开关/正常退出只对已用槽busy=false，全部结算共享1500ms预算，失败也确认关闭，Disabled后无通信。配置生效与cleanup未确认分离。具体产品语义以设计为准，本协议不意味着以上客户端行为已实现。
+动作/消息共享100ms写入间隔及429退避；每槽最新版本、普通300ms合并。关闭消息/总开关/正常退出只对已用槽busy=false，全部结算共享1500ms预算，失败也确认关闭，Disabled后无通信。配置生效与cleanup未确认分离。上述客户端行为已在阶段9–10实现并通过生产回归，不能据此推断全部真实业务及显示验收通过；阶段11状态见[待续审计](../../docs/design/petdex-message-integration-acceptance.md#阶段11检查与待续审计)。
+
+阶段8实现说明：安全内容边界已落在 `src-tauri/src/petdex/message_content.rs`，共享双语资源为 `src/locales/petdex-messages.json`。有限详情先对≤32KiB完整候选做redaction检查，再以pulldown-cmark/linkify提取允许文本，按上文规范化与字节上限裁剪，最后紧凑serde_json编码。内联HTML保守整字段回退。对外仅允许SafeMessage的五个字段，不序列化内部归属/运行；两消息偏好默认false。此为生产内容模型和本地回归，不是新HTTP/显示证据，网络发送尚未接入。接口和代际规则见[阶段8交接](../../docs/design/petdex-message-integration-acceptance.md#阶段8实现与交接验收)。
+
+阶段9实现说明：`petdex/message_delivery.rs` 现已复用协调循环及 `transport.rs` 的锁、客户端与匿名门禁发送 `/bubble`。成功响应必须≤1024字节且serde解析为 `ok=true`、正整数counter；HTTP200本身不确认接受。动作、气泡和一次token轮换重试共用100ms写入间隔、429至少1秒退避及有界失败退避。普通尝试与全部关闭槽分别共享1500ms总预算。安装持久化在阻塞worker执行，用单调写入版本保护迟到结算。真实Petdex0.8.0/PID72831的三个固定测试槽已通过生产发送和关闭，最终均非忙碌；无新显示截图，不据此声称可见或已删除，详见[阶段9验收](../../docs/design/petdex-message-integration-acceptance.md#阶段9实现与交接验收)。

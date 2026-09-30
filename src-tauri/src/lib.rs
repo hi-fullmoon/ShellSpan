@@ -279,7 +279,13 @@ pub fn run() {
                 deployment::DeploymentWorkflowRuntime::initialize(&shellspan_dir)
                     .map_err(std::io::Error::other)?;
             let credentials = keychain::CredentialManager::new();
-            app.manage(petdex::PetdexAdapter::new(home_dir));
+            let petdex = petdex::PetdexAdapter::new(home_dir);
+            let message_adapter = petdex.clone();
+            let message_directory = shellspan_dir.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                message_adapter.initialize_messages(&message_directory);
+            });
+            app.manage(petdex);
             app.manage(credentials.clone());
             let routes = llm::routes::RouteStore::open(database.clone(), credentials.clone())
                 .map_err(std::io::Error::other)?;
@@ -380,6 +386,9 @@ pub fn run() {
             agent_runtime::agent_runtime_reconcile_recovery,
             agent_runtime::agent_runtime_abort_recovery,
             petdex::petdex_set_enabled,
+            petdex::configuration::petdex_configure,
+            petdex::configuration::petdex_message_diagnostic,
+            petdex::configuration::petdex_test_message,
             petdex::petdex_get_status,
             petdex::petdex_check_health,
             petdex::petdex_test_connection,

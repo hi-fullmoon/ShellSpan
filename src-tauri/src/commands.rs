@@ -1187,13 +1187,16 @@ pub(crate) fn close_session(
 }
 
 #[tauri::command]
-pub(crate) fn request_app_restart(
+pub(crate) async fn request_app_restart(
     app: AppHandle,
     forwards_state: State<'_, crate::port_forward::PortForwardManager>,
     agent_runtime: State<'_, crate::agent_runtime::AgentRuntime>,
     sessions: State<'_, SessionManager>,
-) {
+) -> Result<(), String> {
     info!("Requesting application restart");
+    if let Some(adapter) = app.try_state::<crate::petdex::PetdexAdapter>() {
+        adapter.shutdown_messages().await;
+    }
     if let Err(error) = forwards_state.cancel_all() {
         warn!("Failed to cancel port forwards before restart: {error}");
     }
@@ -1201,16 +1204,20 @@ pub(crate) fn request_app_restart(
         warn!("Failed to persist Agent runtime tasks before restart: {error}");
     }
     app.request_restart();
+    Ok(())
 }
 
 #[tauri::command]
-pub(crate) fn request_app_exit(
+pub(crate) async fn request_app_exit(
     app: AppHandle,
     forwards_state: State<'_, crate::port_forward::PortForwardManager>,
     agent_runtime: State<'_, crate::agent_runtime::AgentRuntime>,
     sessions: State<'_, SessionManager>,
-) {
+) -> Result<(), String> {
     info!("Requesting application exit");
+    if let Some(adapter) = app.try_state::<crate::petdex::PetdexAdapter>() {
+        adapter.shutdown_messages().await;
+    }
     if let Err(error) = forwards_state.cancel_all() {
         warn!("Failed to cancel port forwards before exit: {error}");
     }
@@ -1218,6 +1225,7 @@ pub(crate) fn request_app_exit(
         warn!("Failed to persist Agent runtime tasks before exit: {error}");
     }
     app.exit(0);
+    Ok(())
 }
 
 #[tauri::command]
@@ -1518,11 +1526,14 @@ pub(crate) async fn copy_remote_path(
     let operation_id = request.operation_id.clone();
     let pool = pool.inner().clone();
     let known_hosts = remote_known_hosts_path(&app)?;
-    let mut activity = crate::petdex::ActivityGuard::start(
+    let mut activity = crate::petdex::ActivityGuard::start_owned(
         &app,
         crate::petdex::ActivitySource::Sftp,
         crate::petdex::ActivityPhase::Running,
+        pool.activity_owner(&request.connection),
+        crate::petdex::types::ActivityKind::Copy,
     );
+    activity.details(|details| details.file(&request.source_path));
     let result = tauri::async_runtime::spawn_blocking(move || {
         let result =
             copy_remote_path_blocking(request, cancel_flag, Some(&pool), Some(&known_hosts));
@@ -1562,11 +1573,18 @@ pub(crate) async fn copy_remote_to_remote(
     let operation_id = request.operation_id.clone();
     let pool = pool.inner().clone();
     let known_hosts = remote_known_hosts_path(&app)?;
-    let mut activity = crate::petdex::ActivityGuard::start(
+    let mut activity = crate::petdex::ActivityGuard::start_owned(
         &app,
         crate::petdex::ActivitySource::Sftp,
         crate::petdex::ActivityPhase::Running,
+        petdex_cross_copy_owner(&pool, &request),
+        crate::petdex::types::ActivityKind::CrossCopy,
     );
+    activity.details(|details| {
+        if request.source_paths.len() == 1 {
+            details.file(&request.source_paths[0]);
+        }
+    });
     let worker_app = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         let result = copy_remote_to_remote_blocking(
@@ -1590,6 +1608,13 @@ pub(crate) async fn copy_remote_to_remote(
         error!("Copy remote to remote failed: {error:?}");
     }
     result
+}
+
+fn petdex_cross_copy_owner(
+    pool: &SftpPool,
+    request: &CopyRemoteToRemoteRequest,
+) -> crate::petdex::types::ActivityOwner {
+    pool.activity_owner(&request.destination_connection)
 }
 
 #[tauri::command]
@@ -1623,11 +1648,18 @@ pub(crate) async fn upload_local_paths(
         .map_err(|message| RemoteFsError::Other { message })?;
     let operation_id = request.operation_id.clone();
     let pool = pool.inner().clone();
-    let mut activity = crate::petdex::ActivityGuard::start(
+    let mut activity = crate::petdex::ActivityGuard::start_owned(
         &app,
         crate::petdex::ActivitySource::Sftp,
         crate::petdex::ActivityPhase::Running,
+        pool.activity_owner(&request.connection),
+        crate::petdex::types::ActivityKind::Upload,
     );
+    activity.details(|details| {
+        if request.local_paths.len() == 1 {
+            details.file(&request.local_paths[0]);
+        }
+    });
     let worker_app = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         let result = upload_local_paths_blocking(worker_app, request, cancel_flag, Some(&pool));
@@ -1760,11 +1792,18 @@ pub(crate) async fn download_remote_paths(
         .map_err(|message| RemoteFsError::Other { message })?;
     let operation_id = request.operation_id.clone();
     let pool = pool.inner().clone();
-    let mut activity = crate::petdex::ActivityGuard::start(
+    let mut activity = crate::petdex::ActivityGuard::start_owned(
         &app,
         crate::petdex::ActivitySource::Sftp,
         crate::petdex::ActivityPhase::Running,
+        pool.activity_owner(&request.connection),
+        crate::petdex::types::ActivityKind::Download,
     );
+    activity.details(|details| {
+        if request.remote_paths.len() == 1 {
+            details.file(&request.remote_paths[0]);
+        }
+    });
     let worker_app = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         let result = download_remote_paths_blocking(worker_app, request, cancel_flag, Some(&pool));
@@ -3304,10 +3343,12 @@ pub(crate) fn spawn_ssh_thread(
             }),
             None => Ok(()),
         };
-        let mut activity = crate::petdex::ActivityGuard::start(
+        let mut activity = crate::petdex::ActivityGuard::start_owned(
             &app,
             crate::petdex::ActivitySource::Ssh,
             crate::petdex::ActivityPhase::Connecting,
+            pool.activity_owner(&connection_request),
+            crate::petdex::types::ActivityKind::Connect,
         );
         let run_result = run_ssh_session(
             &app,

@@ -13,6 +13,66 @@ use super::{
 const UPDATE_TOKEN_HEADER: &str = "X-Petdex-Update-Token";
 const MAX_PROTOCOL_RESPONSE_BYTES: usize = 1024;
 
+#[derive(Default)]
+pub(super) struct WritePolicy {
+    last_write: Option<Instant>,
+    limited_until: Option<Instant>,
+    pid: Option<u32>,
+    pub generation: u64,
+    failures: u32,
+    retry_at: Option<Instant>,
+}
+
+impl WritePolicy {
+    #[cfg(test)]
+    pub fn pid_for_test(&self) -> u32 {
+        self.pid.unwrap()
+    }
+    pub fn deadline(&self, now: Instant) -> Instant {
+        self.last_write
+            .map(|t| t + super::MIN_SEND_INTERVAL)
+            .unwrap_or(now)
+            .max(self.limited_until.unwrap_or(now))
+            .max(self.retry_at.unwrap_or(now))
+            .max(now)
+    }
+    pub fn observe(&mut self, pid: u32) {
+        if self.pid != Some(pid) {
+            self.pid = Some(pid);
+            self.generation += 1;
+        }
+    }
+    pub fn record(&mut self, status: StatusCode, now: Instant) {
+        if status == StatusCode::TOO_MANY_REQUESTS {
+            self.limited_until = Some(now + std::time::Duration::from_secs(1));
+        }
+    }
+    pub fn result(&mut self, result: RequestResult, now: Instant) {
+        if result == RequestResult::Applied {
+            self.failures = 0;
+            self.retry_at = None;
+        } else if result.should_retry() {
+            self.failures = self.failures.saturating_add(1);
+            self.retry_at = Some(now + super::delivery::failure_backoff(self.failures));
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct BubbleReceipt {
+    ok: bool,
+    counter: u64,
+}
+
+fn validate_bubble_receipt(body: &[u8]) -> Result<(), RequestFailure> {
+    let receipt: BubbleReceipt = decode_protocol_response(body)?;
+    if receipt.ok && receipt.counter > 0 {
+        Ok(())
+    } else {
+        Err(RequestFailure::Rejected)
+    }
+}
+
 #[derive(serde::Deserialize)]
 struct ProtocolHealth {
     ok: bool,
@@ -99,7 +159,9 @@ impl PetdexAdapter {
                 self.apply_state_serialized(command, cancellation.clone())) =>
                 result.unwrap_or(Err(RequestFailure::Transport)),
         };
-        RequestResult::from_result(result)
+        let result = RequestResult::from_result(result);
+        self.record_transport_result(result);
+        result
     }
 
     async fn apply_state_serialized(
@@ -115,6 +177,8 @@ impl PetdexAdapter {
         if cancellation.is_cancelled() || !self.inner.enabled.load(Ordering::Acquire) {
             return Err(RequestFailure::Disabled);
         }
+        command.remaining_duration(Instant::now())?;
+        self.wait_write().await;
         command.remaining_duration(Instant::now())?;
 
         // Preserve missing/unreadable-file diagnostics without reading a secret.
@@ -148,15 +212,24 @@ impl PetdexAdapter {
         // Authentication failures get one immediate retry only when Petdex
         // actually replaced the token. Persistent failures are handled by the
         // bounded coordinator backoff, never an authentication loop.
-        self.check_protocol_compatibility().await?;
-        let refreshed_token = self.read_token().await?;
+        let refreshed_token = self.refresh_token(&first_token).await?;
         if cancellation.is_cancelled() || !self.inner.enabled.load(Ordering::Acquire) {
             return Err(RequestFailure::Disabled);
         }
-        if refreshed_token == first_token {
-            return Err(RequestFailure::Unauthorized);
-        }
         Self::classify_status(self.post_state(command, &refreshed_token).await?)
+    }
+
+    pub(super) async fn refresh_token(
+        &self,
+        first: &SecretToken,
+    ) -> Result<SecretToken, RequestFailure> {
+        self.check_protocol_compatibility().await?;
+        let refreshed = self.read_token().await?;
+        if &refreshed == first {
+            Err(RequestFailure::Unauthorized)
+        } else {
+            Ok(refreshed)
+        }
     }
 
     pub(super) async fn read_token(&self) -> Result<SecretToken, RequestFailure> {
@@ -216,7 +289,7 @@ impl PetdexAdapter {
         decode_protocol_response(&body)
     }
 
-    async fn check_protocol_compatibility(&self) -> Result<(), RequestFailure> {
+    pub(super) async fn check_protocol_compatibility(&self) -> Result<(), RequestFailure> {
         let health: ProtocolHealth = self.protocol_response("/health").await?;
         if !health.compatible() {
             return Err(RequestFailure::Rejected);
@@ -225,17 +298,48 @@ impl PetdexAdapter {
         if !identity.compatible() {
             return Err(RequestFailure::Rejected);
         }
+        self.inner
+            .write_policy
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .observe(identity.pid);
         Ok(())
     }
 
-    async fn post_state(
+    pub(super) fn service_generation(&self) -> u64 {
+        self.inner
+            .write_policy
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .generation
+    }
+
+    pub(super) fn record_transport_result(&self, result: RequestResult) {
+        self.inner
+            .write_policy
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .result(result, Instant::now());
+    }
+
+    // Caller holds request_lock. Every authenticated write, including retries,
+    // shares this clock. Waiting is inside the caller's total attempt budget.
+    pub(super) async fn wait_write(&self) {
+        let deadline = self
+            .inner
+            .write_policy
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .deadline(Instant::now());
+        tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
+    }
+
+    pub(super) async fn post_bytes(
         &self,
-        command: StateCommand,
+        path: &str,
+        bytes: Vec<u8>,
         token: &SecretToken,
     ) -> Result<StatusCode, RequestFailure> {
-        // Repeat immediately before each authenticated attempt, including the
-        // single token-rotation retry. Never attach a token to either probe.
-        self.check_protocol_compatibility().await?;
         let client = self
             .inner
             .client
@@ -245,30 +349,77 @@ impl PetdexAdapter {
             .inner
             .endpoint
             .as_ref()
-            .ok_or(RequestFailure::Transport)?;
-        let mut token_header =
+            .ok_or(RequestFailure::Transport)?
+            .join(path)
+            .map_err(|_| RequestFailure::Transport)?;
+        let mut header =
             HeaderValue::from_str(token.expose()).map_err(|_| RequestFailure::TokenInvalid)?;
-        token_header.set_sensitive(true);
+        header.set_sensitive(true);
+        self.inner
+            .write_policy
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .last_write = Some(Instant::now());
+        let mut response = client
+            .post(endpoint)
+            .header(CONTENT_TYPE, "application/json")
+            .header(CONNECTION, "close")
+            .header(UPDATE_TOKEN_HEADER, header)
+            .body(bytes)
+            .send()
+            .await
+            .map_err(|_| RequestFailure::Transport)?;
+        let status = response.status();
+        self.inner
+            .write_policy
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .record(status, Instant::now());
+        if response
+            .content_length()
+            .is_some_and(|n| n > MAX_PROTOCOL_RESPONSE_BYTES as u64)
+        {
+            return Err(RequestFailure::Rejected);
+        }
+        let mut body = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| RequestFailure::Transport)?
+        {
+            if body.len().saturating_add(chunk.len()) > MAX_PROTOCOL_RESPONSE_BYTES {
+                return Err(RequestFailure::Rejected);
+            }
+            body.extend_from_slice(&chunk);
+        }
+        if path == "/bubble" && status == StatusCode::OK {
+            validate_bubble_receipt(&body)?;
+        }
+        Ok(status)
+    }
+
+    async fn post_state(
+        &self,
+        command: StateCommand,
+        token: &SecretToken,
+    ) -> Result<StatusCode, RequestFailure> {
+        // Repeat immediately before each authenticated attempt, including the
+        // single token-rotation retry. Never attach a token to either probe.
+        self.wait_write().await;
+        self.check_protocol_compatibility().await?;
         let duration = command.remaining_duration(Instant::now())?.map(|duration| {
             let millis = duration.as_millis().max(1);
             u64::try_from(millis).unwrap_or(u64::MAX).min(30_000)
         });
-        client
-            .post(endpoint.clone())
-            .header(CONTENT_TYPE, "application/json")
-            .header(CONNECTION, "close")
-            .header(UPDATE_TOKEN_HEADER, token_header)
-            .json(&StateRequest {
-                state: command.state,
-                duration,
-            })
-            .send()
-            .await
-            .map(|response| response.status())
-            .map_err(|_| RequestFailure::Transport)
+        let bytes = serde_json::to_vec(&StateRequest {
+            state: command.state,
+            duration,
+        })
+        .map_err(|_| RequestFailure::Rejected)?;
+        self.post_bytes("/state", bytes, token).await
     }
 
-    fn classify_status(status: StatusCode) -> Result<(), RequestFailure> {
+    pub(super) fn classify_status(status: StatusCode) -> Result<(), RequestFailure> {
         match status {
             StatusCode::OK => Ok(()),
             StatusCode::UNAUTHORIZED => Err(RequestFailure::Unauthorized),
@@ -280,6 +431,54 @@ impl PetdexAdapter {
 #[cfg(test)]
 mod protocol_tests {
     use super::*;
+
+    #[test]
+    fn bubble_receipt_requires_bounded_success_and_integer_counter() {
+        assert!(validate_bubble_receipt(br#"{"ok":true,"counter":123,"extra":true}"#).is_ok());
+        for body in [
+            b"".as_slice(),
+            b"<html>",
+            br#"{"ok":false,"counter":1}"#,
+            br#"{"ok":true}"#,
+            br#"{"counter":1}"#,
+            br#"{"ok":true,"counter":-1}"#,
+            br#"{"ok":true,"counter":1.5}"#,
+            br#"{"ok":true,"counter":"1"}"#,
+            br#"{"ok":true,"counter":0}"#,
+        ] {
+            assert!(validate_bubble_receipt(body).is_err());
+        }
+        assert!(validate_bubble_receipt(&vec![b' '; 1025]).is_err());
+    }
+
+    #[test]
+    fn writes_retries_and_both_channels_share_interval_rate_limit_and_failure_backoff() {
+        let now = Instant::now();
+        let mut policy = WritePolicy::default();
+        assert_eq!(policy.deadline(now), now);
+        policy.last_write = Some(now);
+        assert_eq!(policy.deadline(now), now + super::super::MIN_SEND_INTERVAL);
+        policy.record(StatusCode::TOO_MANY_REQUESTS, now);
+        policy.result(RequestResult::Applied, now);
+        assert_eq!(
+            policy.deadline(now),
+            now + std::time::Duration::from_secs(1)
+        );
+        policy.result(RequestResult::Transport, now);
+        policy.result(RequestResult::Unauthorized, now);
+        policy.result(RequestResult::Rejected, now);
+        policy.result(RequestResult::Transport, now);
+        assert_eq!(
+            policy.deadline(now),
+            now + std::time::Duration::from_secs(2)
+        );
+        policy.observe(1);
+        let generation = policy.generation;
+        policy.observe(1);
+        assert_eq!(policy.generation, generation);
+        policy.observe(2);
+        assert_eq!(policy.generation, generation + 1);
+    }
 
     #[test]
     fn accepts_only_the_native_anonymous_contract() {

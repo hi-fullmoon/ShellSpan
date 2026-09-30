@@ -1,4 +1,6 @@
 import type { PetdexCategories } from '@/types';
+import type { Locale } from '@/types';
+import type { PetdexMessagePreferences } from './message-preferences';
 
 export const DEFAULT_PETDEX_CATEGORIES: PetdexCategories = { ssh: true, sftp: true, ai: false };
 
@@ -7,9 +9,14 @@ export interface PetdexConfiguration {
   categories: PetdexCategories;
 }
 
-export interface PetdexConfigurationPatch {
+export interface PetdexConfigurationPatch extends Partial<PetdexMessagePreferences> {
+  locale?: Locale;
   enabled?: boolean;
   categories?: Partial<PetdexCategories>;
+}
+
+export function resolvePetdexSettings(confirmed: import('./messages').PetdexSettings, patch: PetdexConfigurationPatch): import('./messages').PetdexSettings {
+  return { ...confirmed, ...patch, categories: { ...confirmed.categories, ...patch.categories } };
 }
 
 export function resolvePetdexConfiguration(confirmed: PetdexConfiguration, patch: PetdexConfigurationPatch): PetdexConfiguration {

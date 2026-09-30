@@ -57,6 +57,7 @@ import { clearTerminalWorkspace } from '@/lib/terminal/terminal-workspace-persis
 import { clearSftpWorkspace } from '@/lib/sftp/sftp-workspace-persistence';
 import { checkPetdexHealth, getPetdexStatus, listenToPetdexStatus, testPetdexConnection } from '@/lib/petdex/petdex';
 import { PetdexDiagnostics } from './petdex-diagnostics';
+import { PetdexMessageSettings } from './petdex-message-settings';
 import { openFeedback } from '@/lib/feedback';
 import type { PetdexCategories, PetdexDiagnostic, PetdexHealth } from '@/types';
 import { INITIAL_PETDEX_DIAGNOSTIC_VIEW, petdexDiagnosticStatus, reducePetdexDiagnosticView, PETDEX_STATUS_LABEL_KEYS, PETDEX_PREVIEW_LABEL_KEYS } from '@/lib/petdex/diagnostic';
@@ -357,6 +358,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           && operationRevision === petdexOperationRevisionRef.current
         ) {
           setPetdexStatus(status);
+          toast(t('settings.experimental.petdex.messages.saved'));
         }
       })
       .catch(() => {
@@ -364,7 +366,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           petdexMountedRef.current
           && operationRevision === petdexOperationRevisionRef.current
         ) {
-          toast.error(t('settings.experimental.petdex.operationError'));
+          toast.error(t('settings.experimental.petdex.messages.saveFailed'));
         }
       });
   };
@@ -615,6 +617,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       </div>
                     ))}
                   </CardContent>
+                </IntegrationGroup>
+                <IntegrationGroup title={t('settings.experimental.petdex.messages.title')}>
+                  <PetdexMessageSettings />
                 </IntegrationGroup>
                 <IntegrationGroup title={t('settings.experimental.group.diagnostics')}>
                   <CardHeader>

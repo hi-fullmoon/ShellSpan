@@ -6,6 +6,8 @@ import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useUpdateStore } from '@/stores/updateStore';
 import type { PetdexDiagnostic, ShortcutBindings } from '@/types';
 import { Toaster } from '@/components/ui/sonner';
+import { toast } from 'sonner';
+import type { PetdexSettings } from '@/lib/petdex/messages';
 
 const disabled: PetdexDiagnostic = { revision: 0, status: 'disabled', errorReason: null, targetAction: null, lastSuccessAt: null };
 const connected: PetdexDiagnostic = { ...disabled, revision: 2, status: 'connected', targetAction: 'waving' };
@@ -36,6 +38,16 @@ vi.mock('@/lib/petdex/petdex', () => ({
   getPetdexStatus: petdexMocks.getStatus,
   listenToPetdexStatus: petdexMocks.listen,
   testPetdexConnection: petdexMocks.testConnection,
+}));
+
+vi.mock('@/lib/petdex/messages', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/petdex/messages')>(),
+  configurePetdexSettings: async (configuration: PetdexSettings) => ({
+    effective: configuration,
+    diagnostic: await petdexMocks.configure(configuration.enabled, configuration.categories),
+    cleanupOutcome: 'notNeeded',
+    messageDiagnostic: { revision: 1, status: 'disabled', acceptedCount: 0, lastAcceptedAt: null, usedSlotCount: 0, errorReason: null, unsupported: false, cleanupOutcome: 'notNeeded' },
+  }),
 }));
 
 vi.mock('@/lib/feedback', () => ({
@@ -81,8 +93,10 @@ describe('SettingsPanel', () => {
   };
 
   it('renders one section at a time with tab navigation', async () => {
+    const toastCount = toast.getHistory().length;
     render(<SettingsPanel />);
     await waitFor(() => {});
+    expect(toast.getHistory()).toHaveLength(toastCount);
 
     expect(screen.getByText('workbench.settings.title')).toBeInTheDocument();
     const sectionTitleKeys = [
@@ -281,7 +295,7 @@ describe('SettingsPanel', () => {
       petdexConfiguring: false,
     });
     expect(
-      await screen.findByText('settings.experimental.petdex.operationError'),
+      await screen.findByText('settings.experimental.petdex.messages.saveFailed'),
     ).toBeInTheDocument();
     expect(screen.queryByText('sensitive backend detail')).not.toBeInTheDocument();
   });
