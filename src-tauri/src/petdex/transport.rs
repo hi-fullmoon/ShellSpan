@@ -51,7 +51,7 @@ impl WritePolicy {
         if result == RequestResult::Applied {
             self.failures = 0;
             self.retry_at = None;
-        } else if result.should_retry() && !self.retry_at.is_some_and(|deadline| now < deadline) {
+        } else if result.should_retry() && self.retry_at.is_none_or(|deadline| now >= deadline) {
             // Another channel or a bounded manual request can time out while
             // waiting for this backoff. It has not made a new attempt and must
             // not move the recovery deadline or increase the failure count.
