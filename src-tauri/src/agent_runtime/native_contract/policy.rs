@@ -464,6 +464,13 @@ pub(crate) fn decode_write_file_arguments_native(
         .map_err(|error| format!("invalid write_file arguments: {error}"))
 }
 
+pub(crate) fn validate_visible_command_input(command: &str) -> Result<(), String> {
+    if command.is_empty() || command.len() > 8192 || command.chars().any(char::is_control) {
+        return Err("invalid terminal_execute arguments".into());
+    }
+    Ok(())
+}
+
 pub fn validate_tool_arguments_native(
     tool_name: &str,
     arguments: &serde_json::Value,
@@ -492,10 +499,8 @@ pub fn validate_tool_arguments_native(
         }
         "terminal_execute" => {
             let value = decode_arguments::<TerminalExecuteArgumentsNative>(arguments)?;
-            if value.command.is_empty()
-                || value.command.len() > 8192
-                || value.command.chars().any(char::is_control)
-                || value.explanation.trim().is_empty()
+            validate_visible_command_input(&value.command)?;
+            if value.explanation.trim().is_empty()
                 || value.explanation.len() > 2_048
                 || value
                     .timeout_ms

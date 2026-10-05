@@ -4,7 +4,13 @@ import { SettingsPanel } from '../settings-panel';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useUpdateStore } from '@/stores/updateStore';
-import type { ShortcutBindings } from '@/types';
+import type { PetdexDiagnostic, ShortcutBindings } from '@/types';
+import { Toaster } from '@/components/ui/sonner';
+import { toast } from 'sonner';
+import type { PetdexSettings } from '@/lib/petdex/messages';
+
+const disabled: PetdexDiagnostic = { revision: 0, status: 'disabled', errorReason: null, targetAction: null, lastSuccessAt: null };
+const connected: PetdexDiagnostic = { ...disabled, revision: 2, status: 'connected', targetAction: 'waving' };
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -34,8 +40,18 @@ vi.mock('@/lib/petdex/petdex', () => ({
   testPetdexConnection: petdexMocks.testConnection,
 }));
 
-vi.mock('@/lib/petdex/petdex-feedback', () => ({
-  openPetdexPhase3Feedback: petdexFeedbackMocks.open,
+vi.mock('@/lib/petdex/messages', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/petdex/messages')>(),
+  configurePetdexSettings: async (configuration: PetdexSettings) => ({
+    effective: configuration,
+    diagnostic: await petdexMocks.configure(configuration.enabled, configuration.categories),
+    cleanupOutcome: 'notNeeded',
+    messageDiagnostic: { revision: 1, status: 'disabled', acceptedCount: 0, lastAcceptedAt: null, usedSlotCount: 0, errorReason: null, unsupported: false, cleanupOutcome: 'notNeeded' },
+  }),
+}));
+
+vi.mock('@/lib/feedback', () => ({
+  openFeedback: petdexFeedbackMocks.open,
 }));
 
 vi.mock('@/hooks/useI18n', () => ({
@@ -56,10 +72,10 @@ vi.mock('@/hooks/useTheme', () => ({
 
 describe('SettingsPanel', () => {
   beforeEach(() => {
-    petdexMocks.configure.mockReset().mockResolvedValue('notDetected');
-    petdexMocks.getStatus.mockReset().mockResolvedValue('notDetected');
+    petdexMocks.configure.mockReset().mockResolvedValue({ ...disabled, revision: 3 });
+    petdexMocks.getStatus.mockReset().mockResolvedValue(disabled);
     petdexMocks.listen.mockReset().mockResolvedValue(vi.fn());
-    petdexMocks.testConnection.mockReset().mockResolvedValue('connected');
+    petdexMocks.testConnection.mockReset().mockResolvedValue({ diagnostic: connected, preview: 'requested' });
     petdexFeedbackMocks.open.mockReset().mockResolvedValue(undefined);
     useAppStore.setState({
       activeSettingsSection: 'general',
@@ -77,8 +93,10 @@ describe('SettingsPanel', () => {
   };
 
   it('renders one section at a time with tab navigation', async () => {
+    const toastCount = toast.getHistory().length;
     render(<SettingsPanel />);
     await waitFor(() => {});
+    expect(toast.getHistory()).toHaveLength(toastCount);
 
     expect(screen.getByText('workbench.settings.title')).toBeInTheDocument();
     const sectionTitleKeys = [
@@ -89,9 +107,13 @@ describe('SettingsPanel', () => {
       'settings.ai.title',
       'settings.shortcuts.title',
       'settings.experimental.title',
+      'settings.feedback.title',
     ];
     for (const titleKey of sectionTitleKeys) {
-      expect(screen.getByRole('tab', { name: titleKey })).toBeInTheDocument();
+      const tab = screen.getByRole('tab', { name: titleKey });
+      expect(tab).toHaveAttribute('title', titleKey);
+      expect(tab).toHaveClass('min-w-0', 'h-8');
+      expect(within(tab).getByText(titleKey)).toHaveClass('min-w-0', 'truncate');
     }
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(sectionTitleKeys);
 
@@ -125,6 +147,14 @@ describe('SettingsPanel', () => {
     expect(screen.getByRole('button', {
       name: 'settings.experimental.petdex.testAction',
     })).toBeDisabled();
+    for (const category of ['ssh', 'sftp', 'ai']) {
+      const toggle = screen.getByRole('switch', { name: `settings.experimental.petdex.category.${category}` });
+      expect(toggle).toBeEnabled();
+      expect(toggle).toHaveAttribute('aria-describedby', 'petdex-categories-description');
+      expect(toggle).toHaveAttribute('data-size', 'default');
+      if (category === 'ai') expect(toggle).not.toBeChecked();
+      else expect(toggle).toBeChecked();
+    }
     expect(screen.getByRole('switch', {
       name: 'settings.experimental.petdex.enabled',
     })).toHaveAttribute(
@@ -137,9 +167,15 @@ describe('SettingsPanel', () => {
     expect(screen.getByRole('status', {
       name: 'settings.experimental.petdex.statusAnnouncement',
     })).toHaveAttribute('aria-atomic', 'true');
+    expect(screen.queryByRole('button', {
+      name: 'settings.feedback.title',
+    })).not.toBeInTheDocument();
+    openSection('settings.feedback.title');
     expect(screen.getByRole('button', {
-      name: 'settings.experimental.petdex.feedbackAction',
-    })).toHaveAttribute('aria-describedby', 'petdex-feedback-description');
+      name: 'settings.feedback.title',
+    })).toHaveAttribute('aria-describedby', 'feedback-description');
+    expect(screen.getByText('settings.feedback.reportTitle')).toBeInTheDocument();
+    expect(screen.queryByText('settings.experimental.petdex.title')).not.toBeInTheDocument();
     expect(petdexFeedbackMocks.open).not.toHaveBeenCalled();
 
     openSection('settings.general.title');
@@ -170,7 +206,8 @@ describe('SettingsPanel', () => {
   });
 
   it('persists the opt-in and exposes a user-triggered test result', async () => {
-    render(<SettingsPanel />);
+    petdexMocks.configure.mockResolvedValueOnce({ ...disabled, revision: 1, status: 'checking', targetAction: 'idle' });
+    const view = render(<><SettingsPanel /><Toaster /></>);
     openSection('settings.experimental.title');
     const toggle = screen.getByRole('switch', {
       name: 'settings.experimental.petdex.enabled',
@@ -190,7 +227,7 @@ describe('SettingsPanel', () => {
         petdexConfiguring: false,
       });
     });
-    expect(petdexMocks.configure).toHaveBeenCalledWith(true);
+    expect(petdexMocks.configure).toHaveBeenCalledWith(true, { ssh: true, sftp: true, ai: false });
     const testButton = screen.getByRole('button', {
       name: 'settings.experimental.petdex.testAction',
     });
@@ -200,19 +237,22 @@ describe('SettingsPanel', () => {
 
     expect(await screen.findByText('settings.experimental.petdex.status.connected')).toBeInTheDocument();
     expect(petdexMocks.testConnection).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('settings.experimental.petdex.preview.requested')).toBeInTheDocument();
+    view.rerender(<><SettingsPanel /><Toaster /></>);
+    expect(screen.getAllByText('settings.experimental.petdex.preview.requested')).toHaveLength(1);
 
     fireEvent.click(toggle);
     await waitFor(() => {
       expect(useAppStore.getState().petdexEnabled).toBe(false);
     });
-    expect(petdexMocks.configure).toHaveBeenLastCalledWith(false);
+    expect(petdexMocks.configure).toHaveBeenLastCalledWith(false, { ssh: true, sftp: true, ai: false });
     expect(testButton).toBeDisabled();
-    expect(screen.getByText('settings.experimental.petdex.status.notDetected')).toBeInTheDocument();
+    expect(screen.getByText('settings.experimental.petdex.status.disabled')).toBeInTheDocument();
   });
 
   it('does not let an older status snapshot overwrite a newer event', async () => {
-    const snapshot = deferred<'notDetected'>();
-    let emitStatus: ((status: 'connected') => void) | undefined;
+    const snapshot = deferred<PetdexDiagnostic>();
+    let emitStatus: ((status: PetdexDiagnostic) => void) | undefined;
     petdexMocks.getStatus.mockReturnValue(snapshot.promise);
     petdexMocks.listen.mockImplementation(async (callback) => {
       emitStatus = callback;
@@ -222,19 +262,19 @@ describe('SettingsPanel', () => {
 
     render(<SettingsPanel />);
     await waitFor(() => expect(petdexMocks.getStatus).toHaveBeenCalledTimes(1));
-    act(() => emitStatus?.('connected'));
+    act(() => emitStatus?.(connected));
     await act(async () => {
-      snapshot.resolve('notDetected');
+      snapshot.resolve(disabled);
       await snapshot.promise;
     });
 
     expect(screen.getByText('settings.experimental.petdex.status.connected')).toBeInTheDocument();
     expect(
-      screen.queryByText('settings.experimental.petdex.status.notDetected'),
+      screen.queryByText('settings.experimental.petdex.status.disabled'),
     ).not.toBeInTheDocument();
   });
 
-  it('rolls back a failed disable request and shows a finite error state', async () => {
+  it('rolls back a failed disable request and shows one finite error toast', async () => {
     useAppStore.setState({
       activeSettingsSection: 'experimental',
       petdexBackendEnabled: true,
@@ -242,7 +282,7 @@ describe('SettingsPanel', () => {
     });
     petdexMocks.configure.mockRejectedValueOnce(new Error('sensitive backend detail'));
 
-    render(<SettingsPanel />);
+    render(<><SettingsPanel /><Toaster /></>);
     const toggle = screen.getByRole('switch', {
       name: 'settings.experimental.petdex.enabled',
     });
@@ -255,20 +295,20 @@ describe('SettingsPanel', () => {
       petdexConfiguring: false,
     });
     expect(
-      await screen.findByText('settings.experimental.petdex.status.connectionError'),
+      await screen.findByText('settings.experimental.petdex.messages.saveFailed'),
     ).toBeInTheDocument();
     expect(screen.queryByText('sensitive backend detail')).not.toBeInTheDocument();
   });
 
   it('opens voluntary feedback only after a user action and without reading the opt-in state', async () => {
     render(<SettingsPanel />);
-    openSection('settings.experimental.title');
+    openSection('settings.feedback.title');
 
     expect(useAppStore.getState().petdexEnabled).toBe(false);
     expect(petdexFeedbackMocks.open).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', {
-      name: 'settings.experimental.petdex.feedbackAction',
+      name: 'settings.feedback.title',
     }));
 
     expect(petdexFeedbackMocks.open).toHaveBeenCalledTimes(1);

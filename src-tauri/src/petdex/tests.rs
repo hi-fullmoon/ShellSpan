@@ -14,6 +14,272 @@ use tempfile::TempDir;
 const TOKEN_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const TOKEN_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
+#[cfg(target_os = "macos")]
+#[tokio::test]
+#[ignore = "requires the explicitly selected existing non-Petdex loopback service; no service lifecycle changes"]
+async fn existing_foreign_service_is_rejected_before_authenticated_delivery() {
+    assert_eq!(
+        std::env::var("SHELLSPAN_PETDEX_FOREIGN_E2E").as_deref(),
+        Ok("1")
+    );
+    let pid: u32 = std::env::var("SHELLSPAN_PETDEX_FOREIGN_PID")
+        .expect("explicit foreign PID")
+        .parse()
+        .expect("PID");
+    let process = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "comm="])
+        .output()
+        .expect("process identity");
+    assert!(process.status.success());
+    assert!(String::from_utf8(process.stdout)
+        .expect("process path")
+        .trim()
+        .ends_with("/Python"));
+    let adapter = PetdexAdapter::new(PathBuf::from(std::env::var_os("HOME").expect("home")));
+    let client = adapter.inner.client.as_ref().expect("client");
+    for path in ["health", "whoami"] {
+        let response = client
+            .get(format!("http://127.0.0.1:7777/{path}"))
+            .send()
+            .await
+            .expect("anonymous response");
+        assert_eq!(response.status(), reqwest::StatusCode::NOT_FOUND);
+    }
+    adapter.set_enabled_for_io_test(true);
+    let result = adapter
+        .apply_state(
+            StateCommand::full_ttl(PetdexState::Waving),
+            adapter.cancellation_token(),
+        )
+        .await;
+    adapter.set_enabled_for_io_test(false);
+    assert_eq!(result, RequestResult::Rejected);
+}
+
+#[tokio::test]
+async fn health_check_disabled_and_cancelled_preserve_diagnostics() {
+    let home = TempDir::new().expect("isolated home");
+    let adapter = PetdexAdapter::new(home.path().to_path_buf());
+    let before = adapter.status();
+    assert_eq!(adapter.check_health().await, types::PetdexHealth::Disabled);
+    assert_eq!(adapter.status(), before);
+    let (_receiver, _) = adapter.prepare_coordinator().expect("enable");
+    let lock = adapter.inner.request_lock.lock().await;
+    let check = adapter.check_health();
+    tokio::pin!(check);
+    tokio::select! {
+        result = &mut check => panic!("check must wait for request lock: {result:?}"),
+        _ = tokio::task::yield_now() => {}
+    }
+    adapter.stop_coordinator();
+    let disabled = adapter.status();
+    assert_eq!(check.await, types::PetdexHealth::Disabled);
+    assert_eq!(adapter.status(), disabled);
+    drop(lock);
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+#[ignore = "requires an already running, locally identified Petdex; never starts or stops it"]
+async fn running_macos_petdex_accepts_production_transport() {
+    assert_eq!(
+        std::env::var("SHELLSPAN_PETDEX_RUNNING_E2E").as_deref(),
+        Ok("1")
+    );
+    let adapter = PetdexAdapter::new(PathBuf::from(std::env::var_os("HOME").expect("home")));
+    let client = adapter.inner.client.as_ref().expect("HTTP client");
+    let identity: Value = client
+        .get("http://127.0.0.1:7777/whoami")
+        .send()
+        .await
+        .expect("identity response")
+        .json()
+        .await
+        .expect("identity JSON");
+    assert_eq!(identity["ok"], true);
+    assert_eq!(identity["inProcess"], true);
+    let pid = identity["pid"].as_u64().expect("native process ID");
+    let process = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "comm="])
+        .output()
+        .expect("process identity");
+    assert!(process.status.success());
+    assert_eq!(
+        String::from_utf8(process.stdout)
+            .expect("executable path")
+            .trim(),
+        "/Applications/Petdex.app/Contents/MacOS/petdex-desktop-native"
+    );
+    let health: Value = client
+        .get("http://127.0.0.1:7777/health")
+        .send()
+        .await
+        .expect("health response")
+        .json()
+        .await
+        .expect("health JSON");
+    assert_eq!(health["ok"], true);
+    assert_eq!(health["port"], 7777);
+    // Only after checking the live native process do we read its credential.
+    let (_receiver, _) = adapter
+        .prepare_coordinator()
+        .expect("enable production coordinator");
+    let mut activity = ActivityGuard::new(
+        Some(adapter.clone()),
+        ActivitySource::Sftp,
+        ActivityPhase::Running,
+    );
+    {
+        let cancellation = adapter.cancellation_token();
+        adapter
+            .inner
+            .coordinator
+            .lock()
+            .expect("coordinator lock")
+            .refresh_diagnostic(&cancellation, None, false);
+    }
+    let before_check = adapter.status();
+    assert_eq!(adapter.check_health().await, types::PetdexHealth::Reachable);
+    assert_eq!(
+        adapter.status(),
+        before_check,
+        "anonymous health must not claim authenticated delivery"
+    );
+    assert_eq!(adapter.status().target_action, Some(PetdexState::Running));
+    activity.transition(ActivityPhase::Cancelled);
+    let cancellation = adapter.cancellation_token();
+    let result = adapter
+        .apply_state(
+            StateCommand::full_ttl(PetdexState::Waving),
+            cancellation.clone(),
+        )
+        .await;
+    assert_eq!(result, RequestResult::Applied);
+    {
+        let mut control = adapter.inner.coordinator.lock().expect("coordinator lock");
+        control.refresh_diagnostic(&cancellation, Some(result), false);
+        assert_eq!(control.diagnostic.status, PetdexConnectionStatus::Connected);
+        assert!(control.diagnostic.last_success_at.is_some());
+    }
+    adapter.stop_coordinator();
+    assert_eq!(adapter.status().status, PetdexConnectionStatus::Disabled);
+    // HTTP success does not assert queued=true or visible animation. No cleanup POST.
+}
+
+#[test]
+fn diagnostic_revisions_and_success_time_do_not_regress() {
+    let mut diagnostic = PetdexDiagnostic::default();
+    assert_eq!(diagnostic.status, PetdexConnectionStatus::Disabled);
+    assert_eq!(diagnostic.target_action, None);
+    assert!(diagnostic.update(
+        PetdexConnectionStatus::Checking,
+        None,
+        Some(PetdexState::Idle),
+        None
+    ));
+    assert_eq!(diagnostic.revision, 1);
+    assert!(!diagnostic.update(
+        PetdexConnectionStatus::Checking,
+        None,
+        Some(PetdexState::Idle),
+        None
+    ));
+    assert!(diagnostic.update(
+        PetdexConnectionStatus::Connected,
+        None,
+        Some(PetdexState::Idle),
+        Some(100)
+    ));
+    assert!(!diagnostic.update(
+        PetdexConnectionStatus::Connected,
+        None,
+        Some(PetdexState::Idle),
+        Some(99)
+    ));
+    assert_eq!(diagnostic.last_success_at, Some(100));
+    diagnostic.update(PetdexConnectionStatus::Disabled, None, None, None);
+    assert_eq!(diagnostic.revision, 3);
+    assert_eq!(diagnostic.last_success_at, Some(100));
+    assert_eq!(diagnostic.target_action, None);
+}
+
+#[test]
+fn cancelled_generation_cannot_publish_into_disabled_or_reopened_diagnostics() {
+    let adapter = PetdexAdapter::new(PathBuf::new());
+    let old = adapter.cancellation_token();
+    adapter.stop_coordinator();
+    let disabled = adapter.status();
+    let mut control = adapter.inner.coordinator.lock().expect("coordinator lock");
+    assert!(!control.refresh_diagnostic(&old, Some(RequestResult::Applied), false));
+    assert_eq!(control.diagnostic, disabled);
+    control.cancellation = CancellationToken::new();
+    let current = control.cancellation.clone();
+    assert!(control.refresh_diagnostic(&current, None, true));
+    let checking = control.diagnostic;
+    assert!(!control.refresh_diagnostic(&old, Some(RequestResult::Unauthorized), false));
+    assert_eq!(control.diagnostic, checking);
+    assert!(control.refresh_diagnostic(&current, Some(RequestResult::Applied), false));
+    assert!(control.diagnostic.revision > checking.revision);
+    assert!(control.diagnostic.last_success_at.is_some());
+    assert_eq!(control.diagnostic.status, PetdexConnectionStatus::Connected);
+}
+
+#[test]
+fn every_transport_result_has_a_distinct_finite_diagnostic() {
+    use super::types::PetdexErrorReason;
+    for (result, status, reason) in [
+        (
+            RequestResult::Applied,
+            PetdexConnectionStatus::Connected,
+            None,
+        ),
+        (
+            RequestResult::Disabled,
+            PetdexConnectionStatus::Disabled,
+            None,
+        ),
+        (
+            RequestResult::TokenMissing,
+            PetdexConnectionStatus::NotDetected,
+            Some(PetdexErrorReason::TokenMissing),
+        ),
+        (
+            RequestResult::TokenUnreadable,
+            PetdexConnectionStatus::TokenUnreadable,
+            Some(PetdexErrorReason::TokenUnreadable),
+        ),
+        (
+            RequestResult::TokenInvalid,
+            PetdexConnectionStatus::TokenInvalid,
+            Some(PetdexErrorReason::TokenInvalid),
+        ),
+        (
+            RequestResult::Transport,
+            PetdexConnectionStatus::Unreachable,
+            Some(PetdexErrorReason::Transport),
+        ),
+        (
+            RequestResult::Unauthorized,
+            PetdexConnectionStatus::Unauthorized,
+            Some(PetdexErrorReason::Unauthorized),
+        ),
+        (
+            RequestResult::Rejected,
+            PetdexConnectionStatus::Rejected,
+            Some(PetdexErrorReason::Rejected),
+        ),
+    ] {
+        assert_eq!(result.connection_status(), status);
+        assert_eq!(result.error_reason(), reason);
+    }
+    let serialized =
+        serde_json::to_value(PetdexDiagnostic::default()).expect("diagnostic serialization");
+    assert_eq!(
+        serialized,
+        json!({"revision": 0, "status": "disabled", "errorReason": null, "targetAction": null, "lastSuccessAt": null})
+    );
+}
+
 struct CapturedRequest {
     body: Value,
     headers: BTreeMap<String, String>,
@@ -73,34 +339,85 @@ fn read_request(stream: &mut TcpStream) -> CapturedRequest {
         let count = stream.read(&mut chunk).expect("read request");
         assert!(count > 0, "client closed before request headers");
         bytes.extend_from_slice(&chunk[..count]);
-        if let Some(index) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
-            break index + 4;
+        let mut headers = [httparse::EMPTY_HEADER; 32];
+        if let httparse::Status::Complete(end) = httparse::Request::new(&mut headers)
+            .parse(&bytes)
+            .expect("HTTP request")
+        {
+            break end;
         }
     };
-    let header_text = String::from_utf8(bytes[..header_end].to_vec()).expect("headers");
-    let mut lines = header_text.split("\r\n");
-    let request_line = lines.next().expect("request line").to_string();
-    let mut headers = BTreeMap::new();
-    for line in lines.filter(|line| !line.is_empty()) {
-        let (name, value) = line.split_once(':').expect("header");
-        headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());
-    }
+    let mut parsed_headers = [httparse::EMPTY_HEADER; 32];
+    let mut parsed = httparse::Request::new(&mut parsed_headers);
+    parsed
+        .parse(&bytes[..header_end])
+        .expect("complete HTTP headers");
+    let request_line = format!(
+        "{} {} HTTP/1.{}",
+        parsed.method.expect("method"),
+        parsed.path.expect("path"),
+        parsed.version.expect("version")
+    );
+    let headers: BTreeMap<String, String> = parsed
+        .headers
+        .iter()
+        .map(|header| {
+            (
+                header.name.to_ascii_lowercase(),
+                String::from_utf8(header.value.to_vec()).expect("header value"),
+            )
+        })
+        .collect();
     let content_length = headers
         .get("content-length")
-        .expect("content length")
-        .parse::<usize>()
-        .expect("numeric content length");
+        .map(|value| value.parse::<usize>().expect("numeric content length"))
+        .unwrap_or(0);
     while bytes.len() < header_end + content_length {
         let count = stream.read(&mut chunk).expect("read body");
         assert!(count > 0, "client closed before request body");
         bytes.extend_from_slice(&chunk[..count]);
     }
     CapturedRequest {
-        body: serde_json::from_slice(&bytes[header_end..header_end + content_length])
-            .expect("JSON body"),
+        body: if content_length == 0 {
+            Value::Null
+        } else {
+            serde_json::from_slice(&bytes[header_end..header_end + content_length])
+                .expect("JSON body")
+        },
         headers,
         request_line,
     }
+}
+
+// Maintain the existing transport fixture's protocol contract. These responses
+// are client regression fixtures, never evidence of a live Petdex identity.
+fn accept_state_request(listener: &TcpListener) -> (TcpStream, CapturedRequest) {
+    loop {
+        let (mut stream, _) = listener.accept().expect("accept request");
+        let request = read_request(&mut stream);
+        if request.request_line == "POST /state HTTP/1.1" {
+            return (stream, request);
+        }
+        respond_to_protocol_probe(&mut stream, &request);
+    }
+}
+
+fn respond_to_protocol_probe(stream: &mut TcpStream, request: &CapturedRequest) {
+    let body = match request.request_line.as_str() {
+        "GET /health HTTP/1.1" => json!({"ok": true, "port": 7777}),
+        "GET /whoami HTTP/1.1" => json!({"ok": true, "pid": std::process::id(), "inProcess": true}),
+        _ => panic!("unexpected fixture request"),
+    };
+    assert!(!request.headers.contains_key("x-petdex-update-token"));
+    let body = serde_json::to_vec(&body).expect("protocol JSON");
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+        body.len()
+    )
+    .expect("protocol headers");
+    stream.write_all(&body).expect("protocol body");
+    stream.flush().expect("flush protocol response");
 }
 
 fn respond(stream: &mut TcpStream, status: u16, reason: &str) {
@@ -142,13 +459,28 @@ fn arbiter_honors_priority_ttl_and_persistent_recovery() {
     let start = Instant::now();
     let mut arbiter = PetdexArbiter::default();
 
-    arbiter.apply(PetdexEvent::SshConnecting("ssh-1".into()), start);
+    arbiter.apply(
+        ActivityEvent::new(ActivitySource::Ssh, 1, 0, ActivityPhase::Connecting, start),
+        start,
+    );
     assert_eq!(arbiter.target(start).state, PetdexState::Waiting);
-    arbiter.apply(PetdexEvent::SftpStarted("sftp-1".into()), start);
+    arbiter.apply(
+        ActivityEvent::new(ActivitySource::Sftp, 2, 0, ActivityPhase::Running, start),
+        start,
+    );
     assert_eq!(arbiter.target(start).state, PetdexState::Running);
 
     let failure_at = start + Duration::from_millis(20);
-    arbiter.apply(PetdexEvent::SftpFailed("sftp-1".into()), failure_at);
+    arbiter.apply(
+        ActivityEvent::new(
+            ActivitySource::Sftp,
+            2,
+            1,
+            ActivityPhase::Failed,
+            failure_at,
+        ),
+        failure_at,
+    );
     assert_eq!(arbiter.target(failure_at).state, PetdexState::Failed);
     assert_eq!(
         arbiter.target(failure_at + FAILURE_TTL).state,
@@ -156,7 +488,16 @@ fn arbiter_honors_priority_ttl_and_persistent_recovery() {
     );
 
     let connected_at = failure_at + FAILURE_TTL + Duration::from_millis(1);
-    arbiter.apply(PetdexEvent::SshConnected("ssh-1".into()), connected_at);
+    arbiter.apply(
+        ActivityEvent::new(
+            ActivitySource::Ssh,
+            1,
+            1,
+            ActivityPhase::Connected,
+            connected_at,
+        ),
+        connected_at,
+    );
     assert_eq!(arbiter.target(connected_at).state, PetdexState::Waving);
     assert_eq!(
         arbiter.target(connected_at + SUCCESS_TTL).state,
@@ -168,26 +509,50 @@ fn arbiter_honors_priority_ttl_and_persistent_recovery() {
 fn concurrent_operations_end_independently_and_cancel_is_neutral() {
     let start = Instant::now();
     let mut arbiter = PetdexArbiter::default();
-    arbiter.apply(PetdexEvent::SftpStarted("transfer-a".into()), start);
-    arbiter.apply(PetdexEvent::SftpStarted("transfer-b".into()), start);
-    arbiter.apply(PetdexEvent::SftpStarted("transfer-b".into()), start);
+    arbiter.apply(
+        ActivityEvent::new(ActivitySource::Sftp, 1, 0, ActivityPhase::Running, start),
+        start,
+    );
+    arbiter.apply(
+        ActivityEvent::new(ActivitySource::Sftp, 2, 0, ActivityPhase::Running, start),
+        start,
+    );
+    arbiter.apply(
+        ActivityEvent::new(ActivitySource::Sftp, 2, 0, ActivityPhase::Running, start),
+        start,
+    );
     assert_eq!(arbiter.active_sftp_operations(), 2);
 
-    arbiter.apply(PetdexEvent::SftpSucceeded("transfer-a".into()), start);
+    arbiter.apply(
+        ActivityEvent::new(ActivitySource::Sftp, 1, 1, ActivityPhase::Succeeded, start),
+        start,
+    );
     assert_eq!(arbiter.target(start).state, PetdexState::Jumping);
     assert_eq!(
         arbiter.target(start + SUCCESS_TTL).state,
         PetdexState::Running
     );
     arbiter.apply(
-        PetdexEvent::SftpCancelled("transfer-b".into()),
+        ActivityEvent::new(
+            ActivitySource::Sftp,
+            2,
+            1,
+            ActivityPhase::Cancelled,
+            start + SUCCESS_TTL,
+        ),
         start + SUCCESS_TTL,
     );
     assert_eq!(arbiter.target(start + SUCCESS_TTL).state, PetdexState::Idle);
     assert!(!arbiter.has_failure());
 
     arbiter.apply(
-        PetdexEvent::SftpFailed("transfer-a".into()),
+        ActivityEvent::new(
+            ActivitySource::Sftp,
+            1,
+            2,
+            ActivityPhase::Failed,
+            start + SUCCESS_TTL,
+        ),
         start + SUCCESS_TTL,
     );
     assert!(!arbiter.has_failure());
@@ -197,9 +562,18 @@ fn concurrent_operations_end_independently_and_cancel_is_neutral() {
 fn concurrent_ssh_completion_does_not_clear_another_connection() {
     let start = Instant::now();
     let mut arbiter = PetdexArbiter::default();
-    arbiter.apply(PetdexEvent::SshConnecting("ssh-a".into()), start);
-    arbiter.apply(PetdexEvent::SshConnecting("ssh-b".into()), start);
-    arbiter.apply(PetdexEvent::SshConnected("ssh-a".into()), start);
+    arbiter.apply(
+        ActivityEvent::new(ActivitySource::Ssh, 1, 0, ActivityPhase::Connecting, start),
+        start,
+    );
+    arbiter.apply(
+        ActivityEvent::new(ActivitySource::Ssh, 2, 0, ActivityPhase::Connecting, start),
+        start,
+    );
+    arbiter.apply(
+        ActivityEvent::new(ActivitySource::Ssh, 1, 1, ActivityPhase::Connected, start),
+        start,
+    );
     assert_eq!(arbiter.target(start).state, PetdexState::Waving);
     assert_eq!(
         arbiter.target(start + SUCCESS_TTL).state,
@@ -207,7 +581,10 @@ fn concurrent_ssh_completion_does_not_clear_another_connection() {
     );
 
     let failed_at = start + SUCCESS_TTL;
-    arbiter.apply(PetdexEvent::SshFailed("ssh-b".into()), failed_at);
+    arbiter.apply(
+        ActivityEvent::new(ActivitySource::Ssh, 2, 1, ActivityPhase::Failed, failed_at),
+        failed_at,
+    );
     assert_eq!(arbiter.target(failed_at).state, PetdexState::Failed);
     assert_eq!(
         arbiter.target(failed_at + FAILURE_TTL).state,
@@ -215,7 +592,16 @@ fn concurrent_ssh_completion_does_not_clear_another_connection() {
     );
 
     let disconnect_at = failed_at + FAILURE_TTL;
-    arbiter.apply(PetdexEvent::SshFailed("ssh-a".into()), disconnect_at);
+    arbiter.apply(
+        ActivityEvent::new(
+            ActivitySource::Ssh,
+            1,
+            2,
+            ActivityPhase::Failed,
+            disconnect_at,
+        ),
+        disconnect_at,
+    );
     assert_eq!(arbiter.target(disconnect_at).state, PetdexState::Failed);
 }
 
@@ -233,7 +619,7 @@ fn delivery_deduplicates_throttles_resyncs_and_bounds_backoff() {
     let mut delivery = DeliveryPolicy::default();
 
     assert_eq!(delivery.attempt_deadline(idle, start), Some(start));
-    delivery.record(PetdexState::Idle, RequestResult::Applied, start);
+    delivery.record(idle.command(), RequestResult::Applied, start);
     assert_eq!(
         delivery.attempt_deadline(idle, start),
         Some(start + INITIAL_RECOVERY_PROBE_INTERVAL)
@@ -244,14 +630,14 @@ fn delivery_deduplicates_throttles_resyncs_and_bounds_backoff() {
     );
 
     let failed_at = start + MIN_SEND_INTERVAL;
-    delivery.record(PetdexState::Running, RequestResult::Transport, failed_at);
+    delivery.record(running.command(), RequestResult::Transport, failed_at);
     assert_eq!(
         delivery.attempt_deadline(running, failed_at),
         Some(failed_at + INITIAL_FAILURE_BACKOFF)
     );
     for count in 2..=12 {
         let attempt_at = failed_at + Duration::from_secs(count.into());
-        delivery.record(PetdexState::Running, RequestResult::Transport, attempt_at);
+        delivery.record(running.command(), RequestResult::Transport, attempt_at);
         assert!(failure_backoff(count) <= MAX_FAILURE_BACKOFF);
     }
     let final_failure_at = failed_at + Duration::from_secs(12);
@@ -283,23 +669,19 @@ fn delivery_uses_activity_aware_probes_and_recovers_after_success_or_manual_rese
     };
     let mut delivery = DeliveryPolicy::default();
 
-    delivery.record(PetdexState::Running, RequestResult::Applied, start);
+    delivery.record(running.command(), RequestResult::Applied, start);
     assert_eq!(
         delivery.attempt_deadline(running, start),
         Some(start + INITIAL_RECOVERY_PROBE_INTERVAL)
     );
     let initial_probe_at = start + INITIAL_RECOVERY_PROBE_INTERVAL;
-    delivery.record(
-        PetdexState::Running,
-        RequestResult::Applied,
-        initial_probe_at,
-    );
+    delivery.record(running.command(), RequestResult::Applied, initial_probe_at);
     assert_eq!(
         delivery.attempt_deadline(running, initial_probe_at),
         Some(initial_probe_at + WARM_RECOVERY_PROBE_INTERVAL)
     );
     let warm_probe_at = initial_probe_at + WARM_RECOVERY_PROBE_INTERVAL;
-    delivery.record(PetdexState::Running, RequestResult::Applied, warm_probe_at);
+    delivery.record(running.command(), RequestResult::Applied, warm_probe_at);
     assert_eq!(
         delivery.attempt_deadline(running, warm_probe_at),
         Some(warm_probe_at + ACTIVE_STEADY_RECOVERY_PROBE_INTERVAL)
@@ -312,7 +694,7 @@ fn delivery_uses_activity_aware_probes_and_recovers_after_success_or_manual_rese
     let failed_at = warm_probe_at + MIN_SEND_INTERVAL;
     for count in 1_u32..=9 {
         delivery.record(
-            PetdexState::Idle,
+            idle.command(),
             RequestResult::Transport,
             failed_at + Duration::from_secs(count.into()),
         );
@@ -331,7 +713,7 @@ fn delivery_uses_activity_aware_probes_and_recovers_after_success_or_manual_rese
     );
 
     let recovered_at = failed_at + Duration::from_secs(70);
-    delivery.record(PetdexState::Idle, RequestResult::Applied, recovered_at);
+    delivery.record(idle.command(), RequestResult::Applied, recovered_at);
     assert_eq!(delivery.consecutive_failures, 0);
     assert!(delivery.retry_at.is_none());
     assert_eq!(
@@ -340,16 +722,12 @@ fn delivery_uses_activity_aware_probes_and_recovers_after_success_or_manual_rese
     );
     let initial_idle_probe_at = recovered_at + INITIAL_RECOVERY_PROBE_INTERVAL;
     delivery.record(
-        PetdexState::Idle,
+        idle.command(),
         RequestResult::Applied,
         initial_idle_probe_at,
     );
     let warm_idle_probe_at = initial_idle_probe_at + WARM_RECOVERY_PROBE_INTERVAL;
-    delivery.record(
-        PetdexState::Idle,
-        RequestResult::Applied,
-        warm_idle_probe_at,
-    );
+    delivery.record(idle.command(), RequestResult::Applied, warm_idle_probe_at);
     assert_eq!(
         delivery.attempt_deadline(idle, warm_idle_probe_at),
         Some(warm_idle_probe_at + IDLE_STEADY_RECOVERY_PROBE_INTERVAL)
@@ -363,10 +741,13 @@ fn event_storm_coalesces_to_one_wake_without_losing_lifecycles() {
     let adapter = fixture_adapter(&listener, token_path(&root));
     let mut receiver = install_coordinator_queue(&adapter, COORDINATOR_QUEUE_CAPACITY);
 
-    for index in 0..10_000 {
-        let operation_id = format!("transfer-{index}");
-        adapter.queue_event(PetdexEvent::SftpStarted(operation_id.clone()));
-        adapter.queue_event(PetdexEvent::SftpSucceeded(operation_id));
+    for _ in 0..10_000 {
+        let mut activity = ActivityGuard::new(
+            Some(adapter.clone()),
+            ActivitySource::Sftp,
+            ActivityPhase::Running,
+        );
+        activity.transition(ActivityPhase::Succeeded);
     }
 
     {
@@ -408,7 +789,11 @@ fn a_full_control_queue_still_records_the_latest_business_state() {
         .try_send(CoordinatorMessage::Test(reply))
         .expect("fill control queue");
 
-    adapter.queue_event(PetdexEvent::SshConnecting("ssh-1".into()));
+    let _activity = ActivityGuard::new(
+        Some(adapter.clone()),
+        ActivitySource::Ssh,
+        ActivityPhase::Connecting,
+    );
 
     let mut control = adapter
         .inner
@@ -444,7 +829,7 @@ async fn test_connection_times_out_while_waiting_for_queue_capacity() {
         .await
         .expect("bounded test connection result");
 
-    assert_eq!(status, PetdexConnectionStatus::ConnectionError);
+    assert_eq!(status, Err("petdex-check-timeout"));
 }
 
 #[tokio::test]
@@ -464,8 +849,13 @@ async fn disabling_releases_a_test_waiting_for_a_coordinator_reply() {
     adapter.stop_coordinator();
 
     assert_eq!(
-        request.await.expect("test request join"),
-        PetdexConnectionStatus::NotDetected
+        request
+            .await
+            .expect("test request join")
+            .expect("disabled snapshot")
+            .diagnostic
+            .status,
+        PetdexConnectionStatus::Disabled
     );
 }
 
@@ -534,8 +924,7 @@ async fn sends_only_the_fixed_header_and_state_payload() {
     let adapter = fixture_adapter(&listener, path);
     adapter.set_enabled_for_io_test(true);
     let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("accept request");
-        let request = read_request(&mut stream);
+        let (mut stream, request) = accept_state_request(&listener);
         respond(&mut stream, 200, "OK");
         request
     });
@@ -556,7 +945,12 @@ async fn sends_only_the_fixed_header_and_state_payload() {
         TOKEN_A
     );
     assert_eq!(request.headers.get("connection").unwrap(), "close");
-    assert_eq!(request.body, json!({ "state": "waving", "duration": 1200 }));
+    assert_eq!(request.body["state"], "waving");
+    assert!((1..=1200).contains(
+        &request.body["duration"]
+            .as_u64()
+            .expect("remaining duration")
+    ));
     assert_eq!(request.body.as_object().unwrap().len(), 2);
 }
 
@@ -569,13 +963,11 @@ async fn rereads_rotated_token_once_after_unauthorized() {
     let adapter = fixture_adapter(&listener, path.clone());
     adapter.set_enabled_for_io_test(true);
     let server = thread::spawn(move || {
-        let (mut first, _) = listener.accept().expect("first request");
-        let first_request = read_request(&mut first);
+        let (mut first, first_request) = accept_state_request(&listener);
         write_token(&path, TOKEN_B);
         respond(&mut first, 401, "Unauthorized");
 
-        let (mut second, _) = listener.accept().expect("second request");
-        let second_request = read_request(&mut second);
+        let (mut second, second_request) = accept_state_request(&listener);
         respond(&mut second, 200, "OK");
         (first_request, second_request)
     });
@@ -608,9 +1000,16 @@ async fn unchanged_token_after_unauthorized_is_not_retried() {
     let adapter = fixture_adapter(&listener, path);
     adapter.set_enabled_for_io_test(true);
     let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("request");
-        let request = read_request(&mut stream);
+        let (mut stream, request) = accept_state_request(&listener);
         respond(&mut stream, 401, "Unauthorized");
+        // Refresh checks are anonymous; an unchanged token still must not
+        // produce a second authenticated attempt.
+        for path in ["health", "whoami"] {
+            let (mut probe_stream, _) = listener.accept().expect("refresh probe");
+            let probe = read_request(&mut probe_stream);
+            assert_eq!(probe.request_line, format!("GET /{path} HTTP/1.1"));
+            respond_to_protocol_probe(&mut probe_stream, &probe);
+        }
         listener
             .set_nonblocking(true)
             .expect("nonblocking listener");
@@ -654,8 +1053,7 @@ async fn the_same_adapter_recovers_after_service_restart_and_token_rotation() {
     write_token(&path, TOKEN_B);
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port)).expect("restart listener");
     let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("recovery request");
-        let request = read_request(&mut stream);
+        let (mut stream, request) = accept_state_request(&listener);
         respond(&mut stream, 200, "OK");
         request
     });
@@ -873,6 +1271,7 @@ async fn controlled_macos_petdex_restart_recovers_without_adapter_restart() {
     wait_for_result(&adapter, RequestResult::Applied, Duration::from_secs(10)).await;
     let first_token = adapter
         .read_token()
+        .await
         .unwrap_or_else(|_| panic!("Petdex E2E could not read a valid runtime token category"));
 
     petdex.stop();
@@ -881,6 +1280,7 @@ async fn controlled_macos_petdex_restart_recovers_without_adapter_restart() {
     wait_for_result(&adapter, RequestResult::Applied, Duration::from_secs(10)).await;
     let rotated_token = adapter
         .read_token()
+        .await
         .unwrap_or_else(|_| panic!("Petdex E2E could not read a valid rotated-token category"));
     assert!(
         first_token != rotated_token,

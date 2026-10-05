@@ -78,10 +78,10 @@ impl FileOperationRegistryNative {
         let mut operations = self
             .operations
             .lock()
-            .map_err(|_| "file operation registry is unavailable".to_string())?;
+            .map_err(|_| "File operation registry is unavailable".to_string())?;
         let key = (task_id.to_string(), call_id.to_string());
         if operations.contains_key(&key) {
-            return Err("file operation id is already active".into());
+            return Err("File operation id is already active".into());
         }
         let flag = Arc::new(AtomicBool::new(false));
         operations.insert(key.clone(), Arc::clone(&flag));
@@ -97,7 +97,7 @@ impl FileOperationRegistryNative {
         let operations = self
             .operations
             .lock()
-            .map_err(|_| "file operation registry is unavailable".to_string())?;
+            .map_err(|_| "File operation registry is unavailable".to_string())?;
         for ((owner_task_id, _), flag) in operations.iter() {
             if owner_task_id == task_id {
                 flag.store(true, Ordering::SeqCst);
@@ -110,7 +110,7 @@ impl FileOperationRegistryNative {
 impl FileOperationGuardNative {
     fn ensure_active(&self) -> Result<(), String> {
         if self.flag.load(Ordering::SeqCst) {
-            Err("file operation was cancelled".into())
+            Err("File operation was cancelled".into())
         } else {
             Ok(())
         }
@@ -205,7 +205,7 @@ pub(super) fn preview_file_call_native(
         "transfer_file" => {
             let arguments: TransferFileArgumentsNative =
                 serde_json::from_value(call.arguments.clone())
-                    .map_err(|error| format!("invalid transfer_file arguments: {error}"))?;
+                    .map_err(|error| format!("Invalid transfer_file arguments: {error}"))?;
             Ok(AgentCallPreviewNative {
                 tool_name: call.tool_name.clone(),
                 target_id: call.target.target_id().to_string(),
@@ -248,13 +248,13 @@ pub(super) fn execute_file_tool_native(
         "trash_file" => execute_trash_file(&context, &operation),
         "apply_patch" | "edit_file" => execute_apply_patch(&context, &operation),
         "transfer_file" => execute_transfer_file(&context, &operation),
-        _ => Err("tool has no native M2 file driver".into()),
+        _ => Err("Tool has no native M2 file driver".into()),
     }
 }
 
 fn validate_trash_file(call: &AgentToolCallNative) -> Result<PathBuf, String> {
     let arguments: TrashFileArgumentsNative = serde_json::from_value(call.arguments.clone())
-        .map_err(|error| format!("invalid trash_file arguments: {error}"))?;
+        .map_err(|error| format!("Invalid trash_file arguments: {error}"))?;
     let AgentToolTargetNative::Local {
         cwd: Some(root), ..
     } = &call.target
@@ -285,23 +285,23 @@ fn validate_trash_file(call: &AgentToolCallNative) -> Result<PathBuf, String> {
     }
     let file = options
         .open(&path)
-        .map_err(|error| format!("failed to inspect trash file: {error}"))?;
+        .map_err(|error| format!("Failed to inspect trash file: {error}"))?;
     let before = file
         .metadata()
-        .map_err(|error| format!("failed to inspect trash file: {error}"))?;
+        .map_err(|error| format!("Failed to inspect trash file: {error}"))?;
     if !before.is_file() || before.len() > MAX_FILE_BYTES {
         return Err("trash_file only accepts regular files up to 64 MiB".into());
     }
     let mut bytes = Vec::new();
     file.take(MAX_FILE_BYTES + 1)
         .read_to_end(&mut bytes)
-        .map_err(|error| format!("failed to verify trash file: {error}"))?;
+        .map_err(|error| format!("Failed to verify trash file: {error}"))?;
     if bytes.len() as u64 > MAX_FILE_BYTES || sha256_hex(&bytes) != arguments.expected_sha256 {
         return Err("trash_file digest precondition failed; no file was moved. Read the current file before requesting deletion again.".into());
     }
     let rechecked = resolve_local_existing(&root, &arguments.path, false)?;
     let after = fs::symlink_metadata(&rechecked)
-        .map_err(|error| format!("failed to revalidate trash file: {error}"))?;
+        .map_err(|error| format!("Failed to revalidate trash file: {error}"))?;
     if rechecked != path
         || before.len() != after.len()
         || before.modified().ok() != after.modified().ok()
@@ -354,7 +354,7 @@ fn execute_read_file(
     operation: &FileOperationGuardNative,
 ) -> Result<FileToolOutputNative, String> {
     let arguments: ReadFileArgumentsNative = serde_json::from_value(context.call.arguments.clone())
-        .map_err(|error| format!("invalid read_file arguments: {error}"))?;
+        .map_err(|error| format!("Invalid read_file arguments: {error}"))?;
     let requested_limit = arguments
         .max_bytes
         .unwrap_or(DEFAULT_READ_BYTES)
@@ -431,7 +431,7 @@ fn execute_list_directory(
 ) -> Result<FileToolOutputNative, String> {
     let arguments: ListDirectoryArgumentsNative =
         serde_json::from_value(context.call.arguments.clone())
-            .map_err(|error| format!("invalid list_directory arguments: {error}"))?;
+            .map_err(|error| format!("Invalid list_directory arguments: {error}"))?;
     let (path, mut entries) = list_target_directory(
         &context.call.target,
         &arguments.path,
@@ -446,19 +446,19 @@ fn execute_list_directory(
     let offset = decode_cursor(arguments.cursor.as_deref(), &digest)?;
     let page_size = arguments.page_size.map_or(DEFAULT_PAGE_SIZE, usize::from);
     if offset > entries.len() {
-        return Err("directory cursor is outside the current listing".into());
+        return Err("Directory cursor is outside the current listing".into());
     }
     let mut end = offset.saturating_add(page_size).min(entries.len());
     while end > offset
         && serde_json::to_vec(&entries[offset..end])
-            .map_err(|error| format!("failed to bound directory output: {error}"))?
+            .map_err(|error| format!("Failed to bound directory output: {error}"))?
             .len()
             > 240 * 1024
     {
         end -= 1;
     }
     if end == offset && offset < entries.len() {
-        return Err("one directory entry exceeds the native output limit".into());
+        return Err("One directory entry exceeds the native output limit".into());
     }
     let next_cursor = (end < entries.len()).then(|| encode_cursor(end, &digest));
     let page = entries[offset..end].to_vec();
@@ -482,7 +482,7 @@ fn execute_search_text(
 ) -> Result<FileToolOutputNative, String> {
     let arguments: SearchTextArgumentsNative =
         serde_json::from_value(context.call.arguments.clone())
-            .map_err(|error| format!("invalid search_text arguments: {error}"))?;
+            .map_err(|error| format!("Invalid search_text arguments: {error}"))?;
     let (root, mut matches, bounds_hit) = search_target(
         &context.call.target,
         &arguments,
@@ -500,20 +500,20 @@ fn execute_search_text(
     let digest = listing_digest(&matches)?;
     let offset = decode_cursor(arguments.cursor.as_deref(), &digest)?;
     if offset > matches.len() {
-        return Err("search cursor is outside the current result set".into());
+        return Err("Search cursor is outside the current result set".into());
     }
     let page_size = usize::from(arguments.max_results.unwrap_or(100));
     let mut end = offset.saturating_add(page_size).min(matches.len());
     while end > offset
         && serde_json::to_vec(&matches[offset..end])
-            .map_err(|error| format!("failed to bound search output: {error}"))?
+            .map_err(|error| format!("Failed to bound search output: {error}"))?
             .len()
             > 1_000_000
     {
         end -= 1;
     }
     if end == offset && offset < matches.len() {
-        return Err("one search result exceeds the native output limit".into());
+        return Err("One search result exceeds the native output limit".into());
     }
     let next_cursor = (end < matches.len()).then(|| encode_cursor(end, &digest));
     let page = matches[offset..end].to_vec();
@@ -680,7 +680,7 @@ fn execute_transfer_file(
 ) -> Result<FileToolOutputNative, String> {
     let arguments: TransferFileArgumentsNative =
         serde_json::from_value(context.call.arguments.clone())
-            .map_err(|error| format!("invalid transfer_file arguments: {error}"))?;
+            .map_err(|error| format!("Invalid transfer_file arguments: {error}"))?;
     let expected = arguments
         .expected_sha256
         .as_deref()
@@ -696,16 +696,16 @@ fn execute_transfer_file(
     } = &context.call.target
     else {
         return Err(
-            "native SFTP transfer requires a remote target with remote and local roots".into(),
+            "Native SFTP transfer requires a remote target with remote and local roots".into(),
         );
     };
     let connection =
         connection_for_remote_target(&context.call.target, context.database, context.credentials)?;
     let connected = connect_sftp(&connection, None, Some(context.known_hosts_path))
-        .map_err(|error| format!("native SFTP connection failed: {error:?}"))?;
+        .map_err(|error| format!("Native SFTP connection failed: {error:?}"))?;
     let connected = connected
         .lock()
-        .map_err(|_| "native SFTP connection is unavailable".to_string())?;
+        .map_err(|_| "Native SFTP connection is unavailable".to_string())?;
     let sftp = &connected.sftp;
     let remote_root = resolve_remote_root(sftp, remote_root)?;
     let local_root = canonical_local_root(Path::new(local_root))?;
@@ -738,7 +738,7 @@ fn execute_transfer_file(
             )?;
             let verified = read_remote_bounded(sftp, &remote_destination, max_bytes, operation)?;
             if sha256_hex(&verified) != expected {
-                return Err("remote upload digest verification failed".into());
+                return Err("Remote upload digest verification failed".into());
             }
             (
                 local_source.to_string_lossy().to_string(),
@@ -774,7 +774,7 @@ fn execute_transfer_file(
             )?;
             let verified = read_local_bounded(&local_destination, max_bytes, operation)?;
             if sha256_hex(&verified) != expected {
-                return Err("local download digest verification failed".into());
+                return Err("Local download digest verification failed".into());
             }
             (
                 remote_source,
@@ -807,18 +807,18 @@ fn validate_overwrite_precondition(
     match existing {
         None => {
             if arguments.destination_sha256.is_some() {
-                Err("transfer destination disappeared before write".into())
+                Err("Transfer destination disappeared before write".into())
             } else {
                 Ok(())
             }
         }
-        Some(_) if !arguments.overwrite => Err("transfer destination already exists".into()),
+        Some(_) if !arguments.overwrite => Err("Transfer destination already exists".into()),
         Some(content) => {
             let expected = arguments.destination_sha256.as_deref().ok_or_else(|| {
-                "overwrite requires the destination digest precondition".to_string()
+                "Overwrite requires the destination digest precondition".to_string()
             })?;
             if sha256_hex(content) != expected {
-                Err("transfer destination digest precondition failed".into())
+                Err("Transfer destination digest precondition failed".into())
             } else {
                 Ok(())
             }
@@ -932,7 +932,7 @@ fn compute_edit_call_preview(
     if call.tool_name == "apply_patch" {
         let arguments: ApplyPatchArgumentsNative =
             serde_json::from_value(call.arguments.clone())
-                .map_err(|error| format!("invalid apply_patch arguments: {error}"))?;
+                .map_err(|error| format!("Invalid apply_patch arguments: {error}"))?;
         return compute_patch_preview(
             &call.target,
             &arguments,
@@ -944,7 +944,7 @@ fn compute_edit_call_preview(
     }
     crate::agent_runtime::validate_tool_arguments_native("edit_file", &call.arguments)?;
     let arguments: EditFileArgumentsNative = serde_json::from_value(call.arguments.clone())
-        .map_err(|error| format!("invalid edit_file arguments: {error}"))?;
+        .map_err(|error| format!("Invalid edit_file arguments: {error}"))?;
     let registry = FileOperationRegistryNative::default();
     let operation = registry.begin("edit-preview", "edit-preview")?;
     let (_, before, _) = read_target_file(
@@ -1031,7 +1031,7 @@ fn compute_patch_preview(
         return Err("apply_patch produces no change; no file was written. Read the relevant lines to check whether the requested change is already present; otherwise supply a patch with actual additions or deletions.".into());
     }
     if after.len() as u64 > MAX_FILE_BYTES {
-        return Err("patched file exceeds the native size limit".into());
+        return Err("Patched file exceeds the native size limit".into());
     }
     let diff = diffy::create_patch(before_text, std::str::from_utf8(&after).unwrap()).to_string();
     if diff.len() > MAX_EXACT_DIFF_BYTES {
@@ -1057,7 +1057,7 @@ fn checkpoint_target_file(
     let kind = match context.call.target {
         AgentToolTargetNative::Local { .. } => CheckpointTargetKindNative::Local,
         AgentToolTargetNative::Remote { .. } => CheckpointTargetKindNative::Remote,
-        _ => return Err("file checkpoint requires a host target".into()),
+        _ => return Err("File checkpoint requires a host target".into()),
     };
     checkpoint_target_file_with_kind(context, path, original, metadata, kind)
 }
@@ -1104,10 +1104,10 @@ fn read_write_destination(
         } => {
             let connection = connection_for_remote_target(target, database, credentials)?;
             let connected = connect_sftp(&connection, None, Some(known_hosts_path))
-                .map_err(|error| format!("native SFTP connection failed: {error:?}"))?;
+                .map_err(|error| format!("Native SFTP connection failed: {error:?}"))?;
             let connected = connected
                 .lock()
-                .map_err(|_| "native SFTP connection is unavailable".to_string())?;
+                .map_err(|_| "Native SFTP connection is unavailable".to_string())?;
             let root = resolve_remote_root(&connected.sftp, root)?;
             let path = resolve_remote_path(&connected.sftp, &root, requested_path, true)?;
             let metadata = match connected.sftp.lstat(Path::new(&path)) {
@@ -1118,18 +1118,18 @@ fn read_write_destination(
                 Err(error) if is_sftp_missing(&error) => {
                     CheckpointOriginalMetadataNative::default()
                 }
-                Err(error) => return Err(format!("failed to inspect remote file: {error}")),
+                Err(error) => return Err(format!("Failed to inspect remote file: {error}")),
             };
             let before = read_remote_optional(&connected.sftp, &path, MAX_FILE_BYTES, operation)?;
             Ok((path, before, metadata))
         }
         AgentToolTargetNative::Local { cwd: None, .. } => {
-            Err("local file tools require a frozen cwd root".into())
+            Err("Local file tools require a frozen cwd root".into())
         }
         AgentToolTargetNative::Remote {
             root_path: None, ..
-        } => Err("remote file tools require a frozen rootPath".into()),
-        _ => Err("file tool requires a local or remote target".into()),
+        } => Err("Remote file tools require a frozen rootPath".into()),
+        _ => Err("File tool requires a local or remote target".into()),
     }
 }
 
@@ -1149,13 +1149,13 @@ fn read_target_file(
             let root = canonical_local_root(Path::new(root))?;
             let path = resolve_local_existing(&root, requested_path, false)?;
             use super::scoped_read::{LocalScopedReader, ScopeReadError};
-            let reader = LocalScopedReader::open(root.to_str().ok_or("invalid local root")?)
-                .map_err(|error| format!("native scoped root: {error}"))?;
+            let reader = LocalScopedReader::open(root.to_str().ok_or("Invalid local root")?)
+                .map_err(|error| format!("Native scoped root: {error}"))?;
             let relative = path
                 .strip_prefix(&root)
-                .map_err(|_| "file escaped native root")?
+                .map_err(|_| "File escaped native root")?
                 .to_str()
-                .ok_or("invalid local path")?
+                .ok_or("Invalid local path")?
                 .replace('\\', "/");
             let bytes = reader
                 .read_checked(&relative, limit as usize, || {
@@ -1163,7 +1163,7 @@ fn read_target_file(
                         .ensure_active()
                         .map_err(|_| ScopeReadError::Cancelled)
                 })
-                .map_err(|error| format!("native scoped read: {error}"))?;
+                .map_err(|error| format!("Native scoped read: {error}"))?;
             Ok((
                 path.to_string_lossy().to_string(),
                 bytes,
@@ -1176,16 +1176,16 @@ fn read_target_file(
         } => {
             let connection = connection_for_remote_target(target, database, credentials)?;
             let connected = connect_sftp(&connection, None, Some(known_hosts_path))
-                .map_err(|error| format!("native SFTP connection failed: {error:?}"))?;
+                .map_err(|error| format!("Native SFTP connection failed: {error:?}"))?;
             let connected = connected
                 .lock()
-                .map_err(|_| "native SFTP connection is unavailable".to_string())?;
+                .map_err(|_| "Native SFTP connection is unavailable".to_string())?;
             let root = resolve_remote_root(&connected.sftp, root)?;
             let path = resolve_remote_path(&connected.sftp, &root, requested_path, false)?;
             let stat = connected
                 .sftp
                 .stat(Path::new(&path))
-                .map_err(|error| format!("failed to inspect remote file: {error}"))?;
+                .map_err(|error| format!("Failed to inspect remote file: {error}"))?;
             let bytes = read_remote_bounded(&connected.sftp, &path, limit, operation)?;
             Ok((
                 path,
@@ -1197,12 +1197,12 @@ fn read_target_file(
             ))
         }
         AgentToolTargetNative::Local { cwd: None, .. } => {
-            Err("local file tools require a frozen cwd root".into())
+            Err("Local file tools require a frozen cwd root".into())
         }
         AgentToolTargetNative::Remote {
             root_path: None, ..
-        } => Err("remote file tools require a frozen rootPath".into()),
-        _ => Err("file tool requires a local or remote target".into()),
+        } => Err("Remote file tools require a frozen rootPath".into()),
+        _ => Err("File tool requires a local or remote target".into()),
     }
 }
 
@@ -1230,10 +1230,10 @@ fn write_target_file(
         } => {
             let connection = connection_for_remote_target(target, database, credentials)?;
             let connected = connect_sftp(&connection, None, Some(known_hosts_path))
-                .map_err(|error| format!("native SFTP connection failed: {error:?}"))?;
+                .map_err(|error| format!("Native SFTP connection failed: {error:?}"))?;
             let connected = connected
                 .lock()
-                .map_err(|_| "native SFTP connection is unavailable".to_string())?;
+                .map_err(|_| "Native SFTP connection is unavailable".to_string())?;
             let root = resolve_remote_root(&connected.sftp, root)?;
             let path = resolve_remote_path(&connected.sftp, &root, requested_path, true)?;
             write_remote_atomic(
@@ -1245,7 +1245,7 @@ fn write_target_file(
                 operation,
             )
         }
-        _ => Err("file write requires a path-scoped host target".into()),
+        _ => Err("File write requires a path-scoped host target".into()),
     }
 }
 
@@ -1278,18 +1278,18 @@ fn list_target_directory(
             let path = resolve_local_existing(&root, requested_path, true)?;
             let mut entries = Vec::new();
             for entry in fs::read_dir(&path)
-                .map_err(|error| format!("failed to list local directory: {error}"))?
+                .map_err(|error| format!("Failed to list local directory: {error}"))?
             {
                 operation.ensure_active()?;
                 let entry =
-                    entry.map_err(|error| format!("failed to inspect local entry: {error}"))?;
+                    entry.map_err(|error| format!("Failed to inspect local entry: {error}"))?;
                 let name = entry.file_name().to_string_lossy().to_string();
                 if !include_hidden && name.starts_with('.') {
                     continue;
                 }
                 let entry_path = entry.path();
                 let metadata = fs::symlink_metadata(&entry_path)
-                    .map_err(|error| format!("failed to inspect local entry: {error}"))?;
+                    .map_err(|error| format!("Failed to inspect local entry: {error}"))?;
                 entries.push(DirectoryEntryNative {
                     name,
                     path: entry_path.to_string_lossy().to_string(),
@@ -1306,24 +1306,24 @@ fn list_target_directory(
         } => {
             let connection = connection_for_remote_target(target, database, credentials)?;
             let connected = connect_sftp(&connection, None, Some(known_hosts_path))
-                .map_err(|error| format!("native SFTP connection failed: {error:?}"))?;
+                .map_err(|error| format!("Native SFTP connection failed: {error:?}"))?;
             let connected = connected
                 .lock()
-                .map_err(|_| "native SFTP connection is unavailable".to_string())?;
+                .map_err(|_| "Native SFTP connection is unavailable".to_string())?;
             let root = resolve_remote_root(&connected.sftp, root)?;
             let path = resolve_remote_path(&connected.sftp, &root, requested_path, false)?;
             let stat = connected
                 .sftp
                 .lstat(Path::new(&path))
-                .map_err(|error| format!("failed to inspect remote directory: {error}"))?;
+                .map_err(|error| format!("Failed to inspect remote directory: {error}"))?;
             if remote_kind(stat.perm) != "directory" {
-                return Err("remote list path is not a directory".into());
+                return Err("Remote list path is not a directory".into());
             }
             let mut entries = Vec::new();
             for (entry_path, stat) in connected
                 .sftp
                 .readdir(Path::new(&path))
-                .map_err(|error| format!("failed to list remote directory: {error}"))?
+                .map_err(|error| format!("Failed to list remote directory: {error}"))?
             {
                 operation.ensure_active()?;
                 let name = entry_path
@@ -1418,7 +1418,7 @@ fn search_target(
                     SearchModeNative::Content | SearchModeNative::Both
                 ) {
                     let metadata = fs::metadata(&file)
-                        .map_err(|error| format!("failed to inspect search file: {error}"))?;
+                        .map_err(|error| format!("Failed to inspect search file: {error}"))?;
                     if bytes_read.saturating_add(metadata.len()) > MAX_SEARCH_BYTES {
                         bounds_hit = true;
                         break;
@@ -1441,23 +1441,23 @@ fn search_target(
         } => {
             let connection = connection_for_remote_target(target, database, credentials)?;
             let connected = connect_sftp(&connection, None, Some(known_hosts_path))
-                .map_err(|error| format!("native SFTP connection failed: {error:?}"))?;
+                .map_err(|error| format!("Native SFTP connection failed: {error:?}"))?;
             let connected = connected
                 .lock()
-                .map_err(|_| "native SFTP connection is unavailable".to_string())?;
+                .map_err(|_| "Native SFTP connection is unavailable".to_string())?;
             let root = resolve_remote_root(&connected.sftp, root)?;
             let search_root = resolve_remote_path(&connected.sftp, &root, &arguments.path, false)?;
             let mut files = Vec::new();
             let stat = connected
                 .sftp
                 .lstat(Path::new(&search_root))
-                .map_err(|error| format!("failed to inspect remote search path: {error}"))?;
+                .map_err(|error| format!("Failed to inspect remote search path: {error}"))?;
             match remote_kind(stat.perm) {
                 "file" => files.push((search_root.clone(), stat.size.unwrap_or(0))),
                 "directory" => {
                     collect_remote_files(&connected.sftp, &search_root, &mut files, operation)?
                 }
-                "symlink" => return Err("remote symlink traversal is denied".into()),
+                "symlink" => return Err("Remote symlink traversal is denied".into()),
                 _ => return Err("search_text path must be a regular file or directory".into()),
             }
             let mut matches = Vec::new();
@@ -1540,13 +1540,13 @@ fn collect_local_files(
         return Ok(());
     }
     for entry in fs::read_dir(root)
-        .map_err(|error| format!("failed to traverse local search root: {error}"))?
+        .map_err(|error| format!("Failed to traverse local search root: {error}"))?
     {
         operation.ensure_active()?;
-        let entry = entry.map_err(|error| format!("failed to inspect search entry: {error}"))?;
+        let entry = entry.map_err(|error| format!("Failed to inspect search entry: {error}"))?;
         let path = entry.path();
         let metadata = fs::symlink_metadata(&path)
-            .map_err(|error| format!("failed to inspect search entry: {error}"))?;
+            .map_err(|error| format!("Failed to inspect search entry: {error}"))?;
         if metadata.file_type().is_symlink() {
             continue;
         }
@@ -1573,7 +1573,7 @@ fn collect_remote_files(
     }
     for (path, stat) in sftp
         .readdir(Path::new(root))
-        .map_err(|error| format!("failed to traverse remote search root: {error}"))?
+        .map_err(|error| format!("Failed to traverse remote search root: {error}"))?
     {
         operation.ensure_active()?;
         let display = slash_path(&path);
@@ -1596,7 +1596,7 @@ fn collect_remote_files(
 fn canonical_local_root(root: &Path) -> Result<PathBuf, String> {
     use super::scoped_read::{LocalScopedReader, ScopedReader};
     let reader =
-        LocalScopedReader::open(root.to_str().ok_or("invalid local root")?).map_err(|error| {
+        LocalScopedReader::open(root.to_str().ok_or("Invalid local root")?).map_err(|error| {
             format!("AGENT_UNSAFE_FILE_ROOT: local file root must be a real directory without symlink ancestors: {error}")
         })?;
     Ok(PathBuf::from(reader.root()))
@@ -1609,12 +1609,12 @@ fn resolve_local_existing(
 ) -> Result<PathBuf, String> {
     let canonical = resolve_local_search_path(root, requested)?;
     let metadata = fs::symlink_metadata(&canonical)
-        .map_err(|error| format!("failed to inspect scoped path: {error}"))?;
+        .map_err(|error| format!("Failed to inspect scoped path: {error}"))?;
     if directory && !metadata.is_dir() {
-        return Err("local path must be a directory; received a regular file".into());
+        return Err("Local path must be a directory; received a regular file".into());
     }
     if !directory && !metadata.is_file() {
-        return Err("local path must be a regular file; received a directory".into());
+        return Err("Local path must be a regular file; received a directory".into());
     }
     Ok(canonical)
 }
@@ -1627,17 +1627,17 @@ fn resolve_local_search_path(root: &Path, requested: &str) -> Result<PathBuf, St
         ensure_no_local_symlink(root, &candidate, false)?;
     }
     let canonical = fs::canonicalize(&candidate)
-        .map_err(|error| format!("failed to canonicalize scoped path: {error}"))?;
+        .map_err(|error| format!("Failed to canonicalize scoped path: {error}"))?;
     if !canonical.starts_with(root) {
-        return Err("local path escapes the frozen root".into());
+        return Err("Local path escapes the frozen root".into());
     }
     let metadata = fs::symlink_metadata(&canonical)
-        .map_err(|error| format!("failed to inspect scoped path: {error}"))?;
+        .map_err(|error| format!("Failed to inspect scoped path: {error}"))?;
     if metadata.file_type().is_symlink() {
-        return Err("local symlink traversal is denied".into());
+        return Err("Local symlink traversal is denied".into());
     }
     if !metadata.is_dir() && !metadata.is_file() {
-        return Err("local path must be a regular file or directory".into());
+        return Err("Local path must be a regular file or directory".into());
     }
     Ok(canonical)
 }
@@ -1646,24 +1646,24 @@ fn resolve_local_destination(root: &Path, requested: &str) -> Result<PathBuf, St
     let candidate = local_candidate(root, requested)?;
     let parent = candidate
         .parent()
-        .ok_or_else(|| "local destination has no parent".to_string())?;
+        .ok_or_else(|| "Local destination has no parent".to_string())?;
     if Path::new(requested).is_absolute() {
         ensure_absolute_no_symlink(parent)?;
     } else {
         ensure_no_local_symlink(root, parent, false)?;
     }
     let canonical_parent = fs::canonicalize(parent)
-        .map_err(|error| format!("failed to canonicalize destination parent: {error}"))?;
+        .map_err(|error| format!("Failed to canonicalize destination parent: {error}"))?;
     if !canonical_parent.starts_with(root) {
-        return Err("local destination escapes the frozen root".into());
+        return Err("Local destination escapes the frozen root".into());
     }
     let name = candidate
         .file_name()
-        .ok_or_else(|| "local destination has no file name".to_string())?;
+        .ok_or_else(|| "Local destination has no file name".to_string())?;
     let destination = canonical_parent.join(name);
     if let Ok(metadata) = fs::symlink_metadata(&destination) {
         if metadata.file_type().is_symlink() || !metadata.is_file() {
-            return Err("local destination is not a regular file".into());
+            return Err("Local destination is not a regular file".into());
         }
     }
     Ok(destination)
@@ -1677,7 +1677,7 @@ fn local_candidate(root: &Path, requested: &str) -> Result<PathBuf, String> {
         .components()
         .any(|component| matches!(component, Component::ParentDir))
     {
-        return Err("local path traversal is denied".into());
+        return Err("Local path traversal is denied".into());
     }
     let candidate = if requested.is_absolute() {
         requested.to_path_buf()
@@ -1688,7 +1688,7 @@ fn local_candidate(root: &Path, requested: &str) -> Result<PathBuf, String> {
         .components()
         .any(|component| matches!(component, Component::ParentDir))
     {
-        return Err("local path traversal is denied".into());
+        return Err("Local path traversal is denied".into());
     }
     Ok(candidate)
 }
@@ -1699,25 +1699,25 @@ fn ensure_no_local_symlink(
     allow_missing_leaf: bool,
 ) -> Result<(), String> {
     if !path.starts_with(root) {
-        return Err("local path escapes the frozen root".into());
+        return Err("Local path escapes the frozen root".into());
     }
     let relative = path
         .strip_prefix(root)
-        .map_err(|_| "local path escapes the frozen root".to_string())?;
+        .map_err(|_| "Local path escapes the frozen root".to_string())?;
     let mut current = root.to_path_buf();
     let component_count = relative.components().count();
     for (index, component) in relative.components().enumerate() {
         current.push(component.as_os_str());
         match fs::symlink_metadata(&current) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
-                return Err("local symlink traversal is denied".into())
+                return Err("Local symlink traversal is denied".into())
             }
             Ok(_) => {}
             Err(error)
                 if allow_missing_leaf
                     && index + 1 == component_count
                     && error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(format!("failed to revalidate local path: {error}")),
+            Err(error) => return Err(format!("Failed to revalidate local path: {error}")),
         }
     }
     Ok(())
@@ -1735,9 +1735,9 @@ fn ensure_absolute_no_symlink(path: &Path) -> Result<(), String> {
             continue;
         }
         let metadata = fs::symlink_metadata(&current)
-            .map_err(|error| format!("failed to revalidate absolute local path: {error}"))?;
+            .map_err(|error| format!("Failed to revalidate absolute local path: {error}"))?;
         if metadata.file_type().is_symlink() {
-            return Err("local symlink traversal is denied".into());
+            return Err("Local symlink traversal is denied".into());
         }
     }
     Ok(())
@@ -1750,11 +1750,11 @@ fn read_local_optional(
 ) -> Result<Option<Vec<u8>>, String> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
-            Err("local destination is not a regular file".into())
+            Err("Local destination is not a regular file".into())
         }
         Ok(_) => read_local_bounded(path, limit, operation).map(Some),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(format!("failed to inspect local file: {error}")),
+        Err(error) => Err(format!("Failed to inspect local file: {error}")),
     }
 }
 
@@ -1765,12 +1765,12 @@ fn read_local_bounded(
 ) -> Result<Vec<u8>, String> {
     operation.ensure_active()?;
     let metadata = fs::symlink_metadata(path)
-        .map_err(|error| format!("failed to inspect local file: {error}"))?;
+        .map_err(|error| format!("Failed to inspect local file: {error}"))?;
     if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() > limit {
-        return Err("local file failed native type or size bounds".into());
+        return Err("Local file failed native type or size bounds".into());
     }
     let mut file =
-        File::open(path).map_err(|error| format!("failed to open local file: {error}"))?;
+        File::open(path).map_err(|error| format!("Failed to open local file: {error}"))?;
     read_stream_bounded(&mut file, limit, operation)
 }
 
@@ -1784,43 +1784,43 @@ fn write_local_atomic(
     operation.ensure_active()?;
     let parent = destination
         .parent()
-        .ok_or_else(|| "local destination has no parent".to_string())?;
+        .ok_or_else(|| "Local destination has no parent".to_string())?;
     ensure_no_local_symlink(root, parent, false)?;
     let current = read_local_optional(destination, MAX_TRANSFER_BYTES, operation)?;
     match (expected_before, current.as_deref()) {
         (Some(expected), Some(bytes)) if sha256_hex(bytes) == expected => {}
-        (Some(_), _) => return Err("local file changed before atomic replacement".into()),
+        (Some(_), _) => return Err("Local file changed before atomic replacement".into()),
         (None, None) => {}
         (None, Some(_)) => {
-            return Err("local destination appeared before atomic replacement".into())
+            return Err("Local destination appeared before atomic replacement".into())
         }
     }
     let mut temp = NamedTempFile::new_in(parent)
-        .map_err(|error| format!("failed to create local write temp file: {error}"))?;
+        .map_err(|error| format!("Failed to create local write temp file: {error}"))?;
     let permissions = fs::metadata(destination)
         .ok()
         .map(|metadata| metadata.permissions());
     temp.write_all(content)
         .and_then(|()| temp.as_file().sync_all())
-        .map_err(|error| format!("failed to write local temp file: {error}"))?;
+        .map_err(|error| format!("Failed to write local temp file: {error}"))?;
     if let Some(permissions) = permissions {
         temp.as_file()
             .set_permissions(permissions)
-            .map_err(|error| format!("failed to preserve local permissions: {error}"))?;
+            .map_err(|error| format!("Failed to preserve local permissions: {error}"))?;
     }
     operation.ensure_active()?;
     ensure_no_local_symlink(root, parent, false)?;
     let current = read_local_optional(destination, MAX_TRANSFER_BYTES, operation)?;
     match (expected_before, current.as_deref()) {
         (Some(expected), Some(bytes)) if sha256_hex(bytes) == expected => {}
-        (Some(_), _) => return Err("local file drifted during atomic replacement".into()),
+        (Some(_), _) => return Err("Local file drifted during atomic replacement".into()),
         (None, None) => {}
         (None, Some(_)) => {
-            return Err("local destination appeared during atomic replacement".into())
+            return Err("Local destination appeared during atomic replacement".into())
         }
     }
     temp.persist(destination)
-        .map_err(|error| format!("failed to atomically replace local file: {}", error.error))?;
+        .map_err(|error| format!("Failed to atomically replace local file: {}", error.error))?;
     Ok(())
 }
 
@@ -1828,7 +1828,7 @@ fn local_metadata(path: &Path) -> Result<CheckpointOriginalMetadataNative, Strin
     let metadata = match fs::metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Default::default()),
-        Err(error) => return Err(format!("failed to inspect local metadata: {error}")),
+        Err(error) => return Err(format!("Failed to inspect local metadata: {error}")),
     };
     #[cfg(unix)]
     let permissions = {
@@ -1852,17 +1852,17 @@ fn resolve_remote_root(sftp: &Sftp, root: &str) -> Result<String, String> {
     let normalized = normalize_remote_absolute(root)?;
     let stat = sftp
         .lstat(Path::new(&normalized))
-        .map_err(|error| format!("failed to inspect remote root: {error}"))?;
+        .map_err(|error| format!("Failed to inspect remote root: {error}"))?;
     if remote_kind(stat.perm) != "directory" {
-        return Err("remote root is not a directory".into());
+        return Err("Remote root is not a directory".into());
     }
     let canonical = slash_path(
         &sftp
             .realpath(Path::new(&normalized))
-            .map_err(|error| format!("failed to canonicalize remote root: {error}"))?,
+            .map_err(|error| format!("Failed to canonicalize remote root: {error}"))?,
     );
     if canonical != normalized {
-        return Err("remote root contains a symlink or identity drift".into());
+        return Err("Remote root contains a symlink or identity drift".into());
     }
     Ok(canonical)
 }
@@ -1874,7 +1874,7 @@ fn resolve_remote_path(
     allow_missing_leaf: bool,
 ) -> Result<String, String> {
     if requested.contains('\\') {
-        return Err("remote paths must use POSIX separators".into());
+        return Err("Remote paths must use POSIX separators".into());
     }
     let candidate = if requested.starts_with('/') {
         normalize_remote_absolute(requested)?
@@ -1882,7 +1882,7 @@ fn resolve_remote_path(
         normalize_remote_absolute(&format!("{}/{}", root.trim_end_matches('/'), requested))?
     };
     if !remote_path_within(root, &candidate) {
-        return Err("remote path escapes the frozen root".into());
+        return Err("Remote path escapes the frozen root".into());
     }
     let relative = candidate
         .strip_prefix(root)
@@ -1905,24 +1905,24 @@ fn resolve_remote_path(
         }
         match sftp.lstat(Path::new(&current)) {
             Ok(stat) if remote_kind(stat.perm) == "symlink" => {
-                return Err("remote symlink traversal is denied".into())
+                return Err("Remote symlink traversal is denied".into())
             }
             Ok(_) => {}
             Err(error)
                 if allow_missing_leaf
                     && index + 1 == components.len()
                     && is_sftp_missing(&error) => {}
-            Err(error) => return Err(format!("failed to revalidate remote path: {error}")),
+            Err(error) => return Err(format!("Failed to revalidate remote path: {error}")),
         }
     }
     if !allow_missing_leaf || sftp.lstat(Path::new(&candidate)).is_ok() {
         let canonical = slash_path(
             &sftp
                 .realpath(Path::new(&candidate))
-                .map_err(|error| format!("failed to canonicalize remote path: {error}"))?,
+                .map_err(|error| format!("Failed to canonicalize remote path: {error}"))?,
         );
         if canonical != candidate || !remote_path_within(root, &canonical) {
-            return Err("remote path identity drifted or escaped its root".into());
+            return Err("Remote path identity drifted or escaped its root".into());
         }
     }
     Ok(candidate)
@@ -1930,15 +1930,15 @@ fn resolve_remote_path(
 
 fn normalize_remote_absolute(path: &str) -> Result<String, String> {
     if !path.starts_with('/') || path.contains('\0') {
-        return Err("remote path must be absolute and contain no NUL".into());
+        return Err("Remote path must be absolute and contain no NUL".into());
     }
     let mut components = Vec::new();
     for component in path.split('/') {
         match component {
             "" | "." => {}
-            ".." => return Err("remote path traversal is denied".into()),
+            ".." => return Err("Remote path traversal is denied".into()),
             value if value.chars().any(char::is_control) => {
-                return Err("remote path contains control characters".into())
+                return Err("Remote path contains control characters".into())
             }
             value => components.push(value),
         }
@@ -1962,11 +1962,11 @@ fn read_remote_optional(
 ) -> Result<Option<Vec<u8>>, String> {
     match sftp.lstat(Path::new(path)) {
         Ok(stat) if remote_kind(stat.perm) != "file" => {
-            Err("remote destination is not a regular file".into())
+            Err("Remote destination is not a regular file".into())
         }
         Ok(_) => read_remote_bounded(sftp, path, limit, operation).map(Some),
         Err(error) if is_sftp_missing(&error) => Ok(None),
-        Err(error) => Err(format!("failed to inspect remote file: {error}")),
+        Err(error) => Err(format!("Failed to inspect remote file: {error}")),
     }
 }
 
@@ -1979,13 +1979,13 @@ fn read_remote_bounded(
     operation.ensure_active()?;
     let stat = sftp
         .lstat(Path::new(path))
-        .map_err(|error| format!("failed to inspect remote file: {error}"))?;
+        .map_err(|error| format!("Failed to inspect remote file: {error}"))?;
     if remote_kind(stat.perm) != "file" || stat.size.unwrap_or(0) > limit {
-        return Err("remote file failed native type or size bounds".into());
+        return Err("Remote file failed native type or size bounds".into());
     }
     let mut file = sftp
         .open(Path::new(path))
-        .map_err(|error| format!("failed to open remote file: {error}"))?;
+        .map_err(|error| format!("Failed to open remote file: {error}"))?;
     read_stream_bounded(&mut file, limit, operation)
 }
 
@@ -2001,7 +2001,7 @@ fn write_remote_atomic(
     let parent = destination
         .rsplit_once('/')
         .map(|(parent, _)| if parent.is_empty() { "/" } else { parent })
-        .ok_or_else(|| "remote destination has no parent".to_string())?;
+        .ok_or_else(|| "Remote destination has no parent".to_string())?;
     let parent = resolve_remote_path(sftp, root, parent, false)?;
     let existing_permissions = sftp
         .lstat(Path::new(destination))
@@ -2010,10 +2010,10 @@ fn write_remote_atomic(
     let current = read_remote_optional(sftp, destination, MAX_TRANSFER_BYTES, operation)?;
     match (expected_before, current.as_deref()) {
         (Some(expected), Some(bytes)) if sha256_hex(bytes) == expected => {}
-        (Some(_), _) => return Err("remote file changed before atomic replacement".into()),
+        (Some(_), _) => return Err("Remote file changed before atomic replacement".into()),
         (None, None) => {}
         (None, Some(_)) => {
-            return Err("remote destination appeared before atomic replacement".into())
+            return Err("Remote destination appeared before atomic replacement".into())
         }
     }
     let name = destination.rsplit('/').next().unwrap_or("file");
@@ -2025,14 +2025,14 @@ fn write_remote_atomic(
             0o600,
             OpenType::File,
         )
-        .map_err(|error| format!("failed to create remote temp file: {error}"))?;
+        .map_err(|error| format!("Failed to create remote temp file: {error}"))?;
     let write_result = write_stream(&mut temp, content, operation);
     if let Err(error) = write_result {
         let _ = sftp.unlink(Path::new(&temp_path));
         return Err(error);
     }
     temp.flush()
-        .map_err(|error| format!("failed to flush remote temp file: {error}"))?;
+        .map_err(|error| format!("Failed to flush remote temp file: {error}"))?;
     drop(temp);
     if let Some(permissions) = existing_permissions {
         sftp.setstat(
@@ -2046,12 +2046,12 @@ fn write_remote_atomic(
                 mtime: None,
             },
         )
-        .map_err(|error| format!("failed to preserve remote permissions: {error}"))?;
+        .map_err(|error| format!("Failed to preserve remote permissions: {error}"))?;
     }
     let staged = read_remote_bounded(sftp, &temp_path, MAX_TRANSFER_BYTES, operation)?;
     if staged != content {
         let _ = sftp.unlink(Path::new(&temp_path));
-        return Err("remote temp file digest verification failed".into());
+        return Err("Remote temp file digest verification failed".into());
     }
     operation.ensure_active()?;
     let _ = resolve_remote_path(sftp, root, &parent, false)?;
@@ -2060,12 +2060,12 @@ fn write_remote_atomic(
         (Some(expected), Some(bytes)) if sha256_hex(bytes) == expected => {}
         (Some(_), _) => {
             let _ = sftp.unlink(Path::new(&temp_path));
-            return Err("remote file drifted during atomic replacement".into());
+            return Err("Remote file drifted during atomic replacement".into());
         }
         (None, None) => {}
         (None, Some(_)) => {
             let _ = sftp.unlink(Path::new(&temp_path));
-            return Err("remote destination appeared during atomic replacement".into());
+            return Err("Remote destination appeared during atomic replacement".into());
         }
     }
     let backup_path = expected_before.map(|_| {
@@ -2080,7 +2080,7 @@ fn write_remote_atomic(
             Path::new(backup),
             Some(RenameFlags::ATOMIC | RenameFlags::NATIVE),
         )
-        .map_err(|error| format!("failed to stage remote replacement backup: {error}"))?;
+        .map_err(|error| format!("Failed to stage remote replacement backup: {error}"))?;
     }
     match sftp.rename(
         Path::new(&temp_path),
@@ -2090,7 +2090,7 @@ fn write_remote_atomic(
         Ok(()) => {
             if let Some(backup) = backup_path {
                 sftp.unlink(Path::new(&backup)).map_err(|error| {
-                    format!("remote write succeeded but backup cleanup failed: {error}")
+                    format!("Remote write succeeded but backup cleanup failed: {error}")
                 })?;
             }
             Ok(())
@@ -2105,11 +2105,11 @@ fn write_remote_atomic(
                 );
                 if rollback.is_err() {
                     return Err(format!(
-                        "remote atomic replacement failed and rollback was not confirmed: {error}"
+                        "Remote atomic replacement failed and rollback was not confirmed: {error}"
                     ));
                 }
             }
-            Err(format!("failed to atomically replace remote file: {error}"))
+            Err(format!("Failed to atomically replace remote file: {error}"))
         }
     }
 }
@@ -2124,7 +2124,7 @@ fn read_stream_bounded<R: Read>(
             .ensure_active()
             .map_err(|_| super::scoped_read::ScopeReadError::Cancelled)
     })
-    .map_err(|error| format!("native bounded read failed: {error}"))
+    .map_err(|error| format!("Native bounded read failed: {error}"))
 }
 
 fn write_stream<W: Write>(
@@ -2136,7 +2136,7 @@ fn write_stream<W: Write>(
         operation.ensure_active()?;
         writer
             .write_all(chunk)
-            .map_err(|error| format!("failed to write file bytes: {error}"))?;
+            .map_err(|error| format!("Failed to write file bytes: {error}"))?;
     }
     Ok(())
 }
@@ -2195,7 +2195,7 @@ fn path_is_sensitive(path: &str) -> bool {
 
 fn listing_digest<T: Serialize>(value: &T) -> Result<String, String> {
     let bytes = serde_json::to_vec(value)
-        .map_err(|error| format!("failed to bind pagination cursor: {error}"))?;
+        .map_err(|error| format!("Failed to bind pagination cursor: {error}"))?;
     Ok(sha256_hex(&bytes))
 }
 
@@ -2209,18 +2209,18 @@ fn decode_cursor(cursor: Option<&str>, digest: &str) -> Result<usize, String> {
     };
     let decoded = URL_SAFE_NO_PAD
         .decode(cursor)
-        .map_err(|_| "pagination cursor is invalid".to_string())?;
+        .map_err(|_| "Pagination cursor is invalid".to_string())?;
     let decoded =
-        std::str::from_utf8(&decoded).map_err(|_| "pagination cursor is invalid".to_string())?;
+        std::str::from_utf8(&decoded).map_err(|_| "Pagination cursor is invalid".to_string())?;
     let (offset, cursor_digest) = decoded
         .split_once(':')
-        .ok_or_else(|| "pagination cursor is invalid".to_string())?;
+        .ok_or_else(|| "Pagination cursor is invalid".to_string())?;
     if cursor_digest != digest {
-        return Err("pagination cursor no longer matches the target snapshot".into());
+        return Err("Pagination cursor no longer matches the target snapshot".into());
     }
     offset
         .parse::<usize>()
-        .map_err(|_| "pagination cursor is invalid".to_string())
+        .map_err(|_| "Pagination cursor is invalid".to_string())
 }
 
 fn matches_globs(path: &str, globs: &[String]) -> bool {
@@ -2607,12 +2607,12 @@ mod tests {
         for requested in requests {
             assert_eq!(
                 resolve_local_search_path(&root, requested).unwrap_err(),
-                "local path traversal is denied",
+                "Local path traversal is denied",
                 "search accepted or misclassified {requested}"
             );
             assert_eq!(
                 resolve_local_destination(&root, requested).unwrap_err(),
-                "local path traversal is denied",
+                "Local path traversal is denied",
                 "destination accepted or misclassified {requested}"
             );
         }
@@ -2643,7 +2643,7 @@ mod tests {
 
         assert_eq!(
             operation.ensure_active().unwrap_err(),
-            "file operation was cancelled"
+            "File operation was cancelled"
         );
     }
 
@@ -2661,19 +2661,19 @@ mod tests {
         };
         assert_eq!(
             validate_overwrite_precondition(&base, Some(content)).unwrap_err(),
-            "transfer destination already exists"
+            "Transfer destination already exists"
         );
 
         let mut overwrite = base;
         overwrite.overwrite = true;
         assert_eq!(
             validate_overwrite_precondition(&overwrite, Some(content)).unwrap_err(),
-            "overwrite requires the destination digest precondition"
+            "Overwrite requires the destination digest precondition"
         );
         overwrite.destination_sha256 = Some(sha256_hex(b"wrong"));
         assert_eq!(
             validate_overwrite_precondition(&overwrite, Some(content)).unwrap_err(),
-            "transfer destination digest precondition failed"
+            "Transfer destination digest precondition failed"
         );
         overwrite.destination_sha256 = Some(sha256_hex(content));
         validate_overwrite_precondition(&overwrite, Some(content)).unwrap();

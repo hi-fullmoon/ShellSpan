@@ -63,6 +63,29 @@ pub(crate) enum AgentDriverSettlement {
     Failed,
 }
 
+struct PetdexDriverLease<'a> {
+    sessions: &'a AgentSessionStore,
+    entry: &'a AgentEntry,
+    generation: u64,
+    settled: bool,
+}
+
+impl Drop for PetdexDriverLease<'_> {
+    fn drop(&mut self) {
+        if !self.settled {
+            self.sessions.settle_petdex_driver(
+                &self.entry.session_id,
+                self.generation,
+                if self.entry.cancellation().is_cancelled() {
+                    AgentDriverSettlement::Cancelled
+                } else {
+                    AgentDriverSettlement::Failed
+                },
+            );
+        }
+    }
+}
+
 pub(crate) async fn drive_agent(
     sessions: AgentSessionStore,
     entry: Arc<AgentEntry>,
@@ -71,40 +94,54 @@ pub(crate) async fn drive_agent(
     compactions: AgentCompactionManager,
     config: AgentDriverConfig,
 ) -> AgentDriverSettlement {
-    match drive_agent_inner(&sessions, &entry, &hooks, &tools, &compactions, config).await {
-        Ok(settlement) => settlement,
-        Err(message) if message.starts_with("ephemeralInputRecoveryRequired:") => {
-            match tools.mark_ephemeral_input_failure(&entry, &message) {
-                Ok(()) if entry.phase().ok() == Some(AgentLifecyclePhase::Idle) => {
-                    AgentDriverSettlement::Idle
-                }
-                Ok(()) => AgentDriverSettlement::Waiting,
-                Err(error) => {
-                    let reason = format!("runtimeFailure: {error}");
-                    let _ = close_open_scope(&sessions, &entry, &reason);
-                    let _ =
-                        sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason);
-                    let _ = entry.set_phase(AgentLifecyclePhase::Stopping);
-                    AgentDriverSettlement::Failed
+    let generation = sessions.begin_petdex_driver(&entry.session_id);
+    let mut observation = PetdexDriverLease {
+        sessions: &sessions,
+        entry: &entry,
+        generation,
+        settled: false,
+    };
+    let settlement =
+        match drive_agent_inner(&sessions, &entry, &hooks, &tools, &compactions, config).await {
+            Ok(settlement) => settlement,
+            Err(message) if message.starts_with("ephemeralInputRecoveryRequired:") => {
+                match tools.mark_ephemeral_input_failure(&entry, &message) {
+                    Ok(()) if entry.phase().ok() == Some(AgentLifecyclePhase::Idle) => {
+                        AgentDriverSettlement::Idle
+                    }
+                    Ok(()) => AgentDriverSettlement::Waiting,
+                    Err(error) => {
+                        let reason = format!("runtimeFailure: {error}");
+                        let _ = close_open_scope(&sessions, &entry, &reason);
+                        let _ = sessions.terminate(
+                            &entry.session_id,
+                            AgentSessionStatus::Failed,
+                            reason,
+                        );
+                        let _ = entry.set_phase(AgentLifecyclePhase::Stopping);
+                        AgentDriverSettlement::Failed
+                    }
                 }
             }
-        }
-        Err(message) if message.starts_with("toolSchedulerFailure:") => {
-            let _ = tools.mark_scheduler_failure(&entry, &message);
-            AgentDriverSettlement::Waiting
-        }
-        Err(_) if entry.cancellation().is_cancelled() => {
-            let _ = close_open_scope(&sessions, &entry, "cancelled");
-            AgentDriverSettlement::Cancelled
-        }
-        Err(message) => {
-            let reason = format!("runtimeFailure: {message}");
-            let _ = close_open_scope(&sessions, &entry, &reason);
-            let _ = sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason);
-            let _ = entry.set_phase(AgentLifecyclePhase::Stopping);
-            AgentDriverSettlement::Failed
-        }
-    }
+            Err(message) if message.starts_with("toolSchedulerFailure:") => {
+                let _ = tools.mark_scheduler_failure(&entry, &message);
+                AgentDriverSettlement::Waiting
+            }
+            Err(_) if entry.cancellation().is_cancelled() => {
+                let _ = close_open_scope(&sessions, &entry, "cancelled");
+                AgentDriverSettlement::Cancelled
+            }
+            Err(message) => {
+                let reason = format!("runtimeFailure: {message}");
+                let _ = close_open_scope(&sessions, &entry, &reason);
+                let _ = sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason);
+                let _ = entry.set_phase(AgentLifecyclePhase::Stopping);
+                AgentDriverSettlement::Failed
+            }
+        };
+    sessions.settle_petdex_driver(&entry.session_id, generation, settlement);
+    observation.settled = true;
+    settlement
 }
 
 async fn drive_agent_inner(

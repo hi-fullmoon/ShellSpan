@@ -34,7 +34,7 @@ use crate::{
         SessionStatus,
     },
     observe_terminal_raw_output,
-    petdex::{self, PetdexEvent},
+    petdex::{ActivityGuard, ActivityPhase},
     terminal_integration::{
         quote_remote_posix, remote_posix_bootstrap, TerminalIntegrationStreamDecoder,
         TerminalShellKind,
@@ -439,15 +439,15 @@ pub(crate) fn run_ssh_session<
     app: &AppHandle,
     session_id: &str,
     request: &SessionCreateRequest,
-    rx: Receiver<SessionCommand>,
+    rx: &Receiver<SessionCommand>,
     wake: SessionWakeSource,
     output_ready: Arc<AtomicBool>,
     output_paused: Arc<AtomicBool>,
     bootstrap_remote_integration: bool,
     on_broker_attached: A,
     on_connected: C,
+    activity: &mut ActivityGuard,
 ) -> Result<Option<String>, ConnectionError> {
-    petdex::notify(app, PetdexEvent::SshConnecting(session_id.to_string()));
     info!(
         "SSH session connecting session_id={} {}",
         session_id,
@@ -646,7 +646,7 @@ pub(crate) fn run_ssh_session<
                             Some("shell ready".to_string()),
                         )
                     },
-                    || petdex::notify(app, PetdexEvent::SshConnected(session_id.to_string())),
+                    || activity.transition(ActivityPhase::Connected),
                     on_connected,
                 )
                 .map_err(|message| ConnectionError::Other { message })?;
@@ -861,7 +861,7 @@ fn session_loop(
     session_id: &str,
     session: &Session,
     channel: &mut Channel,
-    rx: Receiver<SessionCommand>,
+    rx: &Receiver<SessionCommand>,
     wake: &SessionWakeSource,
     output_ready: &AtomicBool,
     output_paused: &AtomicBool,
@@ -908,7 +908,7 @@ fn session_loop_inner(
     session_id: &str,
     session: &Session,
     channel: &mut Channel,
-    rx: Receiver<SessionCommand>,
+    rx: &Receiver<SessionCommand>,
     wake: &SessionWakeSource,
     output_ready: &AtomicBool,
     output_paused: &AtomicBool,

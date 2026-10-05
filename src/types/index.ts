@@ -19,12 +19,37 @@ export type TerminalBellStyle = 'none' | 'sound';
 export type TerminalRightClickBehavior = 'paste' | 'copyPaste' | 'none';
 export type SftpConflictPolicy = 'ask' | 'overwrite' | 'skip';
 export type WorkbenchTab = 'connections' | 'deployments' | 'knownHosts' | 'keychain' | 'monitor' | 'logs';
-export type SettingsSection = 'appearance' | 'general' | 'terminal' | 'sftp' | 'ai' | 'shortcuts' | 'experimental';
+export type SettingsSection = 'appearance' | 'general' | 'terminal' | 'sftp' | 'ai' | 'shortcuts' | 'experimental' | 'feedback';
 export type PetdexConnectionStatus =
+  | 'disabled'
+  | 'checking'
   | 'notDetected'
   | 'connected'
-  | 'notRunning'
+  | 'unreachable'
+  | 'unauthorized'
+  | 'rejected'
+  | 'tokenUnreadable'
+  | 'tokenInvalid'
   | 'connectionError';
+export type PetdexAction = 'idle' | 'waiting' | 'waving' | 'running' | 'jumping' | 'failed';
+export interface PetdexCategories { ssh: boolean; sftp: boolean; ai: boolean }
+export type PetdexErrorReason = 'tokenMissing' | 'tokenUnreadable' | 'tokenInvalid'
+  | 'transport' | 'unauthorized' | 'rejected';
+export interface PetdexDiagnostic {
+  revision: number;
+  status: PetdexConnectionStatus;
+  errorReason: PetdexErrorReason | null;
+  targetAction: PetdexAction | null;
+  /** Unix milliseconds of HTTP success, not confirmation of visible animation. */
+  lastSuccessAt: number | null;
+}
+export type PetdexPreviewOutcome = 'requested' | 'overridden' | 'failed' | 'disabled';
+export type PetdexHealth = 'reachable' | 'unavailable' | 'disabled';
+export interface PetdexCheckResult { diagnostic: PetdexDiagnostic; health: PetdexHealth }
+export interface PetdexTestResult {
+  diagnostic: PetdexDiagnostic;
+  preview: PetdexPreviewOutcome;
+}
 export type LogSource = 'frontend' | 'backend';
 export type ShortcutAction =
   | 'openWorkbench'
