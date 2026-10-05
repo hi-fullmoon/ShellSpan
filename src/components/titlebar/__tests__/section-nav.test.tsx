@@ -22,6 +22,25 @@ describe('SectionNav', () => {
     expect(container.querySelector('[data-tauri-drag-region]')).not.toBeInTheDocument();
   });
 
+  it('renders equal-height icon capsules with readable labels and keyboard focus styling', () => {
+    render(<SectionNav />);
+
+    for (const label of ['section.workbench', 'section.terminal', 'section.sftp']) {
+      const button = screen.getByRole('button', { name: label });
+      expect(button).toHaveClass('py-1.5', 'rounded-full', 'gap-1', 'shrink-0', 'whitespace-nowrap', 'focus-visible:ring-2');
+      expect(button).not.toHaveClass('h-8');
+      expect(button.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+      expect(button.querySelector('span')).toHaveClass('translate-y-px');
+      expect(button).toHaveTextContent(label);
+    }
+
+    expect(screen.getByRole('button', { name: 'section.workbench' })).toHaveClass('bg-app-tab-active', 'text-app-tab-accent');
+    fireEvent.click(screen.getByRole('button', { name: 'section.sftp' }), { detail: 0 });
+    expect(screen.getByRole('button', { name: 'section.sftp' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('button', { name: 'section.sftp' })).toHaveClass('bg-app-tab-active', 'text-app-tab-accent');
+    expect(screen.getByRole('button', { name: 'section.workbench' })).not.toHaveClass('bg-app-tab-active');
+  });
+
   it('activates a section when WKWebView only delivers pointerup', () => {
     render(<SectionNav />);
     expect(useAppStore.getState().activeSection).toBe('workbench');
