@@ -580,7 +580,7 @@ typeset -gi __shellspan_integration_active=1
 typeset -gi __shellspan_command_active=0
 __shellspan_emit() {{
   (( __shellspan_integration_active )) || return 0
-  builtin printf '%s\0' "$@" 2>/dev/null >"$__shellspan_control_path" || {{
+  {{ builtin printf '%s\0' "$@" >"$__shellspan_control_path"; }} 2>/dev/null || {{
     __shellspan_integration_active=0
     return 0
   }}
@@ -605,6 +605,12 @@ add-zsh-hook precmd __shellspan_precmd
 add-zsh-hook preexec __shellspan_preexec
 add-zsh-hook chpwd __shellspan_chpwd
 {prompt_end_hook}
+# System zshrc may derive HISTFILE from our temporary ZDOTDIR. Keep history
+# in the user's home when that default would outlive the control directory.
+# Preserve all explicitly configured history paths outside the bootstrap root.
+if [[ ${{HISTFILE-}} == "${{__shellspan_control_path:h}}/.zsh_history" ]]; then
+  HISTFILE="$HOME/.zsh_history"
+fi
 unset ZDOTDIR
 __shellspan_emit R zsh
 "#

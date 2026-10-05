@@ -745,6 +745,7 @@ impl AgentRuntime {
         has_pending_user_input: bool,
         has_unverified_user_submission: bool,
         has_credential_prompt: bool,
+        reduced_motion: bool,
     ) -> Result<bool, String> {
         self.native_engine.acknowledge_terminal_lease_ready(
             session_id,
@@ -755,6 +756,7 @@ impl AgentRuntime {
             has_pending_user_input,
             has_unverified_user_submission,
             has_credential_prompt,
+            reduced_motion,
         )
     }
 
@@ -844,6 +846,13 @@ impl AgentRuntime {
             }
             publisher(event);
         }))
+    }
+
+    pub(crate) fn attach_petdex(
+        &self,
+        adapter: crate::petdex::PetdexAdapter,
+    ) -> Result<(), String> {
+        self.sessions.attach_petdex(adapter)
     }
 
     pub(crate) fn create_session(

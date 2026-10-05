@@ -1,40 +1,41 @@
-import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { PetdexConnectionStatus } from '@/types';
+import type { UnlistenFn } from '@tauri-apps/api/event';
+import type { PetdexCategories, PetdexDiagnostic, PetdexTestResult } from '@/types';
+import {
+  invokePetdexGetStatus,
+  invokePetdexCheckHealth,
+  invokePetdexSetEnabled,
+  invokePetdexTestConnection,
+  listenPetdexStatus,
+} from '@/lib/ipc/tauri';
+import { isPetdexDiagnostic, isPetdexTestResult, isPetdexCheckResult } from './diagnostic';
 
-const PETDEX_STATUS_EVENT = 'petdex-status';
-const PETDEX_CONNECTION_STATUSES: readonly PetdexConnectionStatus[] = [
-  'notDetected',
-  'connected',
-  'notRunning',
-  'connectionError',
-];
-
-export function isPetdexConnectionStatus(value: unknown): value is PetdexConnectionStatus {
-  return typeof value === 'string'
-    && PETDEX_CONNECTION_STATUSES.includes(value as PetdexConnectionStatus);
+export async function checkPetdexHealth() {
+  const result = await invokePetdexCheckHealth();
+  if (!isPetdexCheckResult(result)) throw new Error('petdex-invalid-check-result');
+  return result;
 }
 
-function normalizeStatus(value: unknown): PetdexConnectionStatus {
-  return isPetdexConnectionStatus(value) ? value : 'connectionError';
+function validateDiagnostic(value: unknown): PetdexDiagnostic {
+  if (!isPetdexDiagnostic(value)) throw new Error('petdex-invalid-diagnostic');
+  return value;
 }
 
-export async function configurePetdex(enabled: boolean): Promise<PetdexConnectionStatus> {
-  return normalizeStatus(await invoke<unknown>('petdex_set_enabled', { enabled }));
+export async function configurePetdex(enabled: boolean, categories?: PetdexCategories): Promise<PetdexDiagnostic> {
+  return validateDiagnostic(await invokePetdexSetEnabled(enabled, categories));
 }
 
-export async function getPetdexStatus(): Promise<PetdexConnectionStatus> {
-  return normalizeStatus(await invoke<unknown>('petdex_get_status'));
+export async function getPetdexStatus(): Promise<PetdexDiagnostic> {
+  return validateDiagnostic(await invokePetdexGetStatus());
 }
 
-export async function testPetdexConnection(): Promise<PetdexConnectionStatus> {
-  return normalizeStatus(await invoke<unknown>('petdex_test_connection'));
+export async function testPetdexConnection(): Promise<PetdexTestResult> {
+  const result = await invokePetdexTestConnection();
+  if (!isPetdexTestResult(result)) throw new Error('petdex-invalid-test-result');
+  return result;
 }
 
-export function listenToPetdexStatus(
-  callback: (status: PetdexConnectionStatus) => void,
-): Promise<UnlistenFn> {
-  return listen<unknown>(PETDEX_STATUS_EVENT, (event) => {
-    callback(normalizeStatus(event.payload));
+export function listenToPetdexStatus(callback: (snapshot: PetdexDiagnostic) => void): Promise<UnlistenFn> {
+  return listenPetdexStatus((snapshot) => {
+    if (isPetdexDiagnostic(snapshot)) callback(snapshot);
   });
 }

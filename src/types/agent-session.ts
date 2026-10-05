@@ -79,8 +79,9 @@ export interface AgentTerminalLeaseEvent {
   taskId: string;
   operationId: string;
   acquiredAtUnixMs: number;
-  state: 'acquired' | 'released';
+  state: 'acquired' | 'activity' | 'released';
   commandDisplay?: string;
+  commandPhase?: 'typing' | 'running';
   reason?: AgentTerminalLeaseReleaseReason;
 }
 
@@ -93,6 +94,7 @@ export interface AgentTerminalLeaseControlInput {
   hasPendingUserInput?: boolean;
   hasUnverifiedUserSubmission?: boolean;
   hasCredentialPrompt?: boolean;
+  reducedMotion?: boolean;
 }
 
 export type AgentSessionInboxLane = 'nextTurn' | 'nextStep';

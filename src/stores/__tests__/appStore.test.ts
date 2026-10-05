@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, it, beforeEach, vi } from 'vitest';
+import type { PetdexDiagnostic } from '@/types';
+import type { PetdexSettings } from '@/lib/petdex/messages';
+
+const disabled: PetdexDiagnostic = { revision: 0, status: 'disabled', errorReason: null, targetAction: null, lastSuccessAt: null };
 
 const mocks = vi.hoisted(() => ({
   configurePetdex: vi.fn(),
@@ -6,8 +10,13 @@ const mocks = vi.hoisted(() => ({
   savePreferences: vi.fn(),
 }));
 
-vi.mock('@/lib/petdex/petdex', () => ({ configurePetdex: mocks.configurePetdex }));
 vi.mock('@/lib/ipc/tauri', () => ({
+  invokePetdexConfigure: async (configuration: PetdexSettings) => ({
+    effective: configuration,
+    diagnostic: await mocks.configurePetdex(configuration.enabled, configuration.categories),
+    cleanupOutcome: 'notNeeded',
+    messageDiagnostic: { revision: 1, status: 'disabled', acceptedCount: 0, lastAcceptedAt: null, usedSlotCount: 0, errorReason: null, unsupported: false, cleanupOutcome: 'notNeeded' },
+  }),
   invokeLoadPreferences: mocks.loadPreferences,
   invokeSavePreferences: mocks.savePreferences,
 }));
@@ -35,7 +44,7 @@ function deferred<T>() {
 describe('appStore', () => {
   beforeEach(() => {
     vi.useRealTimers();
-    mocks.configurePetdex.mockReset().mockResolvedValue('notDetected');
+    mocks.configurePetdex.mockReset().mockResolvedValue(disabled);
     mocks.loadPreferences.mockReset().mockResolvedValue([]);
     mocks.savePreferences.mockReset().mockResolvedValue(undefined);
     useAppStore.setState(initialState, true);
@@ -68,9 +77,9 @@ describe('appStore', () => {
       petdexRequestedEnabled: true,
       petdexConfiguring: true,
     });
-    await expect(confirmation).resolves.toBe('notDetected');
+    await expect(confirmation).resolves.toEqual(disabled);
     expect(useAppStore.getState().petdexEnabled).toBe(true);
-    expect(mocks.configurePetdex).toHaveBeenCalledWith(true);
+    expect(mocks.configurePetdex).toHaveBeenCalledWith(true, { ssh: true, sftp: true, ai: false });
   });
 
   it('rolls back the requested state when backend confirmation fails', async () => {
@@ -89,8 +98,8 @@ describe('appStore', () => {
   });
 
   it('serializes rapid changes and commits only the latest intent', async () => {
-    const enable = deferred<'notDetected'>();
-    const disable = deferred<'notDetected'>();
+    const enable = deferred<PetdexDiagnostic>();
+    const disable = deferred<PetdexDiagnostic>();
     mocks.configurePetdex
       .mockImplementationOnce(() => enable.promise)
       .mockImplementationOnce(() => disable.promise);
@@ -104,7 +113,7 @@ describe('appStore', () => {
       petdexConfiguring: true,
     });
 
-    enable.resolve('notDetected');
+    enable.resolve(disabled);
     await enabling;
     expect(useAppStore.getState()).toMatchObject({
       petdexEnabled: false,
@@ -113,19 +122,22 @@ describe('appStore', () => {
     });
 
     await Promise.resolve();
-    disable.resolve('notDetected');
+    disable.resolve(disabled);
     await disabling;
     expect(useAppStore.getState()).toMatchObject({
       petdexEnabled: false,
       petdexRequestedEnabled: null,
       petdexConfiguring: false,
     });
-    expect(mocks.configurePetdex.mock.calls).toEqual([[true], [false]]);
+    expect(mocks.configurePetdex.mock.calls).toEqual([
+      [true, { ssh: true, sftp: true, ai: false }],
+      [false, { ssh: true, sftp: true, ai: false }],
+    ]);
   });
 
   it('rolls back to the actual backend state when the latest rapid change fails', async () => {
-    const enable = deferred<'notDetected'>();
-    const disable = deferred<'notDetected'>();
+    const enable = deferred<PetdexDiagnostic>();
+    const disable = deferred<PetdexDiagnostic>();
     mocks.configurePetdex
       .mockImplementationOnce(() => enable.promise)
       .mockImplementationOnce(() => disable.promise);
@@ -133,7 +145,7 @@ describe('appStore', () => {
     const enabling = useAppStore.getState().setPetdexEnabled(true);
     await Promise.resolve();
     const disabling = useAppStore.getState().setPetdexEnabled(false);
-    enable.resolve('notDetected');
+    enable.resolve(disabled);
     await enabling;
     expect(useAppStore.getState()).toMatchObject({
       petdexBackendEnabled: true,
@@ -152,19 +164,19 @@ describe('appStore', () => {
     });
   });
 
-  it('hydrates and persists the Petdex opt-in as a boolean preference', async () => {
+  it('migrates the legacy opt-in through the configuration command without debounced overwrites', async () => {
     mocks.loadPreferences.mockResolvedValue([['petdexEnabled', 'true']]);
 
     await useAppStore.getState().hydrateFromDb();
 
     expect(useAppStore.getState().petdexEnabled).toBe(true);
-    expect(mocks.configurePetdex).toHaveBeenCalledWith(true);
+    expect(mocks.configurePetdex).toHaveBeenCalledWith(true, { ssh: true, sftp: true, ai: false });
 
     vi.useFakeTimers();
     await useAppStore.getState().setPetdexEnabled(false);
     await vi.advanceTimersByTimeAsync(500);
 
-    expect(mocks.savePreferences).toHaveBeenCalledWith(
+    expect(mocks.savePreferences).not.toHaveBeenCalledWith(
       expect.arrayContaining([['petdexEnabled', 'false']]),
     );
   });

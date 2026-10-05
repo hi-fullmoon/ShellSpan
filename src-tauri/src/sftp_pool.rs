@@ -44,6 +44,7 @@ pub(crate) struct JumpHostKey {
 
 #[derive(Default, Clone)]
 pub(crate) struct SftpPool {
+    activity_owners: Arc<Mutex<HashMap<ConnectionKey, std::sync::Weak<uuid::Uuid>>>>,
     sessions: Arc<Mutex<HashMap<ConnectionKey, PooledEntry>>>,
     in_flight: Arc<Mutex<HashMap<ConnectionKey, Arc<ConnectSlot>>>>,
 }
@@ -154,6 +155,29 @@ impl ConnectSlot {
 }
 
 impl SftpPool {
+    // Use the pool's authoritative connection equality, never a UI tab or a
+    // newly invented host/credential digest. Only a random opaque handle leaves
+    // this registry; stale entries are released with their last activity.
+    pub(crate) fn activity_owner(
+        &self,
+        request: &RemoteConnectionRequest,
+    ) -> crate::petdex::types::ActivityOwner {
+        let mut owners = self
+            .activity_owners
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        owners.retain(|_, owner| owner.strong_count() > 0);
+        let key = connection_key(request);
+        let owner = owners
+            .get(&key)
+            .and_then(std::sync::Weak::upgrade)
+            .unwrap_or_else(|| {
+                let id = Arc::new(uuid::Uuid::new_v4());
+                owners.insert(key, Arc::downgrade(&id));
+                id
+            });
+        crate::petdex::types::ActivityOwner::Connection(owner)
+    }
     pub(crate) fn get(
         &self,
         request: &RemoteConnectionRequest,

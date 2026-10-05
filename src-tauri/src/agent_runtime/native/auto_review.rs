@@ -2,9 +2,11 @@
 use std::path::{Component, Path};
 use std::process::Command;
 
+#[cfg(unix)]
+use crate::agent_runtime::ExecCommandArgumentsNative;
 use crate::agent_runtime::{
     AgentObservedEffectNative, AgentPermissionModeNative, AgentToolCallNative,
-    AgentToolTargetNative, ExecCommandArgumentsNative,
+    AgentToolTargetNative,
 };
 
 #[cfg(unix)]
@@ -337,12 +339,28 @@ mod tests {
         review_call(mode, call, &effect, &scope)
     }
 
+    #[cfg(unix)]
     fn command(root: &Path, script: &str) -> AgentToolCallNative {
         call(
             root,
             "exec_command",
             json!({"command": script, "explanation": "inspect the current workspace", "channel":"direct", "cwd": root}),
         )
+    }
+
+    #[cfg(not(unix))]
+    #[test]
+    fn local_commands_require_manual_approval_on_non_unix_platforms() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(workspace.path()).unwrap();
+        let call = call(
+            &root,
+            "exec_command",
+            json!({"command":"pwd", "explanation":"inspect the current workspace", "channel":"direct", "cwd":root}),
+        );
+        let decision = review(AgentPermissionModeNative::ScopedAutopilot, &call);
+        assert!(decision.requires_approval);
+        assert!(decision.command.is_none());
     }
 
     #[cfg(unix)]

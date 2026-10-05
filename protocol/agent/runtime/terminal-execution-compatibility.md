@@ -164,6 +164,41 @@ or terminal workspace field to restore. Existing persisted
 `executionSurface = boundTerminal` values now select the frozen user terminal;
 they do not authorize rebinding an old Agent Session to a replacement transport.
 
+## Visible command typing
+
+The frontend lease-ready acknowledgement accepts optional `reducedMotion`.
+Missing preferences default to reduced motion for older clients. The desktop
+passes the current `prefers-reduced-motion` preference for each operation.
+Without reduced motion, command input advances in Unicode grapheme clusters
+at 35 ms intervals, batching long commands into at most 48 writes (a 1.7 s
+input budget). A 150 ms pause precedes the submit key. Output remains live.
+Animated chunks use normal text input rather than repeated bracketed pastes,
+avoiding paste-highlight redraws when the command wraps across terminal rows.
+Reduced motion submits the complete input without animation or pause.
+
+Lease events additionally accept `state: activity` and
+`commandPhase: typing | running`. They carry no command text and only update
+the matching active lease; they do not acquire ownership or require another
+readiness acknowledgement. The existing status bar displays the phase.
+
+Each input enqueue and the final submit share a per-operation gate with
+cancellation and takeover. Cancelling before submit discards the shell edit
+buffer with the existing scoped interrupt and settles as cancelled/taken over;
+the submit key is never sent. Execution timeout starts after submission.
+Every bracketed-paste envelope is closed within one enqueue. Visible commands
+retain the production single-line contract: newlines, tabs and other control
+characters are rejected before acquiring a lease or writing to the PTY.
+Multiline scripts use Direct execution. Typing does not expand shell support.
+
+The broker tracks pending command input independently of the Agent lease.
+Releasing or retiring a command cannot unlock a potentially dirty edit buffer.
+Only an accepted command-start/prompt-end event or a new terminal generation
+clears this guard. If integration fails during typing, input stops, cleanup
+attempts a scoped interrupt, and subsequent user input is rejected with
+`TERMINAL_INPUT_RECOVERY_REQUIRED` until the prompt is confirmed or the terminal
+is reconnected. Raw terminal output does not clear the guard. Commands are
+never replayed.
+
 ## Phase 6 counters
 
 `get_terminal_broker_snapshot` exposes read-only, process-lifetime unsigned

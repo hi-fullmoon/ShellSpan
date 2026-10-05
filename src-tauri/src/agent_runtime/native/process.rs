@@ -257,7 +257,7 @@ impl ManagedProcessNative {
         let state = self
             .state
             .lock()
-            .map_err(|_| "process state is unavailable".to_string())?;
+            .map_err(|_| "Process state is unavailable".to_string())?;
         Ok(ProcessSnapshotNative {
             process_handle: self.process_handle.clone(),
             target_id: self.target_id.clone(),
@@ -284,11 +284,11 @@ impl ManagedProcessNative {
         let state = self
             .state
             .lock()
-            .map_err(|_| "process state is unavailable".to_string())?;
+            .map_err(|_| "Process state is unavailable".to_string())?;
         let (state, _) = self
             .changed
             .wait_timeout_while(state, timeout, |state| !state.lifecycle.is_terminal())
-            .map_err(|_| "process state is unavailable".to_string())?;
+            .map_err(|_| "Process state is unavailable".to_string())?;
         Ok(ProcessSnapshotNative {
             process_handle: self.process_handle.clone(),
             target_id: self.target_id.clone(),
@@ -321,7 +321,7 @@ impl ManagedProcessNative {
 
     pub(crate) fn write_stdin(&self, input: String, close: bool) -> Result<usize, String> {
         if self.snapshot()?.state.is_terminal() {
-            return Err("process is no longer running".into());
+            return Err("Process is no longer running".into());
         }
         let (sender, receiver) = mpsc::sync_channel(1);
         self.controls
@@ -330,10 +330,10 @@ impl ManagedProcessNative {
                 close,
                 response: sender,
             })
-            .map_err(|_| "process input channel is unavailable".to_string())?;
+            .map_err(|_| "Process input channel is unavailable".to_string())?;
         receiver
             .recv_timeout(Duration::from_secs(5))
-            .map_err(|_| "process input acknowledgement timed out".to_string())?
+            .map_err(|_| "Process input acknowledgement timed out".to_string())?
     }
 
     pub(crate) fn kill(
@@ -346,7 +346,7 @@ impl ManagedProcessNative {
         }
         self.controls
             .send(ProcessControlNative::Kill { signal })
-            .map_err(|_| "process control channel is unavailable".to_string())?;
+            .map_err(|_| "Process control channel is unavailable".to_string())?;
         if let Some(cancellation) = &self.io_cancellation {
             cancellation.cancel();
         }
@@ -364,9 +364,9 @@ impl ProcessRegistryNative {
         let processes = self
             .processes
             .lock()
-            .map_err(|_| "process registry is unavailable".to_string())?;
+            .map_err(|_| "Process registry is unavailable".to_string())?;
         if processes.len() >= MAX_TRACKED_PROCESSES {
-            return Err("native process registry reached its bounded capacity".into());
+            return Err("Native process registry reached its bounded capacity".into());
         }
         Ok(())
     }
@@ -375,15 +375,15 @@ impl ProcessRegistryNative {
         let mut processes = self
             .processes
             .lock()
-            .map_err(|_| "process registry is unavailable".to_string())?;
+            .map_err(|_| "Process registry is unavailable".to_string())?;
         if processes.len() >= MAX_TRACKED_PROCESSES {
-            return Err("native process registry reached its bounded capacity".into());
+            return Err("Native process registry reached its bounded capacity".into());
         }
         if processes
             .insert(process.process_handle.clone(), process)
             .is_some()
         {
-            return Err("duplicate process handle".into());
+            return Err("Duplicate process handle".into());
         }
         Ok(())
     }
@@ -391,17 +391,17 @@ impl ProcessRegistryNative {
     pub(crate) fn get(&self, handle: &str) -> Result<Arc<ManagedProcessNative>, String> {
         self.processes
             .lock()
-            .map_err(|_| "process registry is unavailable".to_string())?
+            .map_err(|_| "Process registry is unavailable".to_string())?
             .get(handle)
             .cloned()
-            .ok_or_else(|| "process handle was not found".to_string())
+            .ok_or_else(|| "Process handle was not found".to_string())
     }
 
     pub(crate) fn running_count(&self) -> Result<usize, String> {
         let processes = self
             .processes
             .lock()
-            .map_err(|_| "process registry is unavailable".to_string())?;
+            .map_err(|_| "Process registry is unavailable".to_string())?;
         let mut running = 0;
         for process in processes.values() {
             if process.snapshot()?.state == ProcessLifecycleNative::Running {
@@ -419,7 +419,7 @@ impl ProcessRegistryNative {
         if state.is_terminal() {
             self.processes
                 .lock()
-                .map_err(|_| "process registry is unavailable".to_string())?
+                .map_err(|_| "Process registry is unavailable".to_string())?
                 .remove(process_handle);
         }
         Ok(())
@@ -429,7 +429,7 @@ impl ProcessRegistryNative {
         let processes = self
             .processes
             .lock()
-            .map_err(|_| "process registry is unavailable".to_string())?
+            .map_err(|_| "Process registry is unavailable".to_string())?
             .values()
             .filter(|process| process.task_id == task_id)
             .cloned()
@@ -440,7 +440,7 @@ impl ProcessRegistryNative {
         let mut registry = self
             .processes
             .lock()
-            .map_err(|_| "process registry is unavailable".to_string())?;
+            .map_err(|_| "Process registry is unavailable".to_string())?;
         for process in processes {
             registry.remove(&process.process_handle);
         }
@@ -451,7 +451,7 @@ impl ProcessRegistryNative {
         let processes = self
             .processes
             .lock()
-            .map_err(|_| "process registry is unavailable".to_string())?;
+            .map_err(|_| "Process registry is unavailable".to_string())?;
         let mut task_ids = processes
             .values()
             .map(|process| process.task_id.clone())
@@ -523,7 +523,7 @@ fn spawn_local_process_with_scope_native(
         #[cfg(test)]
         LocalFilesystemScopeNative::WorkspaceOnly => {
             let root = cwd.ok_or_else(|| {
-                "operator execution requires a frozen local workspace root".to_string()
+                "Operator execution requires a frozen local workspace root".to_string()
             })?;
             let (command, temp) = workspace_scoped_local_shell_command(command, root)?;
             (command, Some(temp))
@@ -583,17 +583,17 @@ fn spawn_local_child_native(
     }
     let mut child = child
         .spawn()
-        .map_err(|error| format!("failed to start local direct command: {error}"))?;
+        .map_err(|error| format!("Failed to start local direct command: {error}"))?;
     let containment = LocalProcessContainmentNative::attach(&mut child)?;
     let stdin = child.stdin.take();
     let stdout = child
         .stdout
         .take()
-        .ok_or_else(|| "local command stdout was not captured".to_string())?;
+        .ok_or_else(|| "Local command stdout was not captured".to_string())?;
     let stderr = child
         .stderr
         .take()
-        .ok_or_else(|| "local command stderr was not captured".to_string())?;
+        .ok_or_else(|| "Local command stderr was not captured".to_string())?;
     let (control_tx, control_rx) = mpsc::channel();
     let process = ManagedProcessNative::new(
         task_id,
@@ -625,14 +625,14 @@ fn spawn_local_child_native(
 #[cfg(test)]
 fn canonical_workspace_root_native(root: &Path) -> Result<PathBuf, String> {
     let metadata = std::fs::symlink_metadata(root)
-        .map_err(|error| format!("failed to inspect operator workspace root: {error}"))?;
+        .map_err(|error| format!("Failed to inspect operator workspace root: {error}"))?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err("operator workspace root must be a real directory".into());
+        return Err("Operator workspace root must be a real directory".into());
     }
     let canonical = std::fs::canonicalize(root)
-        .map_err(|error| format!("failed to canonicalize operator workspace root: {error}"))?;
+        .map_err(|error| format!("Failed to canonicalize operator workspace root: {error}"))?;
     if canonical.parent().is_none() {
-        return Err("filesystem roots cannot be operator workspaces".into());
+        return Err("Filesystem roots cannot be operator workspaces".into());
     }
     Ok(canonical)
 }
@@ -642,7 +642,7 @@ fn sandbox_temp_native() -> Result<tempfile::TempDir, String> {
     tempfile::Builder::new()
         .prefix("shellspan-agent-")
         .tempdir()
-        .map_err(|error| format!("failed to create Agent sandbox temp directory: {error}"))
+        .map_err(|error| format!("Failed to create Agent sandbox temp directory: {error}"))
 }
 
 #[cfg(target_os = "macos")]
@@ -654,7 +654,7 @@ fn workspace_scoped_local_shell_command(
     let root = canonical_workspace_root_native(root)?;
     let temp = sandbox_temp_native()?;
     let temp_root = std::fs::canonicalize(temp.path())
-        .map_err(|error| format!("failed to canonicalize Agent sandbox temp directory: {error}"))?;
+        .map_err(|error| format!("Failed to canonicalize Agent sandbox temp directory: {error}"))?;
     let root = seatbelt_string_native(&root)?;
     let temp_path = seatbelt_string_native(&temp_root)?;
     let profile = format!(
@@ -673,9 +673,9 @@ fn workspace_scoped_local_shell_command(
 fn seatbelt_string_native(path: &Path) -> Result<String, String> {
     let value = path
         .to_str()
-        .ok_or_else(|| "operator workspace path is not valid UTF-8".to_string())?;
+        .ok_or_else(|| "Operator workspace path is not valid UTF-8".to_string())?;
     if value.chars().any(char::is_control) {
-        return Err("operator workspace path contains control characters".into());
+        return Err("Operator workspace path contains control characters".into());
     }
     Ok(value.replace('\\', "\\\\").replace('"', "\\\""))
 }
@@ -689,7 +689,7 @@ fn workspace_scoped_local_shell_command(
     let root = canonical_workspace_root_native(root)?;
     let temp = sandbox_temp_native()?;
     let temp_root = std::fs::canonicalize(temp.path())
-        .map_err(|error| format!("failed to canonicalize Agent sandbox temp directory: {error}"))?;
+        .map_err(|error| format!("Failed to canonicalize Agent sandbox temp directory: {error}"))?;
     let mut process = Command::new("bwrap");
     process.args([
         "--die-with-parent",
@@ -716,7 +716,7 @@ fn workspace_scoped_local_shell_command(
     _command: &str,
     _root: &Path,
 ) -> Result<(Command, tempfile::TempDir), String> {
-    Err("operator workspace sandbox is unavailable on this platform".into())
+    Err("Operator workspace sandbox is unavailable on this platform".into())
 }
 
 pub(crate) struct RemoteProcessStartNative {
@@ -750,7 +750,7 @@ pub(super) fn spawn_remote_diagnostic_process_native(
         cancellation: cancellation.child_token(),
         deadline,
         runtime: tokio::runtime::Handle::try_current()
-            .map_err(|_| "remote diagnostics require the native async runtime")?,
+            .map_err(|_| "Remote diagnostics require the native async runtime")?,
     };
     spawn_remote_process_with_io(start, Some(io))
 }
@@ -900,7 +900,7 @@ impl LocalProcessContainmentNative {
             let _ = child.kill();
             let _ = child.wait();
             return Err(format!(
-                "failed to create Windows process containment job: {}",
+                "Failed to create Windows process containment job: {}",
                 std::io::Error::last_os_error()
             ));
         }
@@ -928,7 +928,7 @@ impl LocalProcessContainmentNative {
             let _ = child.kill();
             let _ = child.wait();
             return Err(format!(
-                "failed to contain Windows process tree in a job: {error}"
+                "Failed to contain Windows process tree in a job: {error}"
             ));
         }
         Ok(Self { job })
@@ -978,8 +978,8 @@ fn run_local_worker(
                             .write_all(input.as_bytes())
                             .and_then(|_| writer.flush())
                             .map(|_| input.len())
-                            .map_err(|error| format!("failed to write process stdin: {error}")),
-                        None => Err("process stdin is closed".into()),
+                            .map_err(|error| format!("Failed to write process stdin: {error}")),
+                        None => Err("Process stdin is closed".into()),
                     };
                     if close {
                         stdin.take();
@@ -1030,7 +1030,7 @@ fn run_local_worker(
                     ProcessLifecycleNative::Failed,
                     None,
                     false,
-                    Some(format!("failed to observe local command: {error}")),
+                    Some(format!("Failed to observe local command: {error}")),
                 );
                 return;
             }
@@ -1076,7 +1076,7 @@ fn read_remote_stream(
                 ProcessOutputNative::Stderr(buffer[..count].to_vec())
             }),
             Err(error) if error.kind() == ErrorKind::WouldBlock => return Ok(()),
-            Err(error) => return Err(format!("failed to read remote process output: {error}")),
+            Err(error) => return Err(format!("Failed to read remote process output: {error}")),
         }
     }
     Ok(())
@@ -1146,7 +1146,7 @@ fn run_remote_worker(
                 ProcessLifecycleNative::Failed,
                 None,
                 false,
-                Some(format!("failed to open remote process channel: {error}")),
+                Some(format!("Failed to open remote process channel: {error}")),
             );
             return;
         }
@@ -1164,7 +1164,7 @@ fn run_remote_worker(
             ProcessLifecycleNative::Failed,
             None,
             false,
-            Some(format!("failed to start remote process: {error}")),
+            Some(format!("Failed to start remote process: {error}")),
         );
         return;
     }
@@ -1255,7 +1255,7 @@ fn remote_start_interrupted(
                 return true;
             }
             ProcessControlNative::Write { response, .. } => {
-                let _ = response.send(Err("remote process has not started".into()));
+                let _ = response.send(Err("Remote process has not started".into()));
             }
         }
     }
@@ -1292,7 +1292,7 @@ fn finish_remote_channel(
                     ProcessLifecycleNative::Failed,
                     None,
                     false,
-                    Some(format!("failed to close remote process channel: {error}")),
+                    Some(format!("Failed to close remote process channel: {error}")),
                 );
                 return;
             }
@@ -1321,7 +1321,7 @@ fn finish_remote_channel(
                     None,
                     false,
                     Some(format!(
-                        "failed to read remote process exit status: {error}"
+                        "Failed to read remote process exit status: {error}"
                     )),
                 );
                 return;
@@ -1344,7 +1344,7 @@ fn remote_finalization_interrupted(
                 return true;
             }
             ProcessControlNative::Write { response, .. } => {
-                let _ = response.send(Err("remote process stdin is closed".into()));
+                let _ = response.send(Err("Remote process stdin is closed".into()));
             }
         }
     }
@@ -1365,12 +1365,12 @@ fn write_remote_input(
     let mut written = 0;
     while written < input.len() {
         match channel.write(&input[written..]) {
-            Ok(0) => return Err("remote process stdin closed before accepting input".into()),
+            Ok(0) => return Err("Remote process stdin closed before accepting input".into()),
             Ok(count) => written += count,
             Err(error) if error.kind() == ErrorKind::WouldBlock && Instant::now() < deadline => {
                 thread::sleep(PROCESS_POLL_INTERVAL);
             }
-            Err(error) => return Err(format!("failed to write remote process stdin: {error}")),
+            Err(error) => return Err(format!("Failed to write remote process stdin: {error}")),
         }
     }
     loop {
@@ -1379,13 +1379,13 @@ fn write_remote_input(
             Err(error) if error.kind() == ErrorKind::WouldBlock && Instant::now() < deadline => {
                 thread::sleep(PROCESS_POLL_INTERVAL);
             }
-            Err(error) => return Err(format!("failed to flush remote process stdin: {error}")),
+            Err(error) => return Err(format!("Failed to flush remote process stdin: {error}")),
         }
     }
     if close {
         channel
             .send_eof()
-            .map_err(|error| format!("failed to close remote process stdin: {error}"))?;
+            .map_err(|error| format!("Failed to close remote process stdin: {error}"))?;
     }
     Ok(written)
 }
@@ -1507,6 +1507,10 @@ mod tests {
         assert_eq!(snapshot.stdout, "out");
         assert_eq!(snapshot.stderr, "err");
         assert!(snapshot.process_handle.starts_with("proc-"));
+        assert_eq!(
+            process.write_stdin(String::new(), false).unwrap_err(),
+            "Process is no longer running"
+        );
     }
 
     #[cfg(unix)]
@@ -1629,7 +1633,7 @@ mod tests {
         };
         assert!(canonical_workspace_root_native(root)
             .unwrap_err()
-            .contains("filesystem roots"));
+            .contains("Filesystem roots"));
         let result = spawn_workspace_scoped_local_process_native(
             "invalid-workspace-task".into(),
             "invalid-workspace-request".into(),
@@ -1642,7 +1646,7 @@ mod tests {
             .err()
             .expect("invalid workspace must not start a process");
         if cfg!(any(target_os = "macos", target_os = "linux")) {
-            assert!(error.contains("filesystem roots"), "{error}");
+            assert!(error.contains("Filesystem roots"), "{error}");
         } else {
             assert!(error.contains("sandbox is unavailable"), "{error}");
         }
