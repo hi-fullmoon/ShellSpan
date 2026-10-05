@@ -754,7 +754,10 @@ mod tests {
     fn config_read_errors_use_sentence_case() {
         let workspace = tempfile::tempdir().unwrap();
         let error = load_mcp_server_native(workspace.path(), "server").unwrap_err();
-        assert!(error.starts_with("Failed to inspect MCP config:"), "{error}");
+        assert!(
+            error.starts_with("Failed to inspect MCP config:"),
+            "{error}"
+        );
 
         fs::create_dir(workspace.path().join(".shellspan")).unwrap();
         fs::write(workspace.path().join(".shellspan/mcp.json"), b"{").unwrap();
