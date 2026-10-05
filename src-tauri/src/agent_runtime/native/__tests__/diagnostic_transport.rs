@@ -14,7 +14,7 @@ fn diagnostic_json_capture_redacts_escaped_credentials_before_snapshots() {
             .args([
                 "-I",
                 "-c",
-                "import json,sys; print(json.dumps(json.load(sys.stdin), ensure_ascii=True))",
+                "import json,sys; print(json.dumps(json.load(sys.stdin.buffer), ensure_ascii=True))",
             ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -28,6 +28,10 @@ fn diagnostic_json_capture_redacts_escaped_credentials_before_snapshots() {
             .unwrap();
         let output = child.wait_with_output().unwrap();
         assert!(output.status.success());
+        assert_eq!(
+            serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+            input
+        );
 
         let (tx, _rx) = mpsc::channel();
         let mut process = ManagedProcessNative::new(
