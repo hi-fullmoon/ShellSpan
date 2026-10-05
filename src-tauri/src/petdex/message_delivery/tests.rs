@@ -453,12 +453,25 @@ async fn action_that_expires_behind_shared_lock_is_never_sent_late() {
 #[tokio::test]
 async fn late_blocking_settlement_cannot_clear_new_busy_version() {
     let (_root, adapter) = adapter();
-    let mut installation = adapter.inner.message_installation.lock().unwrap();
-    installation
-        .as_mut()
-        .unwrap()
-        .attempt_version(0, false, 1)
-        .unwrap();
+    let (locked_tx, locked_rx) = tokio::sync::oneshot::channel();
+    let (advance_tx, advance_rx) = std::sync::mpsc::channel();
+    let locking_adapter = adapter.clone();
+    let installation_task = tokio::task::spawn_blocking(move || {
+        let mut installation = locking_adapter.inner.message_installation.lock().unwrap();
+        installation
+            .as_mut()
+            .unwrap()
+            .attempt_version(0, false, 1)
+            .unwrap();
+        locked_tx.send(()).unwrap();
+        advance_rx.recv().unwrap();
+        installation
+            .as_mut()
+            .unwrap()
+            .attempt_version(0, true, 2)
+            .unwrap();
+    });
+    locked_rx.await.unwrap();
     let other = adapter.clone();
     let task = tokio::spawn(async move {
         other
@@ -466,12 +479,8 @@ async fn late_blocking_settlement_cannot_clear_new_busy_version() {
             .await
     });
     tokio::task::yield_now().await;
-    installation
-        .as_mut()
-        .unwrap()
-        .attempt_version(0, true, 2)
-        .unwrap();
-    drop(installation);
+    advance_tx.send(()).unwrap();
+    installation_task.await.unwrap();
     assert!(matches!(task.await.unwrap(), Err(RequestFailure::Expired)));
     assert!(
         adapter

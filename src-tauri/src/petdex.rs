@@ -503,7 +503,7 @@ impl PetdexAdapter {
             // Alternate ready channels, so continuous action churn cannot starve
             // bubbles. Absolute action TTL is rechecked after every queue wait.
             if message_deadline.is_some_and(|d| d <= now)
-                && (!last_was_message || !attempt_deadline.is_some_and(|d| d <= now))
+                && (!last_was_message || attempt_deadline.is_none_or(|d| d > now))
             {
                 self.deliver_message(pending.unwrap()).await;
                 last_was_message = true;
