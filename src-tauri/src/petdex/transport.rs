@@ -24,7 +24,7 @@ pub(super) struct WritePolicy {
 }
 
 impl WritePolicy {
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "macos"))]
     pub fn pid_for_test(&self) -> u32 {
         self.pid.unwrap()
     }
