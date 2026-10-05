@@ -13,6 +13,7 @@ use crate::agent_runtime::{
 use super::scoped_read::{LocalScopedReader, ScopedReader};
 use super::{path_is_sensitive_native, CallPolicyScopeNative};
 
+#[cfg(unix)]
 #[derive(Debug, Clone)]
 pub(crate) struct ReviewedReadCommand {
     program: String,
@@ -22,6 +23,10 @@ pub(crate) struct ReviewedReadCommand {
     directory: String,
     input: Option<String>,
 }
+
+#[cfg(not(unix))]
+#[derive(Debug, Clone)]
+pub(crate) struct ReviewedReadCommand;
 
 pub(crate) struct ApprovalReview {
     pub(crate) requires_approval: bool,
@@ -361,6 +366,10 @@ mod tests {
         let decision = review(AgentPermissionModeNative::ScopedAutopilot, &call);
         assert!(decision.requires_approval);
         assert!(decision.command.is_none());
+        assert!(ReviewedReadCommand
+            .command()
+            .unwrap_err()
+            .contains("requires manual command approval"));
     }
 
     #[cfg(unix)]
