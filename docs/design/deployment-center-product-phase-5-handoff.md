@@ -40,10 +40,10 @@
 
 | 行为 | 证据 |
 | --- | --- |
-| 独立构建、冻结源码、实际镜像身份 | [阶段 1](deployment-center-product-phase-1-handoff.md) 与 [产物身份](deployment-center-product-phase-1-evidence.json) |
-| 配置关联、真实缺失条件、修订竞争 | [阶段 2](deployment-center-product-phase-2-handoff.md) 与 [检查记录](deployment-center-product-phase-2-evidence.json) |
-| 准备、审批、端口/配置冲突、真实发布 | [阶段 3](deployment-center-product-phase-3-handoff.md)、[后端记录](deployment-center-product-phase-3-evidence.json)、[原生发布记录](deployment-center-product-phase-3-native-evidence.json) |
-| 数据权限、重启、升级、历史 bundle 回退、HTTP 失败恢复、丢失回执及保留清理 | [阶段 4](deployment-center-product-phase-4-handoff.md) 与 [完整生命周期结果](deployment-center-product-phase-4-lifecycle-evidence.json) |
+| 独立构建、冻结源码、实际镜像身份 | [产物身份](deployment-center-product-phase-1-evidence.json) |
+| 配置关联、真实缺失条件、修订竞争 | [检查记录](deployment-center-product-phase-2-evidence.json) |
+| 准备、审批、端口/配置冲突、真实发布 | [后端记录](deployment-center-product-phase-3-evidence.json)、[原生发布记录](deployment-center-product-phase-3-native-evidence.json) |
+| 数据权限、重启、升级、历史 bundle 回退、HTTP 失败恢复、丢失回执及保留清理 | [完整生命周期结果](deployment-center-product-phase-4-lifecycle-evidence.json) |
 
 阶段 4 初次、升级、回退、失败运行分别是 `run-a983ae8a-6a41-4fbd-a308-e1680ba1fe57`、`run-136dd035-fd98-49f9-8153-af9a24ed7770`、`run-caa6a4ef-cfde-46a3-9372-b2dfbb2e4864`、`run-e78cf57e-bbe4-4e8b-8140-046531c9cc40`。真实两条 API 写入的完整对象和文件摘要经重启、升级、回退、恢复及清理校验；恢复后原运行仍为 failed。
 

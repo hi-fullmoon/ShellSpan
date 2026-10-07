@@ -42,7 +42,6 @@
 
 - [工作流设计](./deployment-center-workflow-design.md)
 - [既有实施计划](./deployment-center-workflow-implementation-plan.md)
-- [界面专项设计](./deployment-workflow-xyflow-ui-refactor-plan.md)
 - [前端协议类型](../../src/lib/deployment/types.ts)
 - [原生命令入口](../../src-tauri/src/deployment/commands.rs)
 - [Compose 执行器](../../src-tauri/src/deployment/docker_compose_executor.rs)

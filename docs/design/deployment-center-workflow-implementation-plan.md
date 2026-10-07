@@ -4,7 +4,7 @@
 > 实施方式：严格串行；每个阶段使用独立 Codex 会话  
 > 兼容策略：不实现 旧版 兼容编译、旧运行渲染、旧产物适配或历史数据迁移
 
-> 后续专项：工作流正式上线后的 React Flow 图编辑器与无 Card 本地部署 UI 重构，按 [`deployment-workflow-xyflow-ui-refactor-plan.md`](./deployment-workflow-xyflow-ui-refactor-plan.md) 的六个独立会话阶段实施。本文件的阶段 4–6 与既有验收证据保留为初次交付历史，不作为后续 UI 结构的约束。
+> 本文件记录初次交付的实施阶段；当前产品范围与最终验收见 [产品完善设计](./deployment-center-product-completion-design.md) 和 [最终交接](./deployment-center-product-phase-5-handoff.md)。
 
 ## 1. 实施原则
 
