@@ -32,6 +32,9 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
+#[path = "log_export.rs"]
+mod log_export;
+
 use crate::terminal_integration::{PreparedLocalShellIntegration, TerminalShellKind};
 
 const LOCAL_OUTPUT_QUEUE_CAPACITY: usize = 32;
@@ -3120,8 +3123,7 @@ pub(crate) async fn export_log_file(
             .save_file();
         match path {
             Some(path) => {
-                std::fs::write(&path, content)
-                    .map_err(|error| format!("failed to write log file: {error}"))?;
+                log_export::write_redacted_export(&path, &content)?;
                 Ok(Some(portable_local_path(&path)))
             }
             None => Ok(None),

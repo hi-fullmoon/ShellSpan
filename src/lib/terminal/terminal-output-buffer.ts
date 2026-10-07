@@ -227,6 +227,8 @@ export function redactTerminalSecrets(value: string): string {
 
 const SENSITIVE_FIELD_KEYS = new Set([
   'apikey',
+  'accesskey',
+  'accesskeyid',
   'accesstoken',
   'authtoken',
   'authorization',
@@ -260,7 +262,12 @@ export function redactSensitiveValue<T>(value: T): T {
 
   const redacted: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-    redacted[key] = SENSITIVE_FIELD_KEYS.has(normalizedSensitiveKey(key))
+    const normalized = normalizedSensitiveKey(key);
+    const sensitive = SENSITIVE_FIELD_KEYS.has(normalized)
+      || [...SENSITIVE_FIELD_KEYS].some((suffix) => (
+        suffix !== 'credential' && suffix !== 'credentials' && normalized.endsWith(suffix)
+      ));
+    redacted[key] = sensitive
       ? '[REDACTED]'
       : redactSensitiveValue(item);
   }

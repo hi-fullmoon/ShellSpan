@@ -1,0 +1,11 @@
+{
+  "name": "shellspan-real-dependency-acceptance",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "node dependency-check.cjs"
+  },
+  "dependencies": {
+    "is-number": "7.0.0"
+  }
+}

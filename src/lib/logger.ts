@@ -1,4 +1,4 @@
-import { redactTerminalSecrets } from '@/lib/terminal/terminal-output-buffer';
+import { redactSensitiveValue, redactTerminalSecrets } from '@/lib/terminal/terminal-output-buffer';
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -24,14 +24,14 @@ function serializeDetail(detail: unknown): string {
     return redactTerminalSecrets(detail);
   }
   try {
-    return redactTerminalSecrets(JSON.stringify(detail) ?? String(detail));
+    return redactTerminalSecrets(JSON.stringify(redactSensitiveValue(detail)) ?? String(detail));
   } catch {
     return redactTerminalSecrets(String(detail));
   }
 }
 
-function formatRecord(module: string, message: string, details: unknown[]): string {
-  const base = `[${module}] ${message}`;
+export function formatLogRecord(module: string, message: string, details: unknown[]): string {
+  const base = `[${redactTerminalSecrets(module)}] ${redactTerminalSecrets(message)}`;
   if (details.length === 0) {
     return base;
   }
@@ -50,7 +50,7 @@ async function writeToTauriLog(level: LogLevel, record: string): Promise<void> {
 export function createLogger(module: string): Logger {
   const write = (level: LogLevel, message: string, details: unknown[]): void => {
     try {
-      const record = formatRecord(module, message, details);
+      const record = formatLogRecord(module, message, details);
       if (isTauriRuntime()) {
         void writeToTauriLog(level, record);
         return;

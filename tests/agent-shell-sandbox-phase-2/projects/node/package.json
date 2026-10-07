@@ -1,0 +1,10 @@
+{
+  "name": "sandbox-arithmetic",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node --check sum.js",
+    "test": "node --test sum.node-check.mjs"
+  },
+  "packageManager": "pnpm@11.1.1"
+}

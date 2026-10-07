@@ -13,24 +13,27 @@ fn normalized_key(key: &str) -> String {
 }
 
 pub(crate) fn is_sensitive_key(key: &str) -> bool {
-    matches!(
-        normalized_key(key).as_str(),
-        "apikey"
-            | "accesstoken"
-            | "authtoken"
-            | "authorization"
-            | "clientsecret"
-            | "credential"
-            | "credentials"
-            | "passphrase"
-            | "password"
-            | "passwd"
-            | "privatekey"
-            | "privatekeydata"
-            | "pwd"
-            | "secret"
-            | "token"
-    )
+    let normalized = normalized_key(key);
+    matches!(normalized.as_str(), "credential" | "credentials")
+        || [
+            "apikey",
+            "accesskey",
+            "accesskeyid",
+            "accesstoken",
+            "authtoken",
+            "authorization",
+            "clientsecret",
+            "passphrase",
+            "password",
+            "passwd",
+            "privatekey",
+            "privatekeydata",
+            "pwd",
+            "secret",
+            "token",
+        ]
+        .iter()
+        .any(|suffix| normalized.ends_with(suffix))
 }
 
 // These patterns locate values in prose and code examples, not entire messages.
