@@ -137,6 +137,7 @@ mod tests {
             event(
                 0,
                 AgentSessionEventPayload::SessionCreated {
+                    sandbox_policy: None,
                     task_id: "task-1".into(),
                     goal: "inspect".into(),
                     parent_session_id: None,

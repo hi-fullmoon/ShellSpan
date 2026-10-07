@@ -12,6 +12,7 @@ fn task_budget_session() -> (
     sessions.configure(root.path().to_path_buf()).unwrap();
     artifacts.configure(root.path()).unwrap();
     sessions.create(super::super::CreateAgentSessionRequest {
+        sandbox_policy: None,
         session_id: "token-budget-review".into(),
         task_id: "token-budget-review".into(),
         goal: "Inspect task token budgeting and verify continuation".into(),

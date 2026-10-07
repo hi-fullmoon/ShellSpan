@@ -160,6 +160,10 @@
       "additionalProperties": false,
       "required": ["command", "explanation", "channel"],
       "properties": {
+        "readPaths": { "type": "array", "maxItems": 8, "items": { "$ref": "#/$defs/path" } },
+        "writePaths": { "type": "array", "maxItems": 8, "items": { "$ref": "#/$defs/path" } },
+        "localServices": { "type": "array", "maxItems": 8, "items": { "type": "object", "additionalProperties": false, "required": ["port"], "properties": { "port": { "type": "integer", "minimum": 1, "maximum": 65535 } } } },
+        "networkTargets": { "type": "array", "maxItems": 8, "items": { "type": "object", "additionalProperties": false, "required": ["host", "port"], "properties": { "host": { "type": "string", "minLength": 1, "maxLength": 253 }, "port": { "type": "integer", "minimum": 1, "maximum": 65535 }, "resolver": { "type": "string", "enum": ["system", "cloudflare"], "default": "system" } } } },
         "command": {
           "type": "string",
           "minLength": 1,

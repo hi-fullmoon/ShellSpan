@@ -187,6 +187,14 @@ pub enum AgentExecutionChannelNative {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExecCommandArgumentsNative {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub write_paths: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub local_services: Vec<LocalServiceRequestNative>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub network_targets: Vec<NetworkTargetRequestNative>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub read_paths: Vec<String>,
     pub command: String,
     pub explanation: String,
     pub channel: AgentExecutionChannelNative,
@@ -198,6 +206,39 @@ pub struct ExecCommandArgumentsNative {
     pub background: Option<bool>,
     #[serde(default)]
     pub elevated: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NetworkTargetRequestNative {
+    pub host: String,
+    pub port: u16,
+    #[serde(default)]
+    pub resolver: NetworkResolverNative,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum NetworkResolverNative {
+    #[default]
+    System,
+    Cloudflare,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkProxyAuditNative {
+    pub client_bytes: u64,
+    pub upstream_bytes: u64,
+    pub connections_started: u64,
+    pub denied_requests: u64,
+    pub closed: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocalServiceRequestNative {
+    pub port: u16,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

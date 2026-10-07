@@ -906,6 +906,7 @@ impl SubAgentManager {
             provider,
         };
         let request = CreateAgentSessionRequest {
+            sandbox_policy: parent.header.sandbox_policy,
             session_id: child_session_id.clone(),
             task_id: child_task_id,
             goal: goal.clone(),
@@ -2118,6 +2119,7 @@ mod retry_policy_tests {
         store.configure(root.path().to_path_buf()).unwrap();
         let mut parent = store
             .create(CreateAgentSessionRequest {
+                sandbox_policy: None,
                 session_id: "diagnostic-parent".into(),
                 task_id: "diagnostic-task".into(),
                 goal: "Collect system metrics".into(),
@@ -2319,8 +2321,13 @@ mod retry_policy_tests {
                 effects: vec![AgentSessionEffect::ReadOnly],
                 target_ids: vec![target.target_id.clone()],
             };
+            store.create(serde_json::from_value(serde_json::json!({
+                "sessionId": "handoff-parent", "taskId": "parent-task", "goal": "Inspect project",
+                "target": target, "executionSurface": "direct",
+            })).unwrap()).unwrap();
             store
                 .create(CreateAgentSessionRequest {
+                    sandbox_policy: None,
                     session_id: "handoff-child".into(),
                     task_id: "handoff-task".into(),
                     goal: "Inspect saved progress".into(),

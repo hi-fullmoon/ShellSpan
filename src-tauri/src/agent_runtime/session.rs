@@ -40,9 +40,19 @@ const MAX_SESSION_TITLE_BYTES: usize = 512;
 
 type EventPublisher = Arc<dyn Fn(&AgentSessionEvent) + Send + Sync>;
 
+fn is_zero(value: &u64) -> bool {
+    *value == 0
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AgentSessionHeader {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) cache_directory_candidates: Vec<String>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub(crate) sandbox_binding_revision: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) sandbox_policy: Option<super::AgentSandboxPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) model_selection: Option<super::AgentSubagentModel>,
     pub(crate) session_id: String,
@@ -71,6 +81,8 @@ pub(crate) struct AgentSessionHeader {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct CreateAgentSessionRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) sandbox_policy: Option<super::AgentSandboxPolicy>,
     pub(crate) session_id: String,
     pub(crate) task_id: String,
     pub(crate) goal: String,
@@ -139,6 +151,7 @@ pub(crate) struct AgentSessionRenameInput {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AgentSessionSnapshot {
+    pub(crate) sandbox_capability: super::AgentSandboxCapability,
     pub(crate) header: AgentSessionHeader,
     pub(crate) status: AgentSessionStatus,
     pub(crate) ended: bool,
@@ -270,6 +283,7 @@ impl AgentSessionRecord {
             .first()
             .ok_or_else(|| "Agent session log is empty".to_string())?;
         let AgentSessionEventPayload::SessionCreated {
+            sandbox_policy,
             task_id,
             goal,
             parent_session_id,
@@ -285,6 +299,9 @@ impl AgentSessionRecord {
             return Err("Agent session log does not start with session/created".into());
         };
         let header = AgentSessionHeader {
+            cache_directory_candidates: Vec::new(),
+            sandbox_binding_revision: 0,
+            sandbox_policy: *sandbox_policy,
             model_selection: None,
             session_id: first.session_id.clone(),
             task_id: task_id.clone(),
@@ -331,9 +348,12 @@ impl AgentSessionRecord {
 
     fn snapshot(&self) -> Result<AgentSessionSnapshot, String> {
         if let Some(snapshot) = self.snapshot_cache.get() {
-            return Ok(snapshot.clone());
+            let mut snapshot = snapshot.clone();
+            snapshot.sandbox_capability = super::sandbox_capability_for(&self.header);
+            return Ok(snapshot);
         }
         let snapshot = AgentSessionSnapshot {
+            sandbox_capability: super::sandbox_capability_for(&self.header),
             header: self.header.clone(),
             status: self.status,
             ended: self.ended,
@@ -597,6 +617,13 @@ impl AgentSessionStore {
             }
             return Err("Agent session already exists with a different payload".into());
         }
+        if let Some(parent_id) = &request.parent_session_id {
+            let parent = inner
+                .sessions
+                .get(parent_id)
+                .ok_or("parent Agent Session was not found")?;
+            validate_sandbox_inheritance(&parent.header, &request)?;
+        }
         if let Some(source_id) = request.continued_from_session_id.as_deref() {
             let source = inner
                 .sessions
@@ -681,6 +708,7 @@ impl AgentSessionStore {
             .sessions
             .get(parent_session_id)
             .ok_or_else(|| "parent Agent Session was not found".to_string())?;
+        validate_sandbox_inheritance(&parent.header, &request)?;
         if parent.ended || parent.status.is_terminal() {
             return Err("terminal parent Agent Session cannot create a child".into());
         }
@@ -2376,6 +2404,28 @@ impl AgentSessionStore {
         Ok(())
     }
 
+    pub(crate) fn has_unfinished_children(&self, session_id: &str) -> Result<bool, String> {
+        let inner = self.lock_configured()?;
+        let mut family = std::collections::HashSet::from([session_id.to_owned()]);
+        loop {
+            let before = family.len();
+            for record in inner.sessions.values() {
+                if record.header.parent_session_id.as_ref().is_some_and(|parent| family.contains(parent)) {
+                    family.insert(record.header.session_id.clone());
+                }
+            }
+            if family.len() == before { break; }
+        }
+        Ok(inner.sessions.values().any(|record| record.header.session_id != session_id
+            && family.contains(&record.header.session_id) && !record.ended && !record.archived))
+    }
+
+    pub(crate) fn family_task_ids(&self, session_id: &str) -> Result<Vec<String>, String> {
+        let inner = self.lock_configured()?;
+        let family = session_family_locked(&inner,session_id);
+        Ok(inner.sessions.values().filter(|record| family.contains(&record.header.session_id)).map(|record| record.header.task_id.clone()).collect())
+    }
+
     pub(crate) fn list_page(
         &self,
         request: AgentSessionListRequest,
@@ -2465,6 +2515,68 @@ impl AgentSessionStore {
     }
 }
 
+fn validate_sandbox_inheritance(
+    parent: &AgentSessionHeader,
+    child: &CreateAgentSessionRequest,
+) -> Result<(), String> {
+    let restricted = parent
+        .sandbox_policy
+        .is_some_and(|policy| policy != super::AgentSandboxPolicy::Host);
+    let approval_rank = |mode: Option<AgentSessionPermissionMode>| match mode
+        .unwrap_or(AgentSessionPermissionMode::RequestApproval)
+    {
+        AgentSessionPermissionMode::RequestApproval => 0,
+        AgentSessionPermissionMode::ScopedAutopilot => 1,
+        AgentSessionPermissionMode::Operator => 2,
+    };
+    let expanded_scope = parent
+        .capability_scope
+        .as_ref()
+        .is_some_and(|parent_scope| {
+            child.capability_scope.as_ref().is_none_or(|scope| {
+                scope
+                    .tool_names
+                    .iter()
+                    .any(|tool| !parent_scope.tool_names.contains(tool))
+                    || scope
+                        .effects
+                        .iter()
+                        .any(|effect| !parent_scope.effects.contains(effect))
+                    || scope
+                        .target_ids
+                        .iter()
+                        .any(|id| !parent_scope.target_ids.contains(id))
+            })
+        });
+    if child.sandbox_policy != parent.sandbox_policy
+        || (restricted
+            && (child.target != parent.target
+                || child.execution_surface != parent.execution_surface
+                || approval_rank(child.permission_mode) > approval_rank(parent.permission_mode)
+                || expanded_scope
+                || child.subagent.as_ref().is_some_and(|metadata| {
+                    metadata
+                        .target_scope
+                        .iter()
+                        .any(|target| Some(target) != parent.target.as_ref())
+                })
+                || child.capability_scope.as_ref().is_some_and(|scope| {
+                    scope.target_ids.iter().any(|id| {
+                        parent
+                            .target
+                            .as_ref()
+                            .is_none_or(|target| id != &target.target_id)
+                    })
+                })))
+    {
+        return Err(
+            "sandboxInheritanceDenied: child policy and restricted authority cannot exceed parent"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
 fn validate_create_request(request: &CreateAgentSessionRequest) -> Result<(), String> {
     validate_identifier(&request.session_id, "sessionId")?;
     validate_identifier(&request.task_id, "taskId")?;
@@ -2530,6 +2642,7 @@ fn create_session_events(
             None,
             None,
             AgentSessionEventPayload::SessionCreated {
+                sandbox_policy: request.sandbox_policy,
                 task_id: request.task_id.clone(),
                 goal: request.goal.clone(),
                 parent_session_id: request.parent_session_id.clone(),
@@ -2559,11 +2672,28 @@ fn create_session_events(
     Ok(events)
 }
 
+fn session_family_locked(inner: &AgentSessionStoreInner, session_id: &str) -> std::collections::HashSet<String> {
+    let mut family = std::collections::HashSet::from([session_id.to_owned()]);
+    loop {
+        let before = family.len();
+        for record in inner.sessions.values() {
+            if record.header.parent_session_id.as_ref().is_some_and(|parent| family.contains(parent)) { family.insert(record.header.session_id.clone()); }
+        }
+        if family.len() == before { return family; }
+    }
+}
+
 fn append_payloads_locked(
     inner: &mut AgentSessionStoreInner,
     session_id: &str,
     payloads: Vec<(Option<String>, Option<String>, AgentSessionEventPayload)>,
 ) -> Result<(Vec<AgentSessionEvent>, Option<EventPublisher>), String> {
+    if payloads.iter().any(|(_,_,payload)| matches!(payload,AgentSessionEventPayload::SessionSandboxPolicyChanged {..})) {
+        let family=session_family_locked(inner,session_id);
+        if inner.sessions.values().any(|record| record.header.session_id != session_id && family.contains(&record.header.session_id) && !record.ended && !record.archived) {
+            return Err("SANDBOX_POLICY_BUSY: child work appeared before policy commit".into());
+        }
+    }
     #[cfg(test)]
     if inner
         .append_failure
@@ -2930,6 +3060,12 @@ fn validate_event_transition(
             };
             if !absolute || root.chars().any(char::is_control) {
                 return Err("InvalidRequest: project directory must be absolute".into());
+            }
+            Ok(())
+        }
+        AgentSessionEventPayload::SessionSandboxPolicyChanged { .. } => {
+            if record.header.subagent.is_some() || record.status != AgentSessionStatus::Idle || !record.inbox.is_empty() {
+                return Err("sandbox policy change requires an idle root Session with no queued input".into());
             }
             Ok(())
         }
@@ -3446,6 +3582,7 @@ fn apply_event(record: &mut AgentSessionRecord, event: &AgentSessionEvent) -> Re
     observe_event(record, event);
     match &event.payload {
         AgentSessionEventPayload::SessionResumed {} => {
+            record.header.sandbox_binding_revision = event.seq;
             record.status = AgentSessionStatus::Idle;
             record.ended = false;
         }
@@ -3455,6 +3592,7 @@ fn apply_event(record: &mut AgentSessionRecord, event: &AgentSessionEvent) -> Re
         }
         AgentSessionEventPayload::AgentStatus { status, .. } => record.status = *status,
         AgentSessionEventPayload::SessionEnded { status, .. } => {
+            record.header.sandbox_binding_revision = event.seq;
             record.status = *status;
             record.ended = true;
         }
@@ -3499,10 +3637,19 @@ fn apply_event(record: &mut AgentSessionRecord, event: &AgentSessionEvent) -> Re
         AgentSessionEventPayload::SessionPermissionChanged { mode } => {
             record.header.permission_mode = Some(*mode);
         }
+        AgentSessionEventPayload::SessionCacheDirectoryCandidates { directories } => {
+            record.header.cache_directory_candidates = directories.clone();
+        }
+        AgentSessionEventPayload::SessionSandboxPolicyChanged { policy } => {
+            record.header.sandbox_binding_revision = event.seq;
+            record.header.sandbox_policy = Some(*policy);
+        }
         AgentSessionEventPayload::SessionExecutionSurfaceChanged { surface } => {
+            record.header.sandbox_binding_revision = event.seq;
             record.header.execution_surface = *surface;
         }
         AgentSessionEventPayload::SessionProjectRootBound { root } => {
+            record.header.sandbox_binding_revision = event.seq;
             if let Some(target) = record.header.target.as_mut() {
                 if target.kind == "local" {
                     target.cwd = Some(root.clone());
@@ -3523,6 +3670,20 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
     use AgentSessionEventPayload as Payload;
 
     match &event.payload {
+        Payload::SandboxStartRejected { reason } => {
+            require_scope(event, false, false)?;
+            validate_text(reason, "sandbox rejection reason", false, MAX_LABEL_BYTES)?;
+        }
+        Payload::SandboxCallFrozen { call_id, contract } => {
+            require_scope(event, true, true)?;
+            validate_identifier(call_id, "callId")?;
+            validate_session_target(&contract.target)?;
+            if contract.version != 1 || !contract.resource_grants.is_empty() {
+                return Err(
+                    "sandbox frozen audit requires version 1 without live resource grants".into(),
+                );
+            }
+        }
         Payload::QuestionRequested { .. }
         | Payload::QuestionAnswered { .. }
         | Payload::QuestionCancelled { .. } => {
@@ -3664,14 +3825,61 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
             validate_text(&provider.model_id, "modelId", false, MAX_LABEL_BYTES)?;
             validate_optional_text(provider.reasoning_effort.as_deref(), "reasoning effort")?;
         }
+        Payload::SandboxResourceAudit { call_id, audit } => {
+            use super::sandbox_audit::SandboxResourceAuditAction;
+            match audit.action {
+                SandboxResourceAuditAction::Approved | SandboxResourceAuditAction::Reused => {
+                    require_scope(event, true, true)?;
+                    validate_identifier(call_id.as_deref().ok_or("resource audit call missing")?, "resource audit callId")?;
+                    if audit.scope.is_none() || audit.call_expires_at_unix_ms.is_none() || audit.cleanup_confirmed.is_some() {
+                        return Err("resource approval audit is incomplete".into());
+                    }
+                }
+                SandboxResourceAuditAction::Revoked | SandboxResourceAuditAction::RevocationFailed => {
+                    require_scope(event, false, false)?;
+                    if call_id.is_some() || audit.scope.is_some() || audit.cleanup_confirmed != Some(audit.action == SandboxResourceAuditAction::Revoked) {
+                        return Err("resource revocation audit is incomplete".into());
+                    }
+                }
+            }
+            validate_collection(&audit.resources,"resource audit resources")?;
+            for resource in &audit.resources {
+                match resource {
+                    super::AgentSandboxResource::ReadPath { path } | super::AgentSandboxResource::WritePath { path } => validate_text(path,"resource path",false,4096)?,
+                    super::AgentSandboxResource::NetworkTarget {host,port,protocol,allow_redirects,..} => {
+                        validate_text(host,"resource host",false,253)?;
+                        if *port == 0 || protocol != "tcp" || *allow_redirects { return Err("resource network audit unsupported".into()); }
+                    }
+                    super::AgentSandboxResource::LocalService {address,port} => {
+                        if address != "127.0.0.1" || *port == 0 { return Err("resource service audit unsupported".into()); }
+                    }
+                }
+            }
+        }
         Payload::SessionPermissionChanged { .. } => {
             require_scope(event, false, false)?;
+        }
+        Payload::SessionCacheDirectoryCandidates { directories } => {
+            require_scope(event, false, false)?;
+            if directories.len() > 8 {
+                return Err("Too many cache directory candidates".into());
+            }
+            for directory in directories {
+                validate_text(directory, "cache directory candidate", false, 4096)?;
+                if !std::path::Path::new(directory).is_absolute()
+                    || super::native::path_is_sensitive_native(directory)
+                    || super::native::protected_delete_path_native(directory)
+                {
+                    return Err("Invalid non-sensitive cache directory candidate".into());
+                }
+            }
         }
         Payload::SessionProjectRootBound { root } => {
             require_scope(event, false, false)?;
             validate_text(root, "project root", false, 4096)?;
         }
-        Payload::SessionExecutionSurfaceChanged { .. } => {
+        Payload::SessionExecutionSurfaceChanged { .. }
+        | Payload::SessionSandboxPolicyChanged { .. } => {
             require_scope(event, false, false)?;
         }
         Payload::SessionRenamed {

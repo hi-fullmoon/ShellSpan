@@ -351,6 +351,7 @@ export type AgentSessionEvent =
       continuedFromSessionId?: string;
       target?: AgentSessionTarget;
       permissionMode?: AgentSessionPermissionMode;
+      sandboxPolicy?: AgentSandboxPolicy;
       executionSurface: AgentExecutionSurface;
       successCriteria?: readonly string[];
       capabilityScope?: AgentCapabilityScope;
@@ -399,6 +400,8 @@ export type AgentSessionEvent =
     }>
   | AgentSessionEventWithData<'session/model_selected', { provider: AgentSubagentModel }>
   | AgentSessionEventWithData<'session/permission_changed', { mode: AgentSessionPermissionMode }>
+  | AgentSessionEventWithData<'session/sandbox_policy_changed', { policy: AgentSandboxPolicy }>
+  | AgentSessionEventWithData<'session/cache_directory_candidates', { directories: readonly string[] }>
   | AgentSessionEventWithData<'session/execution_surface_changed', { surface: AgentExecutionSurface }>
   | AgentSessionEventWithData<'session/project_root_bound', { root: string }>
   | AgentSessionEventWithData<'session/renamed', {
@@ -522,6 +525,12 @@ export type AgentSessionEvent =
       status: 'dispatched';
       idempotency: 'yes' | 'no' | 'conditional';
     }>
+  | AgentSessionEventWithData<'sandbox/call_frozen', {
+      callId: string;
+      contract: AgentSandboxContract;
+    }>
+  | AgentSessionEventWithData<'sandbox/start_rejected', { reason: string }>
+  | AgentSessionEventWithData<'sandbox/resource_audit', { callId: string | null; audit: AgentSandboxResourceAudit }>
   | AgentSessionEventWithData<'tool/result', {
       callId: string;
       name: string;
@@ -655,7 +664,76 @@ export interface AgentTaskProjection {
   readonly evidence: readonly AgentTaskEvidenceProjection[];
 }
 
+export type AgentSandboxPolicy = 'readOnly' | 'workspace' | 'host';
+
+export interface AgentSandboxCapability {
+  readonly status: 'full' | 'partial' | 'unavailable';
+  readonly files: boolean;
+  readonly network: boolean;
+  readonly processLifecycle: boolean;
+  readonly gaps: readonly string[];
+}
+
+/** Live memory-only authorization metadata; never inferred from historical events. */
+export interface AgentSandboxAuthorizationStatus {
+  readonly state: 'active' | 'expired' | 'none';
+  readonly checkedAtUnixMs: number;
+  readonly expiresAtUnixMs: number | null;
+  readonly readPaths: readonly string[];
+  readonly writePaths: readonly string[];
+  readonly networkTargets: readonly { readonly host: string; readonly port: number; readonly resolver: 'system' | 'cloudflare' }[];
+  readonly localServices: readonly { readonly port: number }[];
+  readonly activeProcesses: number;
+}
+
+/** Historical consent/cleanup facts, not restorable grants or bearer capabilities. */
+export interface AgentSandboxResourceAudit {
+  readonly action: 'approved' | 'reused' | 'revoked' | 'revocationFailed';
+  readonly scope: 'once' | 'session' | null;
+  readonly resources: readonly AgentSandboxResource[];
+  readonly bindingRevision: number;
+  readonly callExpiresAtUnixMs: number | null;
+  readonly sessionExpiresAtUnixMs: number | null;
+  readonly cleanupConfirmed: boolean | null;
+}
+
+export type AgentSandboxResource =
+  | Readonly<{ kind: 'readPath' | 'writePath'; path: string }>
+  | Readonly<{ kind: 'networkTarget'; protocol: string; host: string; port: number; allowRedirects: boolean; resolver?: 'system' | 'cloudflare' }>
+  | Readonly<{ kind: 'localService'; address: string; port: number }>;
+
+export interface AgentSandboxResourceGrant {
+  readonly authorizationId: string;
+  readonly sessionId: string;
+  readonly callId: string | null;
+  readonly target: AgentSessionTarget;
+  readonly issuedAtUnixMs: number;
+  readonly expiresAtUnixMs: number;
+  readonly source: string;
+  readonly resource: AgentSandboxResource;
+}
+
+export interface AgentSandboxContract {
+  readonly version: 1;
+  readonly bindingRevision: number;
+  readonly sessionCreatedAtUnixMs: number;
+  readonly policy: AgentSandboxPolicy;
+  readonly target: AgentSessionTarget;
+  readonly executionSurface: AgentExecutionSurface;
+  readonly root: string | null;
+  readonly readAllow: readonly string[];
+  readonly writeAllow: readonly string[];
+  readonly deny: readonly string[];
+  readonly network: 'account' | 'deny';
+  readonly source: 'legacy' | 'session-intent';
+  readonly issuedAtUnixMs: number;
+  readonly resourceGrants: readonly AgentSandboxResourceGrant[];
+}
+
 export interface AgentSessionHeader {
+  readonly cacheDirectoryCandidates?: readonly string[];
+  readonly sandboxBindingRevision?: number;
+  readonly sandboxPolicy?: AgentSandboxPolicy;
   readonly modelSelection?: AgentSubagentModel;
   readonly sessionId: string;
   readonly taskId: string;
@@ -673,6 +751,8 @@ export interface AgentSessionHeader {
 }
 
 export interface AgentSessionSnapshot {
+  /** Current backend always supplies this fact; older clients/log fixtures may omit it. */
+  readonly sandboxCapability?: AgentSandboxCapability;
   readonly header: AgentSessionHeader;
   readonly status: AgentSessionRuntimeStatus;
   readonly ended: boolean;
@@ -720,6 +800,7 @@ export interface AgentSessionEventPage {
 }
 
 export interface CreateAgentSessionRequest {
+  readonly sandboxPolicy?: AgentSandboxPolicy;
   readonly sessionId: string;
   readonly taskId: string;
   readonly goal: string;

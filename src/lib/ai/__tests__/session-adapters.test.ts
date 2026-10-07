@@ -923,6 +923,10 @@ describe('AgentSessionAdapter', () => {
       approvalId: 'approval-health',
     };
     expect(dependencies.approve).toHaveBeenCalledWith(approvalDecision);
+    await adapter.approve({ ...approval, resourceScope: 'once' });
+    await adapter.approve({ ...approval, resourceScope: 'session' });
+    expect(dependencies.approve).toHaveBeenNthCalledWith(2, approvalDecision, 'once');
+    expect(dependencies.approve).toHaveBeenNthCalledWith(3, approvalDecision, 'session');
     expect(dependencies.reject).toHaveBeenCalledWith(approvalDecision);
     expect(dependencies.loadArtifact).toHaveBeenCalledWith({
       sessionId: 'session-fixture', artifactId: 'artifact-report', maxBytes: 4096,

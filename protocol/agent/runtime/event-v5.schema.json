@@ -47,6 +47,8 @@
         "agent/inbox/reordered",
         "session/model_selected",
         "session/permission_changed",
+        "session/sandbox_policy_changed",
+        "session/cache_directory_candidates",
         "session/execution_surface_changed",
         "session/project_root_bound",
         "session/renamed",
@@ -73,6 +75,9 @@
         "question/answered",
         "question/cancelled",
         "tool/approval",
+        "sandbox/call_frozen",
+        "sandbox/resource_audit",
+        "sandbox/start_rejected",
         "tool/execution",
         "tool/result",
         "context/artifact",
@@ -97,6 +102,46 @@
     }
   },
   "allOf": [
+    {"if":{"properties":{"type":{"const":"session/cache_directory_candidates"}},"required":["type"]},"then":{"required":["data"],"properties":{"data":{"type":"object","additionalProperties":false,"required":["directories"],"properties":{"directories":{"type":"array","maxItems":8,"items":{"type":"string","minLength":1,"maxLength":4096}}}}}}},
+    {
+      "if":{"properties":{"type":{"const":"sandbox/resource_audit"}},"required":["type"]},
+      "then":{"required":["data"],"properties":{"data":{"type":"object","additionalProperties":false,"required":["callId","audit"],"properties":{"callId":{"type":["string","null"]},"audit":{"$ref":"#/$defs/sandboxResourceAudit"}}}}}
+    },
+    {
+      "if": { "properties": { "type": { "const": "sandbox/call_frozen" } }, "required": ["type"] },
+      "then": {
+        "required": ["turnId", "stepId", "data"],
+        "properties": {
+          "turnId": { "type": "string", "minLength": 1 },
+          "stepId": { "type": "string", "minLength": 1 },
+          "data": {
+            "type": "object", "additionalProperties": false, "required": ["callId", "contract"],
+            "properties": {
+              "callId": { "type": "string", "minLength": 1 },
+              "contract": { "$ref": "#/$defs/sandboxContract" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "sandbox/start_rejected" } }, "required": ["type"] },
+      "then": {
+        "required": ["data"],
+        "properties": {
+          "data": {
+            "type": "object", "additionalProperties": false, "required": ["reason"],
+            "properties": { "reason": { "type": "string", "minLength": 1 } }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "session/created" } }, "required": ["type"] },
+      "then": {
+        "properties": { "data": { "type": "object", "properties": { "sandboxPolicy": { "enum": ["readOnly", "workspace", "host"] } } } }
+      }
+    },
     {
       "if": {
         "properties": {
@@ -922,9 +967,7 @@
           "data": {
             "type": "object",
             "additionalProperties": false,
-            "required": [
-              "surface"
-            ],
+            "required": ["surface"],
             "properties": {
               "surface": {
                 "enum": [
@@ -936,6 +979,10 @@
           }
         }
       }
+    },
+    {
+      "if": {"properties":{"type":{"const":"session/sandbox_policy_changed"}},"required":["type"]},
+      "then": {"required":["data"],"properties":{"data":{"type":"object","additionalProperties":false,"required":["policy"],"properties":{"policy":{"enum":["readOnly","workspace","host"]}}}}}
     },
     {
       "if": {
@@ -1054,6 +1101,63 @@
     }
   ],
   "$defs": {
+    "sandboxResourceAudit": {
+      "type":"object","additionalProperties":false,
+      "required":["action","scope","resources","bindingRevision","callExpiresAtUnixMs","sessionExpiresAtUnixMs","cleanupConfirmed"],
+      "properties":{
+        "action":{"enum":["approved","reused","revoked","revocationFailed"]},
+        "scope":{"enum":["once","session",null]},
+        "resources":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/sandboxAuditResource"}},
+        "bindingRevision":{"type":"integer","minimum":0},
+        "callExpiresAtUnixMs":{"type":["integer","null"],"minimum":0},
+        "sessionExpiresAtUnixMs":{"type":["integer","null"],"minimum":0},
+        "cleanupConfirmed":{"type":["boolean","null"]}
+      }
+    },
+    "sandboxAuditResource": {
+      "oneOf":[
+        {"type":"object","additionalProperties":false,"required":["kind","path"],"properties":{"kind":{"enum":["readPath","writePath"]},"path":{"type":"string","minLength":1,"maxLength":4096}}},
+        {"type":"object","additionalProperties":false,"required":["kind","protocol","host","port","allowRedirects"],"properties":{"kind":{"const":"networkTarget"},"protocol":{"const":"tcp"},"host":{"type":"string","minLength":1,"maxLength":253},"port":{"type":"integer","minimum":1,"maximum":65535},"allowRedirects":{"const":false},"resolver":{"enum":["system","cloudflare"]}}},
+        {"type":"object","additionalProperties":false,"required":["kind","address","port"],"properties":{"kind":{"const":"localService"},"address":{"const":"127.0.0.1"},"port":{"type":"integer","minimum":1,"maximum":65535}}}
+      ]
+    },
+    "sandboxContract": {
+      "type": "object", "additionalProperties": false,
+      "required": ["version", "bindingRevision", "sessionCreatedAtUnixMs", "policy", "target", "executionSurface", "root", "readAllow", "writeAllow", "deny", "network", "source", "issuedAtUnixMs", "resourceGrants"],
+      "properties": {
+        "version": { "const": 1 },
+        "bindingRevision": { "type": "integer", "minimum": 0 },
+        "sessionCreatedAtUnixMs": { "type": "integer", "minimum": 0 },
+        "policy": { "enum": ["readOnly", "workspace", "host"] },
+        "target": { "$ref": "#/$defs/sandboxTarget" },
+        "executionSurface": { "enum": ["direct", "boundTerminal"] },
+        "root": { "type": ["string", "null"] },
+        "readAllow": { "$ref": "#/$defs/sandboxPaths" },
+        "writeAllow": { "$ref": "#/$defs/sandboxPaths" },
+        "deny": { "$ref": "#/$defs/sandboxPaths" },
+        "network": { "enum": ["account", "deny"] },
+        "source": { "enum": ["legacy", "session-intent"] },
+        "issuedAtUnixMs": { "type": "integer", "minimum": 0 },
+        "resourceGrants": { "type": "array", "maxItems": 0, "description": "Phase 1 never issues or persists live resource grants." }
+      }
+    },
+    "sandboxPaths": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "sandboxTarget": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "targetId", "sessionId"],
+      "properties": {
+        "kind": { "enum": ["local", "remote"] },
+        "targetId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "label": { "type": "string" },
+        "profileId": { "type": "string" },
+        "host": { "type": "string" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "username": { "type": "string" },
+        "cwd": { "type": "string" },
+        "rootPath": { "type": "string" },
+        "localRoot": { "type": "string" }
+      }
+    },
     "selection": {
       "type": "object",
       "additionalProperties": false,

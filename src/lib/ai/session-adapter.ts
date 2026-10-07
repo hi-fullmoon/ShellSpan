@@ -62,6 +62,7 @@ export interface AiInboxItem {
 }
 
 export interface AiPendingApproval {
+  readonly sandboxCapability?: import('@/types/agent-session').AgentSandboxCapability;
   readonly sessionId: string;
   readonly turnId: string;
   readonly stepId: string;
@@ -152,6 +153,7 @@ export interface AiContextUsage {
 }
 
 export type AiCreateSessionInput = Readonly<{
+  cacheDirectoryCandidates?: readonly string[];
   kind: 'agent';
   request: CreateAgentSessionRequest;
 }>;
@@ -179,6 +181,7 @@ export interface AiSubmitReceipt {
 }
 
 export interface AiApprovalDecisionInput {
+  readonly resourceScope?: 'once' | 'session';
   readonly sessionId: string;
   readonly turnId: string;
   readonly stepId: string;

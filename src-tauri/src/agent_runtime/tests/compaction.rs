@@ -48,6 +48,7 @@
         artifacts.configure(root.path()).unwrap();
         sessions
             .create(super::super::CreateAgentSessionRequest {
+                sandbox_policy: None,
                 session_id: "session".into(),
                 task_id: "task".into(),
                 goal: "Preserve audit history while compacting".into(),

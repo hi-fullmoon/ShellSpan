@@ -262,6 +262,7 @@ fn persisted_stream() -> (tempfile::TempDir, Arc<DurableModelStreamSink>) {
     sessions.configure(root.path().to_path_buf()).unwrap();
     sessions
         .create(super::super::CreateAgentSessionRequest {
+            sandbox_policy: None,
             session_id: "stream-test".into(),
             task_id: "stream-test".into(),
             goal: "Review agent loop".into(),

@@ -7,6 +7,7 @@ import { projectQuestions } from './question-projection';
 import { invokeSubmitAgentImages } from '@/lib/ipc/tauri';
 import { requireVision } from '@/lib/ai/vision-contract';
 import {
+  invokeSetCacheDirectoryCandidates,
   invokeAgentRuntimeFollowup,
   invokeAgentRuntimeSteer,
   invokeApproveAgentRuntimeTool,
@@ -293,7 +294,7 @@ function flattenChatNodes(nodes: readonly AiConversationNode[]): readonly AiConv
   return readable;
 }
 
-function pendingApproval(nodes: readonly AiConversationNode[]): AiPendingApproval | null {
+function pendingApproval(nodes: readonly AiConversationNode[], capability?: import('@/types/agent-session').AgentSandboxCapability): AiPendingApproval | null {
   const readable = flattenChatNodes(nodes);
   const node = readable.find((candidate) => (
     candidate.kind === 'approvalMarker' && candidate.status === 'requested'
@@ -302,6 +303,7 @@ function pendingApproval(nodes: readonly AiConversationNode[]): AiPendingApprova
   const tool = findConversationTool(nodes, node);
   return {
     sessionId: node.sessionId,
+    sandboxCapability: capability,
     turnId: node.turnId,
     stepId: node.stepId,
     requestId: node.requestId,
@@ -341,9 +343,15 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
   const nodes = projected?.nodes ?? projectAgentChatNodes(state.events);
   const header = { ...state.snapshot.header };
   for (const event of events) {
+    if (event.type === 'session/created' && event.sessionId === header.sessionId) header.sandboxPolicy = event.data.sandboxPolicy;
     if (event.type === 'session/model_selected') header.modelSelection = event.data.provider;
     if (event.type === 'session/permission_changed') header.permissionMode = event.data.mode;
     if (event.type === 'session/execution_surface_changed') header.executionSurface = event.data.surface;
+    if (event.type === 'session/sandbox_policy_changed') header.sandboxPolicy = event.data.policy;
+    if (event.type === 'session/cache_directory_candidates') header.cacheDirectoryCandidates = event.data.directories;
+    if (event.type === 'session/sandbox_policy_changed' || event.type === 'session/execution_surface_changed' || event.type === 'session/project_root_bound' || event.type === 'session/ended' || event.type === 'session/resumed') {
+      header.sandboxBindingRevision = Math.max(header.sandboxBindingRevision ?? 0, event.seq);
+    }
   }
   const task = activity.plan === undefined
     ? state.snapshot.task
@@ -356,6 +364,8 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
       kind: 'agent',
       value: {
         ...state.snapshot,
+        sandboxCapability: events.some(event => event.type === 'session/sandbox_policy_changed' && event.seq >= state.snapshot!.eventCount)
+          ? undefined : state.snapshot.sandboxCapability,
         status: activity.status,
         ended: [...events].reverse().find(event => event.type === 'session/ended' || event.type === 'session/resumed')?.type === 'session/ended',
         header,
@@ -369,7 +379,7 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
       && agent.parentSessionId === state.snapshot?.header.sessionId
     )),
     inbox: projectAgentInbox(events),
-    pendingApproval: pendingApproval(nodes),
+    pendingApproval: pendingApproval(nodes, header.sandboxPolicy !== undefined && header.sandboxPolicy !== 'host' ? state.snapshot.sandboxCapability : undefined),
     pendingQuestion: projectQuestions(events).find((q) => q.status === 'pending') ?? null,
     status: activity.status,
     error: activity.status === 'failed' || activity.status === 'cancelled' ? terminalError(nodes) : null,
@@ -601,6 +611,7 @@ export function createAgentSessionAdapter(
     input: Extract<AiCreateSessionInput, { readonly kind: 'agent' }>,
   ): Promise<AiSessionView> => {
     await dependencies.createSession(input.request);
+    if (input.cacheDirectoryCandidates?.length) await invokeSetCacheDirectoryCandidates(input.request.sessionId,input.cacheDirectoryCandidates);
     return openEntry(input.request.sessionId);
   };
 
@@ -833,7 +844,8 @@ export function createAgentSessionAdapter(
       for (const listener of entry.listeners) listener(entry.view);
     },
     async approve(input: AiApprovalDecisionInput): Promise<void> {
-      await dependencies.approve(decision(input));
+      if (input.resourceScope === undefined) await dependencies.approve(decision(input));
+      else await dependencies.approve(decision(input), input.resourceScope);
     },
     async reject(input: AiApprovalDecisionInput): Promise<void> {
       await dependencies.reject(decision(input));

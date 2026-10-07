@@ -382,6 +382,7 @@ fn configured() -> (tempfile::TempDir, AgentSessionStore) {
 fn create(store: &AgentSessionStore) {
     store
         .create(CreateAgentSessionRequest {
+            sandbox_policy: None,
             session_id: "session-1".into(),
             task_id: "task-1".into(),
             goal: "Inspect nginx".into(),
@@ -504,6 +505,7 @@ fn execution_surface_is_persisted_in_session_created_and_restored_from_header() 
     let (root, store) = configured();
     let snapshot = store
         .create(CreateAgentSessionRequest {
+            sandbox_policy: None,
             session_id: "visible-session".into(),
             task_id: "visible-task".into(),
             goal: "Show commands in the bound terminal".into(),
@@ -602,6 +604,7 @@ fn terminal_continuation_links_full_history_without_rebinding_the_old_target() {
     let old_target = target();
     store
         .create(CreateAgentSessionRequest {
+            sandbox_policy: None,
             session_id: "historical-root".into(),
             task_id: "historical-task".into(),
             goal: "Explain the result".into(),
@@ -621,6 +624,7 @@ fn terminal_continuation_links_full_history_without_rebinding_the_old_target() {
         ..old_target.clone()
     };
     let continued = CreateAgentSessionRequest {
+        sandbox_policy: None,
         session_id: "continued-root".into(),
         task_id: "continued-task".into(),
         goal: "Explain the result".into(),
@@ -679,6 +683,7 @@ fn terminal_continuation_model_context_excludes_old_tool_effects() {
     let old_target = target();
     store
         .create(CreateAgentSessionRequest {
+            sandbox_policy: None,
             session_id: "historical-root".into(),
             task_id: "historical-task".into(),
             goal: "Explain the result".into(),
@@ -720,6 +725,7 @@ fn terminal_continuation_model_context_excludes_old_tool_effects() {
         .unwrap();
     store
         .create(CreateAgentSessionRequest {
+            sandbox_policy: None,
             session_id: "continued-root".into(),
             task_id: "continued-task".into(),
             goal: "Explain the result".into(),
@@ -1180,6 +1186,7 @@ fn child_request() -> (CreateAgentSessionRequest, AgentSessionEventPayload) {
     };
     (
         CreateAgentSessionRequest {
+            sandbox_policy: None,
             session_id: "child-1".into(),
             task_id: "child-task-1".into(),
             goal: "inspect".into(),
@@ -1209,10 +1216,96 @@ fn child_request() -> (CreateAgentSessionRequest, AgentSessionEventPayload) {
 }
 
 #[test]
+fn sandbox_child_creation_cannot_expand_policy_or_change_restricted_target() {
+    let (_root, store) = configured();
+    let parent: CreateAgentSessionRequest = serde_json::from_value(serde_json::json!({
+        "sessionId": "session-1", "taskId": "task-1", "goal": "Inspect project",
+        "target": target(), "sandboxPolicy": "workspace", "permissionMode": "requestApproval",
+        "capabilityScope": {"toolNames": ["read_file"], "effects": ["readOnly"], "targetIds": ["target-1"]},
+        "executionSurface": "direct",
+    }))
+    .unwrap();
+    store.create(parent).unwrap();
+    let (mut child, descriptor) = child_request();
+    child.sandbox_policy = Some(super::super::AgentSandboxPolicy::Host);
+    assert!(store
+        .create_child_with_descriptor("session-1", child.clone(), descriptor.clone())
+        .unwrap_err()
+        .starts_with("sandboxInheritanceDenied:"));
+    assert!(store
+        .create(child.clone())
+        .unwrap_err()
+        .starts_with("sandboxInheritanceDenied:"));
+    child.sandbox_policy = Some(super::super::AgentSandboxPolicy::Workspace);
+    child.target.as_mut().unwrap().cwd = Some("/another-project".into());
+    child.subagent.as_mut().unwrap().target_scope = vec![child.target.clone().unwrap()];
+    assert!(store
+        .create_child_with_descriptor("session-1", child.clone(), descriptor.clone())
+        .unwrap_err()
+        .starts_with("sandboxInheritanceDenied:"));
+    child.target = Some(target());
+    child.subagent.as_mut().unwrap().target_scope = vec![target()];
+    for expansion in ["targetScope", "surface", "approval", "tools", "targetIds"] {
+        let mut expanded = child.clone();
+        match expansion {
+            "targetScope" => {
+                let mut alternate = target();
+                alternate.cwd = Some("/another-project".into());
+                expanded
+                    .subagent
+                    .as_mut()
+                    .unwrap()
+                    .target_scope
+                    .push(alternate);
+            }
+            "surface" => expanded.execution_surface = AgentExecutionSurface::BoundTerminal,
+            "approval" => expanded.permission_mode = Some(AgentSessionPermissionMode::Operator),
+            "tools" => expanded
+                .capability_scope
+                .as_mut()
+                .unwrap()
+                .tool_names
+                .push("write_file".into()),
+            "targetIds" => expanded
+                .capability_scope
+                .as_mut()
+                .unwrap()
+                .target_ids
+                .push("another-target".into()),
+            _ => unreachable!(),
+        }
+        expanded.subagent.as_mut().unwrap().capability_scope =
+            expanded.capability_scope.clone().unwrap();
+        assert!(
+            store
+                .create_child_with_descriptor("session-1", expanded.clone(), descriptor.clone())
+                .unwrap_err()
+                .starts_with("sandboxInheritanceDenied:"),
+            "expansion: {expansion}"
+        );
+        assert!(
+            store
+                .create(expanded)
+                .unwrap_err()
+                .starts_with("sandboxInheritanceDenied:"),
+            "expansion: {expansion}"
+        );
+    }
+    let snapshot = store
+        .create_child_with_descriptor("session-1", child, descriptor)
+        .unwrap();
+    assert_eq!(
+        snapshot.header.sandbox_policy,
+        Some(super::super::AgentSandboxPolicy::Workspace)
+    );
+}
+
+#[test]
 fn child_session_and_parent_descriptor_are_committed_together() {
     let (root, store) = configured();
     store
         .create(CreateAgentSessionRequest {
+            sandbox_policy: None,
             session_id: "session-1".into(),
             task_id: "task-1".into(),
             goal: "parent".into(),
@@ -1785,6 +1878,7 @@ fn client_submission_ids_are_idempotent_per_session_and_survive_restart() {
 
     store
         .create(CreateAgentSessionRequest {
+            sandbox_policy: None,
             session_id: "session-2".into(),
             task_id: "task-2".into(),
             goal: "Other".into(),
@@ -2121,6 +2215,7 @@ fn strict_replay_rejects_sequence_version_identity_and_timestamp_drift() {
             None,
             None,
             AgentSessionEventPayload::SessionCreated {
+                sandbox_policy: None,
                 task_id: "task-1".into(),
                 goal: "goal".into(),
                 parent_session_id: None,

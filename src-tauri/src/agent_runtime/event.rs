@@ -592,6 +592,8 @@ pub(crate) enum AgentCompactionStatus {
 pub(crate) enum AgentSessionEventPayload {
     #[serde(rename = "session/created")]
     SessionCreated {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sandbox_policy: Option<super::AgentSandboxPolicy>,
         task_id: String,
         goal: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -680,6 +682,10 @@ pub(crate) enum AgentSessionEventPayload {
     SessionPermissionChanged { mode: AgentSessionPermissionMode },
     #[serde(rename = "session/execution_surface_changed")]
     SessionExecutionSurfaceChanged { surface: AgentExecutionSurface },
+    #[serde(rename = "session/sandbox_policy_changed")]
+    SessionSandboxPolicyChanged { policy: super::AgentSandboxPolicy },
+    #[serde(rename = "session/cache_directory_candidates")]
+    SessionCacheDirectoryCandidates { directories: Vec<String> },
     #[serde(rename = "session/project_root_bound")]
     SessionProjectRootBound { root: String },
     #[serde(rename = "session/renamed")]
@@ -857,6 +863,18 @@ pub(crate) enum AgentSessionEventPayload {
         expires_at_unix_ms: Option<u64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         prompt: Option<String>,
+    },
+    #[serde(rename = "sandbox/call_frozen")]
+    SandboxCallFrozen {
+        call_id: String,
+        contract: super::AgentSandboxContract,
+    },
+    #[serde(rename = "sandbox/start_rejected")]
+    SandboxStartRejected { reason: String },
+    #[serde(rename = "sandbox/resource_audit")]
+    SandboxResourceAudit {
+        call_id: Option<String>,
+        audit: super::sandbox_audit::SandboxResourceAudit,
     },
     #[serde(rename = "tool/execution")]
     ToolExecution {

@@ -225,6 +225,9 @@ function createActivityNodesProjection() {
     switch (event.type) {
       case 'session/model_selected':
       case 'session/permission_changed':
+      case 'session/sandbox_policy_changed':
+      case 'session/cache_directory_candidates':
+      case 'sandbox/resource_audit':
       case 'session/execution_surface_changed':
       case 'session/project_root_bound':
         break;
