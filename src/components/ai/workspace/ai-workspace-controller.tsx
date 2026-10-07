@@ -6,6 +6,10 @@ import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { AgentPermissionSelector } from '../agent-permission-selector';
 import { AgentExecutionSurfaceSelector } from '../agent-execution-surface-selector';
+import { AiSandboxSettings } from './ai-sandbox-settings';
+import { useI18n } from '@/hooks/useI18n';
+import { useSandboxDefaultsStore } from '@/stores/sandboxDefaultsStore';
+import { sandboxPolicyLabels } from '@/lib/ai/sandbox-presentation';
 import { AiComposerModelSelector } from './ai-composer-model-selector';
 import { AiWorkspaceRoot } from './ai-workspace-root';
 import { AiImageDraftControls } from './ai-image-attachments';
@@ -26,6 +30,7 @@ export function AiWorkspaceController({
   onClose,
 }: AiWorkspaceControllerProps): React.ReactNode {
   const controller = useAiSessionController({ scope, adapter });
+  const { t } = useI18n();
   const activeTerminalId = useTerminalStore((state) => state.activeSessionId);
   const activeTerminalStatus = useTerminalStore((state) => state.sessions.find(
     (candidate) => candidate.sessionId === state.activeSessionId,
@@ -38,6 +43,15 @@ export function AiWorkspaceController({
   )?.promptReady);
   const session = controller.view?.snapshot.value;
   const configuringContinuation = controller.historicalContinuationAvailable;
+  const policy = controller.selectedSandboxPolicy;
+  const capability = configuringContinuation || !session
+    ? controller.selectedExecutionSurface === 'direct' ? controller.sandboxTarget?.kind === 'local' ? controller.nativeSandboxCapability : controller.remoteSandboxCapability : undefined
+    : session.sandboxCapability;
+  const policyLabel = t(policy ? sandboxPolicyLabels[policy] : 'agent.sandbox.legacy');
+  const isolationLabel = t(policy === 'host' || policy === undefined
+    ? 'agent.sandbox.notIsolated'
+    : capability ? `agent.sandbox.${capability.status}`
+      : configuringContinuation || !session ? 'agent.sandbox.unavailable' : 'agent.sandbox.unknown');
   const existingSessionLocked = !configuringContinuation
     && Boolean(session?.archived || session?.header.subagent);
   const modelSettingsLocked = controller.settingsBusy || !controller.canStartAgent
@@ -93,6 +107,8 @@ export function AiWorkspaceController({
       skillsScopeKey={controller.skillsScopeKey}
       skillsNeedsRoot={controller.skillsNeedsRoot}
       projectTargetLabel={controller.projectTargetLabel}
+      projectRootRequest={controller.projectRootRequest}
+      onSelectProjectRoot={controller.selectProjectRoot}
       pendingNodes={controller.pendingNodes}
       scope={scope}
       composerState={controller.composer}
@@ -131,17 +147,48 @@ export function AiWorkspaceController({
             <AgentPermissionSelector
               sessionId={activeTerminalId}
               variant="composer"
+              workspaceAutomation={policy === 'workspace' && controller.sandboxTarget?.kind === 'local' && controller.selectedExecutionSurface === 'direct' && capability?.files === true && capability.network && capability.status !== 'unavailable'}
               disabled={runtimeSettingsLocked}
               mode={controller.selectedPermission}
               onModeChange={controller.view && !configuringContinuation ? controller.selectPermission : undefined}
             />
         )
         : undefined}
-      executionSurfaceControl={scope === 'terminal' && activeTerminalId
+      policySummary={scope === 'terminal' ? `${policyLabel} · ${isolationLabel}` : undefined}
+      sessionSettingsControl={scope === 'terminal'
         ? (
+            <AiSandboxSettings
+              sessionId={!configuringContinuation ? session?.header.sessionId : undefined}
+              revision={session?.header.sandboxBindingRevision}
+              policy={controller.selectedSandboxPolicy}
+              target={controller.sandboxTarget}
+              capability={capability}
+              backendCapability={controller.sandboxTarget?.kind === 'local' ? controller.nativeSandboxCapability : controller.remoteSandboxCapability}
+              onChooseProjectRoot={controller.chooseProjectRoot}
+              onVerifyRemote={controller.verifyRemoteSandbox}
+              remoteVerificationBusy={controller.remoteSandboxVerificationBusy}
+              remoteVerificationError={controller.remoteSandboxVerificationError}
+              canSwitchPolicy={Boolean(session && !configuringContinuation && !session.ended && !session.archived && !session.header.subagent)}
+              defaultConfiguration={controller.sandboxDefaultConfiguration}
+              defaultsReady={controller.sandboxDefaultsReady}
+              canRememberDefault={controller.canRememberSandboxDefault}
+              onRememberDefault={controller.rememberSandboxDefault}
+              onForgetDefault={controller.forgetSandboxDefault}
+              onReloadDefaults={useSandboxDefaultsStore.getState().load}
+              onClearDefaults={useSandboxDefaultsStore.getState().clear}
+              onRevokeReads={!configuringContinuation && session && !session.ended && !session.archived && !session.header.subagent ? controller.revokeSandboxReads : undefined}
+              revokeBusy={controller.settingsBusy}
+              surface={controller.selectedExecutionSurface}
+              existing={Boolean(controller.view && !configuringContinuation)}
+              disabled={controller.view && !configuringContinuation ? executionSurfaceLocked : controller.settingsBusy || activeTerminalStatus !== 'connected' || controller.historicalContinuationBusy || controller.composer.phase === 'submitting' || controller.composer.phase === 'stopping'}
+              onPolicyChange={controller.selectSandboxPolicy}
+            />
+          ) : undefined}
+      executionSurfaceControl={scope === 'terminal' && activeTerminalId ? (
             <AgentExecutionSurfaceSelector
               surface={controller.selectedExecutionSurface}
               realTerminalState={realTerminalState}
+              boundTerminalDisabled={controller.selectedSandboxPolicy !== undefined && controller.selectedSandboxPolicy !== 'host'}
               disabled={executionSurfaceLocked}
               onSurfaceChange={controller.selectExecutionSurface}
             />

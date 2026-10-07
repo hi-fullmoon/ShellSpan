@@ -1,6 +1,7 @@
 import { Clock3Icon } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
@@ -59,12 +60,20 @@ export function AiToolDetails({
   node,
   onBack,
   onClose,
+  artifacts = [],
+  onOpenArtifact,
 }: {
   readonly node: AiConversationNodeOf<'tool'> | null;
   readonly onBack: () => void;
   readonly onClose?: () => void;
+  readonly artifacts?: readonly AiConversationNodeOf<'artifact'>[];
+  readonly onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void;
 }): React.ReactNode {
   const { t } = useI18n();
+  const output = node?.output;
+  const artifactRef = output && typeof output === 'object' && 'artifactRef' in output
+    ? output.artifactRef : null;
+  const outputArtifact = artifacts.find((artifact) => artifact.artifactKind === 'tool-result' && artifact.artifactId === artifactRef);
   return (
     <div className="ai-details-root flex size-full min-h-0 min-w-0 flex-col" data-slot="ai-tool-details">
       <AiRouteHeader
@@ -102,6 +111,11 @@ export function AiToolDetails({
                   />
                 ) : undefined}
               >
+                {outputArtifact && onOpenArtifact && (
+                  <Button variant="plain" size="sm" onClick={() => onOpenArtifact(outputArtifact)}>
+                    {t('ai.workspace.details.openSavedOutput')}
+                  </Button>
+                )}
                 {node.output === null && node.state !== 'running'
                   ? <p className="ai-details-empty m-0 py-3 px-3.5 [overflow-wrap:anywhere]">{t('ai.workspace.details.noOutput')}</p>
                   : <AiToolExpandedContent node={node} showCopyActions={false} />}

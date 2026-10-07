@@ -229,10 +229,15 @@ impl SkillRuntime {
         cancellation: CancellationToken,
     ) -> Result<SkillReadResult, String> {
         let header = self.sessions.snapshot(session_id)?.header;
-        if !scope_enabled(&header) {
-            let result = SkillReadResult::unavailable(
-                "Skills are outside the frozen target or capability scope",
-            );
+        let restricted = header
+            .sandbox_policy
+            .is_some_and(|policy| policy != super::AgentSandboxPolicy::Host);
+        if restricted || !scope_enabled(&header) {
+            let result = SkillReadResult::unavailable(if restricted {
+                "Skills do not have a verified restricted filesystem reader"
+            } else {
+                "Skills are outside the frozen target or capability scope"
+            });
             self.sessions.append(
                 session_id,
                 None,

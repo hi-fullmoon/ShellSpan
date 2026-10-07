@@ -148,6 +148,21 @@ for (const engine of [chromium]) {
       assert.equal(await composer.locator('.ai-execution-surface-label').evaluate(
         element => element.scrollWidth > element.clientWidth), true,
         'Execution surface label should yield width when the toolbar runs out of room');
+      for (const width of [720, 320]) {
+        await page.setViewportSize({ width, height: 800 });
+        await page.locator('[data-testid="alignment-row"] [data-slot="agent-permission-selector"] button').focus();
+        await page.keyboard.press('Enter');
+        const menu = page.locator('.ai-permission-menu');
+        await menu.waitFor();
+        await menu.evaluate(async element => {
+          await Promise.all(element.getAnimations().map(animation => animation.finished));
+        });
+        const bounds = await menu.boundingBox();
+        assert.equal(bounds.width, 300);
+        assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width);
+        await page.screenshot({ path: `/tmp/shellspan-permission-menu-${width}.png` });
+        await page.keyboard.press('Escape');
+      }
     } finally {
       await browser.close();
     }

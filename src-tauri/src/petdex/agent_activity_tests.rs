@@ -8,6 +8,7 @@ use crate::agent_runtime::{
 fn create_session(store: &AgentSessionStore, id: &str) {
     store
         .create(CreateAgentSessionRequest {
+            sandbox_policy: None,
             session_id: id.into(),
             task_id: format!("task-{id}"),
             goal: "Inspect the workspace".into(),
@@ -678,6 +679,7 @@ async fn configured_model_question_and_answer_follow_real_driver_lifecycle() {
     runtime.attach_petdex(adapter.clone()).unwrap();
     runtime
         .create_session(CreateAgentSessionRequest {
+            sandbox_policy: Some(crate::agent_runtime::AgentSandboxPolicy::Host),
             session_id: "petdex-live-question".into(),
             task_id: "petdex-live-question".into(),
             goal: "Verify a user question and answer".into(),

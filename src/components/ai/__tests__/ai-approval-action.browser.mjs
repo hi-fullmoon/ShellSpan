@@ -61,6 +61,51 @@ try {
         assert.equal(await action.count(), 0);
         assert.ok(await page.getByText('pwd', { exact: true }).isVisible());
         assert.ok(await page.getByText('此命令尚无沙箱隔离，将以当前账户权限执行，可能影响工作目录之外的数据。', { exact: true }).isVisible());
+        for (const locale of ['zh-CN', 'en-US']) {
+          await show({approvalId:`resource-${locale}-${width}`,toolName:'run_terminal_command', target:{kind:'local',targetId:'local',sessionId:'terminal',cwd:'/project'},
+            sandboxCapability:{status:'partial',files:true,network:true,processLifecycle:false,gaps:[]},
+            arguments:{command:'cat .env.production',readPaths:['/project/.env.production']}}, locale);
+          await page.getByText(locale === 'zh-CN' ? '文件读取授权：仅本次前台执行' : 'File read authorization: this foreground call only', {exact:true}).waitFor();
+          assert.ok(await page.getByText('/project/.env.production', {exact:true}).isVisible());
+          const scope = page.getByRole('combobox', {name:locale === 'zh-CN' ? '文件授权范围' : 'File authorization scope'});
+          await scope.click();
+          await page.getByRole('option', {name:locale === 'zh-CN' ? '当前会话' : 'Current session',exact:true}).click();
+          await page.getByText(locale === 'zh-CN' ? '文件读取授权：当前会话' : 'File read authorization: current session', {exact:true}).waitFor();
+          assert.equal(await page.getByText('此命令尚无沙箱隔离，将以当前账户权限执行，可能影响工作目录之外的数据。', {exact:true}).count(), 0);
+          const panel = page.locator('[data-slot="ai-approval-panel"]');
+          const bounds = await panel.boundingBox();
+          assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width);
+          await page.screenshot({path:`/tmp/ai-resource-read-${engine.name()}-${locale}-${width}.png`});
+          await show({approvalId:`network-${locale}-${width}`,toolName:'run_terminal_command',target:{kind:'local',targetId:'local',sessionId:'terminal',cwd:'/project'},
+            sandboxCapability:{status:'partial',files:true,network:true,processLifecycle:false,gaps:[]},
+            arguments:{command:'pnpm view react version',networkTargets:[{host:'registry.npmjs.org',port:443,resolver:'cloudflare'}]}},locale);
+          await page.getByText(locale === 'zh-CN' ? '本次执行的网络目标授权' : 'Network target authorization for this execution',{exact:true}).waitFor();
+          assert.ok(await page.getByText('registry.npmjs.org:443',{exact:true}).isVisible());
+          assert.ok(await page.getByText(locale === 'zh-CN' ? '允许将此主机名发送至 Cloudflare 加密 DNS 解析；仍拒绝非公网地址。' : 'Permit sending this hostname to Cloudflare encrypted DNS. Non-public results remain denied.',{exact:true}).isVisible());
+          const networkScope = page.getByRole('combobox',{name:locale === 'zh-CN' ? '资源授权范围' : 'Resource authorization scope'});
+          await networkScope.click();
+          await page.getByRole('option',{name:locale === 'zh-CN' ? '当前会话' : 'Current session',exact:true}).click();
+          await page.getByText(locale === 'zh-CN' ? '当前会话的网络目标授权' : 'Network target authorization for this session',{exact:true}).waitFor();
+          await page.screenshot({path:`/tmp/ai-network-grant-${engine.name()}-${locale}-${width}.png`});
+          await show({approvalId:`cache-${locale}-${width}`,callId:`cache-${locale}-${width}`,toolName:'run_terminal_command',target:{kind:'local',targetId:'local',sessionId:'terminal',cwd:'/project'},
+            sandboxCapability:{status:'partial',files:true,network:true,processLifecycle:false,gaps:[]},
+            arguments:{command:'pnpm build',writePaths:['/tmp/owned-project-cache']}},locale);
+          await page.getByText(locale === 'zh-CN' ? '本次执行的缓存目录读写授权' : 'Cache directory read/write authorization for this execution',{exact:true}).waitFor();
+          assert.ok(await page.getByText('/tmp/owned-project-cache',{exact:true}).isVisible());
+          assert.equal(await page.locator('#ai-approval-title').evaluate(el => el === document.activeElement), true);
+          const cacheScope = page.getByRole('combobox',{name:locale === 'zh-CN' ? '资源授权范围' : 'Resource authorization scope'});
+          await cacheScope.focus();
+          await page.keyboard.press('ArrowDown');
+          await page.getByRole('option',{name:locale === 'zh-CN' ? '当前会话' : 'Current session',exact:true}).press('Enter');
+          await page.getByText(locale === 'zh-CN' ? '当前会话的缓存目录读写授权' : 'Cache directory read/write authorization for this session',{exact:true}).waitFor();
+          const cacheGeometry = await panel.evaluate(element => {
+            const footer = element.querySelector('[data-slot="card-footer"]').getBoundingClientRect();
+            return {overflow:element.scrollWidth > element.clientWidth,bottom:footer.bottom,viewport:innerHeight};
+          });
+          assert.equal(cacheGeometry.overflow,false);
+          assert.ok(cacheGeometry.bottom <= cacheGeometry.viewport);
+          await page.screenshot({path:`/tmp/ai-resource-cache-${engine.name()}-${locale}-${width}.png`});
+        }
         await show({ toolName: 'trash_file', risk: 'destructive', effect: 'destructive',
           target: { kind: 'local', targetId: 'local', sessionId: 'terminal', label: '本机' },
           arguments: { path: '/workspace/old-config.json', expectedSha256: 'a'.repeat(64) } });

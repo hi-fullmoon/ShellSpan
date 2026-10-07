@@ -102,6 +102,7 @@ pub(crate) enum NativeToolIdempotency {
 
 #[derive(Debug, Clone)]
 pub(crate) struct NativeToolRequest {
+    pub(crate) sandbox_contract: super::AgentSandboxContract,
     pub(crate) session_id: String,
     pub(crate) task_id: String,
     pub(crate) goal: String,
@@ -262,6 +263,9 @@ impl EphemeralTerminalResultStore {
 }
 
 pub(crate) trait NativeToolRuntime: Send + Sync {
+    fn prepare_sandbox(&self, header: &super::AgentSessionHeader) -> Result<(), String> {
+        super::sandbox::require_session_sandbox(header)
+    }
     fn terminal_interactive_tools_enabled(&self, _remote_target: bool) -> bool {
         false
     }
@@ -288,6 +292,19 @@ pub(crate) trait NativeToolRuntime: Send + Sync {
         approved: bool,
         cancellation: CancellationToken,
     ) -> Result<NativeToolResult, String>;
+
+    fn execute_scoped(
+        &self,
+        token: &str,
+        approved: bool,
+        cancellation: CancellationToken,
+        scope: super::sandbox_authorization::ResourceAuthorizationScope,
+    ) -> Result<NativeToolResult, String> {
+        if scope != super::sandbox_authorization::ResourceAuthorizationScope::Once {
+            return Err("Session resource authorization is unsupported by this adapter".into());
+        }
+        self.execute(token, approved, cancellation)
+    }
 
     fn abandon(&self, token: &str);
 
@@ -411,6 +428,22 @@ impl NativeToolRuntimeSlot {
 }
 
 impl NativeToolRuntime for NativeToolRuntimeSlot {
+    fn prepare_sandbox(&self, header: &super::AgentSessionHeader) -> Result<(), String> {
+        match self.runtime() {
+            Ok(runtime) => runtime.prepare_sandbox(header),
+            Err(_) => super::sandbox::require_session_sandbox(header),
+        }
+    }
+    fn execute_scoped(
+        &self,
+        token: &str,
+        approved: bool,
+        cancellation: CancellationToken,
+        scope: super::sandbox_authorization::ResourceAuthorizationScope,
+    ) -> Result<NativeToolResult, String> {
+        self.runtime()?
+            .execute_scoped(token, approved, cancellation, scope)
+    }
     fn terminal_interactive_tools_enabled(&self, remote_target: bool) -> bool {
         self.runtime()
             .is_ok_and(|runtime| runtime.terminal_interactive_tools_enabled(remote_target))
@@ -543,6 +576,9 @@ pub(crate) struct AgentToolPipeline {
 }
 
 impl AgentToolPipeline {
+    pub(crate) fn prepare_sandbox(&self, header: &super::AgentSessionHeader) -> Result<(), String> {
+        self.native.prepare_sandbox(header)
+    }
     pub(crate) fn new(
         agents: super::AgentRegistry,
         sessions: AgentSessionStore,
@@ -730,7 +766,15 @@ impl AgentToolPipeline {
         let permission_mode = snapshot.header.permission_mode.ok_or_else(|| {
             "nativePermissionMissing: Session has no Rust permission mode".to_string()
         })?;
+        let sandbox_contract = super::AgentSandboxContract::freeze(
+            snapshot.header.sandbox_policy,
+            &target,
+            snapshot.header.execution_surface,
+            current_unix_ms(),
+        )?
+        .bind_to_session(&snapshot.header);
         let request_for = |model_call: ModelToolCall| NativeToolRequest {
+            sandbox_contract: sandbox_contract.clone(),
             session_id: entry.session_id.clone(),
             task_id: snapshot.header.task_id.clone(),
             goal: snapshot.header.goal.clone(),
@@ -752,6 +796,23 @@ impl AgentToolPipeline {
         let mut running = futures_util::stream::FuturesUnordered::new();
         let mut draining_barrier = false;
         let mut budget_exhausted = false;
+        let mut frozen_calls = self
+            .sessions
+            .all_events(&entry.session_id)?
+            .iter()
+            .filter_map(|event| {
+                if event.turn_id.as_deref() == Some(turn_id)
+                    && event.step_id.as_deref() == Some(step_id)
+                {
+                    if let AgentSessionEventPayload::SandboxCallFrozen { call_id, .. } =
+                        &event.payload
+                    {
+                        return Some(call_id.clone());
+                    }
+                }
+                None
+            })
+            .collect::<std::collections::HashSet<_>>();
         let outcome: Result<ToolPipelineSettlement, String> = async {
             loop {
                 while let Some((request, preparation, result)) = ready.remove(&committed) {
@@ -776,6 +837,17 @@ impl AgentToolPipeline {
                             budget_exhausted = true;
                             continue;
                         }
+                    }
+                    let sandbox_request = request_for(call.clone());
+                    if frozen_calls.insert(call.call_id.clone()) {
+                        self.sessions.append(&entry.session_id, Some(turn_id.into()), Some(step_id.into()), AgentSessionEventPayload::SandboxCallFrozen {
+                            call_id: call.call_id.clone(), contract: sandbox_request.sandbox_contract.clone(),
+                        })?;
+                    }
+                    if let Err(reason) = sandbox_request.sandbox_contract.authorize_call(&sandbox_request.session_id, &call.call_id, &target, current_unix_ms()) {
+                        if !running.is_empty() { draining_barrier = true; continue; }
+                        self.commit_not_started(&sandbox_request, &reason)?;
+                        next += 1; committed += 1; continue;
                     }
                     if call.name == super::skills::SKILL_TOOL {
                         if !running.is_empty() { draining_barrier = true; continue; }
@@ -1184,6 +1256,13 @@ impl AgentToolPipeline {
         };
         let header = self.sessions.snapshot(&entry.session_id)?.header;
         let request = NativeToolRequest {
+            sandbox_contract: super::AgentSandboxContract::freeze(
+                header.sandbox_policy,
+                &target,
+                header.execution_surface,
+                current_unix_ms(),
+            )?
+            .bind_to_session(&header),
             session_id: entry.session_id.clone(),
             task_id: self.sessions.snapshot(&entry.session_id)?.header.task_id,
             goal: header.goal,
@@ -1531,6 +1610,17 @@ impl AgentToolPipeline {
     }
 
     fn prepare_native(&self, request: &NativeToolRequest) -> Result<NativeToolPreparation, String> {
+        if request.sandbox_contract.policy != super::AgentSandboxPolicy::Host
+            && !super::sandbox::restricted_model_tool(&request.model_call.name)
+        {
+            return Err("sandboxToolUnsupported: tool has no native sandbox boundary".into());
+        }
+        request.sandbox_contract.authorize_call(
+            &request.session_id,
+            &request.model_call.call_id,
+            &request.target,
+            current_unix_ms(),
+        )?;
         super::model::reject_omitted_input_replay(
             &request.model_call.name,
             &request.model_call.arguments,
@@ -1782,6 +1872,27 @@ impl AgentToolPipeline {
     }
 
     fn commit_not_started(&self, request: &NativeToolRequest, reason: &str) -> Result<(), String> {
+        let capability =
+            super::sandbox_capability_for(&self.sessions.snapshot(&request.session_id)?.header);
+        // `reason` comes from controller admission, never command output.
+        let failure = if reason.starts_with("sandboxBackendUnavailable:") {
+            super::sandbox::host_policy_failure(Some(request.sandbox_contract.policy))
+        } else {
+            None
+        }
+        .unwrap_or_else(|| {
+            super::AgentExecutionFailure::new(
+                super::AgentExecutionFailureKind::PolicyRejected,
+                if reason.starts_with("sandboxToolUnsupported:") {
+                    "sandboxToolUnsupported"
+                } else if reason.starts_with("sandboxPolicyUnsupported:") {
+                    "sandboxPolicyUnsupported"
+                } else {
+                    "dispatchPolicyRejected"
+                },
+                super::AgentExecutionAdmission::NotStarted,
+            )
+        });
         self.sessions.append_batch(&request.session_id, vec![
             AgentScopedPayload {
                 turn_id: Some(request.turn_id.clone()), step_id: Some(request.step_id.clone()),
@@ -1801,7 +1912,7 @@ impl AgentToolPipeline {
                     call_id: request.model_call.call_id.clone(), name: request.model_call.name.clone(),
                     status: AgentToolResultStatus::Rejected,
                     summary: format!("Tool not started: {reason}"),
-                    data: Some(serde_json::json!({"schedulerAdmission": "notStarted", "reason": reason})),
+                    data: Some(serde_json::json!({"schedulerAdmission": "notStarted", "reason": reason, "sandboxContract": request.sandbox_contract, "sandboxCapability": capability, "failure": failure})),
                     duration_ms: None, evidence_refs: Vec::new(),
                 },
             },
@@ -1838,12 +1949,27 @@ impl AgentToolPipeline {
         approved: bool,
         cancellation: CancellationToken,
     ) -> Result<Result<NativeToolResult, String>, String> {
+        self.execute_native_scoped(
+            preparation,
+            approved,
+            cancellation,
+            super::sandbox_authorization::ResourceAuthorizationScope::Once,
+        )
+        .await
+    }
+    async fn execute_native_scoped(
+        &self,
+        preparation: &NativeToolPreparation,
+        approved: bool,
+        cancellation: CancellationToken,
+        scope: super::sandbox_authorization::ResourceAuthorizationScope,
+    ) -> Result<Result<NativeToolResult, String>, String> {
         let native = Arc::clone(&self.native);
         let token = preparation.token.clone();
         let lease = PreparedLease::new(native.clone(), &token);
         tokio::task::spawn_blocking(move || {
             let _lease = lease;
-            native.execute(&token, approved, cancellation)
+            native.execute_scoped(&token, approved, cancellation, scope)
         })
         .await
         .map_err(|error| format!("Native tool worker failed: {error}"))
@@ -2057,6 +2183,21 @@ impl AgentToolPipeline {
         input: AgentToolDecisionInput,
         decision: AgentToolDecision,
     ) -> Result<(), String> {
+        self.decide_scoped(
+            entry,
+            input,
+            decision,
+            super::sandbox_authorization::ResourceAuthorizationScope::Once,
+        )
+        .await
+    }
+    pub(crate) async fn decide_scoped(
+        &self,
+        entry: &Arc<AgentEntry>,
+        input: AgentToolDecisionInput,
+        decision: AgentToolDecision,
+        scope: super::sandbox_authorization::ResourceAuthorizationScope,
+    ) -> Result<(), String> {
         let key = approval_key(&input.session_id, &input.step_id, &input.call_id);
         let mut pending = {
             let mut pending = self
@@ -2161,7 +2302,7 @@ impl AgentToolPipeline {
         )?;
         self.append_execution_dispatch(&pending.request, &pending.preparation)?;
         let result = self
-            .execute_native(&pending.preparation, true, entry.cancellation())
+            .execute_native_scoped(&pending.preparation, true, entry.cancellation(), scope)
             .await;
         drop(refreshed_lease);
         let still_executing = self
@@ -2603,6 +2744,13 @@ impl AgentToolPipeline {
                 })
                 .collect();
             let request = NativeToolRequest {
+                sandbox_contract: super::AgentSandboxContract::freeze(
+                    snapshot.header.sandbox_policy,
+                    &target,
+                    snapshot.header.execution_surface,
+                    current_unix_ms(),
+                )?
+                .bind_to_session(&snapshot.header),
                 session_id: entry.session_id.clone(),
                 task_id: snapshot.header.task_id.clone(),
                 goal: snapshot.header.goal.clone(),
@@ -2623,8 +2771,19 @@ impl AgentToolPipeline {
                     .ok_or_else(|| "Recovered tool call has no Rust permission mode".to_string())?,
                 execution_surface: snapshot.header.execution_surface,
             };
-            if super::model::recorded_tool_call_omits_replay(call) {
-                let reason = if status == AgentToolApprovalStatus::Approved {
+            let restricted = snapshot
+                .header
+                .sandbox_policy
+                .is_some_and(|policy| policy != super::AgentSandboxPolicy::Host);
+            if restricted || super::model::recorded_tool_call_omits_replay(call) {
+                let reason_code = if restricted {
+                    "sandboxAuthorizationInvalidAfterRestart"
+                } else {
+                    "ephemeralArgumentsUnavailableAfterRestart"
+                };
+                let reason = if restricted {
+                    "sandboxAuthorizationInvalidAfterRestart: restricted resource authorization expired on recovery; this call was not dispatched."
+                } else if status == AgentToolApprovalStatus::Approved {
                     "An ephemeral tool call was authorized but not dispatched before restart; it was cancelled because its private arguments were not persisted."
                 } else {
                     "An ephemeral tool call approval was cancelled after restart because its private arguments were not persisted."
@@ -2641,7 +2800,7 @@ impl AgentToolPipeline {
                                 approval_id: (!approval_id.is_empty()).then(|| approval_id.clone()),
                                 status: AgentToolApprovalStatus::Cancelled,
                                 risk: call.effect,
-                                reason: Some("ephemeralArgumentsUnavailableAfterRestart".into()),
+                                reason: Some(reason_code.into()),
                                 expires_at_unix_ms: Some(expires_at),
                                 prompt: None,
                             },
@@ -2656,7 +2815,9 @@ impl AgentToolPipeline {
                                 summary: reason.into(),
                                 data: Some(serde_json::json!({
                                     "recovery": "notRestartable",
-                                    "reason": "ephemeralArgumentsUnavailableAfterRestart"
+                                    "reason": reason_code,
+                                    "sandboxContract": request.sandbox_contract,
+                                    "sandboxCapability": super::sandbox_capability_for(&snapshot.header),
                                 })),
                                 duration_ms: None,
                                 evidence_refs: Vec::new(),
@@ -2667,14 +2828,17 @@ impl AgentToolPipeline {
                 for remaining in &remaining_calls {
                     let mut remaining_request = request.clone();
                     remaining_request.model_call = remaining.clone();
-                    self.commit_not_started(
-                        &remaining_request,
-                        "ephemeralArgumentsUnavailableAfterRestart",
-                    )?;
+                    self.commit_not_started(&remaining_request, reason_code)?;
                 }
                 resumable = true;
                 continue;
             }
+            request.sandbox_contract.authorize_call(
+                &request.session_id,
+                &request.model_call.call_id,
+                &request.target,
+                current_unix_ms(),
+            )?;
             let mut preparation = self.native.prepare(request.clone())?;
             let lease = Arc::new(PreparedLease::new(self.native.clone(), &preparation.token));
             if preparation.call != *call {
@@ -2969,6 +3133,87 @@ mod ephemeral_terminal_result_tests {
     use super::*;
 
     #[test]
+    fn sandbox_native_admission_only_reaches_adapter_for_direct_process_tools() {
+        let root = tempfile::tempdir().unwrap();
+        let target: AgentSessionTarget = serde_json::from_value(serde_json::json!({
+            "kind": "local", "targetId": "local", "sessionId": "terminal", "cwd": root.path(),
+        }))
+        .unwrap();
+        let pipeline = AgentToolPipeline::new(
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Arc::new(NativeToolRuntimeSlot::default()),
+            Default::default(),
+            Default::default(),
+        );
+        super::super::verify_native_sandbox_backend();
+        for name in [
+            "run_terminal_command",
+            "write_terminal_input",
+            "read_terminal",
+            "wait_terminal",
+            "write_process_input",
+            "wait_process",
+            "kill_process",
+            "read_file",
+            "write_file",
+            "apply_patch",
+            "transfer_file",
+            "probe_http",
+            "inspect_host",
+            "call_mcp_tool",
+        ] {
+            for surface in [
+                super::super::AgentExecutionSurface::Direct,
+                super::super::AgentExecutionSurface::BoundTerminal,
+            ] {
+                let request = NativeToolRequest {
+                    sandbox_contract: super::super::AgentSandboxContract::freeze(
+                        Some(super::super::AgentSandboxPolicy::Workspace),
+                        &target,
+                        surface,
+                        current_unix_ms(),
+                    )
+                    .unwrap(),
+                    session_id: "session".into(),
+                    task_id: "task".into(),
+                    goal: "Inspect project".into(),
+                    success_criteria: vec![],
+                    turn_id: "turn".into(),
+                    step_id: "step".into(),
+                    request_id: "request".into(),
+                    model_call: ModelToolCall {
+                        call_id: "call".into(),
+                        provider_call_id: None,
+                        name: name.into(),
+                        arguments: serde_json::json!({}),
+                    },
+                    target: target.clone(),
+                    permission_mode: super::super::AgentSessionPermissionMode::Operator,
+                    execution_surface: surface,
+                };
+                let error = pipeline.prepare_native(&request).unwrap_err();
+                if !super::super::sandbox::restricted_model_tool(name) {
+                    assert!(
+                        error.starts_with("sandboxToolUnsupported:"),
+                        "{name}: {error}"
+                    );
+                } else if cfg!(target_os = "macos")
+                    && surface == super::super::AgentExecutionSurface::Direct
+                {
+                    assert_eq!(error, "Agent Runtime native tool adapter is not configured");
+                } else {
+                    assert!(
+                        error.starts_with("sandboxBackendUnavailable:"),
+                        "{name}: {error}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn terminal_input_history_survives_only_in_the_current_live_turn() {
         use super::super::{
             AgentAssistantContentBlock, AgentSurfaceMessage, AgentSurfaceSnapshot,
@@ -3077,6 +3322,7 @@ mod ephemeral_terminal_result_tests {
         .unwrap();
         sessions
             .create(super::super::CreateAgentSessionRequest {
+                sandbox_policy: None,
                 session_id: "input-recovery".into(),
                 task_id: "input-recovery-task".into(),
                 goal: "Inspect current directory".into(),
@@ -3099,6 +3345,13 @@ mod ephemeral_terminal_result_tests {
             Default::default(),
         );
         let mut request = NativeToolRequest {
+            sandbox_contract: crate::agent_runtime::AgentSandboxContract::freeze(
+                None,
+                &target,
+                crate::agent_runtime::AgentExecutionSurface::BoundTerminal,
+                current_unix_ms(),
+            )
+            .unwrap(),
             session_id: "input-recovery".into(),
             task_id: "input-recovery-task".into(),
             goal: "Inspect current directory".into(),

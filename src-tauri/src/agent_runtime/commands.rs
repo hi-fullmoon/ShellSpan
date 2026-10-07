@@ -17,6 +17,25 @@ use super::{
 
 pub(crate) const AGENT_RUNTIME_SESSION_EVENT: &str = "agent-runtime-session-event";
 
+#[tauri::command]
+pub(crate) async fn agent_runtime_probe_native_sandbox(
+) -> Result<super::AgentSandboxCapability, String> {
+    tokio::task::spawn_blocking(|| {
+        super::verify_native_sandbox_backend();
+        super::native_sandbox_capability()
+    })
+    .await
+    .map_err(|_| "Native sandbox preflight worker failed".into())
+}
+
+/// Read-only local infrastructure detection. Does not grant resources or start
+/// containers, install dependencies, pull images, or open restricted admission.
+#[tauri::command]
+pub(crate) async fn agent_runtime_probe_local_sandbox_backend(
+) -> super::native::container_backend::LocalContainerBackendProbe {
+    super::native::container_backend::probe_local_container_backend().await
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AgentTerminalLeaseControlInput {
@@ -192,13 +211,18 @@ pub(crate) struct AgentSessionIdInput {
 }
 
 #[tauri::command]
-pub(crate) fn agent_runtime_create_session(
+pub(crate) async fn agent_runtime_create_session(
     app: AppHandle,
     runtime: State<'_, AgentRuntime>,
     request: CreateAgentSessionRequest,
 ) -> Result<AgentSessionSnapshot, String> {
-    configure_runtime(&app, &runtime)?;
-    runtime.create_session(request)
+    let runtime = runtime.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        configure_runtime(&app, &runtime)?;
+        runtime.create_session(request)
+    })
+    .await
+    .map_err(|error| format!("Agent session creation worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -306,7 +330,7 @@ pub(crate) fn agent_runtime_fleet_reconcile(
 }
 
 #[tauri::command]
-pub(crate) fn agent_runtime_start(
+pub(crate) async fn agent_runtime_start(
     app: AppHandle,
     runtime: State<'_, AgentRuntime>,
     credentials: State<'_, CredentialManager>,
@@ -327,7 +351,10 @@ pub(crate) fn agent_runtime_start(
     let route = routes.route(&selection.route_id)?;
     let provider = route.provider(&selection)?;
     let api_key = llm.routes.credential(route)?;
-    runtime.start(&input.session_id, provider, api_key)
+    let runtime = runtime.inner().clone();
+    tokio::task::spawn_blocking(move || runtime.start(&input.session_id, provider, api_key))
+        .await
+        .map_err(|_| "Agent start worker failed".to_string())?
 }
 
 #[tauri::command]
@@ -385,6 +412,43 @@ pub(crate) fn agent_runtime_bind_project_root(
 pub(crate) struct AgentExecutionSurfaceInput {
     session_id: String,
     surface: super::AgentExecutionSurface,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentSandboxPolicyInput {
+    session_id: String,
+    policy: super::AgentSandboxPolicy,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentCacheCandidatesInput {
+    session_id: String,
+    directories: Vec<String>,
+}
+
+#[tauri::command]
+pub(crate) fn agent_runtime_set_cache_directory_candidates(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    input: AgentCacheCandidatesInput,
+) -> Result<AgentSessionSnapshot, String> {
+    configure_runtime(&app, &runtime)?;
+    runtime.set_cache_directory_candidates(&input.session_id, input.directories)
+}
+
+#[tauri::command]
+pub(crate) async fn agent_runtime_set_sandbox_policy(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    input: AgentSandboxPolicyInput,
+) -> Result<AgentSessionSnapshot, String> {
+    configure_runtime(&app, &runtime)?;
+    let runtime = runtime.inner().clone();
+    tokio::task::spawn_blocking(move || runtime.set_sandbox_policy(&input.session_id, input.policy))
+        .await
+        .map_err(|_| "Sandbox policy worker failed".to_string())?
 }
 
 #[tauri::command]
@@ -527,9 +591,40 @@ pub(crate) async fn agent_runtime_approve_tool(
     app: AppHandle,
     runtime: State<'_, AgentRuntime>,
     input: AgentToolDecisionInput,
+    resource_scope: Option<super::sandbox_authorization::ResourceAuthorizationScope>,
 ) -> Result<AgentSessionSnapshot, String> {
     configure_runtime(&app, &runtime)?;
-    runtime.approve_tool(input).await
+    runtime
+        .approve_tool_scoped(input, resource_scope.unwrap_or_default())
+        .await
+}
+
+#[tauri::command]
+pub(crate) async fn agent_runtime_revoke_sandbox_reads(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    input: AgentSessionIdInput,
+) -> Result<AgentSessionSnapshot, String> {
+    configure_runtime(&app, &runtime)?;
+    runtime
+        .revoke_sandbox_reads(
+            &input.session_id,
+            app.state::<crate::models::SessionManager>().inner(),
+        )
+        .await
+}
+
+#[tauri::command]
+pub(crate) async fn agent_runtime_get_sandbox_authorizations(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    input: AgentSessionIdInput,
+) -> Result<super::sandbox_authorization::SandboxAuthorizationStatus, String> {
+    configure_runtime(&app, &runtime)?;
+    let runtime = runtime.inner().clone();
+    tokio::task::spawn_blocking(move || runtime.sandbox_authorizations(&input.session_id))
+        .await
+        .map_err(|_| "Sandbox authorization status worker failed".to_string())?
 }
 
 #[tauri::command]

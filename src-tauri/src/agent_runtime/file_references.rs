@@ -273,6 +273,7 @@ impl FileReferenceRuntime {
         Self::validate_ids(&input.session_id, &input.request_id)?;
         query_parts(&input.query).map_err(|e| e.to_string())?;
         let header = self.sessions.snapshot(&input.session_id)?.header;
+        super::sandbox::require_host_policy(header.sandbox_policy)?;
         let target = header.target.ok_or("RootRequired")?;
         if !matches!(target.kind.as_str(), "local" | "remote")
             || header.capability_scope.is_some_and(|s| {

@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ChevronRightIcon, ShieldAlertIcon } from 'lucide-react';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -27,7 +28,7 @@ export interface AiApprovalPanelProps {
   readonly error: string | null;
   readonly argumentsLoading?: boolean;
   readonly argumentsError?: string | null;
-  readonly onApprove: () => void;
+  readonly onApprove: (scope?: 'once' | 'session') => void;
   readonly onReject: () => void;
   readonly onOpenDetails: () => void;
 }
@@ -128,6 +129,9 @@ export function AiApprovalPanel({
 }: AiApprovalPanelProps): React.ReactNode {
   const { t } = useI18n();
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const [resourceScope, setResourceScope] = useState<'once' | 'session'>('once');
+  useEffect(() => { setResourceScope('once'); }, [approval.sessionId, approval.turnId, approval.stepId, approval.requestId, approval.callId, approval.approvalId]);
+  const resourceScopeItems = [{value:'once',label:t('ai.workspace.approval.scopeOnce')},{value:'session',label:t('ai.workspace.approval.scopeSession')}];
   const pending = decision !== null;
   const command = argumentString(approval, 'command');
   const inputKind = argumentString(approval, 'inputKind');
@@ -148,6 +152,18 @@ export function AiApprovalPanel({
     && !Array.isArray(approval.arguments)
     ? approval.arguments as Record<string, unknown>
     : null;
+  const readPaths = Array.isArray(argumentRecord?.readPaths)
+    ? argumentRecord.readPaths.filter((value): value is string => typeof value === 'string') : [];
+  const writePaths = Array.isArray(argumentRecord?.writePaths)
+    ? argumentRecord.writePaths.filter((value): value is string => typeof value === 'string') : [];
+  const networkTargets = Array.isArray(argumentRecord?.networkTargets)
+    ? argumentRecord.networkTargets.flatMap((value: unknown) => {
+      if (!value || typeof value !== 'object' || !('host' in value) || !('port' in value)
+        || typeof value.host !== 'string' || typeof value.port !== 'number') return [];
+      return [{ endpoint: `${value.host}:${value.port}`, resolver: 'resolver' in value && value.resolver === 'cloudflare' ? 'cloudflare' : 'system' }];
+    }) : [];
+  const localServices = Array.isArray(argumentRecord?.localServices)
+    ? argumentRecord.localServices.flatMap((value: unknown) => value && typeof value === 'object' && 'port' in value && typeof value.port === 'number' ? [`127.0.0.1:${value.port}`] : []) : [];
   const volatileArgumentsRequired = argumentRecord?.contentPersisted === false && (
     approval.toolName === 'write_terminal_input'
       ? inputKind === 'text' || inputKind === 'paste'
@@ -181,7 +197,7 @@ export function AiApprovalPanel({
 
   useEffect(() => {
     headingRef.current?.focus({ preventScroll: true });
-  }, [approval.approvalId]);
+  }, [approval.sessionId, approval.turnId, approval.stepId, approval.requestId, approval.callId, approval.approvalId]);
 
   return (
     <Card
@@ -253,10 +269,61 @@ export function AiApprovalPanel({
               </Alert>
             )}
 
+            {readPaths.length > 0 && (
+              <Alert variant="subtle" size="sm">
+                <AlertDescription>
+                  <p>{t(resourceScope === 'session' ? 'ai.workspace.approval.sessionReadGrant' : 'ai.workspace.approval.projectReadGrant')}</p>
+                  <p>{t('ai.workspace.approval.projectReadGrantNotice')}</p>
+                  <ul>{readPaths.map(path => <li className="break-words" key={path}>{path}</li>)}</ul>
+                  <Select items={resourceScopeItems} value={resourceScope} disabled={decision !== null} onValueChange={value => { if (value === 'once' || value === 'session') setResourceScope(value); }}>
+                    <SelectTrigger size="sm" aria-label={t(writePaths.length || networkTargets.length || localServices.length ? 'ai.workspace.approval.resourceScopeAll' : 'ai.workspace.approval.resourceScope')}><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectGroup>{resourceScopeItems.map(item => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectGroup></SelectContent>
+                  </Select>
+                  {resourceScope === 'session' && <p>{t(writePaths.length || networkTargets.length || localServices.length ? 'ai.workspace.approval.scopeResourcesSessionNotice' : 'ai.workspace.approval.scopeSessionNotice')}</p>}
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {writePaths.length > 0 && <Alert variant="subtle" size="sm"><AlertDescription>
+              <p>{t(resourceScope === 'session' ? 'ai.workspace.approval.cacheSessionGrant' : 'ai.workspace.approval.cacheGrant')}</p>
+              <p>{t('ai.workspace.approval.cacheGrantNotice')}</p>
+              <ul>{writePaths.map(path => <li className="break-words" key={path}>{path}</li>)}</ul>
+            </AlertDescription></Alert>}
+
+            {networkTargets.length > 0 && (
+              <Alert variant="subtle" size="sm">
+                <AlertDescription>
+                  <p>{t(resourceScope === 'session' ? 'ai.workspace.approval.networkSessionGrant' : 'ai.workspace.approval.networkGrant')}</p>
+                  <p>{t('ai.workspace.approval.networkGrantNotice')}</p>
+                  <ul>{networkTargets.map(target => <li className="break-words" key={target.endpoint}><span>{target.endpoint}</span><p>{t(target.resolver === 'cloudflare' ? 'ai.workspace.approval.networkDnsCloudflare' : 'ai.workspace.approval.networkDnsSystem')}</p></li>)}</ul>
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {localServices.length > 0 && (
+              <Alert variant="subtle" size="sm">
+                <AlertDescription>
+                  <p>{t(resourceScope === 'session' ? 'ai.workspace.approval.localServiceSessionGrant' : 'ai.workspace.approval.localServiceGrant')}</p>
+                  <p>{t('ai.workspace.approval.localServiceGrantNotice')}</p>
+                  <ul>{localServices.map(address => <li className="break-words" key={address}>{address}</li>)}</ul>
+                </AlertDescription>
+              </Alert>
+            )}
+
             {volatileArgumentsError && (
               <AiErrorNotice title={t('ai.workspace.approval.previewUnavailableTitle')}>
                 {volatileArgumentsError}
               </AiErrorNotice>
+            )}
+
+            {readPaths.length === 0 && (writePaths.length > 0 || networkTargets.length > 0 || localServices.length > 0) && (
+              <Alert variant="subtle" size="sm"><AlertDescription>
+                <Select items={resourceScopeItems} value={resourceScope} disabled={decision !== null} onValueChange={value => { if (value === 'once' || value === 'session') setResourceScope(value); }}>
+                  <SelectTrigger size="sm" aria-label={t('ai.workspace.approval.resourceScopeAll')}><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectGroup>{resourceScopeItems.map(item => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectGroup></SelectContent>
+                </Select>
+                {resourceScope === 'session' && <p>{t('ai.workspace.approval.scopeResourcesSessionNotice')}</p>}
+              </AlertDescription></Alert>
             )}
 
             {intent && (
@@ -276,7 +343,7 @@ export function AiApprovalPanel({
               <AlertDescription className="flex flex-wrap items-center gap-x-1">
                 <span className="font-medium">{t('ai.workspace.approval.impact')}</span>
                 <span>{t(approval.toolName === 'trash_file' ? 'ai.workspace.approval.trashImpact' : riskKeys.description)}</span>
-                {command && <span>{t('ai.workspace.approval.unsandboxedImpact')}</span>}
+                {command && <span>{t(approval.sandboxCapability?.files && approval.sandboxCapability.network ? 'ai.workspace.approval.sandboxedImpact' : 'ai.workspace.approval.unsandboxedImpact')}</span>}
               </AlertDescription>
             </Alert>
 
@@ -299,7 +366,7 @@ export function AiApprovalPanel({
           {decision === 'reject' && <Spinner data-icon="inline-start" />}
           {t('ai.workspace.approval.reject')}
         </Button>
-        <Button size="sm" variant="warning" disabled={pending || volatileArgumentsMissing} aria-busy={argumentsLoading || undefined} onClick={onApprove} aria-label={t(approval.toolName === 'trash_file' ? 'ai.workspace.approval.action.trashFile' : 'ai.workspace.approval.approveOnce')}>
+        <Button size="sm" variant="warning" disabled={pending || volatileArgumentsMissing} aria-busy={argumentsLoading || undefined} onClick={() => { if (readPaths.length || writePaths.length || networkTargets.length || localServices.length) onApprove(resourceScope); else onApprove(); }} aria-label={t(approval.toolName === 'trash_file' ? 'ai.workspace.approval.action.trashFile' : 'ai.workspace.approval.approveOnce')}>
           {decision === 'approve' && <Spinner data-icon="inline-start" />}
           {t(approval.toolName === 'trash_file' ? 'ai.workspace.approval.action.trashFile' : 'ai.workspace.approval.approveOnce')}
         </Button>

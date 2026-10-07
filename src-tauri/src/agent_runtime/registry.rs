@@ -36,6 +36,7 @@ pub(crate) struct AgentModelSelection {
 }
 
 pub(crate) struct AgentEntry {
+    shutdown_admission: super::shutdown_admission::ShutdownAdmission,
     pub(crate) session_id: String,
     // A new in-memory Agent starts a new series when a persisted session resumes.
     pub(crate) request_series_id: String,
@@ -63,8 +64,11 @@ impl AgentEntry {
         capability_scope: Option<AgentCapabilityScope>,
         subagent: Option<AgentSubagentSession>,
         initial_phase: AgentLifecyclePhase,
+        shutdown_admission: super::shutdown_admission::ShutdownAdmission,
     ) -> Self {
         Self {
+            cancellation: shutdown_admission.cancellation(),
+            shutdown_admission,
             session_id,
             request_series_id: format!("series-{}", uuid::Uuid::new_v4().simple()),
             model: Mutex::new(AgentModelSelection { provider, adapter }),
@@ -72,7 +76,6 @@ impl AgentEntry {
             capability_scope,
             subagent,
             owner: Mutex::new(None),
-            cancellation: CancellationToken::new(),
             admitting: AtomicBool::new(true),
             driver_active: AtomicBool::new(false),
             title_started: AtomicBool::new(false),
@@ -151,6 +154,7 @@ impl AgentEntry {
     }
 
     pub(crate) fn try_acquire_driver(&self) -> Result<bool, String> {
+        let _admission=self.shutdown_admission.enter()?;
         if !self.admitting.load(Ordering::Acquire)
             || matches!(
                 self.phase()?,
@@ -161,10 +165,15 @@ impl AgentEntry {
         {
             return Ok(false);
         }
-        Ok(self
+        let acquired=self
             .driver_active
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_ok())
+            .is_ok();
+        if acquired && self.shutdown_admission.ensure_open().is_err() {
+            self.release_driver();
+            return Ok(false);
+        }
+        Ok(acquired)
     }
 
     pub(crate) fn release_driver(&self) {
@@ -192,7 +201,7 @@ impl AgentEntry {
     }
 
     pub(crate) fn is_admitting(&self) -> bool {
-        self.admitting.load(Ordering::Acquire)
+        self.admitting.load(Ordering::Acquire) && self.shutdown_admission.ensure_open().is_ok()
     }
 
     pub(crate) fn cancel(&self) {
@@ -223,10 +232,14 @@ impl AgentEntry {
 
 #[derive(Clone, Default)]
 pub(crate) struct AgentRegistry {
+    shutdown_admission: super::shutdown_admission::ShutdownAdmission,
     entries: Arc<Mutex<HashMap<String, Arc<AgentEntry>>>>,
 }
 
 impl AgentRegistry {
+    pub(crate) fn with_shutdown_admission(shutdown_admission: super::shutdown_admission::ShutdownAdmission) -> Self {
+        Self {shutdown_admission,entries:Default::default()}
+    }
     pub(crate) fn set_owner(
         &self,
         child: &Arc<AgentEntry>,
@@ -271,6 +284,7 @@ impl AgentRegistry {
         provider: AiProviderConfig,
         adapter: Arc<dyn ModelAdapter>,
     ) -> Result<AgentHandle, String> {
+        let _admission=self.shutdown_admission.enter()?;
         let snapshot = sessions.snapshot(&session_id)?;
         if snapshot.ended {
             return Err("ended Agent session cannot attach an Agent".into());
@@ -287,6 +301,7 @@ impl AgentRegistry {
             snapshot.header.capability_scope,
             snapshot.header.subagent,
             initial_phase,
+            self.shutdown_admission.clone(),
         ));
         let mut entries = self
             .entries
@@ -296,6 +311,11 @@ impl AgentRegistry {
             return Err("Agent Session already has a registered Agent".into());
         }
         entries.insert(session_id, Arc::clone(&entry));
+        if self.shutdown_admission.ensure_open().is_err() {
+            entries.remove(&entry.session_id);
+            entry.cancel();
+            return Err("agentRuntimeShuttingDown: Agent registration was cancelled".into());
+        }
         Ok(AgentHandle {
             registry: self.clone(),
             sessions,
@@ -442,6 +462,7 @@ mod tests {
         sessions.configure(root.path().to_path_buf()).unwrap();
         sessions
             .create(CreateAgentSessionRequest {
+                sandbox_policy: None,
                 session_id: "session-1".into(),
                 task_id: "task-1".into(),
                 goal: "test lifecycle".into(),

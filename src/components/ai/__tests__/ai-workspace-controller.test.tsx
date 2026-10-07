@@ -154,8 +154,9 @@ it('remembers a confirmed permission for new Agent conversations without changin
   await user.click(screen.getByRole('menuitemradio', { name: 'second-model' }));
   await waitFor(() => expect(agent.selectModel).toHaveBeenCalledWith(view.summary.id, expect.objectContaining({ id: second.id })));
   expect(useAiSettingsStore.getState().defaultProviderId).toBe(provider.id);
-  await user.click(screen.getByRole('button', { name: /Permission mode:/ }));
-  await user.click(await screen.findByRole('menuitemradio', { name: /^Full access/ }));
+  await user.click(screen.getByRole('button', { name: /Operation approval:/ }));
+  expect(await screen.findByText('Operation approval', { selector: '[data-slot="dropdown-menu-label"]' })).toBeVisible();
+  await user.click(await screen.findByRole('menuitemradio', { name: /^No per-call approval/ }));
   await user.click(await screen.findByRole('button', { name: 'Allow full access' }));
   await waitFor(() => expect(agent.setPermission).toHaveBeenCalledWith(view.summary.id, 'operator'));
   expect(useAgentPermissionStore.getState().getMode('terminal-1')).toBe('fullAccess');
@@ -195,10 +196,10 @@ it('allows changing model and permissions before retrying a failed conversation'
     failed.summary.id,
     expect.objectContaining({ id: second.id }),
   ));
-  const permission = screen.getByRole('button', { name: /Permission mode:/ });
+  const permission = screen.getByRole('button', { name: /Operation approval:/ });
   expect(permission).toBeEnabled();
   await user.click(permission);
-  await user.click(await screen.findByRole('menuitemradio', { name: /^Full access/ }));
+  await user.click(await screen.findByRole('menuitemradio', { name: /^No per-call approval/ }));
   await user.click(await screen.findByRole('button', { name: 'Allow full access' }));
   await waitFor(() => expect(agent.setPermission).toHaveBeenCalledWith(failed.summary.id, 'operator'));
 });
@@ -256,6 +257,25 @@ function runningAgentView(sessionId = 'agent-session-1', terminalId = 'terminal-
   };
 }
 
+it('preserves local workspace intent even when approval is operator and refuses submission before transport', async () => {
+  connectedLocalTerminal();
+  useAgentPermissionStore.getState().setMode('terminal-local', 'fullAccess');
+  const agent = adapter();
+  const { result } = renderHook(() => useAiSessionController({ scope: 'terminal', adapter: agent }));
+  expect(result.current.selectedSandboxPolicy).toBe('workspace');
+  act(() => result.current.selectExecutionSurface('boundTerminal'));
+  expect(result.current.selectedExecutionSurface).toBe('direct');
+  act(() => { result.current.setDraft('Inspect this project'); result.current.submit('primary'); });
+  await waitFor(() => expect(result.current.composer.failedDrafts).toHaveLength(1));
+  expect(agent.submit).not.toHaveBeenCalled();
+  expect(agent.create).not.toHaveBeenCalled();
+  act(() => result.current.selectSandboxPolicy('host'));
+  expect(result.current.selectedSandboxPolicy).toBe('host');
+  expect(result.current.selectedPermission).toBe('fullAccess');
+  act(() => result.current.newSession());
+  expect(result.current.selectedSandboxPolicy).toBe('workspace');
+});
+
 it('keeps request-approval distinct from scoped read-only auto approval', async () => {
   connectedTerminal();
   const base = runningAgentView();
@@ -279,6 +299,26 @@ it('keeps request-approval distinct from scoped read-only auto approval', async 
   expect(result.current.selectedPermission).toBe('requestApproval');
 });
 
+it('deduplicates approval decisions before transport settles and preserves resource scope', async () => {
+  connectedTerminal();
+  const base = runningAgentView();
+  const pending: AiSessionView = { ...base, pendingApproval: {
+    sessionId: base.summary.id, turnId:'turn', stepId:'step', requestId:'request', callId:'call', approvalId:'approval',
+    risk:'externalSideEffect', effect:'externalSideEffect', prompt:null, reason:null, expiresAtUnixMs:null,
+    toolName:'run_terminal_command', target:null, arguments:{command:'pnpm view react version',networkTargets:[{host:'registry.npmjs.org',port:443}]},evidenceRefs:[],
+  } };
+  const approve = vi.fn(async () => { throw new Error('IPC unavailable in unit environment'); });
+  const agent = adapter({ list:vi.fn(async () => ({sessions:[pending.summary]})), open:vi.fn(async () => pending), approve });
+  const { result } = renderHook(() => useAiSessionController({ scope:'terminal', adapter:agent }));
+  await waitFor(() => expect(result.current.view?.pendingApproval).not.toBeNull());
+  await waitFor(() => expect(result.current.view?.pendingApproval?.approvalId).toBe('approval'));
+  act(() => { result.current.approve('session'); result.current.approve('once'); result.current.reject(); });
+  await waitFor(() => expect(result.current.approvalError).toContain('IPC unavailable'));
+  expect(approve).toHaveBeenCalledOnce();
+  expect(approve).toHaveBeenCalledWith(expect.objectContaining({resourceScope:'session'}));
+  expect(agent.reject).not.toHaveBeenCalled();
+});
+
 it('uses remembered Agent controls for new sessions while historical sessions keep their own values', async () => {
   connectedTerminal();
   const base = runningAgentView();
@@ -286,7 +326,7 @@ it('uses remembered Agent controls for new sessions while historical sessions ke
     ...base,
     snapshot: { kind: 'agent', value: {
       ...base.snapshot.value,
-      header: { ...base.snapshot.value.header, permissionMode: 'scopedAutopilot', executionSurface: 'direct' },
+      header: { ...base.snapshot.value.header, permissionMode: 'scopedAutopilot', executionSurface: 'direct', sandboxPolicy: 'readOnly' },
     } },
   };
   const agent = adapter({
@@ -304,10 +344,12 @@ it('uses remembered Agent controls for new sessions while historical sessions ke
   await waitFor(() => expect(result.current.view?.summary.id).toBe(old.summary.id));
   expect(result.current.selectedPermission).toBe('autoApproveReadOnly');
   expect(result.current.selectedExecutionSurface).toBe('direct');
+  expect(result.current.selectedSandboxPolicy).toBe('readOnly');
 
   act(() => result.current.newSession());
   expect(result.current.selectedPermission).toBe('requestApproval');
   expect(result.current.selectedExecutionSurface).toBe('boundTerminal');
+  expect(result.current.selectedSandboxPolicy).toBe('host');
   act(() => { result.current.setDraft('Check the service'); result.current.submit('primary'); });
   await waitFor(() => expect(agent.submit).toHaveBeenCalledWith(null, expect.objectContaining({
     create: expect.objectContaining({ request: expect.objectContaining({
@@ -601,11 +643,14 @@ it('does not mount an empty image addon for stale image errors', () => {
     pendingFiles: [], busy: false, submittedOperationId: undefined, locked: false, error: 'IMAGE_CANCELLED',
     send: vi.fn(), detach: async () => null, reportError: vi.fn(), add: vi.fn(), remove: vi.fn(), cancel: vi.fn(),
   });
+  let mounted: ReturnType<typeof render> | undefined;
   try {
-    const { container } = render(<AiWorkspaceController scope="terminal" adapter={adapter()} />);
+    mounted = render(<AiWorkspaceController scope="terminal" adapter={adapter()} />);
+    const { container } = mounted;
     expect(screen.queryByTestId('image-draft')).not.toBeInTheDocument();
     expect(container.querySelector('.ai-image-draft-addon')).toBeNull();
   } finally {
+    mounted?.unmount();
     imageDraft.mockRestore();
   }
 });
@@ -963,8 +1008,8 @@ describe('AiWorkspaceController', () => {
     await user.click(await within(history).findByText('Run checks'));
 
     const model = await screen.findByRole('button', { name: /Model selection: model-test/ });
-    const permission = screen.getByRole('button', { name: /Permission mode:/ });
-    const execution = screen.getByRole('button', { name: /Command execution: Direct/ });
+    const permission = screen.getByRole('button', { name: /Operation approval:/ });
+    const execution = screen.getByRole('button', { name: /Execution method: Direct/ });
     expect(model).toBeEnabled();
     expect(permission).toBeEnabled();
     expect(execution).toBeEnabled();
@@ -973,7 +1018,7 @@ describe('AiWorkspaceController', () => {
     await user.click(await screen.findByRole('menuitem', { name: /Model.*model-test/ }));
     await user.click(screen.getByRole('menuitemradio', { name: 'second-model' }));
     await user.click(permission);
-    await user.click(await screen.findByRole('menuitemradio', { name: /^Full access/ }));
+    await user.click(await screen.findByRole('menuitemradio', { name: /^No per-call approval/ }));
     await user.click(await screen.findByRole('button', { name: 'Allow full access' }));
     await user.click(execution);
     await user.click(await screen.findByRole('menuitemradio', { name: 'Visible command' }));
@@ -1447,8 +1492,8 @@ describe('AiWorkspaceController', () => {
     render(<AiWorkspaceController scope="terminal" adapter={agent} />);
     await waitFor(() => expect(agent.list).toHaveBeenCalledOnce());
 
-    await user.click(screen.getByRole('button', { name: /Permission mode:/ }));
-    await user.click(await screen.findByRole('menuitemradio', { name: /^Full access/ }));
+    await user.click(screen.getByRole('button', { name: /Operation approval:/ }));
+    await user.click(await screen.findByRole('menuitemradio', { name: /^No per-call approval/ }));
     await user.click(await screen.findByRole('button', { name: 'Allow full access' }));
     expect(useAgentPermissionStore.getState().getMode('terminal-1')).toBe('fullAccess');
 
@@ -1460,7 +1505,7 @@ describe('AiWorkspaceController', () => {
       }));
     });
 
-    await waitFor(() => expect(screen.getByRole('button', { name: /Permission mode: Full access/ })).toBeVisible());
+    await waitFor(() => expect(screen.getByRole('button', { name: /Operation approval: No per-call approval/ })).toBeVisible());
     expect(agent.list).toHaveBeenCalledOnce();
   });
 
@@ -1480,6 +1525,9 @@ describe('AiWorkspaceController', () => {
     }));
 
     act(() => {
+      result.current.selectSandboxPolicy('host');
+    });
+    act(() => {
       result.current.setDraft('Delete an obsolete generated file');
       result.current.submit('primary');
     });
@@ -1488,6 +1536,7 @@ describe('AiWorkspaceController', () => {
       create: expect.objectContaining({
         request: expect.objectContaining({
           permissionMode: 'operator',
+          sandboxPolicy: 'host',
           target: expect.objectContaining({
             kind: 'local',
             cwd: '/Users/test/project',
@@ -1581,6 +1630,9 @@ describe('AiWorkspaceController', () => {
     }));
 
     act(() => {
+      result.current.selectSandboxPolicy('host');
+    });
+    act(() => {
       result.current.setDraft('Run with full access');
       result.current.submit('primary');
     });
@@ -1603,7 +1655,7 @@ describe('AiWorkspaceController', () => {
     render(<AiWorkspaceController scope="terminal" adapter={agent} />);
 
     const user = userEvent.setup();
-    const direct = screen.getByRole('button', { name: 'Command execution: Direct' });
+    const direct = screen.getByRole('button', { name: 'Execution method: Direct' });
     expect(direct).toHaveAttribute('data-terminal-surface-state', 'direct');
     expect(direct).toHaveAttribute(
       'aria-description',
@@ -1611,7 +1663,7 @@ describe('AiWorkspaceController', () => {
     );
     await user.click(direct);
     await user.click(await screen.findByRole('menuitemradio', { name: 'Visible command' }));
-    expect(screen.getByRole('button', { name: 'Command execution: Visible command' }))
+    expect(screen.getByRole('button', { name: 'Execution method: Visible command' }))
       .toHaveAttribute('data-terminal-surface-state', 'ready');
     await user.type(screen.getByRole('textbox'), 'Show this command');
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
@@ -1630,7 +1682,7 @@ describe('AiWorkspaceController', () => {
     }));
     render(<AiWorkspaceController scope="terminal" adapter={adapter()} />);
 
-    const direct = screen.getByRole('button', { name: 'Command execution: Direct' });
+    const direct = screen.getByRole('button', { name: 'Execution method: Direct' });
     expect(direct).toHaveAttribute('data-real-terminal-state', 'busy');
     await userEvent.click(direct);
     const visibleCommand = await screen.findByRole('menuitemradio', { name: 'Visible command' });
@@ -1665,7 +1717,7 @@ describe('AiWorkspaceController', () => {
     });
     render(<AiWorkspaceController scope="terminal" adapter={agent} />);
 
-    const direct = await screen.findByRole('button', { name: 'Command execution: Direct' });
+    const direct = await screen.findByRole('button', { name: 'Execution method: Direct' });
     expect(direct).toBeDisabled();
     act(() => publish?.(idle));
     await waitFor(() => expect(direct).toBeEnabled());
@@ -1764,11 +1816,11 @@ describe('AiWorkspaceController', () => {
     render(<AiWorkspaceController scope="terminal" adapter={agent} />);
 
     await waitFor(() => expect(agent.open).toHaveBeenCalledWith(view.summary.id));
-    const choice = await screen.findByRole('button', { name: 'Command execution: Visible command' });
+    const choice = await screen.findByRole('button', { name: 'Execution method: Visible command' });
     expect(choice).toBeDisabled();
     expect(choice).toHaveAttribute('data-terminal-surface-state', 'ready');
     expect(choice).toHaveAttribute('aria-description', expect.stringContaining('Agent is idle'));
-    expect(screen.queryByRole('button', { name: 'Command execution: Direct' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Execution method: Direct' })).toBeNull();
   });
 
   it('switches execution surface in an idle existing Session', async () => {
@@ -1786,7 +1838,7 @@ describe('AiWorkspaceController', () => {
       setExecutionSurface: vi.fn(async () => undefined),
     });
     render(<AiWorkspaceController scope="terminal" adapter={agent} />);
-    const choice = await screen.findByRole('button', { name: 'Command execution: Direct' });
+    const choice = await screen.findByRole('button', { name: 'Execution method: Direct' });
     expect(choice).toBeEnabled();
     expect(choice).toHaveAttribute(
       'aria-description',
@@ -1814,7 +1866,7 @@ describe('AiWorkspaceController', () => {
       setExecutionSurface: vi.fn(async () => undefined),
     });
     render(<AiWorkspaceController scope="terminal" adapter={agent} />);
-    const choice = await screen.findByRole('button', { name: 'Command execution: Direct' });
+    const choice = await screen.findByRole('button', { name: 'Execution method: Direct' });
     expect(choice).toBeEnabled();
     const user = userEvent.setup();
     await user.click(choice);

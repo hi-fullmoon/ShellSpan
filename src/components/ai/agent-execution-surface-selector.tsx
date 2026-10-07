@@ -2,10 +2,12 @@ import { ChevronDownIcon, MonitorCogIcon, SquareTerminalIcon } from 'lucide-reac
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
@@ -63,6 +65,7 @@ const DIRECT_FALLBACK_COPY = {
 
 export interface AgentExecutionSurfaceSelectorProps {
   readonly disabled?: boolean;
+  readonly boundTerminalDisabled?: boolean;
   readonly surface: AgentExecutionSurface;
   readonly realTerminalState?: RealTerminalPresentationState;
   /** Reserved for a future authoritative runtime routing result. */
@@ -73,6 +76,7 @@ export interface AgentExecutionSurfaceSelectorProps {
 /** Session-scoped execution choice; changes apply only after the Agent becomes idle. */
 export function AgentExecutionSurfaceSelector({
   disabled = false,
+  boundTerminalDisabled = false,
   surface,
   realTerminalState = 'unavailable',
   runtimeFallback,
@@ -100,8 +104,10 @@ export function AgentExecutionSurfaceSelector({
 
   return (
     <DropdownMenu>
+      <Tooltip>
       <DropdownMenuTrigger
         render={(
+          <TooltipTrigger render={
           <Button
             variant="ghost"
             size="xs"
@@ -113,6 +119,7 @@ export function AgentExecutionSurfaceSelector({
             aria-label={`${t('agent.executionSurface')}: ${t(current.label)}`}
             aria-description={accessibleDescription}
           />
+          } />
         )}
       >
         <span
@@ -124,6 +131,8 @@ export function AgentExecutionSurfaceSelector({
           <ChevronDownIcon data-icon="inline-end" />
         </span>
       </DropdownMenuTrigger>
+      <TooltipContent>{`${t('agent.executionSurface')}: ${t(current.label)}`}</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent
         side="top"
         sideOffset={8}
@@ -132,11 +141,12 @@ export function AgentExecutionSurfaceSelector({
         aria-label={t('agent.executionSurface')}
       >
         <DropdownMenuGroup>
+          <DropdownMenuLabel className="text-[11px]">{t('agent.executionSurface')}</DropdownMenuLabel>
           <DropdownMenuRadioGroup
             value={surface}
             onValueChange={(value) => {
               if (value === 'direct') onSurfaceChange?.(value);
-              if (value === 'boundTerminal' && presentation.realTerminalState === 'ready') {
+              if (value === 'boundTerminal' && !boundTerminalDisabled && presentation.realTerminalState === 'ready') {
                 onSurfaceChange?.(value);
               }
             }}
@@ -157,7 +167,7 @@ export function AgentExecutionSurfaceSelector({
                   value={option.surface}
                   closeOnClick
                   disabled={option.surface === 'boundTerminal'
-                    && presentation.realTerminalState !== 'ready'}
+                    && (boundTerminalDisabled || presentation.realTerminalState !== 'ready')}
                   className="ai-execution-surface-menu-option min-h-12 items-start gap-1 py-2 pr-8 pl-2"
                   aria-description={t(description)}
                 >

@@ -1,9 +1,38 @@
 use super::*;
 use crate::agent_runtime::skills::*;
 use crate::agent_runtime::AgentCapabilityScope;
+
+#[tokio::test]
+async fn restricted_skill_discovery_reports_unavailable_without_aborting_session_initialization() {
+    let storage = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    write_skill(
+        project.path(),
+        "ordinary",
+        "",
+        "Ordinary project instructions",
+    );
+    let runtime = AgentRuntimeBuilder::new().build();
+    runtime.configure(storage.path().to_path_buf()).unwrap();
+    runtime.create_session(serde_json::from_value(serde_json::json!({
+        "sessionId":"restricted-skills", "taskId":"restricted-skills", "goal":"Read ordinary project",
+        "target":{"kind":"local", "targetId":"local", "sessionId":"terminal", "cwd":project.path()},
+        "executionSurface":"direct", "sandboxPolicy":"workspace", "permissionMode":"requestApproval",
+    })).unwrap()).unwrap();
+    let result = runtime.list_skills("restricted-skills").await.unwrap();
+    assert_eq!(result.status, "unavailable");
+    assert!(result.entries.is_empty());
+    assert!(result.revision.is_none());
+    assert!(!result.diagnostics.is_empty());
+    assert_ne!(
+        runtime.session("restricted-skills").unwrap().status,
+        AgentSessionStatus::Failed
+    );
+}
 pub(super) fn create_skill_session(runtime: &AgentRuntime, session: &str, root: &std::path::Path) {
     runtime
         .create_session(CreateAgentSessionRequest {
+            sandbox_policy: Some(crate::agent_runtime::AgentSandboxPolicy::Host),
             session_id: session.into(),
             task_id: format!("task-{session}"),
             goal: "Read Skills".into(),
@@ -82,6 +111,7 @@ async fn skill_builtin_rootless_local_remote_slash_model_permissions_and_replay(
             target.username = None;
         }
         let request = CreateAgentSessionRequest {
+            sandbox_policy: Some(crate::agent_runtime::AgentSandboxPolicy::Host),
             session_id: "builtin".into(),
             task_id: "task-builtin".into(),
             goal: "Inspect target".into(),

@@ -236,7 +236,12 @@ export function AiSessionRecordsDialog({ onOpenChange }: {
             </div>
             <div className="ai-panel-shell ai-workspace-root ai-session-records-detail flex min-h-0 min-w-0 flex-1 flex-col">
               {detail?.kind === 'tool' ? (
-                <AiToolDetails node={detail.node} onBack={() => setDetail(null)} />
+                <AiToolDetails
+                  node={detail.node}
+                  artifacts={view?.nodes.filter((node): node is AiConversationNodeOf<'artifact'> => node.kind === 'artifact')}
+                  onOpenArtifact={(node) => setDetail({ kind: 'artifact', node })}
+                  onBack={() => setDetail(null)}
+                />
               ) : detail?.kind === 'artifact' ? (
                 <AiArtifactDetails
                   sessionId={detail.node.sessionId}

@@ -19,6 +19,13 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('AiSessionHeader', () => {
+  it('shows the policy summary without adding a header row and exposes session settings', () => {
+    const { container } = render(<AiSessionHeader title="Agent" context="Terminal" status="idle"
+      policySummary="Host operations · Not isolated" settingsControl={<button type="button">Session settings</button>} />);
+    expect(screen.getByText('Terminal · Host operations · Not isolated')).toHaveAttribute('title', 'Terminal · Host operations · Not isolated');
+    expect(screen.getByRole('button', { name: 'Session settings' }).closest('header')).not.toBeNull();
+    expect(container.querySelector('header')).toHaveClass('h-10', 'min-h-10');
+  });
   it('uses compact action buttons while preserving their labels and callbacks', async () => {
     const user = userEvent.setup();
     const onHistory = vi.fn();

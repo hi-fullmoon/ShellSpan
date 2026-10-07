@@ -7,8 +7,16 @@ import { builtinSkillPreview } from '@/lib/ai/builtin-skills';
 import { listProjectDirectories as readProjectDirectories } from '@/lib/ai/project-directory-completion';
 import { questionKey } from '@/types/agent-question';
 import { useImageDraft } from './use-image-draft';
+import { useRemoteSandboxVerification } from './use-remote-sandbox-verification';
+import { useProfileStore } from '@/stores/profileStore';
 import { sessionProviderConfig } from '@/lib/ai/session-settings';
 import { initialSessionIntent } from '@/lib/ai/session-intent';
+import { defaultSandboxIntent } from '@/lib/ai/sandbox-presentation';
+import { freezeCreationProjectRoot } from '@/lib/ai/session-target';
+import { invokeProbeNativeSandbox, invokeRevokeSandboxReads, invokeSetAgentRuntimeSandboxPolicy, invokeResolveLocalProjectRoot } from '@/lib/ipc/tauri';
+import { useToast } from '@/hooks/useToast';
+import { sandboxDefaultScope, useSandboxDefaultsStore, type SandboxDefaultConfiguration } from '@/stores/sandboxDefaultsStore';
+import type { AgentSandboxCapability } from '@/types/agent-session';
 import { isTopLevelAiSession, listAllAiSessions } from '@/lib/ai/session-list';
 import type { AiProviderConfig } from '@/types/ai';
 import { requireVision } from '@/lib/ai/vision-contract';
@@ -70,6 +78,7 @@ import type { AppSection } from '@/types';
 import type { AgentPermissionMode } from '@/types/agent-approval';
 import type {
   AgentExecutionSurface,
+  AgentSandboxPolicy,
   AgentSessionPermissionMode,
   AgentSessionTarget,
   AgentTerminalContextSnapshot,
@@ -94,6 +103,23 @@ export interface AiSessionController {
   readonly selectedProvider?: AiProviderConfig;
   readonly selectedPermission?: AgentPermissionMode;
   readonly selectedExecutionSurface: AgentExecutionSurface;
+  readonly selectedSandboxPolicy?: AgentSandboxPolicy;
+  readonly sandboxTarget?: AgentSessionTarget;
+  readonly nativeSandboxCapability?: AgentSandboxCapability;
+  readonly remoteSandboxCapability?: AgentSandboxCapability;
+  readonly remoteSandboxVerificationBusy: boolean;
+  readonly remoteSandboxVerificationError: boolean;
+  readonly verifyRemoteSandbox: () => Promise<void>;
+  readonly projectRootRequest: number;
+  readonly chooseProjectRoot: () => void;
+  readonly selectProjectRoot: (root: string) => Promise<void>;
+  readonly sandboxDefaultConfiguration?: SandboxDefaultConfiguration;
+  readonly sandboxDefaultsReady: boolean;
+  readonly canRememberSandboxDefault: boolean;
+  readonly rememberSandboxDefault: (directories: readonly string[]) => Promise<void>;
+  readonly forgetSandboxDefault: () => Promise<void>;
+  readonly revokeSandboxReads: () => void;
+  readonly selectSandboxPolicy: (policy: AgentSandboxPolicy) => void;
   readonly settingsBusy: boolean;
   readonly selectModel: (provider: AiProviderConfig) => Promise<void>;
   readonly selectPermission: (mode: AgentPermissionMode) => Promise<void>;
@@ -165,7 +191,7 @@ export interface AiSessionController {
   readonly openArtifactDetails: (node: AiConversationNodeOf<'artifact'>) => void;
   readonly saveScrollAnchor: (anchor: AiScrollAnchor) => void;
   readonly completeRouteReturn: () => void;
-  readonly approve: () => void;
+  readonly approve: (resourceScope?: 'once' | 'session') => void;
   readonly reject: () => void;
   readonly loadOlder: () => void;
   readonly loadArtifact: AiSessionAdapter['loadArtifact'];
@@ -260,6 +286,13 @@ export function useAiSessionController({
   resolveTerminalDirectory = readTerminalCurrentDirectory,
 }: UseAiSessionControllerInput): AiSessionController {
   const [adapter] = useState(() => providedAdapter ?? sharedAgentSessionAdapter());
+  const toast = useToast();
+  const defaults = useSandboxDefaultsStore(state => state.defaults);
+  const defaultsInitialized = useSandboxDefaultsStore(state => state.initialized);
+  const defaultsLoadError = useSandboxDefaultsStore(state => state.loadError);
+  useEffect(() => {
+    if (!providedAdapter && isTauriRuntime() && !useSandboxDefaultsStore.getState().initialized) void useSandboxDefaultsStore.getState().load();
+  }, [providedAdapter]);
   const submissionMemory = useMemo(() => submissionMemoryFor(adapter), [adapter]);
   const canRestoreWorkbench = providedAdapter !== undefined || isTauriRuntime();
   const terminalSessions = useTerminalStore((state) => state.sessions);
@@ -285,6 +318,10 @@ export function useAiSessionController({
     return providers.find((item) => item.id === defaultProviderId) ?? providers[0];
   }, [defaultProviderId, providers, routeSnapshot]);
   const activeTerminal = terminalSessions.find((item) => item.sessionId === activeTerminalId);
+  const activeTerminalRef = useRef(activeTerminal);
+  activeTerminalRef.current = activeTerminal;
+  const projectSourceKey = JSON.stringify([activeTerminal?.sessionId, activeTerminal?.host, activeTerminal?.port,
+    activeTerminal?.username, activeTerminal?.profileId, activeTerminal?.terminalSessionId, activeTerminal?.terminalGeneration, activeTerminal?.status]);
   const activePermissionBinding = useAgentPermissionStore((state) => state.bindings[activeTerminalId ?? '']);
   const historyScopeKey = activeTerminal ? terminalLoginScopeKey(activeTerminal) : null;
   // Session recovery depends on the terminal's durable target identity, not on
@@ -321,6 +358,7 @@ export function useAiSessionController({
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const deletePendingRef = useRef(false);
   const [approvalDecision, setApprovalDecision] = useState<'approve' | 'reject' | null>(null);
+  const approvalDecisionPending = useRef<string | null>(null);
   const [approvalError, setApprovalError] = useState<string | null>(null);
   const [approvalArgumentsPreview, setApprovalArgumentsPreview] = useState<Readonly<{
     key: string;
@@ -339,6 +377,17 @@ export function useAiSessionController({
     () => useAgentPermissionStore.getState().getExecutionSurface(activeTerminalId ?? ''),
   );
   const settingsPending = useRef(false);
+  const [sandboxIntent, setSandboxIntent] = useState<{ key: string; policy: AgentSandboxPolicy; defaultScope?: string } | null>(null);
+  const [nativeSandboxCapability, setNativeSandboxCapability] = useState<AgentSandboxCapability>();
+  const [newTargetRoot, setNewTargetRoot] = useState<{key:string;root:string|null;ready:boolean}>();
+  const [skillRoot, setSkillRoot] = useState<string | null>(null);
+  const pendingProjectDraft = useRef<{context:object;content:string;message:string} | null>(null);
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let current = true;
+    void invokeProbeNativeSandbox().then(value => { if (current) setNativeSandboxCapability(value); }).catch(() => { if (current) setNativeSandboxCapability(undefined); });
+    return () => { current = false; };
+  }, []);
   const currentProviderConfig = useCallback((): AiProviderConfig => {
     const selection = viewRef.current?.snapshot.value.header.modelSelection;
     const routes=useLlmRoutesStore.getState();
@@ -428,15 +477,24 @@ export function useAiSessionController({
   // Initial history is only a convenience. It must never claim a workspace after
   // the user has begun a draft, chosen a project, or explicitly navigated.
   const automaticRestore = useRef({ key: workspaceScopeKey, eligible: true });
+  const projectedRoot = newTargetRoot?.key === workspaceScopeKey ? newTargetRoot.root : null;
+  const newDefaultScope = activeTerminal ? sandboxDefaultScope(runtimeTarget(activeTerminal, skillRoot ?? projectedRoot ?? undefined)) : null;
+  const newSandboxPolicy = sandboxIntent?.key === workspaceScopeKey && (!sandboxIntent.defaultScope || sandboxIntent.defaultScope === newDefaultScope) ? sandboxIntent.policy
+    : (newDefaultScope ? defaults[newDefaultScope]?.policy : undefined)
+      ?? defaultSandboxIntent({ kind: activeTerminal?.host === 'local' && activeTerminal.port === 0 ? 'local' : 'remote' });
   const [completedRestore, setCompletedRestore] = useState<object | null>(null);
   if (automaticRestore.current.key !== workspaceScopeKey) {
     automaticRestore.current = { key: workspaceScopeKey, eligible: true };
   }
   const claimWorkspace = useCallback(() => { automaticRestore.current.eligible = false; }, []);
+  const defaultsRequired = !providedAdapter && isTauriRuntime() && scope === 'terminal'
+    && (!view || view.snapshot.value.header.target?.sessionId !== activeTerminal?.sessionId);
+  const defaultsReady = !defaultsRequired || sandboxIntent?.key === workspaceScopeKey && !sandboxIntent.defaultScope || defaultsInitialized && !defaultsLoadError
+    && (activeTerminal?.host !== 'local' || newTargetRoot?.key === workspaceScopeKey && newTargetRoot.ready);
   const canStartAgent = scope === 'workbench'
-    || activeTerminal?.status === 'connected';
+    || activeTerminal?.status === 'connected' && defaultsReady;
   const terminalUnavailableReason = scope === 'terminal' && !canStartAgent
-    ? t('agent.availability.needsTerminal')
+    ? t(activeTerminal?.status === 'connected' && !defaultsReady ? defaultsLoadError ? 'agent.sandbox.defaultsLoadFailed' : 'agent.sandbox.defaultsLoading' : 'agent.availability.needsTerminal')
     : null;
   const hasProvider = Boolean(
     view?.snapshot.value.header.modelSelection?.modelId.trim()
@@ -543,12 +601,20 @@ export function useAiSessionController({
     value => { claimWorkspace(); dispatch({ type: 'draft.changed', value }); },
     id => submissionInputs.current.has(id));
   const [skillNavigation, setSkillNavigation] = useState(0);
-  const [skillRoot, setSkillRoot] = useState<string | null>(null);
+  const [projectRootRequest, setProjectRootRequest] = useState(0);
+  const profile = useProfileStore(state => state.profiles.find(item => item.id === activeTerminal?.profileId));
+  const verificationTarget = activeTerminal ? runtimeTarget(activeTerminal, skillRoot ?? projectedRoot ?? undefined) : undefined;
+  const remoteVerification = useRemoteSandboxVerification(verificationTarget, newSandboxPolicy,
+    JSON.stringify([activeTerminal?.sessionId, activeTerminal?.terminalSessionId, activeTerminal?.terminalGeneration, activeTerminal?.status, profile]),
+    activeTerminal?.status === 'connected' && newExecutionSurface === 'direct');
+  const restrictedBackendReady = verificationTarget?.kind === 'local'
+    ? nativeSandboxCapability?.files === true && nativeSandboxCapability.network
+    : remoteVerification.result?.capability.files === true && remoteVerification.result.capability.network;
   useEffect(() => {
     coldSkillSession.current = null;
     terminalDirectory.current = null;
     setSkillRoot(null);
-  }, [workspaceScopeKey, openedSessionId]);
+  }, [workspaceScopeKey, openedSessionId, projectSourceKey]);
 
   const createInput = useCallback((
     content: string,
@@ -583,6 +649,9 @@ export function useAiSessionController({
       throw new Error(t('ai.workspace.error.connectedTerminalRequired'));
     }
     const sessionId = `agent-${activeTerminal.sessionId}-${operationId()}`;
+    if (newSandboxPolicy !== 'host' && (newExecutionSurface !== 'direct' || !restrictedBackendReady)) {
+      throw new Error(`sandboxBackendUnavailable: ${t('agent.sandbox.backendUnavailable')}${newExecutionSurface === 'boundTerminal' ? ` ${t('agent.sandbox.terminalConflict')}` : ''}`);
+    }
     return {
       kind: 'agent',
       request: {
@@ -590,6 +659,7 @@ export function useAiSessionController({
         taskId: `task-${sessionId}`,
         goal: intent.goal,
         target: runtimeTarget(activeTerminal, workspaceRoot),
+        sandboxPolicy: newSandboxPolicy,
         permissionMode: permissionMode(
           useAgentPermissionStore.getState().getMode(activeTerminal.sessionId),
         ),
@@ -597,50 +667,68 @@ export function useAiSessionController({
         successCriteria: intent.successCriteria,
       },
     };
-  }, [activeTerminal, newExecutionSurface, operationId, scope, t]);
+  }, [activeTerminal, restrictedBackendReady, newSandboxPolicy, newExecutionSurface, operationId, scope, t]);
 
-  const projectKey = `${workspaceScopeKey}:${openedSessionId ?? 'new'}:${skillNavigation}`;
+  const projectKey = `${workspaceScopeKey}:${openedSessionId ?? 'new'}:${skillNavigation}:${projectSourceKey}`;
   const projectEpoch = useRef({ key: projectKey });
   if (projectEpoch.current.key !== projectKey) projectEpoch.current = { key: projectKey };
   const resolveProjectRoot = useCallback(async (root?: string): Promise<string | null> => {
     const epoch = projectEpoch.current;
+    const terminal = activeTerminalRef.current;
     let selectedRoot = normalizedWorkspaceRoot(root);
-    if (!selectedRoot && scope === 'terminal' && activeTerminal?.status === 'connected') {
+    if (!selectedRoot && scope === 'terminal' && terminal?.status === 'connected') {
       if (terminalDirectory.current?.epoch !== epoch) {
         terminalDirectory.current = {
           epoch,
-          promise: resolveTerminalDirectory(activeTerminal),
+          promise: resolveTerminalDirectory(terminal),
         };
       }
       selectedRoot = normalizedWorkspaceRoot(await terminalDirectory.current.promise ?? undefined);
     }
     if (projectEpoch.current !== epoch) throw new Error('Cancelled');
+    if (selectedRoot && terminal?.host === 'local' && !providedAdapter && isTauriRuntime()) {
+      selectedRoot = await invokeResolveLocalProjectRoot(selectedRoot);
+      if (projectEpoch.current !== epoch) throw new Error('Cancelled');
+    }
     return selectedRoot;
-  }, [activeTerminal, resolveTerminalDirectory, scope]);
+  }, [projectSourceKey, resolveTerminalDirectory, scope, providedAdapter]);
+  useEffect(() => {
+    if (providedAdapter || !isTauriRuntime() || scope !== 'terminal' || activeTerminal?.status !== 'connected'
+      || view?.snapshot.value.header.target?.sessionId === activeTerminal.sessionId) return;
+    if (skillRoot) { setNewTargetRoot({key:workspaceScopeKey,root:skillRoot,ready:true}); return; }
+    let current = true;
+    setNewTargetRoot({key:workspaceScopeKey,root:null,ready:false});
+    if (activeTerminal.host !== 'local') setNewTargetRoot({key:workspaceScopeKey,root:null,ready:true});
+    else void resolveProjectRoot().then(root => { if (current) setNewTargetRoot({key:workspaceScopeKey,root,ready:true}); }, () => { if (current) setNewTargetRoot({key:workspaceScopeKey,root:null,ready:true}); });
+    return () => { current = false; };
+  }, [providedAdapter, scope, workspaceScopeKey, activeTerminal?.sessionId, activeTerminal?.status, activeTerminal?.host, resolveProjectRoot, view?.summary.id, skillNavigation, skillRoot]);
   const createInputWithFrozenTargetRoot = useCallback(async (
     content: string,
   ): Promise<Extract<AiCreateSessionInput, { kind: 'agent' }>> => {
+    const epoch=projectEpoch.current;
+    let selectedRoot: string | null = null;
+    if (scope === 'terminal' && newSandboxPolicy !== 'host') {
+      try { selectedRoot=await resolveProjectRoot(skillRoot ?? projectedRoot ?? undefined); }
+      catch { if (projectEpoch.current !== epoch) throw new Error('Cancelled'); }
+    }
+    if (scope === 'terminal' && newSandboxPolicy !== 'host' && !selectedRoot) {
+      const message=`sandboxWorkspaceMissing: ${t('agent.sandbox.rootRequired')}`;
+      pendingProjectDraft.current={context:submissionContextRef.current,content,message};
+      setProjectRootRequest(value => value + 1);
+      throw new Error(message);
+    }
     const input = createInput(documentMessageSummary(content));
     const target = input.request.target;
-    if (!target || input.request.permissionMode !== 'operator'
+    const restricted = input.request.sandboxPolicy !== undefined && input.request.sandboxPolicy !== 'host';
+    if (!target || (!restricted && input.request.permissionMode !== 'operator' && !skillRoot)
       || (target.kind !== 'local' && target.kind !== 'remote')
-      || (target.kind === 'remote' && !target.profileId)) return input;
-    const root = await resolveProjectRoot();
-    if (!root) {
-      // The directory enables structured file tools; full-access shell execution
-      // does not require a workspace sandbox or a successful directory probe.
-      return input;
-    }
-    return {
-      ...input,
-      request: {
-        ...input.request,
-        target: target.kind === 'local'
-          ? { ...target, cwd: root }
-          : { ...target, rootPath: root },
-      },
-    };
-  }, [createInput, resolveProjectRoot]);
+      || (target.kind === 'remote' && !target.profileId && !skillRoot)) return input;
+    if (!restricted) selectedRoot = await resolveProjectRoot(skillRoot ?? projectedRoot ?? undefined);
+    const frozen = freezeCreationProjectRoot(input, selectedRoot);
+    const key = sandboxDefaultScope(frozen.request.target);
+    const candidates = key ? defaults[key]?.cacheDirectories : undefined;
+    return candidates?.length ? {...frozen,cacheDirectoryCandidates:candidates} : frozen;
+  }, [createInput, resolveProjectRoot, skillRoot, projectedRoot, defaults, scope, newSandboxPolicy]);
   const ensureProjectSession = useCallback(async (root?: string): Promise<string> => {
     const epoch = projectEpoch.current;
     let sessionId = viewRef.current?.summary.id ?? openedSessionId;
@@ -1091,6 +1179,7 @@ export function useAiSessionController({
 
   useEffect(() => {
     setApprovalDecision(null);
+    approvalDecisionPending.current = null;
     setApprovalError(null);
     const approval = view?.pendingApproval;
     if (!approval || !needsVolatileApprovalArguments(approval)) {
@@ -1189,6 +1278,8 @@ export function useAiSessionController({
   }, [claimWorkspace, resetComposer]);
 
   const newSession = useCallback((): void => {
+    setSandboxIntent(null);
+    setNewTargetRoot(undefined);
     claimWorkspace();
     setHistoricalSources([]);
     setHistoricalContinuationError(null);
@@ -1475,13 +1566,17 @@ export function useAiSessionController({
     scrollAnchorsRef.current[key] = anchor;
   }, []);
 
-  const decideApproval = useCallback((decision: 'approve' | 'reject'): void => {
+  const decideApproval = useCallback((decision: 'approve' | 'reject', resourceScope?: 'once' | 'session'): void => {
     const approval = viewRef.current?.pendingApproval;
-    if (!approval || approvalDecision !== null) return;
+    if (!approval || approvalDecision !== null || approvalDecisionPending.current !== null) return;
+    const key = approvalIdentityKey(approval);
+    approvalDecisionPending.current = key;
     setApprovalDecision(decision);
     setApprovalError(null);
-    const operation = decision === 'approve' ? adapter.approve(approval) : adapter.reject(approval);
+    const operation = decision === 'approve' ? adapter.approve(resourceScope === undefined ? approval : { ...approval, resourceScope }) : adapter.reject(approval);
     void operation.catch((error: unknown) => {
+      if (approvalDecisionPending.current !== key || !viewRef.current?.pendingApproval || approvalIdentityKey(viewRef.current.pendingApproval) !== key) return;
+      approvalDecisionPending.current = null;
       setApprovalDecision(null);
       setApprovalError(normalizeAiSessionError(error).message);
     });
@@ -1514,6 +1609,18 @@ export function useAiSessionController({
 
   const reconnectedSnapshot = canContinueReconnectedView && visibleView?.snapshot.kind === 'agent'
     ? visibleView.snapshot.value : null;
+  const defaultsTarget = visibleView && !canContinueHistoricalView ? visibleView.snapshot.value.header.target
+    : activeTerminal ? runtimeTarget(activeTerminal, skillRoot ?? projectedRoot ?? undefined) : undefined;
+  const currentDefaultScope = sandboxDefaultScope(defaultsTarget);
+  const configuringNewPolicy = !visibleView || canContinueHistoricalView;
+  useEffect(() => {
+    if (!configuringNewPolicy || !newDefaultScope || !defaultsInitialized || defaultsLoadError) return;
+    setSandboxIntent(previous => {
+      if (previous?.key === workspaceScopeKey && (!previous.defaultScope || previous.defaultScope === newDefaultScope)) return previous;
+      return {key:workspaceScopeKey,defaultScope:newDefaultScope,policy:useSandboxDefaultsStore.getState().defaults[newDefaultScope]?.policy
+        ?? defaultSandboxIntent({kind:activeTerminalRef.current?.host === 'local' ? 'local' : 'remote'})};
+    });
+  }, [configuringNewPolicy,newDefaultScope,defaultsInitialized,defaultsLoadError,workspaceScopeKey,submissionContextRef.current]);
 
   return {
     submissionContext: submissionContextRef.current,
@@ -1554,6 +1661,74 @@ export function useAiSessionController({
       : permissionModeForUi(visibleView.snapshot.value.header.permissionMode),
     selectedExecutionSurface: canContinueHistoricalView ? newExecutionSurface : visibleView?.snapshot.value.header.executionSurface
       ?? newExecutionSurface,
+    selectedSandboxPolicy: visibleView && !canContinueHistoricalView
+      ? visibleView.snapshot.value.header.sandboxPolicy : newSandboxPolicy,
+    sandboxTarget: visibleView && !canContinueHistoricalView
+      ? visibleView.snapshot.value.header.target
+      : defaultsTarget?.kind === 'remote' && remoteVerification.result
+        ? { ...defaultsTarget, rootPath: remoteVerification.result.canonicalRoot } : defaultsTarget,
+    sandboxDefaultConfiguration: currentDefaultScope ? defaults[currentDefaultScope] : undefined,
+    sandboxDefaultsReady: defaultsInitialized && !defaultsLoadError,
+    canRememberSandboxDefault: Boolean(currentDefaultScope && defaultsInitialized && !defaultsLoadError),
+    rememberSandboxDefault: async directories => {
+      if (!currentDefaultScope) throw new Error(t('agent.sandbox.defaultsRootRequired'));
+      const policy = visibleView && !canContinueHistoricalView ? visibleView.snapshot.value.header.sandboxPolicy ?? 'host' : newSandboxPolicy;
+      await useSandboxDefaultsStore.getState().remember(currentDefaultScope,{policy,cacheDirectories:directories});
+      toast.success(t('agent.sandbox.defaultsSaved'));
+    },
+    forgetSandboxDefault: async () => {
+      if (!currentDefaultScope) return;
+      await useSandboxDefaultsStore.getState().remember(currentDefaultScope,null);
+      toast.success(t('agent.sandbox.defaultsForgotten'));
+    },
+    nativeSandboxCapability,
+    remoteSandboxCapability: remoteVerification.result?.capability,
+    remoteSandboxVerificationBusy: remoteVerification.busy,
+    remoteSandboxVerificationError: remoteVerification.error,
+    verifyRemoteSandbox: remoteVerification.verify,
+    projectRootRequest,
+    chooseProjectRoot: () => setProjectRootRequest(value => value + 1),
+    selectProjectRoot: async root => {
+      const absolute = normalizedWorkspaceRoot(root);
+      if (!absolute) throw new Error(`InvalidRequest: ${t('ai.workspace.skills.absoluteRoot')}`);
+      const selected = await resolveProjectRoot(absolute);
+      if (!selected) throw new Error(`InvalidRequest: ${t('ai.workspace.skills.absoluteRoot')}`);
+      claimWorkspace();
+      if (viewRef.current && !canContinueHistoricalView) {
+        await ensureProjectSession(selected);
+      } else {
+        setSkillRoot(selected);
+        setNewTargetRoot({ key: workspaceScopeKey, root: selected, ready: true });
+      }
+      const pending=pendingProjectDraft.current;
+      pendingProjectDraft.current=null;
+      if (pending?.context === submissionContextRef.current && !composerRef.current.draft) {
+        dispatch({type:'draft.changed',value:pending.content});
+      }
+      if (pending?.context === submissionContextRef.current && composerRef.current.lastError?.message === pending.message) {
+        dispatch({type:'error.dismissed'});
+      }
+    },
+    revokeSandboxReads: () => { void changeSettings(async sessionId => {
+      await invokeRevokeSandboxReads(sessionId);
+      await adapter.refresh(sessionId);
+      toast.success(t('agent.sandbox.revoked'));
+    }); },
+    selectSandboxPolicy: (policy) => {
+      if (settingsPending.current) return;
+      if (!canContinueHistoricalView && viewRef.current) {
+        void changeSettings(async sessionId => {
+          await invokeSetAgentRuntimeSandboxPolicy({sessionId,policy});
+          await adapter.refresh(sessionId);
+          toast.success(t('agent.sandbox.policyChanged'));
+        });
+        return;
+      }
+      if (!canContinueHistoricalView && composerRef.current.sessionId) return;
+      if (policy !== 'host' && (newExecutionSurface !== 'direct' || activeTerminal?.host === 'local' && (!nativeSandboxCapability?.files || !nativeSandboxCapability.network))) return;
+      claimWorkspace();
+      setSandboxIntent({ key: workspaceScopeKey, policy });
+    },
     settingsBusy,
     selectModel: (provider) => changeSettings(async (sessionId) => {
       if (!adapter.selectModel) throw new Error('Model selection is unavailable');
@@ -1570,6 +1745,9 @@ export function useAiSessionController({
       }
     }),
     selectExecutionSurface: (surface) => {
+      const policy = viewRef.current && !canContinueHistoricalView
+        ? viewRef.current.snapshot.value.header.sandboxPolicy ?? 'host' : newSandboxPolicy;
+      if (surface === 'boundTerminal' && policy !== 'host') return;
       if (canContinueHistoricalView) {
         claimWorkspace();
         setNewExecutionSurface(surface);
@@ -1795,7 +1973,7 @@ export function useAiSessionController({
     openArtifactDetails,
     saveScrollAnchor,
     completeRouteReturn: () => setNavigation((current) => ({ ...current, returnFocus: null })),
-    approve: () => decideApproval('approve'),
+    approve: (scope) => decideApproval('approve', scope),
     reject: () => decideApproval('reject'),
     loadOlder,
     loadArtifact,

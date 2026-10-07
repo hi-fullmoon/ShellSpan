@@ -9,6 +9,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import {
   DropdownMenu,
@@ -83,6 +84,7 @@ function terminalLabel(session: TerminalSession): string {
 }
 
 export interface AgentPermissionSelectorProps {
+  readonly workspaceAutomation?: boolean;
   readonly sessionId: string;
   readonly disabled?: boolean;
   readonly mode?: AgentPermissionMode;
@@ -96,6 +98,7 @@ export function AgentPermissionSelector({
   mode: selectedMode,
   onModeChange,
   variant = 'default',
+  workspaceAutomation = false,
 }: AgentPermissionSelectorProps): React.ReactNode {
   const { t } = useI18n();
   const binding = useAgentPermissionStore((state) => state.bindings[sessionId]);
@@ -120,9 +123,8 @@ export function AgentPermissionSelector({
   const current = PERMISSION_OPTIONS.find((option) => option.mode === visibleMode)
     ?? PERMISSION_OPTIONS[0];
   const CurrentIcon = current.icon;
-  const triggerLabel = visibleMode === 'fullAccess'
-    ? 'agent.permission.fullAccessSelected'
-    : composer ? current.composerLabel : current.label;
+  const triggerLabel = composer ? current.composerLabel
+    : visibleMode === 'fullAccess' ? 'agent.permission.fullAccessSelected' : current.label;
 
   useEffect(() => {
     if (!fullAccessDialogOpen || !confirmationTarget) return;
@@ -157,8 +159,10 @@ export function AgentPermissionSelector({
       data-variant={variant}
     >
       <DropdownMenu>
+        <Tooltip>
         <DropdownMenuTrigger
           render={(
+            <TooltipTrigger render={
             <Button
               variant={composer ? 'ghost' : 'outline'}
               size={composer ? 'xs' : 'sm'}
@@ -168,6 +172,7 @@ export function AgentPermissionSelector({
                 ? t('agent.permission.composerAria', { mode: t(triggerLabel) })
                 : t('agent.permission')}
             />
+            } />
           )}
         >
           <span
@@ -189,23 +194,25 @@ export function AgentPermissionSelector({
             <ChevronDownIcon data-icon="inline-end" />
           </span>
         </DropdownMenuTrigger>
+        <TooltipContent>{composer ? `${t('agent.permission.approval')}: ${t(triggerLabel)}` : t('agent.permission')}</TooltipContent>
+        </Tooltip>
         <DropdownMenuContent
           side={composer ? 'top' : 'bottom'}
           sideOffset={composer ? 8 : 4}
           align="start"
           className={cn(
             composer
-              ? 'ai-permission-menu w-[240px] max-w-[calc(100vw-16px)] p-[3px]'
+              ? 'ai-permission-menu w-[300px] max-w-[calc(100vw-16px)] p-[3px]'
               : 'w-96 max-w-[calc(100vw-1rem)]',
           )}
         >
           <DropdownMenuGroup>
-            {!composer && (
-              <DropdownMenuLabel className="text-[11px]">{t('agent.permission')}</DropdownMenuLabel>
-            )}
+            <DropdownMenuLabel className="text-[11px]">{t(composer ? 'agent.permission.approval' : 'agent.permission')}</DropdownMenuLabel>
             <DropdownMenuRadioGroup value={visibleMode} onValueChange={selectMode}>
               {(composer ? COMPOSER_PERMISSION_OPTIONS : PERMISSION_OPTIONS).map((option) => {
                 const Icon = option.icon;
+                const description = workspaceAutomation && option.mode === 'autoApproveReadOnly'
+                  ? 'agent.sandbox.autopilotNotice' : option.composerDescription;
                 return (
                   <DropdownMenuRadioItem
                     key={option.mode}
@@ -216,7 +223,7 @@ export function AgentPermissionSelector({
                         ? 'ai-permission-menu-option min-h-12 items-start gap-1 py-2 pr-8 pl-2'
                         : 'items-start gap-1 py-2 text-[13px]',
                     )}
-                    aria-description={composer ? t(option.description) : undefined}
+                    aria-description={composer ? t(description) : undefined}
                   >
                     {composer ? (
                       <>
@@ -239,7 +246,7 @@ export function AgentPermissionSelector({
                             )}
                           </span>
                           <span className="text-[11px] leading-4 text-muted-foreground" aria-hidden="true">
-                            {t(option.composerDescription)}
+                            {t(description)}
                           </span>
                         </span>
                       </>

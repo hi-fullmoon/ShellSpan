@@ -32,6 +32,7 @@ async fn file_reference_bind_existing_project_root_is_durable_and_one_time() {
         .unwrap();
     target.cwd = None;
     let request = CreateAgentSessionRequest {
+        sandbox_policy: Some(crate::agent_runtime::AgentSandboxPolicy::Host),
         session_id: "unbound".into(),
         task_id: "task-unbound".into(),
         goal: "Browse project".into(),

@@ -323,6 +323,7 @@ export function invokeListAiRouteModels(routeId: string): Promise<{revision:numb
 export function invokeResolveAiSelection(selection: import('@/types/ai').ModelSelection, expectedRevision: number): Promise<import('@/lib/ai/provider-contract').ResolvedModel> {
   return invokeLogged('ai_resolve_selection', { input: { selection, expectedRevision } });
 }
+/** sandboxPolicy intent travels unchanged; Rust owns defaults and capability admission. */
 export async function invokeCreateAgentRuntimeSession(
   request: CreateAgentSessionRequest,
 ): Promise<AgentSessionSnapshot> {
@@ -353,11 +354,31 @@ export async function invokeSetAgentRuntimeExecutionSurface(input: {
   return invokeLogged<AgentSessionSnapshot>('agent_runtime_set_execution_surface', { input });
 }
 
+export function invokeSetAgentRuntimeSandboxPolicy(input: {
+  sessionId: string;
+  policy: import('@/types/agent-session').AgentSandboxPolicy;
+}): Promise<AgentSessionSnapshot> {
+  return invokeLogged('agent_runtime_set_sandbox_policy', { input });
+}
+
+export function invokeSetCacheDirectoryCandidates(sessionId:string,directories:readonly string[]):Promise<AgentSessionSnapshot> {
+  return invokeLogged('agent_runtime_set_cache_directory_candidates',{input:{sessionId,directories}});
+}
+
 export async function invokeBindAgentProjectRoot(input: {
   sessionId: string;
   root: string;
 }): Promise<AgentSessionSnapshot> {
   return invokeLogged<AgentSessionSnapshot>('agent_runtime_bind_project_root', { input });
+}
+
+export function invokeResolveLocalProjectRoot(root: string): Promise<string> {
+  return invokeLogged('agent_runtime_resolve_local_project_root', {root});
+}
+
+/** Only registered by the isolated macOS debug review entry point. */
+export function invokeSandboxSettingsReviewSource(): Promise<import('@/stores/terminalStore').TerminalSession> {
+  return invokeLogged('sandbox_settings_review_source');
 }
 
 export async function invokeSpawnAgentRuntimeSubagent(
@@ -481,8 +502,20 @@ export async function invokeResumeAgentRuntime(input: AgentSessionIdInput): Prom
 
 export async function invokeApproveAgentRuntimeTool(
   input: AgentRuntimeToolDecisionInput,
+  resourceScope?: 'once' | 'session',
 ): Promise<AgentSessionSnapshot> {
-  return invokeLogged<AgentSessionSnapshot>('agent_runtime_approve_tool', { input });
+  return invokeLogged<AgentSessionSnapshot>('agent_runtime_approve_tool', {
+    input,
+    ...(resourceScope === undefined ? {} : { resourceScope }),
+  });
+}
+
+export function invokeRevokeSandboxReads(sessionId: string): Promise<AgentSessionSnapshot> {
+  return invokeLogged('agent_runtime_revoke_sandbox_reads', {input:{sessionId}});
+}
+
+export function invokeGetSandboxAuthorizations(sessionId: string): Promise<import('@/types/agent-session').AgentSandboxAuthorizationStatus> {
+  return invokeLogged('agent_runtime_get_sandbox_authorizations', { input: { sessionId } });
 }
 
 export async function invokeRejectAgentRuntimeTool(
@@ -1398,6 +1431,34 @@ export async function invokeCancelRemoteHealthSnapshot(operationId: string): Pro
 
 export function invokeListAgentRuntimeSkills(sessionId: string): Promise<import('@/types/agent-skill').SkillUserList> {
   return invokeLogged('agent_runtime_list_skills', { input: { sessionId } });
+}
+
+export function invokeProbeLocalSandboxBackend(): Promise<import('@/types/agent-execution').LocalSandboxBackendProbe> {
+  return invokeLogged('agent_runtime_probe_local_sandbox_backend');
+}
+
+export function invokeProbeNativeSandbox(): Promise<import('@/types/agent-session').AgentSandboxCapability> {
+  return invokeLogged('agent_runtime_probe_native_sandbox');
+}
+
+export function invokeVerifyRemoteSandboxTarget(target: import('@/types/agent-session').AgentSessionTarget, policy: 'readOnly' | 'workspace'): Promise<import('@/types/agent-execution').RemoteSandboxVerification> {
+  return invokeLogged('agent_runtime_verify_remote_sandbox_target', { input: { target, policy, requestId: crypto.randomUUID() } });
+}
+
+/** Probe results are transient infrastructure facts, never session grants. */
+export async function invokeProbeRemoteSandboxBackend(sessionId: string, signal: AbortSignal): Promise<import('@/types/agent-execution').RemoteSandboxBackendProbe> {
+  if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
+  const requestId = crypto.randomUUID();
+  const input = { sessionId, requestId };
+  const cancel = (): void => { void invokeLogged('agent_runtime_cancel_remote_sandbox_probe', { input }).catch(() => undefined); };
+  signal.addEventListener('abort', cancel, { once: true });
+  try {
+    const result = await invokeLogged<import('@/types/agent-execution').RemoteSandboxBackendProbe>('agent_runtime_probe_remote_sandbox_backend', { input });
+    if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
+    return result;
+  } finally {
+    signal.removeEventListener('abort', cancel);
+  }
 }
 
 /** Abort cancels only this query; native work remains bounded if the renderer disappears. */

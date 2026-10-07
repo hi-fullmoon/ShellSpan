@@ -82,6 +82,104 @@ pub(crate) fn review_call(
     }
 }
 
+/// Automation applies only to recognized ordinary work in the verified native
+/// workspace. Resource expansion and native deny checks remain independent.
+pub(crate) fn review_workspace_call(
+    mode: AgentPermissionModeNative,
+    call: &AgentToolCallNative,
+    effect: &AgentObservedEffectNative,
+    scope: &CallPolicyScopeNative,
+    contract: Option<&crate::agent_runtime::AgentSandboxContract>,
+) -> ApprovalReview {
+    use crate::agent_runtime::{
+        AgentEffectKindNative, AgentExecutionChannelNative, AgentExecutionSurface,
+        AgentSandboxPolicy,
+    };
+    let eligible = mode == AgentPermissionModeNative::ScopedAutopilot
+        && call.tool_name == "exec_command"
+        && scope.sensitive_path_count == 0
+        && scope.critical_path_count == 0
+        && scope.network_destinations.is_empty()
+        && matches!(
+            effect.kind,
+            AgentEffectKindNative::None
+                | AgentEffectKindNative::ReadOnly
+                | AgentEffectKindNative::StateChange
+        )
+        && crate::agent_runtime::native_sandbox_capability().files
+        && crate::agent_runtime::native_sandbox_capability().network;
+    if eligible {
+        if let (Some(contract), Ok(arguments)) = (
+            contract,
+            serde_json::from_value::<crate::agent_runtime::ExecCommandArgumentsNative>(
+                call.arguments.clone(),
+            ),
+        ) {
+            if contract.policy == AgentSandboxPolicy::Workspace
+                && contract.target.kind == "local"
+                && contract.execution_surface == AgentExecutionSurface::Direct
+                && arguments.channel == AgentExecutionChannelNative::Direct
+                && !arguments.elevated.unwrap_or(false)
+                && arguments.network_targets.is_empty()
+                && arguments.local_services.is_empty()
+                && arguments.read_paths.is_empty()
+                && contract.root.as_ref().is_some_and(|root| {
+                    arguments.cwd.as_ref().is_none_or(|cwd| {
+                        std::fs::canonicalize(cwd).is_ok_and(|cwd| cwd == Path::new(root))
+                    })
+                })
+                && ordinary_workspace_commands(&arguments.command)
+            {
+                return ApprovalReview {
+                    requires_approval: false,
+                    reason: "verified_workspace_operation",
+                    command: None,
+                };
+            }
+        }
+    }
+    review_call(mode, call, effect, scope)
+}
+
+fn ordinary_workspace_commands(script: &str) -> bool {
+    let Some(commands) = super::shell_policy::literal_command_chain(script) else {
+        return false;
+    };
+    commands.iter().all(|command| {
+        let words: Vec<_> = command.split_whitespace().collect();
+        match words.as_slice() {
+            ["pnpm" | "npm", "build" | "test" | "check" | "lint" | "typecheck"]
+            | ["pnpm" | "npm", "run", "build" | "test" | "check" | "lint" | "typecheck"] => true,
+            ["cargo", "build" | "test" | "check" | "clippy" | "fmt", flags @ ..] => {
+                flags.iter().all(|flag| {
+                    matches!(
+                        *flag,
+                        "--offline"
+                            | "--locked"
+                            | "--all-targets"
+                            | "--release"
+                            | "--no-default-features"
+                            | "--workspace"
+                            | "--quiet"
+                            | "-q"
+                            | "--all"
+                            | "--all-features"
+                            | "--no-fail-fast"
+                            | "--check"
+                    )
+                })
+            }
+            ["touch" | "mkdir" | "cp" | "tee", operands @ ..] => {
+                !operands.is_empty()
+                    && operands
+                        .iter()
+                        .all(|word| !word.starts_with('-') || matches!(*word, "-p" | "-a" | "--"))
+            }
+            _ => false,
+        }
+    })
+}
+
 fn structured_read_is_scoped(call: &AgentToolCallNative, scope: &CallPolicyScopeNative) -> bool {
     if let AgentToolTargetNative::Local {
         cwd: Some(root), ..

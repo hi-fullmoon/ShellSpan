@@ -18,11 +18,13 @@ import { AiMentionPanel, type MentionContext, type MentionGroup, type MentionOpt
 import { useComposerMenuGroups } from './ai-composer-menu-content';
 import { isTopLevelAiSession } from '@/lib/ai/session-list';
 
-export function useFileCompletion({ text, update, query, listDirectories, scopeKey, needsRoot, targetLabel, disabled, context }: {
+export function useFileCompletion({ text, update, query, listDirectories, scopeKey, needsRoot, targetLabel, disabled, context, projectRootRequest, onSelectProjectRoot }: {
   text: string; update: (value: string, selectedSkill?: string) => void; query?: ListFileReferences; scopeKey?: string;
   needsRoot?: boolean; targetLabel?: string; disabled: boolean;
   listDirectories?: import('@/types/agent-file-reference').ListProjectDirectories;
   context?: MentionContext;
+  projectRootRequest?: number;
+  onSelectProjectRoot?: (root: string) => Promise<void>;
 }) {
   const { t } = useI18n();
   const editor = useRef<ComposerEditorHandle>(null);
@@ -38,6 +40,14 @@ export function useFileCompletion({ text, update, query, listDirectories, scopeK
   const [root, setRoot] = useState('');
   const [binding, setBinding] = useState(false);
   const [browsing, setBrowsing] = useState(false);
+  const requestedRoot = useRef(projectRootRequest ?? 0);
+  const explicitRootSelection = useRef(false);
+  useEffect(() => {
+    if (!projectRootRequest || requestedRoot.current === projectRootRequest) return;
+    requestedRoot.current = projectRootRequest;
+    explicitRootSelection.current = true;
+    setError(null); setRootOpen(true);
+  }, [projectRootRequest]);
   const historyRequested = useRef(false);
   const rootAbort = useRef<AbortController | null>(null);
   const version = useRef(0);
@@ -76,7 +86,7 @@ export function useFileCompletion({ text, update, query, listDirectories, scopeK
     }, 100);
     return () => { clearTimeout(timer); abort.abort(); version.current++; };
   }, [key, open, query, queryText, needsRoot, rootOpen, showFiles, context !== undefined]);
-  useEffect(() => { setRootOpen(false); setRoot(''); setBinding(false); rootAbort.current?.abort(); }, [scopeKey]);
+  useEffect(() => { explicitRootSelection.current = false; setRootOpen(false); setRoot(''); setBinding(false); rootAbort.current?.abort(); }, [scopeKey]);
   useEffect(() => () => { rootAbort.current?.abort(); }, []);
   const errorText = (code: string): string => {
     if (/RootRequired/.test(code)) return t('ai.workspace.files.rootRequired');
@@ -102,11 +112,19 @@ export function useFileCompletion({ text, update, query, listDirectories, scopeK
     });
   };
   const confirmRoot = async () => {
-    if (!query || binding) return;
+    if ((!query && !onSelectProjectRoot) || binding) return;
     const expected = currentKey.current;
     const abort = new AbortController(); rootAbort.current?.abort(); rootAbort.current = abort;
     setBinding(true); setError(null);
     try {
+      if (explicitRootSelection.current && onSelectProjectRoot) {
+        await onSelectProjectRoot(root);
+        if (abort.signal.aborted || currentKey.current !== expected) return;
+        explicitRootSelection.current = false;
+        setRootOpen(false); editor.current?.focus();
+        return;
+      }
+      if (!query) return;
       const value = await query(queryText, abort.signal, root);
       if (abort.signal.aborted || currentKey.current !== expected) return;
       if (value.status === 'error') { setError(value.code ?? 'Unavailable'); return; }
@@ -257,7 +275,7 @@ export function useFileCompletion({ text, update, query, listDirectories, scopeK
         </div>}
       </div>
     </div> : null;
-  const dialog = <Dialog open={rootOpen} onOpenChange={value => { setRootOpen(value); if (!value) { rootAbort.current?.abort(); setBinding(false); } }}>
+  const dialog = <Dialog open={rootOpen} onOpenChange={value => { setRootOpen(value); if (!value) { explicitRootSelection.current = false; rootAbort.current?.abort(); setBinding(false); } }}>
       <DialogContent className="w-[calc(100%-2rem)]" finalFocus={() => editor.current?.element ?? null} onClick={event => event.stopPropagation()}>
         <DialogHeader className="pr-6">
           <DialogTitle>{t('ai.workspace.files.chooseRoot')}</DialogTitle>

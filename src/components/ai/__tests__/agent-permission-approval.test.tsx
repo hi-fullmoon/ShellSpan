@@ -20,7 +20,7 @@ vi.mock('@/hooks/useI18n', () => ({
       'agent.permission.fullAccess': '完全访问权限',
       'agent.permission.fullAccessSelected': '完全访问',
       'agent.permission.fullAccessDescription': '无需逐次批准即可在冻结工作区内执行操作；工作区外写入和未授权网络访问仍会被拦截。',
-      'agent.permission.composer.fullAccess': '完全访问权限',
+      'agent.permission.composer.fullAccess': '无需逐次审批',
       'agent.permission.composer.fullAccessDescription': '冻结工作区内自动执行；工作区外写入仍会被拦截。',
       'agent.permission.fullAccessWarning': '工作区外写入、未授权网络访问和无法强制边界的 Shell 操作仍会被拦截或请求批准。',
       'agent.permission.fullAccessConfirm': '允许完全访问',
@@ -73,6 +73,7 @@ describe('Agent permission selector', () => {
 
   it('keeps permission selection reachable from the compact Composer variant', async () => {
     const { container } = render(<AgentPermissionSelector sessionId="session-1" variant="composer" />);
+    expect(screen.getByRole('button', { name: 'agent.permission.composerAria' })).not.toHaveAttribute('title');
     expect(container.querySelector('[data-slot="agent-permission-selector"]')).toHaveAttribute(
       'data-variant',
       'composer',
@@ -86,11 +87,12 @@ describe('Agent permission selector', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'agent.permission.composerAria' }));
     const options = await screen.findAllByRole('menuitemradio');
+    expect(screen.getByRole('menu')).toHaveClass('w-[300px]', 'max-w-[calc(100vw-16px)]');
     expect(options).toHaveLength(3);
     expect(options[0]).toHaveTextContent('帮我批准');
     expect(options[0]).toHaveTextContent('推荐');
     expect(options[1]).toHaveTextContent('请求批准');
-    expect(options[2]).toHaveTextContent('完全访问权限');
+    expect(options[2]).toHaveTextContent('无需逐次审批');
     expect(options[2]).toHaveTextContent('高风险');
     for (const option of options) {
       expect(option).not.toHaveClass('focus:**:text-accent-foreground');
@@ -100,7 +102,7 @@ describe('Agent permission selector', () => {
     expect(screen.getByText('高风险')).toHaveClass('text-destructive');
     expect(options[2].querySelector('.lucide-shield-alert')).toHaveClass('text-app-warning');
     expect(screen.getByRole('menuitemradio', { name: /^帮我批准/ })).toBeVisible();
-    expect(screen.getByRole('menuitemradio', { name: /^完全访问权限/ })).toBeVisible();
+    expect(screen.getByRole('menuitemradio', { name: /^无需逐次审批/ })).toBeVisible();
     expect(screen.getByRole('menuitemradio', { name: '请求批准' })).toBeVisible();
     expect(screen.getByText('仅对检测到的风险操作请求批准。')).toBeVisible();
     expect(screen.getByText('冻结工作区内自动执行；工作区外写入仍会被拦截。')).toBeVisible();
@@ -111,12 +113,12 @@ describe('Agent permission selector', () => {
     const { container } = render(<AgentPermissionSelector sessionId="session-1" variant="composer" />);
 
     fireEvent.click(screen.getByRole('button', { name: 'agent.permission.composerAria' }));
-    fireEvent.click(await screen.findByRole('menuitemradio', { name: /^完全访问权限/ }));
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: /^无需逐次审批/ }));
     fireEvent.click(await screen.findByRole('button', { name: '允许完全访问' }));
 
     await waitFor(() => {
       expect(container.querySelector('[data-slot="agent-permission-trigger-content"]'))
-        .toHaveTextContent(/^完全访问$/);
+        .toHaveTextContent(/^无需逐次审批$/);
     });
   });
 

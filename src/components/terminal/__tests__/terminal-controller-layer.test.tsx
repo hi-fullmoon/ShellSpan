@@ -712,6 +712,7 @@ describe('TerminalControllerLayer', () => {
     const removeFirstFilter = vi.fn();
     const removeSecondFilter = vi.fn();
     const suppress = vi.spyOn(controller, 'suppressUserInput').mockReturnValue(releaseFirst);
+    const focus = vi.spyOn(controller, 'focus');
     const subscribeFilter = vi.spyOn(controller, 'subscribeOutputFilter')
       .mockReturnValueOnce(removeFirstFilter)
       .mockReturnValueOnce(removeSecondFilter);
@@ -721,6 +722,7 @@ describe('TerminalControllerLayer', () => {
     await coordinator.handle(leaseEvent('operation-1').payload);
     await coordinator.handle(leaseEvent('operation-1').payload);
     expect(suppress).toHaveBeenCalledOnce();
+    expect(focus).toHaveBeenCalledOnce();
     expect(subscribeFilter).toHaveBeenCalledOnce();
     expect(subscribeFilter.mock.calls[0][0]).toMatchObject({ operationId: 'operation-1' });
 
@@ -729,6 +731,7 @@ describe('TerminalControllerLayer', () => {
     }).payload);
     expect(releaseFirst).not.toHaveBeenCalled();
     expect(removeFirstFilter).toHaveBeenCalledOnce();
+    expect(focus).toHaveBeenCalledTimes(2);
     expect(agentTerminalLeaseState.get('s1')).toMatchObject({
       operationId: 'operation-2',
       commandDisplay: '[Agent] $ safe command',

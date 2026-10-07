@@ -18,6 +18,8 @@ export interface AiSessionHeaderProps {
   readonly status: AiSessionStatus;
   readonly mode?: 'ask' | 'agent';
   readonly lineage?: React.ReactNode;
+  readonly settingsControl?: React.ReactNode;
+  readonly policySummary?: string;
   readonly onClose?: () => void;
   readonly onHistory?: () => void;
   readonly historyOpen?: boolean;
@@ -32,6 +34,8 @@ export function AiSessionHeader({
   status,
   mode = 'agent',
   lineage,
+  settingsControl,
+  policySummary,
   onClose,
   onHistory,
   historyOpen = false,
@@ -62,13 +66,14 @@ export function AiSessionHeader({
           <span className="flex min-w-0 items-center gap-1">
             <h2 className="ai-session-title min-w-0 truncate text-sm font-medium leading-5 text-foreground">{title}</h2>
           </span>
-          <span className="ai-session-context truncate text-[11px] leading-[15px] text-muted-foreground">{context}</span>
+          <span className="ai-session-context truncate text-[11px] leading-[15px] text-muted-foreground" title={policySummary ? `${context} · ${policySummary}` : context}>{context}{policySummary && ` · ${policySummary}`}</span>
         </span>
         <span className="sr-only">{statusLabel}</span>
       </div>
 
       <div className="ai-session-actions flex min-w-0 shrink-0 items-center gap-1 @min-[400px]/ai-workspace:gap-2">
         {lineage}
+        {settingsControl}
         {(onHistory || historyOpen) && (
           <Popover
             open={historyOpen}

@@ -15,6 +15,8 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 import {
+  invokeApproveAgentRuntimeTool,
+  invokeGetSandboxAuthorizations,
   buildRemoteConnectionRequest,
   buildSessionCreateRequest,
   invokeAgentTerminalLeaseReady,
@@ -172,6 +174,18 @@ describe('host key trust serialization', () => {
 });
 
 describe('Agent Session execution surface serialization', () => {
+  it('omits resource scope on ordinary approval and preserves explicitly selected scopes', async () => {
+    invokeMock.mockRejectedValue(new Error('IPC unavailable in unit environment'));
+    const input = { sessionId: 'session', turnId: 'turn', stepId: 'step', requestId: 'request', callId: 'call', approvalId: 'approval' };
+    await expect(invokeApproveAgentRuntimeTool(input)).rejects.toThrow('IPC unavailable');
+    await expect(invokeApproveAgentRuntimeTool(input, 'once')).rejects.toThrow('IPC unavailable');
+    await expect(invokeApproveAgentRuntimeTool(input, 'session')).rejects.toThrow('IPC unavailable');
+    expect(invokeMock).toHaveBeenNthCalledWith(1, 'agent_runtime_approve_tool', { input });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, 'agent_runtime_approve_tool', { input, resourceScope: 'once' });
+    expect(invokeMock).toHaveBeenNthCalledWith(3, 'agent_runtime_approve_tool', { input, resourceScope: 'session' });
+    await expect(invokeGetSandboxAuthorizations('session')).rejects.toThrow('IPC unavailable');
+    expect(invokeMock).toHaveBeenNthCalledWith(4, 'agent_runtime_get_sandbox_authorizations', { input: { sessionId: 'session' } });
+  });
   it('passes the frozen execution surface through the IPC request unchanged', async () => {
     invokeMock.mockResolvedValue({});
     const request = {

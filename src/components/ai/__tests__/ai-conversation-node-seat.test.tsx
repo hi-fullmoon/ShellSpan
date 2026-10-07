@@ -8,6 +8,7 @@ import {
   type AiConversationNodeRendererMap,
 } from '@/components/ai/workspace/ai-conversation-node-seat';
 import { classifyAiTool } from '@/components/ai/workspace/ai-tool-presentation';
+import { AiToolDetails } from '@/components/ai/workspace/ai-tool-details';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { initI18n } from '@/locales';
@@ -699,7 +700,7 @@ describe('AiConversationNodeList', () => {
       sha256: 'abc123',
       sensitivity: 'internal',
     };
-    const { container } = render(<AiConversationNodeList nodes={[artifact]} onOpenArtifact={openArtifact} />);
+    const { container, rerender } = render(<AiConversationNodeList nodes={[artifact]} onOpenArtifact={openArtifact} />);
 
     expect(screen.getByText('Produced')).toBeVisible();
     expect(screen.getByText('42 B')).toBeVisible();
@@ -709,6 +710,15 @@ describe('AiConversationNodeList', () => {
     expect(getComputedStyle(container.querySelector('.ai-produced-files-label svg')!).translate).toBe('0 -1px');
     await user.click(screen.getByRole('button', { name: 'Open artifact Deployment report' }));
     expect(openArtifact).toHaveBeenCalledWith(artifact);
+
+    const internalOutput = { ...artifact, key: 'artifact:tool-output', artifactKind: 'tool-result', title: 'Output for read_file' };
+    rerender(<AiConversationNodeList nodes={[internalOutput]} onOpenArtifact={openArtifact} />);
+    expect(container).toBeEmptyDOMElement();
+
+    const tool = toolNode({ name: 'read_file', output: { artifactRef: artifact.artifactId, truncated: true } });
+    rerender(<AiToolDetails node={tool} artifacts={[internalOutput]} onOpenArtifact={openArtifact} onBack={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'View saved output' }));
+    expect(openArtifact).toHaveBeenLastCalledWith(internalOutput);
   });
 
   it('aligns approval icons and labels with tool rows', () => {

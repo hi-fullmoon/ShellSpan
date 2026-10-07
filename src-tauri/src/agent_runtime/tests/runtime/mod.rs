@@ -1,6 +1,9 @@
 mod continuation_tests {
     include!("continuation.rs");
 }
+mod shutdown_tests {
+    include!("shutdown.rs");
+}
 mod archive_tests {
     include!("archive.rs");
 }
@@ -677,6 +680,7 @@ fn configured_with_native(
 fn create(runtime: &AgentRuntime, session_id: &str) {
     runtime
         .create_session(CreateAgentSessionRequest {
+            sandbox_policy: Some(super::super::AgentSandboxPolicy::Host),
             session_id: session_id.into(),
             task_id: format!("task-{session_id}"),
             goal: "exercise the Agent Runtime driver".into(),
@@ -2073,6 +2077,7 @@ async fn bound_terminal_result_is_redacted_before_model_context_and_session_pers
         configured_with_native(adapter.clone(), AgentDriverConfig::default(), native);
     runtime
         .create_session(CreateAgentSessionRequest {
+            sandbox_policy: Some(super::super::AgentSandboxPolicy::Host),
             session_id: "session-visible-secret".into(),
             task_id: "task-visible-secret".into(),
             goal: "exercise bound terminal redaction boundaries".into(),
@@ -4113,6 +4118,32 @@ fn execution_surface_switch_is_durable_and_preserves_queued_input() {
             .header
             .execution_surface,
         AgentExecutionSurface::BoundTerminal
+    );
+}
+
+#[test]
+fn restricted_execution_surface_refuses_ordinary_terminal_without_mutating_binding() {
+    let storage = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let runtime = AgentRuntimeBuilder::new().build();
+    runtime.configure(storage.path().to_path_buf()).unwrap();
+    let before = runtime.create_session(serde_json::from_value(serde_json::json!({
+        "sessionId":"restricted-surface", "taskId":"restricted-surface", "goal":"Inspect ordinary project",
+        "target":{"kind":"local", "targetId":"local", "sessionId":"terminal", "cwd":project.path()},
+        "sandboxPolicy":"workspace", "executionSurface":"direct", "permissionMode":"scopedAutopilot",
+    })).unwrap()).unwrap();
+    assert!(runtime
+        .set_execution_surface("restricted-surface", AgentExecutionSurface::BoundTerminal)
+        .unwrap_err()
+        .starts_with("sandboxPolicyUnsupported:"));
+    let after = runtime.session("restricted-surface").unwrap();
+    assert_eq!(
+        after.header.execution_surface,
+        before.header.execution_surface
+    );
+    assert_eq!(
+        after.header.sandbox_binding_revision,
+        before.header.sandbox_binding_revision
     );
 }
 

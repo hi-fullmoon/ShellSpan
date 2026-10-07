@@ -230,6 +230,8 @@ export interface AiWorkspaceRootProps {
   readonly modelControl?: React.ReactNode;
   readonly permissionControl?: React.ReactNode;
   readonly executionSurfaceControl?: React.ReactNode;
+  readonly sessionSettingsControl?: React.ReactNode;
+  readonly policySummary?: string;
   readonly composerState?: AiComposerState;
   readonly pendingNodes?: readonly AiConversationNode[];
   readonly announcement?: string | null;
@@ -250,6 +252,8 @@ export interface AiWorkspaceRootProps {
   readonly skillsScopeKey?: string;
   readonly skillsNeedsRoot?: boolean;
   readonly projectTargetLabel?: string;
+  readonly projectRootRequest?: number;
+  readonly onSelectProjectRoot?: (root: string) => Promise<void>;
   readonly onAnswerQuestion?: (input: import('@/types/agent-question').AnswerQuestionInput) => Promise<void>;
   readonly loadingOlder?: boolean;
   readonly queueMutation?: AiQueueMutationState | null;
@@ -313,6 +317,8 @@ export function AiWorkspaceRoot({
   modelControl,
   permissionControl,
   executionSurfaceControl,
+  sessionSettingsControl,
+  policySummary,
   composerState,
   pendingNodes = [],
   announcement,
@@ -334,6 +340,8 @@ export function AiWorkspaceRoot({
   skillsScopeKey,
   skillsNeedsRoot,
   projectTargetLabel,
+  projectRootRequest,
+  onSelectProjectRoot,
   loadingOlder = false,
   queueMutation = null,
   renamingSessionId = null,
@@ -500,6 +508,8 @@ export function AiWorkspaceRoot({
       {route.kind === 'toolDetails' ? (
         <AiToolDetails
           node={toolDetailsNode ?? null}
+          artifacts={view?.nodes.filter((node): node is import('@/lib/ai/conversation-node').AiConversationNodeOf<'artifact'> => node.kind === 'artifact')}
+          onOpenArtifact={onOpenArtifact}
           onBack={() => onBack?.()}
           onClose={onClose}
         />
@@ -520,6 +530,8 @@ export function AiWorkspaceRoot({
           : t(scope === 'terminal' ? 'section.terminal' : 'section.workbench')}
         status={status}
         mode={surfaceMode}
+        settingsControl={surfaceMode === 'agent' ? sessionSettingsControl : undefined}
+        policySummary={surfaceMode === 'agent' ? policySummary : undefined}
         lineage={onOpenSession && lineage
           ? (
               <AiSubagentCatalog
@@ -712,6 +724,8 @@ export function AiWorkspaceRoot({
           attachmentScopeKey={sessionLedgerKey ?? skillsScopeKey}
           skillsNeedsRoot={skillsNeedsRoot}
           projectTargetLabel={projectTargetLabel}
+          projectRootRequest={projectRootRequest}
+          onSelectProjectRoot={onSelectProjectRoot}
           approvalDecision={approvalDecision}
           approvalError={approvalError}
           approvalArguments={approvalArguments}

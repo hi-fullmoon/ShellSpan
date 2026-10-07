@@ -384,6 +384,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
             cleanup(active, false);
           }
         });
+        controller.focus();
       }
       agentTerminalLeaseState.set({
         ...acquiredLease,

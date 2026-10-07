@@ -3,6 +3,7 @@
 mod agent_runtime;
 mod ai;
 mod ai_attachment;
+mod app_exit;
 mod commands;
 mod connection;
 mod db;
@@ -25,6 +26,7 @@ mod redaction;
 mod remote_fs;
 mod remote_health;
 mod runbook;
+mod scoped_ssh_bridge;
 mod session;
 mod sftp_pool;
 pub mod terminal_broker;
@@ -239,6 +241,10 @@ pub(crate) fn emit_session_error(app: &AppHandle, event: SessionErrorEvent) -> R
         .map_err(|error| format!("failed to emit session error event: {error}"))
 }
 
+pub(crate) fn application_context() -> tauri::Context<tauri::Wry> {
+    tauri::generate_context!()
+}
+
 pub fn run() {
     let log_level = if cfg!(debug_assertions) {
         LevelFilter::Debug
@@ -297,6 +303,11 @@ pub fn run() {
             let runtime = app.state::<agent_runtime::AgentRuntime>();
             agent_runtime::configure_runtime(app.handle(), &runtime)?;
             runtime.configure_credentials(credentials)?;
+            app.state::<agent_runtime::ContainerResourceSupervisor>()
+                .configure(
+                    app.path().app_data_dir().map_err(std::io::Error::other)?,
+                    app.state::<keychain::CredentialManager>().inner().clone(),
+                )?;
             #[cfg(not(target_os = "macos"))]
             menu::initialize_tray(app)?;
             Ok(())
@@ -315,6 +326,7 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(SessionManager::default())
         .manage(agent_runtime::AgentRuntime::default())
+        .manage(agent_runtime::ContainerResourceSupervisor::default())
         .manage(UploadCancellationRegistry::default())
         .manage(DeleteCancellationRegistry::default())
         .manage(PreflightCancellationRegistry::default())
@@ -338,11 +350,19 @@ pub fn run() {
             ai::ai_resolve_model,
             ai::ai_model_declaration_template,
             agent_runtime::agent_runtime_create_session,
+            agent_runtime::agent_runtime_probe_local_sandbox_backend,
+            agent_runtime::agent_runtime_probe_native_sandbox,
+            agent_runtime::agent_runtime_probe_remote_sandbox_backend,
+            agent_runtime::agent_runtime_verify_remote_sandbox_target,
+            agent_runtime::agent_runtime_cancel_remote_sandbox_probe,
             agent_runtime::agent_runtime_start,
             agent_runtime::agent_runtime_select_model,
             agent_runtime::agent_runtime_set_permission,
             agent_runtime::agent_runtime_set_execution_surface,
+            agent_runtime::agent_runtime_set_sandbox_policy,
+            agent_runtime::agent_runtime_set_cache_directory_candidates,
             agent_runtime::agent_runtime_bind_project_root,
+            agent_runtime::agent_runtime_resolve_local_project_root,
             agent_runtime::agent_runtime_answer_question,
             agent_runtime::agent_runtime_list_skills,
             agent_runtime::agent_runtime_list_file_references,
@@ -372,6 +392,8 @@ pub fn run() {
             agent_runtime::agent_runtime_interrupt,
             agent_runtime::agent_runtime_resume,
             agent_runtime::agent_runtime_approve_tool,
+            agent_runtime::agent_runtime_revoke_sandbox_reads,
+            agent_runtime::agent_runtime_get_sandbox_authorizations,
             agent_runtime::agent_runtime_reject_tool,
             agent_runtime::agent_runtime_get_pending_approval_arguments,
             agent_runtime::agent_runtime_get_session,
@@ -520,25 +542,46 @@ pub fn run() {
         ]);
 
     let app = menu::configure_builder(builder)
-        .build(tauri::generate_context!())
+        .build(application_context())
         .expect("error while building tauri application");
-    app.run(|app, event| {
-        if matches!(
-            event,
-            tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
-        ) {
-            if let (Some(runtime), Some(sessions)) = (
-                app.try_state::<agent_runtime::AgentRuntime>(),
-                app.try_state::<SessionManager>(),
-            ) {
-                if let Err(error) = runtime.prepare_for_shutdown(&sessions) {
-                    log::warn!(
-                        "Failed to persist Agent runtime tasks during application exit: {error}"
-                    );
-                }
-            }
-        }
-    });
+    app.run(app_exit::handle_event);
+}
+
+#[cfg(debug_assertions)]
+pub fn run_gui_lifecycle_check(root: &std::path::Path, mode: &str) -> Result<(), String> {
+    app_exit::run_check(root, mode)
+}
+
+#[cfg(all(target_os = "macos", debug_assertions))]
+pub fn run_native_sandbox_check(
+    root: &std::path::Path,
+    command: &str,
+) -> Result<serde_json::Value, String> {
+    agent_runtime::run_native_sandbox_check(root, command)
+}
+
+#[cfg(all(target_os = "macos", debug_assertions))]
+pub fn run_native_agent_check(
+    root: &std::path::Path,
+    cancel: bool,
+    session_reads: bool,
+    network: bool,
+    cache_writes: bool,
+) -> Result<(), String> {
+    agent_runtime::native_agent_check::run(root, cancel, session_reads, network, cache_writes)
+}
+
+#[cfg(all(target_os="macos",debug_assertions))]
+pub fn run_native_remote_check(root: &std::path::Path) -> Result<(),String> {
+    agent_runtime::remote_native_check::run(root)
+}
+
+#[cfg(all(target_os = "macos", debug_assertions))]
+pub fn run_native_sandbox_settings_check(
+    root: &std::path::Path,
+    root_entry: bool,
+) -> Result<(), String> {
+    agent_runtime::sandbox_settings_check::run(root, root_entry)
 }
 
 #[cfg(test)]

@@ -86,6 +86,8 @@ export interface AiComposerSeatProps extends ComposerHistoryProps {
   readonly attachmentScopeKey?: string;
   readonly skillsNeedsRoot?: boolean;
   readonly projectTargetLabel?: string;
+  readonly projectRootRequest?: number;
+  readonly onSelectProjectRoot?: (root: string) => Promise<void>;
   readonly onAnswerQuestion?: (input: import('@/types/agent-question').AnswerQuestionInput) => Promise<void>;
   readonly approvalDecision?: 'approve' | 'reject' | null;
   readonly approvalError?: string | null;
@@ -105,7 +107,7 @@ export interface AiComposerSeatProps extends ComposerHistoryProps {
   readonly onResumeQueueItem?: (item: AiInboxItem) => void;
   readonly onReorderQueueLane?: (lane: AiInboxItem['lane'], orderedItemIds: readonly string[]) => void;
   readonly onOpenModel?: () => void;
-  readonly onApprove?: () => void;
+  readonly onApprove?: (scope?: 'once' | 'session') => void;
   readonly onReject?: () => void;
   readonly onOpenApprovalDetails?: () => void;
 }
@@ -140,6 +142,8 @@ export function AiComposerSeat({
   attachmentScopeKey,
   skillsNeedsRoot,
   projectTargetLabel,
+  projectRootRequest,
+  onSelectProjectRoot,
   approvalDecision = null,
   approvalError = null,
   approvalArguments = null,
@@ -361,7 +365,7 @@ export function AiComposerSeat({
     if (attachmentOwnerRef.current !== attachmentOwner) return;
     void documents.addFrom(async signal => [await onReadSession(summary, signal)], summary.title);
   } : undefined;
-  const completion = useFileCompletion({ text: draft, update: updateDraft, query: mode === 'agent' ? onListFileReferences : undefined, listDirectories: onListProjectDirectories, scopeKey: attachmentOwner, needsRoot: skillsNeedsRoot, targetLabel: projectTargetLabel, disabled: !attachmentsEnabled,
+  const completion = useFileCompletion({ text: draft, update: updateDraft, query: mode === 'agent' ? onListFileReferences : undefined, listDirectories: onListProjectDirectories, scopeKey: attachmentOwner, needsRoot: skillsNeedsRoot, targetLabel: projectTargetLabel, disabled: !attachmentsEnabled, projectRootRequest, onSelectProjectRoot,
     context: { agent: mode === 'agent', onUpload: uploadLocalFile, onSession: referenceSession,
       sessions, sessionsLoading, sessionsError, currentSessionId: currentSessionId ?? composerState?.sessionId, onRefreshSessions },
   });
@@ -704,7 +708,7 @@ export function AiComposerSeat({
                 error={approvalError}
                 argumentsLoading={approvalArgumentsLoading}
                 argumentsError={approvalArgumentsError}
-                onApprove={() => onApprove?.()}
+                onApprove={(scope) => onApprove?.(scope)}
                 onReject={() => onReject?.()}
                 onOpenDetails={() => onOpenApprovalDetails?.()}
               />

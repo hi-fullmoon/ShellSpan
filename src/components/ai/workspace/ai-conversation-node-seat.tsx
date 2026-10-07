@@ -774,6 +774,7 @@ export const AiConversationNodeSeat = React.memo(
     readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
     readonly onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void;
   }) {
+    if (node.kind === 'artifact' && node.artifactKind === 'tool-result') return null;
     return (
       <div
         className="ai-transcript-flow-item min-w-0 max-w-full"
