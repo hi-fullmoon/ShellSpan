@@ -402,6 +402,14 @@ pub(crate) struct CredentialManager {
 }
 
 impl CredentialManager {
+    /// Acceptance can read exactly one existing model credential, but cannot
+    /// migrate, write, delete or access SSH/MCP credentials.
+    #[cfg(all(target_os = "macos", debug_assertions))]
+    pub(crate) fn readonly_model_check(reference: Option<String>) -> Self {
+        Self {
+            backend: Arc::new(ReadonlyModelCheckBackend { reference }),
+        }
+    }
     /// Creates a credential manager that stores secrets in the OS-level
     /// keychain (macOS Keychain, Windows Credential Manager, or Linux Secret
     /// Service). Operations fail closed when the native store is unavailable.
@@ -439,7 +447,15 @@ impl CredentialManager {
     /// shared credential vault from an independently rebuilt test executable.
     #[cfg(test)]
     pub(crate) fn isolated_native_for_tests() -> Self {
-        Self::with_backend(Arc::new(NativeKeychainBackend))
+        Self::isolated_native_for_checks()
+    }
+
+    /// Dedicated native acceptance entries; never opens the shared vault.
+    #[cfg(any(test, debug_assertions))]
+    pub(crate) fn isolated_native_for_checks() -> Self {
+        Self {
+            backend: Arc::new(NativeKeychainBackend),
+        }
     }
 
     // --- Generic credentials ---
@@ -552,6 +568,37 @@ impl CredentialManager {
         kind: ProfileSecretKind,
     ) -> Result<(), String> {
         self.delete_credential(PROFILE_SECRET_CREDENTIAL_SERVICE, &kind.key_for(profile_id))
+    }
+}
+
+#[cfg(all(target_os = "macos", debug_assertions))]
+struct ReadonlyModelCheckBackend {
+    reference: Option<String>,
+}
+
+#[cfg(all(target_os = "macos", debug_assertions))]
+impl CredentialBackend for ReadonlyModelCheckBackend {
+    fn set_credential(&self, _: &str, _: &str, _: &str) -> Result<(), String> {
+        Err("Acceptance credentials are read-only".into())
+    }
+    fn delete_credential(&self, _: &str, _: &str) -> Result<(), String> {
+        Err("Acceptance credentials are read-only".into())
+    }
+    fn get_credential(&self, service: &str, key: &str) -> Result<Option<String>, String> {
+        if service != AI_KEY_SERVICE || self.reference.as_deref() != Some(key) {
+            return Err("Acceptance credential reference is outside selected model".into());
+        }
+        let Some(payload) = NativeKeychainBackend
+            .get_credential(CREDENTIAL_VAULT_SERVICE, CREDENTIAL_VAULT_ACCOUNT)?
+        else {
+            return Ok(None);
+        };
+        let vault: CredentialVault =
+            serde_json::from_str(&payload).map_err(|_| "Acceptance credential vault is invalid")?;
+        if vault.version != CREDENTIAL_VAULT_VERSION {
+            return Err("Acceptance credential vault version is unsupported".into());
+        }
+        Ok(vault.get(AI_KEY_SERVICE, key).map(str::to_owned))
     }
 }
 

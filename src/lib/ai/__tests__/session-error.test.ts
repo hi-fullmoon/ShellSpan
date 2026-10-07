@@ -21,6 +21,8 @@ describe('normalizeAiSessionError', () => {
     ['Request cancelled', 'cancelled', false],
     ['Terminal session ended', 'terminal', false],
     ['Unexpected adapter failure', 'unknown', true],
+    ['sandboxBackendUnavailable: restricted tools cannot dispatch', 'unknown', false],
+    ['sandboxAuthorizationInvalid: target changed', 'unknown', false],
   ] as const)('normalizes %s', (message, kind, retryable) => {
     expect(normalizeAiSessionError(new Error(message))).toEqual({ kind, message, retryable });
   });

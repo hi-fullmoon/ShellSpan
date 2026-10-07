@@ -16,6 +16,9 @@ export function normalizeAiSessionError(error: unknown): AiSessionError {
       ? error
       : JSON.stringify(error);
   const text = message.toLowerCase();
+  if (/^(?:error:\s*)?sandbox(?:BackendUnavailable|AuthorizationInvalid|WorkspaceMissing|WorkspaceInvalid|TargetMissing|InheritanceDenied):/.test(message)) {
+    return { kind: 'unknown', message, retryable: false };
+  }
   const revision = /current revision\s+(\d+)/i.exec(message);
   if (/unauthori[sz]ed|forbidden|api key|authentication|401|403/.test(text)) {
     return { kind: 'auth', message, retryable: true };

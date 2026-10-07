@@ -1946,7 +1946,7 @@ fn normalize_remote_absolute(path: &str) -> Result<String, String> {
     Ok(format!("/{}", components.join("/")))
 }
 
-fn remote_path_within(root: &str, path: &str) -> bool {
+pub(crate) fn remote_path_within(root: &str, path: &str) -> bool {
     root == "/"
         || path == root
         || path

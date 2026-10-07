@@ -38,6 +38,8 @@ pub(crate) struct IssuedCapabilityNative {
 
 #[derive(Debug, Clone)]
 struct CapabilityRecordNative {
+    task_id: Option<String>,
+    sandbox_digest: Option<String>,
     reviewed_command: Option<super::ReviewedReadCommand>,
     capability_id: String,
     request_id: String,
@@ -85,6 +87,83 @@ impl Default for NativeCapabilityStoreNative {
 }
 
 impl NativeCapabilityStoreNative {
+    pub(crate) fn bind_task(
+        &self,
+        capability_id: &str,
+        task_id: &str,
+    ) -> Result<(), CapabilityStoreErrorNative> {
+        if task_id.is_empty() {
+            return Err(CapabilityStoreErrorNative::InvalidScope);
+        }
+        let mut records = self
+            .records
+            .lock()
+            .map_err(|_| CapabilityStoreErrorNative::Unavailable)?;
+        let record = records
+            .get_mut(capability_id)
+            .ok_or(CapabilityStoreErrorNative::Unknown)?;
+        if record.uses != 0 || record.task_id.is_some() {
+            return Err(CapabilityStoreErrorNative::InvalidScope);
+        }
+        record.task_id = Some(task_id.into());
+        Ok(())
+    }
+
+    pub(crate) fn revoke_task(&self, task_id: &str) -> Result<(), CapabilityStoreErrorNative> {
+        let mut records = self
+            .records
+            .lock()
+            .map_err(|_| CapabilityStoreErrorNative::Unavailable)?;
+        for record in records
+            .values_mut()
+            .filter(|record| record.task_id.as_deref() == Some(task_id))
+        {
+            record.revoked = true;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn revoke_all(&self) -> Result<(),CapabilityStoreErrorNative> {
+        let mut records=self.records.lock().map_err(|_| CapabilityStoreErrorNative::Unavailable)?;
+        for record in records.values_mut() {record.revoked=true;}
+        Ok(())
+    }
+    pub(crate) fn bind_sandbox(
+        &self,
+        capability_id: &str,
+        digest: String,
+    ) -> Result<(), CapabilityStoreErrorNative> {
+        let mut records = self
+            .records
+            .lock()
+            .map_err(|_| CapabilityStoreErrorNative::Unavailable)?;
+        let record = records
+            .get_mut(capability_id)
+            .ok_or(CapabilityStoreErrorNative::Unknown)?;
+        if record.uses != 0 || record.sandbox_digest.is_some() {
+            return Err(CapabilityStoreErrorNative::InvalidScope);
+        }
+        record.sandbox_digest = Some(digest);
+        Ok(())
+    }
+
+    pub(crate) fn verify_sandbox(
+        &self,
+        capability_id: &str,
+        digest: Option<&str>,
+    ) -> Result<(), CapabilityStoreErrorNative> {
+        let records = self
+            .records
+            .lock()
+            .map_err(|_| CapabilityStoreErrorNative::Unavailable)?;
+        let record = records
+            .get(capability_id)
+            .ok_or(CapabilityStoreErrorNative::Unknown)?;
+        if record.sandbox_digest.as_deref() != digest {
+            return Err(CapabilityStoreErrorNative::InvalidScope);
+        }
+        Ok(())
+    }
     #[cfg(test)]
     fn with_signing_key(key: [u8; 32]) -> Self {
         Self {
@@ -126,6 +205,8 @@ impl NativeCapabilityStoreNative {
         let capability_id = format!("cap-{nonce}-{mac}");
         let expires_at_unix_ms = now_unix_ms.saturating_add(request.ttl_ms);
         let record = CapabilityRecordNative {
+            task_id: None,
+            sandbox_digest: None,
             reviewed_command: request.reviewed_command,
             capability_id: capability_id.clone(),
             request_id: request.request_id,

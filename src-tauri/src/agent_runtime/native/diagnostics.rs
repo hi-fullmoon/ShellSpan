@@ -95,6 +95,8 @@ pub(super) fn execute_diagnostic(
         }
         AgentToolTargetNative::Remote { target_id, .. } => spawn_remote_diagnostic_process_native(
             RemoteProcessStartNative {
+                remote_sandbox: None,
+                admission: None,
                 task_id: request.task_id.clone(),
                 request_id: request.request_id.clone(),
                 owner_target_id: target_id.clone(),

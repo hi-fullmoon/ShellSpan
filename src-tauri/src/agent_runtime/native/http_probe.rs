@@ -48,6 +48,30 @@ pub(super) fn execute_http_probe_native(
     known_hosts_path: &Path,
     cancellation: &CancellationToken,
 ) -> Result<HttpProbeOutputNative, String> {
+    execute_http_probe_transport(
+        call,
+        remote_connection,
+        known_hosts_path,
+        cancellation,
+        None,
+    )
+}
+
+pub(super) fn execute_owned_service_probe_native(
+    call: &AgentToolCallNative,
+    socket: &Path,
+    cancellation: &CancellationToken,
+) -> Result<HttpProbeOutputNative, String> {
+    execute_http_probe_transport(call, None, Path::new(""), cancellation, Some(socket))
+}
+
+fn execute_http_probe_transport(
+    call: &AgentToolCallNative,
+    remote_connection: Option<&RemoteConnectionRequest>,
+    known_hosts_path: &Path,
+    cancellation: &CancellationToken,
+    socket: Option<&Path>,
+) -> Result<HttpProbeOutputNative, String> {
     let remote_connection = match &call.target {
         AgentToolTargetNative::Local { .. } => None,
         AgentToolTargetNative::Remote { .. } => Some(remote_connection.ok_or_else(|| {
@@ -92,6 +116,9 @@ pub(super) fn execute_http_probe_native(
             max_bytes,
             cancellation,
         );
+        if result.is_err() {
+            transport.cancel();
+        }
         let transport_result = transport.finish(deadline);
         return match (result, transport_result) {
             (Ok(output), Ok(())) => Ok(output),
@@ -108,6 +135,7 @@ pub(super) fn execute_http_probe_native(
         remaining_probe_time(deadline)?,
         max_bytes,
         cancellation,
+        socket,
     )
 }
 
@@ -117,13 +145,25 @@ fn send_http_probe(
     timeout: Duration,
     max_bytes: u64,
     cancellation: &CancellationToken,
+    socket: Option<&Path>,
 ) -> Result<HttpProbeOutputNative, String> {
-    let client = Client::builder()
+    let builder = Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(timeout)
         .timeout(timeout)
-        .user_agent(concat!("ShellSpan/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("ShellSpan/", env!("CARGO_PKG_VERSION")));
+    #[cfg(unix)]
+    let builder = if let Some(socket) = socket {
+        builder.unix_socket(socket)
+    } else {
+        builder
+    };
+    #[cfg(not(unix))]
+    if socket.is_some() {
+        return Err("Owned service transport is unavailable".into());
+    }
+    let client = builder
         .build()
         .map_err(|error| format!("Failed to create loopback HTTP client: {error}"))?;
     let method = match arguments.method {

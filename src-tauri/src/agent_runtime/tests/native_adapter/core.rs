@@ -35,6 +35,13 @@
 
     fn request(name: &str, arguments: Value) -> NativeToolRequest {
         NativeToolRequest {
+            sandbox_contract: super::super::AgentSandboxContract::freeze(
+                None,
+                &local_target(),
+                AgentExecutionSurface::Direct,
+                current_unix_ms(),
+            )
+            .unwrap(),
             session_id: "session-native".into(),
             task_id: "task-native".into(),
             goal: "inspect safely".into(),

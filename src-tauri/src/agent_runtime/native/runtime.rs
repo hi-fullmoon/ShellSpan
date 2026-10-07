@@ -55,6 +55,7 @@ pub(crate) const MAX_CAPABILITY_TTL_MS: u64 = 300_000;
 
 #[derive(Debug, Clone)]
 pub(crate) struct NativeExecutionContext {
+    pub(crate) sandbox_contract: Option<crate::agent_runtime::AgentSandboxContract>,
     pub(crate) request: AgentRequestNative,
     pub(crate) turn_id: String,
     pub(crate) step_id: String,
@@ -80,6 +81,23 @@ impl NativeExecutionContext {
         if host_targets != 1 {
             return Err("Native execution requires one frozen Session host target".into());
         }
+        if let Some(contract) = &self.sandbox_contract {
+            contract.authorize_dispatch(&contract.target, current_unix_ms())?;
+            if contract.policy != crate::agent_runtime::AgentSandboxPolicy::Host
+                && !self.request.targets.iter().any(|target| match target {
+                    AgentToolTargetNative::Local {target_id,session_id,cwd} => contract.target.kind == "local"
+                        && target_id == &contract.target.target_id && session_id == &contract.target.session_id && cwd == &contract.target.cwd,
+                    AgentToolTargetNative::Remote {target_id,session_id,profile_id,host,port,username,root_path,local_root} => contract.target.kind == "remote"
+                        && target_id == &contract.target.target_id && session_id == &contract.target.session_id
+                        && profile_id == &contract.target.profile_id && Some(host) == contract.target.host.as_ref()
+                        && Some(*port) == contract.target.port && Some(username) == contract.target.username.as_ref()
+                        && root_path == &contract.target.root_path && local_root == &contract.target.local_root,
+                    _ => false,
+                })
+            {
+                return Err("sandboxAuthorizationInvalid: native target differs from frozen policy".into());
+            }
+        }
         Ok(())
     }
 }
@@ -96,6 +114,11 @@ pub(crate) struct AgentAuthorizeCallRequestNative {
 
 #[derive(Debug, Clone)]
 pub(crate) struct PreparedAuthorizationNative {
+    remote_backend_stamp: Option<String>,
+    requested_writes: Vec<String>,
+    requested_services: Vec<crate::agent_runtime::LocalServiceRequestNative>,
+    requested_networks: Vec<crate::agent_runtime::NetworkTargetRequestNative>,
+    requested_reads: Vec<String>,
     reviewed_command: Option<super::ReviewedReadCommand>,
     pub(crate) context: NativeExecutionContext,
     pub(crate) call: AgentToolCallNative,
@@ -107,6 +130,7 @@ pub(crate) struct PreparedAuthorizationNative {
 
 #[derive(Debug, Clone)]
 pub(crate) struct AgentCapabilityGrantNative {
+    pub(crate) sandbox_contract: Option<crate::agent_runtime::AgentSandboxContract>,
     pub(crate) capability_id: String,
     pub(crate) effective_arguments: Value,
 }
@@ -125,6 +149,8 @@ pub(crate) struct PreparedMcpAuthorizationNative {
 
 #[derive(Clone)]
 pub(crate) struct NativeToolEngine {
+    shutdown_admission: crate::agent_runtime::shutdown_admission::ShutdownAdmission,
+    session_reads: crate::agent_runtime::sandbox_authorization::SessionReadAuthorizations,
     registry: Arc<ToolRegistryNative>,
     capabilities: NativeCapabilityStoreNative,
     processes: ProcessRegistryNative,
@@ -146,6 +172,8 @@ impl Default for NativeToolEngine {
         let terminal_interactive =
             TerminalInteractiveRegistry::new(terminal_leases.clone(), terminal_broker.clone());
         Self {
+            shutdown_admission: Default::default(),
+            session_reads: Default::default(),
             registry: Arc::new(
                 ToolRegistryNative::from_builtin_manifest().expect("valid native tool manifest"),
             ),
@@ -163,6 +191,19 @@ impl Default for NativeToolEngine {
 }
 
 impl NativeToolEngine {
+    pub(crate) fn begin_shutdown_admission(&self) -> bool { self.shutdown_admission.close() }
+    pub(crate) fn shared_shutdown_admission(&self) -> crate::agent_runtime::shutdown_admission::ShutdownAdmission { self.shutdown_admission.clone() }
+    pub(crate) fn ensure_shutdown_admission(&self) -> Result<(),String> { self.shutdown_admission.ensure_open() }
+    pub(crate) fn shutdown_admission(&self) -> crate::agent_runtime::shutdown_admission::ShutdownAdmission { self.shutdown_admission.clone() }
+    pub(crate) fn admit_operation(&self) -> Result<crate::agent_runtime::shutdown_admission::AdmissionLease,String> { self.shutdown_admission.enter() }
+    pub(crate) fn await_shutdown_dispatch(&self) -> Result<(),String> { self.shutdown_admission.await_drained(Duration::from_secs(5)) }
+    #[cfg(debug_assertions)]
+    pub(crate) fn acceptance_process(
+        &self,
+        handle: &str,
+    ) -> Result<Arc<super::ManagedProcessNative>, String> {
+        self.processes.get(handle)
+    }
     pub(crate) fn configure_terminal_broker_rollout(&self) -> Result<(), String> {
         self.terminal_broker.configure_from_trusted_environment()?;
         if !self.terminal_broker.interactive_tools_enabled()? {
@@ -499,7 +540,15 @@ impl NativeToolEngine {
         credentials: &CredentialManager,
         known_hosts_path: &Path,
     ) -> Result<PreparedAuthorizationNative, String> {
+        let _admission = self.admit_operation()?;
         context.validate()?;
+        crate::agent_runtime::tool_boundary::require_native_tool_boundary(
+            context.sandbox_contract.as_ref(),
+            &input.tool_name,
+        )?;
+        let remote_backend_stamp = context.sandbox_contract.as_ref()
+            .filter(|contract| contract.target.kind == "remote" && contract.policy != crate::agent_runtime::AgentSandboxPolicy::Host)
+            .map(crate::agent_runtime::remote_seatbelt::stamp).transpose()?;
         if context.request.request_id != input.request_id
             || !context
                 .request
@@ -514,7 +563,7 @@ impl NativeToolEngine {
             .executable(&input.tool_name)
             .map_err(registry_error_message)?;
         validate_tool_arguments_native(&input.tool_name, &input.arguments)?;
-        let call = AgentToolCallNative {
+        let mut call = AgentToolCallNative {
             request_id: input.request_id,
             call_id: input.call_id,
             tool_name: input.tool_name,
@@ -522,32 +571,142 @@ impl NativeToolEngine {
             target: input.target,
             capability_id: "pending-native-capability".into(),
         };
+        let mut requested_reads = Vec::new();
+        let mut requested_writes = Vec::new();
+        if call.tool_name == "probe_http"
+            && context.sandbox_contract.as_ref().is_some_and(|contract| {
+                contract.policy != crate::agent_runtime::AgentSandboxPolicy::Host
+            })
+        {
+            let arguments: crate::agent_runtime::ProbeHttpArgumentsNative =
+                serde_json::from_value(call.arguments.clone())
+                    .map_err(|_| "Invalid probe arguments")?;
+            self.processes.service_socket(&context, arguments.port)?;
+        }
+        let mut requested_networks = Vec::new();
+        let mut requested_services = Vec::new();
+        if call.tool_name == "exec_command" {
+            let arguments: ExecCommandArgumentsNative =
+                serde_json::from_value(call.arguments.clone())
+                    .map_err(|_| "Invalid exec arguments")?;
+            if !arguments.write_paths.is_empty() {
+                requested_writes =
+                    crate::agent_runtime::sandbox_authorization::cache_write_requests(
+                        context
+                            .sandbox_contract
+                            .as_ref()
+                            .ok_or("sandboxResourceRequestInvalid: frozen policy required")?,
+                        &arguments.write_paths,
+                    )?;
+                call.arguments["writePaths"] = json!(requested_writes);
+            }
+            if !arguments.read_paths.is_empty() {
+                if arguments.background.unwrap_or(false) {
+                    return Err(
+                        "sandboxResourceRequestInvalid: file authorization is foreground-only"
+                            .into(),
+                    );
+                }
+                let contract = context
+                    .sandbox_contract
+                    .as_ref()
+                    .ok_or("sandboxResourceRequestInvalid: frozen policy required")?;
+                requested_reads =
+                    crate::agent_runtime::sandbox_authorization::project_read_requests(
+                        contract,
+                        &arguments.read_paths,
+                    )?;
+                call.arguments["readPaths"] = json!(requested_reads);
+            }
+            if !arguments.network_targets.is_empty() {
+                let contract = context
+                    .sandbox_contract
+                    .as_ref()
+                    .ok_or("sandboxResourceRequestInvalid: frozen policy required")?;
+                requested_networks = crate::agent_runtime::sandbox_authorization::network_requests(
+                    contract,
+                    &arguments.network_targets,
+                )?;
+                call.arguments["networkTargets"] = json!(requested_networks);
+            }
+            if !arguments.local_services.is_empty() {
+                let contract = context
+                    .sandbox_contract
+                    .as_ref()
+                    .ok_or("sandboxResourceRequestInvalid: frozen policy required")?;
+                requested_services =
+                    crate::agent_runtime::sandbox_authorization::local_service_requests(
+                        contract,
+                        &arguments.local_services,
+                    )?;
+                call.arguments["localServices"] = json!(requested_services);
+            }
+        }
         self.revalidate_target(&context, &call.target, sessions, database)?;
         let mut effect = assess_effect_native(&tool.descriptor, &call)?;
         let scope = inspect_call_policy_scope_native(&call)?;
         enforce_native_call_policy_native(&call, &effect, &scope)?;
         self.enforce_runtime_storage_policy(&call, &effect, &scope)?;
+        if !requested_writes.is_empty() || !requested_reads.is_empty() {
+            let mut resource_scope = scope.clone();
+            resource_scope.paths = requested_writes.clone();
+            resource_scope.paths.extend(requested_reads.iter().cloned());
+            let mut resource_effect = effect.clone();
+            resource_effect.kind = AgentEffectKindNative::StateChange;
+            self.enforce_runtime_storage_policy(&call, &resource_effect, &resource_scope)?;
+        }
         let ttl_ms = input.ttl_ms.unwrap_or(DEFAULT_CAPABILITY_TTL_MS);
         if ttl_ms == 0 || ttl_ms > MAX_CAPABILITY_TTL_MS {
             return Err("Capability TTL is outside the native limit".into());
         }
         let preview = preview_file_call_native(&call, database, credentials, known_hosts_path)?;
-        let review = super::review_call(context.request.permission_mode, &call, &effect, &scope);
+        let review = super::auto_review::review_workspace_call(
+            context.request.permission_mode,
+            &call,
+            &effect,
+            &scope,
+            context.sandbox_contract.as_ref(),
+        );
         effect
             .summary
             .push_str(&format!(" Approval review: {}.", review.reason));
+        let has_resources = !requested_reads.is_empty()
+            || !requested_writes.is_empty()
+            || !requested_networks.is_empty()
+            || !requested_services.is_empty();
+        let needs_resource_approval = has_resources
+            && !self.session_reads.covers_resources(
+                &context.request.user_session_id,
+                context
+                    .sandbox_contract
+                    .as_ref()
+                    .ok_or("Frozen policy missing")?,
+                &requested_reads,
+                &requested_writes,
+                &requested_networks,
+                &requested_services,
+                current_unix_ms(),
+            )?;
         Ok(PreparedAuthorizationNative {
+            remote_backend_stamp,
+            requested_writes: requested_writes.clone(),
+            requested_services: requested_services.clone(),
+            requested_networks: requested_networks.clone(),
+            requested_reads: requested_reads.clone(),
             reviewed_command: review.command,
             native_prompt: format!(
-                "{}\nApproval review: {}",
+                "{}\nApproval review: {}\nProject file read requests: {}\nCache directory read/write requests: {}\nTCP target requests (this call only; TLS contents are not inspected): {}",
                 native_prompt(&context, &call, &effect, &scope, &preview, ttl_ms),
-                review.reason
+                review.reason,
+                requested_reads.join(", ")
+                , requested_writes.join(", ")
+                , requested_networks.iter().map(|target| format!("{}:{}", target.host, target.port)).collect::<Vec<_>>().join(", ")
             ),
             context,
             call,
             effect,
             ttl_ms,
-            requires_native_confirmation: review.requires_approval,
+            requires_native_confirmation: review.requires_approval || needs_resource_approval,
         })
     }
 
@@ -556,12 +715,65 @@ impl NativeToolEngine {
         prepared: &PreparedAuthorizationNative,
         approved: bool,
     ) -> Result<AgentCapabilityGrantNative, String> {
+        self.issue_prepared_authorization_scoped(
+            prepared,
+            approved,
+            crate::agent_runtime::sandbox_authorization::ResourceAuthorizationScope::Once,
+        )
+    }
+
+    pub(crate) fn issue_prepared_authorization_scoped(
+        &self,
+        prepared: &PreparedAuthorizationNative,
+        approved: bool,
+        scope: crate::agent_runtime::sandbox_authorization::ResourceAuthorizationScope,
+    ) -> Result<AgentCapabilityGrantNative, String> {
+        use crate::agent_runtime::sandbox_authorization::ResourceAuthorizationScope;
+        let _admission = self.admit_operation()?;
+        if let Some(saved) = &prepared.remote_backend_stamp {
+            if crate::agent_runtime::remote_seatbelt::stamp(prepared.context.sandbox_contract.as_ref().ok_or("sandboxAuthorizationInvalid")?)? != *saved {
+                return Err("sandboxAuthorizationInvalid: remote verification changed after preparation".into());
+            }
+        }
+        if scope == ResourceAuthorizationScope::Session
+            && (!approved
+                || (prepared.requested_reads.is_empty()
+                    && prepared.requested_writes.is_empty()
+                    && prepared.requested_networks.is_empty()
+                    && prepared.requested_services.is_empty()))
+        {
+            return Err(
+                "Session resource authorization requires explicit resource approval".into(),
+            );
+        }
+        let has_resources = !prepared.requested_reads.is_empty()
+            || !prepared.requested_writes.is_empty()
+            || !prepared.requested_networks.is_empty()
+            || !prepared.requested_services.is_empty();
+        if has_resources
+            && !approved
+            && !self.session_reads.covers_resources(
+                &prepared.context.request.user_session_id,
+                prepared
+                    .context
+                    .sandbox_contract
+                    .as_ref()
+                    .ok_or("Frozen policy missing")?,
+                &prepared.requested_reads,
+                &prepared.requested_writes,
+                &prepared.requested_networks,
+                &prepared.requested_services,
+                current_unix_ms(),
+            )?
+        {
+            return Err("Session resource authorization expired or was revoked".into());
+        }
         if prepared.requires_native_confirmation && !approved {
             return Err("Native capability approval was denied".into());
         }
         let IssuedCapabilityNative {
             capability_id,
-            expires_at_unix_ms: _,
+            expires_at_unix_ms,
         } = self
             .capabilities
             .issue(
@@ -580,7 +792,114 @@ impl NativeToolEngine {
                 current_unix_ms(),
             )
             .map_err(|error| format!("Native capability issuance failed: {error:?}"))?;
+        self.capabilities
+            .bind_task(&capability_id, &prepared.context.request.task_id)
+            .map_err(|_| "Native task capability binding failed")?;
+        let resource_expires = if !approved && has_resources {
+            self.session_reads
+                .expiry(&prepared.context.request.user_session_id)?
+                .ok_or("Session authorization was revoked")?
+                .min(expires_at_unix_ms)
+        } else {
+            expires_at_unix_ms
+        };
+        let mut sandbox_contract = if prepared.requested_reads.is_empty() {
+            prepared.context.sandbox_contract.clone()
+        } else {
+            Some(
+                crate::agent_runtime::sandbox_authorization::issue_project_reads(
+                    prepared
+                        .context
+                        .sandbox_contract
+                        .as_ref()
+                        .ok_or("Frozen sandbox missing")?,
+                    &prepared.requested_reads,
+                    &prepared.context.request.user_session_id,
+                    &prepared.call.call_id,
+                    &format!("resource-{}", uuid::Uuid::new_v4()),
+                    current_unix_ms(),
+                    resource_expires,
+                )?,
+            )
+        };
+        if !prepared.requested_writes.is_empty() {
+            sandbox_contract = Some(
+                crate::agent_runtime::sandbox_authorization::issue_cache_writes(
+                    sandbox_contract.ok_or("Frozen sandbox missing")?,
+                    &prepared.requested_writes,
+                    &prepared.context.request.user_session_id,
+                    &prepared.call.call_id,
+                    current_unix_ms(),
+                    resource_expires,
+                )?,
+            );
+        }
+        let mut execution_expires = current_unix_ms().saturating_add(
+            prepared
+                .call
+                .arguments
+                .get("timeoutMs")
+                .and_then(Value::as_u64)
+                .unwrap_or(30_000)
+                .min(3_600_000),
+        );
+        if !approved && has_resources {
+            execution_expires = execution_expires.min(
+                self.session_reads
+                    .expiry(&prepared.context.request.user_session_id)?
+                    .ok_or("Session resource authorization was revoked")?,
+            );
+        }
+        if !prepared.requested_networks.is_empty() {
+            sandbox_contract = Some(
+                crate::agent_runtime::sandbox_authorization::issue_network_targets(
+                    sandbox_contract.ok_or("Frozen sandbox missing")?,
+                    &prepared.requested_networks,
+                    &prepared.context.request.user_session_id,
+                    &prepared.call.call_id,
+                    current_unix_ms(),
+                    execution_expires,
+                )?,
+            );
+        }
+        if !prepared.requested_services.is_empty() {
+            sandbox_contract = Some(
+                crate::agent_runtime::sandbox_authorization::issue_local_services(
+                    sandbox_contract.ok_or("Frozen sandbox missing")?,
+                    &prepared.requested_services,
+                    &prepared.context.request.user_session_id,
+                    &prepared.call.call_id,
+                    current_unix_ms(),
+                    execution_expires,
+                )?,
+            );
+        }
+        if let Some(contract) = &sandbox_contract {
+            self.capabilities
+                .bind_sandbox(
+                    &capability_id,
+                    crate::agent_runtime::remote_seatbelt::dispatch_digest(contract, prepared.remote_backend_stamp.as_deref())?,
+                )
+                .map_err(|_| "Native sandbox capability binding failed")?;
+        }
+        if scope == ResourceAuthorizationScope::Session {
+            self.session_reads.remember_resources(
+                &prepared.context.request.user_session_id,
+                &prepared.context.request.task_id,
+                prepared
+                    .context
+                    .sandbox_contract
+                    .as_ref()
+                    .ok_or("Frozen policy missing")?,
+                &prepared.requested_reads,
+                &prepared.requested_writes,
+                &prepared.requested_networks,
+                &prepared.requested_services,
+                current_unix_ms(),
+            )?;
+        }
         Ok(AgentCapabilityGrantNative {
+            sandbox_contract,
             capability_id,
             effective_arguments: prepared.call.arguments.clone(),
         })
@@ -602,7 +921,12 @@ impl NativeToolEngine {
         sessions: &SessionManager,
         database: &Database,
     ) -> Result<PreparedMcpAuthorizationNative, String> {
+        let _admission = self.admit_operation()?;
         context.validate()?;
+        crate::agent_runtime::tool_boundary::require_native_tool_boundary(
+            context.sandbox_contract.as_ref(),
+            "mcp",
+        )?;
         let target = context
             .request
             .targets
@@ -672,6 +996,11 @@ impl NativeToolEngine {
         prepared: &PreparedMcpAuthorizationNative,
         approved: bool,
     ) -> Result<AgentCapabilityGrantNative, String> {
+        let _admission = self.admit_operation()?;
+        crate::agent_runtime::tool_boundary::require_native_tool_boundary(
+            prepared.context.sandbox_contract.as_ref(),
+            "mcp",
+        )?;
         if prepared.context.request.permission_mode != AgentPermissionModeNative::Operator
             && !approved
         {
@@ -699,6 +1028,7 @@ impl NativeToolEngine {
             )
             .map_err(|error| format!("native MCP capability issuance failed: {error:?}"))?;
         Ok(AgentCapabilityGrantNative {
+            sandbox_contract: None,
             capability_id,
             effective_arguments: prepared.call.arguments.clone(),
         })
@@ -711,6 +1041,11 @@ impl NativeToolEngine {
         credentials: &CredentialManager,
         cancellation: &tokio_util::sync::CancellationToken,
     ) -> Result<AgentToolResultNative, String> {
+        let _admission = self.admit_operation()?;
+        crate::agent_runtime::tool_boundary::require_native_tool_boundary(
+            prepared.context.sandbox_contract.as_ref(),
+            "mcp",
+        )?;
         let mut call = prepared.call.clone();
         call.capability_id = capability_id;
         self.capabilities
@@ -773,7 +1108,14 @@ impl NativeToolEngine {
         known_hosts_path: &Path,
         cancellation: &CancellationToken,
     ) -> Result<AgentToolResultNative, String> {
+        let _admission = if call.tool_name == "exec_command" {
+            self.ensure_shutdown_admission()?; None
+        } else { Some(self.admit_operation()?) };
         context.validate()?;
+        crate::agent_runtime::tool_boundary::require_native_tool_boundary(
+            context.sandbox_contract.as_ref(),
+            &call.tool_name,
+        )?;
         if call.request_id != context.request.request_id
             || !context
                 .request
@@ -819,6 +1161,19 @@ impl NativeToolEngine {
                 decision.reason
             ));
         }
+        let sandbox_digest = context
+            .sandbox_contract
+            .as_ref()
+            .map(|contract| {
+                let stamp = if contract.target.kind == "remote" && contract.policy != crate::agent_runtime::AgentSandboxPolicy::Host {
+                    Some(crate::agent_runtime::remote_seatbelt::stamp(contract)?)
+                } else {None};
+                crate::agent_runtime::remote_seatbelt::dispatch_digest(contract, stamp.as_deref())
+            })
+            .transpose()?;
+        self.capabilities
+            .verify_sandbox(&call.capability_id, sandbox_digest.as_deref())
+            .map_err(|_| "sandboxAuthorizationInvalid: native capability policy mismatch")?;
         let reviewed_command = self
             .capabilities
             .reviewed_command(&call.capability_id)
@@ -867,6 +1222,27 @@ impl NativeToolEngine {
                 tool.descriptor.default_timeout_ms,
             ),
             "probe_http" => {
+                if context.sandbox_contract.as_ref().is_some_and(|contract| {
+                    contract.policy != crate::agent_runtime::AgentSandboxPolicy::Host
+                }) {
+                    let arguments: crate::agent_runtime::ProbeHttpArgumentsNative =
+                        serde_json::from_value(call.arguments.clone())
+                            .map_err(|_| "Invalid probe arguments")?;
+                    let socket = self.processes.service_socket(context, arguments.port)?;
+                    let output = super::http_probe::execute_owned_service_probe_native(
+                        &call,
+                        &socket,
+                        cancellation,
+                    )?;
+                    return Ok(completed_result(
+                        &context.request,
+                        &call,
+                        &effect,
+                        &output.summary,
+                        output.data,
+                        output.truncated,
+                    ));
+                }
                 let remote_connection = match &call.target {
                     AgentToolTargetNative::Remote { .. } => Some(connection_for_remote_target(
                         &call.target,
@@ -931,12 +1307,42 @@ impl NativeToolEngine {
         }
     }
 
+    pub(crate) fn sandbox_authorizations(
+        &self,
+        session_id: &str,
+        task_id: &str,
+        base: &crate::agent_runtime::AgentSandboxContract,
+    ) -> Result<crate::agent_runtime::sandbox_authorization::SandboxAuthorizationStatus, String>
+    {
+        let mut status = self
+            .session_reads
+            .status(session_id, base, current_unix_ms())?;
+        status.active_processes = self.processes.running_task_count(task_id)?;
+        Ok(status)
+    }
+
+    pub(crate) fn has_task_processes(&self, task_id: &str) -> Result<bool, String> {
+        Ok(self.processes.running_task_count(task_id)? > 0)
+    }
+
+    pub(crate) fn revoke_task_authorizations(&self, task_id: &str) -> Result<(), String> {
+        let mut errors=Vec::new();
+        if let Err(error)=self.session_reads.revoke_task(task_id) { errors.push(error); }
+        if self.capabilities.revoke_task(task_id).is_err() { errors.push("Native task capability revocation failed".into()); }
+        if errors.is_empty() { Ok(()) } else { Err(errors.join("; ")) }
+    }
+
+    pub(crate) fn audit_resources_for_task(&self, task_id: &str) -> Result<Vec<crate::agent_runtime::AgentSandboxResource>, String> {
+        self.session_reads.resources_for_task(task_id)
+    }
+
     pub(crate) fn cancel_task(
         &self,
         task_id: &str,
         sessions: &SessionManager,
     ) -> Result<(), String> {
         let mut errors = Vec::new();
+        if let Err(error)=self.revoke_task_authorizations(task_id) { errors.push(error); }
         if let Err(error) = self.file_operations.cancel_task(task_id) {
             errors.push(error);
         }
@@ -957,8 +1363,11 @@ impl NativeToolEngine {
     }
 
     pub(crate) fn prepare_for_shutdown(&self, sessions: &SessionManager) -> Result<usize, String> {
+        self.begin_shutdown_admission();
         let mut cancelled = 0;
         let mut errors = Vec::new();
+        if let Err(error)=self.capabilities.revoke_all() {errors.push(format!("Native shutdown capability revocation failed: {error:?}"));}
+        if let Err(error)=self.session_reads.revoke_all() {errors.push(error);}
         match self.processes.owner_task_ids() {
             Ok(task_ids) => {
                 for task_id in task_ids {
@@ -1348,12 +1757,42 @@ impl NativeToolEngine {
         } else {
             timeout
         };
+        let timeout = if let Some(contract) = &context.sandbox_contract {
+            contract
+                .resource_grants
+                .iter()
+                .fold(timeout, |limit, grant| {
+                    limit.min(Duration::from_millis(
+                        grant.expires_at_unix_ms.saturating_sub(current_unix_ms()),
+                    ))
+                })
+        } else {
+            timeout
+        };
         if self.processes.running_count()? >= max_concurrency as usize {
             return Err("exec_command native concurrency limit was reached".into());
         }
         self.processes.ensure_capacity()?;
         validate_frozen_cwd(&call.target, arguments.cwd.as_deref())?;
-        let process = match &call.target {
+        let launch_admission = self.admit_operation()?;
+        let started = match &call.target {
+            AgentToolTargetNative::Local { target_id, .. }
+                if context.sandbox_contract.as_ref().is_some_and(|contract| {
+                    contract.policy != crate::agent_runtime::AgentSandboxPolicy::Host
+                }) =>
+            {
+                super::spawn_sandboxed_local_process_native(
+                    context.request.task_id.clone(),
+                    context.request.request_id.clone(),
+                    target_id.clone(),
+                    &arguments.command,
+                    context
+                        .sandbox_contract
+                        .as_ref()
+                        .expect("restricted contract"),
+                    timeout,
+                )
+            }
             AgentToolTargetNative::Local { target_id, .. } if reviewed_command.is_some() => {
                 super::spawn_reviewed_local_process_native(
                     context.request.task_id.clone(),
@@ -1361,7 +1800,7 @@ impl NativeToolEngine {
                     target_id.clone(),
                     reviewed_command.expect("reviewed local read"),
                     timeout,
-                )?
+                )
             }
             AgentToolTargetNative::Local { target_id, cwd, .. } => spawn_local_process_native(
                 context.request.task_id.clone(),
@@ -1370,10 +1809,16 @@ impl NativeToolEngine {
                 &arguments.command,
                 cwd.as_deref().map(Path::new),
                 timeout,
-            )?,
+            ),
             AgentToolTargetNative::Remote { target_id, .. } => {
                 let connection = connection_for_remote_target(&call.target, database, credentials)?;
+                let remote_sandbox = context.sandbox_contract.as_ref()
+                    .filter(|contract| contract.policy != crate::agent_runtime::AgentSandboxPolicy::Host)
+                    .map(|contract| crate::agent_runtime::remote_seatbelt::RemoteSeatbeltJob::new(contract, &arguments.command, timeout, &connection, known_hosts_path))
+                    .transpose()?;
                 spawn_remote_process_native(RemoteProcessStartNative {
+                    remote_sandbox,
+                    admission: Some(self.shutdown_admission.clone()),
                     task_id: context.request.task_id.clone(),
                     request_id: context.request.request_id.clone(),
                     owner_target_id: target_id.clone(),
@@ -1381,11 +1826,46 @@ impl NativeToolEngine {
                     connection,
                     known_hosts_path: known_hosts_path.to_path_buf(),
                     timeout,
-                })?
+                })
             }
             _ => return Err("Direct Exec requires a local or remote target".into()),
         };
+        let process = match started {
+            Ok(process) => process,
+            Err(error) => {
+                let admission = if error.starts_with("sandbox") {
+                    crate::agent_runtime::AgentExecutionAdmission::NotStarted
+                } else {
+                    crate::agent_runtime::AgentExecutionAdmission::Unknown
+                };
+                let mut result = direct_infrastructure_failure_result(
+                    &context.request,
+                    call,
+                    effect,
+                    &error,
+                    "nativeDirectStartFailed",
+                    admission,
+                );
+                if error.starts_with("sandboxPolicyUnsupported:")
+                    || error.starts_with("sandboxWorkspaceInvalid:")
+                    || error.starts_with("sandboxPathInvalid:")
+                {
+                    if let Some(Value::Object(data)) = result.data.as_mut() {
+                        data.insert(
+                            "failure".into(),
+                            json!(crate::agent_runtime::AgentExecutionFailure::new(
+                                crate::agent_runtime::AgentExecutionFailureKind::PolicyRejected,
+                                "nativeSandboxPolicyRejected",
+                                admission,
+                            )),
+                        );
+                    }
+                }
+                return Ok(result);
+            }
+        };
         self.processes.insert(Arc::clone(&process))?;
+        drop(launch_admission);
         let background = arguments.background.unwrap_or(false);
         let snapshot = if background {
             process.snapshot()?
@@ -1397,6 +1877,26 @@ impl NativeToolEngine {
                 .remove_terminal(&snapshot.process_handle, snapshot.state)?;
         }
         let mut result = exec_process_result(&context.request, call, effect, snapshot, background);
+        if let Some(contract) = &context.sandbox_contract {
+            if let Some(Value::Object(data)) = result.data.as_mut() {
+                if contract.policy == crate::agent_runtime::AgentSandboxPolicy::Host {
+                    data.insert("sandboxPolicy".into(), json!("host"));
+                    data.insert("executionTarget".into(), json!(&contract.target));
+                    data.insert(
+                        "sandboxCapability".into(),
+                        json!(crate::agent_runtime::sandbox_capability()),
+                    );
+                    data.insert("sandboxBackend".into(), json!("host-account"));
+                } else {
+                    data.insert("sandboxContract".into(), json!(contract));
+                    data.insert(
+                        "sandboxCapability".into(),
+                        json!(if contract.target.kind == "remote" {crate::agent_runtime::remote_seatbelt::partial_capability()} else {crate::agent_runtime::native_sandbox_capability()}),
+                    );
+                    data.insert("sandboxBackend".into(), json!(if contract.target.kind == "remote" {"remote-macos-seatbelt"} else {"macos-seatbelt"}));
+                }
+            }
+        }
         if reviewed_command.is_some() {
             if let Some(Value::Object(data)) = result.data.as_mut() {
                 data.insert("approvalReview".into(), json!("boundedLocalRead"));
@@ -1697,10 +2197,29 @@ impl NativeToolEngine {
         let arguments: WriteStdinArgumentsNative =
             serde_json::from_value(call.arguments.clone())
                 .map_err(|error| format!("Invalid write_stdin arguments: {error}"))?;
+        self.processes
+            .get(process_handle(&call.target)?)?
+            .validate_sandbox_input(
+                context.sandbox_contract.as_ref(),
+                &context.request.user_session_id,
+            )?;
         let accepted = self
             .processes
             .get(process_handle(&call.target)?)?
-            .write_stdin(arguments.input, arguments.close.unwrap_or(false))?;
+            .write_stdin(arguments.input, arguments.close.unwrap_or(false));
+        let accepted = match accepted {
+            Ok(accepted) => accepted,
+            Err(error) => {
+                return Ok(direct_infrastructure_failure_result(
+                    &context.request,
+                    call,
+                    effect,
+                    &error,
+                    "nativeStdinFailed",
+                    crate::agent_runtime::AgentExecutionAdmission::Started,
+                ))
+            }
+        };
         Ok(completed_result(
             &context.request,
             call,
@@ -1744,6 +2263,9 @@ impl NativeToolEngine {
                 "stdout": stdout,
                 "stderr": stderr,
                 "truncated": truncated,
+                "lifecycle": snapshot.state,
+                "terminationConfirmed": snapshot.termination_confirmed,
+                "failure": snapshot.failure,
             }),
             truncated,
         ))
@@ -1762,15 +2284,27 @@ impl NativeToolEngine {
             arguments.signal,
             Duration::from_millis(arguments.timeout_ms.unwrap_or(10_000)),
         )?;
-        self.processes.remove_terminal(handle, snapshot.state)?;
-        Ok(completed_result(
+        let confirmed = snapshot.termination_confirmed;
+        if confirmed {
+            self.processes.remove_terminal(handle, snapshot.state)?;
+        }
+        let mut result = completed_result(
             &context.request,
             call,
             effect,
             "Process termination request was handled.",
-            json!({ "state": format!("{:?}", snapshot.state) }),
+            json!({
+                "state": format!("{:?}", snapshot.state),
+                "lifecycle": snapshot.state,
+                "terminationConfirmed": snapshot.termination_confirmed,
+                "failure": snapshot.failure,
+            }),
             false,
-        ))
+        );
+        if !confirmed {
+            result.status = AgentToolResultStatusNative::Uncertain;
+        }
+        Ok(result)
     }
 
     fn execute_file_tool(
@@ -2002,6 +2536,32 @@ pub(crate) fn connection_for_remote_target(
     Ok(connection)
 }
 
+fn direct_infrastructure_failure_result(
+    request: &AgentRequestNative,
+    call: &AgentToolCallNative,
+    effect: &AgentObservedEffectNative,
+    summary: &str,
+    code: &str,
+    admission: crate::agent_runtime::AgentExecutionAdmission,
+) -> AgentToolResultNative {
+    AgentToolResultNative {
+        request_id: request.request_id.clone(),
+        call_id: call.call_id.clone(),
+        tool_name: call.tool_name.clone(),
+        target_id: call.target.target_id().into(),
+        status: AgentToolResultStatusNative::Failed,
+        summary: crate::redaction::redact_sensitive_text(summary),
+        data: Some(
+            json!({ "channel": "direct", "failure": crate::agent_runtime::AgentExecutionFailure::new(
+            crate::agent_runtime::AgentExecutionFailureKind::InfrastructureFailure, code, admission,
+        ) }),
+        ),
+        artifacts: Vec::new(),
+        effects: vec![effect.clone()],
+        truncated: Some(false),
+    }
+}
+
 fn exec_process_result(
     request: &AgentRequestNative,
     call: &AgentToolCallNative,
@@ -2042,6 +2602,10 @@ fn exec_process_result(
             "stdout": snapshot.stdout,
             "stderr": snapshot.stderr,
             "processHandle": snapshot.process_handle,
+            "lifecycle": snapshot.state,
+            "terminationConfirmed": snapshot.termination_confirmed,
+            "networkProxy": snapshot.network_proxy,
+            "failure": snapshot.failure,
             "durationMs": snapshot.completed_at_unix_ms.unwrap_or_else(current_unix_ms)
                 .saturating_sub(snapshot.started_at_unix_ms),
             "truncated": truncated,
@@ -2123,6 +2687,8 @@ mod tests {
         let terminal_interactive =
             TerminalInteractiveRegistry::new(terminal_leases.clone(), terminal_broker.clone());
         NativeToolEngine {
+            shutdown_admission: Default::default(),
+            session_reads: Default::default(),
             registry: Arc::new(
                 ToolRegistryNative::from_builtin_manifest().expect("valid native tool manifest"),
             ),
@@ -2149,6 +2715,7 @@ mod tests {
         };
         let mut prepared = PreparedMcpAuthorizationNative {
             context: NativeExecutionContext {
+                sandbox_contract: None,
                 request: AgentRequestNative {
                     contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
                     request_id: "request".into(), user_session_id: "session".into(), task_id: "task".into(),
@@ -2237,6 +2804,7 @@ mod tests {
     #[test]
     fn execution_context_is_call_scoped_and_rejects_missing_step_identity() {
         let context = NativeExecutionContext {
+            sandbox_contract: None,
             request: AgentRequestNative {
                 contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
                 request_id: "request-a".into(),
@@ -2381,6 +2949,7 @@ mod tests {
             cwd: Some(workspace.to_str().unwrap().into()),
         };
         let context = NativeExecutionContext {
+            sandbox_contract: None,
             request: AgentRequestNative {
                 contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
                 request_id: "request-full-access".into(),
@@ -2561,6 +3130,7 @@ mod tests {
             local_root: None,
         };
         let context = NativeExecutionContext {
+            sandbox_contract: None,
             request: AgentRequestNative {
                 contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
                 request_id: "request-remote-source".into(),
@@ -2843,6 +3413,7 @@ mod tests {
             local_root: None,
         };
         let context = NativeExecutionContext {
+            sandbox_contract: None,
             request: AgentRequestNative {
                 contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
                 request_id: "request-remote-revalidate".into(),

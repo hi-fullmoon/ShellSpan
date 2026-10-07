@@ -32,6 +32,9 @@ enum PreparedAuthorization {
 }
 
 struct PreparedNativeCall {
+    remote_binding: Option<super::remote_binding::RemoteExecutionBinding>,
+    session_id: String,
+    sandbox_contract: super::AgentSandboxContract,
     authorization: PreparedAuthorization,
     public_call_id: String,
     public_name: String,
@@ -71,6 +74,14 @@ impl NativeToolAdapter {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TerminalCommandArguments {
+    #[serde(default)]
+    write_paths: Vec<String>,
+    #[serde(default)]
+    local_services: Vec<super::LocalServiceRequestNative>,
+    #[serde(default)]
+    network_targets: Vec<super::NetworkTargetRequestNative>,
+    #[serde(default)]
+    read_paths: Vec<String>,
     command: String,
     explanation: String,
     #[serde(default)]
@@ -126,6 +137,20 @@ struct McpCallArguments {
 }
 
 impl NativeToolRuntime for NativeToolAdapter {
+    fn prepare_sandbox(&self, header: &super::AgentSessionHeader) -> Result<(), String> {
+        let _admission = self.engine.admit_operation()?;
+        if header.sandbox_policy.is_some_and(|policy| policy != super::AgentSandboxPolicy::Host)
+            && header.target.as_ref().is_some_and(|target| target.kind == "remote") {
+            if header.execution_surface != super::AgentExecutionSurface::Direct {
+                return Err("sandboxBackendUnavailable: remote restricted execution requires Direct".into());
+            }
+            let known_hosts = crate::known_hosts::known_hosts_path(&self.app)?;
+            super::remote_seatbelt::verify_header(header, &self.app.state::<SessionManager>(),
+                &self.app.state::<Database>(), &self.app.state::<CredentialManager>(), &known_hosts,
+                Some(self.engine.shutdown_admission()))?;
+        }
+        super::sandbox::require_session_sandbox(header)
+    }
     fn terminal_interactive_tools_enabled(&self, remote_target: bool) -> bool {
         self.engine
             .terminal_broker_snapshot(None)
@@ -180,6 +205,18 @@ impl NativeToolRuntime for NativeToolAdapter {
     }
 
     fn prepare(&self, request: NativeToolRequest) -> Result<NativeToolPreparation, String> {
+        self.engine.ensure_shutdown_admission()?;
+        if request.sandbox_contract.policy != super::AgentSandboxPolicy::Host
+            && !super::sandbox::restricted_model_tool(&request.model_call.name)
+        {
+            return Err("sandboxToolUnsupported: tool has no native sandbox boundary".into());
+        }
+        request.sandbox_contract.authorize_call(
+            &request.session_id,
+            &request.model_call.call_id,
+            &request.target,
+            current_unix_ms(),
+        )?;
         let runtime = &self.engine;
         let sessions = self.app.state::<SessionManager>();
         let database = self.app.state::<Database>();
@@ -187,6 +224,11 @@ impl NativeToolRuntime for NativeToolAdapter {
         self.configure(runtime)?;
         let known_hosts_path = crate::known_hosts::known_hosts_path(&self.app)?;
         let owner_target = target_native(&request.target)?;
+        let remote_binding = super::remote_binding::RemoteExecutionBinding::capture(
+            &owner_target,
+            &sessions,
+            &database,
+        )?;
         let target = process_target_for_model_call(&request.model_call, &owner_target)?
             .unwrap_or_else(|| owner_target.clone());
         if matches!(
@@ -242,6 +284,7 @@ impl NativeToolRuntime for NativeToolAdapter {
             );
             let prepared = runtime.prepare_mcp_authorization(
                 NativeExecutionContext {
+                    sandbox_contract: Some(request.sandbox_contract.clone()),
                     request: frozen_request,
                     turn_id: request.turn_id.clone(),
                     step_id: request.step_id.clone(),
@@ -282,6 +325,9 @@ impl NativeToolRuntime for NativeToolAdapter {
                 .insert(
                     token,
                     PreparedNativeCall {
+                        remote_binding,
+                        session_id: request.session_id,
+                        sandbox_contract: request.sandbox_contract,
                         authorization: PreparedAuthorization::Mcp(Box::new(prepared)),
                         public_call_id: request.model_call.call_id,
                         public_name: request.model_call.name,
@@ -354,6 +400,7 @@ impl NativeToolRuntime for NativeToolAdapter {
         );
         let prepared = runtime.prepare_authorization(
             NativeExecutionContext {
+                sandbox_contract: Some(request.sandbox_contract.clone()),
                 request: frozen_request,
                 turn_id: request.turn_id.clone(),
                 step_id: request.step_id.clone(),
@@ -419,6 +466,9 @@ impl NativeToolRuntime for NativeToolAdapter {
             .insert(
                 token,
                 PreparedNativeCall {
+                    remote_binding,
+                    session_id: request.session_id,
+                    sandbox_contract: request.sandbox_contract,
                     authorization: PreparedAuthorization::Tool(Box::new(prepared)),
                     public_call_id: request.model_call.call_id,
                     public_name: request.model_call.name,
@@ -440,6 +490,21 @@ impl NativeToolRuntime for NativeToolAdapter {
         approved: bool,
         cancellation: CancellationToken,
     ) -> Result<NativeToolResult, String> {
+        self.execute_scoped(
+            token,
+            approved,
+            cancellation,
+            super::sandbox_authorization::ResourceAuthorizationScope::Once,
+        )
+    }
+    fn execute_scoped(
+        &self,
+        token: &str,
+        approved: bool,
+        cancellation: CancellationToken,
+        scope: super::sandbox_authorization::ResourceAuthorizationScope,
+    ) -> Result<NativeToolResult, String> {
+        self.engine.ensure_shutdown_admission()?;
         let stored = self
             .prepared
             .lock()
@@ -449,19 +514,92 @@ impl NativeToolRuntime for NativeToolAdapter {
         if cancellation.is_cancelled() {
             return Ok(cancelled_result(&stored));
         }
+        // Shared with start/policy change, including sessions with no registry entry.
+        // Keep the gate through capability issuance and process registration.
+        let session_runtime = self.app.state::<super::AgentRuntime>();
+        let transition = session_runtime.policy_transition(&stored.session_id)?;
+        let _transition = transition.lock().map_err(|_| "Session transition unavailable")?;
+        self.engine.ensure_shutdown_admission()?;
+        let snapshot = self
+            .app
+            .state::<super::AgentRuntime>()
+            .session(&stored.session_id)?;
+        if snapshot.ended || snapshot.archived {
+            return Err("sandboxAuthorizationInvalid: session closed".into());
+        }
+        stored
+            .sandbox_contract
+            .validate_session(&snapshot.header, current_unix_ms())?;
+        stored.sandbox_contract.authorize_call(
+            &stored.session_id,
+            &stored.public_call_id,
+            &stored.sandbox_contract.target,
+            current_unix_ms(),
+        )?;
         let runtime = &self.engine;
         let sessions = self.app.state::<SessionManager>();
         let database = self.app.state::<Database>();
         let credentials = self.app.state::<CredentialManager>();
         self.configure(runtime)?;
         let known_hosts_path = crate::known_hosts::known_hosts_path(&self.app)?;
+        if let Some(binding) = &stored.remote_binding {
+            binding.validate(
+                &target_native(&stored.sandbox_contract.target)?,
+                &sessions,
+                &database,
+            )?;
+        }
         match stored.authorization {
             PreparedAuthorization::Tool(prepared) => {
                 let native_request_id = prepared.call.request_id.clone();
                 let native_call_id = prepared.call.call_id.clone();
                 let native_tool_name = prepared.call.tool_name.clone();
                 let native_target = prepared.call.target.clone();
-                let grant = runtime.issue_prepared_authorization(&prepared, approved)?;
+                let grant =
+                    if scope == super::sandbox_authorization::ResourceAuthorizationScope::Once {
+                        runtime.issue_prepared_authorization(&prepared, approved)?
+                    } else {
+                        runtime.issue_prepared_authorization_scoped(&prepared, approved, scope)?
+                    };
+                if let Some(contract) = grant
+                    .sandbox_contract
+                    .as_ref()
+                    .filter(|contract| !contract.resource_grants.is_empty())
+                {
+                    let audit_result = (|| {
+                        let session_expiry = if !approved
+                            || scope == super::sandbox_authorization::ResourceAuthorizationScope::Session
+                        {
+                            runtime
+                                .sandbox_authorizations(
+                                    &stored.session_id,
+                                    &prepared.context.request.task_id,
+                                    &stored.sandbox_contract,
+                                )?
+                                .expires_at_unix_ms
+                        } else {
+                            None
+                        };
+                        session_runtime.record_sandbox_authorization(
+                            &stored.session_id,
+                            &prepared.context.turn_id,
+                            &prepared.context.step_id,
+                            &stored.public_call_id,
+                            contract,
+                            scope,
+                            approved,
+                            session_expiry,
+                        )
+                    })();
+                    if let Err(error) = audit_result {
+                        return Err(session_runtime.rollback_sandbox_audit(
+                            &stored.session_id,
+                            &prepared.context.request.task_id,
+                            &sessions,
+                            error,
+                        ));
+                    }
+                }
                 if cancellation.is_cancelled() {
                     let _ = runtime.revoke_capability(&grant.capability_id);
                     return Ok(NativeToolResult {
@@ -504,8 +642,10 @@ impl NativeToolRuntime for NativeToolAdapter {
                     target: native_target,
                     capability_id: grant.capability_id,
                 };
+                let mut execution_context = prepared.context.clone();
+                execution_context.sandbox_contract = grant.sandbox_contract;
                 let mut result = runtime.execute_tool(
-                    &prepared.context,
+                    &execution_context,
                     call,
                     &sessions,
                     &database,
@@ -556,6 +696,9 @@ impl NativeToolRuntime for NativeToolAdapter {
                 })
             }
             PreparedAuthorization::Mcp(prepared) => {
+                if scope != super::sandbox_authorization::ResourceAuthorizationScope::Once {
+                    return Err("Session file authorization does not apply to MCP".into());
+                }
                 let grant = runtime.issue_prepared_mcp_authorization(&prepared, approved)?;
                 if cancellation.is_cancelled() {
                     let _ = runtime.revoke_capability(&grant.capability_id);
@@ -664,10 +807,24 @@ fn normalize_arguments(
         };
         let timeout_ms = arguments.timeout_ms;
         let background = arguments.background;
+        if (!arguments.read_paths.is_empty()
+            || !arguments.write_paths.is_empty()
+            || !arguments.network_targets.is_empty()
+            || !arguments.local_services.is_empty())
+            && (request.execution_surface != super::AgentExecutionSurface::Direct
+                || request.sandbox_contract.policy == super::AgentSandboxPolicy::Host
+                || request.target.kind != "local")
+        {
+            return Err("sandboxResourceRequestInvalid: local restricted Direct required".into());
+        }
         return match request.execution_surface {
             super::AgentExecutionSurface::Direct => Ok((
                 "exec_command".into(),
                 omit_null_fields(json!({
+                    "readPaths": if arguments.read_paths.is_empty() {Value::Null} else {json!(arguments.read_paths)},
+                    "writePaths": if arguments.write_paths.is_empty() {Value::Null} else {json!(arguments.write_paths)},
+                    "networkTargets": if arguments.network_targets.is_empty() {Value::Null} else {json!(arguments.network_targets)},
+                    "localServices": if arguments.local_services.is_empty() {Value::Null} else {json!(arguments.local_services)},
                     "command": arguments.command,
                     "explanation": arguments.explanation,
                     "channel": "direct",
