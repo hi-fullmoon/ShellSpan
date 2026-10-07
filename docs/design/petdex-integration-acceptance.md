@@ -35,7 +35,7 @@
 | SSH/SFTP 生命周期 | `src-tauri/src/session.rs`、`commands.rs` | 已定位 SSH 连接、关闭/失败及 SFTP 完成/取消出口；尚无启用时活动快照 |
 | AI/部署生命周期 | `src-tauri/src/agent_runtime/`、`deployment/run_coordinator.rs` 及权威状态更新入口 | 留待阶段 3/4 确认，阶段 0 未声称已核实领域终态 |
 | 偏好与设置 | `src/stores/appStore.ts`、`src/components/workbench/settings-panel.tsx`、`src/locales/{zh-CN,en-US}.ts` | `appStore.test.ts`、`settings-panel.test.tsx` |
-| 反馈入口 | `src/lib/petdex/petdex-feedback.ts`、GitHub issue 表单 | `petdex-feedback.test.ts` |
+| 反馈入口 | `src/lib/feedback.ts`、设置页统一反馈入口、GitHub 新建 Issue 页面 | `settings-panel.test.tsx`、`settings-panel.browser.mjs` |
 | 旧独立协议探针 | `src-tauri/tests/petdex_contract_probe.rs` | 5 项已有 fixture 服务测试；不是实际 Petdex 协议证明 |
 
 阶段 0 仅新增本验收文档、协议文档，并更新计划阶段 0 的证据与清单，不修改业务代码、UI 或测试，不新增 mock。
@@ -225,7 +225,7 @@ SSH/SFTP/AI 分类默认 true/true/false，总开关默认 false，升级保留�
 
 - 新增 `petdex_check_health` 并注册，类型化 IPC 与 Ajv 验证齐全。只读匿名 health 与状态 POST 共用请求锁和取消代际，关闭不通信，1500ms 包含排队上限。它不读 token、不创建挥手、不清理业务、不修改诊断或历史成功发送时间；`reachable` 明确不等同于认证成功。
 - 设置详情通过现有 Collapsible/Button 按需展开，显示有限状态建议、可读目标动作、健康检查有限结果、历史成功时间与无记录空态。历史时间不保证当前可用。主动完成 Toast 与就地结果分工，后台恢复无 Toast；同步 busy ref 防重复触发，原有操作代际阻止过期反馈。
-- “反馈问题”仍打开固定 `petdex-phase3-feedback.yml` URL，保留文件名以兼容既有链接；表单增加问题分类，聚合评估同意变为可选。没有打开或提交 GitHub 反馈，也没有附带/上传应用信息。
+- 当前反馈通过设置页统一入口打开 GitHub 新建 Issue 页面，不指定 Petdex 模板，也不附带或上传应用信息；旧 Petdex 反馈模板、专用模块和对应测试已移除。
 
 | 验证 | 结果与边界 |
 | --- | --- |

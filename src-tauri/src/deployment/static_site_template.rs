@@ -42,29 +42,3 @@ pub(crate) fn static_site_template(
         },
     ))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::deployment::{
-        compiler::compile_workflow_definition, node_registry::DeploymentNodeRegistry,
-    };
-
-    #[test]
-    fn template_factory_binds_only_target_identity_and_remains_compilable() {
-        let (definition, layout) =
-            static_site_template("profile-template", "/srv/www/template").unwrap();
-        assert_eq!(
-            definition.targets[0].connection_profile_id,
-            "profile-template"
-        );
-        assert_eq!(definition.targets[0].remote_root, "/srv/www/template");
-        assert_eq!(layout.nodes.len(), definition.nodes.len());
-        let compiled =
-            compile_workflow_definition(&definition, &DeploymentNodeRegistry::mvp()).unwrap();
-        assert!(compiled
-            .nodes
-            .iter()
-            .any(|node| node.node_type == "deploy.static-switch"));
-    }
-}

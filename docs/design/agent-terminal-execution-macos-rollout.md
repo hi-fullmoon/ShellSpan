@@ -41,7 +41,7 @@ macOS 本地 `pty` wrapper dispatch 会返回
 
 ## 验收入口
 
-`pnpm test:terminal-rollout:macos` 要求原生 Darwin x64/arm64 Rust host、
+`node scripts/verify-terminal-broker-macos.mjs` 要求原生 Darwin x64/arm64 Rust host、
 `/bin/bash` 与 `/bin/zsh`。它覆盖真实 PTY Broker、shell 状态、REPL、单键确认、
 resize、alternate screen、凭据提示拒绝、Direct/兼容性回归、完整串行 Rust 套件
 和两轮 release 性能门槛；不满足主机前提时以 `MISSING` 退出，不能报告 PASS。

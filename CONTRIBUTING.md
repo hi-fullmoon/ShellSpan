@@ -25,6 +25,8 @@ pnpm build
 pnpm test
 ```
 
+专项浏览器、原生桌面和平台验收使用直接运行的脚本，入口及环境要求见 [项目脚本](./scripts/README.md)。
+
 ## 提交规范
 
 > **注意**: 所有 git commit message 必须使用英文。

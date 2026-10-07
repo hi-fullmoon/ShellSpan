@@ -18,8 +18,6 @@ if OUTPUT == ROOT or ROOT in OUTPUT.parents:
 OUTPUT.mkdir(exist_ok=False)
 paths = subprocess.check_output(['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], cwd=ROOT).decode().split('\0')
 root_files = {'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'index.html', 'tsconfig.json', 'tsconfig.node.json', 'vite.config.ts', 'vitest.config.ts', 'CHANGELOG.md', '.gitignore', 'docs/releasing.md', 'AGENTS.md', 'README.md', 'CONTRIBUTING.md', 'rust-toolchain.toml', 'cliff.toml'}
-root_files.update({f'docs/design/deployment-center-product-phase-{phase}-evidence.json' for phase in ['2', '3']})
-root_files.add('docs/design/deployment-center-product-phase-4-lifecycle-evidence.json')
 root_files.add('.agents/skills/shadcn/SKILL.md')
 selected = []
 for name in sorted(set(paths)):

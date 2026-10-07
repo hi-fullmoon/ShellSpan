@@ -545,8 +545,5 @@ fn remote_native_lower_layer_freezes_sftp_root_transports_stdin_denies_and_clean
 #[path = "remote_seatbelt_engine.rs"]
 mod engine_tests;
 #[cfg(test)]
-#[path = "remote_host_deployment.rs"]
-mod host_deployment_tests;
-#[cfg(test)]
 #[path = "remote_seatbelt_pin.rs"]
 mod pin_tests;

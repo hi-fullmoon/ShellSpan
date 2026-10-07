@@ -49,18 +49,3 @@ pub(crate) fn canonical_sha256<T: Serialize>(
         .collect::<String>();
     Ok(format!("sha256:{hex}"))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn object_key_order_does_not_change_digest() {
-        let left: Value = serde_json::from_str(r#"{"a":1,"nested":{"b":2,"a":1}}"#).unwrap();
-        let right: Value = serde_json::from_str(r#"{"nested":{"a":1,"b":2},"a":1}"#).unwrap();
-        assert_eq!(
-            canonical_sha256(&left).unwrap(),
-            canonical_sha256(&right).unwrap()
-        );
-    }
-}

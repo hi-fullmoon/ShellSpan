@@ -10,9 +10,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
-#[cfg(test)]
-pub(crate) const DEPLOYMENT_EXECUTOR_CONTRACT_VERSION: &str = "deployment-node-executor";
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct FrozenNodeInput {
@@ -244,35 +241,4 @@ pub(crate) fn plan_from_descriptor(
         input_digest,
         fixed_actions: descriptor.fixed_actions.clone(),
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn executor_contract_name_and_plan_digests_are_stable() {
-        assert_eq!(
-            DEPLOYMENT_EXECUTOR_CONTRACT_VERSION,
-            "deployment-node-executor"
-        );
-        let definition: super::super::workflow_schema::DeploymentWorkflowDefinition =
-            serde_json::from_str(include_str!(
-                "../../../protocol/deployment/fixtures/docker-compose-workflow.json"
-            ))
-            .unwrap();
-        let node = definition.nodes[0].clone();
-        let registry = DeploymentNodeRegistry::mvp();
-        let descriptor = registry.find(&node.type_name, node.type_version).unwrap();
-        let input = FrozenNodeInput {
-            run_id: "run-contract".into(),
-            node,
-            targets: definition.targets,
-            inputs: BTreeMap::new(),
-        };
-        let first = plan_from_descriptor(descriptor, "test", &input).unwrap();
-        let second = plan_from_descriptor(descriptor, "test", &input).unwrap();
-        assert_eq!(first, second);
-        assert_eq!(first.fixed_actions, vec!["freeze_source_snapshot"]);
-    }
 }

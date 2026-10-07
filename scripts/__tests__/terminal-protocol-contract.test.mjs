@@ -508,7 +508,7 @@ describe('terminal execution Phase 0 protocol contract', () => {
   });
 
   it('records Phase 2/3/4/5/6 platform evidence without promoting partial results', async () => {
-    const [roadmap, rfc, matrix, phase2, phase3, phase4, phase5, phase5Macos, phase6, phase6Macos, windowsRunner, macosRunner, broker, brokerTests, benchmark, packageJsonText] = await Promise.all([
+    const [roadmap, rfc, matrix, phase2, phase3, phase4, phase5, phase5Macos, phase6, phase6Macos, windowsRunner, macosRunner, broker, brokerTests, benchmark] = await Promise.all([
       readFile(path.join(protocolRoot, 'terminal-execution-roadmap.md'), 'utf8'),
       readFile(path.join(protocolRoot, 'terminal-protocol-rfc.md'), 'utf8'),
       readFile(path.join(protocolRoot, 'terminal-execution-test-matrix.md'), 'utf8'),
@@ -524,9 +524,7 @@ describe('terminal execution Phase 0 protocol contract', () => {
       readFile(path.join(repositoryRoot, 'src-tauri/src/terminal_broker.rs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'src-tauri/src/tests/terminal_broker.rs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'src-tauri/examples/terminal_transport_baseline.rs'), 'utf8'),
-      readFile(path.join(repositoryRoot, 'package.json'), 'utf8'),
     ]);
-    const packageJson = JSON.parse(packageJsonText);
 
     expect(roadmap).toContain('[Phase 2 evidence](./terminal-execution-phase-2-acceptance.md)');
     expect(roadmap).toContain('Windows supplement `01a0a566-6a29-74a3-945e-cc310a46cecd` | **complete — PASS**');
@@ -597,18 +595,6 @@ describe('terminal execution Phase 0 protocol contract', () => {
     expect(phase2).toMatch(/historical sections below preserve the evidence boundary[\s\S]*superseded for the\s+current Windows delivery state/i);
     expect(matrix).toMatch(/Windows PowerShell 5\.1 and PowerShell 7 \| \*\*PASS\*\*/);
     expect(matrix).toMatch(/Windows and macOS Phase 6 continuations are complete/i);
-    expect(packageJson.scripts['test:terminal-broker:windows'])
-      .toBe('node scripts/verify-terminal-broker-windows.mjs');
-    expect(packageJson.scripts['test:terminal-interactive:windows'])
-      .toBe('node scripts/verify-terminal-broker-windows.mjs');
-    expect(packageJson.scripts['test:terminal-rollout:windows'])
-      .toBe('node scripts/verify-terminal-broker-windows.mjs');
-    expect(packageJson.scripts['test:terminal-broker:macos'])
-      .toBe('node scripts/verify-terminal-broker-macos.mjs');
-    expect(packageJson.scripts['test:terminal-interactive:macos'])
-      .toBe('node scripts/verify-terminal-broker-macos.mjs');
-    expect(packageJson.scripts['test:terminal-rollout:macos'])
-      .toBe('node scripts/verify-terminal-broker-macos.mjs');
     expect(windowsRunner).toContain("process.platform !== 'win32'");
     expect(windowsRunner).toContain('MISSING: native Windows/ConPTY execution is required');
     expect(windowsRunner).toContain("x64: 'x86_64-pc-windows-msvc'");

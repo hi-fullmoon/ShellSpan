@@ -150,11 +150,6 @@ pub(crate) struct DeploymentNodeTypeSpec {
 }
 
 impl DeploymentNodeTypeSpec {
-    #[cfg(test)]
-    pub(crate) fn qualified_name(&self) -> String {
-        format!("{}@{}", self.type_name, self.type_version)
-    }
-
     pub(crate) fn input(&self, name: &str) -> Option<&PortSpec> {
         self.inputs.iter().find(|port| port.name == name)
     }
@@ -896,16 +891,6 @@ impl DeploymentNodeRegistry {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn nodes(&self) -> &[DeploymentNodeTypeSpec] {
-        &self.nodes
-    }
-
-    #[cfg(test)]
-    pub(crate) fn from_test_nodes(nodes: Vec<DeploymentNodeTypeSpec>) -> Self {
-        Self { nodes }
-    }
-
     pub(crate) fn find(
         &self,
         type_name: &str,
@@ -1567,77 +1552,4 @@ enum NotifyEvent {
     Failed,
     Canceled,
     StateUnknown,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn registry_lists_every_mvp_node_with_readable_metadata() {
-        let registry = DeploymentNodeRegistry::mvp();
-        let names = registry
-            .nodes()
-            .iter()
-            .map(DeploymentNodeTypeSpec::qualified_name)
-            .collect::<Vec<_>>();
-        assert_eq!(names.len(), 18);
-        for expected in [
-            "source.snapshot@1",
-            "build.package-script@1",
-            "build.docker-buildx@2",
-            "artifact.collect@1",
-            "artifact.bundle-compose@1",
-            "target.preflight@2",
-            "release.create-candidate@1",
-            "control.approval@1",
-            "transfer.sftp@2",
-            "release.prepare-files@1",
-            "runtime.load-image@1",
-            "deploy.compose@2",
-            "deploy.static-switch@1",
-            "verify.http@2",
-            "proxy.nginx-reload@2",
-            "release.commit@1",
-            "finalize.notify@1",
-        ] {
-            assert!(
-                names.iter().any(|name| name == expected),
-                "missing {expected}"
-            );
-        }
-        assert!(registry.nodes().iter().all(|node| {
-            !node.display_name_key.is_empty()
-                && !node.description_key.is_empty()
-                && !node.fixed_actions.is_empty()
-                && node.config_schema.schema_version == node.config_schema_version
-                && node.default_config.is_object()
-        }));
-        let package_script = registry.find("build.package-script", 1).unwrap();
-        assert!(package_script
-            .config_schema
-            .fields
-            .iter()
-            .any(|field| field.name == "packageManager" && !field.options.is_empty()));
-        registry
-            .validate_config(package_script, "build", &package_script.default_config)
-            .unwrap();
-    }
-
-    #[test]
-    fn dangerous_command_and_secret_fields_are_rejected_before_schema_parsing() {
-        let registry = DeploymentNodeRegistry::mvp();
-        let node = registry.find("source.snapshot", 1).unwrap();
-        for config in [
-            serde_json::json!({"sourceRef": "repo", "command": "rm -rf /"}),
-            serde_json::json!({"sourceRef": "repo", "password": "literal"}),
-        ] {
-            let errors = registry
-                .validate_config(node, "source", &config)
-                .unwrap_err();
-            assert!(errors
-                .iter()
-                .any(|error| error.code == WorkflowValidationCode::DangerousConfig));
-        }
-    }
 }

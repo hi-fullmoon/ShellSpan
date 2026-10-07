@@ -259,7 +259,7 @@ Mac 首版是用户已批准的常规原目录 Seatbelt、正常进程组、准�
 | Phase0 入口盘点、威胁模型、cfg(test)审查三个[x] | R14/R19/R20/R23/R24；历史交付可保留，不因为新remote/Registry入口存在就假定旧盘点覆盖新增代码，最终需更新差异 |
 | Phase0 后端选择/macOS/Windows真实能力[ ] | Mac常规partial具备当前原生证据；Windows后置缺环境/实现与实机支持记录保持未完成，不阻Mac独立门禁；不以历史Linux容器实验代桌面产品 |
 | Phase0 必要系统读/项目/敏感拒绝/网络/cache/temp[ ] | R13–R18 真实子项已验；全地址族/客户端边界与平台汇总未齐，先按Mac当前declared scope闭合，而不是重加撤回对象保护条件 |
-| Phase0 平台支持矩阵/依赖/缺口/可执行方案[x] | 已有历史文档及本报告matrix、phase5 README复现；须交付当前Mac Seatbelt/工具链、Node relay、远端现有Python/Seatbelt条件和不支持行为。macos-provider ES条件是明确历史材料，不能当当前安装条件 |
+| Phase0 平台支持矩阵/依赖/缺口/可执行方案[x] | 已有历史文档及本报告matrix、phase5 README复现；须交付当前Mac Seatbelt/工具链、Node relay、远端现有Python/Seatbelt条件和不支持行为。首版不要求 Endpoint Security 服务或权限；已清理退出当前路线的候选安装文档与符号探测程序 |
 | Phase1 独立类型/IPC/events/recovery[x] | R01/R02/R23/R25/R26 已实现；新policyChanged/resourceAudit/remote/probe字段继续需schema/IPC/双语key最终专项 |
 | Phase1 按调用freeze/expiry/继承/目标失效[x] | R11/R22/R23；旧contract tests证明对应边界，当前新增remote stamp/Registry/transition需要最新相关回归，不恢复livegrant |
 | Phase1 历史保留/local默认[x] | R03/R10；不把从prefs载入配置变成历史session policy改写或已批准cache；当前首次send缺root链待验 |

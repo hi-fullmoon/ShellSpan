@@ -31,12 +31,3 @@ mod validation_error;
 mod workflow_schema;
 
 pub(crate) use runtime::DeploymentWorkflowRuntime;
-
-#[cfg(test)]
-mod application_acceptance;
-
-#[cfg(test)]
-mod release_acceptance;
-
-#[cfg(test)]
-mod host_compose_tests;

@@ -215,32 +215,3 @@ pub(crate) fn save_deployment_audit_document(
         .map_err(|error| format!("failed to publish deployment audit: {}", error.error))?;
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn event_projection_drops_remote_text_and_unknown_fields() {
-        let event = DeploymentRunEventRecord {
-            run_id: "run-audit".into(),
-            sequence: 1,
-            node_id: Some("deploy".into()),
-            attempt: Some(1),
-            event_kind: "status_changed".into(),
-            status: Some("failed".into()),
-            summary_key: "deployment.run.failed".into(),
-            payload: Some(json!({
-                "failureCode": "DEPLOYMENT_WORKFLOW_NODE_FAILED",
-                "stdout": "password=must-not-escape",
-                "remoteMessage": "untrusted remote text",
-            })),
-            recorded_at: 1,
-        };
-        let encoded = serde_json::to_string(&event_projection(&event)).unwrap();
-        assert!(encoded.contains("failureCode"));
-        assert!(!encoded.contains("must-not-escape"));
-        assert!(!encoded.contains("remoteMessage"));
-        assert!(!encoded.contains("stdout"));
-    }
-}

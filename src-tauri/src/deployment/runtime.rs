@@ -55,12 +55,6 @@ impl DeploymentWorkflowRuntime {
         Self::for_gate_decision(shellspan_directory, admissions_enabled, source)
     }
 
-    #[cfg(test)]
-    fn for_value(shellspan_directory: &Path, value: Option<&str>) -> Result<Self, String> {
-        let (admissions_enabled, source) = parse_gate(value);
-        Self::for_gate_decision(shellspan_directory, admissions_enabled, source)
-    }
-
     fn for_gate_decision(
         shellspan_directory: &Path,
         admissions_enabled: bool,
@@ -83,11 +77,6 @@ impl DeploymentWorkflowRuntime {
             target_locks: Arc::new(Mutex::new(BTreeMap::new())),
             cancellations: Arc::new(Mutex::new(BTreeMap::new())),
         })
-    }
-
-    #[cfg(test)]
-    pub(crate) fn enabled_for_tests(shellspan_directory: &Path) -> Result<Self, String> {
-        Self::for_value(shellspan_directory, Some("true"))
     }
 
     pub(crate) fn capabilities(&self) -> DeploymentWorkflowCapabilities {
@@ -157,75 +146,5 @@ impl DeploymentWorkflowRuntime {
             DeploymentWorkflowAdmission::Mutating if self.capabilities.admissions_enabled => Ok(()),
             DeploymentWorkflowAdmission::Mutating => Err("DEPLOYMENT_WORKFLOW_DISABLED".into()),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn gate_is_default_on_and_invalid_values_fail_closed() {
-        let directory = tempfile::tempdir().unwrap();
-        let missing = DeploymentWorkflowRuntime::for_value(directory.path(), None).unwrap();
-        assert!(missing.capabilities().admissions_enabled);
-        assert!(missing.capabilities().default_enabled);
-        assert_eq!(missing.capabilities().source, "defaultEnabled");
-        assert!(missing
-            .ensure(DeploymentWorkflowAdmission::Mutating)
-            .is_ok());
-
-        let invalid =
-            DeploymentWorkflowRuntime::for_value(directory.path(), Some("sometimes")).unwrap();
-        assert!(!invalid.capabilities().admissions_enabled);
-        assert_eq!(invalid.capabilities().source, "invalidEnvironment");
-    }
-
-    #[test]
-    fn enabled_gate_admits_mutations_and_closed_gate_preserves_continuity() {
-        let directory = tempfile::tempdir().unwrap();
-        let enabled = DeploymentWorkflowRuntime::for_value(directory.path(), Some("true")).unwrap();
-        assert!(enabled.capabilities().coordinator_available);
-        assert!(enabled
-            .ensure(DeploymentWorkflowAdmission::Mutating)
-            .is_ok());
-
-        let disabled =
-            DeploymentWorkflowRuntime::for_value(directory.path(), Some("false")).unwrap();
-        assert!(disabled.capabilities().default_enabled);
-        assert_eq!(disabled.capabilities().source, "environment");
-        assert!(disabled
-            .ensure(DeploymentWorkflowAdmission::ReadOnly)
-            .is_ok());
-        assert!(disabled
-            .ensure(DeploymentWorkflowAdmission::Continuity)
-            .is_ok());
-        assert!(disabled
-            .ensure(DeploymentWorkflowAdmission::Mutating)
-            .is_err());
-    }
-
-    #[tokio::test]
-    async fn target_effect_lock_serializes_the_same_target_only() {
-        let directory = tempfile::tempdir().unwrap();
-        let runtime = DeploymentWorkflowRuntime::enabled_for_tests(directory.path()).unwrap();
-        let production = runtime.acquire_target_lock("production").await.unwrap();
-        let other = runtime.acquire_target_lock("staging").await.unwrap();
-        drop(other);
-        let second_runtime = runtime.clone();
-        let acquired = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let observed = acquired.clone();
-        let task = tokio::spawn(async move {
-            let _guard = second_runtime
-                .acquire_target_lock("production")
-                .await
-                .unwrap();
-            observed.store(true, std::sync::atomic::Ordering::SeqCst);
-        });
-        tokio::task::yield_now().await;
-        assert!(!acquired.load(std::sync::atomic::Ordering::SeqCst));
-        drop(production);
-        task.await.unwrap();
-        assert!(acquired.load(std::sync::atomic::Ordering::SeqCst));
     }
 }

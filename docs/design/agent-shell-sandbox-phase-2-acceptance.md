@@ -330,6 +330,6 @@ debug CLI 的 `status` 只用于已有 fixture marker 的本地核对，无 Taur
 
 2026-10-06 当前范围：桌面仅 macOS 和 Windows，先推进 macOS，Windows 实机环境由用户后续提供；原生 Linux 桌面不是本轮条件。历史 Linux 容器实验结论保持不变，不自动增加 Linux 产品环境。
 
-本轮完成原生 provider 普通能力审查及只读符号探测：macOS 26.7.1 缺少 SDK 标为 macOS 27 起可用的后代 ES 客户端；旧版系统客户端需要 Apple entitlement 和用户完整磁盘访问授权。探测源码通过 clang 的全部警告检查，真实加载系统库，未创建客户端或修改系统。具体安装范围、运行边界、回滚与仍需证明的对象语义见 [macOS provider 接入条件](agent-shell-sandbox-macos-provider.md)。未新增生产 IPC 或不可用后端占位，没有重跑历史边界实验或 GUI 验收。
+历史调查曾完成 Endpoint Security 只读符号探测，未创建客户端或修改系统。首版已采用 Seatbelt 常规原生沙箱，不要求 Endpoint Security 服务、特殊 entitlement 或完整磁盘访问授权；相关候选安装文档及符号探测程序已清理。对象别名等已知限制继续保留在当前能力报告中。
 
 该次调查尚未满足对象 provider、签名/平台授权、网络边界和生产派发条件。此后首版改为常规原生路线，macOS Direct 已按文首实现；不再等待本文的对象 provider 或特权部署，Windows 实机仍后续验收。独立工作区、特权服务及 Linux 模式均未安装或启用。
