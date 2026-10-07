@@ -1140,7 +1140,39 @@ impl Database {
             conn: Arc::new(Mutex::new(conn)),
         };
         db.initialize_or_validate_schema()?;
+        // Pending native approvals never survive restart. Their per-profile
+        // nonce is held by this connection and changed atomically by SQLite
+        // for every write, independently of caller-supplied updated_at.
+        db.conn
+            .lock()
+            .map_err(|_| "database lock unavailable")?
+            .execute_batch("CREATE TEMP TABLE profile_execution_revisions (profile_id TEXT PRIMARY KEY, nonce TEXT NOT NULL);
+                CREATE TEMP TRIGGER profile_execution_insert AFTER INSERT ON main.profiles BEGIN
+                  INSERT OR REPLACE INTO profile_execution_revisions VALUES (NEW.id, hex(randomblob(32)));
+                END;
+                CREATE TEMP TRIGGER profile_execution_update AFTER UPDATE ON main.profiles BEGIN
+                  INSERT OR REPLACE INTO profile_execution_revisions VALUES (NEW.id, hex(randomblob(32)));
+                END;
+                CREATE TEMP TRIGGER profile_execution_delete AFTER DELETE ON main.profiles BEGIN
+                  DELETE FROM profile_execution_revisions WHERE profile_id=OLD.id;
+                END;")
+            .map_err(|_| "failed to initialize native profile execution revisions")?;
         Ok(db)
+    }
+
+    pub(crate) fn profile_execution_revision(&self, id: &str) -> Result<String, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "database lock unavailable")?;
+        conn.execute("INSERT OR IGNORE INTO profile_execution_revisions SELECT id, hex(randomblob(32)) FROM profiles WHERE id=?1", [id])
+            .map_err(|_| "failed to read native profile execution revision")?;
+        conn.query_row(
+            "SELECT nonce FROM profile_execution_revisions WHERE profile_id=?1",
+            [id],
+            |row| row.get(0),
+        )
+        .map_err(|_| "remote profile execution revision unavailable".into())
     }
 
     fn initialize_or_validate_schema(&self) -> Result<(), String> {

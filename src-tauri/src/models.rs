@@ -921,6 +921,7 @@ pub(crate) struct SessionTargetState {
 #[derive(Default)]
 struct SessionRegistry {
     sessions: HashMap<String, ManagedSession>,
+    execution_generations: HashMap<String, uuid::Uuid>,
 }
 
 #[derive(Clone, Default)]
@@ -1670,6 +1671,9 @@ impl SessionManager {
             .registry
             .lock()
             .map_err(|_| "session registry poisoned".to_string())?;
+        guard
+            .execution_generations
+            .insert(session_id.clone(), uuid::Uuid::new_v4());
         guard.sessions.insert(session_id, managed);
         Ok(())
     }
@@ -1731,6 +1735,7 @@ impl SessionManager {
                     .map_err(|error| error.to_string())
             });
         guard.sessions.remove(session_id);
+        guard.execution_generations.remove(session_id);
         send_result
     }
 
@@ -1747,6 +1752,16 @@ impl SessionManager {
     }
 
     pub(crate) fn target_state(&self, session_id: &str) -> Result<SessionTargetState, String> {
+        self.execution_binding_state(session_id)
+            .map(|(state, _)| state)
+    }
+
+    /// Native-only epoch: inserting/reconnecting or changing connection state
+    /// invalidates pending execution approvals, even if the identity returns.
+    pub(crate) fn execution_binding_state(
+        &self,
+        session_id: &str,
+    ) -> Result<(SessionTargetState, uuid::Uuid), String> {
         let guard = self
             .registry
             .lock()
@@ -1755,11 +1770,18 @@ impl SessionManager {
             .sessions
             .get(session_id)
             .ok_or_else(|| format!("session {session_id} not found"))?;
-        Ok(SessionTargetState {
-            terminal_kind: managed.terminal_kind,
-            identity: managed.identity.clone(),
-            status: managed.status.status,
-        })
+        let generation = *guard
+            .execution_generations
+            .get(session_id)
+            .ok_or_else(|| "session execution generation unavailable".to_string())?;
+        Ok((
+            SessionTargetState {
+                terminal_kind: managed.terminal_kind,
+                identity: managed.identity.clone(),
+                status: managed.status.status,
+            },
+            generation,
+        ))
     }
 
     pub(crate) fn set_status(&self, session_id: &str, status: StatusEvent) -> Result<(), String> {
@@ -1771,7 +1793,13 @@ impl SessionManager {
             .sessions
             .get_mut(session_id)
             .ok_or_else(|| format!("session {session_id} not found"))?;
+        let changed = managed.status.status != status.status;
         managed.status = status;
+        if changed {
+            guard
+                .execution_generations
+                .insert(session_id.to_owned(), uuid::Uuid::new_v4());
+        }
         Ok(())
     }
 
@@ -1809,6 +1837,7 @@ impl SessionManager {
             .lock()
             .map_err(|_| "session registry poisoned".to_string())?;
         guard.sessions.remove(session_id);
+        guard.execution_generations.remove(session_id);
         Ok(())
     }
 

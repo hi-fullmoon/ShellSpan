@@ -474,6 +474,15 @@ impl Drop for ScopedForwardCancelGuard {
 }
 
 impl ScopedLoopbackConnection {
+    pub(crate) fn cancel(&self) {
+        self.cancel.store(true, Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn worker_finished(&self) -> bool {
+        self.worker.as_ref().is_some_and(thread::JoinHandle::is_finished)
+    }
+
     pub(crate) fn take_stream(&mut self) -> Result<TcpStream, String> {
         self.stream
             .take()
@@ -571,11 +580,12 @@ pub(crate) fn open_scoped_loopback_connection(
             {
                 return Err("scoped HTTP client stopped before receiving its transport".into());
             }
-            bridge_single_connection(
+            crate::scoped_ssh_bridge::bridge(
+                &session.target,
                 channel,
                 bridge,
-                Arc::new(AtomicU64::new(0)),
-                Arc::new(AtomicU64::new(0)),
+                &worker_cancel,
+                deadline,
             )
         })();
         if let Err(error) = &result {
