@@ -86,7 +86,7 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
-    "@hifullmoon/aicommit": "^2.6.6",
+    "@hifullmoon/aicommit": "^2.6.8",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/cli": "^2.12.0",
     "@testing-library/jest-dom": "^6.10.0",
