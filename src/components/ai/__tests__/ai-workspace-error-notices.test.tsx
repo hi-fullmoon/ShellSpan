@@ -17,7 +17,13 @@ describe('localized workspace errors', () => {
       phase: 'error', lastError: error,
       failedDrafts: [{ id: 'failed-image', content: message, mode: 'nextTurn', error }],
     });
-    render(<AiWorkspaceErrorNotices composerState={state} />);
+    const retried: string[] = [];
+    render(<AiWorkspaceErrorNotices composerState={state} onRetryFailedDraft={id => retried.push(id)} />);
+    const retry = screen.getByRole('button', { name: t('common.retry') });
+    expect(retry).toHaveClass('h-5', 'shrink-0', 'text-[10px]', '[&_svg]:size-2.5');
+    expect(retry).not.toHaveClass('border', 'bg-background');
+    retry.click();
+    expect(retried).toEqual(['failed-image']);
     expect(screen.getByText(t('ai.workspace.images.error.model'))).toBeVisible();
     expect(state.lastError?.message).toBe(message);
     // User-authored draft content is not treated as an error code.

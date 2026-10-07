@@ -20,7 +20,7 @@ export function AiQueueNotice({ conflict, error }: {
       <AlertDescription className="min-w-0">
         {t(conflict ? 'ai.workspace.queue.conflictHint' : 'ai.workspace.queue.failureHint')}
         {error && <Collapsible key={error} className="mt-1 min-w-0">
-          <CollapsibleTrigger render={<Button variant="ghost" size="xs" />} className="group gap-1">
+          <CollapsibleTrigger render={<Button variant="ghost" size="xs" />} className="group h-5 gap-1 text-[10px] [&_svg]:size-2.5">
             {t('ai.workspace.queue.errorDetails')}
             <ChevronDownIcon data-icon="inline-end" className="group-data-[panel-open]:rotate-180" />
           </CollapsibleTrigger>
