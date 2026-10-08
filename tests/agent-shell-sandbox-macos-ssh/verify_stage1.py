@@ -65,6 +65,7 @@ SOURCES = [
     "tests/agent-shell-sandbox-macos-ssh/verify_local_crash.py",
     "src-tauri/src/agent_runtime/tests/sandbox_audit.rs",
     "src-tauri/src/agent_runtime/tests/macos_direct.rs",
+    "src/lib/ai/__tests__/error-message.test.ts",
 ]
 
 

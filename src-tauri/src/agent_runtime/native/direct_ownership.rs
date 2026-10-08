@@ -348,6 +348,18 @@ impl Journal {
 }
 
 impl DirectIntent {
+    pub(super) fn mark_uncertain(&self) -> Result<(), String> {
+        let mut inner = self
+            .journal
+            .inner
+            .lock()
+            .map_err(|_| "directOwnershipUnavailable")?;
+        let journal = inner.as_mut().ok_or("directOwnershipUnavailable")?;
+        journal.restored_debt = true;
+        journal.restored_ids.insert(self.id.clone());
+        journal.live_ids.remove(&self.id);
+        Ok(())
+    }
     pub(crate) fn protect_remote(
         &self,
         job: &crate::agent_runtime::remote_seatbelt::RemoteSeatbeltJob,

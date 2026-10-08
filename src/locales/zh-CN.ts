@@ -390,7 +390,7 @@ export default {
   'ai.error.ephemeralInputUnavailable': '未执行：Agent 使用了已省略的历史输入，需要重新生成命令。',
   'ai.error.sandboxBackendUnavailable': '当前尚无经过验证的沙箱后端，受限会话未执行。主机运维会话使用账户权限，不提供文件或网络隔离。',
   'ai.error.sandboxAuthorizationInvalid': '沙箱授权已过期或会话目标已变化。请先核对已有执行效果，再重新确认目标与授权；不要自动重放旧命令。',
-  'ai.error.sandboxCleanupUnconfirmed': 'Shell 资源清理尚未确认，已暂停新的执行。请核对原执行效果和资源状态，不要重放旧命令；历史记录不能恢复清理权限。',
+  'ai.error.sandboxCleanupUnconfirmed': 'Shell 资源清理尚未确认，已暂停新的执行。请核对原执行效果和资源状态，不要重放旧命令；历史记录本身不能恢复清理权限。',
   'ai.error.sandboxOwnershipUnavailable': 'Shell 资源归属记录不可用，已暂停新的执行。请核对应用数据目录和已有资源状态，不要重放旧命令。',
   'ai.error.sandboxWorkspaceInvalid': '受限策略需要有效的项目目录，请选择目录后重试。',
   'ai.error.sandboxInheritanceDenied': '子 Agent 的策略和目标不能超出父会话范围，本次请求未执行。',

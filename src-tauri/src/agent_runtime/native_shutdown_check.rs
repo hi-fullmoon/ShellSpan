@@ -590,6 +590,10 @@ async fn check(
         .await
         .map_err(|_| "Actual raced dispatch did not join")?;
     let race_marker = workspace.join("race-marker");
+    let raced_error = raced_result
+        .as_ref()
+        .err()
+        .map(|error| crate::redaction::redact_sensitive_text(error));
     let (raced_outcome, raced_contained) = match &raced_result {
         Err(error) if error.contains("agentRuntimeShuttingDown") => {
             ("gateRejected", !race_marker.exists())
@@ -699,6 +703,6 @@ async fn check(
     checks.insert("noModelRequests".into(), json!(model_requests == 0));
     let passed = checks.values().all(|value| value == true);
     Ok(
-        json!({"passed":passed,"mode":if exit_active {"exit-active"} else if undrained {"undrained"} else {"normal"},"shutdownInitiator":if exit_active {"productionAppExit"} else {"explicitRuntime"},"checks":checks,"modelRequests":model_requests,"sourcePtyWrites":source.writes.load(Ordering::SeqCst),"racedDispatchOutcome":raced_outcome,"approvalEntryError":approval_entry_error,"approvalEntryScope":"public API without a model-registered approval; valid pending adapter token and signed capability checked separately","shutdownOutcome":match initial {Ok(count)=>json!({"confirmed":true,"cleaned":count}),Err(error)=>json!({"confirmed":false,"error":crate::redaction::redact_sensitive_text(&error)})}}),
+        json!({"passed":passed,"mode":if exit_active {"exit-active"} else if undrained {"undrained"} else {"normal"},"shutdownInitiator":if exit_active {"productionAppExit"} else {"explicitRuntime"},"checks":checks,"modelRequests":model_requests,"sourcePtyWrites":source.writes.load(Ordering::SeqCst),"racedDispatchOutcome":raced_outcome,"racedDispatchError":raced_error,"approvalEntryError":approval_entry_error,"approvalEntryScope":"public API without a model-registered approval; valid pending adapter token and signed capability checked separately","shutdownOutcome":match initial {Ok(count)=>json!({"confirmed":true,"cleaned":count}),Err(error)=>json!({"confirmed":false,"error":crate::redaction::redact_sensitive_text(&error)})}}),
     )
 }

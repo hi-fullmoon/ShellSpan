@@ -390,7 +390,7 @@ export default {
   'ai.error.ephemeralInputUnavailable': 'Not executed: the Agent used omitted historical input and must reconstruct the command.',
   'ai.error.sandboxBackendUnavailable': 'No verified sandbox backend is available, so the restricted session did not execute. Host sessions use account permissions without file or network isolation.',
   'ai.error.sandboxAuthorizationInvalid': 'Sandbox authorization expired or the session target changed. Check existing execution effects before requesting new authorization. Do not replay the previous command automatically.',
-  'ai.error.sandboxCleanupUnconfirmed': 'Shell resource cleanup is unconfirmed, so new execution is paused. Check the original effects and resource state without replaying the command. History cannot restore cleanup authority.',
+  'ai.error.sandboxCleanupUnconfirmed': 'Shell resource cleanup is unconfirmed, so new execution is paused. Check the original effects and resource state without replaying the command. History alone cannot restore cleanup authority.',
   'ai.error.sandboxOwnershipUnavailable': 'Shell resource ownership records are unavailable, so new execution is paused. Check the application data directory and existing resource state without replaying the command.',
   'ai.error.sandboxWorkspaceInvalid': 'A restricted policy requires a valid project directory. Select a directory and try again.',
   'ai.error.sandboxInheritanceDenied': 'A child Agent cannot exceed its parent session policy or target scope. This request did not execute.',

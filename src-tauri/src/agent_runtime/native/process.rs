@@ -249,7 +249,15 @@ impl ManagedProcessNative {
     ) -> Result<(), String> {
         self.direct_intent
             .set(intent)
-            .map_err(|_| "directOwnershipDuplicate".into())
+            .map_err(|_| "directOwnershipDuplicate".to_string())?;
+        let snapshot = self.snapshot()?;
+        if snapshot.state.is_terminal() && !snapshot.termination_confirmed {
+            self.direct_intent
+                .get()
+                .ok_or("directOwnershipUnavailable")?
+                .mark_uncertain()?;
+        }
+        Ok(())
     }
 
     pub(crate) fn resolve_direct_ownership(&self) -> Result<(), String> {
@@ -407,6 +415,11 @@ impl ManagedProcessNative {
                 .network_audit_snapshot()
                 .is_none_or(|audit| audit.closed);
         state.completed_at_unix_ms = Some(current_unix_ms());
+        if !state.termination_confirmed {
+            if let Some(intent) = self.direct_intent.get() {
+                let _ = intent.mark_uncertain();
+            }
+        }
         state.error = error.map(|value| redact_known_secrets(&value, &self.secrets));
         self.changed.notify_all();
     }
@@ -2502,6 +2515,11 @@ mod tests {
             .unwrap();
         assert!(registry.get(&result.process_handle).is_ok());
         assert!(registry.ensure_capacity().is_err());
+        assert!(registry.ownership.ensure_recovered().is_err());
+        assert!(registry
+            .ownership
+            .begin("new-task", "new-request", "local")
+            .is_err());
         let restored = ProcessRegistryNative::default();
         restored.configure_ownership(root.path()).unwrap();
         assert!(restored.ensure_capacity().is_err());
