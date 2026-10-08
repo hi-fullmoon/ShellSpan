@@ -449,6 +449,10 @@ impl Drop for SourcePty {
 }
 
 fn source(sessions: &SessionManager, id: &str, root: &std::path::Path) -> SourcePty {
+    assert!(
+        super::verify_native_sandbox_backend(),
+        "real macOS kernel preflight must pass before exercising restricted native calls"
+    );
     let pair = native_pty_system()
         .openpty(PtySize {
             rows: 24,

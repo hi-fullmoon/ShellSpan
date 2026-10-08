@@ -1441,6 +1441,10 @@ export function invokeProbeNativeSandbox(): Promise<import('@/types/agent-sessio
   return invokeLogged('agent_runtime_probe_native_sandbox');
 }
 
+export function invokeReconcileDirectResources(): Promise<import('@/types/agent-execution').DirectResourceRecovery> {
+  return invokeLogged('agent_runtime_reconcile_direct_resources');
+}
+
 export function invokeVerifyRemoteSandboxTarget(target: import('@/types/agent-session').AgentSessionTarget, policy: 'readOnly' | 'workspace'): Promise<import('@/types/agent-execution').RemoteSandboxVerification> {
   return invokeLogged('agent_runtime_verify_remote_sandbox_target', { input: { target, policy, requestId: crypto.randomUUID() } });
 }

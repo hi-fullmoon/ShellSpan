@@ -27,8 +27,14 @@ fn known_hosts_path_from_home(home: Result<PathBuf, String>) -> Result<PathBuf, 
 
 pub(crate) fn known_hosts_path(app: &AppHandle) -> Result<PathBuf, String> {
     #[cfg(debug_assertions)]
-    if app.config().identifier == "com.shellspan.native-remote-check" {
-        return app.path().app_data_dir().map(|root| root.join(KNOWN_HOSTS_FILENAME))
+    if matches!(
+        app.config().identifier.as_str(),
+        "com.shellspan.native-remote-check" | "com.shellspan.native-remote-recovery-check"
+    ) {
+        return app
+            .path()
+            .app_data_dir()
+            .map(|root| root.join(KNOWN_HOSTS_FILENAME))
             .map_err(|_| "Remote acceptance known-hosts directory unavailable".into());
     }
     let home = app

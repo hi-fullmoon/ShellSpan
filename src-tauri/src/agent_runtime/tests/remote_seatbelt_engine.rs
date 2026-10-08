@@ -30,17 +30,21 @@ fn context(fixture: &Fixture) -> NativeExecutionContext {
 #[ignore = "explicit ordinary-account self-owned Mac SSH signed NativeToolEngine acceptance"]
 fn remote_native_engine_signed_approval_and_reverification_never_revive_old_grants() {
     let fixture = Fixture::new();
-    verify_header(
+    let engine = NativeToolEngine::default();
+    engine
+        .configure_direct_ownership(&fixture.directory.path().join("state"))
+        .unwrap();
+    verify_header_owned(
         &fixture.header,
         &fixture.sessions,
         &fixture.database,
         &fixture.credentials,
         &fixture.known_hosts,
         Some(fixture.admission.clone()),
+        Some(&engine),
     )
     .unwrap();
     let ctx = context(&fixture);
-    let engine = NativeToolEngine::default();
     let prepare = |id: &str, command: &str| {
         engine.prepare_authorization(ctx.clone(),AgentAuthorizeCallRequestNative {
         request_id:ctx.request.request_id.clone(),call_id:id.into(),tool_name:"exec_command".into(),target:ctx.request.targets[0].clone(),ttl_ms:None,
@@ -117,13 +121,14 @@ fn remote_native_engine_signed_approval_and_reverification_never_revive_old_gran
         .unwrap();
     assert!(capability(&fixture.header).is_none());
     assert!(engine.issue_prepared_authorization(&stale, true).is_err());
-    verify_header(
+    verify_header_owned(
         &fixture.header,
         &fixture.sessions,
         &fixture.database,
         &fixture.credentials,
         &fixture.known_hosts,
         Some(fixture.admission.clone()),
+        Some(&engine),
     )
     .unwrap();
     let error = engine

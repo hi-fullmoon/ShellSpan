@@ -469,7 +469,18 @@ pub(crate) fn open_authenticated_session(
     port: u16,
     known_hosts_path: Option<&Path>,
 ) -> Result<Session, ConnectionError> {
-    open_authenticated_session_pinned(tcp, username, auth_method, password, private_key_data, passphrase, host, port, known_hosts_path, None)
+    open_authenticated_session_pinned(
+        tcp,
+        username,
+        auth_method,
+        password,
+        private_key_data,
+        passphrase,
+        host,
+        port,
+        known_hosts_path,
+        None,
+    )
 }
 
 /// Verify a frozen peer before sending any authentication secret.
@@ -497,9 +508,13 @@ pub(crate) fn open_authenticated_session_pinned(
     }
     if let Some(expected) = frozen_key_sha256 {
         use sha2::{Digest, Sha256};
-        let actual = session.host_key().map(|(key, _)| hex::encode(Sha256::digest(key)));
+        let actual = session
+            .host_key()
+            .map(|(key, _)| hex::encode(Sha256::digest(key)));
         if actual.as_deref() != Some(expected) {
-            return Err(ConnectionError::Other {message:"frozen SSH host key changed before authentication".into()});
+            return Err(ConnectionError::Other {
+                message: "frozen SSH host key changed before authentication".into(),
+            });
         }
     }
 

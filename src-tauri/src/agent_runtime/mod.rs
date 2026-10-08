@@ -25,31 +25,31 @@ mod projection;
 mod prompt;
 pub(crate) mod provider;
 mod recovery;
+mod registry;
 mod remote_backend;
 mod remote_backend_commands;
 mod remote_binding;
-mod remote_seatbelt;
-#[cfg(all(target_os="macos",debug_assertions))]
+#[cfg(all(target_os = "macos", debug_assertions))]
 pub(crate) mod remote_native_check;
-mod registry;
+mod remote_seatbelt;
 mod request_log;
 mod retry;
 mod runtime;
 mod sandbox;
 mod sandbox_audit;
-mod shutdown_admission;
 pub(crate) mod sandbox_authorization;
 #[cfg(all(target_os = "macos", debug_assertions))]
 pub(crate) mod sandbox_settings_check;
 mod session;
 mod session_title;
+mod shutdown_admission;
 pub(crate) mod skill_runtime;
 pub(crate) mod skills;
 mod stream_writer;
 mod subagent;
 mod surface;
-mod tool_pipeline;
 mod tool_boundary;
+mod tool_pipeline;
 mod user_questions;
 
 pub(crate) const TERMINAL_TARGET_UNAVAILABLE_PREFIX: &str = "terminalTargetUnavailable:";
@@ -89,8 +89,8 @@ pub(crate) use project_root_commands::*;
 pub(crate) use projection::*;
 pub(crate) use prompt::*;
 pub(crate) use recovery::*;
-pub(crate) use remote_backend_commands::*;
 pub(crate) use registry::*;
+pub(crate) use remote_backend_commands::*;
 pub(crate) use retry::*;
 pub(crate) use runtime::*;
 pub(crate) use sandbox::*;

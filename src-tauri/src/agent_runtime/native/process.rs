@@ -7,7 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use libssh2_sys::LIBSSH2_ERROR_EAGAIN;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use ssh2::ErrorCode;
 use uuid::Uuid;
 
@@ -26,7 +26,7 @@ const STDERR_CAPTURE_BYTES: usize = 256 * 1024;
 const MAX_TRACKED_PROCESSES: usize = 256;
 const REMOTE_READS_PER_POLL: usize = 8;
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum ProcessLifecycleNative {
     Running,
@@ -42,7 +42,7 @@ impl ProcessLifecycleNative {
     }
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ProcessSnapshotNative {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -72,10 +72,20 @@ fn process_failure(state: &ProcessStateNative) -> Option<AgentExecutionFailure> 
     use AgentExecutionFailureKind as Kind;
     let (kind, code) = match state.lifecycle {
         ProcessLifecycleNative::Running => return None,
+        _ if !state.termination_confirmed => (
+            Kind::TerminationUnconfirmed,
+            "processTerminationUnconfirmed",
+        ),
         ProcessLifecycleNative::Exited if state.exit_code == Some(0) => return None,
         ProcessLifecycleNative::Exited => (Kind::CommandFailed, "commandExitedUnsuccessfully"),
-        ProcessLifecycleNative::Failed if state.error.as_deref().is_some_and(|error| error.starts_with("sandboxAuthorizationInvalid:")) => (Kind::PolicyRejected, "sandboxAuthorizationInvalid"),
-        ProcessLifecycleNative::Failed if !state.termination_confirmed && state.error.as_deref().is_some_and(|error| error.starts_with("sandboxRemote")) => (Kind::TerminationUnconfirmed, "processTerminationUnconfirmed"),
+        ProcessLifecycleNative::Failed
+            if state
+                .error
+                .as_deref()
+                .is_some_and(|error| error.starts_with("sandboxAuthorizationInvalid:")) =>
+        {
+            (Kind::PolicyRejected, "sandboxAuthorizationInvalid")
+        }
         ProcessLifecycleNative::Failed => (Kind::InfrastructureFailure, "processControllerFailed"),
         ProcessLifecycleNative::Cancelled | ProcessLifecycleNative::TimedOut
             if !state.termination_confirmed =>
@@ -93,6 +103,7 @@ fn process_failure(state: &ProcessStateNative) -> Option<AgentExecutionFailure> 
 
 #[derive(Debug)]
 pub(super) struct CaptureBufferNative {
+    rendered: Option<String>,
     limit: usize,
     head_limit: usize,
     tail_limit: usize,
@@ -105,6 +116,7 @@ impl CaptureBufferNative {
     pub(super) fn new(limit: usize) -> Self {
         let head_limit = limit.saturating_mul(3) / 4;
         Self {
+            rendered: None,
             limit,
             head_limit,
             tail_limit: limit - head_limit,
@@ -140,6 +152,9 @@ impl CaptureBufferNative {
     }
 
     pub(super) fn text(&self, secrets: &[String]) -> String {
+        if let Some(rendered) = &self.rendered {
+            return redact_known_secrets(rendered, secrets);
+        }
         let mut bytes = self.head.clone();
         bytes.extend_from_slice(&self.tail);
         redact_known_secrets(&String::from_utf8_lossy(&bytes), secrets)
@@ -197,6 +212,12 @@ enum ProcessOutputNative {
 
 pub(crate) struct ManagedProcessNative {
     #[cfg(target_os = "macos")]
+    guardian_audit: Mutex<Option<crate::agent_runtime::NetworkProxyAuditNative>>,
+    #[cfg(target_os = "macos")]
+    guardian_temp: OnceLock<PathBuf>,
+    sandbox_temp: Mutex<Option<tempfile::TempDir>>,
+    direct_intent: OnceLock<super::direct_ownership::DirectIntent>,
+    #[cfg(target_os = "macos")]
     service_routes: OnceLock<Vec<super::network_proxy::ServiceRoute>>,
     #[cfg(target_os = "macos")]
     network_audit: OnceLock<Arc<super::network_proxy::NetworkAudit>>,
@@ -218,6 +239,37 @@ pub(crate) struct ManagedProcessNative {
 }
 
 impl ManagedProcessNative {
+    #[cfg(debug_assertions)]
+    pub(crate) fn acceptance_owned_remote_directory(&self) -> Option<PathBuf> {
+        self.remote_sandbox.get().map(|job| job.owned_directory())
+    }
+    pub(crate) fn bind_direct_intent(
+        &self,
+        intent: super::direct_ownership::DirectIntent,
+    ) -> Result<(), String> {
+        self.direct_intent
+            .set(intent)
+            .map_err(|_| "directOwnershipDuplicate".to_string())?;
+        let snapshot = self.snapshot()?;
+        if snapshot.state.is_terminal() && !snapshot.termination_confirmed {
+            self.direct_intent
+                .get()
+                .ok_or("directOwnershipUnavailable")?
+                .mark_uncertain()?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn resolve_direct_ownership(&self) -> Result<(), String> {
+        let snapshot = self.snapshot()?;
+        if !snapshot.state.is_terminal() || !snapshot.termination_confirmed {
+            return Err("directCleanupUnconfirmed".into());
+        }
+        if let Some(intent) = self.direct_intent.get() {
+            intent.resolve()?;
+        }
+        Ok(())
+    }
     fn new(
         task_id: String,
         request_id: String,
@@ -229,6 +281,12 @@ impl ManagedProcessNative {
         let process_handle = format!("proc-{}", Uuid::new_v4().simple());
         let target_id = format!("process-{process_handle}");
         Arc::new(Self {
+            sandbox_temp: Mutex::new(None),
+            #[cfg(target_os = "macos")]
+            guardian_audit: Mutex::new(None),
+            #[cfg(target_os = "macos")]
+            guardian_temp: OnceLock::new(),
+            direct_intent: OnceLock::new(),
             #[cfg(target_os = "macos")]
             service_routes: OnceLock::new(),
             #[cfg(target_os = "macos")]
@@ -322,14 +380,32 @@ impl ManagedProcessNative {
         &self,
         lifecycle: ProcessLifecycleNative,
         exit_code: Option<i32>,
-        termination_confirmed: bool,
-        error: Option<String>,
+        mut termination_confirmed: bool,
+        mut error: Option<String>,
     ) {
         let Ok(mut state) = self.state.lock() else {
             return;
         };
         if state.lifecycle.is_terminal() {
             return;
+        }
+        match self.sandbox_temp.lock() {
+            Ok(mut owned) => {
+                if let Some(temp) = owned.take() {
+                    if termination_confirmed {
+                        if temp.close().is_err() {
+                            termination_confirmed = false;
+                            error = Some("sandboxLocalCleanupUnconfirmed".into());
+                        }
+                    } else {
+                        let _retained = temp.keep();
+                    }
+                }
+            }
+            Err(_) => {
+                termination_confirmed = false;
+                error = Some("sandboxLocalCleanupUnconfirmed".into());
+            }
         }
         state.lifecycle = lifecycle;
         state.exit_code = exit_code;
@@ -339,6 +415,11 @@ impl ManagedProcessNative {
                 .network_audit_snapshot()
                 .is_none_or(|audit| audit.closed);
         state.completed_at_unix_ms = Some(current_unix_ms());
+        if !state.termination_confirmed {
+            if let Some(intent) = self.direct_intent.get() {
+                let _ = intent.mark_uncertain();
+            }
+        }
         state.error = error.map(|value| redact_known_secrets(&value, &self.secrets));
         self.changed.notify_all();
     }
@@ -423,7 +504,15 @@ impl ManagedProcessNative {
     fn network_audit_snapshot(&self) -> Option<crate::agent_runtime::NetworkProxyAuditNative> {
         #[cfg(target_os = "macos")]
         {
-            self.network_audit.get().map(|audit| audit.snapshot())
+            self.network_audit
+                .get()
+                .map(|audit| audit.snapshot())
+                .or_else(|| {
+                    self.guardian_audit
+                        .lock()
+                        .ok()
+                        .and_then(|audit| audit.clone())
+                })
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -468,7 +557,8 @@ impl ManagedProcessNative {
             if !self.snapshot()?.termination_confirmed {
                 if let Some(job) = self.remote_sandbox.get() {
                     if job.cleanup(true) {
-                        let mut state = self.state.lock().map_err(|_| "Process state unavailable")?;
+                        let mut state =
+                            self.state.lock().map_err(|_| "Process state unavailable")?;
                         state.termination_confirmed = true;
                         self.changed.notify_all();
                     }
@@ -486,12 +576,275 @@ impl ManagedProcessNative {
     }
 }
 
+#[cfg(target_os = "macos")]
+impl ManagedProcessNative {
+    pub(super) fn guardian_routes(&self) -> Vec<super::network_proxy::ServiceRoute> {
+        self.service_routes.get().cloned().unwrap_or_default()
+    }
+    pub(crate) fn guardian_temp(&self) -> Option<PathBuf> {
+        self.guardian_temp.get().cloned().or_else(|| {
+            self.sandbox_temp
+                .lock()
+                .ok()
+                .and_then(|temp| temp.as_ref().map(|temp| temp.path().to_path_buf()))
+        })
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub(super) fn spawn_guarded_local_process(
+    task: String,
+    request: String,
+    target: String,
+    command: &str,
+    contract: &crate::agent_runtime::AgentSandboxContract,
+    timeout: Duration,
+    intent: &super::direct_ownership::DirectIntent,
+    credentials: &crate::keychain::CredentialManager,
+) -> Result<Arc<ManagedProcessNative>, String> {
+    let custody = intent.protect_local(Some(contract), credentials)?;
+    spawn_guarded_launch(
+        task,
+        request,
+        target,
+        command,
+        Some(contract),
+        timeout,
+        custody,
+    )
+}
+
+#[cfg(target_os = "macos")]
+pub(super) fn spawn_guarded_preflight(
+    intent: &super::direct_ownership::DirectIntent,
+    credentials: &crate::keychain::CredentialManager,
+) -> Result<Arc<ManagedProcessNative>, String> {
+    let custody = intent.protect_local(None, credentials)?;
+    spawn_guarded_launch(
+        "sandbox-preflight".into(),
+        "sandbox-preflight".into(),
+        "sandbox-preflight".into(),
+        "",
+        None,
+        Duration::from_secs(2),
+        custody,
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn spawn_guarded_launch(
+    task: String,
+    request: String,
+    target: String,
+    command: &str,
+    contract: Option<&crate::agent_runtime::AgentSandboxContract>,
+    timeout: Duration,
+    custody: super::local_guardian::LocalCleanupCapsule,
+) -> Result<Arc<ManagedProcessNative>, String> {
+    use super::local_guardian::{self, Launch, Message};
+    let launch = Launch {
+        task: task.clone(),
+        request: request.clone(),
+        target: target.clone(),
+        command: command.into(),
+        contract: contract.cloned(),
+        timeout_ms: timeout
+            .as_millis()
+            .try_into()
+            .map_err(|_| "localControllerUnavailable")?,
+        custody: custody.clone(),
+    };
+    use std::os::unix::process::CommandExt;
+    let executable = std::env::current_exe().map_err(|_| "localControllerUnavailable")?;
+    #[cfg(test)]
+    let executable = executable
+        .parent()
+        .and_then(|directory| directory.parent())
+        .ok_or("localControllerUnavailable")?
+        .join("ShellSpan");
+    let mut child = Command::new(executable)
+        .arg("--local-resource-controller")
+        .current_dir(
+            contract
+                .and_then(|contract| contract.root.as_deref())
+                .map(PathBuf::from)
+                .unwrap_or_else(std::env::temp_dir),
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .process_group(0)
+        .spawn()
+        .map_err(|_| "localControllerUnavailable")?;
+    let mut input = child.stdin.take().ok_or("localControllerUnavailable")?;
+    // The private pipe is the only place command/contract/token are delivered.
+    // On failure closing it asks the newly created controller to stop itself.
+    if local_guardian::write_frame(&launch, &mut input).is_err() {
+        drop(input);
+        thread::spawn(move || {
+            let _ = child.wait();
+        });
+        return Err("localControllerUnavailable".into());
+    }
+    let output = child.stdout.take().ok_or("localControllerUnavailable")?;
+    let (controls, rx) = mpsc::channel();
+    let process = ManagedProcessNative::new(
+        task,
+        request,
+        target,
+        AgentExecutionChannelNative::Direct,
+        Vec::new(),
+        controls,
+    );
+    // Launch input has already crossed the controller boundary; missing ready
+    // or terminal output must never be coerced to definite not-started.
+    process.mark_admission(AgentExecutionAdmission::Unknown);
+    if let Some(contract) = contract {
+        process
+            .sandbox_contract
+            .set(contract.clone())
+            .map_err(|_| "localControllerUnavailable")?;
+    }
+    let worker = Arc::clone(&process);
+    thread::spawn(move || {
+        let (tx, messages) = mpsc::sync_channel(4);
+        thread::spawn(move || {
+            let mut output = std::io::BufReader::new(output);
+            while let Ok(message) = local_guardian::read_frame::<Message>(&mut output) {
+                if tx.send(message).is_err() {
+                    break;
+                }
+            }
+        });
+        let mut responses = HashMap::new();
+        let deadline = Instant::now() + timeout + Duration::from_secs(8);
+        let mut stopping = false;
+        loop {
+            while let Ok(control) = rx.try_recv() {
+                let frame = match control {
+                    ProcessControlNative::Write {
+                        input,
+                        close,
+                        response,
+                    } => {
+                        let id = Uuid::new_v4().to_string();
+                        responses.insert(id.clone(), response);
+                        local_guardian::Control::Write { id, input, close }
+                    }
+                    ProcessControlNative::Kill { signal } => {
+                        local_guardian::Control::Stop { signal }
+                    }
+                };
+                if local_guardian::write_frame(&frame, &mut input).is_err() {
+                    stopping = true;
+                    break;
+                }
+            }
+            match messages.recv_timeout(PROCESS_POLL_INTERVAL) {
+                Ok(Message::NotStarted) => {
+                    let confirmed = custody.reconcile().is_ok();
+                    if confirmed {
+                        worker.mark_admission(AgentExecutionAdmission::NotStarted);
+                    }
+                    let _ = child.wait();
+                    worker.finish(ProcessLifecycleNative::Cancelled, None, confirmed, None);
+                    return;
+                }
+                Ok(Message::Failure { code }) => {
+                    drop(input);
+                    thread::spawn(move || {
+                        let _ = child.wait();
+                    });
+                    worker.finish(ProcessLifecycleNative::Failed, None, false, Some(code));
+                    return;
+                }
+                Ok(Message::Written { id, accepted }) => {
+                    if let Some(response) = responses.remove(&id) {
+                        let _ = response
+                            .send(accepted.ok_or_else(|| "Process stdin is unavailable".into()));
+                    }
+                }
+                Ok(Message::Snapshot {
+                    snapshot,
+                    routes,
+                    temp,
+                }) => {
+                    if let Some(temp) = temp {
+                        let _ = worker.guardian_temp.set(temp);
+                    }
+                    if snapshot.task_id != worker.task_id
+                        || snapshot.request_id != worker.request_id
+                        || snapshot.owner_target_id != worker.owner_target_id
+                    {
+                        break;
+                    }
+                    worker.mark_admission(AgentExecutionAdmission::Started);
+                    let _ = worker.service_routes.set(routes);
+                    if let Ok(mut audit) = worker.guardian_audit.lock() {
+                        *audit = snapshot.network_proxy.clone();
+                    }
+                    if let Ok(mut state) = worker.state.lock() {
+                        state.stdout = CaptureBufferNative::new(STDOUT_CAPTURE_BYTES);
+                        state.stdout.push(snapshot.stdout.as_bytes());
+                        state.stdout.bytes_read = snapshot.stdout_bytes_read;
+                        state.stdout.rendered = Some(snapshot.stdout);
+                        state.stderr = CaptureBufferNative::new(STDERR_CAPTURE_BYTES);
+                        state.stderr.push(snapshot.stderr.as_bytes());
+                        state.stderr.bytes_read = snapshot.stderr_bytes_read;
+                        state.stderr.rendered = Some(snapshot.stderr);
+                    }
+                    worker.changed.notify_all();
+                    if snapshot.state.is_terminal() {
+                        let confirmed =
+                            snapshot.termination_confirmed && custody.reconcile().is_ok();
+                        let _ = child.wait();
+                        worker.finish(
+                            snapshot.state,
+                            snapshot.exit_code,
+                            confirmed,
+                            snapshot.error,
+                        );
+                        return;
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+            }
+            if stopping || Instant::now() >= deadline {
+                break;
+            }
+        }
+        drop(input); // asks live controller to stop; never kills a historical PID.
+        thread::spawn(move || {
+            let _ = child.wait();
+        });
+        // Do not infer termination from controller EOF, exit or missing output.
+        worker.finish(
+            ProcessLifecycleNative::Failed,
+            None,
+            false,
+            Some("localControllerCleanupUnconfirmed".into()),
+        );
+    });
+    Ok(process)
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct ProcessRegistryNative {
+    pub(super) ownership: super::direct_ownership::DirectOwnership,
+    pub(super) dispatch: Arc<Mutex<()>>,
     processes: Arc<Mutex<HashMap<String, Arc<ManagedProcessNative>>>>,
 }
 
 impl ProcessRegistryNative {
+    pub(crate) fn configure_ownership(&self, root: &Path) -> Result<(), String> {
+        self.ownership.configure(root)
+    }
+
+    pub(crate) fn ensure_recovered(&self) -> Result<(), String> {
+        self.ownership.ensure_recovered()
+    }
+
     pub(crate) fn service_socket(
         &self,
         context: &super::NativeExecutionContext,
@@ -534,6 +887,7 @@ impl ProcessRegistryNative {
         Err("sandboxResourceRequestInvalid: no active owned service on this port".into())
     }
     pub(crate) fn ensure_capacity(&self) -> Result<(), String> {
+        self.ensure_recovered()?;
         let processes = self
             .processes
             .lock()
@@ -628,6 +982,12 @@ impl ProcessRegistryNative {
                     .snapshot()
                     .is_ok_and(|snapshot| snapshot.termination_confirmed)
             }) {
+                if let Some(intent) = processes
+                    .get(process_handle)
+                    .and_then(|process| process.direct_intent.get())
+                {
+                    intent.resolve()?;
+                }
                 processes.remove(process_handle);
             }
         }
@@ -635,6 +995,10 @@ impl ProcessRegistryNative {
     }
 
     pub(crate) fn cancel_task(&self, task_id: &str) -> Result<(), String> {
+        let _dispatch = self
+            .dispatch
+            .lock()
+            .map_err(|_| "Direct dispatch is unavailable")?;
         let processes = self
             .processes
             .lock()
@@ -648,7 +1012,15 @@ impl ProcessRegistryNative {
         for process in &processes {
             match process.kill(ProcessSignalNative::Kill, Duration::from_secs(2)) {
                 Ok(snapshot) if snapshot.termination_confirmed => {
-                    confirmed.push(process.process_handle.clone())
+                    match process
+                        .direct_intent
+                        .get()
+                        .map(|intent| intent.resolve())
+                        .transpose()
+                    {
+                        Ok(_) => confirmed.push(process.process_handle.clone()),
+                        Err(error) => errors.push(error),
+                    }
                 }
                 Ok(_) => errors.push("Native process cancellation remains unconfirmed".to_string()),
                 Err(error) => errors.push(error),
@@ -845,6 +1217,10 @@ fn spawn_local_child_tracked(
         control_tx,
     );
     process.mark_admission(AgentExecutionAdmission::Started);
+    *process
+        .sandbox_temp
+        .lock()
+        .map_err(|_| "sandboxLocalCleanupUnconfirmed")? = sandbox_temp;
     let worker = Arc::clone(&process);
     thread::spawn(move || {
         run_local_worker(
@@ -858,18 +1234,6 @@ fn spawn_local_child_tracked(
             containment,
             auxiliary,
         );
-        if let Some(temp) = sandbox_temp {
-            if !worker
-                .snapshot()
-                .is_ok_and(|snapshot| snapshot.termination_confirmed)
-            {
-                let retained = temp.keep();
-                log::warn!(
-                    "Native sandbox termination remains unconfirmed; temporary data retained at {}",
-                    retained.display()
-                );
-            }
-        }
     });
     Ok(process)
 }
@@ -1069,7 +1433,9 @@ fn spawn_remote_process_with_io(
     io: Option<DiagnosticProcessIo>,
 ) -> Result<Arc<ManagedProcessNative>, String> {
     let mut secrets = known_connection_secret_values(&start.connection);
-    if let Some(job) = &start.remote_sandbox { secrets.push(job.secret()); }
+    if let Some(job) = &start.remote_sandbox {
+        secrets.push(job.secret());
+    }
     let (control_tx, control_rx) = mpsc::channel();
     let mut process = ManagedProcessNative::new(
         start.task_id.clone(),
@@ -1341,29 +1707,22 @@ fn run_local_worker(
                 }
                 ProcessControlNative::Kill { signal } => {
                     drop(auxiliary.take());
-                    let requested = containment.terminate(&mut child, signal);
+                    let _requested = containment.terminate(&mut child, signal);
                     let settle_deadline = Instant::now() + Duration::from_secs(2);
-                    let mut status = None;
                     while Instant::now() < settle_deadline {
-                        match child.try_wait() {
-                            Ok(Some(observed)) => {
-                                status = Some(observed);
-                                break;
-                            }
-                            Ok(None) => thread::sleep(PROCESS_POLL_INTERVAL),
+                        match local_child_finished(&mut child) {
+                            Ok(true) => break,
+                            Ok(false) => thread::sleep(PROCESS_POLL_INTERVAL),
                             Err(_) => break,
                         }
                     }
-                    if status.is_none() {
-                        let _ = containment.terminate(&mut child, ProcessSignalNative::Kill);
-                        status = child.wait().ok();
-                    }
+                    let (status, confirmed) = settle_local_group(&mut child, &containment);
                     drain_process_output(&process, &output_rx);
                     drop(auxiliary.take());
                     process.finish(
                         ProcessLifecycleNative::Cancelled,
                         status.and_then(|status| status.code()),
-                        requested,
+                        confirmed,
                         None,
                     );
                     return;
@@ -1373,14 +1732,20 @@ fn run_local_worker(
         while let Ok(output) = output_rx.try_recv() {
             process.push_output(output);
         }
-        match child.try_wait() {
-            Ok(Some(status)) => {
+        match local_child_finished(&mut child) {
+            Ok(true) => {
+                let (status, confirmed) = settle_local_group(&mut child, &containment);
                 drain_process_output(&process, &output_rx);
                 drop(auxiliary.take());
-                process.finish(ProcessLifecycleNative::Exited, status.code(), true, None);
+                process.finish(
+                    ProcessLifecycleNative::Exited,
+                    status.and_then(|status| status.code()),
+                    confirmed,
+                    None,
+                );
                 return;
             }
-            Ok(None) => {}
+            Ok(false) => {}
             Err(error) => {
                 drop(auxiliary.take());
                 process.finish(
@@ -1394,14 +1759,65 @@ fn run_local_worker(
         }
         if Instant::now() >= deadline {
             drop(auxiliary.take());
-            let confirmed = containment.terminate(&mut child, ProcessSignalNative::Kill);
-            let _ = child.wait();
+            let (_, confirmed) = settle_local_group(&mut child, &containment);
             drain_process_output(&process, &output_rx);
             drop(auxiliary.take());
             process.finish(ProcessLifecycleNative::TimedOut, None, confirmed, None);
             return;
         }
         thread::sleep(PROCESS_POLL_INTERVAL);
+    }
+}
+
+fn local_child_finished(child: &mut Child) -> std::io::Result<bool> {
+    #[cfg(unix)]
+    {
+        // WNOWAIT retains the leader PID until the final group signal. Reaping
+        // first would allow a reused PID to identify an unrelated process group.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        let result = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                child.id(),
+                &mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        if result != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(unsafe { info.si_pid() } != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        child.try_wait().map(|status| status.is_some())
+    }
+}
+
+fn settle_local_group(
+    child: &mut Child,
+    containment: &LocalProcessContainmentNative,
+) -> (Option<std::process::ExitStatus>, bool) {
+    let _requested = containment.terminate(child, ProcessSignalNative::Kill);
+    let status = child.wait().ok();
+    #[cfg(unix)]
+    {
+        // After reaping, only observe. Never signal a historical/reused PID.
+        let deadline = Instant::now() + Duration::from_millis(500);
+        loop {
+            let result = unsafe { libc::kill(-(child.id() as i32), 0) };
+            if result < 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+                return (status, true);
+            }
+            if Instant::now() >= deadline {
+                return (status, false);
+            }
+            thread::sleep(PROCESS_POLL_INTERVAL);
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        (status, _requested)
     }
 }
 
@@ -1472,9 +1888,17 @@ fn run_remote_worker(
     if start.remote_sandbox.is_some() {
         return restricted_remote::run(process, start, controls);
     }
-    let _admission = match start.admission.as_ref().map(|admission| admission.enter()).transpose() {
+    let _admission = match start
+        .admission
+        .as_ref()
+        .map(|admission| admission.enter())
+        .transpose()
+    {
         Ok(lease) => lease,
-        Err(error) => {process.finish(ProcessLifecycleNative::Failed, None, true, Some(error)); return;}
+        Err(error) => {
+            process.finish(ProcessLifecycleNative::Failed, None, true, Some(error));
+            return;
+        }
     };
     let deadline = io.map_or_else(|| Instant::now() + start.timeout, |io| io.deadline);
     if remote_diagnostic_interrupted(&process, io)
@@ -1523,7 +1947,10 @@ fn run_remote_worker(
         return;
     }
     if let Some(admission) = &start.admission {
-        if let Err(error) = admission.ensure_open() {process.finish(ProcessLifecycleNative::Failed, None, true, Some(error)); return;}
+        if let Err(error) = admission.ensure_open() {
+            process.finish(ProcessLifecycleNative::Failed, None, true, Some(error));
+            return;
+        }
     }
     process.mark_admission(AgentExecutionAdmission::Unknown);
     if let Err(error) = crate::execution::start_ssh_exec_channel(&mut channel, &start.command) {
@@ -1781,6 +2208,384 @@ mod diagnostic_transport_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn record_acceptance(name: &str, facts: serde_json::Value) {
+        let Some(root) = std::env::var_os("SHELLSPAN_STAGE1_EVIDENCE_DIR") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        assert!(root.is_absolute() && root.is_dir());
+        std::fs::write(
+            root.join(format!("{name}.json")),
+            serde_json::to_vec_pretty(&facts).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn owned_crash_child() {
+        let Some(root) = std::env::var_os("SHELLSPAN_DIRECT_CRASH_FIXTURE") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        let registry = ProcessRegistryNative::default();
+        registry.configure_ownership(&root).unwrap();
+        let intent = registry
+            .ownership
+            .begin("crash-task", "crash-request", "local")
+            .unwrap()
+            .unwrap();
+        if std::env::var("SHELLSPAN_DIRECT_CRASH_PHASE").as_deref() == Ok("before") {
+            std::fs::write(root.join("ready"), b"ready").unwrap();
+            thread::sleep(Duration::from_secs(20));
+            drop(intent);
+            return;
+        }
+        let workspace = root.join("project");
+        let mut command = Command::new("/bin/sh");
+        command
+            .args([
+                "-c",
+                "printf started > effect; sleep 2; printf finished >> effect",
+            ])
+            .current_dir(&workspace);
+        let process = spawn_fixed_local_process_native(
+            "crash-task".into(),
+            "crash-request".into(),
+            "local".into(),
+            command,
+            Duration::from_secs(4),
+        )
+        .unwrap();
+        process.bind_direct_intent(intent).unwrap();
+        registry.insert(process).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !workspace.join("effect").is_file() {
+            assert!(Instant::now() < deadline);
+            thread::sleep(PROCESS_POLL_INTERVAL);
+        }
+        std::fs::write(root.join("ready"), b"ready").unwrap();
+        thread::sleep(Duration::from_secs(20));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn owned_app_crash_preserves_dispatch_debt_after_real_effect_and_natural_exit() {
+        owned_crash_recovery(false);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn owned_app_crash_before_dispatch_retains_debt_without_executing_or_replaying() {
+        owned_crash_recovery(true);
+    }
+
+    #[cfg(target_os = "macos")]
+    fn owned_crash_recovery(before_dispatch: bool) {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("project")).unwrap();
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "agent_runtime::native::process::tests::owned_crash_child",
+            ])
+            .env("SHELLSPAN_DIRECT_CRASH_FIXTURE", root.path())
+            .env(
+                "SHELLSPAN_DIRECT_CRASH_PHASE",
+                if before_dispatch { "before" } else { "after" },
+            )
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(8);
+        while !root.path().join("ready").is_file() {
+            assert!(
+                child.try_wait().unwrap().is_none(),
+                "owned acceptance application exited before ready"
+            );
+            assert!(Instant::now() < deadline);
+            thread::sleep(PROCESS_POLL_INTERVAL);
+        }
+        // Only this newly spawned Child handle is killed; no PID/name lookup.
+        child.kill().unwrap();
+        assert!(!child.wait().unwrap().success());
+        let restored = crate::agent_runtime::NativeToolEngine::default();
+        restored.configure_direct_ownership(root.path()).unwrap();
+        assert!(restored.admit_operation().is_err());
+        if before_dispatch {
+            assert!(!root.path().join("project/effect").exists());
+        } else {
+            thread::sleep(Duration::from_secs(3));
+            assert_eq!(
+                std::fs::read_to_string(root.path().join("project/effect")).unwrap(),
+                "startedfinished"
+            );
+        }
+        assert!(
+            restored.admit_operation().is_err(),
+            "a natural descendant exit is not a verified cleanup receipt"
+        );
+        let record =
+            rusqlite::Connection::open(root.path().join("agent-direct-ownership.sqlite3")).unwrap();
+        assert_eq!(
+            record
+                .query_row("SELECT count(*) FROM dispatch_debt", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        record_acceptance(
+            if before_dispatch {
+                "crash-before-dispatch"
+            } else {
+                "crash-after-dispatch"
+            },
+            serde_json::json!({
+                "childPid":child.id(), "ownChildReaped":child.try_wait().unwrap().is_some(),
+                "beforeDispatch":before_dispatch,"effect":std::fs::read_to_string(root.path().join("project/effect")).ok(),
+                "restartAdmissionBlocked":restored.admit_operation().is_err(),
+                "remainingDebtRows":record.query_row("SELECT count(*) FROM dispatch_debt",[],|row|row.get::<_,i64>(0)).unwrap(),
+                "scope":"independent real Rust test application and production process registry; no Wry/pipeline/model crash claim"
+            }),
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_shell_exit_stops_ordinary_background_group_before_confirming_cleanup() {
+        let workspace = tempfile::tempdir().unwrap();
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "sleep 30 & printf '%s' \"$!\" > descendant; exit 0"]);
+        command.current_dir(workspace.path());
+        let process = spawn_fixed_local_process_native(
+            "group-exit".into(),
+            "request".into(),
+            "local".into(),
+            command,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        let result = process.wait(Duration::from_secs(8)).unwrap();
+        let pid: i32 = std::fs::read_to_string(workspace.path().join("descendant"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(result.state.is_terminal(), "{result:?}");
+        let observed = unsafe { libc::kill(pid, 0) };
+        record_acceptance(
+            "shell-exit-group",
+            serde_json::json!({"exitCode":result.exit_code,"terminationConfirmed":result.termination_confirmed,"descendantAbsent":observed < 0,"descendantPid":pid}),
+        );
+        if result.termination_confirmed {
+            assert!(
+                observed < 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH),
+                "confirmed cleanup must not leave an ordinary child"
+            );
+        } else {
+            assert_eq!(
+                result.failure.unwrap().kind,
+                AgentExecutionFailureKind::TerminationUnconfirmed
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn concurrent_owned_tasks_cancel_independently_and_persist_only_unconfirmed_debt() {
+        let root = tempfile::tempdir().unwrap();
+        let registry = ProcessRegistryNative::default();
+        registry.configure_ownership(root.path()).unwrap();
+        let launch = |task: &str| {
+            let intent = registry
+                .ownership
+                .begin(task, "request", "local")
+                .unwrap()
+                .unwrap();
+            let mut command = Command::new("/bin/sleep");
+            command.arg("30");
+            let process = spawn_fixed_local_process_native(
+                task.into(),
+                "request".into(),
+                "local".into(),
+                command,
+                Duration::from_secs(35),
+            )
+            .unwrap();
+            process.bind_direct_intent(intent).unwrap();
+            registry.insert(process.clone()).unwrap();
+            process
+        };
+        let first = launch("first");
+        let second = launch("second");
+        registry.cancel_task("first").unwrap();
+        assert!(first.snapshot().unwrap().termination_confirmed);
+        assert_eq!(
+            second.snapshot().unwrap().state,
+            ProcessLifecycleNative::Running
+        );
+        assert_eq!(registry.running_task_count("second").unwrap(), 1);
+        let restored = ProcessRegistryNative::default();
+        restored.configure_ownership(root.path()).unwrap();
+        assert!(restored.ensure_capacity().is_err());
+        registry.cancel_task("second").unwrap();
+        assert!(second.snapshot().unwrap().termination_confirmed);
+        let clean = ProcessRegistryNative::default();
+        clean.configure_ownership(root.path()).unwrap();
+        clean.ensure_capacity().unwrap();
+        record_acceptance(
+            "two-task-cancellation",
+            serde_json::json!({"firstTerminationConfirmed":first.snapshot().unwrap().termination_confirmed,"secondTerminationConfirmed":second.snapshot().unwrap().termination_confirmed,"remainingOwnedProcesses":registry.running_count().unwrap(),"newStartupAdmissionAllowed":clean.ensure_capacity().is_ok()}),
+        );
+    }
+
+    #[test]
+    fn scoped_process_receipt_is_published_after_owned_temp_is_removed() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().to_path_buf();
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "exit 0"]);
+        let process = spawn_local_child_native(
+            "cleanup-order".into(),
+            "request".into(),
+            "local".into(),
+            command,
+            Some(temp),
+            Duration::from_secs(3),
+        )
+        .unwrap();
+        let result = process.wait(Duration::from_secs(5)).unwrap();
+        assert!(result.termination_confirmed, "{result:?}");
+        assert!(
+            !path.exists(),
+            "terminal receipt must follow temporary resource cleanup"
+        );
+        record_acceptance(
+            "cleanup-before-receipt",
+            serde_json::json!({"terminationConfirmed":result.termination_confirmed,"ownedDirectoryAbsent":!path.exists()}),
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn actual_temp_cleanup_failure_retains_process_and_persisted_dispatch_debt() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let parent = root.path().join("owned-temp-parent");
+        std::fs::create_dir(&parent).unwrap();
+        let temp = tempfile::tempdir_in(&parent).unwrap();
+        let retained = temp.path().to_path_buf();
+        let registry = ProcessRegistryNative::default();
+        registry.configure_ownership(root.path()).unwrap();
+        let intent = registry
+            .ownership
+            .begin("cleanup-failed", "request", "local")
+            .unwrap()
+            .unwrap();
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "exit 0"]);
+        let process = spawn_local_child_native(
+            "cleanup-failed".into(),
+            "request".into(),
+            "local".into(),
+            command,
+            Some(temp),
+            Duration::from_secs(3),
+        )
+        .unwrap();
+        process.bind_direct_intent(intent).unwrap();
+        registry.insert(process.clone()).unwrap();
+        let result = process.wait(Duration::from_secs(5)).unwrap();
+        // Restore only the fixture permission before assertions/TempDir Drop.
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(result.exit_code, Some(0));
+        assert!(
+            !result.termination_confirmed,
+            "actual deletion denial must not become success"
+        );
+        assert_eq!(
+            result.failure.unwrap().kind,
+            AgentExecutionFailureKind::TerminationUnconfirmed
+        );
+        assert!(retained.exists());
+        registry
+            .remove_terminal(&result.process_handle, result.state)
+            .unwrap();
+        assert!(registry.get(&result.process_handle).is_ok());
+        assert!(registry.ensure_capacity().is_err());
+        assert!(registry.ownership.ensure_recovered().is_err());
+        assert!(registry
+            .ownership
+            .begin("new-task", "new-request", "local")
+            .is_err());
+        let restored = ProcessRegistryNative::default();
+        restored.configure_ownership(root.path()).unwrap();
+        assert!(restored.ensure_capacity().is_err());
+        record_acceptance(
+            "cleanup-failure",
+            serde_json::json!({"exitCode":result.exit_code,"terminationConfirmed":result.termination_confirmed,"ownedDirectoryRetained":retained.exists(),"currentDispatchBlocked":registry.ensure_capacity().is_err(),"restartDispatchBlocked":restored.ensure_capacity().is_err()}),
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancellation_waits_for_actual_launch_registration_and_then_confirms_its_stop() {
+        let root = tempfile::tempdir().unwrap();
+        let registry = ProcessRegistryNative::default();
+        registry.configure_ownership(root.path()).unwrap();
+        let dispatch = registry.dispatch.lock().unwrap();
+        let intent = registry
+            .ownership
+            .begin("raced-task", "request", "local")
+            .unwrap()
+            .unwrap();
+        let mut command = Command::new("/bin/sleep");
+        command.arg("5");
+        let process = spawn_fixed_local_process_native(
+            "raced-task".into(),
+            "request".into(),
+            "local".into(),
+            command,
+            Duration::from_secs(8),
+        )
+        .unwrap();
+        process.bind_direct_intent(intent).unwrap();
+        let cancelling = registry.clone();
+        let (entered, ready) = mpsc::channel();
+        let (completed, result) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            entered.send(()).unwrap();
+            completed
+                .send(cancelling.cancel_task("raced-task"))
+                .unwrap();
+        });
+        ready.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert!(
+            matches!(
+                result.recv_timeout(Duration::from_millis(50)),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            ),
+            "cancellation cannot return before a running launch registers"
+        );
+        registry.insert(process.clone()).unwrap();
+        drop(dispatch);
+        result
+            .recv_timeout(Duration::from_secs(3))
+            .unwrap()
+            .unwrap();
+        worker.join().unwrap();
+        assert!(process.snapshot().unwrap().termination_confirmed);
+        assert_eq!(registry.running_count().unwrap(), 0);
+        let restored = ProcessRegistryNative::default();
+        restored.configure_ownership(root.path()).unwrap();
+        restored.ensure_capacity().unwrap();
+        record_acceptance(
+            "cancel-during-registration",
+            serde_json::json!({"terminationConfirmed":process.snapshot().unwrap().termination_confirmed,"remainingOwnedProcesses":registry.running_count().unwrap(),"restartDispatchAllowed":restored.ensure_capacity().is_ok()}),
+        );
+    }
 
     #[cfg(unix)]
     #[test]

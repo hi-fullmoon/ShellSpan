@@ -65,6 +65,7 @@ impl NativeToolAdapter {
             .path()
             .app_data_dir()
             .map_err(|error| format!("failed to resolve Agent native runtime root: {error}"))?;
+        runtime.configure_direct_ownership(&root)?;
         runtime.configure_checkpoint_root(root)?;
         runtime.reconcile_remote_visible_rollout()?;
         Ok(())
@@ -139,15 +140,29 @@ struct McpCallArguments {
 impl NativeToolRuntime for NativeToolAdapter {
     fn prepare_sandbox(&self, header: &super::AgentSessionHeader) -> Result<(), String> {
         let _admission = self.engine.admit_operation()?;
-        if header.sandbox_policy.is_some_and(|policy| policy != super::AgentSandboxPolicy::Host)
-            && header.target.as_ref().is_some_and(|target| target.kind == "remote") {
+        if header
+            .sandbox_policy
+            .is_some_and(|policy| policy != super::AgentSandboxPolicy::Host)
+            && header
+                .target
+                .as_ref()
+                .is_some_and(|target| target.kind == "remote")
+        {
             if header.execution_surface != super::AgentExecutionSurface::Direct {
-                return Err("sandboxBackendUnavailable: remote restricted execution requires Direct".into());
+                return Err(
+                    "sandboxBackendUnavailable: remote restricted execution requires Direct".into(),
+                );
             }
             let known_hosts = crate::known_hosts::known_hosts_path(&self.app)?;
-            super::remote_seatbelt::verify_header(header, &self.app.state::<SessionManager>(),
-                &self.app.state::<Database>(), &self.app.state::<CredentialManager>(), &known_hosts,
-                Some(self.engine.shutdown_admission()))?;
+            super::remote_seatbelt::verify_header_owned(
+                header,
+                &self.app.state::<SessionManager>(),
+                &self.app.state::<Database>(),
+                &self.app.state::<CredentialManager>(),
+                &known_hosts,
+                Some(self.engine.shutdown_admission()),
+                Some(&self.engine),
+            )?;
         }
         super::sandbox::require_session_sandbox(header)
     }
@@ -518,7 +533,9 @@ impl NativeToolRuntime for NativeToolAdapter {
         // Keep the gate through capability issuance and process registration.
         let session_runtime = self.app.state::<super::AgentRuntime>();
         let transition = session_runtime.policy_transition(&stored.session_id)?;
-        let _transition = transition.lock().map_err(|_| "Session transition unavailable")?;
+        let _transition = transition
+            .lock()
+            .map_err(|_| "Session transition unavailable")?;
         self.engine.ensure_shutdown_admission()?;
         let snapshot = self
             .app
@@ -568,7 +585,8 @@ impl NativeToolRuntime for NativeToolAdapter {
                 {
                     let audit_result = (|| {
                         let session_expiry = if !approved
-                            || scope == super::sandbox_authorization::ResourceAuthorizationScope::Session
+                            || scope
+                                == super::sandbox_authorization::ResourceAuthorizationScope::Session
                         {
                             runtime
                                 .sandbox_authorizations(

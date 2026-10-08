@@ -2410,20 +2410,36 @@ impl AgentSessionStore {
         loop {
             let before = family.len();
             for record in inner.sessions.values() {
-                if record.header.parent_session_id.as_ref().is_some_and(|parent| family.contains(parent)) {
+                if record
+                    .header
+                    .parent_session_id
+                    .as_ref()
+                    .is_some_and(|parent| family.contains(parent))
+                {
                     family.insert(record.header.session_id.clone());
                 }
             }
-            if family.len() == before { break; }
+            if family.len() == before {
+                break;
+            }
         }
-        Ok(inner.sessions.values().any(|record| record.header.session_id != session_id
-            && family.contains(&record.header.session_id) && !record.ended && !record.archived))
+        Ok(inner.sessions.values().any(|record| {
+            record.header.session_id != session_id
+                && family.contains(&record.header.session_id)
+                && !record.ended
+                && !record.archived
+        }))
     }
 
     pub(crate) fn family_task_ids(&self, session_id: &str) -> Result<Vec<String>, String> {
         let inner = self.lock_configured()?;
-        let family = session_family_locked(&inner,session_id);
-        Ok(inner.sessions.values().filter(|record| family.contains(&record.header.session_id)).map(|record| record.header.task_id.clone()).collect())
+        let family = session_family_locked(&inner, session_id);
+        Ok(inner
+            .sessions
+            .values()
+            .filter(|record| family.contains(&record.header.session_id))
+            .map(|record| record.header.task_id.clone())
+            .collect())
     }
 
     pub(crate) fn list_page(
@@ -2672,14 +2688,26 @@ fn create_session_events(
     Ok(events)
 }
 
-fn session_family_locked(inner: &AgentSessionStoreInner, session_id: &str) -> std::collections::HashSet<String> {
+fn session_family_locked(
+    inner: &AgentSessionStoreInner,
+    session_id: &str,
+) -> std::collections::HashSet<String> {
     let mut family = std::collections::HashSet::from([session_id.to_owned()]);
     loop {
         let before = family.len();
         for record in inner.sessions.values() {
-            if record.header.parent_session_id.as_ref().is_some_and(|parent| family.contains(parent)) { family.insert(record.header.session_id.clone()); }
+            if record
+                .header
+                .parent_session_id
+                .as_ref()
+                .is_some_and(|parent| family.contains(parent))
+            {
+                family.insert(record.header.session_id.clone());
+            }
         }
-        if family.len() == before { return family; }
+        if family.len() == before {
+            return family;
+        }
     }
 }
 
@@ -2688,9 +2716,19 @@ fn append_payloads_locked(
     session_id: &str,
     payloads: Vec<(Option<String>, Option<String>, AgentSessionEventPayload)>,
 ) -> Result<(Vec<AgentSessionEvent>, Option<EventPublisher>), String> {
-    if payloads.iter().any(|(_,_,payload)| matches!(payload,AgentSessionEventPayload::SessionSandboxPolicyChanged {..})) {
-        let family=session_family_locked(inner,session_id);
-        if inner.sessions.values().any(|record| record.header.session_id != session_id && family.contains(&record.header.session_id) && !record.ended && !record.archived) {
+    if payloads.iter().any(|(_, _, payload)| {
+        matches!(
+            payload,
+            AgentSessionEventPayload::SessionSandboxPolicyChanged { .. }
+        )
+    }) {
+        let family = session_family_locked(inner, session_id);
+        if inner.sessions.values().any(|record| {
+            record.header.session_id != session_id
+                && family.contains(&record.header.session_id)
+                && !record.ended
+                && !record.archived
+        }) {
             return Err("SANDBOX_POLICY_BUSY: child work appeared before policy commit".into());
         }
     }
@@ -3064,8 +3102,14 @@ fn validate_event_transition(
             Ok(())
         }
         AgentSessionEventPayload::SessionSandboxPolicyChanged { .. } => {
-            if record.header.subagent.is_some() || record.status != AgentSessionStatus::Idle || !record.inbox.is_empty() {
-                return Err("sandbox policy change requires an idle root Session with no queued input".into());
+            if record.header.subagent.is_some()
+                || record.status != AgentSessionStatus::Idle
+                || !record.inbox.is_empty()
+            {
+                return Err(
+                    "sandbox policy change requires an idle root Session with no queued input"
+                        .into(),
+                );
             }
             Ok(())
         }
@@ -3830,28 +3874,52 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
             match audit.action {
                 SandboxResourceAuditAction::Approved | SandboxResourceAuditAction::Reused => {
                     require_scope(event, true, true)?;
-                    validate_identifier(call_id.as_deref().ok_or("resource audit call missing")?, "resource audit callId")?;
-                    if audit.scope.is_none() || audit.call_expires_at_unix_ms.is_none() || audit.cleanup_confirmed.is_some() {
+                    validate_identifier(
+                        call_id.as_deref().ok_or("resource audit call missing")?,
+                        "resource audit callId",
+                    )?;
+                    if audit.scope.is_none()
+                        || audit.call_expires_at_unix_ms.is_none()
+                        || audit.cleanup_confirmed.is_some()
+                    {
                         return Err("resource approval audit is incomplete".into());
                     }
                 }
-                SandboxResourceAuditAction::Revoked | SandboxResourceAuditAction::RevocationFailed => {
+                SandboxResourceAuditAction::Revoked
+                | SandboxResourceAuditAction::RevocationFailed => {
                     require_scope(event, false, false)?;
-                    if call_id.is_some() || audit.scope.is_some() || audit.cleanup_confirmed != Some(audit.action == SandboxResourceAuditAction::Revoked) {
+                    if call_id.is_some()
+                        || audit.scope.is_some()
+                        || audit.cleanup_confirmed
+                            != Some(audit.action == SandboxResourceAuditAction::Revoked)
+                    {
                         return Err("resource revocation audit is incomplete".into());
                     }
                 }
             }
-            validate_collection(&audit.resources,"resource audit resources")?;
+            validate_collection(&audit.resources, "resource audit resources")?;
             for resource in &audit.resources {
                 match resource {
-                    super::AgentSandboxResource::ReadPath { path } | super::AgentSandboxResource::WritePath { path } => validate_text(path,"resource path",false,4096)?,
-                    super::AgentSandboxResource::NetworkTarget {host,port,protocol,allow_redirects,..} => {
-                        validate_text(host,"resource host",false,253)?;
-                        if *port == 0 || protocol != "tcp" || *allow_redirects { return Err("resource network audit unsupported".into()); }
+                    super::AgentSandboxResource::ReadPath { path }
+                    | super::AgentSandboxResource::WritePath { path } => {
+                        validate_text(path, "resource path", false, 4096)?
                     }
-                    super::AgentSandboxResource::LocalService {address,port} => {
-                        if address != "127.0.0.1" || *port == 0 { return Err("resource service audit unsupported".into()); }
+                    super::AgentSandboxResource::NetworkTarget {
+                        host,
+                        port,
+                        protocol,
+                        allow_redirects,
+                        ..
+                    } => {
+                        validate_text(host, "resource host", false, 253)?;
+                        if *port == 0 || protocol != "tcp" || *allow_redirects {
+                            return Err("resource network audit unsupported".into());
+                        }
+                    }
+                    super::AgentSandboxResource::LocalService { address, port } => {
+                        if address != "127.0.0.1" || *port == 0 {
+                            return Err("resource service audit unsupported".into());
+                        }
                     }
                 }
             }

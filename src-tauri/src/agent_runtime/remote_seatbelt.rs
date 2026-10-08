@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
+#[path = "remote_cleanup.rs"]
+pub(crate) mod cleanup;
 
 use super::remote_binding::RemoteExecutionBinding;
 use super::{
@@ -380,6 +382,7 @@ fn verify_receipt(value: Value, key: &[u8; 32], job_id: &str) -> Result<Value, S
     Ok(parsed)
 }
 
+#[cfg(test)]
 pub(crate) fn verify_header(
     header: &AgentSessionHeader,
     sessions: &SessionManager,
@@ -387,6 +390,26 @@ pub(crate) fn verify_header(
     credentials: &CredentialManager,
     known_hosts: &Path,
     admission: Option<super::shutdown_admission::ShutdownAdmission>,
+) -> Result<(), String> {
+    verify_header_owned(
+        header,
+        sessions,
+        database,
+        credentials,
+        known_hosts,
+        admission,
+        None,
+    )
+}
+
+pub(crate) fn verify_header_owned(
+    header: &AgentSessionHeader,
+    sessions: &SessionManager,
+    database: &Database,
+    credentials: &CredentialManager,
+    known_hosts: &Path,
+    admission: Option<super::shutdown_admission::ShutdownAdmission>,
+    engine: Option<&super::NativeToolEngine>,
 ) -> Result<(), String> {
     let key = cache_key(header)?;
     if cache()
@@ -404,6 +427,8 @@ pub(crate) fn verify_header(
         .target
         .as_ref()
         .ok_or("sandboxRemoteIdentityMissing")?;
+    let request_id = Uuid::new_v4().to_string();
+    let mut intent = None;
     let root = target
         .root_path
         .as_ref()
@@ -509,6 +534,12 @@ pub(crate) fn verify_header(
         let secret = token();
         let id = Uuid::new_v4().to_string();
         let request = json!({"mode":"selftest","root":root,"home":home,"uid":facts.uid,"deny":deny_paths(&facts),"policy":"workspace","jobId":id,"token":hex::encode(secret)});
+        intent = engine
+            .map(|engine| {
+                engine.begin_direct_ownership(&header.task_id, &request_id, &target.target_id)
+            })
+            .transpose()?
+            .flatten();
         let receipt = verify_receipt(
             fixed_json(
                 &python,
@@ -570,17 +601,31 @@ pub(crate) fn verify_header(
         &connection,
         known_hosts,
     )?;
+    if intent.is_none() {
+        intent = engine
+            .map(|engine| {
+                engine.begin_direct_ownership(&header.task_id, &request_id, &target.target_id)
+            })
+            .transpose()?
+            .flatten();
+    }
+    if let Some(intent) = &intent {
+        intent.protect_remote(&job, credentials)?;
+    }
     let process = super::spawn_remote_process_native(super::RemoteProcessStartNative {
         remote_sandbox: Some(job),
         admission: admission.clone(),
         task_id: "remote-sandbox-preflight".into(),
-        request_id: Uuid::new_v4().to_string(),
+        request_id,
         owner_target_id: target.target_id.clone(),
         command: probe_command.into(),
         connection: connection.clone(),
         known_hosts_path: known_hosts.to_owned(),
         timeout: Duration::from_secs(20),
     })?;
+    if let Some(intent) = intent {
+        process.bind_direct_intent(intent)?;
+    }
     let checked = (|| {
         process.write_stdin("sandbox-remote-input\n".into(), false)?;
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -599,6 +644,9 @@ pub(crate) fn verify_header(
         Ok(())
     })();
     let cleanup = process.kill(super::ProcessSignalNative::Kill, Duration::from_secs(8))?;
+    if cleanup.termination_confirmed {
+        process.resolve_direct_ownership()?;
+    }
     if checked.is_err()
         || !cleanup.termination_confirmed
         || !entry.valid()
@@ -606,9 +654,10 @@ pub(crate) fn verify_header(
             .as_ref()
             .is_some_and(|gate| gate.ensure_open().is_err())
     {
-        return Err(
-            "sandboxRemotePreflightFailed: actual remote input or cleanup is not confirmed".into(),
-        );
+        return Err(format!(
+            "sandboxRemotePreflightFailed: actual remote input or cleanup is not confirmed (input={}, state={:?}, terminationConfirmed={}, controllerError={})",
+            checked.is_ok(), cleanup.state, cleanup.termination_confirmed, cleanup.error.as_deref().unwrap_or("none")
+        ));
     }
     let mut entries = cache()
         .lock()
@@ -690,7 +739,7 @@ impl RemoteSeatbeltJob {
     pub(crate) fn contract(&self) -> &AgentSandboxContract {
         &self.contract
     }
-    #[cfg(test)]
+    #[cfg(any(test, debug_assertions))]
     pub(crate) fn owned_directory(&self) -> PathBuf {
         Path::new(&self.verification.facts.temp_base).join(format!(
             "shellspan-native-remote-{}",

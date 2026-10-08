@@ -7,6 +7,8 @@ export function aiErrorMessage(message: string, t: (key: LocaleKey, values?: Rec
   const sandboxDiagnostic = diagnostic.replace(/^Tool not started:\s*/, '');
   if (diagnostic.startsWith('SANDBOX_POLICY_BUSY:')) return t('agent.sandbox.policyBusy');
   if (diagnostic.startsWith('EXECUTION_SURFACE_BUSY:')) return t('agent.executionSurface.backgroundBusy');
+  if (/^(?:directCleanupUnconfirmed|sandboxLocalCleanupUnconfirmed|sandboxRemoteCleanupUnconfirmed|localControllerCleanupUnconfirmed|localControllerUnavailable|localControllerPanicked)(?=:|\s|$)/.test(sandboxDiagnostic)) return t('ai.error.sandboxCleanupUnconfirmed');
+  if (/^directOwnership(?:Unavailable|Invalid|RootChanged|WriteFailed|Duplicate)(?=:|\s|$)/.test(sandboxDiagnostic)) return t('ai.error.sandboxOwnershipUnavailable');
   if (sandboxDiagnostic.startsWith('sandboxBackendUnavailable:')) return t('ai.error.sandboxBackendUnavailable');
   if (sandboxDiagnostic.startsWith('sandboxAuthorizationInvalid:') || sandboxDiagnostic.startsWith('sandboxAuthorizationInvalidAfterRestart:')) return t('ai.error.sandboxAuthorizationInvalid');
   if (/^sandbox(?:WorkspaceMissing|WorkspaceInvalid|TargetMissing):/.test(sandboxDiagnostic)) return t('ai.error.sandboxWorkspaceInvalid');

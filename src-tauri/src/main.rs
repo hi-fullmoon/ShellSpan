@@ -4,11 +4,23 @@ fn main() {
     let args = std::env::args_os().collect::<Vec<_>>();
     if args
         .get(1)
+        .is_some_and(|arg| arg == "--local-resource-controller")
+    {
+        #[cfg(target_os = "macos")]
+        {
+            if args.len() != 2 || shell_span_lib::run_local_resource_controller().is_err() {
+                std::process::exit(2);
+            }
+            return;
+        }
+        #[cfg(not(target_os = "macos"))]
+        std::process::exit(2);
+    }
+    if args
+        .get(1)
         .is_some_and(|arg| arg == "--native-sandbox-settings-check")
     {
-        if !(3..=4).contains(&args.len())
-            || args.get(3).is_some_and(|arg| arg != "root-entry")
-        {
+        if !(3..=4).contains(&args.len()) || args.get(3).is_some_and(|arg| arg != "root-entry") {
             eprintln!("Usage: ShellSpan --native-sandbox-settings-check <empty-fixture-directory> [root-entry]");
             std::process::exit(2);
         }
@@ -27,12 +39,25 @@ fn main() {
         }
         return;
     }
-    if args.get(1).is_some_and(|arg| arg == "--native-remote-check") {
-        if args.len()!=3 { eprintln!("Usage: ShellSpan --native-remote-check <empty-fixture-directory>");std::process::exit(2); }
-        #[cfg(all(target_os="macos",debug_assertions))]
-        if let Err(error)=shell_span_lib::run_native_remote_check(std::path::Path::new(&args[2])) {eprintln!("{error}");std::process::exit(1);}
-        #[cfg(not(all(target_os="macos",debug_assertions)))]
-        {eprintln!("Native remote checks require a macOS debug build");std::process::exit(2);}
+    if args
+        .get(1)
+        .is_some_and(|arg| arg == "--native-remote-check")
+    {
+        if args.len() != 3 {
+            eprintln!("Usage: ShellSpan --native-remote-check <empty-fixture-directory>");
+            std::process::exit(2);
+        }
+        #[cfg(all(target_os = "macos", debug_assertions))]
+        if let Err(error) = shell_span_lib::run_native_remote_check(std::path::Path::new(&args[2]))
+        {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        #[cfg(not(all(target_os = "macos", debug_assertions)))]
+        {
+            eprintln!("Native remote checks require a macOS debug build");
+            std::process::exit(2);
+        }
         return;
     }
     if args.get(1).is_some_and(|arg| arg == "--native-agent-check") {

@@ -94,3 +94,25 @@ Runtime context 包含原始策略意图、`effectiveSandboxPolicy`、来源和�
 `sandbox/call_frozen` 记录 call ID 与冻结契约；同一 Turn/Step/call 只记录一次。拒绝结果包含 `schedulerAdmission: notStarted`、原因、同一契约与能力事实，表示工具尚未执行，不应自动重试或推测副作用。既有 audit 脱敏继续生效。两个新增事件使用现有 v5 envelope；规范见 `event-v5.schema.json`，旧 `session/created` 无策略字段仍可解析。
 
 前端恢复投影保留新意图与后端能力；错误通过已有 AI 错误展示路径提供中英文解释。阶段 1 不增加策略选择 UI、资源授权弹框、布局变更或后端自动安装，不开放任何受限执行平台。
+
+## 2026-10-08 完善阶段 1：Direct 资源债务
+
+当前 macOS 本地与已验证普通账户 SSH 的 `partial` Direct 路径使用应用数据目录中的 `agent-direct-ownership.sqlite3`。SQLite WAL/FULL 在实际启动前提交唯一意图，保存意图 ID、task/request/target ID，不保存命令、PID、目录清理凭据或 live grants。本地首次 OS 预检及远端固定自检／真实 stdin 与取消预检同样纳入生产意图。Native probe 的 IPC 名称、输入、返回能力字段和注册不变，应用状态由 Tauri 注入，存储初始化和预检在 blocking worker 执行。
+
+当前进程持有的意图只能解除自己的债务；解除要求控制器终态、实际终止核对及临时资源清理已确认。正常退出的清理与 `wait_process`／`kill_process` 回收才删除对应行。记录写入失败时不启动；解除写入失败、启动结果未知或意图被丢弃而未解除时保持债务，不接受新的 native 派发。授权检查到进程注册的启动窗口与取消时的资源快照串行，锁在启动注册完成后释放，运行中的多个任务仍可并发。
+
+重启后发现任何遗留行，Native prepare、issue、dispatch 和新会话创建保持关闭；关闭流程也不能将空的内存 registry 解释为清理完成。意图本身是债务证据，不是拥有凭据，不能从它恢复授权、信号目标或目录删除权。SSH 启动前另将精确清理胶囊保存在系统钥匙串，SQLite 仅保存引用。胶囊绑定应用存储根、意图及 task/request/target，冻结主机密钥、账户与 credential reference、控制器源码摘要、job/root/digest 和清理 token；不保存用户命令、执行 grant 或密码／私钥值。
+
+新增 `agent_runtime_reconcile_direct_resources` 无输入 IPC，返回 `{ resolved, uncertain }`，在 blocking worker 核对历史债务。它不注册为模型工具，也不自动重放。原创建进程 PID／启动时间仅用于拒绝清理仍存活的创建者，不用于发信号；SSH 可信胶囊只能执行固定 status/stop/cleanup，必须取得对应签名 controllerFinished、terminationConfirmed 和精确目录清理回执。本地胶囊只核验独立控制器的签名清理回执，不向 PID 或目录猜测的进程发送信号。缺失或不匹配的胶囊、没有托管凭据的历史债务、离线及清理写入失败继续 uncertain；副作用 reconciliation、恢复原账户／目录或重新预检不能清除它。钥匙串删除与 SQLite 解除之间发生崩溃也可能保守保留债务。未写入账本的资源不补认领；兼容验收按用户要求排除。
+
+macOS 受限本地 Direct 和首次固定预检使用同一应用二进制的 `--local-resource-controller` 无界面入口，在初始化 Tauri 前处理有界 JSON 行 IPC。启动前托管本地胶囊，包含独立 job、策略摘要、应用状态根下的精确回执目录及 HMAC token，不保存用户命令或 grant。启动命令／当前契约／token 只通过私有 stdin 管道交付，随后仅接受输入及停止控制；不从 argv、环境或普通配置恢复。控制器重新执行真实 OS 预检，持有真实 Child、未回收的组身份、网络代理和 temp。EOF、父 App 崩溃或 IPC 损坏触发取消；实际组停止、代理关闭和 temp 清理先于 HMAC 签名回执，文件及目录完成 fsync。回执打开拒绝符号链接，签名绑定 job 与策略摘要，胶囊还绑定意图、task/request/target 和应用根。
+
+交付启动输入后，未收到 ready/terminal 的状态为 unknown；仅控制器确认尚未创建用户命令且清理回执有效时才标记 notStarted。恢复核验真实签名终态后才解除本地资源债务，不恢复执行 grant，也不替代副作用核对。控制器自身被强制终止、回执丢失／损坏、清理失败或无托管凭据的历史资源继续 uncertain；不承诺系统崩溃或敌对后代逃离进程组后的自动清理。Host 本地路径沿用原账户行为，不宣称受限资源隔离。
+
+本地 Unix 运行器使用 `waitid(WNOWAIT)`，保持组领头 PID 未回收直至最后一次组信号；回收之后仅观察，不再对历史 PID 发信号。普通后台子进程、临时目录与网络代理的终态先于成功回执。清理失败优先报告 `terminationUnconfirmed`，Direct exec／`wait_process` 返回 `uncertain`，零退出码或策略失效都不覆盖该事实。这里的确认只覆盖现有普通进程组边界，不能证明敌对后代、硬链接或同账户竞争隔离。
+
+匹配本轮修订的证据与未完成项见 [完善阶段 1 验收记录](../../../docs/design/agent-shell-sandbox-macos-ssh-stage-1-acceptance.md)。
+
+多个 App 共用状态目录时，admission 同时核对数据库中不属于当前 live intent 集合的债务；begin 使用 SQLite IMMEDIATE 事务，将核对与写入串行。即使两个 App 都在第一条债务写入前配置完成，另一个 App 的后续派发仍被拒绝。门禁不会自动认领对方资源，已观察的 foreign 债务不会因行消失而自动解除；当前支持安全拒绝，不承诺多个 App 同时执行共享状态资源。
+
+现有前端错误格式化为 Direct 清理债务和归属记录不可用提供中英文提示，不改变持久诊断或授予新的操作。绑定失效提示不再单凭错误代码声明调用未执行：实际是否开始以 controller admission 为准，必须核对已有效果，不自动重放旧命令。

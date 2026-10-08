@@ -28,9 +28,9 @@ mod result;
 mod ssh;
 mod target;
 
+pub(crate) use cancellation::CancellationHandle;
 #[cfg(test)]
 pub(crate) use cancellation::ExecutionCancellationErrorKind;
-pub(crate) use cancellation::CancellationHandle;
 pub(crate) use cancellation::ExecutionCancellationRegistry;
 pub(crate) use redaction::{redact_known_json_values, redact_known_secrets};
 pub(crate) use request::known_connection_secret_values;
@@ -48,8 +48,8 @@ pub(crate) use result::ReviewedSshExecutionResult;
 #[cfg(test)]
 pub(crate) use ssh::execute_reviewed_ssh_command;
 pub(crate) use ssh::execute_reviewed_ssh_command_with_handle;
-pub(crate) use ssh::{execute_ssh_channel_with_input, SshChannelExecutionOutcome};
 pub(crate) use ssh::open_ssh_execution_session;
 pub(crate) use ssh::open_ssh_execution_session_pinned;
-pub(crate) use ssh::SshExecutionSession;
 pub(crate) use ssh::start_ssh_exec_channel;
+pub(crate) use ssh::SshExecutionSession;
+pub(crate) use ssh::{execute_ssh_channel_with_input, SshChannelExecutionOutcome};

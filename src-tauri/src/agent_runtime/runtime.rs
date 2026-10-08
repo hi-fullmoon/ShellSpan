@@ -85,7 +85,8 @@ impl AgentRuntimeBuilder {
     }
 
     pub(crate) fn build(self) -> AgentRuntime {
-        let agents = AgentRegistry::with_shutdown_admission(self.native_engine.shared_shutdown_admission());
+        let agents =
+            AgentRegistry::with_shutdown_admission(self.native_engine.shared_shutdown_admission());
         let tool_pipeline = AgentToolPipeline::new(
             agents.clone(),
             self.sessions.clone(),
@@ -193,22 +194,34 @@ impl Default for AgentRuntimeBuilder {
 }
 
 impl AgentRuntime {
-    pub(crate) fn verify_remote_sandbox_target(&self, target: super::AgentSessionTarget, policy: super::AgentSandboxPolicy,
-        request_id: &str) -> Result<super::remote_seatbelt::RemoteSandboxVerification,String> {
-        let _admission=self.native_engine.admit_operation()?;
-        if target.kind!="remote" || policy==super::AgentSandboxPolicy::Host {return Err("sandboxPolicyUnsupported: verification requires a restricted SSH target".into());}
+    pub(crate) fn verify_remote_sandbox_target(
+        &self,
+        target: super::AgentSessionTarget,
+        policy: super::AgentSandboxPolicy,
+        request_id: &str,
+    ) -> Result<super::remote_seatbelt::RemoteSandboxVerification, String> {
+        let _admission = self.native_engine.admit_operation()?;
+        if target.kind != "remote" || policy == super::AgentSandboxPolicy::Host {
+            return Err(
+                "sandboxPolicyUnsupported: verification requires a restricted SSH target".into(),
+            );
+        }
         uuid::Uuid::parse_str(request_id).map_err(|_| "Invalid remote verification request id")?;
-        let id=format!("remote-verify-{request_id}");
+        let id = format!("remote-verify-{request_id}");
         let header:super::AgentSessionHeader=serde_json::from_value(serde_json::json!({"sessionId":id,"taskId":id,"goal":"Verify existing remote sandbox capabilities",
             "target":target,"sandboxPolicy":policy,"executionSurface":"direct","createdAtUnixMs":crate::db::current_timestamp_ms() as u64}))
             .map_err(|_| "sandboxRemoteRequestInvalid")?;
         self.tools.prepare_sandbox(&header)?;
         super::remote_seatbelt::verification_summary(&header)
     }
-    #[cfg(all(target_os="macos",debug_assertions))]
-    pub(crate) fn acceptance_native_runtime(&self) -> Result<Arc<dyn NativeToolRuntime>,String> {
-        self.native_slot.clone().map(|slot| Arc::new(slot) as Arc<dyn NativeToolRuntime>)
-            .ok_or_else(|| "Native acceptance requires the production installed runtime slot".into())
+    #[cfg(all(target_os = "macos", debug_assertions))]
+    pub(crate) fn acceptance_native_runtime(&self) -> Result<Arc<dyn NativeToolRuntime>, String> {
+        self.native_slot
+            .clone()
+            .map(|slot| Arc::new(slot) as Arc<dyn NativeToolRuntime>)
+            .ok_or_else(|| {
+                "Native acceptance requires the production installed runtime slot".into()
+            })
     }
     #[cfg(debug_assertions)]
     pub(crate) fn acceptance_process(
@@ -595,10 +608,20 @@ impl AgentRuntime {
         &self,
         credentials: crate::keychain::CredentialManager,
     ) -> Result<(), String> {
+        #[cfg(target_os = "macos")]
+        self.native_engine
+            .configure_local_cleanup_credentials(credentials.clone())?;
         self.subagents.set_credentials(credentials)
     }
 
     pub(crate) fn configure_native(&self, app: tauri::AppHandle) -> Result<(), String> {
+        #[cfg(target_os = "macos")]
+        use tauri::Manager;
+        #[cfg(target_os = "macos")]
+        if let Some(credentials) = app.try_state::<crate::keychain::CredentialManager>() {
+            self.native_engine
+                .configure_local_cleanup_credentials(credentials.inner().clone())?;
+        }
         self.native_engine.reconcile_remote_visible_rollout()?;
         let emitter = app.clone();
         self.native_engine
@@ -830,97 +853,174 @@ impl AgentRuntime {
         sessions: &crate::models::SessionManager,
     ) -> Result<usize, String> {
         self.begin_shutdown_admission();
-        let mut errors=Vec::new();
+        let mut errors = Vec::new();
         match self.sessions.session_ids() {
-            Ok(ids)=>for session_id in ids {
-                match self.agents.get(&session_id) {
-                    Ok(Some(entry))=>{
-                        if let Err(error)=entry.stop_admission() {errors.push(error);}
-                        entry.cancel();
-                        if let Err(error)=self.models.images.cancel_session(&session_id) {errors.push(error);}
-                    },
-                    Ok(None)=>{},Err(error)=>errors.push(error),
+            Ok(ids) => {
+                for session_id in ids {
+                    match self.agents.get(&session_id) {
+                        Ok(Some(entry)) => {
+                            if let Err(error) = entry.stop_admission() {
+                                errors.push(error);
+                            }
+                            entry.cancel();
+                            if let Err(error) = self.models.images.cancel_session(&session_id) {
+                                errors.push(error);
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(error) => errors.push(error),
+                    }
                 }
-            },
-            Err(error)=>errors.push(error),
+            }
+            Err(error) => errors.push(error),
         }
-        let cleaned=self.native_engine.prepare_for_shutdown(sessions);
+        let cleaned = self.native_engine.prepare_for_shutdown(sessions);
         match cleaned {
-            Ok(count) if errors.is_empty()=>Ok(count),
-            Ok(_)=>Err(errors.join("; ")),
-            Err(error)=>{errors.push(error);Err(errors.join("; "))},
+            Ok(count) if errors.is_empty() => Ok(count),
+            Ok(_) => Err(errors.join("; ")),
+            Err(error) => {
+                errors.push(error);
+                Err(errors.join("; "))
+            }
         }
     }
 
-    pub(crate) fn begin_shutdown_admission(&self) -> bool { self.native_engine.begin_shutdown_admission() }
-    pub(crate) fn ensure_shutdown_admission(&self) -> Result<(),String> { self.native_engine.ensure_shutdown_admission() }
+    pub(crate) fn begin_shutdown_admission(&self) -> bool {
+        self.native_engine.begin_shutdown_admission()
+    }
+    pub(crate) fn ensure_shutdown_admission(&self) -> Result<(), String> {
+        self.native_engine.ensure_shutdown_admission()
+    }
 
-    pub(crate) async fn shutdown(&self, sessions: &crate::models::SessionManager) -> Result<usize,String> {
+    pub(crate) async fn shutdown(
+        &self,
+        sessions: &crate::models::SessionManager,
+    ) -> Result<usize, String> {
         self.begin_shutdown_admission();
         if self.shutdown_outcome.begin() {
-            let runtime=self.clone(); let sessions=sessions.clone();
+            let runtime = self.clone();
+            let sessions = sessions.clone();
             tauri::async_runtime::spawn(async move {
                 use futures_util::FutureExt;
-                let result=std::panic::AssertUnwindSafe(runtime.shutdown_work(sessions)).catch_unwind().await
-                    .unwrap_or_else(|_| Err("Agent shutdown worker panicked; cleanup remains unconfirmed".into()));
+                let result = std::panic::AssertUnwindSafe(runtime.shutdown_work(sessions))
+                    .catch_unwind()
+                    .await
+                    .unwrap_or_else(|_| {
+                        Err("Agent shutdown worker panicked; cleanup remains unconfirmed".into())
+                    });
                 runtime.shutdown_outcome.finish(result);
             });
         }
         self.shutdown_outcome.wait().await
     }
 
-    async fn shutdown_work(&self, sessions: crate::models::SessionManager) -> Result<usize,String> {
-        let mut errors=Vec::new(); let mut count=0;
-        let first_runtime=self.clone(); let first_sessions=sessions.clone();
-        match tauri::async_runtime::spawn_blocking(move || first_runtime.prepare_for_shutdown(&first_sessions)).await {
-            Ok(Ok(value))=>count+=value, Ok(Err(error))=>errors.push(error), Err(_)=>errors.push("Initial shutdown worker did not complete".into()),
+    async fn shutdown_work(
+        &self,
+        sessions: crate::models::SessionManager,
+    ) -> Result<usize, String> {
+        let mut errors = Vec::new();
+        let mut count = 0;
+        let first_runtime = self.clone();
+        let first_sessions = sessions.clone();
+        match tauri::async_runtime::spawn_blocking(move || {
+            first_runtime.prepare_for_shutdown(&first_sessions)
+        })
+        .await
+        {
+            Ok(Ok(value)) => count += value,
+            Ok(Err(error)) => errors.push(error),
+            Err(_) => errors.push("Initial shutdown worker did not complete".into()),
         }
         // Cancel actual pending/executing tool ownership before waiting on its workers.
         for entry in self.shutdown_entries(&mut errors) {
-                entry.cancel();
-                let pipeline=self.tools.clone();
-                match tauri::async_runtime::spawn_blocking(move || pipeline.cancel_session(&entry)).await {
-                    Ok(Ok(()))=>{},Ok(Err(error))=>errors.push(error),Err(_)=>errors.push("Tool cancellation worker did not complete".into()),
-                }
+            entry.cancel();
+            let pipeline = self.tools.clone();
+            match tauri::async_runtime::spawn_blocking(move || pipeline.cancel_session(&entry))
+                .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => errors.push(error),
+                Err(_) => errors.push("Tool cancellation worker did not complete".into()),
+            }
         }
-        let engine=self.native_engine.clone();
+        let engine = self.native_engine.clone();
         match tauri::async_runtime::spawn_blocking(move || engine.await_shutdown_dispatch()).await {
-            Ok(Ok(()))=>{}, Ok(Err(error))=>errors.push(error), Err(_)=>errors.push("Shutdown dispatch wait did not complete".into()),
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => errors.push(error),
+            Err(_) => errors.push("Shutdown dispatch wait did not complete".into()),
         }
         for entry in self.shutdown_entries(&mut errors) {
-            let session_id=entry.session_id.clone();
-            if let Err(error)=entry.stop_admission() {errors.push(error);}
+            let session_id = entry.session_id.clone();
+            if let Err(error) = entry.stop_admission() {
+                errors.push(error);
+            }
             entry.cancel();
-            if let Err(error)=self.models.images.cancel_session(&session_id) {errors.push(error);}
-            let pipeline=self.tools.clone(); let owner=entry.clone();
-            match tauri::async_runtime::spawn_blocking(move || pipeline.cancel_session(&owner)).await {
-                Ok(Ok(()))=>{}, Ok(Err(error))=>errors.push(error), Err(_)=>errors.push("Approval cancellation worker did not complete".into()),
+            if let Err(error) = self.models.images.cancel_session(&session_id) {
+                errors.push(error);
             }
-            let settled=async { self.tools.await_pending_executions(&entry).await?; entry.await_idle().await; Ok::<(),String>(()) };
-            match tokio::time::timeout(std::time::Duration::from_secs(5),settled).await {
-                Ok(Ok(()))=>{ if let Err(error)=self.interrupt(&session_id).await {errors.push(error);} },
-                Ok(Err(error))=>errors.push(error), Err(_)=>errors.push(format!("Agent shutdown remains unconfirmed for Session {session_id}")),
+            let pipeline = self.tools.clone();
+            let owner = entry.clone();
+            match tauri::async_runtime::spawn_blocking(move || pipeline.cancel_session(&owner))
+                .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => errors.push(error),
+                Err(_) => errors.push("Approval cancellation worker did not complete".into()),
+            }
+            let settled = async {
+                self.tools.await_pending_executions(&entry).await?;
+                entry.await_idle().await;
+                Ok::<(), String>(())
+            };
+            match tokio::time::timeout(std::time::Duration::from_secs(5), settled).await {
+                Ok(Ok(())) => {
+                    if let Err(error) = self.interrupt(&session_id).await {
+                        errors.push(error);
+                    }
+                }
+                Ok(Err(error)) => errors.push(error),
+                Err(_) => errors.push(format!(
+                    "Agent shutdown remains unconfirmed for Session {session_id}"
+                )),
             }
         }
-        let last_runtime=self.clone();
-        match tauri::async_runtime::spawn_blocking(move || last_runtime.prepare_for_shutdown(&sessions)).await {
-            Ok(Ok(value))=>count+=value,Ok(Err(error))=>errors.push(error),Err(_)=>errors.push("Final shutdown worker did not complete".into()),
+        let last_runtime = self.clone();
+        match tauri::async_runtime::spawn_blocking(move || {
+            last_runtime.prepare_for_shutdown(&sessions)
+        })
+        .await
+        {
+            Ok(Ok(value)) => count += value,
+            Ok(Err(error)) => errors.push(error),
+            Err(_) => errors.push("Final shutdown worker did not complete".into()),
         }
-        if errors.is_empty() {Ok(count)} else {Err(errors.join("; "))}
+        if errors.is_empty() {
+            Ok(count)
+        } else {
+            Err(errors.join("; "))
+        }
     }
 
     fn shutdown_entries(&self, errors: &mut Vec<String>) -> Vec<Arc<super::AgentEntry>> {
-        let mut entries=Vec::new();
+        let mut entries = Vec::new();
         match self.sessions.session_ids() {
-            Ok(ids)=>for id in ids {
-                match self.agents.get(&id) {Ok(Some(entry))=>entries.push(entry),Ok(None)=>{},Err(error)=>errors.push(error)}
-            },
-            Err(error)=>errors.push(error),
+            Ok(ids) => {
+                for id in ids {
+                    match self.agents.get(&id) {
+                        Ok(Some(entry)) => entries.push(entry),
+                        Ok(None) => {}
+                        Err(error) => errors.push(error),
+                    }
+                }
+            }
+            Err(error) => errors.push(error),
         }
         entries
     }
 
     pub(crate) fn configure(&self, app_data_root: PathBuf) -> Result<(), String> {
+        self.native_engine
+            .configure_direct_ownership(&app_data_root)?;
         self.native_engine.configure_terminal_broker_rollout()?;
         let parallelism = std::env::var("SHELLSPAN_MAX_PARALLEL_TOOL_CALLS")
             .map(Some)
@@ -993,6 +1093,20 @@ impl AgentRuntime {
         self.sessions.attach_petdex(adapter)
     }
 
+    pub(crate) fn probe_native_sandbox(&self) -> Result<super::AgentSandboxCapability, String> {
+        let _admission = self.native_engine.admit_operation()?;
+        super::verify_native_sandbox_backend_owned(&self.native_engine);
+        Ok(super::native_sandbox_capability())
+    }
+    pub(crate) fn reconcile_direct_resources(
+        &self,
+        credentials: &crate::keychain::CredentialManager,
+        known_hosts: &std::path::Path,
+    ) -> Result<super::DirectResourceRecovery, String> {
+        self.native_engine
+            .reconcile_direct_resources(credentials, known_hosts)
+    }
+
     pub(crate) fn create_session(
         &self,
         mut request: CreateAgentSessionRequest,
@@ -1003,7 +1117,7 @@ impl AgentRuntime {
             .as_ref()
             .is_some_and(|target| target.kind == "local")
         {
-            super::verify_native_sandbox_backend();
+            super::verify_native_sandbox_backend_owned(&self.native_engine);
         }
         if request.sandbox_policy.is_none() && self.sessions.snapshot(&request.session_id).is_ok() {
             request.sandbox_policy = self
@@ -1255,7 +1369,9 @@ impl AgentRuntime {
     ) -> Result<AgentSessionSnapshot, String> {
         let _shutdown_admission = self.native_engine.admit_operation()?;
         let transition = self.policy_transition(session_id)?;
-        let _transition = transition.try_lock().map_err(|_| "SANDBOX_POLICY_BUSY: session transition in progress")?;
+        let _transition = transition
+            .try_lock()
+            .map_err(|_| "SANDBOX_POLICY_BUSY: session transition in progress")?;
         let snapshot = self.sessions.snapshot(session_id)?;
         let sandbox_admission = if snapshot.ended || snapshot.archived {
             Err("sandboxAuthorizationInvalid: session closed".to_string())
@@ -1800,14 +1916,19 @@ impl AgentRuntime {
         if let Some(entry) = self.agents.get(session_id)? {
             entry.stop_admission()?;
         }
-        let resources = self.native_engine.audit_resources_for_task(&snapshot.header.task_id)?;
+        let resources = self
+            .native_engine
+            .audit_resources_for_task(&snapshot.header.task_id)?;
         let result = async {
-            self.native_engine.cancel_task(&snapshot.header.task_id, sessions)?;
+            self.native_engine
+                .cancel_task(&snapshot.header.task_id, sessions)?;
             let stopped = self.interrupt(session_id).await?;
-            self.native_engine.cancel_task(&snapshot.header.task_id, sessions)?;
-            Ok::<_,String>(stopped)
-        }.await;
-        self.record_sandbox_revocation(&snapshot.header,resources,result.is_ok())?;
+            self.native_engine
+                .cancel_task(&snapshot.header.task_id, sessions)?;
+            Ok::<_, String>(stopped)
+        }
+        .await;
+        self.record_sandbox_revocation(&snapshot.header, resources, result.is_ok())?;
         result
     }
 

@@ -11,7 +11,9 @@ pub(crate) fn handle_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
         if let Some(runtime) = app.try_state::<crate::agent_runtime::AgentRuntime>() {
             runtime.begin_shutdown_admission();
         }
-        if app.try_state::<ExitCoordination>().is_none() { app.manage(ExitCoordination::default()); }
+        if app.try_state::<ExitCoordination>().is_none() {
+            app.manage(ExitCoordination::default());
+        }
         let exit = app.state::<ExitCoordination>();
         let supervisor = app
             .state::<crate::agent_runtime::ContainerResourceSupervisor>()
@@ -57,9 +59,14 @@ pub(crate) fn handle_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
             {
                 log::warn!("Agent shutdown deadline reached; pending custody remains for recovery");
             }
-            if !supervisor.shutdown_complete() { supervisor.finish_shutdown(); }
+            if !supervisor.shutdown_complete() {
+                supervisor.finish_shutdown();
+            }
             // This marks the bounded exit coordination done, not successful resource cleanup.
-            shutdown_app.state::<ExitCoordination>().finished.store(true,std::sync::atomic::Ordering::Release);
+            shutdown_app
+                .state::<ExitCoordination>()
+                .finished
+                .store(true, std::sync::atomic::Ordering::Release);
             shutdown_app.exit(code.unwrap_or(0));
         });
     }

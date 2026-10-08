@@ -159,6 +159,9 @@ pub(crate) fn run(
             Some("normal") => shutdown_check::run(root, false, false),
             Some("undrained") => shutdown_check::run(root, true, false),
             Some("exit-active") => shutdown_check::run(root, false, true),
+            Some("local-crash-seed") | Some("local-crash-reopen") => {
+                shutdown_check::run(root, false, false)
+            }
             Some("restore-seed") => restore_check::run(root, false),
             Some("restore-reopen") => restore_check::run(root, true),
             Some("pipeline-waiting-seed") => pipeline_recovery_check::run(root, false, false),

@@ -47,9 +47,15 @@ if ready["unknown"]:
 
 os.kill(pid, signal.SIGKILL)
 deadline = time.monotonic() + 5
-while subprocess.run(["ps", "-p", str(pid), "-o", "pid="],
-                     capture_output=True).returncode == 0:
+while True:
+    observed = subprocess.run(["ps", "-p", str(pid), "-o", "stat="],
+                              capture_output=True, text=True)
+    # A terminated child owned by an orchestrator remains a zombie until its
+    # Popen/Child handle is reaped. The caller must wait() before reopening.
+    if observed.returncode != 0 or observed.stdout.strip().startswith("Z"):
+        break
     assert time.monotonic() < deadline, "Owned App did not terminate after its fixture interrupt"
     time.sleep(0.02)
 print(json.dumps({"interruptedPid": pid, "originalStartTime": actual_start,
-                  "signal": "SIGKILL", "scope": "owned App only; no descendant PID was signalled"}))
+                  "signal": "SIGKILL", "parentMustReap": observed.returncode == 0,
+                  "scope": "owned App only; no descendant PID was signalled"}))

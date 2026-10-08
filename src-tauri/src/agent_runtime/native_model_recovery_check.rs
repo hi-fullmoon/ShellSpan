@@ -10,6 +10,93 @@ const COMMAND: &str = "printf 'real-model-waiting' > model-waiting-marker";
 const UNKNOWN_COMMAND: &str =
     "printf started >> unknown-marker; sleep 6; printf ended >> unknown-marker";
 
+async fn check_unknown_debt_reopen(
+    app: &tauri::AppHandle,
+    runtime: &AgentRuntime,
+    project: &Path,
+    root: &Path,
+    sessions: &SessionManager,
+    writes: &AtomicUsize,
+) -> Result<Value, String> {
+    let before = runtime.session(SESSION)?;
+    let events = runtime.events(AgentSessionEventsRequest {
+        session_id: SESSION.into(),
+        cursor: None,
+        limit: 1000,
+    })?;
+    let requests = events
+        .events
+        .iter()
+        .filter(|event| matches!(event.payload, AgentSessionEventPayload::RequestStart { .. }))
+        .count();
+    let approval = events
+        .events
+        .iter()
+        .find_map(|event| match &event.payload {
+            AgentSessionEventPayload::ToolApproval {
+                request_id,
+                call_id,
+                approval_id: Some(approval_id),
+                status: AgentToolApprovalStatus::Requested,
+                ..
+            } => Some(AgentToolDecisionInput {
+                session_id: SESSION.into(),
+                turn_id: event.turn_id.clone()?,
+                step_id: event.step_id.clone()?,
+                request_id: request_id.clone(),
+                call_id: call_id.clone(),
+                approval_id: approval_id.clone(),
+            }),
+            _ => None,
+        })
+        .ok_or("Actual old unknown approval identity missing")?;
+    let old_rejected = runtime.approve_tool(approval).await.is_err();
+    let resume_rejected = runtime.resume_recovery(SESSION).await.is_err();
+    let effect = std::fs::read_to_string(project.join("unknown-marker"))
+        .map_err(|_| "Actual bounded effect missing")?;
+    if effect != "started" {
+        return Err("Actual old effect is not the single bounded sequence".into());
+    }
+    let blocked_before = runtime.probe_native_sandbox().is_err();
+    let recovered = super::super::commands::agent_runtime_reconcile_direct_resources(
+        app.clone(),
+        app.state::<AgentRuntime>(),
+    )
+    .await?;
+    let repeated = super::super::commands::agent_runtime_reconcile_direct_resources(
+        app.clone(),
+        app.state::<AgentRuntime>(),
+    )
+    .await?;
+    runtime.reconcile_recovery(AgentRecoveryReconcileInput{session_id:SESSION.into(),outcome:AgentRecoveryReconcileOutcome::ConfirmedApplied,evidence:"The exact owned command wrote started once; App SIGKILL closed the private pipe and its independent controller stopped the command before ended. Resource cleanup is independently confirmed by authenticated custody and its signed terminal receipt; no command is replayed.".into()})?;
+    let admission_reopened = runtime.probe_native_sandbox().is_ok();
+    let after = runtime.events(AgentSessionEventsRequest {
+        session_id: SESSION.into(),
+        cursor: None,
+        limit: 1000,
+    })?;
+    let current_requests = after
+        .events
+        .iter()
+        .filter(|event| matches!(event.payload, AgentSessionEventPayload::RequestStart { .. }))
+        .count();
+    let db = rusqlite::Connection::open(root.join("state/agent-direct-ownership.sqlite3"))
+        .map_err(|_| "Actual debt journal missing")?;
+    let debt: i64 = db
+        .query_row("SELECT count(*) FROM dispatch_debt", [], |row| row.get(0))
+        .map_err(|_| "Actual debt count unavailable")?;
+    let shutdown_confirmed = runtime.prepare_for_shutdown(sessions).is_ok();
+    let checks = json!({"actualGeneratedUnknownBoundary":before.recovery.kind==AgentRecoveryCheckpointKind::ExecutionInFlight&&requests>0,
+        "oldApprovalRejected":old_rejected,"resumeRejected":resume_rejected,"singleOldEffectObserved":effect=="started",
+        "resourceGateClosedBeforeReceipt":blocked_before,"signedResourceCleanup":recovered.resolved==1&&recovered.uncertain==0&&debt==0,
+        "cleanupIdempotent":repeated.resolved==0&&repeated.uncertain==0,"admissionReopenedWithoutOldGrant":admission_reopened,"noNewGeneratedRequest":current_requests==requests,
+        "shutdownConfirmed":shutdown_confirmed,"sourcePtyUntouched":writes.load(Ordering::SeqCst)==0});
+    Ok(
+        json!({"passed":checks.as_object().is_some_and(|checks|checks.values().all(|value|value==true)),"checks":checks,"modelId":"MiniMax-M3","modelRequests":requests,
+        "resourceState":"confirmed","remainingResourceDebt":debt,"scope":"real generated pipeline hard crash; independent controller stops actual owned group/proxy/temp; authenticated signed cleanup permits admission without restoring old grants or model continuation"}),
+    )
+}
+
 async fn check_unknown_reopen(
     runtime: &AgentRuntime,
     llm: &crate::llm::runtime::LlmRuntime,
@@ -344,7 +431,15 @@ async fn check(
     app.manage(runtime.clone());
     app.manage(llm.clone());
     runtime.configure_native(app.clone())?;
-    super::super::commands::agent_runtime_probe_native_sandbox().await?;
+    if reopen && unknown && runtime.probe_native_sandbox().is_err() {
+        return check_unknown_debt_reopen(app, &runtime, &project, root, &sessions, &source.writes)
+            .await;
+    }
+    super::super::commands::agent_runtime_probe_native_sandbox(
+        app.clone(),
+        app.state::<AgentRuntime>(),
+    )
+    .await?;
     let command = if unknown { UNKNOWN_COMMAND } else { COMMAND };
     if !reopen {
         runtime.create_session(serde_json::from_value(json!({"sessionId":SESSION,"taskId":SESSION,"goal":"Reach real current model waiting approval in an owned project",

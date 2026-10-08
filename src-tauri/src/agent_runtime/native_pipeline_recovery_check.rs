@@ -174,7 +174,11 @@ async fn check(
     app.manage(sessions.clone());
     app.manage(runtime.clone());
     runtime.configure_native(app.clone())?;
-    super::super::commands::agent_runtime_probe_native_sandbox().await?;
+    super::super::commands::agent_runtime_probe_native_sandbox(
+        app.clone(),
+        app.state::<AgentRuntime>(),
+    )
+    .await?;
     if !reopen {
         runtime.create_session(serde_json::from_value(json!({"sessionId":SESSION,"taskId":SESSION,"goal":"Recover actual registered pipeline boundary from fixed protocol input",
         "target":{"kind":"local","targetId":"pipeline-local","sessionId":"acceptance-source","cwd":project},"sandboxPolicy":"workspace","executionSurface":"direct","permissionMode":"requestApproval","successCriteria":["No re-execution of a recovered native call"]})).map_err(|_|"Actual session schema failed")?)?;
