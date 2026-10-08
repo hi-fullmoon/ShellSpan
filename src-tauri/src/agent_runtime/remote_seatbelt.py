@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import platform
 import pwd
+import select
 import signal
 import shutil
 import socket
@@ -69,22 +70,59 @@ def alive(group):
         return True
     except ProcessLookupError:
         return False
+    except PermissionError:
+        # A reparented group can still exist without being signalable by this
+        # account. Lack of permission is never proof of termination.
+        return True
+
+
+class RemoteTransportClosed(Exception):
+    pass
+
+
+def wait_command_finished(child, reader, timeout, disconnected):
+    deadline = time.monotonic() + timeout
+    while child.returncode is None:
+        if disconnected.is_set():
+            raise RemoteTransportClosed()
+        if select.select([reader], [], [], 0.02)[0]:
+            data = reader.readline(129)
+            if not data:
+                # A concurrent stop closes the pipe before wait() publishes
+                # returncode. Do not race its signed final controller state.
+                time.sleep(0.02)
+            else:
+                if len(data) > 128 or not data.endswith(b"\n"):
+                    raise RuntimeError("remoteSeatbeltCompletionInvalid")
+                code = json.loads(data)
+                if not isinstance(code, int) or not -255 <= code <= 255:
+                    raise RuntimeError("remoteSeatbeltCompletionInvalid")
+                return code
+        if time.monotonic() >= deadline:
+            raise subprocess.TimeoutExpired("owned remote child", timeout)
+    return child.returncode
 
 
 def terminate(child, kind="terminate"):
-    # The controller retains the actual Popen object; an external PID receipt
-    # never authorizes killing an arbitrary later process after reconnect.
-    if child.poll() is None:
+    # The fixed leader stays alive after command completion. Never poll/reap
+    # it before the last group signal, including on Python without waitid.
+    if child.returncode is None:
         selected={"interrupt":signal.SIGINT,"terminate":signal.SIGTERM,"kill":signal.SIGKILL}[kind]
-        os.killpg(child.pid, selected)
         try:
-            child.wait(timeout=1)
-        except subprocess.TimeoutExpired:
+            os.killpg(child.pid, selected)
+        except (ProcessLookupError, PermissionError):
+            pass
+        if kind != "kill":
+            time.sleep(1)
+        try:
             os.killpg(child.pid, signal.SIGKILL)
-            child.wait(timeout=2)
-    # A cooperative Shell can exit before ordinary children in its group.
-    if alive(child.pid):
-        os.killpg(child.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        child.wait(timeout=2)
+    # Once reaped, only observe; a historical PID never authorizes a signal.
+    deadline = time.monotonic() + 2
+    while alive(child.pid) and time.monotonic() < deadline:
+        time.sleep(0.02)
     return not alive(child.pid)
 
 
@@ -198,15 +236,31 @@ def main(request):
     server = socketserver.UnixStreamServer(str(directory / "control"), Control)
     os.chmod(directory / "control", 0o600)
     worker = threading.Thread(target=server.serve_forever, daemon=True)
+    disconnected = threading.Event()
+    # Losing the SSH client must not bypass the actual Popen/group owner and
+    # its signed final receipt. The handler never acquires the controller lock.
+    signal.signal(signal.SIGHUP, lambda signum, frame: disconnected.set())
     code = 125
+    completion_read, completion_write = os.pipe()
+    completion_reader = os.fdopen(completion_read, "rb", buffering=0)
+    # The user Shell does not inherit this completion descriptor. Its own
+    # completion does not release the leader identity used for group cleanup.
+    leader = f'/bin/sh -c "$1" {completion_write}>&-; code=$?; printf "%s\\n" "$code" >&{completion_write}; read -r shellspan_hold'
     try:
-        child = subprocess.Popen(["/usr/bin/sandbox-exec", "-p", profile(root, home, work, request["policy"] == "readOnly", request["deny"]), "/bin/sh", "-c", request["command"]], cwd=root, env=environment(home, work), stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr, close_fds=True, start_new_session=True)
+        child = subprocess.Popen(["/usr/bin/sandbox-exec", "-p", profile(root, home, work, request["policy"] == "readOnly", request["deny"]), "/bin/sh", "-c", leader, "shellspan-owned-leader", request["command"]], cwd=root, env=environment(home, work), stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr, close_fds=True, pass_fds=(completion_write,), start_new_session=True)
+        os.close(completion_write)
+        completion_write = None
         state["started"] = True
         state["state"] = "running"
         worker.start()
         write_state(directory / "state.json", key, state)
         try:
-            code = child.wait(timeout=timeout)
+            code = wait_command_finished(child, completion_reader, timeout, disconnected)
+        except RemoteTransportClosed:
+            with lock:
+                state["state"] = "cancelled"
+                state["terminationConfirmed"] = terminate(child, "kill")
+            code = 125
         except subprocess.TimeoutExpired:
             with lock:
                 state["state"] = "timedOut"
@@ -216,9 +270,14 @@ def main(request):
             if state["state"] == "running":
                 state["state"] = "exited"
                 state["terminationConfirmed"] = terminate(child)
+            elif state["state"] == "cancelled":
+                code = child.returncode
             state["exitCode"] = code
             write_state(directory / "state.json", key, state)
     finally:
+        completion_reader.close()
+        if completion_write is not None:
+            os.close(completion_write)
         if child is not None:
             with lock:
                 state["terminationConfirmed"] = terminate(child)
@@ -246,6 +305,11 @@ if __name__ == "__main__":
         if len(line) > 65536 or not line.endswith(b"\n"):
             raise RuntimeError("remoteSeatbeltRequestLimit")
         main(json.loads(line))
-    except Exception:
-        sys.stderr.write("remoteSeatbeltControllerFailed\n")
+    except Exception as error:
+        # Exception class is useful controller evidence; messages/tracebacks
+        # may include request values or secret material and are never emitted.
+        trace = error.__traceback__
+        while trace.tb_next is not None:
+            trace = trace.tb_next
+        sys.stderr.write(f"remoteSeatbeltControllerFailed:{type(error).__name__}:{trace.tb_frame.f_code.co_name}:{getattr(error, 'errno', None)}\n")
         sys.exit(125)

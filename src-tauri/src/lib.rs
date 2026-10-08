@@ -352,6 +352,7 @@ pub fn run() {
             agent_runtime::agent_runtime_create_session,
             agent_runtime::agent_runtime_probe_local_sandbox_backend,
             agent_runtime::agent_runtime_probe_native_sandbox,
+            agent_runtime::agent_runtime_reconcile_direct_resources,
             agent_runtime::agent_runtime_probe_remote_sandbox_backend,
             agent_runtime::agent_runtime_verify_remote_sandbox_target,
             agent_runtime::agent_runtime_cancel_remote_sandbox_probe,
@@ -571,9 +572,14 @@ pub fn run_native_agent_check(
     agent_runtime::native_agent_check::run(root, cancel, session_reads, network, cache_writes)
 }
 
-#[cfg(all(target_os="macos",debug_assertions))]
-pub fn run_native_remote_check(root: &std::path::Path) -> Result<(),String> {
+#[cfg(all(target_os = "macos", debug_assertions))]
+pub fn run_native_remote_check(root: &std::path::Path) -> Result<(), String> {
     agent_runtime::remote_native_check::run(root)
+}
+
+#[cfg(target_os = "macos")]
+pub fn run_local_resource_controller() -> Result<(), String> {
+    agent_runtime::run_local_resource_controller()
 }
 
 #[cfg(all(target_os = "macos", debug_assertions))]

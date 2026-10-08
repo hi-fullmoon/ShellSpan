@@ -578,13 +578,34 @@ struct ReadonlyModelCheckBackend {
 
 #[cfg(all(target_os = "macos", debug_assertions))]
 impl CredentialBackend for ReadonlyModelCheckBackend {
-    fn set_credential(&self, _: &str, _: &str, _: &str) -> Result<(), String> {
+    fn set_credential(&self, service: &str, key: &str, value: &str) -> Result<(), String> {
+        if service == "ShellSpan.AgentDirectCleanup.v1"
+            && key
+                .strip_prefix("job-")
+                .is_some_and(|id| uuid::Uuid::parse_str(id).is_ok())
+        {
+            return NativeKeychainBackend.set_credential(service, key, value);
+        }
         Err("Acceptance credentials are read-only".into())
     }
-    fn delete_credential(&self, _: &str, _: &str) -> Result<(), String> {
+    fn delete_credential(&self, service: &str, key: &str) -> Result<(), String> {
+        if service == "ShellSpan.AgentDirectCleanup.v1"
+            && key
+                .strip_prefix("job-")
+                .is_some_and(|id| uuid::Uuid::parse_str(id).is_ok())
+        {
+            return NativeKeychainBackend.delete_credential(service, key);
+        }
         Err("Acceptance credentials are read-only".into())
     }
     fn get_credential(&self, service: &str, key: &str) -> Result<Option<String>, String> {
+        if service == "ShellSpan.AgentDirectCleanup.v1"
+            && key
+                .strip_prefix("job-")
+                .is_some_and(|id| uuid::Uuid::parse_str(id).is_ok())
+        {
+            return NativeKeychainBackend.get_credential(service, key);
+        }
         if service != AI_KEY_SERVICE || self.reference.as_deref() != Some(key) {
             return Err("Acceptance credential reference is outside selected model".into());
         }

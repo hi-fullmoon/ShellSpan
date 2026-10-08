@@ -480,7 +480,9 @@ impl ScopedLoopbackConnection {
 
     #[cfg(test)]
     pub(crate) fn worker_finished(&self) -> bool {
-        self.worker.as_ref().is_some_and(thread::JoinHandle::is_finished)
+        self.worker
+            .as_ref()
+            .is_some_and(thread::JoinHandle::is_finished)
     }
 
     pub(crate) fn take_stream(&mut self) -> Result<TcpStream, String> {

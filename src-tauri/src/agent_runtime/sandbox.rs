@@ -118,9 +118,15 @@ pub(crate) fn sandbox_capability() -> AgentSandboxCapability {
 }
 
 pub(crate) fn sandbox_capability_for(header: &super::AgentSessionHeader) -> AgentSandboxCapability {
-    if header.sandbox_policy.is_some_and(|policy| policy != AgentSandboxPolicy::Host)
+    if header
+        .sandbox_policy
+        .is_some_and(|policy| policy != AgentSandboxPolicy::Host)
         && header.execution_surface == AgentExecutionSurface::Direct
-        && header.target.as_ref().is_some_and(|target| target.kind == "remote") {
+        && header
+            .target
+            .as_ref()
+            .is_some_and(|target| target.kind == "remote")
+    {
         return super::remote_seatbelt::capability(header).unwrap_or_else(sandbox_capability);
     }
     if header
@@ -252,7 +258,9 @@ impl AgentSandboxContract {
         };
         let deny = if policy != AgentSandboxPolicy::Host && target.kind == "remote" {
             super::remote_seatbelt::deny_for(target).unwrap_or_default()
-        } else { deny };
+        } else {
+            deny
+        };
         Ok(Self {
             version: 1,
             binding_revision: 0,
@@ -318,7 +326,13 @@ impl AgentSandboxContract {
                 grant.source == "native-approved-call"
                     && grant.call_id.is_some()
                     && match &grant.resource {
-                        AgentSandboxResource::ReadPath { path } => super::sandbox_authorization::project_read_requests(self,&[path.clone()]).is_ok(),
+                        AgentSandboxResource::ReadPath { path } => {
+                            super::sandbox_authorization::project_read_requests(
+                                self,
+                                &[path.clone()],
+                            )
+                            .is_ok()
+                        }
                         AgentSandboxResource::WritePath { path } => {
                             super::sandbox_authorization::cache_write_requests(
                                 self,

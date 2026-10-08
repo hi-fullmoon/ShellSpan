@@ -21,6 +21,16 @@ describe.each([['zh-CN', zhCN], ['en-US', enUS]] as const)('AI error messages in
     ['Tool not started: sandboxBackendUnavailable: restricted tools cannot dispatch', 'ai.error.sandboxBackendUnavailable'],
     ['sandboxAuthorizationInvalid: target changed', 'ai.error.sandboxAuthorizationInvalid'],
     ['sandboxAuthorizationInvalidAfterRestart: resource authorization expired', 'ai.error.sandboxAuthorizationInvalid'],
+    ['directCleanupUnconfirmed: restored Direct dispatch debt requires resource evidence; new dispatch is paused', 'ai.error.sandboxCleanupUnconfirmed'],
+    ['Error: directCleanupUnconfirmed', 'ai.error.sandboxCleanupUnconfirmed'],
+    ['Tool not started: directCleanupUnconfirmed: new dispatch is paused', 'ai.error.sandboxCleanupUnconfirmed'],
+    ['sandboxLocalCleanupUnconfirmed', 'ai.error.sandboxCleanupUnconfirmed'],
+    ['sandboxRemoteCleanupUnconfirmed', 'ai.error.sandboxCleanupUnconfirmed'],
+    ['directOwnershipUnavailable', 'ai.error.sandboxOwnershipUnavailable'],
+    ['directOwnershipInvalid', 'ai.error.sandboxOwnershipUnavailable'],
+    ['directOwnershipRootChanged', 'ai.error.sandboxOwnershipUnavailable'],
+    ['directOwnershipWriteFailed', 'ai.error.sandboxOwnershipUnavailable'],
+    ['directOwnershipDuplicate', 'ai.error.sandboxOwnershipUnavailable'],
     ['sandboxWorkspaceMissing: select a project directory', 'ai.error.sandboxWorkspaceInvalid'],
     ['sandboxWorkspaceInvalid: project directory is unavailable', 'ai.error.sandboxWorkspaceInvalid'],
     ['sandboxInheritanceDenied: child policy must match parent', 'ai.error.sandboxInheritanceDenied'],
@@ -36,7 +46,7 @@ describe.each([['zh-CN', zhCN], ['en-US', enUS]] as const)('AI error messages in
     expect(aiErrorMessage(message, key => messages[key])).toBe(messages[key]);
   });
 
-  it.each(['Unknown provider response', 'IMAGE_NEW_ERROR: diagnostics', 'INVALID_MODEL_SELECTION_OTHER: diagnostics', '请检查模型配置。'])('preserves unrecognized messages: %s', message => {
+  it.each(['Unknown provider response', 'IMAGE_NEW_ERROR: diagnostics', 'INVALID_MODEL_SELECTION_OTHER: diagnostics', 'directCleanupUnconfirmedOther: diagnostics', 'directOwnershipAvailable: diagnostics', '请检查模型配置。'])('preserves unrecognized messages: %s', message => {
     expect(aiErrorMessage(message, key => messages[key])).toBe(message);
   });
 });

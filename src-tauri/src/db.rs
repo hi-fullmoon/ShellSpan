@@ -1161,10 +1161,7 @@ impl Database {
     }
 
     pub(crate) fn profile_execution_revision(&self, id: &str) -> Result<String, String> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| "database lock unavailable")?;
+        let conn = self.conn.lock().map_err(|_| "database lock unavailable")?;
         conn.execute("INSERT OR IGNORE INTO profile_execution_revisions SELECT id, hex(randomblob(32)) FROM profiles WHERE id=?1", [id])
             .map_err(|_| "failed to read native profile execution revision")?;
         conn.query_row(

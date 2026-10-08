@@ -154,7 +154,7 @@ impl AgentEntry {
     }
 
     pub(crate) fn try_acquire_driver(&self) -> Result<bool, String> {
-        let _admission=self.shutdown_admission.enter()?;
+        let _admission = self.shutdown_admission.enter()?;
         if !self.admitting.load(Ordering::Acquire)
             || matches!(
                 self.phase()?,
@@ -165,7 +165,7 @@ impl AgentEntry {
         {
             return Ok(false);
         }
-        let acquired=self
+        let acquired = self
             .driver_active
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_ok();
@@ -237,8 +237,13 @@ pub(crate) struct AgentRegistry {
 }
 
 impl AgentRegistry {
-    pub(crate) fn with_shutdown_admission(shutdown_admission: super::shutdown_admission::ShutdownAdmission) -> Self {
-        Self {shutdown_admission,entries:Default::default()}
+    pub(crate) fn with_shutdown_admission(
+        shutdown_admission: super::shutdown_admission::ShutdownAdmission,
+    ) -> Self {
+        Self {
+            shutdown_admission,
+            entries: Default::default(),
+        }
     }
     pub(crate) fn set_owner(
         &self,
@@ -284,7 +289,7 @@ impl AgentRegistry {
         provider: AiProviderConfig,
         adapter: Arc<dyn ModelAdapter>,
     ) -> Result<AgentHandle, String> {
-        let _admission=self.shutdown_admission.enter()?;
+        let _admission = self.shutdown_admission.enter()?;
         let snapshot = sessions.snapshot(&session_id)?;
         if snapshot.ended {
             return Err("ended Agent session cannot attach an Agent".into());

@@ -132,16 +132,33 @@ pub(crate) fn open_ssh_execution_session_pinned(
 ) -> Result<SshExecutionSession, SshExecutionFailure> {
     validate_ssh_connection_fields(request)?;
     if request.jump_host.is_some() {
-        return Err(SshExecutionFailure {category:ExecutionErrorCategory::InvalidRequest,
-            message:"restricted SSH jump-host key binding is not verified".into()});
+        return Err(SshExecutionFailure {
+            category: ExecutionErrorCategory::InvalidRequest,
+            message: "restricted SSH jump-host key binding is not verified".into(),
+        });
     }
-    let tcp = connect_tcp_stream(&request.host, request.port).map_err(|message| SshExecutionFailure {
-        category:ExecutionErrorCategory::ConnectionFailed,message,
-    })?;
-    let target = crate::connection::open_authenticated_session_pinned(tcp, &request.username, request.auth_method,
-        request.password.as_deref(), request.private_key_data.as_deref(), request.passphrase.as_deref(),
-        &request.host, request.port, Some(known_hosts_path), Some(expected_host_key)).map_err(classify_connection_error)?;
-    Ok(SshExecutionSession {target,_jump:None})
+    let tcp =
+        connect_tcp_stream(&request.host, request.port).map_err(|message| SshExecutionFailure {
+            category: ExecutionErrorCategory::ConnectionFailed,
+            message,
+        })?;
+    let target = crate::connection::open_authenticated_session_pinned(
+        tcp,
+        &request.username,
+        request.auth_method,
+        request.password.as_deref(),
+        request.private_key_data.as_deref(),
+        request.passphrase.as_deref(),
+        &request.host,
+        request.port,
+        Some(known_hosts_path),
+        Some(expected_host_key),
+    )
+    .map_err(classify_connection_error)?;
+    Ok(SshExecutionSession {
+        target,
+        _jump: None,
+    })
 }
 
 fn validate_ssh_connection_fields(
@@ -247,7 +264,15 @@ pub(crate) fn execute_ssh_channel(
     cancellation: &CancellationHandle,
     deadline: Instant,
 ) -> SshChannelExecutionOutcome {
-    execute_ssh_channel_with_input(session, command, None, output_policy, known_secrets, cancellation, deadline)
+    execute_ssh_channel_with_input(
+        session,
+        command,
+        None,
+        output_policy,
+        known_secrets,
+        cancellation,
+        deadline,
+    )
 }
 
 /// Fixed-purpose control input is sent through the encrypted channel, never
@@ -296,20 +321,45 @@ pub(crate) fn execute_ssh_channel_with_input(
     if let Some(input) = input {
         let mut written = 0;
         while written < input.len() {
-            if let Some(outcome) = observed_terminal_or_deadline(cancellation, deadline) { return outcome; }
+            if let Some(outcome) = observed_terminal_or_deadline(cancellation, deadline) {
+                return outcome;
+            }
             match channel.write(&input[written..]) {
-                Ok(0) => return SshChannelExecutionOutcome::Failed(SshExecutionFailure {category:ExecutionErrorCategory::TransportFailed,message:"fixed SSH control input closed before delivery".into()}),
+                Ok(0) => {
+                    return SshChannelExecutionOutcome::Failed(SshExecutionFailure {
+                        category: ExecutionErrorCategory::TransportFailed,
+                        message: "fixed SSH control input closed before delivery".into(),
+                    })
+                }
                 Ok(n) => written += n,
-                Err(error) if matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::Interrupted) => std::thread::sleep(SSH_EXECUTION_POLL_INTERVAL),
-                Err(_) => return SshChannelExecutionOutcome::Failed(SshExecutionFailure {category:ExecutionErrorCategory::TransportFailed,message:"fixed SSH control input failed".into()}),
+                Err(error)
+                    if matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::Interrupted) =>
+                {
+                    std::thread::sleep(SSH_EXECUTION_POLL_INTERVAL)
+                }
+                Err(_) => {
+                    return SshChannelExecutionOutcome::Failed(SshExecutionFailure {
+                        category: ExecutionErrorCategory::TransportFailed,
+                        message: "fixed SSH control input failed".into(),
+                    })
+                }
             }
         }
         loop {
-            if let Some(outcome) = observed_terminal_or_deadline(cancellation, deadline) { return outcome; }
+            if let Some(outcome) = observed_terminal_or_deadline(cancellation, deadline) {
+                return outcome;
+            }
             match channel.send_eof() {
                 Ok(()) => break,
-                Err(error) if error.code() == ErrorCode::Session(LIBSSH2_ERROR_EAGAIN) => std::thread::sleep(SSH_EXECUTION_POLL_INTERVAL),
-                Err(_) => return SshChannelExecutionOutcome::Failed(SshExecutionFailure {category:ExecutionErrorCategory::TransportFailed,message:"fixed SSH control EOF failed".into()}),
+                Err(error) if error.code() == ErrorCode::Session(LIBSSH2_ERROR_EAGAIN) => {
+                    std::thread::sleep(SSH_EXECUTION_POLL_INTERVAL)
+                }
+                Err(_) => {
+                    return SshChannelExecutionOutcome::Failed(SshExecutionFailure {
+                        category: ExecutionErrorCategory::TransportFailed,
+                        message: "fixed SSH control EOF failed".into(),
+                    })
+                }
             }
         }
     }

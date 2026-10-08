@@ -40,3 +40,9 @@ export interface RemoteSandboxVerification {
   readonly sourceBindingDigest: string;
   readonly capability: import('@/types/agent-session').AgentSandboxCapability;
 }
+
+/** Cleanup reconciliation counts; this does not restore an execution grant. */
+export interface DirectResourceRecovery {
+  readonly resolved: number;
+  readonly uncertain: number;
+}

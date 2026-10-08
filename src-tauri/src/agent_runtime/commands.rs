@@ -19,13 +19,41 @@ pub(crate) const AGENT_RUNTIME_SESSION_EVENT: &str = "agent-runtime-session-even
 
 #[tauri::command]
 pub(crate) async fn agent_runtime_probe_native_sandbox(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
 ) -> Result<super::AgentSandboxCapability, String> {
-    tokio::task::spawn_blocking(|| {
-        super::verify_native_sandbox_backend();
-        super::native_sandbox_capability()
+    let runtime = runtime.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        let root = app
+            .path()
+            .app_data_dir()
+            .map_err(|_| "Native sandbox storage unavailable")?;
+        runtime.configure(root)?;
+        runtime.probe_native_sandbox()
     })
     .await
-    .map_err(|_| "Native sandbox preflight worker failed".into())
+    .map_err(|_| "Native sandbox preflight worker failed".to_string())?
+}
+
+/// User-triggered cleanup reconciliation; never issues an execution grant.
+#[tauri::command]
+pub(crate) async fn agent_runtime_reconcile_direct_resources(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+) -> Result<super::DirectResourceRecovery, String> {
+    let runtime = runtime.inner().clone();
+    let credentials = app.state::<CredentialManager>().inner().clone();
+    let known_hosts = crate::known_hosts::known_hosts_path(&app)?;
+    tokio::task::spawn_blocking(move || {
+        let root = app
+            .path()
+            .app_data_dir()
+            .map_err(|_| "directOwnershipUnavailable")?;
+        runtime.configure(root)?;
+        runtime.reconcile_direct_resources(&credentials, &known_hosts)
+    })
+    .await
+    .map_err(|_| "directOwnershipUnavailable".to_string())?
 }
 
 /// Read-only local infrastructure detection. Does not grant resources or start

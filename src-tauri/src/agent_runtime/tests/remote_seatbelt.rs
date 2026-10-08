@@ -481,7 +481,7 @@ fn remote_native_lower_layer_freezes_sftp_root_transports_stdin_denies_and_clean
     );
     process.write_stdin("early-input\n".into(), false).unwrap();
     let result = process.wait(Duration::from_secs(12)).unwrap();
-    assert_eq!(result.exit_code, Some(0));
+    assert_eq!(result.exit_code, Some(0), "{result:?}");
     assert_eq!(result.stdout, "early-input");
     assert!(result.termination_confirmed);
     let ssh = open_ssh_execution_session(&fixture.connection, &fixture.known_hosts).unwrap();
@@ -547,3 +547,7 @@ mod engine_tests;
 #[cfg(test)]
 #[path = "remote_seatbelt_pin.rs"]
 mod pin_tests;
+
+#[cfg(test)]
+#[path = "remote_seatbelt_recovery.rs"]
+mod recovery_tests;

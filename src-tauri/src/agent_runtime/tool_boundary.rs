@@ -12,9 +12,14 @@ pub(crate) fn require_native_tool_boundary(
     if contract.policy == AgentSandboxPolicy::Host {
         return Ok(());
     }
-    if contract.target.kind == "remote" && contract.execution_surface == AgentExecutionSurface::Direct
-        && matches!(name,"exec_command"|"write_stdin"|"wait_process"|"kill_process")
-        && super::remote_seatbelt::authorize(contract).is_ok() {
+    if contract.target.kind == "remote"
+        && contract.execution_surface == AgentExecutionSurface::Direct
+        && matches!(
+            name,
+            "exec_command" | "write_stdin" | "wait_process" | "kill_process"
+        )
+        && super::remote_seatbelt::authorize(contract).is_ok()
+    {
         return Ok(());
     }
     if contract.target.kind == "local"

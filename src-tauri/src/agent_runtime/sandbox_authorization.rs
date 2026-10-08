@@ -187,7 +187,10 @@ fn binding_digest(contract: &AgentSandboxContract) -> Result<String, String> {
 }
 
 impl SessionReadAuthorizations {
-    pub(crate) fn resources_for_task(&self, task: &str) -> Result<Vec<AgentSandboxResource>, String> {
+    pub(crate) fn resources_for_task(
+        &self,
+        task: &str,
+    ) -> Result<Vec<AgentSandboxResource>, String> {
         let records = self
             .0
             .lock()
@@ -395,8 +398,11 @@ impl SessionReadAuthorizations {
         Ok(())
     }
 
-    pub(crate) fn revoke_all(&self) -> Result<(),String> {
-        self.0.lock().map_err(|_| "Session resource authorization unavailable")?.clear();
+    pub(crate) fn revoke_all(&self) -> Result<(), String> {
+        self.0
+            .lock()
+            .map_err(|_| "Session resource authorization unavailable")?
+            .clear();
         Ok(())
     }
 }

@@ -17,7 +17,7 @@ type Body = Full<Bytes>;
 trait ProxyStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
 impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send> ProxyStream for T {}
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub(super) struct ServiceRoute {
     pub(super) port: u16,
     pub(super) socket: PathBuf,

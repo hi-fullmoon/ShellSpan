@@ -225,8 +225,8 @@ pub enum NetworkResolverNative {
     Cloudflare,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NetworkProxyAuditNative {
     pub client_bytes: u64,
     pub upstream_bytes: u64,

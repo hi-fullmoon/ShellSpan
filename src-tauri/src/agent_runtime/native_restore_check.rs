@@ -147,7 +147,11 @@ async fn check(app: &tauri::AppHandle, root: &Path, reopen: bool) -> Result<Valu
     app.manage(sessions.clone());
     app.manage(runtime.clone());
     runtime.configure_native(app.clone())?;
-    let preflight = super::super::commands::agent_runtime_probe_native_sandbox().await?;
+    let preflight = super::super::commands::agent_runtime_probe_native_sandbox(
+        app.clone(),
+        app.state::<AgentRuntime>(),
+    )
+    .await?;
     if preflight.status != AgentSandboxCapabilityStatus::Partial
         || !preflight.files
         || !preflight.network

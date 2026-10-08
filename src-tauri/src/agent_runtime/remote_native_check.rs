@@ -5,8 +5,13 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 use tauri::Manager;
 use tokio_util::sync::CancellationToken;
+#[path = "native_remote_recovery_check.rs"]
+mod recovery;
 
 pub(crate) fn run(root: &Path) -> Result<(), String> {
+    if let Ok(mode) = std::env::var("SHELLSPAN_NATIVE_REMOTE_LIFECYCLE_CHECK") {
+        return recovery::run(root, &mode);
+    }
     if !root.is_absolute()
         || !root.is_dir()
         || std::fs::read_dir(root)

@@ -16,9 +16,53 @@ pub(crate) fn verified() -> bool {
 }
 
 /// Called on the blocking execution path, never from snapshot rendering.
+#[cfg(test)]
 pub(crate) fn verify_backend() -> bool {
+    verify_backend_with_ownership(None)
+}
+
+pub(crate) fn verify_backend_owned(engine: &super::NativeToolEngine) -> bool {
+    verify_backend_with_ownership(Some(engine))
+}
+
+pub(super) fn verify_backend_for_controller() -> bool {
+    verify_backend_with_ownership(None)
+}
+
+fn verify_backend_with_ownership(engine: Option<&super::NativeToolEngine>) -> bool {
+    // Missing custody configuration is not a negative kernel probe result.
+    // Do not poison the process-wide kernel cache before native setup exists.
+    if VERIFIED.get().is_none()
+        && engine.is_some_and(|engine| engine.local_cleanup_credentials().ok().flatten().is_none())
+    {
+        return false;
+    }
     *VERIFIED.get_or_init(|| {
         let check = || -> Result<bool, String> {
+            let intent = engine
+                .map(|engine| {
+                    engine.begin_direct_ownership(
+                        "sandbox-preflight",
+                        "sandbox-preflight",
+                        "sandbox-preflight",
+                    )
+                })
+                .transpose()?
+                .flatten();
+            if let (Some(engine), Some(intent)) = (engine, intent.as_ref()) {
+                let credentials = engine
+                    .local_cleanup_credentials()?
+                    .ok_or("directOwnershipUnavailable")?;
+                let process = super::process::spawn_guarded_preflight(intent, &credentials)?;
+                let result = process.wait(Duration::from_secs(5))?;
+                let ready = result.exit_code == Some(0)
+                    && result.stdout == "native-ready"
+                    && result.termination_confirmed;
+                if result.termination_confirmed {
+                    intent.resolve()?;
+                }
+                return Ok(ready);
+            }
             let workspace = tempfile::tempdir().map_err(|_| "sandboxTempUnavailable")?;
             let target = serde_json::from_value(serde_json::json!({
                 "kind": "local", "targetId": "sandbox-preflight", "sessionId": "sandbox-preflight",
@@ -41,8 +85,28 @@ pub(crate) fn verify_backend() -> bool {
                 Some(temp),
                 Duration::from_secs(2),
             )?;
-            let result = process.wait(Duration::from_secs(3))?;
-            Ok(result.exit_code == Some(0) && result.stdout == "native-ready")
+            if let Some(intent) = intent {
+                process.bind_direct_intent(intent)?;
+            }
+            let result = match process.wait(Duration::from_secs(3)) {
+                Ok(result) => result,
+                Err(error) => {
+                    let _retained = workspace.keep();
+                    return Err(error);
+                }
+            };
+            let ready = result.exit_code == Some(0)
+                && result.stdout == "native-ready"
+                && result.termination_confirmed;
+            if result.termination_confirmed {
+                workspace
+                    .close()
+                    .map_err(|_| "sandboxLocalCleanupUnconfirmed")?;
+                process.resolve_direct_ownership()?;
+            } else {
+                let _retained = workspace.keep();
+            }
+            Ok(ready)
         };
         check().unwrap_or(false)
     })
@@ -610,6 +674,10 @@ mod tests {
     }
 
     fn contract(root: &Path, policy: AgentSandboxPolicy) -> AgentSandboxContract {
+        assert!(
+            verify_backend(),
+            "real kernel preflight must pass before constructing an executable test contract"
+        );
         let target: AgentSessionTarget = serde_json::from_value(serde_json::json!({
             "kind": "local", "targetId": "native-sandbox", "sessionId": "native-sandbox",
             "localRoot": root.to_str().unwrap(), "cwd": root.to_str().unwrap(),

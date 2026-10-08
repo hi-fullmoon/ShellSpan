@@ -38,6 +38,9 @@ fn resource_audit_records_actual_once_session_expiry_and_revocation_without_bear
     let sessions = SessionManager::default();
     let source = source(&sessions, "audit-source", workspace.path());
     let runtime = AgentRuntimeBuilder::new().build();
+    runtime
+        .configure_credentials(CredentialManager::isolated_native_for_tests())
+        .unwrap();
     runtime.configure(storage.path().to_path_buf()).unwrap();
     let snapshot = runtime.create_session(serde_json::from_value(json!({
         "sessionId":"resource-audit","taskId":"resource-audit","goal":"Write owned cache after explicit approval","target":{"kind":"local","targetId":"local","sessionId":"audit-source","cwd":workspace.path()},"sandboxPolicy":"workspace","executionSurface":"direct","permissionMode":"operator","successCriteria":["Actual cache file exists and audit contains scope and expiry"],
@@ -272,6 +275,9 @@ fn configured_cache_candidates_persist_as_header_data_without_live_authority() {
     let storage = tempfile::tempdir().unwrap();
     let cache = tempfile::tempdir().unwrap();
     let runtime = AgentRuntimeBuilder::new().build();
+    runtime
+        .configure_credentials(CredentialManager::isolated_native_for_tests())
+        .unwrap();
     runtime.configure(storage.path().to_path_buf()).unwrap();
     runtime.create_session(serde_json::from_value(json!({"sessionId":"cache-config","taskId":"cache-config","goal":"Keep explicit project configuration","target":{"kind":"local","targetId":"local","sessionId":"source","cwd":workspace.path()},"sandboxPolicy":"readOnly","executionSurface":"direct","permissionMode":"requestApproval","successCriteria":["Configuration is not authority"]})).unwrap()).unwrap();
     let paths = vec![cache

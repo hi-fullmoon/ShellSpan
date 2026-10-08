@@ -123,9 +123,14 @@ impl NativeCapabilityStoreNative {
         Ok(())
     }
 
-    pub(crate) fn revoke_all(&self) -> Result<(),CapabilityStoreErrorNative> {
-        let mut records=self.records.lock().map_err(|_| CapabilityStoreErrorNative::Unavailable)?;
-        for record in records.values_mut() {record.revoked=true;}
+    pub(crate) fn revoke_all(&self) -> Result<(), CapabilityStoreErrorNative> {
+        let mut records = self
+            .records
+            .lock()
+            .map_err(|_| CapabilityStoreErrorNative::Unavailable)?;
+        for record in records.values_mut() {
+            record.revoked = true;
+        }
         Ok(())
     }
     pub(crate) fn bind_sandbox(

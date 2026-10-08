@@ -85,17 +85,42 @@ impl NativeExecutionContext {
             contract.authorize_dispatch(&contract.target, current_unix_ms())?;
             if contract.policy != crate::agent_runtime::AgentSandboxPolicy::Host
                 && !self.request.targets.iter().any(|target| match target {
-                    AgentToolTargetNative::Local {target_id,session_id,cwd} => contract.target.kind == "local"
-                        && target_id == &contract.target.target_id && session_id == &contract.target.session_id && cwd == &contract.target.cwd,
-                    AgentToolTargetNative::Remote {target_id,session_id,profile_id,host,port,username,root_path,local_root} => contract.target.kind == "remote"
-                        && target_id == &contract.target.target_id && session_id == &contract.target.session_id
-                        && profile_id == &contract.target.profile_id && Some(host) == contract.target.host.as_ref()
-                        && Some(*port) == contract.target.port && Some(username) == contract.target.username.as_ref()
-                        && root_path == &contract.target.root_path && local_root == &contract.target.local_root,
+                    AgentToolTargetNative::Local {
+                        target_id,
+                        session_id,
+                        cwd,
+                    } => {
+                        contract.target.kind == "local"
+                            && target_id == &contract.target.target_id
+                            && session_id == &contract.target.session_id
+                            && cwd == &contract.target.cwd
+                    }
+                    AgentToolTargetNative::Remote {
+                        target_id,
+                        session_id,
+                        profile_id,
+                        host,
+                        port,
+                        username,
+                        root_path,
+                        local_root,
+                    } => {
+                        contract.target.kind == "remote"
+                            && target_id == &contract.target.target_id
+                            && session_id == &contract.target.session_id
+                            && profile_id == &contract.target.profile_id
+                            && Some(host) == contract.target.host.as_ref()
+                            && Some(*port) == contract.target.port
+                            && Some(username) == contract.target.username.as_ref()
+                            && root_path == &contract.target.root_path
+                            && local_root == &contract.target.local_root
+                    }
                     _ => false,
                 })
             {
-                return Err("sandboxAuthorizationInvalid: native target differs from frozen policy".into());
+                return Err(
+                    "sandboxAuthorizationInvalid: native target differs from frozen policy".into(),
+                );
             }
         }
         Ok(())
@@ -149,6 +174,8 @@ pub(crate) struct PreparedMcpAuthorizationNative {
 
 #[derive(Clone)]
 pub(crate) struct NativeToolEngine {
+    #[cfg(target_os = "macos")]
+    local_cleanup_credentials: Arc<Mutex<Option<CredentialManager>>>,
     shutdown_admission: crate::agent_runtime::shutdown_admission::ShutdownAdmission,
     session_reads: crate::agent_runtime::sandbox_authorization::SessionReadAuthorizations,
     registry: Arc<ToolRegistryNative>,
@@ -172,6 +199,8 @@ impl Default for NativeToolEngine {
         let terminal_interactive =
             TerminalInteractiveRegistry::new(terminal_leases.clone(), terminal_broker.clone());
         Self {
+            #[cfg(target_os = "macos")]
+            local_cleanup_credentials: Arc::new(Mutex::new(None)),
             shutdown_admission: Default::default(),
             session_reads: Default::default(),
             registry: Arc::new(
@@ -191,12 +220,68 @@ impl Default for NativeToolEngine {
 }
 
 impl NativeToolEngine {
-    pub(crate) fn begin_shutdown_admission(&self) -> bool { self.shutdown_admission.close() }
-    pub(crate) fn shared_shutdown_admission(&self) -> crate::agent_runtime::shutdown_admission::ShutdownAdmission { self.shutdown_admission.clone() }
-    pub(crate) fn ensure_shutdown_admission(&self) -> Result<(),String> { self.shutdown_admission.ensure_open() }
-    pub(crate) fn shutdown_admission(&self) -> crate::agent_runtime::shutdown_admission::ShutdownAdmission { self.shutdown_admission.clone() }
-    pub(crate) fn admit_operation(&self) -> Result<crate::agent_runtime::shutdown_admission::AdmissionLease,String> { self.shutdown_admission.enter() }
-    pub(crate) fn await_shutdown_dispatch(&self) -> Result<(),String> { self.shutdown_admission.await_drained(Duration::from_secs(5)) }
+    #[cfg(target_os = "macos")]
+    pub(crate) fn configure_local_cleanup_credentials(
+        &self,
+        credentials: CredentialManager,
+    ) -> Result<(), String> {
+        *self
+            .local_cleanup_credentials
+            .lock()
+            .map_err(|_| "directOwnershipUnavailable")? = Some(credentials);
+        Ok(())
+    }
+    #[cfg(target_os = "macos")]
+    pub(super) fn local_cleanup_credentials(&self) -> Result<Option<CredentialManager>, String> {
+        self.local_cleanup_credentials
+            .lock()
+            .map(|credentials| credentials.clone())
+            .map_err(|_| "directOwnershipUnavailable".into())
+    }
+    pub(crate) fn begin_shutdown_admission(&self) -> bool {
+        self.shutdown_admission.close()
+    }
+    pub(crate) fn shared_shutdown_admission(
+        &self,
+    ) -> crate::agent_runtime::shutdown_admission::ShutdownAdmission {
+        self.shutdown_admission.clone()
+    }
+    pub(crate) fn ensure_shutdown_admission(&self) -> Result<(), String> {
+        self.shutdown_admission.ensure_open()
+    }
+    pub(crate) fn shutdown_admission(
+        &self,
+    ) -> crate::agent_runtime::shutdown_admission::ShutdownAdmission {
+        self.shutdown_admission.clone()
+    }
+    pub(crate) fn admit_operation(
+        &self,
+    ) -> Result<crate::agent_runtime::shutdown_admission::AdmissionLease, String> {
+        self.processes.ensure_recovered()?;
+        self.shutdown_admission.enter()
+    }
+    pub(crate) fn configure_direct_ownership(&self, root: &Path) -> Result<(), String> {
+        self.processes.configure_ownership(root)
+    }
+    pub(crate) fn reconcile_direct_resources(
+        &self,
+        credentials: &CredentialManager,
+        known_hosts: &Path,
+    ) -> Result<super::DirectResourceRecovery, String> {
+        self.processes.ownership.reconcile(credentials, known_hosts)
+    }
+    pub(crate) fn begin_direct_ownership(
+        &self,
+        task: &str,
+        request: &str,
+        target: &str,
+    ) -> Result<Option<super::direct_ownership::DirectIntent>, String> {
+        self.processes.ownership.begin(task, request, target)
+    }
+    pub(crate) fn await_shutdown_dispatch(&self) -> Result<(), String> {
+        self.shutdown_admission
+            .await_drained(Duration::from_secs(5))
+    }
     #[cfg(debug_assertions)]
     pub(crate) fn acceptance_process(
         &self,
@@ -546,9 +631,15 @@ impl NativeToolEngine {
             context.sandbox_contract.as_ref(),
             &input.tool_name,
         )?;
-        let remote_backend_stamp = context.sandbox_contract.as_ref()
-            .filter(|contract| contract.target.kind == "remote" && contract.policy != crate::agent_runtime::AgentSandboxPolicy::Host)
-            .map(crate::agent_runtime::remote_seatbelt::stamp).transpose()?;
+        let remote_backend_stamp = context
+            .sandbox_contract
+            .as_ref()
+            .filter(|contract| {
+                contract.target.kind == "remote"
+                    && contract.policy != crate::agent_runtime::AgentSandboxPolicy::Host
+            })
+            .map(crate::agent_runtime::remote_seatbelt::stamp)
+            .transpose()?;
         if context.request.request_id != input.request_id
             || !context
                 .request
@@ -731,8 +822,18 @@ impl NativeToolEngine {
         use crate::agent_runtime::sandbox_authorization::ResourceAuthorizationScope;
         let _admission = self.admit_operation()?;
         if let Some(saved) = &prepared.remote_backend_stamp {
-            if crate::agent_runtime::remote_seatbelt::stamp(prepared.context.sandbox_contract.as_ref().ok_or("sandboxAuthorizationInvalid")?)? != *saved {
-                return Err("sandboxAuthorizationInvalid: remote verification changed after preparation".into());
+            if crate::agent_runtime::remote_seatbelt::stamp(
+                prepared
+                    .context
+                    .sandbox_contract
+                    .as_ref()
+                    .ok_or("sandboxAuthorizationInvalid")?,
+            )? != *saved
+            {
+                return Err(
+                    "sandboxAuthorizationInvalid: remote verification changed after preparation"
+                        .into(),
+                );
             }
         }
         if scope == ResourceAuthorizationScope::Session
@@ -878,7 +979,10 @@ impl NativeToolEngine {
             self.capabilities
                 .bind_sandbox(
                     &capability_id,
-                    crate::agent_runtime::remote_seatbelt::dispatch_digest(contract, prepared.remote_backend_stamp.as_deref())?,
+                    crate::agent_runtime::remote_seatbelt::dispatch_digest(
+                        contract,
+                        prepared.remote_backend_stamp.as_deref(),
+                    )?,
                 )
                 .map_err(|_| "Native sandbox capability binding failed")?;
         }
@@ -1109,8 +1213,24 @@ impl NativeToolEngine {
         cancellation: &CancellationToken,
     ) -> Result<AgentToolResultNative, String> {
         let _admission = if call.tool_name == "exec_command" {
-            self.ensure_shutdown_admission()?; None
-        } else { Some(self.admit_operation()?) };
+            self.ensure_shutdown_admission()?;
+            None
+        } else {
+            Some(self.admit_operation()?)
+        };
+        // Serialize capability verification through process registration with
+        // cancellation's resource snapshot. Never leave a verified launch
+        // outside the registry when cancellation returns.
+        let direct_dispatch = if call.tool_name == "exec_command" {
+            Some(
+                self.processes
+                    .dispatch
+                    .lock()
+                    .map_err(|_| "Direct dispatch is unavailable")?,
+            )
+        } else {
+            None
+        };
         context.validate()?;
         crate::agent_runtime::tool_boundary::require_native_tool_boundary(
             context.sandbox_contract.as_ref(),
@@ -1165,9 +1285,13 @@ impl NativeToolEngine {
             .sandbox_contract
             .as_ref()
             .map(|contract| {
-                let stamp = if contract.target.kind == "remote" && contract.policy != crate::agent_runtime::AgentSandboxPolicy::Host {
+                let stamp = if contract.target.kind == "remote"
+                    && contract.policy != crate::agent_runtime::AgentSandboxPolicy::Host
+                {
                     Some(crate::agent_runtime::remote_seatbelt::stamp(contract)?)
-                } else {None};
+                } else {
+                    None
+                };
                 crate::agent_runtime::remote_seatbelt::dispatch_digest(contract, stamp.as_deref())
             })
             .transpose()?;
@@ -1213,6 +1337,7 @@ impl NativeToolEngine {
                 tool.descriptor.default_timeout_ms,
                 tool.descriptor.max_concurrency,
                 reviewed_command.as_ref(),
+                direct_dispatch,
             ),
             "terminal_execute" => self.execute_terminal_command(
                 context,
@@ -1326,13 +1451,24 @@ impl NativeToolEngine {
     }
 
     pub(crate) fn revoke_task_authorizations(&self, task_id: &str) -> Result<(), String> {
-        let mut errors=Vec::new();
-        if let Err(error)=self.session_reads.revoke_task(task_id) { errors.push(error); }
-        if self.capabilities.revoke_task(task_id).is_err() { errors.push("Native task capability revocation failed".into()); }
-        if errors.is_empty() { Ok(()) } else { Err(errors.join("; ")) }
+        let mut errors = Vec::new();
+        if let Err(error) = self.session_reads.revoke_task(task_id) {
+            errors.push(error);
+        }
+        if self.capabilities.revoke_task(task_id).is_err() {
+            errors.push("Native task capability revocation failed".into());
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("; "))
+        }
     }
 
-    pub(crate) fn audit_resources_for_task(&self, task_id: &str) -> Result<Vec<crate::agent_runtime::AgentSandboxResource>, String> {
+    pub(crate) fn audit_resources_for_task(
+        &self,
+        task_id: &str,
+    ) -> Result<Vec<crate::agent_runtime::AgentSandboxResource>, String> {
         self.session_reads.resources_for_task(task_id)
     }
 
@@ -1342,7 +1478,9 @@ impl NativeToolEngine {
         sessions: &SessionManager,
     ) -> Result<(), String> {
         let mut errors = Vec::new();
-        if let Err(error)=self.revoke_task_authorizations(task_id) { errors.push(error); }
+        if let Err(error) = self.revoke_task_authorizations(task_id) {
+            errors.push(error);
+        }
         if let Err(error) = self.file_operations.cancel_task(task_id) {
             errors.push(error);
         }
@@ -1366,8 +1504,17 @@ impl NativeToolEngine {
         self.begin_shutdown_admission();
         let mut cancelled = 0;
         let mut errors = Vec::new();
-        if let Err(error)=self.capabilities.revoke_all() {errors.push(format!("Native shutdown capability revocation failed: {error:?}"));}
-        if let Err(error)=self.session_reads.revoke_all() {errors.push(error);}
+        if let Err(error) = self.processes.ensure_recovered() {
+            errors.push(error);
+        }
+        if let Err(error) = self.capabilities.revoke_all() {
+            errors.push(format!(
+                "Native shutdown capability revocation failed: {error:?}"
+            ));
+        }
+        if let Err(error) = self.session_reads.revoke_all() {
+            errors.push(error);
+        }
         match self.processes.owner_task_ids() {
             Ok(task_ids) => {
                 for task_id in task_ids {
@@ -1745,6 +1892,7 @@ impl NativeToolEngine {
         default_timeout_ms: u64,
         max_concurrency: u16,
         reviewed_command: Option<&super::ReviewedReadCommand>,
+        dispatch: Option<std::sync::MutexGuard<'_, ()>>,
     ) -> Result<AgentToolResultNative, String> {
         let arguments: ExecCommandArgumentsNative = serde_json::from_value(call.arguments.clone())
             .map_err(|error| format!("Invalid exec_command arguments: {error}"))?;
@@ -1769,18 +1917,60 @@ impl NativeToolEngine {
         } else {
             timeout
         };
+        let dispatch = match dispatch {
+            Some(dispatch) => dispatch,
+            None => self
+                .processes
+                .dispatch
+                .lock()
+                .map_err(|_| "Direct dispatch is unavailable")?,
+        };
         if self.processes.running_count()? >= max_concurrency as usize {
             return Err("exec_command native concurrency limit was reached".into());
         }
         self.processes.ensure_capacity()?;
         validate_frozen_cwd(&call.target, arguments.cwd.as_deref())?;
         let launch_admission = self.admit_operation()?;
+        let intent = self.processes.ownership.begin(
+            &context.request.task_id,
+            &context.request.request_id,
+            call.target.target_id(),
+        )?;
         let started = match &call.target {
             AgentToolTargetNative::Local { target_id, .. }
                 if context.sandbox_contract.as_ref().is_some_and(|contract| {
                     contract.policy != crate::agent_runtime::AgentSandboxPolicy::Host
                 }) =>
             {
+                #[cfg(target_os = "macos")]
+                if let Some(intent) = &intent {
+                    super::process::spawn_guarded_local_process(
+                        context.request.task_id.clone(),
+                        context.request.request_id.clone(),
+                        target_id.clone(),
+                        &arguments.command,
+                        context
+                            .sandbox_contract
+                            .as_ref()
+                            .expect("restricted contract"),
+                        timeout,
+                        intent,
+                        credentials,
+                    )
+                } else {
+                    super::spawn_sandboxed_local_process_native(
+                        context.request.task_id.clone(),
+                        context.request.request_id.clone(),
+                        target_id.clone(),
+                        &arguments.command,
+                        context
+                            .sandbox_contract
+                            .as_ref()
+                            .expect("restricted contract"),
+                        timeout,
+                    )
+                }
+                #[cfg(not(target_os = "macos"))]
                 super::spawn_sandboxed_local_process_native(
                     context.request.task_id.clone(),
                     context.request.request_id.clone(),
@@ -1812,10 +2002,25 @@ impl NativeToolEngine {
             ),
             AgentToolTargetNative::Remote { target_id, .. } => {
                 let connection = connection_for_remote_target(&call.target, database, credentials)?;
-                let remote_sandbox = context.sandbox_contract.as_ref()
-                    .filter(|contract| contract.policy != crate::agent_runtime::AgentSandboxPolicy::Host)
-                    .map(|contract| crate::agent_runtime::remote_seatbelt::RemoteSeatbeltJob::new(contract, &arguments.command, timeout, &connection, known_hosts_path))
+                let remote_sandbox = context
+                    .sandbox_contract
+                    .as_ref()
+                    .filter(|contract| {
+                        contract.policy != crate::agent_runtime::AgentSandboxPolicy::Host
+                    })
+                    .map(|contract| {
+                        crate::agent_runtime::remote_seatbelt::RemoteSeatbeltJob::new(
+                            contract,
+                            &arguments.command,
+                            timeout,
+                            &connection,
+                            known_hosts_path,
+                        )
+                    })
                     .transpose()?;
+                if let (Some(intent), Some(job)) = (&intent, &remote_sandbox) {
+                    intent.protect_remote(job, credentials)?;
+                }
                 spawn_remote_process_native(RemoteProcessStartNative {
                     remote_sandbox,
                     admission: Some(self.shutdown_admission.clone()),
@@ -1833,6 +2038,11 @@ impl NativeToolEngine {
         let process = match started {
             Ok(process) => process,
             Err(error) => {
+                if error.starts_with("sandbox") {
+                    if let Some(intent) = &intent {
+                        intent.resolve()?;
+                    }
+                }
                 let admission = if error.starts_with("sandbox") {
                     crate::agent_runtime::AgentExecutionAdmission::NotStarted
                 } else {
@@ -1864,7 +2074,17 @@ impl NativeToolEngine {
                 return Ok(result);
             }
         };
-        self.processes.insert(Arc::clone(&process))?;
+        if let Some(intent) = intent {
+            process.bind_direct_intent(intent)?;
+        }
+        if let Err(error) = self.processes.insert(Arc::clone(&process)) {
+            let _ = process.kill(
+                crate::agent_runtime::ProcessSignalNative::Kill,
+                Duration::from_secs(8),
+            );
+            return Err(error);
+        }
+        drop(dispatch);
         drop(launch_admission);
         let background = arguments.background.unwrap_or(false);
         let snapshot = if background {
@@ -1891,9 +2111,20 @@ impl NativeToolEngine {
                     data.insert("sandboxContract".into(), json!(contract));
                     data.insert(
                         "sandboxCapability".into(),
-                        json!(if contract.target.kind == "remote" {crate::agent_runtime::remote_seatbelt::partial_capability()} else {crate::agent_runtime::native_sandbox_capability()}),
+                        json!(if contract.target.kind == "remote" {
+                            crate::agent_runtime::remote_seatbelt::partial_capability()
+                        } else {
+                            crate::agent_runtime::native_sandbox_capability()
+                        }),
                     );
-                    data.insert("sandboxBackend".into(), json!(if contract.target.kind == "remote" {"remote-macos-seatbelt"} else {"macos-seatbelt"}));
+                    data.insert(
+                        "sandboxBackend".into(),
+                        json!(if contract.target.kind == "remote" {
+                            "remote-macos-seatbelt"
+                        } else {
+                            "macos-seatbelt"
+                        }),
+                    );
                 }
             }
         }
@@ -2248,7 +2479,7 @@ impl NativeToolEngine {
         let (stderr, stderr_cut) = truncate_utf8(&snapshot.stderr, limit / 4);
         let truncated =
             snapshot.stdout_truncated || snapshot.stderr_truncated || stdout_cut || stderr_cut;
-        Ok(completed_result(
+        let mut result = completed_result(
             &context.request,
             call,
             effect,
@@ -2268,7 +2499,11 @@ impl NativeToolEngine {
                 "failure": snapshot.failure,
             }),
             truncated,
-        ))
+        );
+        if snapshot.state.is_terminal() && !snapshot.termination_confirmed {
+            result.status = AgentToolResultStatusNative::Uncertain;
+        }
+        Ok(result)
     }
 
     fn kill_process(
@@ -2569,7 +2804,9 @@ fn exec_process_result(
     snapshot: ProcessSnapshotNative,
     background: bool,
 ) -> AgentToolResultNative {
-    let status = if background && snapshot.state == ProcessLifecycleNative::Running {
+    let status = if snapshot.state.is_terminal() && !snapshot.termination_confirmed {
+        AgentToolResultStatusNative::Uncertain
+    } else if background && snapshot.state == ProcessLifecycleNative::Running {
         AgentToolResultStatusNative::Completed
     } else {
         match snapshot.state {
@@ -2687,6 +2924,8 @@ mod tests {
         let terminal_interactive =
             TerminalInteractiveRegistry::new(terminal_leases.clone(), terminal_broker.clone());
         NativeToolEngine {
+            #[cfg(target_os = "macos")]
+            local_cleanup_credentials: Arc::new(Mutex::new(None)),
             shutdown_admission: Default::default(),
             session_reads: Default::default(),
             registry: Arc::new(
@@ -2991,6 +3230,7 @@ mod tests {
                 &directory.path().join("known_hosts"),
                 5_000,
                 1,
+                None,
                 None,
             )
             .unwrap();
