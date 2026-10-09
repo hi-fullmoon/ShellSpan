@@ -6,6 +6,40 @@ use tauri::{Manager, State};
 
 struct VerificationReviewRoot(std::path::PathBuf);
 struct RemoteReviewSource(AgentSessionTarget);
+struct NativeReviewProject(std::path::PathBuf);
+
+#[tauri::command]
+async fn sandbox_settings_review_native_result(
+    app: tauri::AppHandle,
+    root: State<'_, VerificationReviewRoot>,
+    project: State<'_, NativeReviewProject>,
+    checks: std::collections::BTreeMap<String, bool>,
+    diagnostic: Option<String>,
+) -> Result<(), String> {
+    let root = root.0.clone();
+    let project = project.0.clone();
+    let fleet = std::env::var("SHELLSPAN_SANDBOX_FLEET_NATIVE").as_deref() == Ok("1");
+    let passed = tokio::task::spawn_blocking(move || {
+        let (marker, value, report, expected, scope): (_, _, _, &[&str], _) = if fleet {
+            ("fleet-stage2-marker", "fleet-stage2", "fleet-native-review.json",
+             &["parentGenerated", "fleetStarted", "childrenInherited", "operatorNativeResult", "fleetCompleted", "approvalsExact", "modelToolsBounded"],
+             "actual public IPC fleet Operator command and owned marker; no active fleet cancellation claim")
+        } else {
+            ("child-stage2-marker", "child-stage2", "child-native-review.json",
+             &["parentGenerated", "childInherited", "exactApproval", "nativeResult", "modelToolsBounded"],
+             "actual public IPC child command and owned marker; no fleet native claim")
+        };
+        let effect = std::fs::read_to_string(project.join(marker)).is_ok_and(|content| content == value);
+        let passed = checks.len() == expected.len() && expected.iter().all(|name| checks.get(*name) == Some(&true)) && effect;
+        std::fs::write(root.join(report), serde_json::to_vec_pretty(&serde_json::json!({
+            "passed":passed,"checks":checks,"markerMatches":effect,"scope":scope,
+            "diagnostic":diagnostic.map(|value| crate::redaction::redact_sensitive_text(&value).chars().take(1024).collect::<String>())
+        })).map_err(|_| "Native review encoding failed")?).map_err(|_| "Native review write failed")?;
+        Ok::<_, String>(passed)
+    }).await.map_err(|_| "Native review worker failed")??;
+    app.exit(if passed { 0 } else { 1 });
+    Ok(())
+}
 
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -105,6 +139,78 @@ fn sandbox_settings_review_source(
     )
 }
 
+fn selected_review_route() -> Result<
+    (
+        crate::llm::routes::ProviderRoute,
+        crate::llm::routes::RouteSnapshot,
+    ),
+    String,
+> {
+    use crate::llm::routes::{RouteSnapshot, ROUTES_KEY};
+    let home = std::env::home_dir().ok_or("Model review home unavailable")?;
+    let source = rusqlite::Connection::open_with_flags(
+        home.join(".shellspan-dev/shellspan-v1.db"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .map_err(|_| "Model review default route database unavailable")?;
+    let document: String = source
+        .query_row(
+            "SELECT value FROM preferences WHERE key=?1",
+            [ROUTES_KEY],
+            |row| row.get(0),
+        )
+        .map_err(|_| "Model review default route unavailable")?;
+    let mut snapshot: RouteSnapshot =
+        serde_json::from_str(&document).map_err(|_| "Model review route schema invalid")?;
+    let selection = snapshot
+        .default_selection
+        .as_ref()
+        .ok_or("Model review default selection missing")?
+        .clone();
+    if selection.model_id != "MiniMax-M3" {
+        return Err("Model review requires the existing selected MiniMax-M3".into());
+    }
+    let route = snapshot.route(&selection.route_id)?.clone();
+    snapshot.routes = vec![route.clone()];
+    Ok((route, snapshot))
+}
+
+fn install_review_journal(root: &Path) -> Result<(), String> {
+    let Some(path) = std::env::var_os("SHELLSPAN_SANDBOX_REVIEW_REPLAY_JOURNAL") else {
+        return Ok(());
+    };
+    let source = std::path::PathBuf::from(path)
+        .canonicalize()
+        .map_err(|_| "Owned review journal unavailable")?;
+    let allowed = std::env::current_dir()
+        .map_err(|_| "Review checkout unavailable")?
+        .join(".phase4-acceptance")
+        .canonicalize()
+        .map_err(|_| "Review evidence root unavailable")?;
+    if !source.starts_with(allowed)
+        || source.extension().and_then(|value| value.to_str()) != Some("jsonl")
+        || !source.is_file()
+        || std::fs::metadata(&source)
+            .map_err(|_| "Review journal metadata unavailable")?
+            .len()
+            > 16 * 1024 * 1024
+    {
+        return Err("Replay requires an exact bounded owned acceptance journal".into());
+    }
+    let directory = root.join("agent-runtime/sessions-v5");
+    std::fs::create_dir_all(&directory).map_err(|_| "Review replay directory unavailable")?;
+    std::fs::copy(
+        &source,
+        directory.join(
+            source
+                .file_name()
+                .ok_or("Review journal name unavailable")?,
+        ),
+    )
+    .map_err(|_| "Review journal copy failed")?;
+    Ok(())
+}
+
 fn initialize_local(app: &tauri::AppHandle, root: &Path) -> Result<ReviewFixture, String> {
     let workspace = tempfile::tempdir().map_err(|_| "Root review workspace unavailable")?;
     let canonical = workspace
@@ -113,33 +219,7 @@ fn initialize_local(app: &tauri::AppHandle, root: &Path) -> Result<ReviewFixture
         .map_err(|_| "Root review workspace metadata unavailable")?;
     let database = crate::db::Database::open(&root.join("review.db"))?;
     let live_route = if std::env::var("SHELLSPAN_SANDBOX_WORKBENCH_MODEL").as_deref() == Ok("1") {
-        use crate::llm::routes::{RouteSnapshot, ROUTES_KEY};
-        let home = std::env::home_dir().ok_or("Model review home unavailable")?;
-        let source = rusqlite::Connection::open_with_flags(
-            home.join(".shellspan-dev/shellspan-v1.db"),
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-        )
-        .map_err(|_| "Model review default route database unavailable")?;
-        let document: String = source
-            .query_row(
-                "SELECT value FROM preferences WHERE key=?1",
-                [ROUTES_KEY],
-                |row| row.get(0),
-            )
-            .map_err(|_| "Model review default route unavailable")?;
-        let mut snapshot: RouteSnapshot =
-            serde_json::from_str(&document).map_err(|_| "Model review route schema invalid")?;
-        let selection = snapshot
-            .default_selection
-            .as_ref()
-            .ok_or("Model review default selection missing")?
-            .clone();
-        if selection.model_id != "MiniMax-M3" {
-            return Err("Model review requires the existing selected MiniMax-M3".into());
-        }
-        let route = snapshot.route(&selection.route_id)?.clone();
-        snapshot.routes = vec![route.clone()];
-        Some((route, snapshot))
+        Some(selected_review_route()?)
     } else {
         None
     };
@@ -267,6 +347,7 @@ pub(crate) fn run(root: &Path, root_entry: bool) -> Result<(), String> {
             sandbox_settings_review_source,
             sandbox_settings_review_verification_result,
             sandbox_settings_review_orchestration_result,
+            sandbox_settings_review_native_result,
             crate::commands::load_preferences,
             crate::commands::save_preferences,
             crate::commands::list_local_directory,
@@ -319,15 +400,22 @@ pub(crate) fn run(root: &Path, root_entry: bool) -> Result<(), String> {
                 let owned=if root_entry && !remote_root_entry {initialize_local(&handle,&saved)?} else {
                     let app_root=handle.path().app_data_dir().map_err(|_| "Settings fixture root unavailable")?;
                     if !crate::known_hosts::known_hosts_path(&handle)?.starts_with(&app_root) {return Err("Settings fixture requires isolated known-hosts".into());}
-                    let owned=super::remote_seatbelt::tests::Fixture::new();owned.install(&handle)?;
+                    let live_route=if remote_root_entry && model_enabled {Some(selected_review_route()?)} else {None};
+                    let owned=super::remote_seatbelt::tests::Fixture::new();
+                    if let Some((route,_))=&live_route {
+                        let reference=match &route.auth {crate::llm::routes::RouteAuth::Keychain {reference}=>Some(reference.clone()),crate::llm::routes::RouteAuth::None=>None};
+                        owned.install_with_model(&handle,reference)?;
+                    } else {owned.install(&handle)?;}
                     if remote_root_entry {
                         let target=owned.target();
-                        std::fs::write(saved.join("root-review-intent.json"),serde_json::to_vec_pretty(&serde_json::json!({"projectRoot":target.root_path,"scope":"actual owned remote PTY and full production controller; no model route"})).map_err(|_|"Remote root report encoding failed")?).map_err(|_|"Remote root report write failed")?;
+                        std::fs::write(saved.join("root-review-intent.json"),serde_json::to_vec_pretty(&serde_json::json!({"projectRoot":target.root_path,"liveModel":model_enabled,"scope":"actual owned remote PTY and full production controller; model enabled only by explicit mode"})).map_err(|_|"Remote root report encoding failed")?).map_err(|_|"Remote root report write failed")?;
                         handle.manage(RemoteReviewSource(target));
                     }
+                    if let Some((_,snapshot))=live_route {handle.state::<crate::db::Database>().save_preferences(&[(crate::llm::routes::ROUTES_KEY.into(),serde_json::to_string(&snapshot).map_err(|_|"Remote review route snapshot encoding failed")?)])?;}
                     let routes=crate::llm::routes::RouteStore::open(handle.state::<crate::db::Database>().inner().clone(),handle.state::<crate::keychain::CredentialManager>().inner().clone())?;
                     handle.manage(crate::llm::runtime::LlmRuntime {routes});ReviewFixture::Remote(owned)
                 };
+                if root_entry && !remote_root_entry {install_review_journal(&saved)?;}
                 let runtime=AgentRuntimeBuilder::new().build();runtime.configure(handle.path().app_data_dir().map_err(|_| "Settings review app directory unavailable")?)?;
                 handle.manage(runtime.clone());runtime.configure_native(handle.clone())?;
                 if !root_entry {
@@ -338,11 +426,12 @@ pub(crate) fn run(root: &Path, root_entry: bool) -> Result<(), String> {
                 let orchestration=std::env::var("SHELLSPAN_SANDBOX_WORKBENCH_ORCHESTRATION").as_deref()==Ok("1");
                 if orchestration {
                     let project=match &owned {ReviewFixture::Local {_workspace,..} if model_enabled => _workspace.path().canonicalize().map_err(|_|"Orchestration project unavailable")?,_=>return Err("Orchestration review requires the owned local real-model fixture".into())};
+                    handle.manage(NativeReviewProject(project.clone()));
                     runtime.create_session(serde_json::from_value(serde_json::json!({"sessionId":"orchestration-parent","taskId":"orchestration-parent","goal":"Actual scoped public IPC acceptance without tool side effects","target":{"kind":"local","targetId":"terminal-acceptance-source","sessionId":"acceptance-source","cwd":project},"sandboxPolicy":"workspace","executionSurface":"direct","permissionMode":"requestApproval","capabilityScope":{"toolNames":["run_terminal_command","write_process_input","wait_process","kill_process","probe_http"],"effects":["none","readOnly","stateChange"],"targetIds":["terminal-acceptance-source"]},"successCriteria":["Scoped model-only child and fleet preserve permissions and binding"]})).map_err(|_|"Orchestration parent schema invalid")?)?;
                     runtime.create_session(serde_json::from_value(serde_json::json!({"sessionId":"orchestration-terminal-parent","taskId":"orchestration-terminal-parent","goal":"Actual terminal-default parent scope, with sandbox and approval unchanged","target":{"kind":"local","targetId":"terminal-acceptance-source","sessionId":"acceptance-source","cwd":project},"sandboxPolicy":"workspace","executionSurface":"direct","permissionMode":"requestApproval","successCriteria":["Effective child model tools remain within the parent's sandbox tool surface"]})).map_err(|_|"Terminal-default parent schema invalid")?)?;
                 }
                 *retained.lock().map_err(|_| "Settings review fixture unavailable")?=Some(owned);
-                let url=if orchestration {"src/components/ai/__tests__/sandbox-orchestration-native.html"} else if root_entry {"src/components/ai/__tests__/sandbox-settings-native.html?root-entry=1"} else if std::env::var("SHELLSPAN_SANDBOX_VERIFICATION_REGRESSION").as_deref()==Ok("1") {"src/components/ai/__tests__/remote-verification-native.html?session=remote-settings"} else {"src/components/ai/__tests__/sandbox-settings-native.html?session=remote-settings"};
+                let url=if orchestration && std::env::var("SHELLSPAN_SANDBOX_FLEET_NATIVE").as_deref()==Ok("1") {"src/components/ai/__tests__/sandbox-fleet-native.html"} else if orchestration && std::env::var("SHELLSPAN_SANDBOX_CHILD_NATIVE").as_deref()==Ok("1") {"src/components/ai/__tests__/sandbox-child-native.html"} else if orchestration {"src/components/ai/__tests__/sandbox-orchestration-native.html"} else if root_entry {"src/components/ai/__tests__/sandbox-settings-native.html?root-entry=1"} else if std::env::var("SHELLSPAN_SANDBOX_VERIFICATION_REGRESSION").as_deref()==Ok("1") {"src/components/ai/__tests__/remote-verification-native.html?session=remote-settings"} else {"src/components/ai/__tests__/sandbox-settings-native.html?session=remote-settings"};
                 tauri::WebviewWindowBuilder::new(&handle,"main",tauri::WebviewUrl::App(url.into())).title(if orchestration {"ShellSpan public IPC acceptance"} else {"ShellSpan isolated sandbox settings review"}).focused(!orchestration).inner_size(620.0,680.0).build().map_err(|_| "Settings review window unavailable")?;
                 Ok(())
             })();

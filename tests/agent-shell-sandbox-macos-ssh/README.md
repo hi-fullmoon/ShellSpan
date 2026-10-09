@@ -20,6 +20,16 @@ python3 tests/agent-shell-sandbox-macos-ssh/verify_stage2.py --output .phase4-ac
 
 ## 阶段 1 原有入口
 
+`verify_stage2_public_ipc.py --child-native --output <新的忽略目录>` 使用真实 Operator 子模型、继承范围、精确自有 marker 命令审批和原生结果。只批准与预期命令及目录完全一致、无额外资源扩展的调用，偏离即拒绝；不代表 fleet 原生工具已经通过。
+
+`launch_remote_workbench.py --local` 提供独立本地工作台及新建的精确普通读取文件，文件保留并在 launch.json 中记录，不从旧路径推断清理权限。`inspect_local_resources.py` 从实际 journal 导出 once/session、reused、撤销和原生 stdout 匹配事实，不导出 grant 或 bearer。
+
+`recorded-sandbox-approval.test.tsx` 必须提供真实 Wry／模型／审计失败 fixture：设置 `SHELLSPAN_STAGE2_APPROVAL_FIXTURE=<该验收目录>` 后执行对应 Vitest。缺少记录时明确 skipped，不构造替代事件、快照或 mock IPC。`--local --replay-journal <精确自有 jsonl>` 在空目录门禁核对后只重读原始历史，原日志不改写、不复制凭据／live grant／资源归属，用于实际 Wry 的旧审批和恢复显示验收。
+
+远端实际模型窗口可使用 `launch_remote_workbench.py --output <新的忽略目录>` 启动独立 App bundle，避免选择用户正在使用的窗口。入口仅提供真实 fixture，不自动选择策略或批准命令。`inspect_remote_workbench.py --output <本次目录>` 只读实际 journal、精确 marker 和债务数据库，导出白名单事实；marker 为同主机 OS 观察，不冒充 SFTP 验收。窗口退出、源码哈希与模型请求分别记录，整阶段保持 pending。
+
+`inspect_stage2_timeout.py` 仅核对原 r2 超时报告所记录的精确目录和数据库。没有原 PTY handle／可信退出回执时保留 terminationConfirmed=false；cwd 查询为空和 debt=0 均不证明资源已清理，不按历史 PID／名称补认领。
+
 ```bash
 python3 tests/agent-shell-sandbox-macos-ssh/verify_stage1.py --output .phase4-acceptance/stage1-new-run
 ```

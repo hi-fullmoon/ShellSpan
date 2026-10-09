@@ -294,10 +294,13 @@ function flattenChatNodes(nodes: readonly AiConversationNode[]): readonly AiConv
   return readable;
 }
 
-function pendingApproval(nodes: readonly AiConversationNode[], capability?: import('@/types/agent-session').AgentSandboxCapability): AiPendingApproval | null {
+export function pendingApproval(nodes: readonly AiConversationNode[], capability?: import('@/types/agent-session').AgentSandboxCapability): AiPendingApproval | null {
+  const closedTurns = new Set(nodes.flatMap(node => node.kind === 'turnProcess'
+    && node.hasEndBoundary && node.turnId !== null ? [node.turnId] : []));
   const readable = flattenChatNodes(nodes);
   const node = readable.find((candidate) => (
     candidate.kind === 'approvalMarker' && candidate.status === 'requested'
+    && candidate.turnId !== null && !closedTurns.has(candidate.turnId)
   ));
   if (node?.kind !== 'approvalMarker' || node.turnId === null || node.stepId === null) return null;
   const tool = findConversationTool(nodes, node);
@@ -802,6 +805,17 @@ export function createAgentSessionAdapter(
       if (retainedImages) requireVision(input.provider);
       if (hasImages || (!paused && (input.mode === 'start' || view.status === 'idle' || retainedImages))) {
         await dependencies.start({ sessionId: resolvedSessionId, selection: { routeId: input.provider.id, modelId: input.provider.model, reasoningEffort: input.provider.reasoningEffort } });
+        // Remote capability is verified during start, after the initial creation snapshot.
+        // Reload the authoritative snapshot before publishing approvals or new input.
+        if (view.snapshot.value.header.target?.kind === 'remote'
+          && view.snapshot.value.header.sandboxPolicy !== undefined
+          && view.snapshot.value.header.sandboxPolicy !== 'host') {
+          const entry = ensureEntry(resolvedSessionId);
+          const state = await entry.client.reconnect();
+          view = entry.project(state);
+          entry.view = view;
+          for (const listener of entry.listeners) listener(view);
+        }
       }
       const message = {
         sessionId: resolvedSessionId,
@@ -873,6 +887,14 @@ export function createAgentSessionAdapter(
         const selection = view.snapshot.value.header.modelSelection;
         if (!selection) throw new Error('Select a model before resuming queued input');
         await dependencies.start({ sessionId, selection });
+        if (view.snapshot.value.header.target?.kind === 'remote'
+          && view.snapshot.value.header.sandboxPolicy !== undefined
+          && view.snapshot.value.header.sandboxPolicy !== 'host') {
+          const entry = ensureEntry(sessionId);
+          const state = await entry.client.reconnect();
+          entry.view = entry.project(state);
+          for (const listener of entry.listeners) listener(entry.view);
+        }
       }
       const revision = type === 'resume' ? ensureEntry(sessionId).view?.revision ?? expectedRevision : expectedRevision;
       await waitForCommittedOperation(sessionId, clientOperationId, () => dependencies.mutateInbox({

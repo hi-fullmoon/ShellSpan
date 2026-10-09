@@ -43,3 +43,51 @@ fn readonly_model_acceptance_refuses_other_references_before_accessing_user_vaul
         .delete_credential(AI_KEY_SERVICE, &reference)
         .is_err());
 }
+
+#[test]
+fn model_and_fixture_acceptance_reads_only_its_new_ssh_key_without_write_authority() {
+    let key_id = uuid::Uuid::new_v4().to_string();
+    let secret = uuid::Uuid::new_v4().to_string();
+    let native = CredentialManager::isolated_native_for_checks();
+    native.store_key_credential(&key_id, &secret).unwrap();
+    let profile_id = uuid::Uuid::new_v4().to_string();
+    let passphrase = uuid::Uuid::new_v4().to_string();
+    let stored_passphrase =
+        native.store_profile_secret(&profile_id, ProfileSecretKind::Passphrase, &passphrase);
+    let restricted = CredentialManager::readonly_model_check_with_fixture_key(
+        None,
+        key_id.clone(),
+        profile_id.clone(),
+    );
+    let found_passphrase =
+        restricted.retrieve_profile_secret(&profile_id, ProfileSecretKind::Passphrase);
+    let other_passphrase = restricted.retrieve_profile_secret(
+        &uuid::Uuid::new_v4().to_string(),
+        ProfileSecretKind::Passphrase,
+    );
+    let other_kind =
+        restricted.retrieve_profile_secret(&profile_id, ProfileSecretKind::JumpPassphrase);
+    let denied_passphrase_write =
+        restricted.store_profile_secret(&profile_id, ProfileSecretKind::Passphrase, "forbidden");
+    let denied_passphrase_delete =
+        restricted.delete_profile_secret(&profile_id, ProfileSecretKind::Passphrase);
+    let found = restricted.retrieve_key_credential(&key_id);
+    let other = restricted.retrieve_key_credential(&uuid::Uuid::new_v4().to_string());
+    let denied_write = restricted.store_key_credential(&key_id, "forbidden");
+    let denied_delete = restricted.delete_key_credential(&key_id);
+    let removed = native.delete_key_credential(&key_id);
+    let removed_passphrase =
+        native.delete_profile_secret(&profile_id, ProfileSecretKind::Passphrase);
+    assert!(removed.is_ok(), "owned SSH fixture key cleanup failed");
+    assert!(
+        removed_passphrase.is_ok(),
+        "owned fixture passphrase cleanup failed"
+    );
+    assert!(stored_passphrase.is_ok());
+    assert!(found_passphrase.ok().flatten().as_deref() == Some(passphrase.as_str()));
+    assert!(other_passphrase.is_err() && other_kind.is_err());
+    assert!(denied_passphrase_write.is_err() && denied_passphrase_delete.is_err());
+    assert!(found.ok().flatten().as_deref() == Some(secret.as_str()));
+    assert!(other.is_err());
+    assert!(denied_write.is_err() && denied_delete.is_err());
+}

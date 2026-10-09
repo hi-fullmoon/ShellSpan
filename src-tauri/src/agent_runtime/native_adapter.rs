@@ -584,7 +584,8 @@ impl NativeToolRuntime for NativeToolAdapter {
                     .filter(|contract| !contract.resource_grants.is_empty())
                 {
                     let audit_result = (|| {
-                        let session_expiry = if !approved
+                        let resource_approved = approved && prepared.requires_resource_confirmation;
+                        let session_expiry = if !resource_approved
                             || scope
                                 == super::sandbox_authorization::ResourceAuthorizationScope::Session
                         {
@@ -605,7 +606,7 @@ impl NativeToolRuntime for NativeToolAdapter {
                             &stored.public_call_id,
                             contract,
                             scope,
-                            approved,
+                            resource_approved,
                             session_expiry,
                         )
                     })();

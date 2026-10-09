@@ -372,7 +372,7 @@ export function AiApprovalPanel({
         </Button>
       </CardFooter>
       <span className="sr-only" aria-live="polite">
-        {pending ? t('ai.workspace.approval.pending') : error}
+        {pending ? t('ai.workspace.approval.pending') : null}
       </span>
     </Card>
   );

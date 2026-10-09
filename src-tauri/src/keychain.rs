@@ -407,7 +407,28 @@ impl CredentialManager {
     #[cfg(all(target_os = "macos", debug_assertions))]
     pub(crate) fn readonly_model_check(reference: Option<String>) -> Self {
         Self {
-            backend: Arc::new(ReadonlyModelCheckBackend { reference }),
+            backend: Arc::new(ReadonlyModelCheckBackend {
+                reference,
+                fixture_key_id: None,
+                fixture_passphrase_key: None,
+            }),
+        }
+    }
+    /// Debug-only read access to exactly the newly created SSH fixture key.
+    #[cfg(all(target_os = "macos", debug_assertions))]
+    pub(crate) fn readonly_model_check_with_fixture_key(
+        reference: Option<String>,
+        fixture_key_id: String,
+        fixture_profile_id: String,
+    ) -> Self {
+        Self {
+            backend: Arc::new(ReadonlyModelCheckBackend {
+                reference,
+                fixture_key_id: Some(fixture_key_id),
+                fixture_passphrase_key: Some(
+                    ProfileSecretKind::Passphrase.key_for(&fixture_profile_id),
+                ),
+            }),
         }
     }
     /// Creates a credential manager that stores secrets in the OS-level
@@ -574,6 +595,8 @@ impl CredentialManager {
 #[cfg(all(target_os = "macos", debug_assertions))]
 struct ReadonlyModelCheckBackend {
     reference: Option<String>,
+    fixture_key_id: Option<String>,
+    fixture_passphrase_key: Option<String>,
 }
 
 #[cfg(all(target_os = "macos", debug_assertions))]
@@ -599,6 +622,14 @@ impl CredentialBackend for ReadonlyModelCheckBackend {
         Err("Acceptance credentials are read-only".into())
     }
     fn get_credential(&self, service: &str, key: &str) -> Result<Option<String>, String> {
+        if service == PROFILE_SECRET_CREDENTIAL_SERVICE
+            && self.fixture_passphrase_key.as_deref() == Some(key)
+        {
+            return NativeKeychainBackend.get_credential(service, key);
+        }
+        if service == KEY_CREDENTIAL_SERVICE && self.fixture_key_id.as_deref() == Some(key) {
+            return NativeKeychainBackend.get_credential(service, key);
+        }
         if service == "ShellSpan.AgentDirectCleanup.v1"
             && key
                 .strip_prefix("job-")

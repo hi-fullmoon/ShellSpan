@@ -130,3 +130,35 @@ debug Wry 接入现有 profile hydration、SFTP pool、目录请求注册／取�
 阶段 2 仍待真实远端模型启动／命令链、子会话／fleet 原生工具与活动资源边界、工作台实际撤销／过期／恢复以及审批审计失败时的完整 UI 去重与焦点验收。历史超时的资源未确认也继续保留，阶段 3 不放行。
 
 最终继续修订的预检回归为 `.phase4-acceptance/stage2-verification-continued-final-2026-10-09/report.json`：四项真实 SSH/Wry 检查通过，18 个相关源码运行前后匹配，二进制未变化，用户 known_hosts 未变化。真实 OS 钥匙串最终两项回归通过；日志 `stage2-keychain-native-final-2026-10-09.log`。全仓格式、includes 和 diff check 最后复验通过；日志 `stage2-continued-{fmt-final,includes-final}-2026-10-09.log`。这些成功不解除 r2 超时的未确认状态，也不代表用户继续使用的窗口已退出。
+
+## 2026-10-09 远端真实模型与能力快照修复
+
+重新读取阶段 1 本轮完成决定，延期的不同 macOS 账户不冒充通过；生产 uncertain 门禁保持。公共 IPC r2 历史超时的只读复核保存在 `.phase4-acceptance/stage2-timeout-readonly-2026-10-09/report.json`：实际 journal 有 1 次模型请求、0 工具调用／执行／结果，Direct 债务 0，原项目仍存在，精确 cwd 查询为空。原 PTY handle 和可信 App 退出回执缺失，terminationConfirmed=false；没有信号、钥匙串读取、目录删除或按名称补认领。
+
+远端模型验收只读适配现在同时允许本次生成的精确 SSH key 引用及 fixture profile 的可选口令读取；其他 SSH／profile 引用、写入与删除均拒绝。真实 OS 钥匙串 3 项通过，日志 `stage2-scoped-ssh-keychain-r3-2026-10-09.log`。生产 CredentialManager 未改变。旧 r2 的预检失败、0 模型请求、0 session、sourcePtyWrites=0、正常退出分别保留。
+
+真实主 controller 发现创建会话时的未验证能力快照在远端 start 完成后仍被用于摘要及审批。`agent-session-adapter.ts` 现在在受限远端 start 后重新读取权威快照，再提交输入；恢复队列 start 同样刷新。没有从预检缓存、历史工具结果或模型文字推断授权，没有布局／样式修改。
+
+`.phase4-acceptance/stage2-remote-main-model-r3-2026-10-09/live-model-facts.json` 保存实际 MiniMax、审批和 SSH 原生执行：首次不一致审批被拒绝，新显式请求后摘要和审批显示 partial，批准前 marker absent；控制器 completed／direct／remote-macos-seatbelt／workspace／partial、exitCode=0、terminationConfirmed=true、durationMs=2352、resourceGrants=0，实际 marker 为 remote-stage2，Direct 债务 0。marker 是同主机精确 OS 文件观察，不声称由 SFTP 核对。热更新窗口内新的会话仍出现旧提示并拒绝，fresh marker absent；保留该失败，首次启动须由全新窗口复验，不将 follow-up 成功扩大为首次启动通过。
+
+本修订全量 Rust 1164 passed、0 failed、66 ignored，另 5 项集成 passed；全量前端 2458 passed、2 skipped。就近 adapter／sandbox 现有回归 39 passed，前端和原生构建通过。对应日志 `stage2-remote-{rust-full,frontend-full}-2026-10-09.log`、`stage2-remote-snapshot-tests-r2-2026-10-09.log`、`stage2-remote-snapshot-build-2026-10-09.log`、`stage2-remote-model-build-r2-2026-10-09.log`；跳过项不计通过，既有警告保留。阶段 2 继续 pending，子会话原生工具、完整撤销／过期／恢复和审计失败 UI 仍待验收，阶段 3 不放行。
+
+### 全新窗口与活动资源撤销
+
+`.phase4-acceptance/stage2-remote-main-model-r4-2026-10-09/live-model-facts.json` 的 7 项检查 true：全新窗口首次启动摘要显示 partial，后续实际审批显示项目路径及默认网络限制；自然过期产生 timedOut／Native approval expired，UI 显示“批准请求已过期”，当时 marker absent。新的显式请求生成独立审批，实际批准后 remote-macos-seatbelt／workspace／partial、exitCode=0、terminationConfirmed=true、durationMs=2292，marker 匹配、债务 0。原生最终结果不由模型回复推断。退出报告为 1 session、6 次模型请求、sourcePtyWrites=0、exitCode=0，包含后续后台撤销尝试。
+
+该 r4 的实际后台撤销暴露空资源审计问题：后台 started 效果存在、结束效果 absent，UI 活动数从 1 降至 0，但后续审计拒绝空 resources，显示 `resource audit resources must contain 1-1024 items`。修复仅让 revoked／revocationFailed 接受空资源集合，保留清理结果；approved／reused 仍要求非空。协议同步，真实日志持久化／重启读取回归加入 `tests/sandbox_audit.rs`，4 项通过。原编译失败和缺少 target 的初次回归失败日志保留，最终日志为 `stage2-empty-revocation-tests-r3-2026-10-09.log`。
+
+最终 `.phase4-acceptance/stage2-remote-revoke-r5-2026-10-09/live-model-facts.json` 的撤销 7 项全部 true：实际模型获批启动 remote-macos-seatbelt 后台命令，start marker 为 started，工作台活动进程 1；用户入口撤销后活动数 0、无操作失败、end marker absent、审计 revoked／cleanupConfirmed=true／resources=[]、债务 0。正常退出为 1 session、2 次真实请求、PTY 零写入；10 个源文件和二进制运行前后匹配。该证据证明没有资源扩展授权的活动 SSH 命令停止，不代替 once/session 资源复用或离线未确认撤销。
+
+审计修复后的全量 Rust 1165 passed、0 failed、66 ignored，另 5 项集成 passed，日志 `stage2-empty-revocation-rust-full-2026-10-09.log`。前端未再变更，全量 2458／2 skipped 沿用上面的修订；fmt、includes、diff check 通过。当前阶段仍 pending，不提交、不推送、不开放阶段 3。
+
+### 子会话、资源复用及审计失败继续验收
+
+公共 IPC Operator 原生工具补验为 `.phase4-acceptance/stage2-child-native-r2-2026-10-09/report.json`：5 项检查及实际 child-stage2 marker true，源码／二进制／用户 known_hosts 未变化，3 次模型请求、3 个 session、PTY 零写入、exitCode=0。实际子会话继承 workspace／requestApproval／Direct 和精确 cwd，模型工具范围未扩大；精确命令的独立审批后 macos-seatbelt／partial、exitCode=0、terminationConfirmed=true，实际文件匹配。原首次报告 false 保留：普通命令的 pending arguments IPC 返回 null，因为该 IPC 只返回临时敏感参数；新入口同生产 UI 一样读取已提交的普通命令参数，仍精确比较后批准，不放宽命令。该证明不覆盖 fleet 原生命令。
+
+首轮真实本地工作台 `.phase4-acceptance/stage2-local-resource-ui-2026-10-09/resource-facts.json` 覆盖精确普通文件 once／session 批准、真实 stdout 和自然过期拒绝，13 次真实模型请求，1 session、PTY 零写入、正常退出。会话资源与操作批准必须独立：已存在 session 授权时，再次独立操作批准原先仍被审计为 approved／once。修复在 Native prepare 中区分资源初次批准需求，操作批准复用已覆盖资源，不更新原 session 期限；签发时重新核对原授权，准备后被撤销也不能以批准操作复活。真实普通文件／原生控制器回归 1 passed，原编译失败日志保留，最终日志 `stage2-independent-resource-approval-tests-r2-2026-10-09.log`；原生全量 1165 passed、66 ignored，另 5 集成 passed。
+
+`.phase4-acceptance/stage2-local-resource-ui-r2-2026-10-09/resource-facts.json` 记录修复后的 actual approved／session 与 reused／session，两个结果 macos-seatbelt、退出 0、terminationConfirmed=true，stdout 匹配本次自有文件，原 sessionExpiresAtUnixMs 未延长。工作台撤销后无有效授权／后台 0；再次读取生成新审批。仅将本次自有 journal 从 600 设为不可写，批准时出现真实 Permission denied，该请求未执行，随后恢复 600。无有效资源且后台 0；旧审批重试／取消被后端拒绝，恢复日志权限后通过现有撤销入口结束回合，没有重放命令。
+
+该真实失败还发现两个前端问题：可见错误与 sr-only 播报重复；已提交取消回合的历史 requested 审批仍显示为操作卡。现在错误由既有 Alert 播报，sr-only 只表达进行中状态；审批投影按已提交 turn/end 撤下操作卡，保留历史事件，不能从 snapshot／历史审计推断恢复授权。`recorded-sandbox-approval.test.tsx` 直接读取上述真实 journal／AX 记录，不使用 mock 或替代事件；修复前两项失败，修复后两项通过，连同就近回归 43 passed。初次前端构建的 ES 目标兼容错误保留，改为兼容循环后构建及两项回归通过。实际 Wry 重读最终记录和其他剩余边界继续待补齐，不把这些分项当作整阶段完成。
