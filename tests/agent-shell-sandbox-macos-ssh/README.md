@@ -20,6 +20,10 @@ python3 tests/agent-shell-sandbox-macos-ssh/verify_stage2.py --output .phase4-ac
 
 ## 阶段 1 原有入口
 
+`verify_stage2_public_ipc.py --fleet-native --output <新的忽略目录>` 启动真实 fleet，精确批准 Operator 的一条 foreground marker 命令，其他角色不调用工具。start_fleet 的 Promise 会等待整个 fleet 结束，入口发起后同时轮询实际审批，最终再核对返回值；不改变审批 TTL。该证明不包含活动 fleet 后台取消。
+
+`verify_stage2.py --bundle --output <新的忽略目录>` 建立单独命名的 App，launch.json 给出确切 bundle／PID，允许显式显示本轮窗口以提供真实渲染帧。保留 StrictMode、requestAnimationFrame 和实际 SSH 预检。超时即 unconfirmed；新窗口成功不能替代旧窗口清理回执。
+
 `verify_stage2_public_ipc.py --child-native --output <新的忽略目录>` 使用真实 Operator 子模型、继承范围、精确自有 marker 命令审批和原生结果。只批准与预期命令及目录完全一致、无额外资源扩展的调用，偏离即拒绝；不代表 fleet 原生工具已经通过。
 
 `launch_remote_workbench.py --local` 提供独立本地工作台及新建的精确普通读取文件，文件保留并在 launch.json 中记录，不从旧路径推断清理权限。`inspect_local_resources.py` 从实际 journal 导出 once/session、reused、撤销和原生 stdout 匹配事实，不导出 grant 或 bearer。

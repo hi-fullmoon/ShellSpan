@@ -162,3 +162,31 @@ debug Wry 接入现有 profile hydration、SFTP pool、目录请求注册／取�
 `.phase4-acceptance/stage2-local-resource-ui-r2-2026-10-09/resource-facts.json` 记录修复后的 actual approved／session 与 reused／session，两个结果 macos-seatbelt、退出 0、terminationConfirmed=true，stdout 匹配本次自有文件，原 sessionExpiresAtUnixMs 未延长。工作台撤销后无有效授权／后台 0；再次读取生成新审批。仅将本次自有 journal 从 600 设为不可写，批准时出现真实 Permission denied，该请求未执行，随后恢复 600。无有效资源且后台 0；旧审批重试／取消被后端拒绝，恢复日志权限后通过现有撤销入口结束回合，没有重放命令。
 
 该真实失败还发现两个前端问题：可见错误与 sr-only 播报重复；已提交取消回合的历史 requested 审批仍显示为操作卡。现在错误由既有 Alert 播报，sr-only 只表达进行中状态；审批投影按已提交 turn/end 撤下操作卡，保留历史事件，不能从 snapshot／历史审计推断恢复授权。`recorded-sandbox-approval.test.tsx` 直接读取上述真实 journal／AX 记录，不使用 mock 或替代事件；修复前两项失败，修复后两项通过，连同就近回归 43 passed。初次前端构建的 ES 目标兼容错误保留，改为兼容循环后构建及两项回归通过。实际 Wry 重读最终记录和其他剩余边界继续待补齐，不把这些分项当作整阶段完成。
+
+### 最终实时错误、历史重读及 fleet 原生命令
+
+`.phase4-acceptance/stage2-audit-ui-final-2026-10-09/resource-facts.json` 的 8 项实际检查 true：新自有 journal 的真实 Permission denied 只在 AX 中出现一次，tool/execution 为 0，没有 completed 原生结果；权限恢复为原 600 后，经工作台撤销入口结束回合，无有效授权、后台 0、旧审批操作卡消失、Direct 债务 0。launch-final 的 15 个源码／二进制哈希运行前后匹配，1 session、7 次实际模型请求、PTY 零写入、exitCode=0。前一回合有实际 REQUEST_HEADERS_TIMEOUT／网络恢复重试及审批自然过期，全部保留，不算成功执行。点击关闭时 CUA 超时，但 launcher 的真实正常退出回执已核对；不从点击成功或 UI 工具超时推断进程终态。
+
+`.phase4-acceptance/stage2-approval-replay-ui-r2-2026-10-09/replay-ui-facts.json` 记录 actual Wry 的历史显示：逐字复制本次自有已提交 journal，成功 stdout 和取消回合可见，旧审批操作卡 absent，新增模型请求 0、原 journal 未变化、正常退出。没有复制数据库、凭据、live grant 或资源归属，证明范围仅为历史重读和操作卡投影，不冒充同状态目录的完整资源恢复。首次在空目录门禁前复制日志被拒绝，原 exitCode=1 记录保留；当前复制只在新空目录门禁核对之后的显式 debug 路径进行。
+
+`.phase4-acceptance/stage2-fleet-native-r3-2026-10-09/report.json` 的 7 项检查和实际 fleet-stage2 marker true：公共 IPC 真实启动 fleet，4 个角色继承 workspace／requestApproval／Direct、精确 target／cwd，实际模型工具不扩大；只有 Operator 调用一条精确获批的 foreground 命令，其余角色无工具调用。控制器 macos-seatbelt／partial、退出 0、terminationConfirmed=true；fleet completed，6 session／6 次实际模型请求、PTY 零写入、Direct 债务 0、exitCode=0。源码、二进制及用户 known_hosts 未变化。该结果不覆盖 fleet 活动后台进程取消。
+
+前两轮 fleet 失败保留：start_fleet 会等待整个 fleet 完成，验收脚本先等待它返回再读取审批，导致 Operator 审批已过期，公共批准返回 Agent Session is not started。两轮没有 marker、正常失败退出、债务 0。最终入口发起 start 后同时读取真实子会话事件，在原审批 TTL 内核对并批准精确命令，之后等待最终 start 回执；没有改变生产审批／超时、开放新模型工具或填入虚假结果。
+
+SSH fixture 的 profileId 和 keyId 现在都由本轮 UUID 生成，只读凭据适配只允许这两个精确新引用以及已选模型引用；真实 OS 测试核对 key／passphrase 正向读取、其他 profile／kind 拒绝、写入／删除拒绝及自身条目清理，3 passed。当前 `.phase4-acceptance/stage2-final-ssh-verification-r2-2026-10-09/report.json` 的四项实际 StrictMode／SSH 预检检查 true，18 个相关源码／二进制前后匹配，用户 known_hosts 未变化。前一轮 120 秒超时没有完成报告，保留 unconfirmed，不按 PID／名称清理。最终用独立 App bundle 显式显示真实窗口，保留 requestAnimationFrame 等待和原预检步骤；成功不解释原超时原因或解除原资源未确认。
+
+最终质量：实际记录 fixture 环境下全量前端 2460 passed、2 skipped；全量 Rust 1165 passed、0 failed、66 ignored，另 5 集成 passed。前端／原生构建、fmt、includes、diff check 通过；ignored／skipped 不计通过。日志为 `stage2-final-{frontend-full,rust-full}-2026-10-09.log` 及各最终构建／检查日志。后续仅增加 debug 验收诊断／调度和凭据 fixture 引用，原生及前端重建通过，对应真实 Wry／fleet 报告绑定其修订；旧报告不冒充所有新源码的证据。
+
+工作期间 HEAD 被其他操作更新，已保留新修订及终端弹框等无关修改；本任务工具没有执行 commit、tag 或推送。
+
+### 当前仍待完成的范围
+
+- 实际工作台的完整 unknown／资源恢复门禁链，不能用上面的历史重读替代同状态目录及可信资源归属恢复。
+- fleet／子会话活动后台资源的取消、重绑及过期审批组合；当前原生命令证明均为 foreground，远端活动撤销为独立主会话。
+- 真实工作台内目标、连接代际及账户变化的完整组合；不同真实 macOS SSH 账户继续按阶段 1 决定延期，不记作已通过。
+- session 资源授权的整段实际一小时到期边界；已有真实审批 TTL 过期及签发／撤销回归，不冒充该长时段实测。
+- 原公共 IPC r2 及本轮预检超时的历史资源未确认仍保留，不凭新分项成功、空 registry 或 debt=0 清除。
+
+阶段 2 整体保持待完成，阶段 3 门禁不放行。原先用户继续使用的窗口不关闭，保留的普通读取 fixture 文件只用于本轮输入与记录，不恢复授权。
+
+最终同修订子会话复验为 `.phase4-acceptance/stage2-child-native-final-2026-10-09/report.json`：5 项检查／实际 marker true，3 次实际请求、3 session、PTY 零写入、退出 0、Direct 债务 0；源码、二进制及用户 known_hosts 未变化。没有额外工具调用、elevated 或 boundTerminal 变通。交付汇总 `.phase4-acceptance/stage2-delivery-summary-2026-10-09.json` 记录各确切报告 SHA-256 和当前修订，核对实时 UI 验收对应的六个生产源码哈希仍与当前文件一致，actualUiProductionHashesMatchNow=true；后续 debug 验收入口的修订与生产行为证据分开记录。最后前端构建、全仓 fmt、includes、AI styles、diff check 通过，既有构建警告保留。本汇总仍为 pending，不清除上述缺口或历史未确认状态。
