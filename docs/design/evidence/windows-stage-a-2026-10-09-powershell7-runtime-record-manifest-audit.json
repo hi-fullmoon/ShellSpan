@@ -1,0 +1,11 @@
+{
+  "scope": "runtime manifest mapping audit only; not independent object identity or journal authentication",
+  "root": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-d2b93407bbd14b81b2518060b06797ea",
+  "source_count": 304,
+  "copy_count": 304,
+  "valid_mapping_count": 304,
+  "unique_destinations": 304,
+  "total_bytes": 236516521.0,
+  "root_identity_equal": true,
+  "production": "unavailable"
+}

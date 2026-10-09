@@ -1,0 +1,18 @@
+﻿{
+    "version":  1,
+    "backend":  "fixed-system-admission-preparation-v1",
+    "production":  "unavailable",
+    "fixture_id":  "932184dd-8072-4aa0-891f-3d685c390b85",
+    "image_volume":  2523053325,
+    "image_file_index":  1970324838415171,
+    "image_size":  4263424,
+    "state":  "protected image prepared; service installation not requested",
+    "service_install_planned":  false,
+    "service_created":  false,
+    "service_removed":  false,
+    "observed_service_exit":  null,
+    "fixed_workload":  false,
+    "fixed_lifecycle":  "normal",
+    "fixed_tool":  null,
+    "recovery_target":  "9d1db0bc-ea92-4ffa-9667-29710fc833b4"
+}

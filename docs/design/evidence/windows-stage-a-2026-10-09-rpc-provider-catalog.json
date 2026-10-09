@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "observation": "installed-provider-metadata-only",
+  "provider_name": "Microsoft-Windows-RPC",
+  "provider_guid": "6ad52b32-d609-4be9-ae07-ce8dae937e39",
+  "events": [
+    {
+      "Id": 2,
+      "Version": 1,
+      "Template": "<template xmlns=\"http://schemas.microsoft.com/win/2004/08/events\">\r\n  <data name=\"ImangeName\" inType=\"win:UnicodeString\" outType=\"xs:string\"/>\r\n  <data name=\"InterfaceUuid\" inType=\"win:GUID\" outType=\"xs:GUID\"/>\r\n  <data name=\"FilterKey\" inType=\"win:GUID\" outType=\"xs:GUID\"/>\r\n</template>\r\n"
+    },
+    {
+      "Id": 5,
+      "Version": 1,
+      "Template": "<template xmlns=\"http://schemas.microsoft.com/win/2004/08/events\">\r\n  <data name=\"InterfaceUuid\" inType=\"win:GUID\" outType=\"xs:GUID\"/>\r\n  <data name=\"ProcNum\" inType=\"win:UInt32\" outType=\"win:HexInt32\"/>\r\n  <data name=\"Protocol\" inType=\"win:UInt32\" outType=\"xs:unsignedInt\"/>\r\n  <data name=\"NetworkAddress\" inType=\"win:UnicodeString\" outType=\"xs:string\"/>\r\n  <data name=\"Endpoint\" inType=\"win:UnicodeString\" outType=\"xs:string\"/>\r\n  <data name=\"Options\" inType=\"win:UnicodeString\" outType=\"xs:string\"/>\r\n  <data name=\"AuthenticationLevel\" inType=\"win:UInt32\" outType=\"xs:unsignedInt\"/>\r\n  <data name=\"AuthenticationService\" inType=\"win:UInt32\" outType=\"xs:unsignedInt\"/>\r\n  <data name=\"ImpersonationLevel\" inType=\"win:UInt32\" outType=\"xs:unsignedInt\"/>\r\n</template>\r\n"
+    },
+    {
+      "Id": 6,
+      "Version": 1,
+      "Template": "<template xmlns=\"http://schemas.microsoft.com/win/2004/08/events\">\r\n  <data name=\"InterfaceUuid\" inType=\"win:GUID\" outType=\"xs:GUID\"/>\r\n  <data name=\"ProcNum\" inType=\"win:UInt32\" outType=\"win:HexInt32\"/>\r\n  <data name=\"Protocol\" inType=\"win:UInt32\" outType=\"xs:unsignedInt\"/>\r\n  <data name=\"NetworkAddress\" inType=\"win:UnicodeString\" outType=\"xs:string\"/>\r\n  <data name=\"Endpoint\" inType=\"win:UnicodeString\" outType=\"xs:string\"/>\r\n  <data name=\"Options\" inType=\"win:UnicodeString\" outType=\"xs:string\"/>\r\n  <data name=\"AuthenticationLevel\" inType=\"win:UInt32\" outType=\"xs:unsignedInt\"/>\r\n  <data name=\"AuthenticationService\" inType=\"win:UInt32\" outType=\"xs:unsignedInt\"/>\r\n  <data name=\"ImpersonationLevel\" inType=\"win:UInt32\" outType=\"xs:unsignedInt\"/>\r\n</template>\r\n"
+    },
+    {
+      "Id": 7,
+      "Version": 1,
+      "Template": "<template xmlns=\"http://schemas.microsoft.com/win/2004/08/events\">\r\n  <data name=\"Status\" inType=\"win:UInt32\" outType=\"win:HexInt32\"/>\r\n</template>\r\n"
+    },
+    {
+      "Id": 8,
+      "Version": 1,
+      "Template": "<template xmlns=\"http://schemas.microsoft.com/win/2004/08/events\">\r\n  <data name=\"Status\" inType=\"win:UInt32\" outType=\"win:HexInt32\"/>\r\n</template>\r\n"
+    }
+  ],
+  "trace_session_started": false,
+  "call_path_proven": false,
+  "production": "unavailable"
+}

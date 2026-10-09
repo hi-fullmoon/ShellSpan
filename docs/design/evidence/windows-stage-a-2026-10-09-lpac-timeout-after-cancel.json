@@ -1,0 +1,78 @@
+{
+  "production": "unavailable",
+  "candidate": "lpac-file-network-candidate",
+  "profile_name": "ShellSpan-candidate-025d30c9a33c4a27a41fbf5272f7f8f8",
+  "state": "admission experiment completed; no production acceptance; receipt retained",
+  "appcontainer_identity": true,
+  "source_not_elevated": true,
+  "same_user": true,
+  "low_integrity": true,
+  "lpac_requested": true,
+  "actual_lpac": true,
+  "lpac_evidence_method": "actual Token AccessCheck: unique package positive control plus AllApplicationPackages exclusion; not class-46 inference",
+  "capabilities_empty": false,
+  "requested_capabilities": [
+    "registryRead"
+  ],
+  "capabilities_verified": true,
+  "entry_exit_73": false,
+  "process_tree_stopped": true,
+  "lifecycle_timeout_observed": true,
+  "lifecycle_cancel_observed": false,
+  "owned_job_total_processes": 4,
+  "owned_job_process_observations": [
+    {
+      "pid": 10980,
+      "image": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-a68fda42d3d14b1e89e9349670fdf518\\probe.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    },
+    {
+      "pid": 27228,
+      "image": "C:\\Windows\\System32\\conhost.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    },
+    {
+      "pid": 25852,
+      "image": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-a68fda42d3d14b1e89e9349670fdf518\\probe.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    },
+    {
+      "pid": 24348,
+      "image": "C:\\Windows\\System32\\conhost.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    }
+  ],
+  "profile_removed": true,
+  "error": null,
+  "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-a68fda42d3d14b1e89e9349670fdf518",
+  "fixture_acls_revoked": true,
+  "probe": null
+}

@@ -1,0 +1,38 @@
+{
+  "observed_at": "2026-10-09T08:43:56.5412362+08:00",
+  "source": "Get-NetIPAddress Preferred local interfaces; read-only",
+  "addresses": [
+    {
+      "IPAddress": "fe80::b536:471a:b66b:ef1b%16",
+      "AddressFamily": 23,
+      "PrefixLength": 64,
+      "InterfaceIndex": 16
+    },
+    {
+      "IPAddress": "fe80::1d0e:ae69:97e9:b894%11",
+      "AddressFamily": 23,
+      "PrefixLength": 64,
+      "InterfaceIndex": 11
+    },
+    {
+      "IPAddress": "169.254.83.107",
+      "AddressFamily": 2,
+      "PrefixLength": 16,
+      "InterfaceIndex": 16
+    },
+    {
+      "IPAddress": "192.168.2.154",
+      "AddressFamily": 2,
+      "PrefixLength": 24,
+      "InterfaceIndex": 11
+    },
+    {
+      "IPAddress": "198.18.0.1",
+      "AddressFamily": 2,
+      "PrefixLength": 30,
+      "InterfaceIndex": 23
+    }
+  ],
+  "network_denial_verified": false,
+  "production": "unavailable"
+}

@@ -1,0 +1,429 @@
+{
+  "backend": "account-restricted-token-acl-wfp-prototype-v1",
+  "production": "unavailable",
+  "account": "SSPA7ea3d4930fdb",
+  "account_sid": "S-1-5-21-4017028701-367916445-1230427694-1021",
+  "restricting_sid": "S-1-5-21-2124666003-4059-16821-302319530",
+  "filter_keys": [
+    "3ab3400f-e3d5-4599-9aa1-9eb3ba46fe32",
+    "3be4b272-7ad3-47e3-9fce-59875a46a05f",
+    "9c8e94a8-29cc-4777-ace0-028efd009fe2",
+    "5776f077-91db-4c05-9cf9-2b6c5ffa70f7"
+  ],
+  "fixture": "C:\\ProgramData\\ShellSpan-stage-A-7ea3d493-0fdb-41b5-aa07-0512d1d15e57",
+  "state": "NO-GO: incomplete phase A acceptance; retained fixture is evidence, not reusable authorization",
+  "checks": [
+    {
+      "name": "readOnly: read ordinary",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: write ordinary",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: read secret denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: write secret denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: read root .env.local",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: write root .env.local denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: external read denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: external write denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: secret DELETE denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: sensitive ancestor DELETE denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: project DELETE_CHILD denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: secret WRITE_DAC denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: rules write denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: artifact creation denied",
+      "passed": true,
+      "detail": "actual create result: Some(Some(5))"
+    },
+    {
+      "name": "workspace: read ordinary",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: write ordinary",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: read secret denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: write secret denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: read root .env.local",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: write root .env.local denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: external read denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: external write denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: secret DELETE denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: sensitive ancestor DELETE denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: project DELETE_CHILD denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: secret WRITE_DAC denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: rules write denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: artifact create/write/close",
+      "passed": true,
+      "detail": "actual operation completed"
+    },
+    {
+      "name": "workspace: artifact reopen/read",
+      "passed": true,
+      "detail": "actual operation completed"
+    },
+    {
+      "name": "workspace: artifact reopen/write",
+      "passed": true,
+      "detail": "actual operation completed"
+    },
+    {
+      "name": "workspace: artifact subdirectory create",
+      "passed": true,
+      "detail": "actual operation completed"
+    },
+    {
+      "name": "workspace: nested artifact create/write/close",
+      "passed": true,
+      "detail": "actual operation completed"
+    },
+    {
+      "name": "workspace: nested artifact reopen/read",
+      "passed": true,
+      "detail": "actual operation completed"
+    },
+    {
+      "name": "actual dedicated account SID",
+      "passed": true,
+      "detail": "TokenUser queried from stable process Token"
+    },
+    {
+      "name": "actual non-elevated Token",
+      "passed": true,
+      "detail": "actual TokenElevation"
+    },
+    {
+      "name": "actual admin group disabled or absent",
+      "passed": true,
+      "detail": "actual TokenGroups"
+    },
+    {
+      "name": "actual built-in Users group enabled",
+      "passed": true,
+      "detail": "actual TokenGroups; no administrator group grant"
+    },
+    {
+      "name": "two-step owned process termination confirmed",
+      "passed": true,
+      "detail": "stable root/member handle waits and exact Job snapshot; tree stopped=true; only root=false; runner child proof=true"
+    },
+    {
+      "name": "actual dedicated account SID",
+      "passed": true,
+      "detail": "TokenUser queried from stable process Token"
+    },
+    {
+      "name": "actual non-elevated Token",
+      "passed": true,
+      "detail": "actual TokenElevation"
+    },
+    {
+      "name": "actual admin group disabled or absent",
+      "passed": true,
+      "detail": "actual TokenGroups"
+    },
+    {
+      "name": "actual built-in Users group enabled",
+      "passed": true,
+      "detail": "actual TokenGroups; no administrator group grant"
+    },
+    {
+      "name": "actual private window station",
+      "passed": true,
+      "detail": "actual process station; host station not reused"
+    },
+    {
+      "name": "actual private desktop",
+      "passed": true,
+      "detail": "actual thread desktop"
+    },
+    {
+      "name": "restricted fixed image read/execute",
+      "passed": true,
+      "detail": "actual CreateFile read/execute error=None"
+    },
+    {
+      "name": "restricted system runtime file read",
+      "passed": true,
+      "detail": "actual fixed System32/kernel32.dll read error=None"
+    },
+    {
+      "name": "actual dedicated account SID",
+      "passed": true,
+      "detail": "TokenUser queried from stable process Token"
+    },
+    {
+      "name": "actual non-elevated Token",
+      "passed": true,
+      "detail": "actual TokenElevation"
+    },
+    {
+      "name": "actual admin group disabled or absent",
+      "passed": true,
+      "detail": "actual TokenGroups"
+    },
+    {
+      "name": "actual built-in Users group enabled",
+      "passed": true,
+      "detail": "actual TokenGroups; no administrator group grant"
+    },
+    {
+      "name": "actual exact single restricting SID",
+      "passed": true,
+      "detail": "TokenRestrictedSids; no broad substitute SID"
+    },
+    {
+      "name": "actual dangerous privileges disabled",
+      "passed": true,
+      "detail": "TokenPrivileges; only traversal privilege may remain enabled"
+    },
+    {
+      "name": "suspended child exact Job membership",
+      "passed": true,
+      "detail": "actual stable handles before Resume"
+    },
+    {
+      "name": "restricted child initialization and fixed probe exit",
+      "passed": false,
+      "detail": "actual exit code 0xc0000022"
+    },
+    {
+      "name": "primary process startup boundary",
+      "passed": false,
+      "detail": "identity gate failed: restricted child initialization and fixed probe exit"
+    }
+  ],
+  "cleanup_debt": [],
+  "missing_evidence": [
+    "restricted child process, private desktop and descendants",
+    "minimal system/toolchain startup rights",
+    "DNS/system-service delegation, private network and inbound",
+    "reparse/hardlink/ADS/short names and concurrent ACL/object replacement",
+    "persistent filters across crash/reboot",
+    "full protected credential and immutable recovery journal (phase B)"
+  ],
+  "runtime_grants": [
+    {
+      "path": "C:\\WINDOWS\\system32\\ntdll.dll",
+      "volume_serial": 2523053325,
+      "file_index": 7881299348682858,
+      "state": "revoked"
+    },
+    {
+      "path": "C:\\WINDOWS\\system32\\kernel32.dll",
+      "volume_serial": 2523053325,
+      "file_index": 5910974511700506,
+      "state": "revoked"
+    },
+    {
+      "path": "C:\\WINDOWS\\system32\\KernelBase.dll",
+      "volume_serial": 2523053325,
+      "file_index": 10133099162360392,
+      "state": "revoked"
+    },
+    {
+      "path": "C:\\WINDOWS\\system32\\advapi32.dll",
+      "volume_serial": 2523053325,
+      "file_index": 4785074604840428,
+      "state": "revoked"
+    },
+    {
+      "path": "C:\\WINDOWS\\system32\\sechost.dll",
+      "volume_serial": 2523053325,
+      "file_index": 8162774325396209,
+      "state": "revoked"
+    },
+    {
+      "path": "C:\\WINDOWS\\system32\\rpcrt4.dll",
+      "volume_serial": 2523053325,
+      "file_index": 7318349395263670,
+      "state": "revoked"
+    },
+    {
+      "path": "C:\\WINDOWS\\system32\\user32.dll",
+      "volume_serial": 2523053325,
+      "file_index": 6473924465142498,
+      "state": "revoked"
+    },
+    {
+      "path": "C:\\WINDOWS\\system32\\win32u.dll",
+      "volume_serial": 2523053325,
+      "file_index": 4503599628168656,
+      "state": "revoked"
+    },
+    {
+      "path": "C:\\WINDOWS\\system32\\gdi32.dll",
+      "volume_serial": 2523053325,
+      "file_index": 844424931414273,
+      "state": "revoked"
+    },
+    {
+      "path": "C:\\WINDOWS\\system32\\gdi32full.dll",
+      "volume_serial": 2523053325,
+      "file_index": 12384898976040627,
+      "state": "revoked"
+    },
+    {
+      "path": "C:\\WINDOWS\\system32\\msvcp_win.dll",
+      "volume_serial": 2523053325,
+      "file_index": 3377699721449987,
+      "state": "revoked"
+    },
+    {
+      "path": "C:\\WINDOWS\\system32\\ucrtbase.dll",
+      "volume_serial": 2523053325,
+      "file_index": 3377699721450009,
+      "state": "revoked"
+    },
+    {
+      "path": "C:\\WINDOWS\\system32\\ws2_32.dll",
+      "volume_serial": 2523053325,
+      "file_index": 4785074604879682,
+      "state": "revoked"
+    },
+    {
+      "path": "C:\\WINDOWS\\system32\\bcrypt.dll",
+      "volume_serial": 2523053325,
+      "file_index": 6755399441817971,
+      "state": "revoked"
+    },
+    {
+      "path": "C:\\WINDOWS\\system32\\bcryptPrimitives.dll",
+      "volume_serial": 2523053325,
+      "file_index": 6192449488396679,
+      "state": "revoked"
+    },
+    {
+      "path": "C:\\WINDOWS\\system32\\cryptbase.dll",
+      "volume_serial": 2523053325,
+      "file_index": 2814749768026062,
+      "state": "revoked"
+    },
+    {
+      "path": "C:\\WINDOWS\\system32\\cryptsp.dll",
+      "volume_serial": 2523053325,
+      "file_index": 2814749768026068,
+      "state": "revoked"
+    },
+    {
+      "path": "C:\\WINDOWS\\system32\\sspicli.dll",
+      "volume_serial": 2523053325,
+      "file_index": 6755399441833425,
+      "state": "revoked"
+    },
+    {
+      "path": "C:\\WINDOWS\\system32\\secur32.dll",
+      "volume_serial": 2523053325,
+      "file_index": 1688849861103563,
+      "state": "revoked"
+    },
+    {
+      "path": "C:\\WINDOWS\\system32\\imm32.dll",
+      "volume_serial": 2523053325,
+      "file_index": 2251799814730030,
+      "state": "revoked"
+    },
+    {
+      "path": "C:\\WINDOWS\\system32\\combase.dll",
+      "volume_serial": 2523053325,
+      "file_index": 4503599628133100,
+      "state": "revoked"
+    }
+  ]
+}

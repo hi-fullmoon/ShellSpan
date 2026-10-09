@@ -1,0 +1,253 @@
+{
+  "version": 1,
+  "backend": "account-profile-lifecycle-prototype-v1",
+  "production": "unavailable",
+  "fixture_id": "36a4a7d8-a817-42c9-a74a-1c57cc7937de",
+  "account": "SSPA36a4a7d8a817",
+  "account_sid": "S-1-5-21-4017028701-367916445-1230427694-1059",
+  "filter_keys": [
+    "170c8420-8793-4a91-b87f-4b1932419212",
+    "ef286310-ca2d-45f9-bd73-adf601ffa369",
+    "780df815-28f7-4d2c-abd4-1e6f8c8c302c",
+    "84eda13f-a2d8-4467-acdd-786f9df0ea94"
+  ],
+  "profile_absent_before_load": true,
+  "profile_registry_security_verified": true,
+  "planned_private_station": "SSPA-36a4a7d8a81742c9a74a1c57cc7937de",
+  "planned_package_sid": "S-1-15-2-1518763561-992966620-33884359-2996067329-2152717468-3018097083-116112133",
+  "private_desktop_verified": true,
+  "duplicate_station_rejected": true,
+  "private_station_removed": true,
+  "profile": {
+    "path": "C:\\Users\\SSPA36a4a7d8a817",
+    "volume_serial": 2523053325,
+    "file_index": 54887620458621855
+  },
+  "profile_unloaded": false,
+  "profile_removed": false,
+  "account_removed": false,
+  "filters_removed": false,
+  "non_elevated_account_token": true,
+  "state": "fresh private desktop grants/nonvisibility verified; duplicate creation rejected; station absence verified",
+  "error": null,
+  "cleanup_debt": [
+    "owned package namespace absence unconfirmed; retain debt"
+  ],
+  "controller_interruption_checkpoint": false,
+  "recovery_executed": false,
+  "account_lpac_started": true,
+  "account_lpac_cleanup_verified": true,
+  "account_lpac_verified": false,
+  "controller_receiver_counts": null,
+  "account_lpac_outer_job_total": null,
+  "account_lpac_diagnostic_report": null,
+  "profile_residual_recycled": false,
+  "account_lpac_admission_only": false,
+  "planned_private_namespace": "\\Sessions\\0\\AppContainerNamedObjects\\S-1-15-2-1518763561-992966620-33884359-2996067329-2152717468-3018097083-116112133",
+  "private_namespace_verified": false,
+  "private_namespace_removed": false,
+  "controller_admission_report": {
+    "active_processes_at_trigger": 4,
+    "actual_capabilities_verified": true,
+    "actual_low_integrity": true,
+    "actual_lpac": true,
+    "actual_package_verified": true,
+    "actual_user_sid": "S-1-5-21-4017028701-367916445-1230427694-1059",
+    "actual_user_verified": true,
+    "as_user_controller_error": "controller CreateProcessAsUser fixed account LPAC comparison: Win32 2",
+    "as_user_target_context_error": null,
+    "baseline_job_total": 2,
+    "baseline_tree_stopped": true,
+    "controller_privileges_before_creation": {
+      "SeAssignPrimaryTokenPrivilege": {
+        "enabled": false,
+        "present": true
+      },
+      "SeImpersonatePrivilege": {
+        "enabled": true,
+        "present": true
+      },
+      "SeIncreaseQuotaPrivilege": {
+        "enabled": false,
+        "present": true
+      }
+    },
+    "creation_api": "CreateProcessAsUserW target account context",
+    "error": null,
+    "execution_job_final_active": 0,
+    "execution_job_final_total": 4,
+    "execution_job_observations": [
+      {
+        "actual_lpac": true,
+        "appcontainer": true,
+        "error": null,
+        "exact_capabilities": true,
+        "exact_job_member": true,
+        "expected_package": true,
+        "expected_user": true,
+        "image": "C:\\ProgramData\\ShellSpan-AC-36a4a7d8a81742c9a74a1c57cc7937de\\probe.exe",
+        "integrity_rid": 4096,
+        "pid": 21568
+      },
+      {
+        "actual_lpac": true,
+        "appcontainer": true,
+        "error": null,
+        "exact_capabilities": true,
+        "exact_job_member": true,
+        "expected_package": true,
+        "expected_user": true,
+        "image": "C:\\Windows\\System32\\conhost.exe",
+        "integrity_rid": 4096,
+        "pid": 29992
+      },
+      {
+        "actual_lpac": true,
+        "appcontainer": true,
+        "error": null,
+        "exact_capabilities": true,
+        "exact_job_member": true,
+        "expected_package": true,
+        "expected_user": true,
+        "image": "C:\\ProgramData\\ShellSpan-AC-36a4a7d8a81742c9a74a1c57cc7937de\\probe.exe",
+        "integrity_rid": 4096,
+        "pid": 24776
+      },
+      {
+        "actual_lpac": true,
+        "appcontainer": true,
+        "error": null,
+        "exact_capabilities": true,
+        "exact_job_member": true,
+        "expected_package": true,
+        "expected_user": true,
+        "image": "C:\\Windows\\System32\\conhost.exe",
+        "integrity_rid": 4096,
+        "pid": 19480
+      }
+    ],
+    "execution_topology_verified": true,
+    "fixture": "C:\\ProgramData\\ShellSpan-AC-36a4a7d8a81742c9a74a1c57cc7937de",
+    "lifecycle": "timeout",
+    "lifecycle_cancel_observed": false,
+    "lifecycle_fixture_prefix_verified": true,
+    "lifecycle_root_failure_observed": false,
+    "lifecycle_timeout_observed": true,
+    "ordinary_creation_error": null,
+    "ordinary_creation_succeeded": true,
+    "owned_job_total": 4,
+    "process_tree_stopped": true,
+    "production": "unavailable",
+    "profile_folder": "C:\\Users\\SSPA36a4a7d8a817\\AppData\\Local\\Packages\\shellspan-candidate-36a4a7d8a81742c9a74a1c57cc7937de\\AC",
+    "profile_folder_in_dedicated_account": true,
+    "profile_removed": true,
+    "root_exit_73": false,
+    "root_exit_code_at_trigger": 259,
+    "scope": "controller fixed file/registry/loopback workload; incomplete stage A matrix",
+    "source_file_registry_controls_verified": true,
+    "source_token_non_elevated": true,
+    "source_token_session": 0,
+    "with_token_creation_error": "controller create fixed source-account LPAC process: Win32 87",
+    "workload_checks_passed": false,
+    "workload_report": {
+      "checks": [
+        {
+          "detail": "actual child operation Win32=None",
+          "name": "readonly.txt read",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=Some(5)",
+          "name": "readonly.txt write",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=None",
+          "name": "workspace.txt read",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=None",
+          "name": "workspace.txt write",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=Some(5)",
+          "name": "secret.txt read",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=Some(5)",
+          "name": "secret.txt write",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=Some(5)",
+          "name": "external.txt read",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=Some(5)",
+          "name": "external.txt write",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=Some(5)",
+          "name": "external-aap.txt read",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=Some(5)",
+          "name": "external-aap.txt write",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=None",
+          "name": "artifact create/write/close",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=None",
+          "name": "artifact reopen/read",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=None",
+          "name": "artifact reopen/write",
+          "passed": true
+        },
+        {
+          "detail": "controller-owned cloned workers passed positive controls before Resume; received=0",
+          "name": "TCP receiver 0 no traffic",
+          "passed": true
+        },
+        {
+          "detail": "controller-owned cloned workers passed positive controls before Resume; received=0",
+          "name": "TCP receiver 1 no traffic",
+          "passed": true
+        },
+        {
+          "detail": "controller-owned cloned workers passed positive controls before Resume; received=0",
+          "name": "UDP receiver 0 no traffic",
+          "passed": true
+        },
+        {
+          "detail": "controller-owned cloned workers passed positive controls before Resume; received=0",
+          "name": "UDP receiver 1 no traffic",
+          "passed": true
+        }
+      ],
+      "complete": false
+    },
+    "workload_retired": true
+  },
+  "controller_workload_requested": true,
+  "controller_workload_planned_root": "C:\\ProgramData\\ShellSpan-AC-36a4a7d8a81742c9a74a1c57cc7937de",
+  "controller_workload_fixture": {
+    "path": "C:\\ProgramData\\ShellSpan-AC-36a4a7d8a81742c9a74a1c57cc7937de",
+    "volume_serial": 2523053325,
+    "file_index": 8444249301362887
+  },
+  "controller_workload_retired": true,
+  "controller_lifecycle": "timeout"
+}

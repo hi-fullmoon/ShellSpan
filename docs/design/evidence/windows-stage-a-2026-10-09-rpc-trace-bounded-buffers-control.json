@@ -1,0 +1,62 @@
+{
+    "dns_query":  {
+                      "Ok":  {
+                                 "cancel_status":  null,
+                                 "completion_status":  9701,
+                                 "dispatch_status":  9701,
+                                 "fixed_answer":  false,
+                                 "records_returned":  false,
+                                 "timed_out":  false
+                             }
+                  },
+    "fixture_id":  "206fe99f-4268-49da-8761-1b261402e751",
+    "production":  "unavailable",
+    "rpc_trace":  {
+                      "consumer_closed":  true,
+                      "events":  [
+                                     {
+                                         "activity_id":  "e400ef87-c7ff-4b67-8dad-494d230a19c7",
+                                         "event_id":  5,
+                                         "interface_id":  "45776b01-5956-4485-9f80-f428f7d60129",
+                                         "operation":  4,
+                                         "process_id":  20880,
+                                         "protocol":  3,
+                                         "status":  null,
+                                         "thread_id":  24248
+                                     },
+                                     {
+                                         "activity_id":  "e400ef87-c7ff-4b67-8dad-494d230a19c7",
+                                         "event_id":  7,
+                                         "interface_id":  null,
+                                         "operation":  null,
+                                         "process_id":  20880,
+                                         "protocol":  null,
+                                         "status":  0,
+                                         "thread_id":  24248
+                                     }
+                                 ],
+                      "events_lost":  0,
+                      "maximum_buffers":  4,
+                      "number_of_buffers":  2,
+                      "process_id":  20880,
+                      "realtime_buffers_lost":  0,
+                      "session_absent":  true,
+                      "session_name":  "ShellSpan-RpcClient-206fe99f426849da87611b261402e751",
+                      "session_stopped":  true
+                  },
+    "scope":  "ordinary elevated self-PID cache-only DNS control",
+    "trace_intent":  {
+                         "fixture_id":  "206fe99f-4268-49da-8761-1b261402e751",
+                         "owner":  {
+                                       "creation_time":  134359981178514902,
+                                       "process_id":  20880
+                                   },
+                         "session_guid":  "206fe99f-4268-49da-8761-1b261402e751",
+                         "session_name":  "ShellSpan-RpcClient-206fe99f426849da87611b261402e751",
+                         "target":  {
+                                        "creation_time":  134359981178514902,
+                                        "process_id":  20880
+                                    },
+                         "version":  1
+                     }
+}

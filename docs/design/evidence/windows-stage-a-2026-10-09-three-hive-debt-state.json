@@ -1,0 +1,27 @@
+{
+  "observed_at": "2026-10-09T05:55:35.6448181Z",
+  "scope": "read-only three exact owned hive debts",
+  "records": [
+    {
+      "sid": "S-1-5-21-4017028701-367916445-1230427694-1063",
+      "disabled": true,
+      "loaded": true,
+      "hive_present": null,
+      "hive_probe_error": "OpenSubKey denied registry access under ordinary caller; presence unknown"
+    },
+    {
+      "sid": "S-1-5-21-4017028701-367916445-1230427694-1065",
+      "disabled": true,
+      "loaded": true,
+      "hive_present": null,
+      "hive_probe_error": "OpenSubKey denied registry access under ordinary caller; presence unknown"
+    },
+    {
+      "sid": "S-1-5-21-4017028701-367916445-1230427694-1134",
+      "disabled": true,
+      "loaded": true,
+      "hive_present": null,
+      "hive_probe_error": "OpenSubKey denied registry access under ordinary caller; presence unknown"
+    }
+  ]
+}

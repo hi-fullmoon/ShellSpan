@@ -1,0 +1,23 @@
+[
+  {
+    "path": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "file_version": "10.0.26100.8875 (WinBuild.160101.0800)",
+    "product_version": "10.0.26100.8875",
+    "bytes": 495616,
+    "sha256": "60C9B29843624DD8AF6B6A7B26147753BE6AEEF65098B9A503CC50850AFE410F"
+  },
+  {
+    "path": "D:\\Programs\\Git\\cmd\\git.exe",
+    "file_version": "2.55.0.windows.3",
+    "product_version": "2.55.0.windows.3",
+    "bytes": 46920,
+    "sha256": "7B7971DD13F0C3A284E538601F2F9770B3A87DFACCB5FB52D68141C67ED22364"
+  },
+  {
+    "path": "D:\\Programs\\nodejs\\node.exe",
+    "file_version": "26.5.0",
+    "product_version": "26.5.0",
+    "bytes": 103291208,
+    "sha256": "119D6FA70E6AE1B15B90688AB6BCC8E3A2819ACEA021AF196895CAB1843645AF"
+  }
+]

@@ -1,0 +1,67 @@
+{
+  "actual_exit": 73,
+  "error": null,
+  "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-fc2f29080ae64be9a96386e7e5f29809",
+  "fixture_recycled": true,
+  "images": [
+    {
+      "bytes": 301368,
+      "file_index": 1970324837548114,
+      "path": "D:\\Programs\\PowerShell\\7\\pwsh.exe",
+      "volume": 170928010
+    }
+  ],
+  "observations": [
+    {
+      "actual_lpac": false,
+      "appcontainer": false,
+      "error": null,
+      "exact_capabilities": true,
+      "exact_job_member": true,
+      "expected_package": true,
+      "expected_user": true,
+      "image": "D:\\Programs\\PowerShell\\7\\pwsh.exe",
+      "integrity_rid": 8192,
+      "pid": 14484
+    },
+    {
+      "actual_lpac": false,
+      "appcontainer": false,
+      "error": null,
+      "exact_capabilities": true,
+      "exact_job_member": true,
+      "expected_package": true,
+      "expected_user": true,
+      "image": "C:\\Windows\\System32\\conhost.exe",
+      "integrity_rid": 8192,
+      "pid": 30384
+    }
+  ],
+  "positive_control_passed": true,
+  "process_tree_stopped": true,
+  "production": "unavailable",
+  "scope": "unelevated shared-source positive tool control only",
+  "source_integrity": 8192,
+  "source_sid": "S-1-5-21-4017028701-367916445-1230427694-1001",
+  "static_imports": [
+    [
+      "advapi32.dll",
+      "api-ms-win-crt-convert-l1-1-0.dll",
+      "api-ms-win-crt-heap-l1-1-0.dll",
+      "api-ms-win-crt-locale-l1-1-0.dll",
+      "api-ms-win-crt-math-l1-1-0.dll",
+      "api-ms-win-crt-runtime-l1-1-0.dll",
+      "api-ms-win-crt-stdio-l1-1-0.dll",
+      "api-ms-win-crt-string-l1-1-0.dll",
+      "api-ms-win-crt-time-l1-1-0.dll",
+      "kernel32.dll",
+      "shell32.dll",
+      "user32.dll"
+    ]
+  ],
+  "stderr": "",
+  "stdout": "",
+  "tool": "power_shell7",
+  "topology_verified": true,
+  "total_processes": 2
+}

@@ -1,0 +1,210 @@
+{
+    "version":  1,
+    "backend":  "account-profile-lifecycle-prototype-v1",
+    "production":  "unavailable",
+    "fixture_id":  "90d35657-7e5e-4fe8-a2db-b3bb3d8b2f5a",
+    "account":  "SSPA90d356577e5e",
+    "account_sid":  "S-1-5-21-4017028701-367916445-1230427694-1098",
+    "filter_keys":  [
+                        "27155e08-304c-4905-9654-75341b665c80",
+                        "42150824-99e0-4917-9b85-4ec0f1390d75",
+                        "b1f631ca-0753-496d-b3f4-4c51ef9cbfb5",
+                        "958169be-770f-4eae-9afe-817cd2788d36"
+                    ],
+    "profile_absent_before_load":  true,
+    "profile_registry_security_verified":  true,
+    "planned_private_station":  "SSPA-90d356577e5e4fe8a2dbb3bb3d8b2f5a",
+    "planned_package_sid":  "S-1-15-2-3314150863-3866397835-1353120101-3413338703-376896622-2867881313-668255508",
+    "private_desktop_verified":  true,
+    "duplicate_station_rejected":  true,
+    "private_station_removed":  true,
+    "profile":  {
+                    "path":  "C:\\Users\\SSPA90d356577e5e",
+                    "volume_serial":  2523053325,
+                    "file_index":  3096224745096560
+                },
+    "profile_unloaded":  true,
+    "profile_removed":  true,
+    "account_removed":  true,
+    "filters_removed":  true,
+    "non_elevated_account_token":  true,
+    "state":  "owned Windows profile, account and persistent SID filters retired; evidence retained",
+    "error":  "; fixed workload report unavailable",
+    "cleanup_debt":  [
+
+                     ],
+    "controller_interruption_checkpoint":  false,
+    "recovery_executed":  true,
+    "account_lpac_started":  true,
+    "account_lpac_cleanup_verified":  true,
+    "account_lpac_verified":  false,
+    "controller_receiver_counts":  null,
+    "account_lpac_outer_job_total":  null,
+    "account_lpac_diagnostic_report":  null,
+    "profile_residual_recycled":  false,
+    "account_lpac_admission_only":  false,
+    "planned_private_namespace":  "\\Sessions\\0\\AppContainerNamedObjects\\S-1-15-2-3314150863-3866397835-1353120101-3413338703-376896622-2867881313-668255508",
+    "private_namespace_verified":  false,
+    "private_namespace_removed":  true,
+    "namespace_retirement_observation":  {
+                                             "absent":  true,
+                                             "attempts":  1,
+                                             "budget_ms":  2000,
+                                             "elapsed_ms":  0,
+                                             "error":  null,
+                                             "scope":  "exact owned namespace read-only retirement observation"
+                                         },
+    "controller_admission_report":  {
+                                        "actual_capabilities_verified":  true,
+                                        "actual_low_integrity":  true,
+                                        "actual_lpac":  true,
+                                        "actual_package_verified":  true,
+                                        "actual_user_sid":  "S-1-5-21-4017028701-367916445-1230427694-1098",
+                                        "actual_user_verified":  true,
+                                        "as_user_controller_error":  "controller CreateProcessAsUser fixed account LPAC comparison: Win32 2",
+                                        "as_user_target_context_error":  null,
+                                        "baseline_job_total":  3,
+                                        "baseline_tree_stopped":  true,
+                                        "controller_privileges_before_creation":  {
+                                                                                      "SeAssignPrimaryTokenPrivilege":  {
+                                                                                                                            "enabled":  false,
+                                                                                                                            "present":  true
+                                                                                                                        },
+                                                                                      "SeImpersonatePrivilege":  {
+                                                                                                                     "enabled":  true,
+                                                                                                                     "present":  true
+                                                                                                                 },
+                                                                                      "SeIncreaseQuotaPrivilege":  {
+                                                                                                                       "enabled":  false,
+                                                                                                                       "present":  true
+                                                                                                                   }
+                                                                                  },
+                                        "creation_api":  "CreateProcessAsUserW target account context",
+                                        "error":  "; fixed workload report unavailable",
+                                        "execution_job_final_active":  0,
+                                        "execution_job_final_total":  4,
+                                        "execution_job_observations":  [
+                                                                           {
+                                                                               "actual_lpac":  true,
+                                                                               "appcontainer":  true,
+                                                                               "error":  null,
+                                                                               "exact_capabilities":  true,
+                                                                               "exact_job_member":  true,
+                                                                               "expected_package":  true,
+                                                                               "expected_user":  true,
+                                                                               "image":  "C:\\ProgramData\\ShellSpan-AC-90d356577e5e4fe8a2dbb3bb3d8b2f5a\\probe.exe",
+                                                                               "integrity_rid":  4096,
+                                                                               "pid":  30928
+                                                                           },
+                                                                           {
+                                                                               "actual_lpac":  true,
+                                                                               "appcontainer":  true,
+                                                                               "error":  null,
+                                                                               "exact_capabilities":  true,
+                                                                               "exact_job_member":  true,
+                                                                               "expected_package":  true,
+                                                                               "expected_user":  true,
+                                                                               "image":  "C:\\Windows\\System32\\conhost.exe",
+                                                                               "integrity_rid":  4096,
+                                                                               "pid":  4200
+                                                                           },
+                                                                           {
+                                                                               "actual_lpac":  true,
+                                                                               "appcontainer":  true,
+                                                                               "error":  null,
+                                                                               "exact_capabilities":  true,
+                                                                               "exact_job_member":  true,
+                                                                               "expected_package":  true,
+                                                                               "expected_user":  true,
+                                                                               "image":  "C:\\ProgramData\\ShellSpan-AC-90d356577e5e4fe8a2dbb3bb3d8b2f5a\\probe.exe",
+                                                                               "integrity_rid":  4096,
+                                                                               "pid":  10248
+                                                                           },
+                                                                           {
+                                                                               "actual_lpac":  true,
+                                                                               "appcontainer":  true,
+                                                                               "error":  null,
+                                                                               "exact_capabilities":  true,
+                                                                               "exact_job_member":  true,
+                                                                               "expected_package":  true,
+                                                                               "expected_user":  true,
+                                                                               "image":  "C:\\Windows\\System32\\conhost.exe",
+                                                                               "integrity_rid":  4096,
+                                                                               "pid":  22276
+                                                                           }
+                                                                       ],
+                                        "execution_topology_verified":  true,
+                                        "fixture":  "C:\\ProgramData\\ShellSpan-AC-90d356577e5e4fe8a2dbb3bb3d8b2f5a",
+                                        "ordinary_account_credential_comparison":  {
+                                                                                       "context":  "exact owned account impersonation; not primary child evidence",
+                                                                                       "denial_win32":  1168,
+                                                                                       "error":  null
+                                                                                   },
+                                        "ordinary_creation_error":  null,
+                                        "ordinary_creation_succeeded":  true,
+                                        "ordinary_primary_credential_comparison":  {
+                                                                                       "denial_win32":  1168,
+                                                                                       "error":  null,
+                                                                                       "fixture_id":  "90d35657-7e5e-4fe8-a2db-b3bb3d8b2f5a",
+                                                                                       "rpc_admission":  {
+                                                                                                             "auth_status":  0,
+                                                                                                             "binding_status":  0,
+                                                                                                             "compose_status":  0,
+                                                                                                             "free_binding_status":  0,
+                                                                                                             "free_string_status":  0,
+                                                                                                             "lsa_connection":  {
+                                                                                                                                    "close_status":  0,
+                                                                                                                                    "connect_status":  0,
+                                                                                                                                    "handle_returned":  true
+                                                                                                                                },
+                                                                                                             "lsa_self_comparison":  {
+                                                                                                                                         "connection":  {
+                                                                                                                                                            "close_status":  0,
+                                                                                                                                                            "connect_status":  0,
+                                                                                                                                                            "handle_returned":  true
+                                                                                                                                                        },
+                                                                                                                                         "credential_denial_win32":  1168,
+                                                                                                                                         "credential_error":  null,
+                                                                                                                                         "error":  null,
+                                                                                                                                         "impersonate_win32":  null,
+                                                                                                                                         "restored":  true,
+                                                                                                                                         "security_context_equal":  true
+                                                                                                                                     }
+                                                                                                         },
+                                                                                       "user_sid":  "S-1-5-21-4017028701-367916445-1230427694-1098",
+                                                                                       "version":  1
+                                                                                   },
+                                        "ordinary_primary_security_verified":  true,
+                                        "owned_job_total":  4,
+                                        "process_tree_stopped":  true,
+                                        "production":  "unavailable",
+                                        "profile_folder":  "C:\\Users\\SSPA90d356577e5e\\AppData\\Local\\Packages\\shellspan-candidate-90d356577e5e4fe8a2dbb3bb3d8b2f5a\\AC",
+                                        "profile_folder_in_dedicated_account":  true,
+                                        "profile_removed":  true,
+                                        "root_exit_73":  true,
+                                        "scope":  "controller fixed file/registry/loopback workload; incomplete stage A matrix",
+                                        "source_file_registry_controls_verified":  true,
+                                        "source_token_non_elevated":  true,
+                                        "source_token_session":  0,
+                                        "with_token_creation_error":  "controller create fixed source-account LPAC process: Win32 87",
+                                        "workload_observation_error":  "fixed report budget exceeded before deserialization",
+                                        "workload_retired":  true
+                                    },
+    "controller_workload_requested":  true,
+    "controller_workload_planned_root":  "C:\\ProgramData\\ShellSpan-AC-90d356577e5e4fe8a2dbb3bb3d8b2f5a",
+    "controller_workload_fixture":  {
+                                        "path":  "C:\\ProgramData\\ShellSpan-AC-90d356577e5e4fe8a2dbb3bb3d8b2f5a",
+                                        "volume_serial":  2523053325,
+                                        "file_index":  4785074605360494
+                                    },
+    "controller_workload_retired":  true,
+    "controller_workload_files_retired":  false,
+    "controller_lifecycle":  "normal",
+    "controller_tool":  null,
+    "credential_reference":  "ShellSpan/owned-account/v1/90d35657-7e5e-4fe8-a2db-b3bb3d8b2f5a/S-1-5-21-4017028701-367916445-1230427694-1098",
+    "credential_reference_verified":  true,
+    "credential_removed":  true,
+    "profile_recovery_api_loaded":  false,
+    "profile_recovery_api_unloaded":  false,
+    "recovery_logon_pending":  false
+}

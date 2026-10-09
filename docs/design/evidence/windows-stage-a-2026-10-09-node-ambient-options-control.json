@@ -1,0 +1,8 @@
+{
+  "scope": "fixed ordinary ambient NODE_OPTIONS failure control; no actual module or host secrets",
+  "node_options": "--require=ShellSpan-owned-ambient-module-must-not-load",
+  "node_path": "ShellSpan-ambient-path-must-not-inherit",
+  "actual_exit": 1,
+  "missing_owned_module_observed": true,
+  "module_not_found_observed": true
+}

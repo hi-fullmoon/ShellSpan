@@ -1,0 +1,106 @@
+{
+  "tool_admission": {
+    "actual_exit": 73,
+    "etw_delivery_verified": true,
+    "expected_exit": 73,
+    "image": {
+      "bytes": 7680,
+      "file_index": 5910974511049696,
+      "path": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-0979d6c890a145f784253c53086f1497\\powershell-etw-probe.exe",
+      "volume": 2523053325
+    },
+    "initializer_succeeded": false,
+    "scope": "shared-source LPAC admission only; not dedicated-account compatibility acceptance",
+    "static_imports": [],
+    "stderr": "",
+    "stdio_handle_count": 3,
+    "stdout": "{\"version\":1,\"scope\":\"fixed-powershell-etw-initializer\",\"assembly\":\"C:\\\\Windows\\\\Microsoft.Net\\\\assembly\\\\GAC_MSIL\\\\System.Management.Automation\\\\v4.0_3.0.0.0__31bf3856ad364e35\\\\System.Management.Automation.dll\",\"type\":\"System.Management.Automation.Tracing.PSEtwLog\",\"assembly_version\":\"System.Management.Automation, Version=3.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35\",\"mvid\":\"a002aaca-c1f1-4bf9-8710-85b273cd7dce\",\"stage\":\"initializer\",\"initializer_succeeded\":false,\"chain_complete\":true,\"exceptions\":[{\"type\":\"System.TypeInitializationException\",\"hresult\":-2146233036,\"native_error\":null,\"message\":\"“System.Management.Automation.Tracing.PSEtwLog”的类型初始值设定项引发异常。\",\"stack\":\"   在 System.Runtime.CompilerServices.RuntimeHelpers._RunClassConstructor(RuntimeType type)\\u000d\\u000a   在 PowerShellEtwProbe.Main(String[] args)\"},{\"type\":\"System.TypeInitializationException\",\"hresult\":-2146233036,\"native_error\":null,\"message\":\"“System.Management.Automation.Tracing.PSEtwLogProvider”的类型初始值设定项引发异常。\",\"stack\":\"   在 System.Management.Automation.Tracing.PSEtwLog..cctor()\"},{\"type\":\"System.ComponentModel.Win32Exception\",\"hresult\":-2147467259,\"native_error\":5,\"message\":\"拒绝访问。\",\"stack\":\"   在 System.Diagnostics.Eventing.EventProvider.EtwRegister()\\u000d\\u000a   在 System.Diagnostics.Eventing.EventProvider..ctor(Guid providerGuid)\\u000d\\u000a   在 System.Management.Automation.Tracing.PSEtwLogProvider..cctor()\"}],\"native_registrations\":[{\"provider\":\"a0c1853b-5c40-4b15-8766-3cf1c58f985a\",\"register_code\":5,\"handle_nonzero\":false,\"unregister_code\":null},{\"provider\":\"3229ad87-338e-4e53-85b4-f77f5f2c2a07\",\"register_code\":5,\"handle_nonzero\":false,\"unregister_code\":null}]}\r\n",
+    "tool": "power_shell_etw_probe",
+    "topology_verified": true
+  },
+  "production": "unavailable",
+  "candidate": "lpac-fixed-tool-admission",
+  "profile_name": "ShellSpan-candidate-ae1feca9c5a8451cabb690802edc685c",
+  "created_package_sid": "S-1-15-2-3230492667-1016960721-3606573465-1780530470-3894435089-1434978564-931575900",
+  "namespace_admission": {
+    "observations": [
+      {
+        "create_subdirectory_admission": "0xc0000034",
+        "path": "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects\\S-1-15-2-3230492667-1016960721-3606573465-1780530470-3894435089-1434978564-931575900",
+        "read_control": "0xc0000034",
+        "traverse": "0xc0000034"
+      },
+      {
+        "create_subdirectory_admission": "0x00000000",
+        "path": "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects",
+        "read_control": "0x00000000",
+        "traverse": "0x00000000"
+      }
+    ],
+    "read_only": true
+  },
+  "state": "admission experiment completed; no production acceptance; receipt retained",
+  "appcontainer_identity": true,
+  "source_not_elevated": true,
+  "source_creation_boundary": {
+    "child_process_policy_flags": 0,
+    "current_job_active_process_limit": 0,
+    "current_job_limit_flags": 10240,
+    "current_job_ui_restrictions": 0,
+    "in_job": true,
+    "token_restricted": false,
+    "token_session_id": 1
+  },
+  "actual_source_user_sid": "S-1-5-21-4017028701-367916445-1230427694-1001",
+  "dedicated_account_plan_verified": false,
+  "receiver_evidence_owner": "fixture-controller",
+  "receiver_quietness_verified": false,
+  "same_user": true,
+  "low_integrity": true,
+  "lpac_requested": true,
+  "actual_lpac": true,
+  "lpac_evidence_method": "actual Token AccessCheck: unique package positive control plus AllApplicationPackages exclusion; not class-46 inference",
+  "capabilities_empty": false,
+  "requested_capabilities": [
+    "registryRead"
+  ],
+  "capabilities_verified": true,
+  "entry_exit_73": false,
+  "process_tree_stopped": true,
+  "lifecycle_timeout_observed": false,
+  "lifecycle_cancel_observed": false,
+  "lifecycle_root_failure_observed": false,
+  "active_processes_after_root_failure": null,
+  "owned_job_total_processes": 2,
+  "owned_job_process_observations": [
+    {
+      "pid": 14780,
+      "image": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-0979d6c890a145f784253c53086f1497\\powershell-etw-probe.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    },
+    {
+      "pid": 17808,
+      "image": "C:\\Windows\\System32\\conhost.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    }
+  ],
+  "profile_removed": true,
+  "error": null,
+  "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-0979d6c890a145f784253c53086f1497",
+  "fixture_acls_revoked": true,
+  "probe": null
+}

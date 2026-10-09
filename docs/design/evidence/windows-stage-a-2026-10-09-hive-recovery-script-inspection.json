@@ -1,0 +1,22 @@
+[
+  {
+    "fixture_id": "ba16502e-566b-4193-93d6-b6b34414ae68",
+    "recorded_retirement": false,
+    "retirement_consistent_with_os": false,
+    "hive_absent": false,
+    "profile_not_loaded": false,
+    "original_service_absent": true,
+    "account_disabled": true,
+    "eligible_for_fixed_recovery": false
+  },
+  {
+    "fixture_id": "4bb6655d-3b91-4088-b7f3-7db3e7005b0b",
+    "recorded_retirement": false,
+    "retirement_consistent_with_os": false,
+    "hive_absent": false,
+    "profile_not_loaded": false,
+    "original_service_absent": true,
+    "account_disabled": true,
+    "eligible_for_fixed_recovery": false
+  }
+]

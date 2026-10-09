@@ -1,0 +1,110 @@
+{
+  "production": "unavailable",
+  "candidate": "lpac-file-network-candidate",
+  "profile_name": "ShellSpan-candidate-08e7bf64bf3c41d5bcb805385dc76bb4",
+  "state": "admission experiment completed; no production acceptance; receipt retained",
+  "appcontainer_identity": true,
+  "source_not_elevated": true,
+  "same_user": true,
+  "low_integrity": true,
+  "lpac_requested": true,
+  "actual_lpac": true,
+  "lpac_evidence_method": "actual Token AccessCheck: unique package positive control plus AllApplicationPackages exclusion; not class-46 inference",
+  "capabilities_empty": true,
+  "entry_exit_73": false,
+  "process_tree_stopped": true,
+  "profile_removed": true,
+  "error": "candidate fixed exit 0x00000065; diagnostic={\"fixed_probe_panic\":\"panicked at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library\\\\std\\\\src\\\\sys\\\\pal\\\\windows\\\\winsock.rs:26:9:\\nassertion `left == right` failed\\n  left: 10107\\n right: 0\"}",
+  "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-ec8345cb56ff4a008db1a3ae22f17bed",
+  "fixture_acls_revoked": true,
+  "probe": {
+    "checks": [
+      {
+        "name": "readonly.txt read",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "readonly.txt write",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "workspace.txt read",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "workspace.txt write",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "secret.txt read",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "secret.txt write",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "external.txt read",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "external.txt write",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "external-aap.txt read",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "external-aap.txt write",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "artifact create/write/close",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "artifact reopen/read",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "artifact reopen/write",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "TCP receiver 0 no traffic",
+        "passed": true,
+        "detail": "positive control passed; continuously observed before Resume through child exit; received=0; MAX denotes receiver error"
+      },
+      {
+        "name": "TCP receiver 1 no traffic",
+        "passed": true,
+        "detail": "positive control passed; continuously observed before Resume through child exit; received=0; MAX denotes receiver error"
+      },
+      {
+        "name": "UDP receiver 0 no traffic",
+        "passed": true,
+        "detail": "positive control passed; continuously observed before Resume through child exit; received=0; MAX denotes receiver error"
+      },
+      {
+        "name": "UDP receiver 1 no traffic",
+        "passed": true,
+        "detail": "positive control passed; continuously observed before Resume through child exit; received=0; MAX denotes receiver error"
+      }
+    ],
+    "complete": false
+  }
+}

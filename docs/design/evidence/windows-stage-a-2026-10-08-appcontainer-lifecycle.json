@@ -1,0 +1,42 @@
+[
+  {
+    "profile_name": "ShellSpan-candidate-08dc6f6b497140069122db79438b3b03",
+    "appcontainer_identity": true,
+    "entry_exit_73": true,
+    "process_tree_stopped": true,
+    "profile_removed": true,
+    "error": null
+  },
+  {
+    "profile_name": "ShellSpan-candidate-2a6bce403c804547ab109ab9bdc0f106",
+    "appcontainer_identity": true,
+    "entry_exit_73": true,
+    "process_tree_stopped": true,
+    "profile_removed": true,
+    "error": null
+  },
+  {
+    "profile_name": "ShellSpan-candidate-8986eaaa1a044e1e948b748b2e6f99ee",
+    "appcontainer_identity": false,
+    "entry_exit_73": false,
+    "process_tree_stopped": true,
+    "profile_removed": true,
+    "error": "create suspended AppContainer fixed cmd: Win32 203"
+  },
+  {
+    "profile_name": "ShellSpan-candidate-a8c0ffe4a6c146d78f105d2d5f082f0e",
+    "appcontainer_identity": true,
+    "entry_exit_73": true,
+    "process_tree_stopped": true,
+    "profile_removed": true,
+    "error": null
+  },
+  {
+    "profile_name": "ShellSpan-candidate-fca8d3dfa40c409297630d833ba12604",
+    "appcontainer_identity": false,
+    "entry_exit_73": false,
+    "process_tree_stopped": true,
+    "profile_removed": true,
+    "error": "create suspended AppContainer fixed cmd: Win32 203"
+  }
+]

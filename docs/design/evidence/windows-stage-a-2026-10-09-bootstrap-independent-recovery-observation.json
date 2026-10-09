@@ -1,0 +1,104 @@
+{
+    "native_exit":  2,
+    "receipt":  {
+                    "version":  1,
+                    "backend":  "account-profile-lifecycle-prototype-v1",
+                    "production":  "unavailable",
+                    "fixture_id":  "093354fe-26ac-48e5-9cd6-256b30ee7599",
+                    "account":  "SSPA093354fe26ac",
+                    "account_sid":  "S-1-5-21-4017028701-367916445-1230427694-1116",
+                    "filter_keys":  [
+                                        "c67c3c34-edbd-473f-9e12-21058c1c01b4",
+                                        "e7550fe3-13db-4bb4-879e-47affa252fbb",
+                                        "62c92242-9e82-4a37-897a-7b2293f3bac4",
+                                        "6996dcc9-72e8-4ebc-abaf-5864639cd2f3"
+                                    ],
+                    "profile_absent_before_load":  true,
+                    "profile_registry_security_verified":  true,
+                    "planned_private_station":  "SSPA-093354fe26ac48e59cd6256b30ee7599",
+                    "planned_package_sid":  "S-1-15-2-108990869-2920403215-3114656766-2736982734-2026480004-4102707924-3864084015",
+                    "private_desktop_verified":  true,
+                    "duplicate_station_rejected":  true,
+                    "private_station_removed":  true,
+                    "profile":  {
+                                    "path":  "C:\\Users\\SSPA093354fe26ac",
+                                    "volume_serial":  2523053325,
+                                    "file_index":  2533274791816079
+                                },
+                    "profile_unloaded":  false,
+                    "profile_removed":  false,
+                    "account_removed":  false,
+                    "filters_removed":  false,
+                    "non_elevated_account_token":  true,
+                    "state":  "exact UUID recovery incomplete; retain protected receipt and offline slot debt",
+                    "error":  "EOF while parsing a value at line 1 column 0",
+                    "cleanup_debt":  [
+                                         "retain offline slot: owned LPAC profile/fixture retirement unconfirmed"
+                                     ],
+                    "controller_interruption_checkpoint":  false,
+                    "recovery_executed":  true,
+                    "account_lpac_started":  true,
+                    "account_lpac_cleanup_verified":  false,
+                    "account_lpac_verified":  false,
+                    "controller_receiver_counts":  [
+                                                       0,
+                                                       0,
+                                                       0,
+                                                       0
+                                                   ],
+                    "account_lpac_outer_job_total":  2,
+                    "account_lpac_bootstrap_exit":  null,
+                    "account_lpac_outer_tree_stopped":  false,
+                    "independent_bootstrap_recovery_observation":  {
+                                                                       "account_disabled":  true,
+                                                                       "account_processes_absent":  true,
+                                                                       "account_sid":  "S-1-5-21-4017028701-367916445-1230427694-1116",
+                                                                       "candidate":  {
+                                                                                         "bytes":  3226624,
+                                                                                         "file_index":  1970324838394900,
+                                                                                         "path":  "C:\\ProgramData\\ShellSpan-account-profile-A-093354fe-26ac-48e5-9cd6-256b30ee7599\\ShellSpan-stage-A-account-lpac-093354fe-26ac-48e5-9cd6-256b30ee7599\\candidate.exe",
+                                                                                         "volume":  2523053325
+                                                                                     },
+                                                                       "error":  null,
+                                                                       "fixture_id":  "093354fe-26ac-48e5-9cd6-256b30ee7599",
+                                                                       "hive_absent":  true,
+                                                                       "profile_identity_verified":  true,
+                                                                       "protected_plan_bound":  true,
+                                                                       "report":  {
+                                                                                      "bytes":  0,
+                                                                                      "file_index":  1970324838394902,
+                                                                                      "path":  "C:\\ProgramData\\ShellSpan-account-profile-A-093354fe-26ac-48e5-9cd6-256b30ee7599\\ShellSpan-stage-A-account-lpac-093354fe-26ac-48e5-9cd6-256b30ee7599\\account-report.json",
+                                                                                      "volume":  2523053325
+                                                                                  },
+                                                                       "scope":  "read-only bootstrap recovery prerequisites; not retirement authorization"
+                                                                   },
+                    "account_lpac_diagnostic_report":  null,
+                    "profile_residual_recycled":  false,
+                    "account_lpac_admission_only":  true,
+                    "planned_private_namespace":  "\\Sessions\\1\\AppContainerNamedObjects\\S-1-15-2-108990869-2920403215-3114656766-2736982734-2026480004-4102707924-3864084015",
+                    "private_namespace_verified":  true,
+                    "private_namespace_removed":  true,
+                    "namespace_retirement_observation":  {
+                                                             "absent":  true,
+                                                             "attempts":  1,
+                                                             "budget_ms":  2000,
+                                                             "elapsed_ms":  0,
+                                                             "error":  null,
+                                                             "scope":  "exact owned namespace read-only retirement observation"
+                                                         },
+                    "controller_admission_report":  null,
+                    "controller_workload_requested":  false,
+                    "controller_workload_planned_root":  null,
+                    "controller_workload_fixture":  null,
+                    "controller_workload_retired":  false,
+                    "controller_workload_files_retired":  false,
+                    "controller_lifecycle":  "normal",
+                    "controller_tool":  null,
+                    "credential_reference":  null,
+                    "credential_reference_verified":  false,
+                    "credential_removed":  false,
+                    "profile_recovery_api_loaded":  false,
+                    "profile_recovery_api_unloaded":  false,
+                    "recovery_logon_pending":  false
+                }
+}

@@ -1,0 +1,154 @@
+{
+  "production": "unavailable",
+  "candidate": "lpac-file-network-candidate",
+  "profile_name": "ShellSpan-candidate-92a33078ad174c94a42117791e243ab7",
+  "state": "admission experiment completed; no production acceptance; receipt retained",
+  "appcontainer_identity": true,
+  "source_not_elevated": true,
+  "same_user": true,
+  "low_integrity": true,
+  "lpac_requested": true,
+  "actual_lpac": true,
+  "lpac_evidence_method": "actual Token AccessCheck: unique package positive control plus AllApplicationPackages exclusion; not class-46 inference",
+  "capabilities_empty": false,
+  "requested_capabilities": [
+    "registryRead"
+  ],
+  "capabilities_verified": true,
+  "entry_exit_73": true,
+  "process_tree_stopped": true,
+  "profile_removed": true,
+  "error": null,
+  "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-80c124bbb16f4915990d82a30aba7018",
+  "fixture_acls_revoked": true,
+  "probe": {
+    "checks": [
+      {
+        "name": "readonly.txt read",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "readonly.txt write",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "workspace.txt read",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "workspace.txt write",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "secret.txt read",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "secret.txt write",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "external.txt read",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "external.txt write",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "external-aap.txt read",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "external-aap.txt write",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "artifact create/write/close",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "artifact reopen/read",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "artifact reopen/write",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "Winsock registry read admission: SYSTEM\\CurrentControlSet\\Services\\WinSock2\\Parameters",
+        "passed": true,
+        "detail": "read-only key open Win32=0; no registry values or contents recorded"
+      },
+      {
+        "name": "Winsock registry read admission: SYSTEM\\CurrentControlSet\\Services\\WinSock2\\Parameters\\Protocol_Catalog9",
+        "passed": true,
+        "detail": "read-only key open Win32=0; no registry values or contents recorded"
+      },
+      {
+        "name": "Winsock registry read admission: SYSTEM\\CurrentControlSet\\Services\\WinSock2\\Parameters\\NameSpace_Catalog5",
+        "passed": true,
+        "detail": "read-only key open Win32=0; no registry values or contents recorded"
+      },
+      {
+        "name": "actual Winsock initialization",
+        "passed": true,
+        "detail": "WSAStartup 2.2 return=0; initialization failure is not network denial"
+      },
+      {
+        "name": "TCP 0 denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(10013)"
+      },
+      {
+        "name": "UDP 0 API observation",
+        "passed": true,
+        "detail": "send result=Err(Os { code: 10013, kind: PermissionDenied, message: \"以一种访问权限不允许的方式做了一个访问套接字的尝试。\" }); API observation alone is not network denial proof"
+      },
+      {
+        "name": "TCP 1 denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(10013)"
+      },
+      {
+        "name": "UDP 1 API observation",
+        "passed": true,
+        "detail": "send result=Err(Os { code: 10013, kind: PermissionDenied, message: \"以一种访问权限不允许的方式做了一个访问套接字的尝试。\" }); API observation alone is not network denial proof"
+      },
+      {
+        "name": "TCP receiver 0 no traffic",
+        "passed": true,
+        "detail": "positive control passed; continuously observed before Resume through child exit; received=0; MAX denotes receiver error"
+      },
+      {
+        "name": "TCP receiver 1 no traffic",
+        "passed": true,
+        "detail": "positive control passed; continuously observed before Resume through child exit; received=0; MAX denotes receiver error"
+      },
+      {
+        "name": "UDP receiver 0 no traffic",
+        "passed": true,
+        "detail": "positive control passed; continuously observed before Resume through child exit; received=0; MAX denotes receiver error"
+      },
+      {
+        "name": "UDP receiver 1 no traffic",
+        "passed": true,
+        "detail": "positive control passed; continuously observed before Resume through child exit; received=0; MAX denotes receiver error"
+      }
+    ],
+    "complete": true
+  }
+}

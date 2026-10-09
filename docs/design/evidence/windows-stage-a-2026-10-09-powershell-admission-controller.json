@@ -1,0 +1,100 @@
+{
+  "tool_admission": {
+    "actual_exit": 4294901760,
+    "expected_exit": 73,
+    "image": {
+      "bytes": 495616,
+      "file_index": 7036874418551825,
+      "path": "C:\\WINDOWS\\system32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      "volume": 2523053325
+    },
+    "scope": "shared-source LPAC admission only; not dedicated-account compatibility acceptance",
+    "tool": "power_shell",
+    "topology_verified": true
+  },
+  "production": "unavailable",
+  "candidate": "lpac-file-network-candidate",
+  "profile_name": "ShellSpan-candidate-1647e01059324acc9563caa74dd227ef",
+  "created_package_sid": "S-1-15-2-2280042238-3187471315-2463420692-2816357637-2261384475-2681832970-203310047",
+  "namespace_admission": {
+    "observations": [
+      {
+        "create_subdirectory_admission": "0xc0000034",
+        "path": "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects\\S-1-15-2-2280042238-3187471315-2463420692-2816357637-2261384475-2681832970-203310047",
+        "read_control": "0xc0000034",
+        "traverse": "0xc0000034"
+      },
+      {
+        "create_subdirectory_admission": "0x00000000",
+        "path": "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects",
+        "read_control": "0x00000000",
+        "traverse": "0x00000000"
+      }
+    ],
+    "read_only": true
+  },
+  "state": "admission experiment completed; no production acceptance; receipt retained",
+  "appcontainer_identity": true,
+  "source_not_elevated": true,
+  "source_creation_boundary": {
+    "child_process_policy_flags": 0,
+    "current_job_active_process_limit": 0,
+    "current_job_limit_flags": 10240,
+    "current_job_ui_restrictions": 0,
+    "in_job": true,
+    "token_restricted": false,
+    "token_session_id": 1
+  },
+  "actual_source_user_sid": "S-1-5-21-4017028701-367916445-1230427694-1001",
+  "dedicated_account_plan_verified": false,
+  "receiver_evidence_owner": "fixture-controller",
+  "receiver_quietness_verified": false,
+  "same_user": true,
+  "low_integrity": true,
+  "lpac_requested": true,
+  "actual_lpac": true,
+  "lpac_evidence_method": "actual Token AccessCheck: unique package positive control plus AllApplicationPackages exclusion; not class-46 inference",
+  "capabilities_empty": false,
+  "requested_capabilities": [
+    "registryRead"
+  ],
+  "capabilities_verified": true,
+  "entry_exit_73": false,
+  "process_tree_stopped": true,
+  "lifecycle_timeout_observed": false,
+  "lifecycle_cancel_observed": false,
+  "lifecycle_root_failure_observed": false,
+  "active_processes_after_root_failure": null,
+  "owned_job_total_processes": 2,
+  "owned_job_process_observations": [
+    {
+      "pid": 20988,
+      "image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    },
+    {
+      "pid": 12628,
+      "image": "C:\\Windows\\System32\\conhost.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    }
+  ],
+  "profile_removed": true,
+  "error": "fixed tool compatibility unverified: exit=0xffff0000; topology=true",
+  "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-d9677e22af074ceea74984f2ee4f6453",
+  "fixture_acls_revoked": true,
+  "probe": null
+}

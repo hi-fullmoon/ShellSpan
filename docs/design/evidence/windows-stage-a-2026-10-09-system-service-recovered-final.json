@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "backend": "fixed-system-admission-preparation-v1",
+  "production": "unavailable",
+  "fixture_id": "5ce3cef2-de97-4208-aa52-0b3ec98f48ae",
+  "image_volume": 2523053325,
+  "image_file_index": 14918173765881651,
+  "image_size": 1954304,
+  "state": "exact service retirement confirmed; profile recovery is independently gated",
+  "service_install_planned": true,
+  "service_created": true,
+  "service_removed": true
+}

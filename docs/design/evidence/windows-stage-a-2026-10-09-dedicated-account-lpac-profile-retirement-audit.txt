@@ -1,0 +1,7 @@
+
+FullName                         Attributes
+--------                         ----------
+C:\Users\SSPAda62891db9d3         Directory
+                          Hidden, Directory
+False
+False

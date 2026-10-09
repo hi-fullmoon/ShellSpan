@@ -1,0 +1,93 @@
+{
+  "actual_exit": 73,
+  "dependency_report_bound": true,
+  "error": null,
+  "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-804b6c04efd64ca3bd531fb84932603e",
+  "fixture_recycled": true,
+  "images": [
+    {
+      "bytes": 2194944,
+      "file_index": 1688849860492817,
+      "path": "D:\\Developer\\ShellSpan\\tests\\windows-sandbox-account\\target\\debug\\shellspan-appcontainer-candidate.exe",
+      "volume": 170928010
+    },
+    {
+      "bytes": 4383048,
+      "file_index": 1125899907578178,
+      "path": "D:\\Programs\\Git\\mingw64\\bin\\git.exe",
+      "volume": 170928010
+    }
+  ],
+  "observations": [
+    {
+      "actual_lpac": false,
+      "appcontainer": false,
+      "error": null,
+      "exact_capabilities": true,
+      "exact_job_member": true,
+      "expected_package": true,
+      "expected_user": true,
+      "image": "D:\\Developer\\ShellSpan\\tests\\windows-sandbox-account\\target\\debug\\shellspan-appcontainer-candidate.exe",
+      "integrity_rid": 8192,
+      "pid": 11500
+    },
+    {
+      "actual_lpac": false,
+      "appcontainer": false,
+      "error": null,
+      "exact_capabilities": true,
+      "exact_job_member": true,
+      "expected_package": true,
+      "expected_user": true,
+      "image": "C:\\Windows\\System32\\conhost.exe",
+      "integrity_rid": 8192,
+      "pid": 25464
+    }
+  ],
+  "positive_control_passed": true,
+  "process_tree_stopped": true,
+  "production": "unavailable",
+  "scope": "unelevated shared-source positive tool control only",
+  "source_integrity": 8192,
+  "source_sid": "S-1-5-21-4017028701-367916445-1230427694-1001",
+  "static_imports": [
+    [
+      "advapi32.dll",
+      "api-ms-win-core-synch-l1-2-0.dll",
+      "api-ms-win-crt-heap-l1-1-0.dll",
+      "api-ms-win-crt-locale-l1-1-0.dll",
+      "api-ms-win-crt-math-l1-1-0.dll",
+      "api-ms-win-crt-runtime-l1-1-0.dll",
+      "api-ms-win-crt-stdio-l1-1-0.dll",
+      "api-ms-win-security-base-l1-2-2.dll",
+      "bcryptprimitives.dll",
+      "kernel32.dll",
+      "ntdll.dll",
+      "ole32.dll",
+      "oleaut32.dll",
+      "rpcrt4.dll",
+      "secur32.dll",
+      "shell32.dll",
+      "userenv.dll",
+      "vcruntime140.dll",
+      "ws2_32.dll"
+    ],
+    [
+      "advapi32.dll",
+      "kernel32.dll",
+      "libiconv-2.dll",
+      "libintl-8.dll",
+      "libpcre2-8-0.dll",
+      "msvcrt.dll",
+      "ntdll.dll",
+      "user32.dll",
+      "ws2_32.dll",
+      "zlib1.dll"
+    ]
+  ],
+  "stderr": "",
+  "stdout": "{\"checks\":[{\"file_error\":\"fixed tool image lease: Win32 2\",\"file_identity\":null,\"freed\":null,\"load_win32\":126,\"loaded\":false,\"loaded_path\":null,\"location\":\"git-directory\",\"name\":\"advapi32.dll\",\"path\":\"D:\\\\Programs\\\\Git\\\\mingw64\\\\bin\\\\advapi32.dll\"},{\"file_error\":null,\"file_identity\":{\"bytes\":791056,\"file_index\":4785074604840428,\"path\":\"C:\\\\WINDOWS\\\\system32\\\\advapi32.dll\",\"volume\":2523053325},\"freed\":true,\"load_win32\":null,\"loaded\":true,\"loaded_path\":{\"Ok\":\"C:\\\\WINDOWS\\\\System32\\\\advapi32.dll\"},\"location\":\"system32\",\"name\":\"advapi32.dll\",\"path\":\"C:\\\\WINDOWS\\\\system32\\\\advapi32.dll\"},{\"file_error\":\"fixed tool image lease: Win32 2\",\"file_identity\":null,\"freed\":null,\"load_win32\":126,\"loaded\":false,\"loaded_path\":null,\"location\":\"git-directory\",\"name\":\"kernel32.dll\",\"path\":\"D:\\\\Programs\\\\Git\\\\mingw64\\\\bin\\\\kernel32.dll\"},{\"file_error\":null,\"file_identity\":{\"bytes\":861984,\"file_index\":5910974511700506,\"path\":\"C:\\\\WINDOWS\\\\system32\\\\kernel32.dll\",\"volume\":2523053325},\"freed\":true,\"load_win32\":null,\"loaded\":true,\"loaded_path\":{\"Ok\":\"C:\\\\WINDOWS\\\\System32\\\\KERNEL32.DLL\"},\"location\":\"system32\",\"name\":\"kernel32.dll\",\"path\":\"C:\\\\WINDOWS\\\\system32\\\\kernel32.dll\"},{\"file_error\":null,\"file_identity\":{\"bytes\":1143148,\"file_index\":1125899907578195,\"path\":\"D:\\\\Programs\\\\Git\\\\mingw64\\\\bin\\\\libiconv-2.dll\",\"volume\":170928010},\"freed\":true,\"load_win32\":null,\"loaded\":true,\"loaded_path\":{\"Ok\":\"D:\\\\Programs\\\\Git\\\\mingw64\\\\bin\\\\libiconv-2.dll\"},\"location\":\"git-directory\",\"name\":\"libiconv-2.dll\",\"path\":\"D:\\\\Programs\\\\Git\\\\mingw64\\\\bin\\\\libiconv-2.dll\"},{\"file_error\":\"fixed tool image lease: Win32 2\",\"file_identity\":null,\"freed\":null,\"load_win32\":126,\"loaded\":false,\"loaded_path\":null,\"location\":\"system32\",\"name\":\"libiconv-2.dll\",\"path\":\"C:\\\\WINDOWS\\\\system32\\\\libiconv-2.dll\"},{\"file_error\":null,\"file_identity\":{\"bytes\":298731,\"file_index\":1125899907578197,\"path\":\"D:\\\\Programs\\\\Git\\\\mingw64\\\\bin\\\\libintl-8.dll\",\"volume\":170928010},\"freed\":true,\"load_win32\":null,\"loaded\":true,\"loaded_path\":{\"Ok\":\"D:\\\\Programs\\\\Git\\\\mingw64\\\\bin\\\\libintl-8.dll\"},\"location\":\"git-directory\",\"name\":\"libintl-8.dll\",\"path\":\"D:\\\\Programs\\\\Git\\\\mingw64\\\\bin\\\\libintl-8.dll\"},{\"file_error\":\"fixed tool image lease: Win32 2\",\"file_identity\":null,\"freed\":null,\"load_win32\":126,\"loaded\":false,\"loaded_path\":null,\"location\":\"system32\",\"name\":\"libintl-8.dll\",\"path\":\"C:\\\\WINDOWS\\\\system32\\\\libintl-8.dll\"},{\"file_error\":null,\"file_identity\":{\"bytes\":717955,\"file_index\":1125899907578202,\"path\":\"D:\\\\Programs\\\\Git\\\\mingw64\\\\bin\\\\libpcre2-8-0.dll\",\"volume\":170928010},\"freed\":true,\"load_win32\":null,\"loaded\":true,\"loaded_path\":{\"Ok\":\"D:\\\\Programs\\\\Git\\\\mingw64\\\\bin\\\\libpcre2-8-0.dll\"},\"location\":\"git-directory\",\"name\":\"libpcre2-8-0.dll\",\"path\":\"D:\\\\Programs\\\\Git\\\\mingw64\\\\bin\\\\libpcre2-8-0.dll\"},{\"file_error\":\"fixed tool image lease: Win32 2\",\"file_identity\":null,\"freed\":null,\"load_win32\":126,\"loaded\":false,\"loaded_path\":null,\"location\":\"system32\",\"name\":\"libpcre2-8-0.dll\",\"path\":\"C:\\\\WINDOWS\\\\system32\\\\libpcre2-8-0.dll\"},{\"file_error\":\"fixed tool image lease: Win32 2\",\"file_identity\":null,\"freed\":null,\"load_win32\":126,\"loaded\":false,\"loaded_path\":null,\"location\":\"git-directory\",\"name\":\"msvcrt.dll\",\"path\":\"D:\\\\Programs\\\\Git\\\\mingw64\\\\bin\\\\msvcrt.dll\"},{\"file_error\":null,\"file_identity\":{\"bytes\":699848,\"file_index\":2814749768026907,\"path\":\"C:\\\\WINDOWS\\\\system32\\\\msvcrt.dll\",\"volume\":2523053325},\"freed\":true,\"load_win32\":null,\"loaded\":true,\"loaded_path\":{\"Ok\":\"C:\\\\WINDOWS\\\\System32\\\\msvcrt.dll\"},\"location\":\"system32\",\"name\":\"msvcrt.dll\",\"path\":\"C:\\\\WINDOWS\\\\system32\\\\msvcrt.dll\"},{\"file_error\":\"fixed tool image lease: Win32 2\",\"file_identity\":null,\"freed\":null,\"load_win32\":126,\"loaded\":false,\"loaded_path\":null,\"location\":\"git-directory\",\"name\":\"ntdll.dll\",\"path\":\"D:\\\\Programs\\\\Git\\\\mingw64\\\\bin\\\\ntdll.dll\"},{\"file_error\":null,\"file_identity\":{\"bytes\":2554168,\"file_index\":7881299348682858,\"path\":\"C:\\\\WINDOWS\\\\system32\\\\ntdll.dll\",\"volume\":2523053325},\"freed\":true,\"load_win32\":null,\"loaded\":true,\"loaded_path\":{\"Ok\":\"C:\\\\WINDOWS\\\\SYSTEM32\\\\ntdll.dll\"},\"location\":\"system32\",\"name\":\"ntdll.dll\",\"path\":\"C:\\\\WINDOWS\\\\system32\\\\ntdll.dll\"},{\"file_error\":\"fixed tool image lease: Win32 2\",\"file_identity\":null,\"freed\":null,\"load_win32\":126,\"loaded\":false,\"loaded_path\":null,\"location\":\"git-directory\",\"name\":\"user32.dll\",\"path\":\"D:\\\\Programs\\\\Git\\\\mingw64\\\\bin\\\\user32.dll\"},{\"file_error\":null,\"file_identity\":{\"bytes\":1974768,\"file_index\":6473924465142498,\"path\":\"C:\\\\WINDOWS\\\\system32\\\\user32.dll\",\"volume\":2523053325},\"freed\":true,\"load_win32\":null,\"loaded\":true,\"loaded_path\":{\"Ok\":\"C:\\\\WINDOWS\\\\System32\\\\USER32.dll\"},\"location\":\"system32\",\"name\":\"user32.dll\",\"path\":\"C:\\\\WINDOWS\\\\system32\\\\user32.dll\"},{\"file_error\":\"fixed tool image lease: Win32 2\",\"file_identity\":null,\"freed\":null,\"load_win32\":126,\"loaded\":false,\"loaded_path\":null,\"location\":\"git-directory\",\"name\":\"ws2_32.dll\",\"path\":\"D:\\\\Programs\\\\Git\\\\mingw64\\\\bin\\\\ws2_32.dll\"},{\"file_error\":null,\"file_identity\":{\"bytes\":553552,\"file_index\":4785074604879682,\"path\":\"C:\\\\WINDOWS\\\\system32\\\\ws2_32.dll\",\"volume\":2523053325},\"freed\":true,\"load_win32\":null,\"loaded\":true,\"loaded_path\":{\"Ok\":\"C:\\\\WINDOWS\\\\System32\\\\ws2_32.dll\"},\"location\":\"system32\",\"name\":\"ws2_32.dll\",\"path\":\"C:\\\\WINDOWS\\\\system32\\\\ws2_32.dll\"},{\"file_error\":null,\"file_identity\":{\"bytes\":128488,\"file_index\":1125899907578249,\"path\":\"D:\\\\Programs\\\\Git\\\\mingw64\\\\bin\\\\zlib1.dll\",\"volume\":170928010},\"freed\":true,\"load_win32\":null,\"loaded\":true,\"loaded_path\":{\"Ok\":\"D:\\\\Programs\\\\Git\\\\mingw64\\\\bin\\\\zlib1.dll\"},\"location\":\"git-directory\",\"name\":\"zlib1.dll\",\"path\":\"D:\\\\Programs\\\\Git\\\\mingw64\\\\bin\\\\zlib1.dll\"},{\"file_error\":\"fixed tool image lease: Win32 2\",\"file_identity\":null,\"freed\":null,\"load_win32\":126,\"loaded\":false,\"loaded_path\":null,\"location\":\"system32\",\"name\":\"zlib1.dll\",\"path\":\"C:\\\\WINDOWS\\\\system32\\\\zlib1.dll\"}],\"image\":{\"bytes\":4383048,\"file_index\":1125899907578178,\"path\":\"D:\\\\Programs\\\\Git\\\\mingw64\\\\bin\\\\git.exe\",\"volume\":170928010},\"image_read_error\":null,\"imports\":[\"advapi32.dll\",\"kernel32.dll\",\"libiconv-2.dll\",\"libintl-8.dll\",\"libpcre2-8-0.dll\",\"msvcrt.dll\",\"ntdll.dll\",\"user32.dll\",\"ws2_32.dll\",\"zlib1.dll\"],\"scope\":\"fixed static Git import file/load observations; not full dependency closure\",\"version\":1}\n",
+  "tool": "git_dependency_probe",
+  "topology_verified": true,
+  "total_processes": 2
+}

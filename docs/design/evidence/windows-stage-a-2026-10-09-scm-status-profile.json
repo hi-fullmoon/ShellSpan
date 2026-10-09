@@ -1,0 +1,182 @@
+﻿{
+  "version": 1,
+  "backend": "account-profile-lifecycle-prototype-v1",
+  "production": "unavailable",
+  "fixture_id": "75b49292-c8e1-4fd3-aa29-3cb694c3a455",
+  "account": "SSPA75b49292c8e1",
+  "account_sid": "S-1-5-21-4017028701-367916445-1230427694-1091",
+  "filter_keys": [
+    "fc0c1932-e803-4307-a5ff-05c1dec5d873",
+    "b246cd41-eb56-411e-aec7-b138e2e9a5b5",
+    "1a750517-56e5-486f-b979-d4e11a898cd7",
+    "ae09c3bc-bf34-489a-a7af-7823f1c64343"
+  ],
+  "profile_absent_before_load": true,
+  "profile_registry_security_verified": true,
+  "planned_private_station": "SSPA-75b49292c8e14fd3aa293cb694c3a455",
+  "planned_package_sid": "S-1-15-2-1621697568-2005429386-893807673-2827231129-455896628-243352581-2002410366",
+  "private_desktop_verified": true,
+  "duplicate_station_rejected": true,
+  "private_station_removed": true,
+  "profile": {
+    "path": "C:\\Users\\SSPA75b49292c8e1",
+    "volume_serial": 2523053325,
+    "file_index": 10977524092913428
+  },
+  "profile_unloaded": false,
+  "profile_removed": false,
+  "account_removed": false,
+  "filters_removed": false,
+  "non_elevated_account_token": true,
+  "state": "fresh private desktop grants/nonvisibility verified; duplicate creation rejected; station absence verified",
+  "error": null,
+  "cleanup_debt": [
+    "owned package namespace absence unconfirmed; retain debt"
+  ],
+  "controller_interruption_checkpoint": false,
+  "recovery_executed": false,
+  "account_lpac_started": true,
+  "account_lpac_cleanup_verified": true,
+  "account_lpac_verified": false,
+  "controller_receiver_counts": null,
+  "account_lpac_outer_job_total": null,
+  "account_lpac_diagnostic_report": null,
+  "profile_residual_recycled": false,
+  "account_lpac_admission_only": false,
+  "planned_private_namespace": "\\Sessions\\0\\AppContainerNamedObjects\\S-1-15-2-1621697568-2005429386-893807673-2827231129-455896628-243352581-2002410366",
+  "private_namespace_verified": false,
+  "private_namespace_removed": false,
+  "namespace_retirement_observation": {
+    "absent": false,
+    "attempts": 41,
+    "budget_ms": 2000,
+    "elapsed_ms": 2000,
+    "error": null,
+    "scope": "exact owned namespace read-only retirement observation"
+  },
+  "controller_admission_report": {
+    "actual_capabilities_verified": true,
+    "actual_low_integrity": true,
+    "actual_lpac": true,
+    "actual_package_verified": true,
+    "actual_user_sid": "S-1-5-21-4017028701-367916445-1230427694-1091",
+    "actual_user_verified": true,
+    "as_user_controller_error": "controller CreateProcessAsUser fixed account LPAC comparison: Win32 2",
+    "as_user_target_context_error": null,
+    "baseline_job_total": 2,
+    "baseline_tree_stopped": true,
+    "controller_privileges_before_creation": {
+      "SeAssignPrimaryTokenPrivilege": {
+        "enabled": false,
+        "present": true
+      },
+      "SeImpersonatePrivilege": {
+        "enabled": true,
+        "present": true
+      },
+      "SeIncreaseQuotaPrivilege": {
+        "enabled": false,
+        "present": true
+      }
+    },
+    "creation_api": "CreateProcessAsUserW target account context",
+    "error": null,
+    "execution_job_final_active": 0,
+    "execution_job_final_total": 2,
+    "execution_job_observations": [
+      {
+        "actual_lpac": true,
+        "appcontainer": true,
+        "error": null,
+        "exact_capabilities": true,
+        "exact_job_member": true,
+        "expected_package": true,
+        "expected_user": true,
+        "image": "D:\\Programs\\nodejs\\node.exe",
+        "integrity_rid": 4096,
+        "pid": 9032
+      },
+      {
+        "actual_lpac": true,
+        "appcontainer": true,
+        "error": null,
+        "exact_capabilities": true,
+        "exact_job_member": true,
+        "expected_package": true,
+        "expected_user": true,
+        "image": "C:\\Windows\\System32\\conhost.exe",
+        "integrity_rid": 4096,
+        "pid": 10696
+      }
+    ],
+    "execution_topology_verified": true,
+    "fixture": "C:\\ProgramData\\ShellSpan-AC-75b49292c8e14fd3aa293cb694c3a455",
+    "ordinary_account_credential_comparison": {
+      "context": "exact owned account impersonation; not primary child evidence",
+      "denial_win32": 1168,
+      "error": null
+    },
+    "ordinary_creation_error": null,
+    "ordinary_creation_succeeded": true,
+    "owned_job_total": 2,
+    "process_tree_stopped": true,
+    "production": "unavailable",
+    "profile_folder": "C:\\Users\\SSPA75b49292c8e1\\AppData\\Local\\Packages\\shellspan-candidate-75b49292c8e14fd3aa293cb694c3a455\\AC",
+    "profile_folder_in_dedicated_account": true,
+    "profile_removed": true,
+    "root_exit_73": true,
+    "scope": "controller fixed dedicated-account tool admission; incomplete stage A matrix",
+    "source_file_registry_controls_verified": true,
+    "source_token_non_elevated": true,
+    "source_token_session": 0,
+    "tool_admission": {
+      "actual_exit": 73,
+      "expected_exit": 73,
+      "image": {
+        "bytes": 103291208,
+        "file_index": 2814749767107451,
+        "path": "D:\\Programs\\nodejs\\node.exe",
+        "volume": 170928010
+      },
+      "output_verified": true,
+      "scope": "fixed dedicated-account tool startup only; not complete stage A",
+      "static_imports": [
+        "advapi32.dll",
+        "api-ms-win-core-synch-l1-2-0.dll",
+        "crypt32.dll",
+        "dbghelp.dll",
+        "iphlpapi.dll",
+        "kernel32.dll",
+        "ntdll.dll",
+        "ole32.dll",
+        "shell32.dll",
+        "user32.dll",
+        "userenv.dll",
+        "winmm.dll",
+        "ws2_32.dll"
+      ],
+      "stderr": "",
+      "stdout": "",
+      "tool": "node"
+    },
+    "with_token_creation_error": "controller create fixed source-account LPAC process: Win32 87",
+    "workload_retired": true
+  },
+  "controller_workload_requested": true,
+  "controller_workload_planned_root": "C:\\ProgramData\\ShellSpan-AC-75b49292c8e14fd3aa293cb694c3a455",
+  "controller_workload_fixture": {
+    "path": "C:\\ProgramData\\ShellSpan-AC-75b49292c8e14fd3aa293cb694c3a455",
+    "volume_serial": 2523053325,
+    "file_index": 12947848929888015
+  },
+  "controller_workload_retired": true,
+  "controller_workload_files_retired": false,
+  "controller_lifecycle": "normal",
+  "controller_tool": "node",
+  "credential_reference": "ShellSpan/owned-account/v1/75b49292-c8e1-4fd3-aa29-3cb694c3a455/S-1-5-21-4017028701-367916445-1230427694-1091",
+  "credential_reference_verified": true,
+  "credential_removed": false,
+  "profile_recovery_api_loaded": false,
+  "profile_recovery_api_unloaded": false,
+  "recovery_logon_pending": false
+}

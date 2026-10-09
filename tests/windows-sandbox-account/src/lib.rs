@@ -1,0 +1,33 @@
+//! Shared fixed-runner primitives for the independent Windows experiment.
+#![cfg(windows)]
+pub mod account_lpac_plan;
+pub mod appcontainer_probe;
+pub mod credential_reference;
+pub mod cross_slot_registry_probe;
+pub mod dns_native_probe;
+pub mod dns_probe;
+pub mod dns_receiver;
+pub mod dns_sender_identity;
+pub mod fixed_environment;
+pub mod fixed_tool;
+#[path = "runner.rs"]
+pub mod fixture_runner;
+pub mod git_bundle;
+pub mod git_dependency_probe;
+pub mod git_prefix_probe;
+pub mod job_observer;
+pub mod package_network_filter;
+pub mod package_network_intent;
+pub mod pe_imports;
+pub mod policy;
+pub mod powershell_etw_probe;
+pub mod powershell_runtime;
+pub mod receiver_control;
+pub mod rpc_admission_probe;
+pub mod rpc_network_filter;
+pub mod rpc_network_intent;
+pub mod rpc_trace;
+pub mod rpc_trace_intent;
+pub mod source_tool_control;
+pub mod startup_capability_policy;
+pub mod wfp_account_descriptor;

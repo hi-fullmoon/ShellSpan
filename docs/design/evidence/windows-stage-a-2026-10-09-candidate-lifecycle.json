@@ -1,0 +1,146 @@
+[
+  {
+    "profile_name": "ShellSpan-candidate-00c4794e00e34beba5db9425b6404abe",
+    "candidate": "appcontainer-admission-only",
+    "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-dcff38a9623249f09ab2d0b74bf471c0",
+    "process_tree_stopped": true,
+    "fixture_acls_revoked": true,
+    "profile_removed": true,
+    "error": "invalid Token query budget"
+  },
+  {
+    "profile_name": "ShellSpan-candidate-08dc6f6b497140069122db79438b3b03",
+    "candidate": "appcontainer-admission-only",
+    "fixture": null,
+    "process_tree_stopped": true,
+    "fixture_acls_revoked": null,
+    "profile_removed": true,
+    "error": null
+  },
+  {
+    "profile_name": "ShellSpan-candidate-2a6bce403c804547ab109ab9bdc0f106",
+    "candidate": "appcontainer-admission-only",
+    "fixture": null,
+    "process_tree_stopped": true,
+    "fixture_acls_revoked": null,
+    "profile_removed": true,
+    "error": null
+  },
+  {
+    "profile_name": "ShellSpan-candidate-2e0298ac67204a64995006b7d36a7ebf",
+    "candidate": "appcontainer-admission-only",
+    "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-6a3198ffc8bd477fbbe861393fda38a0",
+    "process_tree_stopped": true,
+    "fixture_acls_revoked": true,
+    "profile_removed": true,
+    "error": "invalid Token query budget"
+  },
+  {
+    "profile_name": "ShellSpan-candidate-46d166b700044a58854024727e8e8aec",
+    "candidate": "appcontainer-admission-only",
+    "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-93b7317a7fb34928ac783716dc362961",
+    "process_tree_stopped": true,
+    "fixture_acls_revoked": true,
+    "profile_removed": true,
+    "error": "candidate fixed exit 0x00000065; diagnostic={\"fixed_probe_panic\":\"panicked at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library\\\\std\\\\src\\\\sys\\\\pal\\\\windows\\\\winsock.rs:26:9:\\nassertion `left == right` failed\\n  left: 10107\\n right: 0\"}"
+  },
+  {
+    "profile_name": "ShellSpan-candidate-698fd06db4bf43b3ba08f666df6e1446",
+    "candidate": "appcontainer-admission-only",
+    "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-55a41b4b92684046bd61f83a74b90622",
+    "process_tree_stopped": true,
+    "fixture_acls_revoked": true,
+    "profile_removed": true,
+    "error": null
+  },
+  {
+    "profile_name": "ShellSpan-candidate-753795416e5145ef9fdd88ea63b2aadb",
+    "candidate": "appcontainer-admission-only",
+    "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-4a424fdaf8b541b1a85434af9579410e",
+    "process_tree_stopped": true,
+    "fixture_acls_revoked": true,
+    "profile_removed": true,
+    "error": null
+  },
+  {
+    "profile_name": "ShellSpan-candidate-7ceb07bf54be4ee78296b3d18988f634",
+    "candidate": "appcontainer-admission-only",
+    "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-2affa8865d0246188d6c1351c5f5b497",
+    "process_tree_stopped": true,
+    "fixture_acls_revoked": true,
+    "profile_removed": true,
+    "error": "candidate fixed exit 0x00000065"
+  },
+  {
+    "profile_name": "ShellSpan-candidate-8986eaaa1a044e1e948b748b2e6f99ee",
+    "candidate": "appcontainer-admission-only",
+    "fixture": null,
+    "process_tree_stopped": true,
+    "fixture_acls_revoked": null,
+    "profile_removed": true,
+    "error": "create suspended AppContainer fixed cmd: Win32 203"
+  },
+  {
+    "profile_name": "ShellSpan-candidate-973d73cbcae446058a2d37097b4aa997",
+    "candidate": "appcontainer-admission-only",
+    "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-a0a420ac5ace46468c47318c89f8990c",
+    "process_tree_stopped": true,
+    "fixture_acls_revoked": true,
+    "profile_removed": true,
+    "error": null
+  },
+  {
+    "profile_name": "ShellSpan-candidate-a8c0ffe4a6c146d78f105d2d5f082f0e",
+    "candidate": "appcontainer-admission-only",
+    "fixture": null,
+    "process_tree_stopped": true,
+    "fixture_acls_revoked": null,
+    "profile_removed": true,
+    "error": null
+  },
+  {
+    "profile_name": "ShellSpan-candidate-b7ecc2ba42ca416697fff128a638d0be",
+    "candidate": "appcontainer-admission-only",
+    "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-90ce6c905fd94e8dac6a0e439bf1c118",
+    "process_tree_stopped": true,
+    "fixture_acls_revoked": true,
+    "profile_removed": true,
+    "error": "missing initialized child report: 拒绝访问。 (os error 5)"
+  },
+  {
+    "profile_name": "ShellSpan-candidate-d3a649411a6c4da893ee4668eff184e0",
+    "candidate": "appcontainer-admission-only",
+    "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-4efb8074b8da4e90922ef705472f879b",
+    "process_tree_stopped": true,
+    "fixture_acls_revoked": true,
+    "profile_removed": true,
+    "error": null
+  },
+  {
+    "profile_name": "ShellSpan-candidate-f3588a52fa6e4350bd9339b91c1e09f4",
+    "candidate": "appcontainer-admission-only",
+    "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-76bcf829f2bc46c09d1401bc223f2bac",
+    "process_tree_stopped": true,
+    "fixture_acls_revoked": true,
+    "profile_removed": true,
+    "error": "candidate fixed exit 0x00000065; diagnostic={\"fixed_probe_panic\":\"panicked at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library\\\\std\\\\src\\\\sys\\\\pal\\\\windows\\\\winsock.rs:26:9:\\nassertion `left == right` failed\\n  left: 10107\\n right: 0\"}"
+  },
+  {
+    "profile_name": "ShellSpan-candidate-fca8d3dfa40c409297630d833ba12604",
+    "candidate": "appcontainer-admission-only",
+    "fixture": null,
+    "process_tree_stopped": true,
+    "fixture_acls_revoked": null,
+    "profile_removed": true,
+    "error": "create suspended AppContainer fixed cmd: Win32 203"
+  },
+  {
+    "profile_name": "ShellSpan-candidate-ff10745d24b5467e990e38e8be5019dd",
+    "candidate": "lpac-file-network-candidate",
+    "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-b41dcfc2084640ffbd7671cf2152df11",
+    "process_tree_stopped": true,
+    "fixture_acls_revoked": false,
+    "profile_removed": false,
+    "error": "拒绝访问。 (os error 5); retain owned profile: fixture ACE cleanup unconfirmed"
+  }
+]

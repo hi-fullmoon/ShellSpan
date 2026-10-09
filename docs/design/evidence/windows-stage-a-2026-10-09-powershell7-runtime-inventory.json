@@ -1,0 +1,34 @@
+{
+  "TopLevelFiles": 320,
+  "TopLevelBytes": 237155260.0,
+  "Required": [
+    {
+      "Name": "pwsh.exe",
+      "Bytes": 301368
+    },
+    {
+      "Name": "pwsh.dll",
+      "Bytes": 157472
+    },
+    {
+      "Name": "pwsh.runtimeconfig.json",
+      "Bytes": 790
+    },
+    {
+      "Name": "pwsh.deps.json",
+      "Bytes": 99499
+    },
+    {
+      "Name": "hostfxr.dll",
+      "Bytes": 379688
+    },
+    {
+      "Name": "hostpolicy.dll",
+      "Bytes": 378664
+    },
+    {
+      "Name": "coreclr.dll",
+      "Bytes": 4614952
+    }
+  ]
+}

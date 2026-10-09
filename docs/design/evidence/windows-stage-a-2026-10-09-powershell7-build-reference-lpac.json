@@ -1,0 +1,64 @@
+{
+  "tool_admission": null,
+  "production": "unavailable",
+  "candidate": "lpac-fixed-tool-admission",
+  "profile_name": "ShellSpan-candidate-e469d6587e7e4990b988df14123956ed",
+  "created_package_sid": "S-1-15-2-2201826979-968571096-854907391-2136497601-1068328796-3019918626-1916921890",
+  "namespace_admission": {
+    "observations": [
+      {
+        "create_subdirectory_admission": "0xc0000034",
+        "path": "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects\\S-1-15-2-2201826979-968571096-854907391-2136497601-1068328796-3019918626-1916921890",
+        "read_control": "0xc0000034",
+        "traverse": "0xc0000034"
+      },
+      {
+        "create_subdirectory_admission": "0x00000000",
+        "path": "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects",
+        "read_control": "0x00000000",
+        "traverse": "0x00000000"
+      }
+    ],
+    "read_only": true
+  },
+  "state": "admission experiment completed; no production acceptance; receipt retained",
+  "appcontainer_identity": false,
+  "source_not_elevated": true,
+  "source_creation_boundary": {
+    "child_process_policy_flags": 0,
+    "current_job_active_process_limit": 0,
+    "current_job_limit_flags": 10240,
+    "current_job_ui_restrictions": 0,
+    "in_job": true,
+    "token_restricted": false,
+    "token_session_id": 1
+  },
+  "actual_source_user_sid": "S-1-5-21-4017028701-367916445-1230427694-1001",
+  "dedicated_account_plan_verified": false,
+  "receiver_evidence_owner": "fixture-controller",
+  "receiver_quietness_verified": false,
+  "same_user": false,
+  "low_integrity": false,
+  "lpac_requested": true,
+  "actual_lpac": false,
+  "lpac_evidence_method": "actual Token AccessCheck: unique package positive control plus AllApplicationPackages exclusion; not class-46 inference",
+  "capabilities_empty": false,
+  "requested_capabilities": [
+    "registryRead",
+    "lpacInstrumentation"
+  ],
+  "capabilities_verified": false,
+  "entry_exit_73": false,
+  "process_tree_stopped": true,
+  "lifecycle_timeout_observed": false,
+  "lifecycle_cancel_observed": false,
+  "lifecycle_root_failure_observed": false,
+  "active_processes_after_root_failure": null,
+  "owned_job_total_processes": null,
+  "owned_job_process_observations": [],
+  "profile_removed": true,
+  "error": "open retirement object: Win32 5",
+  "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-1ed87e9d31154e5e9f3bba15b53d1d02",
+  "fixture_acls_revoked": true,
+  "probe": null
+}

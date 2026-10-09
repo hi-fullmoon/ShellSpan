@@ -1,0 +1,12 @@
+{
+  "production": "unavailable",
+  "candidate": "appcontainer-admission-only",
+  "profile_name": "ShellSpan-candidate-fca8d3dfa40c409297630d833ba12604",
+  "state": "admission experiment completed; no production acceptance; receipt retained",
+  "appcontainer_identity": false,
+  "capabilities_empty": false,
+  "entry_exit_73": false,
+  "process_tree_stopped": true,
+  "profile_removed": true,
+  "error": "create suspended AppContainer fixed cmd: Win32 203"
+}

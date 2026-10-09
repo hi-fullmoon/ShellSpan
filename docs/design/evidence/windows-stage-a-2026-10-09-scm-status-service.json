@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "backend": "fixed-system-admission-preparation-v1",
+  "production": "unavailable",
+  "fixture_id": "75b49292-c8e1-4fd3-aa29-3cb694c3a455",
+  "image_volume": 2523053325,
+  "image_file_index": 11540474046334730,
+  "image_size": 3090432,
+  "state": "owned SYSTEM service stopped and removed; inspect profile receipt",
+  "service_install_planned": true,
+  "service_created": true,
+  "service_removed": true,
+  "observed_service_exit": {
+    "win32_exit_code": 1066,
+    "service_specific_exit_code": 2,
+    "process_exit_confirmed": true
+  },
+  "fixed_workload": true,
+  "fixed_lifecycle": "normal",
+  "fixed_tool": "node",
+  "recovery_target": null
+}

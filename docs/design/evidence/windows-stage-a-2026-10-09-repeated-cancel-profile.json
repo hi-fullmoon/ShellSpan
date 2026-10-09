@@ -1,0 +1,282 @@
+{
+  "version": 1,
+  "backend": "account-profile-lifecycle-prototype-v1",
+  "production": "unavailable",
+  "fixture_id": "78680981-2497-4295-84ee-bc51abb09353",
+  "account": "SSPA786809812497",
+  "account_sid": "S-1-5-21-4017028701-367916445-1230427694-1073",
+  "filter_keys": [
+    "023d6fa8-326e-4e21-996f-8b8854a08216",
+    "accaf9a3-ab4a-4263-aeb0-072076c7ceed",
+    "643969f3-0be5-4e38-b1f3-aa65e261f87d",
+    "ff9c142a-fe4e-4ceb-926b-701d8a51ecd5"
+  ],
+  "profile_absent_before_load": true,
+  "profile_registry_security_verified": true,
+  "planned_private_station": "SSPA-786809812497429584eebc51abb09353",
+  "planned_package_sid": "S-1-15-2-2490451904-2994144546-1236048965-617070778-947391437-2054554224-1757172434",
+  "private_desktop_verified": true,
+  "duplicate_station_rejected": true,
+  "private_station_removed": true,
+  "profile": {
+    "path": "C:\\Users\\SSPA786809812497",
+    "volume_serial": 2523053325,
+    "file_index": 5066549581072249
+  },
+  "profile_unloaded": false,
+  "profile_removed": false,
+  "account_removed": false,
+  "filters_removed": false,
+  "non_elevated_account_token": true,
+  "state": "fresh private desktop grants/nonvisibility verified; duplicate creation rejected; station absence verified",
+  "error": null,
+  "cleanup_debt": [
+    "owned package namespace absence unconfirmed; retain debt"
+  ],
+  "controller_interruption_checkpoint": false,
+  "recovery_executed": false,
+  "account_lpac_started": true,
+  "account_lpac_cleanup_verified": true,
+  "account_lpac_verified": false,
+  "controller_receiver_counts": null,
+  "account_lpac_outer_job_total": null,
+  "account_lpac_diagnostic_report": null,
+  "profile_residual_recycled": false,
+  "account_lpac_admission_only": false,
+  "planned_private_namespace": "\\Sessions\\0\\AppContainerNamedObjects\\S-1-15-2-2490451904-2994144546-1236048965-617070778-947391437-2054554224-1757172434",
+  "private_namespace_verified": false,
+  "private_namespace_removed": false,
+  "controller_admission_report": {
+    "active_processes_at_trigger": 4,
+    "actual_capabilities_verified": true,
+    "actual_low_integrity": true,
+    "actual_lpac": true,
+    "actual_package_verified": true,
+    "actual_user_sid": "S-1-5-21-4017028701-367916445-1230427694-1073",
+    "actual_user_verified": true,
+    "as_user_controller_error": "controller CreateProcessAsUser fixed account LPAC comparison: Win32 2",
+    "as_user_target_context_error": null,
+    "baseline_job_total": 3,
+    "baseline_tree_stopped": true,
+    "cancellation_requests_sent": 3,
+    "controller_privileges_before_creation": {
+      "SeAssignPrimaryTokenPrivilege": {
+        "enabled": false,
+        "present": true
+      },
+      "SeImpersonatePrivilege": {
+        "enabled": true,
+        "present": true
+      },
+      "SeIncreaseQuotaPrivilege": {
+        "enabled": false,
+        "present": true
+      }
+    },
+    "creation_api": "CreateProcessAsUserW target account context",
+    "error": null,
+    "execution_job_final_active": 0,
+    "execution_job_final_total": 4,
+    "execution_job_observations": [
+      {
+        "actual_lpac": true,
+        "appcontainer": true,
+        "error": null,
+        "exact_capabilities": true,
+        "exact_job_member": true,
+        "expected_package": true,
+        "expected_user": true,
+        "image": "C:\\ProgramData\\ShellSpan-AC-786809812497429584eebc51abb09353\\probe.exe",
+        "integrity_rid": 4096,
+        "pid": 13424
+      },
+      {
+        "actual_lpac": true,
+        "appcontainer": true,
+        "error": null,
+        "exact_capabilities": true,
+        "exact_job_member": true,
+        "expected_package": true,
+        "expected_user": true,
+        "image": "C:\\Windows\\System32\\conhost.exe",
+        "integrity_rid": 4096,
+        "pid": 1668
+      },
+      {
+        "actual_lpac": true,
+        "appcontainer": true,
+        "error": null,
+        "exact_capabilities": true,
+        "exact_job_member": true,
+        "expected_package": true,
+        "expected_user": true,
+        "image": "C:\\ProgramData\\ShellSpan-AC-786809812497429584eebc51abb09353\\probe.exe",
+        "integrity_rid": 4096,
+        "pid": 26408
+      },
+      {
+        "actual_lpac": true,
+        "appcontainer": true,
+        "error": null,
+        "exact_capabilities": true,
+        "exact_job_member": true,
+        "expected_package": true,
+        "expected_user": true,
+        "image": "C:\\Windows\\System32\\conhost.exe",
+        "integrity_rid": 4096,
+        "pid": 25076
+      }
+    ],
+    "execution_topology_verified": true,
+    "fixture": "C:\\ProgramData\\ShellSpan-AC-786809812497429584eebc51abb09353",
+    "lifecycle": "repeated_cancel",
+    "lifecycle_cancel_observed": true,
+    "lifecycle_fixture_prefix_verified": true,
+    "lifecycle_root_failure_observed": false,
+    "lifecycle_timeout_observed": false,
+    "ordinary_account_credential_comparison": {
+      "context": "exact owned account impersonation; not primary child evidence",
+      "denial_win32": 1168,
+      "error": null
+    },
+    "ordinary_creation_error": null,
+    "ordinary_creation_succeeded": true,
+    "ordinary_primary_credential_comparison": {
+      "denial_win32": 1168,
+      "error": null,
+      "fixture_id": "78680981-2497-4295-84ee-bc51abb09353",
+      "rpc_admission": {
+        "auth_status": 0,
+        "binding_status": 0,
+        "compose_status": 0,
+        "free_binding_status": 0,
+        "free_string_status": 0
+      },
+      "user_sid": "S-1-5-21-4017028701-367916445-1230427694-1073",
+      "version": 1
+    },
+    "ordinary_primary_security_verified": true,
+    "owned_job_total": 4,
+    "process_tree_stopped": true,
+    "production": "unavailable",
+    "profile_folder": "C:\\Users\\SSPA786809812497\\AppData\\Local\\Packages\\shellspan-candidate-786809812497429584eebc51abb09353\\AC",
+    "profile_folder_in_dedicated_account": true,
+    "profile_removed": true,
+    "repeated_cancellation_retirement_verified": true,
+    "root_exit_73": false,
+    "root_exit_code_at_trigger": 259,
+    "scope": "controller fixed file/registry/loopback workload; incomplete stage A matrix",
+    "source_file_registry_controls_verified": true,
+    "source_token_non_elevated": true,
+    "source_token_session": 0,
+    "with_token_creation_error": "controller create fixed source-account LPAC process: Win32 87",
+    "workload_checks_passed": false,
+    "workload_report": {
+      "checks": [
+        {
+          "detail": "actual child operation Win32=None",
+          "name": "readonly.txt read",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=Some(5)",
+          "name": "readonly.txt write",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=None",
+          "name": "workspace.txt read",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=None",
+          "name": "workspace.txt write",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=Some(5)",
+          "name": "secret.txt read",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=Some(5)",
+          "name": "secret.txt write",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=Some(5)",
+          "name": "external.txt read",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=Some(5)",
+          "name": "external.txt write",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=Some(5)",
+          "name": "external-aap.txt read",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=Some(5)",
+          "name": "external-aap.txt write",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=None",
+          "name": "artifact create/write/close",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=None",
+          "name": "artifact reopen/read",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=None",
+          "name": "artifact reopen/write",
+          "passed": true
+        },
+        {
+          "detail": "controller-owned cloned workers passed positive controls before Resume; received=0",
+          "name": "TCP receiver 0 no traffic",
+          "passed": true
+        },
+        {
+          "detail": "controller-owned cloned workers passed positive controls before Resume; received=0",
+          "name": "TCP receiver 1 no traffic",
+          "passed": true
+        },
+        {
+          "detail": "controller-owned cloned workers passed positive controls before Resume; received=0",
+          "name": "UDP receiver 0 no traffic",
+          "passed": true
+        },
+        {
+          "detail": "controller-owned cloned workers passed positive controls before Resume; received=0",
+          "name": "UDP receiver 1 no traffic",
+          "passed": true
+        }
+      ],
+      "complete": false
+    },
+    "workload_retired": true
+  },
+  "controller_workload_requested": true,
+  "controller_workload_planned_root": "C:\\ProgramData\\ShellSpan-AC-786809812497429584eebc51abb09353",
+  "controller_workload_fixture": {
+    "path": "C:\\ProgramData\\ShellSpan-AC-786809812497429584eebc51abb09353",
+    "volume_serial": 2523053325,
+    "file_index": 7318349394757454
+  },
+  "controller_workload_retired": true,
+  "controller_workload_files_retired": false,
+  "controller_lifecycle": "repeated_cancel",
+  "credential_reference": "ShellSpan/owned-account/v1/78680981-2497-4295-84ee-bc51abb09353/S-1-5-21-4017028701-367916445-1230427694-1073",
+  "credential_reference_verified": true,
+  "credential_removed": false,
+  "profile_recovery_api_loaded": false,
+  "profile_recovery_api_unloaded": false,
+  "recovery_logon_pending": false
+}

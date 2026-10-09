@@ -1,0 +1,9 @@
+{
+  "scope": "actual ordinary hive query with caller Continue",
+  "sid": "S-1-5-21-4017028701-367916445-1230427694-1063",
+  "caller_error_action": "Continue",
+  "query_threw": true,
+  "returned_presence": null,
+  "exception_type": "System.Security.SecurityException",
+  "production": "unavailable"
+}

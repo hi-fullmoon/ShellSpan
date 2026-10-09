@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "backend": "account-profile-lifecycle-prototype-v1",
+  "production": "unavailable",
+  "fixture_id": "e2875268-2f4c-4a68-bcfd-8aeb18daaf1b",
+  "account": "SSPAe28752682f4c",
+  "account_sid": "S-1-5-21-4017028701-367916445-1230427694-1033",
+  "filter_keys": [
+    "4344c5f4-e1d1-4db1-b74a-6ef42e069c0b",
+    "ed786f7d-adb6-4963-82f1-d6c5e654bccc",
+    "01063f2b-d397-4a73-be7d-dbcd9e1734d1",
+    "ea9e0f94-152d-4f99-aa2c-32451de5d89c"
+  ],
+  "profile_absent_before_load": true,
+  "profile_registry_security_verified": true,
+  "planned_private_station": "SSPA-e28752682f4c4a68bcfd8aeb18daaf1b",
+  "planned_package_sid": "S-1-15-2-1540748921-2547095743-3945847872-693220396-554072522-656496988-1102480996",
+  "private_desktop_verified": true,
+  "duplicate_station_rejected": true,
+  "private_station_removed": true,
+  "profile": {
+    "path": "C:\\Users\\SSPAe28752682f4c",
+    "volume_serial": 2523053325,
+    "file_index": 17451448556237575
+  },
+  "profile_unloaded": true,
+  "profile_removed": true,
+  "account_removed": true,
+  "filters_removed": true,
+  "non_elevated_account_token": true,
+  "state": "owned Windows profile, account and persistent SID filters retired; evidence retained",
+  "error": "dedicated-account LPAC fixed experiment failed; inspect diagnostic report",
+  "cleanup_debt": [],
+  "controller_interruption_checkpoint": false,
+  "recovery_executed": false,
+  "account_lpac_started": true,
+  "account_lpac_cleanup_verified": true,
+  "account_lpac_verified": false
+}

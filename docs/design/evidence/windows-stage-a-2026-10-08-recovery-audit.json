@@ -1,0 +1,16 @@
+{
+  "account": "SSPAf816a05ebbd6",
+  "account_sid": "S-1-5-21-4017028701-367916445-1230427694-1013",
+  "account_enabled": false,
+  "matching_process_ids": [],
+  "null_sid_entries": [
+    {
+      "pid": 0,
+      "name": ""
+    },
+    {
+      "pid": 4,
+      "name": "System"
+    }
+  ]
+}

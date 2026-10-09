@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "backend": "account-profile-lifecycle-prototype-v1",
+  "production": "unavailable",
+  "fixture_id": "4f357bb6-4ab4-4872-afd5-66b055b9575d",
+  "account": "SSPA4f357bb64ab4",
+  "account_sid": "S-1-5-21-4017028701-367916445-1230427694-1030",
+  "filter_keys": [
+    "c4e89416-5a45-40ff-85cd-485a444892de",
+    "47130379-5639-44f1-988b-2a40de370150",
+    "6225db5a-861d-48a4-a87f-b927e6e979a6",
+    "85da4aaf-26ed-4133-a479-e63d4dae4fc0"
+  ],
+  "profile_absent_before_load": true,
+  "profile_registry_security_verified": true,
+  "planned_private_station": "SSPA-4f357bb64ab44872afd566b055b9575d",
+  "planned_package_sid": "S-1-15-2-100447491-4047592915-2239814999-1884491244-1535903225-1052843061-4110593047",
+  "private_desktop_verified": true,
+  "duplicate_station_rejected": true,
+  "private_station_removed": true,
+  "profile": {
+    "path": "C:\\Users\\SSPA4f357bb64ab4",
+    "volume_serial": 2523053325,
+    "file_index": 12384898975445753
+  },
+  "profile_unloaded": true,
+  "profile_removed": true,
+  "account_removed": true,
+  "filters_removed": true,
+  "non_elevated_account_token": true,
+  "state": "owned Windows profile, account and persistent SID filters retired; evidence retained",
+  "error": null,
+  "cleanup_debt": [],
+  "controller_interruption_checkpoint": false,
+  "recovery_executed": true
+}

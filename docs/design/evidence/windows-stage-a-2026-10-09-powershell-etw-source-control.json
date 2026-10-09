@@ -1,0 +1,55 @@
+{
+  "actual_exit": 73,
+  "error": null,
+  "etw_positive_initializer_verified": true,
+  "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-ccf987e2924e490eb58eae27a2820ee2",
+  "fixture_recycled": true,
+  "images": [
+    {
+      "bytes": 7680,
+      "file_index": 3096224744047199,
+      "path": "D:\\Developer\\ShellSpan\\tests\\windows-sandbox-account\\target\\debug\\powershell-etw-probe.exe",
+      "volume": 170928010
+    }
+  ],
+  "observations": [
+    {
+      "actual_lpac": false,
+      "appcontainer": false,
+      "error": null,
+      "exact_capabilities": true,
+      "exact_job_member": true,
+      "expected_package": true,
+      "expected_user": true,
+      "image": "D:\\Developer\\ShellSpan\\tests\\windows-sandbox-account\\target\\debug\\powershell-etw-probe.exe",
+      "integrity_rid": 8192,
+      "pid": 29048
+    },
+    {
+      "actual_lpac": false,
+      "appcontainer": false,
+      "error": null,
+      "exact_capabilities": true,
+      "exact_job_member": true,
+      "expected_package": true,
+      "expected_user": true,
+      "image": "C:\\Windows\\System32\\conhost.exe",
+      "integrity_rid": 8192,
+      "pid": 1396
+    }
+  ],
+  "positive_control_passed": true,
+  "process_tree_stopped": true,
+  "production": "unavailable",
+  "scope": "unelevated shared-source positive tool control only",
+  "source_integrity": 8192,
+  "source_sid": "S-1-5-21-4017028701-367916445-1230427694-1001",
+  "static_imports": [
+    []
+  ],
+  "stderr": "",
+  "stdout": "{\"version\":1,\"scope\":\"fixed-powershell-etw-initializer\",\"assembly\":\"C:\\\\Windows\\\\Microsoft.Net\\\\assembly\\\\GAC_MSIL\\\\System.Management.Automation\\\\v4.0_3.0.0.0__31bf3856ad364e35\\\\System.Management.Automation.dll\",\"type\":\"System.Management.Automation.Tracing.PSEtwLog\",\"assembly_version\":\"System.Management.Automation, Version=3.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35\",\"mvid\":\"a002aaca-c1f1-4bf9-8710-85b273cd7dce\",\"stage\":\"complete\",\"initializer_succeeded\":true,\"chain_complete\":true,\"exceptions\":[],\"native_registrations\":[{\"provider\":\"a0c1853b-5c40-4b15-8766-3cf1c58f985a\",\"register_code\":0,\"handle_nonzero\":true,\"unregister_code\":0},{\"provider\":\"3229ad87-338e-4e53-85b4-f77f5f2c2a07\",\"register_code\":0,\"handle_nonzero\":true,\"unregister_code\":0}]}\r\n",
+  "tool": "power_shell_etw_probe",
+  "topology_verified": true,
+  "total_processes": 2
+}

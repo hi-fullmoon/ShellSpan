@@ -1,0 +1,15 @@
+
+FullName                                                                                                           Attributes
+--------                                                                                                           ----------
+C:\Users\SSPAda62891db9d3\AppData                                                                           Hidden, Directory
+C:\Users\SSPAda62891db9d3\AppData\Local                                                                             Directory
+C:\Users\SSPAda62891db9d3\AppData\Local\Temp                                                                        Directory
+C:\Users\SSPAda62891db9d3\AppData\Local\Temp\ShellSpan-AC-bf9b6f53e4fa44e482bf5f8ee921e441                          Directory
+C:\Users\SSPAda62891db9d3\AppData\Local\Temp\ShellSpan-AC-bf9b6f53e4fa44e482bf5f8ee921e441\output                   Directory
+C:\Users\SSPAda62891db9d3\AppData\Local\Temp\ShellSpan-AC-bf9b6f53e4fa44e482bf5f8ee921e441\external-aap.txt           Archive
+C:\Users\SSPAda62891db9d3\AppData\Local\Temp\ShellSpan-AC-bf9b6f53e4fa44e482bf5f8ee921e441\external.txt               Archive
+C:\Users\SSPAda62891db9d3\AppData\Local\Temp\ShellSpan-AC-bf9b6f53e4fa44e482bf5f8ee921e441\ownership.json             Archive
+C:\Users\SSPAda62891db9d3\AppData\Local\Temp\ShellSpan-AC-bf9b6f53e4fa44e482bf5f8ee921e441\probe.exe                  Archive
+C:\Users\SSPAda62891db9d3\AppData\Local\Temp\ShellSpan-AC-bf9b6f53e4fa44e482bf5f8ee921e441\readonly.txt               Archive
+C:\Users\SSPAda62891db9d3\AppData\Local\Temp\ShellSpan-AC-bf9b6f53e4fa44e482bf5f8ee921e441\secret.txt                 Archive
+C:\Users\SSPAda62891db9d3\AppData\Local\Temp\ShellSpan-AC-bf9b6f53e4fa44e482bf5f8ee921e441\workspace.txt              Archive

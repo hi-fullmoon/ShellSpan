@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "backend": "fixed-system-admission-preparation-v1",
+  "production": "unavailable",
+  "fixture_id": "4ab261ec-d3ac-4118-99d7-449219731e5f",
+  "image_volume": 2523053325,
+  "image_file_index": 7599824371312700,
+  "image_size": 2983936,
+  "state": "owned SYSTEM service stopped and removed; inspect profile receipt",
+  "service_install_planned": true,
+  "service_created": true,
+  "service_removed": true,
+  "fixed_workload": false,
+  "fixed_lifecycle": "normal",
+  "fixed_tool": null,
+  "recovery_target": "78c1bb9d-4c84-4c90-b28b-833b30917342"
+}

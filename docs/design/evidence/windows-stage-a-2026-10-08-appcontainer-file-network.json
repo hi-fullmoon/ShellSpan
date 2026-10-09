@@ -1,0 +1,18 @@
+{
+  "production": "unavailable",
+  "candidate": "appcontainer-admission-only",
+  "profile_name": "ShellSpan-candidate-b7ecc2ba42ca416697fff128a638d0be",
+  "state": "admission experiment completed; no production acceptance; receipt retained",
+  "appcontainer_identity": true,
+  "source_not_elevated": true,
+  "same_user": true,
+  "low_integrity": true,
+  "capabilities_empty": true,
+  "entry_exit_73": true,
+  "process_tree_stopped": true,
+  "profile_removed": true,
+  "error": "missing initialized child report: 拒绝访问。 (os error 5)",
+  "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-90ce6c905fd94e8dac6a0e439bf1c118",
+  "fixture_acls_revoked": true,
+  "probe": null
+}

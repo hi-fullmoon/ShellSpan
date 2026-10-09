@@ -1,0 +1,128 @@
+{
+  "tool_admission": {
+    "actual_exit": 73,
+    "artifact": {
+      "bytes": 25,
+      "file_index": 6192449488941626,
+      "path": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-3f94b32aa5cf4fcd85d382be4867723f\\output/powershell-fixed-artifact.txt",
+      "volume": 2523053325
+    },
+    "artifact_verified": true,
+    "expected_exit": 73,
+    "image": {
+      "bytes": 301368,
+      "file_index": 5348024558809429,
+      "path": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-3f94b32aa5cf4fcd85d382be4867723f\\pwsh.exe",
+      "volume": 2523053325
+    },
+    "runtime_bytes": 242562201,
+    "runtime_file_count": 471,
+    "runtime_intent": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-3f94b32aa5cf4fcd85d382be4867723f\\powershell-runtime-intent.json",
+    "scope": "shared-source LPAC admission only; not dedicated-account compatibility acceptance",
+    "static_imports": [
+      "advapi32.dll",
+      "api-ms-win-crt-convert-l1-1-0.dll",
+      "api-ms-win-crt-heap-l1-1-0.dll",
+      "api-ms-win-crt-locale-l1-1-0.dll",
+      "api-ms-win-crt-math-l1-1-0.dll",
+      "api-ms-win-crt-runtime-l1-1-0.dll",
+      "api-ms-win-crt-stdio-l1-1-0.dll",
+      "api-ms-win-crt-string-l1-1-0.dll",
+      "api-ms-win-crt-time-l1-1-0.dll",
+      "kernel32.dll",
+      "shell32.dll",
+      "user32.dll"
+    ],
+    "stderr": "",
+    "stdio_handle_count": 3,
+    "stdout": "",
+    "tool": "power_shell7_runtime_build",
+    "topology_verified": true
+  },
+  "production": "unavailable",
+  "candidate": "lpac-fixed-tool-admission",
+  "profile_name": "ShellSpan-candidate-2cfe25cdb32d4f4e94d018a2807e5474",
+  "created_package_sid": "S-1-15-2-981503276-3542853477-207866612-3647440751-2535626990-1012089740-144203871",
+  "namespace_admission": {
+    "observations": [
+      {
+        "create_subdirectory_admission": "0xc0000034",
+        "path": "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects\\S-1-15-2-981503276-3542853477-207866612-3647440751-2535626990-1012089740-144203871",
+        "read_control": "0xc0000034",
+        "traverse": "0xc0000034"
+      },
+      {
+        "create_subdirectory_admission": "0x00000000",
+        "path": "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects",
+        "read_control": "0x00000000",
+        "traverse": "0x00000000"
+      }
+    ],
+    "read_only": true
+  },
+  "state": "cleanup debt: retain exact owned profile; no automatic rerun",
+  "appcontainer_identity": true,
+  "source_not_elevated": true,
+  "source_creation_boundary": {
+    "child_process_policy_flags": 0,
+    "current_job_active_process_limit": 0,
+    "current_job_limit_flags": 10240,
+    "current_job_ui_restrictions": 0,
+    "in_job": true,
+    "token_restricted": false,
+    "token_session_id": 1
+  },
+  "actual_source_user_sid": "S-1-5-21-4017028701-367916445-1230427694-1001",
+  "dedicated_account_plan_verified": false,
+  "receiver_evidence_owner": "fixture-controller",
+  "receiver_quietness_verified": false,
+  "same_user": true,
+  "low_integrity": true,
+  "lpac_requested": true,
+  "actual_lpac": true,
+  "lpac_evidence_method": "actual Token AccessCheck: unique package positive control plus AllApplicationPackages exclusion; not class-46 inference",
+  "capabilities_empty": false,
+  "requested_capabilities": [
+    "registryRead",
+    "lpacInstrumentation"
+  ],
+  "capabilities_verified": true,
+  "entry_exit_73": false,
+  "process_tree_stopped": true,
+  "lifecycle_timeout_observed": false,
+  "lifecycle_cancel_observed": false,
+  "lifecycle_root_failure_observed": false,
+  "active_processes_after_root_failure": null,
+  "owned_job_total_processes": 2,
+  "owned_job_process_observations": [
+    {
+      "pid": 31392,
+      "image": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-3f94b32aa5cf4fcd85d382be4867723f\\pwsh.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    },
+    {
+      "pid": 16188,
+      "image": "C:\\Windows\\System32\\conhost.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    }
+  ],
+  "profile_removed": false,
+  "error": "; owned AC cleanup budget exceeded; retain owned profile: fixture ACE cleanup unconfirmed",
+  "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-3f94b32aa5cf4fcd85d382be4867723f",
+  "fixture_acls_revoked": false,
+  "probe": null
+}

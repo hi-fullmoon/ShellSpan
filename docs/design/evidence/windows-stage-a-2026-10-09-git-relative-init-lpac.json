@@ -1,0 +1,225 @@
+{
+  "tool_admission": {
+    "actual_exit": 1,
+    "bundle_files": [
+      {
+        "destination": {
+          "bytes": 4383048,
+          "file_index": 2251799815072186,
+          "path": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-580739ab5e5f430ebdf71e00130821c7\\git.exe",
+          "volume": 2523053325
+        },
+        "imports": [
+          "advapi32.dll",
+          "kernel32.dll",
+          "libiconv-2.dll",
+          "libintl-8.dll",
+          "libpcre2-8-0.dll",
+          "msvcrt.dll",
+          "ntdll.dll",
+          "user32.dll",
+          "ws2_32.dll",
+          "zlib1.dll"
+        ],
+        "source": {
+          "bytes": 4383048,
+          "file_index": 1125899907578178,
+          "path": "D:\\Programs\\Git\\mingw64\\bin\\git.exe",
+          "volume": 170928010
+        }
+      },
+      {
+        "destination": {
+          "bytes": 1143148,
+          "file_index": 7318349395863995,
+          "path": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-580739ab5e5f430ebdf71e00130821c7\\libiconv-2.dll",
+          "volume": 2523053325
+        },
+        "imports": [
+          "kernel32.dll",
+          "msvcrt.dll"
+        ],
+        "source": {
+          "bytes": 1143148,
+          "file_index": 1125899907578195,
+          "path": "D:\\Programs\\Git\\mingw64\\bin\\libiconv-2.dll",
+          "volume": 170928010
+        }
+      },
+      {
+        "destination": {
+          "bytes": 298731,
+          "file_index": 2251799815072188,
+          "path": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-580739ab5e5f430ebdf71e00130821c7\\libintl-8.dll",
+          "volume": 2523053325
+        },
+        "imports": [
+          "advapi32.dll",
+          "kernel32.dll",
+          "libiconv-2.dll",
+          "msvcrt.dll"
+        ],
+        "source": {
+          "bytes": 298731,
+          "file_index": 1125899907578197,
+          "path": "D:\\Programs\\Git\\mingw64\\bin\\libintl-8.dll",
+          "volume": 170928010
+        }
+      },
+      {
+        "destination": {
+          "bytes": 717955,
+          "file_index": 6755399442442685,
+          "path": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-580739ab5e5f430ebdf71e00130821c7\\libpcre2-8-0.dll",
+          "volume": 2523053325
+        },
+        "imports": [
+          "kernel32.dll",
+          "msvcrt.dll"
+        ],
+        "source": {
+          "bytes": 717955,
+          "file_index": 1125899907578202,
+          "path": "D:\\Programs\\Git\\mingw64\\bin\\libpcre2-8-0.dll",
+          "volume": 170928010
+        }
+      },
+      {
+        "destination": {
+          "bytes": 128488,
+          "file_index": 2533274791782846,
+          "path": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-580739ab5e5f430ebdf71e00130821c7\\zlib1.dll",
+          "volume": 2523053325
+        },
+        "imports": [
+          "kernel32.dll",
+          "msvcrt.dll"
+        ],
+        "source": {
+          "bytes": 128488,
+          "file_index": 1125899907578249,
+          "path": "D:\\Programs\\Git\\mingw64\\bin\\zlib1.dll",
+          "volume": 170928010
+        }
+      }
+    ],
+    "expected_exit": 0,
+    "image": {
+      "bytes": 4383048,
+      "file_index": 2251799815072186,
+      "path": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-580739ab5e5f430ebdf71e00130821c7\\git.exe",
+      "volume": 2523053325
+    },
+    "scope": "shared-source LPAC admission only; not dedicated-account compatibility acceptance",
+    "static_imports": [
+      "advapi32.dll",
+      "kernel32.dll",
+      "libiconv-2.dll",
+      "libintl-8.dll",
+      "libpcre2-8-0.dll",
+      "msvcrt.dll",
+      "ntdll.dll",
+      "user32.dll",
+      "ws2_32.dll",
+      "zlib1.dll"
+    ],
+    "stderr": "error: cannot lock ref 'HEAD': unable to create directory for C:/Users/zhengbiwen/AppData/Local/Temp/ShellSpan-AC-580739ab5e5f430ebdf71e00130821c7/output/HEAD\n",
+    "stdio_handle_count": 3,
+    "stdout": "",
+    "system_imports": [
+      "advapi32.dll",
+      "kernel32.dll",
+      "msvcrt.dll",
+      "ntdll.dll",
+      "user32.dll",
+      "ws2_32.dll"
+    ],
+    "tool": "git_bundle_init",
+    "topology_verified": true
+  },
+  "production": "unavailable",
+  "candidate": "lpac-fixed-tool-admission",
+  "profile_name": "ShellSpan-candidate-973c0f5712d941079944d770231ec0b1",
+  "created_package_sid": "S-1-15-2-636007498-2664059608-1117658501-1184641908-2549691735-3918022567-1863814828",
+  "namespace_admission": {
+    "observations": [
+      {
+        "create_subdirectory_admission": "0xc0000034",
+        "path": "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects\\S-1-15-2-636007498-2664059608-1117658501-1184641908-2549691735-3918022567-1863814828",
+        "read_control": "0xc0000034",
+        "traverse": "0xc0000034"
+      },
+      {
+        "create_subdirectory_admission": "0x00000000",
+        "path": "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects",
+        "read_control": "0x00000000",
+        "traverse": "0x00000000"
+      }
+    ],
+    "read_only": true
+  },
+  "state": "admission experiment completed; no production acceptance; receipt retained",
+  "appcontainer_identity": true,
+  "source_not_elevated": true,
+  "source_creation_boundary": {
+    "child_process_policy_flags": 0,
+    "current_job_active_process_limit": 0,
+    "current_job_limit_flags": 10240,
+    "current_job_ui_restrictions": 0,
+    "in_job": true,
+    "token_restricted": false,
+    "token_session_id": 1
+  },
+  "actual_source_user_sid": "S-1-5-21-4017028701-367916445-1230427694-1001",
+  "dedicated_account_plan_verified": false,
+  "receiver_evidence_owner": "fixture-controller",
+  "receiver_quietness_verified": false,
+  "same_user": true,
+  "low_integrity": true,
+  "lpac_requested": true,
+  "actual_lpac": true,
+  "lpac_evidence_method": "actual Token AccessCheck: unique package positive control plus AllApplicationPackages exclusion; not class-46 inference",
+  "capabilities_empty": false,
+  "requested_capabilities": [
+    "registryRead"
+  ],
+  "capabilities_verified": true,
+  "entry_exit_73": false,
+  "process_tree_stopped": true,
+  "lifecycle_timeout_observed": false,
+  "lifecycle_cancel_observed": false,
+  "lifecycle_root_failure_observed": false,
+  "active_processes_after_root_failure": null,
+  "owned_job_total_processes": 2,
+  "owned_job_process_observations": [
+    {
+      "pid": 3528,
+      "image": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-580739ab5e5f430ebdf71e00130821c7\\git.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    },
+    {
+      "pid": 11280,
+      "image": "C:\\Windows\\System32\\conhost.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    }
+  ],
+  "profile_removed": true,
+  "error": "fixed tool compatibility unverified: exit=0x00000001; topology=true",
+  "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-580739ab5e5f430ebdf71e00130821c7",
+  "fixture_acls_revoked": true,
+  "probe": null
+}

@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "backend": "account-profile-lifecycle-prototype-v1",
+  "production": "unavailable",
+  "fixture_id": "43dc94e3-3f37-416a-96fc-0f96a78fdde9",
+  "account": "SSPA43dc94e33f37",
+  "account_sid": "S-1-5-21-4017028701-367916445-1230427694-1053",
+  "filter_keys": [
+    "71c2f768-1c7a-44f1-b825-7bf6e59a1a2f",
+    "a5816050-5f7e-4826-a520-745379538a43",
+    "6964742d-4af9-45d1-8d50-3654d3e8f052",
+    "d43a07aa-81f8-4ad8-add7-e2d5667a11a6"
+  ],
+  "profile_absent_before_load": true,
+  "profile_registry_security_verified": true,
+  "planned_private_station": "SSPA-43dc94e33f37416a96fc0f96a78fdde9",
+  "planned_package_sid": "S-1-15-2-3904864311-3131246722-402322511-2602475385-2249963797-807574143-4101234183",
+  "private_desktop_verified": true,
+  "duplicate_station_rejected": true,
+  "private_station_removed": true,
+  "profile": {
+    "path": "C:\\Users\\SSPA43dc94e33f37",
+    "volume_serial": 2523053325,
+    "file_index": 10414574138511352
+  },
+  "profile_unloaded": true,
+  "profile_removed": true,
+  "account_removed": true,
+  "filters_removed": true,
+  "non_elevated_account_token": true,
+  "state": "owned Windows profile, account and persistent SID filters retired; evidence retained",
+  "error": "controller CreateProcessAsUser fixed account LPAC comparison: Win32 2",
+  "cleanup_debt": [],
+  "controller_interruption_checkpoint": false,
+  "recovery_executed": true,
+  "account_lpac_started": true,
+  "account_lpac_cleanup_verified": true,
+  "account_lpac_verified": false,
+  "controller_receiver_counts": null,
+  "account_lpac_outer_job_total": null,
+  "account_lpac_diagnostic_report": null,
+  "profile_residual_recycled": false,
+  "account_lpac_admission_only": true,
+  "planned_private_namespace": "\\Sessions\\0\\AppContainerNamedObjects\\S-1-15-2-3904864311-3131246722-402322511-2602475385-2249963797-807574143-4101234183",
+  "private_namespace_verified": false,
+  "private_namespace_removed": true,
+  "controller_admission_report": {
+    "actual_capabilities_verified": false,
+    "actual_low_integrity": false,
+    "actual_lpac": false,
+    "actual_package_verified": false,
+    "actual_user_verified": false,
+    "controller_privileges_before_creation": {
+      "SeAssignPrimaryTokenPrivilege": {
+        "enabled": false,
+        "present": true
+      },
+      "SeImpersonatePrivilege": {
+        "enabled": true,
+        "present": true
+      },
+      "SeIncreaseQuotaPrivilege": {
+        "enabled": false,
+        "present": true
+      }
+    },
+    "error": "controller CreateProcessAsUser fixed account LPAC comparison: Win32 2",
+    "ordinary_creation_error": null,
+    "ordinary_creation_succeeded": true,
+    "owned_job_total": 2,
+    "process_tree_stopped": true,
+    "production": "unavailable",
+    "profile_folder": "C:\\Users\\SSPA43dc94e33f37\\AppData\\Local\\Packages\\shellspan-candidate-43dc94e33f37416a96fc0f96a78fdde9\\AC",
+    "profile_folder_in_dedicated_account": true,
+    "profile_removed": true,
+    "root_exit_73": false,
+    "scope": "controller fixed System32 admission only",
+    "source_token_non_elevated": true,
+    "source_token_session": 0,
+    "with_token_creation_error": "controller create fixed source-account LPAC process: Win32 87"
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "actual_exit": 73,
+  "error": null,
+  "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-0dc2519169bd4bb4afb0ead37d90e095",
+  "fixture_recycled": true,
+  "images": [
+    {
+      "bytes": 3176960,
+      "file_index": 2533274790660802,
+      "path": "D:\\Developer\\ShellSpan\\tests\\windows-sandbox-account\\target\\debug\\shellspan-appcontainer-candidate.exe",
+      "volume": 170928010
+    }
+  ],
+  "observations": [
+    {
+      "actual_lpac": false,
+      "appcontainer": false,
+      "error": null,
+      "exact_capabilities": true,
+      "exact_job_member": true,
+      "expected_package": true,
+      "expected_user": true,
+      "image": "D:\\Developer\\ShellSpan\\tests\\windows-sandbox-account\\target\\debug\\shellspan-appcontainer-candidate.exe",
+      "integrity_rid": 8192,
+      "pid": 27296
+    },
+    {
+      "actual_lpac": false,
+      "appcontainer": false,
+      "error": null,
+      "exact_capabilities": true,
+      "exact_job_member": true,
+      "expected_package": true,
+      "expected_user": true,
+      "image": "C:\\Windows\\System32\\conhost.exe",
+      "integrity_rid": 8192,
+      "pid": 8520
+    }
+  ],
+  "positive_control_passed": true,
+  "prefix_report_bound": true,
+  "process_tree_stopped": true,
+  "production": "unavailable",
+  "scope": "unelevated shared-source positive tool control only",
+  "source_integrity": 8192,
+  "source_sid": "S-1-5-21-4017028701-367916445-1230427694-1001",
+  "static_imports": [
+    [
+      "advapi32.dll",
+      "api-ms-win-core-synch-l1-2-0.dll",
+      "api-ms-win-crt-heap-l1-1-0.dll",
+      "api-ms-win-crt-locale-l1-1-0.dll",
+      "api-ms-win-crt-math-l1-1-0.dll",
+      "api-ms-win-crt-runtime-l1-1-0.dll",
+      "api-ms-win-crt-stdio-l1-1-0.dll",
+      "api-ms-win-security-base-l1-2-2.dll",
+      "bcryptprimitives.dll",
+      "dnsapi.dll",
+      "kernel32.dll",
+      "ntdll.dll",
+      "ole32.dll",
+      "oleaut32.dll",
+      "rpcrt4.dll",
+      "secur32.dll",
+      "shell32.dll",
+      "userenv.dll",
+      "vcruntime140.dll",
+      "ws2_32.dll"
+    ]
+  ],
+  "stderr": "",
+  "stdout": "{\"observations\":[{\"attributes\":54,\"attributes_error\":null,\"identity\":[2523053325,1407374883553285],\"metadata_error\":null,\"open_error\":null,\"path\":\"C:\\\\\"},{\"attributes\":17,\"attributes_error\":null,\"identity\":[2523053325,2251799813686678],\"metadata_error\":null,\"open_error\":null,\"path\":\"C:\\\\Users\"},{\"attributes\":16,\"attributes_error\":null,\"identity\":[2523053325,3940649673954254],\"metadata_error\":null,\"open_error\":null,\"path\":\"C:\\\\Users\\\\ZHENGB~1\"},{\"attributes\":16,\"attributes_error\":null,\"identity\":[2523053325,1970324837103274],\"metadata_error\":null,\"open_error\":null,\"path\":\"C:\\\\Users\\\\ZHENGB~1\\\\AppData\"},{\"attributes\":16,\"attributes_error\":null,\"identity\":[2523053325,1970324837103304],\"metadata_error\":null,\"open_error\":null,\"path\":\"C:\\\\Users\\\\ZHENGB~1\\\\AppData\\\\Local\"},{\"attributes\":16,\"attributes_error\":null,\"identity\":[2523053325,10977524091720686],\"metadata_error\":null,\"open_error\":null,\"path\":\"C:\\\\Users\\\\ZHENGB~1\\\\AppData\\\\Local\\\\Temp\"},{\"attributes\":16,\"attributes_error\":null,\"identity\":[2523053325,34339947158783592],\"metadata_error\":null,\"open_error\":null,\"path\":\"C:\\\\Users\\\\ZHENGB~1\\\\AppData\\\\Local\\\\Temp\\\\ShellSpan-AC-0dc2519169bd4bb4afb0ead37d90e095\"},{\"attributes\":16,\"attributes_error\":null,\"identity\":[2523053325,9007199254913757],\"metadata_error\":null,\"open_error\":null,\"path\":\"C:\\\\Users\\\\ZHENGB~1\\\\AppData\\\\Local\\\\Temp\\\\ShellSpan-AC-0dc2519169bd4bb4afb0ead37d90e095\\\\output\"}],\"root\":\"C:\\\\Users\\\\ZHENGB~1\\\\AppData\\\\Local\\\\Temp\\\\ShellSpan-AC-0dc2519169bd4bb4afb0ead37d90e095\",\"version\":1}\n",
+  "tool": "git_prefix_probe",
+  "topology_verified": true,
+  "total_processes": 2
+}

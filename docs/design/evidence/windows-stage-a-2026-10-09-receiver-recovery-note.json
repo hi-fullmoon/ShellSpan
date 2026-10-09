@@ -1,0 +1,10 @@
+{
+  "affected_reports": [
+    "windows-stage-a-2026-10-08-appcontainer-receiver-audit.json",
+    "windows-stage-a-2026-10-08-lpac-receiver-audit.json"
+  ],
+  "network_evidence_valid": false,
+  "reason": "receiver clones were blocking; host wake traffic was sent to owned endpoints solely to allow cleanup; exclude these runs from network conclusions",
+  "owned_processes_finished": true,
+  "subsequent_fix": "each cloned socket explicitly nonblocking, worker positive controls, held TCP handles, regression test"
+}

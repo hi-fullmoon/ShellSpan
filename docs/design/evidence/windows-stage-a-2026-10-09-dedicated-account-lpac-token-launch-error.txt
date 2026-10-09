@@ -1,0 +1,1 @@
+stage A NO-GO: owned account profile diagnostic failed; retain protected receipt and offline disabled-account debt

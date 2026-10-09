@@ -1,0 +1,66 @@
+{
+  "actual_exit": 0,
+  "error": null,
+  "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-a9b05ff2bb05485fadf54372cf3177f8",
+  "fixture_recycled": true,
+  "images": [
+    {
+      "bytes": 4383048,
+      "file_index": 1125899907578178,
+      "path": "D:\\Programs\\Git\\mingw64\\bin\\git.exe",
+      "volume": 170928010
+    }
+  ],
+  "observations": [
+    {
+      "actual_lpac": false,
+      "appcontainer": false,
+      "error": null,
+      "exact_capabilities": true,
+      "exact_job_member": true,
+      "expected_package": true,
+      "expected_user": true,
+      "image": "D:\\Programs\\Git\\mingw64\\bin\\git.exe",
+      "integrity_rid": 8192,
+      "pid": 23040
+    },
+    {
+      "actual_lpac": false,
+      "appcontainer": false,
+      "error": null,
+      "exact_capabilities": true,
+      "exact_job_member": true,
+      "expected_package": true,
+      "expected_user": true,
+      "image": "C:\\Windows\\System32\\conhost.exe",
+      "integrity_rid": 8192,
+      "pid": 26976
+    }
+  ],
+  "positive_control_passed": true,
+  "process_tree_stopped": true,
+  "production": "unavailable",
+  "repository_verified": true,
+  "scope": "unelevated shared-source positive tool control only",
+  "source_integrity": 8192,
+  "source_sid": "S-1-5-21-4017028701-367916445-1230427694-1001",
+  "static_imports": [
+    [
+      "advapi32.dll",
+      "kernel32.dll",
+      "libiconv-2.dll",
+      "libintl-8.dll",
+      "libpcre2-8-0.dll",
+      "msvcrt.dll",
+      "ntdll.dll",
+      "user32.dll",
+      "ws2_32.dll",
+      "zlib1.dll"
+    ]
+  ],
+  "stderr": "",
+  "stdout": "Initialized empty Git repository in C:/Users/zhengbiwen/AppData/Local/Temp/ShellSpan-AC-a9b05ff2bb05485fadf54372cf3177f8/output/\n",
+  "tool": "git_bundle_init",
+  "topology_verified": true,
+  "total_processes": 2
+}

@@ -1,5 +1,5 @@
 use crate::policy::{self, Object};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::ffi::c_void;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -16,9 +16,111 @@ use windows_sys::Win32::NetworkManagement::WindowsFilteringPlatform::*;
 use windows_sys::Win32::Security::Authorization::*;
 use windows_sys::Win32::Security::*;
 use windows_sys::Win32::Storage::FileSystem::*;
+use windows_sys::Win32::System::JobObjects::*;
 use windows_sys::Win32::System::Threading::*;
 
 type Result<T> = std::result::Result<T, String>;
+mod account_profile;
+mod bootstrap;
+mod journal;
+mod system_admission;
+pub fn prepare_system_profile_recovery(id: &str) -> Result<()> {
+    system_admission::prepare_recovery(id)
+}
+
+pub fn prepare_system_admission() -> Result<()> {
+    system_admission::prepare()
+}
+pub fn prepare_system_workload() -> Result<()> {
+    system_admission::prepare_workload()
+}
+pub fn prepare_system_git_bundle() -> Result<()> {
+    system_admission::prepare_git_bundle()
+}
+pub fn prepare_system_dns_rpc_block_internet() -> Result<()> {
+    system_admission::prepare_dns_rpc_block_internet()
+}
+pub fn prepare_system_dns_rpc_instrumentation_internet() -> Result<()> {
+    system_admission::prepare_dns_rpc_instrumentation_internet()
+}
+pub fn prepare_system_dns_rpc_instrumentation_default() -> Result<()> {
+    system_admission::prepare_dns_rpc_instrumentation_default()
+}
+pub fn prepare_system_dns_package_block_internet() -> Result<()> {
+    system_admission::prepare_dns_package_block_internet()
+}
+pub fn prepare_system_dns_package_block() -> Result<()> {
+    system_admission::prepare_dns_package_block()
+}
+pub fn prepare_system_node_rpc_block() -> Result<()> {
+    system_admission::prepare_node_rpc_block()
+}
+pub fn prepare_system_node_package_block() -> Result<()> {
+    system_admission::prepare_node_package_block()
+}
+pub fn prepare_system_node() -> Result<()> {
+    system_admission::prepare_node()
+}
+pub fn prepare_system_git_init() -> Result<()> {
+    system_admission::prepare_git_init()
+}
+pub fn prepare_system_git_prefix_probe() -> Result<()> {
+    system_admission::prepare_git_prefix_probe()
+}
+pub fn prepare_system_cross_slot_registry_probe() -> Result<()> {
+    system_admission::prepare_cross_slot_registry_probe()
+}
+pub fn prepare_system_powershell() -> Result<()> {
+    system_admission::prepare_powershell()
+}
+pub fn prepare_system_powershell7_runtime() -> Result<()> {
+    system_admission::prepare_powershell7_runtime()
+}
+pub fn prepare_system_powershell7_artifact() -> Result<()> {
+    system_admission::prepare_powershell7_artifact()
+}
+pub fn prepare_system_powershell7_build() -> Result<()> {
+    system_admission::prepare_powershell7_build()
+}
+pub fn prepare_system_lifecycle(mode: &str) -> Result<()> {
+    system_admission::prepare_lifecycle(mode)
+}
+pub fn run_system_admission(id: &str) -> Result<()> {
+    system_admission::run(id)
+}
+pub fn system_admission_entry(id: &str) -> Result<()> {
+    system_admission::dispatch(id)
+}
+pub fn recover_system_admission(id: &str) -> Result<()> {
+    system_admission::recover(id)
+}
+
+pub fn diagnose_account_profile() -> Result<()> {
+    account_profile::run()
+}
+pub fn diagnose_account_lpac() -> Result<()> {
+    account_profile::run_lpac()
+}
+pub fn diagnose_account_lpac_admission() -> Result<()> {
+    account_profile::run_lpac_admission()
+}
+pub fn diagnose_controller_lpac_admission() -> Result<()> {
+    account_profile::run_controller_admission()
+}
+pub fn interrupt_account_profile() -> Result<()> {
+    account_profile::interrupt()
+}
+
+pub fn recover_account_profile(id: &str) -> Result<()> {
+    account_profile::recover(id)
+}
+mod recovery;
+mod runtime_grants;
+
+pub fn recover(fixture_id: &str) -> Result<()> {
+    recovery::run(fixture_id)
+}
+
 fn wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(Some(0)).collect()
 }
@@ -112,7 +214,29 @@ pub fn preflight() -> Result<()> {
     if !elevated()? {
         return Err("administrator setup required (current token is not elevated); no accounts, ACLs or WFP filters changed".into());
     }
+    require_loader_setup_admission()?;
     Err("elevated preflight only; explicit --run-owned-fixture action required. Production remains unavailable".into())
+}
+
+pub fn diagnose_loader_setup() -> Result<serde_json::Value> {
+    Ok(serde_json::json!({
+        "production": "unavailable",
+        "elevated": elevated()?,
+        "acl_mutated": false,
+        "checks": crate::runner::setup_loader_admission(),
+    }))
+}
+
+fn require_loader_setup_admission() -> Result<()> {
+    let failed: Vec<_> = crate::runner::setup_loader_admission()
+        .into_iter()
+        .filter(|check| !check.passed)
+        .collect();
+    if failed.is_empty() {
+        return Ok(());
+    }
+    Err(format!("setup cannot acquire shared loader WRITE_DAC; no account, fixture, ACL or WFP mutation attempted: {}",
+        failed.iter().map(|check| format!("{} ({})", check.name, check.detail)).collect::<Vec<_>>().join("; ")))
 }
 
 // Account credentials are created and used in this process only. No reusable secret
@@ -171,6 +295,65 @@ impl Account {
             },
             "set fixture account state",
         )
+    }
+    fn join_builtin_users(&self, account_text: &str) -> Result<()> {
+        // Resolve the built-in SID instead of assuming an English group name.
+        // This only changes the freshly created, disabled fixture account.
+        let group = sid("S-1-5-32-545")?;
+        let subject = sid(account_text)?;
+        let mut name_length = 0;
+        let mut domain_length = 0;
+        let mut kind = 0;
+        unsafe {
+            LookupAccountSidW(
+                null(),
+                group.0,
+                null_mut(),
+                &mut name_length,
+                null_mut(),
+                &mut domain_length,
+                &mut kind,
+            );
+        }
+        if name_length == 0 || name_length > 256 || domain_length > 256 {
+            return Err("built-in Users alias unavailable".into());
+        }
+        let mut name = vec![0u16; name_length as usize];
+        let mut domain = vec![0u16; domain_length as usize];
+        win(
+            unsafe {
+                LookupAccountSidW(
+                    null(),
+                    group.0,
+                    name.as_mut_ptr(),
+                    &mut name_length,
+                    domain.as_mut_ptr(),
+                    &mut domain_length,
+                    &mut kind,
+                )
+            },
+            "resolve built-in Users alias",
+        )?;
+        if kind != SidTypeAlias {
+            return Err("built-in Users SID is not a local alias".into());
+        }
+        let member = LOCALGROUP_MEMBERS_INFO_0 {
+            lgrmi0_sid: subject.0,
+        };
+        let result = unsafe {
+            NetLocalGroupAddMembers(
+                null(),
+                name.as_ptr(),
+                0,
+                (&member as *const LOCALGROUP_MEMBERS_INFO_0).cast(),
+                1,
+            )
+        };
+        if result == ERROR_MEMBER_IN_ALIAS {
+            Ok(())
+        } else {
+            status(result, "add only owned account to built-in Users")
+        }
     }
     fn logon(&self, password: &Password) -> Result<Handle> {
         let mut handle = null_mut();
@@ -422,6 +605,15 @@ fn impersonated<T>(token: HANDLE, action: impl FnOnce() -> T) -> Result<T> {
 // Non-inheriting, call-unique ACEs on fixture objects only. Existing owner/DACL
 // remain intact. Revocation merges with the then-current DACL, never restores it.
 fn acl(path: &Path, subject: &Local, rights: u32, mode: ACCESS_MODE) -> Result<()> {
+    acl_with_inheritance(path, subject, rights, mode, 0)
+}
+fn acl_with_inheritance(
+    path: &Path,
+    subject: &Local,
+    rights: u32,
+    mode: ACCESS_MODE,
+    inheritance: u32,
+) -> Result<()> {
     let name = wide(path.to_str().ok_or("non-Unicode fixture path")?);
     let mut old = null_mut();
     let mut sd = null_mut();
@@ -447,7 +639,7 @@ fn acl(path: &Path, subject: &Local, rights: u32, mode: ACCESS_MODE) -> Result<(
     let entry = EXPLICIT_ACCESS_W {
         grfAccessPermissions: rights,
         grfAccessMode: mode,
-        grfInheritance: 0,
+        grfInheritance: inheritance,
         Trustee: TRUSTEE_W {
             TrusteeForm: TRUSTEE_IS_SID,
             TrusteeType: TRUSTEE_IS_UNKNOWN,
@@ -475,6 +667,51 @@ fn acl(path: &Path, subject: &Local, rights: u32, mode: ACCESS_MODE) -> Result<(
         },
         "write fixture ACL",
     )
+}
+
+fn has_owned_allow_ace(path: &Path, subject: &Local) -> Result<bool> {
+    let mut dacl = null_mut();
+    let mut sd = null_mut();
+    status(
+        unsafe {
+            GetNamedSecurityInfoW(
+                wide(path.to_str().ok_or("invalid owned object path")?).as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                null_mut(),
+                null_mut(),
+                &mut dacl,
+                null_mut(),
+                &mut sd,
+            )
+        },
+        "verify owned ACE revocation",
+    )?;
+    let _storage = Local(sd);
+    if dacl.is_null() {
+        return Err("NULL DACL during cleanup verification".into());
+    }
+    for index in 0..unsafe { (*dacl).AceCount } as u32 {
+        let mut ace = null_mut();
+        win(
+            unsafe { GetAce(dacl, index, &mut ace) },
+            "inspect cleanup ACE",
+        )?;
+        // ACCESS_ALLOWED_ACE_TYPE = 0 in the Windows ACE header contract.
+        if unsafe { (*(ace as *const ACE_HEADER)).AceType } == 0 {
+            let allowed = unsafe { &*(ace as *const ACCESS_ALLOWED_ACE) };
+            if unsafe {
+                EqualSid(
+                    (&allowed.SidStart as *const u32).cast_mut().cast(),
+                    subject.0,
+                )
+            } != 0
+            {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
 
 struct Engine(HANDLE);
@@ -554,12 +791,7 @@ fn install_network(engine: &Engine, account_sid: &str, keys: &[GUID; 4]) -> Resu
     install
 }
 
-#[derive(Serialize)]
-struct Check {
-    name: String,
-    passed: bool,
-    detail: String,
-}
+use crate::runner::Check;
 #[derive(Serialize)]
 struct Receipt {
     backend: &'static str,
@@ -573,19 +805,15 @@ struct Receipt {
     checks: Vec<Check>,
     cleanup_debt: Vec<String>,
     missing_evidence: Vec<&'static str>,
+    runtime_grants: Vec<runtime_grants::RuntimeRecord>,
 }
 fn save(path: &Path, receipt: &Receipt) -> Result<()> {
     let bytes = serde_json::to_vec_pretty(receipt).map_err(|e| e.to_string())?;
-    // Parent is protected before this file is created. Flush each transition.
-    let mut file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(path)
-        .map_err(|e| e.to_string())?;
-    file.write_all(&bytes)
-        .and_then(|_| file.sync_all())
-        .map_err(|e| e.to_string())
+    journal::publish(path, &bytes, false)
+}
+
+pub fn diagnose_journal() -> Result<()> {
+    journal::diagnose()
 }
 fn protected_fixture(root: &Path) -> Result<()> {
     let (sd, _) = descriptor("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)")?;
@@ -721,25 +949,58 @@ fn file_checks(root: &Path, token: HANDLE, receipt: &mut Receipt, workspace: boo
                         .open(root.join("project/.git/config")),
                 ),
             ),
-            (
-                "build artifact create and reopen",
-                if workspace {
-                    let artifact = root.join("project/output/artifact.txt");
-                    fs::write(&artifact, b"owned build artifact").is_ok()
-                        && fs::read(&artifact).is_ok()
-                } else {
-                    denied(
-                        OpenOptions::new()
-                            .write(true)
-                            .create_new(true)
-                            .open(root.join("project/output/read-only-artifact.txt")),
-                    )
-                },
-            ),
         ]
     })?;
     for (name, passed) in tests {
         record(receipt, format!("{prefix}: {name}"), passed, "actual file access under restricted impersonation; does not prove child-process identity");
+    }
+    let operations = impersonated(token, || {
+        let mut results = Vec::new();
+        if workspace {
+            let artifact = root.join("project/output/artifact.txt");
+            results.push((
+                "artifact create/write/close",
+                fs::write(&artifact, b"owned build artifact"),
+            ));
+            results.push(("artifact reopen/read", fs::read(&artifact).map(|_| ())));
+            results.push((
+                "artifact reopen/write",
+                OpenOptions::new().write(true).open(&artifact).map(|_| ()),
+            ));
+            let directory = root.join("project/output/generated");
+            results.push(("artifact subdirectory create", fs::create_dir(&directory)));
+            let nested = directory.join("nested.txt");
+            results.push((
+                "nested artifact create/write/close",
+                fs::write(&nested, b"owned nested artifact"),
+            ));
+            results.push(("nested artifact reopen/read", fs::read(&nested).map(|_| ())));
+        } else {
+            let result = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(root.join("project/output/read-only-artifact.txt"));
+            let detail = format!(
+                "actual create result: {:?}",
+                result.as_ref().err().map(std::io::Error::raw_os_error)
+            );
+            return vec![("artifact creation denied", denied(result), detail)];
+        }
+        results
+            .into_iter()
+            .map(|(name, result)| {
+                let detail = match &result {
+                    Ok(()) => "actual operation completed".into(),
+                    Err(error) => {
+                        format!("Win32 {:?}; kind {:?}", error.raw_os_error(), error.kind())
+                    }
+                };
+                (name, result.is_ok(), detail)
+            })
+            .collect()
+    })?;
+    for (name, passed, detail) in operations {
+        record(receipt, format!("{prefix}: {name}"), passed, detail);
     }
     Ok(())
 }
@@ -766,48 +1027,11 @@ fn delete_denied(path: &Path) -> bool {
     open_denied(path, DELETE)
 }
 
-// Both API-side and receiver-side observations are required. UDP send success
-// alone is deliberately not considered a failure or a successful block.
-fn network_checks(token: HANDLE, receipt: &mut Receipt) -> Result<()> {
-    for bind in ["127.0.0.1:0", "[::1]:0"] {
-        let tcp = TcpListener::bind(bind).map_err(|e| format!("TCP receiver {bind}: {e}"))?;
-        tcp.set_nonblocking(true).map_err(|e| e.to_string())?;
-        let address = tcp.local_addr().map_err(|e| e.to_string())?;
-        // Prove receiver reachability from the host before testing the sandbox.
-        let baseline = TcpStream::connect_timeout(&address, Duration::from_secs(1))
-            .map_err(|e| e.to_string())?;
-        let accepted = tcp.accept().map_err(|e| e.to_string())?;
-        drop(accepted);
-        drop(baseline);
-        let api_denied = impersonated(token, || {
-            TcpStream::connect_timeout(&address, Duration::from_millis(500)).is_err()
-        })?;
-        let no_connection =
-            matches!(tcp.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock);
-        record(receipt, format!("TCP {address}"), api_denied && no_connection, format!("API denied={api_denied}; receiver no connection={no_connection}; impersonated-thread scope only"));
-        let udp = UdpSocket::bind(bind).map_err(|e| e.to_string())?;
-        udp.set_read_timeout(Some(Duration::from_millis(600)))
-            .map_err(|e| e.to_string())?;
-        let address = udp.local_addr().map_err(|e| e.to_string())?;
-        let host = UdpSocket::bind(bind).map_err(|e| e.to_string())?;
-        host.send_to(b"host-positive-control", address)
-            .map_err(|e| e.to_string())?;
-        let mut bytes = [0; 64];
-        udp.recv_from(&mut bytes).map_err(|e| e.to_string())?;
-        let api = impersonated(token, || {
-            UdpSocket::bind(bind)
-                .and_then(|socket| socket.send_to(b"sandbox-negative-control", address))
-        })?;
-        let no_packet = matches!(udp.recv_from(&mut bytes), Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut));
-        record(receipt, format!("UDP {address}"), no_packet, format!("API send success={}; receiver no packet={no_packet}; impersonated-thread scope only", api.is_ok()));
-    }
-    Ok(())
-}
-
 pub fn run() -> Result<()> {
     if !elevated()? {
         return Err("explicit elevated setup action required; no machine resources changed".into());
     }
+    require_loader_setup_admission()?;
     let id = Uuid::new_v4();
     // Never accepts a user/model-selected account, path, command or filter key.
     let root = fixture_parent()?.join(format!("ShellSpan-stage-A-{id}"));
@@ -853,13 +1077,14 @@ pub fn run() -> Result<()> {
         checks: vec![],
         cleanup_debt: vec![],
         missing_evidence: vec![
-            "restricted child process, private desktop and descendants",
+            "initialized restricted child process and descendant behavior (suspended identity/private bootstrap desktop alone are insufficient)",
             "minimal system/toolchain startup rights",
             "DNS/system-service delegation, private network and inbound",
             "reparse/hardlink/ADS/short names and concurrent ACL/object replacement",
             "persistent filters across crash/reboot",
             "full protected credential and immutable recovery journal (phase B)",
         ],
+        runtime_grants: vec![],
     };
     save(&receipt_path, &receipt)?;
     // Generate without materializing a printable password String.
@@ -874,11 +1099,13 @@ pub fn run() -> Result<()> {
     let mut account = Account::create(name, &mut password)?;
     let mut network = None;
     let mut granted: Vec<(PathBuf, Local)> = vec![];
+    let mut runtime_grants = None;
     let experiment = (|| {
         let account_text = account_sid(&account.name)?;
         receipt.account_sid = Some(account_text.clone());
         receipt.state = "disabled account SID resolved; planned persistent filters".into();
         save(&receipt_path, &receipt)?;
+        account.join_builtin_users(&account_text)?;
         network = Some(engine()?);
         install_network(network.as_ref().unwrap(), &account_text, &keys)?;
         receipt.state = "persistent SID filters installed; account still disabled".into();
@@ -889,7 +1116,6 @@ pub fn run() -> Result<()> {
         let login_result = account.logon(&password);
         account.enabled(false)?;
         let login = login_result?;
-        drop(password);
         if token_sid(login.0)? != account_text {
             return Err("logon account SID mismatch".into());
         }
@@ -902,6 +1128,7 @@ pub fn run() -> Result<()> {
             "project/nested",
             "project/.git",
             "project/output",
+            "scratch",
         ] {
             fs::create_dir(root.join(dir)).map_err(|e| e.to_string())?;
         }
@@ -911,8 +1138,29 @@ pub fn run() -> Result<()> {
             "project/.env.local",
             "project/.git/config",
             "external.txt",
+            "bootstrap.json",
         ] {
             fs::write(root.join(file), b"owned non-secret fixture\n").map_err(|e| e.to_string())?;
+        }
+        fs::copy(
+            std::env::current_exe()
+                .map_err(|e| e.to_string())?
+                .parent()
+                .ok_or("missing executable directory")?
+                .join("shellspan-owned-fixture-runner.exe"),
+            root.join("runner.exe"),
+        )
+        .map_err(|e| format!("copy owned runner: {e}"))?;
+        let frozen_rules = policy::FrozenRules::new(&["nested/.env.secret"], &[".git"])?;
+        let mut frozen_project =
+            policy::freeze_owned_project_with_rules(&root.join("project"), &frozen_rules)?;
+        if frozen_project.identities.len() != frozen_project.entries.len() + 1 {
+            return Err("project snapshot identity inventory incomplete".into());
+        }
+        if frozen_project.entries.get(".env.local") != Some(&Object::RootEnvLocal)
+            || frozen_project.entries.get("nested/.env.secret") != Some(&Object::Secret)
+        {
+            return Err("frozen project classification differs from owned fixture".into());
         }
         // Ordinary account + restricting SID must independently pass. Root grants
         // traverse only and protects ownership.json against both read and writes.
@@ -922,16 +1170,35 @@ pub fn run() -> Result<()> {
                 ("project", Object::PinnedDirectory),
                 ("project/nested", Object::PinnedDirectory),
                 ("project/output", Object::OrdinaryDirectory),
-                ("project/.git", Object::Rules),
+                ("project/.git", Object::RulesDirectory),
                 ("project/.git/config", Object::Rules),
                 ("project/normal.txt", Object::OrdinaryFile),
-                ("project/nested/.env.secret", Object::Secret),
-                ("project/.env.local", Object::RootEnvLocal),
+                (
+                    "project/nested/.env.secret",
+                    policy::classify_project_object("nested/.env.secret", false, false, false)?,
+                ),
+                (
+                    "project/.env.local",
+                    policy::classify_project_object(".env.local", false, false, false)?,
+                ),
                 ("external.txt", Object::External),
+                ("runner.exe", Object::OrdinaryFile),
+                ("bootstrap.json", Object::Rules),
+                ("scratch", Object::OrdinaryDirectory),
             ];
-            for (relative, object) in entries {
+            for (relative, fallback_object) in entries {
+                let object = if let Some(project_relative) = relative.strip_prefix("project/") {
+                    *frozen_project
+                        .entries
+                        .get(project_relative)
+                        .ok_or("fixture grant target absent from frozen project")?
+                } else {
+                    fallback_object
+                };
                 let path = root.join(relative);
-                let rights = if relative.is_empty() {
+                let rights = if relative == "scratch" {
+                    policy::access(true, Object::OrdinaryDirectory)
+                } else if relative.is_empty() || relative == "runner.exe" {
                     policy::EXECUTE
                 } else {
                     policy::access(workspace, object)
@@ -946,12 +1213,63 @@ pub fn run() -> Result<()> {
                     receipt.state = format!("applying owned ACE: {relative}");
                     save(&receipt_path, &receipt)?;
                     granted.push((path.clone(), subject));
-                    acl(&path, &granted.last().unwrap().1, rights, SET_ACCESS)?;
+                    // Only the dedicated, initially empty output fixture propagates
+                    // rights. Never propagate these ACEs onto frozen secrets/rules.
+                    let inheritance =
+                        if relative == "scratch" || relative == "project/output" && workspace {
+                            SUB_CONTAINERS_AND_OBJECTS_INHERIT
+                        } else {
+                            0
+                        };
+                    acl_with_inheritance(
+                        &path,
+                        &granted.last().unwrap().1,
+                        rights,
+                        SET_ACCESS,
+                        inheritance,
+                    )?;
                 }
             }
             file_checks(&root, restricted.0, &mut receipt, workspace)?;
         }
-        network_checks(restricted.0, &mut receipt)?;
+        frozen_project.verify_unchanged()?;
+        frozen_project.retain_protected_leases();
+        // Named sections are distinct securable objects from their backing DLL
+        // files. Refuse startup before system file ACL mutation if they fail.
+        let loader = unsafe { crate::runner::loader_readiness(login.0, restricted.0) }?;
+        let loader_ready = loader.checks.iter().all(|check| check.passed);
+        for check in loader.checks {
+            record(&mut receipt, check.name, check.passed, check.detail);
+        }
+        save(&receipt_path, &receipt)?;
+        if !loader_ready {
+            return Err("shared loader object access denied; no runtime ACL grants or child launch attempted".into());
+        }
+        receipt.state =
+            "planned two-step primary process; interruption requires exact resource recovery"
+                .into();
+        save(&receipt_path, &receipt)?;
+        runtime_grants = Some(runtime_grants::RuntimeGrants::new(&restricting_text)?);
+        runtime_grants
+            .as_mut()
+            .unwrap()
+            .prepare(&root, &mut receipt)?;
+        if let Err(error) = bootstrap::run(
+            &root,
+            &account,
+            &password,
+            &account_text,
+            &restricting_text,
+            &mut receipt,
+        ) {
+            record(
+                &mut receipt,
+                "primary process startup boundary",
+                false,
+                error,
+            );
+        }
+        save(&receipt_path, &receipt)?;
         Ok::<(), String>(())
     })();
     if let Err(error) = &experiment {
@@ -962,14 +1280,60 @@ pub fn run() -> Result<()> {
             error.clone(),
         );
     }
-    // No processes were created: token handles are closed before cleanup. If a
-    // future launcher is added, process-tree proof must precede this entire block.
+    // Fixed bootstrap/probe code may have run. Uncertain stable root/member
+    // waits retain all permissions and filters, even after closing the owned Job.
     if let Err(error) = account.enabled(false) {
         receipt.cleanup_debt.push(error);
     }
-    for (path, subject) in granted.iter().rev() {
-        if let Err(error) = acl(path, subject, 0, REVOKE_ACCESS) {
-            receipt.cleanup_debt.push(error);
+    if receipt.cleanup_debt.is_empty() {
+        if let Some(runtime) = &runtime_grants {
+            if let Err(error) = runtime.revoke(&root, &mut receipt) {
+                receipt.cleanup_debt.push(error);
+            }
+        }
+    }
+    if receipt.cleanup_debt.is_empty() {
+        for (path, subject) in granted.iter().rev() {
+            if let Err(error) = acl(path, subject, 0, REVOKE_ACCESS) {
+                receipt.cleanup_debt.push(error);
+            }
+        }
+        // Inheritance removal must be observed on the actual newly created
+        // objects; a successful parent ACL API return alone is insufficient.
+        for relative in [
+            "project/output/artifact.txt",
+            "project/output/generated",
+            "project/output/generated/nested.txt",
+            "scratch/bootstrap.json",
+            "scratch/child.json",
+        ] {
+            let path = root.join(relative);
+            let exists = match path.try_exists() {
+                Ok(exists) => exists,
+                Err(error) => {
+                    receipt
+                        .cleanup_debt
+                        .push(format!("inspect generated object {relative}: {error}"));
+                    continue;
+                }
+            };
+            if exists {
+                let Some(account_text) = receipt.account_sid.as_deref() else {
+                    receipt
+                        .cleanup_debt
+                        .push("missing cleanup account SID".into());
+                    continue;
+                };
+                for text in [account_text, &receipt.restricting_sid] {
+                    match sid(text).and_then(|subject| has_owned_allow_ace(&path, &subject)) {
+                        Ok(false) => {}
+                        Ok(true) => receipt.cleanup_debt.push(format!(
+                            "owned inherited ACE remains: {relative}; SID {text}"
+                        )),
+                        Err(error) => receipt.cleanup_debt.push(error),
+                    }
+                }
+            }
         }
     }
     // Keep account/SID protection whenever cleanup is uncertain. No prefix sweep.

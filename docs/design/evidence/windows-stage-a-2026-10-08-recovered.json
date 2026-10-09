@@ -1,0 +1,241 @@
+{
+  "account": "SSPAf816a05ebbd6",
+  "account_sid": "S-1-5-21-4017028701-367916445-1230427694-1013",
+  "backend": "account-restricted-token-acl-wfp-prototype-v1",
+  "checks": [
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "readOnly: read ordinary",
+      "passed": true
+    },
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "readOnly: write ordinary",
+      "passed": true
+    },
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "readOnly: read secret denied",
+      "passed": true
+    },
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "readOnly: write secret denied",
+      "passed": true
+    },
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "readOnly: read root .env.local",
+      "passed": true
+    },
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "readOnly: write root .env.local denied",
+      "passed": true
+    },
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "readOnly: external read denied",
+      "passed": true
+    },
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "readOnly: external write denied",
+      "passed": true
+    },
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "readOnly: secret DELETE denied",
+      "passed": true
+    },
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "readOnly: sensitive ancestor DELETE denied",
+      "passed": true
+    },
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "readOnly: project DELETE_CHILD denied",
+      "passed": true
+    },
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "readOnly: secret WRITE_DAC denied",
+      "passed": true
+    },
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "readOnly: rules write denied",
+      "passed": true
+    },
+    {
+      "detail": "actual create result: Some(Some(5))",
+      "name": "readOnly: artifact creation denied",
+      "passed": true
+    },
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "workspace: read ordinary",
+      "passed": true
+    },
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "workspace: write ordinary",
+      "passed": true
+    },
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "workspace: read secret denied",
+      "passed": true
+    },
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "workspace: write secret denied",
+      "passed": true
+    },
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "workspace: read root .env.local",
+      "passed": true
+    },
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "workspace: write root .env.local denied",
+      "passed": true
+    },
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "workspace: external read denied",
+      "passed": true
+    },
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "workspace: external write denied",
+      "passed": true
+    },
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "workspace: secret DELETE denied",
+      "passed": true
+    },
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "workspace: sensitive ancestor DELETE denied",
+      "passed": true
+    },
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "workspace: project DELETE_CHILD denied",
+      "passed": true
+    },
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "workspace: secret WRITE_DAC denied",
+      "passed": true
+    },
+    {
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity",
+      "name": "workspace: rules write denied",
+      "passed": true
+    },
+    {
+      "detail": "actual operation completed",
+      "name": "workspace: artifact create/write/close",
+      "passed": true
+    },
+    {
+      "detail": "actual operation completed",
+      "name": "workspace: artifact reopen/read",
+      "passed": true
+    },
+    {
+      "detail": "actual operation completed",
+      "name": "workspace: artifact reopen/write",
+      "passed": true
+    },
+    {
+      "detail": "actual operation completed",
+      "name": "workspace: artifact subdirectory create",
+      "passed": true
+    },
+    {
+      "detail": "actual operation completed",
+      "name": "workspace: nested artifact create/write/close",
+      "passed": true
+    },
+    {
+      "detail": "actual operation completed",
+      "name": "workspace: nested artifact reopen/read",
+      "passed": true
+    },
+    {
+      "detail": "TokenUser queried from stable process Token",
+      "name": "actual dedicated account SID",
+      "passed": true
+    },
+    {
+      "detail": "actual TokenElevation",
+      "name": "actual non-elevated Token",
+      "passed": true
+    },
+    {
+      "detail": "actual TokenGroups",
+      "name": "actual admin group disabled or absent",
+      "passed": true
+    },
+    {
+      "detail": "stable root wait and owned Job; only root=false; child proof=false",
+      "name": "two-step owned process termination confirmed",
+      "passed": false
+    },
+    {
+      "detail": "TokenUser queried from stable process Token",
+      "name": "actual dedicated account SID",
+      "passed": true
+    },
+    {
+      "detail": "actual TokenElevation",
+      "name": "actual non-elevated Token",
+      "passed": true
+    },
+    {
+      "detail": "actual TokenGroups",
+      "name": "actual admin group disabled or absent",
+      "passed": true
+    },
+    {
+      "detail": "actual process station; host station not reused",
+      "name": "actual private window station",
+      "passed": true
+    },
+    {
+      "detail": "actual thread desktop",
+      "name": "actual private desktop",
+      "passed": true
+    },
+    {
+      "detail": "runner creates own restricted primary child: Win32 5",
+      "name": "primary process startup boundary",
+      "passed": false
+    }
+  ],
+  "cleanup_debt": [],
+  "filter_keys": [
+    "aaf8b456-d92c-486c-93b3-33c6a30918a2",
+    "d2648274-ae51-4ab5-8f81-b2ca9982b045",
+    "28344d8f-e8e6-455c-a1d1-93ce3212df7b",
+    "8f37fce9-92f1-4e9d-bfd7-b782e660a219"
+  ],
+  "fixture": "C:\\ProgramData\\ShellSpan-stage-A-f816a05e-bbd6-4a39-842b-72958382421c",
+  "missing_evidence": [
+    "restricted child process, private desktop and descendants",
+    "minimal system/toolchain startup rights",
+    "DNS/system-service delegation, private network and inbound",
+    "reparse/hardlink/ADS/short names and concurrent ACL/object replacement",
+    "persistent filters across crash/reboot",
+    "full protected credential and immutable recovery journal (phase B)"
+  ],
+  "production": "unavailable",
+  "restricting_sid": "S-1-5-21-4162232414-48086-19001-2507287428",
+  "state": "owned account/ACL/WFP recovery completed; fixture retained for evidence; production unavailable"
+}

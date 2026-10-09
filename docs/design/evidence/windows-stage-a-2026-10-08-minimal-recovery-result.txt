@@ -1,0 +1,1 @@
+Exact fixture 3fd8658e-66cd-4668-9644-a37db9b0f621: recovery completed; see windows-stage-a-2026-10-08-minimal-recovered.json for protected receipt export.

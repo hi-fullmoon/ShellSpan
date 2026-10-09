@@ -1,0 +1,103 @@
+{
+  "tool_admission": {
+    "actual_exit": 1,
+    "expected_exit": 0,
+    "image": {
+      "bytes": 46920,
+      "file_index": 1125899907578052,
+      "path": "D:\\Programs\\Git\\cmd\\git.exe",
+      "volume": 170928010
+    },
+    "scope": "shared-source LPAC admission only; not dedicated-account compatibility acceptance",
+    "stderr": "error launching git: \r\r\n",
+    "stdio_handle_count": 3,
+    "stdout": "",
+    "tool": "git",
+    "topology_verified": true
+  },
+  "production": "unavailable",
+  "candidate": "lpac-fixed-tool-admission",
+  "profile_name": "ShellSpan-candidate-24046313840042e7917bec20791586db",
+  "created_package_sid": "S-1-15-2-3772313937-2507347593-570801208-3256523948-3164023108-2938698401-2046115658",
+  "namespace_admission": {
+    "observations": [
+      {
+        "create_subdirectory_admission": "0xc0000034",
+        "path": "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects\\S-1-15-2-3772313937-2507347593-570801208-3256523948-3164023108-2938698401-2046115658",
+        "read_control": "0xc0000034",
+        "traverse": "0xc0000034"
+      },
+      {
+        "create_subdirectory_admission": "0x00000000",
+        "path": "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects",
+        "read_control": "0x00000000",
+        "traverse": "0x00000000"
+      }
+    ],
+    "read_only": true
+  },
+  "state": "admission experiment completed; no production acceptance; receipt retained",
+  "appcontainer_identity": true,
+  "source_not_elevated": true,
+  "source_creation_boundary": {
+    "child_process_policy_flags": 0,
+    "current_job_active_process_limit": 0,
+    "current_job_limit_flags": 10240,
+    "current_job_ui_restrictions": 0,
+    "in_job": true,
+    "token_restricted": false,
+    "token_session_id": 1
+  },
+  "actual_source_user_sid": "S-1-5-21-4017028701-367916445-1230427694-1001",
+  "dedicated_account_plan_verified": false,
+  "receiver_evidence_owner": "fixture-controller",
+  "receiver_quietness_verified": false,
+  "same_user": true,
+  "low_integrity": true,
+  "lpac_requested": true,
+  "actual_lpac": true,
+  "lpac_evidence_method": "actual Token AccessCheck: unique package positive control plus AllApplicationPackages exclusion; not class-46 inference",
+  "capabilities_empty": false,
+  "requested_capabilities": [
+    "registryRead"
+  ],
+  "capabilities_verified": true,
+  "entry_exit_73": false,
+  "process_tree_stopped": true,
+  "lifecycle_timeout_observed": false,
+  "lifecycle_cancel_observed": false,
+  "lifecycle_root_failure_observed": false,
+  "active_processes_after_root_failure": null,
+  "owned_job_total_processes": 2,
+  "owned_job_process_observations": [
+    {
+      "pid": 10336,
+      "image": "D:\\Programs\\Git\\cmd\\git.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    },
+    {
+      "pid": 30048,
+      "image": "C:\\Windows\\System32\\conhost.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    }
+  ],
+  "profile_removed": true,
+  "error": "fixed tool compatibility unverified: exit=0x00000001; topology=true",
+  "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-28bba56007b9486e840cae654ed40779",
+  "fixture_acls_revoked": true,
+  "probe": null
+}

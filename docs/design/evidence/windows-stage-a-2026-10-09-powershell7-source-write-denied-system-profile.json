@@ -1,0 +1,197 @@
+{
+    "version":  1,
+    "backend":  "account-profile-lifecycle-prototype-v1",
+    "production":  "unavailable",
+    "fixture_id":  "5f6825cd-d349-4d04-a0ee-d2186e461818",
+    "account":  "SSPA5f6825cdd349",
+    "account_sid":  "S-1-5-21-4017028701-367916445-1230427694-1113",
+    "filter_keys":  [
+                        "c0fc635e-2591-407d-86b0-2bcb24e9a7a6",
+                        "d304599c-1ddc-409d-b451-4d8fc24dda7c",
+                        "49ccd2f4-2d22-44dc-83c1-6b068efe2b58",
+                        "cacef5d3-0169-4835-8c4e-5d303760057d"
+                    ],
+    "profile_absent_before_load":  true,
+    "profile_registry_security_verified":  true,
+    "planned_private_station":  "SSPA-5f6825cdd3494d04a0eed2186e461818",
+    "planned_package_sid":  "S-1-15-2-3805454815-1886268295-125734679-279170566-124573932-635459092-3246403747",
+    "private_desktop_verified":  true,
+    "duplicate_station_rejected":  true,
+    "private_station_removed":  true,
+    "profile":  {
+                    "path":  "C:\\Users\\SSPA5f6825cdd349",
+                    "volume_serial":  2523053325,
+                    "file_index":  2533274791804915
+                },
+    "profile_unloaded":  false,
+    "profile_removed":  false,
+    "account_removed":  false,
+    "filters_removed":  false,
+    "non_elevated_account_token":  true,
+    "state":  "fresh private desktop grants/nonvisibility verified; duplicate creation rejected; station absence verified",
+    "error":  null,
+    "cleanup_debt":  [
+                         "owned package namespace absence unconfirmed; retain debt"
+                     ],
+    "controller_interruption_checkpoint":  false,
+    "recovery_executed":  false,
+    "account_lpac_started":  true,
+    "account_lpac_cleanup_verified":  true,
+    "account_lpac_verified":  false,
+    "controller_receiver_counts":  null,
+    "account_lpac_outer_job_total":  null,
+    "account_lpac_diagnostic_report":  null,
+    "profile_residual_recycled":  false,
+    "account_lpac_admission_only":  false,
+    "planned_private_namespace":  "\\Sessions\\0\\AppContainerNamedObjects\\S-1-15-2-3805454815-1886268295-125734679-279170566-124573932-635459092-3246403747",
+    "private_namespace_verified":  false,
+    "private_namespace_removed":  false,
+    "namespace_retirement_observation":  {
+                                             "absent":  false,
+                                             "attempts":  41,
+                                             "budget_ms":  2000,
+                                             "elapsed_ms":  2001,
+                                             "error":  null,
+                                             "scope":  "exact owned namespace read-only retirement observation"
+                                         },
+    "controller_admission_report":  {
+                                        "actual_capabilities_verified":  true,
+                                        "actual_low_integrity":  true,
+                                        "actual_lpac":  true,
+                                        "actual_package_verified":  true,
+                                        "actual_user_sid":  "S-1-5-21-4017028701-367916445-1230427694-1113",
+                                        "actual_user_verified":  true,
+                                        "as_user_controller_error":  "controller CreateProcessAsUser fixed account LPAC comparison: Win32 2",
+                                        "as_user_target_context_error":  null,
+                                        "baseline_job_total":  2,
+                                        "baseline_tree_stopped":  true,
+                                        "controller_privileges_before_creation":  {
+                                                                                      "SeAssignPrimaryTokenPrivilege":  {
+                                                                                                                            "enabled":  false,
+                                                                                                                            "present":  true
+                                                                                                                        },
+                                                                                      "SeImpersonatePrivilege":  {
+                                                                                                                     "enabled":  true,
+                                                                                                                     "present":  true
+                                                                                                                 },
+                                                                                      "SeIncreaseQuotaPrivilege":  {
+                                                                                                                       "enabled":  false,
+                                                                                                                       "present":  true
+                                                                                                                   }
+                                                                                  },
+                                        "creation_api":  "CreateProcessAsUserW target account context",
+                                        "error":  null,
+                                        "execution_job_final_active":  0,
+                                        "execution_job_final_total":  2,
+                                        "execution_job_observations":  [
+                                                                           {
+                                                                               "actual_lpac":  true,
+                                                                               "appcontainer":  true,
+                                                                               "error":  null,
+                                                                               "exact_capabilities":  true,
+                                                                               "exact_job_member":  true,
+                                                                               "expected_package":  true,
+                                                                               "expected_user":  true,
+                                                                               "image":  "C:\\ProgramData\\ShellSpan-AC-5f6825cdd3494d04a0eed2186e461818\\pwsh.exe",
+                                                                               "integrity_rid":  4096,
+                                                                               "pid":  31248
+                                                                           },
+                                                                           {
+                                                                               "actual_lpac":  true,
+                                                                               "appcontainer":  true,
+                                                                               "error":  null,
+                                                                               "exact_capabilities":  true,
+                                                                               "exact_job_member":  true,
+                                                                               "expected_package":  true,
+                                                                               "expected_user":  true,
+                                                                               "image":  "C:\\Windows\\System32\\conhost.exe",
+                                                                               "integrity_rid":  4096,
+                                                                               "pid":  28304
+                                                                           }
+                                                                       ],
+                                        "execution_topology_verified":  true,
+                                        "fixture":  "C:\\ProgramData\\ShellSpan-AC-5f6825cdd3494d04a0eed2186e461818",
+                                        "ordinary_account_credential_comparison":  {
+                                                                                       "context":  "exact owned account impersonation; not primary child evidence",
+                                                                                       "denial_win32":  1168,
+                                                                                       "error":  null
+                                                                                   },
+                                        "ordinary_creation_error":  null,
+                                        "ordinary_creation_succeeded":  true,
+                                        "owned_job_total":  2,
+                                        "process_tree_stopped":  true,
+                                        "production":  "unavailable",
+                                        "profile_folder":  "C:\\Users\\SSPA5f6825cdd349\\AppData\\Local\\Packages\\shellspan-candidate-5f6825cdd3494d04a0eed2186e461818\\AC",
+                                        "profile_folder_in_dedicated_account":  true,
+                                        "profile_removed":  true,
+                                        "root_exit_73":  true,
+                                        "scope":  "controller fixed dedicated-account tool admission; incomplete stage A matrix",
+                                        "source_file_registry_controls_verified":  true,
+                                        "source_token_non_elevated":  true,
+                                        "source_token_session":  0,
+                                        "tool_admission":  {
+                                                               "actual_exit":  73,
+                                                               "artifact":  {
+                                                                                "bytes":  25,
+                                                                                "file_index":  2814749768516245,
+                                                                                "path":  "C:\\ProgramData\\ShellSpan-AC-5f6825cdd3494d04a0eed2186e461818\\output/powershell-fixed-artifact.txt",
+                                                                                "volume":  2523053325
+                                                                            },
+                                                               "artifact_verified":  true,
+                                                               "build_dll":  {
+                                                                                 "bytes":  2048,
+                                                                                 "file_index":  2814749768516244,
+                                                                                 "path":  "C:\\ProgramData\\ShellSpan-AC-5f6825cdd3494d04a0eed2186e461818\\output/powershell-fixed-build.dll",
+                                                                                 "volume":  2523053325
+                                                                             },
+                                                               "build_dll_verified":  true,
+                                                               "expected_exit":  73,
+                                                               "image":  {
+                                                                             "bytes":  301368,
+                                                                             "file_index":  2251799815094745,
+                                                                             "path":  "C:\\ProgramData\\ShellSpan-AC-5f6825cdd3494d04a0eed2186e461818\\pwsh.exe",
+                                                                             "volume":  2523053325
+                                                                         },
+                                                               "output_verified":  true,
+                                                               "runtime_bytes":  242562201,
+                                                               "runtime_file_count":  471,
+                                                               "scope":  "fixed dedicated-account PowerShell startup only; not complete stage A",
+                                                               "static_imports":  [
+                                                                                      "advapi32.dll",
+                                                                                      "api-ms-win-crt-convert-l1-1-0.dll",
+                                                                                      "api-ms-win-crt-heap-l1-1-0.dll",
+                                                                                      "api-ms-win-crt-locale-l1-1-0.dll",
+                                                                                      "api-ms-win-crt-math-l1-1-0.dll",
+                                                                                      "api-ms-win-crt-runtime-l1-1-0.dll",
+                                                                                      "api-ms-win-crt-stdio-l1-1-0.dll",
+                                                                                      "api-ms-win-crt-string-l1-1-0.dll",
+                                                                                      "api-ms-win-crt-time-l1-1-0.dll",
+                                                                                      "kernel32.dll",
+                                                                                      "shell32.dll",
+                                                                                      "user32.dll"
+                                                                                  ],
+                                                               "stderr":  "",
+                                                               "stdout":  "",
+                                                               "tool":  "power_shell7_runtime"
+                                                           },
+                                        "with_token_creation_error":  "controller create fixed source-account LPAC process: Win32 87",
+                                        "workload_retired":  true
+                                    },
+    "controller_workload_requested":  true,
+    "controller_workload_planned_root":  "C:\\ProgramData\\ShellSpan-AC-5f6825cdd3494d04a0eed2186e461818",
+    "controller_workload_fixture":  {
+                                        "path":  "C:\\ProgramData\\ShellSpan-AC-5f6825cdd3494d04a0eed2186e461818",
+                                        "volume_serial":  2523053325,
+                                        "file_index":  4503599628778975
+                                    },
+    "controller_workload_retired":  true,
+    "controller_workload_files_retired":  false,
+    "controller_lifecycle":  "normal",
+    "controller_tool":  "power_shell7_runtime_build",
+    "credential_reference":  "ShellSpan/owned-account/v1/5f6825cd-d349-4d04-a0ee-d2186e461818/S-1-5-21-4017028701-367916445-1230427694-1113",
+    "credential_reference_verified":  true,
+    "credential_removed":  false,
+    "profile_recovery_api_loaded":  false,
+    "profile_recovery_api_unloaded":  false,
+    "recovery_logon_pending":  false
+}

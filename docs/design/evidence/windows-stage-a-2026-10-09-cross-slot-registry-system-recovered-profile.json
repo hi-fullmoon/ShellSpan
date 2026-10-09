@@ -1,0 +1,229 @@
+﻿{
+    "version":  1,
+    "backend":  "account-profile-lifecycle-prototype-v1",
+    "production":  "unavailable",
+    "fixture_id":  "e1644c26-421b-4f43-a821-a33dd3eebc07",
+    "account":  "SSPAe1644c26421b",
+    "account_sid":  "S-1-5-21-4017028701-367916445-1230427694-1121",
+    "filter_keys":  [
+                        "551b79c4-a9f7-4d25-94fd-ed9a1ea5e38a",
+                        "21902ff4-02e8-455e-a195-fcbae2133db8",
+                        "864d84e8-7852-4ccf-a82a-3ff4d8c4c009",
+                        "82602360-47a1-4fc7-8000-77eaa18bb6ed"
+                    ],
+    "profile_absent_before_load":  true,
+    "profile_registry_security_verified":  true,
+    "planned_private_station":  "SSPA-e1644c26421b4f43a821a33dd3eebc07",
+    "planned_package_sid":  "S-1-15-2-1635600751-3686954365-870355550-3040803086-122668882-2363823889-555060471",
+    "private_desktop_verified":  true,
+    "duplicate_station_rejected":  true,
+    "private_station_removed":  true,
+    "profile":  {
+                    "path":  "C:\\Users\\SSPAe1644c26421b",
+                    "volume_serial":  2523053325,
+                    "file_index":  2533274791822059
+                },
+    "profile_unloaded":  true,
+    "profile_removed":  true,
+    "account_removed":  true,
+    "filters_removed":  true,
+    "non_elevated_account_token":  true,
+    "state":  "owned Windows profile, account and persistent SID filters retired; evidence retained",
+    "error":  null,
+    "cleanup_debt":  [
+
+                     ],
+    "controller_interruption_checkpoint":  false,
+    "recovery_executed":  true,
+    "account_lpac_started":  true,
+    "account_lpac_cleanup_verified":  true,
+    "account_lpac_verified":  false,
+    "controller_receiver_counts":  null,
+    "account_lpac_outer_job_total":  null,
+    "account_lpac_bootstrap_exit":  null,
+    "account_lpac_outer_tree_stopped":  false,
+    "independent_bootstrap_recovery_observation":  null,
+    "independent_bootstrap_files_retired":  false,
+    "account_lpac_diagnostic_report":  null,
+    "profile_residual_recycled":  false,
+    "account_lpac_admission_only":  false,
+    "planned_private_namespace":  "\\Sessions\\0\\AppContainerNamedObjects\\S-1-15-2-1635600751-3686954365-870355550-3040803086-122668882-2363823889-555060471",
+    "private_namespace_verified":  false,
+    "private_namespace_removed":  true,
+    "namespace_retirement_observation":  {
+                                             "absent":  true,
+                                             "attempts":  1,
+                                             "budget_ms":  2000,
+                                             "elapsed_ms":  0,
+                                             "error":  null,
+                                             "scope":  "exact owned namespace read-only retirement observation"
+                                         },
+    "controller_admission_report":  {
+                                        "actual_capabilities_verified":  true,
+                                        "actual_low_integrity":  true,
+                                        "actual_lpac":  true,
+                                        "actual_package_verified":  true,
+                                        "actual_user_sid":  "S-1-5-21-4017028701-367916445-1230427694-1121",
+                                        "actual_user_verified":  true,
+                                        "as_user_controller_error":  "controller CreateProcessAsUser fixed account LPAC comparison: Win32 2",
+                                        "as_user_target_context_error":  null,
+                                        "baseline_job_total":  2,
+                                        "baseline_tree_stopped":  true,
+                                        "controller_privileges_before_creation":  {
+                                                                                      "SeAssignPrimaryTokenPrivilege":  {
+                                                                                                                            "enabled":  false,
+                                                                                                                            "present":  true
+                                                                                                                        },
+                                                                                      "SeImpersonatePrivilege":  {
+                                                                                                                     "enabled":  true,
+                                                                                                                     "present":  true
+                                                                                                                 },
+                                                                                      "SeIncreaseQuotaPrivilege":  {
+                                                                                                                       "enabled":  false,
+                                                                                                                       "present":  true
+                                                                                                                   }
+                                                                                  },
+                                        "creation_api":  "CreateProcessAsUserW target account context",
+                                        "cross_slot_control":  {
+                                                                   "ownership":  [
+                                                                                     {
+                                                                                         "account_disabled":  true,
+                                                                                         "account_sid":  "S-1-5-21-4017028701-367916445-1230427694-1063",
+                                                                                         "fixture_id":  "ba16502e-566b-4193-93d6-b6b34414ae68",
+                                                                                         "profile_identity_verified":  true
+                                                                                     },
+                                                                                     {
+                                                                                         "account_disabled":  true,
+                                                                                         "account_sid":  "S-1-5-21-4017028701-367916445-1230427694-1065",
+                                                                                         "fixture_id":  "4bb6655d-3b91-4088-b7f3-7db3e7005b0b",
+                                                                                         "profile_identity_verified":  true
+                                                                                     }
+                                                                                 ],
+                                                                   "registry_positive":  {
+                                                                                             "peers":  [
+                                                                                                           {
+                                                                                                               "target_sid":  "S-1-5-21-4017028701-367916445-1230427694-1063",
+                                                                                                               "win32":  0
+                                                                                                           },
+                                                                                                           {
+                                                                                                               "target_sid":  "S-1-5-21-4017028701-367916445-1230427694-1065",
+                                                                                                               "win32":  0
+                                                                                                           }
+                                                                                                       ],
+                                                                                             "source_sid":  "S-1-5-18",
+                                                                                             "version":  1
+                                                                                         }
+                                                               },
+                                        "error":  null,
+                                        "execution_job_final_active":  0,
+                                        "execution_job_final_total":  2,
+                                        "execution_job_observations":  [
+                                                                           {
+                                                                               "actual_lpac":  true,
+                                                                               "appcontainer":  true,
+                                                                               "error":  null,
+                                                                               "exact_capabilities":  true,
+                                                                               "exact_job_member":  true,
+                                                                               "expected_package":  true,
+                                                                               "expected_user":  true,
+                                                                               "image":  "C:\\ProgramData\\ShellSpan-AC-e1644c26421b4f43a821a33dd3eebc07\\probe.exe",
+                                                                               "integrity_rid":  4096,
+                                                                               "pid":  30508
+                                                                           },
+                                                                           {
+                                                                               "actual_lpac":  true,
+                                                                               "appcontainer":  true,
+                                                                               "error":  null,
+                                                                               "exact_capabilities":  true,
+                                                                               "exact_job_member":  true,
+                                                                               "expected_package":  true,
+                                                                               "expected_user":  true,
+                                                                               "image":  "C:\\Windows\\System32\\conhost.exe",
+                                                                               "integrity_rid":  4096,
+                                                                               "pid":  16708
+                                                                           }
+                                                                       ],
+                                        "execution_topology_verified":  true,
+                                        "fixture":  "C:\\ProgramData\\ShellSpan-AC-e1644c26421b4f43a821a33dd3eebc07",
+                                        "ordinary_account_credential_comparison":  {
+                                                                                       "context":  "exact owned account impersonation; not primary child evidence",
+                                                                                       "denial_win32":  1168,
+                                                                                       "error":  null
+                                                                                   },
+                                        "ordinary_creation_error":  null,
+                                        "ordinary_creation_succeeded":  true,
+                                        "owned_job_total":  2,
+                                        "process_tree_stopped":  true,
+                                        "production":  "unavailable",
+                                        "profile_folder":  "C:\\Users\\SSPAe1644c26421b\\AppData\\Local\\Packages\\shellspan-candidate-e1644c26421b4f43a821a33dd3eebc07\\AC",
+                                        "profile_folder_in_dedicated_account":  true,
+                                        "profile_removed":  true,
+                                        "root_exit_73":  true,
+                                        "scope":  "controller fixed dedicated-account tool admission; incomplete stage A matrix",
+                                        "source_file_registry_controls_verified":  true,
+                                        "source_token_non_elevated":  true,
+                                        "source_token_session":  0,
+                                        "tool_admission":  {
+                                                               "actual_exit":  73,
+                                                               "cross_slot_report_bound":  true,
+                                                               "expected_exit":  73,
+                                                               "image":  {
+                                                                             "bytes":  4146688,
+                                                                             "file_index":  1970324838400896,
+                                                                             "path":  "C:\\ProgramData\\ShellSpan-AC-e1644c26421b4f43a821a33dd3eebc07\\probe.exe",
+                                                                             "volume":  2523053325
+                                                                         },
+                                                               "output_verified":  true,
+                                                               "scope":  "fixed dedicated-account tool startup only; not complete stage A",
+                                                               "static_imports":  [
+                                                                                      "advapi32.dll",
+                                                                                      "api-ms-win-core-synch-l1-2-0.dll",
+                                                                                      "api-ms-win-crt-heap-l1-1-0.dll",
+                                                                                      "api-ms-win-crt-locale-l1-1-0.dll",
+                                                                                      "api-ms-win-crt-math-l1-1-0.dll",
+                                                                                      "api-ms-win-crt-runtime-l1-1-0.dll",
+                                                                                      "api-ms-win-crt-stdio-l1-1-0.dll",
+                                                                                      "api-ms-win-security-base-l1-2-2.dll",
+                                                                                      "bcryptprimitives.dll",
+                                                                                      "combase.dll",
+                                                                                      "dnsapi.dll",
+                                                                                      "fwpuclnt.dll",
+                                                                                      "kernel32.dll",
+                                                                                      "netapi32.dll",
+                                                                                      "ntdll.dll",
+                                                                                      "ole32.dll",
+                                                                                      "oleaut32.dll",
+                                                                                      "rpcrt4.dll",
+                                                                                      "secur32.dll",
+                                                                                      "shell32.dll",
+                                                                                      "user32.dll",
+                                                                                      "userenv.dll",
+                                                                                      "vcruntime140.dll",
+                                                                                      "ws2_32.dll",
+                                                                                      "wtsapi32.dll"
+                                                                                  ],
+                                                               "stderr":  "",
+                                                               "stdout":  "{\"version\":1,\"source_sid\":\"S-1-5-21-4017028701-367916445-1230427694-1121\",\"peers\":[{\"target_sid\":\"S-1-5-21-4017028701-367916445-1230427694-1063\",\"win32\":5},{\"target_sid\":\"S-1-5-21-4017028701-367916445-1230427694-1065\",\"win32\":5}]}\n",
+                                                               "tool":  "cross_slot_registry_probe"
+                                                           },
+                                        "with_token_creation_error":  "controller create fixed source-account LPAC process: Win32 87",
+                                        "workload_retired":  true
+                                    },
+    "controller_workload_requested":  true,
+    "controller_workload_planned_root":  "C:\\ProgramData\\ShellSpan-AC-e1644c26421b4f43a821a33dd3eebc07",
+    "controller_workload_fixture":  {
+                                        "path":  "C:\\ProgramData\\ShellSpan-AC-e1644c26421b4f43a821a33dd3eebc07",
+                                        "volume_serial":  2523053325,
+                                        "file_index":  3659174698664681
+                                    },
+    "controller_workload_retired":  true,
+    "controller_workload_files_retired":  false,
+    "controller_lifecycle":  "normal",
+    "controller_tool":  "cross_slot_registry_probe",
+    "credential_reference":  "ShellSpan/owned-account/v1/e1644c26-421b-4f43-a821-a33dd3eebc07/S-1-5-21-4017028701-367916445-1230427694-1121",
+    "credential_reference_verified":  true,
+    "credential_removed":  true,
+    "profile_recovery_api_loaded":  false,
+    "profile_recovery_api_unloaded":  false,
+    "recovery_logon_pending":  false
+}

@@ -1,0 +1,159 @@
+{
+  "version": 1,
+  "backend": "account-profile-lifecycle-prototype-v1",
+  "production": "unavailable",
+  "fixture_id": "ba16502e-566b-4193-93d6-b6b34414ae68",
+  "account": "SSPAba16502e566b",
+  "account_sid": "S-1-5-21-4017028701-367916445-1230427694-1063",
+  "filter_keys": [
+    "e239b528-39dd-4ac5-9d1a-ed908bcb1e21",
+    "75069545-e503-4408-b026-2dca6143d867",
+    "5531d6da-eba0-424f-9b13-09c59e4546e1",
+    "8f323b81-ac7b-42e4-8df7-4fe20f21f4c8"
+  ],
+  "profile_absent_before_load": true,
+  "profile_registry_security_verified": true,
+  "planned_private_station": "SSPA-ba16502e566b419393d6b6b34414ae68",
+  "planned_package_sid": "S-1-15-2-3904950024-3713996985-4010194149-693316975-2528316010-1656868490-2366249891",
+  "private_desktop_verified": true,
+  "duplicate_station_rejected": true,
+  "private_station_removed": false,
+  "profile": {
+    "path": "C:\\Users\\SSPAba16502e566b",
+    "volume_serial": 2523053325,
+    "file_index": 5910974511144578
+  },
+  "profile_unloaded": false,
+  "profile_removed": false,
+  "account_removed": false,
+  "filters_removed": false,
+  "non_elevated_account_token": true,
+  "state": "exact UUID recovery incomplete; retain protected receipt and offline slot debt",
+  "error": null,
+  "cleanup_debt": [
+    "fixed running SYSTEM service interruption; exact UUID recovery required",
+    "workload recovery requires owned hive absence; retain SID block"
+  ],
+  "controller_interruption_checkpoint": false,
+  "recovery_executed": true,
+  "account_lpac_started": true,
+  "account_lpac_cleanup_verified": false,
+  "account_lpac_verified": false,
+  "controller_receiver_counts": null,
+  "account_lpac_outer_job_total": null,
+  "account_lpac_diagnostic_report": null,
+  "profile_residual_recycled": false,
+  "account_lpac_admission_only": false,
+  "planned_private_namespace": "\\Sessions\\0\\AppContainerNamedObjects\\S-1-15-2-3904950024-3713996985-4010194149-693316975-2528316010-1656868490-2366249891",
+  "private_namespace_verified": false,
+  "private_namespace_removed": false,
+  "controller_admission_report": {
+    "active_processes_at_trigger": 4,
+    "actual_capabilities_verified": true,
+    "actual_low_integrity": true,
+    "actual_lpac": true,
+    "actual_package_verified": true,
+    "actual_user_sid": "S-1-5-21-4017028701-367916445-1230427694-1063",
+    "actual_user_verified": true,
+    "as_user_controller_error": "controller CreateProcessAsUser fixed account LPAC comparison: Win32 2",
+    "as_user_target_context_error": null,
+    "controller_privileges_before_creation": {
+      "SeAssignPrimaryTokenPrivilege": {
+        "enabled": false,
+        "present": true
+      },
+      "SeImpersonatePrivilege": {
+        "enabled": true,
+        "present": true
+      },
+      "SeIncreaseQuotaPrivilege": {
+        "enabled": false,
+        "present": true
+      }
+    },
+    "creation_api": "CreateProcessAsUserW target account context",
+    "error": null,
+    "execution_job_observations": [
+      {
+        "actual_lpac": true,
+        "appcontainer": true,
+        "error": null,
+        "exact_capabilities": true,
+        "exact_job_member": true,
+        "expected_package": true,
+        "expected_user": true,
+        "image": "C:\\ProgramData\\ShellSpan-AC-ba16502e566b419393d6b6b34414ae68\\probe.exe",
+        "integrity_rid": 4096,
+        "pid": 12596
+      },
+      {
+        "actual_lpac": true,
+        "appcontainer": true,
+        "error": null,
+        "exact_capabilities": true,
+        "exact_job_member": true,
+        "expected_package": true,
+        "expected_user": true,
+        "image": "C:\\Windows\\System32\\conhost.exe",
+        "integrity_rid": 4096,
+        "pid": 30256
+      },
+      {
+        "actual_lpac": true,
+        "appcontainer": true,
+        "error": null,
+        "exact_capabilities": true,
+        "exact_job_member": true,
+        "expected_package": true,
+        "expected_user": true,
+        "image": "C:\\ProgramData\\ShellSpan-AC-ba16502e566b419393d6b6b34414ae68\\probe.exe",
+        "integrity_rid": 4096,
+        "pid": 14264
+      },
+      {
+        "actual_lpac": true,
+        "appcontainer": true,
+        "error": null,
+        "exact_capabilities": true,
+        "exact_job_member": true,
+        "expected_package": true,
+        "expected_user": true,
+        "image": "C:\\Windows\\System32\\conhost.exe",
+        "integrity_rid": 4096,
+        "pid": 9760
+      }
+    ],
+    "execution_topology_verified": true,
+    "fixture": "C:\\ProgramData\\ShellSpan-AC-ba16502e566b419393d6b6b34414ae68",
+    "lifecycle": "service_crash",
+    "lifecycle_cancel_observed": false,
+    "lifecycle_root_failure_observed": false,
+    "lifecycle_timeout_observed": false,
+    "ordinary_creation_error": null,
+    "ordinary_creation_succeeded": true,
+    "owned_job_total": 4,
+    "process_tree_stopped": false,
+    "production": "unavailable",
+    "profile_folder": "C:\\Users\\SSPAba16502e566b\\AppData\\Local\\Packages\\shellspan-candidate-ba16502e566b419393d6b6b34414ae68\\AC",
+    "profile_folder_in_dedicated_account": true,
+    "profile_removed": false,
+    "root_exit_73": false,
+    "root_exit_code_at_trigger": 259,
+    "scope": "controller fixed file/registry/loopback workload; incomplete stage A matrix",
+    "service_crash_checkpoint": true,
+    "source_file_registry_controls_verified": true,
+    "source_token_non_elevated": true,
+    "source_token_session": 0,
+    "with_token_creation_error": "controller create fixed source-account LPAC process: Win32 87"
+  },
+  "controller_workload_requested": true,
+  "controller_workload_planned_root": "C:\\ProgramData\\ShellSpan-AC-ba16502e566b419393d6b6b34414ae68",
+  "controller_workload_fixture": {
+    "path": "C:\\ProgramData\\ShellSpan-AC-ba16502e566b419393d6b6b34414ae68",
+    "volume_serial": 2523053325,
+    "file_index": 14636698789174892
+  },
+  "controller_workload_retired": false,
+  "controller_workload_files_retired": false,
+  "controller_lifecycle": "service_crash"
+}

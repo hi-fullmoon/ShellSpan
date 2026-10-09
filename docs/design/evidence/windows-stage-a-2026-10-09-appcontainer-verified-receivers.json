@@ -1,0 +1,130 @@
+{
+  "production": "unavailable",
+  "candidate": "appcontainer-admission-only",
+  "profile_name": "ShellSpan-candidate-753795416e5145ef9fdd88ea63b2aadb",
+  "state": "admission experiment completed; no production acceptance; receipt retained",
+  "appcontainer_identity": true,
+  "source_not_elevated": true,
+  "same_user": true,
+  "low_integrity": true,
+  "lpac_requested": false,
+  "actual_lpac": false,
+  "lpac_evidence_method": "actual Token AccessCheck: unique package positive control plus AllApplicationPackages exclusion; not class-46 inference",
+  "capabilities_empty": true,
+  "entry_exit_73": true,
+  "process_tree_stopped": true,
+  "profile_removed": true,
+  "error": null,
+  "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-4a424fdaf8b541b1a85434af9579410e",
+  "fixture_acls_revoked": true,
+  "probe": {
+    "checks": [
+      {
+        "name": "readonly.txt read",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "readonly.txt write",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "workspace.txt read",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "workspace.txt write",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "secret.txt read",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "secret.txt write",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "external.txt read",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "external.txt write",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "external-aap.txt read",
+        "passed": false,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "external-aap.txt write",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "artifact create/write/close",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "artifact reopen/read",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "artifact reopen/write",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "TCP 0 denied",
+        "passed": false,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "UDP 0 API observation",
+        "passed": true,
+        "detail": "send result=Ok(11); API observation alone is not network denial proof"
+      },
+      {
+        "name": "TCP 1 denied",
+        "passed": false,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "UDP 1 API observation",
+        "passed": true,
+        "detail": "send result=Ok(11); API observation alone is not network denial proof"
+      },
+      {
+        "name": "TCP receiver 0 no traffic",
+        "passed": true,
+        "detail": "positive control passed; continuously observed before Resume through child exit; received=0; MAX denotes receiver error"
+      },
+      {
+        "name": "TCP receiver 1 no traffic",
+        "passed": true,
+        "detail": "positive control passed; continuously observed before Resume through child exit; received=0; MAX denotes receiver error"
+      },
+      {
+        "name": "UDP receiver 0 no traffic",
+        "passed": true,
+        "detail": "positive control passed; continuously observed before Resume through child exit; received=0; MAX denotes receiver error"
+      },
+      {
+        "name": "UDP receiver 1 no traffic",
+        "passed": true,
+        "detail": "positive control passed; continuously observed before Resume through child exit; received=0; MAX denotes receiver error"
+      }
+    ],
+    "complete": true
+  }
+}

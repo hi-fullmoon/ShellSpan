@@ -1,0 +1,144 @@
+{
+    "version":  1,
+    "backend":  "account-profile-lifecycle-prototype-v1",
+    "production":  "unavailable",
+    "fixture_id":  "d8418cc2-51f6-47f2-9c83-956f57f58c45",
+    "account":  "SSPAd8418cc251f6",
+    "account_sid":  "S-1-5-21-4017028701-367916445-1230427694-1119",
+    "filter_keys":  [
+                        "6b1ac0fa-4843-4b47-b9ea-193148e891cf",
+                        "620c8d0d-5bcc-48ae-bcf5-7055988e57af",
+                        "78226ef5-78f2-4fa4-ba5c-155cc1bc7364",
+                        "c8217d0a-16d8-4183-96ce-f78bd62da1c7"
+                    ],
+    "profile_absent_before_load":  true,
+    "profile_registry_security_verified":  true,
+    "planned_private_station":  "SSPA-d8418cc251f647f29c83956f57f58c45",
+    "planned_package_sid":  "S-1-15-2-1657788906-3535468574-65974579-2351538840-3500193977-309307652-3858338331",
+    "private_desktop_verified":  true,
+    "duplicate_station_rejected":  true,
+    "private_station_removed":  true,
+    "profile":  {
+                    "path":  "C:\\Users\\SSPAd8418cc251f6",
+                    "volume_serial":  2523053325,
+                    "file_index":  3659174698660174
+                },
+    "profile_unloaded":  true,
+    "profile_removed":  true,
+    "account_removed":  true,
+    "filters_removed":  true,
+    "non_elevated_account_token":  true,
+    "state":  "owned Windows profile, account and persistent SID filters retired; evidence retained",
+    "error":  "dedicated-account LPAC fixed experiment failed; inspect diagnostic report",
+    "cleanup_debt":  [
+
+                     ],
+    "controller_interruption_checkpoint":  false,
+    "recovery_executed":  false,
+    "account_lpac_started":  true,
+    "account_lpac_cleanup_verified":  true,
+    "account_lpac_verified":  false,
+    "controller_receiver_counts":  [
+                                       0,
+                                       0,
+                                       0,
+                                       0
+                                   ],
+    "account_lpac_outer_job_total":  2,
+    "account_lpac_bootstrap_exit":  2,
+    "account_lpac_outer_tree_stopped":  true,
+    "independent_bootstrap_recovery_observation":  null,
+    "independent_bootstrap_files_retired":  false,
+    "account_lpac_diagnostic_report":  {
+                                           "active_processes_after_root_failure":  null,
+                                           "actual_lpac":  false,
+                                           "actual_source_user_sid":  "S-1-5-21-4017028701-367916445-1230427694-1119",
+                                           "appcontainer_identity":  false,
+                                           "candidate":  "lpac-file-network-candidate",
+                                           "capabilities_empty":  false,
+                                           "capabilities_verified":  false,
+                                           "created_package_sid":  "S-1-15-2-1657788906-3535468574-65974579-2351538840-3500193977-309307652-3858338331",
+                                           "dedicated_account_plan_verified":  true,
+                                           "entry_exit_73":  false,
+                                           "error":  "create suspended AppContainer fixed cmd: Win32 5",
+                                           "fixture":  null,
+                                           "fixture_acls_revoked":  true,
+                                           "lifecycle_cancel_observed":  false,
+                                           "lifecycle_root_failure_observed":  false,
+                                           "lifecycle_timeout_observed":  false,
+                                           "low_integrity":  false,
+                                           "lpac_evidence_method":  "actual Token AccessCheck: unique package positive control plus AllApplicationPackages exclusion; not class-46 inference",
+                                           "lpac_requested":  true,
+                                           "namespace_admission":  {
+                                                                       "observations":  [
+                                                                                            {
+                                                                                                "create_subdirectory_admission":  "0x00000000",
+                                                                                                "path":  "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects\\S-1-15-2-1657788906-3535468574-65974579-2351538840-3500193977-309307652-3858338331",
+                                                                                                "read_control":  "0x00000000",
+                                                                                                "traverse":  "0x00000000"
+                                                                                            },
+                                                                                            {
+                                                                                                "create_subdirectory_admission":  "0xc0000022",
+                                                                                                "path":  "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects",
+                                                                                                "read_control":  "0xc0000022",
+                                                                                                "traverse":  "0x00000000"
+                                                                                            }
+                                                                                        ],
+                                                                       "read_only":  true
+                                                                   },
+                                           "owned_job_process_observations":  [
+
+                                                                              ],
+                                           "owned_job_total_processes":  null,
+                                           "probe":  null,
+                                           "process_tree_stopped":  true,
+                                           "production":  "unavailable",
+                                           "profile_name":  "ShellSpan-candidate-d8418cc251f647f29c83956f57f58c45",
+                                           "profile_removed":  true,
+                                           "receiver_evidence_owner":  "external-controller-required",
+                                           "receiver_quietness_verified":  false,
+                                           "requested_capabilities":  [
+                                                                          "registryRead"
+                                                                      ],
+                                           "same_user":  false,
+                                           "source_creation_boundary":  {
+                                                                            "child_process_policy_flags":  0,
+                                                                            "current_job_active_process_limit":  0,
+                                                                            "current_job_limit_flags":  8192,
+                                                                            "current_job_ui_restrictions":  0,
+                                                                            "in_job":  true,
+                                                                            "token_restricted":  false,
+                                                                            "token_session_id":  1
+                                                                        },
+                                           "source_not_elevated":  true,
+                                           "state":  "admission experiment completed; no production acceptance; receipt retained",
+                                           "tool_admission":  null
+                                       },
+    "profile_residual_recycled":  false,
+    "account_lpac_admission_only":  true,
+    "planned_private_namespace":  "\\Sessions\\1\\AppContainerNamedObjects\\S-1-15-2-1657788906-3535468574-65974579-2351538840-3500193977-309307652-3858338331",
+    "private_namespace_verified":  true,
+    "private_namespace_removed":  true,
+    "namespace_retirement_observation":  {
+                                             "absent":  true,
+                                             "attempts":  1,
+                                             "budget_ms":  2000,
+                                             "elapsed_ms":  0,
+                                             "error":  null,
+                                             "scope":  "exact owned namespace read-only retirement observation"
+                                         },
+    "controller_admission_report":  null,
+    "controller_workload_requested":  false,
+    "controller_workload_planned_root":  null,
+    "controller_workload_fixture":  null,
+    "controller_workload_retired":  false,
+    "controller_workload_files_retired":  false,
+    "controller_lifecycle":  "normal",
+    "controller_tool":  null,
+    "credential_reference":  null,
+    "credential_reference_verified":  false,
+    "credential_removed":  false,
+    "profile_recovery_api_loaded":  false,
+    "profile_recovery_api_unloaded":  false,
+    "recovery_logon_pending":  false
+}

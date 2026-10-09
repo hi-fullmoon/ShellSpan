@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "backend": "account-profile-lifecycle-prototype-v1",
+  "production": "unavailable",
+  "fixture_id": "56bb8ddb-7ce5-4913-ba32-7307f2bf303f",
+  "account": "SSPA56bb8ddb7ce5",
+  "account_sid": "S-1-5-21-4017028701-367916445-1230427694-1026",
+  "filter_keys": [
+    "00aa321c-c621-4bf2-9404-95f7d9c240db",
+    "778685a7-903c-466a-b105-8903a3b21061",
+    "0d004f71-a272-46a3-a2ec-379e6d4affae",
+    "e85c616b-dc85-4f26-b5f8-0dd9528a4607"
+  ],
+  "profile_absent_before_load": true,
+  "profile": {
+    "path": "C:\\Users\\SSPA56bb8ddb7ce5",
+    "volume_serial": 2523053325,
+    "file_index": 9007199254917875
+  },
+  "profile_unloaded": true,
+  "profile_removed": true,
+  "account_removed": true,
+  "filters_removed": true,
+  "non_elevated_account_token": true,
+  "state": "owned Windows profile, account and persistent SID filters retired; evidence retained",
+  "error": null,
+  "cleanup_debt": []
+}

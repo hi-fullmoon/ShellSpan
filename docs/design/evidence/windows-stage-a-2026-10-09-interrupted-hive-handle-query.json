@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "scope": "ordinary read-only fixed interrupted profile observation; no recovery dispatched",
+  "last_boot": "2026-10-08T21:25:57.7053630+08:00",
+  "observations": [
+    {
+      "sid": "S-1-5-21-4017028701-367916445-1230427694-1063",
+      "hive_present": null,
+      "hive_observation": "unknown",
+      "error_type": "MethodInvocationException",
+      "profile_loaded": true,
+      "recovery_eligible": false
+    },
+    {
+      "sid": "S-1-5-21-4017028701-367916445-1230427694-1065",
+      "hive_present": null,
+      "hive_observation": "unknown",
+      "error_type": "MethodInvocationException",
+      "profile_loaded": true,
+      "recovery_eligible": false
+    }
+  ]
+}

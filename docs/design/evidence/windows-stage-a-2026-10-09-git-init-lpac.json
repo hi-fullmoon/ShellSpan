@@ -1,0 +1,225 @@
+{
+  "tool_admission": {
+    "actual_exit": 128,
+    "bundle_files": [
+      {
+        "destination": {
+          "bytes": 4383048,
+          "file_index": 5066549582113557,
+          "path": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-8590879e38164283ae2a221f85acbb0e\\git.exe",
+          "volume": 2523053325
+        },
+        "imports": [
+          "advapi32.dll",
+          "kernel32.dll",
+          "libiconv-2.dll",
+          "libintl-8.dll",
+          "libpcre2-8-0.dll",
+          "msvcrt.dll",
+          "ntdll.dll",
+          "user32.dll",
+          "ws2_32.dll",
+          "zlib1.dll"
+        ],
+        "source": {
+          "bytes": 4383048,
+          "file_index": 1125899907578178,
+          "path": "D:\\Programs\\Git\\mingw64\\bin\\git.exe",
+          "volume": 170928010
+        }
+      },
+      {
+        "destination": {
+          "bytes": 1143148,
+          "file_index": 5066549582113558,
+          "path": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-8590879e38164283ae2a221f85acbb0e\\libiconv-2.dll",
+          "volume": 2523053325
+        },
+        "imports": [
+          "kernel32.dll",
+          "msvcrt.dll"
+        ],
+        "source": {
+          "bytes": 1143148,
+          "file_index": 1125899907578195,
+          "path": "D:\\Programs\\Git\\mingw64\\bin\\libiconv-2.dll",
+          "volume": 170928010
+        }
+      },
+      {
+        "destination": {
+          "bytes": 298731,
+          "file_index": 4785074605402903,
+          "path": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-8590879e38164283ae2a221f85acbb0e\\libintl-8.dll",
+          "volume": 2523053325
+        },
+        "imports": [
+          "advapi32.dll",
+          "kernel32.dll",
+          "libiconv-2.dll",
+          "msvcrt.dll"
+        ],
+        "source": {
+          "bytes": 298731,
+          "file_index": 1125899907578197,
+          "path": "D:\\Programs\\Git\\mingw64\\bin\\libintl-8.dll",
+          "volume": 170928010
+        }
+      },
+      {
+        "destination": {
+          "bytes": 717955,
+          "file_index": 5629499535534872,
+          "path": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-8590879e38164283ae2a221f85acbb0e\\libpcre2-8-0.dll",
+          "volume": 2523053325
+        },
+        "imports": [
+          "kernel32.dll",
+          "msvcrt.dll"
+        ],
+        "source": {
+          "bytes": 717955,
+          "file_index": 1125899907578202,
+          "path": "D:\\Programs\\Git\\mingw64\\bin\\libpcre2-8-0.dll",
+          "volume": 170928010
+        }
+      },
+      {
+        "destination": {
+          "bytes": 128488,
+          "file_index": 5348024558824217,
+          "path": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-8590879e38164283ae2a221f85acbb0e\\zlib1.dll",
+          "volume": 2523053325
+        },
+        "imports": [
+          "kernel32.dll",
+          "msvcrt.dll"
+        ],
+        "source": {
+          "bytes": 128488,
+          "file_index": 1125899907578249,
+          "path": "D:\\Programs\\Git\\mingw64\\bin\\zlib1.dll",
+          "volume": 170928010
+        }
+      }
+    ],
+    "expected_exit": 0,
+    "image": {
+      "bytes": 4383048,
+      "file_index": 5066549582113557,
+      "path": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-8590879e38164283ae2a221f85acbb0e\\git.exe",
+      "volume": 2523053325
+    },
+    "scope": "shared-source LPAC admission only; not dedicated-account compatibility acceptance",
+    "static_imports": [
+      "advapi32.dll",
+      "kernel32.dll",
+      "libiconv-2.dll",
+      "libintl-8.dll",
+      "libpcre2-8-0.dll",
+      "msvcrt.dll",
+      "ntdll.dll",
+      "user32.dll",
+      "ws2_32.dll",
+      "zlib1.dll"
+    ],
+    "stderr": "warning: unable to access 'C:/Windows/System32/config': Permission denied\nwarning: unable to access 'C:/Windows/System32/config': Permission denied\nfatal: unknown error occurred while reading the configuration files\n",
+    "stdio_handle_count": 3,
+    "stdout": "",
+    "system_imports": [
+      "advapi32.dll",
+      "kernel32.dll",
+      "msvcrt.dll",
+      "ntdll.dll",
+      "user32.dll",
+      "ws2_32.dll"
+    ],
+    "tool": "git_bundle_init",
+    "topology_verified": true
+  },
+  "production": "unavailable",
+  "candidate": "lpac-fixed-tool-admission",
+  "profile_name": "ShellSpan-candidate-88ee1fc423ac48d488eab1b23428d392",
+  "created_package_sid": "S-1-15-2-2452221221-1688241454-1429578401-3362489215-1257303931-966143582-3884057413",
+  "namespace_admission": {
+    "observations": [
+      {
+        "create_subdirectory_admission": "0xc0000034",
+        "path": "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects\\S-1-15-2-2452221221-1688241454-1429578401-3362489215-1257303931-966143582-3884057413",
+        "read_control": "0xc0000034",
+        "traverse": "0xc0000034"
+      },
+      {
+        "create_subdirectory_admission": "0x00000000",
+        "path": "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects",
+        "read_control": "0x00000000",
+        "traverse": "0x00000000"
+      }
+    ],
+    "read_only": true
+  },
+  "state": "admission experiment completed; no production acceptance; receipt retained",
+  "appcontainer_identity": true,
+  "source_not_elevated": true,
+  "source_creation_boundary": {
+    "child_process_policy_flags": 0,
+    "current_job_active_process_limit": 0,
+    "current_job_limit_flags": 10240,
+    "current_job_ui_restrictions": 0,
+    "in_job": true,
+    "token_restricted": false,
+    "token_session_id": 1
+  },
+  "actual_source_user_sid": "S-1-5-21-4017028701-367916445-1230427694-1001",
+  "dedicated_account_plan_verified": false,
+  "receiver_evidence_owner": "fixture-controller",
+  "receiver_quietness_verified": false,
+  "same_user": true,
+  "low_integrity": true,
+  "lpac_requested": true,
+  "actual_lpac": true,
+  "lpac_evidence_method": "actual Token AccessCheck: unique package positive control plus AllApplicationPackages exclusion; not class-46 inference",
+  "capabilities_empty": false,
+  "requested_capabilities": [
+    "registryRead"
+  ],
+  "capabilities_verified": true,
+  "entry_exit_73": false,
+  "process_tree_stopped": true,
+  "lifecycle_timeout_observed": false,
+  "lifecycle_cancel_observed": false,
+  "lifecycle_root_failure_observed": false,
+  "active_processes_after_root_failure": null,
+  "owned_job_total_processes": 2,
+  "owned_job_process_observations": [
+    {
+      "pid": 25500,
+      "image": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-8590879e38164283ae2a221f85acbb0e\\git.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    },
+    {
+      "pid": 17944,
+      "image": "C:\\Windows\\System32\\conhost.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    }
+  ],
+  "profile_removed": true,
+  "error": "fixed tool compatibility unverified: exit=0x00000080; topology=true",
+  "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-8590879e38164283ae2a221f85acbb0e",
+  "fixture_acls_revoked": true,
+  "probe": null
+}

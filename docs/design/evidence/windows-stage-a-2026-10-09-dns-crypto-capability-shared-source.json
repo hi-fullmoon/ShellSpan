@@ -1,0 +1,887 @@
+{
+  "tool_admission": null,
+  "production": "unavailable",
+  "candidate": "lpac-file-network-candidate",
+  "profile_name": "ShellSpan-candidate-7c6fff1db3c84140936275c23a413b87",
+  "created_package_sid": "S-1-15-2-3377738350-2387442514-2834170403-2510724843-567487452-1354628875-1195022093",
+  "namespace_admission": {
+    "observations": [
+      {
+        "create_subdirectory_admission": "0xc0000034",
+        "path": "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects\\S-1-15-2-3377738350-2387442514-2834170403-2510724843-567487452-1354628875-1195022093",
+        "read_control": "0xc0000034",
+        "traverse": "0xc0000034"
+      },
+      {
+        "create_subdirectory_admission": "0x00000000",
+        "path": "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects",
+        "read_control": "0x00000000",
+        "traverse": "0x00000000"
+      }
+    ],
+    "read_only": true
+  },
+  "state": "admission experiment completed; no production acceptance; receipt retained",
+  "appcontainer_identity": true,
+  "source_not_elevated": true,
+  "source_creation_boundary": {
+    "child_process_policy_flags": 0,
+    "current_job_active_process_limit": 0,
+    "current_job_limit_flags": 10240,
+    "current_job_ui_restrictions": 0,
+    "in_job": true,
+    "token_restricted": false,
+    "token_session_id": 1
+  },
+  "actual_source_user_sid": "S-1-5-21-4017028701-367916445-1230427694-1001",
+  "dedicated_account_plan_verified": false,
+  "receiver_evidence_owner": "fixture-controller",
+  "receiver_quietness_verified": false,
+  "same_user": true,
+  "low_integrity": true,
+  "lpac_requested": true,
+  "actual_lpac": true,
+  "lpac_evidence_method": "actual Token AccessCheck: unique package positive control plus AllApplicationPackages exclusion; not class-46 inference",
+  "capabilities_empty": false,
+  "requested_capabilities": [
+    "registryRead",
+    "lpacCryptoServices"
+  ],
+  "capabilities_verified": true,
+  "entry_exit_73": true,
+  "process_tree_stopped": true,
+  "lifecycle_timeout_observed": false,
+  "lifecycle_cancel_observed": false,
+  "lifecycle_root_failure_observed": false,
+  "active_processes_after_root_failure": null,
+  "owned_job_total_processes": null,
+  "owned_job_process_observations": [
+    {
+      "pid": 5840,
+      "image": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-cc4bbea26917452896f00ed108f94b76\\probe.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    },
+    {
+      "pid": 15176,
+      "image": "C:\\Windows\\System32\\conhost.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    },
+    {
+      "pid": 17288,
+      "image": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-cc4bbea26917452896f00ed108f94b76\\probe.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    },
+    {
+      "pid": 3088,
+      "image": "C:\\Windows\\System32\\conhost.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    }
+  ],
+  "profile_removed": true,
+  "error": "fixed file/network probe matrix failed or incomplete",
+  "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-cc4bbea26917452896f00ed108f94b76",
+  "fixture_acls_revoked": true,
+  "probe": {
+    "checks": [
+      {
+        "name": "readonly.txt read",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "readonly.txt write",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "workspace.txt read",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "workspace.txt write",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "secret.txt read",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "secret.txt write",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "external.txt read",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "external.txt write",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "external-aap.txt read",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "external-aap.txt write",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "artifact create/write/close",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "artifact reopen/read",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "artifact reopen/write",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "private registry read denied",
+        "passed": true,
+        "detail": "actual key open Win32=5; host read/write positive controls passed; no values read"
+      },
+      {
+        "name": "private registry write denied",
+        "passed": true,
+        "detail": "actual key open Win32=5; host read/write positive controls passed; no values read"
+      },
+      {
+        "name": "explicit Job breakaway denied",
+        "passed": true,
+        "detail": "same fixed image, no inherited handles, never resumed; creation=0, Win32=Some(5)"
+      },
+      {
+        "name": "descendant user identity",
+        "passed": true,
+        "detail": "actual suspended descendant Token SID equals fixed parent Token"
+      },
+      {
+        "name": "descendant package identity",
+        "passed": true,
+        "detail": "actual suspended descendant Token SID equals fixed parent Token"
+      },
+      {
+        "name": "descendant low integrity",
+        "passed": true,
+        "detail": "actual suspended descendant Token SID equals fixed parent Token"
+      },
+      {
+        "name": "descendant exact capabilities",
+        "passed": true,
+        "detail": "actual suspended Token count, SID and attributes match parent"
+      },
+      {
+        "name": "descendant actual LPAC",
+        "passed": true,
+        "detail": "actual Token package positive control and AAP exclusion"
+      },
+      {
+        "name": "descendant Job membership",
+        "passed": true,
+        "detail": "created without breakaway flags or inherited handles; actual suspended process is in a Job"
+      },
+      {
+        "name": "fixed descendant exit",
+        "passed": true,
+        "detail": "actual exit=73"
+      },
+      {
+        "name": "descendant network: actual Winsock initialization",
+        "passed": true,
+        "detail": "actual leaf WSAStartup 2.2 return=0"
+      },
+      {
+        "name": "descendant network: TCP listener 0 denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(10013)"
+      },
+      {
+        "name": "descendant network: TCP 0 denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(10013)"
+      },
+      {
+        "name": "descendant network: UDP 0 API observation",
+        "passed": true,
+        "detail": "actual leaf send result=Err(Os { code: 10013, kind: PermissionDenied, message: \"以一种访问权限不允许的方式做了一个访问套接字的尝试。\" }); controller receiver counts remain required"
+      },
+      {
+        "name": "descendant network: TCP listener 1 denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(10013)"
+      },
+      {
+        "name": "descendant network: TCP 1 denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(10013)"
+      },
+      {
+        "name": "descendant network: UDP 1 API observation",
+        "passed": true,
+        "detail": "actual leaf send result=Err(Os { code: 10013, kind: PermissionDenied, message: \"以一种访问权限不允许的方式做了一个访问套接字的尝试。\" }); controller receiver counts remain required"
+      },
+      {
+        "name": "descendant network: private TCP 0 denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(10013)"
+      },
+      {
+        "name": "descendant network: private UDP 0 API observation",
+        "passed": true,
+        "detail": "private bind/send=Err(Os { code: 10013, kind: PermissionDenied, message: \"以一种访问权限不允许的方式做了一个访问套接字的尝试。\" }); owned receiver evidence required"
+      },
+      {
+        "name": "descendant network: private TCP 1 denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(10013)"
+      },
+      {
+        "name": "descendant network: private UDP 1 API observation",
+        "passed": true,
+        "detail": "private bind/send=Err(Os { code: 10013, kind: PermissionDenied, message: \"以一种访问权限不允许的方式做了一个访问套接字的尝试。\" }); owned receiver evidence required"
+      },
+      {
+        "name": "descendant network: DNS self-context comparison",
+        "passed": true,
+        "detail": "{\"dns_cache_only\":{\"dispatch_status\":87,\"completion_status\":87,\"records_returned\":false,\"fixed_answer\":false,\"cancel_status\":null,\"timed_out\":false},\"impersonate_win32\":null,\"security_context_equal\":true,\"connection\":{\"connect_status\":-1073741790,\"handle_returned\":false,\"close_status\":null},\"restored\":true,\"error\":null,\"credential_denial_win32\":null,\"credential_error\":null}"
+      },
+      {
+        "name": "descendant network: DNS cache-only API admission",
+        "passed": false,
+        "detail": "{\"dispatch_status\":87,\"completion_status\":87,\"records_returned\":false,\"fixed_answer\":false,\"cancel_status\":null,\"timed_out\":false}"
+      },
+      {
+        "name": "descendant network: DNS numeric local API control",
+        "passed": true,
+        "detail": "{\"dispatch_status\":0,\"completion_status\":0,\"records_returned\":true,\"fixed_answer\":true,\"cancel_status\":null,\"timed_out\":false}"
+      },
+      {
+        "name": "descendant network: DNS UDP API denied",
+        "passed": false,
+        "detail": "{\"dispatch_status\":87,\"completion_status\":87,\"records_returned\":false,\"fixed_answer\":false,\"cancel_status\":null,\"timed_out\":false}"
+      },
+      {
+        "name": "descendant network: DNS TCP API denied",
+        "passed": false,
+        "detail": "{\"dispatch_status\":87,\"completion_status\":87,\"records_returned\":false,\"fixed_answer\":false,\"cancel_status\":null,\"timed_out\":false}"
+      },
+      {
+        "name": "sensitive file short-name read denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "sensitive file short-name write denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "readonly.txt short-root read",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "readonly.txt short-root write",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "workspace.txt short-root read",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "workspace.txt short-root write",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "secret.txt short-root read",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "secret.txt short-root write",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "readonly.txt hardlink alias denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "secret.txt hardlink alias denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "Everyone-only external file read denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "Everyone-only external file write denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "ordinary artifact rename",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "ordinary renamed artifact delete",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "default project .env.local read",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "default project .env.local write denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "default project nested/.env.local read",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "default project nested/.env.local write denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "default project rules/config.json read",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "default project rules/config.json write denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "default project rules directory DELETE denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "default project nested directory DELETE denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "workspace project .env.local read",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "workspace project .env.local write denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "workspace project nested/.env.local read",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "workspace project nested/.env.local write denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "workspace project rules/config.json read",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "workspace project rules/config.json write denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "workspace project rules directory DELETE denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "workspace project nested directory DELETE denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "readonly.txt new ADS create denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "secret.txt new ADS create denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "workspace new ADS create/write",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "workspace new ADS reopen/read",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "workspace new ADS delete",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "readonly ordinary file read",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "readonly ordinary file write denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "readonly ordinary file rename denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "readonly ordinary file delete denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "readonly ordinary directory rename denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "readonly ordinary directory delete denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "workspace ordinary file write",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "workspace ordinary file rename",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "workspace ordinary file delete",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "workspace ordinary directory rename",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "workspace ordinary directory delete",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "new workspace file create/write",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "new workspace file reopen/read",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "new workspace file rename",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "new workspace file delete",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "new workspace directory create",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "new workspace nested file create/write",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "new workspace nested file delete",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "new workspace directory rename",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "new workspace directory delete",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "readonly project file create denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "readonly project directory create denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "independent sensitive root env read denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "independent sensitive root env write denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "independent sensitive rules overlap read denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "independent sensitive rules overlap write denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "independent sensitive ordinary read control",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "independent sensitive ordinary write control",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "independent sensitive parent DELETE denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "ordinary directory create",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "ordinary directory rename",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "ordinary directory delete",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "protected parent DELETE access denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "protected parent rename denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "protected child read denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "protected child write denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "protected child rename denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "protected child delete denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "readonly.txt ADS read",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "readonly.txt ADS write",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "workspace.txt ADS read",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "workspace.txt ADS write",
+        "passed": true,
+        "detail": "actual child operation Win32=None"
+      },
+      {
+        "name": "secret.txt ADS read",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "secret.txt ADS write",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(5)"
+      },
+      {
+        "name": "Winsock registry read admission: SYSTEM\\CurrentControlSet\\Services\\WinSock2\\Parameters",
+        "passed": true,
+        "detail": "read-only key open Win32=0; no registry values or contents recorded"
+      },
+      {
+        "name": "Winsock registry read admission: SYSTEM\\CurrentControlSet\\Services\\WinSock2\\Parameters\\Protocol_Catalog9",
+        "passed": true,
+        "detail": "read-only key open Win32=0; no registry values or contents recorded"
+      },
+      {
+        "name": "Winsock registry read admission: SYSTEM\\CurrentControlSet\\Services\\WinSock2\\Parameters\\NameSpace_Catalog5",
+        "passed": true,
+        "detail": "read-only key open Win32=0; no registry values or contents recorded"
+      },
+      {
+        "name": "actual Winsock initialization",
+        "passed": true,
+        "detail": "WSAStartup 2.2 return=0; initialization failure is not network denial"
+      },
+      {
+        "name": "TCP listener 0 denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(10013)"
+      },
+      {
+        "name": "TCP 0 denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(10013)"
+      },
+      {
+        "name": "UDP 0 API observation",
+        "passed": true,
+        "detail": "send result=Err(Os { code: 10013, kind: PermissionDenied, message: \"以一种访问权限不允许的方式做了一个访问套接字的尝试。\" }); API observation alone is not network denial proof"
+      },
+      {
+        "name": "TCP listener 1 denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(10013)"
+      },
+      {
+        "name": "TCP 1 denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(10013)"
+      },
+      {
+        "name": "UDP 1 API observation",
+        "passed": true,
+        "detail": "send result=Err(Os { code: 10013, kind: PermissionDenied, message: \"以一种访问权限不允许的方式做了一个访问套接字的尝试。\" }); API observation alone is not network denial proof"
+      },
+      {
+        "name": "private TCP 0 denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(10013)"
+      },
+      {
+        "name": "private UDP 0 API observation",
+        "passed": true,
+        "detail": "private bind/send=Err(Os { code: 10013, kind: PermissionDenied, message: \"以一种访问权限不允许的方式做了一个访问套接字的尝试。\" }); owned receiver evidence required"
+      },
+      {
+        "name": "private TCP 1 denied",
+        "passed": true,
+        "detail": "actual child operation Win32=Some(10013)"
+      },
+      {
+        "name": "private UDP 1 API observation",
+        "passed": true,
+        "detail": "private bind/send=Err(Os { code: 10013, kind: PermissionDenied, message: \"以一种访问权限不允许的方式做了一个访问套接字的尝试。\" }); owned receiver evidence required"
+      },
+      {
+        "name": "DNS self-context comparison",
+        "passed": true,
+        "detail": "{\"dns_cache_only\":{\"dispatch_status\":87,\"completion_status\":87,\"records_returned\":false,\"fixed_answer\":false,\"cancel_status\":null,\"timed_out\":false},\"impersonate_win32\":null,\"security_context_equal\":true,\"connection\":{\"connect_status\":-1073741790,\"handle_returned\":false,\"close_status\":null},\"restored\":true,\"error\":null,\"credential_denial_win32\":null,\"credential_error\":null}"
+      },
+      {
+        "name": "DNS cache-only API admission",
+        "passed": false,
+        "detail": "{\"dispatch_status\":87,\"completion_status\":87,\"records_returned\":false,\"fixed_answer\":false,\"cancel_status\":null,\"timed_out\":false}"
+      },
+      {
+        "name": "DNS numeric local API control",
+        "passed": true,
+        "detail": "{\"dispatch_status\":0,\"completion_status\":0,\"records_returned\":true,\"fixed_answer\":true,\"cancel_status\":null,\"timed_out\":false}"
+      },
+      {
+        "name": "DNS UDP API denied",
+        "passed": false,
+        "detail": "{\"dispatch_status\":87,\"completion_status\":87,\"records_returned\":false,\"fixed_answer\":false,\"cancel_status\":null,\"timed_out\":false}"
+      },
+      {
+        "name": "DNS TCP API denied",
+        "passed": false,
+        "detail": "{\"dispatch_status\":87,\"completion_status\":87,\"records_returned\":false,\"fixed_answer\":false,\"cancel_status\":null,\"timed_out\":false}"
+      },
+      {
+        "name": "controller memory read handle denied",
+        "passed": true,
+        "detail": "fixed live controller PID supplied before Resume; access-denied required; missing process does not pass; no memory or token read attempted"
+      },
+      {
+        "name": "controller memory write handle denied",
+        "passed": true,
+        "detail": "fixed live controller PID supplied before Resume; access-denied required; missing process does not pass; no memory or token read attempted"
+      },
+      {
+        "name": "controller memory operation handle denied",
+        "passed": true,
+        "detail": "fixed live controller PID supplied before Resume; access-denied required; missing process does not pass; no memory or token read attempted"
+      },
+      {
+        "name": "controller thread creation handle denied",
+        "passed": true,
+        "detail": "fixed live controller PID supplied before Resume; access-denied required; missing process does not pass; no memory or token read attempted"
+      },
+      {
+        "name": "controller handle duplication handle denied",
+        "passed": true,
+        "detail": "fixed live controller PID supplied before Resume; access-denied required; missing process does not pass; no memory or token read attempted"
+      },
+      {
+        "name": "controller termination handle denied",
+        "passed": true,
+        "detail": "fixed live controller PID supplied before Resume; access-denied required; missing process does not pass; no memory or token read attempted"
+      },
+      {
+        "name": "controller verified protected child survived unchanged",
+        "passed": true,
+        "detail": "controller reads fixed non-sensitive fixture after exact execution tree stopped"
+      },
+      {
+        "name": "private TCP receiver 0 no traffic",
+        "passed": true,
+        "detail": "owned private receiver; before/after controls verified; received=0"
+      },
+      {
+        "name": "private TCP receiver 1 no traffic",
+        "passed": true,
+        "detail": "owned private receiver; before/after controls verified; received=0"
+      },
+      {
+        "name": "private UDP receiver 0 no traffic",
+        "passed": true,
+        "detail": "owned private receiver; before/after controls verified; received=0"
+      },
+      {
+        "name": "private UDP receiver 1 no traffic",
+        "passed": true,
+        "detail": "owned private receiver; before/after controls verified; received=0"
+      },
+      {
+        "name": "DNS UDP receiver no traffic",
+        "passed": true,
+        "detail": "owned DNS native before/after controls verified; received=0"
+      },
+      {
+        "name": "DNS TCP receiver no traffic",
+        "passed": true,
+        "detail": "owned DNS native before/after controls verified; received=0"
+      },
+      {
+        "name": "TCP receiver 0 no traffic",
+        "passed": true,
+        "detail": "controller-owned cloned workers passed positive controls before Resume and after tree stop; final controls subtracted once; received=0"
+      },
+      {
+        "name": "TCP receiver 1 no traffic",
+        "passed": true,
+        "detail": "controller-owned cloned workers passed positive controls before Resume and after tree stop; final controls subtracted once; received=0"
+      },
+      {
+        "name": "UDP receiver 0 no traffic",
+        "passed": true,
+        "detail": "controller-owned cloned workers passed positive controls before Resume and after tree stop; final controls subtracted once; received=0"
+      },
+      {
+        "name": "UDP receiver 1 no traffic",
+        "passed": true,
+        "detail": "controller-owned cloned workers passed positive controls before Resume and after tree stop; final controls subtracted once; received=0"
+      }
+    ],
+    "complete": true
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "fixture_id": "58d623bc-e0e4-45c7-a352-8d369f00c292",
+  "dispatch_status": 0,
+  "completion_status": 0,
+  "records_returned": true,
+  "received": 1,
+  "receiver_error": null,
+  "request_size": 64,
+  "result_size": 32
+}

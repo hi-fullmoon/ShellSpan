@@ -1,0 +1,12 @@
+[
+  {
+    "Path": "D:\\Developer\\ShellSpan\\tests\\windows-sandbox-account\\diagnostics\\PowerShellEtwProbe.cs",
+    "Bytes": 4593,
+    "Sha256": "8A558618B26AC982B01936733360E97EAF3741EC469E6322E4D9CB7BF5F22B51"
+  },
+  {
+    "Path": "D:\\Developer\\ShellSpan\\tests\\windows-sandbox-account\\target\\debug\\powershell-etw-probe.exe",
+    "Bytes": 7680,
+    "Sha256": "9BB0D0C2A23786A8CDD3BB584B8C90180938C3188205125ED208C72C61482BE6"
+  }
+]

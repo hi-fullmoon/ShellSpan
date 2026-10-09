@@ -1,0 +1,121 @@
+{
+  "tool_admission": {
+    "actual_exit": 1,
+    "expected_exit": 73,
+    "image": {
+      "bytes": 301368,
+      "file_index": 3096224745121366,
+      "path": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-a05ca2edf2bf431a92ef8b2478ea0e8a\\pwsh.exe",
+      "volume": 2523053325
+    },
+    "runtime_bytes": 236516521,
+    "runtime_file_count": 304,
+    "runtime_intent": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-a05ca2edf2bf431a92ef8b2478ea0e8a\\powershell-runtime-intent.json",
+    "scope": "shared-source LPAC admission only; not dedicated-account compatibility acceptance",
+    "static_imports": [
+      "advapi32.dll",
+      "api-ms-win-crt-convert-l1-1-0.dll",
+      "api-ms-win-crt-heap-l1-1-0.dll",
+      "api-ms-win-crt-locale-l1-1-0.dll",
+      "api-ms-win-crt-math-l1-1-0.dll",
+      "api-ms-win-crt-runtime-l1-1-0.dll",
+      "api-ms-win-crt-stdio-l1-1-0.dll",
+      "api-ms-win-crt-string-l1-1-0.dll",
+      "api-ms-win-crt-time-l1-1-0.dll",
+      "kernel32.dll",
+      "shell32.dll",
+      "user32.dll"
+    ],
+    "stderr": "\u001b[31;1mAdd-Type: \u001b[31;1mThe 'Add-Type' command was found in the module 'Microsoft.PowerShell.Utility', but the module could not be loaded due to the following error: [Cannot find the built-in module 'Microsoft.PowerShell.Utility' that is compatible with the 'Core' edition. Please make sure the PowerShell built-in modules are available. They usually come with the PowerShell package under the $PSHOME module path, and are required for PowerShell to function properly.]\u001b[0m\r\n\u001b[31;1m\u001b[31;1mFor more information, run 'Import-Module Microsoft.PowerShell.Utility'.\u001b[0m\r\n",
+    "stdio_handle_count": 3,
+    "stdout": "",
+    "tool": "power_shell7_runtime_build",
+    "topology_verified": true
+  },
+  "production": "unavailable",
+  "candidate": "lpac-fixed-tool-admission",
+  "profile_name": "ShellSpan-candidate-47066abb0fc04b8ca4f2f746872edca6",
+  "created_package_sid": "S-1-15-2-985294008-1857357987-2011936512-2440324810-1579456656-19980826-213882751",
+  "namespace_admission": {
+    "observations": [
+      {
+        "create_subdirectory_admission": "0xc0000034",
+        "path": "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects\\S-1-15-2-985294008-1857357987-2011936512-2440324810-1579456656-19980826-213882751",
+        "read_control": "0xc0000034",
+        "traverse": "0xc0000034"
+      },
+      {
+        "create_subdirectory_admission": "0x00000000",
+        "path": "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects",
+        "read_control": "0x00000000",
+        "traverse": "0x00000000"
+      }
+    ],
+    "read_only": true
+  },
+  "state": "admission experiment completed; no production acceptance; receipt retained",
+  "appcontainer_identity": true,
+  "source_not_elevated": true,
+  "source_creation_boundary": {
+    "child_process_policy_flags": 0,
+    "current_job_active_process_limit": 0,
+    "current_job_limit_flags": 10240,
+    "current_job_ui_restrictions": 0,
+    "in_job": true,
+    "token_restricted": false,
+    "token_session_id": 1
+  },
+  "actual_source_user_sid": "S-1-5-21-4017028701-367916445-1230427694-1001",
+  "dedicated_account_plan_verified": false,
+  "receiver_evidence_owner": "fixture-controller",
+  "receiver_quietness_verified": false,
+  "same_user": true,
+  "low_integrity": true,
+  "lpac_requested": true,
+  "actual_lpac": true,
+  "lpac_evidence_method": "actual Token AccessCheck: unique package positive control plus AllApplicationPackages exclusion; not class-46 inference",
+  "capabilities_empty": false,
+  "requested_capabilities": [
+    "registryRead",
+    "lpacInstrumentation"
+  ],
+  "capabilities_verified": true,
+  "entry_exit_73": false,
+  "process_tree_stopped": true,
+  "lifecycle_timeout_observed": false,
+  "lifecycle_cancel_observed": false,
+  "lifecycle_root_failure_observed": false,
+  "active_processes_after_root_failure": null,
+  "owned_job_total_processes": 2,
+  "owned_job_process_observations": [
+    {
+      "pid": 26312,
+      "image": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-a05ca2edf2bf431a92ef8b2478ea0e8a\\pwsh.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    },
+    {
+      "pid": 8832,
+      "image": "C:\\Windows\\System32\\conhost.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    }
+  ],
+  "profile_removed": true,
+  "error": "fixed tool compatibility unverified: exit=0x00000001; topology=true",
+  "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-a05ca2edf2bf431a92ef8b2478ea0e8a",
+  "fixture_acls_revoked": true,
+  "probe": null
+}

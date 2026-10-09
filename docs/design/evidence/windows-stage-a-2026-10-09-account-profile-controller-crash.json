@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "backend": "account-profile-lifecycle-prototype-v1",
+  "production": "unavailable",
+  "fixture_id": "d2af25a6-ea8e-46e2-a329-d216cc21afe3",
+  "account": "SSPAd2af25a6ea8e",
+  "account_sid": "S-1-5-21-4017028701-367916445-1230427694-1028",
+  "filter_keys": [
+    "fda1c6ed-833c-45c1-9047-d44c05182c00",
+    "05258954-9509-4b00-bcfb-71c351c1fd1a",
+    "d3f92e50-3951-481f-a1a7-e16cbb6a0129",
+    "8eb255f1-19c3-4ed5-87fd-ef70adb67692"
+  ],
+  "profile_absent_before_load": true,
+  "planned_private_station": "SSPA-d2af25a6ea8e46e2a329d216cc21afe3",
+  "planned_package_sid": "S-1-15-2-2784943030-959719879-3605746843-3491229048-1926467882-373804737-1529810033",
+  "private_desktop_verified": true,
+  "duplicate_station_rejected": true,
+  "private_station_removed": true,
+  "profile": {
+    "path": "C:\\Users\\SSPAd2af25a6ea8e",
+    "volume_serial": 2523053325,
+    "file_index": 15199648742552312
+  },
+  "profile_unloaded": true,
+  "profile_removed": false,
+  "account_removed": false,
+  "filters_removed": false,
+  "non_elevated_account_token": true,
+  "state": "fixed controller interruption after unload before resource retirement; exact UUID recovery required",
+  "error": null,
+  "cleanup_debt": [],
+  "controller_interruption_checkpoint": true,
+  "recovery_executed": false
+}

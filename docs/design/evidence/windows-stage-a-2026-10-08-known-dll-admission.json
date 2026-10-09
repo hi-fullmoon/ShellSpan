@@ -1,0 +1,20 @@
+[
+  {
+    "path": "\\KnownDlls",
+    "access": "READ_CONTROL | WRITE_DAC",
+    "ntstatus": "0xc0000022",
+    "acl_mutated": false
+  },
+  {
+    "path": "\\KnownDlls\\ntdll.dll",
+    "access": "READ_CONTROL | WRITE_DAC",
+    "ntstatus": "0xc0000022",
+    "acl_mutated": false
+  },
+  {
+    "path": "\\KnownDlls\\kernel32.dll",
+    "access": "READ_CONTROL | WRITE_DAC",
+    "ntstatus": "0xc0000022",
+    "acl_mutated": false
+  }
+]

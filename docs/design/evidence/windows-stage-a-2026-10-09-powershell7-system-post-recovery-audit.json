@@ -1,0 +1,10 @@
+{
+  "fixture_id": "cfc15886-16b6-41c8-97d6-7054e51db0ac",
+  "checked_at_utc": "2026-10-08T23:27:44.8631689Z",
+  "account_absent": true,
+  "profile_absent": true,
+  "hive_absent": true,
+  "admission_service_absent": true,
+  "recovery_service_absent": true,
+  "production": "unavailable"
+}

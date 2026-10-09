@@ -1,0 +1,369 @@
+{
+  "version": 1,
+  "backend": "account-profile-lifecycle-prototype-v1",
+  "production": "unavailable",
+  "fixture_id": "6ca68dfa-5532-4d7f-b584-212c357404d6",
+  "account": "SSPA6ca68dfa5532",
+  "account_sid": "S-1-5-21-4017028701-367916445-1230427694-1066",
+  "filter_keys": [
+    "de2d68e6-ce49-4dce-a1f7-72bf80375cf5",
+    "3dac0b5a-dcbf-44bd-8cf1-7def7bd4d22f",
+    "5a86e08a-acd1-4d6d-9203-526918c933b5",
+    "3a317530-3e66-446d-aef0-ac29c9299a8f"
+  ],
+  "profile_absent_before_load": true,
+  "profile_registry_security_verified": true,
+  "planned_private_station": "SSPA-6ca68dfa55324d7fb584212c357404d6",
+  "planned_package_sid": "S-1-15-2-2798282781-3011104996-786120273-3433738184-2132313549-2275163756-1052773092",
+  "private_desktop_verified": true,
+  "duplicate_station_rejected": true,
+  "private_station_removed": true,
+  "profile": {
+    "path": "C:\\Users\\SSPA6ca68dfa5532",
+    "volume_serial": 2523053325,
+    "file_index": 6755399441300155
+  },
+  "profile_unloaded": false,
+  "profile_removed": false,
+  "account_removed": false,
+  "filters_removed": false,
+  "non_elevated_account_token": true,
+  "state": "fresh private desktop grants/nonvisibility verified; duplicate creation rejected; station absence verified",
+  "error": null,
+  "cleanup_debt": [
+    "owned package namespace absence unconfirmed; retain debt"
+  ],
+  "controller_interruption_checkpoint": false,
+  "recovery_executed": false,
+  "account_lpac_started": true,
+  "account_lpac_cleanup_verified": true,
+  "account_lpac_verified": false,
+  "controller_receiver_counts": null,
+  "account_lpac_outer_job_total": null,
+  "account_lpac_diagnostic_report": null,
+  "profile_residual_recycled": false,
+  "account_lpac_admission_only": false,
+  "planned_private_namespace": "\\Sessions\\0\\AppContainerNamedObjects\\S-1-15-2-2798282781-3011104996-786120273-3433738184-2132313549-2275163756-1052773092",
+  "private_namespace_verified": false,
+  "private_namespace_removed": false,
+  "controller_admission_report": {
+    "actual_capabilities_verified": true,
+    "actual_low_integrity": true,
+    "actual_lpac": true,
+    "actual_package_verified": true,
+    "actual_user_sid": "S-1-5-21-4017028701-367916445-1230427694-1066",
+    "actual_user_verified": true,
+    "as_user_controller_error": "controller CreateProcessAsUser fixed account LPAC comparison: Win32 2",
+    "as_user_target_context_error": null,
+    "baseline_job_total": 2,
+    "baseline_tree_stopped": true,
+    "controller_privileges_before_creation": {
+      "SeAssignPrimaryTokenPrivilege": {
+        "enabled": false,
+        "present": true
+      },
+      "SeImpersonatePrivilege": {
+        "enabled": true,
+        "present": true
+      },
+      "SeIncreaseQuotaPrivilege": {
+        "enabled": false,
+        "present": true
+      }
+    },
+    "creation_api": "CreateProcessAsUserW target account context",
+    "error": null,
+    "execution_job_final_active": 0,
+    "execution_job_final_total": 4,
+    "execution_job_observations": [
+      {
+        "actual_lpac": true,
+        "appcontainer": true,
+        "error": null,
+        "exact_capabilities": true,
+        "exact_job_member": true,
+        "expected_package": true,
+        "expected_user": true,
+        "image": "C:\\ProgramData\\ShellSpan-AC-6ca68dfa55324d7fb584212c357404d6\\probe.exe",
+        "integrity_rid": 4096,
+        "pid": 24940
+      },
+      {
+        "actual_lpac": true,
+        "appcontainer": true,
+        "error": null,
+        "exact_capabilities": true,
+        "exact_job_member": true,
+        "expected_package": true,
+        "expected_user": true,
+        "image": "C:\\Windows\\System32\\conhost.exe",
+        "integrity_rid": 4096,
+        "pid": 20608
+      },
+      {
+        "actual_lpac": true,
+        "appcontainer": true,
+        "error": null,
+        "exact_capabilities": true,
+        "exact_job_member": true,
+        "expected_package": true,
+        "expected_user": true,
+        "image": "C:\\ProgramData\\ShellSpan-AC-6ca68dfa55324d7fb584212c357404d6\\probe.exe",
+        "integrity_rid": 4096,
+        "pid": 21388
+      },
+      {
+        "actual_lpac": true,
+        "appcontainer": true,
+        "error": null,
+        "exact_capabilities": true,
+        "exact_job_member": true,
+        "expected_package": true,
+        "expected_user": true,
+        "image": "C:\\Windows\\System32\\conhost.exe",
+        "integrity_rid": 4096,
+        "pid": 16876
+      }
+    ],
+    "execution_topology_verified": true,
+    "fixture": "C:\\ProgramData\\ShellSpan-AC-6ca68dfa55324d7fb584212c357404d6",
+    "lifecycle_fixture_prefix_verified": false,
+    "ordinary_creation_error": null,
+    "ordinary_creation_succeeded": true,
+    "owned_job_total": 4,
+    "process_tree_stopped": true,
+    "production": "unavailable",
+    "profile_folder": "C:\\Users\\SSPA6ca68dfa5532\\AppData\\Local\\Packages\\shellspan-candidate-6ca68dfa55324d7fb584212c357404d6\\AC",
+    "profile_folder_in_dedicated_account": true,
+    "profile_removed": true,
+    "root_exit_73": true,
+    "scope": "controller fixed file/registry/loopback workload; incomplete stage A matrix",
+    "source_file_registry_controls_verified": true,
+    "source_token_non_elevated": true,
+    "source_token_session": 0,
+    "with_token_creation_error": "controller create fixed source-account LPAC process: Win32 87",
+    "workload_checks_passed": true,
+    "workload_report": {
+      "checks": [
+        {
+          "detail": "actual child operation Win32=None",
+          "name": "readonly.txt read",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=Some(5)",
+          "name": "readonly.txt write",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=None",
+          "name": "workspace.txt read",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=None",
+          "name": "workspace.txt write",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=Some(5)",
+          "name": "secret.txt read",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=Some(5)",
+          "name": "secret.txt write",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=Some(5)",
+          "name": "external.txt read",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=Some(5)",
+          "name": "external.txt write",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=Some(5)",
+          "name": "external-aap.txt read",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=Some(5)",
+          "name": "external-aap.txt write",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=None",
+          "name": "artifact create/write/close",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=None",
+          "name": "artifact reopen/read",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=None",
+          "name": "artifact reopen/write",
+          "passed": true
+        },
+        {
+          "detail": "actual key open Win32=5; host read/write positive controls passed; no values read",
+          "name": "private registry read denied",
+          "passed": true
+        },
+        {
+          "detail": "actual key open Win32=5; host read/write positive controls passed; no values read",
+          "name": "private registry write denied",
+          "passed": true
+        },
+        {
+          "detail": "actual suspended descendant Token SID equals fixed parent Token",
+          "name": "descendant user identity",
+          "passed": true
+        },
+        {
+          "detail": "actual suspended descendant Token SID equals fixed parent Token",
+          "name": "descendant package identity",
+          "passed": true
+        },
+        {
+          "detail": "actual suspended descendant Token SID equals fixed parent Token",
+          "name": "descendant low integrity",
+          "passed": true
+        },
+        {
+          "detail": "actual suspended Token count, SID and attributes match parent",
+          "name": "descendant exact capabilities",
+          "passed": true
+        },
+        {
+          "detail": "actual Token package positive control and AAP exclusion",
+          "name": "descendant actual LPAC",
+          "passed": true
+        },
+        {
+          "detail": "created without breakaway flags or inherited handles; actual suspended process is in a Job",
+          "name": "descendant Job membership",
+          "passed": true
+        },
+        {
+          "detail": "actual exit=73",
+          "name": "fixed descendant exit",
+          "passed": true
+        },
+        {
+          "detail": "read-only key open Win32=0; no registry values or contents recorded",
+          "name": "Winsock registry read admission: SYSTEM\\CurrentControlSet\\Services\\WinSock2\\Parameters",
+          "passed": true
+        },
+        {
+          "detail": "read-only key open Win32=0; no registry values or contents recorded",
+          "name": "Winsock registry read admission: SYSTEM\\CurrentControlSet\\Services\\WinSock2\\Parameters\\Protocol_Catalog9",
+          "passed": true
+        },
+        {
+          "detail": "read-only key open Win32=0; no registry values or contents recorded",
+          "name": "Winsock registry read admission: SYSTEM\\CurrentControlSet\\Services\\WinSock2\\Parameters\\NameSpace_Catalog5",
+          "passed": true
+        },
+        {
+          "detail": "WSAStartup 2.2 return=0; initialization failure is not network denial",
+          "name": "actual Winsock initialization",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=Some(10013)",
+          "name": "TCP 0 denied",
+          "passed": true
+        },
+        {
+          "detail": "send result=Err(Os { code: 10013, kind: PermissionDenied, message: \"以一种访问权限不允许的方式做了一个访问套接字的尝试。\" }); API observation alone is not network denial proof",
+          "name": "UDP 0 API observation",
+          "passed": true
+        },
+        {
+          "detail": "actual child operation Win32=Some(10013)",
+          "name": "TCP 1 denied",
+          "passed": true
+        },
+        {
+          "detail": "send result=Err(Os { code: 10013, kind: PermissionDenied, message: \"以一种访问权限不允许的方式做了一个访问套接字的尝试。\" }); API observation alone is not network denial proof",
+          "name": "UDP 1 API observation",
+          "passed": true
+        },
+        {
+          "detail": "fixed live controller PID supplied before Resume; access-denied required; missing process does not pass; no memory or token read attempted",
+          "name": "controller memory read handle denied",
+          "passed": true
+        },
+        {
+          "detail": "fixed live controller PID supplied before Resume; access-denied required; missing process does not pass; no memory or token read attempted",
+          "name": "controller memory write handle denied",
+          "passed": true
+        },
+        {
+          "detail": "fixed live controller PID supplied before Resume; access-denied required; missing process does not pass; no memory or token read attempted",
+          "name": "controller memory operation handle denied",
+          "passed": true
+        },
+        {
+          "detail": "fixed live controller PID supplied before Resume; access-denied required; missing process does not pass; no memory or token read attempted",
+          "name": "controller thread creation handle denied",
+          "passed": true
+        },
+        {
+          "detail": "fixed live controller PID supplied before Resume; access-denied required; missing process does not pass; no memory or token read attempted",
+          "name": "controller handle duplication handle denied",
+          "passed": true
+        },
+        {
+          "detail": "fixed live controller PID supplied before Resume; access-denied required; missing process does not pass; no memory or token read attempted",
+          "name": "controller termination handle denied",
+          "passed": true
+        },
+        {
+          "detail": "controller-owned cloned workers passed positive controls before Resume; received=0",
+          "name": "TCP receiver 0 no traffic",
+          "passed": true
+        },
+        {
+          "detail": "controller-owned cloned workers passed positive controls before Resume; received=0",
+          "name": "TCP receiver 1 no traffic",
+          "passed": true
+        },
+        {
+          "detail": "controller-owned cloned workers passed positive controls before Resume; received=0",
+          "name": "UDP receiver 0 no traffic",
+          "passed": true
+        },
+        {
+          "detail": "controller-owned cloned workers passed positive controls before Resume; received=0",
+          "name": "UDP receiver 1 no traffic",
+          "passed": true
+        }
+      ],
+      "complete": true
+    },
+    "workload_retired": true
+  },
+  "controller_workload_requested": true,
+  "controller_workload_planned_root": "C:\\ProgramData\\ShellSpan-AC-6ca68dfa55324d7fb584212c357404d6",
+  "controller_workload_fixture": {
+    "path": "C:\\ProgramData\\ShellSpan-AC-6ca68dfa55324d7fb584212c357404d6",
+    "volume_serial": 2523053325,
+    "file_index": 7881299348142777
+  },
+  "controller_workload_retired": true,
+  "controller_workload_files_retired": false,
+  "controller_lifecycle": "normal",
+  "credential_reference": "ShellSpan/owned-account/v1/6ca68dfa-5532-4d7f-b584-212c357404d6/S-1-5-21-4017028701-367916445-1230427694-1066",
+  "credential_reference_verified": true,
+  "credential_removed": false,
+  "profile_recovery_api_loaded": false,
+  "profile_recovery_api_unloaded": false,
+  "recovery_logon_pending": false
+}

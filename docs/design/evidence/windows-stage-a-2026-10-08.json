@@ -1,0 +1,211 @@
+{
+  "backend": "account-restricted-token-acl-wfp-prototype-v1",
+  "production": "unavailable",
+  "account": "SSPAd367c1b09dc4",
+  "account_sid": "S-1-5-21-4017028701-367916445-1230427694-1008",
+  "restricting_sid": "S-1-5-21-3546792368-40388-20259-1104882057",
+  "filter_keys": [
+    "69072500-0580-4734-8558-658352967115",
+    "27598e39-e3b9-462d-beb2-daf60fd79f4c",
+    "1b94353e-8b35-490d-b561-2c0fe249577d",
+    "f6b6425d-afc0-432a-98a7-5a439b563df1"
+  ],
+  "fixture": "C:\\ProgramData\\ShellSpan-stage-A-d367c1b0-9dc4-4f23-8929-db413240fe70",
+  "state": "NO-GO: incomplete phase A acceptance; retained fixture is evidence, not reusable authorization",
+  "checks": [
+    {
+      "name": "readOnly: read ordinary",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: write ordinary",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: read secret denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: write secret denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: read root .env.local",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: write root .env.local denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: external read denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: external write denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: secret DELETE denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: sensitive ancestor DELETE denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: project DELETE_CHILD denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: secret WRITE_DAC denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: rules write denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "readOnly: artifact creation denied",
+      "passed": true,
+      "detail": "actual create result: Some(Some(5))"
+    },
+    {
+      "name": "workspace: read ordinary",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: write ordinary",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: read secret denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: write secret denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: read root .env.local",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: write root .env.local denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: external read denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: external write denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: secret DELETE denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: sensitive ancestor DELETE denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: project DELETE_CHILD denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: secret WRITE_DAC denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: rules write denied",
+      "passed": true,
+      "detail": "actual file access under restricted impersonation; does not prove child-process identity"
+    },
+    {
+      "name": "workspace: artifact create/write/close",
+      "passed": true,
+      "detail": "actual operation completed"
+    },
+    {
+      "name": "workspace: artifact reopen/read",
+      "passed": true,
+      "detail": "actual operation completed"
+    },
+    {
+      "name": "workspace: artifact reopen/write",
+      "passed": true,
+      "detail": "actual operation completed"
+    },
+    {
+      "name": "workspace: artifact subdirectory create",
+      "passed": true,
+      "detail": "actual operation completed"
+    },
+    {
+      "name": "workspace: nested artifact create/write/close",
+      "passed": true,
+      "detail": "actual operation completed"
+    },
+    {
+      "name": "workspace: nested artifact reopen/read",
+      "passed": true,
+      "detail": "actual operation completed"
+    },
+    {
+      "name": "TCP 127.0.0.1:62183",
+      "passed": false,
+      "detail": "API denied=false; receiver no connection=false; impersonated-thread scope only"
+    },
+    {
+      "name": "UDP 127.0.0.1:57327",
+      "passed": false,
+      "detail": "API send success=true; receiver no packet=false; impersonated-thread scope only"
+    },
+    {
+      "name": "TCP [::1]:62186",
+      "passed": false,
+      "detail": "API denied=false; receiver no connection=false; impersonated-thread scope only"
+    },
+    {
+      "name": "UDP [::1]:57330",
+      "passed": false,
+      "detail": "API send success=true; receiver no packet=false; impersonated-thread scope only"
+    }
+  ],
+  "cleanup_debt": [],
+  "missing_evidence": [
+    "restricted child process, private desktop and descendants",
+    "minimal system/toolchain startup rights",
+    "DNS/system-service delegation, private network and inbound",
+    "reparse/hardlink/ADS/short names and concurrent ACL/object replacement",
+    "persistent filters across crash/reboot",
+    "full protected credential and immutable recovery journal (phase B)"
+  ]
+}

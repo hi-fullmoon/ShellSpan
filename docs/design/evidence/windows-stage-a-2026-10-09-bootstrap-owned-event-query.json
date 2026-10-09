@@ -1,0 +1,19 @@
+{
+  "fixture_id": "093354fe-26ac-48e5-9cd6-256b30ee7599",
+  "start_utc": "2026-10-09T03:43:32.9640069Z",
+  "end_utc": "2026-10-09T03:47:32.9640069Z",
+  "scope": "read-only log query; only exact owned UUID matches; no matching event does not prove successful execution",
+  "observations": [
+    {
+      "log": "Application",
+      "query_succeeded": true,
+      "matching_events": []
+    },
+    {
+      "log": "Microsoft-Windows-CodeIntegrity/Operational",
+      "query_succeeded": false,
+      "error_type": "System.Exception",
+      "matching_events": []
+    }
+  ]
+}

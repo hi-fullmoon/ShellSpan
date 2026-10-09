@@ -1,6 +1,8 @@
 # Windows Agent Shell 沙箱首版设计
 
 日期：2026-10-07。状态：阶段 A 独立原型已实施部分验证，验收 NO-GO；生产保持 unavailable。详情见 [阶段 A 验收交接](agent-shell-sandbox-windows-stage-a-handoff.md)。
+2026-10-08 子项更新见 [续作记录](agent-shell-sandbox-windows-stage-a-2026-10-08.md)：自有 output 的限定继承、新对象创建/重开及暂停 primary 身份/Job 已通过；恢复后的 loader 仍以 0xc0000022 退出。下文保留初次失败记录，不能据此推定任意项目已通过。
+后续实机确认：单 restricting SID 无法打开三个 KnownDlls 共享对象，而 UAC setup 也无法取得这些对象的 WRITE_DAC。原型现于机器资源创建前拒绝；本机当前启动方案的可行性需重新评审，不能通过扩大 DLL 白名单或宽泛 SID 宣称解决。
 
 ## 1. 结论与范围
 
@@ -134,6 +136,18 @@ readOnly 模式可写的命令临时目录不是项目写入授权。首次 work
 
 默认拒绝阶段不添加“block all + allow proxy”组合来宣称有例外；Windows 规则优先级及代理绕过需另行设计。明确公网目标、DNS 选择和 Node LocalService 等现有 macOS 授权暂不映射到 Windows。后续受控代理阶段通过独立验收后才开放，不能临时允许账户全部联网。
 
+2026-10-09 专用账户反例：保留四项持久账户 SID ALE 过滤器，仅在固定诊断 LPAC primary 增加 internetClient 后，真实后代 DnsQueryEx UDP/TCP 均解析成功，两个自有 DNS 接收端各实际收到一次查询。见 [系统代办反例](evidence/windows-stage-a-2026-10-09-dns-sid-block-system-profile.json)。因此账户 SID block 不足以封锁 DNS 代办，不得依靠它允许网络 capability；默认候选继续不授予网络能力，当前仍 NO-GO。原能力集合及诊断二进制已恢复，资源已独立回收。
+
+2026-10-09 下一项网络候选实验：现有代码只使用 ALE_USER_ID 的账户安全描述符，不能把已观测的 DNS 代办反例视为封闭。微软文档列出 ALE_PACKAGE_ID 可用于 CONNECT/RECV_ACCEPT 等 ALE 层，且其条件类型为 FWP_SID，见 [层可用条件](https://learn.microsoft.com/en-us/windows/win32/fwp/filtering-conditions-available-at-each-filtering-layer) 与 [条件数据类型](https://learn.microsoft.com/en-us/windows-hardware/drivers/network/filtering-condition-data-types)。这仅证明 API 条件可用，不证明 DNS 服务代办流量保留原调用包身份；该点必须实测。
+
+候选实施必须保留原四项持久账户 SID block，另以本轮冻结且实际 Token 核验过的 package SID 安装四项独立 block；不能在原过滤器追加 package 条件而缩小原账户保护范围。新增 filter keys、package identity、意图与拥有状态必须先写受保护 journal，Resume 前重新查询实际过滤器条件，恢复按精确 key/layer/action/SID 核验并在执行树停止后最后退役。不得通过阻断整个 DNS Client 服务、通用 svchost 或宿主端口影响其他程序。固定反例实验仍使用本轮自有 DNS 接收端和明确临时网络能力，根与实际后代分别查询 UDP/TCP并核对接收计数；默认能力集合保持独立验证。若包条件仍不能封锁代办，继续 NO-GO，不能把超时或 87 转成明确拒绝。该候选尚未安装或验证，不算阶段 A 完成证据。
+2026-10-09 包过滤候选已得到实际否证：保留四账户 ALE_USER_ID 与四独立 ALE_PACKAGE_ID BLOCK，仅固定诊断增加 internetClient，根与实际后代 DNS UDP/TCP 均成功、自有接收端各收到两次查询。见 [包规则代办反例](evidence/windows-stage-a-2026-10-09-dns-package-block-internet-system-profile.json)。规则安装/精确查询/退役已实测，但不能据此声称 DNS 封闭；默认仍不授予网络能力，代办网络方案继续 NO-GO。新增包规则不替代原账户防护。
+
+2026-10-09 下一项代办边界候选为 WFP RPC_UM 的精确调用账户条件，而不是继续使用 ALE 连接身份。官方 [逐层条件表](https://learn.microsoft.com/en-us/windows/win32/fwp/filtering-conditions-available-at-each-filtering-layer) 明确 RPC_UM 可用 REMOTE_USER_TOKEN、RPC_IF_UUID 与 RPC_PROTOCOL；没有列出 ALE_USER_ID 或 ALE_PACKAGE_ID，不能直接复制连接层条件。官方 [条件定义](https://learn.microsoft.com/en-us/windows/win32/fwp/filtering-condition-identifiers-) 指定 REMOTE_USER_TOKEN 为 FWP_SECURITY_DESCRIPTOR_TYPE，RPC_PROTOCOL 为 FWP_UINT8，LRPC 为可选协议类型。可行性尚需实际验证：DNS 的本机代办路径是否经过这一层、实际令牌是否仍代表沙箱账户，文档不能替代实测。
+
+后续固定实验只允许本轮新创建且禁用/无管理员权限的账户 SID，持久拥有 key 与唯一完整安全描述符必须先入受保护 journal，查询核验、精确退役和旧账户规则保留应先实现；不得安装无账户条件的全局 RPC block，不修改 DNS 服务配置或已有系统接口 ACL。先验证普通自有账户与 SYSTEM 对照仍可查询，再验证真实 Low LPAC 根和后代，读取自有 DNS 接收计数。若调用身份缺失/层不支持/查询未知，拒绝派发并保留债务。即使固定 DNS 路径可被拒绝，完整 COM/RPC/设备代办矩阵仍须单独验收；不能由单个接口外推全部系统服务。
+2026-10-09 RPC_UM 候选亦被固定DNS实测否证：保留精确账户REMOTE_USER_TOKEN规则、四账户/四包连接规则，真实根及后代的DNS UDP/TCP仍成功，自有接收端各收到两次。见 [RPC规则代办反例](evidence/windows-stage-a-2026-10-09-dns-rpc-block-internet-system-profile.json)。这说明该候选不足以封锁本机DNS路径，不证明调用实际经过RPC_UM或匹配到该条件；下一步需要入口及调用身份观测，继续NO-GO。所有本轮规则及槽资源已精确恢复。
+
 网络测试要同时检查沙箱 API 结果和自有接收端；UDP Send 成功不能证明包到达。并测试 DNS/系统服务代办、直接 socket、回环、私网、子进程换 executable 的路径，不能把 curl 失败外推为全部网络拒绝。
 
 阶段 A 的四个持久账户 SID ALE 过滤器安装和撤销成功，但当前原型在宿主进程的受限 impersonation 线程上创建 socket，IPv4/IPv6 回环 TCP/UDP 接收端均实际收到连接或包。因此该测试形态不能作为专用账户主 Token 的网络证据，也不能推断 WFP 方案已经成功或整体无效。下一轮阶段 A 必须以实际专用账户受限 **primary Token 子进程** 创建 socket，验证其实际身份，并覆盖后代与系统服务代办。受限 impersonation 不作为沙箱执行入口或替代路径。
@@ -212,6 +226,8 @@ readOnly 模式可写的命令临时目录不是项目写入授权。首次 work
 完成相关 TS/Rust 回归、Windows 实机反例、Wry 设置与审批组合检查、双语能力说明及安装/卸载回退后，才可以更改生产 unavailable 门禁。测试跳过项、历史 PSEC/minifilter 测试和只验证 std::process 的 Job 用例都不能替代这份矩阵。
 
 ## 11. 本次文档决策与下一步
+
+2026-10-09 更新：原单 restricting SID 路径仍被 loader/KnownDlls 阻断。替代 LPAC 候选在一次性 SYSTEM 固定服务与精确专用账户 impersonation 创建上下文下，已通过实际暂停根身份、Low IL、LPAC AccessCheck 与固定退出码 admission；服务和所有账户资源已精确退役。该成功不替代第 9/10 节的完整默认模式和负例验收；完整工作负载需沿成功路径验证后才能决定采用替代方案。完整阶段 A/B 仍未完成，生产 unavailable。详细证据见阶段 A 续作与 A/B 核对表。
 
 最初文档仅为设计草案。阶段 A 已新增独立实验并经 UAC 在自有 fixture 上实际创建账户、增量 ACE 与持久 WFP 过滤器；正常清理回执未报告账户/ACE/过滤器债务，fixture 留作证据。未安装服务、未改用户项目 ACL、未开放执行能力。阶段 A 未验收通过，不启动阶段 B；继续阶段 A 时先解决新对象权限与真实 primary Token 网络验证。
 

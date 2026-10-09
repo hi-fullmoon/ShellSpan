@@ -1,0 +1,21 @@
+{
+  "production": "unavailable",
+  "candidate": "appcontainer-admission-only",
+  "profile_name": "ShellSpan-candidate-7ceb07bf54be4ee78296b3d18988f634",
+  "state": "admission experiment completed; no production acceptance; receipt retained",
+  "appcontainer_identity": true,
+  "source_not_elevated": true,
+  "same_user": true,
+  "low_integrity": true,
+  "lpac_requested": true,
+  "actual_lpac": true,
+  "lpac_evidence_method": "actual Token AccessCheck: unique package positive control plus AllApplicationPackages exclusion; not class-46 inference",
+  "capabilities_empty": true,
+  "entry_exit_73": false,
+  "process_tree_stopped": true,
+  "profile_removed": true,
+  "error": "candidate fixed exit 0x00000065",
+  "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-2affa8865d0246188d6c1351c5f5b497",
+  "fixture_acls_revoked": true,
+  "probe": null
+}

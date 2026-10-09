@@ -1,0 +1,15 @@
+{
+  "production": "unavailable",
+  "candidate": "appcontainer-admission-only",
+  "profile_name": "ShellSpan-candidate-2a6bce403c804547ab109ab9bdc0f106",
+  "state": "admission experiment completed; no production acceptance; receipt retained",
+  "appcontainer_identity": true,
+  "source_not_elevated": true,
+  "same_user": true,
+  "low_integrity": true,
+  "capabilities_empty": true,
+  "entry_exit_73": true,
+  "process_tree_stopped": true,
+  "profile_removed": true,
+  "error": null
+}

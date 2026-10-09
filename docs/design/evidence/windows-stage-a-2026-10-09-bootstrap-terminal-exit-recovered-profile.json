@@ -1,0 +1,103 @@
+{
+    "version":  1,
+    "backend":  "account-profile-lifecycle-prototype-v1",
+    "production":  "unavailable",
+    "fixture_id":  "e60c360d-ec81-4b71-88a5-7d461d8ed952",
+    "account":  "SSPAe60c360dec81",
+    "account_sid":  "S-1-5-21-4017028701-367916445-1230427694-1117",
+    "filter_keys":  [
+                        "18850af1-3154-4d4a-98c9-690cbfcbb646",
+                        "f11f6bd6-8872-41eb-82bf-ec002879d554",
+                        "eaaf0997-4599-47e5-9ca9-96b2c071d964",
+                        "cfa1f238-1407-4531-bc6f-2c943e084685"
+                    ],
+    "profile_absent_before_load":  true,
+    "profile_registry_security_verified":  true,
+    "planned_private_station":  "SSPA-e60c360dec814b7188a57d461d8ed952",
+    "planned_package_sid":  "S-1-15-2-5762241-1039835702-2217600783-9693274-1529325631-3805735017-4181707506",
+    "private_desktop_verified":  true,
+    "duplicate_station_rejected":  true,
+    "private_station_removed":  true,
+    "profile":  {
+                    "path":  "C:\\Users\\SSPAe60c360dec81",
+                    "volume_serial":  2523053325,
+                    "file_index":  3096224745238852
+                },
+    "profile_unloaded":  true,
+    "profile_removed":  true,
+    "account_removed":  true,
+    "filters_removed":  true,
+    "non_elevated_account_token":  true,
+    "state":  "owned Windows profile, account and persistent SID filters retired; evidence retained",
+    "error":  "terminal bootstrap exit=0x00000002; fixed report invalid: EOF while parsing a value at line 1 column 0",
+    "cleanup_debt":  [
+
+                     ],
+    "controller_interruption_checkpoint":  false,
+    "recovery_executed":  true,
+    "account_lpac_started":  true,
+    "account_lpac_cleanup_verified":  true,
+    "account_lpac_verified":  false,
+    "controller_receiver_counts":  [
+                                       0,
+                                       0,
+                                       0,
+                                       0
+                                   ],
+    "account_lpac_outer_job_total":  2,
+    "account_lpac_bootstrap_exit":  2,
+    "account_lpac_outer_tree_stopped":  true,
+    "independent_bootstrap_recovery_observation":  {
+                                                       "account_disabled":  true,
+                                                       "account_processes_absent":  true,
+                                                       "account_sid":  "S-1-5-21-4017028701-367916445-1230427694-1117",
+                                                       "candidate":  {
+                                                                         "bytes":  3226624,
+                                                                         "file_index":  1970324838396372,
+                                                                         "path":  "C:\\ProgramData\\ShellSpan-account-profile-A-e60c360d-ec81-4b71-88a5-7d461d8ed952\\ShellSpan-stage-A-account-lpac-e60c360d-ec81-4b71-88a5-7d461d8ed952\\candidate.exe",
+                                                                         "volume":  2523053325
+                                                                     },
+                                                       "error":  null,
+                                                       "fixture_id":  "e60c360d-ec81-4b71-88a5-7d461d8ed952",
+                                                       "hive_absent":  true,
+                                                       "profile_absence_verified":  false,
+                                                       "profile_identity_verified":  true,
+                                                       "protected_plan_bound":  true,
+                                                       "report":  {
+                                                                      "bytes":  0,
+                                                                      "file_index":  1970324838396374,
+                                                                      "path":  "C:\\ProgramData\\ShellSpan-account-profile-A-e60c360d-ec81-4b71-88a5-7d461d8ed952\\ShellSpan-stage-A-account-lpac-e60c360d-ec81-4b71-88a5-7d461d8ed952\\account-report.json",
+                                                                      "volume":  2523053325
+                                                                  },
+                                                       "scope":  "read-only bootstrap recovery prerequisites; not retirement authorization"
+                                                   },
+    "independent_bootstrap_files_retired":  true,
+    "account_lpac_diagnostic_report":  null,
+    "profile_residual_recycled":  false,
+    "account_lpac_admission_only":  true,
+    "planned_private_namespace":  "\\Sessions\\1\\AppContainerNamedObjects\\S-1-15-2-5762241-1039835702-2217600783-9693274-1529325631-3805735017-4181707506",
+    "private_namespace_verified":  true,
+    "private_namespace_removed":  true,
+    "namespace_retirement_observation":  {
+                                             "absent":  true,
+                                             "attempts":  1,
+                                             "budget_ms":  2000,
+                                             "elapsed_ms":  0,
+                                             "error":  null,
+                                             "scope":  "exact owned namespace read-only retirement observation"
+                                         },
+    "controller_admission_report":  null,
+    "controller_workload_requested":  false,
+    "controller_workload_planned_root":  null,
+    "controller_workload_fixture":  null,
+    "controller_workload_retired":  false,
+    "controller_workload_files_retired":  false,
+    "controller_lifecycle":  "normal",
+    "controller_tool":  null,
+    "credential_reference":  null,
+    "credential_reference_verified":  false,
+    "credential_removed":  false,
+    "profile_recovery_api_loaded":  false,
+    "profile_recovery_api_unloaded":  false,
+    "recovery_logon_pending":  false
+}

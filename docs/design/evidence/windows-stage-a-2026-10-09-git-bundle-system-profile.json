@@ -1,0 +1,262 @@
+{
+  "version": 1,
+  "backend": "account-profile-lifecycle-prototype-v1",
+  "production": "unavailable",
+  "fixture_id": "10f7b738-a61a-496c-89b5-2b1dd5cd22fc",
+  "account": "SSPA10f7b738a61a",
+  "account_sid": "S-1-5-21-4017028701-367916445-1230427694-1084",
+  "filter_keys": [
+    "cb1edee7-6cf9-43f1-bac0-9f3cb792afe8",
+    "b4222336-d228-4036-a5c2-9cd19cbc6afd",
+    "56f1aeef-89cc-4747-92e4-029f830c40e4",
+    "b31186a1-c567-47ba-bcdb-061b16a97bcc"
+  ],
+  "profile_absent_before_load": true,
+  "profile_registry_security_verified": true,
+  "planned_private_station": "SSPA-10f7b738a61a496c89b52b1dd5cd22fc",
+  "planned_package_sid": "S-1-15-2-920664741-3253065447-621034821-2059123138-2628082892-2587102597-71239220",
+  "private_desktop_verified": true,
+  "duplicate_station_rejected": true,
+  "private_station_removed": true,
+  "profile": {
+    "path": "C:\\Users\\SSPA10f7b738a61a",
+    "volume_serial": 2523053325,
+    "file_index": 30117822508134535
+  },
+  "profile_unloaded": false,
+  "profile_removed": false,
+  "account_removed": false,
+  "filters_removed": false,
+  "non_elevated_account_token": true,
+  "state": "fresh private desktop grants/nonvisibility verified; duplicate creation rejected; station absence verified",
+  "error": null,
+  "cleanup_debt": [
+    "owned package namespace absence unconfirmed; retain debt"
+  ],
+  "controller_interruption_checkpoint": false,
+  "recovery_executed": false,
+  "account_lpac_started": true,
+  "account_lpac_cleanup_verified": true,
+  "account_lpac_verified": false,
+  "controller_receiver_counts": null,
+  "account_lpac_outer_job_total": null,
+  "account_lpac_diagnostic_report": null,
+  "profile_residual_recycled": false,
+  "account_lpac_admission_only": false,
+  "planned_private_namespace": "\\Sessions\\0\\AppContainerNamedObjects\\S-1-15-2-920664741-3253065447-621034821-2059123138-2628082892-2587102597-71239220",
+  "private_namespace_verified": false,
+  "private_namespace_removed": false,
+  "controller_admission_report": {
+    "actual_capabilities_verified": true,
+    "actual_low_integrity": true,
+    "actual_lpac": true,
+    "actual_package_verified": true,
+    "actual_user_sid": "S-1-5-21-4017028701-367916445-1230427694-1084",
+    "actual_user_verified": true,
+    "as_user_controller_error": "controller CreateProcessAsUser fixed account LPAC comparison: Win32 2",
+    "as_user_target_context_error": null,
+    "baseline_job_total": 2,
+    "baseline_tree_stopped": true,
+    "controller_privileges_before_creation": {
+      "SeAssignPrimaryTokenPrivilege": {
+        "enabled": false,
+        "present": true
+      },
+      "SeImpersonatePrivilege": {
+        "enabled": true,
+        "present": true
+      },
+      "SeIncreaseQuotaPrivilege": {
+        "enabled": false,
+        "present": true
+      }
+    },
+    "creation_api": "CreateProcessAsUserW target account context",
+    "error": null,
+    "execution_job_final_active": 0,
+    "execution_job_final_total": 2,
+    "execution_job_observations": [
+      {
+        "actual_lpac": true,
+        "appcontainer": true,
+        "error": null,
+        "exact_capabilities": true,
+        "exact_job_member": true,
+        "expected_package": true,
+        "expected_user": true,
+        "image": "C:\\ProgramData\\ShellSpan-AC-10f7b738a61a496c89b52b1dd5cd22fc\\git.exe",
+        "integrity_rid": 4096,
+        "pid": 23972
+      },
+      {
+        "actual_lpac": true,
+        "appcontainer": true,
+        "error": null,
+        "exact_capabilities": true,
+        "exact_job_member": true,
+        "expected_package": true,
+        "expected_user": true,
+        "image": "C:\\Windows\\System32\\conhost.exe",
+        "integrity_rid": 4096,
+        "pid": 26276
+      }
+    ],
+    "execution_topology_verified": true,
+    "fixture": "C:\\ProgramData\\ShellSpan-AC-10f7b738a61a496c89b52b1dd5cd22fc",
+    "ordinary_account_credential_comparison": {
+      "context": "exact owned account impersonation; not primary child evidence",
+      "denial_win32": 1168,
+      "error": null
+    },
+    "ordinary_creation_error": null,
+    "ordinary_creation_succeeded": true,
+    "owned_job_total": 2,
+    "process_tree_stopped": true,
+    "production": "unavailable",
+    "profile_folder": "C:\\Users\\SSPA10f7b738a61a\\AppData\\Local\\Packages\\shellspan-candidate-10f7b738a61a496c89b52b1dd5cd22fc\\AC",
+    "profile_folder_in_dedicated_account": true,
+    "profile_removed": true,
+    "root_exit_73": false,
+    "scope": "controller fixed file/registry/loopback workload; incomplete stage A matrix",
+    "source_file_registry_controls_verified": true,
+    "source_token_non_elevated": true,
+    "source_token_session": 0,
+    "tool_admission": {
+      "actual_exit": 0,
+      "files": [
+        {
+          "destination": {
+            "bytes": 4383048,
+            "file_index": 12384898975372823,
+            "path": "C:\\ProgramData\\ShellSpan-AC-10f7b738a61a496c89b52b1dd5cd22fc\\git.exe",
+            "volume": 2523053325
+          },
+          "imports": [
+            "advapi32.dll",
+            "kernel32.dll",
+            "libiconv-2.dll",
+            "libintl-8.dll",
+            "libpcre2-8-0.dll",
+            "msvcrt.dll",
+            "ntdll.dll",
+            "user32.dll",
+            "ws2_32.dll",
+            "zlib1.dll"
+          ],
+          "source": {
+            "bytes": 4383048,
+            "file_index": 1125899907578178,
+            "path": "D:\\Programs\\Git\\mingw64\\bin\\git.exe",
+            "volume": 170928010
+          }
+        },
+        {
+          "destination": {
+            "bytes": 1143148,
+            "file_index": 58546795155920486,
+            "path": "C:\\ProgramData\\ShellSpan-AC-10f7b738a61a496c89b52b1dd5cd22fc\\libiconv-2.dll",
+            "volume": 2523053325
+          },
+          "imports": [
+            "kernel32.dll",
+            "msvcrt.dll"
+          ],
+          "source": {
+            "bytes": 1143148,
+            "file_index": 1125899907578195,
+            "path": "D:\\Programs\\Git\\mingw64\\bin\\libiconv-2.dll",
+            "volume": 170928010
+          }
+        },
+        {
+          "destination": {
+            "bytes": 298731,
+            "file_index": 13229323905504894,
+            "path": "C:\\ProgramData\\ShellSpan-AC-10f7b738a61a496c89b52b1dd5cd22fc\\libintl-8.dll",
+            "volume": 2523053325
+          },
+          "imports": [
+            "advapi32.dll",
+            "kernel32.dll",
+            "libiconv-2.dll",
+            "msvcrt.dll"
+          ],
+          "source": {
+            "bytes": 298731,
+            "file_index": 1125899907578197,
+            "path": "D:\\Programs\\Git\\mingw64\\bin\\libintl-8.dll",
+            "volume": 170928010
+          }
+        },
+        {
+          "destination": {
+            "bytes": 717955,
+            "file_index": 47287796087494791,
+            "path": "C:\\ProgramData\\ShellSpan-AC-10f7b738a61a496c89b52b1dd5cd22fc\\libpcre2-8-0.dll",
+            "volume": 2523053325
+          },
+          "imports": [
+            "kernel32.dll",
+            "msvcrt.dll"
+          ],
+          "source": {
+            "bytes": 717955,
+            "file_index": 1125899907578202,
+            "path": "D:\\Programs\\Git\\mingw64\\bin\\libpcre2-8-0.dll",
+            "volume": 170928010
+          }
+        },
+        {
+          "destination": {
+            "bytes": 128488,
+            "file_index": 26458647810906316,
+            "path": "C:\\ProgramData\\ShellSpan-AC-10f7b738a61a496c89b52b1dd5cd22fc\\zlib1.dll",
+            "volume": 2523053325
+          },
+          "imports": [
+            "kernel32.dll",
+            "msvcrt.dll"
+          ],
+          "source": {
+            "bytes": 128488,
+            "file_index": 1125899907578249,
+            "path": "D:\\Programs\\Git\\mingw64\\bin\\zlib1.dll",
+            "volume": 170928010
+          }
+        }
+      ],
+      "output_verified": true,
+      "scope": "fixed dedicated-account Git --version only; not complete stage A",
+      "stderr": "",
+      "stdout": "git version 2.55.0.windows.3\n",
+      "system_imports": [
+        "advapi32.dll",
+        "kernel32.dll",
+        "msvcrt.dll",
+        "ntdll.dll",
+        "user32.dll",
+        "ws2_32.dll"
+      ],
+      "tool": "git_bundle"
+    },
+    "with_token_creation_error": "controller create fixed source-account LPAC process: Win32 87",
+    "workload_retired": true
+  },
+  "controller_workload_requested": true,
+  "controller_workload_planned_root": "C:\\ProgramData\\ShellSpan-AC-10f7b738a61a496c89b52b1dd5cd22fc",
+  "controller_workload_fixture": {
+    "path": "C:\\ProgramData\\ShellSpan-AC-10f7b738a61a496c89b52b1dd5cd22fc",
+    "volume_serial": 2523053325,
+    "file_index": 32932572275241081
+  },
+  "controller_workload_retired": true,
+  "controller_workload_files_retired": false,
+  "controller_lifecycle": "normal",
+  "controller_tool": "git_bundle",
+  "credential_reference": "ShellSpan/owned-account/v1/10f7b738-a61a-496c-89b5-2b1dd5cd22fc/S-1-5-21-4017028701-367916445-1230427694-1084",
+  "credential_reference_verified": true,
+  "credential_removed": false,
+  "profile_recovery_api_loaded": false,
+  "profile_recovery_api_unloaded": false,
+  "recovery_logon_pending": false
+}

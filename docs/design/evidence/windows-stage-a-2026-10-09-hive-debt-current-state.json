@@ -1,0 +1,37 @@
+{
+  "observed_at_utc": "2026-10-08T20:53:53.9803626Z",
+  "boot_time": "2026-10-08T21:25:57.705363+08:00",
+  "observations": [
+    {
+      "fixture_id": "ba16502e-566b-4193-93d6-b6b34414ae68",
+      "account_sid": "S-1-5-21-4017028701-367916445-1230427694-1063",
+      "account_disabled": true,
+      "hive_exists": true,
+      "profile_loaded": true,
+      "profile_record_count": 1,
+      "service_absent": true,
+      "cleanup_debt": [
+        "fixed running SYSTEM service interruption; exact UUID recovery required",
+        "workload recovery requires owned hive absence; retain SID block",
+        "ordinary unload of exact owned interrupted account hive: Win32 5"
+      ],
+      "profile_api_loaded": null,
+      "profile_api_unloaded": null
+    },
+    {
+      "fixture_id": "4bb6655d-3b91-4088-b7f3-7db3e7005b0b",
+      "account_sid": "S-1-5-21-4017028701-367916445-1230427694-1065",
+      "account_disabled": true,
+      "hive_exists": true,
+      "profile_loaded": true,
+      "profile_record_count": 1,
+      "service_absent": true,
+      "cleanup_debt": [
+        "fixed running SYSTEM service interruption; exact UUID recovery required",
+        "owned hive remains after profile API reacquisition and unload; retain debt"
+      ],
+      "profile_api_loaded": true,
+      "profile_api_unloaded": true
+    }
+  ]
+}

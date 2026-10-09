@@ -1,0 +1,15 @@
+﻿{
+    "fixture_id":  "0b999d90-d4c9-468a-9d9a-de3f6e75fed1",
+    "before":  {
+                   "service_name":  "Dnscache",
+                   "state":  "Running",
+                   "pid":  2244,
+                   "creation_time":  "2026-10-08T13:26:06.8514440Z"
+               },
+    "after":  {
+                  "service_name":  "Dnscache",
+                  "state":  "Running",
+                  "pid":  2244,
+                  "creation_time":  "2026-10-08T13:26:06.8514440Z"
+              }
+}

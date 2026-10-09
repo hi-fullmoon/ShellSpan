@@ -1,0 +1,20 @@
+{
+  "production": "unavailable",
+  "candidate": "appcontainer-admission-only",
+  "profile_name": "ShellSpan-candidate-2e0298ac67204a64995006b7d36a7ebf",
+  "state": "admission experiment completed; no production acceptance; receipt retained",
+  "appcontainer_identity": true,
+  "source_not_elevated": true,
+  "same_user": true,
+  "low_integrity": true,
+  "lpac_requested": true,
+  "actual_lpac": false,
+  "capabilities_empty": true,
+  "entry_exit_73": false,
+  "process_tree_stopped": true,
+  "profile_removed": true,
+  "error": "invalid Token query budget",
+  "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-6a3198ffc8bd477fbbe861393fda38a0",
+  "fixture_acls_revoked": true,
+  "probe": null
+}

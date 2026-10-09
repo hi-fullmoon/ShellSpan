@@ -1,0 +1,113 @@
+{
+  "tool_admission": {
+    "actual_exit": 73,
+    "etw_delivery_verified": true,
+    "expected_exit": 73,
+    "image": {
+      "bytes": 7680,
+      "file_index": 9007199255408520,
+      "path": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-ce3fc26bce6347008522efbe16255260\\powershell-etw-probe.exe",
+      "volume": 2523053325
+    },
+    "initializer_succeeded": true,
+    "owned_copy_source": {
+      "bytes": 7680,
+      "file_index": 3096224744047199,
+      "path": "D:\\Developer\\ShellSpan\\tests\\windows-sandbox-account\\target\\debug\\powershell-etw-probe.exe",
+      "volume": 170928010
+    },
+    "scope": "shared-source LPAC admission only; not dedicated-account compatibility acceptance",
+    "static_imports": [],
+    "stderr": "",
+    "stdio_handle_count": 3,
+    "stdout": "{\"version\":1,\"scope\":\"fixed-powershell-etw-initializer\",\"assembly\":\"C:\\\\Windows\\\\Microsoft.Net\\\\assembly\\\\GAC_MSIL\\\\System.Management.Automation\\\\v4.0_3.0.0.0__31bf3856ad364e35\\\\System.Management.Automation.dll\",\"type\":\"System.Management.Automation.Tracing.PSEtwLog\",\"assembly_version\":\"System.Management.Automation, Version=3.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35\",\"mvid\":\"a002aaca-c1f1-4bf9-8710-85b273cd7dce\",\"stage\":\"complete\",\"initializer_succeeded\":true,\"chain_complete\":true,\"exceptions\":[],\"native_registrations\":[{\"provider\":\"a0c1853b-5c40-4b15-8766-3cf1c58f985a\",\"register_code\":0,\"handle_nonzero\":true,\"unregister_code\":0},{\"provider\":\"3229ad87-338e-4e53-85b4-f77f5f2c2a07\",\"register_code\":0,\"handle_nonzero\":true,\"unregister_code\":0}]}\r\n",
+    "tool": "power_shell_etw_probe",
+    "topology_verified": true
+  },
+  "production": "unavailable",
+  "candidate": "lpac-fixed-tool-admission",
+  "profile_name": "ShellSpan-candidate-3afb9b6c238041f3970b2d4b94293702",
+  "created_package_sid": "S-1-15-2-3371265934-3314195409-3095985471-3856225162-4282065158-2125653169-923149360",
+  "namespace_admission": {
+    "observations": [
+      {
+        "create_subdirectory_admission": "0xc0000034",
+        "path": "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects\\S-1-15-2-3371265934-3314195409-3095985471-3856225162-4282065158-2125653169-923149360",
+        "read_control": "0xc0000034",
+        "traverse": "0xc0000034"
+      },
+      {
+        "create_subdirectory_admission": "0x00000000",
+        "path": "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects",
+        "read_control": "0x00000000",
+        "traverse": "0x00000000"
+      }
+    ],
+    "read_only": true
+  },
+  "state": "admission experiment completed; no production acceptance; receipt retained",
+  "appcontainer_identity": true,
+  "source_not_elevated": true,
+  "source_creation_boundary": {
+    "child_process_policy_flags": 0,
+    "current_job_active_process_limit": 0,
+    "current_job_limit_flags": 10240,
+    "current_job_ui_restrictions": 0,
+    "in_job": true,
+    "token_restricted": false,
+    "token_session_id": 1
+  },
+  "actual_source_user_sid": "S-1-5-21-4017028701-367916445-1230427694-1001",
+  "dedicated_account_plan_verified": false,
+  "receiver_evidence_owner": "fixture-controller",
+  "receiver_quietness_verified": false,
+  "same_user": true,
+  "low_integrity": true,
+  "lpac_requested": true,
+  "actual_lpac": true,
+  "lpac_evidence_method": "actual Token AccessCheck: unique package positive control plus AllApplicationPackages exclusion; not class-46 inference",
+  "capabilities_empty": false,
+  "requested_capabilities": [
+    "registryRead",
+    "lpacInstrumentation"
+  ],
+  "capabilities_verified": true,
+  "entry_exit_73": false,
+  "process_tree_stopped": true,
+  "lifecycle_timeout_observed": false,
+  "lifecycle_cancel_observed": false,
+  "lifecycle_root_failure_observed": false,
+  "active_processes_after_root_failure": null,
+  "owned_job_total_processes": 2,
+  "owned_job_process_observations": [
+    {
+      "pid": 29264,
+      "image": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-ce3fc26bce6347008522efbe16255260\\powershell-etw-probe.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    },
+    {
+      "pid": 26752,
+      "image": "C:\\Windows\\System32\\conhost.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    }
+  ],
+  "profile_removed": true,
+  "error": null,
+  "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-ce3fc26bce6347008522efbe16255260",
+  "fixture_acls_revoked": true,
+  "probe": null
+}

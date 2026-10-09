@@ -1,0 +1,130 @@
+{
+  "tool_admission": {
+    "expected_exit": 73,
+    "image": {
+      "bytes": 301368,
+      "file_index": 27584547717864257,
+      "path": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-3e4ba36e536a4419bd2bd1fecd8d8695\\pwsh.exe",
+      "volume": 2523053325
+    },
+    "runtime_bytes": 236516521,
+    "runtime_file_count": 304,
+    "runtime_intent": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-3e4ba36e536a4419bd2bd1fecd8d8695\\powershell-runtime-intent.json",
+    "scope": "shared-source LPAC admission only; not dedicated-account compatibility acceptance",
+    "static_imports": [
+      "advapi32.dll",
+      "api-ms-win-crt-convert-l1-1-0.dll",
+      "api-ms-win-crt-heap-l1-1-0.dll",
+      "api-ms-win-crt-locale-l1-1-0.dll",
+      "api-ms-win-crt-math-l1-1-0.dll",
+      "api-ms-win-crt-runtime-l1-1-0.dll",
+      "api-ms-win-crt-stdio-l1-1-0.dll",
+      "api-ms-win-crt-string-l1-1-0.dll",
+      "api-ms-win-crt-time-l1-1-0.dll",
+      "kernel32.dll",
+      "shell32.dll",
+      "user32.dll"
+    ],
+    "stderr": "Unhandled exception. System.TypeInitializationException: The type initializer for 'System.Management.Automation.Tracing.PSEtwLog' threw an exception.\r\n ---> System.TypeInitializationException: The type initializer for 'System.Management.Automation.Tracing.PSEtwLogProvider' threw an exception.\r\n ---> System.ComponentModel.Win32Exception (5): 拒绝访问。\r\n   at System.Diagnostics.Eventing.EventProvider.EtwRegister()\r\n   at System.Management.Automation.Tracing.PSEtwLogProvider..cctor()\r\n   --- End of inner exception stack trace ---\r\n   at System.Management.Automation.Tracing.PSEtwLog..cctor()\r\n   --- End of inner exception stack trace ---\r\n   at System.Management.Automation.Security.SystemPolicy.SafeWldpGetApplicationSettingBoolean(String settingName)\r\n   at System.Management.Automation.Security.SystemPolicy.TestBooleanWldpSetting(String settingName)\r\n   at System.Management.Automation.Security.SystemPolicy.IsFileOnlyEntryEnabled()\r\n   at Microsoft.PowerShell.CommandLineParameterParser.ParseCommand(String[] args, Int32& i, Boolean noexitSeen, Boolean isEncoded)\r\n   at Microsoft.PowerShell.CommandLineParameterParser.ParseHelper(String[] args)\r\n   at Microsoft.PowerShell.ConsoleHost.ParseCommandLine(String[] args)\r\n   at Microsoft.PowerShell.UnmanagedPSEntry.Start(String[] args, Int32 argc)\r\n   at Microsoft.PowerShell.ManagedPSEntry.Main(String[] args)\r\n",
+    "stdio_handle_count": 3,
+    "stdout": "",
+    "tool": "power_shell7_runtime"
+  },
+  "production": "unavailable",
+  "candidate": "lpac-fixed-tool-admission",
+  "profile_name": "ShellSpan-candidate-dc055dabb94848de9e222053bd4b04e2",
+  "created_package_sid": "S-1-15-2-12792318-3200849225-1124070403-1824150328-1663754005-135841814-1366678663",
+  "namespace_admission": {
+    "observations": [
+      {
+        "create_subdirectory_admission": "0xc0000034",
+        "path": "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects\\S-1-15-2-12792318-3200849225-1124070403-1824150328-1663754005-135841814-1366678663",
+        "read_control": "0xc0000034",
+        "traverse": "0xc0000034"
+      },
+      {
+        "create_subdirectory_admission": "0x00000000",
+        "path": "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects",
+        "read_control": "0x00000000",
+        "traverse": "0x00000000"
+      }
+    ],
+    "read_only": true
+  },
+  "state": "cleanup debt: retain exact owned profile; no automatic rerun",
+  "appcontainer_identity": true,
+  "source_not_elevated": true,
+  "source_creation_boundary": {
+    "child_process_policy_flags": 0,
+    "current_job_active_process_limit": 0,
+    "current_job_limit_flags": 10240,
+    "current_job_ui_restrictions": 0,
+    "in_job": true,
+    "token_restricted": false,
+    "token_session_id": 1
+  },
+  "actual_source_user_sid": "S-1-5-21-4017028701-367916445-1230427694-1001",
+  "dedicated_account_plan_verified": false,
+  "receiver_evidence_owner": "fixture-controller",
+  "receiver_quietness_verified": false,
+  "same_user": true,
+  "low_integrity": true,
+  "lpac_requested": true,
+  "actual_lpac": true,
+  "lpac_evidence_method": "actual Token AccessCheck: unique package positive control plus AllApplicationPackages exclusion; not class-46 inference",
+  "capabilities_empty": false,
+  "requested_capabilities": [
+    "registryRead"
+  ],
+  "capabilities_verified": true,
+  "entry_exit_73": false,
+  "process_tree_stopped": true,
+  "lifecycle_timeout_observed": false,
+  "lifecycle_cancel_observed": false,
+  "lifecycle_root_failure_observed": false,
+  "active_processes_after_root_failure": null,
+  "owned_job_total_processes": null,
+  "owned_job_process_observations": [
+    {
+      "pid": 11872,
+      "image": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-3e4ba36e536a4419bd2bd1fecd8d8695\\pwsh.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    },
+    {
+      "pid": 30872,
+      "image": "C:\\Windows\\System32\\conhost.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    },
+    {
+      "pid": 22276,
+      "image": "C:\\Windows\\System32\\WerFault.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    }
+  ],
+  "profile_removed": false,
+  "error": "invalid owned retirement inventory; retain owned profile: fixture ACE cleanup unconfirmed",
+  "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-3e4ba36e536a4419bd2bd1fecd8d8695",
+  "fixture_acls_revoked": false,
+  "probe": null
+}

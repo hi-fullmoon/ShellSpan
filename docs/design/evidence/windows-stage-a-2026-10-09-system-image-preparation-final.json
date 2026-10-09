@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "backend": "fixed-system-admission-preparation-v1",
+  "production": "unavailable",
+  "fixture_id": "ee6a026b-6ce4-4337-95c8-77831e8a61b9",
+  "image_volume": 2523053325,
+  "image_file_index": 15481123719302704,
+  "image_size": 1866240,
+  "state": "protected image prepared; SYSTEM dispatch not implemented"
+}
