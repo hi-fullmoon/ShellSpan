@@ -462,20 +462,24 @@ impl TerminalInteractiveRegistry {
 pub(crate) fn sanitize_terminal_screen(
     mut snapshot: TerminalScreenSnapshot,
 ) -> (TerminalScreenSnapshot, bool) {
-    let credential_like = screen_looks_credential_like(&snapshot);
+    // Private-key payload is not a credential prompt. Remove it before
+    // prompt detection so random encoded bytes cannot trigger that branch.
+    let unclosed_private_key = crate::redaction::redact_terminal_rows(&mut snapshot.content);
+    let credential_like = unclosed_private_key || screen_looks_credential_like(&snapshot);
     snapshot.title = crate::redaction::redact_sensitive_text(&snapshot.title);
     if credential_like {
         snapshot.content.fill(String::new());
         if let Some(first) = snapshot.content.first_mut() {
             *first = "[credential-like terminal screen redacted]".into();
         }
-    } else {
-        crate::redaction::redact_terminal_rows(&mut snapshot.content);
     }
     (snapshot, credential_like)
 }
 
 fn screen_looks_credential_like(snapshot: &TerminalScreenSnapshot) -> bool {
+    if snapshot.private_key_block_open {
+        return true;
+    }
     let mut recent_nonempty = snapshot
         .content
         .iter()
@@ -1476,20 +1480,26 @@ mod tests {
                     let mut original = model.snapshot("redaction", 1);
                     original.content = raw_parser.screen().rows(0, columns as u16).collect();
                     let (redacted, credential_like) = sanitize_terminal_screen(original.clone());
-                    assert!(!credential_like);
+                    assert_eq!(credential_like, !complete);
                     assert_eq!(redacted.content.len(), original.content.len());
                     assert_eq!(redacted.cursor, original.cursor);
                     assert_eq!(redacted.rows, original.rows);
                     assert_eq!(redacted.columns, original.columns);
-                    assert_eq!(redacted.content[0], "正常输出");
-                    for row in &redacted.content[1..] {
-                        assert!(
-                            row.is_empty() || row == "完成" || row == "[REDACTED PRIVATE KEY]",
-                            "private key material survived screen redaction"
-                        );
-                    }
                     if complete {
+                        assert_eq!(redacted.content[0], "正常输出");
+                        for row in &redacted.content[1..] {
+                            assert!(
+                                row.is_empty() || row == "完成" || row == "[REDACTED PRIVATE KEY]",
+                                "private key material survived screen redaction"
+                            );
+                        }
                         assert!(redacted.content.iter().any(|row| row == "完成"));
+                    } else {
+                        assert_eq!(
+                            redacted.content[0],
+                            "[credential-like terminal screen redacted]"
+                        );
+                        assert!(redacted.content[1..].iter().all(String::is_empty));
                     }
                     assert_eq!(sanitize_terminal_screen(redacted.clone()).0, redacted);
                 }
@@ -1498,8 +1508,80 @@ mod tests {
     }
 
     #[test]
+    fn terminal_screen_blocks_prompt_after_unclosed_real_private_key() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("key");
+        assert!(std::process::Command::new("ssh-keygen")
+            .args(["-q", "-t", "ed25519", "-N", "", "-f"])
+            .arg(&path)
+            .status()
+            .unwrap()
+            .success());
+        let key = std::fs::read_to_string(path).unwrap();
+        for prompt in ["Password:", "OTP:"] {
+            let output = format!(
+                "{}\r\n{prompt}",
+                key[..key.rfind("-----END ").unwrap()].replace('\n', "\r\n")
+            );
+            let mut parser = vt100::Parser::new(40, 80, 0);
+            parser.process(output.as_bytes());
+            let mut model =
+                crate::terminal_screen::TerminalScreenModel::new(TerminalGeometry::new(80, 40));
+            model
+                .observe(&crate::terminal_broker::TerminalRawOutputFrame {
+                    protocol_version: 1,
+                    terminal_session_id: "key-prompt".into(),
+                    terminal_generation: 1,
+                    frame_type: "rawOutput",
+                    sequence: 1,
+                    byte_offset: 0,
+                    bytes: output.clone().into_bytes(),
+                })
+                .unwrap();
+            let streamed = model.snapshot("key-prompt", 1);
+            assert!(streamed.private_key_block_open);
+            assert!(
+                screen_looks_credential_like(&streamed),
+                "streaming key masking must not clear the input gate"
+            );
+            assert!(sanitize_terminal_screen(streamed).1);
+            model.resize(TerminalGeometry::new(10, 4)).unwrap();
+            assert!(
+                screen_looks_credential_like(&model.snapshot("key-prompt", 1)),
+                "resize and scrolling must preserve the input gate"
+            );
+            model
+                .observe(&crate::terminal_broker::TerminalRawOutputFrame {
+                    protocol_version: 1,
+                    terminal_session_id: "key-prompt".into(),
+                    terminal_generation: 1,
+                    frame_type: "rawOutput",
+                    sequence: 2,
+                    byte_offset: output.len() as u64,
+                    bytes: key[key.rfind("-----END ").unwrap()..].as_bytes().to_vec(),
+                })
+                .unwrap();
+            assert!(!model.snapshot("key-prompt", 1).private_key_block_open);
+            let mut snapshot =
+                crate::terminal_screen::TerminalScreenModel::new(TerminalGeometry::new(80, 40))
+                    .snapshot("key-prompt", 1);
+            snapshot.content = parser.screen().rows(0, 80).collect();
+            let (redacted, blocked) = sanitize_terminal_screen(snapshot);
+            assert!(
+                blocked,
+                "prompt following unclosed key must block terminal input"
+            );
+            assert_eq!(
+                redacted.content[0],
+                "[credential-like terminal screen redacted]"
+            );
+        }
+    }
+
+    #[test]
     fn credential_prompt_is_redacted_without_exposing_prompt_text() {
         let snapshot = TerminalScreenSnapshot {
+            private_key_block_open: false,
             protocol_version: 1,
             terminal_session_id: "terminal-1".into(),
             terminal_generation: 1,
@@ -1518,6 +1600,12 @@ mod tests {
             content: vec!["Password:".into(), "".into()],
         };
         assert!(screen_looks_credential_like(&snapshot));
+        for prompt in ["OTP:", "Enter OTP code", "otp", "(OTP)"] {
+            let mut candidate = snapshot.clone();
+            candidate.content[0] = prompt.into();
+            assert!(screen_looks_credential_like(&candidate), "{prompt}");
+            assert!(sanitize_terminal_screen(candidate).1, "{prompt}");
+        }
         let (redacted, credential_like) = sanitize_terminal_screen(snapshot);
         assert!(credential_like);
         assert_eq!(

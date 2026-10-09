@@ -609,10 +609,13 @@ impl CredentialBackend for ReadonlyModelCheckBackend {
         if service != AI_KEY_SERVICE || self.reference.as_deref() != Some(key) {
             return Err("Acceptance credential reference is outside selected model".into());
         }
-        let Some(payload) = NativeKeychainBackend
-            .get_credential(CREDENTIAL_VAULT_SERVICE, CREDENTIAL_VAULT_ACCOUNT)?
+        let Some(payload) = macos_keychain::get_generic_password_without_authentication(
+            CREDENTIAL_VAULT_SERVICE,
+            CREDENTIAL_VAULT_ACCOUNT,
+        )
+        .map_err(|_| "MODEL_CREDENTIAL_UNAVAILABLE: noninteractive keychain read rejected")?
         else {
-            return Ok(None);
+            return Err("MODEL_CREDENTIAL_UNAVAILABLE: credential absent or interactive authorization required".into());
         };
         let vault: CredentialVault =
             serde_json::from_str(&payload).map_err(|_| "Acceptance credential vault is invalid")?;
@@ -714,6 +717,37 @@ mod macos_keychain {
                 }
             }
             Err(error) => Err(format!("macOS keychain find existing item: {error}")),
+        }
+    }
+
+    /// Acceptance never opens an authorization prompt or changes a keychain ACL.
+    #[cfg(debug_assertions)]
+    pub(super) fn get_generic_password_without_authentication(
+        service: &str,
+        account: &str,
+    ) -> Result<Option<String>, String> {
+        use security_framework::item::{ItemClass, ItemSearchOptions, SearchResult};
+        validate_specifier(service, "service")?;
+        validate_specifier(account, "account")?;
+        let mut query = ItemSearchOptions::new();
+        query
+            .keychains(&[user_keychain()?])
+            .class(ItemClass::generic_password())
+            .service(service)
+            .account(account)
+            .load_data(true)
+            .skip_authenticated_items(true);
+        match query.search() {
+            Ok(mut results) => match results.pop() {
+                Some(SearchResult::Data(bytes)) => String::from_utf8(bytes)
+                    .map(Some)
+                    .map_err(|_| "Acceptance keychain payload encoding invalid".into()),
+                _ => Err("Acceptance keychain result does not contain credential data".into()),
+            },
+            Err(error) if error.code() == errSecItemNotFound => Ok(None),
+            Err(error) => Err(format!(
+                "Acceptance noninteractive keychain read failed: {error}"
+            )),
         }
     }
 
@@ -878,3 +912,7 @@ mod macos_keychain {
 mod tests {
     include!("tests/keychain.rs");
 }
+
+#[cfg(all(test, target_os = "macos", debug_assertions))]
+#[path = "tests/keychain_native_acceptance.rs"]
+mod native_acceptance_tests;

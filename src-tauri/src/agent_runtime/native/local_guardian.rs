@@ -396,17 +396,42 @@ fn run_inner() -> Result<(), String> {
             crate::agent_runtime::AgentExecutionSurface::Direct,
             0,
         )?;
-        let (mut child, temp) = super::macos_sandbox::command("printf native-ready", &contract)?;
+        let command = "printf native-ready";
+        #[cfg(debug_assertions)]
+        let command = if running_preflight_check() {
+            "printf native-ready; kill -STOP $$"
+        } else {
+            command
+        };
+        let (mut child, temp) = super::macos_sandbox::command(command, &contract)?;
+        #[cfg(debug_assertions)]
+        let temp_path = temp.path().to_path_buf();
+        #[cfg(debug_assertions)]
+        preflight_checkpoint(&launch.custody, workspace.path(), &temp_path, None)?;
         child.stdin(std::process::Stdio::null());
+        let timeout = Duration::from_millis(launch.timeout_ms);
+        #[cfg(debug_assertions)]
+        let timeout = if running_preflight_check() {
+            Duration::from_secs(15)
+        } else {
+            timeout
+        };
         let process = super::process::spawn_local_child_native(
             launch.task,
             launch.request,
             launch.target,
             child,
             Some(temp),
-            Duration::from_millis(launch.timeout_ms),
+            timeout,
         )?;
-        let snapshot = match process.wait(Duration::from_secs(4)) {
+        #[cfg(debug_assertions)]
+        preflight_checkpoint(
+            &launch.custody,
+            workspace.path(),
+            &temp_path,
+            process.acceptance_child_pid.get().copied(),
+        )?;
+        let snapshot = match wait_preflight(&process, &rx) {
             Ok(snapshot) => snapshot,
             Err(error) => {
                 let _ = workspace.keep();
@@ -472,6 +497,83 @@ fn run_inner() -> Result<(), String> {
         }
     }
     supervise(process, launch.custody, rx)
+}
+
+fn wait_preflight(
+    process: &ManagedProcessNative,
+    controls: &mpsc::Receiver<Control>,
+) -> Result<ProcessSnapshotNative, String> {
+    let deadline = Instant::now() + Duration::from_secs(4);
+    loop {
+        match controls.try_recv() {
+            Ok(Control::Stop { .. }) | Err(mpsc::TryRecvError::Disconnected) => {
+                return process.kill(ProcessSignalNative::Kill, Duration::from_secs(4));
+            }
+            Ok(Control::Write { .. }) | Err(mpsc::TryRecvError::Empty) => {}
+        }
+        let snapshot = process.wait(Duration::from_millis(20))?;
+        if snapshot.state.is_terminal() {
+            return Ok(snapshot);
+        }
+        if Instant::now() >= deadline {
+            return process.kill(ProcessSignalNative::Kill, Duration::from_secs(4));
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
+fn running_preflight_check() -> bool {
+    std::env::var("SHELLSPAN_NATIVE_SHUTDOWN_CHECK").as_deref() == Ok("preflight-crash-seed")
+        && std::env::var("SHELLSPAN_PREFLIGHT_RUNNING_CHECK").as_deref() == Ok("1")
+}
+
+/// Isolated timing barriers; no credential, cleanup or receipt bypass.
+#[cfg(debug_assertions)]
+fn preflight_checkpoint(
+    custody: &LocalCleanupCapsule,
+    workspace: &Path,
+    temp: &Path,
+    shell_pid: Option<u32>,
+) -> Result<(), String> {
+    if std::env::var("SHELLSPAN_NATIVE_SHUTDOWN_CHECK").as_deref() != Ok("preflight-crash-seed") {
+        return Ok(());
+    }
+    if running_preflight_check() != shell_pid.is_some() {
+        return Ok(());
+    }
+    let root = PathBuf::from(
+        std::env::var_os("SHELLSPAN_PREFLIGHT_CHECK_ROOT")
+            .ok_or("Preflight checkpoint root missing")?,
+    );
+    if !root.is_absolute()
+        || std::fs::canonicalize(&root).ok().as_ref() != Some(&root)
+        || !custody.directory.starts_with(root.join("state"))
+    {
+        return Err("Preflight checkpoint outside isolated state".into());
+    }
+    let value = serde_json::json!({"controllerPid":std::process::id(),
+        "appPid":unsafe {libc::getppid()},"fixtureRoot":root,
+        "directories":[workspace,temp],"receiptPending":!custody.directory.join("receipt.json").exists(),
+        "shellPid":shell_pid,
+        "window":if shell_pid.is_some() {"real fixed preflight Shell started; printf executed; debug SIGSTOP timing injection before parent SIGKILL"} else {"controller running, real workspace and command temp allocated, before fixed Shell spawn"}});
+    std::fs::write(
+        root.join("preflight-ready.pending.json"),
+        serde_json::to_vec(&value).map_err(|_| "Preflight checkpoint invalid")?,
+    )
+    .map_err(|_| "Preflight checkpoint unavailable")?;
+    std::fs::rename(
+        root.join("preflight-ready.pending.json"),
+        root.join("preflight-ready.json"),
+    )
+    .map_err(|_| "Preflight checkpoint unavailable")?;
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !root.join("preflight-release").is_file() {
+        if Instant::now() >= deadline {
+            return Err("Preflight checkpoint timed out".into());
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    Ok(())
 }
 
 fn supervise(

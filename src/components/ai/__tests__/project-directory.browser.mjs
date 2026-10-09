@@ -116,6 +116,17 @@ try {
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     await page.waitForTimeout(400);
     assert.equal(requests.length, 0, 'closing cancels debounce');
+    await page.getByRole('button', { name: 'Add file or folder' }).click();
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Enter');
+    await input.fill(`${root}/src`);
+    await page.getByRole('option', { name: `${root}/src/`, exact: true }).waitFor();
+    await input.press('Escape');
+    assert.equal(await page.getByRole('option').count(), 0, 'first Escape dismisses directory suggestions');
+    assert.equal(await page.getByRole('dialog').count(), 1);
+    await input.press('Escape');
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
   }
   assert.deepEqual(errors, []);
 } finally { releaseResponse?.(); await browser?.close(); await server.close(); }

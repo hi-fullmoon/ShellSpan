@@ -5,8 +5,9 @@ use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
 pub(super) fn run(root: &Path, undrained: bool, exit_active: bool) -> Result<(), String> {
-    let reopen =
-        std::env::var("SHELLSPAN_NATIVE_SHUTDOWN_CHECK").as_deref() == Ok("local-crash-reopen");
+    let mode = std::env::var("SHELLSPAN_NATIVE_SHUTDOWN_CHECK").unwrap_or_default();
+    let reopen = mode == "local-crash-reopen" || mode == "preflight-crash-reopen";
+    let preflight = mode.starts_with("preflight-crash-");
     if !root.is_absolute()
         || !root.is_dir()
         || (!reopen
@@ -34,7 +35,8 @@ pub(super) fn run(root: &Path, undrained: bool, exit_active: bool) -> Result<(),
             tauri::async_runtime::spawn_blocking(move || {
                 let outcome = tauri::async_runtime::block_on(async {
                     let outcome = std::panic::AssertUnwindSafe(async {
-                        if reopen { check_local_reopen(&handle, &check_root).await }
+                        if preflight { check_preflight(&handle, &check_root, reopen).await }
+                        else if reopen { check_local_reopen(&handle, &check_root).await }
                         else { check(&handle,&check_root,undrained,exit_active).await }
                     })
                         .catch_unwind().await.unwrap_or_else(|_| Err("Shutdown acceptance panicked before completion".into()));
@@ -133,6 +135,53 @@ fn rejected_by_gate<T>(result: &Result<T, String>) -> bool {
         .as_ref()
         .err()
         .is_some_and(|error| error.contains("agentRuntimeShuttingDown"))
+}
+
+async fn check_preflight(
+    app: &tauri::AppHandle,
+    root: &Path,
+    reopen: bool,
+) -> Result<Value, String> {
+    let runtime = AgentRuntimeBuilder::new().build();
+    runtime.configure(
+        app.path()
+            .app_data_dir()
+            .map_err(|_| "Preflight state missing")?,
+    )?;
+    app.manage(CredentialManager::isolated_native_for_checks());
+    app.manage(SessionManager::default());
+    app.manage(runtime.clone());
+    runtime.configure_native(app.clone())?;
+    if !reopen {
+        runtime.probe_native_sandbox()?;
+        return Err("Preflight seed was not interrupted".into());
+    }
+    let blocked = runtime.probe_native_sandbox().is_err();
+    let recovered = super::super::commands::agent_runtime_reconcile_direct_resources(
+        app.clone(),
+        app.state::<AgentRuntime>(),
+    )
+    .await?;
+    let again = super::super::commands::agent_runtime_reconcile_direct_resources(
+        app.clone(),
+        app.state::<AgentRuntime>(),
+    )
+    .await?;
+    let ready: Value = serde_json::from_slice(
+        &std::fs::read(root.join("preflight-ready.json"))
+            .map_err(|_| "Preflight readiness missing")?,
+    )
+    .map_err(|_| "Preflight readiness invalid")?;
+    let absent = ready["directories"]
+        .as_array()
+        .ok_or("Preflight directories missing")?
+        .iter()
+        .all(|value| value.as_str().is_some_and(|path| !Path::new(path).exists()));
+    let reopened = runtime.probe_native_sandbox().is_ok();
+    let checks = json!({"blockedBeforeSignedRecovery":blocked,"signedRecovery":recovered.resolved==1&&recovered.uncertain==0,"idempotentRecovery":again.resolved==0&&again.uncertain==0,"exactDirectoriesAbsent":absent,"admissionReopened":reopened});
+    Ok(
+        json!({"passed":checks.as_object().is_some_and(|checks| checks.values().all(|value|value==true)),"checks":checks,"resolved":recovered.resolved,"uncertain":recovered.uncertain,"scope":ready["window"]}),
+    )
 }
 
 async fn check_local_reopen(app: &tauri::AppHandle, root: &Path) -> Result<Value, String> {
@@ -447,7 +496,7 @@ async fn check(
     let raced_preparation = adapter.prepare(request(
         &raced_header,
         "raced-launch",
-        "printf race-started > race-marker; sleep 30; printf race-finished >> race-marker",
+        "echo $$ > owned-race.pid; printf race-started > race-marker; sleep 30; printf race-finished >> race-marker",
         true,
         json!([]),
     )?)?;
@@ -604,11 +653,54 @@ async fn check(
                 .as_ref()
                 .and_then(|data| data["processHandle"].as_str())
             {
-                let ended = runtime.acceptance_process(handle)?.snapshot()?;
+                let ended = runtime.acceptance_process(handle);
+                let confirmed = match ended {
+                    Ok(process) => {
+                        let snapshot = process.snapshot()?;
+                        snapshot.state.is_terminal() && snapshot.termination_confirmed
+                    }
+                    Err(error) if error == "Process handle was not found" => {
+                        // cancel_task retires handles only after confirmed cleanup
+                        // and debt resolution. Cross-check both the durable ledger
+                        // and actual process; missing registry alone proves nothing.
+                        let ledger = rusqlite::Connection::open_with_flags(
+                            app.path()
+                                .app_data_dir()
+                                .map_err(|_| "Shutdown state unavailable")?
+                                .join("agent-direct-ownership.sqlite3"),
+                            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+                        )
+                        .map_err(|_| "Shutdown debt observation unavailable")?;
+                        let debt: i64 = ledger
+                            .query_row(
+                                "SELECT count(*) FROM dispatch_debt WHERE task_id=?1",
+                                [&raced_header.task_id],
+                                |row| row.get(0),
+                            )
+                            .map_err(|_| "Shutdown debt observation failed")?;
+                        let child_absent =
+                            match std::fs::read_to_string(workspace.join("owned-race.pid")) {
+                                Ok(value) => {
+                                    let pid: u32 = value
+                                        .trim()
+                                        .parse()
+                                        .map_err(|_| "Owned raced PID invalid")?;
+                                    sysinfo::System::new_all()
+                                        .process(sysinfo::Pid::from_u32(pid))
+                                        .is_none()
+                                }
+                                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                                    !race_marker.exists()
+                                }
+                                Err(_) => false,
+                            };
+                        initial.is_ok() && debt == 0 && child_absent
+                    }
+                    Err(error) => return Err(error),
+                };
                 (
                     "nativeStarted",
-                    ended.state.is_terminal()
-                        && ended.termination_confirmed
+                    confirmed
                         && std::fs::read_to_string(&race_marker)
                             .ok()
                             .is_none_or(|content| !content.contains("race-finished")),

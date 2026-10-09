@@ -90,6 +90,7 @@ pub(crate) enum TerminalScreenBuffer {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TerminalScreenSnapshot {
+    pub(crate) private_key_block_open: bool,
     pub(crate) protocol_version: u8,
     pub(crate) terminal_session_id: String,
     pub(crate) terminal_generation: u64,
@@ -190,6 +191,7 @@ impl TerminalScreenModel {
         let (rows, columns) = screen.size();
         let (row, column) = screen.cursor_position();
         TerminalScreenSnapshot {
+            private_key_block_open: self.private_key_filter.state.inside_private_key,
             protocol_version: 1,
             terminal_session_id: terminal_session_id.to_string(),
             terminal_generation,

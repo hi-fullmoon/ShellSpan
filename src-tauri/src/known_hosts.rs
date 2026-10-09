@@ -29,7 +29,9 @@ pub(crate) fn known_hosts_path(app: &AppHandle) -> Result<PathBuf, String> {
     #[cfg(debug_assertions)]
     if matches!(
         app.config().identifier.as_str(),
-        "com.shellspan.native-remote-check" | "com.shellspan.native-remote-recovery-check"
+        "com.shellspan.native-remote-check"
+            | "com.shellspan.native-remote-recovery-check"
+            | "com.shellspan.sandbox-settings-check"
     ) {
         return app
             .path()

@@ -32,7 +32,7 @@ import type { AiScrollAnchor } from '@/lib/ai/panel-route';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { MessageLayoutContext } from './message-layout-context';
+import { MessageLayoutContext, MessageReadingContext } from './message-layout-context';
 import { useTurnScrollTransition } from './workspace/use-turn-scroll-transition';
 
 interface MessageScrollerProps {
@@ -530,7 +530,9 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
         {header && <div className="shrink-0 pt-5" onClickCapture={preserveHistoryPosition}>{header}</div>}
         <MessageScrollerContent ref={contentRef} className={cn('min-h-0 grow shrink-0 gap-4 px-3 py-4', contentClassName)}>
           <MessageLayoutContext.Provider value={commitMessageLayout}>
-            {messageItems}
+            <MessageReadingContext.Provider value={preserveHistoryPosition}>
+              {messageItems}
+            </MessageReadingContext.Provider>
           </MessageLayoutContext.Provider>
         </MessageScrollerContent>
       </MessageScrollerViewport>
