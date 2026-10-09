@@ -8,6 +8,7 @@ import plistlib
 import shutil
 import subprocess
 import time
+import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -16,6 +17,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--reopen-existing", action="store_true")
+    parser.add_argument("--app-name")
     args = parser.parse_args()
     output = args.output.resolve()
     if (output.exists() and not args.reopen_existing) or not output.is_relative_to(ROOT / ".phase4-acceptance"):
@@ -26,15 +28,18 @@ def main():
             parser.error("original owned fixture required")
     else:
         fixture.mkdir(parents=True, mode=0o700)
-    bundle = output / ("ShellSpan Recovery Current.app" if args.reopen_existing else "ShellSpan Recovery Acceptance.app")
+    app_name = args.app_name or ("ShellSpan Recovery Current" if args.reopen_existing else "ShellSpan Recovery Acceptance")
+    if not app_name.replace(" ", "").isalnum() or len(app_name) > 64:
+        parser.error("short alphanumeric application name required")
+    bundle = output / f"{app_name}.app"
     if bundle.exists():
         parser.error("each bundle must be newly created")
     executable = bundle / "Contents/MacOS/ShellSpan"
     executable.parent.mkdir(parents=True)
     shutil.copy2(ROOT / "src-tauri/target/debug/ShellSpan", executable)
     with (bundle / "Contents/Info.plist").open("wb") as handle:
-        plistlib.dump({"CFBundleIdentifier": "com.shellspan.stage2-recovery-current" if args.reopen_existing else "com.shellspan.stage2-recovery-acceptance",
-                      "CFBundleName": "ShellSpan Recovery Current" if args.reopen_existing else "ShellSpan Recovery Acceptance", "CFBundleExecutable": "ShellSpan",
+        plistlib.dump({"CFBundleIdentifier": f"com.shellspan.stage2-recovery-{uuid.uuid4().hex}",
+                      "CFBundleName": app_name, "CFBundleExecutable": "ShellSpan",
                       "CFBundlePackageType": "APPL", "CFBundleVersion": "1", "NSHighResolutionCapable": True}, handle)
     environment = os.environ | {"SHELLSPAN_SANDBOX_SETTINGS_DEV_URL": "http://127.0.0.1:1420",
                                "SHELLSPAN_SANDBOX_WORKBENCH_MODEL": "1"}

@@ -1982,7 +1982,10 @@ impl AgentRuntime {
         self.sessions.snapshot(session_id)
     }
 
-    pub(crate) fn session_for_client(&self, session_id: &str) -> Result<AgentSessionSnapshot, String> {
+    pub(crate) fn session_for_client(
+        &self,
+        session_id: &str,
+    ) -> Result<AgentSessionSnapshot, String> {
         let mut snapshot = self.sessions.snapshot(session_id)?;
         snapshot.recovery_required = self.agents.get(session_id)?.is_none()
             && matches!(
