@@ -112,7 +112,7 @@ enum ReviewFixture {
     Remote(super::remote_seatbelt::tests::Fixture),
     Local {
         source: super::native_agent_check::SourcePty,
-        _workspace: tempfile::TempDir,
+        _workspace: std::path::PathBuf,
     },
 }
 impl ReviewFixture {
@@ -212,9 +212,23 @@ fn install_review_journal(root: &Path) -> Result<(), String> {
 }
 
 fn initialize_local(app: &tauri::AppHandle, root: &Path) -> Result<ReviewFixture, String> {
-    let workspace = tempfile::tempdir().map_err(|_| "Root review workspace unavailable")?;
+    let workspace = root.join("owned-project");
+    let reopening = std::env::var("SHELLSPAN_SANDBOX_WORKBENCH_REOPEN").as_deref() == Ok("1");
+    if reopening {
+        let intent: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(root.join("root-review-intent.json"))
+                .map_err(|_| "Owned reopen intent unavailable")?,
+        )
+        .map_err(|_| "Owned reopen intent invalid")?;
+        if intent["projectRoot"].as_str() != workspace.to_str() || !workspace.is_dir() {
+            return Err("Owned reopen project does not match the original fixture".into());
+        }
+    } else {
+        std::fs::create_dir(&workspace).map_err(|_| "Root review workspace unavailable")?;
+        std::fs::write(workspace.join("package.json"), "{\"private\":true}")
+            .map_err(|_| "Root review project metadata unavailable")?;
+    }
     let canonical = workspace
-        .path()
         .canonicalize()
         .map_err(|_| "Root review workspace metadata unavailable")?;
     let database = crate::db::Database::open(&root.join("review.db"))?;
@@ -276,7 +290,7 @@ fn initialize_local(app: &tauri::AppHandle, root: &Path) -> Result<ReviewFixture
         )?;
     }
     let sessions = crate::models::SessionManager::default();
-    let source = super::native_agent_check::source(&sessions, workspace.path())?;
+    let source = super::native_agent_check::source(&sessions, &workspace)?;
     let key = format!(
         "project:{}",
         serde_json::to_string(
@@ -287,7 +301,9 @@ fn initialize_local(app: &tauri::AppHandle, root: &Path) -> Result<ReviewFixture
         .map_err(|_| "Root review key invalid")?
     );
     let preferences = serde_json::json!({"version":1,"defaults":{key:{"policy":"readOnly","cacheDirectories":[]}}});
-    database.save_preferences(&[("agent_sandbox_defaults".into(), preferences.to_string())])?;
+    if !reopening {
+        database.save_preferences(&[("agent_sandbox_defaults".into(), preferences.to_string())])?;
+    }
     app.manage(database);
     app.manage(credentials);
     app.manage(sessions);
@@ -300,14 +316,25 @@ fn initialize_local(app: &tauri::AppHandle, root: &Path) -> Result<ReviewFixture
 }
 
 pub(crate) fn run(root: &Path, root_entry: bool) -> Result<(), String> {
+    let reopening = std::env::var("SHELLSPAN_SANDBOX_WORKBENCH_REOPEN").as_deref() == Ok("1");
+    if reopening
+        && (!root_entry
+            || std::env::var("SHELLSPAN_SANDBOX_WORKBENCH_REMOTE").as_deref() == Ok("1")
+            || std::env::var_os("SHELLSPAN_SANDBOX_REVIEW_REPLAY_JOURNAL").is_some())
+    {
+        return Err(
+            "Reopen requires the original local workbench fixture without journal import".into(),
+        );
+    }
     let model_enabled =
         root_entry && std::env::var("SHELLSPAN_SANDBOX_WORKBENCH_MODEL").as_deref() == Ok("1");
     if !root.is_absolute()
         || !root.is_dir()
-        || std::fs::read_dir(root)
-            .map_err(|_| "Settings review directory unavailable")?
-            .next()
-            .is_some()
+        || !reopening
+            && std::fs::read_dir(root)
+                .map_err(|_| "Settings review directory unavailable")?
+                .next()
+                .is_some()
     {
         return Err("Settings review requires a new empty absolute directory".into());
     }
@@ -368,6 +395,10 @@ pub(crate) fn run(root: &Path, root_entry: bool) -> Result<(), String> {
             super::commands::agent_runtime_followup,
             super::commands::agent_runtime_steer,
             super::commands::agent_runtime_interrupt,
+            super::commands::agent_runtime_resume_recovery,
+            super::commands::agent_runtime_abort_recovery,
+            super::commands::agent_runtime_reconcile_recovery,
+            super::commands::agent_runtime_reconcile_direct_resources,
             super::commands::agent_runtime_resume,
             super::commands::agent_runtime_get_events,
             super::commands::agent_runtime_get_committed_events,
@@ -425,7 +456,7 @@ pub(crate) fn run(root: &Path, root_entry: bool) -> Result<(), String> {
                 }
                 let orchestration=std::env::var("SHELLSPAN_SANDBOX_WORKBENCH_ORCHESTRATION").as_deref()==Ok("1");
                 if orchestration {
-                    let project=match &owned {ReviewFixture::Local {_workspace,..} if model_enabled => _workspace.path().canonicalize().map_err(|_|"Orchestration project unavailable")?,_=>return Err("Orchestration review requires the owned local real-model fixture".into())};
+                    let project=match &owned {ReviewFixture::Local {_workspace,..} if model_enabled => _workspace.canonicalize().map_err(|_|"Orchestration project unavailable")?,_=>return Err("Orchestration review requires the owned local real-model fixture".into())};
                     handle.manage(NativeReviewProject(project.clone()));
                     runtime.create_session(serde_json::from_value(serde_json::json!({"sessionId":"orchestration-parent","taskId":"orchestration-parent","goal":"Actual scoped public IPC acceptance without tool side effects","target":{"kind":"local","targetId":"terminal-acceptance-source","sessionId":"acceptance-source","cwd":project},"sandboxPolicy":"workspace","executionSurface":"direct","permissionMode":"requestApproval","capabilityScope":{"toolNames":["run_terminal_command","write_process_input","wait_process","kill_process","probe_http"],"effects":["none","readOnly","stateChange"],"targetIds":["terminal-acceptance-source"]},"successCriteria":["Scoped model-only child and fleet preserve permissions and binding"]})).map_err(|_|"Orchestration parent schema invalid")?)?;
                     runtime.create_session(serde_json::from_value(serde_json::json!({"sessionId":"orchestration-terminal-parent","taskId":"orchestration-terminal-parent","goal":"Actual terminal-default parent scope, with sandbox and approval unchanged","target":{"kind":"local","targetId":"terminal-acceptance-source","sessionId":"acceptance-source","cwd":project},"sandboxPolicy":"workspace","executionSurface":"direct","permissionMode":"requestApproval","successCriteria":["Effective child model tools remain within the parent's sandbox tool surface"]})).map_err(|_|"Terminal-default parent schema invalid")?)?;

@@ -1,6 +1,12 @@
 import petdexMessages from './petdex-messages.json';
 
 export default {
+  'agent.recovery.gateTitle': '执行中断，需要确认资源恢复',
+  'agent.recovery.gateNotice': '命令结果尚未确认。旧授权不会恢复，命令不会自动重放。先核对可信资源清理回执；未确认时继续阻止新执行。清理后结束中断回合，新会话的命令仍须重新审批。',
+  'agent.recovery.checkResources': '核对资源清理回执',
+  'agent.recovery.resourcesConfirmed': '资源清理已确认（本次解除 {resolved} 项）；旧执行授权未恢复。',
+  'agent.recovery.resourcesUnknown': '仍有 {uncertain} 项资源无法确认；继续阻止新执行。',
+  'agent.recovery.finishInterrupted': '结束中断回合并新建会话',
   'agent.sandbox.defaultsNotice': '仅将当前项目／连接的策略和缓存目录候选记为配置，不保存资源授权、不改变操作审批模式；新会话仍须重新申请资源权限。',
   'agent.sandbox.defaultsLoading': '正在读取项目／连接默认配置…',
   'agent.sandbox.defaultsLoadFailed': '默认配置尚不可用，可以重新加载、明确清除记忆，或显式按当前所选策略创建本会话；后端和项目根目录验证仍保留。',

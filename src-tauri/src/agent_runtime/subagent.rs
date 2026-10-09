@@ -878,7 +878,7 @@ impl SubAgentManager {
         let capability_scope = delegated_scope(&parent, role, &target_ids)?;
         let target_scope = target_ids
             .iter()
-            .map(|target_id| self.sessions.target_by_id(target_id))
+            .map(|target_id| delegation_target(&self.sessions, &parent, target_id))
             .collect::<Result<Vec<_>, _>>()?;
         let inheritance = match inheritance_mode {
             "blank" => AgentSubagentInheritance::Blank,
@@ -1504,7 +1504,7 @@ impl OrchestrationToolRuntime for SubAgentManager {
                 child_header.target = arguments
                     .target_ids
                     .first()
-                    .map(|id| self.sessions.target_by_id(id))
+                    .map(|id| delegation_target(&self.sessions, &parent, id))
                     .transpose()?;
                 validate_required_tools(&child_header, &scope, &arguments.required_tools)?;
                 let child_session_id = self
@@ -1636,6 +1636,32 @@ impl OrchestrationToolRuntime for SubAgentManager {
             _ => Err("unknown orchestration tool".into()),
         }
     }
+}
+
+pub(super) fn delegation_target(
+    sessions: &super::AgentSessionStore,
+    parent: &AgentSessionSnapshot,
+    target_id: &str,
+) -> Result<super::AgentSessionTarget, String> {
+    // The parent's frozen binding is authoritative. A terminal ID may also
+    // occur in unrelated or older sessions with a different directory/label.
+    if let Some(target) = parent
+        .header
+        .target
+        .as_ref()
+        .filter(|target| target.target_id == target_id)
+    {
+        return Ok(target.clone());
+    }
+    if let Some(target) = parent.header.subagent.as_ref().and_then(|metadata| {
+        metadata
+            .target_scope
+            .iter()
+            .find(|target| target.target_id == target_id)
+    }) {
+        return Ok(target.clone());
+    }
+    sessions.target_by_id(target_id)
 }
 
 fn delegated_scope(

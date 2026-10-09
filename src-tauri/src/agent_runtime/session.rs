@@ -162,6 +162,8 @@ pub(crate) struct AgentSessionSnapshot {
     pub(crate) task: AgentTaskProjection,
     pub(crate) recovery: AgentRecoveryCheckpoint,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) recovery_required: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(crate) uncertain_native_effects: bool,
 }
 
@@ -367,6 +369,7 @@ impl AgentSessionRecord {
             },
             task: derive_task(&self.events),
             recovery: super::derive_recovery_checkpoint(&self.events),
+            recovery_required: false,
             uncertain_native_effects: has_uncertain_tool_executions(&self.events),
         };
         let _ = self.snapshot_cache.set(snapshot.clone());

@@ -682,7 +682,7 @@ pub(crate) fn agent_runtime_get_session(
     input: AgentSessionIdInput,
 ) -> Result<AgentSessionSnapshot, String> {
     configure_runtime(&app, &runtime)?;
-    runtime.session(&input.session_id)
+    runtime.session_for_client(&input.session_id)
 }
 
 #[tauri::command]

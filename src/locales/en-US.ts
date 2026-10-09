@@ -1,6 +1,12 @@
 import petdexMessages from './petdex-messages.json';
 
 export default {
+  'agent.recovery.gateTitle': 'Execution interrupted; resource recovery required',
+  'agent.recovery.gateNotice': 'The command outcome is unconfirmed. Previous grants are not restored and commands are not replayed. Verify trusted cleanup receipts first; unconfirmed resources block new execution. After cleanup, end the interrupted turn and start a new conversation with new command approvals.',
+  'agent.recovery.checkResources': 'Verify cleanup receipts',
+  'agent.recovery.resourcesConfirmed': 'Resource cleanup confirmed ({resolved} resolved now); previous execution grants remain invalid.',
+  'agent.recovery.resourcesUnknown': '{uncertain} resources remain unconfirmed; new execution stays blocked.',
+  'agent.recovery.finishInterrupted': 'End interrupted turn and start a new conversation',
   'agent.sandbox.defaultsNotice': 'Remember this project/connection policy and cache directory candidates as configuration only. It does not save resource authorization or change operation approval mode; new sessions request access again.',
   'agent.sandbox.defaultsLoading': 'Loading project/connection default configuration…',
   'agent.sandbox.defaultsLoadFailed': 'Default configuration is not available. Reload or clear it, or explicitly use the currently selected policy for this session. Backend and project-root checks still apply.',

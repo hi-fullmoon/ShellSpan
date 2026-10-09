@@ -387,7 +387,7 @@ export function useAiSessionController({
     let current = true;
     void invokeProbeNativeSandbox().then(value => { if (current) setNativeSandboxCapability(value); }).catch(() => { if (current) setNativeSandboxCapability(undefined); });
     return () => { current = false; };
-  }, []);
+  }, [view?.snapshot.value.recoveryRequired]);
   const currentProviderConfig = useCallback((): AiProviderConfig => {
     const selection = viewRef.current?.snapshot.value.header.modelSelection;
     const routes=useLlmRoutesStore.getState();

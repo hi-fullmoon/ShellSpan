@@ -36,6 +36,7 @@ import { AiToolDetails } from './ai-tool-details';
 import { AiArtifactDetails } from './ai-artifact-details';
 import type { AiQueueMutationState } from './use-ai-session-controller';
 import { AiWorkspaceErrorNotices } from './ai-workspace-error-notices';
+import { AiNativeRecoveryNotice } from './ai-native-recovery-notice';
 
 export interface AiWorkspaceSubmitInput {
   readonly content: string;
@@ -418,6 +419,7 @@ export function AiWorkspaceRoot({
     : t('ai.workbench.empty');
   const surfaceMode = mode ?? 'agent';
   const availabilityHintId = useId();
+  const recoveryRequired = view?.snapshot.kind === 'agent' && view.snapshot.value.recoveryRequired === true;
   const historicalComposerEnabled = readOnlySession && historicalContinuationAvailable;
   const historicalComposerDisplay = readOnlySession
     && (historicalComposerEnabled || !onContinueOnReconnectedTerminal);
@@ -432,14 +434,14 @@ export function AiWorkspaceRoot({
     detached: null,
     pendingSubmissions: [],
     failedDrafts: [],
-  } : composerState;
+  } : recoveryRequired && composerState ? { ...composerState, terminal: true } : composerState;
   const pendingSubmissions = activeComposerState?.pendingSubmissions;
   const submittedOperationId = pendingSubmissions?.[pendingSubmissions.length - 1]?.clientOperationId;
   const conversationNodes = useMemo(() => {
     // A detached historical session may have no final event (for example after
     // process exit). Preserve its output without presenting it as still live.
     // One-shot subagents are read-only even while their output is still live.
-    const nodes = historicalTargetUnavailable ? visibleNodes.map(historicalOutput) : visibleNodes;
+    const nodes = historicalTargetUnavailable || recoveryRequired ? visibleNodes.map(historicalOutput) : visibleNodes;
     return (
       surfaceMode === 'ask'
         ? askConversationNodes(nodes)
@@ -449,7 +451,7 @@ export function AiWorkspaceRoot({
             : nodes,
         )
     );
-  }, [historicalTargetUnavailable, surfaceMode, view?.snapshot, visibleNodes]);
+  }, [historicalTargetUnavailable, recoveryRequired, surfaceMode, view?.snapshot, visibleNodes]);
   const hero = !sessionLoading && conversationNodes.length === 0
     && status === 'idle' && composerState?.phase !== 'submitting';
   const firstSubmitTransition = useFirstSubmitTransition(hero, imageBusy, submissionContext);
@@ -584,6 +586,8 @@ export function AiWorkspaceRoot({
         data-slot="ai-workspace-status-notices"
         className="mx-auto flex w-full min-w-0 max-w-[calc(var(--ai-composer-card-max-width)+var(--ai-shell-clearance)+var(--ai-shell-clearance))] shrink-0 flex-col gap-1.5 px-[var(--ai-shell-clearance)] py-2 empty:hidden"
       >
+        {recoveryRequired && view && <AiNativeRecoveryNotice key={view.summary.id}
+          sessionId={view.summary.id} onRefresh={onRetrySync} onNewSession={onNewSession} />}
         {historicalContinuationAvailable && (
           <Alert variant="info" size="sm" role="status">
             <InfoIcon aria-hidden="true" />
@@ -714,7 +718,7 @@ export function AiWorkspaceRoot({
           queueMutation={surfaceMode === 'agent' && !readOnlySession ? queueMutation : undefined}
           queueMutable={Boolean(view && !readOnlySession && !view.summary.archived && (!view.snapshot.value.ended || view.status === 'failed'))}
           announcement={announcement}
-          pendingApproval={surfaceMode === 'agent' && !readOnlySession ? view?.pendingApproval : undefined}
+          pendingApproval={surfaceMode === 'agent' && !readOnlySession && !recoveryRequired ? view?.pendingApproval : undefined}
           pendingQuestion={readOnlySession ? undefined : view?.pendingQuestion}
           onAnswerQuestion={readOnlySession ? undefined : onAnswerQuestion}
           onListFileReferences={surfaceMode === 'agent' && !readOnlySession ? onListFileReferences : undefined}
@@ -742,7 +746,7 @@ export function AiWorkspaceRoot({
             firstSubmitTransition.prepare();
             onSubmitGesture(gesture, accelerated);
           } : undefined}
-          onStop={readOnlySession ? undefined : onStop}
+          onStop={readOnlySession || recoveryRequired ? undefined : onStop}
           onBusyPreferenceChange={surfaceMode === 'agent' && !readOnlySession
             && !view?.snapshot.value.header.subagent ? onBusyPreferenceChange : undefined}
           onUpdateQueueItem={surfaceMode === 'agent' && !readOnlySession ? onUpdateQueueItem : undefined}
