@@ -2,15 +2,20 @@ import { invokeGetAgentRuntimeEvents, invokeApproveAgentRuntimeTool, invokeGetSa
 
 export async function run(sessionId: string): Promise<void> {
   const page = await invokeGetAgentRuntimeEvents({ sessionId, limit: 1000 });
-  const request = page.events.find(event => event.type === 'tool/approval' && event.data.status === 'requested');
+  const request = [...page.events].reverse().find(event => event.type === 'tool/approval' && event.data.status === 'requested'
+    && page.events.some(candidate => candidate.type === 'tool/approval' && candidate.data.status === 'approved'
+      && candidate.data.requestId === event.data.requestId && candidate.data.approvalId === event.data.approvalId));
   if (request?.type !== 'tool/approval' || !request.turnId || !request.stepId || !request.data.approvalId) throw new Error('Actual old approval required');
   let rejected = false;
+  let rejectedWithoutResidentDriver = false;
   try {
     await invokeApproveAgentRuntimeTool({ sessionId, turnId: request.turnId, stepId: request.stepId,
       requestId: request.data.requestId, callId: request.data.callId, approvalId: request.data.approvalId });
-  } catch { rejected = true; }
+  } catch (cause) { rejected = true; rejectedWithoutResidentDriver = String(cause).includes('Agent Session is not started'); }
   const authorization = await invokeGetSandboxAuthorizations(sessionId);
-  console.info(JSON.stringify({ oldApprovalRejected: rejected, authorization }));
+  console.info(JSON.stringify({ oldApprovalRejected: rejected, authorization,
+    rejectedWithoutResidentDriver,
+    checkedBeforeOriginalApprovalExpiry: typeof request.data.expiresAtUnixMs === 'number' && Date.now() < request.data.expiresAtUnixMs }));
 }
 
 export async function beginHour(sessionId: string): Promise<void> {
