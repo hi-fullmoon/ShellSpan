@@ -5,6 +5,9 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
+import plistlib
+import uuid
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -37,6 +40,7 @@ def digest(path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--bundle", action="store_true")
     args = parser.parse_args()
     output = args.output.resolve()
     if not output.is_relative_to(ROOT / ".phase4-acceptance") or output.exists():
@@ -45,6 +49,17 @@ def main():
     fixture = output / "wry-regression"
     fixture.mkdir(mode=0o700)
     binary = ROOT / "src-tauri/target/debug/ShellSpan"
+    bundle = None
+    if args.bundle:
+        bundle = output / "ShellSpan Verification Acceptance.app"
+        executable = bundle / "Contents/MacOS/ShellSpan"
+        executable.parent.mkdir(parents=True)
+        shutil.copy2(binary, executable)
+        with (bundle / "Contents/Info.plist").open("wb") as handle:
+            plistlib.dump({"CFBundleIdentifier":f"com.shellspan.stage2-verification.{uuid.uuid4().hex}",
+                          "CFBundleName":"ShellSpan Verification Acceptance", "CFBundleExecutable":"ShellSpan",
+                          "CFBundlePackageType":"APPL", "CFBundleVersion":"1", "NSHighResolutionCapable":True},handle)
+        binary = executable
     known_hosts = [Path.home() / name / "known_hosts" for name in [".shellspan", ".shellspan-dev"]]
     before = [digest(path) for path in known_hosts]
     hashes = {name: digest(ROOT / name) for name in SOURCES}
@@ -59,13 +74,17 @@ def main():
     }
     started = time.monotonic()
     with (output / "wry.log").open("w") as log:
+        process = subprocess.Popen(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
+                                   env=os.environ | {"SHELLSPAN_SANDBOX_VERIFICATION_REGRESSION": "1",
+                                                     "SHELLSPAN_SANDBOX_SETTINGS_DEV_URL": "http://127.0.0.1:1420"})
+        (output / "launch.json").write_text(json.dumps({"pid":process.pid,"bundle":str(bundle) if bundle else None},indent=2))
         try:
-            result = subprocess.run(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
-                                    env=os.environ | {"SHELLSPAN_SANDBOX_VERIFICATION_REGRESSION": "1",
-                                                      "SHELLSPAN_SANDBOX_SETTINGS_DEV_URL": "http://127.0.0.1:1420"}, timeout=120)
-            report["exitCode"] = result.returncode
+            report["exitCode"] = process.wait(timeout=120)
         except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
             report["exitCode"] = None
+            report["resourceState"] = "unconfirmed after owned wrapper timeout; no historical resource cleanup"
     report["durationSeconds"] = round(time.monotonic() - started, 3)
     report["userKnownHostsUnchanged"] = before == [digest(path) for path in known_hosts]
     report["sourceUnchanged"] = hashes == {name: digest(ROOT / name) for name in SOURCES}
