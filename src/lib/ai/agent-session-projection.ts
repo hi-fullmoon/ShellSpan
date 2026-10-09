@@ -979,6 +979,8 @@ function createActivityProjection() {
         if (current) {
           agents.set(event.data.childSessionId, {
             ...current,
+            status: event.data.reason === 'cancelCascade' ? 'cancelled'
+              : event.data.reason === 'idleContinuableReleased' ? 'idle' : current.status,
             detached: true,
             summary: current.summary ?? event.data.reason,
           });

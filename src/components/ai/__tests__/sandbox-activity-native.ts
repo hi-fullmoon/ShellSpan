@@ -12,6 +12,7 @@ const events = async (sessionId: string) => (await invokeGetAgentRuntimeEvents({
 const record = (value: unknown): Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const checks: Record<string, boolean> = {};
 const decided = new Set<string>();
+const facts: Record<string, unknown>[] = [];
 
 async function approveExact(sessionId: string, page: readonly AgentSessionEvent[], command: string): Promise<void> {
   for (const event of page) {
@@ -36,10 +37,9 @@ async function expectRebindBlocked(parentId: string, root: string): Promise<bool
   catch (cause) { return /Busy|already bound/.test(String(cause)); }
 }
 
-async function freshParent(root: string, previous?: AgentSessionHeader): Promise<AgentSessionHeader> {
+async function freshParent(root: string): Promise<AgentSessionHeader> {
   const parentId = `activity-parent-${crypto.randomUUID()}`;
   await invokeCreateAgentRuntimeSession({sessionId:parentId,taskId:parentId,goal:'Actual own child/fleet activity, cancellation and binding acceptance',
-    ...(previous ? {continuedFromSessionId:previous.sessionId} : {}),
     target:{kind:'local',targetId:'terminal-acceptance-source',sessionId:'acceptance-source',cwd:root},
     sandboxPolicy:'workspace',executionSurface:'direct',permissionMode:'requestApproval'});
   const routes = await invokeListAiRoutes();
@@ -56,7 +56,8 @@ async function freshParent(root: string, previous?: AgentSessionHeader): Promise
 
 async function exercise(parent: AgentSessionHeader, fleet: boolean, rebound: string): Promise<AgentSessionHeader> {
   const tag = fleet ? 'fleet' : 'child';
-  const command = `printf started > ${tag}-activity-started; sleep 90; printf ended > ${tag}-activity-ended`;
+  const marker = `${tag}-${parent.sessionId}`;
+  const command = `printf started > ${marker}-started; sleep 90; printf ended > ${marker}-ended`;
   const goal = `Real owned activity acceptance. Use exactly one run_terminal_command command=${JSON.stringify(command)}, cwd=${JSON.stringify(parent.target?.cwd)}, background=true, with no resources outside the project. Request approval. After the running background process result, request wait_process for that exact process, timeoutMs=60000. Never kill or run another command; the client will cancel while it is active.`;
   let childId: string | undefined;
   let fleetId: string | undefined;
@@ -99,10 +100,14 @@ async function exercise(parent: AgentSessionHeader, fleet: boolean, rebound: str
           checks[`${tag}NoActiveResources`] = (await invokeGetSandboxAuthorizations(childId)).activeProcesses === 0;
           // Existing project roots are immutable. Rebinding creates a new
           // explicitly selected conversation; it never rewrites the old child.
-          const reboundHeader = await freshParent(rebound,parent);
+          const reboundHeader = await freshParent(rebound);
           checks[`${tag}ReboundAfterCancel`] = reboundHeader.target?.cwd === rebound
             && (await invokeGetSandboxAuthorizations(reboundHeader.sessionId)).state === 'none'
             && (await invokeGetAgentRuntimeSession({sessionId:parent.sessionId})).header.target?.cwd === parent.target?.cwd;
+          facts.push({kind:tag,parentSessionId:parent.sessionId,childSessionId:childId,fleetId,
+            reboundSessionId:reboundHeader.sessionId,oldRoot:parent.target?.cwd,newRoot:rebound,
+            activeBeforeCancel:authorization.activeProcesses,startedFile:`${parent.target?.cwd}/${marker}-started`,
+            endedFile:`${parent.target?.cwd}/${marker}-ended`});
           if (starting) await starting;
           return reboundHeader;
         }
@@ -119,6 +124,7 @@ async function exercise(parent: AgentSessionHeader, fleet: boolean, rebound: str
 export async function run(root: string): Promise<void> {
   for (const key of Object.keys(checks)) delete checks[key];
   decided.clear();
+  facts.length = 0;
   let diagnostic: string | undefined;
   try {
     const parent = await freshParent(root);
@@ -126,5 +132,5 @@ export async function run(root: string): Promise<void> {
     const rebound = await exercise(parent,false,`${root}/child-rebind`);
     await exercise(rebound,true,`${root}/fleet-rebind`);
   } catch (cause) { diagnostic=String(cause); }
-  console.info(JSON.stringify({activityChecks:checks,diagnostic,passed:Object.keys(checks).length===15&&Object.values(checks).every(Boolean)}));
+  console.info(JSON.stringify({activityChecks:checks,activityFacts:facts,diagnostic,passed:Object.keys(checks).length===15&&Object.values(checks).every(Boolean)}));
 }
