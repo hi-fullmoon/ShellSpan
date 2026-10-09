@@ -150,6 +150,7 @@ pub(crate) struct PreparedAuthorizationNative {
     pub(crate) effect: AgentObservedEffectNative,
     ttl_ms: u64,
     pub(crate) requires_native_confirmation: bool,
+    pub(crate) requires_resource_confirmation: bool,
     pub(crate) native_prompt: String,
 }
 
@@ -798,6 +799,7 @@ impl NativeToolEngine {
             effect,
             ttl_ms,
             requires_native_confirmation: review.requires_approval || needs_resource_approval,
+            requires_resource_confirmation: needs_resource_approval,
         })
     }
 
@@ -851,8 +853,9 @@ impl NativeToolEngine {
             || !prepared.requested_writes.is_empty()
             || !prepared.requested_networks.is_empty()
             || !prepared.requested_services.is_empty();
+        let reuse_resources = has_resources && !prepared.requires_resource_confirmation;
         if has_resources
-            && !approved
+            && (!approved || reuse_resources)
             && !self.session_reads.covers_resources(
                 &prepared.context.request.user_session_id,
                 prepared
@@ -896,7 +899,7 @@ impl NativeToolEngine {
         self.capabilities
             .bind_task(&capability_id, &prepared.context.request.task_id)
             .map_err(|_| "Native task capability binding failed")?;
-        let resource_expires = if !approved && has_resources {
+        let resource_expires = if reuse_resources {
             self.session_reads
                 .expiry(&prepared.context.request.user_session_id)?
                 .ok_or("Session authorization was revoked")?
@@ -944,7 +947,7 @@ impl NativeToolEngine {
                 .unwrap_or(30_000)
                 .min(3_600_000),
         );
-        if !approved && has_resources {
+        if reuse_resources {
             execution_expires = execution_expires.min(
                 self.session_reads
                     .expiry(&prepared.context.request.user_session_id)?
@@ -986,7 +989,7 @@ impl NativeToolEngine {
                 )
                 .map_err(|_| "Native sandbox capability binding failed")?;
         }
-        if scope == ResourceAuthorizationScope::Session {
+        if scope == ResourceAuthorizationScope::Session && !reuse_resources {
             self.session_reads.remember_resources(
                 &prepared.context.request.user_session_id,
                 &prepared.context.request.task_id,

@@ -211,6 +211,8 @@ enum ProcessOutputNative {
 }
 
 pub(crate) struct ManagedProcessNative {
+    #[cfg(debug_assertions)]
+    pub(super) acceptance_child_pid: OnceLock<u32>,
     #[cfg(target_os = "macos")]
     guardian_audit: Mutex<Option<crate::agent_runtime::NetworkProxyAuditNative>>,
     #[cfg(target_os = "macos")]
@@ -281,6 +283,8 @@ impl ManagedProcessNative {
         let process_handle = format!("proc-{}", Uuid::new_v4().simple());
         let target_id = format!("process-{process_handle}");
         Arc::new(Self {
+            #[cfg(debug_assertions)]
+            acceptance_child_pid: OnceLock::new(),
             sandbox_temp: Mutex::new(None),
             #[cfg(target_os = "macos")]
             guardian_audit: Mutex::new(None),
@@ -1216,6 +1220,8 @@ fn spawn_local_child_tracked(
         Vec::new(),
         control_tx,
     );
+    #[cfg(debug_assertions)]
+    let _ = process.acceptance_child_pid.set(child.id());
     process.mark_admission(AgentExecutionAdmission::Started);
     *process
         .sandbox_temp

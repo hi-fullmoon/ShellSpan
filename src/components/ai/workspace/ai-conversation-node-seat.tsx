@@ -29,6 +29,7 @@ import { taskBudgetArtifactTitleKey } from '@/lib/ai/task-token-budget';
 import { requestErrorMessageKey } from '@/lib/ai/request-error';
 import { AiToolRow } from './ai-tool-presentation';
 import { AiTurnFooter } from './ai-turn-footer';
+import { AiUserMessageText } from './ai-user-message-text';
 import { AiProcessingStatus } from './ai-processing-status';
 import { AiQuestionHistory } from './ai-question-panel';
 import {
@@ -191,7 +192,7 @@ function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'us
       {(message.text || node.delivery === 'failed') && (
         <Bubble role="user">
           {pendingIndicator}
-          <span className="ai-user-message-text">{message.text}</span>
+          <AiUserMessageText text={message.text} />
           {node.delivery === 'failed' && (
             <span className="ai-user-delivery mt-0.5 block" data-state={node.delivery}>
               {t('ai.workspace.messageNotSent')}

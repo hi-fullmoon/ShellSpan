@@ -22,14 +22,38 @@ pub(crate) struct Fixture {
     #[cfg(test)]
     admission: super::super::shutdown_admission::ShutdownAdmission,
     key_id: String,
+    profile_id: String,
 }
 
 impl Fixture {
     #[cfg(debug_assertions)]
     pub(crate) fn install(&self, app: &tauri::AppHandle) -> Result<(), String> {
+        self.install_with_credentials(app, self.credentials.clone())
+    }
+    #[cfg(debug_assertions)]
+    pub(crate) fn install_with_model(
+        &self,
+        app: &tauri::AppHandle,
+        reference: Option<String>,
+    ) -> Result<(), String> {
+        self.install_with_credentials(
+            app,
+            CredentialManager::readonly_model_check_with_fixture_key(
+                reference,
+                self.key_id.clone(),
+                self.profile_id.clone(),
+            ),
+        )
+    }
+    #[cfg(debug_assertions)]
+    fn install_with_credentials(
+        &self,
+        app: &tauri::AppHandle,
+        credentials: CredentialManager,
+    ) -> Result<(), String> {
         use tauri::Manager;
         app.manage(self.database.clone());
-        app.manage(self.credentials.clone());
+        app.manage(credentials);
         app.manage(self.sessions.clone());
         let path = crate::known_hosts::known_hosts_path(app)?;
         std::fs::create_dir_all(path.parent().ok_or("Fixture known-hosts parent missing")?)
@@ -331,6 +355,7 @@ impl Fixture {
         #[cfg(not(test))]
         let credentials = CredentialManager::isolated_native_for_checks();
         let key_id = format!("phase4-mac-ssh-{}", Uuid::new_v4());
+        let profile_id = format!("phase4-mac-profile-{}", Uuid::new_v4());
         credentials
             .store_key_credential(
                 &key_id,
@@ -339,7 +364,7 @@ impl Fixture {
             .unwrap();
         database
             .insert_profile(&ProfileRow {
-                id: "mac-profile".into(),
+                id: profile_id.clone(),
                 name: "Own Mac SSH fixture".into(),
                 host: connection.host.clone(),
                 port,
@@ -358,7 +383,7 @@ impl Fixture {
         std::fs::write(project.join(".env"), "ordinary-protected-marker").unwrap();
         std::os::unix::fs::symlink(&project, root.join("project-alias")).unwrap();
         let header=serde_json::from_value(json!({"sessionId":"mac-agent","taskId":"mac-task","goal":"Verify real remote native execution","executionSurface":"direct",
-            "sandboxPolicy":"workspace","createdAtUnixMs":1,"target":{"kind":"remote","targetId":"mac-target","sessionId":"mac-source","profileId":"mac-profile",
+            "sandboxPolicy":"workspace","createdAtUnixMs":1,"target":{"kind":"remote","targetId":"mac-target","sessionId":"mac-source","profileId":profile_id,
                 "host":connection.host,"port":port,"username":connection.username,"rootPath":root.join("project-alias")}})).unwrap();
         Self {
             directory,
@@ -374,6 +399,7 @@ impl Fixture {
             #[cfg(test)]
             admission: Default::default(),
             key_id,
+            profile_id,
         }
     }
 

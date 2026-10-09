@@ -47,6 +47,8 @@ export function ProjectDirectoryInput({ id, value, onChange, disabled, list, onC
       onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
       onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)}
       onKeyDown={event => {
+        // Once suggestions are dismissed, let the enclosing Dialog handle Escape.
+        if (event.key === 'Escape' && !(visible && (entries.length || status !== 'idle'))) return;
         event.stopPropagation();
         if (composing || event.nativeEvent.isComposing || event.keyCode === 229) return;
         if (event.key === 'Escape' && visible && (entries.length || status !== 'idle')) {

@@ -19,6 +19,7 @@ export function aiErrorMessage(message: string, t: (key: LocaleKey, values?: Rec
   if (diagnostic.startsWith('ephemeralInputRecoveryRequired:')) return t('ai.error.ephemeralInputRecoveryRequired');
   const code = /^(?:Error:\s*)?([A-Z][A-Z0-9_]+)(?=:|\s|$)/.exec(message.trim())?.[1];
   if (code === 'INVALID_MODEL_SELECTION') return t('ai.error.invalidModelSelection');
+  if (code === 'MODEL_CREDENTIAL_UNAVAILABLE') return t('ai.error.modelCredentialUnavailable');
   if (code === 'AGENT_CRITICAL_OPERATION_DENIED') return t('ai.error.criticalOperationDenied');
   if (code === 'AUTO_REVIEW_CHANGED') return t('ai.error.autoReviewChanged');
   if (code === 'AGENT_UNSAFE_FILE_ROOT') return t('ai.error.unsafeFileRoot');

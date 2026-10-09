@@ -9,6 +9,7 @@ import { invokeGetAgentRuntimeSession, invokeSandboxSettingsReviewSource } from 
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
+import { useProfileStore } from '@/stores/profileStore';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import { sandboxDefaultScope, useSandboxDefaultsStore } from '@/stores/sandboxDefaultsStore';
@@ -24,7 +25,8 @@ const initial=sessionId ? await invokeGetAgentRuntimeSession({sessionId}) : unde
 await useSandboxDefaultsStore.getState().load();
 if (rootEntry) {
   const source=await invokeSandboxSettingsReviewSource();
-  useTerminalStore.getState().addSession(source);
+  useTerminalStore.getState().addSession(source, source.profileId);
+  if (source.profileId) await useProfileStore.getState().hydrateFromDb();
   useTerminalStore.getState().setStatus(source.sessionId,{sessionId:source.sessionId,status:source.status});
   useAgentPermissionStore.getState().setExecutionSurface(source.sessionId,'direct');
   await useLlmRoutesStore.getState().hydrate();

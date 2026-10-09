@@ -751,6 +751,8 @@ export interface AgentSessionHeader {
 }
 
 export interface AgentSessionSnapshot {
+  /** Durable work remains but this runtime has no resident driver; never replay it from the UI. */
+  readonly recoveryRequired?: boolean;
   /** Current backend always supplies this fact; older clients/log fixtures may omit it. */
   readonly sandboxCapability?: AgentSandboxCapability;
   readonly header: AgentSessionHeader;

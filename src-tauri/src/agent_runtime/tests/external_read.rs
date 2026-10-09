@@ -181,6 +181,49 @@ fn external_ordinary_file_requires_read_approval_without_sibling_or_write_access
         .unwrap();
     assert_eq!(status.read_paths, vec![path.clone()]);
     assert!(status.expires_at_unix_ms.unwrap() > status.checked_at_unix_ms);
+    let original_expiry = status.expires_at_unix_ms;
+    let mut reviewed_context = repeated.context.clone();
+    reviewed_context.request.permission_mode = AgentPermissionModeNative::RequestApproval;
+    let reviewed = engine
+        .prepare_authorization(
+            reviewed_context,
+            AgentAuthorizeCallRequestNative {
+                request_id: repeated.call.request_id.clone(),
+                call_id: uuid::Uuid::new_v4().to_string(),
+                tool_name: "exec_command".into(),
+                target: native_target.clone(),
+                ttl_ms: Some(5000),
+                arguments: repeated.call.arguments.clone(),
+            },
+            &sessions,
+            &database,
+            &credentials,
+            &storage.path().join("known_hosts"),
+        )
+        .unwrap();
+    assert!(reviewed.requires_native_confirmation);
+    assert!(!reviewed.requires_resource_confirmation);
+    assert!(engine
+        .issue_prepared_authorization(&reviewed, false)
+        .is_err());
+    let reviewed_grant = engine
+        .issue_prepared_authorization_scoped(
+            &reviewed,
+            true,
+            crate::agent_runtime::sandbox_authorization::ResourceAuthorizationScope::Session,
+        )
+        .unwrap();
+    assert_eq!(
+        engine
+            .sandbox_authorizations(&header.session_id, &header.task_id, &contract)
+            .unwrap()
+            .expires_at_unix_ms,
+        original_expiry,
+        "Operation approval must not renew existing resource authorization"
+    );
+    let reviewed_result = execute(&reviewed, reviewed_grant).unwrap().data.unwrap();
+    assert_eq!(reviewed_result["stdout"], "external ordinary content\n");
+    assert_eq!(reviewed_result["terminationConfirmed"], true);
     let unrelated = prepare(
         format!("cat {}", sibling.display()),
         vec![sibling
@@ -198,6 +241,12 @@ fn external_ordinary_file_requires_read_approval_without_sibling_or_write_access
         .issue_prepared_authorization(&unrelated, false)
         .is_err());
     engine.cancel_task(&header.task_id, &sessions).unwrap();
+    assert!(
+        engine
+            .issue_prepared_authorization(&reviewed, true)
+            .is_err(),
+        "An operation approval must not revive resources revoked after preparation"
+    );
     assert!(
         execute(&repeated, previous).is_err(),
         "Revocation invalidates already-issued session reuse tokens"

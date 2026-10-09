@@ -44,6 +44,8 @@ describe.each([['zh-CN', zhCN], ['en-US', enUS]] as const)('AI error messages in
     ['IMAGE_CANCELLED', 'ai.workspace.images.error.cancelled'],
     ['INVALID_MODEL_SELECTION: route-8e7d5ff7-25b5-4526-a8fa-df932c19228c/k3', 'ai.error.invalidModelSelection'],
     ['INVALID_MODEL_SELECTION: stale route revision 1', 'ai.error.invalidModelSelection'],
+    ['MODEL_CREDENTIAL_UNAVAILABLE: noninteractive keychain read rejected', 'ai.error.modelCredentialUnavailable'],
+    ['Error: MODEL_CREDENTIAL_UNAVAILABLE: authorization required', 'ai.error.modelCredentialUnavailable'],
     ['Error: INVALID_MODEL_SELECTION: no default route', 'ai.error.invalidModelSelection'],
   ] as const)('translates %s', (message, key) => {
     expect(aiErrorMessage(message, key => messages[key])).toBe(messages[key]);

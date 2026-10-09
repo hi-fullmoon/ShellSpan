@@ -1,6 +1,57 @@
 use super::*;
 
 #[test]
+fn empty_resource_revocation_records_cleanup_and_replays_without_authority() {
+    let storage = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let runtime = AgentRuntimeBuilder::new().build();
+    runtime.configure(storage.path().to_path_buf()).unwrap();
+    let snapshot = runtime.create_session(serde_json::from_value(json!({
+        "sessionId":"empty-revocation","taskId":"empty-revocation","goal":"Audit cancellation without resource grants",
+        "target":{"kind":"local","targetId":"local","sessionId":"empty-source","cwd":workspace.path()},
+        "sandboxPolicy":"workspace","executionSurface":"direct","permissionMode":"requestApproval"
+    })).unwrap()).unwrap();
+    for confirmed in [false, true] {
+        runtime
+            .record_sandbox_revocation(&snapshot.header, vec![], confirmed)
+            .unwrap();
+    }
+    let restored = AgentRuntimeBuilder::new().build();
+    restored.configure(storage.path().to_path_buf()).unwrap();
+    let page = restored
+        .events(crate::agent_runtime::AgentSessionEventsRequest {
+            session_id: snapshot.header.session_id.clone(),
+            cursor: None,
+            limit: 256,
+        })
+        .unwrap();
+    let audits = page
+        .events
+        .iter()
+        .filter_map(|event| match &event.payload {
+            crate::agent_runtime::AgentSessionEventPayload::SandboxResourceAudit {
+                audit, ..
+            } => Some(audit),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(audits.len(), 2);
+    assert_eq!(audits[0].cleanup_confirmed, Some(false));
+    assert_eq!(audits[1].cleanup_confirmed, Some(true));
+    assert!(audits
+        .iter()
+        .all(|audit| audit.resources.is_empty() && audit.scope.is_none()));
+    assert!(
+        restored
+            .session(&snapshot.header.session_id)
+            .unwrap()
+            .header
+            .sandbox_policy
+            == Some(crate::agent_runtime::AgentSandboxPolicy::Workspace)
+    );
+}
+
+#[test]
 fn default_configuration_persists_in_real_preferences_without_native_authority() {
     let storage = tempfile::tempdir().unwrap();
     let path = storage.path().join("preferences.db");

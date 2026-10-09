@@ -20,9 +20,11 @@ writePaths 仅允许本地 workspace 下最多 8 个现有账户缓存／临时�
 
 agent_runtime_set_sandbox_policy 与 start、NativeAdapter execute 共享会话转换锁，并复用应用共享 shutdown admission。切换要求活动根会话空闲、无待审批／队列／未完成子会话、无受影响后台／未确认进程及终端租约；提交与子会话创建在同一 store 锁下再次检查。成功更新 session/sandbox_policy_changed 及 bindingRevision，撤销旧授权和已签发能力。远端新策略必须重新通过真实后端预检；没有 Host fallback。
 
-agent_sandbox_defaults 偏好仅保存按项目／连接绑定的 policy 和 cacheDirectories。session/cache_directory_candidates 将目录候选冻结为启动前配置数据，模型仍需申请精确 writePaths；Header、偏好与恢复不保存 live grant、有效期或 bearer。sandbox/resource_audit 记录批准／复用／撤销的 once/session、资源集合、实际期限、绑定版本和清理结果；这些元数据不能恢复权限。审计写入失败先暂停派发，再撤销能力并清理任务，清理错误保留在结果中。
+agent_sandbox_defaults 偏好仅保存按项目／连接绑定的 policy 和 cacheDirectories。session/cache_directory_candidates 将目录候选冻结为启动前配置数据，模型仍需申请精确 writePaths；Header、偏好与恢复不保存 live grant、有效期或 bearer。sandbox/resource_audit 记录批准／复用／撤销的 once/session、资源集合、实际期限、绑定版本和清理结果；这些元数据不能恢复权限。批准／复用必须有非空资源集合；撤销／撤销失败允许空集合，仍记录清理结果，因为没有扩展授权的后台命令同样需要停止确认。审计写入失败先暂停派发，再撤销能力并清理任务，清理错误保留在结果中。
 
 远端新会话设置使用 agent_runtime_verify_remote_sandbox_target 显式验证当前 target、根和策略。界面只接受与当前请求及终端代次／连接配置匹配的最新结果，目录／策略／连接变化或 30 秒后失效；启动仍执行生产重验证。缺少根目录时复用现有目录弹框，选择目录本身不创建会话、不批准资源、不自动重放发送。
+
+操作批准与资源批准独立。准备时已由有效会话授权覆盖的相同资源，在操作批准后仍按 reused 记录，不延长原授权期限；签发时再次核对覆盖、到期与撤销，过期或撤销不因操作批准获得新权限。新资源仍须初次显式批准。已提交 turn/end 的回合不再展示可操作审批卡，历史 requested 记录继续保留；前端不从清理提示或历史资源审计恢复授权。
 
 现有原生 HMAC 能力记录绑定完整契约 SHA-256 摘要，dispatch 验证原生令牌与该摘要，不能从模型自报字段取得权限。资源 authorizationId 使用独立随机引用，不暴露原生 bearer token。NativeAdapter 转交批准后的 NativeExecutionContext；Seatbelt 精确文件读取例外、前台 deadline 和单次令牌消费共同生效。恢复不复用内存能力记录，取消/绑定变化仍使旧请求失效。审批 IPC 增加可选 resourceScope；agent_runtime_revoke_sandbox_reads 停止派发、取消任务、等待中断并清除会话读取授权，清理未确认时保持停止状态。
 
@@ -116,3 +118,11 @@ macOS 受限本地 Direct 和首次固定预检使用同一应用二进制的 `-
 多个 App 共用状态目录时，admission 同时核对数据库中不属于当前 live intent 集合的债务；begin 使用 SQLite IMMEDIATE 事务，将核对与写入串行。即使两个 App 都在第一条债务写入前配置完成，另一个 App 的后续派发仍被拒绝。门禁不会自动认领对方资源，已观察的 foreign 债务不会因行消失而自动解除；当前支持安全拒绝，不承诺多个 App 同时执行共享状态资源。
 
 现有前端错误格式化为 Direct 清理债务和归属记录不可用提供中英文提示，不改变持久诊断或授予新的操作。绑定失效提示不再单凭错误代码声明调用未执行：实际是否开始以 controller admission 为准，必须核对已有效果，不自动重放旧命令。
+
+## 工作台恢复门禁
+
+`agent_runtime_get_session` 可在 snapshot 中返回 `recoveryRequired: true`：持久检查点仍需处理，但当前 Runtime 没有该会话的 resident driver。这个瞬态展示字段不写入事件、资源授权或幂等提交回执；缺失时不视为新的执行授权。正常活动命令有 resident driver，不因尚未产生持久工具结果而显示重启恢复操作。
+
+工作台显示恢复 Alert，锁住发送、停止和旧审批操作。用户通过 `agent_runtime_reconcile_direct_resources` 核对受保护托管及签名终态；`uncertain > 0` 或 IPC 失败时继续锁住。签名清理仅解除资源债务，不确认命令副作用，也不复活旧执行授权。用户再次显式核对清理后可以结束中断回合并新建会话；新的命令仍走独立操作审批。历史 unknown 无可信托管／回执时仍保留债务，不按 PID、名称或文件副作用清理。
+
+子 Agent 派生优先使用父会话已冻结的同 ID 目标及父级 target scope，避免同一终端其他历史会话的目录或 label 被用于当前派生。已有项目目录不可改写；取消并确认活动资源终态后，用新的显式会话选择新的目录，旧会话绑定和旧授权不迁移。

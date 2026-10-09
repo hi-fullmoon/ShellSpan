@@ -75,13 +75,19 @@ static URL_CREDENTIALS: LazyLock<Regex> = LazyLock::new(|| {
 static TOKEN_CANDIDATES: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[A-Za-z0-9_][A-Za-z0-9_.-]*").unwrap());
 
-pub(crate) fn redact_terminal_rows(rows: &mut [String]) {
+pub(crate) fn redact_terminal_rows(rows: &mut [String]) -> bool {
     // Screen rows can split even the PEM delimiters. Match across their visual
     // boundaries, then hide affected rows without shifting screen coordinates.
     // The terminal renderer trims trailing spaces, including delimiter spaces
     // at wrap boundaries. Normalize spaces in both the input and the pattern.
     let joined = rows.concat().replace(' ', "");
     let private_keys = TERMINAL_PRIVATE_KEYS.find_iter(&joined).collect::<Vec<_>>();
+    let unclosed_private_key = private_keys.iter().any(|key| {
+        !matches!(
+            terminal_private_key_boundary(key.as_str()),
+            Some(PrivateKeyBoundary::End)
+        )
+    });
     let mut offset = 0;
     for row in rows {
         let end = offset + row.len() - row.bytes().filter(|byte| *byte == b' ').count();
@@ -95,6 +101,7 @@ pub(crate) fn redact_terminal_rows(rows: &mut [String]) {
         }
         offset = end;
     }
+    unclosed_private_key
 }
 
 pub(crate) fn redact_sensitive_text(value: &str) -> String {

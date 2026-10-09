@@ -66,6 +66,8 @@ SOURCES = [
     "src-tauri/src/agent_runtime/tests/sandbox_audit.rs",
     "src-tauri/src/agent_runtime/tests/macos_direct.rs",
     "src/lib/ai/__tests__/error-message.test.ts",
+    "src-tauri/src/agent_runtime/native/terminal_interactive.rs",
+    "tests/agent-shell-sandbox-macos-ssh/verify_stage1_closeout.py",
 ]
 
 
@@ -137,6 +139,8 @@ def main():
         report["nativeBinarySha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
         if args.complete_recovery:
             for name, command in [
+                ("stage1-closeout", ["python3", "tests/agent-shell-sandbox-macos-ssh/verify_stage1_closeout.py", "--output", str(output / "closeout")]),
+                ("stage1-running-preflight", ["python3", "tests/agent-shell-sandbox-macos-ssh/verify_stage1_closeout.py", "--running-preflight", "--output", str(output / "closeout-running")]),
                 ("local-app-crash", ["python3", "tests/agent-shell-sandbox-macos-ssh/verify_local_crash.py", "--output", str(output / "local-crash")]),
                 ("model-waiting-interrupt", ["python3", "tests/agent-shell-sandbox-macos-ssh/verify_model_interruptions.py", "--output", str(output / "model-waiting")]),
                 ("model-unknown-interrupt", ["python3", "tests/agent-shell-sandbox-macos-ssh/verify_model_interruptions.py", "--output", str(output / "model-unknown"), "--unknown"]),

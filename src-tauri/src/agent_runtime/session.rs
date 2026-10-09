@@ -162,6 +162,8 @@ pub(crate) struct AgentSessionSnapshot {
     pub(crate) task: AgentTaskProjection,
     pub(crate) recovery: AgentRecoveryCheckpoint,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) recovery_required: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(crate) uncertain_native_effects: bool,
 }
 
@@ -367,6 +369,7 @@ impl AgentSessionRecord {
             },
             task: derive_task(&self.events),
             recovery: super::derive_recovery_checkpoint(&self.events),
+            recovery_required: false,
             uncertain_native_effects: has_uncertain_tool_executions(&self.events),
         };
         let _ = self.snapshot_cache.set(snapshot.clone());
@@ -3873,6 +3876,7 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
             use super::sandbox_audit::SandboxResourceAuditAction;
             match audit.action {
                 SandboxResourceAuditAction::Approved | SandboxResourceAuditAction::Reused => {
+                    validate_collection(&audit.resources, "resource audit resources")?;
                     require_scope(event, true, true)?;
                     validate_identifier(
                         call_id.as_deref().ok_or("resource audit call missing")?,
@@ -3897,7 +3901,7 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
                     }
                 }
             }
-            validate_collection(&audit.resources, "resource audit resources")?;
+            validate_collection_allow_empty(&audit.resources, "resource audit resources")?;
             for resource in &audit.resources {
                 match resource {
                     super::AgentSandboxResource::ReadPath { path }

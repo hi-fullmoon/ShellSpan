@@ -1,6 +1,9 @@
 mod continuation_tests {
     include!("continuation.rs");
 }
+mod recovery_recording_tests {
+    include!("recovery_recording.rs");
+}
 mod shutdown_tests {
     include!("shutdown.rs");
 }

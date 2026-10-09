@@ -1,6 +1,12 @@
 import petdexMessages from './petdex-messages.json';
 
 export default {
+  'agent.recovery.gateTitle': '执行中断，需要确认资源恢复',
+  'agent.recovery.gateNotice': '命令结果尚未确认。旧授权不会恢复，命令不会自动重放。先核对可信资源清理回执；未确认时继续阻止新执行。清理后结束中断回合，新会话的命令仍须重新审批。',
+  'agent.recovery.checkResources': '核对资源清理回执',
+  'agent.recovery.resourcesConfirmed': '资源清理已确认（本次解除 {resolved} 项）；旧执行授权未恢复。',
+  'agent.recovery.resourcesUnknown': '仍有 {uncertain} 项资源无法确认；继续阻止新执行。',
+  'agent.recovery.finishInterrupted': '结束中断回合并新建会话',
   'agent.sandbox.defaultsNotice': '仅将当前项目／连接的策略和缓存目录候选记为配置，不保存资源授权、不改变操作审批模式；新会话仍须重新申请资源权限。',
   'agent.sandbox.defaultsLoading': '正在读取项目／连接默认配置…',
   'agent.sandbox.defaultsLoadFailed': '默认配置尚不可用，可以重新加载、明确清除记忆，或显式按当前所选策略创建本会话；后端和项目根目录验证仍保留。',
@@ -1797,6 +1803,8 @@ export default {
   'ai.workspace.queue.redirectedDescription': '目标任务已结束，这条引导将在后续轮次处理。',
   'ai.workspace.messagePending': '正在发送',
   'ai.workspace.messageNotSent': '未发送',
+  'ai.workspace.messageExpand': '展开全文',
+  'ai.workspace.messageCollapse': '收起',
   'ai.workspace.messageInterrupted': '回复已中断',
   'ai.workspace.reasoningExpand': '展开思考摘要',
   'ai.workspace.reasoningCollapse': '折叠思考摘要',
@@ -2116,6 +2124,7 @@ export default {
   'ai.error.outputLimit': '缩小步骤后仍达到模型输出上限。已保存的修改会保留，未完成的工具调用没有执行。请检查服务配置中的模型输出上限后继续。',
   'ai.error.notFound': '找不到 AI 服务接口（HTTP 404）。请检查服务地址和 API 路径。',
   'ai.error.authentication': 'AI 服务认证失败。请检查 API 密钥和访问权限。',
+  'ai.error.modelCredentialUnavailable': '无法读取模型凭据。请检查已保存的凭据和系统钥匙串授权；模型请求尚未发出。',
   'ai.error.rateLimited': '请求过于频繁，AI 服务暂时限流。请稍后重试。',
   'ai.error.unavailable': 'AI 服务暂时不可用（HTTP {status}）。请稍后重试。',
   'ai.error.http': 'AI 服务请求失败（HTTP {status}）。请检查服务配置。',

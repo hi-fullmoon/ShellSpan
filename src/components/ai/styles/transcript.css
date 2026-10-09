@@ -44,6 +44,10 @@
   color: var(--ai-text);
 }
 
+.ai-user-message-toggle {
+  color: var(--ai-text-muted);
+}
+
 .ai-user-delivery {
   color: var(--ai-text-muted);
   font-size: 11px;

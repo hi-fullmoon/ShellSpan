@@ -1,6 +1,12 @@
 import petdexMessages from './petdex-messages.json';
 
 export default {
+  'agent.recovery.gateTitle': 'Execution interrupted; resource recovery required',
+  'agent.recovery.gateNotice': 'The command outcome is unconfirmed. Previous grants are not restored and commands are not replayed. Verify trusted cleanup receipts first; unconfirmed resources block new execution. After cleanup, end the interrupted turn and start a new conversation with new command approvals.',
+  'agent.recovery.checkResources': 'Verify cleanup receipts',
+  'agent.recovery.resourcesConfirmed': 'Resource cleanup confirmed ({resolved} resolved now); previous execution grants remain invalid.',
+  'agent.recovery.resourcesUnknown': '{uncertain} resources remain unconfirmed; new execution stays blocked.',
+  'agent.recovery.finishInterrupted': 'End interrupted turn and start a new conversation',
   'agent.sandbox.defaultsNotice': 'Remember this project/connection policy and cache directory candidates as configuration only. It does not save resource authorization or change operation approval mode; new sessions request access again.',
   'agent.sandbox.defaultsLoading': 'Loading project/connection default configuration…',
   'agent.sandbox.defaultsLoadFailed': 'Default configuration is not available. Reload or clear it, or explicitly use the currently selected policy for this session. Backend and project-root checks still apply.',
@@ -1799,6 +1805,8 @@ export default {
   'ai.workspace.queue.redirectedDescription': 'The target turn ended. This guidance will run in a later turn.',
   'ai.workspace.messagePending': 'Sending',
   'ai.workspace.messageNotSent': 'Not sent',
+  'ai.workspace.messageExpand': 'Show more',
+  'ai.workspace.messageCollapse': 'Show less',
   'ai.workspace.messageInterrupted': 'Response interrupted',
   'ai.workspace.reasoningExpand': 'Expand thinking summary',
   'ai.workspace.reasoningCollapse': 'Collapse thinking summary',
@@ -2118,6 +2126,7 @@ export default {
   'ai.error.outputLimit': 'The model still reached its output limit after reducing the step size. Saved changes were kept; unfinished tool calls were not executed. Check the model output limit in provider settings before continuing.',
   'ai.error.notFound': 'The AI endpoint was not found (HTTP 404). Check the service URL and API path.',
   'ai.error.authentication': 'AI service authentication failed. Check the API key and access permissions.',
+  'ai.error.modelCredentialUnavailable': 'The model credential could not be read. Check the saved credential and system keychain authorization; no model request has been sent.',
   'ai.error.rateLimited': 'The AI service is rate limiting requests. Try again shortly.',
   'ai.error.unavailable': 'The AI service is temporarily unavailable (HTTP {status}). Try again shortly.',
   'ai.error.http': 'The AI service request failed (HTTP {status}). Check the service configuration.',
