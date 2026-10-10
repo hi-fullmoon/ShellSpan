@@ -8,6 +8,7 @@ import plistlib
 import shutil
 import subprocess
 import tempfile
+import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -17,6 +18,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--local", action="store_true")
     parser.add_argument("--replay-journal", type=Path)
+    parser.add_argument("--app-name")
     args = parser.parse_args()
     output = args.output.resolve()
     if output.exists() or not output.is_relative_to(ROOT / ".phase4-acceptance"):
@@ -27,7 +29,9 @@ def main():
     if replay:
         if not args.local or not replay.is_relative_to(ROOT / ".phase4-acceptance") or not replay.is_file() or replay.suffix != ".jsonl":
             parser.error("replay requires an exact owned ignored journal and local mode")
-    app_name = "ShellSpan Local Acceptance" if args.local else "ShellSpan Remote Acceptance"
+    app_name = args.app_name or ("ShellSpan Local Acceptance" if args.local else "ShellSpan Remote Acceptance")
+    if not app_name.replace(" ", "").isalnum() or len(app_name) > 64:
+        parser.error("short alphanumeric application name required")
     bundle = output / f"{app_name}.app"
     contents = bundle / "Contents"
     executable = contents / "MacOS" / "ShellSpan"
@@ -35,7 +39,7 @@ def main():
     source = ROOT / "src-tauri/target/debug/ShellSpan"
     shutil.copy2(source, executable)
     with (contents / "Info.plist").open("wb") as handle:
-        plistlib.dump({"CFBundleIdentifier":"com.shellspan.stage2-local-acceptance" if args.local else "com.shellspan.stage2-remote-acceptance",
+        plistlib.dump({"CFBundleIdentifier":f"com.shellspan.stage2-acceptance-{uuid.uuid4().hex}",
                       "CFBundleName":app_name, "CFBundleDisplayName":app_name,
                       "CFBundleExecutable":"ShellSpan", "CFBundlePackageType":"APPL",
                       "CFBundleVersion":"1", "NSHighResolutionCapable":True}, handle)
@@ -46,7 +50,8 @@ def main():
              "src-tauri/src/agent_runtime/sandbox_audit.rs", "src-tauri/src/agent_runtime/tests/sandbox_audit.rs",
              "src-tauri/src/agent_runtime/native/runtime.rs", "src-tauri/src/agent_runtime/native_adapter.rs",
              "src-tauri/src/agent_runtime/tests/external_read.rs", "src/components/ai/workspace/ai-approval-panel.tsx",
-             "src/lib/ai/conversation-projection.ts"]
+             "src/lib/ai/conversation-projection.ts",
+             "src-tauri/src/agent_runtime/tool_pipeline.rs", "src/components/ai/__tests__/sandbox-binding-native.ts"]
     report = {"binarySha256":hashlib.sha256(executable.read_bytes()).hexdigest(),
               "sourceSha256":{name:hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in names},
               "scope":"independent bundle, actual controller/remote fixture/model; no automatic approval or stage pass",

@@ -577,6 +577,15 @@ pub fn run_native_remote_check(root: &std::path::Path) -> Result<(), String> {
     agent_runtime::remote_native_check::run(root)
 }
 
+#[cfg(all(target_os = "macos", debug_assertions))]
+pub fn run_native_host_check(
+    root: &std::path::Path,
+    profile: &str,
+    mode: &str,
+) -> Result<(), String> {
+    agent_runtime::remote_native_check::run_host(root, profile, mode)
+}
+
 #[cfg(target_os = "macos")]
 pub fn run_local_resource_controller() -> Result<(), String> {
     agent_runtime::run_local_resource_controller()

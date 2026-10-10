@@ -6,7 +6,428 @@ use tauri::{Manager, State};
 
 struct VerificationReviewRoot(std::path::PathBuf);
 struct RemoteReviewSource(AgentSessionTarget);
+struct RemoteReviewTargets(Vec<AgentSessionTarget>);
+struct BindingReviewFixture(Arc<Mutex<Option<ReviewFixture>>>);
+#[derive(Default)]
+struct ReviewClosedWrites(Mutex<Option<usize>>);
 struct NativeReviewProject(std::path::PathBuf);
+#[derive(Default)]
+struct HourReviewState(Mutex<Option<(serde_json::Value, Option<serde_json::Value>)>>);
+
+#[tauri::command]
+fn sandbox_settings_review_window_size(
+    app: tauri::AppHandle,
+    width: u32,
+) -> Result<serde_json::Value, String> {
+    if ![360, 480, 620, 960].contains(&width) {
+        return Err("Owned review width is outside the acceptance set".into());
+    }
+    let window = app
+        .get_webview_window("main")
+        .ok_or("Owned review window unavailable")?;
+    window
+        .set_size(tauri::LogicalSize::new(width, 680_u32))
+        .map_err(|_| "Owned review resize failed")?;
+    let actual = window
+        .inner_size()
+        .map_err(|_| "Owned review dimensions unavailable")?;
+    Ok(
+        serde_json::json!({"requestedWidth":width,"physicalWidth":actual.width,"physicalHeight":actual.height,
+        "scaleFactor":window.scale_factor().map_err(|_| "Owned review scale unavailable")?}),
+    )
+}
+
+#[tauri::command]
+fn sandbox_settings_review_targets(
+    targets: State<'_, RemoteReviewTargets>,
+    sessions: State<'_, crate::models::SessionManager>,
+) -> Result<serde_json::Value, String> {
+    let values = targets
+        .0
+        .iter()
+        .map(|target| {
+            let (actual, generation) = sessions.execution_binding_state(&target.session_id)?;
+            Ok(
+                serde_json::json!({"target":target,"generation":generation,"source":{
+            "sessionId":target.session_id,"profileId":target.profile_id,
+            "title":actual.identity.title,"host":actual.identity.host,"port":actual.identity.port,
+            "username":actual.identity.username,"status":actual.status}}),
+            )
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(serde_json::json!({"targets":values}))
+}
+
+/// Finish only this application's owned SSH fixture, while Child handles and
+/// the original Runtime are still resident. A process exit code is no receipt.
+#[tauri::command]
+async fn sandbox_settings_review_finish(
+    app: tauri::AppHandle,
+) -> Result<serde_json::Value, String> {
+    let runtime = app.state::<AgentRuntime>().inner().clone();
+    let sessions = app.state::<crate::models::SessionManager>().inner().clone();
+    runtime.shutdown(&sessions).await?;
+    tokio::task::spawn_blocking(move || {
+        let owned = app.state::<BindingReviewFixture>();
+        let mut guard = owned
+            .0
+            .lock()
+            .map_err(|_| "Owned closing fixture unavailable")?;
+        let fixture = guard
+            .as_mut()
+            .ok_or("Closing review requires the resident owned fixture")?;
+        let writes = fixture.source_writes();
+        let receipt = match fixture {
+            ReviewFixture::Remote(remote) => remote.close_for_review()?,
+            ReviewFixture::Local { source, .. } => source.close_for_review()?,
+        };
+        let page = runtime.sessions(AgentSessionListRequest {
+            cursor: None,
+            limit: 200,
+        })?;
+        let mut requests = 0;
+        for session in &page.sessions {
+            requests += runtime
+                .events(AgentSessionEventsRequest {
+                    session_id: session.header.session_id.clone(),
+                    cursor: None,
+                    limit: 1000,
+                })?
+                .events
+                .iter()
+                .filter(|event| {
+                    matches!(event.payload, AgentSessionEventPayload::RequestStart { .. })
+                })
+                .count();
+        }
+        let report = serde_json::json!({"runtimeShutdownConfirmed":true,"fixture":receipt,
+            "sourcePtyWrites":writes,"sessionsCreated":page.sessions.len(),"modelRequests":requests,
+            "observedAtUnixMs":super::driver::current_unix_ms()?,"stage3Allowed":false});
+        let root = app.state::<VerificationReviewRoot>();
+        std::fs::write(
+            root.0.join("fixture-shutdown.json"),
+            serde_json::to_vec_pretty(&report).map_err(|_| "Closing receipt encoding failed")?,
+        )
+        .map_err(|_| "Closing receipt write failed")?;
+        *app.state::<ReviewClosedWrites>()
+            .0
+            .lock()
+            .map_err(|_| "Closing observation unavailable")? = Some(writes);
+        // Release the managed Arc too; Runtime/AppHandle cycles must not keep
+        // the owned server, credential or temporary project alive after exit.
+        drop(guard.take());
+        Ok(report)
+    })
+    .await
+    .map_err(|_| "Owned closing worker failed".to_string())?
+}
+
+#[tauri::command]
+fn sandbox_settings_review_activity_process(
+    runtime: State<'_, AgentRuntime>,
+    root: State<'_, VerificationReviewRoot>,
+) -> Result<serde_json::Value, String> {
+    let page = runtime.events(AgentSessionEventsRequest {
+        session_id: "binding-activity".into(),
+        cursor: None,
+        limit: 1000,
+    })?;
+    let handle = page
+        .events
+        .iter()
+        .filter_map(|event| serde_json::to_value(event).ok())
+        .find_map(|row| {
+            (row["type"] == "tool/result")
+                .then(|| {
+                    row["data"]["data"]["processHandle"]
+                        .as_str()
+                        .map(str::to_owned)
+                })
+                .flatten()
+        })
+        .ok_or("Actual owned activity handle missing")?;
+    let process = runtime.acceptance_process(&handle)?;
+    let snapshot = process.snapshot()?;
+    if snapshot.task_id != "binding-activity" {
+        return Err("Activity process owner mismatch".into());
+    }
+    let report = serde_json::json!({"processHandle":snapshot.process_handle,"taskId":snapshot.task_id,
+        "state":snapshot.state,"terminationConfirmed":snapshot.termination_confirmed,
+        "error":snapshot.error,"completedAtUnixMs":snapshot.completed_at_unix_ms});
+    std::fs::write(
+        root.0.join("binding-process-observed.json"),
+        serde_json::to_vec_pretty(&report).map_err(|_| "Activity snapshot encoding failed")?,
+    )
+    .map_err(|_| "Activity snapshot write failed")?;
+    Ok(report)
+}
+
+#[tauri::command]
+async fn sandbox_settings_review_activity_started(app: tauri::AppHandle) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let owned = app.state::<BindingReviewFixture>();
+        let guard = owned
+            .0
+            .lock()
+            .map_err(|_| "Owned binding fixture unavailable")?;
+        let Some(ReviewFixture::Remote(fixture)) = guard.as_ref() else {
+            return Err("Activity review requires the owned remote fixture".into());
+        };
+        let value = fixture.read_project("binding-background-started")?;
+        if value == "started" {
+            let root = app.state::<VerificationReviewRoot>();
+            std::fs::write(
+                root.0.join("binding-started-observed.json"),
+                serde_json::to_vec_pretty(&serde_json::json!({"value":value,
+                    "observedAtUnixMs":super::driver::current_unix_ms()?,
+                    "observation":"actual SFTP on the exact owned fixture project"}))
+                .map_err(|_| "Startup evidence encoding failed")?,
+            )
+            .map_err(|_| "Startup evidence write failed")?;
+        }
+        Ok(value)
+    })
+    .await
+    .map_err(|_| "Owned activity observation failed".to_string())?
+}
+
+#[tauri::command]
+async fn sandbox_settings_review_new_project(
+    app: tauri::AppHandle,
+) -> Result<AgentSessionTarget, String> {
+    tokio::task::spawn_blocking(move || {
+        let owned = app.state::<BindingReviewFixture>();
+        let guard = owned
+            .0
+            .lock()
+            .map_err(|_| "Owned binding fixture unavailable")?;
+        let Some(ReviewFixture::Remote(fixture)) = guard.as_ref() else {
+            return Err("Project review requires the owned remote fixture".into());
+        };
+        let target = fixture.new_review_project()?;
+        let root = app.state::<VerificationReviewRoot>();
+        std::fs::write(
+            root.0.join("binding-new-project.json"),
+            serde_json::to_vec_pretty(&target)
+                .map_err(|_| "Owned project report encoding failed")?,
+        )
+        .map_err(|_| "Owned project report write failed")?;
+        Ok(target)
+    })
+    .await
+    .map_err(|_| "Owned project worker failed".to_string())?
+}
+
+/// Operates only on this debug application's owned SSH fixture and real PTY.
+#[tauri::command]
+async fn sandbox_settings_review_connection(
+    app: tauri::AppHandle,
+    reconnect: bool,
+) -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(move || {
+        let owned = app.state::<BindingReviewFixture>();
+        let mut guard = owned
+            .0
+            .lock()
+            .map_err(|_| "Owned binding fixture unavailable")?;
+        let Some(ReviewFixture::Remote(fixture)) = guard.as_mut() else {
+            return Err("Connection review requires the owned remote fixture".into());
+        };
+        let sessions = app.state::<crate::models::SessionManager>();
+        let before = sessions
+            .execution_binding_state("mac-source")
+            .ok()
+            .map(|(_, id)| id);
+        if reconnect {
+            fixture.reconnect_source()?;
+        } else {
+            fixture.disconnect_source()?;
+        }
+        let after = sessions
+            .execution_binding_state("mac-source")
+            .ok()
+            .map(|(_, id)| id);
+        let report = serde_json::json!({"reconnect":reconnect,"observedAtUnixMs":super::driver::current_unix_ms()?,"beforeGeneration":before,
+            "afterGeneration":after,"sourcePtyWrites":fixture.source_writes()});
+        let root = app.state::<VerificationReviewRoot>();
+        std::fs::write(
+            root.0.join(if reconnect {
+                "binding-reconnected.json"
+            } else {
+                "binding-disconnected.json"
+            }),
+            serde_json::to_vec_pretty(&report)
+                .map_err(|_| "Connection evidence encoding failed")?,
+        )
+        .map_err(|_| "Connection evidence write failed")?;
+        Ok(report)
+    })
+    .await
+    .map_err(|_| "Owned connection worker failed".to_string())?
+}
+
+#[tauri::command]
+async fn sandbox_settings_review_observe_hour(
+    runtime: State<'_, AgentRuntime>,
+    root: State<'_, VerificationReviewRoot>,
+    observation: State<'_, Arc<HourReviewState>>,
+) -> Result<serde_json::Value, String> {
+    let session_id = "hour-acceptance";
+    let snapshot = runtime.session(session_id)?;
+    let project = root.0.join("owned-project");
+    if snapshot
+        .header
+        .target
+        .as_ref()
+        .and_then(|target| target.cwd.as_deref())
+        != project.to_str()
+        || snapshot.header.sandbox_policy != Some(AgentSandboxPolicy::Workspace)
+    {
+        return Err("Hour observation requires the exact owned workspace Session".into());
+    }
+    let initial = runtime.sandbox_authorizations(session_id)?;
+    let expires = initial
+        .expires_at_unix_ms
+        .ok_or("Actual session authorization required")?;
+    if initial.state != "active"
+        || initial.read_paths.len() != 1
+        || expires <= initial.checked_at_unix_ms
+    {
+        return Err("Actual active single-file session authorization required".into());
+    }
+    let events = serde_json::to_value(runtime.events(AgentSessionEventsRequest {
+        session_id: session_id.into(),
+        cursor: None,
+        limit: 1000,
+    })?)
+    .map_err(|_| "Hour journal encoding failed")?;
+    let audit = events["events"]
+        .as_array()
+        .and_then(|events| {
+            events.iter().find(|event| {
+                event["type"] == "sandbox/resource_audit"
+                    && event["data"]["audit"]["scope"] == "session"
+                    && event["data"]["audit"]["sessionExpiresAtUnixMs"].as_u64() == Some(expires)
+            })
+        })
+        .ok_or("Actual signed session audit required")?;
+    let issued = audit["timeUnixMs"]
+        .as_u64()
+        .ok_or("Actual audit time required")?;
+    if expires.saturating_sub(issued) < 3_599_000 {
+        return Err("The actual grant must retain its production one-hour lifetime".into());
+    }
+    let initial = serde_json::json!({"authorization":initial,"auditAtUnixMs":issued,"pid":std::process::id()});
+    {
+        let mut state = observation
+            .0
+            .lock()
+            .map_err(|_| "Hour observation unavailable")?;
+        if state.is_some() {
+            return Err("The original hour observation is already running".into());
+        }
+        *state = Some((initial.clone(), None));
+    }
+    tokio::fs::write(
+        root.0.join("hour-initial.json"),
+        serde_json::to_vec_pretty(&initial).map_err(|_| "Hour report encoding failed")?,
+    )
+    .await
+    .map_err(|_| "Hour initial report write failed")?;
+    let runtime = runtime.inner().clone();
+    let root = root.0.clone();
+    let observation = observation.inner().clone();
+    let began = std::time::Instant::now();
+    let age_at_start = initial["authorization"]["checkedAtUnixMs"]
+        .as_u64()
+        .unwrap_or(issued)
+        .saturating_sub(issued);
+    tauri::async_runtime::spawn(async move {
+        loop {
+            let now = match super::driver::current_unix_ms() {
+                Ok(now) => now,
+                Err(_) => return,
+            };
+            if now >= expires {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis((expires - now).min(1000))).await;
+        }
+        let final_status = match runtime.sandbox_authorizations(session_id) {
+            Ok(status) => status,
+            Err(_) => return,
+        };
+        let elapsed = began.elapsed().as_millis() as u64;
+        let passed = final_status.state == "expired"
+            && final_status.checked_at_unix_ms >= expires
+            && age_at_start.saturating_add(elapsed) >= 3_599_000
+            && final_status.read_paths.is_empty()
+            && final_status.active_processes == 0;
+        let final_status = serde_json::json!({"passed":passed,"authorization":final_status,"pid":std::process::id(),"monotonicElapsedMs":elapsed,"grantAgeAtObserverStartMs":age_at_start,"stageStatus":"pending","stage3Allowed":false,"scope":"same original Runtime, real production one-hour expiry; no adjusted clock, TTL or restart"});
+        if let Ok(mut state) = observation.0.lock() {
+            if let Some((_, result)) = state.as_mut() {
+                *result = Some(final_status.clone());
+            }
+        }
+        if let Ok(encoded) = serde_json::to_vec_pretty(&final_status) {
+            let _ = tokio::fs::write(root.join("hour-expired.json"), encoded).await;
+        }
+    });
+    Ok(initial)
+}
+
+#[tauri::command]
+async fn sandbox_settings_review_finish_hour(
+    runtime: State<'_, AgentRuntime>,
+    root: State<'_, VerificationReviewRoot>,
+    observation: State<'_, Arc<HourReviewState>>,
+) -> Result<serde_json::Value, String> {
+    let (initial, expired) = observation
+        .0
+        .lock()
+        .map_err(|_| "Hour observation unavailable")?
+        .clone()
+        .ok_or("Original hour observation missing")?;
+    let expired = expired.ok_or("Actual one-hour expiry is still pending")?;
+    let expires = initial["authorization"]["expiresAtUnixMs"]
+        .as_u64()
+        .ok_or("Original deadline missing")?;
+    let events = serde_json::to_value(runtime.events(AgentSessionEventsRequest {
+        session_id: "hour-acceptance".into(),
+        cursor: None,
+        limit: 1000,
+    })?)
+    .map_err(|_| "Hour journal encoding failed")?;
+    let events = events["events"]
+        .as_array()
+        .ok_or("Actual hour journal missing")?;
+    let renewed = events.iter().any(|event| {
+        event["type"] == "sandbox/resource_audit"
+            && event["timeUnixMs"]
+                .as_u64()
+                .is_some_and(|now| now >= expires)
+            && event["data"]["audit"]["action"] == "approved"
+            && event["data"]["audit"]["scope"] == "once"
+    });
+    let completed = events.iter().any(|event| {
+        event["type"] == "tool/result"
+            && event["timeUnixMs"]
+                .as_u64()
+                .is_some_and(|now| now >= expires)
+            && event["data"]["data"]["exitCode"] == 0
+            && event["data"]["data"]["terminationConfirmed"] == true
+            && event["data"]["data"]["stdout"] == "stage2-owned-read-input"
+    });
+    let passed = expired["passed"] == true && renewed && completed;
+    let report = serde_json::json!({"passed":passed,"initial":initial,"expired":expired,"freshOnceResourceApproval":renewed,"freshNativeTerminal":completed,"stageStatus":"pending","stage3Allowed":false});
+    tokio::fs::write(
+        root.0.join("hour-acceptance.json"),
+        serde_json::to_vec_pretty(&report).map_err(|_| "Hour report encoding failed")?,
+    )
+    .await
+    .map_err(|_| "Hour report write failed")?;
+    Ok(report)
+}
 
 #[tauri::command]
 async fn sandbox_settings_review_native_result(
@@ -364,7 +785,10 @@ pub(crate) fn run(root: &Path, root_entry: bool) -> Result<(), String> {
     let saved = root.to_owned();
     let report_root = saved.clone();
     let builder = tauri::Builder::default()
+        .manage(BindingReviewFixture(fixture.clone()))
+        .manage(ReviewClosedWrites::default())
         .manage(VerificationReviewRoot(root.to_owned()))
+        .manage(Arc::new(HourReviewState::default()))
         .manage(crate::directory_request_registry::DirectoryRequestRegistry::default())
         .manage(crate::sftp_pool::SftpPool::default())
         .manage(crate::identity_cache::RemoteIdentityCache::default())
@@ -372,9 +796,18 @@ pub(crate) fn run(root: &Path, root_entry: bool) -> Result<(), String> {
         .manage(crate::petdex::PetdexAdapter::new(root.to_owned()))
         .invoke_handler(tauri::generate_handler![
             sandbox_settings_review_source,
+            sandbox_settings_review_targets,
+            sandbox_settings_review_window_size,
+            sandbox_settings_review_connection,
+            sandbox_settings_review_new_project,
+            sandbox_settings_review_activity_started,
+            sandbox_settings_review_activity_process,
+            sandbox_settings_review_finish,
             sandbox_settings_review_verification_result,
             sandbox_settings_review_orchestration_result,
             sandbox_settings_review_native_result,
+            sandbox_settings_review_observe_hour,
+            sandbox_settings_review_finish_hour,
             crate::commands::load_preferences,
             crate::commands::save_preferences,
             crate::commands::list_local_directory,
@@ -432,13 +865,17 @@ pub(crate) fn run(root: &Path, root_entry: bool) -> Result<(), String> {
                     let app_root=handle.path().app_data_dir().map_err(|_| "Settings fixture root unavailable")?;
                     if !crate::known_hosts::known_hosts_path(&handle)?.starts_with(&app_root) {return Err("Settings fixture requires isolated known-hosts".into());}
                     let live_route=if remote_root_entry && model_enabled {Some(selected_review_route()?)} else {None};
-                    let owned=super::remote_seatbelt::tests::Fixture::new();
+                    let mut owned=super::remote_seatbelt::tests::Fixture::new();
                     if let Some((route,_))=&live_route {
                         let reference=match &route.auth {crate::llm::routes::RouteAuth::Keychain {reference}=>Some(reference.clone()),crate::llm::routes::RouteAuth::None=>None};
                         owned.install_with_model(&handle,reference)?;
                     } else {owned.install(&handle)?;}
                     if remote_root_entry {
                         let target=owned.target();
+                        if std::env::var("SHELLSPAN_SANDBOX_REVIEW_TWO_TARGETS").as_deref()==Ok("1") {
+                            let second=owned.new_review_target()?;
+                            handle.manage(RemoteReviewTargets(vec![target.clone(),second]));
+                        }
                         std::fs::write(saved.join("root-review-intent.json"),serde_json::to_vec_pretty(&serde_json::json!({"projectRoot":target.root_path,"liveModel":model_enabled,"scope":"actual owned remote PTY and full production controller; model enabled only by explicit mode"})).map_err(|_|"Remote root report encoding failed")?).map_err(|_|"Remote root report write failed")?;
                         handle.manage(RemoteReviewSource(target));
                     }
@@ -462,7 +899,7 @@ pub(crate) fn run(root: &Path, root_entry: bool) -> Result<(), String> {
                     runtime.create_session(serde_json::from_value(serde_json::json!({"sessionId":"orchestration-terminal-parent","taskId":"orchestration-terminal-parent","goal":"Actual terminal-default parent scope, with sandbox and approval unchanged","target":{"kind":"local","targetId":"terminal-acceptance-source","sessionId":"acceptance-source","cwd":project},"sandboxPolicy":"workspace","executionSurface":"direct","permissionMode":"requestApproval","successCriteria":["Effective child model tools remain within the parent's sandbox tool surface"]})).map_err(|_|"Terminal-default parent schema invalid")?)?;
                 }
                 *retained.lock().map_err(|_| "Settings review fixture unavailable")?=Some(owned);
-                let url=if orchestration && std::env::var("SHELLSPAN_SANDBOX_FLEET_NATIVE").as_deref()==Ok("1") {"src/components/ai/__tests__/sandbox-fleet-native.html"} else if orchestration && std::env::var("SHELLSPAN_SANDBOX_CHILD_NATIVE").as_deref()==Ok("1") {"src/components/ai/__tests__/sandbox-child-native.html"} else if orchestration {"src/components/ai/__tests__/sandbox-orchestration-native.html"} else if root_entry {"src/components/ai/__tests__/sandbox-settings-native.html?root-entry=1"} else if std::env::var("SHELLSPAN_SANDBOX_VERIFICATION_REGRESSION").as_deref()==Ok("1") {"src/components/ai/__tests__/remote-verification-native.html?session=remote-settings"} else {"src/components/ai/__tests__/sandbox-settings-native.html?session=remote-settings"};
+                let url=if orchestration && std::env::var("SHELLSPAN_SANDBOX_FLEET_NATIVE").as_deref()==Ok("1") {"src/components/ai/__tests__/sandbox-fleet-native.html"} else if orchestration && std::env::var("SHELLSPAN_SANDBOX_CHILD_NATIVE").as_deref()==Ok("1") {"src/components/ai/__tests__/sandbox-child-native.html"} else if orchestration {"src/components/ai/__tests__/sandbox-orchestration-native.html"} else if root_entry && std::env::var("SHELLSPAN_SANDBOX_REVIEW_TWO_TARGETS").as_deref()==Ok("1") {"src/components/ai/__tests__/sandbox-settings-native.html?root-entry=1&two-targets=1"} else if root_entry {"src/components/ai/__tests__/sandbox-settings-native.html?root-entry=1"} else if std::env::var("SHELLSPAN_SANDBOX_VERIFICATION_REGRESSION").as_deref()==Ok("1") {"src/components/ai/__tests__/remote-verification-native.html?session=remote-settings"} else {"src/components/ai/__tests__/sandbox-settings-native.html?session=remote-settings"};
                 tauri::WebviewWindowBuilder::new(&handle,"main",tauri::WebviewUrl::App(url.into())).title(if orchestration {"ShellSpan public IPC acceptance"} else {"ShellSpan isolated sandbox settings review"}).focused(!orchestration).inner_size(620.0,680.0).build().map_err(|_| "Settings review window unavailable")?;
                 Ok(())
             })();
@@ -475,7 +912,12 @@ pub(crate) fn run(root: &Path, root_entry: bool) -> Result<(), String> {
         .lock()
         .map_err(|_| "Settings review fixture unavailable")?
         .as_ref()
-        .map(ReviewFixture::source_writes);
+        .map(ReviewFixture::source_writes)
+        .or(*handle
+            .state::<ReviewClosedWrites>()
+            .0
+            .lock()
+            .map_err(|_| "Closing observation unavailable")?);
     let Some(runtime) = handle.try_state::<AgentRuntime>() else {
         std::fs::write(report_root.join("settings-review.json"),serde_json::to_vec_pretty(&serde_json::json!({"initializationCompleted":false,"exitCode":code,"modelRequests":0,"scope":"fixture initialization failed before runtime became available"})).map_err(|_|"Settings initialization report encoding failed")?).map_err(|_|"Settings initialization report unavailable")?;
         return Err("Settings review initialization failed; inspect isolated diagnostic".into());

@@ -13,6 +13,8 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 #[path = "remote_cleanup.rs"]
 pub(crate) mod cleanup;
+#[path = "remote_host.rs"]
+mod host;
 
 use super::remote_binding::RemoteExecutionBinding;
 use super::{
@@ -275,7 +277,14 @@ fn fingerprint(session: &ssh2::Session) -> Result<String, String> {
         .ok_or_else(|| "sandboxAuthorizationInvalid: SSH host key evidence is missing".into())
 }
 
-fn command(python: &str) -> Result<String, String> {
+fn controller_command(python: &str, host: bool) -> Result<String, String> {
+    let source = host::controller_source(host);
+    if host {
+        // Isolate Python imports without changing the account environment
+        // inherited by the user's host command.
+        return shlex::try_join([python, "-I", "-c", &source])
+            .map_err(|_| "sandboxRemoteRequestInvalid: argument encoding failed".into());
+    }
     shlex::try_join([
         "/usr/bin/env",
         "-i",
@@ -283,7 +292,7 @@ fn command(python: &str) -> Result<String, String> {
         "LANG=C",
         python,
         "-c",
-        include_str!("remote_seatbelt.py"),
+        &source,
     ])
     .map_err(|_| "sandboxRemoteRequestInvalid: argument encoding failed".into())
 }
@@ -307,16 +316,48 @@ fn fixed_json(
     expected_key: &str,
     timeout: Duration,
 ) -> Result<Value, String> {
+    // Owned process workers are ordinary threads. Scoped DNS/handshake
+    // deadlines need an IO runtime even when no Tauri task entered this thread.
+    let _runtime_guard = if tokio::runtime::Handle::try_current().is_err() {
+        static IO_RUNTIME: OnceLock<Result<tokio::runtime::Runtime, String>> = OnceLock::new();
+        let runtime = IO_RUNTIME.get_or_init(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .map_err(|_| "sandboxRemoteControllerUnavailable".to_owned())
+        });
+        Some(runtime.as_ref().map_err(Clone::clone)?.enter())
+    } else {
+        None
+    };
     let deadline = Instant::now() + timeout;
-    let session = open_ssh_execution_session_pinned(connection, known_hosts, expected_key)
-        .map_err(|_| "sandboxRemoteConnectionFailed")?;
-    if fingerprint(&session.target)? != expected_key {
-        return Err(
+    crate::connection::with_scoped_connection_io(
+        tokio_util::sync::CancellationToken::new(),
+        deadline,
+        || {
+            let session = open_ssh_execution_session_pinned(connection, known_hosts, expected_key)
+                .map_err(|_| "sandboxRemoteConnectionFailed")?;
+            if fingerprint(&session.target)? != expected_key {
+                return Err(
             "sandboxAuthorizationInvalid: SSH host key changed; reconnect before verifying again"
                 .into(),
         );
-    }
-    session.target.set_timeout(2000);
+            }
+            fixed_json_peer(&session.target, python, request, connection, timeout)
+        },
+    )
+}
+
+fn fixed_json_peer(
+    session: &ssh2::Session,
+    python: &str,
+    request: &Value,
+    connection: &RemoteConnectionRequest,
+    timeout: Duration,
+) -> Result<Value, String> {
+    let deadline = Instant::now() + timeout;
+    session.set_timeout(timeout.as_millis().clamp(1, 2000) as u32);
     let cancellation = ExecutionCancellationRegistry::default()
         .register(Uuid::new_v4().to_string())
         .map_err(|_| "sandboxRemoteControllerUnavailable")?;
@@ -325,8 +366,8 @@ fn fixed_json(
         secrets.push(token.to_owned());
     }
     let result = execute_ssh_channel_with_input(
-        &session.target,
-        &command(python)?,
+        session,
+        &controller_command(python, request["hostController"] == true)?,
         Some(&request_line(request)?),
         ExecutionOutputPolicy::new(64 * 1024, 4096, 128 * 1024)
             .map_err(|_| "sandboxRemoteOutputInvalid")?,
@@ -594,7 +635,7 @@ pub(crate) fn verify_header_owned(
     contract.deny = deny_paths(&entry.facts);
     let probe_command = "read value; test \"$value\" = sandbox-remote-input || exit 1; printf sandbox-remote-input; exec sleep 30";
     let job = RemoteSeatbeltJob::build(
-        entry.clone(),
+        entry.controller(),
         &contract,
         probe_command,
         Duration::from_secs(20),
@@ -672,13 +713,47 @@ pub(crate) fn verify_header_owned(
 
 #[derive(Clone)]
 pub(crate) struct RemoteSeatbeltJob {
+    control_peer: Arc<Mutex<Option<ssh2::Session>>>,
+    completed_receipt: Arc<Mutex<Option<Value>>>,
     selected_signal: Arc<Mutex<super::ProcessSignalNative>>,
     contract: AgentSandboxContract,
-    verification: Arc<Verification>,
+    verification: Arc<ControllerVerification>,
     key: [u8; 32],
     request: Value,
     connection: RemoteConnectionRequest,
     known_hosts: PathBuf,
+}
+
+struct ControllerVerification {
+    target: AgentToolTargetNative,
+    binding: RemoteExecutionBinding,
+    sessions: SessionManager,
+    database: Database,
+    facts: Inspection,
+    python: String,
+    host_key: String,
+}
+
+impl ControllerVerification {
+    fn valid(&self) -> bool {
+        self.binding
+            .validate(&self.target, &self.sessions, &self.database)
+            .is_ok()
+    }
+}
+
+impl Verification {
+    fn controller(&self) -> Arc<ControllerVerification> {
+        Arc::new(ControllerVerification {
+            target: self.target.clone(),
+            binding: self.binding.clone(),
+            sessions: self.sessions.clone(),
+            database: self.database.clone(),
+            facts: self.facts.clone(),
+            python: self.python.clone(),
+            host_key: self.host_key.clone(),
+        })
+    }
 }
 
 impl RemoteSeatbeltJob {
@@ -696,7 +771,8 @@ impl RemoteSeatbeltJob {
                     .into(),
             );
         }
-        let verification = for_contract(contract)?;
+        let verified = for_contract(contract)?;
+        let verification = verified.controller();
         Self::build(
             verification,
             contract,
@@ -708,7 +784,7 @@ impl RemoteSeatbeltJob {
     }
 
     fn build(
-        verification: Arc<Verification>,
+        verification: Arc<ControllerVerification>,
         contract: &AgentSandboxContract,
         raw_command: &str,
         timeout: Duration,
@@ -724,6 +800,8 @@ impl RemoteSeatbeltJob {
             "uid":verification.facts.uid,"readAllow":contract.read_allow,"writeAllow":contract.write_allow,"deny":contract.deny,
             "policy":contract.policy,"jobId":Uuid::new_v4().to_string(),"token":hex::encode(key),"command":raw_command,"timeoutMs":timeout.as_millis() as u64,"digest":digest});
         Ok(Self {
+            control_peer: Arc::new(Mutex::new(None)),
+            completed_receipt: Arc::new(Mutex::new(None)),
             selected_signal: Arc::new(Mutex::new(super::ProcessSignalNative::Terminate)),
             contract: contract.clone(),
             verification,
@@ -734,7 +812,10 @@ impl RemoteSeatbeltJob {
         })
     }
     pub(crate) fn launch_command(&self) -> Result<String, String> {
-        command(&self.verification.python)
+        controller_command(
+            &self.verification.python,
+            self.request["hostController"] == true,
+        )
     }
     pub(crate) fn contract(&self) -> &AgentSandboxContract {
         &self.contract
@@ -800,7 +881,26 @@ impl RemoteSeatbeltJob {
                 fields.remove(field);
             }
         }
-        let data = verify_receipt(
+        let mut peer = self
+            .control_peer
+            .lock()
+            .map_err(|_| "sandboxRemoteControllerUnavailable")?;
+        let response = if let Some(session) = peer.as_ref() {
+            if fingerprint(session)? != self.verification.host_key {
+                return Err("sandboxAuthorizationInvalid: control peer changed".into());
+            }
+            let response = fixed_json_peer(
+                session,
+                &self.verification.python,
+                &request,
+                &self.connection,
+                timeout,
+            );
+            if response.is_err() {
+                *peer = None;
+            }
+            response
+        } else {
             fixed_json(
                 &self.verification.python,
                 &request,
@@ -808,7 +908,10 @@ impl RemoteSeatbeltJob {
                 &self.known_hosts,
                 &self.verification.host_key,
                 timeout,
-            )?,
+            )
+        };
+        let data = verify_receipt(
+            response?,
             &self.key,
             self.request["jobId"]
                 .as_str()
@@ -837,6 +940,13 @@ impl RemoteSeatbeltJob {
         stop: bool,
         signal: super::ProcessSignalNative,
     ) -> bool {
+        if self
+            .completed_receipt
+            .lock()
+            .is_ok_and(|receipt| receipt.is_some())
+        {
+            return true;
+        }
         if stop {
             let _ = self.control_with_signal("stop", Duration::from_secs(4), Some(signal));
         }
@@ -844,7 +954,17 @@ impl RemoteSeatbeltJob {
         loop {
             if let Ok(data) = self.control("status", Duration::from_secs(2)) {
                 if data["controllerFinished"] == true && data["terminationConfirmed"] == true {
-                    return self.control("cleanup", Duration::from_secs(2)).is_ok();
+                    if let Ok(cleaned) = self.control("cleanup", Duration::from_secs(2)) {
+                        if cleaned["controllerFinished"] == true
+                            && cleaned["terminationConfirmed"] == true
+                        {
+                            if let Ok(mut saved) = self.completed_receipt.lock() {
+                                *saved = Some(cleaned);
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
                 }
             }
             if Instant::now() >= deadline {
@@ -854,6 +974,14 @@ impl RemoteSeatbeltJob {
         }
     }
     pub(crate) fn completion(&self) -> Result<Value, String> {
+        if let Some(data) = self
+            .completed_receipt
+            .lock()
+            .map_err(|_| "sandboxRemoteReceiptUnavailable")?
+            .clone()
+        {
+            return Ok(data);
+        }
         self.control("status", Duration::from_secs(2))
     }
 }

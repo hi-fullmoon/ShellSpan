@@ -22,11 +22,23 @@ struct FixtureSpec {
     parent_nonce: String,
 }
 
-struct RemoteSource {
+pub(super) struct RemoteSource {
     id: String,
     sessions: SessionManager,
     worker: Option<std::thread::JoinHandle<()>>,
     writes: Arc<AtomicUsize>,
+}
+
+impl RemoteSource {
+    pub(super) fn finish(&mut self) -> Result<usize, String> {
+        let _ = self.sessions.close(&self.id);
+        if let Some(worker) = self.worker.take() {
+            worker
+                .join()
+                .map_err(|_| "Owned source worker exit unconfirmed")?;
+        }
+        Ok(self.writes.load(Ordering::SeqCst))
+    }
 }
 
 impl Drop for RemoteSource {
@@ -38,15 +50,24 @@ impl Drop for RemoteSource {
     }
 }
 
-fn source(
+pub(super) fn source(
     id: &str,
     connection: &RemoteConnectionRequest,
     known_hosts: &Path,
     sessions: &SessionManager,
     home: &Path,
 ) -> Result<RemoteSource, String> {
-    let ssh = crate::execution::open_ssh_execution_session(connection, known_hosts)
-        .map_err(|_| "Owned source authentication failed")?;
+    let ssh =
+        crate::execution::open_ssh_execution_session(connection, known_hosts).map_err(|error| {
+            format!(
+                "Owned source authentication failed: {:?}: {}",
+                error.category,
+                crate::execution::redact_known_secrets(
+                    &error.message,
+                    &crate::execution::known_connection_secret_values(connection)
+                )
+            )
+        })?;
     let mut channel = ssh
         .target
         .channel_session()

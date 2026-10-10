@@ -1,5 +1,5 @@
-//! Restricted SSH Direct: encrypted startup input, signed ready receipt and
-//! source-bound lifetime. Host Direct retains its existing worker.
+//! Owned SSH Direct: encrypted startup input, signed ready receipt and
+//! source-bound lifetime. Restricted jobs also provide the Seatbelt boundary.
 use super::*;
 use std::collections::VecDeque;
 
@@ -307,8 +307,10 @@ pub(super) fn run(
             return;
         }
         if channel.eof() {
-            let completion = job.completion();
             let confirmed = job.cleanup(false);
+            // Cleanup retains its authenticated final receipt before removing
+            // the remote state. Do not query a directory already retired.
+            let completion = job.completion();
             match completion {
                 Ok(data) if confirmed => {
                     let code = data["exitCode"]

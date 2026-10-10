@@ -5,8 +5,20 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 use tauri::Manager;
 use tokio_util::sync::CancellationToken;
+#[path = "native_host_check.rs"]
+mod host;
 #[path = "native_remote_recovery_check.rs"]
 mod recovery;
+
+pub(crate) fn run_host(root: &Path, profile: &str, mode: &str) -> Result<(), String> {
+    let result = host::run(root, profile, mode);
+    if let Err(error) = &result {
+        let _ = std::fs::write(root.join(format!("host-{mode}-error-{}.json", uuid::Uuid::new_v4())), serde_json::to_vec_pretty(
+            &json!({"passed":false,"error":crate::redaction::redact_sensitive_text(error),"stage3Allowed":false})
+        ).unwrap_or_default());
+    }
+    result
+}
 
 pub(crate) fn run(root: &Path) -> Result<(), String> {
     if let Ok(mode) = std::env::var("SHELLSPAN_NATIVE_REMOTE_LIFECYCLE_CHECK") {

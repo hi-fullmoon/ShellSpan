@@ -24,6 +24,7 @@ use std::{
 const SSH_TCP_KEEPALIVE_TIME_SECS: u64 = 30;
 const SSH_TCP_KEEPALIVE_INTERVAL_SECS: u64 = 15;
 const SSH_SESSION_IO_TIMEOUT_MS: u32 = 15_000;
+const SSH_HANDSHAKE_TIMEOUT_MS: u32 = 30_000;
 const SSH_TRANSFER_IO_TIMEOUT_MS: u32 = 120_000;
 const JUMP_BRIDGE_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 pub(crate) const SSH_SESSION_KEEPALIVE_INTERVAL_SECS: u32 = 30;
@@ -547,13 +548,14 @@ fn open_handshaken_session(
         message: format!("session init failed: {error}"),
     })?;
     session.set_tcp_stream(tcp);
-    session.set_timeout(SSH_SESSION_IO_TIMEOUT_MS);
+    session.set_timeout(SSH_HANDSHAKE_TIMEOUT_MS);
     session.handshake().map_err(|error| {
         error!("SSH handshake failed remote={host}:{port}: {error}");
         ConnectionError::Other {
             message: format!("ssh handshake failed: {error}"),
         }
     })?;
+    session.set_timeout(SSH_SESSION_IO_TIMEOUT_MS);
 
     Ok(session)
 }
@@ -589,13 +591,10 @@ fn verify_session_host_key(
 pub(crate) fn open_session_for_host_key(host: &str, port: u16) -> Result<Session, String> {
     debug!("Opening SSH session for host key check host={host} port={port}");
     let tcp = connect_tcp_stream(host, port)?;
-    let mut session = Session::new().map_err(|error| format!("session init failed: {error}"))?;
-    session.set_tcp_stream(tcp);
-    session.set_timeout(SSH_SESSION_IO_TIMEOUT_MS);
-    session
-        .handshake()
-        .map_err(|error| format!("ssh handshake failed: {error}"))?;
-    Ok(session)
+    open_handshaken_session(tcp, host, port).map_err(|error| match error {
+        ConnectionError::Other { message } => message,
+        _ => "ssh handshake failed".into(),
+    })
 }
 
 #[cfg(test)]

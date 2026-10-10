@@ -286,6 +286,15 @@ pub(crate) trait NativeToolRuntime: Send + Sync {
 
     fn prepare(&self, request: NativeToolRequest) -> Result<NativeToolPreparation, String>;
 
+    /// Refresh policy while retaining the original approval's execution binding.
+    fn reprepare(
+        &self,
+        _original_token: &str,
+        request: NativeToolRequest,
+    ) -> Result<NativeToolPreparation, String> {
+        self.prepare(request)
+    }
+
     fn execute(
         &self,
         token: &str,
@@ -471,6 +480,14 @@ impl NativeToolRuntime for NativeToolRuntimeSlot {
 
     fn prepare(&self, request: NativeToolRequest) -> Result<NativeToolPreparation, String> {
         self.runtime()?.prepare(request)
+    }
+
+    fn reprepare(
+        &self,
+        original_token: &str,
+        request: NativeToolRequest,
+    ) -> Result<NativeToolPreparation, String> {
+        self.runtime()?.reprepare(original_token, request)
     }
 
     fn execute(
@@ -1610,6 +1627,14 @@ impl AgentToolPipeline {
     }
 
     fn prepare_native(&self, request: &NativeToolRequest) -> Result<NativeToolPreparation, String> {
+        self.prepare_native_bound(request, None)
+    }
+
+    fn prepare_native_bound(
+        &self,
+        request: &NativeToolRequest,
+        original_token: Option<&str>,
+    ) -> Result<NativeToolPreparation, String> {
         if request.sandbox_contract.policy != super::AgentSandboxPolicy::Host
             && !super::sandbox::restricted_model_tool(&request.model_call.name)
         {
@@ -1625,7 +1650,10 @@ impl AgentToolPipeline {
             &request.model_call.name,
             &request.model_call.arguments,
         )?;
-        let preparation = self.native.prepare(request.clone())?;
+        let preparation = match original_token {
+            Some(token) => self.native.reprepare(token, request.clone())?,
+            None => self.native.prepare(request.clone())?,
+        };
         if let Err(error) = self.validate_preparation(request, &preparation) {
             self.native.abandon(&preparation.token);
             return Err(error);
@@ -2253,22 +2281,23 @@ impl AgentToolPipeline {
         }
 
         // Recheck live native policy without running before_tool again or charging again.
+        let refreshed =
+            match self.prepare_native_bound(&pending.request, Some(&pending.preparation.token)) {
+                Ok(refreshed) => refreshed,
+                Err(error) if is_terminal_target_unavailable(&error) => {
+                    self.append_terminal_approval(
+                        &pending,
+                        AgentToolApprovalStatus::Cancelled,
+                        AgentToolResultStatus::Cancelled,
+                        &error,
+                    )?;
+                    self.commit_pending_not_started(&pending, "terminalTargetUnavailable")?;
+                    self.terminate_terminal_target(entry, &error)?;
+                    return Err(error);
+                }
+                Err(error) => return Err(error),
+            };
         self.native.abandon(&pending.preparation.token);
-        let refreshed = match self.prepare_native(&pending.request) {
-            Ok(refreshed) => refreshed,
-            Err(error) if is_terminal_target_unavailable(&error) => {
-                self.append_terminal_approval(
-                    &pending,
-                    AgentToolApprovalStatus::Cancelled,
-                    AgentToolResultStatus::Cancelled,
-                    &error,
-                )?;
-                self.commit_pending_not_started(&pending, "terminalTargetUnavailable")?;
-                self.terminate_terminal_target(entry, &error)?;
-                return Err(error);
-            }
-            Err(error) => return Err(error),
-        };
         let refreshed_lease = PreparedLease::new(self.native.clone(), &refreshed.token);
         self.ensure_capability(
             entry,

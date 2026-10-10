@@ -41,10 +41,28 @@ pub(super) struct SourcePty {
     sender: mpsc::Sender<SessionCommand>,
     worker: Option<std::thread::JoinHandle<()>>,
     writes: Arc<AtomicUsize>,
+    terminal: Arc<std::sync::Mutex<Option<Result<(), String>>>>,
 }
 impl SourcePty {
     pub(super) fn source_writes(&self) -> usize {
         self.writes.load(Ordering::SeqCst)
+    }
+    pub(super) fn close_for_review(&mut self) -> Result<serde_json::Value, String> {
+        let _ = self.sender.send(SessionCommand::Close);
+        if let Some(worker) = self.worker.take() {
+            worker
+                .join()
+                .map_err(|_| "Owned PTY worker exit unconfirmed")?;
+        }
+        self.terminal
+            .lock()
+            .map_err(|_| "Owned PTY receipt unavailable")?
+            .as_ref()
+            .ok_or("Owned PTY wait receipt missing")?
+            .clone()?;
+        Ok(
+            serde_json::json!({"sourceWorkerJoined":true,"sourceWaitConfirmed":true,"sourcePtyWrites":self.source_writes()}),
+        )
     }
 }
 impl Drop for SourcePty {
@@ -79,6 +97,8 @@ pub(super) fn source(sessions: &SessionManager, root: &Path) -> Result<SourcePty
     let (sender, receiver) = mpsc::channel();
     let writes = Arc::new(AtomicUsize::new(0));
     let count = writes.clone();
+    let terminal = Arc::new(std::sync::Mutex::new(None));
+    let observed_terminal = terminal.clone();
     let worker = std::thread::spawn(move || {
         while let Ok(command) = receiver.recv() {
             match command {
@@ -116,7 +136,13 @@ pub(super) fn source(sessions: &SessionManager, root: &Path) -> Result<SourcePty
         drop(writer);
         drop(pair);
         let _ = child.kill();
-        let _ = child.wait();
+        let result = child
+            .wait()
+            .map(|_| ())
+            .map_err(|_| "Owned PTY Child wait unconfirmed".to_string());
+        if let Ok(mut observed) = observed_terminal.lock() {
+            *observed = Some(result);
+        }
     });
     sessions.insert(
         "acceptance-source".into(),
@@ -144,6 +170,7 @@ pub(super) fn source(sessions: &SessionManager, root: &Path) -> Result<SourcePty
         sender,
         worker: Some(worker),
         writes,
+        terminal,
     })
 }
 

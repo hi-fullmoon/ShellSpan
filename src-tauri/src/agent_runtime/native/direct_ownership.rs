@@ -304,10 +304,29 @@ impl DirectOwnership {
                 journal.restored_ids.remove(&id);
                 Ok(())
             };
-            if recover().is_ok() {
-                result.resolved += 1;
-            } else {
-                result.uncertain += 1;
+            match recover() {
+                Ok(()) => result.resolved += 1,
+                Err(error) => {
+                    // Report only fixed categories: custody and credential errors
+                    // may contain sensitive details and must never be dumped.
+                    let category = match error.as_str() {
+                        "directOwnershipInvalid" => "invalid custody",
+                        "directOwnershipUnavailable" => "custody or peer unavailable",
+                        "directOwnershipWriteFailed" => "ledger write failed",
+                        "directCleanupUnconfirmed" => "cleanup unconfirmed or creator active",
+                        "sandboxRemoteControllerFailed: bounded SSH controller operation did not complete" => "controller transport failed",
+                        _ => "protected recovery failed",
+                    };
+                    #[cfg(debug_assertions)]
+                    if std::env::args().any(|arg| arg == "--native-host-check") {
+                        eprintln!("Host cleanup remains uncertain: {category}");
+                    } else {
+                        log::warn!("Direct resource recovery remains uncertain: {category}");
+                    }
+                    #[cfg(not(debug_assertions))]
+                    log::warn!("Direct resource recovery remains uncertain: {category}");
+                    result.uncertain += 1;
+                }
             }
         }
         let mut inner = self

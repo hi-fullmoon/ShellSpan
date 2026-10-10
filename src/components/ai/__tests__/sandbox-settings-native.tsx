@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { AiSandboxSettings } from '../workspace/ai-sandbox-settings';
 import { AiWorkspaceController } from '../workspace/ai-workspace-controller';
 import { Button } from '@/components/ui/button';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { invoke } from '@tauri-apps/api/core';
 import { Toaster } from '@/components/ui/sonner';
 import { useRemoteSandboxVerification } from '../workspace/use-remote-sandbox-verification';
 import { invokeGetAgentRuntimeSession, invokeSandboxSettingsReviewSource } from '@/lib/ipc/tauri';
@@ -14,11 +16,16 @@ import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import { sandboxDefaultScope, useSandboxDefaultsStore } from '@/stores/sandboxDefaultsStore';
 import type { AgentSandboxPolicy } from '@/types/agent-session';
+import type { AgentSessionTarget } from '@/types/agent-session';
+import type { SessionSummary, StatusEvent } from '@/types';
 import '@/styles/base.css';
 import '../styles/styles.css';
 
 const sessionId=new URLSearchParams(location.search).get('session');
 const rootEntry=new URLSearchParams(location.search).has('root-entry');
+const twoTargets=new URLSearchParams(location.search).has('two-targets');
+type OwnedTarget = { target: AgentSessionTarget; generation: string; source: SessionSummary & {profileId: string; status: StatusEvent['status']} };
+let ownedTargets: OwnedTarget[]=[];
 if (!sessionId && !rootEntry) throw new Error('Actual settings review session required');
 useAppStore.setState({locale:'zh-CN'});await initI18n('zh-CN');
 const initial=sessionId ? await invokeGetAgentRuntimeSession({sessionId}) : undefined;
@@ -30,6 +37,17 @@ if (rootEntry) {
   useTerminalStore.getState().setStatus(source.sessionId,{sessionId:source.sessionId,status:source.status});
   useAgentPermissionStore.getState().setExecutionSurface(source.sessionId,'direct');
   await useLlmRoutesStore.getState().hydrate();
+  if(twoTargets){
+    const actual=await invoke<{targets:OwnedTarget[]}>('sandbox_settings_review_targets');
+    ownedTargets=actual.targets;
+    for(const item of ownedTargets){
+      if(!useTerminalStore.getState().sessions.some(session=>session.sessionId===item.source.sessionId))
+        useTerminalStore.getState().addSession(item.source,item.source.profileId);
+      useTerminalStore.getState().setStatus(item.source.sessionId,{sessionId:item.source.sessionId,status:item.source.status});
+      useAgentPermissionStore.getState().setExecutionSurface(item.source.sessionId,'direct');
+    }
+    useTerminalStore.getState().setActiveSession(ownedTargets[0].source.sessionId);
+  }
 }
 function Acceptance() {
   const [policy,setPolicy]=useState<AgentSandboxPolicy>('workspace');
@@ -50,8 +68,13 @@ function Acceptance() {
 }
 function RootAcceptance() {
   const [locale,setLocale]=useState<'zh-CN'|'en-US'>('zh-CN');
+  const active=useTerminalStore(state=>state.activeSessionId);
   return <div className="ai-panel-shell flex h-screen min-h-0 flex-col">
-    <div className="flex shrink-0 justify-end p-2"><Button size="sm" variant="outline" onClick={() => {
+    <div className="flex shrink-0 items-center justify-end gap-3 p-2">
+      {twoTargets && <ToggleGroup size="sm" variant="outline" value={active ? [active] : []} onValueChange={values=>{
+        if(values[0])useTerminalStore.getState().setActiveSession(values[0]);
+      }}>{ownedTargets.map(item=><ToggleGroupItem key={item.source.sessionId} value={item.source.sessionId}>{item.source.title}</ToggleGroupItem>)}</ToggleGroup>}
+      <Button size="sm" variant="outline" onClick={() => {
       const next=locale==='zh-CN' ? 'en-US' : 'zh-CN';
       void initI18n(next).then(() => {useAppStore.setState({locale:next});setLocale(next);});
     }}>{locale==='zh-CN' ? 'English' : '中文'}</Button></div>

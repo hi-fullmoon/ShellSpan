@@ -12,6 +12,7 @@ pub(crate) struct Fixture {
     directory: tempfile::TempDir,
     server: Child,
     source: Option<std::thread::JoinHandle<()>>,
+    review_sources: Vec<(String, std::thread::JoinHandle<()>)>,
     sessions: SessionManager,
     database: Database,
     credentials: CredentialManager,
@@ -23,6 +24,7 @@ pub(crate) struct Fixture {
     admission: super::super::shutdown_admission::ShutdownAdmission,
     key_id: String,
     profile_id: String,
+    closed: bool,
 }
 
 impl Fixture {
@@ -70,6 +72,59 @@ impl Fixture {
         self.writes.load(Ordering::SeqCst)
     }
     #[cfg(debug_assertions)]
+    pub(crate) fn close_for_review(&mut self) -> Result<serde_json::Value, String> {
+        use std::os::unix::process::ExitStatusExt;
+        let source_count = usize::from(self.source.is_some()) + self.review_sources.len();
+        let _ = self.sessions.close("mac-source");
+        if let Some(worker) = self.source.take() {
+            worker
+                .join()
+                .map_err(|_| "Owned source worker exit unconfirmed")?;
+        }
+        for (id, worker) in self.review_sources.drain(..) {
+            let _ = self.sessions.close(&id);
+            worker
+                .join()
+                .map_err(|_| "Owned secondary source exit unconfirmed")?;
+        }
+        let status = match self
+            .server
+            .try_wait()
+            .map_err(|_| "Owned SSH server status unavailable")?
+        {
+            Some(status) => status,
+            None => {
+                // The unreaped live Child is the ownership credential. Never
+                // signal a stored PID after wait/try_wait has reaped it.
+                if unsafe { libc::kill(-(self.server.id() as i32), libc::SIGTERM) } != 0 {
+                    return Err("Owned SSH server stop failed".into());
+                }
+                self.server
+                    .wait()
+                    .map_err(|_| "Owned SSH server exit unconfirmed")?
+            }
+        };
+        if !self.closed {
+            self.credentials.delete_key_credential(&self.key_id)?;
+        }
+        self.closed = true;
+        Ok(
+            json!({"sourceWorkerJoined":true,"sourceWorkerCount":source_count,"serverWaitConfirmed":true,
+            "serverExitCode":status.code(),"serverExitSignal":status.signal(),
+            "ownedCredentialReleased":true,"sourcePtyWrites":self.source_writes()}),
+        )
+    }
+    #[cfg(debug_assertions)]
+    pub(crate) fn new_review_project(&self) -> Result<AgentSessionTarget, String> {
+        let root = self.directory.path().join("binding-project");
+        std::fs::create_dir(&root).map_err(|_| "New owned project creation failed")?;
+        std::fs::write(root.join("package.json"), "{\"private\":true}")
+            .map_err(|_| "New owned project metadata failed")?;
+        let mut target = self.target();
+        target.root_path = Some(root.to_string_lossy().into_owned());
+        Ok(target)
+    }
+    #[cfg(debug_assertions)]
     pub(crate) fn read_project(&self, name: &str) -> Result<String, String> {
         let ssh = open_ssh_execution_session(&self.connection, &self.known_hosts)
             .map_err(|_| "Fixture SSH reopen failed")?;
@@ -94,6 +149,26 @@ impl Fixture {
         if self.source.is_some() {
             return Err("Fixture source is still connected".into());
         }
+        self.source = Some(self.open_review_source("mac-source", "Own Mac SSH reconnect")?);
+        Ok(())
+    }
+    #[cfg(debug_assertions)]
+    pub(crate) fn new_review_target(&mut self) -> Result<AgentSessionTarget, String> {
+        let mut target = self.new_review_project()?;
+        target.session_id = "mac-source-secondary".into();
+        target.target_id = "terminal-mac-source-secondary".into();
+        target.label = Some("Own secondary Mac SSH target".into());
+        let worker = self.open_review_source(&target.session_id, "Own secondary Mac SSH target")?;
+        self.review_sources
+            .push((target.session_id.clone(), worker));
+        Ok(target)
+    }
+    #[cfg(debug_assertions)]
+    fn open_review_source(
+        &self,
+        session_id: &str,
+        title: &str,
+    ) -> Result<std::thread::JoinHandle<()>, String> {
         let ssh = open_ssh_execution_session(&self.connection, &self.known_hosts)
             .map_err(|_| "Fixture SSH reconnect failed")?;
         let mut channel = ssh
@@ -118,13 +193,13 @@ impl Fixture {
         ssh.target.set_blocking(false);
         let (sender, receiver) = mpsc::channel();
         self.sessions.insert(
-            "mac-source".into(),
+            session_id.into(),
             ManagedSession {
                 sender: SessionCommandSender::Standard(sender),
                 waker: None,
                 output_state_sender: None,
                 status: StatusEvent {
-                    session_id: "mac-source".into(),
+                    session_id: session_id.into(),
                     status: SessionStatus::Connected,
                     message: None,
                 },
@@ -132,7 +207,7 @@ impl Fixture {
                 output_paused: Arc::new(AtomicBool::new(false)),
                 terminal_kind: SessionTerminalKind::Remote,
                 identity: SessionIdentity {
-                    title: "Own Mac SSH reconnect".into(),
+                    title: title.into(),
                     host: self.connection.host.clone(),
                     port: self.connection.port,
                     username: self.connection.username.clone(),
@@ -141,7 +216,8 @@ impl Fixture {
         )?;
         let observed = self.writes.clone();
         let sessions = self.sessions.clone();
-        self.source = Some(std::thread::spawn(move || {
+        let source_id = session_id.to_owned();
+        Ok(std::thread::spawn(move || {
             let mut bytes = [0_u8; 4096];
             loop {
                 match receiver.try_recv() {
@@ -166,17 +242,23 @@ impl Fixture {
             let _ = channel.send_eof();
             let _ = channel.close();
             let _ = sessions.set_status(
-                "mac-source",
+                &source_id,
                 StatusEvent {
-                    session_id: "mac-source".into(),
+                    session_id: source_id.clone(),
                     status: SessionStatus::Disconnected,
                     message: None,
                 },
             );
-        }));
-        Ok(())
+        }))
     }
     pub(crate) fn new() -> Self {
+        Self::new_with_native_credentials(false)
+    }
+    #[cfg(test)]
+    pub(super) fn new_host_review() -> Self {
+        Self::new_with_native_credentials(true)
+    }
+    fn new_with_native_credentials(_native_credentials: bool) -> Self {
         use std::os::unix::process::CommandExt;
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().canonicalize().unwrap();
@@ -232,7 +314,7 @@ impl Fixture {
             );
             std::thread::sleep(Duration::from_millis(20));
         }
-        let connection = RemoteConnectionRequest {
+        let mut connection = RemoteConnectionRequest {
             host: "127.0.0.1".into(),
             port,
             username: username.clone(),
@@ -351,7 +433,11 @@ impl Fixture {
         });
         let database = Database::open(&root.join("fixture.db")).unwrap();
         #[cfg(test)]
-        let credentials = CredentialManager::in_memory_for_tests();
+        let credentials = if _native_credentials {
+            CredentialManager::isolated_native_for_checks()
+        } else {
+            CredentialManager::in_memory_for_tests()
+        };
         #[cfg(not(test))]
         let credentials = CredentialManager::isolated_native_for_checks();
         let key_id = format!("phase4-mac-ssh-{}", Uuid::new_v4());
@@ -362,6 +448,9 @@ impl Fixture {
                 &json!({"privateKey":connection.private_key_data}).to_string(),
             )
             .unwrap();
+        if _native_credentials {
+            connection.keychain_key_id = Some(key_id.clone());
+        }
         database
             .insert_profile(&ProfileRow {
                 id: profile_id.clone(),
@@ -389,6 +478,7 @@ impl Fixture {
             directory,
             server,
             source: Some(source),
+            review_sources: Vec::new(),
             sessions,
             database,
             credentials,
@@ -400,6 +490,7 @@ impl Fixture {
             admission: Default::default(),
             key_id,
             profile_id,
+            closed: false,
         }
     }
 
@@ -461,12 +552,21 @@ impl Fixture {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
+        if self.closed {
+            return;
+        }
         let _ = self.sessions.close("mac-source");
         if let Some(worker) = self.source.take() {
             let _ = worker.join();
         }
-        unsafe {
-            libc::kill(-(self.server.id() as i32), libc::SIGTERM);
+        for (id, worker) in self.review_sources.drain(..) {
+            let _ = self.sessions.close(&id);
+            let _ = worker.join();
+        }
+        if self.server.try_wait().is_ok_and(|status| status.is_none()) {
+            unsafe {
+                libc::kill(-(self.server.id() as i32), libc::SIGTERM);
+            }
         }
         let _ = self.server.wait();
         let _ = self.credentials.delete_key_credential(&self.key_id);
@@ -577,3 +677,7 @@ mod pin_tests;
 #[cfg(test)]
 #[path = "remote_seatbelt_recovery.rs"]
 mod recovery_tests;
+
+#[cfg(test)]
+#[path = "remote_host.rs"]
+mod host_tests;

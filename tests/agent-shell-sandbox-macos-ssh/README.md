@@ -1,5 +1,25 @@
 # macOS 与 SSH 完善阶段 1
 
+## SSH Host Direct 收尾回归
+
+`verify_linux_host.py --output <新的忽略目录> --profiles <一到两个已保存配置名称>` 使用 debug-only `--native-host-check` 和现有钥匙串引用运行固定 Linux root 原生检查，不启动模型、不接管用户已有会话。正常退出／超时／取消／源断连使用实际控制器；客户端崩溃只由父进程 kill／wait 自己的 Child，再凭原 custody 清理，不按保存 PID 选择远端资源。失败轮及后续恢复报告分别保存，不将新成功写回旧失败；旧应用债务继续保留。`SHELLSPAN_LINUX_HOST_RECORDING=<该目录> pnpm exec vitest run scripts/__tests__/linux-host-recording.test.mjs` 核验第一台实际记录的两项回归；这不把第二台失败或整个阶段改记通过。
+
+`--native-host-check <新的空绝对目录> <配置名称> handshake` 仅调试无认证的 libssh2 握手、算法与 TCP_NODELAY 对照以及 known_hosts 校验，不读取凭据或执行命令。每项有 30 秒握手期限，记录真实服务器 banner、协商结果和耗时；诊断偏好不进入生产 SSH 配置，也不改变服务器或主机信任。
+
+`cargo test --manifest-path src-tauri/Cargo.toml host_handshake_has_independent_timeout_and_restores_session_io_timeout -- --ignored --test-threads=1` 用自有真实 sshd 和透明 TCP 转发延迟真实服务器字节 16 秒，核对独立握手期限以及握手后的原有 15 秒 I/O 期限。它不生成 SSH 响应，也不代替用户主机的稳定性验收；取消与外层截止时间另由 `skill_scoped_connection_cancellation_and_deadline_join_stalled_handshake` 回归核验。
+
+`SHELLSPAN_LINUX_HOST_ORIGINAL_RECOVERY_REPORT=<原目录中独立保存的成功恢复 JSON> pnpm exec vitest run scripts/__tests__/linux-host-recording.test.mjs` 核对原 started／未确认执行记录及原失败恢复报告仍保留，并单独核对后续原 capsule 清理成功。缺少真实记录时 skipped；它不把原执行或完整主机验收改记通过。
+
+`python3 tests/agent-shell-sandbox-macos-ssh/test_host_controller.py` 使用本机真实自有 Child 验证正常退出、超时、签名回执和错误密钥拒绝。`cargo test --manifest-path src-tauri/Cargo.toml host_tests -- --ignored --test-threads=1` 显式运行自有普通账户 sshd、真实系统钥匙串、生产 NativeToolEngine 单次审批及清理 capsule 回归。测试只使用新临时资源，不连接用户配置，不代替真实 Linux／root 双身份工作台验收，不修改旧债务。所有测试目录及报告继续按阶段 2 的保留边界记录。
+
+## 双目标与窄恢复界面
+
+设置 `SHELLSPAN_SANDBOX_REVIEW_TWO_TARGETS=1` 后用 `launch_remote_workbench.py` 启动新的远端 fixture。它提供同一普通账户／自有 sshd 的两个真实独立 PTY 和目录，不是不同账户或不同主机证明。工具栏使用真实源状态切换；在原 Wry 加载 `target-switch-native.tsx` 的 `verificationMatrix()`，调用生产 hook／IPC 核对 11 项完成及在途结果失效。`pendingA()` 使用真实模型和精确自有命令等待审批；无模型请求、锁屏或未确认终态时保留 pending。
+
+`export_recovery_render_prefix.py --journal <精确自有真实日志> --output <新目录>` 只导出真实已批准／派发事件的原始前缀。通过 `launch_remote_workbench.py --local --replay-journal <导出的 jsonl>` 在新状态目录进行渲染验收；不复制 custody／凭据／live grants，不把它当作资源恢复或历史清理证明。debug-only `sandbox_settings_review_window_size` 仅允许 360／480／620／960 的自有窗口宽度，不增加生产窗口权限。保存中英文实际 AX／截图、DOM 实际宽度与按钮边界；`inspect_narrow_recovery.py` 交叉核对当前精确证据，`SHELLSPAN_STAGE2_NARROW_FIXTURE=<目录> pnpm exec vitest run src/components/ai/__tests__/recorded-narrow-recovery.test.ts` 执行两个真实记录回归。
+
+本地 fixture 收尾同样调用 `sandbox_settings_review_finish`：等待新建 PTY 的实际 Child wait 和源线程 join，只确认本次拥有的资源。导入日志里的历史 request/start 不表示新模型请求；必须核对前缀之后的事件。双 SSH 源的 finish 会关闭并 join 两个源，然后 wait 仍驻留的原始自有 server Child。Mac 锁屏导致收尾无法操作时保留句柄与待确认状态，不按历史 PID／名称补清理。
+
 ## 完整工作台恢复与活动资源验收
 
 `launch_recovery_workbench.py --app-name "ShellSpan Recovery New" --output <新的忽略目录>` 保留新建 App 的实际 Child。先通过真实 controller 选择 `fixture/owned-project`、workspace 和请求批准；模型生成并显式批准固定 `printf started > recovery-started; sleep 120; printf ended > recovery-ended` 后，在输出根创建 `interrupt-owned-app` 请求文件。runner 再核对真实派发 journal、started 效果及 ended absent，仅终止自己的 Child，随后在同状态目录重启。未达到该边界时不强制中断。
@@ -11,6 +31,10 @@
 记录回归使用 `SHELLSPAN_STAGE2_RECOVERY_FIXTURE=<真实恢复目录>` 和 `SHELLSPAN_STAGE2_ACTIVITY_FIXTURE=<真实不同绑定／活动目录>`。前端对应 `recorded-native-recovery.test.tsx`、`recorded-native-activity.test.tsx`；Rust 使用 `cargo test --manifest-path src-tauri/Cargo.toml recovery_recording -- --ignored`。两种前提分开提供；只有普通恢复记录不能代替不同绑定的委派记录。
 
 `recovery-diagnostics.ts` 的 `beginHour(<原 session ID>)` 仅只读核对实际 active grant，并按后端原 expiresAt 时间观察真实到期。需要让签发授权的原 App 持续运行整段一小时；重启后的 none、缩短 TTL 或调时均不计长时段通过。开发源码变更可能使 Wry 页面重载，重载后可重新只读观察同一截止时间，不续期或重发资源批准。所有历史超时资源继续待确认。
+
+更可靠的一小时入口：`launch_remote_workbench.py --local --app-name "ShellSpan Hour Acceptance" --output <新的忽略目录>` 创建原 App、自有项目和普通外部输入文件，路径分别见 `fixture/root-review-intent.json` 与 `launch.json`。在该 Wry 中调用 `sandbox-hour-native.ts` 的 `run(projectRoot, ownedReadFile)`，使用真实 MiniMax-M3、精确命令和生产 session 审批。debug-only 后端观察在原 Runtime 保存 `hour-initial.json`／`hour-expired.json`，不依赖页面或前台，生产 TTL 与时钟不变。到期后同一文件走新的 once 资源审批，生成 `hour-acceptance.json`。
+
+原 App 必须保留；页面若重载，`finish(projectRoot, ownedReadFile)` 可以继续原 expired grant 的新审批，但不能用重启后的 none 替代。使用 `inspect_hour_workbench.py --output <该目录>` 独立核对真实审计、两次精确调用、原进程与实际经过时长。`SHELLSPAN_STAGE2_HOUR_FIXTURE=<真实目录> pnpm exec vitest run src/components/ai/__tests__/recorded-hour-authorization.test.ts` 在完整证据上执行两个回归，未提供实际记录时明确 skipped。
 
 ## 阶段 2 分项入口
 
@@ -59,6 +83,12 @@ python3 tests/agent-shell-sandbox-macos-ssh/verify_stage1.py --output .phase4-ac
 Wry 测试项目自身带实际 Node `package.json`，避免 Node 越过项目根读取外部仓库配置。与生产业务一样，不能通过扩大读取许可修复缺少项目配置的问题。
 
 完整范围和当前结果见 [验收记录](../../docs/design/agent-shell-sandbox-macos-ssh-stage-1-acceptance.md)。
+
+绑定变更验收使用新的 `launch_remote_workbench.py` 普通账户 SSH fixture。在真实 Wry 中加载 `sandbox-binding-native.ts`，`pending(root)` 请求固定自有命令；`reconnect()` 实际断连／重连并刷新原会话预检，`decideOld()` 核对旧审批在原 TTL 内被取消且没有派发。新会话的精确审批与实际效果分别记录。`inspect_binding_workbench.py --output <该目录>` 交叉核对 15 项真实日志／UI／资源事实。
+
+`activity(root)` 先通过实际 SFTP 等到 started，再在活动期间核对目录／策略变更拒绝，实际重连后检查准确的原生进程终态和公共撤销审计。原目录不可改写；新目录由 owned fixture 创建，并以新会话／新审批执行。`inspect_binding_activity.py` 在 fixture 仍存活时核对 19 项事实；Web Inspector 截断的日志只能用标准 JSON decoder 读取完整字段，不能补造省略的数据。
+
+收尾必须在原 App／Runtime 仍驻留时调用 debug-only `sandbox_settings_review_finish`，等待原生 shutdown、自有源线程 join、原始 SSH Child wait 和精确自有凭据释放，保存 `fixture-shutdown.json`。随后关闭实际主窗口并核对 `settings-review.json` 和 `launch-final.json`。不要用 Cmd-Q 的退出码代替回执，也不要从历史 PID／名称认领清理。`SHELLSPAN_STAGE2_BINDING_FIXTURE=<绑定目录> SHELLSPAN_STAGE2_CLOSE_FIXTURE=<退出目录> pnpm exec vitest run src/components/ai/__tests__/recorded-remote-binding.test.ts` 执行三个真实记录回归；缺少证据时明确 skipped。
 
 追加 `--complete-recovery` 会运行本地 Wry 崩溃清理、真实 MiniMax 模型 WaitingApproval／已派发中断、两个远端 Agent Session 并发和 SSH Wry App 崩溃恢复。模型入口只读取现有默认路由的 credential reference，并为本次 UUID 清理胶囊使用真实独立 OS 钥匙串条目，产生实际 API 请求；不改写模型凭据，报告不导出凭据。中断仅针对本次 Popen，校验身份后 SIGKILL，由父进程 wait 回收；僵尸状态不作为仍运行的证明。
 

@@ -220,3 +220,143 @@ SSH fixture 的 profileId 和 keyId 现在都由本轮 UUID 生成，只读凭�
 普通文件 `/private/tmp/shellspan-stage2-hour-eDcGLJ/read-input.txt` 的真实 session 授权在 20:15:00 签发，原截止时间为 21:15:00（Asia/Shanghai）。原 App 保持运行，中间只读核对仍 active，截止时间未续期。截止时间已经过去，但 Mac 再次锁屏，尚不能读取原 App 的实际到期 snapshot 或完成新资源审批，不能把时间经过记为通过。`.phase4-acceptance/stage2-recovery-workbench-2026-10-09/hour-acceptance-pending.json` 核对实际 session 审计寿命为 3599998 ms，post-deadline snapshot 仍为 null，passed=false。不能用 60 秒操作审批到期或单次调用 grant 的 TTL 替代。历史公共 IPC／预检超时资源继续 unconfirmed，不按 PID、名称、空 registry 或新报告补清理。
 
 最后将 `recoveryRequired` 限定为原生执行／已授权未派发／待审批检查点；纯模型请求保留原有继续方式。真实模型 journal 的冷前缀分别核对纯模型不进入资源门禁、unknown 原生执行进入门禁、取消终态不复活，两个记录回归通过。最新全量 Rust 仍为 1165 passed、68 ignored，另 5 集成 passed，日志 `stage2-native-gate-rust-full-2026-10-09.log`；记录回归日志为 `stage2-recorded-native-gate-final-2026-10-09.log`。该范围收窄后的额外真实模型复验保留在 `stage2-recovery-gate-final-2026-10-09/pending-result.json`：系统钥匙串读取等待，1 session、0 model request、0 native dispatch；Mac 锁屏阻止 UI 继续及正常退出，terminationConfirmed=false，未计通过。没有绕过系统授权、复制凭据或按 PID 补清理。前述两轮完整工作台通过证据与这个额外待完成尝试分开保留，阶段 3 继续关闭。
+
+## 2026-10-10 当前补验完成结果
+
+本次要求的三个分项已有实际通过证据：完整 unknown／资源恢复、子 Agent／fleet 活动后台取消与新会话绑定，以及完整一小时授权到期。阶段 2 的其他目标／连接／账户组合与历史未确认资源仍按原记录保留；阶段 3 未开启。
+
+### 最新修订的完整工作台恢复
+
+`.phase4-acceptance/stage2-recovery-2026-10-10/recovery-evidence-final.json`：11 checks true、passed=true。当前 scope 收窄后的原生二进制实际完成 MiniMax-M3 派发、显式审批、中断、同状态目录重启、无回执时 uncertain=1 阻止、原签名回执 resolved=1 清理、新会话独立审批及真实 fresh 效果。旧授权 none、无 resident driver 的旧审批拒绝、旧命令没有重放；新结果 exitCode=0、terminationConfirmed=true，Direct 债务和托管行均为 0。seed 与 reopen 二进制哈希相同。
+
+App 正常退出 code=0，2 session、3 次实际模型请求、sourcePtyWrites=0；实际 UI、原始 journal、日志、marker 和终态报告保留。它补齐了昨日 scope 收窄后模型复验的证明，不覆盖昨日失败／锁屏尝试的原资源未确认状态，也没有以新成功清除任何历史资源。
+
+### 完整一小时到期与到期后新审批
+
+原 10-09 App 已退出，不能用原内存授权补认到期。新的独立 fixture 为 `.phase4-acceptance/stage2-hour-2026-10-10/`，首次真实模型读取的普通自有文件由 launcher 新建，不包含用户敏感内容。通过生产公共审批 IPC 显式选择 session 范围，生产一小时 TTL 不变。
+
+同一原 Runtime／PID 94200 在 **2026-10-10 09:25:59.313 → 10:25:59.313（Asia/Shanghai）** 保存授权。后端在原截止时间之后 3 ms 读到 state=expired，readPaths／writePaths／networkTargets／localServices 均为空、activeProcesses=0；观察期间没有重启、调时、缩短 TTL 或授权续期。保存的单调经过时长为 3596288 ms，观察开始时授权已签发 3655 ms，合计约一小时；审计落盘在签发后 1 ms，记录寿命为 3599999 ms。
+
+后端观察是 debug-only、只读的原 Runtime 任务，页面重载或锁屏不丢弃它；它不授予或恢复执行权限。`hour-initial.json`、`hour-expired.json` 分别保存真实 active／expired 元数据。新的同文件读取在截止时间之后产生不同的 requested／approved approval ID，资源审计 action=approved、scope=once；实际第二次 cat 退出 0、terminationConfirmed=true，stdout 与自有输入完全一致。没有复用已经到期的 session grant，`hour-acceptance.json` 的 freshOnceResourceApproval／freshNativeTerminal／passed 均为 true。
+
+`hour-evidence.json` 独立交叉核对原进程、生产 TTL、真实经过时长、两次精确调用、两份独立审批、session→once 审计及原生终态：11 checks true、passed=true、Direct 债务 0。实际工作台保存了授权有效／原截止时间、到期后没有可复用授权、第二次实际读取与批准的 PNG／AX。正常退出 code=0，1 session、4 次实际模型请求、sourcePtyWrites=0。临时系统睡眠抑制已结束，没有改变锁屏或钥匙串规则。
+
+### 当前质量和保留边界
+
+本轮全量前端 2472 passed、6 skipped；其中新增的两个一小时记录测试在尚未有完整证据时 skipped，实际证据生成后单独运行 **2 passed**。全量 Rust 1165 passed、68 ignored，另 5 集成 passed；恢复／委派的真实记录 Rust 回归另行 2 passed。对应日志 `stage2-hour-{frontend-full,rust-full,recorded-tests,recorded-regressions}-2026-10-10.log`。原生／前端构建、全仓 fmt、includes 和 diff check 通过，原有构建警告保留。
+
+所有 skip／ignore 不计通过。历史公共 IPC／SSH 预检超时资源仍 unconfirmed，不按 PID、名称、空 registry 或新成功报告清理。验收使用新的自有目录／进程／文件，没有提交、tag、推送或进入阶段 3；用户另行更新的 HEAD 和文件继续保留。
+
+## 2026-10-10 连接绑定刷新修复与实际组合复验
+
+修复前在新的自有 SSH fixture 中确认：真实模型的原审批仍在 TTL 内，同身份断连／重连后重新启动原会话刷新预检，批准前重新 prepare 会把原绑定换成新连接绑定，旧审批仍可执行。原生结果实际 exitCode=0、terminationConfirmed=true；记录保留在 `stage2-binding-before-2026-10-10`，不依赖模拟事件或缩短时钟。
+
+NativeAdapter 现在保留原 prepared token 的连接代际、账户／认证和 profile 执行修订；刷新前校验原绑定，刷新后比较新旧绑定。runtime slot 转发这个核验，pipeline 保留原有契约和 omitted-input 校验。绑定变化使原审批持久化为 cancelled，结束原会话，不记录原命令派发；新会话必须重新显式申请审批。刷新期间再次改变绑定也会拒绝，执行前最后一次绑定核验继续保留。
+
+`stage2-binding-fixed-2026-10-10/binding-evidence.json` 的 15 项检查通过：原审批在到期前取消、没有 approved／dispatched、旧效果文件 absent；新会话经实际 UI 独立审批，远端 Seatbelt 命令退出 0 并确认终止，新效果精确匹配。实际 UI、journal、来源代际和资源终态均保存；两个会话授权 none、活动进程 0，Direct debt／custody 0。
+
+`stage2-binding-terminal-2026-10-10/binding-activity-evidence.json` 的 19 项检查通过：自有后台命令的 started 先由实际 SFTP 确认，再断连；活动期间目录改写与策略切换被拒绝。重连使原始连接绑定失效，原准确 process handle 终态为 failed、terminationConfirmed=true，公共撤销审计 cleanupConfirmed=true，ended 效果 absent。原目录与策略保持原值；新建独立目录和会话后由实际 UI 重新审批，真实 fresh 效果仅出现在新目录。原会话工作台显示已停止，两个会话均无残留授权／活动进程，debt／custody 0。未扩展为不同真实账户通过。
+
+退出与资源证明分别记录。前几轮 Cmd-Q 后只有 App 退出码，没有原生汇总／fixture 退出回执，辅助 SSH fixture 的完整退出仍未确认；这些状态不凭新成功补认清理。新增 debug 收尾只使用原 Runtime 和仍驻留的自有 Child／线程／凭据引用：先确认 native shutdown，再 join 源线程、wait 原始 SSH server Child，释放精确自有凭据，并显式释放 managed fixture，避免 AppHandle／Runtime 引用继续持有资源。Child 已被 wait／try_wait 回收后不会再按旧 PID 发信号。
+
+最新 `stage2-binding-close-2026-10-10/fixture/fixture-shutdown.json` 实际确认 runtimeShutdownConfirmed、sourceWorkerJoined、serverWaitConfirmed、ownedCredentialReleased 均为 true；server exitCode=0、PTY 写入 0。该轮实际后台重连与新目录命令保留原生终态／SFTP started／公共撤销日志与 UI；一次新审批自然过期的记录也保留，后续新的精确公共 IPC 审批完成真实执行。正常关闭主窗口后 `settings-review.json`／`launch-final.json` 均存在、exitCode=0，3 session、6 次实际模型请求，sourceUnchanged／binaryUnchanged=true。这个回执不覆盖旧窗口的辅助资源。
+
+当前生产 `native_adapter.rs`／`tool_pipeline.rs` 哈希与 15／19 项通过记录一致；debug 收尾扩展单独记录，不外推为历史资源清理。全量前端 2468 passed、12 skipped，日志 `stage2-binding-frontend-2026-10-10.log`；全量 Rust 1165 passed、68 ignored，日志 `stage2-binding-rust-close-2026-10-10.log`。实际记录回归另行运行，skip／ignore 不计通过。阶段 2 其他目标／账户组合、窄恢复界面及历史未确认边界仍按原范围保留，阶段 3 未放行；没有 commit、tag 或推送。
+
+最终三个真实记录回归 3 passed，日志 `stage2-binding-recorded-final-2026-10-10.log`；前端构建、全仓 fmt、51 个 includes、AI styles 和 diff check 通过。最后一轮全量前端发生在新增退出记录回归之前；新回归以实际收尾证据单独通过，不修改原全量计数。
+
+## 2026-10-10 双目标预检与窄恢复界面补验
+
+新的 `stage2-target-switch-2026-10-10` fixture 在同一普通账户／同一自有 sshd 上创建两个独立的真实 SSH PTY 和独立目录，共享本次自有 profile／凭据。不声称跨主机、不同账户或不同认证方式组合通过。独立工具栏沿用 ToggleGroup 切换真实 TerminalStore 源，不模拟 connected 状态，不改生产工作台布局。
+
+实际主工作台经生产目录选择器绑定自有目录、选择工作区策略，观察 A 的预检按钮 disabled／加载中后切换 B；B 及切回 A 的状态保留为 AX／截图。切换查看目标不等于重绑仍有效的原会话，不要求仅因导航就取消其他目标的活动任务。B 不得沿用 A 的审批／授权，切回时已失效审批不得复活。
+
+生产 `useRemoteSandboxVerification` 在实际 Wry／原生 IPC 上完成 11 项检查：完成结果不出现在另一目标、切回不复活；首次 B 的真实 SSH／SFTP 预检确实 busy 时切换，切回后旧在途响应被丢弃；B 的结果绑定准确源／目录；策略改变及切回不恢复旧结果，新的 A 验证成功。`target-verification-evidence.json` 的 verificationPassed=true、overallPassed=false。这个 hook／IPC 证明与主工作台观察分开记录，没有 mock、响应替换、延时屏障或修改生产计时器。
+
+真实模型待审批组合仍 pending：会话已创建，原 Runtime 查询 idle、modelSelected=false，实际 model request=0。仅采样本轮自有 App 的进程，栈确认 `agent_runtime_start → RouteStore::credential → SecItemCopyMatching → SecurityServer::decrypt` 等待系统钥匙串；随后 UI 工具明确提示 Mac 已锁屏、无法自动解锁。没有绕过钥匙串或把未发生的模型派发记为通过。原 App／两个源的拥有句柄保留用于解锁后继续与可信收尾，不按 PID／名称补清理，不宣布终态。
+
+`stage2-narrow-recovery-2026-10-10/narrow-evidence.json` 的 10 项检查通过。由此前真实 MiniMax／显式批准／已派发日志导出逐字相同的原始前缀，仅重读历史；不复制 database、凭据、live grants 或 resource custody，不重放模型命令。实际 Wry 为 360 CSS px（Retina 截图 720 px），中英文 documentWidth=360，两个按钮边界均在容器内；结束中断和旧停止操作 disabled，旧批准卡不出现。键盘可从语言切换经设置／历史／新会话到 Verify cleanup receipts；两个截图已实看。这个渲染证明不能补认历史资源清理。
+
+本次新建本地 PTY 使用原始 Child wait 回执，sourceWorkerJoined／sourceWaitConfirmed=true、PTY 写入 0；Runtime shutdown 与主窗口正常退出均确认，native／launcher exitCode=0、binaryUnchanged／originalJournalUnchanged=true。汇总里的一个 request/start 来自导入历史；前缀之后实际新增 model request=0／native dispatch=0。两项真实记录回归 2 passed，日志 `stage2-narrow-recorded-2026-10-10.log`。
+
+当前 Rust 1165 passed、68 ignored，前端构建、全仓 fmt、51 includes、AI styles 与 diff check 通过，日志 `stage2-target-ui-{rust,build}-2026-10-10.log`。真实模型待审批跨目标及双 SSH 源可信收尾需 Mac 解锁后继续；历史资源仍 unconfirmed，阶段 3 关闭，未提交或推送。
+
+解锁后在原 App、原状态目录和原会话继续，钥匙串返回后模型选择完成；页面重载导致旧 JS callback 丢失，核对原 journal 没有 request/start 后，通过公共 followup 向同一会话提交精确自有命令。真实 MiniMax 请求产生一次 `printf target-a > switch-target-a` 待审批，实际 A 工作台显示“允许执行一次”。切换 B 后显示 B 新建会话，不出现 A 的审批按钮。原 60000 ms 审批自然到期；随后从 B 打开 A 历史会话，显示续接新会话提示和已过期记录；返回 A 仍显示“批准请求已过期”，无执行按钮。历史视图是在到期后观察，不能外推为到期前历史面板验收。原命令没有 approved 或 dispatched，模型没有重试。
+
+`stage2-target-switch-2026-10-10/target-switch-final-evidence.json` 的 15 项记录检查通过，旧 pending 报告保留不改写。原 Runtime shutdown 后，两个原 SSH 源线程 join、原 sshd Child wait（exitCode=0）、精确自有凭据释放均有回执；PTY 写入 0。主窗口正常退出，launch exitCode=0、sourceUnchanged／binaryUnchanged=true。该轮两个实际模型请求分别为初始工具请求和到期结果总结。不同真实账户仍 deferred，历史未确认资源保持 untouched，阶段 3 继续关闭。
+
+## 2026-10-10 审批未到期时从 B 打开 A 历史会话
+
+新的独立 Wry／同账户双 SSH 源验收目录为 `stage2-history-live-2026-10-10`。真实 MiniMax 生成一次精确自有命令 `printf target-a > switch-target-a`，原审批到期时间为 1791611253574，仍沿用生产 60000 ms TTL。B 打开 A 历史会话的实际 AX／截图时间为 1791611232832（距到期 20742 ms）；展开历史步骤为 1791611237255（距到期 16319 ms）。B 显示历史等待批准步骤与“旧命令不会自动重试”的续接提示，没有“允许执行一次”按钮。截图已实看，不替换模型、IPC 或生产时钟。
+
+切回 A 的实际 AX 时间为 1791611249835（距到期 3739 ms），原审批仍有“允许执行一次”按钮。随后通过 A 实际界面取消，journal 记录 rejected；全日志只有一次 requested，没有 approved 或 tool/execution。生产公共 IPC 查询授权 state=none、activeProcesses=0。实际模型请求为 2 次（工具申请和拒绝结果总结），源 PTY 写入 0。此结果只覆盖同账户跨目标历史导航，不能证明不同账户隔离或活动资源转移场景。
+
+新增 `recorded-history-isolation.test.ts` 对真实时间戳、B 历史／展开内容、A 原审批入口及无批准／派发进行回归，显式指定本轮 fixture 后 2 passed，diff check 通过。未修改生产 UI／后端行为，未提交、tag 或推送。
+
+主窗口正常关闭，launcher exitCode=0、sourceUnchanged／binaryUnchanged=true，`settings-review.json` 存在；本轮没有生成 `fixture-shutdown.json`，因此辅助 SSH 源／server／自有凭据的完整收尾仍 unconfirmed。不能凭应用退出、无活动授权或其他轮次回执补认清理，不按 PID／名称处理。不同真实账户的验收等待用户指定第二个现有可登录普通账户配置；新执行重新审批及旧授权／活动资源不转移尚未获得该组合的真实证据。阶段 2 整体继续 pending，阶段 3 不放行。
+
+## 2026-10-10 不同真实 SSH 登录身份分项验收
+
+用户指定现有 `root@175.178.66.45:22` 与 `root@8.216.9.10:22` 配置，作为不同主机上的真实登录身份。此项不再增加“必须 macOS 普通账户”的要求；平台能力仍按实际 backend 记录。用户已连接窗口使用的已安装二进制与当前修订不同，实际 UI 为旧权限入口。本轮构建当前开发修订，用 `launch_account_review.py` 启动独立命名的正常工作台，在现有开发数据库／系统钥匙串引用上连接这两个配置，没有复制密码、修改用户配置或中断其既有终端。
+
+证据目录 `stage2-real-account-review-2026-10-10`，`account-evidence.json` 的 12 项记录检查通过，**overallPassed=false**。真实记录回归 `recorded-account-isolation.test.ts` 指定该目录后 2 passed。只新增验收脚本／测试／记录，不改生产行为，不提交或推送。
+
+- A 的精确 `printf shellspan-account-a-20261010` 请求实际待审批，切到已连接 B 时仍在 A 的 TTL 内，B 显示独立新会话，无 A 的批准入口。B 历史列表明确按 `root@8.216.9.10:22` 过滤，没有本轮 A 会话。A 请求自然过期，没有 approved／tool/execution，切回后未复活。
+- B 的 `printf shellspan-account-b-20261010` 产生独立 approvalId，经实际 UI 单次批准后派发。原生 SSH 握手在 15002 ms 超时，failure.admission=notStarted、terminationConfirmed=true、stdout 为空，不能记为远端执行成功。
+- A 的第二个独立任务为 `printf shellspan-account-active-a; sleep 40`。实际批准、派发，并收到准确 stdout，证明命令启动。未显式设置超时，触发生产默认 30000 ms；原生结果为 uncertain、timedOut、failure.admission=started、terminationConfirmed=false。此时原会话持有精确 handle `proc-8eaaf45168404e42ac5f75fbe3a4c03b`，不根据这个标识构造额外清理权。
+- 公共 IPC 在超时前查询 A activeProcesses=1、B=0；切到 B 后仍为 A=1、B=0。后一次查询发生在 A 已超时且终止未确认之后，因此证明的是未确认资源仍属于 A，不描述为该时刻远端进程必然仍运行。B 工作台没有接管 A 活动任务。
+- B 的新重试在发送阶段被“Shell 资源清理尚未确认”门禁拒绝，没有新增 requested／模型执行。原 Runtime 对本轮精确 A 会话的公共取消返回 `Native process cancellation remains unconfirmed`；host 会话的资源撤销入口拒绝 `Restricted Session required for resource revocation`。本轮债务保留，不按 PID／名称清理，不以命令自然结束、空授权或窗口退出解除。
+
+两个会话实际为 host policy／host-account，backend capability unavailable；公共资源授权 state=none。已覆盖跨身份审批及活动资源归属，尚未覆盖有实际 live grants 时的授权转移、B 成功执行以及可信资源终态。原验收 Runtime／窗口继续保留，不关闭拥有本轮资源的实例。历史超时资源保持 untouched；阶段 2 整体 pending，阶段 3 不放行。
+
+### 同日继续：收尾阻塞根因复核
+
+原账户验收进程与窗口仍存在。只读查询当前开发 Direct 账本，本轮精确 task 的 dispatch_debt=1、对应 remote_cleanup_custody=0；没有读取 key、修改账本或对远端发出清理命令。
+
+生产 `native/process.rs::run_remote_worker` 的 host 路径在 deadline 到达时关闭 channel，以 terminationConfirmed=false 结束并返回，原 SSH channel／session 随后释放。`ManagedProcessNative::kill` 对已经终态但未确认的记录，仅能调用 `remote_sandbox` 的所属资源清理；本轮 host-account 没有该 job／清理凭据，因此原 Runtime 存在也不能补认终态。不能通过延长等待、重复取消、重连、自然结束或重新启动应用恢复这份已丢失的清理能力。
+
+授权能力复核：`sandbox_authorization.rs` 明确拒绝 host policy 的 sandbox 资源请求。两个登录身份可以证明审批与资源归属隔离，但当前 host-account 路径不能产生所需的实际 sandbox live grants；不能把 state=none 当作授权复用／隔离验收完成。
+
+继续真实执行会触及现有 Direct 债务门禁，故未发送 B 重试、未通过新数据目录／新实例绕过，未重放 A 命令。后续实现需要在新 host-account 执行启动前建立可验证的远端资源归属、收尾凭据及确认回执；这个未来契约不能追认本轮无 custody 的旧债务。当前实际授权验收还需支持资源 grant 的后端。本轮根因记录不放行阶段 2 或阶段 3。
+
+## 2026-10-10 新 Host Direct 可信收尾实现
+
+生产 NativeToolEngine 对带冻结 Host 契约的远端新命令接入专用内存控制器。派发前核验真实源代际、账户／profile 修订、固定主机密钥、规范化 cwd 和现有 Python；未派发的检查失败不创建虚假债务。新 job 的签名清理 capsule 在 Shell 启动前托管到系统钥匙串，原生状态仅存引用。正常退出、超时、取消和绑定失效沿用已有所属资源回执处理。前台调用增加有界收尾等待，回执查询覆盖 DNS／TCP／SSH 的完整期限，避免用户命令到期后在控制器收尾期间过早返回 running。
+
+新 `remote_host.py` 复用未修改的旧控制器签名／Child／进程组函数，单独实现 Host 流程；保留账户环境，并通过 Python `-I` 隔离控制器导入。规范化 `/tmp` 避免 macOS 用户 TMPDIR 超过 Unix socket 路径限制。工具原有最长一小时期限保持；不安装远端组件，不改生产 UI、命令审批或 sandbox grant 范围。旧 Seatbelt 源码及摘要未改变，旧 capsule 缺省按原控制器处理；UID=0 仅适用于明确 Host capsule。
+
+实际验证均使用新自有资源，没有 mock 或模型／IPC 替身：
+
+- `host_tests -- --ignored --test-threads=1` 显式执行 **3 passed**。自有普通账户 sshd 与真实系统钥匙串覆盖正常退出、超时、显式取消、准确 stdout、控制器目录清理、cleanup capsule 的 OS 读取及签名核验。生产 NativeToolEngine 覆盖批准前拒绝、单次批准、host-account／unavailable 事实及正常／超时收尾后自身 dispatch_debt／remote_cleanup_custody 均为 0。这里没有硬崩溃创建者测试或用户 Linux root 工作台模型执行证明。
+- `test_host_controller.py` 实际本机 Child 验证正常／超时终态、最长一小时期限可接受、签名清理、错误密钥不能清理；**1 test passed**。日志 `stage2-host-controller-python-2026-10-10.log`。
+- 全量 Rust **1165 passed、71 ignored**，另 5 集成 passed；日志 `stage2-host-rust-full-2026-10-10.log`。新增三项属于显式分项运行通过，默认 ignored 不计全量通过。前端和原生构建通过，日志 `stage2-host-{frontend,native}-build-2026-10-10.log`；全仓 fmt、51 includes 与 diff check 通过。原有两项 container dead-code 与构建提示保留。
+
+只读复核用户原开发账本，本轮旧 A task 仍 dispatch_debt=1、对应 custody=0。旧账户验收实例继续保留，没有修改账本、按 PID／名称清理或将失败轮次资源随新通过结果补认清理，没有 commit／tag／推送。新代码尚未用于用户两台 Linux root 的工作台重新执行；B 成功执行、实际 sandbox live grants 和阶段 2 其他门禁仍待补齐。Host 收尾能力不等于文件／网络隔离，也不覆盖恶意同账户／逃逸后代；阶段 2 整体 pending，阶段 3 不放行。
+
+## 2026-10-10 真实 Linux 原生收尾补验
+
+新增 debug 固定验收入口及 `verify_linux_host.py`，从用户指定现有配置读取原 credential reference，使用新自有 SSH source、原生 prepare／单次批准／执行流程及独立验收账本。这里没有模型、没有恢复用户旧会话授权，也不代替主工作台跨身份验收。所有新检查是明确固定的验收命令；不修改服务器、known_hosts、用户连接配置或旧债务，不复制 secret 到文件或报告。
+
+最终本轮目录 `stage2-linux-host-r5-2026-10-10`：第一台 `root@175.178.66.45:22` 证明实际 `uname=Linux`／`uid=0`，正常退出、8 秒期限触发超时、真实 started 后显式取消、真实源断连均得到 terminationConfirmed=true，自有账本 debt／custody 均 0、源线程 join、源 PTY 写入 0。独立客户端崩溃窗口先核对真实 host-started、debt=1／custody=1，再由父进程 SIGKILL 并 wait 本次原始 Child（exit=-9）；原 capsule 恢复 resolved=1／uncertain=0，清理后两表均 0，没有重放命令。R1／R4 的前述分项证据同时保留，不覆盖失败或扩大范围。
+
+第二台 `root@8.216.9.10:22` 仍没有完整通过：R1／R2 未得到执行结果；R3 真实返回 `Linux\n0\nhost-normal`，admission=started，但终止未确认。R4／R5 在源 SSH 握手阶段出现 `[Session(-9)] Timed out waiting on socket`。各目录的源码／二进制身份及失败结果独立保存；不得凭某次正常 stdout 或之后成功来解除该轮资源状态。
+
+源码复核发现 EOF 处理窗口：首次 completion 查询失败后，后续 cleanup 成功可能移除最终状态，原生却仍报告未确认。现在清理期间保留已验证的最终回执，并从原 job 内存读取终态；反复清理仅使用同一已验证回执。Host job 的检查／控制复用自己的精确已认证 peer；恢复 capsule 一次核验也复用精确 peer，避免每个回执都重新握手，不共享到其他 job／账户。未将这一源码窗口认定为 R3 失败的唯一根因。
+
+新增真实回执保留回归，实际清理目录后断开原源，原 job 仍能取得 exitCode=0／controllerFinished／terminationConfirmed，且 valid=false，未复活执行。四项真实 SSH／系统钥匙串回归 4 passed，日志 `stage2-linux-host-native-regressions-r2-2026-10-10.log`。第一台实际记录回归 2 passed，第二台失败不计通过。
+
+第二台无认证对照：系统 OpenSSH 校验同一 ECDSA 主机密钥并完成握手，随后按 `PreferredAuthentications=none` 被拒绝，未读取凭据或执行命令；`stage2-linux-host-r4-2026-10-10/b-openssh-handshake.log` 保留事实。libssh2 独立对照在 default／curve25519／ecdh 中超时，一次 group14-sha256 在约 8.5 秒后完成握手并匹配 known_hosts；完整结果为 `stage2-linux-host-b-handshake-2026-10-10/host-handshake.json`。这不证明稳定算法根因，没有修改生产算法或绕过主机信任。
+
+R3 原 capsule 的后续恢复曾停在 macOS `SecurityServer::decrypt`，原进程采样保留为 `recovery-sample.txt`。用户在系统完成授权后，该原请求返回 resolved=0／uncertain=1、debt=1／custody=1；新的 UUID 恢复报告保留旧失败文件，未补认清理。它属于本轮新验收资源，不能与更早的无 custody 旧 A 债务合并或相互替代。旧 A 及其他历史资源继续 unconfirmed，不按 PID／名称处理；阶段 2 整体 pending，阶段 3 不放行。
+
+最终全量 Rust 1165 passed、72 ignored，另 5 集成 passed，日志 `stage2-linux-host-rust-final-r3-2026-10-10.log`；第一台 R5 真实记录回归 2 passed。前端构建通过，日志 `stage2-linux-host-build-final-2026-10-10.log`；当前原生构建、fmt、51 includes 和 diff check 通过。只读复核用户原开发旧 A 行仍 debt=1、custody=0，原账户验收进程保留；本轮固定 Linux 检查进程均已返回。没有 commit、tag、推送或服务端配置改动。下一项仍是第二台 libssh2 握手与可信终态的稳定复验，随后才补完整跨身份／实际授权组合；本记录不宣布该目标完成。
+
+### 第二台原 capsule 收尾与握手复验（2026-10-10）
+
+R3 原目录的独立恢复回执 `target-1-lifecycle/host-recovery-81f58e69-69dc-43db-b7f0-a1497fb71575.json` 通过原系统钥匙串 capsule 和签名回执返回 resolved=1／uncertain=0、debt=0／custody=0。原 `host-normal.json` 的 started／terminationConfirmed=false 以及先前恢复失败文件保持原样；这只确认该轮原资源清理，不把原执行或完整第二台验收改记通过。旧开发 A 只读计数仍为 debt=1／custody=0，原账户验收 App 保留，没有接管或解除该债务。
+
+无认证对照目录 `stage2-linux-host-b-handshake-r2/r3/r4-2026-10-10` 分别保存原始结果。默认 curve25519 既有 574 毫秒成功，也有 15.826 秒成功；30 秒期限内仍存在失败，部分失败未取得服务器 banner。ECDH、group14、AES 与 TCP_NODELAY 对照没有证明稳定根因。生产保留原算法、TCP_NODELAY 和主机信任，只将握手期限独立设为 30 秒，握手成功后恢复原有 15 秒会话 I/O 期限；主机密钥读取复用同一握手入口，取消和更短外层期限仍关闭所属 socket 并 join。诊断入口不读取凭据或执行命令，恢复错误仅输出固定脱敏分类。
+
+第二台 R6／R7／R8／R9 失败记录独立保留。最终 `stage2-linux-host-b-r9-2026-10-10/report.json` 确认源码与二进制未变化，但完整验收 passed=false；该轮正常请求返回 admission=notStarted／processControllerFailed、durationMs=5002，没有正常 stdout，独立账本 debt=0／custody=0。握手及控制器启动等待仍需继续处理，不能凭 R3 清理成功或 R8 的正常退出放行第二台。未开始后续跨主机旧审批、授权和活动资源隔离／新执行重新审批；阶段 2 仍 pending，阶段 3 不放行。
+
+验证：真实自有 sshd／钥匙串 Host 回归 **5 passed**（含透明 TCP 转发延迟实际服务器字节 16 秒的握手测试）；连接测试 **17 passed、1 ignored**；取消／外层期限回归 **1 passed**；第一台原记录及第二台原 capsule 收尾记录 **3 passed**。日志分别为 `stage2-linux-host-b-final-host-tests.log`、`stage2-linux-host-b-connection-tests.log`、`stage2-linux-host-b-handshake-cancel-test-r2.log`、`stage2-linux-host-b-recording-tests.log`。最终原生构建、fmt、51 includes 和 diff check 通过。没有 UI 修改、commit、tag、推送或服务器配置改动。

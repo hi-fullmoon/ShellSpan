@@ -1888,7 +1888,7 @@ impl NativeToolEngine {
         context: &NativeExecutionContext,
         call: &AgentToolCallNative,
         effect: &AgentObservedEffectNative,
-        _sessions: &SessionManager,
+        sessions: &SessionManager,
         database: &Database,
         credentials: &CredentialManager,
         known_hosts_path: &Path,
@@ -1934,6 +1934,40 @@ impl NativeToolEngine {
         self.processes.ensure_capacity()?;
         validate_frozen_cwd(&call.target, arguments.cwd.as_deref())?;
         let launch_admission = self.admit_operation()?;
+        // Inspection has no user dispatch. Prepare ownership before opening
+        // an intent so an unavailable controller cannot create phantom debt.
+        let mut prepared_remote = if matches!(call.target, AgentToolTargetNative::Remote { .. }) {
+            let connection = connection_for_remote_target(&call.target, database, credentials)?;
+            context
+                .sandbox_contract
+                .as_ref()
+                .map(|contract| {
+                    if contract.policy == crate::agent_runtime::AgentSandboxPolicy::Host {
+                        crate::agent_runtime::remote_seatbelt::RemoteSeatbeltJob::new_host(
+                            contract,
+                            &call.target,
+                            &arguments.command,
+                            timeout,
+                            &connection,
+                            known_hosts_path,
+                            sessions,
+                            database,
+                        )
+                    } else {
+                        crate::agent_runtime::remote_seatbelt::RemoteSeatbeltJob::new(
+                            contract,
+                            &arguments.command,
+                            timeout,
+                            &connection,
+                            known_hosts_path,
+                        )
+                    }
+                })
+                .transpose()?
+        } else {
+            None
+        };
+        let remote_owned = prepared_remote.is_some();
         let intent = self.processes.ownership.begin(
             &context.request.task_id,
             &context.request.request_id,
@@ -2005,24 +2039,13 @@ impl NativeToolEngine {
             ),
             AgentToolTargetNative::Remote { target_id, .. } => {
                 let connection = connection_for_remote_target(&call.target, database, credentials)?;
-                let remote_sandbox = context
-                    .sandbox_contract
-                    .as_ref()
-                    .filter(|contract| {
-                        contract.policy != crate::agent_runtime::AgentSandboxPolicy::Host
-                    })
-                    .map(|contract| {
-                        crate::agent_runtime::remote_seatbelt::RemoteSeatbeltJob::new(
-                            contract,
-                            &arguments.command,
-                            timeout,
-                            &connection,
-                            known_hosts_path,
-                        )
-                    })
-                    .transpose()?;
+                let remote_sandbox = prepared_remote.take();
                 if let (Some(intent), Some(job)) = (&intent, &remote_sandbox) {
-                    intent.protect_remote(job, credentials)?;
+                    if let Err(error) = intent.protect_remote(job, credentials) {
+                        // No controller has been started yet.
+                        intent.resolve()?;
+                        return Err(error);
+                    }
                 }
                 spawn_remote_process_native(RemoteProcessStartNative {
                     remote_sandbox,
@@ -2093,7 +2116,10 @@ impl NativeToolEngine {
         let snapshot = if background {
             process.snapshot()?
         } else {
-            process.wait(timeout.saturating_add(Duration::from_secs(1)))?
+            // An owned SSH controller may still be verifying and removing its
+            // signed resources after the user-command deadline has elapsed.
+            let grace = Duration::from_secs(if remote_owned { 16 } else { 1 });
+            process.wait(timeout.saturating_add(grace))?
         };
         if !background {
             self.processes

@@ -7,6 +7,8 @@ use crate::models::AuthMethod;
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct RemoteCleanupCapsule {
+    #[serde(default)]
+    host_controller: bool,
     python: String,
     host_key: String,
     controller_sha256: String,
@@ -53,9 +55,12 @@ impl RemoteSeatbeltJob {
             keychain_key_id: connection.keychain_key_id,
         };
         Ok(RemoteCleanupCapsule {
+            host_controller: self.request["hostController"] == true,
             python: self.verification.python.clone(),
             host_key: self.verification.host_key.clone(),
-            controller_sha256: hex::encode(Sha256::digest(include_bytes!("remote_seatbelt.py"))),
+            controller_sha256: hex::encode(Sha256::digest(host::controller_source(
+                self.request["hostController"] == true,
+            ))),
             profile_id,
             connection,
             root: self.verification.facts.root.clone(),
@@ -81,11 +86,14 @@ impl RemoteCleanupCapsule {
         mode: &str,
         credentials: &CredentialManager,
         known_hosts: &Path,
+        peer: &mut Option<ssh2::Session>,
     ) -> Result<Value, String> {
         if !matches!(mode, "status" | "stop" | "cleanup")
             || self.controller_sha256
-                != hex::encode(Sha256::digest(include_bytes!("remote_seatbelt.py")))
-            || self.uid == 0
+                != hex::encode(Sha256::digest(host::controller_source(
+                    self.host_controller,
+                )))
+            || self.uid == 0 && !self.host_controller
         {
             return Err("directOwnershipInvalid".into());
         }
@@ -121,15 +129,24 @@ impl RemoteCleanupCapsule {
                 }
             }
         }
-        let request = json!({"mode":mode,"root":self.root,"home":self.home,"tempBase":self.temp_base,"uid":self.uid,
+        let request = json!({"mode":mode,"hostController":self.host_controller,"root":self.root,"home":self.home,"tempBase":self.temp_base,"uid":self.uid,
             "jobId":self.job_id,"digest":self.digest,"token":self.token,"signal":"kill"});
+        if peer.is_none() {
+            let session =
+                open_ssh_execution_session_pinned(&connection, known_hosts, &self.host_key)
+                    .map_err(|_| "directOwnershipUnavailable")?;
+            *peer = Some(session.target.clone());
+        }
+        let session = peer.as_ref().ok_or("directOwnershipUnavailable")?;
+        if fingerprint(session)? != self.host_key {
+            return Err("directOwnershipInvalid".into());
+        }
         let data = verify_receipt(
-            fixed_json(
+            fixed_json_peer(
+                session,
                 &self.python,
                 &request,
                 &connection,
-                known_hosts,
-                &self.host_key,
                 Duration::from_secs(4),
             )?,
             &key,
@@ -146,15 +163,16 @@ impl RemoteCleanupCapsule {
         credentials: &CredentialManager,
         known_hosts: &Path,
     ) -> Result<(), String> {
-        let first = self.control("status", credentials, known_hosts)?;
+        let mut peer = None;
+        let first = self.control("status", credentials, known_hosts, &mut peer)?;
         if first["controllerFinished"] != true {
-            let _ = self.control("stop", credentials, known_hosts);
+            let _ = self.control("stop", credentials, known_hosts, &mut peer);
         }
         let deadline = Instant::now() + Duration::from_secs(8);
         loop {
-            let data = self.control("status", credentials, known_hosts)?;
+            let data = self.control("status", credentials, known_hosts, &mut peer)?;
             if data["controllerFinished"] == true && data["terminationConfirmed"] == true {
-                let cleaned = self.control("cleanup", credentials, known_hosts)?;
+                let cleaned = self.control("cleanup", credentials, known_hosts, &mut peer)?;
                 if cleaned["controllerFinished"] == true && cleaned["terminationConfirmed"] == true
                 {
                     return Ok(());

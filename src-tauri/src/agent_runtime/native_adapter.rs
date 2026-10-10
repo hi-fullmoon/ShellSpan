@@ -219,6 +219,48 @@ impl NativeToolRuntime for NativeToolAdapter {
         )
     }
 
+    fn reprepare(
+        &self,
+        original_token: &str,
+        request: NativeToolRequest,
+    ) -> Result<NativeToolPreparation, String> {
+        let original_binding = self
+            .prepared
+            .lock()
+            .map_err(|_| "native prepared-call registry is unavailable")?
+            .get(original_token)
+            .ok_or("Original approval preparation is unavailable")?
+            .remote_binding
+            .clone();
+        if let Some(binding) = &original_binding {
+            binding
+                .validate(
+                    &target_native(&request.target)?,
+                    &self.app.state::<SessionManager>(),
+                    &self.app.state::<Database>(),
+                )
+                .map_err(|_| {
+                    terminal_target_unavailable(
+                        "Remote execution binding changed; request a new approval",
+                    )
+                })?;
+        }
+        let refreshed = self.prepare(request)?;
+        let unchanged = self
+            .prepared
+            .lock()
+            .map_err(|_| "native prepared-call registry is unavailable")?
+            .get(&refreshed.token)
+            .is_some_and(|stored| stored.remote_binding == original_binding);
+        if !unchanged {
+            self.abandon(&refreshed.token);
+            return Err(terminal_target_unavailable(
+                "Remote execution binding changed during approval refresh; request a new approval",
+            ));
+        }
+        Ok(refreshed)
+    }
+
     fn prepare(&self, request: NativeToolRequest) -> Result<NativeToolPreparation, String> {
         self.engine.ensure_shutdown_admission()?;
         if request.sandbox_contract.policy != super::AgentSandboxPolicy::Host

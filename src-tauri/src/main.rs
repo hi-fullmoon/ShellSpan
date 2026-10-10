@@ -2,6 +2,33 @@
 
 fn main() {
     let args = std::env::args_os().collect::<Vec<_>>();
+    if args.get(1).is_some_and(|arg| arg == "--native-host-check") {
+        if args.len() != 5 {
+            eprintln!("Usage: ShellSpan --native-host-check <owned-directory> <existing-profile-name> <lifecycle|crash|recover|handshake>");
+            std::process::exit(2);
+        }
+        #[cfg(all(target_os = "macos", debug_assertions))]
+        {
+            let result = args[3]
+                .to_str()
+                .zip(args[4].to_str())
+                .ok_or("Host check arguments invalid".to_owned())
+                .and_then(|(profile, mode)| {
+                    shell_span_lib::run_native_host_check(
+                        std::path::Path::new(&args[2]),
+                        profile,
+                        mode,
+                    )
+                });
+            if result.is_err() {
+                eprintln!("Host check did not pass; preserve owned evidence and resources");
+                std::process::exit(1);
+            }
+        }
+        #[cfg(not(all(target_os = "macos", debug_assertions)))]
+        std::process::exit(2);
+        return;
+    }
     if args
         .get(1)
         .is_some_and(|arg| arg == "--local-resource-controller")
