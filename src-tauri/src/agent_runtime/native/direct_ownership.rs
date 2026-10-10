@@ -307,19 +307,27 @@ impl DirectOwnership {
             match recover() {
                 Ok(()) => result.resolved += 1,
                 Err(error) => {
-                    // Report only fixed categories: custody and credential errors
-                    // may contain sensitive details and must never be dumped.
+                    // Custody and credential failures use fixed categories;
+                    // their potentially sensitive details are never dumped.
                     let category = match error.as_str() {
                         "directOwnershipInvalid" => "invalid custody",
                         "directOwnershipUnavailable" => "custody or peer unavailable",
                         "directOwnershipWriteFailed" => "ledger write failed",
                         "directCleanupUnconfirmed" => "cleanup unconfirmed or creator active",
-                        "sandboxRemoteControllerFailed: bounded SSH controller operation did not complete" => "controller transport failed",
+                        error if error.starts_with("sandboxRemoteControllerFailed:") => {
+                            "controller transport failed"
+                        }
                         _ => "protected recovery failed",
                     };
                     #[cfg(debug_assertions)]
                     if std::env::args().any(|arg| arg == "--native-host-check") {
-                        eprintln!("Host cleanup remains uncertain: {category}");
+                        if error.starts_with("sandboxRemoteControllerFailed:") {
+                            // Controller errors have already passed known-secret
+                            // redaction; credential and custody errors never do.
+                            eprintln!("Host cleanup remains uncertain: {error}");
+                        } else {
+                            eprintln!("Host cleanup remains uncertain: {category}");
+                        }
                     } else {
                         log::warn!("Direct resource recovery remains uncertain: {category}");
                     }

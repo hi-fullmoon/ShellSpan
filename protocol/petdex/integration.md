@@ -1,6 +1,6 @@
 # Petdex 联动契约与限制
 
-核验日期：2026-09-29。阶段 0 建立基线；阶段 1 已补齐客户端通信可靠性与诊断契约；阶段 2 已实现活动快照、仲裁与独立预览；阶段 3 已接入 AI 回合观察和分类配置。
+核验日期：2026-09-29。动作联动阶段0–5已完成，消息气泡阶段6–11也已完成；两者的实际证据与限制分别见[动作验收](../../docs/design/petdex-integration-acceptance.md)及[消息验收](../../docs/design/petdex-message-integration-acceptance.md)。下文说明动作联动契约，消息内容与传输另见[气泡契约](bubble.md)。
 
 ## 证据范围
 
@@ -13,7 +13,7 @@
 
 ## 现有请求契约
 
-消息气泡属于待实施扩展，见[消息设计](../../docs/design/petdex-message-integration-design.md)、[阶段6–11计划](../../docs/design/petdex-message-integration-plan.md)、[气泡契约](bubble.md)及[消息验收](../../docs/design/petdex-message-integration-acceptance.md)。确认方案为AI按会话、SSH/SFTP按后端连接归属，最多三个固定槽，默认模板、另行开启有限详情，关闭只结算已用槽且共享1500ms预算。当前下述实现仍不调用 `/bubble`；不能将计划能力套用为已实现行为。阶段6已完成固定版本协议及限定范围的真实显示核验，具备阶段7交接条件；组合/计时和残留限制见消息验收。
+消息气泡已接入，见[消息设计](../../docs/design/petdex-message-integration-design.md)、[气泡契约](bubble.md)及[消息验收](../../docs/design/petdex-message-integration-acceptance.md)。AI按会话、SSH/SFTP按后端连接归属，最多三个固定槽，默认模板、另行开启有限详情，关闭只结算已用槽且共享1500ms预算。消息与详情默认关闭，生产消息传输使用 `/bubble`；下述 `/state` 动作契约不能替代气泡契约。组合、计时、隐私和残留限制按各自验收范围说明。
 
 ShellSpan 的动作发送只向 `http://127.0.0.1:7777/state` 发出 JSON POST，凭证通过 `tokio::fs::read_to_string` 异步读取自 `~/.petdex/runtime/update-token`，使用标记为 sensitive 的 `X-Petdex-Update-Token` 请求头。客户端禁止代理，显式使用 `reqwest::redirect::Policy::none()` 禁止重定向，连接超时 250ms、单次请求超时 750ms。取消覆盖请求锁等待、异步读取和请求；重新读取后再次检查取消。阶段 4 另有用户主动触发的匿名只读 `GET /health`，见下文。
 
@@ -71,7 +71,7 @@ ShellSpan 的动作发送只向 `http://127.0.0.1:7777/state` 发出 JSON POST�
 
 ## 隐私与错误处理
 
-- 业务标识只用于 ShellSpan 内部仲裁，不发送主机、路径、文件名、任务 ID、终端/AI 内容或自由文本，不调用 bubble、更新或远程服务接口。
+- 动作请求的业务标识只用于 ShellSpan 内部仲裁，`/state` 不发送主机、路径、文件名、任务 ID、终端/AI 内容或自由文本，不调用更新或远程服务接口。另行开启的消息及有限详情遵循[气泡契约](bubble.md)的独立内容边界。
 - 总开关默认关闭；关闭时不读凭证、不发请求。Petdex 拥有的令牌文件是本地协议凭证来源，不复制到普通配置、日志、快照或仓库。
 - 当前客户端 trim 后校验 64 位十六进制；401 时重新读取，只有值发生变化才立即重试一次；传输失败由协调器退避恢复。250ms 起步，最大 60s；最短发送间隔 100ms。
 - 传输错误映射为 `unreachable`，不推断对端是否运行；凭证缺失、不可读、无效、认证失败与请求拒绝分别呈现有限类别，不输出原始响应或令牌。

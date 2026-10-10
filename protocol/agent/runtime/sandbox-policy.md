@@ -135,6 +135,8 @@ macOS 受限本地 Direct 和首次固定预检使用同一应用二进制的 `-
 
 控制器在用户 Shell 启动前创建独占目录与鉴权 socket，以仍拥有的 Child／进程组收尾；ready、终态和清理回执使用随机任务密钥签名并绑定 job、命令摘要和规范化 cwd。密钥经加密 SSH stdin 传入，清理 capsule 托管到系统钥匙串，普通账本仅存引用；恢复 capsule 没有原命令、没有执行授权。超时、取消和连接绑定失效均通过同一控制器核验。无法确认回执或清理时保留 uncertain 和派发门禁。已回收 Child 的历史 PID 不构成新的信号权限。
 
+SSH exec 请求只携带固定的短 Python 启动器。加密 stdin 按顺序传入两行 JSON：静态控制器源码字符串、原控制请求；每行继续使用 64 KiB 上限与标准 JSON 编解码。源码和签名回执格式不变，旧 capsule 仍按原控制器摘要校验。通道开启与 exec 请求在 libssh2 返回 EAGAIN 时等待同一请求，受原截止时间和取消状态约束，不重新派发命令。
+
 Host 控制器沿用账户环境与权限，仍没有文件／网络隔离，不支持 sandbox live grants，不承诺隔离恶意同账户进程或所有逃逸后代。后端继续报告 host-account／unavailable；资源终止确认仅是本次控制器的所属进程组和回执事实。UID=0 仅允许在明确 Host capsule 中使用，受限 Seatbelt capsule 的普通账户要求不放松。
 
 旧 Seatbelt 控制器源码与摘要保持兼容；缺少新 host 标记的 capsule 按原格式校验。本次扩展仅保护新派发，不能为无可信 custody 的旧 Host 超时债务补造清理权限。仍存活的创建者资源不能被其他 Runtime 接管。

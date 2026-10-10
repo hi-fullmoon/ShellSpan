@@ -278,11 +278,11 @@ fn fingerprint(session: &ssh2::Session) -> Result<String, String> {
 }
 
 fn controller_command(python: &str, host: bool) -> Result<String, String> {
-    let source = host::controller_source(host);
+    let bootstrap = "import json,sys;exec(json.loads(sys.stdin.buffer.readline(65536)))";
     if host {
         // Isolate Python imports without changing the account environment
         // inherited by the user's host command.
-        return shlex::try_join([python, "-I", "-c", &source])
+        return shlex::try_join([python, "-I", "-c", bootstrap])
             .map_err(|_| "sandboxRemoteRequestInvalid: argument encoding failed".into());
     }
     shlex::try_join([
@@ -292,7 +292,7 @@ fn controller_command(python: &str, host: bool) -> Result<String, String> {
         "LANG=C",
         python,
         "-c",
-        &source,
+        bootstrap,
     ])
     .map_err(|_| "sandboxRemoteRequestInvalid: argument encoding failed".into())
 }
@@ -306,6 +306,13 @@ fn request_line(request: &Value) -> Result<Vec<u8>, String> {
     }
     bytes.push(b'\n');
     Ok(bytes)
+}
+
+fn controller_input(request: &Value) -> Result<Vec<u8>, String> {
+    let source = host::controller_source(request["hostController"] == true);
+    let mut input = request_line(&json!(source))?;
+    input.extend(request_line(request)?);
+    Ok(input)
 }
 
 fn fixed_json(
@@ -368,7 +375,7 @@ fn fixed_json_peer(
     let result = execute_ssh_channel_with_input(
         session,
         &controller_command(python, request["hostController"] == true)?,
-        Some(&request_line(request)?),
+        Some(&controller_input(request)?),
         ExecutionOutputPolicy::new(64 * 1024, 4096, 128 * 1024)
             .map_err(|_| "sandboxRemoteOutputInvalid")?,
         &secrets,
@@ -382,10 +389,33 @@ fn fixed_json_peer(
         } => serde_json::from_str(&output.stdout.text).map_err(|_| {
             "sandboxRemoteReceiptInvalid: structured controller output is missing".into()
         }),
-        _ => Err(
-            "sandboxRemoteControllerFailed: bounded SSH controller operation did not complete"
-                .into(),
-        ),
+        SshChannelExecutionOutcome::Failed(error) => Err(format!(
+            "sandboxRemoteControllerFailed: {:?}: {}",
+            error.category,
+            crate::execution::redact_known_secrets(&error.message, &secrets),
+        )),
+        SshChannelExecutionOutcome::TimedOut => {
+            Err("sandboxRemoteControllerFailed: bounded SSH controller operation timed out".into())
+        }
+        SshChannelExecutionOutcome::Cancelled => {
+            Err("sandboxRemoteControllerFailed: bounded SSH controller operation cancelled".into())
+        }
+        SshChannelExecutionOutcome::Completed {
+            exit_code: 125,
+            output,
+        } => Err(format!(
+            "sandboxRemoteControllerFailed: controller exited with status 125: {}",
+            output
+                .stderr
+                .text
+                .chars()
+                .take(512)
+                .collect::<String>()
+                .trim()
+        )),
+        SshChannelExecutionOutcome::Completed { exit_code, .. } => Err(format!(
+            "sandboxRemoteControllerFailed: controller exited with status {exit_code}"
+        )),
     }
 }
 
@@ -828,7 +858,7 @@ impl RemoteSeatbeltJob {
         ))
     }
     pub(crate) fn launch_input(&self) -> Result<Vec<u8>, String> {
-        request_line(&self.request)
+        controller_input(&self.request)
     }
     pub(crate) fn ready(&self) -> Result<bool, String> {
         Ok(self.control("status", Duration::from_secs(2))?["started"] == true)
@@ -848,8 +878,15 @@ impl RemoteSeatbeltJob {
             &self.known_hosts,
             &self.verification.host_key,
         )
-        .map_err(|_| {
-            "sandboxRemoteConnectionFailed: frozen SSH peer could not be authenticated".into()
+        .map_err(|error| {
+            format!(
+                "sandboxRemoteConnectionFailed: frozen SSH peer could not be authenticated ({:?}: {})",
+                error.category,
+                crate::execution::redact_known_secrets(
+                    &error.message,
+                    &known_connection_secret_values(&self.connection),
+                )
+            )
         })
     }
     pub(crate) fn secret(&self) -> String {

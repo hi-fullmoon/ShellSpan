@@ -299,25 +299,46 @@ pub(crate) fn execute_ssh_channel_with_input(
             })
         }
     };
-    let mut channel = match session.channel_session() {
-        Ok(channel) => channel,
-        Err(error) => {
-            return SshChannelExecutionOutcome::Failed(SshExecutionFailure {
-                category: ExecutionErrorCategory::ChannelOpenFailed,
-                message: format!("failed to open reviewed SSH command channel: {error}"),
-            })
+    let mut channel = {
+        let _opening_mode = SessionBlockingModeGuard::nonblocking(session);
+        loop {
+            if let Some(outcome) = observed_terminal_or_deadline(cancellation, deadline) {
+                return outcome;
+            }
+            match session.channel_session() {
+                Ok(channel) => break channel,
+                Err(error) if error.code() == ErrorCode::Session(LIBSSH2_ERROR_EAGAIN) => {
+                    std::thread::sleep(SSH_EXECUTION_POLL_INTERVAL);
+                }
+                Err(error) => {
+                    return SshChannelExecutionOutcome::Failed(SshExecutionFailure {
+                        category: ExecutionErrorCategory::ChannelOpenFailed,
+                        message: format!("failed to open reviewed SSH command channel: {error}"),
+                    });
+                }
+            }
         }
     };
-    if let Err(error) = start_ssh_exec_channel(&mut channel, command) {
-        return SshChannelExecutionOutcome::Failed(SshExecutionFailure {
-            category: ExecutionErrorCategory::CommandStartFailed,
-            message: format!("failed to start reviewed SSH command: {error}"),
-        });
-    }
-
     // This guard is declared after the channel so blocking mode is restored
     // before Channel::drop asks libssh2 to free the channel on every path.
     let _blocking_mode = SessionBlockingModeGuard::nonblocking(session);
+    loop {
+        if let Some(outcome) = observed_terminal_or_deadline(cancellation, deadline) {
+            return outcome;
+        }
+        match start_ssh_exec_channel(&mut channel, command) {
+            Ok(()) => break,
+            Err(error) if error.code() == ErrorCode::Session(LIBSSH2_ERROR_EAGAIN) => {
+                std::thread::sleep(SSH_EXECUTION_POLL_INTERVAL);
+            }
+            Err(error) => {
+                return SshChannelExecutionOutcome::Failed(SshExecutionFailure {
+                    category: ExecutionErrorCategory::CommandStartFailed,
+                    message: format!("failed to start reviewed SSH command: {error}"),
+                });
+            }
+        }
+    }
     if let Some(input) = input {
         let mut written = 0;
         while written < input.len() {

@@ -1,6 +1,6 @@
 # Petdex 消息气泡接入设计
 
-状态：阶段6–11已串行完成并经协调审阅；颜色测试记录已按授权删除，真实Codex与ShellSpan卡片共存已获用户现场确认。原偏好已恢复、己方槽已结算、开发应用正常退出，外部新钩子和Petdex保留。网络抓包等覆盖边界仍明确记录，详见[阶段11审计](petdex-message-integration-acceptance.md#阶段11检查与待续审计)。消息与详情默认关闭。真实契约见[协议](../../protocol/petdex/bubble.md)，证据见[验收](petdex-message-integration-acceptance.md)，实施记录见[阶段6–11计划](petdex-message-integration-plan.md)。范围仅SSH、SFTP、AI，部署延期。
+状态：阶段6–11已串行完成并经协调审阅；颜色测试记录已按授权删除，真实Codex与ShellSpan卡片共存已获用户现场确认。原偏好已恢复、己方槽已结算、开发应用正常退出，外部新钩子和Petdex保留。网络抓包等覆盖边界仍明确记录，详见[阶段11审计](petdex-message-integration-acceptance.md#阶段11检查与待续审计)。消息与详情默认关闭。真实契约见[协议](../../protocol/petdex/bubble.md)，实施与证据见[阶段6–11验收记录](petdex-message-integration-acceptance.md)。范围仅SSH、SFTP、AI，部署延期。
 
 ## 1. 归属和三个固定槽位
 

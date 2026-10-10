@@ -357,6 +357,18 @@ R3 原目录的独立恢复回执 `target-1-lifecycle/host-recovery-81f58e69-69d
 
 无认证对照目录 `stage2-linux-host-b-handshake-r2/r3/r4-2026-10-10` 分别保存原始结果。默认 curve25519 既有 574 毫秒成功，也有 15.826 秒成功；30 秒期限内仍存在失败，部分失败未取得服务器 banner。ECDH、group14、AES 与 TCP_NODELAY 对照没有证明稳定根因。生产保留原算法、TCP_NODELAY 和主机信任，只将握手期限独立设为 30 秒，握手成功后恢复原有 15 秒会话 I/O 期限；主机密钥读取复用同一握手入口，取消和更短外层期限仍关闭所属 socket 并 join。诊断入口不读取凭据或执行命令，恢复错误仅输出固定脱敏分类。
 
-第二台 R6／R7／R8／R9 失败记录独立保留。最终 `stage2-linux-host-b-r9-2026-10-10/report.json` 确认源码与二进制未变化，但完整验收 passed=false；该轮正常请求返回 admission=notStarted／processControllerFailed、durationMs=5002，没有正常 stdout，独立账本 debt=0／custody=0。握手及控制器启动等待仍需继续处理，不能凭 R3 清理成功或 R8 的正常退出放行第二台。未开始后续跨主机旧审批、授权和活动资源隔离／新执行重新审批；阶段 2 仍 pending，阶段 3 不放行。
+第二台 R6／R7／R8／R9 失败记录独立保留。最终 `stage2-linux-host-b-r9-2026-10-10/report.json` 确认源码与二进制未变化，但完整验收 passed=false；该轮正常请求返回 admission=notStarted／processControllerFailed、durationMs=5002，没有正常 stdout，独立账本 debt=0／custody=0。summary 为 frozen SSH peer 连接失败，5 秒仅是该次失败耗时，不证明存在固定 5 秒启动等待期限。握手及冻结 peer 连接仍需继续处理，不能凭 R3 清理成功或 R8 的正常退出放行第二台。未开始后续跨主机旧审批、授权和活动资源隔离／新执行重新审批；阶段 2 仍 pending，阶段 3 不放行。
 
 验证：真实自有 sshd／钥匙串 Host 回归 **5 passed**（含透明 TCP 转发延迟实际服务器字节 16 秒的握手测试）；连接测试 **17 passed、1 ignored**；取消／外层期限回归 **1 passed**；第一台原记录及第二台原 capsule 收尾记录 **3 passed**。日志分别为 `stage2-linux-host-b-final-host-tests.log`、`stage2-linux-host-b-connection-tests.log`、`stage2-linux-host-b-handshake-cancel-test-r2.log`、`stage2-linux-host-b-recording-tests.log`。最终原生构建、fmt、51 includes 和 diff check 通过。没有 UI 修改、commit、tag、推送或服务器配置改动。
+
+### 启动与控制通道修正及 R15 收尾阻塞（2026-10-10）
+
+R10／R11 分别定位到派发前固定检查请求失败、SFTP 初始化失败；R12／R13 明确捕获到 exec 请求的 socket 超时，R14 触发检查请求本身的截止时间。SFTP 检查沿用默认 15 秒 I/O 期限；派发前只读检查的总期限为 15 秒。原生命令期限与审批不变。通道开启及 exec 请求改为非阻塞，在 EAGAIN 时等待同一请求，并检查原截止时间、取消和绑定状态。控制器 exec 请求仅含短启动器，源码字符串和原请求通过加密 stdin 的两行 JSON 传入，使用同一个二进制缓冲层解码；没有更改原 Python 控制器源码、签名格式、capsule 摘要或主机信任。
+
+原始 `stage2-linux-host-b-r15-2026-10-10` 在上述分帧传输修订之前运行。它返回空 stdout、admission=unknown、terminationConfirmed=false、sandboxRemoteStartupStopped，自有账本 debt=1／custody=1，整轮 passed=false，原始源码／二进制未变化。后续恢复只使用该目录的原受保护 capsule，没有重放原命令；debug-only 入口允许精确一条 debt／custody 的原 unknown 启动记录，生产恢复仍核验 capsule 的原 root、身份、来源和签名。
+
+R15 四次恢复报告分别保存。最新 `stage2-linux-host-b-r15-recovery-r4-launcher.log` 证明已连回原 peer、执行清理查询，控制器返回 `status 125: remoteHostControllerFailed:FileNotFoundError`；对应 status 路径读取原 job 的 `state.json`，没有取得签名终态。R15 仍 resolved=0／uncertain=1，debt=1／custody=1，不能凭文件不存在、客户端退出或新修订通过补认清理。没有启动下一轮用户主机命令。旧 A 独立账本仍 debt=1／custody=0；R3 原资源仍已确认清理，三者不合并。
+
+当前阻塞点是 R15 原签名状态缺失。后续需要补齐启动中断及清理 ACK 丢失时的持久签名收尾证据，并复核原轮是否有独立可信回执；后续机制不能为 R15 补造回执。第二台未通过完整验收，跨主机旧审批／授权／活动资源隔离及新执行重新审批尚未开始，阶段 2 pending、阶段 3 不放行。
+
+真实回归：Host **7 passed**（含认证后真实响应延迟 3 秒，以及同连接 100 毫秒期限仍在 1 秒内返回）；旧 Seatbelt stdin、限制及清理兼容性 **1 passed**；SSH 执行器测试 **9 passed**；控制器实际退出类别测试 **1 passed**。日志分别为 `stage2-linux-host-b-framed-controller-tests-r2.log`、`stage2-linux-host-b-framed-seatbelt-test-r2.log`、`stage2-linux-host-b-channel-tests-r2.log`、`stage2-linux-host-b-controller-class-test.log`。原生构建、fmt、51 includes 和 diff check 通过；没有 UI、服务器配置、commit、tag 或推送操作。

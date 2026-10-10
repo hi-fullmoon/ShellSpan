@@ -115,19 +115,51 @@ pub(super) fn run(
         return;
     }
     session.target.set_timeout(2000);
-    let mut channel = match session.target.channel_session() {
-        Ok(channel) => channel,
-        Err(_) => {
-            reject_pending(pending);
-            process.finish(
-                ProcessLifecycleNative::Failed,
-                None,
-                true,
-                Some("sandboxRemoteChannelUnavailable".into()),
-            );
-            return;
+    let mut channel = {
+        let _opening_mode = RemoteBlockingModeGuard::nonblocking(&session.target);
+        loop {
+            if let Some(lifecycle) = queued_control(&process, &controls, &mut pending, deadline) {
+                reject_pending(pending);
+                process.finish(lifecycle, None, true, None);
+                return;
+            }
+            if !job.valid()
+                || start
+                    .admission
+                    .as_ref()
+                    .is_some_and(|gate| gate.ensure_open().is_err())
+            {
+                reject_pending(pending);
+                process.finish(
+                    ProcessLifecycleNative::Failed,
+                    None,
+                    true,
+                    Some("sandboxAuthorizationInvalid: remote startup was revoked".into()),
+                );
+                return;
+            }
+            match session.target.channel_session() {
+                Ok(channel) => break channel,
+                Err(error)
+                    if error.code()
+                        == ssh2::ErrorCode::Session(libssh2_sys::LIBSSH2_ERROR_EAGAIN) =>
+                {
+                    thread::sleep(PROCESS_POLL_INTERVAL);
+                }
+                Err(_) => {
+                    reject_pending(pending);
+                    process.finish(
+                        ProcessLifecycleNative::Failed,
+                        None,
+                        true,
+                        Some("sandboxRemoteChannelUnavailable".into()),
+                    );
+                    return;
+                }
+            }
         }
     };
+    let _mode = RemoteBlockingModeGuard::nonblocking(&session.target);
     let command = match job.launch_command() {
         Ok(command) => command,
         Err(error) => {
@@ -144,17 +176,46 @@ pub(super) fn run(
             return;
         }
     };
-    if crate::execution::start_ssh_exec_channel(&mut channel, &command).is_err() {
-        reject_pending(pending);
-        process.finish(
-            ProcessLifecycleNative::Failed,
-            None,
-            true,
-            Some("sandboxRemoteControllerStartFailed".into()),
-        );
-        return;
+    loop {
+        if let Some(lifecycle) = queued_control(&process, &controls, &mut pending, deadline) {
+            reject_pending(pending);
+            process.finish(lifecycle, None, true, None);
+            return;
+        }
+        if !job.valid()
+            || start
+                .admission
+                .as_ref()
+                .is_some_and(|gate| gate.ensure_open().is_err())
+        {
+            reject_pending(pending);
+            process.finish(
+                ProcessLifecycleNative::Failed,
+                None,
+                true,
+                Some("sandboxAuthorizationInvalid: remote startup was revoked".into()),
+            );
+            return;
+        }
+        match crate::execution::start_ssh_exec_channel(&mut channel, &command) {
+            Ok(()) => break,
+            Err(error)
+                if error.code() == ssh2::ErrorCode::Session(libssh2_sys::LIBSSH2_ERROR_EAGAIN) =>
+            {
+                thread::sleep(PROCESS_POLL_INTERVAL);
+            }
+            Err(_) => {
+                reject_pending(pending);
+                process.finish(
+                    ProcessLifecycleNative::Failed,
+                    None,
+                    true,
+                    Some("sandboxRemoteControllerStartFailed".into()),
+                );
+                return;
+            }
+        }
     }
-    let _mode = RemoteBlockingModeGuard::nonblocking(&session.target);
     // No user command can start until the complete JSON line is delivered.
     // A partial transport result once delivery starts is deliberately unknown.
     process.mark_admission(AgentExecutionAdmission::Unknown);

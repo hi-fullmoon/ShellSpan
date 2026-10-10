@@ -73,7 +73,7 @@ CUA能捕获桌宠主窗口和设置窗口，不能取得独立气泡窗口；�
 
 ## 阶段7接口交接
 
-按[确认设计](petdex-message-integration-design.md)及[阶段计划](petdex-message-integration-plan.md)继续：
+按[确认设计](petdex-message-integration-design.md)继续；以下为阶段6当时的交接，后续实施结果见本文各阶段验收：
 
 1. 在ActivityEvent/ActivityGuard增加内部ActivityOwner（AI会话、后端连接）与有限ActivityKind；跨连接复制归目标连接，不建第二套事件来源。内部身份与显示详情分离，不进入外发序列化。
 2. 三固定槽：不超过三归属分别显示，更多为两个优先对象＋第三摘要；失败>等待>完成>运行>连接中，同级保留，真实运行去重计数。

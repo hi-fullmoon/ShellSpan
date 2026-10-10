@@ -5,6 +5,123 @@ use super::super::super::{
 use super::*;
 
 #[test]
+#[ignore = "actual sshd channel response delayed beyond its blocking IO timeout"]
+fn host_control_channel_waits_until_its_deadline_for_delayed_server_bytes() {
+    use std::net::{Shutdown, TcpListener, TcpStream};
+
+    let fixture = Fixture::new_host_review();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server_address = (fixture.connection.host.clone(), fixture.connection.port);
+    let delay_next_response = Arc::new(AtomicBool::new(false));
+    let delay = delay_next_response.clone();
+    let relay = std::thread::spawn(move || {
+        let mut workers = Vec::new();
+        for _ in 0..2 {
+            let (mut client, _) = listener.accept().unwrap();
+            let mut server = TcpStream::connect(server_address.clone()).unwrap();
+            let delay = delay.clone();
+            workers.push(std::thread::spawn(move || {
+                let mut client_reader = client.try_clone().unwrap();
+                let mut server_writer = server.try_clone().unwrap();
+                let upstream = std::thread::spawn(move || {
+                    let _ = std::io::copy(&mut client_reader, &mut server_writer);
+                    let _ = server_writer.shutdown(Shutdown::Write);
+                });
+                let mut bytes = [0; 8192];
+                while let Ok(count) = server.read(&mut bytes) {
+                    if count == 0 {
+                        break;
+                    }
+                    // Forward actual encrypted server bytes without decoding them.
+                    if delay.swap(false, Ordering::SeqCst) {
+                        std::thread::sleep(Duration::from_secs(3));
+                    }
+                    if client.write_all(&bytes[..count]).is_err() {
+                        break;
+                    }
+                }
+                let _ = client.shutdown(Shutdown::Both);
+                upstream.join().unwrap();
+            }));
+        }
+        for worker in workers {
+            worker.join().unwrap();
+        }
+    });
+    let (_trust_directory, known) =
+        crate::connection::trusted_known_hosts_fixture("127.0.0.1", address.port());
+    let mut connection = fixture.connection.clone();
+    connection.port = address.port();
+    let session = open_ssh_execution_session(&connection, &known).unwrap();
+    delay_next_response.store(true, Ordering::SeqCst);
+    let started = Instant::now();
+    let result = fixed_json_peer(
+        &session.target,
+        "/usr/bin/python3",
+        &json!({"mode":"inspect", "hostController":true, "root":"/"}),
+        &connection,
+        Duration::from_secs(5),
+    );
+    let elapsed = started.elapsed();
+    assert!(session.target.is_blocking());
+    delay_next_response.store(true, Ordering::SeqCst);
+    let timeout_started = Instant::now();
+    let timed_out = fixed_json_peer(
+        &session.target,
+        "/usr/bin/python3",
+        &json!({"mode":"inspect", "hostController":true, "root":"/"}),
+        &connection,
+        Duration::from_millis(100),
+    );
+    let timeout_elapsed = timeout_started.elapsed();
+    assert!(session.target.is_blocking());
+    drop(session);
+    relay.join().unwrap();
+    assert!(
+        result.is_ok(),
+        "actual delayed control response failed: {result:?}"
+    );
+    assert!(elapsed >= Duration::from_secs(3));
+    assert!(elapsed < Duration::from_secs(5));
+    assert_eq!(
+        timed_out.unwrap_err(),
+        "sandboxRemoteControllerFailed: bounded SSH controller operation timed out"
+    );
+    assert!(timeout_elapsed < Duration::from_secs(1));
+}
+
+#[test]
+#[ignore = "real owned SSH channel reports actual controller launch failure"]
+fn host_controller_failure_preserves_actual_exit_status() {
+    let fixture = Fixture::new_host_review();
+    let session = open_ssh_execution_session(&fixture.connection, &fixture.known_hosts).unwrap();
+    let unavailable = tempfile::tempdir().unwrap();
+    let python = unavailable.path().join("absent-controller-python");
+    let error = fixed_json_peer(
+        &session.target,
+        python.to_str().unwrap(),
+        &json!({"mode":"inspect", "hostController":true, "root":"/"}),
+        &fixture.connection,
+        Duration::from_secs(5),
+    )
+    .unwrap_err();
+    assert_eq!(
+        error,
+        "sandboxRemoteControllerFailed: controller exited with status 127"
+    );
+    let invalid_root = fixed_json_peer(
+        &session.target,
+        "/usr/bin/python3",
+        &json!({"mode":"inspect", "hostController":true, "root":python}),
+        &fixture.connection,
+        Duration::from_secs(5),
+    )
+    .unwrap_err();
+    assert!(invalid_root.contains("status 125: remoteHostControllerFailed:FileNotFoundError"));
+}
+
+#[test]
 #[ignore = "real owned sshd handshake delayed beyond the ordinary session IO timeout"]
 fn host_handshake_has_independent_timeout_and_restores_session_io_timeout() {
     use std::net::{Shutdown, TcpListener, TcpStream};

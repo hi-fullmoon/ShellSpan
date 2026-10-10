@@ -1,7 +1,7 @@
 # Agent 原生命令输入：阶段 0 架构与安全门禁记录
 
 > 日期：2026-09-14  
-> 对应研发计划：[agent-direct-shell-execution-plan.md](agent-direct-shell-execution-plan.md)；方案：[agent-direct-shell-execution.md](agent-direct-shell-execution.md)  
+> 历史方案：[agent-direct-shell-execution.md](agent-direct-shell-execution.md)；现行路线：[终端执行路线图](../../protocol/agent/runtime/terminal-execution-roadmap.md)。本文保留原提案的安全反例，不表示现行架构仍处于该阶段。
 > **决策：NO-GO。不得在本轮对任意原生命令根据 in-band end 自动连续写入下一条 Agent 命令；保持现有 wrapperV1。不进入阶段 1。**
 
 ## 门禁问题与实际结论

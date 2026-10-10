@@ -1,6 +1,6 @@
 # Agent 原生命令输入方案
 
-> 状态：设计提案  
+> 状态：历史设计提案；该提案的安全反例见[阶段0门禁](agent-direct-shell-execution-stage-0-gate.md)，现行架构见[终端协议](../../protocol/agent/runtime/terminal-protocol-rfc.md)和[路线图](../../protocol/agent/runtime/terminal-execution-roadmap.md)。
 > 适用范围：ShellSpan 的可视终端执行模式  
 > 基线：现有 `boundTerminal` PTY、TerminalLeaseManager 与审批链路  
 > 目标：Agent 将命令原样提交给已绑定的交互式 shell，用户直接看到该 shell 的回显、输出和提示符。

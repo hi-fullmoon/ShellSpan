@@ -120,7 +120,7 @@ FrozenFrontendSource新增从完整冻结manifest派生的bundle_plan，记录�
 
 [缓存版本完整回归](evidence/windows-stage-a-2026-10-10-frontend-plan-cache-tests.txt) lib213/main98/candidate11，共322 passed、15 ignored、0 failed。测试不替换当前已冻结服务映像，不能据此声称当前物化加速。
 
-[原system-r3无记录进程快照](evidence/windows-stage-a-2026-10-10-frontend-materialization-system-r3-process.json)04:03:39确认controller31152与worker24948的精确fixture命令及创建时间，worker累计CPU366.03125秒、工作集118571008字节、84899句柄并有Running线程。records_opened=false；未读取活动分页或namespace。此为单点资源观察，尚非峰值预算或创建/退役完成证明；保留同一原事务等待终态。后续计划见[Windows研发计划](agent-shell-sandbox-windows-development-plan.md)，阶段A及生产门禁不变。
+[原system-r3无记录进程快照](evidence/windows-stage-a-2026-10-10-frontend-materialization-system-r3-process.json)04:03:39确认controller31152与worker24948的精确fixture命令及创建时间，worker累计CPU366.03125秒、工作集118571008字节、84899句柄并有Running线程。records_opened=false；未读取活动分页或namespace。此为单点资源观察，尚非峰值预算或创建/退役完成证明；保留同一原事务等待终态。后续计划见[研发终版的 Windows 路线](agent-shell-sandbox-final.md#5-windows-路线与完成门槛)，阶段A及生产门禁不变。
 
 ### 2026-10-10 冻结inventory的完整计划缓存
 

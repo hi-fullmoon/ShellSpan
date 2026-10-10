@@ -60,3 +60,21 @@ describe.skipIf(!recoveryReport)('original Linux host capsule recovery recording
     });
   });
 });
+
+const uncertainStartup = process.env.SHELLSPAN_LINUX_HOST_STARTUP_RECORDING;
+describe.skipIf(!uncertainStartup)('actual uncertain Linux host startup recording', () => {
+  it('retains protected debt when the original startup has no verified terminal receipt', () => {
+    const root = path.resolve(uncertainStartup ?? '.');
+    const read = (name) => JSON.parse(readFileSync(path.join(root, name), 'utf8'));
+    expect(read('host-normal.json').data).toMatchObject({
+      stdout: '', terminationConfirmed: false, failure: { admission: 'unknown' },
+    });
+    expect(read('host-recovery.json')).toMatchObject({
+      passed: false, recovery: { resolved: 0, uncertain: 1 }, ledger: { debt: 1, custody: 1 },
+      stage3Allowed: false, scope: 'cleanup-only; no original command replay or execution grant',
+    });
+    expect(read('../report.json')).toMatchObject({
+      passed: false, sourceUnchanged: true, binaryUnchanged: true, stage3Allowed: false,
+    });
+  });
+});

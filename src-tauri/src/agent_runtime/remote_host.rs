@@ -47,12 +47,16 @@ impl RemoteSeatbeltJob {
                 error.category
             )
         })?;
-        session.target.set_timeout(2000);
         let host_key = fingerprint(&session.target)?;
-        let sftp = session
-            .target
-            .sftp()
-            .map_err(|_| "directOwnershipUnavailable: SFTP unavailable")?;
+        let sftp = session.target.sftp().map_err(|error| {
+            format!(
+                "directOwnershipUnavailable: SFTP unavailable: {}",
+                crate::execution::redact_known_secrets(
+                    &error.to_string(),
+                    &known_connection_secret_values(connection),
+                )
+            )
+        })?;
         let home = sftp
             .realpath(Path::new("."))
             .map_err(|_| "directOwnershipUnavailable: remote home unavailable")?;
@@ -79,7 +83,7 @@ impl RemoteSeatbeltJob {
             python,
             &json!({"mode":"inspect", "hostController":true, "root":canonical}),
             connection,
-            Duration::from_secs(5),
+            Duration::from_secs(15),
         )?)
         .map_err(|_| "directOwnershipUnavailable: invalid remote facts")?;
         if !matches!(facts.platform.as_str(), "linux" | "macos")

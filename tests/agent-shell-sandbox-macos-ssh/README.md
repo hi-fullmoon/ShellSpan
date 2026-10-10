@@ -10,6 +10,10 @@
 
 `SHELLSPAN_LINUX_HOST_ORIGINAL_RECOVERY_REPORT=<原目录中独立保存的成功恢复 JSON> pnpm exec vitest run scripts/__tests__/linux-host-recording.test.mjs` 核对原 started／未确认执行记录及原失败恢复报告仍保留，并单独核对后续原 capsule 清理成功。缺少真实记录时 skipped；它不把原执行或完整主机验收改记通过。
 
+`SHELLSPAN_LINUX_HOST_STARTUP_RECORDING=<原 admission=unknown 的独立验收目录> pnpm exec vitest run scripts/__tests__/linux-host-recording.test.mjs` 核对真实启动中断及原 capsule 恢复仍 uncertain、债务和 custody 保留。debug-only `recover` 接受同一 profile 的原启动中断记录，但必须同时有精确的一条 debt／custody；最终清理权限仍由原受保护 capsule 和签名回执核验，目录不存在不能作为资源终态证明。
+
+`host_control_channel_waits_until_its_deadline_for_delayed_server_bytes -- --ignored --test-threads=1` 用自有真实 sshd 和透明 TCP 转发延迟认证后的真实服务器响应 3 秒，验证通道请求不会被 2 秒阻塞 I/O 提前截断；同一连接上的 100 毫秒截止时间仍在 1 秒内返回，阻塞模式恢复。运行时传输改为短 exec 启动器及两行标准 JSON stdin（源码、原请求），原控制器源码和 capsule 摘要保持兼容。
+
 `python3 tests/agent-shell-sandbox-macos-ssh/test_host_controller.py` 使用本机真实自有 Child 验证正常退出、超时、签名回执和错误密钥拒绝。`cargo test --manifest-path src-tauri/Cargo.toml host_tests -- --ignored --test-threads=1` 显式运行自有普通账户 sshd、真实系统钥匙串、生产 NativeToolEngine 单次审批及清理 capsule 回归。测试只使用新临时资源，不连接用户配置，不代替真实 Linux／root 双身份工作台验收，不修改旧债务。所有测试目录及报告继续按阶段 2 的保留边界记录。
 
 ## 双目标与窄恢复界面

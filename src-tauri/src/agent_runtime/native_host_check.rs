@@ -149,11 +149,15 @@ pub(super) fn run(root: &Path, name: &str, mode: &str) -> Result<(), String> {
                 .iter()
                 .find(|profile| profile.name == name)
                 .ok_or("Original profile unavailable")?;
+            let completed_effect = original["data"]["stdout"] == "Linux\n0\nhost-normal"
+                && original["data"]["failure"]["admission"] == "started";
+            let startup_uncertain = original["data"]["failure"]["admission"] == "unknown"
+                && original["data"]["terminationConfirmed"] == false
+                && ledger(root)? == json!({"debt":1, "custody":1});
             if original["data"]["executionTarget"]["profileId"] != profile.id
-                || original["data"]["stdout"] != "Linux\n0\nhost-normal"
-                || original["data"]["failure"]["admission"] != "started"
+                || !(completed_effect || startup_uncertain)
             {
-                return Err("Original own started effect required".into());
+                return Err("Original own execution and protected custody required".into());
             }
         }
         let result = engine.reconcile_direct_resources(&credentials, &known)?;
