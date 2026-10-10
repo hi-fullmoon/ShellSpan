@@ -1,0 +1,19 @@
+{
+  "accounts_created": false,
+  "actual_system": true,
+  "all_pages_bound": true,
+  "filters_installed": false,
+  "fixture_id": "f9b43a1d-ce0b-4d96-a2f0-2cd9394543d6",
+  "input_namespace_created": false,
+  "objects": 43290,
+  "pages": 677,
+  "planned_not_counted_as_retired": true,
+  "production": "unavailable",
+  "protected_anchor_readback": true,
+  "protected_plan_readback": true,
+  "readback_same_service": true,
+  "recovery_creation_blocked": true,
+  "retained_as_protected_evidence": true,
+  "source_inventory_released": true,
+  "version": 1
+}

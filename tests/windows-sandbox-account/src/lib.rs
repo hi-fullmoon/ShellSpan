@@ -1,6 +1,8 @@
 //! Shared fixed-runner primitives for the independent Windows experiment.
 #![cfg(windows)]
 pub mod account_lpac_plan;
+pub mod ancestor_metadata_acl;
+pub mod ancestor_metadata_intent;
 pub mod appcontainer_probe;
 pub mod credential_reference;
 pub mod cross_slot_registry_probe;
@@ -12,10 +14,20 @@ pub mod fixed_environment;
 pub mod fixed_tool;
 #[path = "runner.rs"]
 pub mod fixture_runner;
+pub mod frontend_asset_copy;
+pub mod frontend_bundle_journal;
+pub mod frontend_bundle_plan;
+pub mod frontend_creation_stamp;
+pub mod frontend_dependency_graph;
+pub mod frontend_materialization;
+pub mod frontend_project_inventory;
+pub mod frontend_runtime_inventory;
+pub mod frontend_source_plan;
 pub mod git_bundle;
 pub mod git_dependency_probe;
 pub mod git_prefix_probe;
 pub mod job_observer;
+pub mod node_project;
 pub mod package_network_filter;
 pub mod package_network_intent;
 pub mod pe_imports;

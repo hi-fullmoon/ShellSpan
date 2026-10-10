@@ -1,0 +1,67 @@
+Already up to date
+Done in 261ms using pnpm v11.1.1
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - `__dirname` (vitest.config.ts:10:20). Use `import.meta.dirname` instead
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.11 D:/Developer/ShellSpan
+
+ ❯ src/lib/petdex/__tests__/diagnostic-csp.test.ts (2 tests | 1 failed) 155ms
+   × keeps the shipped Ajv validators synchronized with their schema 111ms
+ ❯ src/components/ai/__tests__/streaming-text.test.tsx (15 tests | 1 failed) 366ms
+     × preserves selected repository text through fragment retirement and resumes compaction after deselection 12ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/ai/__tests__/streaming-text.test.tsx > streaming text reveal > preserves selected repository text through fragment retirement and resumes compaction after deselection
+AssertionError: expected '' to be '# ShellS' // Object.is equality
+
+- Expected
++ Received
+
+- # ShellS
+
+ ❯ src/components/ai/__tests__/streaming-text.test.tsx:124:38
+    122|       for (let length = 9; length <= 80; length++) {
+    123|         rerender(<Text text={source.slice(0, length)} />);
+    124|         expect(selection.toString()).toBe(source.slice(0, 8));
+       |                                      ^
+    125|         expect(selection.anchorNode).toBe(textNode);
+    126|         expect(container.textContent).toBe(source.slice(0, length));
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/lib/petdex/__tests__/diagnostic-csp.test.ts > keeps the shipped Ajv validators synchronized with their schema
+AssertionError: expected [Function] to not throw an error but 'Error: Command failed: D:\Programs\no…' was thrown
+
+- Expected:
+undefined
+
++ Received:
+"Error: Command failed: D:\\Programs\\nodejs\\node.exe D:\\Developer\\ShellSpan\\scripts\\generate-petdex-validators.mjs --check
+file:///D:/Developer/ShellSpan/scripts/generate-petdex-validators.mjs:21
+    throw new Error('Petdex validators are stale. Run node scripts/generate-petdex-validators.mjs');
+          ^
+
+Error: Petdex validators are stale. Run node scripts/generate-petdex-validators.mjs
+    at file:///D:/Developer/ShellSpan/scripts/generate-petdex-validators.mjs:21:11
+
+Node.js v26.5.0
+"
+
+ ❯ src/lib/petdex/__tests__/diagnostic-csp.test.ts:16:92
+     14| it('keeps the shipped Ajv validators synchronized with their schema', …
+     15|   const script = resolve(import.meta.dirname, '../../../../scripts/gen…
+     16|   expect(() => execFileSync(process.execPath, [script, '--check'], { s…
+       |                                                                                            ^
+     17| });
+     18|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  2 failed | 15 passed (17)
+   Start at  00:24:05
+   Duration  3.17s (transform 312ms, setup 540ms, import 1.73s, tests 521ms, environment 1.36s)
+

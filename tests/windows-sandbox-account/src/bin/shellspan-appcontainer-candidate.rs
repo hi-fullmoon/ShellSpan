@@ -1319,6 +1319,7 @@ fn main() {
             Ok(()) => std::process::exit(73),
             Err(error) => {
                 eprintln!("fixed probe failed: {error}");
+                let _ = owned_probe::record_fixed_child_error(&error);
                 std::process::exit(2);
             }
         }

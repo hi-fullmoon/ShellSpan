@@ -1,5 +1,11 @@
 # Windows sandbox 阶段 A/B 完成核对表
 
+2026-10-10项目补验：独立NodeMetadataProject在专用账户LPAC下完成真实ShellSpan终端输出模块的离线类型剥离、产物重开/导入与四项行为检查，固定摘要通过；无祖先授权入口的EPERM/lstat C盘根失败对照保留。首次namespace回收失败后独立精确恢复、祖先ACE及账户/profile/hive/服务OS缺席通过。此为真实源码模块子集，A7的全项目类型检查、依赖及构建/测试仍未完成。LeafNetwork诊断预算已由4KiB调整至8KiB并有实际payload及上限回归，Workload仍24KiB；B5完整typed IPC仍未实施。
+
+2026-10-09祖先权限补验：独立GitMetadataPrefix在真实专用账户LPAC下验证两个精确祖先对象只允许属性读取；五项额外权限句柄请求明确拒绝5，子文件读取独立校准拒绝，回收及祖先ACE/账户/profile/hive/服务OS缺席通过。仅为句柄权限反例，不宣称完成实际项目或完整文件操作矩阵。详见handoff最新记录。
+
+2026-10-09 Git最新补验：独立GitMetadataInit通过受保护意图为本轮package添加两个祖先的非继承metadata ACE后，实际专用账户LPAC固定bare Git init退出0、产物核验通过。首次namespace/profile回收失败保留，r2独立恢复完成并核验两个祖先ACE及账户/profile/hive/服务缺席，debt空。该证据补充A7有限工具工作流和恢复子项，不替代真实项目、祖先负例、DNS或完整A/B。详见handoff最新记录与git-metadata-recovery-r2回执。
+
 2026-10-09。范围来自 v1-design.md 第 9 节阶段定义及第 10 节对应边界要求；此表只记录证据，不改变需求。完整实机开放、NativeAdapter/product 接入属于 C/D，不能为了 A/B 完成提前开放生产。
 
 | 项目 | 完成证据要求 | 当前状态 |

@@ -4,7 +4,589 @@
 2026-10-08 续作：[新对象权限与两阶段启动记录](agent-shell-sandbox-windows-stage-a-2026-10-08.md)。自有 output 新对象工作流及暂停 primary 身份/Job 已通过；受限子进程 loader 仍以 0xc0000022 退出，阶段 A 仍未通过。以下保留本次原始结果。
 设计：[首版设计](agent-shell-sandbox-windows-v1-design.md)。前序会话：`01a116f1-2d8e-7070-8a10-a2d38102f7f3`。
 
-## 2026-10-09 当前状态（后文为历史快照）
+## 当前状态（最新续作在前，后文为历史快照）
+
+### 2026-10-10 组合项目 SYSTEM 全量物化实测启动
+
+固定 Project 正常物化脚本已构建并通过语法检查。首次非提升准备被管理员权限门禁拒绝，后端报告无资源改变，原失败记录保留。另以独立 system-r2 证据前缀经 UAC 启动固定脚本，准备 fixture 为 41f38744-da2a-4f5e-a73a-c7dabe20054e，wrapper 30932、controller 25020、fixed-admission worker 2376（2026-10-10 08:08:41–43 +08:00）已观察存活。准备记录确认 Project 模式；不打开活动对象页、不重复派发。终态结果和独立 OS 核验尚未取得，阶段 A NO-GO。
+
+### 2026-10-10 组合项目固定准备、故障与恢复 CLI 接入
+
+新增固定 Project 正常准备、全量检查点之后受控错误准备及 canonical nonnil 原事务 UUID 恢复 CLI。Preparation 的 project/failure 标记默认 false，故障标记仅允许 Project 正常物化、不允许恢复或源码混用。恢复准备先确认原 preparation 的 Project 范围、原进程退出及服务移除。受保护 plan/page reader 沿用固定 ProgramData fixture 根、ACL、绑定摘要和预算校验，不接受普通测试目录；Project anchor 使用专用 backend/namespace。
+
+99 项 native 测试和 Clippy 通过，故障/恢复互斥与旧记录默认关闭回归通过，fmt 检查通过。尚未建立 Project 固定实机脚本、派发 SYSTEM 服务或取得组合项目 SYSTEM 正常退役/故障独立恢复证据。无账户、授权、filter 或工具执行；阶段 A NO-GO。
+
+### 2026-10-10 组合项目 SYSTEM worker 与受保护范围分派接入
+
+Preparation 增加默认 false 的 frontend_materialization_project，拒绝与 Source、源码故障标记或非物化分派混用；旧准备函数仍只生成 false。服务按明确 namespace 分派，Project 使用 fixed-frontend-project-materialization-v1 / frontend-project，完整冻结源码与依赖及组合 inventory 摘要共享受保护 plan、初始有序页、journal_prepared 检查点和退役 publisher。Project 恢复要求原 preparation 范围匹配、原进程退出及服务移除，随后以专用 anchor/backend/namespace 和受保护 plan/pages 恢复，不读取原 inventory。
+
+99 项 native 测试、Clippy all-targets 和 fmt 检查通过；新增范围混用、anchor backend/namespace 混用及 nil/self recovery 反例。尚未添加 Project CLI 准备/恢复入口或固定故障模式，也未派发 SYSTEM 实机事务；无账户、授权、filter 或工具执行。代码接入不构成 SYSTEM/LPAC 验收，阶段 A NO-GO。后续需补固定准备与故障/恢复入口及受保护 reader 范围兼容核验，再完整实机验证。
+
+### 2026-10-10 组合项目 SYSTEM 接入前回归基线
+
+[当前修订完整原型回归](evidence/windows-stage-a-2026-10-10-project-before-system-tests.txt)通过：222 library、98 native、11 candidate，共 331 passed、17 ignored、0 failed，原会话 68576 退出码 0。该默认测试命令不执行两个显式忽略的完整组合长测试；它们的正常退役和故障恢复通过证据分别列于下文。恢复 anchor 新增 inventory/plan 摘要的 64 位十六进制格式校验及异常摘要反例，fmt 检查和 Clippy all-targets 通过。
+
+受保护 Project 接入仍需同步覆盖 preparation 范围、服务分派、原服务退出/移除确认、anchor backend/namespace、受保护 plan/page reader、固定故障模式和独立恢复入口。现有布尔 source_scope 仅表示 Source/Dependencies，不能将 Project 按 false 分派为 Dependencies；尚未开放 Project 高权限入口或工具执行。该回归基线不构成 SYSTEM 组合项目验收，阶段 A 继续 NO-GO。
+
+### 2026-10-10 普通组合项目受控故障与磁盘页恢复通过
+
+[故障恢复测试输出](evidence/windows-stage-a-2026-10-10-frontend-project-failure-disk-tests.txt)确认 actual_complete_project_failure_recovers_without_original_inventory 通过，1 passed、0 failed，耗时 3438.69 秒；原会话 4686 退出码 0，原进程 2656 已不存在。测试在完整 applied 后返回固定工作负载错误，释放原 project inventory，使用绑定 plan/hash 和磁盘页恢复 Project journal，确认恢复不创建对象、全部退役、namespace 缺席，最后将自有测试根送入回收站。
+
+该恢复仍在同一普通测试进程内进行，仅释放原输入持有者；不覆盖进程退出、崩溃、重启或 SYSTEM 受保护记录读取。普通诊断记录不构成 SYSTEM 恢复授权。正常退役和本次故障恢复通过后，下一步补受保护 Project preparation、anchor/backend/namespace 绑定、服务分派和独立恢复门禁，再作 SYSTEM 实机验收；原生 Project admission 尚关闭。阶段 A NO-GO，旧未知残留保持隔离。
+
+### 2026-10-10 普通组合项目磁盘检查点复测通过
+
+[disk-r2 测试输出](evidence/windows-stage-a-2026-10-10-frontend-project-materialization-disk-r2-tests.txt)确认 actual_complete_project_materialization_and_retirement 通过，1 passed、0 failed，耗时 3233.36 秒；原会话 17061 退出码 0，原进程 29636 已不存在。该测试断言完整对象创建、回调前全部 applied、正常退役确认及 namespace 缺席，最后将自有测试根送入回收站。此前失败事务的残留仍保持隔离，本次成功不能解释或清理旧债务。
+
+下一步执行普通组合项目全量创建后受控失败、释放原 inventory 后从磁盘页独立恢复的长测试。此次通过仅覆盖普通进程事务，不构成受保护 SYSTEM 组合项目或实际 LPAC 工作负载验收；原生 Project admission 仍关闭，阶段 A NO-GO。
+
+### 2026-10-10 普通组合长测试磁盘检查点复测进行中
+
+长测试在创建对象前发布完整 plan 和普通测试归属诊断记录；分页及退役更新经 fresh pending、flush 和 write-through 原子替换后才更新内存观察。错误结果在断言之前发布，保留退役 index、卷/file ID 上下文。失败恢复分支从磁盘读取页。磁盘发布预算/替换回归和 Clippy 通过。记录明确 system_recovery_authorized=false；这些普通记录不构成 SYSTEM 清理授权。
+
+复测 [disk-r2 测试输出](evidence/windows-stage-a-2026-10-10-frontend-project-materialization-disk-r2-tests.txt)运行于会话 17061、进程 29636、创建时间 2026-10-10 06:07:58.643376 +08:00，当前仍运行，尚无验收通过结论；只观察精确进程和测试日志，不打开活动事务页。旧 be22541c 残留保持隔离。只读残留统计有 3628 个至少 260 字符文件、最大 323 字符；独立新建长路径文件精确回收回归通过，C 盘约 50 GB 空闲，故尚不能用长路径或空间不足解释旧失败。
+
+### 2026-10-10 完整项目普通进程物化测试终态失败，残留隔离保留
+
+会话 97547 / 进程 23460 已终止，测试 FAILED、退出码 1、耗时 2228.64 秒；错误为 Windows 回收站 Some operations were aborted。[失败记录](evidence/windows-stage-a-2026-10-10-frontend-project-materialization-failure.json)保留原错误。不能认定完整退役通过。唯一匹配测试目录及创建时间的候选 fixture 为 be22541c-9ef4-4b72-a33a-885520e20330；路径和时间不构成独立恢复授权。
+
+本次普通测试使用内存分页 publisher，进程退出后原 pages 丢失，不能仅靠路径或 EA 标记重建可信 journal 后清理。残留目录保留，不猜测删除、不重复派发。组合失败恢复长测试尚未执行。下一步先使长测试的计划、归属和全部页持久化，确保失败后可精确恢复；定位回收失败窗口，再重新验收。已为后续事务退役错误增加 index、卷和 file ID 上下文（无输入内容转储），Clippy 通过。Project 原生 admission 仍关闭，阶段 A NO-GO。
+
+### 2026-10-10 完整项目组合计划与物化核心，实测仍运行
+
+新增固定项目输入持有者，保留完整源码与依赖只读租约，分别计算摘要并通过命名字段和版本范围形成组合 inventory 绑定。源码保持项目根，依赖文件、目录和内部别名统一置于 node_modules 下；组合计划拒绝冲突及源码别名。实际完整仓库计划测试通过，验证原 inventory 释放后仍能通过受绑定 plan 读取恢复布局。
+
+组合物化核心使用同一完整 journal 的索引生成创建标记，源码、依赖副本及内部别名共享事务、回调与逆序回收；新增固定 frontend-project namespace。原生 admission 仍明确拒绝 Project 模式，尚未开放 SYSTEM/LPAC 项目派发。Clippy 与组合计划回归通过。
+
+显式长测试 actual_complete_project_materialization_and_retirement 已启动：会话 97547，进程 23460，创建时间 2026-10-10 05:26:14.9897641 +08:00。检查完整对象存在、alias 可读、只读保护、回调前全部 applied 和正常退役终态；当前仍运行，未取得通过结果，不重复启动。此为普通进程、内存分页 publisher，不替代受保护 SYSTEM 磁盘事务或实际 LPAC 构建。后续按原会话终态处理，再补故障恢复与原生接入。
+
+### 2026-10-10 全量源码固定失败后的独立 SYSTEM 恢复通过
+
+原事务 `11673b80-edd1-4fc5-8e95-72ceb922c0ce` 在全部源码创建并完成持久检查点后返回固定错误。[失败核验](evidence/windows-stage-a-2026-10-10-frontend-source-failure-system-failed-audit.json)确认 883 applied、14 页、源码 namespace 存在，原进程退出、服务移除；原错误和失败 anchor 保留。
+
+独立恢复事务 `48420d90-61ec-42df-a059-44ac3bb8aba9` 的 [结果](evidence/windows-stage-a-2026-10-10-frontend-source-failure-independent-result.json)确认 actual_system、source_inventory_opened=false、objects_created=0、883 对象退役确认。[最终核验](evidence/windows-stage-a-2026-10-10-frontend-source-failure-independent-final-audit.json)确认原及恢复进程缺席、14 页共 883 retired、源码 namespace 缺席。无账户、授权、filter 或工具派发。
+
+此为全量检查点之后受控返回错误的真实 SYSTEM 恢复；不覆盖未落盘窗口、进程崩溃或重启。固定故障标记持久化于受保护 preparation，默认 false，拒绝非源码物化及恢复混用；98 项 native 测试和 Clippy 通过。下一步组合源码与冻结依赖，接入专用账户 LPAC 的真实项目执行及其授权/取消/失败恢复，阶段 A 仍 NO-GO。
+
+### 2026-10-10 源码独立 SYSTEM 恢复入口与重复退役通过
+
+恢复事务 `4bea6a19-a71b-4f43-8736-b3a90e921503` 指向已正常退役的源码事务 `a982be11-d802-424e-ba39-dcdfd72a265a`。[恢复结果](evidence/windows-stage-a-2026-10-10-frontend-source-materialization-independent-result.json)确认独立 SYSTEM、原服务已退役、source_inventory_opened=false、objects_created=0、883 条记录退役确认、14 页。此处 objects_retired 表示退役记录确认数；本次没有再次删除 883 个实体对象。
+
+[恢复服务回执](evidence/windows-stage-a-2026-10-10-frontend-source-materialization-independent-service.json)确认两个退出码为 0、进程退出及服务移除；[恢复后独立核验](evidence/windows-stage-a-2026-10-10-frontend-source-materialization-independent-final-audit.json)确认原及恢复进程均缺席、14 页共 883 retired、源码 namespace 不存在。验证恢复入口及重复退役的安全性，不构成源码 SYSTEM 故障遗留恢复证据。下一步加入固定且持久化的源码故障模式，在全量检查点完成后失败，再通过同一独立恢复路径闭合精确资源；不创建账户或扩大权限。
+
+### 2026-10-10 完整源码 SYSTEM 物化与终态核验通过
+
+固定源码准备/恢复 CLI 已接入；source 恢复要求原服务退出并移除，且原准备记录、backend 与 namespace 范围一致。全套原型测试 327 passed、15 ignored、0 failed，Clippy 通过。
+
+实机 fixture `a982be11-d802-424e-ba39-dcdfd72a265a` 的 [SYSTEM 结果](evidence/windows-stage-a-2026-10-10-frontend-source-materialization-system-result.json)确认 883 个对象实际创建并全部退役、14 页、actual_system=true。[服务回执](evidence/windows-stage-a-2026-10-10-frontend-source-materialization-system-service.json)确认退出码均为 0、进程退出且服务移除；[独立终态核验](evidence/windows-stage-a-2026-10-10-frontend-source-materialization-system-final-audit.json)确认无对应进程、14 页共 883 retired、frontend-source namespace 缺席。受保护元数据保留。未创建账户、授予权限、安装 filter 或派发工具。
+
+本次未触发失败恢复，不将普通进程恢复测试替代源码 SYSTEM 故障验收。下一步验证源码 SYSTEM 失败后的独立恢复，再组合源码与冻结依赖、接入专用账户 LPAC 的真实项目工作负载。阶段 A 仍 NO-GO。
+
+### 2026-10-10 固定源码SYSTEM worker接入，准备/恢复尚未开放
+
+Preparation新增默认false的frontend_materialization_source；必须同时为固定物化，不能与账户/工具/其他模式混用。旧记录保持依赖模式，现有prepare构造仍仅false。服务按明确标记分派source worker；共用原固定SYSTEM上下文与受保护父目录创建/身份、source backend/namespace anchor、完整plan及fresh有序分页就绪标记，再调用完整源码事务，报告namespace_root。无账户、授权、filter或工具。
+
+旧依赖独立恢复门禁明确拒绝source原事务，避免把源码按依赖namespace处理。源码准备CLI及源码独立恢复尚未接入，本轮未派发实机服务，不把worker存在当作SYSTEM源码验收。nil source UUID和模式互斥回归、98项native测试、Clippy通过。前一轮[全量源码事务回归](evidence/windows-stage-a-2026-10-10-frontend-source-transaction-tests.txt)327 passed/15 ignored/0 failed对应当时修订，未覆盖本次新worker实机运行。下一步补齐源码准备与恢复scope匹配及受保护reader，再全量验证/固定SYSTEM实测。
+
+### 2026-10-10 完整源码事务与原owner退出后恢复核心验证
+
+源码复制从FrozenFrontendSource持有的精确源identity和SHA256选取输入，新对象使用原子EA标记及独立副本、只读租约；路径不在完整清单、覆盖现有对象均拒绝。新增固定Source/Dependencies namespace区分，旧依赖入口保持原范围；实际源码退役反例验证相邻依赖sentinel保留。
+
+materialize_source_run_and_retire先匹配原生父卷/file ID，再从完整源码计划准备全部planned分页，派生每对象stamp后创建、持有、调用工作负载并逆序退役。真实仓库完整源码测试逐文件核验哈希且回调前全部applied、成功后全部retired/namespace缺席。失败测试在全量applied后注入回调错误，释放原FrozenFrontendSource owner，再仅凭绑定plan/hash/pages进行Source独立退役；无创建重放、全部退役确认。两条完整源码测试分别通过，Clippy/fmt通过；此为普通进程与内存publisher核心验证，尚无SYSTEM受保护source anchor/磁盘publisher、真实崩溃/重启或LPAC派发，不替代阶段A。下一步接入固定SYSTEM源码准备/独立恢复模式与对应原生受保护记录门禁。
+
+### 2026-10-10 执行回调门槛与完整源码对象计划
+
+物化核心新增materialize_run_and_retire：完整创建检查点成功后停止继续创建，持续持有对象进入native协调回调；只有回调成功才允许退役。回调调用者仍必须证明目标身份、持久授权、执行树已停止及授权撤销；错误保留对象/检查点供独立恢复。现有SYSTEM无工具物化入口沿空回调保持行为。实际跨页文件/alias持有、创建发布失败禁止调用、工作负载错误保留applied及后续独立恢复回归通过。[全量原型回归](evidence/windows-stage-a-2026-10-10-frontend-workload-hook-tests.txt)323 passed、15 ignored、0 failed，Clippy/fmt通过。
+
+FrozenFrontendSource新增从完整冻结manifest派生的bundle_plan，记录全部文件及父目录、无alias、不接受调用者缩减范围；真实仓库清单回归逐项核验所有源文件唯一且所有父目录进入计划，源码范围反例和Clippy通过。此计划尚未接入源码原子创建、持久记录或授权；执行回调尚无LPAC启动调用者，不把API存在或普通测试当作完整项目执行验收。下一步需要绑定独立源码namespace/anchor、复制与恢复，再与冻结依赖及专用账户执行链组合。
+
+### 2026-10-10 完整SYSTEM物化与退役通过
+
+原system-r3 wrapper31348已退出。[结果回执](evidence/windows-stage-a-2026-10-10-frontend-materialization-system-r3-result.json)确认fixture310c9957的43290对象全部实际创建并全部退役、677页、retirement_confirmed=true；未创建账户/filter、未授予权限、未派发工具，production unavailable。[服务回执](evidence/windows-stage-a-2026-10-10-frontend-materialization-system-r3-service.json)两个退出码0、process_exit_confirmed及service_removed均true。03:56:03启动至04:54终态约58分钟；此轮映像不含后续inventory缓存改动。
+
+[终态独立提升核验](evidence/windows-stage-a-2026-10-10-frontend-materialization-system-r3-final-audit.json)04:54:39确认精确事务进程0、全部677页唯一状态retired合计43290、namespace缺席、anchor retired且journal_prepared=true。观察脚本先要求匹配成功终态服务回执及无匹配进程才读取记录；保护metadata保留。单点句柄最高已记录121474、工作集最高已记录176513024字节，不称实际峰值或满足生产预算。
+
+本项证明完整冻结依赖对象的SYSTEM创建/正常退役，结合此前r4独立失败恢复补充对象准备路径。仍不证明实际LPAC完整项目工具执行、崩溃/重启各窗口、DNS闭包或阶段A完成。下一步落实冻结依赖在专用账户LPAC中的真实项目执行与资源预算；网络及历史hive债务门禁继续保留。
+
+### 2026-10-10 原物化进程资源变化
+
+[第六次仅进程快照](evidence/windows-stage-a-2026-10-10-frontend-materialization-system-r3-process-6.json)04:26:03核验同一worker24948/03:56:05.547017；累计CPU975.8125秒，工作集152686592字节、117886句柄，有两个Running线程。第五次快照04:21:14的CPU522.953125秒、121474句柄，故CPU继续增长且句柄较该单点下降；不能由变化推断具体创建数、退役数或已完成阶段。原controller仍存活，records_opened=false，尚无终态回执，继续原事务等待。
+
+### 2026-10-10 原物化资源持续增长，未见终态
+
+[第三次仅进程快照](evidence/windows-stage-a-2026-10-10-frontend-materialization-system-r3-process-3.json)04:11:39确认同一worker24948/03:56:05.547017，累计CPU434.640625秒，较第二次401.265625秒增加；工作集124321792字节、101285句柄。两个线程在单点均Wait，不据此判定挂起或失败；原controller仍存活。records_opened=false，未读取活动页或namespace。当前尚无终态，继续原事务；这些单点不构成峰值预算证明，句柄增长应在终态后结合持有模型审核，不能直接判定泄漏或安全回收完成。
+
+### 2026-10-10 缓存全量回归与原物化进程核验
+
+[缓存版本完整回归](evidence/windows-stage-a-2026-10-10-frontend-plan-cache-tests.txt) lib213/main98/candidate11，共322 passed、15 ignored、0 failed。测试不替换当前已冻结服务映像，不能据此声称当前物化加速。
+
+[原system-r3无记录进程快照](evidence/windows-stage-a-2026-10-10-frontend-materialization-system-r3-process.json)04:03:39确认controller31152与worker24948的精确fixture命令及创建时间，worker累计CPU366.03125秒、工作集118571008字节、84899句柄并有Running线程。records_opened=false；未读取活动分页或namespace。此为单点资源观察，尚非峰值预算或创建/退役完成证明；保留同一原事务等待终态。后续计划见[Windows研发计划](agent-shell-sandbox-windows-development-plan.md)，阶段A及生产门禁不变。
+
+### 2026-10-10 冻结inventory的完整计划缓存
+
+RuntimeInventory增加serde跳过的OnceCell，首次bundle_plan执行原完整路径/原生名字比较，后续返回私有不可变计划的clone，亦保留首次错误；源清单字段私有且冻结，不提供失效后重新授权入口。BundlePlan/Alias新增Clone，不改变序列化字段或创建范围。小型计划回归验证缓存从空到已初始化、重复结果字节一致、inventory序列化字节不变，Clippy通过。此为去除启动链多次重复build的代码改进，尚未实测全规模加速。
+
+原r3wrapper31348仍存活，尚无终态；本轮未重建/替换其已冻结保护映像。原native权限/完整plan验证规则不变，下一次受保护运行才可能使用缓存版本。阶段A及生产门禁不变。
+
+### 2026-10-10 原r2恢复完成后新物化r3启动
+
+原r4wrapper已退出且原r2 namespace/全页退役完成后，构建当前映像、检查NTFS/C盘约52.4GB可用及固定脚本解析；以新system-r3证据前缀启动完整物化，不复用旧fixture。新wrapper31348、StartTime03:56:03，fixture310c9957-d9ad-4a2e-9e11-1c878bc74a6f；[准备回执](evidence/windows-stage-a-2026-10-10-frontend-materialization-system-r3-preparation.json)确认固定物化/production unavailable。独立恢复脚本independent-r5仅绑定本轮准备记录。当前仍存活，尚无终态；运行期间不读取原分页，完成后核验，不把前次恢复通过代替全量创建/退役验收。
+
+### 2026-10-10 r4独立SYSTEM完整原对象恢复通过
+
+wrapper5008已终止。[r4结果](evidence/windows-stage-a-2026-10-10-frontend-materialization-independent-r4-result.json)确认原r2 fixture e255b20c的43290项目/677页全部退役、objects_created=0、retirement_confirmed=true，独立SYSTEM且原服务已退役，不打开source inventory/不派发工具/不授予权限/不创建账户或filter。[r4服务回执](evidence/windows-stage-a-2026-10-10-frontend-materialization-independent-r4-service.json)两个退出码0、process_exit_confirmed及service_removed均true。
+
+终态后[提升核验](evidence/windows-stage-a-2026-10-10-frontend-materialization-independent-r4-final-audit.json)03:55:09确认原/恢复匹配进程0，原namespace缺席、anchor retired、全部677页唯一状态retired合计43290；observer21976已终止。该结果证明失败物化后的独立恢复与断点重试，不证明全部43290对象实际创建过（未创建项目通过原生缺席核验退役），不证明崩溃/重启恢复、完整LPAC工具执行、DNS门禁或阶段A完成。原plan/pages/anchor及pending保留为证据，不清除未知记录。r3观察句柄是否导致Win32 5仍非确定归因。
+
+### 2026-10-10 r4继续计算的无记录快照
+
+[第二次进程快照](evidence/windows-stage-a-2026-10-10-frontend-materialization-independent-r4-process-2.json)03:54:17确认原worker27884累计CPU632.328125秒，较03:50:45的299.6875秒增加，81420288字节工作集/377句柄且有Running线程；controller29692及wrapper5008仍存活。records_opened=false，observer5700已终止。当前是实际活进程等待，不因时间增长重启；尚无终态，不能由CPU推断具体退役数量或完成。
+
+### 2026-10-10 r4无记录进程快照
+
+原wrapper5008/03:45:20等待45秒仍存活，尚无终态。r4恢复fixture ed5395c8-d578-4918-85ea-0f06480989c2；[仅进程提升快照](evidence/windows-stage-a-2026-10-10-frontend-materialization-independent-r4-process.json)03:50:45确认controller29692/03:45:21.102988及worker27884/03:45:22.639326仍存在，worker累计CPU299.6875秒、62685184字节工作集、382句柄且有Running线程。records_opened=false，observer30576已终止。此仅证明当前运行，不证明回收数量或完成；不打开原分页/namespace，不重派。
+
+### 2026-10-10 r3第297页发布失败，r4无页观察恢复派发
+
+原wrapper28232已退出。[r3服务回执](evidence/windows-stage-a-2026-10-10-frontend-materialization-independent-r3-service.json)确认process_exit/removed，1066/2；诊断publish flushed owned journal transition frontend-bundle-page-0297.json: Win32 5。页观察与退役发布窗口重叠，不能排除观察句柄造成替换拒绝，不声称为确定原因。原恢复未完成，所有原页/pending及失败证据保留。
+
+已以新independent-r4前缀重新启动独立恢复，仅恢复原r2 fixture，native仍重新核验原服务退役。运行期间不再读取分页；终态后核验。不开放权限或重派物化，阶段A保持NO-GO。
+
+### 2026-10-10 r3退役分页已有实际进展
+
+[第二次只读快照](evidence/windows-stage-a-2026-10-10-frontend-materialization-independent-r3-observation-2.json)03:44:26读取全677页得到诊断摘要retired24229/applied7200/planned11861，总43290。读取跨时间窗口，不是事务快照；retired可能包含从未创建但经缺席确认的计划项目，不能视为实际删除24229对象。namespace仍存在、worker17036仍存活，尚无终态。observer26604已终止。页观察脚本后续改用明确共享READ|WRITE|DELETE的流，不以观察句柄阻碍原子替换；首轮页摘要使用Get-Content，不能宣称其零干扰。最终仅服务/恢复原生结果构成完整退役证据。
+
+### 2026-10-10 r3原对象恢复进行中快照
+
+[提升只读快照](evidence/windows-stage-a-2026-10-10-frontend-materialization-independent-r3-observation.json)03:41:56确认原r2实际677页均存在、journal_prepared=true及namespace存在，anchor仍failed。故本次是已就绪后的实际对象恢复，不是initialization_only分支；不能声称0资源。修复恢复worker17036/03:40:39.799908仍存活，CPU73.5625秒、43040768字节工作集/168句柄；controller25332/03:40:38.39379及wrapper28232继续运行，observer5168已终止。45秒等待未见终态，继续同一恢复，不重派。
+
+### 2026-10-10 长路径全量回归通过，原r2修复恢复r3派发
+
+[完整回归](evidence/windows-stage-a-2026-10-10-frontend-long-path-tests.txt)lib212/main98/candidate11，共321 passed/15 ignored/0 failed。当前binary已构建，脚本解析/fmt/diff通过。旧恢复wrapper已终止后，以新independent-r3证据前缀派发修复映像；仅恢复原r2 fixture e255b20c，不创建新物化事务。新wrapper28232、StartTime03:40:37仍存活，尚无终态。原r2及旧恢复失败证据保留，不能以全量单元回归替代实际原对象恢复。
+
+### 2026-10-10 r2独立恢复失败与长路径原生缺席核验修复
+
+独立wrapper6532已退出，新fixture f915067f-b8c7-4395-9b7e-23131127b8bd的[r2恢复服务回执](evidence/windows-stage-a-2026-10-10-frontend-materialization-independent-r2-service.json)确认process_exit/removed及1066/2；诊断retirement absence not proven: Win32 3。原输入资源仍需恢复，不能将该访问错误当作缺席。
+
+新增native_local_path，仅绝对本地drive路径、拒绝NUL及超长预算、规范分隔符和扩展前缀，不canonicalize。原生退役对象打开、存在/缺席查询、恢复对象重开及alias创建/拆除采用该表示。超过260字符实际回归验证现存对象存在、同目录缺失文件明确缺席、退役句柄及只读lease均成功；Clippy通过。尚未用修复映像重新恢复原r2对象，下一步须先完成相关全量验证，再新独立服务恢复原fixture，不重派物化。
+
+### 2026-10-10 r2失败退役及长路径租约补验
+
+原wrapper16140已退出，[r2服务回执](evidence/windows-stage-a-2026-10-10-frontend-materialization-system-r2-service.json)确认进程退出/服务removed，1066/2；诊断fixed tool image lease: Win32 3。独立r2恢复wrapper6532、StartTime03:36:54已启动且仍存活，新准备记录已保存，尚无终态。不能宣称无残留或恢复通过。
+
+ToolImageLease原生打开对本地绝对路径增加扩展路径表示、规范反斜杠，拒绝NUL，不使用canonicalize跟随入口；已有扩展前缀保留。新增实际超过260字符文件回归，重新lease及内容核验通过，写入拒绝，夹具经回收站处理。此修复尚未证明就是r2具体失败对象的原因，原保护服务仍使用其已冻结旧映像，不能把定向成功代替其恢复结果。
+
+### 2026-10-10 r2受保护未就绪anchor实际发布
+
+[第二次只读快照](evidence/windows-stage-a-2026-10-10-frontend-materialization-system-r2-observation-2.json)03:33:27确认profile及完整anchor已存在，journal_prepared=false、0分页、namespace缺席、未授权且production unavailable。原worker28796累计CPU221.796875秒、110063616字节工作集/44430句柄，仍存活；observer25828已终止。证明新版初始化标记已真实发布，尚未证明所有planned页就绪或对象创建/回收成功。继续原wrapper16140等待，不重派。
+
+### 2026-10-10 r2原进程等待及初始化资源快照
+
+wrapper16140原StartTime03:29:32核验后等待45秒仍存活，尚无终态。[r2提升只读快照](evidence/windows-stage-a-2026-10-10-frontend-materialization-system-r2-observation.json)03:30:49确认controller7212/03:29:33.99914、SYSTEM worker28796/03:29:35.503897；worker累计CPU69.71875秒、65396736字节工作集、44426句柄。profile尚未创建，不能推断失败或缺失恢复债务。observer20428已终止；继续观察同一r2事务，以上单点资源不是峰值预算证明。
+
+### 2026-10-10 修复后新SYSTEM完整物化r2已启动
+
+原两wrapper已终止后，构建当前原型，固定脚本使用新system-r2/independent-r2证据前缀，旧失败证据不覆盖。新wrapper16140创建时间03:29:32，新fixture e255b20c-10d1-468f-b6f3-f9fa3d7c0411；[准备回执](evidence/windows-stage-a-2026-10-10-frontend-materialization-system-r2-preparation.json)确认固定物化且production unavailable。本轮包含journal父共享修复与planned分页就绪标记，不重派旧fixture。当前wrapper存活，等待终态，尚非实际物化/回收通过；恢复脚本仅绑定新r2准备记录。
+
+### 2026-10-10 初始化恢复身份反例与结果范围校验
+
+原生缺席核验回归增加错误file ID和父目录缺失，均拒绝；原namespace入口存在也继续拒绝，不能用PATH_NOT_FOUND作为成功。固定恢复脚本增加initialization_only分支：要求namespace_absence_confirmed=true、page_records_mutated=false及objects_retired=0，记录为初始化缺席确认；普通完整恢复仍要求全部objects数量退役，不混用成功文案。定向实际回归、Clippy、脚本静态解析及diff check通过；尚未SYSTEM验证新初始化分支/故障窗口，不改变阶段A或生产门禁。
+
+### 2026-10-10 明确未就绪事务的namespace缺席恢复分支
+
+独立恢复在受保护anchor明确journal_prepared=false且完整plan绑定验证通过时，使用新原生核心持有/匹配父卷与file ID并确认固定namespace缺席；若存在任何namespace入口则拒绝并保留债务。成功只更新anchor退役及发布initialization_only报告，objects_retired=0，page_records_mutated=false，不合成或覆盖缺失/部分分页，也不认领/删除输入对象。旧None和已就绪true仍使用完整分页恢复，不绕过错误。
+
+实际回归验证空namespace缺席成功、创建入口后拒绝，定向测试及Clippy通过。恢复脚本尚须识别initialization_only结果，native分支故障/身份/页面不变反例与SYSTEM实测仍未完成；旧无字段4be81216不应用该分支。阶段A及生产门禁不变。
+
+### 2026-10-10 完整planned分页持久就绪门槛
+
+物化anchor新增可选journal_prepared：新事务初始false，最后一页planned成功发布后必须原子保存true，callback成功返回后才允许prepare完成并进入transact创建。就绪保存失败沿原错误路径停止，不进入创建。旧anchor缺字段仍为None，不推断为false或授予初始化恢复；显式就绪字段要求stamp版本1。新版false/true、旧None和无对应stamp的拒绝回归通过。
+
+本轮仅补持久启动门槛及格式校验，尚未实现初始化失败的独立退役分支/实机故障注入；旧4be81216无该字段的失败事务不自动套用新版初始化规则，保留原证据。阶段A及生产门禁不变。
+
+### 2026-10-10 namespace持有与兄弟journal发布组合验证
+
+父目录共享回归扩展至实际create_journal_namespace：原子EA创建namespace并持续持有后，兄弟pending能重命名发布/读取，父目录重命名仍拒绝；namespace按精确身份回收成功。完整[原型回归](evidence/windows-stage-a-2026-10-10-frontend-journal-parent-tests.txt)通过，Clippy全目标、fmt及diff check通过。该回归使用实际文件/句柄但不是SYSTEM受保护publisher，不能替代新SYSTEM全规模实测。下一步须闭合分页初始化不完整时的恢复记录协议；旧0页fixture仍保留失败证据。
+
+### 2026-10-10 journal父目录共享策略接入
+
+新增hold_journal_parent，保留原生类型/非reparse/身份核验及目录读取，SHARE_READ|WRITE但不共享DELETE；调用者必须先证明受保护未授权journal范围。仅替换RuntimeInventory的固定父租约、恢复绑定/退役的journal父租约，以及固定namespace创建完成后持有的父租约。普通文件/输入父链的原租约不放宽。namespace新建仍经过原完整校验，随后换持新父句柄避免阻断兄弟分页发布。
+
+六项物化核心和两项native范围回归通过；父共享回归已改用实际helper，再次验证发布/读取成功且父重命名拒绝。Clippy全目标通过。尚未重跑SYSTEM全规模事务，也未完成0页初始化失败的原生恢复协议，阶段A及生产门禁不变。
+
+### 2026-10-10 共享冲突诊断范围修正与测试夹具退役
+
+两项失败父租约测试临时目录aa03b2fc（.moved）/d58a807e已核对本机Temp内绝对路径、非reparse及唯一plan/pending文件固定内容bound plan，随后经系统回收站回收并确认原路径缺席。原SYSTEM元数据不处理。保护读取函数对plan及page使用相同旧错误文案，故此前open fixed protected account plan failed不能证明是完整plan打不开：page0缺席亦可产生该文案。现读取失败增加固定filename和Win32码，journal发布失败增加目标filename，未新增秘密或对象转储。Clippy全目标及fmt通过。共享冲突策略尚未正式接入，原失败与恢复仍未通过。
+
+### 2026-10-10 父目录共享模式冲突实际复现
+
+新增普通账户临时目录回归，持有verify_retirement_object的目录读取/仅SHARE_READ句柄时，子pending重命名发布确实失败Win32 32。metadata-only句柄允许发布但不能阻止父目录重命名，不能用作替代。保留FILE_LIST_DIRECTORY、共享READ|WRITE而不共享DELETE的候选句柄实际允许子文件发布与读取，并拒绝父目录重命名；定向回归通过。尚未接入受保护journal父目录，也未证明独立恢复读取失败的完整原因。前两次失败测试遗留自有临时夹具须精确回收；原SYSTEM事务元数据不删除。
+
+### 2026-10-10 独立恢复失败与原目录终态快照
+
+独立恢复wrapper25588已退出，新fixture022dc03f-09ed-4acf-814c-cab5c6976be3的[服务回执](evidence/windows-stage-a-2026-10-10-frontend-materialization-independent-service.json)确认process_exit/removed，退出1066/2；诊断open fixed protected account plan failed，不能宣称恢复成功。[提升终态快照](evidence/windows-stage-a-2026-10-10-frontend-materialization-observation-failed.json)确认原plan3843877字节实际存在、0分页、namespace缺席、failed anchor及一个9790字节pending，原fixture无存活匹配进程。pending非恢复authority；观察缺席不是全部原生退役证明。两次固定事务均停止，保留元数据及失败证据，后续优先复现原生父句柄与发布/读取的共享冲突，不重派旧任务。
+
+### 2026-10-10 完整物化失败退役，独立恢复已派发
+
+原wrapper26788已退出。[服务回执](evidence/windows-stage-a-2026-10-10-frontend-materialization-system-service.json)确认原进程退出/服务removed，win32_exit_code1066/service_specific2；[诊断](evidence/windows-stage-a-2026-10-10-frontend-materialization-system-diagnostic.json)为publish flushed owned journal transition: Win32 32。不能宣称物化/回收通过。已固定派发独立恢复wrapper25588，StartTime03:18:46，恢复只针对原fixture4be81216；当前仍存活，未见终态。原事务不得重派，所有失败证据保留；须先确认完整页是否发布及实际对象范围，再分析共享冲突来源，不凭错误码推断无残留。
+
+### 2026-10-10 同事务等待与r3快照
+
+按wrapper26788及原StartTime核验后等待30秒，仍未退出且终态回执未出现。固定只读observer12636已终止；[r3快照](evidence/windows-stage-a-2026-10-10-frontend-materialization-observation-r3.json)03:17:07仍为0分页/namespace未创建，原controller及worker同身份存活。此为已验证等待及初始化观测，不重启、不标记失败或完成；仍需原事务终态及原生恢复证据。
+
+### 2026-10-10 原物化worker资源快照
+
+[r2提升快照](evidence/windows-stage-a-2026-10-10-frontend-materialization-observation-r2.json)确认服务worker13516创建时间03:12:27.164697、固定受保护映像及同fixture命令。03:15:58累计CPU203.15625秒，工作集77910016字节、44430句柄，完整anchor已存在但分页0/namespace缺席。此为单点观测，不是峰值或完成证据。observer22676已终止，原wrapper26788继续存活。代码检查发现创建路径多次生成完整BundlePlan，各次均进行原生同级名称比较；尚未实测归因，不能以此宣布性能缺陷或改动运行中的受保护映像。
+
+### 2026-10-10 完整物化提升只读快照
+
+固定只读observer7980已终止；[提升快照](evidence/windows-stage-a-2026-10-10-frontend-materialization-observation.json)证明原fixture受保护profile已存在，anchor固定43290对象/677页、stamp1、creating且未授权，无账户/filter。03:15:06时分页数0、namespace未创建；此为初始化阶段证据，不能认定卡死或失败。controller26888创建时间03:12:25.711902，wrapper26788仍存活。首轮observer仅筛prototype映像，未采fixed-admission服务worker资源，不能将controller的150handles/约11MB冒充worker峰值；脚本已补充worker映像筛选，原快照不覆盖。
+
+### 2026-10-10 固定实验并发重派窗口关闭
+
+完整物化与独立恢复脚本在任何native准备前以CreateNew独占创建started记录并flush，启动失败亦保留，不以最终invocation尚未出现作为重复派发依据。当前原wrapper26788/03:12:24仍存活，已按精确进程StartTime补存本轮started占位。两脚本静态解析及diff check通过。本轮仍未出现终态service/result，继续观察同一任务，不重派。
+
+### 2026-10-10 完整SYSTEM物化实验已启动（非终态）
+
+固定提升脚本已启动，wrapper PID26788、StartTime本机2026-10-10 03:12:24，fixture 4be81216-42c6-4a9c-bf29-8f192ec1beea。[准备回执](evidence/windows-stage-a-2026-10-10-frontend-materialization-system-preparation.json)固定物化模式且production unavailable。当前精确wrapper仍存活，尚无service/result/invocation终态证据；普通观察者未读取到profile根，不能据此推断SYSTEM进度或失败。必须继续观察同一进程/受保护回执，不因等待超时重新派发。此条仅启动记录，不构成创建、回收或阶段A通过证据。
+
+### 2026-10-10 完整物化独立恢复脚本与磁盘预检
+
+新增固定Invoke-FixedFrontendMaterializationRecovery.ps1，仅从本轮固定物化准备证据选取UUID，native准备再次核验原受保护记录及精确SCM退役。结果要求独立SYSTEM、原服务已退役、完整对象/页数及全部退役、objects_created=0、不打开source inventory、不派发工具/账户/grant/filter，以及恢复服务两个退出码0和精确退出/退役。记录成功退役对象的再次确认不等同崩溃恢复，后续实机须据实际原事务状态描述证据。
+
+创建脚本增加服务准备前NTFS与至少2GiB可用空间门禁；本机读取C盘约52.6GB、D盘约40.0GB可用。该阈值仅为基本空间预检，不是完整句柄/内存/回收站资源预算证明。恢复脚本静态解析与diff check通过；本轮未启动服务，峰值资源及完整SYSTEM物化仍未测量。
+
+### 2026-10-10 完整物化SYSTEM实验脚本准备
+
+新增固定Invoke-FixedFrontendMaterialization.ps1，不接受外部命令或路径。按已有固定服务流程保存准备、服务、诊断、结果与anchor，要求完整43290对象/677页、创建与退役数量一致、无账户/filter/grant/tool、两个服务退出码0及精确进程退出/服务退役；额外检查namespace缺席和stamp版本1。已有证据拒绝覆盖，失败保留原fixture并禁止重派。PowerShell静态解析及原型binary构建通过。本轮尚未启动提升脚本，不代表SYSTEM实际物化通过；独立恢复脚本及资源预算预检仍须补齐。
+
+### 2026-10-10 标记恢复协调器拒绝反例与全量回归
+
+新增协调器级实际对象反例：namespace没有EA，或EA其余字段正确但fixture不同，均在发布身份前拒绝；原始分页不变、对象保留、普通创建继续被拒绝。测试夹具在断言后通过回收站处理。此前原子标记观察、分页派生、恢复绑定及native版本门禁的完整原型回归通过，详细见[测试记录](evidence/windows-stage-a-2026-10-10-frontend-stamped-recovery-tests.txt)。Clippy全目标、fmt与diff check通过。尚未新SYSTEM全规模/崩溃恢复实测，阶段A及生产门禁不变。
+
+### 2026-10-10 标记认领与独立恢复入口串联
+
+新增bind_stamped_pending：停止创建，持有并核对实际父卷/file ID，先比对完整计划全部定义，再按依赖顺序观察存在且尚未绑定的对象，以同句柄EA/身份核验结果发布恢复检查点。已退役对象重现拒绝；缺席对象留给逆序退役核验；原有身份不替换。独立SYSTEM恢复worker只在已验证anchor的creation_stamp_version=1时调用，旧无标记anchor仍保留对存在无身份对象的拒绝。
+
+本机实际四对象回归在原创建句柄全部关闭且记录仍planned时完成恢复绑定、禁止创建及完整逆序回收；发布失败保留原记录与对象，重试通过。定向测试通过；尚未实际派发新SYSTEM服务，缺标记/错误标记及完整故障窗口还须补充协调器级反例，不能宣称独立实机恢复或阶段A完成。
+
+### 2026-10-10 从绑定分页派生恢复标记
+
+BundleJournal新增creation_stamp，只从已绑定页内fixture、inventory/plan摘要、完整对象index及kind生成预期EA，不接受调用者替换摘要。新增实际对象回归覆盖计划四项的标记创建、由journal派生后同句柄核验及独立观察；其他index标记与越界index均拒绝。定向测试及Clippy全目标通过。尚未接入原生恢复协调器和独立SYSTEM派发，阶段A及生产门禁不变。
+
+### 2026-10-10 同句柄恢复观察核心
+
+CreationStamp新增observe，以不跟随入口且仅共享读取的句柄打开对象，在同一持有句柄上核验完整EA及卷/file ID。普通文件要求非目录、非reparse及单hardlink；目录要求非reparse；alias允许目录占位状态，其精确junction目标仍须后续退役核心独立核验。返回私有字段的ObservedCreation，持有句柄直到检查点发布，不能从外部构造或替换身份。调用者仍须先证明受保护且从未授权的namespace，EA本身不构成独立拥有授权。
+
+本机定向回归通过：文件、目录和alias占位对象可观察，错误绑定与无标记对象拒绝，观察期间重命名拒绝。Clippy全目标、fmt及diff check通过。本轮未接入独立SYSTEM恢复worker，也未进行全规模或崩溃实验；阶段A及生产门禁不变。
+
+### 2026-10-10 恢复专用身份检查点
+
+BundleJournal新增checkpoint_recovered_creation，仅在creation已停止/恢复faulted状态接受，复用同一原生身份唯一性、卷/父身份及持久父依赖校验；从planned绑定到applied只记录恢复拥有关系，不解除faulted，不开放普通creation_admitted。同页候选发布成功后才更新状态/身份集合，保存失败保持原记录，恢复重试仍保持禁止创建；不能替换已绑定身份。此接口要求native调用者已核验原子标记和受保护、从未授权namespace，状态机本身不代替原生拥有证明。
+
+新增回归验证正常创建阶段拒绝该恢复接口、父依赖未提交拒绝、保存失败保持原记录、恢复逐项绑定后全部普通创建仍拒绝，以及重新加载后的完整逆序退役。尚未将该接口与native EA观察/独立恢复worker联动；既有实际无身份对象仍不能被自动认领，A及生产门禁不变。
+
+完整原型[测试记录](evidence/windows-stage-a-2026-10-10-frontend-recovery-binding-tests.txt)lib207/main98/candidate11，共316 passed/15 ignored/0 failed；Clippy全目标、fmt及diff check通过。
+
+### 2026-10-10 EA标记接入完整物化创建入口
+
+物化anchor新增creation_stamp_version=1；RuntimeInventory创建适配器要求该版本并核对完整plan摘要，以同一完整计划顺序生成每项目录/文件/alias的EA绑定，根namespace使用index0。目录新建、独立复制和alias占位目录改用带EA的native新建请求，不在新建后补写标记；源摘要在目标创建前仍须匹配。目录/alias关闭创建句柄后的原生身份必须与创建时一致，文件写入/同步/重新lease仍核验身份、长度、单hardlink和内容。无标记创建兼容入口仅供测试，固定完整物化创建必须携带标记。
+
+真实临时对象回归验证目录、复制文件及junction设置后标记均可通过独立重开核验；junction拆除后标记仍存在，完整顺序回收通过且原源内容不变。恢复anchor读取允许旧记录没有新字段；新字段若存在但非1拒绝。恢复端尚未把标记用于planned身份认领，既有无身份对象继续保留债务。尚未SYSTEM全规模/故障窗口实测，不改变A及生产门禁。
+
+完整原型[测试记录](evidence/windows-stage-a-2026-10-10-frontend-stamped-creation-tests.txt)lib206/main98/candidate11，共315 passed/15 ignored/0 failed；Clippy全目标、fmt及diff check通过。
+
+### 2026-10-10 原生创建时EA恢复标记可行性实测
+
+新增frontend_creation_stamp，以NtCreateFile的EaBuffer在同一次FILE_CREATE请求中附带固定EA键；标记绑定版本、fixture UUID、完整计划中的index、对象kind、inventory与plan摘要，不包含秘密。拒绝nil/超限index/非法摘要、非本地绝对路径及ADS；仅新建，不覆盖。同步native句柄要求FILE_CREATED并立即以同句柄NtQueryEaFile核验完整字段/字节及有界输出；非预期状态拒绝，不回退到无标记创建。目录/alias占位目录使用目录权限和options，普通文件使用文件options，不请求backup绕过或删除权限。
+
+接口依据：[NtCreateFile](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntcreatefile)、[EA数据结构](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/0eb94f48-6aac-41df-a878-79f4dcfd8989)、[QueryEa](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-zwqueryeafile)。普通账户本机实测文件、目录及alias占位目录均创建并核验成功；原创建句柄关闭后重新打开仍可读到完整标记。错误index/UUID/两项摘要、已有路径、无标记文件及ADS均拒绝，无标记文件内容不变。
+
+该标记仅能在独立核验的受保护、从未授权namespace中作为恢复证据，不能单凭EA认领任意路径。本轮未把标记接入完整物化或planned恢复，没有验证SYSTEM/故障注入/断电持久性；既有无身份planned对象仍拒绝认领，A及生产门禁不变。
+
+完整原型[测试记录](evidence/windows-stage-a-2026-10-10-frontend-atomic-stamp-tests.txt)lib205/main98/candidate11，共314 passed/15 ignored/0 failed。随后增强同一native回归：文件内容实际写入/同步后标记仍可核验，全部句柄关闭后再次新建拒绝且原内容不变；[补验](evidence/windows-stage-a-2026-10-10-frontend-atomic-stamp-data-tests.txt)通过。Clippy全目标、fmt及diff check通过。
+
+### 2026-10-10 独立SYSTEM物化恢复固定派发入口
+
+Preparation新增默认None的frontend_materialization_recovery_target，四个frontend scope严格互斥；独立CLI仅接受规范非nil UUID，原目标不能为新任务自身。准备、服务加载及worker恢复均检查原任务是固定物化模式、原服务已创建/记录退役、原进程退出已确认且SCM精确缺席；原事务失败退出可以恢复，不要求旧只读journal诊断的成功退出码。加载关联目标不递归跟随恢复链。
+
+独立worker要求实际SYSTEM及固定ProgramData，持有原父目录并读取严格deny_unknown_fields的物化anchor，核验身份、UUID、版本/backend、namespace、数量/页数、未授权/无账户/无filter及允许的禁止执行阶段。完整plan和全部页经既有受保护绑定读取后，调用已加载对象退役核心；不打开源inventory、不重新创建或执行。仅全部退役后更新原anchor，并在新恢复任务根发布结果。等待预算3600秒，原只读journal恢复保持600秒。
+
+模式混用、自目标/nil和anchor范围/身份/授权变更反例通过；该代码尚未实际运行新SYSTEM恢复服务，不能称独立实机恢复通过。创建后身份未提交且对象仍存在的窗口仍保留债务，需闭合后再启动全规模物化实验；A及生产门禁不变。
+
+完整原型[测试记录](evidence/windows-stage-a-2026-10-10-frontend-materialization-recovery-dispatch-tests.txt)lib204/main98/candidate11，共313 passed/15 ignored/0 failed；Clippy全目标、fmt及diff check通过。
+
+### 2026-10-10 已加载物化记录的原生退役核心
+
+BundleJournal提供只读退役视图及拥有父身份；恢复核心先核对当前父卷/file ID、完整计划数量及每项定义，随后只能按逆序恢复退役，不创建对象。已记录身份的文件/目录/alias从不跟随入口的当前句柄重新核验原生身份、类型、单hardlink及完整junction目标；已拆除reparse但尚未提交的alias仅允许同身份普通目录并按空目录规则回收。已缺席对象经逐级原生目录核验取得包含关系证据，允许缺失祖先证明其计划后代缺席；不能将一般PATH_NOT_FOUND/访问错误当作成功。已退役对象重现或planned对象存在但无身份均拒绝，不认领或删除。
+
+普通账户实机恢复回归释放全部原lease/journal并回收源码文件后，从已存页重新加载，完成四对象恢复退役；同时覆盖alias已拆除但未提交检查点的状态。发布失败回归扩展验证存在的planned文件没有身份时恢复拒绝、两文件保持存在且不发布退役。首次恢复因目标路径分隔符表示差异失败，创建/恢复共用的reparse构造改为规范Windows反斜杠后重跑通过；失败夹具c49e6217已核对精确路径、junction目标与固定内容后拆除自有reparse并经回收站回收，没有保留该临时目录。
+
+该恢复核心要求后续native原服务退役、受保护anchor、未授权namespace等门禁；本轮实测仍在普通账户测试进程内，不能称独立SYSTEM/崩溃/重启恢复，固定独立派发入口尚未接入。planned且存在的无身份窗口债务仍不能自动回收，全规模实验前需进一步闭合该窗口，A门禁不变。
+
+完整原型[测试记录](evidence/windows-stage-a-2026-10-10-frontend-loaded-recovery-tests.txt)lib204/main96/candidate11，共311 passed/15 ignored/0 failed；Clippy全目标、fmt及diff check通过。
+
+### 2026-10-10 文件父链共享句柄及失效重验
+
+RuntimeInventory复制适配器接入FileParentCache，复制文件对每条实际父目录路径共享Rc句柄，避免35432文件按深度重复打开父链。首次访问仍逐级核验非reparse目录/卷身份；后续仅在旧句柄仍存活且卷匹配时复用。缓存只保留Weak引用，不因缓存存活而延长原生句柄生命周期；文件副本各自持有强引用，最后一个副本退役后缓存不能阻止父目录回收。过期条目必须重新原生打开和核验，不依据旧身份授权新对象。目录与alias创建保持独立父链核验。
+
+新增普通账户真实回归确认两文件父链指向相同句柄、错误卷在创建前拒绝、父目录持有期间重命名拒绝；两文件回收后Weak全部过期，可移动父目录，重新创建同路径后复制取得不同原生目录身份。跨页完整事务与发布失败回归均切换到共享缓存路径，验证缓存不阻止逆序回收。此为句柄数量优化及生命周期验证，尚非SYSTEM全规模峰值测量；完整独立失败恢复与实际资源预算仍待补齐，A门禁不变。
+
+完整原型[测试记录](evidence/windows-stage-a-2026-10-10-frontend-parent-custody-tests.txt)lib203/main96/candidate11，共310 passed/15 ignored/0 failed；Clippy全目标、fmt及diff check通过。
+
+### 2026-10-10 固定SYSTEM完整物化派发接入
+
+Preparation增加默认false的fixed_frontend_materialization字段，独立固定prepare CLI不接受外部命令或路径；禁止与账户workload、工具、原账户恢复、崩溃lifecycle、旧frontend journal或其恢复target混用。服务在既有受保护映像/准备记录授权下派发新worker，完整物化等待预算3600秒，旧journal仍600秒、其他模式仍60秒。旧记录缺少新字段时不启用。
+
+worker要求实际SYSTEM Token、非nil UUID及固定ProgramData，冻结完整inventory/plan后新建受保护父根并记录原生身份，发布独立fixed-frontend-materialization-v1 anchor及完整plan。仅在全部新planned页按序发布后进入完整协调器，后续检查点沿用受保护原子替换；无账户、网络filter、低权限授权或工具执行。失败标记failed且不宣称回收完成，成功要求完整创建/退役数量及retirement_confirmed一致，保留元数据证据。
+
+新增互斥/旧记录兼容与nil入口拒绝回归通过。首次测试使用错误的lifecycle枚举文本，已改为类型化序列化，回归重新通过。此轮仅完成代码与测试接入，尚未实际派发SYSTEM全规模事务；独立物化失败恢复与大规模回收/资源预算仍须先补齐，A及生产门禁不变。
+
+完整原型[测试记录](evidence/windows-stage-a-2026-10-10-frontend-materialization-dispatch-tests.txt)lib202/main96/candidate11，共309 passed/15 ignored/0 failed；Clippy全目标、fmt及diff check通过。
+
+### 2026-10-10 完整计划创建/回收协调器核心
+
+新增frontend_materialization，从仍持有的完整RuntimeInventory及受保护物化anchor取得复制能力，先发布全部planned页；按完整BundlePlan创建namespace根、目录、全部文件与目录alias，不提供子集执行入口。同页连续文件批量提交，目录及alias逐项提交，创建前检查持久依赖。全体创建完成后禁止后续创建，按计划逆序拆除alias并回收普通文件/空目录；每次收到身份绑定且原路径缺席的回收结果后才发布retired检查点，全部retired才返回成功。任意创建/检查点/回收失败返回错误并保留债务，不推断清理完成、不授予权限或执行工具。
+
+普通账户实机两项回归：70个独立文件加根/目录/alias，共73对象跨两页全部创建及回收，78次转换页发布（5次创建、73次退役），源内容不变；重新从最终页读取确认全部retired且不能创建。文件批次发布故障后，两份实际副本仍在，受保护页模拟记录仍planned且无身份，恢复不把它们当作retired或继续创建。该证据不是实际SYSTEM受保护发布或43290对象实测；固定SYSTEM新模式、物化anchor发布及独立失败恢复尚未接入，A门禁不变。
+
+完整原型[测试记录](evidence/windows-stage-a-2026-10-10-frontend-materialization-tests.txt)lib202/main94/candidate11，共307 passed/15 ignored/0 failed；Clippy全目标、fmt及diff check通过。
+
+### 2026-10-10 自有文件/空目录回收与原生缺席核验
+
+OwnedAsset与OwnedDirectory新增消耗自有lease的回收核心，调用者提供已记录期望身份；路径来自私有创建结果，不接受外部回收路径。关闭对象lease后重新取得不跟随reparse的原生句柄，核验卷/file ID及类型，普通文件沿用单hardlink拒绝。目录仅允许空目录，任何子项或枚举错误均拒绝，不递归回收未知对象。保持父链句柄，使用项目既有trash回收站API，随后CreateFileW不跟随入口，仅ERROR_FILE_NOT_FOUND视为原路径缺席；父级缺失/访问错误或仍有对象均不签发RecycledObject结果。
+
+真实临时对象回归覆盖错误身份与非空目录拒绝、独立文件回收、自有junction拆除后的空入口回收及原目标空目录回收；逐项原生缺席核验通过，源文件内容不变。RecycledObject不自动提交journal退役，不代表运行期或SYSTEM恢复验收；native协调器仍须提供树停止、授权撤销、受保护namespace和恢复阶段门禁，以避免关闭对象句柄到Shell回收API之间的路径替换窗口。完整SYSTEM事务与独立崩溃恢复仍未接入，A门禁不变。
+
+完整原型[测试记录](evidence/windows-stage-a-2026-10-10-frontend-retirement-tests.txt)lib200/main94/candidate11，共305 passed/15 ignored/0 failed；Clippy全目标、fmt及diff check通过。
+
+### 2026-10-10 自有junction身份绑定拆除核心
+
+OwnedAlias私有保存创建路径和完整reparse数据，detach先在原持有入口句柄上核验卷/file ID、目录/reparse属性及全部数据；关闭只读句柄后以不跟随入口的读写句柄重新核验，再通过FSCTL_DELETE_REPARSE_POINT仅拆除该mount point。操作后核验原目录仍存在、身份未变且reparse属性消失，返回持有的OwnedDirectory并继续持有目标及父链。失败保留恢复债务语义，不自动回收、不发布retired检查点；运行期树停止及已授权对象恢复门禁仍须由后续native协调器提供。
+
+实机回归替换此前测试专用拆除代码，验证错误原生身份/完整数据被拒绝且链接内容仍可读；真实detach成功后入口成为同身份普通目录，原入口不再读到目标文件，目标文件保持不变。尚未完成剩余目录/文件的可恢复回收、当前对象缺席核验、独立崩溃恢复或全规模SYSTEM创建，A门禁不变。
+
+完整原型[测试记录](evidence/windows-stage-a-2026-10-10-frontend-alias-detach-tests.txt)lib199/main94/candidate11，共304 passed/15 ignored/0 failed；Clippy全目标、fmt及diff check通过。
+
+### 2026-10-10 自有目录junction创建与精确目标核验
+
+新增create_alias，以已持有的非reparse目录作为目标，源/目标父链均须在绝对自有根内且同卷。仅新建目录后设置mount-point reparse，不覆盖既有入口；在变更前检查新目录类型及卷。设置后记录原生身份，再关闭写句柄、重新持有只读原入口句柄，核对卷/file ID、目录/reparse属性及完整FSCTL_GET_REPARSE_POINT字节与冻结目标一致。返回链接身份和入口/目标/父链句柄，不授予低权限或派发工具。
+
+RuntimeInventory适配器仅允许完整BundlePlan中的已记录alias路径及目标，不接受外部目标。普通账户自有对象实测可经junction读到正确目标文件，拒绝普通文件目标/越界、覆盖、持有期间重命名及链接作为新对象父级；测试移除自有reparse数据后回收测试根，目标内容保持不变。这是创建核心验证，正式身份绑定的精确退役、SYSTEM全规模创建及LPAC项目执行尚未完成，A门禁不变。
+
+完整原型[测试记录](evidence/windows-stage-a-2026-10-10-frontend-alias-tests.txt)lib199/main94/candidate11，共304 passed/15 ignored/0 failed；Clippy全目标、fmt及diff check通过。
+
+### 2026-10-10 自有目录创建与完整计划限定适配
+
+文件复制与目录创建共用逐级父对象校验及句柄持有。目录只使用create_dir新建，不递归补父级、不覆盖或认领已有对象；创建后核验实际非reparse目录、目标卷与非零file ID，返回持有句柄及ObjectIdentity供后续检查点绑定。RuntimeInventory复制适配器仅允许完整BundlePlan中已有的非空directory路径，根namespace创建仍须由后续native协调器单独处理。
+
+普通账户自有临时对象回归验证目录覆盖拒绝、持有期间重命名拒绝、缺父级不产生目录、越界拒绝、嵌套目录及独立子文件复制；已有真实junction反例扩展验证目录创建在目标变更前拒绝。此代码不自行发布检查点、设置SYSTEM保护ACL或授予低权限。完整native协调器、根创建、目录链接及精确退役仍未接入，不能视为全规模SYSTEM对象创建通过，A门禁不变。
+
+完整原型[测试记录](evidence/windows-stage-a-2026-10-10-frontend-directory-tests.txt)lib198/main94/candidate11，共303 passed/15 ignored/0 failed；Clippy全目标、fmt及diff check通过。
+
+### 2026-10-10 同页创建检查点批量提交
+
+BundleJournal新增checkpoint_created_batch，最多64个对象且必须同页，逐项从批次开始前的持久状态校验创建依赖；禁止用同批父对象授权子对象。拒绝重复索引、重复/已有身份、跨页/跨卷及父对象身份复用。整页一次发布成功后才更新内存状态和身份集合，revision仍按对象转换次数增加，保持现有恢复校验兼容；发布失败保留整批原状态并禁止后续创建。
+
+新增两项回归覆盖父子同批拒绝、重复索引/身份和跨页拒绝、单次发布与独立恢复读取，以及发布失败后的状态保持。此能力用于完整依赖复制的检查点写入预算；尚未接入全规模native创建，不证明实际对象创建或退役通过。
+
+完整原型[测试记录](evidence/windows-stage-a-2026-10-10-frontend-batch-checkpoint-tests.txt)lib197/main94/candidate11，共302 passed/15 ignored/0 failed；Clippy全目标、fmt及diff check通过。A验收及生产门禁不变。
+
+### 2026-10-10 独立依赖文件复制核心与原生反例
+
+新增frontend_asset_copy，以仍持有的源文件lease读取并核验冻结摘要；目标必须是绝对自有根中的规范相对路径。逐级持有并核验非reparse目录及卷身份，create_new拒绝覆盖，写入并同步后重新取得只读lease，核验原生file ID、单hardlink、长度和内容摘要，拒绝复用源对象身份。失败不自动删除或宣称恢复完成，不授权低权限或派发工具。
+
+RuntimeInventory增加仅匹配完整源清单的复制适配器；要求独立fixed-frontend-materialization-v1受保护anchor绑定fixture、当前完整inventory摘要、父对象原生身份、固定frontend-dependencies namespace及未授权阶段。旧journal诊断anchor不能直接用于复制；新anchor发布及完整native创建协调器尚未接入。
+
+完整原型[测试记录](evidence/windows-stage-a-2026-10-10-frontend-asset-copy-tests.txt)lib195/main94/candidate11，共300 passed/15 ignored/0 failed。
+
+普通账户自有临时对象实测两项回归通过：多hardlink源生成独立且写入受阻的副本，空文件、覆盖拒绝、错误摘要/卷/相对根及普通文件父级拒绝；真实目录junction父级在目标创建前拒绝，源内容不变。Clippy全目标及diff check通过。尚未完成SYSTEM全规模复制、目录/链接事务、精确撤销和LPAC完整项目执行，A仍未通过。
+
+### 2026-10-10 独立SYSTEM进程读取完整旧分页记录通过
+
+新增独立frontend_journal_recovery_target冻结派发字段，禁止同任务UUID、nil、与准备模式/账户workload/工具/原账户恢复/崩溃lifecycle混用。准备与SYSTEM派发时均要求原frontend服务已创建、确认进程退出、两个退出码0、受保护记录标记removed且原生SCM精确缺席；关联记录校验不递归跟随恢复链，避免损坏记录导致循环。该模式只读原记录，不重派原命令或开启原source inventory。
+
+固定旧fixture f9b43a1d-ce0b-4d96-a2f0-2cd9394543d6；新恢复fixture ffa3c0cf-383e-4a2c-b641-2be6bfc8da88，wrapper28788已终止。[独立准备](evidence/windows-stage-a-2026-10-10-frontend-journal-independent-preparation.json)、[服务退出](evidence/windows-stage-a-2026-10-10-frontend-journal-independent-service.json)、[诊断状态](evidence/windows-stage-a-2026-10-10-frontend-journal-independent-diagnostic.json)、[恢复读取结果](evidence/windows-stage-a-2026-10-10-frontend-journal-independent-result.json)确认新SYSTEM进程核对旧根原生身份、受保护anchor、完整plan和全部677页/43290对象；original_service_retired、independent_process、all_pages_bound均true，source_inventory_opened与records_mutated均false。creation仍blocked，planned未当作retired，无账户/filter/input namespace创建。
+
+新服务同样两个SCM退出码0、process_exit_confirmed与service_removed均true。此证据补足独立进程读取，不代表重启恢复、真实输入对象创建/退役、账户profile债务回收或完整B6。受保护记录继续保留为证据；实际复制与链接事务、LPAC全项目构建/测试、DNS与既有profile门禁仍待完成。相关真实结果与混用/目标反例回归通过，Clippy全目标、fmt、diff check通过。
+
+最终[r2完整测试](evidence/windows-stage-a-2026-10-10-frontend-journal-independent-tests-r2.txt)lib193/main94/candidate11，共298 passed/15 ignored/0 failed。下一步进入实际自有目录、独立文件及链接创建，要求原生对象身份与检查点先于低权限授权和工具派发，并联动精确退役预算。
+
+### 2026-10-10 SYSTEM完整分页发布与同服务回读实测通过
+
+新增独立固定frontend-journal服务模式，准备回执冻结fixed_frontend_journal=true，禁止与账户workload、工具、恢复target或崩溃lifecycle混用。沿用受保护映像及精确SYSTEM服务身份/退出/撤销核验，仅该模式等待预算600秒；其他模式维持原预算。worker先核验实际SYSTEM Token，冻结完整本机inventory和计划，再在新建SYS/BA受保护profile UUID目录中发布preparing anchor、固定完整plan和全部分页；全部成功后发布prepared marker。完整plan专用16MiB发布预算仅限固定文件名，普通回执/page维持64KiB。
+
+实际fixture f9b43a1d-ce0b-4d96-a2f0-2cd9394543d6，wrapper15204/worker3640均已终止。[准备回执](evidence/windows-stage-a-2026-10-10-frontend-journal-system-preparation.json)、[服务回执](evidence/windows-stage-a-2026-10-10-frontend-journal-system-service.json)、[受保护anchor副本](evidence/windows-stage-a-2026-10-10-frontend-journal-system-anchor.json)、[结果](evidence/windows-stage-a-2026-10-10-frontend-journal-system-result.json)确认43290对象/677页完整发布与原生受保护回读通过。worker释放inventory、原plan和原journal后，从受保护anchor及plan/pages重新加载并核对当前父对象；creation blocked，planned未计作retired。该回读仍在同一服务内，不能称独立进程、崩溃或重启恢复通过。
+
+实际service process_exit_confirmed=true、SCM两个退出码0、精确service_removed=true。未创建账户、filters或输入namespace，没有授予新package权限；SYS/BA文件记录明确保留为受保护证据。普通未提升观察者的CIM查询不能列出该受保护服务，未据此声称缺席；停止/撤销证据来自提升控制器的原生精确核验。源借用对象只读，没有修改其ACL。独立进程恢复、实际复制/链接创建与撤销、完整LPAC原始构建/测试及既有DNS/profile门禁仍未完成，生产unavailable。
+
+完整原型首轮295 passed/15 ignored；新增真实结果回归已单独通过，验证同服务回读范围、完整数量、禁止执行、无账户/过滤器/输入创建和服务退出/撤销。Clippy全目标及fmt通过。
+
+最终[r2完整测试](evidence/windows-stage-a-2026-10-10-frontend-journal-system-tests-r2.txt)lib193/main92/candidate11，共296 passed/15 ignored/0 failed；diff check通过。下一步先以新SYSTEM进程从原受保护记录恢复并核验原服务已退役，再接入自有输入创建与精确链接事务；不得将此同服务回读视为这些步骤已完成。
+
+### 2026-10-10 独立分页恢复读取核心与受保护文件适配
+
+BundlePlan新增有界绑定读取：16MiB上限，先匹配来自受保护anchor的摘要，再解码并重建完整命名空间，要求版本、目录/文件/链接、恢复数量和creation_ready逐项一致。解码类型保持私有，避免通过公开Deserialize绕过校验；恢复不要求原源码目录存在。路径校验复用既有设备名规则并拒绝NUL、控制字符、通配符及其他Windows非法字符，防止原生字符串截断或设备别名。
+
+BundleJournal新增独立restore_for_retirement：每页64KiB上限，拒绝缺页、页号/总数/UUID/父对象/两项摘要不匹配、未知字段、减少/替换定义、非法状态身份组合、重复或跨卷身份、不一致依赖，以及与状态转换不符的revision。重建依赖计数后强制禁止创建；planned仍须独立核验，不把它视为已缺席，也不重派原命令。真实43290对象/677页完整模拟状态转换后又完成全页绑定恢复；该证据是恢复协议与状态机回归，不是SYSTEM重启或实际OS退役。
+
+account_lpac_plan接入固定frontend计划/页文件族的受保护读取适配：精确ProgramData profile UUID根，无任意文件名；页号固定上限；沿用原生ACL/owner、无reparse、单hardlink和同句柄预算加一读取。错误根、nil UUID和超限索引在IO前拒绝。该新文件族尚未由SYSTEM写入并做正向实机回读，受保护anchor发布、原生创建及对象/链接/内容核验仍未接入，不改变A/B门禁。
+
+最终[r2完整测试](evidence/windows-stage-a-2026-10-10-frontend-bundle-recovery-tests-r2.txt)lib193/main88/candidate11，共292 passed/15 ignored/0 failed；Clippy全目标和fmt通过。DNS明确拒绝、崩溃profile债务、实际完整LPAC构建/测试及生产接入继续未完成。
+
+### 2026-10-10 完整依赖分页检查点核心
+
+新增frontend_bundle_journal核心，固定64对象/页、64KiB/页；先预检所有页包含最大身份字段和revision时的预算，再提交全部planned页，全部成功才返回创建状态机。页绑定fixture UUID、已有自有父对象卷/file ID、完整inventory摘要、完整plan摘要、页号/总页数及revision。RuntimeInventory适配器从当前保留的完整inventory直接生成两项摘要，调用者不能向该适配器传入外部摘要；复制期间仍须保留source inventory。
+
+创建依赖按索引记录，父目录和链接目标须先提交；创建检查点拒绝跨卷、复用已有父对象身份、重复对象身份及重复/已退役状态。发布失败保留先前planned记录并禁止后续创建；取消也阻止创建，不能据此推断已清理。退役须匹配已记录身份，先处理后代与指向目标的链接，再处理目录；保存失败保留原依赖，允许精确恢复重试。该核心仅表示检查点顺序，尚不验证原生目录/链接类型、内容摘要、目标句柄或实际缺席，必须由后续native执行器验证；不依据该状态机单独授权OS操作。
+
+真实43290对象计划分为677页，完整模拟86580次创建/退役checkpoint，验证页预算、依赖顺序和最终全部retired；这是全规模状态机回归，并非真实创建了这些对象。另有普通账户自有临时目录的create_new/flush部分初始发布故障回归，保留首planned页且不返回创建状态机；该测试不证明SYSTEM受保护发布。原生受保护页存储、完整提交门禁及独立恢复读取器、实际独立复制/链接创建/撤销仍未接入，creation_ready仍false，不改变通用撤销预算。
+
+最终[r2完整原型测试](evidence/windows-stage-a-2026-10-10-frontend-bundle-journal-tests-r2.txt)lib188/main88/candidate11，共287 passed/15 ignored/0 failed；Clippy全目标、fmt和diff check通过。阶段A/B、DNS服务代办、崩溃profile债务及生产接入继续未完成。
+
+### 2026-10-10 完整依赖资产与自有命名空间计划实测
+
+此前扫描已实际终止成功：[完整依赖资产清单](evidence/windows-stage-a-2026-10-10-frontend-runtime-inventory.json)为764包、35432文件、3986目录、554959479字节，169个空文件、26977个多hardlink源文件；2017个原生目录链接入口。只读lease保持到输出结束，无源ACL修改、授权或复制；过程持有数万个句柄，必须纳入后续资源/性能预算。多hardlink源将来必须独立复制，不把共享store对象作为自有授权目标。
+
+新增固定 `--inspect-fixed-frontend-bundle-plan`，在完整持有inventory后生成相对node_modules命名空间，保持.pnpm真实包布局与所有已记录入口，包含空目录及全部父级骨架；文件/目录/链接冲突、路径越界、ADS、点路径、链接作为创建父级、非计划目录目标均拒绝。独立[r2实测清单和计划](evidence/windows-stage-a-2026-10-10-frontend-bundle-plan.json)version2包含目录路径；计划35432文件、5840目录、2017链接及根，共43290个恢复对象，creation_ready=false。该数量仅为依赖输入，尚未加入源码、工具、测试辅助输入、工作产物或身份资源；没有简单扩大原768对象通用撤销入口。
+
+实测之后补充原生Windows同目录名字比较（包括Unicode大小写等价）及同链接不同目标拒绝；真实完整清单静态重放计划与实测逐项相同，并核对两轮全部文件身份/摘要与链接记录一致。此重放是后续计划逻辑回归，不能说之前实机二进制包含后来修订。自有创建、受保护逐对象journal、链接撤销/预算绑定及完整LPAC原始构建/测试仍待实施，阶段A和生产门禁不变。
+
+首次新增Unicode回归错误假设σ/ς等价，实测CompareStringOrdinal不等价，已改成原生结果对照；Å/å等价拒绝通过。随后命名空间改为精确字符串保存及原生同级比较，避免通用Unicode lowercase定义身份；仅展示排序保留lowercase顺序。一次完整清单回归因此出现展示顺序差异，已固定展示顺序，并将大型清单比较改为有界断言诊断，避免失败时转储完整对象。原失败记录保留。最终[r4完整测试](evidence/windows-stage-a-2026-10-10-frontend-bundle-plan-tests-r4.txt)lib181/main88/candidate11，共280 passed/15 ignored/0 failed；Clippy全目标、fmt通过。
+
+### 2026-10-10 完整依赖资产只读扫描入口
+
+续作补充：清单交付必须匹配当前仍持有句柄的完整资产、图与链接记录；删减文件并调整总字节、替换file ID、替换摘要、清空依赖边及非法JSON均拒绝回归通过。相同源入口的重复观察若身份或目标不同，拒绝而不是静默去重。最新完整原型[测试记录](evidence/windows-stage-a-2026-10-10-runtime-inventory-tests.txt)为lib178/main88/candidate11，共277 passed/15 ignored/0 failed，Clippy全目标和fmt通过。本轮新增的交付校验尚未包含在此前已启动的扫描二进制中；不得把该扫描说成已验证后来修订。
+
+新增固定 `--inspect-fixed-frontend-runtime`，以现有必需依赖全部解析的图为前置，遍历全部实际 package 根（含正常嵌套目录），保持文件及目录句柄，记录每个文件原生身份、字节数、SHA256 和源 hardlink 数。空依赖资产允许，执行映像仍拒绝空文件；借用硬链接不修改源 ACL，也不视为自有副本。依赖入口补充源/目标卷号、file ID 和 reparse tag；遍历遇到的目录链接仅允许指向同图已解析 package 根，其他目标拒绝。
+
+固定预算为65536文件、16384目录、单文件128MiB、总2GiB；生产仍 unavailable，自有复制、链接事务/撤销、完整运行时 closure 和恢复尚未完成。新增空文件与实际硬链接只读保留句柄回归，两项通过；之前完整原型274项通过，随后新增测试单独通过，Clippy全目标和diff check通过。实机扫描本轮已启动，尚未取得终态；证据输出位置为 `evidence/windows-stage-a-2026-10-10-frontend-runtime-inventory.json`，未完成文件不能作为成功证据。不得据此解除A/B门禁。
+
+### 2026-10-10 pnpm声明与hoisted依赖元数据图
+
+新增固定只读--inspect-fixed-frontend-dependencies入口，冻结package.json/lock及已安装包metadata，声明dependencies/devDependencies/peer/optional的本机实际绑定，补充hoisted别名以覆盖未声明import的兼容范围。pnpm[官方布局说明](https://pnpm.io/symlinked-node-modules-structure)描述store文件及链接/hoist结构；本机顶层typescript实际为junction。检查器保持源入口及实际目标目录句柄，原生检查directory/reparse tag，只允许junction/symlink，canonical目标必须留在本仓库物理.pnpm store，二次核对目标；不会将借用源链接视为拥有资源或修改源ACL。源metadata允许保留只读hardlink，不复制或授权它们。
+
+[首次实际图](evidence/windows-stage-a-2026-10-10-frontend-dependency-graph.json)及[最终r2](evidence/windows-stage-a-2026-10-10-frontend-dependency-graph-r2.json)：764包、2119边、66项目入口、622 hoisted入口，必需声明未解析0、可选缺席102，metadata总1342826字节。lock SHA256与全前端source清单匹配；记录实际包版本及metadata对象身份/摘要，不验证每项semver约束或lockfile integrity，不称完整代码closure。code_files_frozen=false、production unavailable。节点2048、边32768、单JSON512KiB/总32MiB、hoisted遍历条目2048都有预算；遍历按实际canonical package去重以结束cycle。
+
+审查修正optional peer不得把同名必需concrete依赖降级，hoisted scope子项/空scope同样计入枚举预算。r2包含这两项修订。新增实际外部target拒绝、source marker不变、内部目录及真实not-found对照，回收测试目录用回收站；声明路径逃逸/ADS、optional覆盖、限定Node祖先查找及真实图/lock绑定回归通过。第一次Clippy nonminimal_bool及后续test clone lint均已修正，无忽略规则。
+
+最终[r3](evidence/windows-stage-a-2026-10-10-frontend-dependency-graph-r3.json)采用version2，selector只发布SHA256，避免把可能含认证信息的依赖URL写入审计；记录规模及必需解析结果不变，新增URL内容不进入交付回归。首次两轮实际记录只包含已检查的本机依赖规格，保留原始事实。
+
+当前图只冻结metadata和借用目录入口；完整包代码文件inventory、精确源/目标别名身份记录、自有bundle的创建/撤销journal及对应恢复预算尚未连接。下一步按图建立这些事务边界后再复制完整源码/依赖，执行专用账户原始构建/测试；不因当前必需元数据都解析而解除A/B门禁。原型lib175/main88/candidate11，共274 passed/15 ignored，完整目标仍未完成。
+
+### 2026-10-10 全前端输入冻结与普通账户完整基线
+
+新增只读固定inspect入口，冻结编译时仓库的src/public及8个明确顶层输入，无调用者路径参数。保持所有目录/文件lease，拒绝reparse、hardlink、路径逃逸/ADS、敏感配置与预算超限；固定文件预算1024、目录256、字节64MiB。实际[输入清单](evidence/windows-stage-a-2026-10-10-frontend-source-manifest.json)为827文件/6777326字节，含对象卷/file ID与SHA256。SourceManifest结构校验不等于完整性证明；delivery必须逐项匹配当前拥有的不可变inventory，减少非核心文件或替换摘要也拒绝。清单没有授予访问或复制源码，不证明LPAC全项目兼容。
+
+普通开发账户原始[完整构建](evidence/windows-stage-a-2026-10-10-frontend-source-build.txt)tsc/Vite退出0；[完整测试](evidence/windows-stage-a-2026-10-10-frontend-source-test.txt)2466 passed/2 failed/8 skipped，失败为streaming-text选择跨fragment退役和Petdex生成Ajv校验器过期。[两项独立复验](evidence/windows-stage-a-2026-10-10-frontend-source-failures-recheck.txt)15 passed/2 failed，保留失败，不将其修成沙箱通过；本轮没有修改这两处产品代码或生成校验器。其普通测试失败不能归因于LPAC，后续需明确测试基线及修复范围。摘要及manifest摘要绑定见frontend-source-baseline.json。
+
+完整输入本身已超过现有768对象回收预算，不能直接放大原诊断并声称可恢复；下一步需依赖closure、全源码与测试辅助fixture的完整快照、对应拥有记录及有界恢复预算联动，再执行专用账户原始构建/测试。src/public清单不含node_modules、scripts/protocol/src-tauri测试辅助fixture，不把它称为全部测试输入。当前崩溃槽SID1142 profile仍Loaded，已询问操作者安排手动重启，未自动重启机器或强制卸载。
+
+本轮原型lib170/main88/candidate11，共269 passed/15 ignored/0 failed；Clippy、fmt/diff check通过。阶段A与完整目标继续未完成。
+
+### 2026-10-10 真实ShellSpan模块离线转换与行为测试
+
+新增独立NodeProject/NodeMetadataProject固定入口。编译时嵌入当前src/lib/terminal/terminal-output-buffer.ts，规范化CRLF后校验固定SHA256；新建两个只读输入副本并保持文件lease，账户/package仅FR。固定Node26.5.0脚本使用内置[stripTypeScriptTypes](https://nodejs.org/api/module.html#modulestriptypescripttypescode-options)转换，写入并重开.mjs，导入实际产物执行ANSI重绘、近期日志脱敏、snapshot缓存、session重绑定四项检查。仅禁用已知ExperimentalWarning，其他stderr保留并影响输出验收。父控制器独立核对源码、产物摘要、精确版本及唯一有序四项结果；不是类型检查、Vitest全套或pnpm/Vite/Rust全项目构建。
+
+未授权祖先的[首轮](evidence/windows-stage-a-2026-10-10-node-project-system-profile.json)fixture37c21ded-b5df-4c41-a69e-0fa5fc201c80，Node实际exit1，stderr明确EPERM/lstat C盘根，project_verified=false；精确Token/Job通过，随后独立恢复及账户/profile/hive/服务OS缺席通过。保留该失败入口，不通过关闭realpath规避边界。
+
+独立NodeMetadataProject复用受保护checkpointed祖先0x100080/无继承授权。[实测](evidence/windows-stage-a-2026-10-10-node-metadata-project-system-profile.json)fixture6b8ba09e-e416-496b-9227-25b7e1e12e7f，wrapper26340已退出；Node实际73，实际用户/package/capability/Low/LPAC及两成员工具拓扑通过，14550字节产物和四项行为检查匹配。源码写句柄请求被拒绝，可能是FR ACL或保留lease导致的32共享拒绝，不单独证明磁盘ACL写入反例。正常收尾namespace缺席首次未确认，原债务保留；固定独立恢复后debt空、账户/profile/filters/credential全退役，[OS缺席](evidence/windows-stage-a-2026-10-10-node-metadata-project-system-os-audit.json)及[两个祖先ACE缺席](evidence/windows-stage-a-2026-10-10-node-metadata-project-system-ancestor-os-audit.json)均确认。
+
+后续静态前置加固将package严格绑定fixture派生SID、用户要求规范专用账户SID，并保持root句柄；广泛package在输入发布前拒绝回归通过。该前置修订未重派实机，不将先前记录说成包含该修订。真实成功/失败及首次namespace债务、独立恢复加入回归；仍需全项目依赖、类型检查/构建/测试及后代工具验收。DNS、既有崩溃profile债务与完整A/B未完成，production unavailable。
+
+最终默认测试lib168/main88/candidate11，共267 passed/15 ignored/0 failed；fmt与diff check通过。源码/产物/版本/检查项篡改拒绝、独立metadata variant不取得internetClient/instrumentation均有回归。
+
+### 2026-10-10 固定 cache-only 选项对照：最小请求仍返回87
+
+新增固定minimal/fqdn/isolated三组同步请求，均强制DNS_QUERY_NO_WIRE_QUERY，不接受任意名字或options；只在已有Job约束的诊断子进程内调用。普通账户三组均返回9701缓存未命中，无记录。微软[DNS选项说明](https://learn.microsoft.com/en-us/windows/win32/dns/dns-constants)定义NO_WIRE_QUERY只查询本地缓存；这些对照用于请求准入定位，不作为网络拒绝证明。
+
+首次共享源实测在DNS比较前退出，后代报告超出4KiB预算；原始失败证据保留。补齐固定子进程有界错误输出后，r2明确记录fixed report budget exceeded before deserialization；错误输出仅为不可信诊断，不能授权恢复。扩充LeafNetwork上限至8KiB，继续执行上限加一读取、reparse/硬链接拒绝及解析前预算检查。新增实际后代payload超过旧4KiB但小于新8KiB的回归。
+
+[r3实测](evidence/windows-stage-a-2026-10-10-dns-cache-options-shared-lpac-r3.json)根/后代self-context等价且恢复成功，三组dispatch/completion均87，无记录、超时或取消。最小NO_WIRE_QUERY请求也失败，不能将本机87归因于所比较的附加options；仍未定位授权/服务具体失败层。actual_lpac/capabilities_verified及停树/profile/fixture ACL退役均true，完整网络矩阵仍失败；没有创建新专用账户债务。此前祖先崩溃fixture的loaded hive债务仍待精确恢复。
+
+最终原型lib165/main87/candidate11，共263 passed/15 ignored。DNS默认拒绝、真实项目及完整A/B仍未完成，生产unavailable。
+
+### 首个祖先更新后控制器强制退出：ACL已撤销，profile债务未闭合
+
+独立GitMetadataCheckpointCrash入口在第一个真实ACE更新后、applied提交前核验实际SYSTEM Token，持久保存PID/creation_time及两个planned状态，再TerminateProcess自身（固定0xe9，无外部PID参数，不运行Rust析构）。实际fixture03b4f5ac-1d36-44c4-879f-2d0259e28f3e/SID1142，wrapper PID27768已退出，保护回执保存controller16208/creation_time134360345822683570；服务进程终止确认、SCM1067、服务移除。未启动工具，不计LPAC命令成功。
+
+第一次独立恢复被loaded hive阻止。修正精确pre-tool crash恢复顺序：在原服务已退役、账户禁用、无账户进程及原controller已停止的门禁后，允许独立撤销祖先delta，不等待profile恢复；记录retired仍不释放账户/网络/profile。活controller、未知查询、缺精确checkpoint/工具范围均拒绝。只读inspection现在分别报告ancestor ACE缺席和identity_resources_retired，不能以ACL清理成功代表全部恢复。
+
+r2固定恢复wrapper PID12312已退出：[祖先核验](evidence/windows-stage-a-2026-10-09-git-metadata-crash-recovery-r2-ancestor-os-audit.json)确认两个精确对象ACE缺席、identity_resources_retired=false。profile回执states已retired，cleanup_debt仍含hive加载失败，account/profile/filters未退役。[当前CIM只读核验](evidence/windows-stage-a-2026-10-09-metadata-crash-quarantine.json)确认精确账户禁用、profile Loaded=true。需安排手动重启后只恢复此精确UUID；不强制卸载hive、不重放命令、不重复制造同类崩溃债务。本次整体崩溃验收未通过。
+
+新增实际planned崩溃/原服务终止/ACL部分成功但identity债务保留回归，以及活owner在打开目录前拒绝回归；固定dispatch矩阵覆盖新variant。最终lib162/main87/candidate11，共260 passed/15 ignored；Clippy、fmt/diff check通过。其他真实项目、DNS与A/B继续未完成；可独立推进其余门禁，完整完成仍需要该债务最终回收及崩溃生命周期修复。
+
+### 固定部分授权检查点故障实机回收
+
+新增独立GitMetadataPartialFailure枚举/CLI与固定script case，沿用Normal生命周期但在第一个目录实际ACE应用且核验后、applied回执发布前返回固定错误；只此枚举触发，无任意参数或环境开关。两个对象先verify_fresh再持久planned，第二个目录不执行授权，后续工具不启动。该故障是受控publisher拒绝，不是实际磁盘IO错误或控制器强制崩溃。
+
+实际wrapper PID11004已退出，fixture69a82d6c-928c-454b-9c92-47e4b70e4fa5：controller_admission_report.error为fixed ancestor post-mutation checkpoint failure，tool_admission=null、process_tree_stopped=true。正常收尾已将两个对象状态置retired且debt空；随后独立恢复幂等通过。[祖先OS核验](evidence/windows-stage-a-2026-10-09-git-metadata-partial-failure-system-ancestor-os-audit.json)确认两个精确对象package ACE缺席，[系统核验](evidence/windows-stage-a-2026-10-09-git-metadata-partial-failure-system-os-audit.json)确认账户/profile/hive/服务缺席。最终保存的profile回执已是retired，没有另存注入瞬间的planned原始快照；注入窗口由冻结入口及真实错误位置绑定，不能说保存了该瞬时快照，也不将未启动工具计作LPAC执行通过。
+
+新增实际错误/无工具启动/精确身份/幂等终态与OS核验回归，并将新variant纳入原固定dispatch拒绝矩阵。全量lib162/main85/candidate11，共258 passed/15 ignored；Clippy all-targets、fmt、diff check通过。强制controller崩溃、真实磁盘故障、真实项目及DNS仍待完成，A/B保持NO-GO。
+
+### 故障注入前的归属前置修正
+
+审查部分授权窗口发现：原prepare只冻结DACL，已存在精确package ACE时要等apply才拒绝，但此前已发布planned；后续恢复有把既有ACE误认作本轮delta的风险。现在对两个稳定目录全部执行verify_fresh（对象、原摘要、package ACE缺席）后才发布完整意图，不把既有授权带入拥有计划。DirectoryLease对象快照改为只读getter，拒绝路径内NUL，避免可变快照或Win32截断路径混淆。仍不承诺抵抗同账户敌对并发DACL替换。
+
+新增实际自有目录回归：建立package ACE后重新冻结匹配的原摘要，verify_fresh仍因既有授权拒绝，ACL不变；清理使用原拥有lease并回收目录。全量lib162/main84/candidate11，共257 passed/15 ignored；Clippy、fmt、diff check通过。本轮未重跑管理员fixture，上一轮实机证据不能替代本次前置修订的实机复验。下一步继续固定部分授权/检查点故障及controller崩溃验收；DNS、真实项目和完整A/B仍未完成。
+
+### 专用账户祖先 metadata 访问反例实测
+
+独立GitMetadataPrefix入口使用同一checkpointed授权/精确回收链，执行固定prefix probe而不是Git。新增metadata报告核验要求两个祖先path/卷/file ID与保护意图一致，属性/open/metadata成功且READ_ATTRIBUTES=0；LIST_DIRECTORY/ADD_FILE/ADD_SUBDIRECTORY/DELETE_CHILD/WRITE_DAC必须明确Win325，缺少矩阵、87/其他故障、校准缺失或planned检查点均拒绝。原无授权prefix对照保留。
+
+实际wrapper PID7148已退出，fixture12372a68-637c-450c-9175-d5f89e03b988。专用账户LPAC根及conhost身份/Low/capability/Job拓扑通过，probe退出73、prefix_report_bound=true/error=null。C盘根及ProgramData属性读取成功，五项额外权限句柄请求各返回5；独立metadata-only目录同样只允许属性，child内容读5。此范围是实际句柄权限检查，不是创建/删除/枚举内容操作的完整矩阵。终态debt空；原生祖先ACE精确缺席、账户/profile/hive/服务缺席核验均true，见git-metadata-prefix-system-{recovered-profile,ancestor-os-audit,os-audit}.json。
+
+增加真实回执与篡改负例回归（额外权限成功、32/87误认拒绝、对象身份替换、缺校准、未应用检查点）。全量lib161/main84/candidate11，共256 passed/15 ignored；Clippy首次manual_contains失败，修正后all-targets通过，fmt/diff check通过。实机报告对应增加planned门禁之前二进制，回执真实状态为retired，最后该静态核验修订未重新派发。实际项目/工具链、崩溃与部分授权窗口、DNS以及完整A/B仍待完成。
+
+### 专用账户 Git metadata 固定实机成功与精确回收
+
+新增独立GitMetadataInit枚举/CLI/script case，映射原固定GitBundleInit命令与同一冻结工具bundle，只有新入口启用祖先授权；原GitInit失败对照不改变。两个目录句柄/身份/DACL先冻结，完整意图先发布，再逐对象checkpointed应用。本轮实际fixture a619b68b-8170-4e34-a804-933c89a127fc/SID1139，提权wrapper PID28820已退出：实际LPAC Git及conhost精确身份/Low/capability/Job拓扑通过，Git exit0、repository_verified=true，stdout为自有output中的empty repository初始化，process_tree_stopped=true。
+
+首次回收失败：package namespace预算以及profile生命周期缺席未确认，原记录保留在git-metadata-init-system-{profile,recovered-profile}.json，账户/profile未释放，债务非空。不能把Git成功或祖先states=retired当作完整恢复。独立固定Recovery r2 wrapper PID30896已退出，精确原fixture恢复后debt空、账户/profile/账户filters/凭据均退役；[原生祖先核验](evidence/windows-stage-a-2026-10-09-git-metadata-recovery-r2-ancestor-os-audit.json)复查两个精确对象的本轮package ACE缺席，[OS核验](evidence/windows-stage-a-2026-10-09-git-metadata-recovery-r2-os-audit.json)确认账户/profile/hive/两服务缺席。未重放Git或重启机器。
+
+增加实际首轮失败/r2恢复/Git结果/身份/OS缺席绑定回归；首次回归因PowerShell5.1证据UTF8 BOM解析失败，仅读取侧移除BOM后通过，原证据不改。全量lib160/main84/candidate11，共255 passed/15 ignored；Clippy、fmt、diff check通过。实际二进制报告误沿用Git --version scope，后续仅修正报告文案为bare init范围，不将旧报告说成包含该修订；实际命令/产物由其repository核验和冻结入口证明。
+
+这一证据仅覆盖固定bare Git初始化，仍待祖先权限负例的专用账户真实检查、实际项目工具链、控制器崩溃与部分授权窗口。第一次回收的间歇失败仍为生命周期待查项；不因r2成功消除失败事实。DNS和A/B继续未完成，生产unavailable。
+
+### 祖先 ACL 检查点与生产恢复路径连接
+
+增量引擎新增apply_checkpointed/retire_checkpointed：publisher成功提交planned后才变更OS，成功后再提交applied；后置提交失败仍保留可精确撤销的原planned事实，不允许重放授权。恢复前先提交现有状态，撤销并实际核验后再提交retired；retired遇到本轮package ACE重现只报未知债务，不自动删除。publisher由拥有回执调用方提供，不以回调本身证明持久性。
+
+ProfileReceipt cleanup已在disabled_identity/no_account_processes后接入祖先撤销，要求已有独立workload退役事实；两项目录全部稳定打开并核验对象身份后才开始，逐对象反序撤销/保存。旧“handler unavailable”门禁被该受控路径替代；PowerShell外围核对仍保守拒绝非空祖先意图，尚未将其视为实机完成。授权的管理员固定派发入口尚未启用，本轮未修改宿主祖先目录。
+
+自有实际目录新增publisher前置/后置错误注入回归，验证前置失败零变更、applied写失败后从durable planned撤销、retired写失败后幂等重入以及已退役授权重现时保留原ACL。该测试使用注入失败的publisher，不等于生产journal实际磁盘故障或控制器崩溃实测。最终全量lib160/main83/candidate11，共254 passed/15 ignored/0 failed；Clippy、fmt和diff check通过。下一步启用独立固定Git metadata实验并验收实际受保护journal、专用账户、精确回收及崩溃窗口；DNS和完整A/B保持未完成。
+
+### 稳定句柄增量 ACL 引擎与实际目录回归
+
+新增 ancestor_metadata_acl 引擎：保持目录句柄并拒绝非目录/reparse，绑定卷号与file ID；原DACL摘要纳入有序ACE和descriptor control/revision，应用前冲突拒绝。只增加唯一package的0x100080、无继承ACE；拒绝采用已有package授权。撤销只移除唯一且逐字节匹配的本轮ACE，保留其他ACE及后来新增的权限；包ACE重复/权限或flags变化、对象替换均保留债务。撤销后重读DACL核验精确结果，重复撤销检查实际缺席。未知ACE类型保守拒绝；不对同账户恶意并发ACL写入承诺原子保护。
+
+两项真实自有临时目录测试通过，覆盖后来新增的其他package ACE保留、原ACL恢复、重复撤销、原摘要冲突、身份替换和未知本轮权限拒绝。全部临时目录使用回收站清理。引擎尚未接入管理员固定派发/受保护意图发布，ProfileReceipt和脚本保守门禁继续关闭；本轮没有修改C盘根/ProgramData权限，没有专用账户Git通过结论。
+
+最终全量报告为lib159 passed/15 ignored、main83 passed、candidate11 passed，即253 passed/15 ignored/0 failed；Clippy all-targets、fmt和diff check通过。此前本轮各次汇总按总数计少3项，以各原始命令分组结果为准；本次明确逐组汇总，不将ignored计入通过。下一步是受保护journal先于每次变更的执行/恢复连接，以及匹配二进制的固定实机和崩溃注入。DNS与A/B仍未完成。
+
+### 祖先授权意图与恢复门禁实施
+
+新增 ancestor_metadata_intent 固定实验契约：精确本轮 UUID/派生 package、C盘根及ProgramData有序对象身份、原DACL SHA256摘要，权限只允许0x100080且无继承。逐对象planned/applied/retired状态保留部分变更事实；planned也不能视为无需恢复，避免OS变更后检查点写入前崩溃的窗口。摘要只用于冲突检查，不授权完整旧DACL覆盖。
+
+受保护ProfileReceipt接入可选意图并核对冻结工作目录、package和控制器范围；未全部retired不能释放账户/profile/账户网络过滤器。精确磁盘授权/撤销处理尚未实现，因此cleanup对于任何非空祖先意图（包括宣称retired）直接拒绝，保留隔离。PowerShell恢复核对同样拒绝将新意图判为完成；旧回执缺失/null保持兼容。本轮没有授权宿主祖先目录或创建新的机器资源，不能算Git兼容或完整journal/恢复通过。
+
+两项独立契约测试通过；原型全量247 passed/15 ignored，随后新增ProfileReceipt释放门禁测试单独1 passed。Clippy all-targets、fmt、PowerShell5.1恢复门禁回归与diff check通过。下一步实现稳定目录句柄下DACL原状检查、受保护意图发布、最小ACE增量应用与精确撤销/缺席核验，再做专用账户Git实机及崩溃注入；DNS与A/B保持未完成。
+
+### 最小 metadata 权限的 Token 与磁盘校准
+
+真实 LPAC Token 新增内存 AccessCheck 校准；普通宿主 Token 无法满足同一限制性边界。随后在自有 fixture 增加受保护 metadata-only 目录和不继承 package 授权的 child.txt，沿用已有拥有记录及逐对象 package 撤销；不修改任何宿主祖先目录。
+
+三轮固定磁盘实测保留独立回执：仅 READ_ATTRIBUTES（[失败](evidence/windows-stage-a-2026-10-09-metadata-disk-lpac.json)）及 READ_ATTRIBUTES+TRAVERSE（[失败](evidence/windows-stage-a-2026-10-09-metadata-traverse-disk-lpac.json)）都返回属性打开5；READ_ATTRIBUTES+SYNCHRONIZE、无继承的0x100080 ACE（[通过](evidence/windows-stage-a-2026-10-09-metadata-sync-disk-lpac.json)）返回属性打开0，枚举/创建文件/创建目录/DELETE_CHILD/WRITE_DAC和child内容读取均返回5。三轮实际工具退出73，失败轮 prefix_report_bound=false且保留错误；成功轮绑定true/error=null。全部 process_tree_stopped/profile_removed/fixture_acls_revoked=true。SYNCHRONIZE 的同步打开关系参考 [Microsoft NtCreateFile](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/nf-wdm-zwcreatefile)；本机权限组合可行性以这三轮实际句柄结果为依据，不由内存 AccessCheck 外推。
+
+回执校验拒绝任意额外枚举/修改或child读取成功，旧回执仍兼容；新增两项Token校准回归及一项三轮磁盘回执回归。全量默认原型245 passed/15 ignored/0 failed；Clippy all-targets、fmt和diff check通过。最终Token校准已对齐0x100080，磁盘成功记录对应前一版仅0x80的内存校准，不能称最后源码已重跑实机。下一步仍须实现受保护祖先metadata意图、稳定对象身份、非继承增量授权及精确恢复后，才能验证专用账户Git工作流；DNS和A/B门禁保持未完成。
+
+### 后续实施：祖先目录最小权限诊断
+
+扩展固定 GitPrefixProbe，逐个祖先目录分别请求 READ_ATTRIBUTES、LIST_DIRECTORY、ADD_FILE、ADD_SUBDIRECTORY、DELETE_CHILD 和 WRITE_DAC 的句柄访问，不枚举内容、不创建/删除文件、不修改 ACL。新 access 字段保持旧回执兼容，存在时要求完整且拒绝未知字段。访问权含义依据 [Microsoft 文件访问权限](https://learn.microsoft.com/en-us/windows/win32/fileio/file-security-and-access-rights)。句柄获准只证明相应访问检查，不代替实际文件操作或 Git syscall 证据。
+
+真实普通宿主共享源 LPAC 固定探针退出 73；外层原型按设计退出 2，生产 unavailable。回执 [git-prefix-access-lpac](evidence/windows-stage-a-2026-10-09-git-prefix-access-lpac.json) 显示：自有 fixture 之外全部祖先的六项句柄检查均返回 5；fixture 根允许属性/枚举，拒绝四项修改权限；output 允许属性/枚举/创建文件/创建目录，拒绝 DELETE_CHILD/WRITE_DAC。process_tree_stopped、profile_removed、fixture_acls_revoked 和 prefix_report_bound 全部 true。未授予任何祖先权限；这不是专用账户或 Git 兼容验收。
+
+增加实际回执回归与缺失/未知 access 字段拒绝测试；默认全量原型测试 242 passed、15 ignored、0 failed，Clippy all-targets、fmt 和 diff check 通过。第一次编译因 WRITE_DAC 的 SDK 模块路径错误失败，修正为 FileSystem 后通过。下一步在可信 journal/增量撤销机制内验证唯一 package 的非继承祖先 metadata 授权，并验证枚举/创建/删除/改 DACL 仍拒绝，之后才跑真实 Git；默认 DNS 边界与完整 A/B 门禁继续未完成。
 
 ### Git锁文件前缀检查定位与相对git-dir否证
 

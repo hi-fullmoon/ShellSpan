@@ -1,0 +1,72 @@
+{
+  "recovery_id": "ed5395c8-d578-4918-85ea-0f06480989c2",
+  "observed_utc": "2026-10-09T19:54:17.3847594Z",
+  "records_opened": false,
+  "processes": [
+    {
+      "pid": 29692,
+      "creation": "2026-10-10T03:45:21.102988+08:00",
+      "command": "\"D:\\Developer\\ShellSpan\\tests\\windows-sandbox-account\\target\\debug\\shellspan-account-sandbox-prototype.exe\" --run-owned-system-admission ed5395c8-d578-4918-85ea-0f06480989c2",
+      "cpu_seconds": 0.34375,
+      "working_set_bytes": 11661312,
+      "handles": 150,
+      "threads": [
+        {
+          "id": 28888,
+          "state": "Wait",
+          "wait_reason": "UserRequest"
+        }
+      ]
+    },
+    {
+      "pid": 27884,
+      "creation": "2026-10-10T03:45:22.639326+08:00",
+      "command": "\"C:\\ProgramData\\ShellSpan-system-admission-A-ed5395c8-d578-4918-85ea-0f06480989c2\\fixed-admission.exe\" --fixed-system-admission-service ed5395c8-d578-4918-85ea-0f06480989c2",
+      "cpu_seconds": 632.328125,
+      "working_set_bytes": 81420288,
+      "handles": 377,
+      "threads": [
+        {
+          "id": 8600,
+          "state": "Wait",
+          "wait_reason": "UserRequest"
+        },
+        {
+          "id": 13096,
+          "state": "Running",
+          "wait_reason": null
+        },
+        {
+          "id": 6840,
+          "state": "Running",
+          "wait_reason": null
+        },
+        {
+          "id": 20204,
+          "state": "Wait",
+          "wait_reason": "EventPairLow"
+        },
+        {
+          "id": 30416,
+          "state": "Wait",
+          "wait_reason": "UserRequest"
+        },
+        {
+          "id": 16376,
+          "state": "Wait",
+          "wait_reason": "EventPairLow"
+        },
+        {
+          "id": 31120,
+          "state": "Wait",
+          "wait_reason": "EventPairLow"
+        },
+        {
+          "id": 23312,
+          "state": "Wait",
+          "wait_reason": "EventPairLow"
+        }
+      ]
+    }
+  ]
+}

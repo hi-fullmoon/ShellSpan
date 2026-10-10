@@ -1,0 +1,36 @@
+{
+  "fixture_id": "e255b20c-10d1-468f-b6f3-f9fa3d7c0411",
+  "observed_utc": "2026-10-09T19:30:49.5063896Z",
+  "read_only": true,
+  "processes": [
+    {
+      "pid": 7212,
+      "creation": "2026-10-10T03:29:33.99914+08:00",
+      "command": "\"D:\\Developer\\ShellSpan\\tests\\windows-sandbox-account\\target\\debug\\shellspan-account-sandbox-prototype.exe\" --run-owned-system-admission e255b20c-10d1-468f-b6f3-f9fa3d7c0411",
+      "cpu_seconds": 0.078125,
+      "working_set_bytes": 11350016,
+      "handles": 152
+    },
+    {
+      "pid": 28796,
+      "creation": "2026-10-10T03:29:35.503897+08:00",
+      "command": "\"C:\\ProgramData\\ShellSpan-system-admission-A-e255b20c-10d1-468f-b6f3-f9fa3d7c0411\\fixed-admission.exe\" --fixed-system-admission-service e255b20c-10d1-468f-b6f3-f9fa3d7c0411",
+      "cpu_seconds": 69.71875,
+      "working_set_bytes": 65396736,
+      "handles": 44426
+    }
+  ],
+  "admission_files": [
+    {
+      "Name": "fixed-admission.exe",
+      "Length": 6536192,
+      "LastWriteTimeUtc": "2026-10-09T19:29:33.9558624Z"
+    },
+    {
+      "Name": "ownership.json",
+      "Length": 726,
+      "LastWriteTimeUtc": "2026-10-09T19:29:34.7252813Z"
+    }
+  ],
+  "profile_exists": false
+}

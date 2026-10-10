@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "backend": "fixed-frontend-journal-v1",
+  "production": "unavailable",
+  "fixture_id": "f9b43a1d-ce0b-4d96-a2f0-2cd9394543d6",
+  "parent": {
+    "volume": 2523053325,
+    "file_id": 6192449488773355
+  },
+  "inventory_sha256": "9f6b1525fbcb0070af5245c134c925b9f8b0e5c4c656c0acd7bc77efe51dc098",
+  "plan_sha256": "cb118ef0d079eb72a71dc5762a851496c4bbed9013a1fd6f664e8aea21e0cbd8",
+  "pages": 677,
+  "objects": 43290,
+  "phase": "prepared; execution forbidden",
+  "accounts_created": false,
+  "filters_installed": false,
+  "input_namespace_created": false
+}

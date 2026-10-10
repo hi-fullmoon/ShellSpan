@@ -58,8 +58,45 @@ pub fn read_protected(root: &Path) -> Result<AccountLpacPlan> {
 pub fn read_protected_receipt(root: &Path) -> Result<Vec<u8>> {
     read_protected_bytes(root, "ownership.json", 65536)
 }
+fn verify_frontend_record_root(root: &Path, fixture: uuid::Uuid) -> Result<()> {
+    let expected = std::path::PathBuf::from(format!(
+        r"C:\ProgramData\ShellSpan-account-profile-A-{fixture}"
+    ));
+    if fixture.is_nil() || root.as_os_str() != expected.as_os_str() {
+        return Err("frontend recovery record root binding differs".into());
+    }
+    Ok(())
+}
+/// Fixed record family only; callers obtain the expected digest from the
+/// protected ownership anchor, never from an untrusted frontend request.
+pub fn read_protected_frontend_plan(
+    root: &Path,
+    fixture: uuid::Uuid,
+    expected_sha256: &str,
+) -> Result<crate::frontend_bundle_plan::BundlePlan> {
+    verify_frontend_record_root(root, fixture)?;
+    crate::frontend_bundle_plan::BundlePlan::read_bound(
+        &read_protected_bytes(root, "frontend-bundle-plan.json", 16 * 1024 * 1024)?,
+        expected_sha256,
+    )
+}
+pub fn read_protected_frontend_page(
+    root: &Path,
+    fixture: uuid::Uuid,
+    index: usize,
+) -> Result<Vec<u8>> {
+    verify_frontend_record_root(root, fixture)?;
+    if index >= 100000usize.div_ceil(64) {
+        return Err("frontend recovery page index budget exceeded".into());
+    }
+    read_protected_bytes(
+        root,
+        &format!("frontend-bundle-page-{index:04}.json"),
+        65536,
+    )
+}
 #[cfg(windows)]
-fn read_protected_bytes(root: &Path, filename: &'static str, budget: u32) -> Result<Vec<u8>> {
+fn read_protected_bytes(root: &Path, filename: &str, budget: u32) -> Result<Vec<u8>> {
     use std::io::Read;
     use std::os::windows::io::FromRawHandle;
     use std::ptr::{null, null_mut};
@@ -185,7 +222,10 @@ fn read_protected_bytes(root: &Path, filename: &'static str, budget: u32) -> Res
         )
     };
     if raw == INVALID_HANDLE_VALUE {
-        return Err("open fixed protected account plan failed".into());
+        return Err(format!(
+            "open fixed protected record {filename}: Win32 {}",
+            unsafe { GetLastError() }
+        ));
     }
     let mut file = unsafe { std::fs::File::from_raw_handle(raw) };
     if unsafe { GetFileInformationByHandle(raw, &mut info) } == 0
@@ -211,6 +251,30 @@ fn read_protected_bytes(root: &Path, filename: &'static str, budget: u32) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn frontend_record_family_rejects_wrong_root_and_unbounded_index_before_io() {
+        let fixture = uuid::Uuid::new_v4();
+        let root = std::path::PathBuf::from(format!(
+            r"C:\ProgramData\ShellSpan-account-profile-A-{fixture}"
+        ));
+        assert!(
+            read_protected_frontend_page(&std::env::temp_dir(), fixture, 0)
+                .unwrap_err()
+                .contains("binding")
+        );
+        assert!(read_protected_frontend_page(&root, fixture, usize::MAX)
+            .unwrap_err()
+            .contains("budget"));
+        assert!(read_protected_frontend_page(&root, uuid::Uuid::nil(), 0)
+            .unwrap_err()
+            .contains("binding"));
+        assert!(read_protected_frontend_plan(
+            &root.with_file_name("other"),
+            fixture,
+            &"a".repeat(64)
+        )
+        .is_err());
+    }
     #[test]
     fn untrusted_desktop_directory_cannot_supply_a_privileged_plan() {
         let error = read_protected(&std::env::temp_dir()).unwrap_err();

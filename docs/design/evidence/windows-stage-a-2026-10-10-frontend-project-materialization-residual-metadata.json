@@ -1,0 +1,15 @@
+{
+  "observed_utc": "2026-10-09T22:06:31.5795865Z",
+  "candidate_root": "C:/Users/zhengbiwen/AppData/Local/Temp/ShellSpan-project-transaction-be22541c-9ef4-4b72-a33a-885520e20330",
+  "read_only": true,
+  "content_read": false,
+  "reparse_followed": false,
+  "files": 13808,
+  "directories": 5897,
+  "reparse_entries": 0,
+  "files_at_least_260_chars": 3628,
+  "maximum_path_chars": 323,
+  "longest_relative_path": "frontend-project\\node_modules\\.pnpm\\@dnd-kit+core@6.3.1_react-d_5b9ddec44e14c8a53fa8750ace964073\\node_modules\\@dnd-kit\\core\\dist\\components\\DragOverlay\\components\\NullifiedContextProvider\\NullifiedContextProvider.d.ts",
+  "errors": [],
+  "recovery_authorized": false
+}

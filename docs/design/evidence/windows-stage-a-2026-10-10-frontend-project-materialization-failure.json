@@ -1,0 +1,18 @@
+{
+  "test": "actual_complete_project_materialization_and_retirement",
+  "session": 97547,
+  "pid": 23460,
+  "process_creation_utc": "2026-10-09T21:26:14.9897641Z",
+  "terminal": true,
+  "exit_code": 1,
+  "elapsed_seconds": 2228.64,
+  "result": "FAILED",
+  "error": "recycle exact owned object: Error during a trash operation: Some operations were aborted",
+  "fixture_candidate": "be22541c-9ef4-4b72-a33a-885520e20330",
+  "fixture_candidate_path": "C:/Users/zhengbiwen/AppData/Local/Temp/ShellSpan-project-transaction-be22541c-9ef4-4b72-a33a-885520e20330",
+  "attribution": "unique matching test prefix and creation time; not ownership authorization",
+  "checkpoint_publisher": "memory; original pages lost when test process exited",
+  "cleanup_attempted": false,
+  "production": "unavailable",
+  "recovery_authorized": false
+}

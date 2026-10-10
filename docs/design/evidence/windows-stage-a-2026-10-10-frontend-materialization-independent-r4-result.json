@@ -1,0 +1,19 @@
+{
+  "accounts_created": false,
+  "actual_system": true,
+  "filters_installed": false,
+  "fixture_id": "e255b20c-10d1-468f-b6f3-f9fa3d7c0411",
+  "independent_process": true,
+  "objects": 43290,
+  "objects_created": 0,
+  "objects_retired": 43290,
+  "original_service_retired": true,
+  "pages": 677,
+  "permissions_granted": false,
+  "production": "unavailable",
+  "recovery_id": "ed5395c8-d578-4918-85ea-0f06480989c2",
+  "retirement_confirmed": true,
+  "source_inventory_opened": false,
+  "tools_dispatched": false,
+  "version": 1
+}

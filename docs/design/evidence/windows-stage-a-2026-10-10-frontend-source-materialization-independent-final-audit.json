@@ -1,0 +1,138 @@
+{
+  "fixture_id": "a982be11-d802-424e-ba39-dcdfd72a265a",
+  "observed_utc": "2026-10-09T21:18:32.2387376Z",
+  "read_only": true,
+  "processes": [],
+  "admission_files": [
+    {
+      "Name": "fixed-admission.exe",
+      "Length": 6603776,
+      "LastWriteTimeUtc": "2026-10-09T21:16:13.7809814Z"
+    },
+    {
+      "Name": "ownership.json",
+      "Length": 878,
+      "LastWriteTimeUtc": "2026-10-09T21:16:53.8421038Z"
+    },
+    {
+      "Name": "service-result.json",
+      "Length": 168,
+      "LastWriteTimeUtc": "2026-10-09T21:16:53.7154704Z"
+    }
+  ],
+  "profile_exists": true,
+  "profile_files": [
+    {
+      "Name": "frontend-bundle-page-0000.json",
+      "Length": 10161,
+      "LastWriteTimeUtc": "2026-10-09T21:16:53.688646Z"
+    },
+    {
+      "Name": "frontend-bundle-page-0001.json",
+      "Length": 12301,
+      "LastWriteTimeUtc": "2026-10-09T21:16:51.4313153Z"
+    },
+    {
+      "Name": "frontend-bundle-page-0002.json",
+      "Length": 12302,
+      "LastWriteTimeUtc": "2026-10-09T21:16:49.0754655Z"
+    },
+    {
+      "Name": "frontend-bundle-page-0003.json",
+      "Length": 12033,
+      "LastWriteTimeUtc": "2026-10-09T21:16:46.7691551Z"
+    },
+    {
+      "Name": "frontend-bundle-page-0004.json",
+      "Length": 11738,
+      "LastWriteTimeUtc": "2026-10-09T21:16:44.3614678Z"
+    },
+    {
+      "Name": "frontend-bundle-page-0005.json",
+      "Length": 11897,
+      "LastWriteTimeUtc": "2026-10-09T21:16:42.0422578Z"
+    },
+    {
+      "Name": "frontend-bundle-page-0006.json",
+      "Length": 11433,
+      "LastWriteTimeUtc": "2026-10-09T21:16:39.8491458Z"
+    },
+    {
+      "Name": "frontend-bundle-page-0007.json",
+      "Length": 11485,
+      "LastWriteTimeUtc": "2026-10-09T21:16:37.5986568Z"
+    },
+    {
+      "Name": "frontend-bundle-page-0008.json",
+      "Length": 11919,
+      "LastWriteTimeUtc": "2026-10-09T21:16:35.3018776Z"
+    },
+    {
+      "Name": "frontend-bundle-page-0009.json",
+      "Length": 11108,
+      "LastWriteTimeUtc": "2026-10-09T21:16:32.9401359Z"
+    },
+    {
+      "Name": "frontend-bundle-page-0010.json",
+      "Length": 10983,
+      "LastWriteTimeUtc": "2026-10-09T21:16:30.8117206Z"
+    },
+    {
+      "Name": "frontend-bundle-page-0011.json",
+      "Length": 10722,
+      "LastWriteTimeUtc": "2026-10-09T21:16:28.4669737Z"
+    },
+    {
+      "Name": "frontend-bundle-page-0012.json",
+      "Length": 11006,
+      "LastWriteTimeUtc": "2026-10-09T21:16:26.0421602Z"
+    },
+    {
+      "Name": "frontend-bundle-page-0013.json",
+      "Length": 8447,
+      "LastWriteTimeUtc": "2026-10-09T21:16:24.0129841Z"
+    },
+    {
+      "Name": "frontend-bundle-plan.json",
+      "Length": 41371,
+      "LastWriteTimeUtc": "2026-10-09T21:16:15.7479313Z"
+    },
+    {
+      "Name": "frontend-materialization-result.json",
+      "Length": 385,
+      "LastWriteTimeUtc": "2026-10-09T21:16:53.6978597Z"
+    },
+    {
+      "Name": "ownership.json",
+      "Length": 599,
+      "LastWriteTimeUtc": "2026-10-09T21:17:55.3750331Z"
+    }
+  ],
+  "checkpoint_pages": 14,
+  "diagnostic_page_states": {
+    "retired": 883
+  },
+  "states_are_nontransactional_observation": true,
+  "namespace_exists": false,
+  "anchor": {
+    "creation_stamp_version": 1,
+    "journal_prepared": true,
+    "version": 1,
+    "backend": "fixed-frontend-source-materialization-v1",
+    "production": "unavailable",
+    "fixture_id": "a982be11-d802-424e-ba39-dcdfd72a265a",
+    "parent": {
+      "volume": 2523053325,
+      "file_id": 4785074605524160
+    },
+    "inventory_sha256": "8888cfa21e0418f4053abcf29719dfd41549e2b3d9ff1253cad4ccea0452a601",
+    "plan_sha256": "3ccf36e8f4da88aec75a6ff94e1fe340986cc8deec7881067c23b3d7c6aee84f",
+    "objects": 883,
+    "pages": 14,
+    "phase": "retired; execution forbidden",
+    "namespace_root": "frontend-source",
+    "permissions_granted": false,
+    "accounts_created": false,
+    "filters_installed": false
+  }
+}

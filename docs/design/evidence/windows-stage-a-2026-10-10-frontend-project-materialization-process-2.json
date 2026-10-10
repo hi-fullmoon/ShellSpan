@@ -1,0 +1,18 @@
+{
+  "observed_utc": "2026-10-09T21:56:05.8868938Z",
+  "pid": 23460,
+  "creation_utc": "2026-10-09T21:26:14.9897640Z",
+  "session": 97547,
+  "test": "actual_complete_project_materialization_and_retirement",
+  "cpu_seconds": 773.46875,
+  "handles": 118600,
+  "working_set_bytes": 223281152,
+  "read_operations": 8722942,
+  "write_operations": 73429,
+  "read_bytes": 2503548242,
+  "write_bytes": 567194309,
+  "terminal": false,
+  "records_opened": false,
+  "proves_retirement": false,
+  "production": "unavailable"
+}

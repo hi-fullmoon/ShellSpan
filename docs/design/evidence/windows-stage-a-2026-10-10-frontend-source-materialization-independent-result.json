@@ -1,0 +1,20 @@
+{
+  "accounts_created": false,
+  "actual_system": true,
+  "filters_installed": false,
+  "fixture_id": "a982be11-d802-424e-ba39-dcdfd72a265a",
+  "independent_process": true,
+  "namespace_root": "frontend-source",
+  "objects": 883,
+  "objects_created": 0,
+  "objects_retired": 883,
+  "original_service_retired": true,
+  "pages": 14,
+  "permissions_granted": false,
+  "production": "unavailable",
+  "recovery_id": "4bea6a19-a71b-4f43-8736-b3a90e921503",
+  "retirement_confirmed": true,
+  "source_inventory_opened": false,
+  "tools_dispatched": false,
+  "version": 1
+}

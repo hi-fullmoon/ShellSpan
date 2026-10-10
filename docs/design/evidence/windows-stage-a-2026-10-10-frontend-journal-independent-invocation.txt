@@ -1,0 +1,1 @@
+Independent SYSTEM recovery read all pages; creation remains blocked and records remain unchanged.

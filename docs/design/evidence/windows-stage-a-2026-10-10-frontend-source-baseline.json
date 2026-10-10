@@ -1,0 +1,20 @@
+{
+  "scope": "ordinary developer frontend baseline; no LPAC execution",
+  "source_files": 827,
+  "source_bytes": 6777326,
+  "source_manifest_sha256": "961f2e44df0d40d177d00783b25e4e35410d6d2613bfeb7baa7d74b47557bed4",
+  "build_exit_code": 0,
+  "test_exit_code": 1,
+  "test_passed": 2466,
+  "test_failed": 2,
+  "test_skipped": 8,
+  "failed_tests": [
+    "streaming text selection through fragment retirement",
+    "Petdex generated Ajv validator synchronization"
+  ],
+  "targeted_recheck_exit_code": 1,
+  "targeted_recheck_passed": 15,
+  "targeted_recheck_failed": 2,
+  "lpac_full_project_verified": false,
+  "production": "unavailable"
+}

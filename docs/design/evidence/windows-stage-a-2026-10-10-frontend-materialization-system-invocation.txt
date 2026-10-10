@@ -1,0 +1,7 @@
+Exception: D:\Developer\ShellSpan\tests\windows-sandbox-account\scripts\Invoke-FixedFrontendMaterialization.ps1:29
+Line |
+  29 |  … ($diagnostic.diagnostic_error) { throw $diagnostic.diagnostic_error }
+     |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | publish flushed owned journal transition: Win32 32
+
+

@@ -27,6 +27,13 @@ struct ProfileReceipt {
     account_sid: Option<String>,
     filter_keys: [Uuid; 4],
     #[serde(default)]
+    ancestor_metadata_intent: Option<
+        shellspan_account_sandbox_prototype::ancestor_metadata_intent::AncestorMetadataIntent,
+    >,
+    #[serde(default)]
+    ancestor_checkpoint_crash:
+        Option<shellspan_account_sandbox_prototype::rpc_trace_intent::ProcessIdentity>,
+    #[serde(default)]
     package_network_intent:
         Option<shellspan_account_sandbox_prototype::package_network_intent::PackageNetworkIntent>,
     #[serde(default)]
@@ -144,6 +151,32 @@ impl ProfileReceipt {
     fn validate(&self, id: Uuid) -> Result<()> {
         if id.is_nil() {
             return Err("profile transaction UUID must be nonnil".into());
+        }
+        if let Some(owner) = &self.ancestor_checkpoint_crash {
+            if owner.process_id == 0
+                || owner.creation_time == 0
+                || self.controller_tool != Some(FixedSystemTool::GitMetadataCheckpointCrash)
+                || self.ancestor_metadata_intent.is_none()
+            {
+                return Err("ancestor crash checkpoint lacks exact owner or fixed intent".into());
+            }
+        }
+        if let Some(intent) = &self.ancestor_metadata_intent {
+            let root = self
+                .controller_workload_planned_root
+                .as_deref()
+                .ok_or("ancestor metadata intent lacks frozen workload root")?;
+            intent.validate(id, Path::new(root))?;
+            if !self.controller_workload_requested
+                || !self
+                    .controller_tool
+                    .is_some_and(FixedSystemTool::uses_ancestor_metadata)
+                || self.planned_package_sid.as_deref() != Some(intent.package_sid.as_str())
+                || (self.account_removed || self.profile_removed || self.filters_removed)
+                    && !intent.retirement_confirmed()
+            {
+                return Err("ancestor metadata retirement must precede identity release".into());
+            }
         }
         if self.independent_bootstrap_files_retired
             && (!self.recovery_executed
@@ -593,6 +626,132 @@ fn controller_profile_retirement_ready(receipt: &ProfileReceipt) -> bool {
         && receipt.controller_workload_fixture.is_some()
         && receipt.controller_workload_planned_root.is_some()
 }
+fn apply_ancestor_metadata(receipt: &mut ProfileReceipt) -> Result<()> {
+    use shellspan_account_sandbox_prototype::ancestor_metadata_acl::DirectoryLease;
+    use shellspan_account_sandbox_prototype::ancestor_metadata_intent::{
+        AncestorMetadataIntent, MutationState, METADATA_MASK,
+    };
+    if !receipt
+        .controller_tool
+        .is_some_and(FixedSystemTool::uses_ancestor_metadata)
+        || receipt.ancestor_metadata_intent.is_some()
+    {
+        return Err("ancestor grant requires fresh fixed Git metadata dispatch".into());
+    }
+    let leases = [
+        DirectoryLease::open(Path::new(r"C:\"))?,
+        DirectoryLease::open(Path::new(r"C:\ProgramData"))?,
+    ];
+    let intent = AncestorMetadataIntent {
+        version: 1,
+        fixture_id: receipt.fixture_id,
+        package_sid: receipt
+            .planned_package_sid
+            .clone()
+            .ok_or("ancestor grant lacks package identity")?,
+        access_mask: METADATA_MASK,
+        inheritance_flags: 0,
+        objects: [leases[0].object().clone(), leases[1].object().clone()],
+        states: [MutationState::Planned, MutationState::Planned],
+    };
+    // Preflight the complete pair before durable ownership is claimed. Recovery
+    // must never adopt a preexisting grant when application is refused.
+    for (index, lease) in leases.iter().enumerate() {
+        lease.verify_fresh(&intent.objects[index], &intent.package_sid)?;
+    }
+    receipt.ancestor_metadata_intent = Some(intent.clone());
+    receipt.save()?;
+    for (index, lease) in leases.iter().enumerate() {
+        let mut state = MutationState::Planned;
+        lease.apply_checkpointed(
+            &intent.objects[index],
+            &intent.package_sid,
+            &mut state,
+            |checkpoint| {
+                if index == 0 && *checkpoint == MutationState::Applied
+                    && receipt.controller_tool == Some(FixedSystemTool::GitMetadataCheckpointCrash)
+                {
+                    let mut raw = null_mut();
+                    win(unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut raw) }, "verify ancestor crashing controller")?;
+                    let token = Handle(raw);
+                    if token_sid(token.0)? != "S-1-5-18" { return Err("ancestor crash requires actual SYSTEM owner".into()); }
+                    receipt.ancestor_checkpoint_crash = Some(unsafe {
+                        shellspan_account_sandbox_prototype::rpc_trace_intent::ProcessIdentity::from_handle(GetCurrentProcess())
+                    }?);
+                    receipt.state = "durable first ancestor mutation crash checkpoint; applied state not committed".into();
+                    receipt.save()?;
+                    unsafe { TerminateProcess(GetCurrentProcess(), 0xe9); }
+                    return Err("fixed ancestor controller termination failed".into());
+                }
+                if index == 0
+                    && *checkpoint == MutationState::Applied
+                    && receipt.controller_tool == Some(FixedSystemTool::GitMetadataPartialFailure)
+                {
+                    // Fixed diagnostic failure after the real first ACE update,
+                    // before its applied checkpoint. Durable planned remains.
+                    return Err("fixed ancestor post-mutation checkpoint failure".into());
+                }
+                receipt.ancestor_metadata_intent.as_mut().unwrap().states[index] =
+                    checkpoint.clone();
+                receipt.save()
+            },
+        )?;
+    }
+    Ok(())
+}
+fn verified_pretool_crash_scope(receipt: &ProfileReceipt) -> bool {
+    receipt.recovery_executed
+        && receipt.controller_tool == Some(FixedSystemTool::GitMetadataCheckpointCrash)
+        && receipt.ancestor_checkpoint_crash.is_some()
+        && receipt.controller_admission_report.is_none()
+        && receipt.controller_workload_fixture.is_some()
+        && receipt.controller_workload_planned_root.is_some()
+}
+fn retire_ancestor_metadata(receipt: &mut ProfileReceipt) -> Result<()> {
+    use shellspan_account_sandbox_prototype::ancestor_metadata_acl::DirectoryLease;
+    let Some(intent) = receipt.ancestor_metadata_intent.clone() else {
+        return Ok(());
+    };
+    receipt.validate(receipt.fixture_id)?;
+    if let Some(owner) = &receipt.ancestor_checkpoint_crash {
+        if !owner.observe_lifetime()?.original_stopped() {
+            return Err("ancestor crashing controller remains alive; retain quarantine".into());
+        }
+    }
+    if !receipt.controller_workload_files_retired
+        && !receipt.controller_workload_retired
+        && !verified_pretool_crash_scope(receipt)
+    {
+        return Err(
+            "ancestor retirement requires independently retired workload; retain quarantine".into(),
+        );
+    }
+    // Called only after disabled_identity and no_account_processes. Acquire and
+    // validate the entire frozen pair before changing any directory's ACEs.
+    let leases = intent
+        .objects
+        .iter()
+        .map(|object| {
+            let lease = DirectoryLease::open(&object.path)?;
+            lease.matches(object)?;
+            Ok(lease)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    for index in (0..2).rev() {
+        let mut state = receipt.ancestor_metadata_intent.as_ref().unwrap().states[index].clone();
+        leases[index].retire_checkpointed(
+            &intent.objects[index],
+            &intent.package_sid,
+            &mut state,
+            |checkpoint| {
+                receipt.ancestor_metadata_intent.as_mut().unwrap().states[index] =
+                    checkpoint.clone();
+                receipt.save()
+            },
+        )?;
+    }
+    Ok(())
+}
 fn cleanup(receipt: &mut ProfileReceipt) -> Result<()> {
     if receipt.recovery_logon_pending {
         return Err("recovery logon quarantine not restored; retain account and SID block".into());
@@ -700,6 +859,7 @@ fn cleanup(receipt: &mut ProfileReceipt) -> Result<()> {
         disabled_identity(receipt)?
     };
     recovery::no_account_processes(&subject)?;
+    retire_ancestor_metadata(receipt)?;
     recover_trace_before_profile(receipt)?;
     if !hive_absent(&text)? {
         return Err(
@@ -1033,6 +1193,8 @@ fn run_inner(
         account: format!("SSPA{}", &id.simple().to_string()[..12]),
         account_sid: None,
         filter_keys: std::array::from_fn(|_| Uuid::new_v4()),
+        ancestor_metadata_intent: None,
+        ancestor_checkpoint_crash: None,
         package_network_intent: None,
         package_filters_removed: false,
         rpc_network_intent: None,
@@ -1531,6 +1693,11 @@ fn recover_workload_files(receipt: &mut ProfileReceipt) -> Result<()> {
     let subject = disabled_identity(receipt)?;
     recovery::no_account_processes(&subject)?;
     recover_trace_before_profile(receipt)?;
+    if verified_pretool_crash_scope(receipt) {
+        // Exact stopped pre-tool controller/account gates above suffice for
+        // ancestor delta retirement. Loaded profile debt remains independent.
+        retire_ancestor_metadata(receipt)?;
+    }
     let account_sid = receipt
         .account_sid
         .clone()
@@ -1611,6 +1778,39 @@ pub(super) fn verify_recovery_intent(id: Uuid) -> Result<()> {
     let receipt: ProfileReceipt = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
     receipt.validate(id)
 }
+pub(super) fn inspect_ancestor_retirement(id: &str) -> Result<()> {
+    use shellspan_account_sandbox_prototype::ancestor_metadata_acl::DirectoryLease;
+    if !elevated()? {
+        return Err("exact ancestor retirement inspection requires elevated read access".into());
+    }
+    let id = Uuid::parse_str(id).map_err(|_| "invalid ancestor inspection UUID")?;
+    if id.is_nil() {
+        return Err("ancestor inspection requires nonnil fixture".into());
+    }
+    let root = fixture_parent()?.join(format!("ShellSpan-account-profile-A-{id}"));
+    recovery::verify_evidence_acl(&root)?;
+    recovery::verify_evidence_acl(&root.join("ownership.json"))?;
+    let bytes =
+        shellspan_account_sandbox_prototype::account_lpac_plan::read_protected_receipt(&root)?;
+    let receipt: ProfileReceipt = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    receipt.validate(id)?;
+    let intent = receipt
+        .ancestor_metadata_intent
+        .as_ref()
+        .ok_or("ancestor inspection lacks owned intent")?;
+    if !intent.retirement_confirmed() {
+        return Err("ancestor inspection requires durably retired ancestor deltas".into());
+    }
+    for object in &intent.objects {
+        DirectoryLease::open(&object.path)?.verify_absent(object, &intent.package_sid)?;
+    }
+    println!(
+        "{}",
+        serde_json::json!({"fixture_id":id,"production":"unavailable","ancestor_package_aces_absent":true,"exact_objects_verified":2,
+            "identity_resources_retired":receipt.account_removed && receipt.profile_removed && receipt.filters_removed && receipt.cleanup_debt.is_empty()})
+    );
+    Ok(())
+}
 pub(super) fn recover(id: &str) -> Result<()> {
     if !elevated()? {
         return Err("explicit elevated exact owned profile recovery required".into());
@@ -1645,6 +1845,282 @@ pub(super) fn recover(id: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    fn metadata_crash_evidence(file: &str) -> serde_json::Value {
+        let bytes = std::fs::read(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../docs/design/evidence")
+                .join(file),
+        )
+        .unwrap();
+        serde_json::from_slice(bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&bytes)).unwrap()
+    }
+    #[test]
+    fn actual_checkpoint_crash_preserves_planned_and_separates_ancestor_from_profile_debt() {
+        let before = metadata_crash_evidence(
+            "windows-stage-a-2026-10-09-git-metadata-checkpoint-crash-system-profile.json",
+        );
+        let after = metadata_crash_evidence(
+            "windows-stage-a-2026-10-09-git-metadata-crash-recovery-r2-profile.json",
+        );
+        assert_eq!(
+            before["ancestor_metadata_intent"]["states"],
+            serde_json::json!(["planned", "planned"])
+        );
+        assert!(before["controller_admission_report"].is_null());
+        assert_eq!(
+            before["ancestor_checkpoint_crash"],
+            after["ancestor_checkpoint_crash"]
+        );
+        assert!(
+            before["ancestor_checkpoint_crash"]["process_id"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+        assert!(
+            before["ancestor_checkpoint_crash"]["creation_time"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+        assert_eq!(before["fixture_id"], after["fixture_id"]);
+        let service = metadata_crash_evidence(
+            "windows-stage-a-2026-10-09-git-metadata-checkpoint-crash-system-service.json",
+        );
+        assert_eq!(service["fixture_id"], before["fixture_id"]);
+        assert_eq!(
+            service["observed_service_exit"]["process_exit_confirmed"],
+            true
+        );
+        assert_eq!(service["observed_service_exit"]["win32_exit_code"], 1067);
+        assert_eq!(
+            after["ancestor_metadata_intent"]["states"],
+            serde_json::json!(["retired", "retired"])
+        );
+        assert!(!after["cleanup_debt"].as_array().unwrap().is_empty());
+        for field in ["account_removed", "profile_removed", "filters_removed"] {
+            assert_eq!(after[field], false, "{field}");
+        }
+        let audit = metadata_crash_evidence(
+            "windows-stage-a-2026-10-09-git-metadata-crash-recovery-r2-ancestor-os-audit.json",
+        );
+        assert_eq!(audit["fixture_id"], after["fixture_id"]);
+        assert_eq!(audit["ancestor_package_aces_absent"], true);
+        assert_eq!(audit["identity_resources_retired"], false);
+        let receipt: super::ProfileReceipt = serde_json::from_value(after).unwrap();
+        receipt.validate(receipt.fixture_id).unwrap();
+    }
+    #[test]
+    fn live_crash_owner_blocks_ancestor_retirement_before_directory_access() {
+        let value = metadata_crash_evidence(
+            "windows-stage-a-2026-10-09-git-metadata-crash-recovery-r2-profile.json",
+        );
+        let mut receipt: super::ProfileReceipt = serde_json::from_value(value).unwrap();
+        receipt.ancestor_checkpoint_crash = Some(
+            unsafe {
+                shellspan_account_sandbox_prototype::rpc_trace_intent::ProcessIdentity::from_handle(
+                    GetCurrentProcess(),
+                )
+            }
+            .unwrap(),
+        );
+        assert!(super::retire_ancestor_metadata(&mut receipt)
+            .unwrap_err()
+            .contains("remains alive"));
+        receipt
+            .ancestor_checkpoint_crash
+            .as_mut()
+            .unwrap()
+            .creation_time = 0;
+        assert!(receipt.validate(receipt.fixture_id).is_err());
+    }
+    #[test]
+    fn actual_partial_metadata_failure_does_not_launch_tool_and_retires_exact_owned_resources() {
+        fn read(file: &str) -> serde_json::Value {
+            let bytes = std::fs::read(
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../docs/design/evidence")
+                    .join(file),
+            )
+            .unwrap();
+            serde_json::from_slice(bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&bytes))
+                .unwrap()
+        }
+        let before =
+            read("windows-stage-a-2026-10-09-git-metadata-partial-failure-system-profile.json");
+        let after = read(
+            "windows-stage-a-2026-10-09-git-metadata-partial-failure-system-recovered-profile.json",
+        );
+        assert_eq!(before["controller_tool"], "git_metadata_partial_failure");
+        assert_eq!(
+            before["controller_admission_report"]["error"],
+            "fixed ancestor post-mutation checkpoint failure"
+        );
+        assert!(before["controller_admission_report"]["tool_admission"].is_null());
+        assert_eq!(
+            before["controller_admission_report"]["process_tree_stopped"],
+            true
+        );
+        assert_eq!(before["fixture_id"], after["fixture_id"]);
+        assert_eq!(before["account_sid"], after["account_sid"]);
+        assert_eq!(
+            before["ancestor_metadata_intent"],
+            after["ancestor_metadata_intent"]
+        );
+        let receipt: super::ProfileReceipt = serde_json::from_value(after.clone()).unwrap();
+        receipt.validate(receipt.fixture_id).unwrap();
+        assert!(receipt.cleanup_debt.is_empty());
+        assert!(receipt
+            .ancestor_metadata_intent
+            .unwrap()
+            .retirement_confirmed());
+        for field in [
+            "account_removed",
+            "profile_removed",
+            "filters_removed",
+            "credential_removed",
+        ] {
+            assert_eq!(after[field], true, "{field}");
+        }
+        for (file, fields) in [
+            ("windows-stage-a-2026-10-09-git-metadata-partial-failure-system-ancestor-os-audit.json", vec!["ancestor_package_aces_absent"]),
+            ("windows-stage-a-2026-10-09-git-metadata-partial-failure-system-os-audit.json", vec!["account_absent","profile_absent","hive_absent","services_absent"]),
+        ] {
+            let audit = read(file); assert_eq!(audit["fixture_id"], after["fixture_id"]);
+            for field in fields { assert_eq!(audit[field], true, "{field}"); }
+        }
+    }
+    #[test]
+    fn actual_metadata_git_init_passes_but_first_cleanup_failure_requires_independent_recovery() {
+        fn read(file: &str) -> serde_json::Value {
+            let bytes = std::fs::read(
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../docs/design/evidence")
+                    .join(file),
+            )
+            .unwrap();
+            serde_json::from_slice(bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&bytes))
+                .unwrap()
+        }
+        let first =
+            read("windows-stage-a-2026-10-09-git-metadata-init-system-recovered-profile.json");
+        let recovered = read("windows-stage-a-2026-10-09-git-metadata-recovery-r2-profile.json");
+        assert!(!first["cleanup_debt"].as_array().unwrap().is_empty());
+        assert_eq!(first["account_removed"], false);
+        assert_eq!(first["profile_removed"], false);
+        assert_eq!(first["fixture_id"], recovered["fixture_id"]);
+        assert_eq!(first["account_sid"], recovered["account_sid"]);
+        for key in [
+            "fixture_id",
+            "package_sid",
+            "objects",
+            "access_mask",
+            "inheritance_flags",
+        ] {
+            assert_eq!(
+                first["ancestor_metadata_intent"][key], recovered["ancestor_metadata_intent"][key],
+                "{key}"
+            );
+        }
+        let receipt: super::ProfileReceipt = serde_json::from_value(recovered.clone()).unwrap();
+        receipt.validate(receipt.fixture_id).unwrap();
+        assert!(receipt.cleanup_debt.is_empty());
+        assert!(receipt
+            .ancestor_metadata_intent
+            .unwrap()
+            .retirement_confirmed());
+        let report = &recovered["controller_admission_report"];
+        assert_eq!(report["tool_admission"]["actual_exit"], 0);
+        assert_eq!(report["tool_admission"]["repository_verified"], true);
+        for field in [
+            "actual_lpac",
+            "actual_package_verified",
+            "actual_user_verified",
+            "actual_low_integrity",
+            "actual_capabilities_verified",
+            "execution_topology_verified",
+            "process_tree_stopped",
+        ] {
+            assert_eq!(report[field], true, "{field}");
+        }
+        for field in [
+            "account_removed",
+            "profile_removed",
+            "filters_removed",
+            "credential_removed",
+        ] {
+            assert_eq!(recovered[field], true, "{field}");
+        }
+        let ancestor =
+            read("windows-stage-a-2026-10-09-git-metadata-recovery-r2-ancestor-os-audit.json");
+        assert_eq!(ancestor["fixture_id"], recovered["fixture_id"]);
+        assert_eq!(ancestor["ancestor_package_aces_absent"], true);
+        assert_eq!(ancestor["exact_objects_verified"], 2);
+        let os = read("windows-stage-a-2026-10-09-git-metadata-recovery-r2-os-audit.json");
+        assert_eq!(os["fixture_id"], recovered["fixture_id"]);
+        for field in [
+            "account_absent",
+            "profile_absent",
+            "hive_absent",
+            "services_absent",
+        ] {
+            assert_eq!(os[field], true, "{field}");
+        }
+    }
+    #[test]
+    fn ancestor_intent_cannot_release_identity_or_skip_workload_retirement() {
+        use shellspan_account_sandbox_prototype::ancestor_metadata_intent::{
+            AncestorMetadataIntent, AncestorObject, MutationState, METADATA_MASK,
+        };
+        let mut receipt: super::ProfileReceipt = serde_json::from_slice(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/design/evidence/windows-stage-a-2026-10-09-git-prefix-system-profile.json"
+        )))
+        .unwrap();
+        receipt.account_removed = false;
+        receipt.profile_removed = false;
+        receipt.filters_removed = false;
+        receipt.controller_tool = Some(super::FixedSystemTool::GitMetadataInit);
+        let id = receipt.fixture_id;
+        let package = receipt.planned_package_sid.clone().unwrap();
+        receipt.ancestor_metadata_intent = Some(AncestorMetadataIntent {
+            version: 1,
+            fixture_id: id,
+            package_sid: package,
+            access_mask: METADATA_MASK,
+            inheritance_flags: 0,
+            objects: [r"C:\", r"C:\ProgramData"].map(|path| AncestorObject {
+                path: path.into(),
+                volume: 7,
+                file_id: if path == r"C:\" { 1 } else { 2 },
+                original_dacl_sha256: "a".repeat(64),
+            }),
+            states: [MutationState::Planned, MutationState::Applied],
+        });
+        receipt.validate(id).unwrap();
+        receipt.account_removed = true;
+        assert!(receipt
+            .validate(id)
+            .unwrap_err()
+            .contains("identity release"));
+        receipt.account_removed = false;
+        receipt.controller_workload_files_retired = false;
+        receipt.controller_workload_retired = false;
+        assert!(super::retire_ancestor_metadata(&mut receipt)
+            .unwrap_err()
+            .contains("independently retired workload"));
+        receipt.ancestor_metadata_intent.as_mut().unwrap().states =
+            [MutationState::Retired, MutationState::Retired];
+        assert!(super::retire_ancestor_metadata(&mut receipt)
+            .unwrap_err()
+            .contains("independently retired workload"));
+        receipt
+            .ancestor_metadata_intent
+            .as_mut()
+            .unwrap()
+            .inheritance_flags = 3;
+        assert!(receipt.validate(id).is_err());
+    }
     use super::*;
     #[test]
     fn relative_git_directory_still_fails_and_resources_are_retired() {

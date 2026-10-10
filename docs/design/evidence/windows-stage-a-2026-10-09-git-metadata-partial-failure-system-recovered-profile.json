@@ -1,0 +1,145 @@
+﻿{
+    "version":  1,
+    "backend":  "account-profile-lifecycle-prototype-v1",
+    "production":  "unavailable",
+    "fixture_id":  "69a82d6c-928c-454b-9c92-47e4b70e4fa5",
+    "account":  "SSPA69a82d6c928c",
+    "account_sid":  "S-1-5-21-4017028701-367916445-1230427694-1141",
+    "filter_keys":  [
+                        "5c481d35-284b-4dea-bfde-46036b30600f",
+                        "675893b3-14eb-4723-9265-568c7311e9ef",
+                        "abe1894c-046a-408f-ae8f-cbf9d262a34a",
+                        "3a955ac0-9a22-417d-bd5d-53c7a82e8dcf"
+                    ],
+    "ancestor_metadata_intent":  {
+                                     "version":  1,
+                                     "fixture_id":  "69a82d6c-928c-454b-9c92-47e4b70e4fa5",
+                                     "package_sid":  "S-1-15-2-1050156290-3235730656-1040771467-1390442972-3007298022-3375123257-212575958",
+                                     "access_mask":  1048704,
+                                     "inheritance_flags":  0,
+                                     "objects":  [
+                                                     {
+                                                         "path":  "C:\\",
+                                                         "volume":  2523053325,
+                                                         "file_id":  1407374883553285,
+                                                         "original_dacl_sha256":  "ad2948b5b480bb5b5b8087f03033fee2f894b6a311f5869c28ab44ed0137eac8"
+                                                     },
+                                                     {
+                                                         "path":  "C:\\ProgramData",
+                                                         "volume":  2523053325,
+                                                         "file_id":  2251799814625149,
+                                                         "original_dacl_sha256":  "faccfa03b7dd7fb897e1ca60de6fe136180b3d1ed0e886bff0a4c393c26240ec"
+                                                     }
+                                                 ],
+                                     "states":  [
+                                                    "retired",
+                                                    "retired"
+                                                ]
+                                 },
+    "package_network_intent":  null,
+    "package_filters_removed":  false,
+    "rpc_network_intent":  null,
+    "rpc_filter_removed":  false,
+    "rpc_trace_intent":  null,
+    "rpc_trace_removed":  false,
+    "rpc_trace_recovery_stopped":  false,
+    "profile_absent_before_load":  true,
+    "profile_registry_security_verified":  true,
+    "planned_private_station":  "SSPA-69a82d6c928c454b9c9247e4b70e4fa5",
+    "planned_package_sid":  "S-1-15-2-1050156290-3235730656-1040771467-1390442972-3007298022-3375123257-212575958",
+    "private_desktop_verified":  true,
+    "duplicate_station_rejected":  true,
+    "private_station_removed":  true,
+    "profile":  {
+                    "path":  "C:\\Users\\SSPA69a82d6c928c",
+                    "volume_serial":  2523053325,
+                    "file_index":  8162774325292620
+                },
+    "profile_unloaded":  true,
+    "profile_removed":  true,
+    "account_removed":  true,
+    "filters_removed":  true,
+    "non_elevated_account_token":  true,
+    "state":  "owned Windows profile, account and persistent SID filters retired; evidence retained",
+    "error":  "fixed ancestor post-mutation checkpoint failure",
+    "cleanup_debt":  [
+
+                     ],
+    "controller_interruption_checkpoint":  false,
+    "recovery_executed":  true,
+    "account_lpac_started":  true,
+    "account_lpac_cleanup_verified":  true,
+    "account_lpac_verified":  false,
+    "controller_receiver_counts":  null,
+    "account_lpac_outer_job_total":  null,
+    "account_lpac_bootstrap_exit":  null,
+    "account_lpac_outer_tree_stopped":  false,
+    "independent_bootstrap_recovery_observation":  null,
+    "independent_bootstrap_files_retired":  false,
+    "account_lpac_diagnostic_report":  null,
+    "profile_residual_recycled":  false,
+    "account_lpac_admission_only":  false,
+    "planned_private_namespace":  "\\Sessions\\0\\AppContainerNamedObjects\\S-1-15-2-1050156290-3235730656-1040771467-1390442972-3007298022-3375123257-212575958",
+    "private_namespace_verified":  false,
+    "private_namespace_removed":  true,
+    "namespace_retirement_observation":  {
+                                             "absent":  true,
+                                             "attempts":  1,
+                                             "budget_ms":  2000,
+                                             "elapsed_ms":  0,
+                                             "error":  null,
+                                             "scope":  "exact owned namespace read-only retirement observation"
+                                         },
+    "controller_admission_report":  {
+                                        "actual_capabilities_verified":  false,
+                                        "actual_low_integrity":  false,
+                                        "actual_lpac":  false,
+                                        "actual_package_verified":  false,
+                                        "actual_user_verified":  false,
+                                        "baseline_job_total":  0,
+                                        "baseline_tree_stopped":  true,
+                                        "controller_privileges_before_creation":  {
+                                                                                      "SeAssignPrimaryTokenPrivilege":  {
+                                                                                                                            "enabled":  false,
+                                                                                                                            "present":  true
+                                                                                                                        },
+                                                                                      "SeImpersonatePrivilege":  {
+                                                                                                                     "enabled":  true,
+                                                                                                                     "present":  true
+                                                                                                                 },
+                                                                                      "SeIncreaseQuotaPrivilege":  {
+                                                                                                                       "enabled":  false,
+                                                                                                                       "present":  true
+                                                                                                                   }
+                                                                                  },
+                                        "error":  "fixed ancestor post-mutation checkpoint failure",
+                                        "execution_job_final_active":  0,
+                                        "execution_job_final_total":  0,
+                                        "owned_job_total":  0,
+                                        "process_tree_stopped":  true,
+                                        "production":  "unavailable",
+                                        "profile_folder":  null,
+                                        "profile_folder_in_dedicated_account":  false,
+                                        "profile_removed":  true,
+                                        "root_exit_73":  false,
+                                        "scope":  "controller fixed System32 admission only",
+                                        "workload_retired":  true
+                                    },
+    "controller_workload_requested":  true,
+    "controller_workload_planned_root":  "C:\\ProgramData\\ShellSpan-AC-69a82d6c928c454b9c9247e4b70e4fa5",
+    "controller_workload_fixture":  {
+                                        "path":  "C:\\ProgramData\\ShellSpan-AC-69a82d6c928c454b9c9247e4b70e4fa5",
+                                        "volume_serial":  2523053325,
+                                        "file_index":  8725724278713929
+                                    },
+    "controller_workload_retired":  true,
+    "controller_workload_files_retired":  false,
+    "controller_lifecycle":  "normal",
+    "controller_tool":  "git_metadata_partial_failure",
+    "credential_reference":  "ShellSpan/owned-account/v1/69a82d6c-928c-454b-9c92-47e4b70e4fa5/S-1-5-21-4017028701-367916445-1230427694-1141",
+    "credential_reference_verified":  true,
+    "credential_removed":  true,
+    "profile_recovery_api_loaded":  false,
+    "profile_recovery_api_unloaded":  false,
+    "recovery_logon_pending":  false
+}

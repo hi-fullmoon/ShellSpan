@@ -1,0 +1,1 @@
+﻿Fixed Node project resources retired; inspect native project result separately.

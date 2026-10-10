@@ -1,0 +1,50 @@
+{
+  "fixture_id": "4be81216-42c6-4a9c-bf29-8f192ec1beea",
+  "observed_utc": "2026-10-09T19:15:06.0056789Z",
+  "read_only": true,
+  "processes": [
+    {
+      "pid": 26888,
+      "creation": "2026-10-10T03:12:25.711902+08:00",
+      "command": "\"D:\\Developer\\ShellSpan\\tests\\windows-sandbox-account\\target\\debug\\shellspan-account-sandbox-prototype.exe\" --run-owned-system-admission 4be81216-42c6-4a9c-bf29-8f192ec1beea",
+      "cpu_seconds": 0.15625,
+      "working_set_bytes": 11456512,
+      "handles": 150
+    }
+  ],
+  "admission_files": [
+    {
+      "Name": "fixed-admission.exe",
+      "Length": 6517760,
+      "LastWriteTimeUtc": "2026-10-09T19:12:25.6614777Z"
+    },
+    {
+      "Name": "ownership.json",
+      "Length": 726,
+      "LastWriteTimeUtc": "2026-10-09T19:12:26.3656805Z"
+    }
+  ],
+  "profile_exists": true,
+  "checkpoint_pages": 0,
+  "namespace_exists": false,
+  "anchor": {
+    "accounts_created": false,
+    "backend": "fixed-frontend-materialization-v1",
+    "creation_stamp_version": 1,
+    "filters_installed": false,
+    "fixture_id": "4be81216-42c6-4a9c-bf29-8f192ec1beea",
+    "inventory_sha256": "9f6b1525fbcb0070af5245c134c925b9f8b0e5c4c656c0acd7bc77efe51dc098",
+    "namespace_root": "frontend-dependencies",
+    "objects": 43290,
+    "pages": 677,
+    "parent": {
+      "file_id": 16888498603857698,
+      "volume": 2523053325
+    },
+    "permissions_granted": false,
+    "phase": "creating; execution forbidden",
+    "plan_sha256": "cb118ef0d079eb72a71dc5762a851496c4bbed9013a1fd6f664e8aea21e0cbd8",
+    "production": "unavailable",
+    "version": 1
+  }
+}

@@ -1,0 +1,3 @@
+   Compiling shellspan-account-sandbox-prototype v0.1.0 (D:\Developer\ShellSpan\tests\windows-sandbox-account)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.86s
+     Running `tests\windows-sandbox-account\target\debug\shellspan-account-sandbox-prototype.exe --inspect-fixed-frontend-runtime`

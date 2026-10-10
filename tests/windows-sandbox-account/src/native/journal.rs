@@ -2,7 +2,21 @@
 use super::*;
 
 pub(super) fn publish(path: &Path, bytes: &[u8], interrupt_before_publish: bool) -> Result<()> {
-    if bytes.is_empty() || bytes.len() > 65536 {
+    publish_budget(path, bytes, interrupt_before_publish, 65536)
+}
+pub(super) fn publish_frontend_plan(path: &Path, bytes: &[u8]) -> Result<()> {
+    if path.file_name().and_then(|name| name.to_str()) != Some("frontend-bundle-plan.json") {
+        return Err("frontend plan publication name differs".into());
+    }
+    publish_budget(path, bytes, false, 16 * 1024 * 1024)
+}
+fn publish_budget(
+    path: &Path,
+    bytes: &[u8],
+    interrupt_before_publish: bool,
+    budget: usize,
+) -> Result<()> {
+    if bytes.is_empty() || bytes.len() > budget {
         return Err("journal transition exceeds receipt budget".into());
     }
     let parent = path.parent().ok_or("journal parent unavailable")?;
@@ -64,7 +78,12 @@ pub(super) fn publish(path: &Path, bytes: &[u8], interrupt_before_publish: bool)
                 MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
             )
         },
-        "publish flushed owned journal transition",
+        &format!(
+            "publish flushed owned journal transition {}",
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .ok_or("invalid journal filename")?
+        ),
     )
 }
 
@@ -112,6 +131,20 @@ pub(super) fn diagnose() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn larger_frontend_plan_budget_is_not_a_general_receipt_escape() {
+        assert!(
+            publish_frontend_plan(Path::new("not-a-parent/ownership.json"), b"{}")
+                .unwrap_err()
+                .contains("name")
+        );
+        assert!(publish_frontend_plan(
+            Path::new("not-a-parent/frontend-bundle-plan.json"),
+            &vec![0; 16 * 1024 * 1024 + 1]
+        )
+        .unwrap_err()
+        .contains("budget"));
+    }
     #[test]
     fn unbounded_transition_is_rejected_before_touching_resources() {
         let target = Path::new("not-a-journal-parent/receipt.json");

@@ -1,0 +1,7 @@
+{
+  "diagnostic_error": "fixed source workload failure after complete checkpoints",
+  "fixture_id": "11673b80-edd1-4fc5-8e95-72ceb922c0ce",
+  "production": "unavailable",
+  "system_context_verified": true,
+  "version": 1
+}

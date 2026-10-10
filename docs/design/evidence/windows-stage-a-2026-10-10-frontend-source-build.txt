@@ -1,0 +1,71 @@
+Already up to date
+Done in 408ms using pnpm v11.1.1
+
+   ╭──────────────────────────────────────────╮
+   │                                          │
+   │   Update available! 11.1.1 → 12.10.1.    │
+   │   Changelog: https://pnpm.io/v/12.10.1   │
+   │     To update, run: pnpm add -g pnpm     │
+   │                                          │
+   ╰──────────────────────────────────────────╯
+
+$ tsc && vite build
+vite v8.3.1 building client environment for production...
+(node:1524) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+transforming...
+✓ 3101 modules transformed.
+rendering chunks...
+[vite-plugin-static-copy] Copied 185 items.
+computing gzip size...
+dist/index.html                                                2.08 kB │ gzip:   0.80 kB
+dist/assets/geist-cyrillic-ext-wght-normal-DjL33-gN.woff2      7.42 kB
+dist/assets/geist-vietnamese-wght-normal-6IgcOCM7.woff2        8.00 kB
+dist/assets/geist-cyrillic-wght-normal-BEAKL7Jp.woff2         15.08 kB
+dist/assets/geist-latin-ext-wght-normal-DC-KSUi6.woff2        16.51 kB
+dist/assets/geist-latin-wght-normal-BgDaEnEv.woff2            29.40 kB
+dist/assets/pdf.worker.min-Dswkl-cV.mjs                    1,265.41 kB
+dist/assets/document-office.worker-D7vPX0Jr.js             1,341.08 kB
+dist/assets/vendor-terminal-BrP-ENHg.css                       3.93 kB │ gzip:   1.01 kB
+dist/assets/main-QE-nRUli.css                                248.95 kB │ gzip:  39.25 kB
+dist/assets/app-BSg4UZoz.js                                    0.25 kB │ gzip:   0.21 kB
+dist/assets/image-DchLgcTB.js                                  0.60 kB │ gzip:   0.31 kB
+dist/assets/dist-js-v5ZLHBh-.js                                1.02 kB │ gzip:   0.49 kB
+dist/assets/preload-helper-BZ1Pz5am.js                         1.21 kB │ gzip:   0.69 kB
+dist/assets/event-CDMbRaR6.js                                  1.31 kB │ gzip:   0.62 kB
+dist/assets/provider-contract-aWZSOk0J.js                      1.78 kB │ gzip:   0.95 kB
+dist/assets/dist-js-DbVulcbw.js                                1.80 kB │ gzip:   0.86 kB
+dist/assets/core-BTxsdRQz.js                                   1.92 kB │ gzip:   0.81 kB
+dist/assets/clipboard-B9gTVvMB.js                              3.02 kB │ gzip:   1.44 kB
+dist/assets/useSftpConnectionOpener-BGHW6BHk.js                4.67 kB │ gzip:   2.01 kB
+dist/assets/terminal-registry-Cd-CnILl.js                     38.69 kB │ gzip:  11.95 kB
+dist/assets/resizable-BtEW2Ly6.js                             39.69 kB │ gzip:  12.97 kB
+dist/assets/trackpad-safe-pointer-sensor-CjsJOIOV.js          50.53 kB │ gzip:  16.72 kB
+dist/assets/tauri-Ck6bC2Qy.js                                 53.83 kB │ gzip:  16.78 kB
+dist/assets/terminal-DQ5yV9Q-.js                              77.58 kB │ gzip:  22.24 kB
+dist/assets/sftpStore-CKj7r4zC.js                            119.81 kB │ gzip:  36.30 kB
+dist/assets/sftp-Dhfx7SFV.js                                 144.71 kB │ gzip:  41.80 kB
+dist/assets/vendor-react-DJkQ6FXO.js                         218.83 kB │ gzip:  68.25 kB
+dist/assets/workbench-DaUQJRWj.js                            274.67 kB │ gzip:  66.99 kB
+dist/assets/document-pdf-CAWimvK3.js                         430.93 kB │ gzip: 129.25 kB
+dist/assets/vendor-terminal-_VOdTuO3.js                      478.37 kB │ gzip: 122.15 kB
+dist/assets/separator-DRugMFaI.js                            684.39 kB │ gzip: 188.10 kB
+dist/assets/main-B8ffEEn5.js                               1,300.63 kB │ gzip: 388.60 kB
+
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+[INEFFECTIVE_DYNAMIC_IMPORT] src/lib/ai/agent-session-adapter.ts is dynamically imported by src/components/ai/ai-session-records-dialog.tsx but also statically imported by src/lib/ai/submission-memory.ts, dynamic import will not move module into another chunk.
+
+✓ built in 17.59s
+[PLUGIN_TIMINGS] JavaScript callbacks ran for 16.5s of this 17.5s build (94%).
+The slowest callbacks, timed inside each callback (the wait before a callback starts is excluded, the time it awaits is included):
+  - plugin @tailwindcss/vite:generate:build transform (75%, 13.1s, 3 calls)
+  - plugin vite:worker-import-meta-url transform (13%, 2.2s, 1 call)
+Additional callback time came from the callbacks below and from callbacks under 1s.
+1 callback is listed without a time. Its calls overlapped, so the time inside one call includes work from other calls. To find its cost, profile the build with `node --cpu-prof`:
+  - plugin vite:css transform (3 calls)
+See https://rolldown.rs/reference/InputOptions.checks#bundlertimings for more details.
+

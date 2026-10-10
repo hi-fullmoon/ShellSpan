@@ -1,0 +1,21 @@
+{
+  "accounts_created": false,
+  "backend": "fixed-frontend-source-materialization-v1",
+  "creation_stamp_version": 1,
+  "filters_installed": false,
+  "fixture_id": "a982be11-d802-424e-ba39-dcdfd72a265a",
+  "inventory_sha256": "8888cfa21e0418f4053abcf29719dfd41549e2b3d9ff1253cad4ccea0452a601",
+  "journal_prepared": true,
+  "namespace_root": "frontend-source",
+  "objects": 883,
+  "pages": 14,
+  "parent": {
+    "file_id": 4785074605524160,
+    "volume": 2523053325
+  },
+  "permissions_granted": false,
+  "phase": "retired; execution forbidden",
+  "plan_sha256": "3ccf36e8f4da88aec75a6ff94e1fe340986cc8deec7881067c23b3d7c6aee84f",
+  "production": "unavailable",
+  "version": 1
+}

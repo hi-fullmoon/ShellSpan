@@ -1,0 +1,127 @@
+{
+  "tool_admission": {
+    "actual_exit": 73,
+    "expected_exit": 73,
+    "image": {
+      "bytes": 3304448,
+      "file_index": 34339947158779478,
+      "path": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-1b337fd834694ab19cedf8d730f07382\\probe.exe",
+      "volume": 2523053325
+    },
+    "prefix_report_bound": false,
+    "scope": "shared-source LPAC admission only; not dedicated-account compatibility acceptance",
+    "static_imports": [
+      "advapi32.dll",
+      "api-ms-win-core-synch-l1-2-0.dll",
+      "api-ms-win-crt-heap-l1-1-0.dll",
+      "api-ms-win-crt-locale-l1-1-0.dll",
+      "api-ms-win-crt-math-l1-1-0.dll",
+      "api-ms-win-crt-runtime-l1-1-0.dll",
+      "api-ms-win-crt-stdio-l1-1-0.dll",
+      "api-ms-win-security-base-l1-2-2.dll",
+      "bcryptprimitives.dll",
+      "dnsapi.dll",
+      "iphlpapi.dll",
+      "kernel32.dll",
+      "ntdll.dll",
+      "ole32.dll",
+      "oleaut32.dll",
+      "rpcrt4.dll",
+      "secur32.dll",
+      "shell32.dll",
+      "userenv.dll",
+      "vcruntime140.dll",
+      "ws2_32.dll"
+    ],
+    "stderr": "",
+    "stdio_handle_count": 3,
+    "stdout": "{\"metadata_calibration\":{\"access\":{\"add_file\":5,\"add_subdirectory\":5,\"delete_child\":5,\"list_directory\":5,\"read_attributes\":5,\"write_dacl\":5},\"child_read\":5},\"observations\":[{\"access\":{\"add_file\":5,\"add_subdirectory\":5,\"delete_child\":5,\"list_directory\":5,\"read_attributes\":5,\"write_dacl\":5},\"attributes\":null,\"attributes_error\":5,\"identity\":null,\"metadata_error\":null,\"open_error\":5,\"path\":\"C:\\\\\"},{\"access\":{\"add_file\":5,\"add_subdirectory\":5,\"delete_child\":5,\"list_directory\":5,\"read_attributes\":5,\"write_dacl\":5},\"attributes\":null,\"attributes_error\":5,\"identity\":null,\"metadata_error\":null,\"open_error\":5,\"path\":\"C:\\\\Users\"},{\"access\":{\"add_file\":5,\"add_subdirectory\":5,\"delete_child\":5,\"list_directory\":5,\"read_attributes\":5,\"write_dacl\":5},\"attributes\":null,\"attributes_error\":5,\"identity\":null,\"metadata_error\":null,\"open_error\":5,\"path\":\"C:\\\\Users\\\\ZHENGB~1\"},{\"access\":{\"add_file\":5,\"add_subdirectory\":5,\"delete_child\":5,\"list_directory\":5,\"read_attributes\":5,\"write_dacl\":5},\"attributes\":16,\"attributes_error\":null,\"identity\":null,\"metadata_error\":null,\"open_error\":5,\"path\":\"C:\\\\Users\\\\ZHENGB~1\\\\AppData\"},{\"access\":{\"add_file\":5,\"add_subdirectory\":5,\"delete_child\":5,\"list_directory\":5,\"read_attributes\":5,\"write_dacl\":5},\"attributes\":16,\"attributes_error\":null,\"identity\":null,\"metadata_error\":null,\"open_error\":5,\"path\":\"C:\\\\Users\\\\ZHENGB~1\\\\AppData\\\\Local\"},{\"access\":{\"add_file\":5,\"add_subdirectory\":5,\"delete_child\":5,\"list_directory\":5,\"read_attributes\":5,\"write_dacl\":5},\"attributes\":16,\"attributes_error\":null,\"identity\":null,\"metadata_error\":null,\"open_error\":5,\"path\":\"C:\\\\Users\\\\ZHENGB~1\\\\AppData\\\\Local\\\\Temp\"},{\"access\":{\"add_file\":5,\"add_subdirectory\":5,\"delete_child\":5,\"list_directory\":0,\"read_attributes\":0,\"write_dacl\":5},\"attributes\":16,\"attributes_error\":null,\"identity\":[2523053325,39406496739571250],\"metadata_error\":null,\"open_error\":null,\"path\":\"C:\\\\Users\\\\ZHENGB~1\\\\AppData\\\\Local\\\\Temp\\\\ShellSpan-AC-1b337fd834694ab19cedf8d730f07382\"},{\"access\":{\"add_file\":0,\"add_subdirectory\":0,\"delete_child\":5,\"list_directory\":0,\"read_attributes\":0,\"write_dacl\":5},\"attributes\":16,\"attributes_error\":null,\"identity\":[2523053325,64457769666819643],\"metadata_error\":null,\"open_error\":null,\"path\":\"C:\\\\Users\\\\ZHENGB~1\\\\AppData\\\\Local\\\\Temp\\\\ShellSpan-AC-1b337fd834694ab19cedf8d730f07382\\\\output\"}],\"root\":\"C:\\\\Users\\\\ZHENGB~1\\\\AppData\\\\Local\\\\Temp\\\\ShellSpan-AC-1b337fd834694ab19cedf8d730f07382\",\"version\":1}\n",
+    "tool": "git_prefix_probe",
+    "topology_verified": true
+  },
+  "production": "unavailable",
+  "candidate": "lpac-fixed-tool-admission",
+  "profile_name": "ShellSpan-candidate-6614d0fef1074a17b9dc6a85e65bc12f",
+  "created_package_sid": "S-1-15-2-953253361-375940464-514655087-3156961805-3101448554-1411928486-1381758727",
+  "namespace_admission": {
+    "observations": [
+      {
+        "create_subdirectory_admission": "0xc0000034",
+        "path": "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects\\S-1-15-2-953253361-375940464-514655087-3156961805-3101448554-1411928486-1381758727",
+        "read_control": "0xc0000034",
+        "traverse": "0xc0000034"
+      },
+      {
+        "create_subdirectory_admission": "0x00000000",
+        "path": "\\Sessions\\1\\BaseNamedObjects\\AppContainerNamedObjects",
+        "read_control": "0x00000000",
+        "traverse": "0x00000000"
+      }
+    ],
+    "read_only": true
+  },
+  "state": "admission experiment completed; no production acceptance; receipt retained",
+  "appcontainer_identity": true,
+  "source_not_elevated": true,
+  "source_creation_boundary": {
+    "child_process_policy_flags": 0,
+    "current_job_active_process_limit": 0,
+    "current_job_limit_flags": 10240,
+    "current_job_ui_restrictions": 0,
+    "in_job": true,
+    "token_restricted": false,
+    "token_session_id": 1
+  },
+  "actual_source_user_sid": "S-1-5-21-4017028701-367916445-1230427694-1001",
+  "dedicated_account_plan_verified": false,
+  "receiver_evidence_owner": "fixture-controller",
+  "receiver_quietness_verified": false,
+  "same_user": true,
+  "low_integrity": true,
+  "lpac_requested": true,
+  "actual_lpac": true,
+  "lpac_evidence_method": "actual Token AccessCheck: unique package positive control plus AllApplicationPackages exclusion; not class-46 inference",
+  "capabilities_empty": false,
+  "requested_capabilities": [
+    "registryRead"
+  ],
+  "capabilities_verified": true,
+  "entry_exit_73": false,
+  "process_tree_stopped": true,
+  "lifecycle_timeout_observed": false,
+  "lifecycle_cancel_observed": false,
+  "lifecycle_root_failure_observed": false,
+  "active_processes_after_root_failure": null,
+  "owned_job_total_processes": 2,
+  "owned_job_process_observations": [
+    {
+      "pid": 31540,
+      "image": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-1b337fd834694ab19cedf8d730f07382\\probe.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    },
+    {
+      "pid": 6492,
+      "image": "C:\\Windows\\System32\\conhost.exe",
+      "exact_job_member": true,
+      "appcontainer": true,
+      "integrity_rid": 4096,
+      "expected_user": true,
+      "expected_package": true,
+      "exact_capabilities": true,
+      "actual_lpac": true,
+      "error": null
+    }
+  ],
+  "profile_removed": true,
+  "error": "metadata-only disk calibration boundary differs",
+  "fixture": "C:\\Users\\ZHENGB~1\\AppData\\Local\\Temp\\ShellSpan-AC-1b337fd834694ab19cedf8d730f07382",
+  "fixture_acls_revoked": true,
+  "probe": null
+}

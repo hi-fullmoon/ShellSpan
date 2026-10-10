@@ -1,0 +1,8 @@
+﻿Exact OS retirement incomplete.
+At D:\Developer\ShellSpan\tests\windows-sandbox-account\scripts\Recover-FixedMetadataCrash.ps1:28 char:118
++ ... -not $os.services_absent) { throw 'Exact OS retirement incomplete.' }
++                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (Exact OS retirement incomplete.:String) [], RuntimeException
+    + FullyQualifiedErrorId : Exact OS retirement incomplete.
+ 
+

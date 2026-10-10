@@ -1,0 +1,8 @@
+﻿Recovery incomplete; retain quarantine and exact receipt.
+At D:\Developer\ShellSpan\tests\windows-sandbox-account\scripts\Run-FixedProjectMatrix.ps1:97 char:194
++ ... nt -ne 0) { throw 'Recovery incomplete; retain quarantine and exact r ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (Recovery incomp... exact receipt.:String) [], RuntimeException
+    + FullyQualifiedErrorId : Recovery incomplete; retain quarantine and exact receipt.
+ 
+

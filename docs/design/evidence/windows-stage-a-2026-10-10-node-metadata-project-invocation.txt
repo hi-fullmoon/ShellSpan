@@ -1,0 +1,1 @@
+﻿Fixed Node metadata project resources retired; inspect native result separately.

@@ -1,5 +1,6 @@
 //! One-shot owned LocalSystem service. No general command or path interface.
 use super::*;
+use shellspan_account_sandbox_prototype::frontend_materialization::MaterializationNamespace;
 use std::sync::OnceLock;
 use windows_sys::Win32::System::Services::*;
 
@@ -19,6 +20,57 @@ pub(super) fn verify_workload_recovery_service(id: Uuid) -> Result<()> {
     }
     let manager = manager(SC_MANAGER_CONNECT)?;
     confirm_absent(&manager, &wide(&name(id)))
+}
+pub(super) fn verify_frontend_retired(id: Uuid) -> Result<()> {
+    let (plan, _image) = load_inner(id, false)?;
+    if !plan.fixed_frontend_journal
+        || !plan.service_created
+        || !plan.service_removed
+        || !plan.observed_service_exit.as_ref().is_some_and(|s| {
+            s.process_exit_confirmed && s.win32_exit_code == 0 && s.service_specific_exit_code == 0
+        })
+    {
+        return Err(
+            "frontend recovery requires successfully retired original SYSTEM service".into(),
+        );
+    }
+    confirm_absent(&manager(SC_MANAGER_CONNECT)?, &wide(&name(id)))
+}
+pub(super) fn verify_materialization_retired(id: Uuid) -> Result<()> {
+    verify_materialization_retired_in_scope(id, MaterializationNamespace::Dependencies)
+}
+pub(super) fn verify_materialization_retired_in_scope(
+    id: Uuid,
+    namespace: MaterializationNamespace,
+) -> Result<()> {
+    let (plan, _image) = load_inner(id, false)?;
+    if !plan.fixed_frontend_materialization
+        || !matches!(
+            (plan.materialization_namespace(), namespace),
+            (
+                MaterializationNamespace::Source,
+                MaterializationNamespace::Source
+            ) | (
+                MaterializationNamespace::Dependencies,
+                MaterializationNamespace::Dependencies
+            ) | (
+                MaterializationNamespace::Project,
+                MaterializationNamespace::Project
+            )
+        )
+        || !plan.service_created
+        || !plan.service_removed
+        || !plan
+            .observed_service_exit
+            .as_ref()
+            .is_some_and(|s| s.process_exit_confirmed)
+    {
+        return Err(
+            "materialization recovery requires original process exit and exact service retirement"
+                .into(),
+        );
+    }
+    confirm_absent(&manager(SC_MANAGER_CONNECT)?, &wide(&name(id)))
 }
 fn identity(text: &str) -> Result<Uuid> {
     let id = Uuid::parse_str(text).map_err(|_| "invalid SYSTEM admission UUID")?;
@@ -75,10 +127,22 @@ fn validate_service_observation(plan: &Preparation) -> Result<()> {
     Ok(())
 }
 fn load(id: Uuid) -> Result<(Preparation, fs::File)> {
+    load_inner(id, true)
+}
+fn load_inner(id: Uuid, verify_related: bool) -> Result<(Preparation, fs::File)> {
     let root = root(id)?;
     let bytes =
         shellspan_account_sandbox_prototype::account_lpac_plan::read_protected_receipt(&root)?;
     let plan: Preparation = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    validate_frontend_dispatch(&plan)?;
+    if verify_related {
+        if let Some(target) = plan.frontend_materialization_recovery_target {
+            verify_materialization_retired_in_scope(target, plan.materialization_namespace())?;
+        }
+        if let Some(target) = plan.frontend_journal_recovery_target {
+            verify_frontend_retired(target)?;
+        }
+    }
     validate_service_observation(&plan)?;
     validate_tool_dispatch(
         plan.fixed_tool,
@@ -181,7 +245,41 @@ unsafe extern "system" fn service_main(_: u32, _: *mut *mut u16) {
         if !plan.service_install_planned || !plan.service_created || plan.service_removed {
             return Err("fixed service dispatch not authorized by owned receipt".into());
         }
-        let result = if let Some(target) = plan.recovery_target {
+        let result = if let Some(target) = plan.frontend_materialization_recovery_target {
+            match plan.materialization_namespace() {
+                MaterializationNamespace::Source => {
+                    super::super::frontend_materialization::recover_source(id, target)
+                }
+                MaterializationNamespace::Dependencies => {
+                    super::super::frontend_materialization::recover(id, target)
+                }
+                MaterializationNamespace::Project => {
+                    super::super::frontend_materialization::recover_project(id, target)
+                }
+            }
+        } else if let Some(target) = plan.frontend_journal_recovery_target {
+            super::super::frontend_journal::recover(id, target)
+        } else if plan.fixed_frontend_materialization {
+            match plan.materialization_namespace() {
+                MaterializationNamespace::Source => {
+                    super::super::frontend_materialization::run_source(
+                        id,
+                        plan.frontend_source_workload_failure,
+                    )
+                }
+                MaterializationNamespace::Dependencies => {
+                    super::super::frontend_materialization::run(id)
+                }
+                MaterializationNamespace::Project => {
+                    super::super::frontend_materialization::run_project(
+                        id,
+                        plan.frontend_project_workload_failure,
+                    )
+                }
+            }
+        } else if plan.fixed_frontend_journal {
+            super::super::frontend_journal::run(id)
+        } else if let Some(target) = plan.recovery_target {
             account_profile::recover(&target.to_string())
         } else if plan.fixed_workload {
             account_profile::run_system_workload(id, plan.fixed_lifecycle, plan.fixed_tool)
@@ -392,7 +490,19 @@ pub(super) fn run(text: &str) -> Result<()> {
         unsafe { StartServiceW(service.0, 0, null()) },
         "start fixed owned SYSTEM diagnostic",
     )?;
-    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    let deadline = std::time::Instant::now()
+        + Duration::from_secs(
+            if plan.fixed_frontend_materialization
+                || plan.frontend_materialization_recovery_target.is_some()
+            {
+                3600
+            } else if plan.fixed_frontend_journal || plan.frontend_journal_recovery_target.is_some()
+            {
+                600
+            } else {
+                60
+            },
+        );
     let mut process = None;
     let stopped_status = loop {
         let mut observed = SERVICE_STATUS_PROCESS::default();

@@ -34,6 +34,8 @@ pub struct RpcAdmissionObservation {
 #[serde(deny_unknown_fields)]
 pub struct LsaSelfObservation {
     #[serde(default)]
+    pub dns_cache_only_variants: Option<Vec<crate::dns_native_probe::CacheOnlyVariantObservation>>,
+    #[serde(default)]
     pub dns_cache_only: Option<crate::dns_native_probe::DnsApiObservation>,
     #[serde(default)]
     pub dns_cache_only_sync: Option<crate::dns_native_probe::DnsApiObservation>,
@@ -173,6 +175,7 @@ fn observe_self_connection(id: Option<Uuid>) -> Result<LsaSelfObservation, Strin
         _ => None,
     };
     let mut result = LsaSelfObservation {
+        dns_cache_only_variants: None,
         dns_cache_only: None,
         dns_cache_only_sync: None,
         impersonate_win32: None,
@@ -203,6 +206,8 @@ fn observe_self_connection(id: Option<Uuid>) -> Result<LsaSelfObservation, Strin
         if let Some(id) = id {
             result.dns_cache_only = Some(crate::dns_native_probe::query_cache_only(id)?);
             result.dns_cache_only_sync = Some(crate::dns_native_probe::query_cache_only_sync(id)?);
+            result.dns_cache_only_variants =
+                Some(crate::dns_native_probe::query_cache_only_variants(id)?);
         }
         if let Some(reference) = credential {
             let denial = reference.probe_self_context_denial(&before[0], before[2] != "0");

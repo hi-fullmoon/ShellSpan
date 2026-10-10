@@ -1,0 +1,14 @@
+{
+  "observed_utc": "2026-10-09T21:30:37.4081922Z",
+  "pid": 23460,
+  "creation_utc": "2026-10-09T21:26:14.9897641Z",
+  "test": "actual_complete_project_materialization_and_retirement",
+  "session": 97547,
+  "cpu_seconds": 63.296875,
+  "handles": 95996,
+  "working_set_bytes": 122720256,
+  "terminal": false,
+  "records_opened": false,
+  "proves_materialization": false,
+  "production": "unavailable"
+}

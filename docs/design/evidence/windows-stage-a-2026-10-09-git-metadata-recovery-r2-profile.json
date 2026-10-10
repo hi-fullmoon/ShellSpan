@@ -1,0 +1,326 @@
+﻿{
+    "version":  1,
+    "backend":  "account-profile-lifecycle-prototype-v1",
+    "production":  "unavailable",
+    "fixture_id":  "a619b68b-8170-4e34-a804-933c89a127fc",
+    "account":  "SSPAa619b68b8170",
+    "account_sid":  "S-1-5-21-4017028701-367916445-1230427694-1139",
+    "filter_keys":  [
+                        "b9b5f2ec-9f46-4e09-b30b-94d8a7b7fc09",
+                        "5e834cfd-5ddd-42df-8b4f-fe7b8fa62fd5",
+                        "dfcbfff9-7697-484c-b186-08496e38a772",
+                        "80984e94-28a5-41c5-ba52-5e84a2346ec9"
+                    ],
+    "ancestor_metadata_intent":  {
+                                     "version":  1,
+                                     "fixture_id":  "a619b68b-8170-4e34-a804-933c89a127fc",
+                                     "package_sid":  "S-1-15-2-3685273904-497531206-1994570160-1960656515-3463869386-542367146-3846033158",
+                                     "access_mask":  1048704,
+                                     "inheritance_flags":  0,
+                                     "objects":  [
+                                                     {
+                                                         "path":  "C:\\",
+                                                         "volume":  2523053325,
+                                                         "file_id":  1407374883553285,
+                                                         "original_dacl_sha256":  "080e64861dae4beea515f8f300d885307a79ca4ca3a378ceb95f8ac3b2ca5a00"
+                                                     },
+                                                     {
+                                                         "path":  "C:\\ProgramData",
+                                                         "volume":  2523053325,
+                                                         "file_id":  2251799814625149,
+                                                         "original_dacl_sha256":  "faccfa03b7dd7fb897e1ca60de6fe136180b3d1ed0e886bff0a4c393c26240ec"
+                                                     }
+                                                 ],
+                                     "states":  [
+                                                    "retired",
+                                                    "retired"
+                                                ]
+                                 },
+    "package_network_intent":  null,
+    "package_filters_removed":  false,
+    "rpc_network_intent":  null,
+    "rpc_filter_removed":  false,
+    "rpc_trace_intent":  null,
+    "rpc_trace_removed":  false,
+    "rpc_trace_recovery_stopped":  false,
+    "profile_absent_before_load":  true,
+    "profile_registry_security_verified":  true,
+    "planned_private_station":  "SSPA-a619b68b81704e34a804933c89a127fc",
+    "planned_package_sid":  "S-1-15-2-3685273904-497531206-1994570160-1960656515-3463869386-542367146-3846033158",
+    "private_desktop_verified":  true,
+    "duplicate_station_rejected":  true,
+    "private_station_removed":  true,
+    "profile":  {
+                    "path":  "C:\\Users\\SSPAa619b68b8170",
+                    "volume_serial":  2523053325,
+                    "file_index":  12384898975486378
+                },
+    "profile_unloaded":  true,
+    "profile_removed":  true,
+    "account_removed":  true,
+    "filters_removed":  true,
+    "non_elevated_account_token":  true,
+    "state":  "owned Windows profile, account and persistent SID filters retired; evidence retained",
+    "error":  null,
+    "cleanup_debt":  [
+
+                     ],
+    "controller_interruption_checkpoint":  false,
+    "recovery_executed":  true,
+    "account_lpac_started":  true,
+    "account_lpac_cleanup_verified":  true,
+    "account_lpac_verified":  false,
+    "controller_receiver_counts":  null,
+    "account_lpac_outer_job_total":  null,
+    "account_lpac_bootstrap_exit":  null,
+    "account_lpac_outer_tree_stopped":  false,
+    "independent_bootstrap_recovery_observation":  null,
+    "independent_bootstrap_files_retired":  false,
+    "account_lpac_diagnostic_report":  null,
+    "profile_residual_recycled":  true,
+    "account_lpac_admission_only":  false,
+    "planned_private_namespace":  "\\Sessions\\0\\AppContainerNamedObjects\\S-1-15-2-3685273904-497531206-1994570160-1960656515-3463869386-542367146-3846033158",
+    "private_namespace_verified":  false,
+    "private_namespace_removed":  true,
+    "namespace_retirement_observation":  {
+                                             "absent":  true,
+                                             "attempts":  1,
+                                             "budget_ms":  2000,
+                                             "elapsed_ms":  0,
+                                             "error":  null,
+                                             "scope":  "exact owned namespace read-only retirement observation"
+                                         },
+    "controller_admission_report":  {
+                                        "actual_capabilities_verified":  true,
+                                        "actual_low_integrity":  true,
+                                        "actual_lpac":  true,
+                                        "actual_package_verified":  true,
+                                        "actual_user_sid":  "S-1-5-21-4017028701-367916445-1230427694-1139",
+                                        "actual_user_verified":  true,
+                                        "as_user_controller_error":  "controller CreateProcessAsUser fixed account LPAC comparison: Win32 2",
+                                        "as_user_target_context_error":  null,
+                                        "baseline_job_total":  2,
+                                        "baseline_tree_stopped":  true,
+                                        "controller_privileges_before_creation":  {
+                                                                                      "SeAssignPrimaryTokenPrivilege":  {
+                                                                                                                            "enabled":  false,
+                                                                                                                            "present":  true
+                                                                                                                        },
+                                                                                      "SeImpersonatePrivilege":  {
+                                                                                                                     "enabled":  true,
+                                                                                                                     "present":  true
+                                                                                                                 },
+                                                                                      "SeIncreaseQuotaPrivilege":  {
+                                                                                                                       "enabled":  false,
+                                                                                                                       "present":  true
+                                                                                                                   }
+                                                                                  },
+                                        "creation_api":  "CreateProcessAsUserW target account context",
+                                        "error":  null,
+                                        "execution_job_final_active":  0,
+                                        "execution_job_final_total":  2,
+                                        "execution_job_observations":  [
+                                                                           {
+                                                                               "actual_lpac":  true,
+                                                                               "appcontainer":  true,
+                                                                               "error":  null,
+                                                                               "exact_capabilities":  true,
+                                                                               "exact_job_member":  true,
+                                                                               "expected_package":  true,
+                                                                               "expected_user":  true,
+                                                                               "image":  "C:\\ProgramData\\ShellSpan-AC-a619b68b81704e34a804933c89a127fc\\git.exe",
+                                                                               "integrity_rid":  4096,
+                                                                               "pid":  29804
+                                                                           },
+                                                                           {
+                                                                               "actual_lpac":  true,
+                                                                               "appcontainer":  true,
+                                                                               "error":  null,
+                                                                               "exact_capabilities":  true,
+                                                                               "exact_job_member":  true,
+                                                                               "expected_package":  true,
+                                                                               "expected_user":  true,
+                                                                               "image":  "C:\\Windows\\System32\\conhost.exe",
+                                                                               "integrity_rid":  4096,
+                                                                               "pid":  21176
+                                                                           }
+                                                                       ],
+                                        "execution_topology_verified":  true,
+                                        "fixture":  "C:\\ProgramData\\ShellSpan-AC-a619b68b81704e34a804933c89a127fc",
+                                        "ordinary_account_credential_comparison":  {
+                                                                                       "context":  "exact owned account impersonation; not primary child evidence",
+                                                                                       "denial_win32":  1168,
+                                                                                       "error":  null
+                                                                                   },
+                                        "ordinary_creation_error":  null,
+                                        "ordinary_creation_succeeded":  true,
+                                        "owned_job_total":  2,
+                                        "process_tree_stopped":  true,
+                                        "production":  "unavailable",
+                                        "profile_folder":  "C:\\Users\\SSPAa619b68b8170\\AppData\\Local\\Packages\\shellspan-candidate-a619b68b81704e34a804933c89a127fc\\AC",
+                                        "profile_folder_in_dedicated_account":  true,
+                                        "profile_removed":  true,
+                                        "root_exit_73":  false,
+                                        "scope":  "controller fixed dedicated-account tool admission; incomplete stage A matrix",
+                                        "source_file_registry_controls_verified":  true,
+                                        "source_token_non_elevated":  true,
+                                        "source_token_session":  0,
+                                        "tool_admission":  {
+                                                               "actual_exit":  0,
+                                                               "expected_exit":  0,
+                                                               "files":  [
+                                                                             {
+                                                                                 "destination":  {
+                                                                                                     "bytes":  4383048,
+                                                                                                     "file_index":  57983845202614441,
+                                                                                                     "path":  "C:\\ProgramData\\ShellSpan-AC-a619b68b81704e34a804933c89a127fc\\git.exe",
+                                                                                                     "volume":  2523053325
+                                                                                                 },
+                                                                                 "imports":  [
+                                                                                                 "advapi32.dll",
+                                                                                                 "kernel32.dll",
+                                                                                                 "libiconv-2.dll",
+                                                                                                 "libintl-8.dll",
+                                                                                                 "libpcre2-8-0.dll",
+                                                                                                 "msvcrt.dll",
+                                                                                                 "ntdll.dll",
+                                                                                                 "user32.dll",
+                                                                                                 "ws2_32.dll",
+                                                                                                 "zlib1.dll"
+                                                                                             ],
+                                                                                 "source":  {
+                                                                                                "bytes":  4383048,
+                                                                                                "file_index":  1125899907578178,
+                                                                                                "path":  "D:\\Programs\\Git\\mingw64\\bin\\git.exe",
+                                                                                                "volume":  170928010
+                                                                                            }
+                                                                             },
+                                                                             {
+                                                                                 "destination":  {
+                                                                                                     "bytes":  1143148,
+                                                                                                     "file_index":  16888498602858734,
+                                                                                                     "path":  "C:\\ProgramData\\ShellSpan-AC-a619b68b81704e34a804933c89a127fc\\libiconv-2.dll",
+                                                                                                     "volume":  2523053325
+                                                                                                 },
+                                                                                 "imports":  [
+                                                                                                 "kernel32.dll",
+                                                                                                 "msvcrt.dll"
+                                                                                             ],
+                                                                                 "source":  {
+                                                                                                "bytes":  1143148,
+                                                                                                "file_index":  1125899907578195,
+                                                                                                "path":  "D:\\Programs\\Git\\mingw64\\bin\\libiconv-2.dll",
+                                                                                                "volume":  170928010
+                                                                                            }
+                                                                             },
+                                                                             {
+                                                                                 "destination":  {
+                                                                                                     "bytes":  298731,
+                                                                                                     "file_index":  43065671436949745,
+                                                                                                     "path":  "C:\\ProgramData\\ShellSpan-AC-a619b68b81704e34a804933c89a127fc\\libintl-8.dll",
+                                                                                                     "volume":  2523053325
+                                                                                                 },
+                                                                                 "imports":  [
+                                                                                                 "advapi32.dll",
+                                                                                                 "kernel32.dll",
+                                                                                                 "libiconv-2.dll",
+                                                                                                 "msvcrt.dll"
+                                                                                             ],
+                                                                                 "source":  {
+                                                                                                "bytes":  298731,
+                                                                                                "file_index":  1125899907578197,
+                                                                                                "path":  "D:\\Programs\\Git\\mingw64\\bin\\libintl-8.dll",
+                                                                                                "volume":  170928010
+                                                                                            }
+                                                                             },
+                                                                             {
+                                                                                 "destination":  {
+                                                                                                     "bytes":  717955,
+                                                                                                     "file_index":  28710447624706293,
+                                                                                                     "path":  "C:\\ProgramData\\ShellSpan-AC-a619b68b81704e34a804933c89a127fc\\libpcre2-8-0.dll",
+                                                                                                     "volume":  2523053325
+                                                                                                 },
+                                                                                 "imports":  [
+                                                                                                 "kernel32.dll",
+                                                                                                 "msvcrt.dll"
+                                                                                             ],
+                                                                                 "source":  {
+                                                                                                "bytes":  717955,
+                                                                                                "file_index":  1125899907578202,
+                                                                                                "path":  "D:\\Programs\\Git\\mingw64\\bin\\libpcre2-8-0.dll",
+                                                                                                "volume":  170928010
+                                                                                            }
+                                                                             },
+                                                                             {
+                                                                                 "destination":  {
+                                                                                                     "bytes":  128488,
+                                                                                                     "file_index":  34339947158919414,
+                                                                                                     "path":  "C:\\ProgramData\\ShellSpan-AC-a619b68b81704e34a804933c89a127fc\\zlib1.dll",
+                                                                                                     "volume":  2523053325
+                                                                                                 },
+                                                                                 "imports":  [
+                                                                                                 "kernel32.dll",
+                                                                                                 "msvcrt.dll"
+                                                                                             ],
+                                                                                 "source":  {
+                                                                                                "bytes":  128488,
+                                                                                                "file_index":  1125899907578249,
+                                                                                                "path":  "D:\\Programs\\Git\\mingw64\\bin\\zlib1.dll",
+                                                                                                "volume":  170928010
+                                                                                            }
+                                                                             }
+                                                                         ],
+                                                               "image":  {
+                                                                             "bytes":  4383048,
+                                                                             "file_index":  57983845202614441,
+                                                                             "path":  "C:\\ProgramData\\ShellSpan-AC-a619b68b81704e34a804933c89a127fc\\git.exe",
+                                                                             "volume":  2523053325
+                                                                         },
+                                                               "output_verified":  true,
+                                                               "repository_verified":  true,
+                                                               "scope":  "fixed dedicated-account Git --version only; not complete stage A",
+                                                               "static_imports":  [
+                                                                                      "advapi32.dll",
+                                                                                      "kernel32.dll",
+                                                                                      "libiconv-2.dll",
+                                                                                      "libintl-8.dll",
+                                                                                      "libpcre2-8-0.dll",
+                                                                                      "msvcrt.dll",
+                                                                                      "ntdll.dll",
+                                                                                      "user32.dll",
+                                                                                      "ws2_32.dll",
+                                                                                      "zlib1.dll"
+                                                                                  ],
+                                                               "stderr":  "",
+                                                               "stdout":  "Initialized empty Git repository in C:/ProgramData/ShellSpan-AC-a619b68b81704e34a804933c89a127fc/output/\n",
+                                                               "system_imports":  [
+                                                                                      "advapi32.dll",
+                                                                                      "kernel32.dll",
+                                                                                      "msvcrt.dll",
+                                                                                      "ntdll.dll",
+                                                                                      "user32.dll",
+                                                                                      "ws2_32.dll"
+                                                                                  ],
+                                                               "tool":  "git_bundle"
+                                                           },
+                                        "with_token_creation_error":  "controller create fixed source-account LPAC process: Win32 87",
+                                        "workload_retired":  true
+                                    },
+    "controller_workload_requested":  true,
+    "controller_workload_planned_root":  "C:\\ProgramData\\ShellSpan-AC-a619b68b81704e34a804933c89a127fc",
+    "controller_workload_fixture":  {
+                                        "path":  "C:\\ProgramData\\ShellSpan-AC-a619b68b81704e34a804933c89a127fc",
+                                        "volume_serial":  2523053325,
+                                        "file_index":  16325548649435559
+                                    },
+    "controller_workload_retired":  true,
+    "controller_workload_files_retired":  false,
+    "controller_lifecycle":  "normal",
+    "controller_tool":  "git_metadata_init",
+    "credential_reference":  "ShellSpan/owned-account/v1/a619b68b-8170-4e34-a804-933c89a127fc/S-1-5-21-4017028701-367916445-1230427694-1139",
+    "credential_reference_verified":  true,
+    "credential_removed":  true,
+    "profile_recovery_api_loaded":  false,
+    "profile_recovery_api_unloaded":  false,
+    "recovery_logon_pending":  false
+}

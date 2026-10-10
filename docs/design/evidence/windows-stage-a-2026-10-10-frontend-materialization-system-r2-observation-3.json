@@ -1,0 +1,71 @@
+{
+  "fixture_id": "e255b20c-10d1-468f-b6f3-f9fa3d7c0411",
+  "observed_utc": "2026-10-09T19:35:40.2463450Z",
+  "read_only": true,
+  "processes": [
+    {
+      "pid": 7212,
+      "creation": "2026-10-10T03:29:33.99914+08:00",
+      "command": "\"D:\\Developer\\ShellSpan\\tests\\windows-sandbox-account\\target\\debug\\shellspan-account-sandbox-prototype.exe\" --run-owned-system-admission e255b20c-10d1-468f-b6f3-f9fa3d7c0411",
+      "cpu_seconds": 0.328125,
+      "working_set_bytes": 11608064,
+      "handles": 150
+    },
+    {
+      "pid": 28796,
+      "creation": "2026-10-10T03:29:35.503897+08:00",
+      "command": "\"C:\\ProgramData\\ShellSpan-system-admission-A-e255b20c-10d1-468f-b6f3-f9fa3d7c0411\\fixed-admission.exe\" --fixed-system-admission-service e255b20c-10d1-468f-b6f3-f9fa3d7c0411",
+      "cpu_seconds": 349.3125,
+      "working_set_bytes": 108056576,
+      "handles": 44428
+    }
+  ],
+  "admission_files": [
+    {
+      "Name": "fixed-admission.exe",
+      "Length": 6536192,
+      "LastWriteTimeUtc": "2026-10-09T19:29:33.9558624Z"
+    },
+    {
+      "Name": "ownership.json",
+      "Length": 726,
+      "LastWriteTimeUtc": "2026-10-09T19:29:34.7252813Z"
+    }
+  ],
+  "profile_exists": true,
+  "profile_files": [
+    {
+      "Name": "frontend-bundle-plan.json",
+      "Length": 3843877,
+      "LastWriteTimeUtc": "2026-10-09T19:31:54.5129957Z"
+    },
+    {
+      "Name": "ownership.json",
+      "Length": 604,
+      "LastWriteTimeUtc": "2026-10-09T19:31:54.4948739Z"
+    }
+  ],
+  "checkpoint_pages": 0,
+  "namespace_exists": false,
+  "anchor": {
+    "accounts_created": false,
+    "backend": "fixed-frontend-materialization-v1",
+    "creation_stamp_version": 1,
+    "filters_installed": false,
+    "fixture_id": "e255b20c-10d1-468f-b6f3-f9fa3d7c0411",
+    "inventory_sha256": "9f6b1525fbcb0070af5245c134c925b9f8b0e5c4c656c0acd7bc77efe51dc098",
+    "journal_prepared": false,
+    "namespace_root": "frontend-dependencies",
+    "objects": 43290,
+    "pages": 677,
+    "parent": {
+      "file_id": 17732923534007846,
+      "volume": 2523053325
+    },
+    "permissions_granted": false,
+    "phase": "creating; execution forbidden",
+    "plan_sha256": "cb118ef0d079eb72a71dc5762a851496c4bbed9013a1fd6f664e8aea21e0cbd8",
+    "production": "unavailable",
+    "version": 1
+  }
+}

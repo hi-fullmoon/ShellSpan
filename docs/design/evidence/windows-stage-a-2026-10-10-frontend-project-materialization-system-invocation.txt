@@ -1,0 +1,9 @@
+﻿Unexpected materialization preparation.
+At D:\Developer\ShellSpan\tests\windows-sandbox-account\scripts\Invoke-FixedFrontendProjectMaterialization.ps1:24 char:
+410
++ ... ne 'unavailable') { throw 'Unexpected materialization preparation.' }
++                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (Unexpected materialization preparation.:String) [], RuntimeException
+    + FullyQualifiedErrorId : Unexpected materialization preparation.
+ 
+

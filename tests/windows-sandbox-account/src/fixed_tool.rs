@@ -88,6 +88,7 @@ pub enum FixedTool {
     GitPrefixProbe,
     CrossSlotRegistryProbe,
     Node,
+    NodeProject,
 }
 impl FixedTool {
     pub fn from_source_cli(value: &str) -> Option<Self> {
@@ -140,6 +141,7 @@ impl FixedTool {
             Self::GitPrefixProbe => "probe.exe --owned-fixed-git-prefix-probe",
             Self::CrossSlotRegistryProbe => "probe.exe --owned-fixed-cross-slot-registry-access-probe",
             Self::Node => "node.exe -e \"const p=require('node:path');const root=process.env.SSPA_FIXTURE;process.exit(root&&p.resolve(process.cwd()).toLowerCase()===p.resolve(root,'output').toLowerCase()?73:74)\"",
+            Self::NodeProject => "node.exe --disable-warning=ExperimentalWarning ..\\node-project-runner.cjs",
         }
     }
     pub fn expected_exit(self) -> u32 {
@@ -198,7 +200,7 @@ impl FixedTool {
             Self::PowerShellEtwProbe => std::env::current_exe()
                 .map_err(|e| e.to_string())?
                 .with_file_name("powershell-etw-probe.exe"),
-            Self::Node => PathBuf::from(r"D:\Programs\nodejs\node.exe"),
+            Self::Node | Self::NodeProject => PathBuf::from(r"D:\Programs\nodejs\node.exe"),
         })
     }
 }
@@ -519,15 +521,39 @@ impl ToolImageLease {
         Ok(copied)
     }
     pub fn open(path: &Path) -> Result<Self, String> {
+        Self::open_inner(path, false)
+    }
+    /// Immutable dependency assets may be empty; executable admission still
+    /// uses open(), whose existing nonempty-image requirement remains intact.
+    pub(crate) fn open_source(path: &Path) -> Result<Self, String> {
+        Self::open_inner(path, true)
+    }
+    pub(crate) fn source_link_count(&self) -> Result<u32, String> {
+        let mut info = BY_HANDLE_FILE_INFORMATION::default();
+        win(
+            unsafe { GetFileInformationByHandle(self._file.0, &mut info) },
+            "source asset link count",
+        )?;
+        Ok(info.nNumberOfLinks)
+    }
+    fn open_inner(path: &Path, allow_empty: bool) -> Result<Self, String> {
         if !path.is_absolute() {
             return Err("fixed tool requires absolute image".into());
         }
-        let path_wide: Vec<u16> = path
-            .to_str()
-            .ok_or("invalid fixed image path")?
-            .encode_utf16()
-            .chain(Some(0))
-            .collect();
+        let text = path.to_str().ok_or("invalid fixed image path")?;
+        if text.contains('\0') {
+            return Err("invalid fixed image path".into());
+        }
+        // Native copied assets can exceed MAX_PATH. Preserve no-follow entry
+        // validation instead of canonicalizing through a reparse target.
+        let native = if text.starts_with(r"\\?\") {
+            text.replace('/', r"\")
+        } else if text.as_bytes().get(1) == Some(&b':') {
+            format!(r"\\?\{}", text.replace('/', r"\"))
+        } else {
+            text.to_owned()
+        };
+        let path_wide: Vec<u16> = native.encode_utf16().chain(Some(0)).collect();
         let file = Handle(unsafe {
             CreateFileW(
                 path_wide.as_ptr(),
@@ -551,7 +577,7 @@ impl ToolImageLease {
         )?;
         let bytes = ((info.nFileSizeHigh as u64) << 32) | info.nFileSizeLow as u64;
         if info.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY) != 0
-            || bytes == 0
+            || bytes == 0 && !allow_empty
             || bytes > 128 * 1024 * 1024
         {
             return Err("fixed tool image type or byte budget invalid".into());

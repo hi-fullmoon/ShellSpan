@@ -1,0 +1,87 @@
+{
+  "recovery_id": "ed5395c8-d578-4918-85ea-0f06480989c2",
+  "observed_utc": "2026-10-09T19:50:45.3005126Z",
+  "records_opened": false,
+  "processes": [
+    {
+      "pid": 29692,
+      "creation": "2026-10-10T03:45:21.102988+08:00",
+      "command": "\"D:\\Developer\\ShellSpan\\tests\\windows-sandbox-account\\target\\debug\\shellspan-account-sandbox-prototype.exe\" --run-owned-system-admission ed5395c8-d578-4918-85ea-0f06480989c2",
+      "cpu_seconds": 0.1875,
+      "working_set_bytes": 11698176,
+      "handles": 150,
+      "threads": [
+        {
+          "id": 28888,
+          "state": "Wait",
+          "wait_reason": "UserRequest"
+        },
+        {
+          "id": 23236,
+          "state": "Wait",
+          "wait_reason": "EventPairLow"
+        },
+        {
+          "id": 29240,
+          "state": "Wait",
+          "wait_reason": "EventPairLow"
+        }
+      ]
+    },
+    {
+      "pid": 27884,
+      "creation": "2026-10-10T03:45:22.639326+08:00",
+      "command": "\"C:\\ProgramData\\ShellSpan-system-admission-A-ed5395c8-d578-4918-85ea-0f06480989c2\\fixed-admission.exe\" --fixed-system-admission-service ed5395c8-d578-4918-85ea-0f06480989c2",
+      "cpu_seconds": 299.6875,
+      "working_set_bytes": 62685184,
+      "handles": 382,
+      "threads": [
+        {
+          "id": 8600,
+          "state": "Wait",
+          "wait_reason": "UserRequest"
+        },
+        {
+          "id": 13096,
+          "state": "Running",
+          "wait_reason": null
+        },
+        {
+          "id": 6840,
+          "state": "Wait",
+          "wait_reason": "ExecutionDelay"
+        },
+        {
+          "id": 20204,
+          "state": "Wait",
+          "wait_reason": "EventPairLow"
+        },
+        {
+          "id": 30416,
+          "state": "Wait",
+          "wait_reason": "UserRequest"
+        },
+        {
+          "id": 21976,
+          "state": "Wait",
+          "wait_reason": "EventPairLow"
+        },
+        {
+          "id": 23688,
+          "state": "Wait",
+          "wait_reason": "EventPairLow"
+        },
+        {
+          "id": 16376,
+          "state": "Wait",
+          "wait_reason": "EventPairLow"
+        },
+        {
+          "id": 7124,
+          "state": "Wait",
+          "wait_reason": "UserRequest"
+        }
+      ]
+    }
+  ]
+}

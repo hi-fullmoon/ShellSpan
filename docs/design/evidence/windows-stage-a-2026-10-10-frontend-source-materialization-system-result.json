@@ -1,0 +1,17 @@
+{
+  "accounts_created": false,
+  "actual_system": true,
+  "filters_installed": false,
+  "fixture_id": "a982be11-d802-424e-ba39-dcdfd72a265a",
+  "namespace_root": "frontend-source",
+  "objects": 883,
+  "objects_created": 883,
+  "objects_retired": 883,
+  "pages": 14,
+  "permissions_granted": false,
+  "production": "unavailable",
+  "records_retained_as_evidence": true,
+  "retirement_confirmed": true,
+  "tools_dispatched": false,
+  "version": 1
+}

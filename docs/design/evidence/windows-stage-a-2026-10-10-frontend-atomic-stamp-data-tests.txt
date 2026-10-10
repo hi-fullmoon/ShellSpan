@@ -1,0 +1,9 @@
+   Compiling shellspan-account-sandbox-prototype v0.1.0 (D:\Developer\ShellSpan\tests\windows-sandbox-account)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.71s
+     Running unittests src\lib.rs (tests\windows-sandbox-account\target\debug\deps\shellspan_account_sandbox_prototype-7a4e5dd90783178f.exe)
+
+running 1 test
+test frontend_creation_stamp::tests::native_create_includes_bound_ea_for_files_and_directories_without_overwrite ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 219 filtered out; finished in 0.20s
+

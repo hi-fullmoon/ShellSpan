@@ -1,0 +1,239 @@
+﻿{
+    "version":  1,
+    "backend":  "account-profile-lifecycle-prototype-v1",
+    "production":  "unavailable",
+    "fixture_id":  "6b8ba09e-e416-496b-9227-25b7e1e12e7f",
+    "account":  "SSPA6b8ba09ee416",
+    "account_sid":  "S-1-5-21-4017028701-367916445-1230427694-1144",
+    "filter_keys":  [
+                        "4725a358-3ec4-4b79-bddc-fac32161e2e8",
+                        "6a70e9ac-5084-473b-ab1e-653be9e68954",
+                        "8411ead0-ab2b-4bcf-b818-a4b6bd003c7b",
+                        "1741196e-ed07-409b-96fb-ec12228729cf"
+                    ],
+    "ancestor_metadata_intent":  {
+                                     "version":  1,
+                                     "fixture_id":  "6b8ba09e-e416-496b-9227-25b7e1e12e7f",
+                                     "package_sid":  "S-1-15-2-3186391757-495701486-1741877923-3872341438-3103459339-507196126-3468038140",
+                                     "access_mask":  1048704,
+                                     "inheritance_flags":  0,
+                                     "objects":  [
+                                                     {
+                                                         "path":  "C:\\",
+                                                         "volume":  2523053325,
+                                                         "file_id":  1407374883553285,
+                                                         "original_dacl_sha256":  "ad2948b5b480bb5b5b8087f03033fee2f894b6a311f5869c28ab44ed0137eac8"
+                                                     },
+                                                     {
+                                                         "path":  "C:\\ProgramData",
+                                                         "volume":  2523053325,
+                                                         "file_id":  2251799814625149,
+                                                         "original_dacl_sha256":  "faccfa03b7dd7fb897e1ca60de6fe136180b3d1ed0e886bff0a4c393c26240ec"
+                                                     }
+                                                 ],
+                                     "states":  [
+                                                    "retired",
+                                                    "retired"
+                                                ]
+                                 },
+    "ancestor_checkpoint_crash":  null,
+    "package_network_intent":  null,
+    "package_filters_removed":  false,
+    "rpc_network_intent":  null,
+    "rpc_filter_removed":  false,
+    "rpc_trace_intent":  null,
+    "rpc_trace_removed":  false,
+    "rpc_trace_recovery_stopped":  false,
+    "profile_absent_before_load":  true,
+    "profile_registry_security_verified":  true,
+    "planned_private_station":  "SSPA-6b8ba09ee416496b922725b7e1e12e7f",
+    "planned_package_sid":  "S-1-15-2-3186391757-495701486-1741877923-3872341438-3103459339-507196126-3468038140",
+    "private_desktop_verified":  true,
+    "duplicate_station_rejected":  true,
+    "private_station_removed":  true,
+    "profile":  {
+                    "path":  "C:\\Users\\SSPA6b8ba09ee416",
+                    "volume_serial":  2523053325,
+                    "file_index":  5629499535052265
+                },
+    "profile_unloaded":  true,
+    "profile_removed":  true,
+    "account_removed":  true,
+    "filters_removed":  true,
+    "non_elevated_account_token":  true,
+    "state":  "owned Windows profile, account and persistent SID filters retired; evidence retained",
+    "error":  null,
+    "cleanup_debt":  [
+
+                     ],
+    "controller_interruption_checkpoint":  false,
+    "recovery_executed":  true,
+    "account_lpac_started":  true,
+    "account_lpac_cleanup_verified":  true,
+    "account_lpac_verified":  false,
+    "controller_receiver_counts":  null,
+    "account_lpac_outer_job_total":  null,
+    "account_lpac_bootstrap_exit":  null,
+    "account_lpac_outer_tree_stopped":  false,
+    "independent_bootstrap_recovery_observation":  null,
+    "independent_bootstrap_files_retired":  false,
+    "account_lpac_diagnostic_report":  null,
+    "profile_residual_recycled":  false,
+    "account_lpac_admission_only":  false,
+    "planned_private_namespace":  "\\Sessions\\0\\AppContainerNamedObjects\\S-1-15-2-3186391757-495701486-1741877923-3872341438-3103459339-507196126-3468038140",
+    "private_namespace_verified":  false,
+    "private_namespace_removed":  true,
+    "namespace_retirement_observation":  {
+                                             "absent":  true,
+                                             "attempts":  1,
+                                             "budget_ms":  2000,
+                                             "elapsed_ms":  0,
+                                             "error":  null,
+                                             "scope":  "exact owned namespace read-only retirement observation"
+                                         },
+    "controller_admission_report":  {
+                                        "actual_capabilities_verified":  true,
+                                        "actual_low_integrity":  true,
+                                        "actual_lpac":  true,
+                                        "actual_package_verified":  true,
+                                        "actual_user_sid":  "S-1-5-21-4017028701-367916445-1230427694-1144",
+                                        "actual_user_verified":  true,
+                                        "as_user_controller_error":  "controller CreateProcessAsUser fixed account LPAC comparison: Win32 2",
+                                        "as_user_target_context_error":  null,
+                                        "baseline_job_total":  2,
+                                        "baseline_tree_stopped":  true,
+                                        "controller_privileges_before_creation":  {
+                                                                                      "SeAssignPrimaryTokenPrivilege":  {
+                                                                                                                            "enabled":  false,
+                                                                                                                            "present":  true
+                                                                                                                        },
+                                                                                      "SeImpersonatePrivilege":  {
+                                                                                                                     "enabled":  true,
+                                                                                                                     "present":  true
+                                                                                                                 },
+                                                                                      "SeIncreaseQuotaPrivilege":  {
+                                                                                                                       "enabled":  false,
+                                                                                                                       "present":  true
+                                                                                                                   }
+                                                                                  },
+                                        "creation_api":  "CreateProcessAsUserW target account context",
+                                        "error":  null,
+                                        "execution_job_final_active":  0,
+                                        "execution_job_final_total":  2,
+                                        "execution_job_observations":  [
+                                                                           {
+                                                                               "actual_lpac":  true,
+                                                                               "appcontainer":  true,
+                                                                               "error":  null,
+                                                                               "exact_capabilities":  true,
+                                                                               "exact_job_member":  true,
+                                                                               "expected_package":  true,
+                                                                               "expected_user":  true,
+                                                                               "image":  "D:\\Programs\\nodejs\\node.exe",
+                                                                               "integrity_rid":  4096,
+                                                                               "pid":  31720
+                                                                           },
+                                                                           {
+                                                                               "actual_lpac":  true,
+                                                                               "appcontainer":  true,
+                                                                               "error":  null,
+                                                                               "exact_capabilities":  true,
+                                                                               "exact_job_member":  true,
+                                                                               "expected_package":  true,
+                                                                               "expected_user":  true,
+                                                                               "image":  "C:\\Windows\\System32\\conhost.exe",
+                                                                               "integrity_rid":  4096,
+                                                                               "pid":  31032
+                                                                           }
+                                                                       ],
+                                        "execution_topology_verified":  true,
+                                        "fixture":  "C:\\ProgramData\\ShellSpan-AC-6b8ba09ee416496b922725b7e1e12e7f",
+                                        "ordinary_account_credential_comparison":  {
+                                                                                       "context":  "exact owned account impersonation; not primary child evidence",
+                                                                                       "denial_win32":  1168,
+                                                                                       "error":  null
+                                                                                   },
+                                        "ordinary_creation_error":  null,
+                                        "ordinary_creation_succeeded":  true,
+                                        "owned_job_total":  2,
+                                        "process_tree_stopped":  true,
+                                        "production":  "unavailable",
+                                        "profile_folder":  "C:\\Users\\SSPA6b8ba09ee416\\AppData\\Local\\Packages\\shellspan-candidate-6b8ba09ee416496b922725b7e1e12e7f\\AC",
+                                        "profile_folder_in_dedicated_account":  true,
+                                        "profile_removed":  true,
+                                        "root_exit_73":  true,
+                                        "scope":  "controller fixed dedicated-account tool admission; incomplete stage A matrix",
+                                        "source_file_registry_controls_verified":  true,
+                                        "source_token_non_elevated":  true,
+                                        "source_token_session":  0,
+                                        "tool_admission":  {
+                                                               "actual_exit":  73,
+                                                               "artifact":  {
+                                                                                "bytes":  14550,
+                                                                                "file_index":  4503599628222589,
+                                                                                "path":  "C:\\ProgramData\\ShellSpan-AC-6b8ba09ee416496b922725b7e1e12e7f\\output\\terminal-output-buffer.mjs",
+                                                                                "volume":  2523053325
+                                                                            },
+                                                               "expected_exit":  73,
+                                                               "image":  {
+                                                                             "bytes":  103291208,
+                                                                             "file_index":  2814749767107451,
+                                                                             "path":  "D:\\Programs\\nodejs\\node.exe",
+                                                                             "volume":  170928010
+                                                                         },
+                                                               "output_verified":  true,
+                                                               "project":  {
+                                                                               "build_sha256":  "baea864351ffd989a944d0273f03e101e73dba663e937eb637de3972e0dce3b3",
+                                                                               "checks":  [
+                                                                                              "ansi_redraw",
+                                                                                              "redacted_recent_lines",
+                                                                                              "snapshot_cache",
+                                                                                              "session_rebind"
+                                                                                          ],
+                                                                               "node_version":  "v26.5.0",
+                                                                               "source_sha256":  "493170a9ad49179f03b79d2bf109122b2d55bd8ce76a0230b5a1d33e60fe8467",
+                                                                               "source_write_rejected":  true,
+                                                                               "version":  1
+                                                                           },
+                                                               "project_verified":  true,
+                                                               "scope":  "offline transformation and four behavior checks of actual ShellSpan terminal-output-buffer source; no typecheck or complete app build",
+                                                               "static_imports":  [
+                                                                                      "advapi32.dll",
+                                                                                      "api-ms-win-core-synch-l1-2-0.dll",
+                                                                                      "crypt32.dll",
+                                                                                      "dbghelp.dll",
+                                                                                      "iphlpapi.dll",
+                                                                                      "kernel32.dll",
+                                                                                      "ntdll.dll",
+                                                                                      "ole32.dll",
+                                                                                      "shell32.dll",
+                                                                                      "user32.dll",
+                                                                                      "userenv.dll",
+                                                                                      "winmm.dll",
+                                                                                      "ws2_32.dll"
+                                                                                  ],
+                                                               "stderr":  "",
+                                                               "stdout":  "",
+                                                               "tool":  "node_project"
+                                                           },
+                                        "with_token_creation_error":  "controller create fixed source-account LPAC process: Win32 87",
+                                        "workload_retired":  true
+                                    },
+    "controller_workload_requested":  true,
+    "controller_workload_planned_root":  "C:\\ProgramData\\ShellSpan-AC-6b8ba09ee416496b922725b7e1e12e7f",
+    "controller_workload_fixture":  {
+                                        "path":  "C:\\ProgramData\\ShellSpan-AC-6b8ba09ee416496b922725b7e1e12e7f",
+                                        "volume_serial":  2523053325,
+                                        "file_index":  5910974511762918
+                                    },
+    "controller_workload_retired":  true,
+    "controller_workload_files_retired":  false,
+    "controller_lifecycle":  "normal",
+    "controller_tool":  "node_metadata_project",
+    "credential_reference":  "ShellSpan/owned-account/v1/6b8ba09e-e416-496b-9227-25b7e1e12e7f/S-1-5-21-4017028701-367916445-1230427694-1144",
+    "credential_reference_verified":  true,
+    "credential_removed":  true,
+    "profile_recovery_api_loaded":  false,
+    "profile_recovery_api_unloaded":  false,
+    "recovery_logon_pending":  false
+}

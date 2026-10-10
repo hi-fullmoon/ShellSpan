@@ -26,6 +26,13 @@ function Assert-Eligibility($receipt, [hashtable]$actual, [bool]$expected, [stri
     if ($gate.eligible -ne $expected) { throw ('Recovery gate mismatch: ' + $reason) }
 }
 $absent = @{AccountPresent=$false;AccountDisabled=$false;HivePresent=$false;ProfileLoaded=$false;ProfileRecordCount=0;OriginalServicePresent=$false}
+foreach ($ancestorValue in @([pscustomobject]@{states=@('retired','retired')}, 'unsupported', $false)) {
+    $ancestorReceipt = New-Receipt $true
+    $ancestorReceipt | Add-Member -NotePropertyName ancestor_metadata_intent -NotePropertyValue $ancestorValue
+    Assert-Eligibility $ancestorReceipt $absent $false 'ancestor retirement needs exact OS handler'
+    $ancestorGate = Get-FixedRecoveryEligibility -Receipt $ancestorReceipt @absent
+    if ($ancestorGate.recorded_retirement) { throw 'Unsupported ancestor checkpoint claimed retirement.' }
+}
 Assert-Eligibility (New-Receipt $true) $absent $true 'retired receipt and quiet OS can be revalidated natively'
 foreach ($field in @('AccountPresent','HivePresent','ProfileLoaded','OriginalServicePresent')) {
     $contradiction = $absent.Clone()

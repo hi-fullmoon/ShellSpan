@@ -1,0 +1,16 @@
+{
+  "accounts_created": false,
+  "actual_system": true,
+  "filters_installed": false,
+  "fixture_id": "310c9957-d9ad-4a2e-9e11-1c878bc74a6f",
+  "objects": 43290,
+  "objects_created": 43290,
+  "objects_retired": 43290,
+  "pages": 677,
+  "permissions_granted": false,
+  "production": "unavailable",
+  "records_retained_as_evidence": true,
+  "retirement_confirmed": true,
+  "tools_dispatched": false,
+  "version": 1
+}

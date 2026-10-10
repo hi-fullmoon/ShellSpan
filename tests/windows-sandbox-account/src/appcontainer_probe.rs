@@ -110,14 +110,55 @@ fn verify_retirement_inventory_budget(paths: &[PathBuf], budget: usize) -> Resul
     Ok(())
 }
 pub(crate) fn verify_retirement_object(path: &Path) -> Result<Handle> {
+    verify_retirement_object_sharing(path, FILE_SHARE_READ)
+}
+pub(crate) fn native_local_path(path: &Path) -> Result<Vec<u16>> {
+    let text = path.to_str().ok_or("invalid native local path")?;
+    let text = text
+        .strip_prefix(r"\\?\")
+        .unwrap_or(text)
+        .replace('/', r"\");
+    let bytes = text.as_bytes();
+    if text.contains('\0')
+        || bytes.len() < 3
+        || !bytes[0].is_ascii_alphabetic()
+        || bytes[1] != b':'
+        || bytes[2] != b'\\'
+    {
+        return Err("native path must be absolute local drive path".into());
+    }
+    let wide: Vec<u16> = format!(r"\\?\{text}")
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
+    if wide.len() > 32767 {
+        return Err("native local path budget exceeded".into());
+    }
+    Ok(wide)
+}
+/// Caller must already establish protected, never-granted journal ownership.
+/// Allow child journal transitions without permitting parent replacement.
+pub(crate) fn hold_journal_parent(path: &Path) -> Result<Handle> {
+    let held = verify_retirement_object_sharing(path, FILE_SHARE_READ | FILE_SHARE_WRITE)?;
+    let mut info = BY_HANDLE_FILE_INFORMATION::default();
+    win(
+        unsafe { GetFileInformationByHandle(held.0, &mut info) },
+        "inspect journal parent",
+    )?;
+    if info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY == 0 {
+        return Err("journal parent is not a directory".into());
+    }
+    Ok(held)
+}
+fn verify_retirement_object_sharing(path: &Path, sharing: u32) -> Result<Handle> {
     // A metadata-only open does not enforce the desired data sharing lease.
     // FILE_READ_DATA (FILE_LIST_DIRECTORY for directories) is deliberate;
     // no file content is read through this handle.
     let handle = unsafe {
         CreateFileW(
-            wide(path.to_str().ok_or("invalid retirement path")?).as_ptr(),
+            native_local_path(path)?.as_ptr(),
             FILE_READ_DATA | FILE_READ_ATTRIBUTES | READ_CONTROL | WRITE_DAC,
-            FILE_SHARE_READ,
+            sharing,
             null(),
             OPEN_EXISTING,
             FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
@@ -195,10 +236,10 @@ pub enum FixedReportKind {
     OrdinaryCredential,
 }
 impl FixedReportKind {
-    fn specification(self) -> (&'static str, u64) {
+    pub(crate) fn specification(self) -> (&'static str, u64) {
         match self {
             Self::Workload => ("report.json", 24576),
-            Self::LeafNetwork => ("leaf-network.json", 4096),
+            Self::LeafNetwork => ("leaf-network.json", 8192),
             Self::OrdinaryCredential => ("credential-primary-control.json", 4096),
         }
     }
@@ -569,6 +610,35 @@ pub fn leaf() -> Result<()> {
         .write_all(&serde_json::to_vec(&observation).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())
 }
+
+/// Bounded untrusted diagnostic output from the fixed child. Never ownership
+/// evidence; require the executable and frozen fixture to share one directory.
+pub fn record_fixed_child_error(error: &str) -> Result<()> {
+    let image = std::env::current_exe().map_err(|e| e.to_string())?;
+    let root = image
+        .parent()
+        .ok_or("missing fixed diagnostic image directory")?;
+    if PathBuf::from(std::env::var("SSPA_FIXTURE").map_err(|e| e.to_string())?) != root {
+        return Err("fixed error output differs from frozen image directory".into());
+    }
+    let id = root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.strip_prefix("ShellSpan-AC-"))
+        .ok_or("invalid fixed diagnostic fixture")?;
+    if uuid::Uuid::parse_str(id)
+        .map_err(|e| e.to_string())?
+        .is_nil()
+    {
+        return Err("fixed error output requires owned UUID".into());
+    }
+    let bounded: String = error.chars().take(2048).collect();
+    fs::write(
+        root.join("output/child-error.json"),
+        serde_json::json!({"fixed_probe_error": bounded}).to_string(),
+    )
+    .map_err(|e| e.to_string())
+}
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CredentialPrimaryObservation {
@@ -749,7 +819,123 @@ pub unsafe fn lpac_behavior(token: HANDLE, user: PSID, package: PSID) -> Result<
     if !access(&package)? {
         return Err("actual Token does not pass unique package positive control".into());
     }
+    verify_metadata_only_token(impersonation.0, &user, &package)?;
     Ok(!access("S-1-15-2-1")?)
+}
+/// Validate the proposed noninheriting metadata ACE against the actual Token.
+/// This is an in-memory AccessCheck calibration, not an on-disk grant or proof
+/// that Git can traverse the full ancestor chain.
+fn verify_metadata_only_token(token: HANDLE, user: &str, package: &str) -> Result<()> {
+    let sd = descriptor(&format!(
+        "O:SYG:SYD:(A;;FA;;;{user})(A;;0x100080;;;{package})"
+    ))?;
+    let mapping = GENERIC_MAPPING {
+        GenericRead: FILE_GENERIC_READ,
+        GenericWrite: FILE_GENERIC_WRITE,
+        GenericExecute: FILE_GENERIC_EXECUTE,
+        GenericAll: FILE_ALL_ACCESS,
+    };
+    let result = (|| {
+        for (access, expected) in [
+            (FILE_READ_ATTRIBUTES, true),
+            (SYNCHRONIZE, true),
+            (FILE_LIST_DIRECTORY, false),
+            (FILE_ADD_FILE, false),
+            (FILE_ADD_SUBDIRECTORY, false),
+            (FILE_DELETE_CHILD, false),
+            (WRITE_DAC, false),
+        ] {
+            let mut privileges = [0usize; 128];
+            let mut bytes = std::mem::size_of_val(&privileges) as u32;
+            let mut granted = 0;
+            let mut allowed = 0;
+            win(
+                unsafe {
+                    AccessCheck(
+                        sd,
+                        token,
+                        access,
+                        &mapping,
+                        privileges.as_mut_ptr().cast(),
+                        &mut bytes,
+                        &mut granted,
+                        &mut allowed,
+                    )
+                },
+                "metadata-only actual Token access check",
+            )?;
+            if (allowed != 0) != expected || expected && granted & access != access {
+                return Err(format!(
+                    "metadata-only Token boundary differs for access {access:#x}"
+                ));
+            }
+        }
+        Ok(())
+    })();
+    unsafe { LocalFree(sd) };
+    result
+}
+#[cfg(test)]
+mod metadata_token_tests {
+    use super::*;
+
+    #[test]
+    fn ordinary_token_cannot_satisfy_metadata_only_restricting_boundary() {
+        let mut raw = null_mut();
+        win(
+            unsafe {
+                OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_DUPLICATE, &mut raw)
+            },
+            "metadata test source",
+        )
+        .unwrap();
+        let source = Handle(raw);
+        let user_buffer = unsafe { query(source.0, TokenUser) }.unwrap();
+        let user =
+            unsafe { sid_text((*user_buffer.as_ptr().cast::<TOKEN_USER>()).User.Sid) }.unwrap();
+        let mut duplicate = null_mut();
+        win(
+            unsafe {
+                DuplicateTokenEx(
+                    source.0,
+                    TOKEN_QUERY,
+                    null(),
+                    SecurityImpersonation,
+                    TokenImpersonation,
+                    &mut duplicate,
+                )
+            },
+            "metadata test duplicate",
+        )
+        .unwrap();
+        let token = Handle(duplicate);
+        assert!(
+            verify_metadata_only_token(token.0, &user, "S-1-15-2-111-222-333-444-555-666-777")
+                .unwrap_err()
+                .contains("boundary differs")
+        );
+    }
+
+    #[test]
+    fn actual_lpac_metadata_calibration_keeps_owned_retirement_and_production_gate() {
+        let report: serde_json::Value = serde_json::from_slice(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/design/evidence/windows-stage-a-2026-10-09-metadata-token-lpac.json"
+        )))
+        .unwrap();
+        assert!(report["error"].is_null());
+        assert_eq!(report["actual_lpac"], true);
+        assert_eq!(report["production"], "unavailable");
+        for field in [
+            "process_tree_stopped",
+            "profile_removed",
+            "fixture_acls_revoked",
+        ] {
+            assert_eq!(report[field], true, "{field}");
+        }
+        assert_eq!(report["tool_admission"]["actual_exit"], 73);
+        assert_eq!(report["tool_admission"]["prefix_report_bound"], true);
+    }
 }
 pub(crate) fn set_owned_dacl(path: &Path, text: &str) -> Result<()> {
     let descriptor = descriptor(text)?;
@@ -950,6 +1136,13 @@ impl Fixture {
         fs::copy(std::env::current_exe().map_err(|e| e.to_string())?, &image)
             .map_err(|e| e.to_string())?;
         let base_no_inherit = format!("D:P(A;;FA;;;SY)(A;;FA;;;{owner})");
+        fs::create_dir(root.join("metadata-only")).map_err(|e| e.to_string())?;
+        fs::write(
+            root.join("metadata-only/child.txt"),
+            b"owned metadata calibration",
+        )
+        .map_err(|e| e.to_string())?;
+        set_owned_dacl(&root.join("metadata-only/child.txt"), &base_no_inherit)?;
         fs::write(root.join("output/protected.txt"), b"owned protected child")
             .map_err(|e| e.to_string())?;
         set_owned_dacl(&root.join("output/protected.txt"), &base_no_inherit)?;
@@ -1076,6 +1269,12 @@ impl Fixture {
         set_owned_dacl(
             &root.join("external-aap.txt"),
             &format!("{base_no_inherit}(A;;FR;;;S-1-15-2-1)"),
+        )?;
+        // Only this owned calibration directory is changed. The package ACE
+        // has no inheritance flags and does not authorize listing or children.
+        set_owned_dacl(
+            &root.join("metadata-only"),
+            &format!("{base_no_inherit}(A;;0x100080;;;{package})"),
         )?;
         set_owned_dacl(
             &root.join("external-everyone.txt"),
@@ -2850,7 +3049,7 @@ mod tests {
     #[test]
     fn fixed_report_reader_enforces_each_budget_before_parsing() {
         assert_eq!(FixedReportKind::Workload.specification().1, 24 * 1024);
-        assert_eq!(FixedReportKind::LeafNetwork.specification().1, 4 * 1024);
+        assert_eq!(FixedReportKind::LeafNetwork.specification().1, 8 * 1024);
         assert_eq!(
             FixedReportKind::OrdinaryCredential.specification().1,
             4 * 1024
@@ -2977,6 +3176,49 @@ mod tests {
         observation.report.complete = true;
         observation.version = 2;
         assert!(!leaf_network_bound(&observation, id, sid));
+    }
+    #[test]
+    fn asset_copy_rejects_junction_parent_before_target_creation() {
+        use sha2::{Digest, Sha256};
+        use windows_sys::Win32::System::{
+            Ioctl::FSCTL_DELETE_REPARSE_POINT, SystemServices::IO_REPARSE_TAG_MOUNT_POINT,
+        };
+        let root =
+            std::env::temp_dir().join(format!("ShellSpan-asset-junction-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let target = root.join("target");
+        fs::create_dir(&target).unwrap();
+        let source_path = root.join("source.js");
+        fs::write(&source_path, b"independent source").unwrap();
+        let source = crate::fixed_tool::ToolImageLease::open_source(&source_path).unwrap();
+        let digest = Sha256::digest(source.read_bytes().unwrap())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        let output = root.join("output");
+        let junction = create_owned_test_junction(&output, &target).unwrap();
+        assert!(crate::frontend_asset_copy::copy_new(
+            &source,
+            &digest,
+            &output,
+            "copied.js",
+            source.identity.volume
+        )
+        .is_err());
+        assert!(!target.join("copied.js").exists());
+        assert!(crate::frontend_asset_copy::create_directory(
+            &output,
+            "new-directory",
+            source.identity.volume
+        )
+        .is_err());
+        assert!(!target.join("new-directory").exists());
+        assert_eq!(source.read_bytes().unwrap(), b"independent source");
+        let mut removal = Vec::from(IO_REPARSE_TAG_MOUNT_POINT.to_le_bytes());
+        removal.extend([0u8; 4]);
+        junction_control(junction.0, FSCTL_DELETE_REPARSE_POINT, &removal).unwrap();
+        drop((junction, source));
+        trash::delete(root).unwrap();
     }
     fn junction_control(handle: HANDLE, code: u32, data: &[u8]) -> Result<()> {
         let mut returned = 0;

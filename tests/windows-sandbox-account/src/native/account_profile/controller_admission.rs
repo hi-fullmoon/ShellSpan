@@ -635,6 +635,7 @@ pub(super) fn run(
     let mut tool_bundle = None;
     let mut powershell_runtime = None;
     let mut tool_image_lease = None;
+    let mut node_project = None;
     let mut tool_stdio = None;
     let fixed_tool = receipt
         .controller_tool
@@ -664,6 +665,12 @@ pub(super) fn run(
             as_account(login.0, || workload.bind_current_registry())?;
             unsafe { workload.populate(source.0) }?;
             as_account(login.0, || workload.verify_source_controls())?;
+            if receipt
+                .controller_tool
+                .is_some_and(FixedSystemTool::uses_ancestor_metadata)
+            {
+                super::apply_ancestor_metadata(receipt)?;
+            }
             report["source_file_registry_controls_verified"] = serde_json::json!(true);
             if receipt.credential_reference_verified {
                 let reference = shellspan_account_sandbox_prototype::credential_reference::OwnedCredentialReference::new(receipt.fixture_id, &account)?;
@@ -682,7 +689,11 @@ pub(super) fn run(
             }
             if matches!(
                 receipt.controller_tool,
-                Some(FixedSystemTool::GitBundle | FixedSystemTool::GitBundleInit)
+                Some(
+                    FixedSystemTool::GitBundle
+                        | FixedSystemTool::GitBundleInit
+                        | FixedSystemTool::GitMetadataInit
+                )
             ) {
                 tool_bundle = Some(
                     shellspan_account_sandbox_prototype::git_bundle::GitBundle::prepare(
@@ -695,8 +706,12 @@ pub(super) fn run(
                     .as_ref()
                     .ok_or("dedicated tool bundle missing")?;
                 report["tool_admission"] = serde_json::json!({"tool":"git_bundle",
-                    "files":bundle.files,"system_imports":bundle.system_imports,
-                    "scope":"fixed dedicated-account Git --version only; not complete stage A"});
+                "files":bundle.files,"system_imports":bundle.system_imports,
+                "scope":if matches!(fixed_tool, Some(FixedTool::GitBundleInit)) {
+                    "fixed dedicated-account bare Git init only; not complete project or stage A acceptance"
+                } else {
+                    "fixed dedicated-account Git --version only; not complete stage A"
+                }});
             }
             if receipt
                 .controller_tool
@@ -714,6 +729,15 @@ pub(super) fn run(
                 report["tool_admission"] = serde_json::json!({"tool":"power_shell7_runtime", "runtime_file_count":runtime.files.len(), "runtime_bytes":runtime.bytes, "scope":"fixed dedicated-account PowerShell startup only; not complete stage A"});
             }
             if let Some(tool) = fixed_tool {
+                if matches!(tool, FixedTool::NodeProject) {
+                    node_project = Some(
+                        shellspan_account_sandbox_prototype::node_project::NodeProject::prepare(
+                            &workload.root,
+                            &account,
+                            &package_text,
+                        )?,
+                    );
+                }
                 let image = powershell_runtime
                     .as_ref()
                     .map(|runtime| runtime.image().to_path_buf())
@@ -1730,6 +1754,11 @@ pub(super) fn run(
                         stderr.is_empty() && bound
                     } else if matches!(tool, FixedTool::GitPrefixProbe) {
                         let bound = fixture.as_ref().is_some_and(|fixture| {
+                            if receipt.controller_tool == Some(FixedSystemTool::GitMetadataPrefix) {
+                                return receipt.ancestor_metadata_intent.as_ref().is_some_and(|intent| {
+                                    shellspan_account_sandbox_prototype::git_prefix_probe::verify_metadata_delivery(&stdout, &fixture.root, intent).is_ok()
+                                });
+                            }
                             shellspan_account_sandbox_prototype::git_prefix_probe::verify_delivery(
                                 &stdout,
                                 &fixture.root,
@@ -1744,6 +1773,31 @@ pub(super) fn run(
                     report["tool_admission"]["stdout"] = serde_json::json!(stdout);
                     report["tool_admission"]["stderr"] = serde_json::json!(stderr);
                     report["tool_admission"]["output_verified"] = serde_json::json!(valid);
+                    if matches!(tool, FixedTool::NodeProject) {
+                        let result = fixture
+                            .as_ref()
+                            .ok_or_else(|| "missing Node project fixture".to_string())
+                            .and_then(|fixture| {
+                                shellspan_account_sandbox_prototype::node_project::verify(
+                                    &fixture.root,
+                                )
+                            });
+                        report["tool_admission"]["project_verified"] =
+                            serde_json::json!(result.is_ok());
+                        match result {
+                            Ok((result, artifact)) => {
+                                report["tool_admission"]["project"] =
+                                    serde_json::to_value(result).map_err(|e| e.to_string())?;
+                                report["tool_admission"]["artifact"] =
+                                    serde_json::to_value(artifact).map_err(|e| e.to_string())?;
+                                report["tool_admission"]["scope"] = serde_json::json!("offline transformation and four behavior checks of actual ShellSpan terminal-output-buffer source; no typecheck or complete app build");
+                            }
+                            Err(reason) => {
+                                error =
+                                    Some(format!("{}; {reason}", error.take().unwrap_or_default()))
+                            }
+                        }
+                    }
                     if matches!(
                         tool,
                         FixedTool::PowerShell7RuntimeArtifact | FixedTool::PowerShell7RuntimeBuild
@@ -1806,6 +1860,7 @@ pub(super) fn run(
         drop(tool_bundle.take());
         drop(powershell_runtime.take());
         drop(tool_image_lease.take());
+        drop(node_project.take());
         if let Some(workload) = &mut fixture {
             if fixed_tool.is_none() {
                 let observation = workload.observe();

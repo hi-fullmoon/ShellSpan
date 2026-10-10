@@ -1,0 +1,7 @@
+Exception: D:\Developer\ShellSpan\tests\windows-sandbox-account\scripts\Invoke-FixedFrontendMaterializationRecovery.ps1:39
+Line |
+  39 |  … ($diagnostic.diagnostic_error) { throw $diagnostic.diagnostic_error }
+     |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | open fixed protected account plan failed
+
+

@@ -1,5 +1,119 @@
 # Stage A account sandbox prototype
 
+`--inspect-fixed-frontend-runtime` holds all regular assets in the installed
+package graph read-only, including empty files and borrowed hardlinked assets.
+It records file identities, SHA256, byte sizes and source link counts, and
+native source/target identities for directory aliases. Alias targets must
+belong to the resolved graph; unknown reparse types and file aliases fail.
+Budgets: 65536 files, 16384 directories, 128 MiB per file and 2 GiB aggregate.
+Delivered records must match the complete still-held inventory, including
+the graph and aliases. No source ACL change, owned copy, tool execution or
+recovery authorization occurs. The first real scan completed with 35432 files,
+3986 directories and 554959479 bytes. 26977 source files have multiple links;
+future copying must create independent files before granting destination ACLs.
+
+`--inspect-fixed-frontend-bundle-plan` retains the full inventory and projects
+the complete destination namespace, including parent directories and aliases.
+The measured plan has 35432 files, 5840 directories and 2017 aliases: 43290
+objects including the root. Escape, ADS, namespace collisions, native Windows
+case-equivalent sibling names, alias parents and unknown targets are refused.
+Creation remains disabled. The existing 768-object cleanup path is unchanged;
+owned creation, protected journal, exact alias retirement and their budgets
+must be connected before copying or running the full project.
+
+The paged journal core uses at most 64 objects and 64 KiB per page and binds
+fixture/parent identities, inventory/plan hashes and page revisions. Every
+planned page must publish before a creation state machine is returned. Parent
+and alias-target checkpoints precede dependent creation; child and alias
+retirement precede directories. Publication failure or cancellation stops new
+creation and retains debt. The complete measured 43290-object plan fits 677
+pages and passes 86580 simulated creation/retirement transitions. Native
+protected publication/reading is now connected for the separate fixed service
+described below. Actual object/type/content verification remains pending;
+callbacks and state transitions alone authorize no filesystem changes.
+The simulated journal tests create no SYSTEM resources.
+
+Recovery can validate a bounded hash-bound plan independently of the original
+source tree. Every page must match the complete plan and trusted anchor;
+unknown fields, missing pages, changed bindings/definitions, impossible states,
+overlapping identities and incorrect transition revisions fail. A restored
+journal always disables creation. Fixed native readers reuse protected-owner
+and ACL checks, same-handle bounded reads and reparse/hardlink rejection for
+the frontend plan/page family. SYSTEM publication/readback is verified in the
+following fixed workflow. Independent-process reading is also verified below;
+actual OS-object recovery remains pending. Protocol simulation alone is not
+OS evidence.
+
+`--prepare-owned-system-frontend-journal` freezes a separate one-shot SYSTEM
+service mode. It cannot combine with account workloads, tools, recovery or
+crash lifecycles. The service validates its actual SYSTEM token, publishes a
+protected preparation anchor, bounded full plan and all pages, then commits the
+complete anchor. It releases the source inventory and reloads protected records
+without resuming creation. The fixed Invoke-FixedFrontendJournal.ps1 wrapper
+has completed the full 43290-object/677-page case, with zero SCM exit status,
+confirmed process exit and exact service removal. Records remain protected
+evidence; no account, WFP filters or input namespace was created. Readback is
+in the same service. Actual OS-object recovery, copying and alias creation/
+retirement still require implementation and real evidence.
+
+`--prepare-owned-system-frontend-journal-recovery <UUID>` freezes a separate
+read-only recovery mode for an original frontend journal service whose process
+exit, successful status and exact SCM removal are verified. Self targets, nil
+UUIDs and mixed workload/preparation/recovery modes fail. The fixed
+Invoke-FixedFrontendJournalRecovery.ps1 wrapper has launched a distinct SYSTEM
+process, loaded all 677 old pages without opening the source inventory or
+changing old records, and confirmed blocked creation and retained Planned
+status. The new service also exited and was removed. This is independent
+record reading, not reboot or actual-object retirement evidence.
+
+`--inspect-fixed-frontend-dependencies` reads the fixed installed pnpm graph,
+including declared dependencies and hoisted aliases. It retains native source
+entry/target handles, accepts only junction/symlink tags confined to the local
+physical store, and records package metadata identities/digests and unresolved
+optional declarations. The latest graph has 764 packages and 2119 edges with
+no unresolved required declarations and 102 absent optional declarations.
+Code files, semver/integrity validation, owned alias creation/retirement and
+the complete runtime snapshot remain pending; this inspection cannot authorize
+execution or cleanup and creates no machine resources.
+
+`--inspect-fixed-frontend-source` freezes the fixed repository's complete
+src/public inventory and eight explicit configuration inputs, retaining native
+directory/file leases and recording identities/digests. It is read-only and
+accepts no path arguments. A delivery must match the full retained inventory;
+structural validity alone cannot prove completeness. The 827-file input set is
+larger than the current fixture retirement budget. Dependency/test-fixture
+snapshots and bounded recovery must be connected before a full LPAC app run.
+The ordinary full build passes; the ordinary complete test baseline has two
+reproducible failures retained in the 2026-10-10 source-baseline evidence.
+
+Fixed actual-project source diagnostic: `--prepare-owned-system-node-project`
+preserves the no-ancestor failure control. The separate
+`--prepare-owned-system-node-metadata-project` uses checkpointed ancestor
+metadata grants and builds the embedded current ShellSpan terminal-output-buffer
+source with Node 26.5.0 type stripping, reopens/imports the generated module,
+and checks four observable behaviors. Inputs are immutable copies; the controller
+verifies exact source/artifact digests and bounded result fields. This is neither
+typechecking nor the complete app build/test suite. Both fixed one-shot scripts
+retain execution failures separately from resource retirement; production remains
+unavailable. The metadata run succeeded after an initial namespace retirement
+failure and independent exact recovery, including OS and ancestor ACE audits.
+
+Fixed ancestor metadata diagnostics now have separate dedicated-account entries:
+`--prepare-owned-system-git-metadata-init` initializes an owned bare repository;
+`--prepare-owned-system-git-metadata-prefix` checks the two frozen ancestors'
+metadata access and denied extra handle permissions;
+`--prepare-owned-system-git-metadata-partial-failure` injects a publisher failure
+after the first actual ACE update but before the applied checkpoint. These are
+explicit elevated one-shot experiments, not production entry points. They use
+protected per-object intent, exact object identity and noninheriting package
+READ_ATTRIBUTES/SYNCHRONIZE ACEs. Independent
+`--inspect-owned-ancestor-retirement <fixture UUID>` verifies exact ancestor ACE
+absence after protected intent gates and separately reports whether identity
+resources retired; it never grants or removes permissions.
+The fixed scripts retain each experiment's evidence and refuse repetition.
+Controlled failure recovery passed; forced controller crash, actual disk failure,
+full project compatibility and DNS closure remain pending.
+
 The fixed `DnsRpcBlockInternetProbe` now publishes its root-process trace intent
 in the protected profile receipt before starting the PID-filtered session and
 resuming the verified LPAC process. `Run-FixedProjectMatrix.ps1 -Case

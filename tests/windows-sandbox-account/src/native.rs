@@ -22,6 +22,8 @@ use windows_sys::Win32::System::Threading::*;
 type Result<T> = std::result::Result<T, String>;
 mod account_profile;
 mod bootstrap;
+mod frontend_journal;
+mod frontend_materialization;
 mod journal;
 mod system_admission;
 pub fn prepare_system_profile_recovery(id: &str) -> Result<()> {
@@ -63,6 +65,54 @@ pub fn prepare_system_node() -> Result<()> {
 }
 pub fn prepare_system_git_init() -> Result<()> {
     system_admission::prepare_git_init()
+}
+pub fn prepare_system_frontend_journal() -> Result<()> {
+    system_admission::prepare_frontend_journal()
+}
+pub fn prepare_system_frontend_materialization() -> Result<()> {
+    system_admission::prepare_frontend_materialization()
+}
+pub fn prepare_system_frontend_project_materialization(fail_workload: bool) -> Result<()> {
+    system_admission::prepare_frontend_project_materialization(fail_workload)
+}
+pub fn prepare_system_frontend_project_materialization_recovery(target: &str) -> Result<()> {
+    system_admission::prepare_frontend_project_materialization_recovery(target)
+}
+pub fn prepare_system_frontend_source_materialization() -> Result<()> {
+    system_admission::prepare_frontend_source_materialization()
+}
+pub fn prepare_system_frontend_source_workload_failure() -> Result<()> {
+    system_admission::prepare_frontend_source_workload_failure()
+}
+pub fn prepare_system_frontend_source_materialization_recovery(target: &str) -> Result<()> {
+    system_admission::prepare_frontend_source_materialization_recovery(target)
+}
+pub fn prepare_system_frontend_materialization_recovery(target: &str) -> Result<()> {
+    system_admission::prepare_frontend_materialization_recovery(target)
+}
+pub fn prepare_system_frontend_journal_recovery(target: &str) -> Result<()> {
+    system_admission::prepare_frontend_journal_recovery(target)
+}
+pub fn prepare_system_node_project() -> Result<()> {
+    system_admission::prepare_node_project()
+}
+pub fn prepare_system_node_metadata_project() -> Result<()> {
+    system_admission::prepare_node_metadata_project()
+}
+pub fn prepare_system_git_metadata_init() -> Result<()> {
+    system_admission::prepare_git_metadata_init()
+}
+pub fn inspect_ancestor_retirement(id: &str) -> Result<()> {
+    account_profile::inspect_ancestor_retirement(id)
+}
+pub fn prepare_system_git_metadata_prefix() -> Result<()> {
+    system_admission::prepare_git_metadata_prefix()
+}
+pub fn prepare_system_git_metadata_partial_failure() -> Result<()> {
+    system_admission::prepare_git_metadata_partial_failure()
+}
+pub fn prepare_system_git_metadata_checkpoint_crash() -> Result<()> {
+    system_admission::prepare_git_metadata_checkpoint_crash()
 }
 pub fn prepare_system_git_prefix_probe() -> Result<()> {
     system_admission::prepare_git_prefix_probe()

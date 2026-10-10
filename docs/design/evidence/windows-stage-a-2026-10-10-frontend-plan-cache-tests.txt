@@ -1,0 +1,380 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running unittests src\lib.rs (tests\windows-sandbox-account\target\debug\deps\shellspan_account_sandbox_prototype-7a4e5dd90783178f.exe)
+
+running 228 tests
+test appcontainer_probe::tests::actual_cross_volume_junction_project_is_refused_without_target_acl_changes ... ignored, requires current workspace and TEMP on different local NTFS volumes
+test account_lpac_plan::tests::plan_binds_actual_source_and_owned_uuid_without_arbitrary_resource_fields ... ok
+test appcontainer_probe::metadata_token_tests::ordinary_token_cannot_satisfy_metadata_only_restricting_boundary ... ok
+test ancestor_metadata_intent::tests::partial_or_uncheckpointed_mutation_cannot_release_recovery_gate ... ok
+test appcontainer_probe::metadata_token_tests::actual_lpac_metadata_calibration_keeps_owned_retirement_and_production_gate ... ok
+test ancestor_metadata_intent::tests::exact_fixed_ancestors_reject_broader_permissions_and_substitution ... ok
+test account_lpac_plan::tests::frontend_record_family_rejects_wrong_root_and_unbounded_index_before_io ... ok
+test appcontainer_probe::tests::breakaway_requires_access_denial_not_missing_image_or_success ... ok
+test appcontainer_probe::tests::missing_file_is_not_counted_as_denied_access ... ok
+test appcontainer_probe::tests::leaf_network_report_requires_exact_fixture_identity_and_unique_checks ... ok
+test appcontainer_probe::tests::ordinary_controller_positive_control_can_open_each_requested_self_access ... ok
+test appcontainer_probe::tests::registry_fixture_identity_is_bounded_to_the_owned_uuid ... ok
+test account_lpac_plan::tests::untrusted_desktop_directory_cannot_supply_a_privileged_plan ... ok
+test appcontainer_probe::tests::retirement_rejects_external_hardlink_before_acl_mutation ... ok
+test ancestor_metadata_acl::tests::actual_owned_directory_incremental_retirement_preserves_concurrent_unrelated_ace ... ok
+test credential_reference::tests::actual_reset_last_error_lpac_run_still_rejects_rpc_failure_as_denial ... ok
+test credential_reference::tests::credential_denial_requires_explicit_failure_and_a_known_denial_code ... ok
+test credential_reference::tests::mismatched_credential_account_or_target_cannot_authorize_read_or_delete ... ok
+test credential_reference::tests::ordinary_credential_api_overwrites_an_unrelated_prior_last_error ... ok
+test credential_reference::tests::ordinary_host_cannot_operate_system_owned_credentials ... ok
+test credential_reference::tests::references_bind_uuid_and_canonical_account_sid ... ok
+test credential_reference::tests::self_credential_comparison_requires_thread_and_exact_owned_identity ... ok
+test cross_slot_registry_probe::tests::actual_system_cross_slot_access_evidence_binds_controls_child_and_retirement ... ok
+test ancestor_metadata_acl::tests::actual_journal_failures_block_mutation_and_preserve_uncheckpointed_recovery ... ok
+test cross_slot_registry_probe::tests::actual_system_cross_slot_evidence_binds_controls_child_and_retirement ... ok
+test cross_slot_registry_probe::tests::cross_slot_evidence_requires_two_exact_peers_and_explicit_denial ... ok
+test dns_native_probe::tests::actual_cache_only_unknown_owned_question_has_no_records ... ignored, actual Windows DNS cache-only fixed UUID calibration
+test cross_slot_registry_probe::tests::registry_reports_reject_noncanonical_source_and_peer_substitution ... ok
+test dns_native_probe::tests::actual_legacy_cache_only_unknown_owned_name_has_no_records ... ignored, actual Windows legacy DNS fixed cache-only calibration
+test dns_native_probe::tests::actual_lpac_minimal_cache_options_remain_unknown_with_retirement_verified ... ok
+test dns_native_probe::tests::actual_lpac_sync_and_async_cache_failures_remain_unknown_not_denied ... ok
+test dns_native_probe::tests::actual_native_tcp_query_requires_received_owned_question_and_fixed_answer ... ignored, actual Windows DNS API TCP positive control against owned port 53
+test dns_native_probe::tests::actual_native_timeout_cancel_waits_for_completion_and_releases_storage ... ignored, actual Windows DNS cancellation against owned nonresponding UDP port 53
+test dns_native_probe::tests::actual_native_udp_query_requires_received_owned_question_and_fixed_answer ... ignored, actual Windows DNS API positive control against owned UDP receiver
+test dns_native_probe::tests::actual_numeric_address_is_completed_locally_with_exact_record ... ignored, actual Windows DNS API fixed numeric local calibration
+test dns_native_probe::tests::actual_synchronous_cache_only_owned_question_is_a_cache_miss ... ok
+test dns_native_probe::tests::all_dns_modes_share_bounded_slots_released_by_ownership ... ok
+test dns_native_probe::tests::dns_delivery_requires_explicit_nullable_statuses_and_all_observation_fields ... ok
+test dns_native_probe::tests::actual_dedicated_sync_cache_failure_preserves_failed_gate_and_exact_recovery ... ok
+test dns_native_probe::tests::dns_denial_requires_explicit_status_and_verified_quiet_receiver ... ok
+test dns_native_probe::tests::fixed_cache_variants_never_allow_wire_and_reject_non_owned_names ... ok
+test dns_native_probe::tests::immediate_dispatch_failure_cannot_report_untouched_success_status ... ok
+test dns_native_probe::tests::immediate_dns_denial_requires_matching_completion_and_no_success_evidence ... ok
+test dns_native_probe::tests::native_query_rejects_unowned_names_and_remote_or_unassigned_endpoints ... ok
+test dns_native_probe::tests::native_record_name_requires_exact_owned_question_with_dns_case_folding ... ok
+test dns_probe::tests::owned_question_and_answer_reject_other_names_types_flags_and_transactions ... ok
+test dns_native_probe::tests::ordinary_fixed_cache_option_matrix_is_admitted_without_records ... ok
+test dns_probe::tests::real_tcp_fixture_handles_fragmented_fixed_query_and_exact_response ... ok
+test dns_probe::tests::tcp_declared_lengths_are_bounded_before_payload_read ... ok
+test dns_receiver::tests::actual_cache_only_calibration_leaves_owned_dns_window_quiet ... ignored, requires exclusive owned loopback UDP/TCP port 53
+test dns_receiver::tests::actual_dns_receiver_preserves_intervening_queries_and_terminal_counts ... ignored, requires exclusive owned loopback UDP/TCP port 53
+test dns_sender_identity::tests::actual_owned_tcp_connection_is_attributed_to_sender_process ... ignored, requires exclusive owned loopback TCP port 53
+test dns_probe::tests::real_udp_fixture_round_trip_requires_the_exact_owned_answer ... ok
+test fixed_environment::tests::sorts_names_without_changing_unicode_values_or_empty_values ... ok
+test fixed_environment::tests::rejects_ambiguous_names_truncated_blocks_and_budget_overflow ... ok
+test fixed_tool::tests::actual_git_init_keeps_source_success_and_lpac_failure_distinct ... ok
+test ancestor_metadata_acl::tests::actual_owned_directory_rejects_changed_identity_and_unknown_package_delta ... ok
+test fixed_tool::tests::actual_dedicated_file_source_build_binds_success_to_exact_retirement ... ok
+test fixed_tool::tests::actual_node_ambient_preload_is_excluded_with_failure_control ... ok
+test fixed_tool::tests::actual_node_owned_working_directory_receipts_bind_success_and_cleanup ... ok
+test ancestor_metadata_acl::tests::actual_prepublication_check_refuses_existing_delta_even_with_matching_snapshot ... ok
+test appcontainer_probe::tests::frozen_retirement_root_mismatch_rejects_before_parsing_or_mutating_acl ... ok
+test fixed_tool::tests::executed_digest_rejects_same_length_change_and_noncanonical_encoding ... ok
+test fixed_tool::tests::fixed_build_receipts_distinguish_compiler_execution_from_missing_module ... ok
+test fixed_tool::tests::fixed_output_decoding_preserves_localized_diagnostic_and_rejects_truncation ... ok
+test appcontainer_probe::tests::actual_short_alias_binds_same_new_owned_root_identity ... ok
+test appcontainer_probe::tests::actual_junction_rejected_before_any_owned_or_target_acl_mutation ... ok
+test fixed_tool::tests::persisted_build_requires_dll_and_same_owned_retirement ... ok
+test fixed_tool::tests::powershell7_real_receipts_keep_entry_and_dependency_failure_distinct ... ok
+test appcontainer_probe::tests::retirement_inventory_rejects_new_nested_objects_and_missing_objects ... ok
+test appcontainer_probe::tests::retirement_lease_blocks_write_and_replacement_until_released ... ok
+test appcontainer_probe::tests::fixed_report_reader_rejects_hardlinks_and_output_junction_before_content ... ok
+test fixed_tool::tests::tool_contract_has_no_arbitrary_path_or_command ... ok
+test fixed_tool::tests::version_output_rejects_missing_extra_or_corrupt_delivery ... ok
+test fixture_runner::loader_probe::tests::named_object_probe_distinguishes_restriction_from_missing_object ... ok
+test fixture_runner::tests::actual_restricting_sid_must_match_exactly ... ok
+test fixture_runner::tests::cleanup_waits_stable_handles_for_every_owned_job_member ... ok
+test fixture_runner::tests::fixed_config_rejects_external_receivers_commands_and_invalid_desktop ... ok
+test fixture_runner::tests::fixed_runner_environment_contains_only_bound_directories_in_canonical_order ... ok
+test fixture_runner::tests::repeated_retirement_preserves_stopped_tree_and_total_accounting ... ok
+test appcontainer_probe::tests::asset_copy_rejects_junction_parent_before_target_creation ... ok
+test appcontainer_probe::tests::fixed_build_source_retirement_preserves_unrelated_acl_while_content_is_pinned ... ok
+test appcontainer_probe::tests::fixed_report_reader_enforces_each_budget_before_parsing ... ok
+test fixed_tool::tests::image_lease_blocks_mutation_until_retirement ... ok
+test fixed_tool::tests::compiled_dll_gate_rejects_missing_and_corrupt_pe ... ok
+test fixed_tool::tests::owned_copy_preserves_bytes_locks_both_images_and_refuses_overwrite ... ok
+test frontend_bundle_journal::tests::batch_requires_durable_parents_and_commits_one_recoverable_page ... ok
+test fixed_tool::tests::compiled_dll_gate_rejects_same_size_mutation_and_hardlink ... ok
+test frontend_bundle_journal::tests::cancellation_blocks_creation_without_inferring_cleanup ... ok
+test fixed_tool::tests::reference_copy_requires_dll_and_pins_both_owned_directories ... ok
+test frontend_bundle_journal::tests::creation_and_reverse_retirement_require_all_dependencies_and_exact_ids ... ok
+test fixed_tool::tests::stdio_is_exact_inheritable_handles_with_same_handle_read_budget ... ok
+test frontend_bundle_journal::tests::failed_batch_publication_keeps_all_objects_planned_and_stops_creation ... ok
+test frontend_bundle_journal::tests::independent_recovery_loads_partial_state_and_never_resumes_creation ... ok
+test frontend_asset_copy::tests::directory_alias_is_fresh_bound_and_cannot_be_a_creation_parent ... ok
+test frontend_bundle_journal::tests::post_creation_publish_failure_preserves_planned_state_and_blocks_dispatch ... ok
+test frontend_bundle_journal::tests::recovered_identity_binding_keeps_creation_stopped_and_publication_failure_atomic ... ok
+test frontend_bundle_journal::tests::recovery_refuses_changed_bindings_objects_revisions_and_unknown_fields ... ok
+test frontend_bundle_journal::tests::recovery_refuses_overlapping_native_ids_and_impossible_dependencies ... ok
+test frontend_bundle_journal::tests::retirement_publish_failure_retains_dependencies_until_retry_commits ... ok
+test frontend_bundle_plan::tests::bound_recovery_plan_rebuilds_without_source_and_rejects_escaped_or_forged_scope ... ok
+test frontend_bundle_plan::tests::preserves_store_and_alias_layout_with_all_parents_budgeted ... ok
+test frontend_asset_copy::tests::hardlinked_and_empty_sources_produce_independent_locked_files_without_overwrite ... ok
+test frontend_bundle_plan::tests::refuses_escape_case_collision_missing_target_and_link_parent ... ok
+test frontend_asset_copy::tests::owned_directories_are_fresh_locked_and_support_independent_child_copies ... ok
+test appcontainer_probe::tests::fixed_bootstrap_writer_requires_existing_single_link_and_checks_before_mutation ... ok
+test frontend_dependency_graph::tests::actual_installed_graph_records_optional_absence_without_claiming_code_freeze ... ok
+test frontend_dependency_graph::tests::dependency_names_and_optional_precedence_are_bounded ... ok
+test frontend_dependency_graph::tests::dependency_specifications_are_fingerprinted_without_emitting_url_content ... ok
+test frontend_dependency_graph::tests::lookup_stays_inside_fixed_node_modules_and_skips_double_nesting ... ok
+test appcontainer_probe::tests::explicit_fixture_identity_and_registry_binding_cannot_be_replaced ... ok
+test frontend_bundle_journal::tests::binding_and_page_budget_fail_before_any_publication ... ok
+test fixed_tool::tests::build_source_creation_refuses_preexisting_file_and_hardlink_without_overwrite ... ok
+test fixed_tool::tests::artifact_gate_rejects_aliases_missing_and_changed_content ... ok
+test appcontainer_probe::tests::runtime_budget_preserves_small_default_and_rejects_oversized_before_acl_changes ... ok
+test fixed_tool::tests::reference_copy_rejects_actual_junction_without_touching_target ... ok
+test frontend_bundle_journal::tests::creation_stamps_derive_exact_record_binding ... ok
+test frontend_bundle_journal::tests::partial_initial_publication_never_returns_creation_authority ... ok
+test frontend_creation_stamp::tests::native_create_includes_bound_ea_for_files_and_directories_without_overwrite ... ok
+test frontend_dependency_graph::tests::actual_resolution_refuses_external_targets_and_does_not_mutate_sources ... ok
+test frontend_materialization::tests::failed_file_batch_publication_stops_transaction_and_retains_owned_debt ... ok
+test frontend_materialization::tests::long_copied_asset_path_reopens_without_canonicalizing_entry ... ok
+test frontend_source_plan::tests::source_scope_rejects_escape_aliases_and_sensitive_inputs ... ok
+test frontend_runtime_inventory::tests::borrowed_hardlinks_are_observed_and_locked_without_source_mutation ... ok
+test frontend_runtime_inventory::tests::empty_dependency_asset_is_frozen_but_cannot_be_an_executable_image ... ok
+test git_dependency_probe::tests::frozen_import_plan_rejects_identity_path_budget_duplicate_and_device_names ... ok
+test git_prefix_probe::tests::actual_dedicated_metadata_matrix_binds_objects_denials_and_exact_retirement ... ok
+test git_prefix_probe::tests::actual_dedicated_programdata_ancestors_fail_while_owned_output_opens ... ok
+test git_prefix_probe::tests::actual_lpac_access_matrix_separates_metadata_from_mutation_permissions ... ok
+test git_prefix_probe::tests::actual_lpac_denies_ancestors_but_opens_owned_output ... ok
+test git_prefix_probe::tests::delivery_rejects_missing_duplicate_and_contradictory_observations ... ok
+test git_prefix_probe::tests::disk_metadata_calibration_requires_sync_without_directory_or_child_access ... ok
+test frontend_asset_copy::tests::shared_parent_custody_reuses_handles_and_revalidates_after_last_lease ... ok
+test job_observer::topology_tests::concurrent_topology_requires_all_six_unique_fully_verified_members ... ok
+test job_observer::topology_tests::ordinary_control_requires_complete_frozen_images_and_ordinary_context ... ok
+test job_observer::topology_tests::topology_requires_exact_images_unique_processes_and_every_security_fact ... ok
+test node_project::tests::actual_dedicated_project_result_and_first_failure_remain_distinct ... ok
+test frontend_materialization::tests::stamped_recovery_rejects_unmarked_and_wrong_fixture_without_publication ... ok
+test node_project::tests::source_is_actual_project_revision_and_no_caller_inputs_are_accepted ... ok
+test package_network_filter::tests::package_block_inspection_rejects_exact_identity_and_shape_mutations ... ok
+test package_network_intent::tests::package_blocks_bind_fixture_and_cannot_replace_account_block_keys ... ok
+test pe_imports::tests::malformed_imports_never_become_external_paths_or_unbounded_reads ... ok
+test pe_imports::tests::pe32_and_pe32plus_import_rvas_map_to_raw_file_offsets ... ok
+test policy::tests::actual_case_sensitive_inventory_refuses_distinct_case_equivalent_objects ... ignored, requires NTFS per-directory case sensitivity support
+test frontend_materialization::tests::writable_sharing_parent_lease_allows_publication_but_prevents_replacement ... ok
+test git_dependency_probe::tests::delivery_binds_frozen_identity_unique_complete_checks_and_retirement ... ok
+test frontend_asset_copy::tests::recycling_checks_identity_empty_directories_and_native_absence ... ok
+test git_prefix_probe::tests::ordinary_owned_output_has_real_metadata_without_mutation ... ok
+test frontend_asset_copy::tests::stamped_directory_copy_and_alias_preserve_creation_bindings ... ok
+test policy::tests::frozen_windows_env_exception_never_overrides_independent_sensitivity ... ok
+test node_project::tests::preparation_rejects_broad_package_before_any_input_publication ... ok
+test frontend_source_plan::tests::full_inventory_is_bound_to_live_leases_not_a_reduced_manifest ... ok
+test policy::tests::inventory_rejects_case_equivalent_paths_and_duplicate_native_objects ... ok
+test policy::tests::actual_snapshot_binds_stable_identity_and_refuses_hardlinked_secret ... ok
+test policy::tests::project_root_rejects_network_drive_root_and_whole_home_before_scanning ... ok
+test policy::tests::rights_preserve_sensitive_objects_and_ancestors ... ok
+test policy::tests::rules_bound_total_utf16_input_before_native_comparison ... ok
+test policy::tests::rules_directories_allow_readonly_traversal_without_workspace_mutation ... ok
+test policy::tests::sensitive_env_names_win_over_rules_and_devices_never_become_files ... ok
+test policy::tests::execution_pins_only_protected_objects_and_their_ancestors ... ok
+test powershell_etw_probe::tests::actual_full_powershell_timeout_is_not_initializer_compatibility_success ... ok
+test powershell_etw_probe::tests::actual_initializer_comparison_preserves_access_denial_and_cleanup_scope ... ok
+test powershell_etw_probe::tests::actual_instrumentation_candidate_initializes_without_changing_assembly ... ok
+test powershell_etw_probe::tests::diagnostic_rejects_replacement_incomplete_chain_and_false_success ... ok
+test powershell_etw_probe::tests::native_delivery_requires_both_fixed_providers_and_successful_retirement ... ok
+test powershell_runtime::tests::actual_dedicated_build_binds_identity_artifact_and_recovery ... ok
+test powershell_runtime::tests::actual_fixed_powershell_artifact_is_independently_verified_and_retired ... ok
+test powershell_runtime::tests::actual_fixed_reference_build_keeps_artifact_and_full_retirement ... ok
+test powershell_runtime::tests::actual_owned_runtime_instrumentation_exit_and_retirement_are_verified ... ok
+test powershell_runtime::tests::dedicated_actual_startup_and_independent_recovery_preserve_scope ... ok
+test powershell_runtime::tests::dedicated_fixed_artifact_and_recovery_are_independently_verified ... ok
+test policy::tests::concurrent_host_cannot_move_protected_objects_while_ordinary_objects_remain_mutable ... ok
+test policy::tests::fixed_build_source_readonly_rule_pins_bytes_until_execution_ends ... ok
+test powershell_runtime::tests::record_before_grant_actual_runtime_startup_and_manifest_mapping_are_verified ... ok
+test powershell_runtime::tests::recover_fixed_reference_grant_trial ... ignored, single owned reference trial recovery, exact frozen identities only
+test powershell_runtime::tests::recover_fixed_successful_build_budget_trial ... ignored, exact owned successful build budget trial recovery
+test policy::tests::home_exclusion_compares_real_directory_identity_and_rejects_unknown_binding ... ok
+test policy::tests::independent_rules_are_frozen_and_revalidated_with_the_inventory ... ok
+test receiver_control::tests::actual_private_local_receivers_observe_controls_and_real_traffic ... ignored, requires the frozen diagnostic inventory's private local interfaces
+test git_bundle::tests::fixed_git_bundle_preserves_installed_acls_and_retires_only_copy_grants ... ok
+test receiver_control::tests::endpoints_reject_nonloopback_zero_ports_and_wrong_family_order ... ok
+test receiver_control::tests::finish_drains_queued_traffic_without_waiting_for_worker_observation ... ok
+test receiver_control::tests::private_endpoints_require_private_addresses_and_exact_interface_scope ... ok
+test receiver_control::tests::controller_clones_receive_all_transports_and_stop_when_quiet ... ok
+test policy::tests::native_unicode_case_matching_preserves_sensitive_rule_boundaries ... ok
+test rpc_admission_probe::tests::capability_comparison_bounds_native_storage_before_slice_creation ... ok
+test receiver_control::tests::repeated_finish_preserves_failure_and_the_original_observation ... ok
+test rpc_admission_probe::tests::malformed_credential_environment_cannot_skip_owned_reference_probe ... ok
+test rpc_admission_probe::tests::missing_authentication_is_not_success ... ok
+test rpc_admission_probe::tests::lsa_admission_does_not_replace_rpc_or_credential_authorization ... ok
+test policy::tests::snapshot_revalidation_rejects_added_secrets_and_changed_object_lengths ... ok
+test rpc_admission_probe::tests::ordinary_client_configures_current_context_authentication_without_server ... ok
+test rpc_admission_probe::tests::ordinary_client_creates_and_releases_fixed_local_binding_without_server ... ok
+test rpc_admission_probe::tests::ordinary_lsa_connection_is_closed_without_querying_data ... ok
+test rpc_network_filter::tests::rpc_filter_rejects_connection_layers_wrong_condition_and_disabled_state ... ok
+test rpc_admission_probe::tests::self_lsa_comparison_preserves_context_and_rejects_existing_impersonation ... ok
+test rpc_network_intent::tests::rpc_block_cannot_be_global_or_replace_existing_identity_rules ... ok
+test rpc_trace::tests::actual_fixed_dns_control_delivers_correlated_lrpc_events ... ok
+test rpc_admission_probe::tests::same_identity_dns_cache_comparison_restores_primary_context ... ok
+test rpc_trace::tests::actual_native_buffer_budget_is_observed_after_stop ... ok
+test rpc_trace::tests::actual_self_pid_dns_trace_stops_without_loss ... ignored, requires elevated fixed self-PID realtime RPC session; no admission or global tracing
+test rpc_trace::tests::actual_lpac_rpc_provider_registration_failure_does_not_prove_dns_denial ... ok
+test rpc_trace::tests::actual_native_query_control_confirms_session_absence_after_stop ... ok
+test rpc_trace::tests::client_schema_is_fixed_and_does_not_export_address_or_options ... ok
+test rpc_trace::tests::exact_session_identity_accepts_only_known_os_added_mode ... ok
+test rpc_trace::tests::callback_rejects_unrelated_pid_and_budget_overflow_without_export ... ok
+test rpc_trace::tests::native_rpc_registration_control_is_retired_and_schema_rejects_fake_success ... ok
+test rpc_trace::tests::recovery_rejects_live_original_controller_before_query_or_stop ... ok
+test rpc_trace::tests::unbound_trace_identity_is_rejected_before_start ... ok
+test rpc_trace_intent::tests::intent_binds_actual_held_process_and_current_owner ... ok
+test rpc_trace_intent::tests::actual_bound_control_matches_trace_pid_and_creation_identity ... ok
+test rpc_trace_intent::tests::intent_rejects_missing_creation_identity_and_freeform_trace_configuration ... ok
+test startup_capability_policy::tests::default_launch_rejects_network_service_and_ambient_capabilities ... ok
+test rpc_trace_intent::tests::lifetime_witness_distinguishes_live_original_from_reused_pid ... ok
+test wfp_account_descriptor::tests::actual_descriptors_reject_broad_inherited_duplicate_and_wrong_account_matches ... ok
+test policy::tests::actual_project_snapshot_covers_names_and_refuses_partial_budget ... ok
+test powershell_runtime::tests::manifest_conflict_and_budget_failure_never_dispatch_grants ... ok
+test powershell_runtime::tests::reference_inventory_rejects_missing_unknown_and_nested_assets ... ok
+test frontend_materialization::tests::stamped_pending_objects_bind_and_retire_after_original_handles_close ... ok
+test powershell_runtime::tests::fixed_runtime_inventory_requires_core_assets_and_refuses_selected_aliases ... ok
+test frontend_runtime_inventory::tests::cached_plan_preserves_frozen_inventory_bytes_and_complete_plan ... ok
+test powershell_runtime::tests::runtime_inventory_budget_is_checked_before_copy_or_grants ... ok
+test frontend_runtime_inventory::tests::delivery_binds_actual_asset_identity_digest_and_complete_graph ... ok
+test receiver_control::tests::stopped_receivers_cannot_attest_quietness_without_final_positive_controls ... ok
+test frontend_materialization::tests::loaded_recovery_retires_recorded_objects_without_source_or_original_leases ... ok
+test frontend_materialization::tests::real_cross_page_transaction_creates_and_retires_every_object ... ok
+test frontend_bundle_plan::tests::real_complete_inventory_replays_the_measured_destination_plan ... ok
+test frontend_bundle_journal::tests::complete_measured_plan_fits_bounded_pages_and_linear_dependency_index ... ok
+
+test result: ok. 213 passed; 0 failed; 15 ignored; 0 measured; 0 filtered out; finished in 56.80s
+
+     Running unittests src\main.rs (tests\windows-sandbox-account\target\debug\deps\shellspan_account_sandbox_prototype-3d6c6418be5737df.exe)
+
+running 98 tests
+test native::account_profile::account_launch::tests::incomplete_or_nonboolean_retirement_never_authorizes_slot_cleanup ... ok
+test native::account_profile::account_launch::tests::actual_empty_bootstrap_report_does_not_authorize_retirement ... ok
+test native::account_profile::account_launch::tests::independent_bootstrap_prerequisites_do_not_claim_retirement ... ok
+test native::account_profile::controller_admission::tests::account_context_restores_after_failure_and_rejects_nested_adoption ... ok
+test native::account_profile::account_launch::tests::empty_bootstrap_inventory_refuses_unknown_missing_or_duplicate_objects ... ok
+test native::account_profile::account_launch::tests::report_failure_preserves_execution_error_or_terminal_exit ... ok
+test native::account_profile::account_launch::tests::actual_empty_bootstrap_retirement_keeps_execution_failed_and_binds_os_absence ... ok
+test native::account_profile::controller_admission::tests::concurrent_cancel_trigger_requires_both_ready_and_six_live_members ... ok
+test native::account_profile::controller_admission::tests::dedicated_capability_gate_rejects_duplicates_extra_and_attribute_changes ... ok
+test native::account_profile::controller_admission::tests::actual_normal_os_receipt_keeps_failed_credential_gate_closed ... ok
+test native::account_profile::controller_admission::tests::actual_concurrent_cancel_tracks_six_members_and_retires_the_owned_resources ... ok
+test native::account_profile::controller_admission::tests::actual_repeated_cancel_receipt_matches_only_interrupted_contract ... ok
+test native::account_profile::controller_admission::tests::actual_descendant_network_receipt_cannot_cover_later_short_alias_scope ... ok
+test native::account_profile::controller_admission::tests::lifecycle_trigger_requires_real_checkpoint_exit_and_full_live_membership ... ok
+test native::account_profile::controller_admission::tests::interrupted_workload_cannot_substitute_repeated_or_unknown_passing_checks ... ok
+test native::account_profile::account_launch::tests::actual_fixed_report_exposes_creation_denial_and_keeps_cleanup_independent ... ok
+test native::account_profile::controller_admission::tests::ordinary_primary_report_requires_exact_identity_and_one_outcome ... ok
+test native::account_profile::controller_admission::tests::historical_short_alias_receipt_lacks_new_parent_directory_checks ... ok
+test native::account_profile::controller_admission::tests::ordinary_token_does_not_pass_actual_lpac_negative_control ... ok
+test native::account_profile::controller_admission::tests::target_context_has_exact_thread_identity_and_restores_before_return ... ok
+test native::account_profile::controller_admission::tests::dedicated_git_receipt_cannot_substitute_complete_workload_or_initial_cleanup ... ok
+test native::account_profile::controller_admission::tests::dedicated_node_success_and_powershell_failure_remain_scoped_after_recovery ... ok
+test native::account_profile::controller_admission::tests::system_credential_negative_cannot_be_omitted_duplicated_or_failed ... ok
+test native::account_profile::namespace_lease::tests::namespace_binding_rejects_noncanonical_or_foreign_package_sid ... ok
+test native::account_profile::namespace_lease::tests::namespace_name_accepts_only_exact_numeric_session_and_package ... ok
+test native::account_profile::controller_admission::tests::controller_privilege_audit_is_read_only_and_bounded_to_creation_rights ... ok
+test native::account_profile::controller_admission::tests::actual_root_and_leaf_listener_denials_preserve_the_full_credential_failure ... ok
+test native::account_profile::controller_admission::tests::dedicated_project_matrix_passes_core_without_accepting_failed_credentials ... ok
+test native::account_profile::controller_admission::tests::actual_account_sid_filters_do_not_cover_owned_dns_relay ... ok
+test native::account_profile::namespace_lease::tests::actual_service_lifetime_presence_is_not_hidden_by_retirement_wait ... ok
+test native::account_profile::controller_admission::tests::actual_identity_service_calibration_denies_system_credential_but_not_lsa_admission ... ok
+test native::account_profile::namespace_lease::tests::owned_namespace_cannot_adopt_existing_directory_and_disappears_on_close ... ok
+test native::account_profile::controller_admission::tests::dedicated_historical_ads_matrix_cannot_replace_listener_or_credential_checks ... ok
+test native::account_profile::controller_admission::tests::actual_private_network_matrix_passes_core_and_requires_recovery_after_partial_failure ... ok
+test native::account_profile::tests::actual_checkpoint_crash_preserves_planned_and_separates_ancestor_from_profile_debt ... ok
+test native::account_profile::tests::actual_metadata_git_init_passes_but_first_cleanup_failure_requires_independent_recovery ... ok
+test native::account_profile::tests::actual_partial_metadata_failure_does_not_launch_tool_and_retires_exact_owned_resources ... ok
+test native::account_profile::tests::actual_package_block_installation_and_retirement_bind_protected_intent ... ok
+test native::account_profile::tests::actual_dns_package_internet_bypass_is_not_counted_as_network_denial ... ok
+test native::account_profile::tests::actual_rpc_block_installation_and_retirement_bind_protected_intent ... ok
+test native::account_profile::tests::crashed_workload_requires_independent_file_retirement_before_profile_cleanup ... ok
+test native::account_profile::tests::actual_dns_sender_is_bound_to_stable_service_process_outside_owned_tree ... ok
+test native::account_profile::tests::actual_instrumented_lpac_trace_delivers_lrpc_calls_but_dns_bypass_still_fails ... ok
+test native::account_profile::tests::actual_validated_journal_preserves_node_execution_and_exact_retirement ... ok
+test native::account_profile::tests::empty_bootstrap_checkpoint_requires_matching_recovery_lifecycle ... ok
+test native::account_profile::tests::actual_dns_package_matrix_retains_unknown_failure_and_cleans_owned_rules ... ok
+test native::account_profile::tests::ancestor_intent_cannot_release_identity_or_skip_workload_retirement ... ok
+test native::account_profile::tests::actual_dns_rpc_block_bypass_keeps_network_matrix_failed ... ok
+test native::account_profile::tests::profile_replacement_and_path_change_never_match_owned_identity ... ok
+test native::account_profile::tests::actual_service_crash_retires_trace_without_claiming_loaded_hive_cleanup ... ok
+test native::account_profile::tests::registry_descriptor_rejects_binding_writers_and_accepts_read_notify ... ok
+test native::account_profile::tests::invalid_profile_checkpoint_is_rejected_before_journal_publication ... ok
+test native::account_profile::tests::actual_no_internet_instrumented_dns_remains_unknown_despite_empty_trace ... ok
+test native::account_profile::tests::live_crash_owner_blocks_ancestor_retirement_before_directory_access ... ok
+test native::account_profile::tests::repeated_failed_recovery_preserves_existing_debt_without_duplicates ... ok
+test native::account_profile::tests::three_crashed_slots_have_explicit_post_reboot_os_absence_evidence ... ok
+test native::frontend_journal::tests::incomplete_or_cross_fixture_anchor_cannot_authorize_page_loading ... ok
+test native::account_profile::tests::file_retirement_checkpoint_requires_owned_root_and_recovery_execution ... ok
+test native::frontend_materialization::tests::nil_materialization_fixture_is_rejected_before_any_system_mutation ... ok
+test native::account_profile::tests::git_ceiling_diagnostic_does_not_claim_repository_success ... ok
+test native::journal::tests::larger_frontend_plan_budget_is_not_a_general_receipt_escape ... ok
+test native::frontend_materialization::tests::recovery_anchor_rejects_changed_scope_identity_and_grants ... ok
+test native::recovery::tests::missing_wts_sid_uses_actual_held_token_and_never_hides_owned_process ... ok
+test native::recovery::tests::recovery_rejects_user_writable_or_user_owned_receipts ... ok
+test native::journal::tests::unbounded_transition_is_rejected_before_touching_resources ... ok
+test native::frontend_journal::tests::actual_system_full_page_publication_keeps_execution_and_resource_scope_closed ... ok
+test native::frontend_journal::tests::actual_independent_system_recovery_reads_complete_old_records_without_mutation ... ok
+test native::system_admission::service::tests::recovery_dispatch_rejects_execution_modes_and_self_or_nil_targets ... ok
+test native::system_admission::service::tests::saved_failure_receipt_does_not_turn_diagnostic_into_service_success ... ok
+test native::account_profile::tests::actual_protected_lpac_trace_keeps_empty_observation_separate_from_dns_denial ... ok
+test native::runtime_grants::tests::runtime_delta_is_read_only_non_inheriting_and_preserves_host_access ... ok
+test native::system_admission::service::tests::service_config_strings_are_bounded_and_controls_cannot_dispatch_operations ... ok
+test native::account_profile::tests::package_network_journal_requires_identity_and_retirement_before_account_release ... ok
+test native::account_profile::tests::relative_git_directory_still_fails_and_resources_are_retired ... ok
+test native::system_admission::service::tests::service_identity_rejects_aliases_nil_and_command_injection ... ok
+test native::system_admission::service::tests::service_observation_gate_rejects_inconsistent_intent_exit_and_status ... ok
+test native::system_admission::tests::dns_package_block_uses_full_probe_without_a_tool_command ... ok
+test native::system_admission::tests::actual_scm_failure_and_recovery_success_remain_distinct ... ok
+test native::system_admission::tests::instrumentation_without_network_is_a_distinct_frozen_dispatch ... ok
+test native::system_admission::tests::independent_frontend_recovery_rejects_self_target_and_mixed_modes ... ok
+test native::system_admission::tests::lifecycle_contract_rejects_unknown_modes_and_freezes_fixed_leaf_behavior ... ok
+test native::system_admission::tests::frontend_journal_dispatch_cannot_create_accounts_run_tools_or_recover_slots ... ok
+test native::system_admission::tests::materialization_recovery_is_exclusive_and_rejects_self_and_nil ... ok
+test native::system_admission::tests::materialization_dispatch_is_exclusive_and_legacy_records_default_off ... ok
+test native::system_admission::tests::only_fixed_powershell_runtime_variants_use_expanded_recovery_budget ... ok
+test native::system_admission::tests::node_metadata_project_is_an_explicit_minimal_authorization_variant ... ok
+test native::account_profile::tests::rpc_receipt_cannot_release_protection_before_owned_rule_retirement ... ok
+test native::system_admission::tests::system_preparation_rejects_arbitrary_dispatch_fields ... ok
+test native::account_profile::tests::trace_receipt_cannot_release_profile_or_rules_before_session_absence ... ok
+test native::system_admission::tests::service_exit_observation_preserves_failure_and_legacy_unknown_state ... ok
+test native::system_admission::tests::tool_dispatch_requires_frozen_normal_workload_without_recovery ... ok
+test native::tests::actual_restricted_token_requires_both_sid_passes ... ok
+test native::account_profile::controller_admission::tests::actual_dns_parameter_failures_cannot_pass_network_gate ... ok
+test native::account_profile::namespace_lease::tests::absence_observation_keeps_unknown_errors_and_present_timeouts ... ok
+test native::account_profile::controller_admission::tests::every_fixed_workload_check_must_be_present_once_and_pass ... ok
+test native::system_admission::tests::protected_target_rejects_hardlink_alias_while_source_lease_blocks_writes ... ok
+test native::account_profile::tests::residual_inventory_rejects_hardlink_aliases ... ok
+test native::account_profile::account_launch::tests::actual_profile_checkpoint_rejects_replacement_and_unjournaled_absence ... ok
+
+test result: ok. 98 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s
+
+     Running unittests src\bin\shellspan-appcontainer-candidate.rs (tests\windows-sandbox-account\target\debug\deps\shellspan_appcontainer_candidate-06b9992f79efcb10.exe)
+
+running 11 tests
+test tests::fixed_capability_derivation_refuses_ambient_names ... ok
+test tests::capability_gate_requires_unique_exact_sids_and_attributes ... ok
+test tests::actual_new_ads_respects_readonly_secret_and_explicit_workspace_permissions ... ok
+test tests::actual_new_objects_remain_usable_only_in_explicit_workspace ... ok
+test tests::actual_parent_directory_boundaries_preserve_ordinary_descendant_operations ... ok
+test tests::actual_default_project_policy_requires_readonly_exception_and_sensitive_denials ... ok
+test tests::actual_external_loopback_keeps_owned_private_receiver_evidence ... ok
+test tests::actual_workspace_preserves_protected_objects_and_allows_ordinary_mutation ... ok
+test tests::actual_independent_sensitivity_overrides_env_exception_and_readonly_rules ... ok
+test tests::actual_instrumentation_matrix_keeps_all_frozen_checks_and_cleanup ... ok
+test tests::actual_default_ordinary_objects_are_readable_without_mutation_rights ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\shellspan-owned-fixture-runner.rs (tests\windows-sandbox-account\target\debug\deps\shellspan_owned_fixture_runner-729af644c5de2ffe.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\shellspan-retire-runtime-debt.rs (tests\windows-sandbox-account\target\debug\deps\shellspan_retire_runtime_debt-1d7e2bc4ba4ba53e.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\shellspan-rpc-trace-control.rs (tests\windows-sandbox-account\target\debug\deps\shellspan_rpc_trace_control-95a0fb473788a1ce.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests shellspan_account_sandbox_prototype
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

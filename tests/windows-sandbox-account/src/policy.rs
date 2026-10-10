@@ -31,7 +31,7 @@ pub fn access(workspace: bool, object: Object) -> u32 {
     }
 }
 
-fn reserved_device_component(part: &str) -> bool {
+pub(crate) fn reserved_device_component(part: &str) -> bool {
     let stem = part
         .split('.')
         .next()
@@ -108,7 +108,7 @@ pub struct FrozenIdentity {
     pub bytes: u64,
     pub directory: bool,
 }
-fn windows_name_equal(left: &str, right: &str) -> Result<bool, String> {
+pub(crate) fn windows_name_equal(left: &str, right: &str) -> Result<bool, String> {
     use windows_sys::Win32::Globalization::{CompareStringOrdinal, CSTR_EQUAL};
     if left.is_empty() || right.is_empty() {
         return Ok(left.is_empty() && right.is_empty());

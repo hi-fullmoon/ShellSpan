@@ -1,6 +1,6 @@
 # Fixed diagnostic only. No command/path/identity parameters; production stays unavailable.
 [CmdletBinding()]
-param([ValidateSet('CredentialReset', 'NewAds', 'ConcurrentCancel', 'ReceiverDrain', 'ReceiverFinalControls', 'TcpListener', 'TcpListenerBounded', 'PrivateNetwork', 'DnsNetwork', 'DnsContexts', 'DnsSyncCache', 'DnsSidBlock', 'IdentityCredential', 'PowerShellBuild', 'PowerShellPersistedBuild', 'PowerShellDigestBuild', 'PowerShellSourceBuild', 'PowerShellPinnedSourceBuild', 'PowerShellSourceWriteDenied', 'GitInit', 'GitCeilingInit', 'GitRelativeInit', 'GitPrefix', 'NodeOwnedCwd', 'PowerShellOwnedCwd', 'NodeValidatedJournal', 'CrossSlotRegistry', 'CrossSlotRegistryAccess', 'NodePackageBlock', 'NodePackageBlockIndexed', 'DnsPackageBlockDefault', 'DnsPackageBlockMatrix', 'DnsPackageBlockInternet', 'NodeRpcBlock', 'DnsRpcBlockInternet', 'DnsSenderIdentity','DnsProtectedRpcTrace','DnsRpcProviderRegistration','RpcTraceServiceCrash','RpcTraceServiceCrashStopHybrid','DnsRpcInstrumentationInternet','DnsRpcInstrumentationDefault')][string]$Case = 'CredentialReset')
+param([ValidateSet('CredentialReset', 'NewAds', 'ConcurrentCancel', 'ReceiverDrain', 'ReceiverFinalControls', 'TcpListener', 'TcpListenerBounded', 'PrivateNetwork', 'DnsNetwork', 'DnsContexts', 'DnsSyncCache', 'DnsSidBlock', 'IdentityCredential', 'PowerShellBuild', 'PowerShellPersistedBuild', 'PowerShellDigestBuild', 'PowerShellSourceBuild', 'PowerShellPinnedSourceBuild', 'PowerShellSourceWriteDenied', 'GitInit', 'GitMetadataInit', 'GitMetadataPrefix', 'GitMetadataPartialFailure', 'GitMetadataCheckpointCrash', 'GitCeilingInit', 'GitRelativeInit', 'GitPrefix', 'NodeOwnedCwd', 'PowerShellOwnedCwd', 'NodeValidatedJournal', 'NodeProject', 'NodeMetadataProject', 'CrossSlotRegistry', 'CrossSlotRegistryAccess', 'NodePackageBlock', 'NodePackageBlockIndexed', 'DnsPackageBlockDefault', 'DnsPackageBlockMatrix', 'DnsPackageBlockInternet', 'NodeRpcBlock', 'DnsRpcBlockInternet', 'DnsSenderIdentity','DnsProtectedRpcTrace','DnsRpcProviderRegistration','RpcTraceServiceCrash','RpcTraceServiceCrashStopHybrid','DnsRpcInstrumentationInternet','DnsRpcInstrumentationDefault')][string]$Case = 'CredentialReset')
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'InterruptedProfileGate.psm1') -Force
 $workspace = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../..'))
@@ -37,9 +37,15 @@ $prefix = switch ($Case) {
     'CrossSlotRegistryAccess' { 'windows-stage-a-2026-10-09-cross-slot-registry-access-system' }
     'CrossSlotRegistry' { 'windows-stage-a-2026-10-09-cross-slot-registry-system' }
     'NodeValidatedJournal' { 'windows-stage-a-2026-10-09-node-validated-journal-system' }
+    'NodeProject' { 'windows-stage-a-2026-10-10-node-project-system' }
+    'NodeMetadataProject' { 'windows-stage-a-2026-10-10-node-metadata-project-system' }
     'NodeOwnedCwd' { 'windows-stage-a-2026-10-09-node-cwd-assertion-system' }
     'GitPrefix' { 'windows-stage-a-2026-10-09-git-prefix-system' }
     'GitInit' { 'windows-stage-a-2026-10-09-git-init-system' }
+    'GitMetadataInit' { 'windows-stage-a-2026-10-09-git-metadata-init-system' }
+    'GitMetadataPrefix' { 'windows-stage-a-2026-10-09-git-metadata-prefix-system' }
+    'GitMetadataPartialFailure' { 'windows-stage-a-2026-10-09-git-metadata-partial-failure-system' }
+    'GitMetadataCheckpointCrash' { 'windows-stage-a-2026-10-09-git-metadata-checkpoint-crash-system' }
     'GitCeilingInit' { 'windows-stage-a-2026-10-09-git-ceiling-init-system' }
     'GitRelativeInit' { 'windows-stage-a-2026-10-09-git-relative-init-system' }
     'PowerShellSourceWriteDenied' { 'windows-stage-a-2026-10-09-powershell7-source-write-denied-system' }
@@ -62,7 +68,11 @@ foreach ($name in @('preparation','service','profile','recovery-preparation','re
 function Save-Evidence($Name, $Value) {
     $Value | ConvertTo-Json -Depth 100 | Out-File -LiteralPath (Join-Path $evidence ($prefix + '-' + $Name + '.json')) -Encoding utf8
 }
-$preparation = if ($Case -eq 'DnsRpcInstrumentationDefault') {
+$preparation = if ($Case -eq 'NodeMetadataProject') {
+    (& $prototype --prepare-owned-system-node-metadata-project | Out-String) | ConvertFrom-Json
+} elseif ($Case -eq 'NodeProject') {
+    (& $prototype --prepare-owned-system-node-project | Out-String) | ConvertFrom-Json
+} elseif ($Case -eq 'DnsRpcInstrumentationDefault') {
     (& $prototype --prepare-owned-system-dns-rpc-instrumentation-default-diagnostic | Out-String) | ConvertFrom-Json
 } elseif ($Case -eq 'DnsRpcInstrumentationInternet') {
     (& $prototype --prepare-owned-system-dns-rpc-instrumentation-internet-diagnostic | Out-String) | ConvertFrom-Json
@@ -70,7 +80,7 @@ $preparation = if ($Case -eq 'DnsRpcInstrumentationDefault') {
     (& $prototype --prepare-owned-system-lifecycle service-crash | Out-String) | ConvertFrom-Json
 } elseif ($Case -eq 'ConcurrentCancel') {
     (& $prototype --prepare-owned-system-lifecycle concurrent-cancel | Out-String) | ConvertFrom-Json
-} elseif ($Case -in @('DnsRpcBlockInternet','DnsSenderIdentity','DnsProtectedRpcTrace','DnsRpcProviderRegistration')) { (& $prototype --prepare-owned-system-dns-rpc-block-internet-diagnostic | Out-String) | ConvertFrom-Json } elseif ($Case -eq 'NodeRpcBlock') { (& $prototype --prepare-owned-system-node-rpc-block | Out-String) | ConvertFrom-Json } elseif ($Case -eq 'DnsPackageBlockInternet') { (& $prototype --prepare-owned-system-dns-package-block-internet-diagnostic | Out-String) | ConvertFrom-Json } elseif ($Case -in @('DnsPackageBlockDefault','DnsPackageBlockMatrix')) { (& $prototype --prepare-owned-system-dns-package-block | Out-String) | ConvertFrom-Json } elseif ($Case -in @('NodePackageBlock','NodePackageBlockIndexed')) { (& $prototype --prepare-owned-system-node-package-block | Out-String) | ConvertFrom-Json } elseif ($Case -in @('CrossSlotRegistry','CrossSlotRegistryAccess')) { (& $prototype --prepare-owned-system-cross-slot-registry-probe | Out-String) | ConvertFrom-Json } elseif ($Case -in @('NodeOwnedCwd','NodeValidatedJournal')) { (& $prototype --prepare-owned-system-node | Out-String) | ConvertFrom-Json } elseif ($Case -eq 'GitPrefix') { (& $prototype --prepare-owned-system-git-prefix-probe | Out-String) | ConvertFrom-Json } elseif ($Case -in @('GitInit','GitCeilingInit','GitRelativeInit')) { (& $prototype --prepare-owned-system-git-init | Out-String) | ConvertFrom-Json } elseif ($Case -in @('PowerShellBuild','PowerShellPersistedBuild','PowerShellDigestBuild','PowerShellSourceBuild','PowerShellPinnedSourceBuild','PowerShellSourceWriteDenied','PowerShellOwnedCwd')) { (& $prototype --prepare-owned-system-powershell7-build | Out-String) | ConvertFrom-Json } else { (& $prototype --prepare-owned-system-workload | Out-String) | ConvertFrom-Json }
+} elseif ($Case -in @('DnsRpcBlockInternet','DnsSenderIdentity','DnsProtectedRpcTrace','DnsRpcProviderRegistration')) { (& $prototype --prepare-owned-system-dns-rpc-block-internet-diagnostic | Out-String) | ConvertFrom-Json } elseif ($Case -eq 'NodeRpcBlock') { (& $prototype --prepare-owned-system-node-rpc-block | Out-String) | ConvertFrom-Json } elseif ($Case -eq 'DnsPackageBlockInternet') { (& $prototype --prepare-owned-system-dns-package-block-internet-diagnostic | Out-String) | ConvertFrom-Json } elseif ($Case -in @('DnsPackageBlockDefault','DnsPackageBlockMatrix')) { (& $prototype --prepare-owned-system-dns-package-block | Out-String) | ConvertFrom-Json } elseif ($Case -in @('NodePackageBlock','NodePackageBlockIndexed')) { (& $prototype --prepare-owned-system-node-package-block | Out-String) | ConvertFrom-Json } elseif ($Case -in @('CrossSlotRegistry','CrossSlotRegistryAccess')) { (& $prototype --prepare-owned-system-cross-slot-registry-probe | Out-String) | ConvertFrom-Json } elseif ($Case -in @('NodeOwnedCwd','NodeValidatedJournal')) { (& $prototype --prepare-owned-system-node | Out-String) | ConvertFrom-Json } elseif ($Case -eq 'GitMetadataCheckpointCrash') { (& $prototype --prepare-owned-system-git-metadata-checkpoint-crash | Out-String) | ConvertFrom-Json } elseif ($Case -eq 'GitMetadataPartialFailure') { (& $prototype --prepare-owned-system-git-metadata-partial-failure | Out-String) | ConvertFrom-Json } elseif ($Case -eq 'GitMetadataPrefix') { (& $prototype --prepare-owned-system-git-metadata-prefix | Out-String) | ConvertFrom-Json } elseif ($Case -in @('GitMetadataInit','GitMetadataPrefix','GitMetadataPartialFailure','GitMetadataCheckpointCrash','NodeMetadataProject')) { (& $prototype --prepare-owned-system-git-metadata-init | Out-String) | ConvertFrom-Json } elseif ($Case -eq 'GitPrefix') { (& $prototype --prepare-owned-system-git-prefix-probe | Out-String) | ConvertFrom-Json } elseif ($Case -in @('GitInit','GitCeilingInit','GitRelativeInit')) { (& $prototype --prepare-owned-system-git-init | Out-String) | ConvertFrom-Json } elseif ($Case -in @('PowerShellBuild','PowerShellPersistedBuild','PowerShellDigestBuild','PowerShellSourceBuild','PowerShellPinnedSourceBuild','PowerShellSourceWriteDenied','PowerShellOwnedCwd')) { (& $prototype --prepare-owned-system-powershell7-build | Out-String) | ConvertFrom-Json } else { (& $prototype --prepare-owned-system-workload | Out-String) | ConvertFrom-Json }
 $id = [Guid]::Parse($preparation.fixture_id)
 if ($id -eq [Guid]::Empty -or -not $preparation.fixed_workload -or $preparation.production -ne 'unavailable') { throw 'Unexpected fixed preparation.' }
 Save-Evidence 'preparation' $preparation
@@ -102,6 +112,11 @@ $audit = [ordered]@{
 }
 Save-Evidence 'os-audit' $audit
 if (-not $audit.account_absent -or -not $audit.profile_absent -or -not $audit.hive_absent -or -not $audit.services_absent) { throw 'Current OS state contradicts retirement.' }
+if ($Case -in @('GitMetadataInit','GitMetadataPrefix','GitMetadataPartialFailure','GitMetadataCheckpointCrash','NodeMetadataProject')) {
+    $ancestorAudit = (& $prototype --inspect-owned-ancestor-retirement $id.ToString() | Out-String) | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or $ancestorAudit.fixture_id -ne $id.ToString() -or -not $ancestorAudit.ancestor_package_aces_absent -or $ancestorAudit.exact_objects_verified -ne 2) { throw 'Exact ancestor ACE retirement unconfirmed.' }
+    Save-Evidence 'ancestor-os-audit' $ancestorAudit
+}
 
 if ($Case -eq 'DnsSenderIdentity') {
     $serviceAfter=Get-CimInstance Win32_Service -Filter "Name='Dnscache'"

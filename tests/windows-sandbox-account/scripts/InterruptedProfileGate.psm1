@@ -57,6 +57,13 @@ function Get-FixedRecoveryEligibility {
     )
     $recordedRetirement = $true
     $wellFormed = $true
+    # Precise ancestor ACE recovery is not enabled yet. Do not interpret a
+    # checkpoint supplied in this new contract as OS-confirmed retirement.
+    $ancestorIntent = $Receipt.PSObject.Properties['ancestor_metadata_intent']
+    if ($ancestorIntent -and $null -ne $ancestorIntent.Value) {
+        $wellFormed = $false
+        $recordedRetirement = $false
+    }
     foreach ($name in @('profile_removed', 'account_removed', 'filters_removed')) {
         $property = $Receipt.PSObject.Properties[$name]
         if (-not $property -or $property.Value -isnot [bool] -or -not $property.Value) {

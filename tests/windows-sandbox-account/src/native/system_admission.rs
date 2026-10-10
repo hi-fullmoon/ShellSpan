@@ -8,9 +8,15 @@ mod service;
 pub(super) enum FixedSystemTool {
     GitBundle,
     GitBundleInit,
+    GitMetadataInit,
+    GitMetadataPrefix,
+    GitMetadataPartialFailure,
+    GitMetadataCheckpointCrash,
     GitPrefixProbe,
     CrossSlotRegistryProbe,
     Node,
+    NodeProject,
+    NodeMetadataProject,
     NodePackageBlock,
     NodeRpcBlock,
     DnsPackageBlockProbe,
@@ -24,6 +30,16 @@ pub(super) enum FixedSystemTool {
     PowerShell7RuntimeBuild,
 }
 impl FixedSystemTool {
+    pub(super) fn uses_ancestor_metadata(self) -> bool {
+        matches!(
+            self,
+            Self::GitMetadataInit
+                | Self::NodeMetadataProject
+                | Self::GitMetadataPrefix
+                | Self::GitMetadataPartialFailure
+                | Self::GitMetadataCheckpointCrash
+        )
+    }
     pub(super) fn uses_instrumentation(self) -> bool {
         self.uses_powershell_runtime()
             || matches!(
@@ -58,10 +74,14 @@ impl FixedSystemTool {
             | Self::DnsRpcInstrumentationInternetProbe
             | Self::DnsRpcInstrumentationDefaultProbe => return None,
             Self::GitBundle => FixedTool::GitBundle,
-            Self::GitBundleInit => FixedTool::GitBundleInit,
+            Self::GitBundleInit | Self::GitMetadataInit => FixedTool::GitBundleInit,
             Self::GitPrefixProbe => FixedTool::GitPrefixProbe,
+            Self::GitMetadataPrefix
+            | Self::GitMetadataPartialFailure
+            | Self::GitMetadataCheckpointCrash => FixedTool::GitPrefixProbe,
             Self::CrossSlotRegistryProbe => FixedTool::CrossSlotRegistryProbe,
             Self::Node | Self::NodePackageBlock | Self::NodeRpcBlock => FixedTool::Node,
+            Self::NodeProject | Self::NodeMetadataProject => FixedTool::NodeProject,
             Self::PowerShell => FixedTool::PowerShell,
             Self::PowerShell7RuntimeInstrumentation => FixedTool::PowerShell7Runtime,
             Self::PowerShell7RuntimeArtifact => FixedTool::PowerShell7RuntimeArtifact,
@@ -162,6 +182,38 @@ struct Preparation {
     fixed_tool: Option<FixedSystemTool>,
     #[serde(default)]
     recovery_target: Option<Uuid>,
+    #[serde(default)]
+    fixed_frontend_journal: bool,
+    #[serde(default)]
+    fixed_frontend_materialization: bool,
+    #[serde(default)]
+    frontend_materialization_source: bool,
+    #[serde(default)]
+    frontend_materialization_project: bool,
+    #[serde(default)]
+    frontend_project_workload_failure: bool,
+    #[serde(default)]
+    frontend_source_workload_failure: bool,
+    #[serde(default)]
+    frontend_journal_recovery_target: Option<Uuid>,
+    #[serde(default)]
+    frontend_materialization_recovery_target: Option<Uuid>,
+}
+
+impl Preparation {
+    fn materialization_namespace(
+        &self,
+    ) -> shellspan_account_sandbox_prototype::frontend_materialization::MaterializationNamespace
+    {
+        use shellspan_account_sandbox_prototype::frontend_materialization::MaterializationNamespace;
+        if self.frontend_materialization_project {
+            MaterializationNamespace::Project
+        } else if self.frontend_materialization_source {
+            MaterializationNamespace::Source
+        } else {
+            MaterializationNamespace::Dependencies
+        }
+    }
 }
 
 fn held_image(file: &fs::File, require_single_link: bool) -> Result<BY_HANDLE_FILE_INFORMATION> {
@@ -181,6 +233,192 @@ fn held_image(file: &fs::File, require_single_link: bool) -> Result<BY_HANDLE_FI
 
 pub(super) fn prepare() -> Result<()> {
     prepare_inner(false, FixedLifecycle::Normal, None, None)
+}
+pub(super) fn prepare_frontend_journal() -> Result<()> {
+    prepare_inner_mode(false, FixedLifecycle::Normal, None, None, true, None, false)
+}
+pub(super) fn prepare_frontend_materialization() -> Result<()> {
+    prepare_inner_mode(false, FixedLifecycle::Normal, None, None, false, None, true)
+}
+pub(super) fn prepare_frontend_source_materialization() -> Result<()> {
+    prepare_inner_scoped(
+        false,
+        FixedLifecycle::Normal,
+        None,
+        None,
+        false,
+        None,
+        (true, true, false, false, false),
+    )
+}
+pub(super) fn prepare_frontend_project_materialization(fail_workload: bool) -> Result<()> {
+    prepare_inner_scoped(
+        false,
+        FixedLifecycle::Normal,
+        None,
+        None,
+        false,
+        None,
+        (true, false, false, true, fail_workload),
+    )
+}
+pub(super) fn prepare_frontend_project_materialization_recovery(value: &str) -> Result<()> {
+    let target = Uuid::parse_str(value).map_err(|_| "project recovery UUID invalid")?;
+    if target.is_nil() || target.to_string() != value {
+        return Err("project recovery UUID must be canonical nonnil".into());
+    }
+    verify_project_materialization_recovery_target(target)?;
+    prepare_inner_scoped(
+        false,
+        FixedLifecycle::Normal,
+        None,
+        None,
+        false,
+        Some(target),
+        (true, false, false, true, false),
+    )
+}
+pub(super) fn prepare_frontend_source_workload_failure() -> Result<()> {
+    prepare_inner_scoped(
+        false,
+        FixedLifecycle::Normal,
+        None,
+        None,
+        false,
+        None,
+        (true, true, true, false, false),
+    )
+}
+pub(super) fn prepare_frontend_source_materialization_recovery(value: &str) -> Result<()> {
+    let target = Uuid::parse_str(value).map_err(|_| "source recovery UUID invalid")?;
+    if target.is_nil() || target.to_string() != value {
+        return Err("source recovery UUID must be canonical nonnil".into());
+    }
+    verify_source_materialization_recovery_target(target)?;
+    prepare_inner_scoped(
+        false,
+        FixedLifecycle::Normal,
+        None,
+        None,
+        false,
+        Some(target),
+        (true, true, false, false, false),
+    )
+}
+pub(super) fn prepare_frontend_materialization_recovery(value: &str) -> Result<()> {
+    let target = Uuid::parse_str(value).map_err(|_| "materialization recovery UUID invalid")?;
+    if target.is_nil() || target.to_string() != value {
+        return Err("materialization recovery UUID must be canonical nonnil".into());
+    }
+    service::verify_materialization_retired(target)?;
+    prepare_inner_mode(
+        false,
+        FixedLifecycle::Normal,
+        None,
+        None,
+        false,
+        Some(target),
+        true,
+    )
+}
+pub(super) fn verify_materialization_recovery_target(target: Uuid) -> Result<()> {
+    service::verify_materialization_retired(target)
+}
+pub(super) fn verify_project_materialization_recovery_target(target: Uuid) -> Result<()> {
+    service::verify_materialization_retired_in_scope(
+        target,
+        shellspan_account_sandbox_prototype::frontend_materialization::MaterializationNamespace::Project,
+    )
+}
+pub(super) fn verify_source_materialization_recovery_target(target: Uuid) -> Result<()> {
+    service::verify_materialization_retired_in_scope(
+        target,
+        shellspan_account_sandbox_prototype::frontend_materialization::MaterializationNamespace::Source,
+    )
+}
+pub(super) fn prepare_frontend_journal_recovery(value: &str) -> Result<()> {
+    let target = Uuid::parse_str(value).map_err(|_| "frontend recovery UUID invalid")?;
+    if target.is_nil() || target.to_string() != value {
+        return Err("frontend recovery UUID must be canonical nonnil".into());
+    }
+    service::verify_frontend_retired(target)?;
+    prepare_inner_mode(
+        false,
+        FixedLifecycle::Normal,
+        None,
+        None,
+        false,
+        Some(target),
+        false,
+    )
+}
+fn validate_frontend_dispatch(plan: &Preparation) -> Result<()> {
+    if plan.frontend_project_workload_failure
+        && (!plan.frontend_materialization_project
+            || !plan.fixed_frontend_materialization
+            || plan.frontend_materialization_recovery_target.is_some())
+    {
+        return Err(
+            "project failure requires fixed project materialization without recovery".into(),
+        );
+    }
+    if plan.frontend_materialization_project
+        && (plan.frontend_materialization_source
+            || plan.frontend_source_workload_failure
+            || (!plan.fixed_frontend_materialization
+                && plan.frontend_materialization_recovery_target.is_none()))
+    {
+        return Err("project scope requires exclusive fixed materialization dispatch".into());
+    }
+    if plan.frontend_source_workload_failure
+        && (!plan.frontend_materialization_source
+            || !plan.fixed_frontend_materialization
+            || plan.frontend_materialization_recovery_target.is_some())
+    {
+        return Err("source failure requires fixed source materialization without recovery".into());
+    }
+    if plan.frontend_materialization_source
+        && !plan.fixed_frontend_materialization
+        && plan.frontend_materialization_recovery_target.is_none()
+    {
+        return Err("source scope requires fixed materialization dispatch".into());
+    }
+    if (plan.fixed_frontend_journal
+        || plan.fixed_frontend_materialization
+        || plan.frontend_materialization_recovery_target.is_some()
+        || plan.frontend_journal_recovery_target.is_some())
+        && (plan.fixed_workload
+            || plan.fixed_tool.is_some()
+            || plan.recovery_target.is_some()
+            || plan.fixed_lifecycle != FixedLifecycle::Normal)
+    {
+        return Err(
+            "frontend journal service conflicts with account/tool/recovery dispatch".into(),
+        );
+    }
+    let scopes = usize::from(plan.fixed_frontend_journal)
+        + usize::from(plan.fixed_frontend_materialization)
+        + usize::from(plan.frontend_journal_recovery_target.is_some())
+        + usize::from(plan.frontend_materialization_recovery_target.is_some());
+    if scopes > 1 {
+        return Err("frontend service has conflicting scopes".into());
+    }
+    if let Some(target) = plan.frontend_materialization_recovery_target {
+        if target.is_nil() || target == plan.fixture_id {
+            return Err("materialization recovery target conflicts with preparation".into());
+        }
+    }
+    if plan.fixed_frontend_materialization
+        && (plan.fixed_frontend_journal || plan.frontend_journal_recovery_target.is_some())
+    {
+        return Err("frontend materialization conflicts with journal dispatch".into());
+    }
+    if let Some(target) = plan.frontend_journal_recovery_target {
+        if target.is_nil() || target == plan.fixture_id || plan.fixed_frontend_journal {
+            return Err("frontend recovery target conflicts with preparation".into());
+        }
+    }
+    Ok(())
 }
 pub(super) fn prepare_workload() -> Result<()> {
     prepare_inner(true, FixedLifecycle::Normal, None, None)
@@ -257,6 +495,22 @@ pub(super) fn prepare_node() -> Result<()> {
         Some(FixedSystemTool::Node),
     )
 }
+pub(super) fn prepare_node_project() -> Result<()> {
+    prepare_inner(
+        true,
+        FixedLifecycle::Normal,
+        None,
+        Some(FixedSystemTool::NodeProject),
+    )
+}
+pub(super) fn prepare_node_metadata_project() -> Result<()> {
+    prepare_inner(
+        true,
+        FixedLifecycle::Normal,
+        None,
+        Some(FixedSystemTool::NodeMetadataProject),
+    )
+}
 pub(super) fn prepare_powershell() -> Result<()> {
     prepare_inner(
         true,
@@ -297,6 +551,38 @@ pub(super) fn prepare_git_init() -> Result<()> {
         Some(FixedSystemTool::GitBundleInit),
     )
 }
+pub(super) fn prepare_git_metadata_init() -> Result<()> {
+    prepare_inner(
+        true,
+        FixedLifecycle::Normal,
+        None,
+        Some(FixedSystemTool::GitMetadataInit),
+    )
+}
+pub(super) fn prepare_git_metadata_prefix() -> Result<()> {
+    prepare_inner(
+        true,
+        FixedLifecycle::Normal,
+        None,
+        Some(FixedSystemTool::GitMetadataPrefix),
+    )
+}
+pub(super) fn prepare_git_metadata_partial_failure() -> Result<()> {
+    prepare_inner(
+        true,
+        FixedLifecycle::Normal,
+        None,
+        Some(FixedSystemTool::GitMetadataPartialFailure),
+    )
+}
+pub(super) fn prepare_git_metadata_checkpoint_crash() -> Result<()> {
+    prepare_inner(
+        true,
+        FixedLifecycle::Normal,
+        None,
+        Some(FixedSystemTool::GitMetadataCheckpointCrash),
+    )
+}
 pub(super) fn prepare_git_prefix_probe() -> Result<()> {
     prepare_inner(
         true,
@@ -330,6 +616,51 @@ fn prepare_inner(
     recovery_target: Option<Uuid>,
     fixed_tool: Option<FixedSystemTool>,
 ) -> Result<()> {
+    prepare_inner_mode(
+        fixed_workload,
+        fixed_lifecycle,
+        recovery_target,
+        fixed_tool,
+        false,
+        None,
+        false,
+    )
+}
+fn prepare_inner_mode(
+    fixed_workload: bool,
+    fixed_lifecycle: FixedLifecycle,
+    recovery_target: Option<Uuid>,
+    fixed_tool: Option<FixedSystemTool>,
+    fixed_frontend_journal: bool,
+    frontend_journal_recovery_target: Option<Uuid>,
+    fixed_frontend_materialization: bool,
+) -> Result<()> {
+    prepare_inner_scoped(
+        fixed_workload,
+        fixed_lifecycle,
+        recovery_target,
+        fixed_tool,
+        fixed_frontend_journal,
+        frontend_journal_recovery_target,
+        (fixed_frontend_materialization, false, false, false, false),
+    )
+}
+fn prepare_inner_scoped(
+    fixed_workload: bool,
+    fixed_lifecycle: FixedLifecycle,
+    recovery_target: Option<Uuid>,
+    fixed_tool: Option<FixedSystemTool>,
+    fixed_frontend_journal: bool,
+    frontend_journal_recovery_target: Option<Uuid>,
+    materialization_scope: (bool, bool, bool, bool, bool),
+) -> Result<()> {
+    let (
+        fixed_frontend_materialization,
+        frontend_materialization_source,
+        frontend_source_workload_failure,
+        frontend_materialization_project,
+        frontend_project_workload_failure,
+    ) = materialization_scope;
     validate_tool_dispatch(fixed_tool, fixed_workload, fixed_lifecycle, recovery_target)?;
     if !elevated()? {
         return Err(
@@ -358,7 +689,25 @@ fn prepare_inner(
         recovery_target,
         fixed_lifecycle,
         fixed_tool,
+        fixed_frontend_journal,
+        frontend_materialization_source,
+        frontend_materialization_project,
+        frontend_project_workload_failure,
+        frontend_source_workload_failure,
+        fixed_frontend_materialization: fixed_frontend_materialization
+            && frontend_journal_recovery_target.is_none(),
+        frontend_materialization_recovery_target: if fixed_frontend_materialization {
+            frontend_journal_recovery_target
+        } else {
+            None
+        },
+        frontend_journal_recovery_target: if fixed_frontend_materialization {
+            None
+        } else {
+            frontend_journal_recovery_target
+        },
     };
+    validate_frontend_dispatch(&plan)?;
     journal::publish(
         &root.join("ownership.json"),
         &serde_json::to_vec_pretty(&plan).map_err(|e| e.to_string())?,
@@ -428,6 +777,198 @@ fn prepare_inner(
 mod tests {
     use super::*;
     #[test]
+    fn materialization_recovery_is_exclusive_and_rejects_self_and_nil() {
+        let id = Uuid::new_v4();
+        let base = serde_json::json!({"version":1,"backend":"fixed-system-admission-preparation-v1",
+            "production":"unavailable","fixture_id":id,"image_volume":1,"image_file_index":1,
+            "image_size":1,"state":"test recovery","frontend_materialization_recovery_target":Uuid::new_v4()});
+        validate_frontend_dispatch(&serde_json::from_value(base.clone()).unwrap()).unwrap();
+        for (key, value) in [
+            ("fixed_frontend_materialization", serde_json::json!(true)),
+            ("fixed_frontend_journal", serde_json::json!(true)),
+            (
+                "frontend_journal_recovery_target",
+                serde_json::json!(Uuid::new_v4()),
+            ),
+            ("fixed_workload", serde_json::json!(true)),
+            ("fixed_tool", serde_json::json!("node")),
+            ("recovery_target", serde_json::json!(Uuid::new_v4())),
+            (
+                "fixed_lifecycle",
+                serde_json::json!(FixedLifecycle::ServiceCrash),
+            ),
+            (
+                "frontend_materialization_recovery_target",
+                serde_json::json!(id),
+            ),
+            (
+                "frontend_materialization_recovery_target",
+                serde_json::json!(Uuid::nil()),
+            ),
+        ] {
+            let mut changed = base.clone();
+            changed[key] = value;
+            assert!(
+                validate_frontend_dispatch(&serde_json::from_value(changed).unwrap()).is_err(),
+                "accepted mixed {key}"
+            );
+        }
+    }
+    #[test]
+    fn materialization_dispatch_is_exclusive_and_legacy_records_default_off() {
+        let legacy = serde_json::json!({"version":1,"backend":"fixed-system-admission-preparation-v1",
+            "production":"unavailable","fixture_id":Uuid::new_v4(),"image_volume":1,
+            "image_file_index":1,"image_size":1,"state":"test preparation"});
+        let plan: Preparation = serde_json::from_value(legacy.clone()).unwrap();
+        assert!(!plan.fixed_frontend_materialization);
+        assert!(!plan.frontend_materialization_source);
+        assert!(!plan.frontend_source_workload_failure);
+        assert!(!plan.frontend_materialization_project);
+        assert!(!plan.frontend_project_workload_failure);
+        assert!(matches!(
+            plan.materialization_namespace(),
+            shellspan_account_sandbox_prototype::frontend_materialization::MaterializationNamespace::Dependencies
+        ));
+        let mut invalid_source = legacy.clone();
+        invalid_source["frontend_materialization_source"] = serde_json::json!(true);
+        assert!(
+            validate_frontend_dispatch(&serde_json::from_value(invalid_source).unwrap()).is_err()
+        );
+        let mut base = legacy;
+        base["fixed_frontend_materialization"] = serde_json::json!(true);
+        let mut project = base.clone();
+        project["frontend_materialization_project"] = serde_json::json!(true);
+        let project_plan: Preparation = serde_json::from_value(project.clone()).unwrap();
+        validate_frontend_dispatch(&project_plan).unwrap();
+        let mut project_failure = project.clone();
+        project_failure["frontend_project_workload_failure"] = serde_json::json!(true);
+        validate_frontend_dispatch(&serde_json::from_value(project_failure.clone()).unwrap())
+            .unwrap();
+        for (key, value) in [
+            ("frontend_materialization_project", serde_json::json!(false)),
+            ("fixed_frontend_materialization", serde_json::json!(false)),
+            (
+                "frontend_materialization_recovery_target",
+                serde_json::json!(Uuid::new_v4()),
+            ),
+            ("fixed_workload", serde_json::json!(true)),
+        ] {
+            let mut invalid = project_failure.clone();
+            invalid[key] = value;
+            assert!(
+                validate_frontend_dispatch(&serde_json::from_value(invalid).unwrap()).is_err(),
+                "accepted project failure with {key}"
+            );
+        }
+        assert!(matches!(project_plan.materialization_namespace(), shellspan_account_sandbox_prototype::frontend_materialization::MaterializationNamespace::Project));
+        for (key, value) in [
+            ("frontend_materialization_source", serde_json::json!(true)),
+            ("frontend_source_workload_failure", serde_json::json!(true)),
+            ("fixed_frontend_materialization", serde_json::json!(false)),
+        ] {
+            let mut mixed = project.clone();
+            mixed[key] = value;
+            assert!(validate_frontend_dispatch(&serde_json::from_value(mixed).unwrap()).is_err());
+        }
+        validate_frontend_dispatch(&serde_json::from_value(base.clone()).unwrap()).unwrap();
+        let mut source = base.clone();
+        source["frontend_materialization_source"] = serde_json::json!(true);
+        let source_plan: Preparation = serde_json::from_value(source.clone()).unwrap();
+        assert!(matches!(
+            source_plan.materialization_namespace(),
+            shellspan_account_sandbox_prototype::frontend_materialization::MaterializationNamespace::Source
+        ));
+        validate_frontend_dispatch(&serde_json::from_value(source.clone()).unwrap()).unwrap();
+        let mut failure = source.clone();
+        failure["frontend_source_workload_failure"] = serde_json::json!(true);
+        validate_frontend_dispatch(&serde_json::from_value(failure.clone()).unwrap()).unwrap();
+        for key in [
+            "fixed_frontend_materialization",
+            "frontend_materialization_source",
+        ] {
+            let mut invalid = failure.clone();
+            invalid[key] = serde_json::json!(false);
+            assert!(validate_frontend_dispatch(&serde_json::from_value(invalid).unwrap()).is_err());
+        }
+        failure["frontend_materialization_recovery_target"] = serde_json::json!(Uuid::new_v4());
+        assert!(validate_frontend_dispatch(&serde_json::from_value(failure).unwrap()).is_err());
+        let mut recovery = source.clone();
+        recovery["fixed_frontend_materialization"] = serde_json::json!(false);
+        recovery["frontend_materialization_recovery_target"] = serde_json::json!(Uuid::new_v4());
+        validate_frontend_dispatch(&serde_json::from_value(recovery.clone()).unwrap()).unwrap();
+        recovery["frontend_materialization_recovery_target"] = recovery["fixture_id"].clone();
+        assert!(validate_frontend_dispatch(&serde_json::from_value(recovery).unwrap()).is_err());
+        source["fixed_workload"] = serde_json::json!(true);
+        assert!(validate_frontend_dispatch(&serde_json::from_value(source).unwrap()).is_err());
+        for (key, value) in [
+            ("fixed_workload", serde_json::json!(true)),
+            ("fixed_tool", serde_json::json!("node")),
+            ("recovery_target", serde_json::json!(Uuid::new_v4())),
+            (
+                "fixed_lifecycle",
+                serde_json::json!(FixedLifecycle::ServiceCrash),
+            ),
+            ("fixed_frontend_journal", serde_json::json!(true)),
+            (
+                "frontend_journal_recovery_target",
+                serde_json::json!(Uuid::new_v4()),
+            ),
+        ] {
+            let mut changed = base.clone();
+            changed[key] = value;
+            let plan: Preparation = serde_json::from_value(changed).unwrap();
+            assert!(
+                validate_frontend_dispatch(&plan).is_err(),
+                "accepted mixed {key}"
+            );
+        }
+    }
+    #[test]
+    fn frontend_journal_dispatch_cannot_create_accounts_run_tools_or_recover_slots() {
+        let mut plan:Preparation=serde_json::from_value(serde_json::json!({"version":1,"backend":"fixed-system-admission-preparation-v1","production":"unavailable","fixture_id":Uuid::new_v4(),"image_volume":1,"image_file_index":1,"image_size":1,"state":"test preparation","fixed_frontend_journal":true})).unwrap();
+        validate_frontend_dispatch(&plan).unwrap();
+        plan.fixed_workload = true;
+        assert!(validate_frontend_dispatch(&plan).is_err());
+        plan.fixed_workload = false;
+        plan.fixed_tool = Some(FixedSystemTool::Node);
+        assert!(validate_frontend_dispatch(&plan).is_err());
+        plan.fixed_tool = None;
+        plan.recovery_target = Some(Uuid::new_v4());
+        assert!(validate_frontend_dispatch(&plan).is_err());
+        plan.recovery_target = None;
+        plan.fixed_lifecycle = FixedLifecycle::ServiceCrash;
+        assert!(validate_frontend_dispatch(&plan).is_err());
+    }
+    #[test]
+    fn independent_frontend_recovery_rejects_self_target_and_mixed_modes() {
+        let mut plan:Preparation=serde_json::from_value(serde_json::json!({"version":1,"backend":"fixed-system-admission-preparation-v1","production":"unavailable","fixture_id":Uuid::new_v4(),"image_volume":1,"image_file_index":1,"image_size":1,"state":"test preparation","frontend_journal_recovery_target":Uuid::new_v4()})).unwrap();
+        validate_frontend_dispatch(&plan).unwrap();
+        plan.fixed_frontend_journal = true;
+        assert!(validate_frontend_dispatch(&plan).is_err());
+        plan.fixed_frontend_journal = false;
+        plan.fixed_workload = true;
+        assert!(validate_frontend_dispatch(&plan).is_err());
+        plan.fixed_workload = false;
+        plan.frontend_journal_recovery_target = Some(plan.fixture_id);
+        assert!(validate_frontend_dispatch(&plan).is_err());
+        plan.frontend_journal_recovery_target = Some(Uuid::nil());
+        assert!(validate_frontend_dispatch(&plan).is_err());
+    }
+    #[test]
+    fn node_metadata_project_is_an_explicit_minimal_authorization_variant() {
+        use shellspan_account_sandbox_prototype::fixed_tool::FixedTool;
+        assert!(!FixedSystemTool::NodeProject.uses_ancestor_metadata());
+        assert!(FixedSystemTool::NodeMetadataProject.uses_ancestor_metadata());
+        for tool in [
+            FixedSystemTool::NodeProject,
+            FixedSystemTool::NodeMetadataProject,
+        ] {
+            assert!(!tool.uses_diagnostic_internet());
+            assert!(!tool.uses_instrumentation());
+            assert!(matches!(tool.fixed_tool(), Some(FixedTool::NodeProject)));
+        }
+    }
+    #[test]
     fn actual_scm_failure_and_recovery_success_remain_distinct() {
         let failed: Preparation = serde_json::from_str(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -484,6 +1025,8 @@ mod tests {
         assert!(internet.uses_diagnostic_internet());
         for tool in [
             FixedSystemTool::Node,
+            FixedSystemTool::NodeProject,
+            FixedSystemTool::NodeMetadataProject,
             FixedSystemTool::NodePackageBlock,
             FixedSystemTool::NodeRpcBlock,
             FixedSystemTool::DnsPackageBlockProbe,
@@ -512,9 +1055,15 @@ mod tests {
         for tool in [
             FixedSystemTool::GitBundle,
             FixedSystemTool::GitBundleInit,
+            FixedSystemTool::GitMetadataInit,
+            FixedSystemTool::GitMetadataPrefix,
+            FixedSystemTool::GitMetadataPartialFailure,
+            FixedSystemTool::GitMetadataCheckpointCrash,
             FixedSystemTool::GitPrefixProbe,
             FixedSystemTool::CrossSlotRegistryProbe,
             FixedSystemTool::Node,
+            FixedSystemTool::NodeProject,
+            FixedSystemTool::NodeMetadataProject,
             FixedSystemTool::NodePackageBlock,
             FixedSystemTool::NodeRpcBlock,
             FixedSystemTool::DnsPackageBlockProbe,
@@ -543,9 +1092,15 @@ mod tests {
         for tool in [
             FixedSystemTool::GitBundle,
             FixedSystemTool::GitBundleInit,
+            FixedSystemTool::GitMetadataInit,
+            FixedSystemTool::GitMetadataPrefix,
+            FixedSystemTool::GitMetadataPartialFailure,
+            FixedSystemTool::GitMetadataCheckpointCrash,
             FixedSystemTool::GitPrefixProbe,
             FixedSystemTool::CrossSlotRegistryProbe,
             FixedSystemTool::Node,
+            FixedSystemTool::NodeProject,
+            FixedSystemTool::NodeMetadataProject,
             FixedSystemTool::NodePackageBlock,
             FixedSystemTool::NodeRpcBlock,
             FixedSystemTool::DnsPackageBlockProbe,

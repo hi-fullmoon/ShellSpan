@@ -201,6 +201,62 @@ pub fn query_cache_only(id: Uuid) -> Result<DnsApiObservation, String> {
 /// uses the configured resolvers or sends a wire query. Run inside the existing
 /// bounded diagnostic child, whose Job lifetime bounds native calls.
 pub fn query_cache_only_sync(id: Uuid) -> Result<DnsApiObservation, String> {
+    query_cache_variant_sync(id, CacheOnlyVariant::Isolated)
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CacheOnlyVariant {
+    Minimal,
+    Fqdn,
+    Isolated,
+}
+impl CacheOnlyVariant {
+    fn options(self) -> u32 {
+        DNS_QUERY_NO_WIRE_QUERY
+            | match self {
+                Self::Minimal => 0,
+                Self::Fqdn => DNS_QUERY_TREAT_AS_FQDN,
+                Self::Isolated => {
+                    DNS_QUERY_NO_HOSTS_FILE
+                        | DNS_QUERY_NO_LOCAL_NAME
+                        | DNS_QUERY_NO_NETBT
+                        | DNS_QUERY_NO_MULTICAST
+                        | DNS_QUERY_TREAT_AS_FQDN
+                }
+            }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CacheOnlyVariantObservation {
+    pub variant: CacheOnlyVariant,
+    pub query: DnsApiObservation,
+}
+
+/// Fixed no-wire option comparison, bounded by the diagnostic child's Job.
+/// This is parameter-admission evidence, never a network denial proof.
+pub fn query_cache_only_variants(id: Uuid) -> Result<Vec<CacheOnlyVariantObservation>, String> {
+    [
+        CacheOnlyVariant::Minimal,
+        CacheOnlyVariant::Fqdn,
+        CacheOnlyVariant::Isolated,
+    ]
+    .into_iter()
+    .map(|variant| {
+        Ok(CacheOnlyVariantObservation {
+            variant,
+            query: query_cache_variant_sync(id, variant)?,
+        })
+    })
+    .collect()
+}
+
+fn query_cache_variant_sync(
+    id: Uuid,
+    variant: CacheOnlyVariant,
+) -> Result<DnsApiObservation, String> {
     if id.is_nil() {
         return Err("synchronous cache calibration requires owned UUID".into());
     }
@@ -213,14 +269,7 @@ pub fn query_cache_only_sync(id: Uuid) -> Result<DnsApiObservation, String> {
         Version: DNS_QUERY_REQUEST_VERSION1,
         QueryName: name.as_ptr(),
         QueryType: DNS_TYPE_A,
-        QueryOptions: u64::from(
-            DNS_QUERY_NO_WIRE_QUERY
-                | DNS_QUERY_NO_HOSTS_FILE
-                | DNS_QUERY_NO_LOCAL_NAME
-                | DNS_QUERY_NO_NETBT
-                | DNS_QUERY_NO_MULTICAST
-                | DNS_QUERY_TREAT_AS_FQDN,
-        ),
+        QueryOptions: u64::from(variant.options()),
         ..Default::default()
     };
     let mut result = DNS_QUERY_RESULT {
@@ -434,6 +483,103 @@ fn inline_completion_status(dispatch: i32, result: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn actual_lpac_minimal_cache_options_remain_unknown_with_retirement_verified() {
+        let report: serde_json::Value = serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/design/evidence/windows-stage-a-2026-10-10-dns-cache-options-shared-lpac-r3.json")).trim_start_matches('\u{feff}')).unwrap();
+        assert!(!report["error"].is_null());
+        for field in [
+            "actual_lpac",
+            "capabilities_verified",
+            "process_tree_stopped",
+            "profile_removed",
+            "fixture_acls_revoked",
+        ] {
+            assert_eq!(report[field], true, "{field}");
+        }
+        let checks = report["probe"]["checks"].as_array().unwrap();
+        for name in [
+            "DNS self-context comparison",
+            "descendant network: DNS self-context comparison",
+        ] {
+            let entries: Vec<_> = checks
+                .iter()
+                .filter(|check| check["name"] == name)
+                .collect();
+            assert_eq!(entries.len(), 1);
+            let context: crate::rpc_admission_probe::LsaSelfObservation =
+                serde_json::from_str(entries[0]["detail"].as_str().unwrap()).unwrap();
+            assert!(context.security_context_equal && context.restored && context.error.is_none());
+            let variants = context.dns_cache_only_variants.unwrap();
+            assert_eq!(variants.len(), 3);
+            for (entry, expected) in variants.iter().zip([
+                CacheOnlyVariant::Minimal,
+                CacheOnlyVariant::Fqdn,
+                CacheOnlyVariant::Isolated,
+            ]) {
+                assert_eq!(entry.variant, expected);
+                assert_eq!(entry.query.dispatch_status, 87);
+                assert_eq!(entry.query.completion_status, Some(87));
+                assert!(!entry.query.verified_denial(true, 0));
+            }
+        }
+        // Reconstruct the actual fixed leaf payload from the bound checks.
+        // The previous 4 KiB budget rejected this expanded diagnostic.
+        let leaf_checks: Vec<_> = checks
+            .iter()
+            .filter_map(|entry| {
+                let name = entry["name"]
+                    .as_str()?
+                    .strip_prefix("descendant network: ")?;
+                let mut entry = entry.clone();
+                entry["name"] = serde_json::json!(name);
+                Some(entry)
+            })
+            .collect();
+        let payload = serde_json::to_vec(&serde_json::json!({"version":1,
+            "fixture_id":Uuid::new_v4(),"user_sid":report["actual_source_user_sid"],
+            "report":{"checks":leaf_checks,"complete":true}}))
+        .unwrap();
+        assert!(payload.len() > 4096);
+        assert!(
+            payload.len()
+                <= crate::appcontainer_probe::FixedReportKind::LeafNetwork
+                    .specification()
+                    .1 as usize
+        );
+    }
+    #[test]
+    fn fixed_cache_variants_never_allow_wire_and_reject_non_owned_names() {
+        for variant in [
+            CacheOnlyVariant::Minimal,
+            CacheOnlyVariant::Fqdn,
+            CacheOnlyVariant::Isolated,
+        ] {
+            assert_ne!(variant.options() & DNS_QUERY_NO_WIRE_QUERY, 0);
+            assert_eq!(
+                variant.options()
+                    & (DNS_QUERY_WIRE_ONLY | DNS_QUERY_BYPASS_CACHE | DNS_QUERY_MULTICAST_ONLY),
+                0
+            );
+        }
+        assert_eq!(CacheOnlyVariant::Minimal.options(), DNS_QUERY_NO_WIRE_QUERY);
+        assert!(query_cache_only_variants(Uuid::nil()).is_err());
+    }
+
+    #[test]
+    fn ordinary_fixed_cache_option_matrix_is_admitted_without_records() {
+        let matrix = query_cache_only_variants(Uuid::new_v4()).unwrap();
+        assert_eq!(matrix.len(), 3);
+        for (entry, expected) in matrix.iter().zip([
+            CacheOnlyVariant::Minimal,
+            CacheOnlyVariant::Fqdn,
+            CacheOnlyVariant::Isolated,
+        ]) {
+            assert_eq!(entry.variant, expected);
+            assert_eq!(entry.query.completion_status, Some(9701), "{entry:?}");
+            assert!(!entry.query.records_returned && !entry.query.explicit_api_denial());
+        }
+    }
     #[test]
     fn all_dns_modes_share_bounded_slots_released_by_ownership() {
         let counter = AtomicUsize::new(0);

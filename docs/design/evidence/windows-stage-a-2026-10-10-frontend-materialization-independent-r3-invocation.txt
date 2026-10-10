@@ -1,0 +1,7 @@
+Exception: D:\Developer\ShellSpan\tests\windows-sandbox-account\scripts\Invoke-FixedFrontendMaterializationRecovery.ps1:39
+Line |
+  39 |  … ($diagnostic.diagnostic_error) { throw $diagnostic.diagnostic_error }
+     |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | publish flushed owned journal transition frontend-bundle-page-0297.json: Win32 5
+
+

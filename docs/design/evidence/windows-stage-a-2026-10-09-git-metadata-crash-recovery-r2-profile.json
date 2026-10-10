@@ -1,0 +1,108 @@
+﻿{
+    "version":  1,
+    "backend":  "account-profile-lifecycle-prototype-v1",
+    "production":  "unavailable",
+    "fixture_id":  "03b4f5ac-1d36-44c4-879f-2d0259e28f3e",
+    "account":  "SSPA03b4f5ac1d36",
+    "account_sid":  "S-1-5-21-4017028701-367916445-1230427694-1142",
+    "filter_keys":  [
+                        "5159bae7-542e-47fb-9571-93f0f79407c8",
+                        "4f2559db-7ada-4d06-a1bb-8ebbd2cc6d5a",
+                        "e84fd302-1c14-4025-89f8-263f07d6ebd4",
+                        "8e11553e-ed07-4e19-b6bc-dfedd7d7577c"
+                    ],
+    "ancestor_metadata_intent":  {
+                                     "version":  1,
+                                     "fixture_id":  "03b4f5ac-1d36-44c4-879f-2d0259e28f3e",
+                                     "package_sid":  "S-1-15-2-3868140980-559377854-3013780324-2554468305-3294356831-3581367919-3079977452",
+                                     "access_mask":  1048704,
+                                     "inheritance_flags":  0,
+                                     "objects":  [
+                                                     {
+                                                         "path":  "C:\\",
+                                                         "volume":  2523053325,
+                                                         "file_id":  1407374883553285,
+                                                         "original_dacl_sha256":  "ad2948b5b480bb5b5b8087f03033fee2f894b6a311f5869c28ab44ed0137eac8"
+                                                     },
+                                                     {
+                                                         "path":  "C:\\ProgramData",
+                                                         "volume":  2523053325,
+                                                         "file_id":  2251799814625149,
+                                                         "original_dacl_sha256":  "faccfa03b7dd7fb897e1ca60de6fe136180b3d1ed0e886bff0a4c393c26240ec"
+                                                     }
+                                                 ],
+                                     "states":  [
+                                                    "retired",
+                                                    "retired"
+                                                ]
+                                 },
+    "ancestor_checkpoint_crash":  {
+                                      "process_id":  16208,
+                                      "creation_time":  134360345822683570
+                                  },
+    "package_network_intent":  null,
+    "package_filters_removed":  false,
+    "rpc_network_intent":  null,
+    "rpc_filter_removed":  false,
+    "rpc_trace_intent":  null,
+    "rpc_trace_removed":  false,
+    "rpc_trace_recovery_stopped":  false,
+    "profile_absent_before_load":  true,
+    "profile_registry_security_verified":  true,
+    "planned_private_station":  "SSPA-03b4f5ac1d3644c4879f2d0259e28f3e",
+    "planned_package_sid":  "S-1-15-2-3868140980-559377854-3013780324-2554468305-3294356831-3581367919-3079977452",
+    "private_desktop_verified":  true,
+    "duplicate_station_rejected":  true,
+    "private_station_removed":  false,
+    "profile":  {
+                    "path":  "C:\\Users\\SSPA03b4f5ac1d36",
+                    "volume_serial":  2523053325,
+                    "file_index":  9851624185651272
+                },
+    "profile_unloaded":  false,
+    "profile_removed":  false,
+    "account_removed":  false,
+    "filters_removed":  false,
+    "non_elevated_account_token":  true,
+    "state":  "exact UUID recovery incomplete; retain protected receipt and offline slot debt",
+    "error":  null,
+    "cleanup_debt":  [
+                         "owned hive remains after profile API reacquisition and unload; retain debt"
+                     ],
+    "controller_interruption_checkpoint":  false,
+    "recovery_executed":  true,
+    "account_lpac_started":  true,
+    "account_lpac_cleanup_verified":  false,
+    "account_lpac_verified":  false,
+    "controller_receiver_counts":  null,
+    "account_lpac_outer_job_total":  null,
+    "account_lpac_bootstrap_exit":  null,
+    "account_lpac_outer_tree_stopped":  false,
+    "independent_bootstrap_recovery_observation":  null,
+    "independent_bootstrap_files_retired":  false,
+    "account_lpac_diagnostic_report":  null,
+    "profile_residual_recycled":  false,
+    "account_lpac_admission_only":  false,
+    "planned_private_namespace":  "\\Sessions\\0\\AppContainerNamedObjects\\S-1-15-2-3868140980-559377854-3013780324-2554468305-3294356831-3581367919-3079977452",
+    "private_namespace_verified":  false,
+    "private_namespace_removed":  false,
+    "namespace_retirement_observation":  null,
+    "controller_admission_report":  null,
+    "controller_workload_requested":  true,
+    "controller_workload_planned_root":  "C:\\ProgramData\\ShellSpan-AC-03b4f5ac1d3644c4879f2d0259e28f3e",
+    "controller_workload_fixture":  {
+                                        "path":  "C:\\ProgramData\\ShellSpan-AC-03b4f5ac1d3644c4879f2d0259e28f3e",
+                                        "volume_serial":  2523053325,
+                                        "file_index":  16044073673285003
+                                    },
+    "controller_workload_retired":  false,
+    "controller_workload_files_retired":  false,
+    "controller_lifecycle":  "normal",
+    "controller_tool":  "git_metadata_checkpoint_crash",
+    "credential_reference":  "ShellSpan/owned-account/v1/03b4f5ac-1d36-44c4-879f-2d0259e28f3e/S-1-5-21-4017028701-367916445-1230427694-1142",
+    "credential_reference_verified":  true,
+    "credential_removed":  false,
+    "profile_recovery_api_loaded":  true,
+    "profile_recovery_api_unloaded":  true,
+    "recovery_logon_pending":  false
+}
