@@ -121,7 +121,7 @@ macOS 受限本地 Direct 和首次固定预检使用同一应用二进制的 `-
 
 ## 工作台恢复门禁
 
-`agent_runtime_get_session` 可在 snapshot 中返回 `recoveryRequired: true`：持久检查点仍需处理，但当前 Runtime 没有该会话的 resident driver。这个瞬态展示字段不写入事件、资源授权或幂等提交回执；缺失时不视为新的执行授权。正常活动命令有 resident driver，不因尚未产生持久工具结果而显示重启恢复操作。
+`agent_runtime_get_session` 可在 snapshot 中返回 `recoveryRequired: true`：原生执行／已授权未派发／待审批检查点仍需处理，但当前 Runtime 没有该会话的 resident driver。这个瞬态展示字段不写入事件、资源授权或幂等提交回执；缺失时不视为新的执行授权。正常活动命令有 resident driver，不因尚未产生持久工具结果而显示重启恢复操作。纯模型请求或已有持久工具结果不进入该原生资源门禁，保留原有继续方式。
 
 工作台显示恢复 Alert，锁住发送、停止和旧审批操作。用户通过 `agent_runtime_reconcile_direct_resources` 核对受保护托管及签名终态；`uncertain > 0` 或 IPC 失败时继续锁住。签名清理仅解除资源债务，不确认命令副作用，也不复活旧执行授权。用户再次显式核对清理后可以结束中断回合并新建会话；新的命令仍走独立操作审批。历史 unknown 无可信托管／回执时仍保留债务，不按 PID、名称或文件副作用清理。
 

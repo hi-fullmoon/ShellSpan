@@ -179,7 +179,7 @@ SSH fixture 的 profileId 和 keyId 现在都由本轮 UUID 生成，只读凭�
 
 工作期间 HEAD 被其他操作更新，已保留新修订及终端弹框等无关修改；本任务工具没有执行 commit、tag 或推送。
 
-### 当前仍待完成的范围
+### 前次验收的未完成范围（最新结果见下节）
 
 - 实际工作台的完整 unknown／资源恢复门禁链，不能用上面的历史重读替代同状态目录及可信资源归属恢复。
 - fleet／子会话活动后台资源的取消、重绑及过期审批组合；当前原生命令证明均为 foreground，远端活动撤销为独立主会话。
@@ -190,3 +190,33 @@ SSH fixture 的 profileId 和 keyId 现在都由本轮 UUID 生成，只读凭�
 阶段 2 整体保持待完成，阶段 3 门禁不放行。原先用户继续使用的窗口不关闭，保留的普通读取 fixture 文件只用于本轮输入与记录，不恢复授权。
 
 最终同修订子会话复验为 `.phase4-acceptance/stage2-child-native-final-2026-10-09/report.json`：5 项检查／实际 marker true，3 次实际请求、3 session、PTY 零写入、退出 0、Direct 债务 0；源码、二进制及用户 known_hosts 未变化。没有额外工具调用、elevated 或 boundTerminal 变通。交付汇总 `.phase4-acceptance/stage2-delivery-summary-2026-10-09.json` 记录各确切报告 SHA-256 和当前修订，核对实时 UI 验收对应的六个生产源码哈希仍与当前文件一致，actualUiProductionHashesMatchNow=true；后续 debug 验收入口的修订与生产行为证据分开记录。最后前端构建、全仓 fmt、includes、AI styles、diff check 通过，既有构建警告保留。本汇总仍为 pending，不清除上述缺口或历史未确认状态。
+
+## 2026-10-09 完整工作台恢复与活动资源补验
+
+当前补充证据覆盖前文仍待完成矩阵中的本地完整 unknown／资源恢复，以及子 Agent／fleet 活动后台取消与新会话绑定组合。其他目标、连接代际、账户及历史未确认资源的边界继续保留，阶段 3 不放行。
+
+### 同状态目录的完整 unknown／资源恢复
+
+`.phase4-acceptance/stage2-recovery-workbench-final-2026-10-09/recovery-evidence-final.json` 的 11 项实测检查通过。自有 MiniMax-M3 工作台实际请求并显式批准 `printf started > recovery-started; sleep 120; printf ended > recovery-ended`；确认派发 journal 和 `started` 效果后，仅终止本次父进程仍持有的 App Child。退出码 -9，随后在同一 fixture／owned-project／Direct 状态数据库重启；seed 与 reopen 使用相同原生二进制哈希。没有复制历史日志、数据库、凭据或资源来代替重启。
+
+实际 controller 显示恢复 Alert，旧审批操作和发送／停止被锁住；公共审批 IPC 返回没有 resident driver，旧会话授权为 none，活动进程为 0。这个拒绝原因直接记录为 `rejectedWithoutResidentDriver=true`；没有将审批 TTL 已过期的观察描述为“到期前拒绝”。原 `recovery-started` 仍为单次内容，`recovery-ended` 未出现，旧命令没有重放。
+
+先仅暂存本次所属控制器的精确签名回执，实际核对返回 uncertain=1，恢复操作继续禁用。还原同一回执后通过受保护托管和 HMAC 终态核验，resolved=1、uncertain=0；Direct 债务和托管行均为 0。用户操作在最终动作前重新核对回执，然后结束中断回合并新建会话；`printf fresh > recovery-fresh` 在新的独立审批前 absent，显式批准后内容为 fresh，原生结果 direct／macos-seatbelt、exitCode=0、terminationConfirmed=true。清理不被用来声明旧命令完整执行，也不迁移旧授权。
+
+本轮修复包括：公共 snapshot 的瞬态 `recoveryRequired` 区分冷恢复和真实活动 driver；工作台只在该状态显示恢复区域，并将旧活动过程显示为未完成；清理后重新探测能力，避免沿用 unavailable 摘要。恢复 UI 沿用共享 Alert／Button，双语实看，实际窗口为 620×680。动态缩窄调用未获 debug App 的窗口权限，未计为窄窗口通过；没有扩大生产权限。截图、AX、原始日志、实际 journal 和白名单资源报告均保留。首次自有 fixture 的完整通过证据也保留在 `stage2-recovery-workbench-2026-10-09/recovery-evidence-r1.json`。
+
+### 子 Agent／fleet 活动后台取消与新会话绑定
+
+`.phase4-acceptance/stage2-activity-workbench-2026-10-09/activity-evidence.json` 的 15 项公共 IPC 实测检查通过，报告独立核对真实模型 journal、后台 running 结果、cancelled 终态和精确 marker。Operator 子会话和 fleet Operator 分别实际批准一条自有 `printf started; sleep 90; printf ended` 后台命令；活动期间旧目录改写及策略变更被拒绝。取消子会话／abort fleet 后活动进程为 0，Direct 债务与托管行均为 0，精确 started 文件匹配、ended 文件 absent。
+
+已有项目目录不可改写。组合中的“重绑”通过显式创建新会话并选择新目录完成；新会话没有迁移旧资源授权，旧父／子目录保持原值。fleet 在 Operator 资源活动期间被 abort，实际观察 Explorer 和 Operator；没有把此证明扩展为四角色完成或业务完成。
+
+验收发现同 ID 目标的全局查询会取到其他历史会话的目录／label。派生现在优先使用当前父会话冻结的目标与 target scope，原权限收窄检查继续保留。另修复 cancelCascade 的 detached 子会话仍显示 running 的投影，实际取消日志驱动的回归确认显示 cancelled。验收代码未替换模型、IPC、资源控制器或时钟。
+
+### 当前质量与长时段边界
+
+全量前端 2472 passed、4 skipped，日志 `stage2-recovery-frontend-final-2026-10-09.log`；全量 Rust 1165 passed、0 failed、68 ignored，另 5 集成 passed，日志 `stage2-recovery-rust-full-final-2026-10-09.log`。新增真实记录回归需分别指定 recovery 与 activity fixture；缺少实际记录时保持 skip／ignore，不构造替代事件。当前前端／原生构建和格式检查通过，已有构建警告保留。源码、证据与后续用户自行提交的 HEAD 分别记录，本任务工具没有创建 commit、tag 或推送。
+
+普通文件 `/private/tmp/shellspan-stage2-hour-eDcGLJ/read-input.txt` 的真实 session 授权在 20:15:00 签发，原截止时间为 21:15:00（Asia/Shanghai）。原 App 保持运行，中间只读核对仍 active，截止时间未续期。截止时间已经过去，但 Mac 再次锁屏，尚不能读取原 App 的实际到期 snapshot 或完成新资源审批，不能把时间经过记为通过。`.phase4-acceptance/stage2-recovery-workbench-2026-10-09/hour-acceptance-pending.json` 核对实际 session 审计寿命为 3599998 ms，post-deadline snapshot 仍为 null，passed=false。不能用 60 秒操作审批到期或单次调用 grant 的 TTL 替代。历史公共 IPC／预检超时资源继续 unconfirmed，不按 PID、名称、空 registry 或新报告补清理。
+
+最后将 `recoveryRequired` 限定为原生执行／已授权未派发／待审批检查点；纯模型请求保留原有继续方式。真实模型 journal 的冷前缀分别核对纯模型不进入资源门禁、unknown 原生执行进入门禁、取消终态不复活，两个记录回归通过。最新全量 Rust 仍为 1165 passed、68 ignored，另 5 集成 passed，日志 `stage2-native-gate-rust-full-2026-10-09.log`；记录回归日志为 `stage2-recorded-native-gate-final-2026-10-09.log`。该范围收窄后的额外真实模型复验保留在 `stage2-recovery-gate-final-2026-10-09/pending-result.json`：系统钥匙串读取等待，1 session、0 model request、0 native dispatch；Mac 锁屏阻止 UI 继续及正常退出，terminationConfirmed=false，未计通过。没有绕过系统授权、复制凭据或按 PID 补清理。前述两轮完整工作台通过证据与这个额外待完成尝试分开保留，阶段 3 继续关闭。

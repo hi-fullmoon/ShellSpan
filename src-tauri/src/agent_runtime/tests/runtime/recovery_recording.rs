@@ -34,6 +34,17 @@ fn recorded_workbench_crash_requires_recovery_without_a_resident_driver() {
     let sessions = storage.path().join("agent-runtime/sessions-v5");
     std::fs::create_dir_all(&sessions).unwrap();
     let file = sessions.join(format!("{session_id}.jsonl"));
+    let model_boundary = events
+        .iter()
+        .position(|event| matches!(event.payload, AgentSessionEventPayload::RequestStart { .. }))
+        .expect("actual model request required");
+    std::fs::write(&file, format!("{}\n", lines[..=model_boundary].join("\n"))).unwrap();
+    let model_only = AgentRuntimeBuilder::new().build();
+    model_only.configure(storage.path().to_path_buf()).unwrap();
+    let model_snapshot = model_only.session_for_client(session_id).unwrap();
+    assert!(!model_snapshot.recovery_required);
+    assert!(!model_snapshot.uncertain_native_effects);
+    drop(model_only);
     // Exact recorded prefix: no synthesized events, model responses or tool effects.
     std::fs::write(&file, format!("{}\n", lines[..=boundary].join("\n"))).unwrap();
     let runtime = AgentRuntimeBuilder::new().build();
@@ -61,7 +72,9 @@ fn recorded_workbench_crash_requires_recovery_without_a_resident_driver() {
 #[ignore = "requires the actual own multi-session Wry model recording"]
 fn recorded_delegation_uses_the_parent_binding_instead_of_another_session() {
     let evidence = std::path::PathBuf::from(
-        std::env::var("SHELLSPAN_STAGE2_RECOVERY_FIXTURE").expect("actual recording required"),
+        std::env::var("SHELLSPAN_STAGE2_ACTIVITY_FIXTURE")
+            .or_else(|_| std::env::var("SHELLSPAN_STAGE2_RECOVERY_FIXTURE"))
+            .expect("actual differently bound recording required"),
     );
     let storage = tempfile::tempdir().unwrap();
     let destination = storage.path().join("agent-runtime/sessions-v5");

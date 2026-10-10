@@ -1989,8 +1989,10 @@ impl AgentRuntime {
         let mut snapshot = self.sessions.snapshot(session_id)?;
         snapshot.recovery_required = self.agents.get(session_id)?.is_none()
             && matches!(
-                snapshot.recovery.status,
-                super::AgentRecoveryStatus::Required | super::AgentRecoveryStatus::Available
+                snapshot.recovery.kind,
+                super::AgentRecoveryCheckpointKind::ExecutionInFlight
+                    | super::AgentRecoveryCheckpointKind::AuthorizedBeforeExecute
+                    | super::AgentRecoveryCheckpointKind::WaitingApproval
             )
             && !snapshot.ended;
         Ok(snapshot)

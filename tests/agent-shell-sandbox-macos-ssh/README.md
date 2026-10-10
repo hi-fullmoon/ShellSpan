@@ -1,5 +1,17 @@
 # macOS 与 SSH 完善阶段 1
 
+## 完整工作台恢复与活动资源验收
+
+`launch_recovery_workbench.py --app-name "ShellSpan Recovery New" --output <新的忽略目录>` 保留新建 App 的实际 Child。先通过真实 controller 选择 `fixture/owned-project`、workspace 和请求批准；模型生成并显式批准固定 `printf started > recovery-started; sleep 120; printf ended > recovery-ended` 后，在输出根创建 `interrupt-owned-app` 请求文件。runner 再核对真实派发 journal、started 效果及 ended absent，仅终止自己的 Child，随后在同状态目录重启。未达到该边界时不强制中断。
+
+工作台显示恢复门禁，通过精确自有回执的暂存／还原实测 uncertain 阻止与签名清理确认。结束中断回合后选择新会话及目录，重新请求并显式批准 `printf fresh > recovery-fresh`。使用 `inspect_recovery_workbench.py --output <该目录> --report-name <新文件名>` 交叉核对实际 UI、journal、marker 和数据库计数；报告不覆盖旧文件，不导出 custody 或 grant proof。`--reopen-existing --app-name <新名称>` 仅用于同一已记录本地 fixture 的后续 debug 修订，不能用于认领历史资源。
+
+`sandbox-activity-native.ts` 的 `run(<本次自有项目>)` 在独立 Wry 的实际公共 IPC 上建立真实模型父／子 Agent／fleet。自有项目需要已有 `child-rebind`、`fleet-rebind` 子目录。只批准精确后台命令，活动时拒绝旧绑定改写／策略变更，取消后通过显式新会话选择新目录；既有目录不可改写。保存真实控制台 AX 为 `activity-final.ax.txt` 后，用 `inspect_activity_workbench.py --output <该目录>` 导出白名单终态报告。该入口在 fleet 活动时 abort，不声称四角色完成。
+
+记录回归使用 `SHELLSPAN_STAGE2_RECOVERY_FIXTURE=<真实恢复目录>` 和 `SHELLSPAN_STAGE2_ACTIVITY_FIXTURE=<真实不同绑定／活动目录>`。前端对应 `recorded-native-recovery.test.tsx`、`recorded-native-activity.test.tsx`；Rust 使用 `cargo test --manifest-path src-tauri/Cargo.toml recovery_recording -- --ignored`。两种前提分开提供；只有普通恢复记录不能代替不同绑定的委派记录。
+
+`recovery-diagnostics.ts` 的 `beginHour(<原 session ID>)` 仅只读核对实际 active grant，并按后端原 expiresAt 时间观察真实到期。需要让签发授权的原 App 持续运行整段一小时；重启后的 none、缩短 TTL 或调时均不计长时段通过。开发源码变更可能使 Wry 页面重载，重载后可重新只读观察同一截止时间，不续期或重发资源批准。所有历史超时资源继续待确认。
+
 ## 阶段 2 分项入口
 
 先读取当前阶段 1 完成决定和阶段 2 验收记录，生产 uncertain 门禁继续保留。启动本仓库 Vite（`127.0.0.1:1420`），构建当前原生 debug 二进制后，执行：
