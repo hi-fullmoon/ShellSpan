@@ -319,4 +319,22 @@ describe('NewSessionDialog', () => {
 
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it('keeps a definite dialog height and shrink chain so the command list can scroll', () => {
+    useProfileStore.setState({
+      profiles: [makeProfile('p1', 'Alpha', 'host1.io', 'user1')],
+    });
+
+    render(<NewSessionDialog open onClose={vi.fn()} onConnect={mockConnect} />);
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveClass('h-[76vh]', 'max-h-[76vh]', 'flex-col', 'overflow-hidden');
+
+    expect(dialog.querySelector('[data-slot="dialog-header"]')).toHaveClass('shrink-0');
+    expect(dialog.querySelector('[data-slot="dialog-footer"]')).toHaveClass('shrink-0');
+
+    const scrollArea = dialog.querySelector('[data-slot="scroll-area"]');
+    expect(scrollArea).toHaveClass('min-h-0', 'flex-1');
+    expect(scrollArea).not.toHaveClass('min-h-32');
+  });
 });

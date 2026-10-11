@@ -173,13 +173,13 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
-      <DialogContent className="top-[12vh] flex max-h-[76vh] w-[calc(100%-2rem)] max-w-2xl translate-y-0 flex-col gap-0 overflow-hidden p-0">
-        <DialogHeader className="px-4 pb-3 pt-4 pr-12">
+      <DialogContent className="top-[12vh] flex h-[76vh] max-h-[76vh] w-[calc(100%-2rem)] max-w-2xl translate-y-0 flex-col gap-0 overflow-hidden p-0">
+        <DialogHeader className="shrink-0 px-4 pb-3 pt-4 pr-12">
           <DialogTitle>{t('sftp.newConnectionMenu.title')}</DialogTitle>
           <DialogDescription>{t('sftp.newConnectionMenu.description')}</DialogDescription>
         </DialogHeader>
 
-        <div className="px-4 pb-4">
+        <div className="shrink-0 px-4 pb-4">
           <InputGroup className="h-10 has-[[data-slot=input-group-control]:focus-visible]:ring-1">
             <InputGroupInput
               type="search"
@@ -197,7 +197,7 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
         </div>
 
         <Separator />
-        <ScrollArea className="min-h-32 flex-1">
+        <ScrollArea className="min-h-0 flex-1">
           <div ref={listRef} className="flex flex-col gap-2 px-4 py-3">
             {hasResults ? (
               <>
@@ -283,7 +283,7 @@ export const SftpNewConnectionMenu: React.FC<SftpNewConnectionMenuProps> = ({
         </ScrollArea>
         <Separator />
 
-        <DialogFooter className="flex-row flex-wrap items-center justify-between gap-2 px-4 py-3 pt-3">
+        <DialogFooter className="shrink-0 flex-row flex-wrap items-center justify-between gap-2 px-4 py-3 pt-3">
           <Button
             type="button"
             variant="ghost"

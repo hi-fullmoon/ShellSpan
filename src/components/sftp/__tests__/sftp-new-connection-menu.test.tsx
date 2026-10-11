@@ -162,4 +162,26 @@ describe('SftpNewConnectionMenu', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onConnect).not.toHaveBeenCalled();
   });
+
+  it('keeps a definite dialog height and shrink chain so the profile list can scroll', () => {
+    useProfileStore.setState({ profiles: [profile] });
+
+    render(
+      <SftpNewConnectionMenu
+        open
+        onClose={vi.fn()}
+        onConnect={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveClass('h-[76vh]', 'max-h-[76vh]', 'flex-col', 'overflow-hidden');
+
+    expect(dialog.querySelector('[data-slot="dialog-header"]')).toHaveClass('shrink-0');
+    expect(dialog.querySelector('[data-slot="dialog-footer"]')).toHaveClass('shrink-0');
+
+    const scrollArea = dialog.querySelector('[data-slot="scroll-area"]');
+    expect(scrollArea).toHaveClass('min-h-0', 'flex-1');
+    expect(scrollArea).not.toHaveClass('min-h-32');
+  });
 });

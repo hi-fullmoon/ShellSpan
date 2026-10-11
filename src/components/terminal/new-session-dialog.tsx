@@ -239,13 +239,13 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
-      <DialogContent className="top-[12vh] flex max-h-[76vh] w-[calc(100%-2rem)] max-w-2xl translate-y-0 flex-col gap-0 overflow-hidden p-0">
-        <DialogHeader className="px-4 pb-3 pt-4 pr-12">
+      <DialogContent className="top-[12vh] flex h-[76vh] max-h-[76vh] w-[calc(100%-2rem)] max-w-2xl translate-y-0 flex-col gap-0 overflow-hidden p-0">
+        <DialogHeader className="shrink-0 px-4 pb-3 pt-4 pr-12">
           <DialogTitle>{t('terminal.newSession.title')}</DialogTitle>
           <DialogDescription>{t('terminal.newSession.description')}</DialogDescription>
         </DialogHeader>
 
-        <div className="px-4 pb-4">
+        <div className="shrink-0 px-4 pb-4">
           <InputGroup className="h-10 has-[[data-slot=input-group-control]:focus-visible]:ring-1">
             <InputGroupInput
               ref={searchInputRef}
@@ -264,7 +264,7 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
         </div>
 
         <Separator />
-        <ScrollArea className="min-h-32 flex-1">
+        <ScrollArea className="min-h-0 flex-1">
           <div id="new-session-command-list" ref={commandListRef} className="flex flex-col gap-2 px-4 py-3">
             {localCommand && (
               <Button
@@ -311,7 +311,7 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
         </ScrollArea>
         <Separator />
 
-        <DialogFooter className="flex-row flex-wrap items-center justify-between gap-2 px-4 py-3 pt-3">
+        <DialogFooter className="shrink-0 flex-row flex-wrap items-center justify-between gap-2 px-4 py-3 pt-3">
           <div className="flex items-center gap-1">
             <Button type="button" size="sm" onClick={handleCreateConnection}>
               <PlusIcon data-icon="inline-start" />
