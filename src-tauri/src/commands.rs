@@ -40,6 +40,11 @@ const LOCAL_OUTPUT_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const LOCAL_STARTUP_OUTPUT_BUFFER_LIMIT_BYTES: usize = 1_000_000;
 const LOCAL_READER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const LOCAL_SHELL_ENVIRONMENT_VARIABLE: &str = "SHELLSPAN_LOCAL_SHELL";
+/// How long the create_session command waits for the SSH worker's connect
+/// result. Must outlast the worker's full connect budget (every resolved TCP
+/// address plus the handshake and auth) so real connection errors win the race
+/// instead of surfacing as a broker-attachment timeout.
+pub(crate) const SSH_CONNECT_RESULT_WAIT: Duration = Duration::from_secs(30);
 
 enum LocalWorkerActivity {
     Command(Result<SessionCommand, crossbeam_channel::RecvError>),
@@ -380,7 +385,7 @@ async fn create_remote_terminal_session(
     );
 
     let connection_result = match tauri::async_runtime::spawn_blocking(move || {
-        connection_result_rx.recv_timeout(Duration::from_secs(10))
+        connection_result_rx.recv_timeout(SSH_CONNECT_RESULT_WAIT)
     })
     .await
     {

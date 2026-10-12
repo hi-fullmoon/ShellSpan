@@ -860,6 +860,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                     </div>
                     <Combobox
                       items={PROVIDER_PROFILE_IDS}
+                      itemToStringLabel={(profile) => t(`settings.ai.profileName.${profile}`)}
                       value={draft ? resolveProviderProfile(draft) : null}
                       onValueChange={(profile) => {
                         if (!profile || !draft) return;
@@ -879,7 +880,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                                 className="[&>svg]:size-4!"
                               >
                                 <ProfileIcon aria-hidden />
-                                <span>{profile}</span>
+                                <span>{t(`settings.ai.profileName.${profile}`)}</span>
                               </ComboboxItem>
                             );
                           }}

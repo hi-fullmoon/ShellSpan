@@ -6,7 +6,7 @@
         should_prepare_remote_integration, should_release_local_startup_output,
         visible_command_integration_presentation, wait_for_local_worker_activity,
         LocalWorkerActivity, LOCAL_OUTPUT_DRAIN_BUDGET, LOCAL_OUTPUT_QUEUE_CAPACITY,
-        LOCAL_OUTPUT_READY_TIMEOUT,
+        LOCAL_OUTPUT_READY_TIMEOUT, SSH_CONNECT_RESULT_WAIT,
     };
     use crate::models::{
         ManagedSession, SessionCommand, SessionCommandSender, SessionIdentity, SessionManager,
@@ -744,5 +744,18 @@
                 message: "connection lost".into(),
             })),
             ActivityPhase::Failed
+        );
+    }
+
+    #[test]
+    fn ssh_connect_result_wait_outlasts_full_tcp_connect_budget() {
+        use crate::connection::TCP_CONNECT_ATTEMPT_TIMEOUT;
+        // connect_tcp_stream tries every resolved address sequentially, so a
+        // dual-stack host can spend two full attempt timeouts before failing.
+        // The command wait must exceed that budget so the SSH worker reports
+        // the real connection error instead of the broker-attachment timeout.
+        assert!(
+            SSH_CONNECT_RESULT_WAIT > 2 * TCP_CONNECT_ATTEMPT_TIMEOUT,
+            "SSH_CONNECT_RESULT_WAIT must exceed the dual-stack TCP connect budget"
         );
     }

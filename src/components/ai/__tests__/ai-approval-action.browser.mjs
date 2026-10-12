@@ -37,6 +37,18 @@ try {
           await show(args.approval, args.locale);
         }, { entry, approval: { ...approval, ...changes }, locale });
         await show();
+        for (const dark of [false, true]) {
+          await page.evaluate(dark => document.documentElement.classList.toggle('dark', dark), dark);
+          assert.ok(await page.locator('span.text-app-warning[aria-hidden="true"]').evaluate(el => {
+            const probe = document.createElement('span');
+            probe.style.color = 'var(--app-warning)';
+            el.append(probe);
+            const matches = getComputedStyle(el).color === getComputedStyle(probe).color;
+            probe.remove();
+            return matches;
+          }), 'Approval icon must use the theme warning color');
+        }
+        await page.evaluate(() => document.documentElement.classList.remove('dark'));
         const action = page.locator('[data-slot="ai-approval-action"]');
         await page.getByText('列出目录内容', { exact: true }).waitFor();
         assert.ok(await action.getByText('/apps/for-you', { exact: true }).isVisible());

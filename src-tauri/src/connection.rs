@@ -26,6 +26,10 @@ const SSH_TCP_KEEPALIVE_INTERVAL_SECS: u64 = 15;
 const SSH_SESSION_IO_TIMEOUT_MS: u32 = 15_000;
 const SSH_TRANSFER_IO_TIMEOUT_MS: u32 = 120_000;
 const JUMP_BRIDGE_RETRY_INTERVAL: Duration = Duration::from_millis(10);
+/// Per-address TCP connect budget when no scoped connection deadline applies.
+/// Every resolved address is attempted sequentially, so dual-stack hosts can
+/// spend up to twice this before connect fails.
+pub(crate) const TCP_CONNECT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(12);
 pub(crate) const SSH_SESSION_KEEPALIVE_INTERVAL_SECS: u32 = 30;
 
 pub(crate) struct TransferTimeoutGuard<'a> {
@@ -378,7 +382,7 @@ pub(crate) fn connect_tcp_stream(host: &str, port: u16) -> Result<TcpStream, Str
         let timeout = SCOPED_CONNECTION_IO.with(|slot| {
             slot.borrow()
                 .as_ref()
-                .map_or(Duration::from_secs(12), |context| {
+                .map_or(TCP_CONNECT_ATTEMPT_TIMEOUT, |context| {
                     context
                         .deadline
                         .saturating_duration_since(std::time::Instant::now())

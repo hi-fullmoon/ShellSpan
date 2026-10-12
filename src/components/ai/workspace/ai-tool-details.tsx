@@ -87,7 +87,7 @@ export function AiToolDetails({
                     {t(`ai.workspace.tool.${node.state}`)}
                   </Badge>
                   {node.durationMs !== null && (
-                    <small className="ai-detail-duration inline-flex shrink-0 items-center gap-[5px]"><Clock3Icon aria-hidden="true" />{node.durationMs} ms</small>
+                    <small className="ai-detail-duration inline-flex shrink-0 items-center gap-1"><Clock3Icon aria-hidden="true" />{node.durationMs} ms</small>
                   )}
                 </div>
                 <p className="m-0 [overflow-wrap:anywhere]">{node.summary || node.name}</p>

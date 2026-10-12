@@ -496,7 +496,7 @@ export function AiComposerSeat({
               onBlur={() => { completion.editorProps.onBlur(); skillCompletion.editorProps.onBlur(); }}
               data-testid="ai-workspace-composer"
               className={cn(
-                'mr-1 w-[calc(100%-4px)] shrink-0 resize-none overflow-y-auto pt-1 pr-2 pb-0 pl-4 [field-sizing:content] max-h-[min(336px,42vh)]',
+                'w-full shrink-0 overflow-y-auto pt-1 pr-3 pb-0 pl-4 [field-sizing:content] max-h-[min(336px,42vh)]',
                 phase === 'hero' ? 'min-h-13' : 'min-h-7',
               )}
               aria-describedby={unavailableReason ? availabilityHintId : undefined}

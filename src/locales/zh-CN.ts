@@ -1,6 +1,22 @@
 import petdexMessages from './petdex-messages.json';
 
 export default {
+  'settings.ai.profileName.openai': 'OpenAI',
+  'settings.ai.profileName.anthropic': 'Anthropic',
+  'settings.ai.profileName.ollama': 'Ollama',
+  'settings.ai.profileName.deepseek': 'DeepSeek',
+  'settings.ai.profileName.minimax': 'MiniMax',
+  'settings.ai.profileName.qwen': '通义千问',
+  'settings.ai.profileName.glm': '智谱 GLM',
+  'settings.ai.profileName.kimi': 'Kimi',
+  'settings.ai.profileName.openrouter': 'OpenRouter',
+  'settings.ai.profileName.generic': '通用兼容服务',
+  'ai.workspace.tool.inputLabel': '输入',
+  'ai.workspace.tool.outputLabel': '输出',
+  'ai.workspace.tool.omittedLines': '… 省略 {count} 行 …',
+  'ai.workspace.tool.omittedResults': '… 省略 {count} 条结果 …',
+  'ai.workspace.images.fallbackAlt': '图片',
+  'ai.workspace.localTarget': '本地',
   'settings.experimental.petdex.messages.title': '消息气泡',
   'settings.experimental.petdex.messages.configuration': '配置同步',
   'settings.experimental.petdex.messages.configurationFailed': '最近配置未同步，下次更改偏好时重试；应用语言保持不变。',

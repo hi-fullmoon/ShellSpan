@@ -195,7 +195,7 @@ export function AiApprovalPanel({
     >
       <CardHeader className="ai-approval-panel-header shrink-0 gap-2 px-4 py-3 has-data-[slot=card-action]:grid-cols-1 @min-[480px]/ai-workspace:has-data-[slot=card-action]:grid-cols-[minmax(0,1fr)_auto]">
         <div className="flex min-w-0 items-start gap-2">
-          <span className="flex size-7 shrink-0 items-center justify-center text-warning" aria-hidden="true">
+          <span className="flex size-7 shrink-0 items-center justify-center text-app-warning" aria-hidden="true">
             <ShieldAlertIcon />
           </span>
           <div className="flex min-w-0 flex-col gap-0.5">

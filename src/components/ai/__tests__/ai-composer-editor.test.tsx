@@ -12,6 +12,11 @@ beforeEach(async () => { useAppStore.setState({ locale: 'en-US' }); await initI1
 afterEach(cleanup);
 
 describe('composer layout', () => {
+  it('uses a full-width scroll layer with content padding', () => {
+    render(<AiComposerSeat phase="active" status="idle" />);
+    expect(screen.getByRole('textbox')).toHaveClass('w-full', 'overflow-y-auto', 'pl-4', 'pr-3');
+    expect(screen.getByRole('textbox')).not.toHaveClass('mr-1', 'resize-none', 'w-[calc(100%-4px)]');
+  });
   it('keeps image drafts flush with the top edge in every phase', () => {
     const imageControls = <div>image preview</div>;
     const { container, rerender } = render(

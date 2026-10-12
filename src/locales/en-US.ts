@@ -1,6 +1,22 @@
 import petdexMessages from './petdex-messages.json';
 
 export default {
+  'settings.ai.profileName.openai': 'OpenAI',
+  'settings.ai.profileName.anthropic': 'Anthropic',
+  'settings.ai.profileName.ollama': 'Ollama',
+  'settings.ai.profileName.deepseek': 'DeepSeek',
+  'settings.ai.profileName.minimax': 'MiniMax',
+  'settings.ai.profileName.qwen': 'Qwen',
+  'settings.ai.profileName.glm': 'GLM',
+  'settings.ai.profileName.kimi': 'Kimi',
+  'settings.ai.profileName.openrouter': 'OpenRouter',
+  'settings.ai.profileName.generic': 'Generic compatible service',
+  'ai.workspace.tool.inputLabel': 'IN',
+  'ai.workspace.tool.outputLabel': 'OUT',
+  'ai.workspace.tool.omittedLines': '… {count} lines omitted …',
+  'ai.workspace.tool.omittedResults': '… {count} results omitted …',
+  'ai.workspace.images.fallbackAlt': 'image',
+  'ai.workspace.localTarget': 'local',
   'settings.experimental.petdex.messages.title': 'Message bubbles',
   'settings.experimental.petdex.messages.configuration': 'Configuration sync',
   'settings.experimental.petdex.messages.configurationFailed': 'Latest configuration was not synchronized. The next preference change will retry; the app language is unchanged.',

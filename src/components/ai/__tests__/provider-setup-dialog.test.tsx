@@ -113,22 +113,22 @@ describe('ProviderSetupDialog', () => {
     const options = await screen.findAllByRole('option');
 
     expect(options.map(option => option.textContent)).toEqual([
-      'openai',
-      'anthropic',
-      'ollama',
-      'deepseek',
-      'minimax',
-      'qwen',
-      'glm',
-      'kimi',
-      'openrouter',
-      'generic',
+      'settings.ai.profileName.openai',
+      'settings.ai.profileName.anthropic',
+      'settings.ai.profileName.ollama',
+      'settings.ai.profileName.deepseek',
+      'settings.ai.profileName.minimax',
+      'settings.ai.profileName.qwen',
+      'settings.ai.profileName.glm',
+      'settings.ai.profileName.kimi',
+      'settings.ai.profileName.openrouter',
+      'settings.ai.profileName.generic',
     ]);
     options.forEach((option) => {
       expect(option.querySelector('svg')).toBeInTheDocument();
     });
     for (const profile of ['anthropic', 'qwen', 'glm', 'openrouter']) {
-      const option = options.find(candidate => candidate.textContent === profile);
+      const option = options.find(candidate => candidate.textContent === `settings.ai.profileName.${profile}`);
       expect(option?.querySelector('svg')).not.toHaveAttribute('data-lucide', 'server');
       expect(option?.querySelector('svg path')).toHaveAttribute('d');
     }
@@ -944,7 +944,7 @@ describe('ProviderSetupDialog', () => {
     render(<ProviderSetupDialog open provider={provider} onOpenChange={vi.fn()} onSaved={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: /settings.ai.advancedSettings/ }));
     await user.click(screen.getByRole('combobox', { name: 'settings.ai.profile' }));
-    await user.click(await screen.findByRole('option', { name: 'qwen' }));
+    await user.click(await screen.findByRole('option', { name: 'settings.ai.profileName.qwen' }));
     await user.click(screen.getByRole('button', { name: 'common.save' }));
 
     await waitFor(() => expect(routeSave).toHaveBeenCalledTimes(1));

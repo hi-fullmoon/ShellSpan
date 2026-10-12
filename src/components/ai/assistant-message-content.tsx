@@ -222,7 +222,9 @@ export const MarkdownContent = React.memo(function MarkdownContent({
   /** Previously displayed source moved here by a streaming chunk split. */
   initialSource?: string;
 }): React.JSX.Element {
+  const { t } = useI18n();
   const previousSource = useRef(initialSource);
+  const fallbackImageAlt = t('ai.workspace.images.fallbackAlt');
   const revealFrom = children.startsWith(previousSource.current) ? previousSource.current.length : children.length;
   useLayoutEffect(() => { previousSource.current = children; }, [children]);
   // Stable element types preserve code/table DOM (focus and horizontal scroll)
@@ -239,7 +241,7 @@ export const MarkdownContent = React.memo(function MarkdownContent({
       <MarkdownInlineCode className={className}>{codeChildren}</MarkdownInlineCode>
     ),
     hr: () => <Separator />,
-    img: ({ alt }) => <span className="ai-markdown-image-alt">[{alt || 'image'}]</span>,
+    img: ({ alt }) => <span className="ai-markdown-image-alt">[{alt || fallbackImageAlt}]</span>,
     pre: ({ children: codeChildren }) => (
       <MarkdownCodeBlock
         copiedLabel={copiedLabel}
@@ -254,7 +256,7 @@ export const MarkdownContent = React.memo(function MarkdownContent({
         <table>{tableChildren}</table>
       </div>
     ),
-  }), [copiedLabel, copyLabel, showCodeBlockActions]);
+  }), [copiedLabel, copyLabel, showCodeBlockActions, fallbackImageAlt]);
   return (
     <div className="ai-assistant-markdown min-w-0 max-w-full [overflow-wrap:anywhere]">
       <StreamingTextBoundaryContext.Provider value={revealFrom}>

@@ -95,6 +95,8 @@ describe('AI conversation record management', () => {
     render(<AiSessionRecordsDialog onOpenChange={vi.fn()} />);
 
     const title = await screen.findByText('Old terminal conversation');
+    expect(screen.getByRole('dialog')).toHaveClass('border-app-border', 'bg-app-surface', 'sm:rounded-lg', 'overflow-hidden');
+    expect(screen.getByRole('dialog')).not.toHaveClass('border-app-border/70', 'bg-card', 'sm:rounded-xl');
     const search = screen.getByRole('searchbox');
     expect(search).toHaveClass('h-8');
     expect(search.parentElement?.parentElement).toHaveClass('py-2');

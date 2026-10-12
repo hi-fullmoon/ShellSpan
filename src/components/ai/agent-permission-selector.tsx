@@ -77,8 +77,8 @@ function terminalIdentity(session: TerminalSession): string {
   ]);
 }
 
-function terminalLabel(session: TerminalSession): string {
-  if (session.host === 'local' && session.port === 0) return `${session.title} (local)`;
+function terminalLabel(session: TerminalSession, localLabel: string): string {
+  if (session.host === 'local' && session.port === 0) return `${session.title} (${localLabel})`;
   return `${session.title} (${session.username}@${session.host}:${session.port})`;
 }
 
@@ -142,7 +142,7 @@ export function AgentPermissionSelector({
       setConfirmationTarget({
         sessionId,
         identity: terminalIdentity(terminal),
-        label: terminalLabel(terminal),
+        label: terminalLabel(terminal, t('ai.workspace.localTarget')),
       });
       setFullAccessDialogOpen(true);
       return;

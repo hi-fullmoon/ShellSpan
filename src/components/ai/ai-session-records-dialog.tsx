@@ -216,7 +216,7 @@ export function AiSessionRecordsDialog({ onOpenChange }: {
 
   return (
     <Dialog open onOpenChange={(open) => { if (!deletingAll) onOpenChange(open); }}>
-      <DialogContent className="flex h-[min(48rem,calc(100vh-2rem))] w-[min(64rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden border-app-border/70 bg-card p-0 [&_[data-slot=dialog-close]]:size-8 sm:rounded-xl">
+      <DialogContent className="flex h-[min(48rem,calc(100vh-2rem))] w-[min(64rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden border-app-border bg-app-surface p-0 [&_[data-slot=dialog-close]]:size-8">
         <CompactDialogHeader
           title={t('settings.ai.records.title')}
           description={t('settings.ai.records.description')}

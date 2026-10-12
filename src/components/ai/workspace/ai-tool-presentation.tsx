@@ -329,7 +329,7 @@ function ReadSurface({ node, compact, showCopyActions }: { node: ToolNode; compa
   const output = outputText(node);
   const lines = bounded(output).split('\n');
   const shown = compact && lines.length > 8
-    ? [...lines.slice(0, 4), `… ${lines.length - 8} lines …`, ...lines.slice(-4)]
+    ? [...lines.slice(0, 4), t('ai.workspace.tool.omittedLines', { count: lines.length - 8 }), ...lines.slice(-4)]
     : lines;
   return (
     <div className="ai-read-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="read">
@@ -350,11 +350,12 @@ function ReadSurface({ node, compact, showCopyActions }: { node: ToolNode; compa
 }
 
 function SearchSurface({ node, compact }: { node: ToolNode; compact: boolean }) {
+  const { t } = useI18n();
   const input = asRecord(node.input);
   const query = firstString(input, ['query', 'pattern']) ?? node.summary ?? node.name;
   const lines = bounded(outputText(node)).split('\n').filter(Boolean);
   const shown = compact && lines.length > 8
-    ? [...lines.slice(0, 4), `… ${lines.length - 8} results …`, ...lines.slice(-4)]
+    ? [...lines.slice(0, 4), t('ai.workspace.tool.omittedResults', { count: lines.length - 8 }), ...lines.slice(-4)]
     : lines;
   return (
     <div className="ai-search-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="search">
@@ -645,6 +646,7 @@ function DiffCode({ text, path }: { text: string; path: string }) {
 }
 
 function CodeSurface({ node, showCopyActions }: { node: ToolNode; showCopyActions: boolean }) {
+  const { t } = useI18n();
   const input = asRecord(node.input);
   const code = firstString(input, ['code', 'program', 'script']) ?? formatToolValue(node.input);
   const language = firstString(input, ['language', 'lang']) ?? 'code';
@@ -657,7 +659,7 @@ function CodeSurface({ node, showCopyActions }: { node: ToolNode; showCopyAction
       <pre className="ai-code-block-pre m-0 max-w-full overflow-x-auto p-4 whitespace-pre-wrap break-all"><code>{bounded(code)}</code></pre>
       {node.output !== null && (
         <div className="ai-io-section grid max-h-[150px] grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-3.5 overflow-auto px-4 py-3">
-          <span className="ai-io-label">OUT</span>
+          <span className="ai-io-label">{t('ai.workspace.tool.outputLabel')}</span>
           <pre className="ai-io-text m-0 min-w-0 max-w-full whitespace-pre-wrap [overflow-wrap:anywhere]">{bounded(outputText(node))}</pre>
         </div>
       )}
@@ -666,20 +668,21 @@ function CodeSurface({ node, showCopyActions }: { node: ToolNode; showCopyAction
 }
 
 function IoSurface({ node, compact }: { node: ToolNode; compact: boolean }) {
+  const { t } = useI18n();
   const input = bounded(formatToolValue(node.input));
   const output = bounded(outputText(node));
   return (
     <div className="ai-io-card my-1 ml-1 flex min-w-0 max-w-[calc(100%-4px)] flex-col overflow-hidden" data-ai-tool-view="generic">
       {input && (
         <div className="ai-io-section grid max-h-[150px] grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-3.5 overflow-auto px-4 py-3">
-          <span className="ai-io-label">IN</span>
+          <span className="ai-io-label">{t('ai.workspace.tool.inputLabel')}</span>
           <pre className="ai-io-text m-0 min-w-0 max-w-full whitespace-pre-wrap [overflow-wrap:anywhere]">{compact ? input.slice(0, 8_192) : input}</pre>
         </div>
       )}
       {input && output && <span className="ai-io-divider" aria-hidden="true" />}
       {output && (
         <div className="ai-io-section grid max-h-[150px] grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-3.5 overflow-auto px-4 py-3">
-          <span className="ai-io-label">OUT</span>
+          <span className="ai-io-label">{t('ai.workspace.tool.outputLabel')}</span>
           <pre className="ai-io-text m-0 min-w-0 max-w-full whitespace-pre-wrap [overflow-wrap:anywhere]" data-error={node.state === 'failed' || undefined}>
             {compact ? output.slice(0, 8_192) : output}
           </pre>
