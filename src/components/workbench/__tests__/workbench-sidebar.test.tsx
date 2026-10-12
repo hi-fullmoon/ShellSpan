@@ -239,7 +239,13 @@ describe('WorkbenchSidebar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open user menu' }));
     // The identity row itself is the profile entry (GitHub-style), announced
     // via the screen-reader-only "Edit profile" hint.
-    fireEvent.click(screen.getByRole('menuitem', { name: /Edit profile/ }));
+    const profileItem = screen.getByRole('menuitem', { name: /Edit profile/ });
+    expect(profileItem.querySelector('svg.lucide-pencil')).toHaveClass(
+      'opacity-0',
+      'group-hover/dropdown-menu-item:opacity-100',
+      'group-focus-visible/dropdown-menu-item:opacity-100',
+    );
+    fireEvent.click(profileItem);
 
     const dialog = await screen.findByRole('dialog');
     expect(dialog).toHaveTextContent('Edit profile');

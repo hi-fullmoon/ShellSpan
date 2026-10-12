@@ -201,7 +201,7 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
                 <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
                 <span className="truncate text-xs font-normal text-muted-foreground">{t('workbench.userMenu.localProfile')}</span>
               </span>
-              <PencilIcon className="size-3 shrink-0 text-muted-foreground/60" aria-hidden />
+              <PencilIcon className="size-3 shrink-0 text-muted-foreground/60 opacity-0 group-hover/dropdown-menu-item:opacity-100 group-focus-visible/dropdown-menu-item:opacity-100" aria-hidden />
               <span className="sr-only">{t('workbench.userMenu.editProfile')}</span>
             </DropdownMenuItem>
           </DropdownMenuGroup>
