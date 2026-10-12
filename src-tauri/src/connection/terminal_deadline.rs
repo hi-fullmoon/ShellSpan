@@ -135,6 +135,41 @@ pub(crate) fn failure_reason() -> Option<String> {
     active().and_then(|attempt| attempt.check().err())
 }
 
+pub(super) fn handshake(session: &mut Session) -> Result<(), String> {
+    let Some(attempt) = active() else {
+        return session.handshake().map_err(|error| error.to_string());
+    };
+    let blocking = session.is_blocking();
+    let deadline = if session.timeout() == 0 {
+        attempt.deadline
+    } else {
+        attempt
+            .deadline
+            .min(Instant::now() + Duration::from_millis(u64::from(session.timeout())))
+    };
+    // Winsock shutdown does not reliably wake libssh2's blocking wait. Use
+    // libssh2's resumable nonblocking handshake and check the attempt directly.
+    session.set_blocking(false);
+    let result = (|| loop {
+        attempt.check()?;
+        if Instant::now() >= deadline {
+            return Err("SSH handshake timed out".into());
+        }
+        match session.handshake() {
+            Ok(()) => return attempt.check(),
+            Err(error) if error.code() == ssh2::ErrorCode::Session(-37) => {
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => {
+                attempt.check()?;
+                return Err(error.to_string());
+            }
+        }
+    })();
+    session.set_blocking(blocking);
+    result
+}
+
 pub(crate) fn complete() -> Result<(), String> {
     if let Some(attempt) = active() {
         let mut sockets = attempt
@@ -307,7 +342,8 @@ mod tests {
         let mut session = Session::new().unwrap();
         session.set_tcp_stream(client);
         session.set_timeout(3_000);
-        assert!(session.handshake().is_err());
+        assert!(handshake(&mut session).is_err());
+        assert!(session.is_blocking());
         assert_eq!(
             failure_reason().as_deref(),
             Some("SSH connection timed out")
@@ -347,12 +383,12 @@ mod tests {
                 watched.load(AtomicOrdering::SeqCst)
             });
         register(&client).unwrap();
-        // Exercise the production SSH I/O path. A raw blocking Winsock recv
-        // already in progress need not wake when a cloned socket is shut down.
+        // Exercise the production cancellable SSH handshake.
         let mut session = Session::new().unwrap();
         session.set_tcp_stream(client);
         session.set_timeout(3_000);
-        assert!(session.handshake().is_err());
+        assert!(handshake(&mut session).is_err());
+        assert!(session.is_blocking());
         let returned_at = Instant::now();
         let cancelled_at = receiver.recv_timeout(Duration::from_secs(1)).unwrap();
         release_peer.send(()).unwrap();
@@ -362,6 +398,26 @@ mod tests {
             failure_reason().as_deref(),
             Some("SSH connection cancelled")
         );
+    }
+
+    #[test]
+    fn terminal_handshake_preserves_session_timeout_and_nonblocking_mode() {
+        let (client, _server) = socket_pair();
+        let _guard =
+            TerminalConnectionGuard::new(Instant::now() + Duration::from_secs(5), || false);
+        let mut session = Session::new().unwrap();
+        session.set_tcp_stream(client);
+        session.set_blocking(false);
+        session.set_timeout(150);
+        let started = Instant::now();
+        assert_eq!(
+            handshake(&mut session).unwrap_err(),
+            "SSH handshake timed out"
+        );
+        assert!(!session.is_blocking());
+        assert_eq!(session.timeout(), 150);
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(failure_reason().is_none());
     }
 
     #[test]

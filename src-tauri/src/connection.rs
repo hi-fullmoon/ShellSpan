@@ -529,7 +529,7 @@ fn open_handshaken_session(
     })?;
     session.set_tcp_stream(tcp);
     session.set_timeout(SSH_SESSION_IO_TIMEOUT_MS);
-    session.handshake().map_err(|error| {
+    terminal_deadline::handshake(&mut session).map_err(|error| {
         error!("SSH handshake failed remote={host}:{port}: {error}");
         ConnectionError::Other {
             message: format!("ssh handshake failed: {error}"),
@@ -573,8 +573,7 @@ pub(crate) fn open_session_for_host_key(host: &str, port: u16) -> Result<Session
     let mut session = Session::new().map_err(|error| format!("session init failed: {error}"))?;
     session.set_tcp_stream(tcp);
     session.set_timeout(SSH_SESSION_IO_TIMEOUT_MS);
-    session
-        .handshake()
+    terminal_deadline::handshake(&mut session)
         .map_err(|error| format!("ssh handshake failed: {error}"))?;
     Ok(session)
 }
