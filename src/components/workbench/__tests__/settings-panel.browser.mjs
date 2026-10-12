@@ -21,6 +21,7 @@ const server = await createServer({
         export { default as React } from 'react';
         export { createRoot } from 'react-dom/client';
         export { SettingsPanel } from '/src/components/workbench/settings-panel.tsx';
+        export { useAppStore } from '/src/stores/appStore.ts';
       `;
     },
     configureServer(vite) {
@@ -112,6 +113,50 @@ try {
     assert.equal(overflow.cardCount, 4, 'terminal section should render 4 groups');
     assert.ok(overflow.firstCardRadius.length > 0, 'settings cards should carry a compact radius');
     assert.ok(overflow.groupTitleRow <= 22, `group title row ${overflow.groupTitleRow}px exceeds 22px at ${viewport.width}`);
+    const titleInput = page.getByLabel('自定义模板', { exact: true });
+    await titleInput.scrollIntoViewIfNeeded();
+    await page.getByLabel('页签标题模板', { exact: true }).click();
+    await page.getByRole('option', { name: '连接名称', exact: true }).click();
+    assert.ok(await page.getByText('全局默认', { exact: true }).isVisible(), 'scope must display a readable label');
+    assert.ok(await page.getByLabel('页签标题模板', { exact: true }).getByText('连接名称', { exact: true }).isVisible(), 'preset must display a readable label');
+    await page.getByLabel('页签标题模板', { exact: true }).click();
+    await page.getByRole('option', { name: '名称与会话序号', exact: true }).click();
+    assert.equal(await titleInput.inputValue(), '${name} #${index}');
+    assert.ok(await page.getByLabel('页签标题模板', { exact: true }).getByText('名称与会话序号', { exact: true }).isVisible());
+    await page.getByLabel('页签标题模板', { exact: true }).click();
+    await page.getByRole('option', { name: '自定义模板', exact: true }).click();
+    assert.ok(await page.getByLabel('页签标题模板', { exact: true }).getByText('自定义模板', { exact: true }).isVisible());
+    await titleInput.fill('${user}@${host} #${index}');
+    await page.getByRole('button', { name: '保存', exact: true }).click();
+    assert.equal(await page.evaluate(async () => (await import('/settings-runtime.js')).useAppStore.getState().terminalTabTitleTemplate), '${user}@${host} #${index}');
+    await titleInput.fill('${unknown}');
+    assert.equal(await titleInput.getAttribute('aria-invalid'), 'true');
+    assert.ok(await page.getByRole('button', { name: '保存', exact: true }).isDisabled());
+    await titleInput.fill('${name}');
+    await titleInput.press('Enter');
+    assert.ok(await page.getByLabel('页签标题模板', { exact: true }).getByText('自定义模板', { exact: true }).isVisible());
+    const titleLayout = await page.locator('[data-terminal-title-settings]').evaluate((element) => {
+      const input = element.querySelector('[data-slot="input"]');
+      const selects = [...element.querySelectorAll('[data-title-selects] [data-slot="select-trigger"]')];
+      const rect = element.getBoundingClientRect();
+      const inputRect = input.getBoundingClientRect();
+      return { width: rect.width, inputWidth: inputRect.width, height: rect.height,
+        selectTops: selects.map((select) => select.getBoundingClientRect().top),
+        fits: element.scrollWidth <= element.clientWidth };
+    });
+    assert.ok(titleLayout.inputWidth > titleLayout.width - 40, 'template editor must use the full row width');
+    assert.ok(titleLayout.fits, 'title settings must not overflow');
+    if (viewport.width === 1280) {
+      assert.equal(titleLayout.selectTops[0], titleLayout.selectTops[1], 'wide title controls must share one row');
+      assert.ok(titleLayout.height < 300, 'wide title editor should remain compact');
+    } else {
+      assert.ok(titleLayout.selectTops[1] > titleLayout.selectTops[0], 'narrow title controls must stack');
+    }
+    assert.ok(await titleInput.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.left >= 0 && rect.right <= window.innerWidth;
+    }), 'template input must fit the narrow dialog');
+    await page.screenshot({ path: `/tmp/shellspan-title-settings-${viewport.width}.png` });
 
     await openSection('experimental');
     const panel = page.getByRole('tabpanel');

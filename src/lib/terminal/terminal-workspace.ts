@@ -1,5 +1,6 @@
 import type { TerminalSession, TerminalWorkspaceSession } from '@/stores/terminalStore';
 import type { TerminalLayoutNode } from '@/components/terminal/terminal-split';
+import { MAX_TAB_TITLE_LENGTH } from './tab-title';
 
 export interface TerminalWorkspaceSnapshot {
   sessions: TerminalWorkspaceSession[];
@@ -22,6 +23,9 @@ export function serializeTerminalWorkspace(
     .map(({
       sessionId,
       title,
+      baseTitle,
+      manualTitle,
+      titleIndex,
       host,
       port,
       username,
@@ -31,6 +35,9 @@ export function serializeTerminalWorkspace(
     }) => ({
       sessionId,
       title,
+      baseTitle,
+      manualTitle,
+      titleIndex,
       host,
       port,
       username,
@@ -74,7 +81,10 @@ function isTerminalWorkspaceSession(value: unknown): value is TerminalWorkspaceS
     && session.sessionId.length > 0
     && session.sessionId.length <= MAX_STRING_LENGTH
     && typeof session.title === 'string'
-    && session.title.length <= MAX_STRING_LENGTH
+    && session.title.length <= MAX_TAB_TITLE_LENGTH
+    && (session.baseTitle === undefined || (typeof session.baseTitle === 'string' && session.baseTitle.length <= MAX_STRING_LENGTH))
+    && (session.manualTitle === undefined || (typeof session.manualTitle === 'string' && session.manualTitle.length <= MAX_STRING_LENGTH))
+    && (session.titleIndex === undefined || (typeof session.titleIndex === 'number' && Number.isSafeInteger(session.titleIndex) && session.titleIndex > 0))
     && typeof session.host === 'string'
     && session.host.length <= MAX_STRING_LENGTH
     && typeof session.port === 'number'

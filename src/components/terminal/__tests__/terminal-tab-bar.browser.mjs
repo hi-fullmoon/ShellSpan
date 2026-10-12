@@ -24,6 +24,7 @@ const server = await createServer({
         export { createRoot } from 'react-dom/client';
         export { TerminalTabBar } from '/src/components/terminal/terminal-tab-bar.tsx';
         export { useTerminalStore } from '/src/stores/terminalStore.ts';
+        export { useAppStore } from '/src/stores/appStore.ts';
         export { SftpTabBar } from '/src/components/sftp/sftp-tab-bar.tsx';
         export { useSftpStore } from '/src/stores/sftpStore.ts';
       `;
@@ -58,6 +59,14 @@ try {
   }, { username: userInfo().username, shell: basename(userInfo().shell || process.env.SHELL) });
   await page.locator('[data-terminal-tab-bar] [role="tab"]').waitFor();
   await page.locator('[data-sftp-tab-bar] [role="tab"]').waitFor();
+  await page.evaluate(async () => {
+    const { useAppStore } = await import('/tab-runtime.js');
+    useAppStore.getState().setTerminalTabTitleTemplate('${user}@${host} #${index}');
+  });
+  const terminalTab = page.locator('[data-terminal-tab-bar] [role="tab"]');
+  await terminalTab.getByText(`${userInfo().username}@localhost #1`, { exact: true }).waitFor();
+  assert.equal(await terminalTab.getAttribute('aria-label'), `${userInfo().username}@localhost #1`);
+  assert.ok((await terminalTab.getAttribute('title')).includes(`${userInfo().username}@localhost:22`));
   for (const width of [400, 1280]) {
     await page.setViewportSize({ width, height: 720 });
     for (const selector of ['[data-terminal-tab-bar]', '[data-sftp-tab-bar]']) {

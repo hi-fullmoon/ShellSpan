@@ -1,6 +1,21 @@
 import petdexMessages from './petdex-messages.json';
 
 export default {
+  'terminal.title.template': '页签标题模板',
+  'terminal.title.description': '配置默认标题；手动重命名的页签保持原名称。',
+  'terminal.title.scope': '应用范围',
+  'terminal.title.global': '全局默认',
+  'terminal.title.custom': '自定义模板',
+  'terminal.title.variables': '可用变量：${name} 连接名称、${user} 用户、${host} 主机、${port} 端口、${index} 同一连接的会话序号。',
+  'terminal.title.invalid': '请输入不超过 256 个字符的模板，仅支持上述变量，不能包含换行或控制字符。',
+  'terminal.title.preview': '预览：{title}',
+  'terminal.title.inherit': '使用全局默认',
+  'terminal.title.reset': '恢复默认标题',
+  'terminal.title.preset0': '连接名称',
+  'terminal.title.preset1': '用户与主机',
+  'terminal.title.preset2': '名称与主机',
+  'terminal.title.preset3': '主机与端口',
+  'terminal.title.preset4': '名称与会话序号',
   'settings.ai.profileName.openai': 'OpenAI',
   'settings.ai.profileName.anthropic': 'Anthropic',
   'settings.ai.profileName.ollama': 'Ollama',

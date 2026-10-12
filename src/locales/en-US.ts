@@ -1,6 +1,21 @@
 import petdexMessages from './petdex-messages.json';
 
 export default {
+  'terminal.title.template': 'Tab title template',
+  'terminal.title.description': 'Configure automatic titles. Manually renamed tabs keep their names.',
+  'terminal.title.scope': 'Apply to',
+  'terminal.title.global': 'Global default',
+  'terminal.title.custom': 'Custom template',
+  'terminal.title.variables': 'Variables: ${name} connection name, ${user} user, ${host} host, ${port} port, ${index} session number for this connection.',
+  'terminal.title.invalid': 'Enter a template of up to 256 characters using the supported variables, without newlines or control characters.',
+  'terminal.title.preview': 'Preview: {title}',
+  'terminal.title.inherit': 'Use global default',
+  'terminal.title.reset': 'Restore default title',
+  'terminal.title.preset0': 'Connection name',
+  'terminal.title.preset1': 'User and host',
+  'terminal.title.preset2': 'Name and host',
+  'terminal.title.preset3': 'Host and port',
+  'terminal.title.preset4': 'Name and session number',
   'settings.ai.profileName.openai': 'OpenAI',
   'settings.ai.profileName.anthropic': 'Anthropic',
   'settings.ai.profileName.ollama': 'Ollama',

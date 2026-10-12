@@ -9,6 +9,9 @@ import type {
   TerminalIntegrationStateEvent,
 } from '@/types';
 import { generateId } from '@/lib/utils';
+import { useAppStore } from './appStore';
+import { useProfileStore } from './profileStore';
+import { formatTabTitle } from '@/lib/terminal/tab-title';
 
 export interface TerminalSession {
   sessionId: string;
@@ -20,6 +23,9 @@ export interface TerminalSession {
   integrationStateRevision?: number;
   promptReady?: boolean;
   title: string;
+  baseTitle?: string;
+  manualTitle?: string;
+  titleIndex?: number;
   host: string;
   port: number;
   username: string;
@@ -48,7 +54,7 @@ export interface PendingTerminalConnection {
 
 export type TerminalWorkspaceSession = Pick<
   TerminalSession,
-  'sessionId' | 'title' | 'host' | 'port' | 'username' | 'profileId' | 'pinned' | 'color'
+  'sessionId' | 'title' | 'baseTitle' | 'manualTitle' | 'titleIndex' | 'host' | 'port' | 'username' | 'profileId' | 'pinned' | 'color'
 >;
 
 const sortSessions = (sessions: TerminalSession[]): TerminalSession[] => {
@@ -111,6 +117,7 @@ interface TerminalState {
   setClosed: (sessionId: string, event: ClosedEvent) => void;
   setIntegrationState: (event: TerminalIntegrationStateEvent) => void;
   updateTitle: (sessionId: string, title: string) => void;
+  resetTitle: (sessionId: string) => void;
   togglePin: (sessionId: string) => void;
   setTabColor: (sessionId: string, color?: string) => void;
 }
@@ -130,6 +137,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
         sessions[existingIndex] = {
           ...existing,
           title: pending.title,
+          baseTitle: pending.title,
           host: pending.host,
           port: pending.port,
           username: pending.username,
@@ -181,6 +189,9 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
         sessionId: summary.sessionId,
         ...brokerIdentity(summary),
         title: summary.title,
+        baseTitle: summary.title,
+        manualTitle: pending.manualTitle,
+        titleIndex: pending.titleIndex,
         host: summary.host,
         port: summary.port,
         username: summary.username,
@@ -257,6 +268,11 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
       const sessions = restored.map((session) => ({
         sessionId: session.sessionId,
         title: session.title,
+        baseTitle: session.baseTitle ?? session.title,
+        manualTitle: session.manualTitle ?? (session.baseTitle === undefined
+          && session.title !== (useProfileStore.getState().getProfile(session.profileId ?? '')?.name || session.host)
+          ? session.title : undefined),
+        titleIndex: session.titleIndex,
         host: session.host,
         port: session.port,
         username: session.username,
@@ -305,6 +321,9 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
         sessionId: summary.sessionId,
         ...brokerIdentity(summary, old),
         title: old.title ?? summary.title,
+        baseTitle: old.baseTitle ?? old.title,
+        manualTitle: old.manualTitle,
+        titleIndex: old.titleIndex,
         host: summary.host,
         port: summary.port,
         username: summary.username,
@@ -422,10 +441,14 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
       const sessions = state.sessions.map((session) => {
         if (session.sessionId !== sessionId) return session;
         changed = true;
-        return { ...session, title };
+        return { ...session, title, manualTitle: title };
       });
       return changed ? { sessions } : state;
     }),
+  resetTitle: (sessionId) => set((state) => ({
+    sessions: state.sessions.map((session) => session.sessionId === sessionId
+      ? { ...session, manualTitle: undefined } : session),
+  })),
   togglePin: (sessionId) =>
     set((state) => {
       let changed = false;
@@ -447,3 +470,47 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
       return changed ? { sessions } : state;
     }),
 }));
+
+function refreshTabTitles(): void {
+  const { sessions } = useTerminalStore.getState();
+  const preferences = useAppStore.getState();
+  const profiles = useProfileStore.getState();
+  const identity = (session: TerminalSession) => session.profileId ?? `${session.username}@${session.host}:${session.port}`;
+  const maxima = new Map<string, number>();
+  for (const session of sessions) {
+    maxima.set(identity(session), Math.max(maxima.get(identity(session)) ?? 0, session.titleIndex ?? 0));
+  }
+  let changed = false;
+  const next = sessions.map((session) => {
+    const key = identity(session);
+    const index = session.titleIndex ?? (maxima.get(key) ?? 0) + 1;
+    maxima.set(key, Math.max(maxima.get(key) ?? 0, index));
+    const baseTitle = session.baseTitle ?? session.title;
+    const profile = session.profileId ? profiles.getProfile(session.profileId) : undefined;
+    const name = profile ? profile.name || session.host : baseTitle || session.host;
+    const template = (session.profileId && preferences.terminalTabTitleOverrides[session.profileId]) || preferences.terminalTabTitleTemplate;
+    const custom = session.profileId && preferences.terminalTabTitleOverrides[session.profileId] !== undefined
+      ? preferences.terminalTabTitleCustomOverrides[session.profileId] === true
+      : preferences.terminalTabTitleCustom;
+    const title = session.manualTitle ?? formatTabTitle(template, {
+      name, user: session.username, host: session.host, port: session.port, index,
+    }, custom);
+    if (title === session.title && baseTitle === session.baseTitle && index === session.titleIndex) return session;
+    changed = true;
+    return { ...session, title, baseTitle, titleIndex: index };
+  });
+  if (changed) useTerminalStore.setState({ sessions: next });
+}
+
+useTerminalStore.subscribe((state, previous) => {
+  if (state.sessions !== previous.sessions) refreshTabTitles();
+});
+useAppStore.subscribe((state, previous) => {
+  if (state.terminalTabTitleTemplate !== previous.terminalTabTitleTemplate
+    || state.terminalTabTitleCustom !== previous.terminalTabTitleCustom
+    || state.terminalTabTitleCustomOverrides !== previous.terminalTabTitleCustomOverrides
+    || state.terminalTabTitleOverrides !== previous.terminalTabTitleOverrides) refreshTabTitles();
+});
+useProfileStore.subscribe((state, previous) => {
+  if (state.profiles !== previous.profiles) refreshTabTitles();
+});

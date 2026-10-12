@@ -63,6 +63,8 @@ import { openFeedback } from '@/lib/feedback';
 import type { PetdexCategories, PetdexDiagnostic, PetdexHealth } from '@/types';
 import { INITIAL_PETDEX_DIAGNOSTIC_VIEW, petdexDiagnosticStatus, reducePetdexDiagnosticView, PETDEX_STATUS_LABEL_KEYS, PETDEX_PREVIEW_LABEL_KEYS } from '@/lib/petdex/diagnostic';
 import { SettingRow, SettingsGroup } from './settings-layout';
+import { TerminalTitleSettings } from '@/components/terminal/terminal-title-settings';
+import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
 
 interface ShortcutGroup {
   id: 'app' | 'terminal' | 'sftp';
@@ -963,6 +965,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   </div>
                 </SettingRow>
                 <SettingGroupLabel>{t('settings.terminal.groupSessions')}</SettingGroupLabel>
+                <Field className="min-w-0 gap-3 px-3.5 py-3" data-terminal-title-settings>
+                  <div className="flex min-w-0 flex-col gap-0.5">
+                    <FieldLabel className="text-sm font-medium text-foreground">{t('terminal.title.template')}</FieldLabel>
+                    <FieldDescription>{t('terminal.title.description')}</FieldDescription>
+                  </div>
+                  <TerminalTitleSettings />
+                </Field>
                 <SettingRow label={t('settings.terminal.autoReconnect')} description={t('settings.terminal.autoReconnectDescription')}>
                   <div className="flex justify-end">
                     <Switch

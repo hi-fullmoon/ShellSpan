@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { DEFAULT_TAB_TITLE_TEMPLATE, normalizeTabTitleOverrides, validTabTitleTemplate } from '@/lib/terminal/tab-title';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { shallow } from 'zustand/shallow';
 import { changeLocale } from '@/locales';
@@ -41,6 +42,10 @@ export const DEFAULT_SHORTCUTS: ShortcutBindings = {
 };
 
 interface AppPreferences extends PetdexMessagePreferences {
+  terminalTabTitleTemplate: string;
+  terminalTabTitleOverrides: Record<string, string>;
+  terminalTabTitleCustom: boolean;
+  terminalTabTitleCustomOverrides: Record<string, boolean>;
   theme: ThemeMode;
   locale: Locale;
   profileName: string;
@@ -78,6 +83,8 @@ interface AppPreferences extends PetdexMessagePreferences {
 }
 
 interface AppState extends AppPreferences {
+  setTerminalTabTitleTemplate: (template: string, custom?: boolean) => void;
+  setTerminalTabTitleOverride: (profileId: string, template: string | null, custom?: boolean) => void;
   initialized: boolean;
   petdexBackendEnabled: boolean;
   petdexBackendCategories: PetdexCategories;
@@ -142,6 +149,8 @@ interface AppState extends AppPreferences {
 }
 
 const PREFERENCE_KEYS: readonly (keyof AppPreferences)[] = [
+  'terminalTabTitleTemplate', 'terminalTabTitleOverrides',
+  'terminalTabTitleCustom', 'terminalTabTitleCustomOverrides',
   'theme', 'locale', 'profileName', 'profileAvatar', 'startupUpdateCheck', 'startupSection',
   'terminalFontSize', 'terminalFontFamily', 'terminalCursorBlink',
   'terminalCursorStyle', 'terminalCopyOnSelect', 'terminalScrollback',
@@ -157,6 +166,10 @@ const PREFERENCE_KEYS: readonly (keyof AppPreferences)[] = [
 
 function getDefaultPreferences(): AppPreferences {
   return {
+    terminalTabTitleTemplate: DEFAULT_TAB_TITLE_TEMPLATE,
+    terminalTabTitleOverrides: {},
+    terminalTabTitleCustom: false,
+    terminalTabTitleCustomOverrides: {},
     theme: 'system',
     locale: 'zh-CN',
     profileName: '',
@@ -246,6 +259,18 @@ function entriesToPreferences(entries: [string, string][]): Partial<AppPreferenc
 
   return {
     theme: (prefs.theme as ThemeMode) ?? defaults.theme,
+    terminalTabTitleTemplate: validTabTitleTemplate(prefs.terminalTabTitleTemplate) ? prefs.terminalTabTitleTemplate : DEFAULT_TAB_TITLE_TEMPLATE,
+    terminalTabTitleOverrides: normalizeTabTitleOverrides(prefs.terminalTabTitleOverrides),
+    terminalTabTitleCustom: prefs.terminalTabTitleCustom === true,
+    terminalTabTitleCustomOverrides: Object.fromEntries(
+      Object.keys(normalizeTabTitleOverrides(prefs.terminalTabTitleOverrides)).map((id) => [
+        id,
+        prefs.terminalTabTitleCustomOverrides !== null
+          && typeof prefs.terminalTabTitleCustomOverrides === 'object'
+          && !Array.isArray(prefs.terminalTabTitleCustomOverrides)
+          && (prefs.terminalTabTitleCustomOverrides as Record<string, unknown>)[id] === true,
+      ]),
+    ),
     locale: (prefs.locale as Locale) ?? defaults.locale,
     profileName: sanitizeProfileName(prefs.profileName),
     profileAvatar: sanitizeProfileAvatar(prefs.profileAvatar),
@@ -482,6 +507,19 @@ export const useAppStore = create<AppState>()(
     setTerminalTrimTrailingWhitespace: (terminalTrimTrailingWhitespace) => set({ terminalTrimTrailingWhitespace }),
     setTerminalRightClickBehavior: (terminalRightClickBehavior) => set({ terminalRightClickBehavior }),
     setTerminalBellStyle: (terminalBellStyle) => set({ terminalBellStyle }),
+    setTerminalTabTitleTemplate: (template, custom = false) => {
+      if (validTabTitleTemplate(template)) set({ terminalTabTitleTemplate: template, terminalTabTitleCustom: custom });
+    },
+    setTerminalTabTitleOverride: (profileId, template, custom = false) => {
+      if (template !== null && !validTabTitleTemplate(template)) return;
+      set((state) => {
+        const overrides = { ...state.terminalTabTitleOverrides };
+        const modes = { ...state.terminalTabTitleCustomOverrides };
+        if (template === null) { delete overrides[profileId]; delete modes[profileId]; }
+        else { overrides[profileId] = template; modes[profileId] = custom; }
+        return { terminalTabTitleOverrides: overrides, terminalTabTitleCustomOverrides: modes };
+      });
+    },
     setConfirmBeforeExit: (confirmBeforeExit) => set({ confirmBeforeExit }),
     setRestoreWorkspace: (restoreWorkspace) => set({ restoreWorkspace }),
     setSftpShowHiddenFiles: (sftpShowHiddenFiles) => set({ sftpShowHiddenFiles }),
@@ -534,6 +572,10 @@ useAppStore.subscribe(
     terminalTrimTrailingWhitespace: state.terminalTrimTrailingWhitespace,
     terminalRightClickBehavior: state.terminalRightClickBehavior,
     terminalBellStyle: state.terminalBellStyle,
+    terminalTabTitleTemplate: state.terminalTabTitleTemplate,
+    terminalTabTitleOverrides: state.terminalTabTitleOverrides,
+    terminalTabTitleCustom: state.terminalTabTitleCustom,
+    terminalTabTitleCustomOverrides: state.terminalTabTitleCustomOverrides,
     confirmBeforeExit: state.confirmBeforeExit,
     restoreWorkspace: state.restoreWorkspace,
     sftpShowHiddenFiles: state.sftpShowHiddenFiles,

@@ -13,9 +13,10 @@ import type { TerminalSession } from '@/stores/terminalStore';
 import type { TerminalSplitDirection } from './terminal-split';
 import { TerminalCloseDetails } from './terminal-close-details';
 import { copyTerminalText } from './terminal-clipboard';
+import { useAppStore } from '@/stores/appStore';
 
 const MENU_WIDTH = 256;
-const MENU_HEIGHT = 420;
+const MENU_HEIGHT = 480;
 
 const TAB_COLORS = [
   '#ef4444',
@@ -308,6 +309,14 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
         >
           {t('common.rename')}
         </MenuItem>
+        <MenuItem disabled={!target.manualTitle} onClick={() => {
+          useTerminalStore.getState().resetTitle(target.sessionId);
+          onClose();
+        }}>{t('terminal.title.reset')}</MenuItem>
+        <MenuItem onClick={() => {
+          useAppStore.getState().openSettings('terminal');
+          onClose();
+        }}>{t('terminal.title.template')}</MenuItem>
         <MenuItem
           onClick={handleDuplicate}
           disabled={!target.profileId}

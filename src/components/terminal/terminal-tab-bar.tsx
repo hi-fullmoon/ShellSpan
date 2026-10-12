@@ -91,6 +91,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
       aria-selected={active}
       aria-busy={session.pendingConnection || undefined}
       aria-label={session.title}
+      title={`${session.title}\n${session.username}@${session.host}:${session.port}`}
       data-session-tab={session.sessionId}
       // Activate on pointerdown (like browser tabs) instead of click: dnd-kit
       // swallows the click after any drag, so a trackpad tap that jitters past
