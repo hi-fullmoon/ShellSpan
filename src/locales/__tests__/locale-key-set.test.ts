@@ -23,28 +23,8 @@ describe('locale catalog key sets', () => {
     }
   });
 
-  it('keeps native deployment timeline events readable without legacy deployment UI keys', () => {
-    for (const key of [
-      'deployment.prepare.running',
-      'deployment.prepare.failed',
-      'deployment.prepare.succeeded',
-      'deployment.attempt.started',
-      'deployment.run.coordinatorStopped',
-      'deployment.run.integrityUnknown',
-    ] as const) {
-      expect(enUS[key]).toBeTruthy();
-      expect(zhCN[key]).toBeTruthy();
-    }
-
-    for (const key of [
-      'deployment.form.createTitle',
-      'deployment.artifact.build',
-      'deployment.preflight.run',
-      'deployment.transfer.upload',
-      'deployment.execute.run',
-    ]) {
-      expect(enUS).not.toHaveProperty(key);
-      expect(zhCN).not.toHaveProperty(key);
-    }
+  it('removes deployment center locale keys', () => {
+    expect(Object.keys(enUS).some((key) => key.startsWith('deployment.'))).toBe(false);
+    expect(Object.keys(zhCN).some((key) => key.startsWith('deployment.'))).toBe(false);
   });
 });

@@ -31,8 +31,6 @@ import {
 import { useKeychainStore } from '@/stores/keychainStore';
 import { createLogger } from '@/lib/logger';
 import { useRemoteHealthStore } from '@/stores/remoteHealthStore';
-import { useDeploymentWorkflowStore } from '@/stores/deploymentWorkflowStore';
-import { DeploymentWorkflowCenter } from './deployment-workflow-center';
 
 const logger = createLogger('connection-import');
 
@@ -168,11 +166,6 @@ const Workbench: React.FC<WorkbenchProps> = ({
     setActiveTab('monitor');
   }, [setActiveTab]);
 
-  const openDeployments = useCallback((profile: ConnectionProfile): void => {
-    useDeploymentWorkflowStore.getState().setProfileFilter(profile.id);
-    setActiveTab('deployments');
-  }, [setActiveTab]);
-
   useEffect(() => {
     const handleConnectProfile = (event: Event): void => {
       const detail = (event as CustomEvent<{
@@ -275,7 +268,6 @@ const Workbench: React.FC<WorkbenchProps> = ({
               onConnectTerminal={connect}
               onConnectSftp={connectSftp}
               onOpenHealth={openRemoteHealth}
-              onOpenDeployments={openDeployments}
               onDuplicate={handleDuplicate}
               onToggleFavorite={(profile) => void handleToggleFavorite(profile)}
               onImport={() => void handleOpenImport()}
@@ -287,7 +279,6 @@ const Workbench: React.FC<WorkbenchProps> = ({
           )}
           {activeTab === 'keychain' && <KeychainPanel onEditConnection={handleEdit} />}
           {activeTab === 'monitor' && <MonitorPanel />}
-          {activeTab === 'deployments' && <DeploymentWorkflowCenter />}
           {activeTab === 'logs' && <LogPanel />}
         </div>
       </div>

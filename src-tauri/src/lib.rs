@@ -6,7 +6,6 @@ mod ai_attachment;
 mod commands;
 mod connection;
 mod db;
-mod deployment;
 mod directory_request_registry;
 mod execution;
 mod health;
@@ -70,21 +69,6 @@ pub(crate) use session::{
 pub(crate) const SSH_DATA_EVENT_PREFIX: &str = "ssh-data:";
 pub(crate) const SSH_STATUS_EVENT: &str = "ssh-status";
 
-/// Import a reviewed local configuration without opening a window or executing
-/// deployment nodes. Explicit database and package paths prevent cross-profile imports.
-pub fn import_deployment_configuration(
-    database: &std::path::Path,
-    package: &std::path::Path,
-) -> Result<String, String> {
-    deployment::import::import(database, package)
-}
-
-pub fn check_deployment_configuration(
-    database: &std::path::Path,
-    application_id: &str,
-) -> Result<String, String> {
-    deployment::import::check(database, application_id)
-}
 pub(crate) const SSH_CLOSED_EVENT: &str = "ssh-closed";
 pub(crate) const SSH_SESSION_ERROR_EVENT: &str = "ssh-session-error";
 pub(crate) const UPLOAD_PROGRESS_EVENT: &str = "upload-progress";
@@ -274,10 +258,7 @@ pub fn run() {
             }
             let home_dir = app.path().home_dir()?;
             let shellspan_dir = shellspan_data_dir(&home_dir);
-            let database = db::Database::open(&shellspan_dir.join("shellspan-v1.db"))?;
-            let deployment_runtime =
-                deployment::DeploymentWorkflowRuntime::initialize(&shellspan_dir)
-                    .map_err(std::io::Error::other)?;
+            let database = db::Database::open(&shellspan_dir.join(db::DATABASE_FILE_NAME))?;
             let credentials = keychain::CredentialManager::new();
             let petdex = petdex::PetdexAdapter::new(home_dir);
             let message_adapter = petdex.clone();
@@ -291,9 +272,6 @@ pub fn run() {
                 .map_err(std::io::Error::other)?;
             app.manage(llm::runtime::LlmRuntime { routes });
             app.manage(database);
-            app.manage(deployment_runtime);
-            deployment::commands::start_deployment_workflow_recovery(app.handle())
-                .map_err(std::io::Error::other)?;
             let runtime = app.state::<agent_runtime::AgentRuntime>();
             agent_runtime::configure_runtime(app.handle(), &runtime)?;
             runtime.configure_credentials(credentials)?;
@@ -473,38 +451,6 @@ pub fn run() {
             commands::list_recent_profiles,
             commands::touch_recent_profile,
             commands::remove_recent_profile,
-            deployment::commands::deployment_workflow_capabilities,
-            deployment::commands::inspect_deployment_source_binding,
-            deployment::commands::list_deployment_applications,
-            deployment::commands::save_deployment_application,
-            deployment::commands::inspect_deployment_project,
-            deployment::commands::check_deployment_readiness,
-            deployment::commands::get_deployment_readiness,
-            deployment::commands::observe_deployment_service,
-            deployment::commands::preview_deployment_files,
-            deployment::commands::apply_deployment_files,
-            deployment::commands::list_deployment_node_types,
-            deployment::commands::validate_deployment_workflow,
-            deployment::commands::list_deployment_workflows,
-            deployment::commands::get_deployment_workflow,
-            deployment::commands::create_deployment_workflow,
-            deployment::commands::create_static_site_deployment_workflow,
-            deployment::commands::update_deployment_workflow,
-            deployment::commands::update_deployment_workflow_layout,
-            deployment::commands::archive_deployment_workflow,
-            deployment::commands::prepare_deployment_run,
-            deployment::commands::approve_deployment_run,
-            deployment::commands::start_deployment_run,
-            deployment::commands::cancel_deployment_run,
-            deployment::commands::reconcile_deployment_run,
-            deployment::commands::list_deployment_runs,
-            deployment::commands::get_deployment_run_detail,
-            deployment::commands::list_deployment_run_events,
-            deployment::commands::list_deployment_releases,
-            deployment::commands::list_deployment_run_nodes,
-            deployment::commands::list_deployment_node_attempts,
-            deployment::commands::inspect_deployment_artifact,
-            deployment::commands::export_deployment_run_audit,
             commands::list_sftp_bookmarks,
             commands::add_sftp_bookmark,
             commands::remove_sftp_bookmark,

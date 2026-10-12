@@ -1,5 +1,4 @@
 import React from 'react';
-import { DEPLOYMENT_ENTRY_POINTS_VISIBLE } from '@/lib/deployment/availability';
 import { cn } from '@/lib/utils';
 import { getPlatform } from '@/lib/platform';
 import { getShortcutKeys } from '@/lib/shortcuts';
@@ -19,11 +18,9 @@ import {
 import type { SettingsSection, WorkbenchTab } from '@/types';
 import { useUpdateStore } from '@/stores/updateStore';
 import { useAppStore } from '@/stores/appStore';
-import { useDeploymentWorkflowRunStore } from '@/stores/deploymentWorkflowRunStore';
 import {
   ActivityIcon,
   ChevronUpIcon,
-  CloudUploadIcon,
   FileTextIcon,
   InfoIcon,
   KeyboardIcon,
@@ -115,20 +112,11 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
   const checkingForUpdates = updatePhase === 'checking';
   const downloadingUpdate = updatePhase === 'update_available' || updatePhase === 'downloading';
   const updateBusy = checkingForUpdates || downloadingUpdate;
-  const deploymentAttentionCount = useDeploymentWorkflowRunStore(
-    (state) => state.runs.filter((run) => run.status === 'state_unknown').length,
-  );
   const items: MenuItem[] = [
     {
       key: 'connections',
       label: t('workbench.connections.title'),
       icon: ServerIcon,
-    },
-    {
-      key: 'deployments',
-      label: t('deployment.title'),
-      icon: CloudUploadIcon,
-      badge: deploymentAttentionCount,
     },
     {
       key: 'keychain',
@@ -155,7 +143,7 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
   return (
     <Sidebar className="border-r border-app-border/50 p-2">
       <nav className="flex flex-1 flex-col gap-1">
-        {items.filter((item) => DEPLOYMENT_ENTRY_POINTS_VISIBLE || item.key !== 'deployments').map((item) => {
+        {items.map((item) => {
           return (
             <WorkbenchSidebarItem
               key={item.key}

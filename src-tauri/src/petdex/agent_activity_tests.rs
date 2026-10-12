@@ -634,7 +634,9 @@ async fn configured_model_question_and_answer_follow_real_driver_lifecycle() {
     };
     assert_eq!(std::env::var("SHELLSPAN_PETDEX_AI_E2E").as_deref(), Ok("1"));
     let home = std::env::var_os("HOME").expect("HOME is required");
-    let source = PathBuf::from(home).join(".shellspan-dev/shellspan-v1.db");
+    let source = PathBuf::from(home)
+        .join(".shellspan-dev")
+        .join(crate::db::DATABASE_FILE_NAME);
     let connection =
         rusqlite::Connection::open_with_flags(source, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
             .unwrap();

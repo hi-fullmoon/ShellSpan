@@ -1,9 +1,7 @@
 import React from 'react';
-import { DEPLOYMENT_ENTRY_POINTS_VISIBLE } from '@/lib/deployment/availability';
 import {
   BotIcon,
   CableIcon,
-  CloudUploadIcon,
   FolderIcon,
   FolderOpenIcon,
   FolderSyncIcon,
@@ -47,8 +45,6 @@ import { isPortForwardActive, usePortForwardStore } from '@/stores/portForwardSt
 import { useProfileStore } from '@/stores/profileStore';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
 import { useTerminalStore } from '@/stores/terminalStore';
-import { useDeploymentWorkflowStore } from '@/stores/deploymentWorkflowStore';
-import type { DeploymentWorkflowRecord } from '@/lib/deployment/types';
 import type { TerminalSession } from '@/stores/terminalStore';
 import type {
   AppSection,
@@ -67,7 +63,6 @@ type PaletteGroup =
   | 'bookmark'
   | 'quickAction'
   | 'forward'
-  | 'deployment'
   | 'settings';
 
 export interface CommandPaletteItem {
@@ -94,19 +89,17 @@ interface BuildCommandPaletteItemsOptions {
   sftpConnections: SftpConnection[];
   bookmarks: ProfileBookmark[];
   portForwardRuntimes: PortForwardRuntime[];
-  workflows?: DeploymentWorkflowRecord[];
   label: (key: LocaleKey, values?: Record<string, string | number>) => string;
   navigate: (section: AppSection, tab?: WorkbenchTab) => void;
   openSettings: (section: SettingsSection) => void;
   connect: (profileId: string, target: 'terminal' | 'sftp') => void;
-  openHostTool: (profileId: string, tool: 'overview' | 'portForward' | 'quickActions' | 'deployments') => void;
+  openHostTool: (profileId: string, tool: 'overview' | 'portForward' | 'quickActions') => void;
   switchTerminal: (sessionId: string) => void;
   switchSftp: (connectionId: string) => void;
   openBookmark: (profile: ConnectionProfile, bookmark: SftpBookmarkRow) => void;
   runQuickAction: (profile: ConnectionProfile, action: HostQuickAction) => void | Promise<void>;
   splitTerminal: (direction: 'right' | 'bottom') => void;
   startForward: (profile: ConnectionProfile, ruleId: string) => void | Promise<void>;
-  openDeployment?: (workflowId: string, mode: 'details' | 'newRelease') => void;
 }
 
 const SETTINGS: Array<{ id: SettingsSection; icon: React.ElementType }> = [
@@ -152,7 +145,6 @@ export function buildCommandPaletteItems({
   sftpConnections,
   bookmarks,
   portForwardRuntimes,
-  workflows = [],
   label,
   navigate,
   openSettings,
@@ -164,7 +156,6 @@ export function buildCommandPaletteItems({
   runQuickAction,
   splitTerminal,
   startForward,
-  openDeployment,
 }: BuildCommandPaletteItemsOptions): CommandPaletteItem[] {
   const navigation: CommandPaletteItem[] = [
     ['workbench', 'workbench', undefined, WrenchIcon],
@@ -172,8 +163,7 @@ export function buildCommandPaletteItems({
     ['sftp', 'sftp', undefined, FolderSyncIcon],
     ['logs', 'workbench', 'logs', LogsIcon],
     ['monitor', 'workbench', 'monitor', MonitorIcon],
-    ['deployments', 'workbench', 'deployments', CloudUploadIcon],
-  ].filter(([, , tab]) => DEPLOYMENT_ENTRY_POINTS_VISIBLE || tab !== 'deployments').map(([id, section, tab, icon]) => ({
+  ].map(([id, section, tab, icon]) => ({
     id: `navigation-${String(id)}`,
     group: 'navigation' as const,
     label: label(`commandPalette.action.${String(id)}` as LocaleKey),
@@ -235,15 +225,6 @@ export function buildCommandPaletteItems({
       icon: ServerIcon,
       run: () => connect(profile.id, 'sftp'),
     },
-    ...(DEPLOYMENT_ENTRY_POINTS_VISIBLE ? [{
-      id: `profile-deployments-${profile.id}`,
-      group: 'connection' as const,
-      label: `${label('commandPalette.action.deployments')}: ${profile.name}`,
-      detail: `${profile.username}@${profile.host}:${profile.port}`,
-      keywords: `${profile.name} ${profile.host} deployment release preflight`,
-      icon: CloudUploadIcon,
-      run: () => openHostTool(profile.id, 'deployments'),
-    }] : []),
     {
       id: `profile-overview-${profile.id}`,
       group: 'connection',
@@ -272,39 +253,6 @@ export function buildCommandPaletteItems({
       run: () => openHostTool(profile.id, 'quickActions'),
     },
   ]);
-
-  const deployments = (DEPLOYMENT_ENTRY_POINTS_VISIBLE ? workflows : []).flatMap((workflow): CommandPaletteItem[] => {
-    const target = workflow.definition.targets[0];
-    if (!target) return [];
-    const profile = profiles.find((candidate) => candidate.id === target.connectionProfileId);
-    const detail = profile
-      ? `${profile.name} · ${profile.username}@${profile.host}:${profile.port}`
-      : target.connectionProfileId;
-    const composeProject = workflow.definition.nodes
-      .find((node) => node.type === 'deploy.compose')
-      ?.config.projectName;
-    const keywords = `${workflow.name} ${String(composeProject ?? '')} ${detail} deployment workflow release host`;
-    return [
-      {
-        id: `deployment-workflow-${workflow.id}`,
-        group: 'deployment',
-        label: `${label('commandPalette.action.openDeploymentWorkflow')}: ${workflow.name}`,
-        detail,
-        keywords,
-        icon: CloudUploadIcon,
-        run: () => openDeployment?.(workflow.id, 'details'),
-      },
-      {
-        id: `deployment-new-release-${workflow.id}`,
-        group: 'deployment',
-        label: `${label('commandPalette.action.newDeploymentRelease')}: ${workflow.name}`,
-        detail,
-        keywords: `${keywords} new publish deploy`,
-        icon: CloudUploadIcon,
-        run: () => openDeployment?.(workflow.id, 'newRelease'),
-      },
-    ];
-  });
 
   const openTerminalSessions = terminalSessions.map((session): CommandPaletteItem => ({
     id: `terminal-session-${session.sessionId}`,
@@ -405,7 +353,6 @@ export function buildCommandPaletteItems({
   return [
     ...navigation,
     ...connections,
-    ...deployments,
     ...openTerminalSessions,
     ...openSftpSessions,
     ...bookmarkItems,
@@ -443,8 +390,6 @@ export const CommandPalette: React.FC = () => {
   const activeTerminalSessionId = useTerminalStore((state) => state.activeSessionId);
   const sftpConnections = useSftpStore((state) => state.connections);
   const portForwardRuntimes = usePortForwardStore((state) => state.runtimes);
-  const workflows = useDeploymentWorkflowStore((state) => state.workflows);
-  const deploymentInitialized = useDeploymentWorkflowStore((state) => state.initialized);
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
   const [activeIndex, setActiveIndex] = React.useState(0);
@@ -465,10 +410,6 @@ export const CommandPalette: React.FC = () => {
     return () => { cancelled = true; };
   }, [open, profiles]);
 
-  React.useEffect(() => {
-    if (!DEPLOYMENT_ENTRY_POINTS_VISIBLE || !open || deploymentInitialized) return;
-    void useDeploymentWorkflowStore.getState().initialize().catch(() => undefined);
-  }, [deploymentInitialized, open]);
 
   const items = React.useMemo(
     () => buildCommandPaletteItems({
@@ -478,7 +419,6 @@ export const CommandPalette: React.FC = () => {
       sftpConnections,
       bookmarks,
       portForwardRuntimes,
-      workflows,
       label: t,
       navigate: (section, tab) => {
         const app = useAppStore.getState();
@@ -496,11 +436,6 @@ export const CommandPalette: React.FC = () => {
       openHostTool: (profileId, tool) => {
         const app = useAppStore.getState();
         app.setActiveSection('workbench');
-        if (tool === 'deployments') {
-          useDeploymentWorkflowStore.getState().setProfileFilter(profileId);
-          app.setActiveWorkbenchTab('deployments');
-          return;
-        }
         app.setActiveWorkbenchTab('connections');
         document.dispatchEvent(new CustomEvent('shellspan:open-host-tool', {
           detail: { profileId, tool },
@@ -542,25 +477,12 @@ export const CommandPalette: React.FC = () => {
         const rule = profile.portForwards?.find((candidate) => candidate.id === ruleId);
         if (rule) await usePortForwardStore.getState().startRule(profile, rule, 'manual');
       },
-      openDeployment: (workflowId, mode) => {
-        const app = useAppStore.getState();
-        const deployment = useDeploymentWorkflowStore.getState();
-        deployment.setProfileFilter(null);
-        app.setActiveSection('workbench');
-        app.setActiveWorkbenchTab('deployments');
-        deployment.selectWorkflow(workflowId);
-        deployment.requestTab('runs');
-        if (mode === 'newRelease') {
-          deployment.requestDeploy();
-        }
-      },
     }),
     [
       bookmarks,
       info,
       portForwardRuntimes,
       profiles,
-      workflows,
       sftpConnections,
       showError,
       t,
@@ -594,7 +516,6 @@ export const CommandPalette: React.FC = () => {
     'bookmark',
     'quickAction',
     'forward',
-    'deployment',
     'settings',
   ];
 

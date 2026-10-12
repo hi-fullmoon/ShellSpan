@@ -14,8 +14,6 @@ import { useProfileStore } from '@/stores/profileStore';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import type { ConnectionProfile, SftpBookmarkRow } from '@/types';
-import { buildDeploymentTemplate } from '@/lib/deployment/editor';
-import type { DeploymentWorkflowRecord } from '@/lib/deployment/types';
 
 const { invokeListSftpBookmarks } = vi.hoisted(() => ({
   invokeListSftpBookmarks: vi.fn().mockResolvedValue([]),
@@ -69,26 +67,6 @@ const terminalSession = {
   username: 'deploy',
   status: 'connected' as const,
   profileId: profile.id,
-};
-
-const workflowTemplate = buildDeploymentTemplate(
-  'dockerCompose',
-  { connectionProfileId: profile.id, remoteRoot: '/srv/payments' },
-  (typeName) => typeName,
-);
-
-const workflow: DeploymentWorkflowRecord = {
-  id: 'workflow-api',
-  name: 'Payments API',
-  archived: false,
-  revision: 3,
-  enabled: true,
-  definitionDigest: `sha256:${'a'.repeat(64)}`,
-  layoutRevision: 1,
-  layout: workflowTemplate.layout,
-  createdAt: 1,
-  updatedAt: 3,
-  definition: workflowTemplate.definition,
 };
 
 function buildOptions(
@@ -201,19 +179,6 @@ describe('CommandPalette', () => {
     expect(items.find((item) => item.id === 'profile-deployments-profile-1')).toBeUndefined();
   });
 
-  it('hides workflow and new-release entries even when workflows are loaded', () => {
-    const openDeployment = vi.fn();
-    const items = buildCommandPaletteItems(buildOptions({
-      workflows: [workflow],
-      openDeployment,
-    }));
-    const details = items.find((item) => item.id === 'deployment-workflow-workflow-api');
-    const release = items.find((item) => item.id === 'deployment-new-release-workflow-api');
-
-    expect(details).toBeUndefined();
-    expect(release).toBeUndefined();
-    expect(items.some((item) => item.group === 'deployment')).toBe(false);
-  });
 
   it('deduplicates bookmark loads by endpoint and retains a usable profile target', async () => {
     invokeListSftpBookmarks.mockResolvedValueOnce([{

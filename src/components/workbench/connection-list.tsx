@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { DEPLOYMENT_ENTRY_POINTS_VISIBLE } from '@/lib/deployment/availability';
 import { useI18n } from '@/hooks/useI18n';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { Button } from '@/components/ui/button';
@@ -39,7 +38,6 @@ import {
   UploadIcon,
   InfoIcon,
   CableIcon,
-  CloudUploadIcon,
   HeartPulseIcon,
   ZapIcon,
 } from 'lucide-react';
@@ -67,7 +65,6 @@ export interface ConnectionListProps {
   onConnectTerminal: (profile: ConnectionProfile) => void;
   onConnectSftp: (profile: ConnectionProfile) => void;
   onOpenHealth?: (profile: ConnectionProfile) => void;
-  onOpenDeployments?: (profile: ConnectionProfile) => void;
   onDuplicate: (profile: ConnectionProfile) => void;
   onToggleFavorite: (profile: ConnectionProfile) => void;
   onImport: () => void;
@@ -83,7 +80,6 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
   onConnectTerminal,
   onConnectSftp,
   onOpenHealth = () => {},
-  onOpenDeployments = () => {},
   onDuplicate,
   onToggleFavorite,
   onImport,
@@ -238,7 +234,6 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
                     onConnectTerminal={onConnectTerminal}
                     onConnectSftp={onConnectSftp}
                     onOpenHealth={onOpenHealth}
-                    onOpenDeployments={onOpenDeployments}
                     onDuplicate={onDuplicate}
                     onToggleFavorite={onToggleFavorite}
                     onOverview={setOverviewProfile}
@@ -265,7 +260,6 @@ interface ConnectionCardProps {
   onConnectTerminal: (profile: ConnectionProfile) => void;
   onConnectSftp: (profile: ConnectionProfile) => void;
   onOpenHealth: (profile: ConnectionProfile) => void;
-  onOpenDeployments: (profile: ConnectionProfile) => void;
   onDuplicate: (profile: ConnectionProfile) => void;
   onToggleFavorite: (profile: ConnectionProfile) => void;
   onOverview: (profile: ConnectionProfile) => void;
@@ -314,7 +308,6 @@ const ConnectionCard = React.memo<ConnectionCardProps>(
     onConnectTerminal,
     onConnectSftp,
     onOpenHealth,
-    onOpenDeployments,
     onDuplicate,
     onToggleFavorite,
     onOverview,
@@ -325,7 +318,6 @@ const ConnectionCard = React.memo<ConnectionCardProps>(
     const handleConnectTerminal = useDebouncedCallback(() => onConnectTerminal(profile), CARD_ACTION_DEBOUNCE_MS);
     const handleConnectSftp = useDebouncedCallback(() => onConnectSftp(profile), CARD_ACTION_DEBOUNCE_MS);
     const handleOpenHealth = useDebouncedCallback(() => onOpenHealth(profile), CARD_ACTION_DEBOUNCE_MS);
-    const handleOpenDeployments = useDebouncedCallback(() => onOpenDeployments(profile), CARD_ACTION_DEBOUNCE_MS);
     const handleEdit = useDebouncedCallback(() => onEdit(profile), CARD_ACTION_DEBOUNCE_MS);
     const handleDuplicate = useDebouncedCallback(() => onDuplicate(profile), CARD_ACTION_DEBOUNCE_MS);
     const handleDelete = useDebouncedCallback(() => onDelete(profile), CARD_ACTION_DEBOUNCE_MS);
@@ -424,12 +416,6 @@ const ConnectionCard = React.memo<ConnectionCardProps>(
                     <HeartPulseIcon />
                     {t('remoteHealth.open')}
                   </DropdownMenuItem>
-                  {DEPLOYMENT_ENTRY_POINTS_VISIBLE && (
-                    <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleOpenDeployments}>
-                      <CloudUploadIcon />
-                      {t('deployment.openForHost')}
-                    </DropdownMenuItem>
-                  )}
                   <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handlePortForward}>
                     <CableIcon />
                     {t('portForward.open')}

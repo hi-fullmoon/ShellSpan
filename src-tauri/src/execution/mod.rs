@@ -35,16 +35,17 @@ pub(crate) use redaction::{redact_known_json_values, redact_known_secrets};
 pub(crate) use request::known_connection_secret_values;
 #[cfg(test)]
 pub(crate) use request::DEFAULT_TOTAL_READ_HARD_LIMIT_BYTES;
+#[cfg(test)]
 pub(crate) use request::{
     ExecutionOutputPolicy, FrozenTargetIdentity, ReviewedSshCommand, ReviewedSshExecutionRequest,
 };
 #[cfg(test)]
 pub(crate) use result::ExecutionErrorCategory;
+#[cfg(test)]
 pub(crate) use result::ExecutionStatus;
 #[cfg(test)]
 pub(crate) use result::ReviewedSshExecutionResult;
 #[cfg(test)]
 pub(crate) use ssh::execute_reviewed_ssh_command;
-pub(crate) use ssh::execute_reviewed_ssh_command_with_handle;
 pub(crate) use ssh::open_ssh_execution_session;
 pub(crate) use ssh::start_ssh_exec_channel;

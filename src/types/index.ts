@@ -18,7 +18,7 @@ export type TerminalColorScheme = (typeof TERMINAL_COLOR_SCHEME_IDS)[number];
 export type TerminalBellStyle = 'none' | 'sound';
 export type TerminalRightClickBehavior = 'paste' | 'copyPaste' | 'none';
 export type SftpConflictPolicy = 'ask' | 'overwrite' | 'skip';
-export type WorkbenchTab = 'connections' | 'deployments' | 'knownHosts' | 'keychain' | 'monitor' | 'logs';
+export type WorkbenchTab = 'connections' | 'knownHosts' | 'keychain' | 'monitor' | 'logs';
 export type SettingsSection = 'appearance' | 'general' | 'terminal' | 'sftp' | 'ai' | 'shortcuts' | 'experimental' | 'feedback';
 export type PetdexConnectionStatus =
   | 'disabled'

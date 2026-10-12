@@ -64,9 +64,7 @@ tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt", "sy
 tokio-util = "0.7"
 httpdate = "1"
 tempfile = "3.27.0"
-tar = "0.4"
 zstd = "0.14"
-zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 url = "2"
 rwml = { version = "0.1.4", default-features = false }
 tauri-plugin-clipboard-manager = "2"

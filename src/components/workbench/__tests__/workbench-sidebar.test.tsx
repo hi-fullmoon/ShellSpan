@@ -3,36 +3,6 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import { WorkbenchSidebar } from '../workbench-sidebar';
 import { useAppStore } from '@/stores/appStore';
 import { useUpdateStore } from '@/stores/updateStore';
-import { useDeploymentWorkflowRunStore } from '@/stores/deploymentWorkflowRunStore';
-import type { DeploymentRunSummary } from '@/lib/deployment/types';
-
-function runSummary(
-  runId: string,
-  status: DeploymentRunSummary['status'],
-): DeploymentRunSummary {
-  return {
-    runId,
-    workflowId: 'workflow-1',
-    workflowRevision: 1,
-    operationKind: 'deploy',
-    triggerKind: 'manual',
-    status,
-    planDigest: 'sha256:plan',
-    targetRelease: {
-      releaseId: 'release-1',
-      artifactContentDigest: 'sha256:artifact',
-      layoutDigest: 'sha256:layout',
-    },
-    artifactReferences: [],
-    expiresAt: Date.now() + 60_000,
-    expired: false,
-    planDrifted: false,
-    createdAt: 10,
-    updatedAt: 11,
-    startedAt: null,
-    finishedAt: null,
-  };
-}
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
@@ -65,7 +35,6 @@ describe('WorkbenchSidebar', () => {
   beforeEach(() => {
     useUpdateStore.setState({ phase: 'idle' });
     useAppStore.setState({ profileName: '', profileAvatar: '' });
-    useDeploymentWorkflowRunStore.setState({ runs: [] });
   });
 
   it('hides the deployment center and preserves the other navigation entries', () => {
@@ -85,18 +54,6 @@ describe('WorkbenchSidebar', () => {
     expect(onTabChange).toHaveBeenCalledWith('connections');
   });
 
-  it('keeps the deployment entry hidden with runs awaiting reconciliation', () => {
-    useDeploymentWorkflowRunStore.setState({
-      runs: [
-        runSummary('run-1', 'state_unknown'),
-        runSummary('run-2', 'state_unknown'),
-        runSummary('run-3', 'succeeded'),
-      ],
-    });
-    render(<WorkbenchSidebar activeTab="deployments" onTabChange={vi.fn()} onOpenSettings={vi.fn()} onCheckForUpdates={vi.fn()} onOpenAbout={vi.fn()} onRequestExit={vi.fn()} />);
-
-    expect(screen.queryByRole('button', { name: /Deployments/ })).not.toBeInTheDocument();
-  });
 
   it('activates a menu item when WKWebView drops its trackpad pointerdown', () => {
     const onTabChange = vi.fn();

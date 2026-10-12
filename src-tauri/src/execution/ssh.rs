@@ -580,11 +580,8 @@ pub(crate) fn execute_reviewed_ssh_command(
     result
 }
 
-/// Executes a reviewed request using a cancellation registration owned by a
-/// larger fixed-purpose operation. Deployment preflight uses this so one
-/// operation ID remains cancellable during both local Git inspection and the
-/// remote SSH probe, without a registration race between those phases.
-pub(crate) fn execute_reviewed_ssh_command_with_handle(
+/// Executes a reviewed request using the caller's cancellation registration.
+fn execute_reviewed_ssh_command_with_handle(
     database: &Database,
     credentials: &CredentialManager,
     known_hosts_path: &Path,

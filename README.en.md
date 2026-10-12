@@ -11,7 +11,7 @@ ShellSpan is a desktop SSH client for remote system administration, with an inte
 - **Terminal**: SSH and local terminals, tabbed sessions, jump hosts, and port forwarding
 - **File management**: Dual-pane SFTP browsing, drag-and-drop transfers, resumable transfers, and file previews
 - **Connection management**: Saved connections, password and private key authentication, and credentials managed through the system keychain
-- **Administration tools**: Local and remote monitoring, log viewing, and deployment management
+- **Administration tools**: Local and remote monitoring and log viewing
 - **AI assistant**: Runs tasks within terminal sessions, with administration skills, operation approvals, and the ability to stop at any time
 
 ## Screenshots
@@ -65,6 +65,8 @@ pnpm test          # Run unit tests
 pnpm build         # Type-check and build the frontend
 pnpm tauri:build   # Build desktop installers
 ```
+
+The main branch starts with database schema version 1. First launch creates `~/.shellspan/shellspan-main.db`; development uses `~/.shellspan-dev/shellspan-main.db`. Data from previous databases is not imported.
 
 ## License
 
