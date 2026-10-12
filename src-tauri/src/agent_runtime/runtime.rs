@@ -1362,15 +1362,14 @@ impl AgentRuntime {
             matches!(&event.payload, super::AgentSessionEventPayload::InboxSpliced { messages, .. }
                 if messages.iter().any(|message| message.client_submission_id.as_deref() == Some(operation_id.as_str())))
         }))?;
-        if committed {
-            if !snapshot
+        if committed
+            && !snapshot
                 .inbox
                 .next_turn
                 .iter()
                 .any(|message| message.message_id == operation_id)
-            {
-                return Ok(snapshot);
-            }
+        {
+            return Ok(snapshot);
         }
         // Join the failed driver before admitting a new recovery input.
         self.resume(session_id).await?;

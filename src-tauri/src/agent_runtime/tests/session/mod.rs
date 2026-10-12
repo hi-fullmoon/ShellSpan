@@ -1717,7 +1717,7 @@ fn preparation_failure_claim_rejects_changed_input_and_survives_restart() {
                 "session-1",
                 "current-turn".into(),
                 "current-step".into(),
-                Some(&[current.clone()]),
+                Some(std::slice::from_ref(&current)),
             )
             .unwrap()
             .is_some());

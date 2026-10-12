@@ -2884,7 +2884,7 @@ fn validate_model_retry_record(record: &AgentSessionRecord, turn_id: &str) -> Re
         .unwrap_or_default()
         .to_ascii_lowercase();
     if !failure.retryable()
-        || matches!(failure.status, Some(401 | 402 | 403 | 404))
+        || matches!(failure.status, Some(401..=404))
         || matches!(
             code.as_str(),
             "insufficient_quota"
