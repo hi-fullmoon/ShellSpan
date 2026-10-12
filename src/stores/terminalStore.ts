@@ -11,7 +11,7 @@ import type {
 import { generateId } from '@/lib/utils';
 import { useAppStore } from './appStore';
 import { useProfileStore } from './profileStore';
-import { formatTabTitle } from '@/lib/terminal/tab-title';
+import { formatTabTitle, resolveTabTitleValues } from '@/lib/terminal/tab-title';
 
 export interface TerminalSession {
   sessionId: string;
@@ -487,14 +487,12 @@ function refreshTabTitles(): void {
     maxima.set(key, Math.max(maxima.get(key) ?? 0, index));
     const baseTitle = session.baseTitle ?? session.title;
     const profile = session.profileId ? profiles.getProfile(session.profileId) : undefined;
-    const name = profile ? profile.name || session.host : baseTitle || session.host;
     const template = (session.profileId && preferences.terminalTabTitleOverrides[session.profileId]) || preferences.terminalTabTitleTemplate;
     const custom = session.profileId && preferences.terminalTabTitleOverrides[session.profileId] !== undefined
       ? preferences.terminalTabTitleCustomOverrides[session.profileId] === true
       : preferences.terminalTabTitleCustom;
-    const title = session.manualTitle ?? formatTabTitle(template, {
-      name, user: session.username, host: session.host, port: session.port, index,
-    }, custom);
+    const title = session.manualTitle ?? formatTabTitle(template,
+      resolveTabTitleValues({ ...session, titleIndex: index }, profile), custom);
     if (title === session.title && baseTitle === session.baseTitle && index === session.titleIndex) return session;
     changed = true;
     return { ...session, title, baseTitle, titleIndex: index };

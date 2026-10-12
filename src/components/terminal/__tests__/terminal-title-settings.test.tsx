@@ -5,6 +5,7 @@ import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { TerminalTitleSettings } from '../terminal-title-settings';
 import { useProfileStore } from '@/stores/profileStore';
+import { useTerminalStore } from '@/stores/terminalStore';
 
 beforeEach(async () => {
   useAppStore.setState({ terminalTabTitleTemplate: '${name}', terminalTabTitleOverrides: {} });
@@ -12,8 +13,25 @@ beforeEach(async () => {
 });
 afterEach(() => {
   cleanup();
+  useTerminalStore.setState({ sessions: [], activeSessionId: null });
   useProfileStore.setState({ profiles: [] });
   useAppStore.setState({ terminalTabTitleTemplate: '${name}', terminalTabTitleOverrides: {} });
+});
+
+it('keeps preview and session titles consistent after the configured host changes', () => {
+  const profile = { id: 'profile', name: '', host: 'old.example.com', port: 22, username: 'root', authMethod: 'password' as const, createdAt: 0, updatedAt: 0 };
+  useProfileStore.setState({ profiles: [profile] });
+  useAppStore.getState().setTerminalTabTitleTemplate('${name} · ${host}');
+  useTerminalStore.getState().addSession({ sessionId: 'connected', title: profile.host, host: profile.host, port: 22, username: 'root' }, profile.id);
+  render(<TerminalTitleSettings profileId={profile.id} />);
+  act(() => useProfileStore.setState({ profiles: [{ ...profile, host: 'new.example.com' }] }));
+  expect(useTerminalStore.getState().sessions[0].title).toBe('old.example.com');
+  expect(screen.getByText('预览：old.example.com')).toBeInTheDocument();
+  act(() => useProfileStore.setState({ profiles: [{ ...profile, name: 'Production', host: 'new.example.com' }] }));
+  expect(useTerminalStore.getState().sessions[0].title).toBe('Production · old.example.com');
+  expect(screen.getByText('预览：Production · old.example.com')).toBeInTheDocument();
+  act(() => useTerminalStore.setState({ sessions: [] }));
+  expect(screen.getByText('预览：Production · new.example.com')).toBeInTheDocument();
 });
 
 it('previews deduplication and persists a custom template identical to the preset', () => {

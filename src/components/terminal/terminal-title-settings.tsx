@@ -3,7 +3,7 @@ import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useTerminalStore } from '@/stores/terminalStore';
-import { formatTabTitle, TAB_TITLE_PRESETS, validTabTitleTemplate } from '@/lib/terminal/tab-title';
+import { formatTabTitle, resolveTabTitleValues, TAB_TITLE_PRESETS, validTabTitleTemplate } from '@/lib/terminal/tab-title';
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -38,13 +38,7 @@ export function TerminalTitleSettings({ profileId }: { profileId?: string }) {
   const save = (value: string, isCustom = custom) => { if (scope) setOverride(scope, value, isCustom); else setGlobal(value, isCustom); };
   const session = sessions.find((item) => scope ? item.profileId === scope : !item.manualTitle);
   const profile = profiles.find((item) => item.id === (scope || session?.profileId));
-  const preview = session || profile ? formatTabTitle(draft, {
-    name: profile?.name || profile?.host || session?.baseTitle || session?.host || '',
-    user: session?.username ?? profile?.username ?? '',
-    host: session?.host ?? profile?.host ?? '',
-    port: session?.port ?? profile?.port ?? 22,
-    index: session?.titleIndex ?? 1,
-  }, custom) : null;
+  const preview = session || profile ? formatTabTitle(draft, resolveTabTitleValues(session, profile), custom) : null;
 
   return <FieldGroup className="@container min-w-0 gap-3">
     <FieldGroup className="grid min-w-0 grid-cols-1 gap-3 @min-[28rem]:grid-cols-2" data-title-selects>
