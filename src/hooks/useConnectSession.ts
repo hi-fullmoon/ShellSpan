@@ -93,7 +93,6 @@ export function useConnectSession(): {
       pinned: options?.pinned,
       color: options?.color,
     }, options?.connectionAttemptId);
-    setActiveSection('terminal');
     logger.info(`Connecting to ${profile.host}:${profile.port} as ${profile.username}`);
 
     try {
@@ -117,6 +116,7 @@ export function useConnectSession(): {
         }
 
         const preparedProfile = ensuredProfile;
+        setActiveSection('terminal');
 
         try {
           const summary = await invokeCreateSession(

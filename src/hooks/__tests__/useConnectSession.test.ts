@@ -168,6 +168,7 @@ describe('useConnectSession', () => {
       connection = result.current.connect(profile);
     });
 
+    await waitFor(() => expect(invokeCreateSession).toHaveBeenCalledTimes(1));
     expect(useAppStore.getState().activeSection).toBe('terminal');
     expect(useTerminalStore.getState().sessions).toHaveLength(1);
     expect(useTerminalStore.getState().sessions[0]).toMatchObject({

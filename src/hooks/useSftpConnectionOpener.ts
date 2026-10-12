@@ -174,7 +174,6 @@ export function useSftpConnectionOpener(): {
           connection: buildRemoteConnectionRequest(attemptProfile),
         }, targetConnectionId, targetSide);
       const connectionAttemptId = beginAttempt(profile);
-      setActiveSection('sftp');
       try {
         const profileWithSavedSecrets = await useProfileStore
           .getState()
@@ -190,6 +189,7 @@ export function useSftpConnectionOpener(): {
         }
 
         const preparedProfile = profileWithKey;
+        setActiveSection('sftp');
 
         const attemptSftpConnection = async (attemptId: string): Promise<void> => {
           try {
