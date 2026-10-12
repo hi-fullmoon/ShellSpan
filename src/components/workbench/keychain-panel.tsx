@@ -51,6 +51,24 @@ export function credentialAlgorithm(type: string): string {
   return '';
 }
 
+export function credentialEndpoint(profile: ConnectionProfile): string {
+  const host = profile.host.includes(':') ? `[${profile.host}]` : profile.host;
+  return `${profile.username}@${host}:${profile.port}`;
+}
+
+export function credentialLabel(key: KeychainKeySummary, profiles: ConnectionProfile[]): string {
+  const profile = credentialProfiles(key, profiles)[0];
+  return key.service === 'com.shellspan.profile-password' && profile
+    ? `${profile.username}@${profile.host}`
+    : key.label;
+}
+
+export function credentialSearchText(key: KeychainKeySummary, profiles: ConnectionProfile[]): string {
+  return [key.label, credentialLabel(key, profiles), key.keyType,
+    ...credentialProfiles(key, profiles).flatMap((profile) => [profile.name, credentialEndpoint(profile)]),
+  ].join(' ').toLowerCase();
+}
+
 export const KeychainPanel: React.FC<{ onEditConnection?: (profile: ConnectionProfile) => void }> = ({ onEditConnection }) => {
   const { t } = useI18n();
   const { success: showSuccess, error: showError } = useToast();
@@ -86,7 +104,7 @@ export const KeychainPanel: React.FC<{ onEditConnection?: (profile: ConnectionPr
     : [t('workbench.keychain.sshKey'), credentialAlgorithm(key.keyType)].filter(Boolean).join(' · ');
 
   const associations = (key: KeychainKeySummary): string => {
-    const names = credentialProfiles(key, profiles).map((profile) => profile.name).join(', ');
+    const names = credentialProfiles(key, profiles).map(credentialEndpoint).join(', ');
     return names ? t('workbench.keychain.usedBy', { names }) : t('workbench.keychain.unused');
   };
 
@@ -94,7 +112,7 @@ export const KeychainPanel: React.FC<{ onEditConnection?: (profile: ConnectionPr
   const filteredKeys = useMemo(() => {
     return keys.filter((key) => {
       if (!normalizedQuery) return true;
-      return [key.label, key.keyType, typeLabel(key), ...credentialProfiles(key, profiles).map((profile) => profile.name)].join(' ').toLowerCase().includes(normalizedQuery);
+      return `${credentialSearchText(key, profiles)} ${typeLabel(key).toLowerCase()}`.includes(normalizedQuery);
     });
   }, [keys, normalizedQuery, profiles, t]);
 
@@ -290,12 +308,14 @@ export const KeychainPanel: React.FC<{ onEditConnection?: (profile: ConnectionPr
               <ResponsiveCardGrid columns={1} minColumnWidth={MANAGEMENT_CARD_MIN_WIDTH} gap="0.5rem">
                 {filteredKeys.map((key) => {
                   const isProfilePassword = key.service === 'com.shellspan.profile-password';
+                  const linkedProfiles = credentialProfiles(key, profiles);
+                  const label = credentialLabel(key, profiles);
                   return (
                     <ManagementCard key={key.id}>
                       <div className="flex items-center gap-1">
                         <ManagementCardIcon>{key.kind === 'password' ? <Lock /> : <FileKey />}</ManagementCardIcon>
                         <div className="flex min-w-0 flex-1 flex-col gap-1">
-                          <span className="truncate text-[13px] font-medium leading-tight text-app-text">{key.label}</span>
+                          <span title={label} className="truncate text-[13px] font-medium leading-tight text-app-text">{label}</span>
                           <Badge variant="secondary" size="sm">{typeLabel(key)}</Badge>
                         </div>
                         {(!isProfilePassword || (onEditConnection && credentialProfiles(key, profiles).length > 0)) && (
@@ -317,7 +337,28 @@ export const KeychainPanel: React.FC<{ onEditConnection?: (profile: ConnectionPr
                           <Trash2Icon data-icon="inline-start" className="text-destructive" />
                         </IconActionButton>
                       </div>
-                      <p className="truncate text-xs text-muted-foreground" title={associations(key)}>{associations(key)}</p>
+                      {linkedProfiles.length > 1 ? (
+                        <Popover>
+                          <PopoverTrigger render={<Button variant="link" size="sm" className="max-w-full justify-start" />}>
+                            {t('workbench.keychain.linkedCount', { count: linkedProfiles.length })}
+                          </PopoverTrigger>
+                          <PopoverContent>
+                            <PopoverTitle>{t('workbench.keychain.linkedConnections')}</PopoverTitle>
+                            <ScrollArea className="max-h-64 [&_[data-slot=scroll-area-viewport]]:max-h-64">
+                              <ul className="flex flex-col gap-2">
+                                {linkedProfiles.map((profile) => (
+                                  <li key={profile.id} className="min-w-0 text-xs">
+                                    <p className="truncate" title={profile.name}>{profile.name}</p>
+                                    <p className="break-all text-muted-foreground">{credentialEndpoint(profile)}</p>
+                                  </li>
+                                ))}
+                              </ul>
+                            </ScrollArea>
+                          </PopoverContent>
+                        </Popover>
+                      ) : (
+                        <p className="truncate text-xs text-muted-foreground" title={associations(key)}>{associations(key)}</p>
+                      )}
                     </ManagementCard>
                   );
                 })}
