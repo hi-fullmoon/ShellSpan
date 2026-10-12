@@ -1146,6 +1146,7 @@ export default {
   'update.failed': 'Update failed: {error}',
   'update.failedFriendly': 'Update failed. Try again later; details were recorded in the logs.',
   'update.manualUnavailable': 'Update checks are only available in the desktop app.',
+  'update.developmentUnavailable': 'Updates cannot be checked or installed in development. Please use a release build.',
 
   'update.restartDialog.title': 'New version downloaded',
   'update.restartDialog.description': 'Version {version} is ready. Restart the app to finish installation.',

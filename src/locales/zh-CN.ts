@@ -1146,6 +1146,7 @@ export default {
   'update.failed': '更新失败：{error}',
   'update.failedFriendly': '更新失败，请稍后重试；详细错误信息已记录到日志。',
   'update.manualUnavailable': '更新检查仅在桌面应用中可用。',
+  'update.developmentUnavailable': '开发环境无法检查或安装更新，请使用正式版应用。',
 
   'update.restartDialog.title': '新版本已下载完成',
   'update.restartDialog.description': '版本 {version} 已准备就绪，重启应用后即可完成安装。',

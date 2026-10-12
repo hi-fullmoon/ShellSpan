@@ -41,7 +41,12 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
   restartDialogDismissed: false,
 
   runCheck: async (mode) => {
-    if (import.meta.env.DEV) return;
+    if (import.meta.env.DEV) {
+      if (mode === 'manual') {
+        useToastStore.getState().addToast(t('update.developmentUnavailable'), 'info');
+      }
+      return;
+    }
 
     if (!isTauriRuntime()) {
       if (mode === 'manual') {
@@ -137,7 +142,10 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
   },
 
   installNow: async () => {
-    if (import.meta.env.DEV) return;
+    if (import.meta.env.DEV) {
+      useToastStore.getState().addToast(t('update.developmentUnavailable'), 'info');
+      return;
+    }
 
     set({ restartDialogDismissed: true });
     try {
