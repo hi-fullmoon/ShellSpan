@@ -59,9 +59,34 @@ Session, attaches its runtime and resumes that item. Process startup first repai
 committed claim intents, then durably pauses remaining root-session inputs. Merely
 opening a conversation or replaying a receipt does not authorize consuming them.
 
-Model-request retry and recovery remain owned by the driver. Frontend admission
-does not retry a model generation or a tool call. Approval and question gates
-remain in force; ordinary messages can queue while those gates are waiting.
+Automatic model-request retry remains owned by the driver. Manual recovery uses
+`agent_runtime_retry_model({ sessionId, turnId })`, only for the latest settled
+turn whose final model failure is retryable. Configuration failures, pending
+inputs, tool calls in that turn and uncertain effects block this operation.
+The native boundary also enforces the recorded provider retry deadline.
+
+The command joins the failed runtime and records a runtime-source recovery input
+with the deterministic receipt `model-retry-{turnId}`. It starts a new turn using
+the current session model selection and existing surface, including the original
+text and image references. It does not duplicate the original user message or
+rewrite the failed turn. Repeated commands acknowledge the same admission;
+completed recovery receipts never authorize another generation. A subsequent
+failed recovery turn has its own identity and can be retried separately.
+If process startup pauses an unclaimed recovery input, the original failed
+turn keeps its recovery action. An explicit click resumes only that durable
+input and records `agent/inbox/item_resumed`; opening the conversation does
+not resume it. The adapter dispatches this action even when an admission receipt
+already exists, and confirms that the recovery is no longer paused.
+Resuming an unclaimed recovery revalidates the latest failed turn and pending
+work under the native store lock. An obsolete paused input cannot be resumed
+after a newer turn begins. Consumed receipts remain idempotent acknowledgements.
+The adapter waits for fresh recovery evidence independently of the IPC reply;
+after 15 seconds it backfills events, with a further 3-second confirmation limit.
+Stream errors in Chat Completions and Responses retain their typed provider
+codes so temporary limits and terminal quota/policy errors have the same
+recovery classification as HTTP errors.
+Approval and question gates remain in force. Tool failure recovery requires
+inspection and explicit follow-up rather than replaying tool calls.
 
 Validation covers the pure composer and admission coordinator, real native store
 write/replay, claim-prefix recovery, native image admission, real WebKit IndexedDB

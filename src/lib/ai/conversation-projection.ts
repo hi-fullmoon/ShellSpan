@@ -300,6 +300,7 @@ function createChatProjection() {
   let previousPromptContent: string | undefined;
   const artifacts = new Map<string, AiArtifactNode>();
   const requests = new Map<string, RequestFacts>();
+  const failures = new Map<string, { failure: NonNullable<AiErrorNode['failure']>; retryAt?: number }>();
   const activeRequestByStep = new Map<string, string>();
   const tools = new Map<string, AiToolNode>();
   const unscopedNodes = new Map<string, AiConversationNode>();
@@ -472,6 +473,7 @@ function createChatProjection() {
       message,
       code: null,
       state: errorState(status),
+      ...failures.get(resolvedTurnId),
     });
   };
 
@@ -782,6 +784,7 @@ function createChatProjection() {
       }
       case 'request/header':
       case 'request/start': {
+        if (event.turnId) failures.delete(event.turnId);
         const turn = ensureTurn(event);
         {
           const facts: RequestFacts = {
@@ -884,6 +887,10 @@ function createChatProjection() {
         break;
       }
       case 'request/failure': {
+        if (event.turnId) failures.set(event.turnId, {
+          failure: event.data.failure,
+          retryAt: event.data.failure.retryAfterMs === undefined ? undefined : event.timeUnixMs + event.data.failure.retryAfterMs,
+        });
         const request = requests.get(event.data.requestId);
         if (request) {
           request.completedAt = event.timeUnixMs;
@@ -925,6 +932,7 @@ function createChatProjection() {
         break;
       }
       case 'assistant/message': {
+        if (event.turnId) failures.delete(event.turnId);
         const requestId = event.stepId ? activeRequestByStep.get(event.stepId) ?? null : null;
         const reasoning = reasoningContent(event.data.content);
         if (reasoning) {

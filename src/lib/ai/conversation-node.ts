@@ -147,6 +147,8 @@ export interface AiErrorNode extends AiConversationNodeBase {
   readonly message: string;
   readonly code: string | null;
   readonly state: 'failed' | 'cancelled' | 'unknown';
+  readonly failure?: Extract<import('@/types/agent-session').AgentSessionEvent, { type: 'request/failure' }>['data']['failure'];
+  readonly retryAt?: number;
 }
 
 export interface AiDurableTurnStats {

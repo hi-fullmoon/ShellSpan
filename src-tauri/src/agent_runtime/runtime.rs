@@ -1348,6 +1348,46 @@ impl AgentRuntime {
         self.stop_session(session_id, false).await
     }
 
+    pub(crate) async fn retry_model_failure(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        provider: AiProviderConfig,
+        api_key: Option<String>,
+    ) -> Result<AgentSessionSnapshot, String> {
+        self.sessions.validate_model_retry(session_id, turn_id)?;
+        let snapshot = self.sessions.snapshot(session_id)?;
+        let operation_id = format!("model-retry-{turn_id}");
+        let committed = self.sessions.read_events(session_id, |events| events.iter().any(|event| {
+            matches!(&event.payload, super::AgentSessionEventPayload::InboxSpliced { messages, .. }
+                if messages.iter().any(|message| message.client_submission_id.as_deref() == Some(operation_id.as_str())))
+        }))?;
+        if committed {
+            if !snapshot
+                .inbox
+                .next_turn
+                .iter()
+                .any(|message| message.message_id == operation_id)
+            {
+                return Ok(snapshot);
+            }
+        }
+        // Join the failed driver before admitting a new recovery input.
+        self.resume(session_id).await?;
+        // Resolve and attach the model first: a configuration/start failure must
+        // leave the recovery button usable, not strand a hidden queued input.
+        self.start(session_id, provider, api_key)?;
+        let entry = self
+            .agents
+            .get(session_id)?
+            .ok_or("MODEL_RETRY_UNAVAILABLE: runtime is stopping")?;
+        entry
+            .with_input_admission(|| self.sessions.retry_model_failure(session_id, turn_id))?
+            .ok_or("MODEL_RETRY_UNAVAILABLE: runtime is stopping")?;
+        self.wake(session_id)?;
+        self.sessions.snapshot(session_id)
+    }
+
     pub(crate) async fn resume(&self, session_id: &str) -> Result<AgentSessionSnapshot, String> {
         let snapshot = self.sessions.snapshot(session_id)?;
         if snapshot.archived || snapshot.header.subagent.is_some() {

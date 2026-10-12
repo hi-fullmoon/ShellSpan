@@ -353,12 +353,14 @@ pub(in crate::llm) fn process_chat_event(
         sink.emit(StreamDelta::Usage { usage: next.into() })?;
         usage.merge_latest(next);
     }
-    if let Some(message) = value
-        .pointer("/error/message")
-        .or_else(|| value.get("message"))
-        .and_then(Value::as_str)
+    if value.get("error").is_some_and(Value::is_object)
+        || value
+            .pointer("/error/message")
+            .or_else(|| value.get("message"))
+            .and_then(Value::as_str)
+            .is_some()
     {
-        return Err(normalize_provider_error(400, message));
+        return Err(normalize_stream_error(&value));
     }
     if let Some(reason) = value
         .pointer("/choices/0/finish_reason")

@@ -743,13 +743,7 @@ pub(in crate::llm) fn process_responses_event(
             return Err(response_incomplete_error(&value));
         }
         Some("response.failed") | Some("error") => {
-            let message = value
-                .pointer("/response/error/message")
-                .or_else(|| value.pointer("/error/message"))
-                .or_else(|| value.get("message"))
-                .and_then(Value::as_str)
-                .unwrap_or("OpenAI request failed");
-            return Err(normalize_provider_error(400, message));
+            return Err(normalize_stream_error(&value));
         }
         _ => {}
     }

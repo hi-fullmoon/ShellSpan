@@ -4,6 +4,8 @@ import { fallbackSessionTitle } from './session-title';
 import { normalizeAiSessionError } from './session-error';
 import { invokeAnswerAgentRuntimeQuestion, invokeListAgentRuntimeSkills, invokeListAgentFileReferences } from '@/lib/ipc/tauri';
 import { projectQuestions } from './question-projection';
+import { modelRetryConfirmation } from './failure-recovery';
+import { awaitMutationAcknowledgement } from './mutation-acknowledgement';
 import { invokeSubmitAgentImages } from '@/lib/ipc/tauri';
 import { requireVision } from '@/lib/ai/vision-contract';
 import {
@@ -15,6 +17,7 @@ import {
   invokeDeleteAgentRuntimeSession,
   invokeInterruptAgentRuntime,
   invokeResumeAgentRuntime,
+  invokeRetryAgentModel,
   invokeCreateAgentRuntimeSession,
   invokeGetPendingAgentRuntimeApprovalArguments,
   invokeGetAgentRuntimeArtifact,
@@ -382,6 +385,8 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
     revision: state.lastCommittedSeq === undefined ? state.snapshot.eventCount : state.lastCommittedSeq + 1,
     committedOperationIds: events.flatMap((event) => {
       switch (event.type) {
+        case 'agent/inbox/spliced':
+          return event.data.messages.flatMap(message => message.source.label === 'model-failure-retry' && message.clientSubmissionId ? [message.clientSubmissionId] : []);
         case 'question/answered':
           return [event.data.submission.clientOperationId];
         case 'agent/inbox/item_resumed':
@@ -517,10 +522,13 @@ export function createAgentSessionAdapter(
     sessionId: string,
     clientOperationId: string,
     command: () => Promise<unknown>,
+    recovery?: { readonly confirmed: (view: AiSessionView) => boolean },
   ): Promise<void> => {
     const entry = ensureEntry(sessionId);
     await openEntry(sessionId);
-    if (entry.view?.committedOperationIds?.includes(clientOperationId)) return;
+    const confirmed = (view?: AiSessionView): boolean => Boolean(view && (recovery
+      ? recovery.confirmed(view) : view.committedOperationIds?.includes(clientOperationId)));
+    if (!recovery && confirmed(entry.view)) return;
     let settled = false;
     let resolveCommit: (() => void) | undefined;
     let rejectCommit: ((error: Error) => void) | undefined;
@@ -531,20 +539,27 @@ export function createAgentSessionAdapter(
     // A timeout can fire while the IPC command is still pending.
     void committed.catch(() => undefined);
     const listener: AiSessionListener = (next) => {
-      if (!next.committedOperationIds?.includes(clientOperationId) || settled) return;
+      if (!confirmed(next) || settled) return;
       settled = true;
       entry.listeners.delete(listener);
       resolveCommit?.();
     };
     entry.listeners.add(listener);
+    let recoveryTimeout: ReturnType<typeof globalThis.setTimeout> | undefined;
     const timeout = globalThis.setTimeout(() => {
       if (settled) return;
+      if (recovery) recoveryTimeout = globalThis.setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        entry.listeners.delete(listener);
+        rejectCommit?.(new Error('Model retry recovery confirmation timed out'));
+      }, 3_000);
       void entry.client.reconnect().then((state) => {
         if (settled) return;
         const refreshed = entry.project(state);
         entry.view = refreshed;
         for (const subscribed of entry.listeners) subscribed(refreshed);
-        if (refreshed.committedOperationIds?.includes(clientOperationId)) return;
+        if (confirmed(refreshed)) return;
         settled = true;
         entry.listeners.delete(listener);
         rejectCommit?.(new Error('Committed Agent Runtime mutation event timed out'));
@@ -558,26 +573,28 @@ export function createAgentSessionAdapter(
     try {
       // The durable receipt can arrive before the IPC response, or after the
       // response is lost entirely. It is sufficient to settle the operation.
-      await Promise.race([command(), committed]);
-      if (entry.view?.committedOperationIds?.includes(clientOperationId) && !settled) {
-        settled = true;
-        entry.listeners.delete(listener);
-        resolveCommit?.();
-      }
-      await committed;
+      const running = command();
+      if (recovery && entry.view) listener(entry.view);
+      await awaitMutationAcknowledgement(running, committed, () => {
+        if (entry.view) listener(entry.view);
+      });
     } catch (error) {
       // IPC may fail after durable append. Reconnect before reporting failure,
       // so retries can acknowledge the original operation, even after consumption.
-      if (!entry.view?.committedOperationIds?.includes(clientOperationId)) {
+      if (!confirmed(entry.view)) {
         try {
-          const refreshed = entry.project(await entry.client.reconnect());
+          const reconnect = entry.client.reconnect();
+          const state = recovery ? await Promise.race([reconnect, committed.then(() => {
+            throw new Error('Model retry was confirmed while reconnecting');
+          })]) : await reconnect;
+          const refreshed = entry.project(state);
           entry.view = refreshed;
           for (const subscribed of entry.listeners) subscribed(refreshed);
         } catch {
           // Preserve the original error; the caller retries the same identity.
         }
       }
-      if (entry.view?.committedOperationIds?.includes(clientOperationId)) {
+      if (confirmed(entry.view)) {
         entry.listeners.delete(listener);
         return;
       }
@@ -588,6 +605,7 @@ export function createAgentSessionAdapter(
       throw error;
     } finally {
       globalThis.clearTimeout(timeout);
+      if (recoveryTimeout !== undefined) globalThis.clearTimeout(recoveryTimeout);
     }
   };
 
@@ -893,6 +911,15 @@ export function createAgentSessionAdapter(
       entry.view = view;
       for (const listener of entry.listeners) listener(view);
       return view;
+    },
+    async retryModel(sessionId, turnId): Promise<void> {
+      // An old admission receipt does not prove a paused recovery was resumed.
+      // Always dispatch the explicit action; native receipt handling is idempotent.
+      const before = await openEntry(sessionId);
+      const id = `model-retry-${turnId}`;
+      await waitForCommittedOperation(sessionId, id, () => invokeRetryAgentModel({ sessionId, turnId }), {
+        confirmed: modelRetryConfirmation(before, turnId),
+      });
     },
     async loadOlder(_sessionId: string, _cursor: string): Promise<readonly AiConversationNode[]> {
       return [];

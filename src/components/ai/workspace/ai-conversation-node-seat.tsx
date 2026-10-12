@@ -31,6 +31,7 @@ import { AiToolRow } from './ai-tool-presentation';
 import { AiTurnFooter } from './ai-turn-footer';
 import { AiProcessingStatus } from './ai-processing-status';
 import { AiQuestionHistory } from './ai-question-panel';
+import { AiFailureRecoveryAction } from './ai-failure-recovery';
 import {
   AI_DISCLOSURE_LEADING_CLASS,
   AI_DISCLOSURE_ROW_CLASS,
@@ -454,7 +455,10 @@ function ErrorNodeView({ node }: { readonly node: AiConversationNodeOf<'error'> 
         <span className="ai-turn-error-title mr-1.5">{t('ai.requestFailed')}</span>
         <span>{errorNodeMessage(node, t)}</span>
         <Collapsible className="ai-error-details">
-          <CollapsibleTrigger className="text-muted-foreground underline underline-offset-4">{t('ai.error.details')}</CollapsibleTrigger>
+          <div className="flex min-w-0 flex-wrap items-center gap-1">
+            <CollapsibleTrigger className="text-muted-foreground underline underline-offset-4">{t('ai.error.details')}</CollapsibleTrigger>
+            <AiFailureRecoveryAction turnId={node.turnId} />
+          </div>
           <CollapsibleContent>
             <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">
               {node.message}

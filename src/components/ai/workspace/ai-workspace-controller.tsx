@@ -158,6 +158,8 @@ export function AiWorkspaceController({
       onDismissError={controller.dismissError}
       onRetryFailedDraft={controller.retryFailedDraft}
       onRetrySync={controller.retrySync}
+      onRetryModel={controller.canStartAgent ? controller.retryModel : undefined}
+      retryingModel={controller.retryingModel}
       onOpenModel={openAiSettings}
       onHistory={controller.openSessions}
       onRefreshSessions={controller.refreshSessions}

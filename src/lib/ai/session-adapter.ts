@@ -217,6 +217,7 @@ export interface AiSessionAdapter<Kind extends AiSessionKind = AiSessionKind> {
   rename(input: AiSessionRenameInput): Promise<void>;
   refresh(sessionId: string): Promise<AiSessionView>;
   retrySync?(sessionId: string): Promise<AiSessionView>;
+  retryModel?(sessionId: string, turnId: string): Promise<void>;
   loadOlder(sessionId: string, cursor: string): Promise<readonly AiConversationNode[]>;
   loadArtifact(sessionId: string, artifactId: string, maxBytes: number): Promise<AgentArtifactResponse>;
   dispose(): void;

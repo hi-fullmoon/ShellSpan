@@ -25,6 +25,8 @@ import { AiComposerSeat } from './ai-composer-seat';
 import { useFirstSubmitTransition } from './use-first-submit-transition';
 import { AiEmptyHero } from './ai-empty-hero';
 import { AiConversation } from './ai-conversation';
+import { AiFailureRecoveryContext } from './ai-failure-recovery';
+import { latestFailureRecovery } from '@/lib/ai/failure-recovery';
 import { aiAskConversationNodeRenderers } from './ai-conversation-node-seat';
 import { AiSessionHeader } from './ai-session-header';
 import { AiSessionBrowser } from './ai-session-browser';
@@ -273,6 +275,8 @@ export interface AiWorkspaceRootProps {
   readonly onRetryFailedDraft?: (id: string) => void;
   readonly onRetrySync?: () => Promise<void>;
   readonly onOpenModel?: () => void;
+  readonly onRetryModel?: (turnId: string) => void;
+  readonly retryingModel?: boolean;
   readonly onNewSession?: () => void;
   readonly onHistory?: () => void;
   readonly onRefreshSessions?: () => void;
@@ -356,6 +360,8 @@ export function AiWorkspaceRoot({
   onRetryFailedDraft,
   onRetrySync,
   onOpenModel,
+  onRetryModel,
+  retryingModel = false,
   onNewSession,
   onHistory,
   onRefreshSessions,
@@ -650,6 +656,13 @@ export function AiWorkspaceRoot({
                 : <ShellSpanGlyph />}
             />
           ) : (
+            <AiFailureRecoveryContext.Provider value={{
+              recovery: view && !readOnlySession && !historicalTargetUnavailable
+                ? latestFailureRecovery(view) : null,
+              busy: retryingModel || activeComposerState?.phase === 'submitting' || activeComposerState?.phase === 'stopping',
+              onRetry: onRetryModel,
+              onSettings: onOpenModel,
+            }}>
             <AiConversation
               key={conversationIdentity.generation}
               nodes={conversationNodes}
@@ -669,6 +682,7 @@ export function AiWorkspaceRoot({
               loadingOlder={loadingOlder}
               onLoadOlder={onLoadOlder}
             />
+            </AiFailureRecoveryContext.Provider>
           )}
         </div>
 

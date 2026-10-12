@@ -171,6 +171,43 @@ pub(crate) struct AgentRuntimeStartInput {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentModelRetryInput {
+    session_id: String,
+    turn_id: String,
+}
+
+#[tauri::command]
+pub(crate) async fn agent_runtime_retry_model(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    credentials: State<'_, CredentialManager>,
+    input: AgentModelRetryInput,
+) -> Result<AgentSessionSnapshot, String> {
+    configure_runtime(&app, &runtime)?;
+    runtime.configure_credentials(credentials.inner().clone())?;
+    let selection = runtime
+        .session(&input.session_id)?
+        .header
+        .model_selection
+        .ok_or("MODEL_RETRY_UNAVAILABLE: select a model first")?;
+    let (provider, api_key) = {
+        let llm = app.state::<crate::llm::runtime::LlmRuntime>();
+        let routes = llm.routes.snapshot()?;
+        let route = routes.route(&selection.route_id)?;
+        let selection = crate::llm::routes::ModelSelection {
+            route_id: selection.route_id.clone(),
+            model_id: selection.model_id,
+            reasoning_effort: selection.reasoning_effort,
+        };
+        (route.provider(&selection)?, llm.routes.credential(route)?)
+    };
+    runtime
+        .retry_model_failure(&input.session_id, &input.turn_id, provider, api_key)
+        .await
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AgentRuntimeModelSelectionInput {
     session_id: String,
     selection: crate::llm::routes::ModelSelection,

@@ -449,6 +449,10 @@ export async function invokeResumeAgentRuntime(input: AgentSessionIdInput): Prom
   return invokeLogged<AgentSessionSnapshot>('agent_runtime_resume', { input });
 }
 
+export async function invokeRetryAgentModel(input: { sessionId: string; turnId: string }): Promise<AgentSessionSnapshot> {
+  return invokeLogged<AgentSessionSnapshot>('agent_runtime_retry_model', { input });
+}
+
 export async function invokeApproveAgentRuntimeTool(
   input: AgentRuntimeToolDecisionInput,
 ): Promise<AgentSessionSnapshot> {

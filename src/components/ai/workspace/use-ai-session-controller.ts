@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
+import { latestFailureRecovery } from '@/lib/ai/failure-recovery';
+import { aiErrorMessage } from '@/lib/ai/error-message';
 
 import { sharedAgentSessionAdapter, submissionMemoryFor } from '@/lib/ai/submission-memory';
 import { AiSubmissionQueue } from '@/lib/ai/submission-queue';
@@ -146,6 +149,8 @@ export interface AiSessionController {
   readonly retryFailedDraft: (failedDraftId: string) => void;
   readonly dismissError: () => void;
   readonly retrySync: () => Promise<void>;
+  readonly retryModel: (turnId: string) => void;
+  readonly retryingModel: boolean;
   readonly openSessions: () => void;
   readonly openSession: (summary: AiSessionSummary) => void;
   readonly newSession: () => void;
@@ -335,6 +340,8 @@ export function useAiSessionController({
   const composerRef = useRef(composer);
   const viewRef = useRef(view);
   const [settingsBusy, setSettingsBusy] = useState(false);
+  const [retryingModelSession, setRetryingModelSession] = useState<string | null>(null);
+  const modelRetryPending = useRef(false);
   const [newExecutionSurface, setNewExecutionSurface] = useState<AgentExecutionSurface>(
     () => useAgentPermissionStore.getState().getExecutionSurface(activeTerminalId ?? ''),
   );
@@ -1747,6 +1754,24 @@ export function useAiSessionController({
       });
     },
     dismissError: () => dispatch({ type: 'error.dismissed' }),
+    retryingModel: retryingModelSession === view?.summary.id,
+    retryModel: (turnId) => {
+      const current = viewRef.current;
+      const recovery = current && latestFailureRecovery(current);
+      const context = submissionContextRef.current;
+      if (!current || recovery?.kind !== 'retry' || recovery.turnId !== turnId
+        || (recovery.retryAt ?? 0) > now() || readOnlySession || !canStartAgent
+        || modelRetryPending.current || settingsPending.current
+        || ['submitting', 'stopping'].includes(composerRef.current.phase) || !adapter.retryModel) return;
+      modelRetryPending.current = true;
+      setRetryingModelSession(current.summary.id);
+      void adapter.retryModel(current.summary.id, turnId).catch(error => {
+        if (mountedRef.current && submissionContextRef.current === context) toast.error(aiErrorMessage(normalizeAiSessionError(error).message, t));
+      }).finally(() => {
+        modelRetryPending.current = false;
+        if (mountedRef.current) setRetryingModelSession(null);
+      });
+    },
     retrySync: async () => {
       const sessionId = viewRef.current?.summary.id;
       const context = submissionContextRef.current;

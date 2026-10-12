@@ -460,6 +460,44 @@ fn openai_reasoning_items_replay_exactly_and_keep_output_order() {
 
 #[test]
 fn provider_errors_are_typed_for_retry_auth_rate_limit_and_context() {
+    for (status, body, code, retryable) in [
+        (
+            429,
+            r#"{"error":{"code":"insufficient_quota","message":"Quota exhausted"}}"#,
+            "insufficient_quota",
+            false,
+        ),
+        (
+            403,
+            r#"{"error":{"code":"content_policy_violation","message":"Declined"}}"#,
+            "content_policy_violation",
+            false,
+        ),
+        (
+            429,
+            r#"{"error":{"code":429,"metadata":{"error_type":"rate_limit_exceeded"}}}"#,
+            "rate_limit_exceeded",
+            true,
+        ),
+        (
+            429,
+            r#"{"error":{"code":429,"message":"Upstream capacity"}}"#,
+            "HTTP_429",
+            true,
+        ),
+        (
+            403,
+            r#"{"error":{"code":"server_error","metadata":{"error_type":"content_policy_violation"}}}"#,
+            "content_policy_violation",
+            false,
+        ),
+        (503, "Unavailable", "HTTP_503", true),
+    ] {
+        let error = normalize_provider_error(status, body);
+        assert_eq!(error.code.as_deref(), Some(code));
+        assert_eq!(error.retryable(), retryable);
+        assert_eq!(error.status, Some(status));
+    }
     assert_eq!(
         normalize_provider_error(503, "unavailable").kind,
         NormalizedModelErrorKind::Retryable
@@ -480,6 +518,73 @@ fn provider_errors_are_typed_for_retry_auth_rate_limit_and_context() {
     assert_eq!(permanent.kind, NormalizedModelErrorKind::Terminal);
     assert!(!permanent.retryable());
     assert!(normalize_provider_error(503, "unavailable").retryable());
+}
+
+#[test]
+fn streaming_provider_errors_keep_typed_recovery_through_both_parsers() {
+    let sink: Arc<dyn ModelStreamSink> = Arc::new(RecordingSink::default());
+    let capabilities = ProviderCapabilities {
+        cumulative_stream: false,
+        supports_stream_usage: true,
+        native_reasoning: false,
+        split_reasoning: false,
+        replay_reasoning_content: false,
+        think_tag_fallback: false,
+        parallel_tool_calls: true,
+    };
+    for (code, expected_kind, status) in [
+        (
+            "rate_limit_exceeded",
+            NormalizedModelErrorKind::RateLimited,
+            429,
+        ),
+        (
+            "provider_overloaded",
+            NormalizedModelErrorKind::Retryable,
+            503,
+        ),
+        (
+            "insufficient_quota",
+            NormalizedModelErrorKind::Terminal,
+            429,
+        ),
+        (
+            "content_policy_violation",
+            NormalizedModelErrorKind::Terminal,
+            403,
+        ),
+    ] {
+        let payload = json!({"error":{"code":code,"message":"Provider request failed"}});
+        let error = process_chat_event(
+            &format!("data: {payload}"),
+            capabilities,
+            &sink,
+            &mut ChatAccumulator::default(),
+            &mut ProviderUsage::default(),
+            &mut false,
+            &mut ModelFinishReason::Other,
+        )
+        .unwrap_err();
+        assert_eq!(error.kind, expected_kind);
+        assert_eq!(error.code.as_deref(), Some(code));
+        assert_eq!(error.status, Some(status));
+        let payload = json!({"type":"response.failed","response":{"error":{"code":code,"message":"Provider request failed"}}});
+        let error = process_responses_event(
+            &format!("data: {payload}"),
+            &sink,
+            &mut BTreeMap::new(),
+            &mut BTreeMap::new(),
+            &mut BTreeMap::new(),
+            &mut BTreeMap::new(),
+            &mut ProviderUsage::default(),
+            &mut false,
+            &mut Value::Null,
+        )
+        .unwrap_err();
+        assert_eq!(error.kind, expected_kind);
+        assert_eq!(error.code.as_deref(), Some(code));
+        assert_eq!(error.status, Some(status));
+    }
 }
 
 #[test]

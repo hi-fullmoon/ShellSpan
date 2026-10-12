@@ -188,6 +188,25 @@ pub(in crate::llm) async fn checked_stream_response(
 }
 
 pub(in crate::llm) fn normalize_provider_error(status: u16, message: &str) -> NormalizedModelError {
+    let body = serde_json::from_str::<serde_json::Value>(message).ok();
+    let provider_error = body.as_ref().and_then(|value| value.get("error"));
+    let code = provider_error
+        .and_then(|value| {
+            value
+                .get("metadata")
+                .and_then(|metadata| metadata.get("error_type"))
+                .and_then(serde_json::Value::as_str)
+                .or_else(|| value.get("code").and_then(serde_json::Value::as_str))
+                .or_else(|| value.get("type").and_then(serde_json::Value::as_str))
+        })
+        .filter(|code| {
+            !code.is_empty()
+                && code.len() <= 128
+                && code
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        })
+        .map(str::to_ascii_lowercase);
     let normalized = message.to_ascii_lowercase();
     let context_too_large = [
         "context length",
@@ -198,7 +217,20 @@ pub(in crate::llm) fn normalize_provider_error(status: u16, message: &str) -> No
     ]
     .iter()
     .any(|phrase| normalized.contains(phrase));
-    let kind = if matches!(status, 401 | 403) {
+    let kind = if matches!(
+        code.as_deref(),
+        Some(
+            "insufficient_quota"
+                | "billing_hard_limit_reached"
+                | "content_policy_violation"
+                | "invalid_request_error"
+                | "model_not_found"
+        )
+    ) {
+        NormalizedModelErrorKind::Terminal
+    } else if matches!(code.as_deref(), Some("context_length_exceeded")) {
+        NormalizedModelErrorKind::ContextTooLarge
+    } else if matches!(status, 401 | 403) {
         NormalizedModelErrorKind::Authentication
     } else if status == 429 {
         NormalizedModelErrorKind::RateLimited
@@ -216,8 +248,45 @@ pub(in crate::llm) fn normalize_provider_error(status: u16, message: &str) -> No
     };
     let mut error = NormalizedModelError::new(kind, display);
     error.status = Some(status);
-    error.code = Some(format!("HTTP_{status}"));
+    error.code = Some(code.unwrap_or_else(|| format!("HTTP_{status}")));
     error
+}
+
+/// Both supported streaming protocols carry structured errors inside a 200 response.
+pub(in crate::llm) fn normalize_stream_error(value: &serde_json::Value) -> NormalizedModelError {
+    let source = value
+        .pointer("/response/error")
+        .or_else(|| value.get("error"))
+        .unwrap_or(value);
+    let mut error = source.clone();
+    if let Some(kind) = value
+        .get("error_type")
+        .or_else(|| value.pointer("/response/error_type"))
+    {
+        if let Some(object) = error.as_object_mut() {
+            object.insert("metadata".into(), serde_json::json!({"error_type": kind}));
+        }
+    }
+    let code = error
+        .pointer("/metadata/error_type")
+        .or_else(|| error.get("code"))
+        .or_else(|| error.get("type"));
+    let status = code
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|status| u16::try_from(status).ok())
+        .filter(|status| (400..600).contains(status))
+        .unwrap_or_else(|| match code.and_then(serde_json::Value::as_str) {
+            Some("rate_limit_exceeded" | "rate_limit_error" | "insufficient_quota") => 429,
+            Some("provider_overloaded" | "overloaded_error" | "server_error" | "server") => 503,
+            Some("provider_unavailable") => 502,
+            Some("timeout" | "request_timeout") => 408,
+            Some("authentication" | "authentication_error" | "invalid_api_key") => 401,
+            Some("permission_denied" | "permission_error" | "content_policy_violation") => 403,
+            Some("payment_required") => 402,
+            Some("model_not_found") => 404,
+            _ => 400,
+        });
+    normalize_provider_error(status, &serde_json::json!({"error": error}).to_string())
 }
 
 pub(in crate::llm) struct StreamDeadline {

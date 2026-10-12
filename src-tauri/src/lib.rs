@@ -349,6 +349,7 @@ pub fn run() {
             agent_runtime::agent_runtime_takeover_terminal,
             agent_runtime::agent_runtime_interrupt,
             agent_runtime::agent_runtime_resume,
+            agent_runtime::agent_runtime_retry_model,
             agent_runtime::agent_runtime_approve_tool,
             agent_runtime::agent_runtime_reject_tool,
             agent_runtime::agent_runtime_get_pending_approval_arguments,

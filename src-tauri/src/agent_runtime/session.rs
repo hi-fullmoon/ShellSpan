@@ -1407,6 +1407,96 @@ impl AgentSessionStore {
         Ok(AgentClaimedStep { messages })
     }
 
+    pub(crate) fn validate_model_retry(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+    ) -> Result<(), String> {
+        validate_identifier(turn_id, "turnId")?;
+        let inner = self.lock_configured()?;
+        let record = inner
+            .sessions
+            .get(session_id)
+            .ok_or("Agent session was not found")?;
+        validate_model_retry_record(record, turn_id)
+    }
+
+    /// Record a human recovery action without duplicating the original user input.
+    /// The per-turn submission identity is also the durable receipt for a lost IPC reply.
+    pub(crate) fn retry_model_failure(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+    ) -> Result<AgentSessionSnapshot, String> {
+        validate_identifier(turn_id, "turnId")?;
+        let mut inner = self.lock_configured()?;
+        let record = inner
+            .sessions
+            .get(session_id)
+            .ok_or("Agent session was not found")?;
+        let operation_id = format!("model-retry-{turn_id}");
+        if let Some((_, message)) = find_submission(record, &operation_id) {
+            validate_model_retry_receipt(message, turn_id)?;
+            if !record.inbox.paused_ids().contains(&operation_id) {
+                return record.snapshot();
+            }
+            validate_model_retry_record(record, turn_id)?;
+            validate_mutable_session(record, "model retry recovery")?;
+            if record.header.subagent.is_some() || has_uncertain_tool_executions(&record.events) {
+                return Err("MODEL_RETRY_UNAVAILABLE: pending recovery requires inspection".into());
+            }
+            let previous_revision = record.events.len() as u64;
+            let (events, publisher) = append_payloads_locked(
+                &mut inner,
+                session_id,
+                vec![(
+                    None,
+                    None,
+                    AgentSessionEventPayload::InboxItemResumed {
+                        item_id: operation_id,
+                        previous_revision,
+                        client_operation_id: format!(
+                            "model-retry-resume-{}",
+                            Uuid::new_v4().simple()
+                        ),
+                    },
+                )],
+            )?;
+            let snapshot = inner.sessions[session_id].snapshot()?;
+            drop(inner);
+            publish_events(publisher, &events);
+            return Ok(snapshot);
+        }
+        validate_model_retry_record(record, turn_id)?;
+        let mut source = AgentMessageSource::runtime("model-failure-retry".into());
+        source.metadata.insert("retryTurnId".into(), turn_id.into());
+        let message = AgentInboxMessage {
+            message_id: operation_id.clone(),
+            client_submission_id: Some(operation_id),
+            content: "The user explicitly requested a retry of the latest failed model request. Continue answering the existing user request using the conversation above. Do not treat this recovery notice as a new user question.".into(),
+            source,
+            images: Vec::new(),
+            terminal_context: None,
+        };
+        let (events, publisher) = append_payloads_locked(
+            &mut inner,
+            session_id,
+            vec![(
+                None,
+                None,
+                AgentSessionEventPayload::InboxSpliced {
+                    operation: AgentInboxOperation::Enqueued,
+                    lane: AgentInboxLane::NextTurn,
+                    messages: vec![message],
+                },
+            )],
+        )?;
+        let snapshot = inner.sessions[session_id].snapshot()?;
+        drop(inner);
+        publish_events(publisher, &events);
+        Ok(snapshot)
+    }
+
     pub(crate) fn enqueue(
         &self,
         session_id: &str,
@@ -2712,6 +2802,125 @@ fn append_payloads_locked(
         .petdex
         .observe(session_id, &record.events, &appended, record.status, false);
     Ok((appended, inner.publisher.clone()))
+}
+
+fn validate_model_retry_record(record: &AgentSessionRecord, turn_id: &str) -> Result<(), String> {
+    let operation_id = format!("model-retry-{turn_id}");
+    validate_identifier(&operation_id, "clientSubmissionId")?;
+    if let Some((_, message)) = find_submission(record, &operation_id) {
+        validate_model_retry_receipt(message, turn_id)?;
+        if !record
+            .inbox
+            .next_turn()
+            .iter()
+            .chain(&record.inbox.next_step())
+            .any(|pending| pending.message_id == operation_id)
+        {
+            return Ok(());
+        }
+    }
+    if record.archived
+        || record.header.subagent.is_some()
+        || !matches!(
+            record.status,
+            AgentSessionStatus::Failed | AgentSessionStatus::Idle
+        )
+        || record
+            .inbox
+            .next_turn()
+            .iter()
+            .chain(&record.inbox.next_step())
+            .any(|pending| pending.message_id != operation_id)
+        || has_uncertain_tool_executions(&record.events)
+    {
+        return Err(
+            "MODEL_RETRY_UNAVAILABLE: Session must be settled without pending or uncertain work"
+                .into(),
+        );
+    }
+    let boundary = record.events.iter().rev().find(|event| {
+        matches!(
+            event.payload,
+            AgentSessionEventPayload::TurnStart | AgentSessionEventPayload::TurnEnd { .. }
+        )
+    });
+    if !boundary.is_some_and(|event| {
+        event.turn_id.as_deref() == Some(turn_id)
+            && matches!(event.payload, AgentSessionEventPayload::TurnEnd { .. })
+    }) {
+        return Err("MODEL_RETRY_UNAVAILABLE: only the latest failed Turn can be retried".into());
+    }
+    let events: Vec<_> = record
+        .events
+        .iter()
+        .filter(|event| event.turn_id.as_deref() == Some(turn_id))
+        .collect();
+    if events.iter().any(|event| {
+        matches!(
+            event.payload,
+            AgentSessionEventPayload::ToolCall { .. }
+                | AgentSessionEventPayload::QuestionRequested { .. }
+        )
+    }) {
+        return Err("MODEL_RETRY_VERIFY: inspect tool execution before continuing".into());
+    }
+    let failure_event = events.iter().rev().find(|event| {
+        matches!(
+            event.payload,
+            AgentSessionEventPayload::RequestFailure { .. }
+                | AgentSessionEventPayload::RequestUsage { .. }
+                | AgentSessionEventPayload::AssistantMessage { .. }
+        )
+    });
+    let Some(event) = failure_event else {
+        return Err("MODEL_RETRY_UNAVAILABLE: no failed model request".into());
+    };
+    let AgentSessionEventPayload::RequestFailure { failure, .. } = &event.payload else {
+        return Err("MODEL_RETRY_UNAVAILABLE: no failed model request".into());
+    };
+    let code = failure
+        .code
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if !failure.retryable()
+        || matches!(failure.status, Some(401 | 402 | 403 | 404))
+        || matches!(
+            code.as_str(),
+            "insufficient_quota"
+                | "billing_hard_limit_reached"
+                | "model_not_found"
+                | "content_policy_violation"
+                | "context_length_exceeded"
+                | "invalid_request_error"
+        )
+    {
+        return Err(
+            "MODEL_RETRY_UNAVAILABLE: resolve model configuration or request errors first".into(),
+        );
+    }
+    if failure
+        .retry_after_ms
+        .is_some_and(|delay| current_unix_ms() < event.time_unix_ms.saturating_add(delay))
+    {
+        return Err("MODEL_RETRY_COOLDOWN: wait for the provider retry window".into());
+    }
+    Ok(())
+}
+
+fn validate_model_retry_receipt(message: &AgentInboxMessage, turn_id: &str) -> Result<(), String> {
+    if message.source.kind != super::AgentMessageSourceKind::Runtime
+        || message.source.label != "model-failure-retry"
+        || message
+            .source
+            .metadata
+            .get("retryTurnId")
+            .and_then(serde_json::Value::as_str)
+            != Some(turn_id)
+    {
+        return Err("MODEL_RETRY_UNAVAILABLE: recovery receipt identity conflicts".into());
+    }
+    Ok(())
 }
 
 fn find_submission<'a>(
