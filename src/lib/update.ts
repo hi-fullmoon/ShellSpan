@@ -60,6 +60,8 @@ export interface AvailableUpdate {
 }
 
 export async function checkForUpdate(): Promise<AvailableUpdate | null> {
+  if (import.meta.env.DEV) return null;
+
   const { check } = await import('@tauri-apps/plugin-updater');
   const update = await check();
   if (!update) {
@@ -84,6 +86,8 @@ export async function downloadAndInstallUpdate(
   update: AvailableUpdate,
   onProgress: (progress: UpdateDownloadProgress) => void,
 ): Promise<void> {
+  if (import.meta.env.DEV) return;
+
   let receivedBytes = 0;
   let totalBytes = 0;
 
@@ -123,6 +127,8 @@ const STARTUP_UPDATE_CHECK_KEY = 'shellspan.update.lastStartupCheckAt';
 const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
 
 export function shouldRunStartupUpdateCheck(now: number): boolean {
+  if (import.meta.env.DEV) return false;
+
   const raw = window.localStorage.getItem(STARTUP_UPDATE_CHECK_KEY);
   if (raw == null) {
     return true;

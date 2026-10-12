@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  checkForUpdate,
   markStartupUpdateCheck,
   shouldRunStartupUpdateCheck,
   updateFlowReducer,
@@ -63,6 +64,9 @@ describe('updateFlowReducer', () => {
 });
 
 describe('startup update check throttle', () => {
+  beforeEach(() => vi.stubEnv('DEV', false));
+  afterEach(() => vi.unstubAllEnvs());
+
   it('runs when no previous check is recorded', () => {
     window.localStorage.removeItem('shellspan.update.lastStartupCheckAt');
     expect(shouldRunStartupUpdateCheck(Date.now())).toBe(true);
@@ -78,5 +82,20 @@ describe('startup update check throttle', () => {
     const now = Date.now();
     markStartupUpdateCheck(now - 60 * 60 * 1000);
     expect(shouldRunStartupUpdateCheck(now)).toBe(false);
+  });
+});
+
+describe('development updates', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('skips startup checks even when no previous check is recorded', () => {
+    vi.stubEnv('DEV', true);
+    window.localStorage.removeItem('shellspan.update.lastStartupCheckAt');
+    expect(shouldRunStartupUpdateCheck(Date.now())).toBe(false);
+  });
+
+  it('returns without loading the desktop updater', async () => {
+    vi.stubEnv('DEV', true);
+    await expect(checkForUpdate()).resolves.toBeNull();
   });
 });

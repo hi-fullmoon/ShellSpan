@@ -41,6 +41,8 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
   restartDialogDismissed: false,
 
   runCheck: async (mode) => {
+    if (import.meta.env.DEV) return;
+
     if (!isTauriRuntime()) {
       if (mode === 'manual') {
         useToastStore.getState().addToast(t('update.manualUnavailable'), 'error');
@@ -135,6 +137,8 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
   },
 
   installNow: async () => {
+    if (import.meta.env.DEV) return;
+
     set({ restartDialogDismissed: true });
     try {
       logger.info('Installing update now');

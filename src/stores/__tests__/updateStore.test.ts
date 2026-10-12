@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useUpdateStore } from '../updateStore';
 
 const mocks = vi.hoisted(() => ({
@@ -35,9 +35,11 @@ vi.mock('@/locales', () => ({
 
 describe('updateStore', () => {
   beforeEach(() => {
+    vi.stubEnv('DEV', false);
     vi.clearAllMocks();
     useUpdateStore.getState().reset();
   });
+  afterEach(() => vi.unstubAllEnvs());
 
   it('reports that a download is active when another manual check is requested', async () => {
     let finishDownload!: () => void;
