@@ -83,16 +83,10 @@ export function useConnectSession(): {
     profile: ConnectionProfile,
     options?: ConnectSessionOptions,
   ): Promise<void> => {
-    const connectionAttemptId = beginConnectionAttempt({
-      title: profile.name || profile.host,
-      host: profile.host,
-      port: profile.port,
-      username: profile.username,
-      profileId: profile.id,
-      insertAfterId: options?.insertAfterId,
-      pinned: options?.pinned,
-      color: options?.color,
-    }, options?.connectionAttemptId);
+    const originalSection = useAppStore.getState().activeSection;
+    const originalSessionId = useTerminalStore.getState().activeSessionId;
+    let connectionAttemptId = options?.connectionAttemptId;
+    let cancelled = false;
     logger.info(`Connecting to ${profile.host}:${profile.port} as ${profile.username}`);
 
     try {
@@ -105,17 +99,29 @@ export function useConnectSession(): {
           .ensurePassword(currentProfile);
         const profileWithPassword = await promptForMissingPassword(profileWithSavedSecrets);
         if (!profileWithPassword) {
+          cancelled = true;
           logger.info('Connection cancelled by user (password dialog dismissed)');
           return;
         }
 
         const ensuredProfile = await ensureKeychainKeyForProfile(profileWithPassword);
         if (!ensuredProfile) {
+          cancelled = true;
           logger.info('Connection cancelled by user (key prompt dismissed)');
           return;
         }
 
         const preparedProfile = ensuredProfile;
+        connectionAttemptId = beginConnectionAttempt({
+          title: profile.name || profile.host,
+          host: profile.host,
+          port: profile.port,
+          username: profile.username,
+          profileId: profile.id,
+          insertAfterId: options?.insertAfterId,
+          pinned: options?.pinned,
+          color: options?.color,
+        }, connectionAttemptId);
         setActiveSection('terminal');
 
         try {
@@ -159,6 +165,7 @@ export function useConnectSession(): {
               missingKeyTarget,
             );
             if (!recovered) {
+              cancelled = true;
               logger.info('Connection cancelled by user (key prompt dismissed)');
               return;
             }
@@ -183,7 +190,22 @@ export function useConnectSession(): {
         }
       }
     } finally {
-      endConnectionAttempt(connectionAttemptId);
+      if (connectionAttemptId) {
+        const terminal = useTerminalStore.getState();
+        // Only restore navigation while this attempt still owns the selection.
+        // A different tab or connection selected during the prompt takes priority.
+        if (cancelled && terminal.activeSessionId === connectionAttemptId) {
+          if (originalSessionId === null || terminal.sessions.some(
+            (session) => session.sessionId === originalSessionId,
+          )) {
+            terminal.setActiveSession(originalSessionId);
+          }
+          if (useAppStore.getState().activeSection === 'terminal') {
+            setActiveSection(originalSection);
+          }
+        }
+        endConnectionAttempt(connectionAttemptId);
+      }
     }
   }, [beginConnectionAttempt, endConnectionAttempt, handleConnectionError, resolveConnectionAttempt, setActiveSection]);
 

@@ -6,6 +6,8 @@ import { useProfileStore } from '@/stores/profileStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useAppStore } from '@/stores/appStore';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
+import { useKeychainKeyPromptStore } from '@/stores/keychainKeyPromptStore';
+import { useToastStore } from '@/stores/toastStore';
 import type { ConnectionProfile } from '@/types';
 
 vi.mock('@/lib/ipc/tauri', () => ({
@@ -395,21 +397,23 @@ describe('useConnectSession', () => {
     });
   });
 
-  it('cancels connection when key prompt is dismissed', async () => {
+  it.each([false, true])('cancels key recovery and preserves newer navigation: %s', async (navigateDuringPrompt) => {
+    useAppStore.setState({ activeSection: 'sftp' });
+    for (const sessionId of ['session-a', 'session-b']) {
+      useTerminalStore.getState().addSession({ ...SUMMARY, sessionId });
+    }
+    useTerminalStore.getState().setActiveSession('session-a');
+    const originalSessions = useTerminalStore.getState().sessions;
     const keychainProfile: ConnectionProfile = {
       ...profile,
       authMethod: 'key',
       keychainKeyId: 'old-key',
     };
-    const addToast = vi.fn();
-    vi.spyOn(
-      (await import('@/stores/toastStore')).useToastStore,
-      'getState',
-    ).mockReturnValue({
-      toasts: [],
-      addToast,
-      removeToast: vi.fn(),
-    });
+    const originalToasts = useToastStore.getState().toasts;
+    const actualKeyPrompt = await vi.importActual<typeof import('@/lib/connections/keychain-key-prompt')>(
+      '@/lib/connections/keychain-key-prompt',
+    );
+    vi.mocked(promptForMissingKeychainKey).mockImplementation(actualKeyPrompt.promptForMissingKeychainKey);
     vi.mocked(invokeCreateSession).mockRejectedValueOnce({
       type: 'Other',
       payload: { message: 'keychain key not found: old-key' },
@@ -418,13 +422,26 @@ describe('useConnectSession', () => {
 
     const { result } = renderHook(() => useConnectSession());
 
+    let opening!: Promise<void>;
+    act(() => { opening = result.current.connect(keychainProfile); });
+    await waitFor(() => expect(useKeychainKeyPromptStore.getState().pending).not.toBeNull());
+    expect(useAppStore.getState().activeSection).toBe('terminal');
+    if (navigateDuringPrompt) {
+      act(() => {
+        useTerminalStore.getState().setActiveSession('session-b');
+        useAppStore.getState().setActiveSection('workbench');
+      });
+    }
     await act(async () => {
-      await result.current.connect(keychainProfile);
+      useKeychainKeyPromptStore.getState().resolveKey(null);
+      await opening;
     });
 
     expect(promptForMissingKeychainKey).toHaveBeenCalledWith(keychainProfile, 'main');
-    expect(addToast).not.toHaveBeenCalled();
-    expect(useTerminalStore.getState().sessions).toHaveLength(0);
+    expect(useToastStore.getState().toasts).toEqual(originalToasts);
+    expect(useTerminalStore.getState().sessions).toEqual(originalSessions);
+    expect(useTerminalStore.getState().activeSessionId).toBe(navigateDuringPrompt ? 'session-b' : 'session-a');
+    expect(useAppStore.getState().activeSection).toBe(navigateDuringPrompt ? 'workbench' : 'sftp');
   });
 
   it('recovers a missing jump-host key and retries', async () => {
