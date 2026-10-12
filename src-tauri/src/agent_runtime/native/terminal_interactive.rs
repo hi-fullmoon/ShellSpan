@@ -462,6 +462,10 @@ impl TerminalInteractiveRegistry {
 pub(crate) fn sanitize_terminal_screen(
     mut snapshot: TerminalScreenSnapshot,
 ) -> (TerminalScreenSnapshot, bool) {
+    // Random private-key bytes can contain prompt markers such as "otp".
+    // Remove key material before deciding whether the remaining screen is a
+    // credential prompt; prompts outside the key still trigger full redaction.
+    crate::redaction::redact_terminal_rows(&mut snapshot.content);
     let credential_like = screen_looks_credential_like(&snapshot);
     snapshot.title = crate::redaction::redact_sensitive_text(&snapshot.title);
     if credential_like {
@@ -469,8 +473,6 @@ pub(crate) fn sanitize_terminal_screen(
         if let Some(first) = snapshot.content.first_mut() {
             *first = "[credential-like terminal screen redacted]".into();
         }
-    } else {
-        crate::redaction::redact_terminal_rows(&mut snapshot.content);
     }
     (snapshot, credential_like)
 }
@@ -1492,6 +1494,17 @@ mod tests {
                         assert!(redacted.content.iter().any(|row| row == "完成"));
                     }
                     assert_eq!(sanitize_terminal_screen(redacted.clone()).0, redacted);
+                    if complete {
+                        let mut with_prompt = original;
+                        *with_prompt.content.last_mut().unwrap() = "Password:".into();
+                        let (hidden, credential_like) = sanitize_terminal_screen(with_prompt);
+                        assert!(credential_like);
+                        assert_eq!(
+                            hidden.content[0],
+                            "[credential-like terminal screen redacted]"
+                        );
+                        assert!(hidden.content[1..].iter().all(String::is_empty));
+                    }
                 }
             }
         }
