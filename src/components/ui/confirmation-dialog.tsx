@@ -34,6 +34,7 @@ export interface ConfirmationDialogProps {
   media?: React.ReactNode;
   mediaVariant?: ConfirmationDialogMediaVariant;
   children?: React.ReactNode;
+  contentClassName?: string;
 }
 
 /** Shared compact layout for actions that require an explicit second confirmation. */
@@ -52,12 +53,13 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
   media,
   mediaVariant = 'default',
   children,
+  contentClassName,
 }) => {
   const { t } = useI18n();
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <CompactAlertDialogContent>
+      <CompactAlertDialogContent className={contentClassName}>
         <CompactAlertDialogHeader>
           {media && (
             <AlertDialogMedia

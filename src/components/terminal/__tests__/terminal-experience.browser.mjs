@@ -450,6 +450,43 @@ try {
   await page.getByRole('button', { name: '取消', exact: true }).click();
   await page.getByRole('alertdialog').waitFor({ state: 'detached' });
 
+  for (const viewport of [{ width: 1280, height: 800 }, { width: 400, height: 600 }]) {
+    await page.setViewportSize(viewport);
+    await page.evaluate(() => {
+      const { React, ConfirmationDialog, TerminalCloseDetails, useTerminalStore, t } = window.runtime;
+      // Real local connection attempts supply the long list without IPC substitutes.
+      for (let i = 0; i < 8; i++) useTerminalStore.getState().beginConnectionAttempt({
+        title: window.identity.title, host: window.identity.host,
+        username: window.identity.username, port: window.identity.port,
+      });
+      const sessions = useTerminalStore.getState().sessions;
+      window.dialogRoot.render(React.createElement(ConfirmationDialog, {
+        open: true, onOpenChange: () => window.dialogRoot.render(null),
+        title: t('terminal.tab.closeOthersConfirmTitle'),
+        description: t('terminal.tab.closeOthersConfirmMessage', { count: sessions.length }),
+        contentClassName: '[&>[data-slot=scroll-area]]:max-h-[min(280px,calc(100vh-12rem))]',
+        confirmLabel: t('common.close'), onConfirm: () => {},
+      }, React.createElement(TerminalCloseDetails, { sessions })));
+    });
+    const dialog = page.getByRole('alertdialog');
+    await dialog.waitFor();
+    await dialog.evaluate(async (element) => {
+      await Promise.all(element.getAnimations().map((animation) => animation.finished));
+    });
+    const bounds = await dialog.boundingBox();
+    assert.ok(bounds.height <= 420, `close others dialog too tall: ${bounds.height}`);
+    const scrolling = await dialog.locator('[data-slot="scroll-area-viewport"]').evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      return { height: element.clientHeight, total: element.scrollHeight, top: element.scrollTop };
+    });
+    assert.ok(scrolling.height <= 280 && scrolling.total > scrolling.height && scrolling.top > 0);
+    const button = await dialog.getByRole('button', { name: '关闭', exact: true }).boundingBox();
+    assert.ok(button.y >= bounds.y && button.y + button.height <= bounds.y + bounds.height);
+    await page.screenshot({ path: `/tmp/shellspan-close-others-${viewport.width}.png` });
+    await dialog.getByRole('button', { name: '取消', exact: true }).click();
+    await dialog.waitFor({ state: 'detached' });
+  }
+
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.evaluate(() => {
     const { React, TerminalPane, agentTerminalLeaseState, terminalInputReadiness } = window.runtime;

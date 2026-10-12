@@ -394,6 +394,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
       />
       <ConfirmationDialog
         open={closeOthersConfirm}
+        contentClassName="[&>[data-slot=scroll-area]]:max-h-[min(280px,calc(100vh-12rem))]"
         onOpenChange={(nextOpen) => { if (!nextOpen) dismissCloseOthersConfirm(); }}
         title={t('terminal.tab.closeOthersConfirmTitle')}
         description={t('terminal.tab.closeOthersConfirmMessage', { count: closeOthersIds.length })}
