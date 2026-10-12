@@ -619,6 +619,13 @@ export const TerminalControllerLayer: React.FC = () => {
         }
       }
     }
+    for (const session of sessions) {
+      if (session.status === 'error' && session.statusMessage) {
+        terminalRegistry.get(session.sessionId)?.writeConnectionFailure(session.statusMessage);
+      } else if (session.status === 'connecting') {
+        terminalRegistry.get(session.sessionId)?.clearConnectionFailure();
+      }
+    }
     for (const sessionId of knownRef.current) {
       if (!currentIds.has(sessionId)) {
         terminalRegistry.dispose(sessionId);

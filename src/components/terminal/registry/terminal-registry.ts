@@ -400,6 +400,8 @@ export interface TerminalController {
   subscribeLifecycle(listener: TerminalLifecycleCallback): () => void;
   write(chunk: string): void;
   writeDisconnectedHint(): void;
+  writeConnectionFailure(message: string): void;
+  clearConnectionFailure(): void;
   rebindSession(sessionId: string): void;
   updateOptions(preferences: TerminalDisplayPreferences): void;
   refreshTheme(): void;
@@ -701,8 +703,12 @@ class TerminalControllerImpl implements TerminalController {
       logger.info(`Session ${sessionId} status: ${event.payload.status}`);
       this.emitLifecycle({ type: 'status', sessionId, payload: event.payload });
       this.setStatus(sessionId, event.payload);
-      this.writeSystemLine(formatTerminalStatusLine(event.payload.status, event.payload.message));
-      if (event.payload.status === 'connected' || event.payload.status === 'error') {
+      if (event.payload.status === 'error' && event.payload.message) {
+        this.writeConnectionFailure(event.payload.message);
+      } else {
+        this.writeSystemLine(formatTerminalStatusLine(event.payload.status, event.payload.message));
+      }
+      if (event.payload.status === 'connected') {
         this.resetNoticeState();
       }
     });
@@ -746,8 +752,12 @@ class TerminalControllerImpl implements TerminalController {
         logger.info(`Session ${sessionId} reconciled status: ${snapshot.status}`);
         this.emitLifecycle({ type: 'status', sessionId, payload: snapshot });
         this.setStatus(sessionId, snapshot);
-        this.writeSystemLine(formatTerminalStatusLine(snapshot.status, snapshot.message));
-        if (snapshot.status === 'connected' || snapshot.status === 'error') {
+        if (snapshot.status === 'error' && snapshot.message) {
+          this.writeConnectionFailure(snapshot.message);
+        } else {
+          this.writeSystemLine(formatTerminalStatusLine(snapshot.status, snapshot.message));
+        }
+        if (snapshot.status === 'connected') {
           this.resetNoticeState();
         }
       }
@@ -1265,6 +1275,21 @@ class TerminalControllerImpl implements TerminalController {
     this.terminal.write(chunk);
   }
 
+  private failureMessage: string | undefined;
+
+  writeConnectionFailure(message: string): void {
+    if (this.failureMessage === message) return;
+    this.failureMessage = message;
+    this.terminal.write('\r\n\u001b[?25l');
+    this.writeSystemLine(formatTerminalStatusLine('error', message));
+    this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.hintLabel'), t('terminal.notice.connectionFailedHint')));
+    this.inputBlockedNoticeRef = true;
+  }
+
+  clearConnectionFailure(): void {
+    this.failureMessage = undefined;
+  }
+
   writeDisconnectedHint(): void {
     this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.hintLabel'), t('terminal.notice.disconnectedHint')));
     this.inputBlockedNoticeRef = true;
@@ -1272,6 +1297,8 @@ class TerminalControllerImpl implements TerminalController {
 
   rebindSession(sessionId: string): void {
     if (this.disposed || sessionId === this.sessionId) return;
+    this.failureMessage = undefined;
+    this.terminal.write('\u001b[?25h');
     const previousSessionId = this.sessionId;
     terminalInputReadiness.finish(previousSessionId);
     this.emitLifecycle({

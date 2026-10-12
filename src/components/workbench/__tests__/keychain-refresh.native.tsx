@@ -6,7 +6,9 @@ import { useAppStore } from '@/stores/appStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useKeychainStore } from '@/stores/keychainStore';
 import { initI18n } from '@/locales';
-import { invokeListKeyCredentials, isTauriRuntime } from '@/lib/ipc/tauri';
+import { invokeListKeyCredentials, invokeRetrieveProfilePassword, isTauriRuntime } from '@/lib/ipc/tauri';
+import { persistPromptedPassword, promptForMissingPassword } from '@/lib/connections/password-prompt';
+import { usePasswordPromptStore } from '@/stores/passwordPromptStore';
 
 // Run only through scripts/verify-credential-refresh.mjs in a real Tauri window.
 // No IPC, store action or credential response is replaced by a test double.
@@ -36,38 +38,56 @@ async function verify(): Promise<void> {
   const name = `credential-refresh-${crypto.randomUUID()}`;
   let profileId: string | undefined;
   const shows = (label: string): boolean =>
-    [...container.querySelectorAll('.grid span')].some((element) => element.textContent === label);
+    [...container.querySelectorAll('span[title]')].some((element) => element.textContent === label);
+  const username = name;
+  const endpointLabel = `${username}@127.0.0.1`;
   try {
     flushSync(() => root.render(<Workbench />));
     flushSync(() => useAppStore.getState().setActiveWorkbenchTab('connections'));
-    // This follows the same persistence path as submitting the connection form.
+    // Exercise the same password persistence helper used after connection and
+    // reconnection success, against the real OS keychain and credential metadata.
     const profile = await useProfileStore.getState().addProfile({
       name,
       host: '127.0.0.1',
       port: 22,
-      username: 'credential-refresh-regression',
+      username,
       authMethod: 'password',
-      password: crypto.randomUUID(),
     });
     profileId = profile.id;
+    const cancelled = promptForMissingPassword(profile);
+    usePasswordPromptStore.getState().resolvePassword(null);
+    assert(await cancelled === null, 'Cancelling the password prompt returned a credential');
+    assert(!(await invokeListKeyCredentials()).some((key) => key.id === profileId),
+      'Cancelling the password prompt saved credential metadata');
+    const password = crypto.randomUUID();
+    await persistPromptedPassword(profile, { ...profile, password });
+    assert(await invokeRetrieveProfilePassword(profileId) === password,
+      'Prompted password was not stored in the OS keychain');
+    const replacement = crypto.randomUUID();
+    await persistPromptedPassword({ ...profile, password }, { ...profile, password: replacement });
+    assert(await invokeRetrieveProfilePassword(profileId) === replacement,
+      'Replacement password did not update the OS keychain');
+    assert((await invokeListKeyCredentials()).filter((key) => key.id === profileId).length === 1,
+      'Replacing the password duplicated credential metadata');
     assert((await invokeListKeyCredentials()).some((key) => key.id === profileId),
       'New connection did not persist credential metadata');
     assert(!useKeychainStore.getState().keys.some((key) => key.id === profileId),
       'Precondition failed: credential cache must still be stale before switching');
 
     flushSync(() => useAppStore.getState().setActiveWorkbenchTab('keychain'));
-    await eventually(() => shows(name), 'Returning to credentials did not display the new credential');
+    await eventually(() => shows(endpointLabel), 'Returning to credentials did not display the new credential');
     assert(useKeychainStore.getState().keys.some((key) => key.id === profileId),
       'Successful refresh did not update the credential store');
 
     const renamed = `${name}-renamed`;
     await useProfileStore.getState().updateProfile(profileId, { name: renamed });
-    await eventually(() => [...container.querySelectorAll('p[title]')]
-      .some((element) => element.getAttribute('title') === `Used by: ${renamed}`),
-    'Editing a connection while credentials are visible left the old association');
+    await eventually(() => useKeychainStore.getState().keys
+      .some((key) => key.id === profileId && key.label === renamed),
+    'Editing a connection while credentials are visible left stale credential metadata');
+    assert(shows(endpointLabel), 'Renaming a connection changed its credential endpoint label');
 
     await useProfileStore.getState().removeProfile(profileId);
-    await eventually(() => !shows(name)
+    await eventually(() => !shows(endpointLabel)
       && !useKeychainStore.getState().keys.some((key) => key.id === profileId),
     'Removing a connection left its credential visible');
     assert(!(await invokeListKeyCredentials()).some((key) => key.id === profileId),

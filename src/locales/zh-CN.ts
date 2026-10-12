@@ -691,6 +691,7 @@ export default {
   'terminal.notice.reconnectRetryIn': '{seconds} 秒后重试',
   'terminal.notice.hintLabel': '提示',
   'terminal.notice.disconnectedHint': '会话已断开，按回车重连',
+  'terminal.notice.connectionFailedHint': '连接未建立，按回车重试',
   'terminal.notice.closedLabel': '会话已关闭',
   'terminal.notice.pressEnterReconnect': '按回车重连',
   'terminal.notice.writeFailedLabel': '写入失败',

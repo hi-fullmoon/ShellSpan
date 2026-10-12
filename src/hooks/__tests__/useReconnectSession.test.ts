@@ -7,7 +7,8 @@ import { terminalRegistry } from '@/components/terminal/registry/terminal-regist
 import { usePortForwardStore } from '@/stores/portForwardStore';
 import { useAppStore } from '@/stores/appStore';
 
-vi.mock('@/lib/ipc/tauri', () => ({
+vi.mock('@/lib/ipc/tauri', async (importActual) => ({
+  ...await importActual<typeof import('@/lib/ipc/tauri')>(),
   invokeGetSessionStatus: vi.fn().mockResolvedValue({
     sessionId: 's1',
     status: 'connected',
@@ -43,7 +44,8 @@ vi.mock('@/lib/ipc/tauri', () => ({
   })),
 }));
 
-vi.mock('@/lib/connections/password-prompt', () => ({
+vi.mock('@/lib/connections/password-prompt', async (importActual) => ({
+  ...await importActual<typeof import('@/lib/connections/password-prompt')>(),
   promptForMissingPassword: vi.fn(
     (profile) => Promise.resolve({ ...profile, password: 'mock-pass' }),
   ),
@@ -143,10 +145,10 @@ describe('useReconnectSession', () => {
 
     const session = useTerminalStore.getState().sessions[0];
     expect(session?.status).toBe('error');
-    expect(session?.statusMessage).toBe('boom');
+    expect(session?.statusMessage).toBe((await import('@/locales')).t('error.operationFailed'));
   });
 
-  it('creates a new session and replaces the old one on success', async () => {
+  it('keeps the replacement session when native password storage is unavailable', async () => {
     const startAutoForOwner = vi.fn().mockResolvedValue(undefined);
     usePortForwardStore.setState({ startAutoForOwner });
     useProfileStore.setState({
@@ -199,10 +201,35 @@ describe('useReconnectSession', () => {
     expect(useTerminalStore.getState().sessions[0]?.sessionId).toBe('s2');
     expect(useTerminalStore.getState().activeSessionId).toBe('s2');
     expect(terminalRegistry.get('s2')?.terminal).toBe(terminal);
+    expect((await import('@/stores/toastStore')).useToastStore.getState().toasts).toEqual(
+      expect.arrayContaining([expect.objectContaining({
+        message: (await import('@/locales')).t('error.secretStoreFailed'),
+      })]),
+    );
     expect(startAutoForOwner).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'p1', password: 'mock-pass' }),
       'terminal:s2',
     );
+
+    // Native storage fails outside Tauri. Closing the new tab as that real
+    // failure is reported must prevent forwarding after the await resumes.
+    useTerminalStore.getState().removeSession('s2');
+    useTerminalStore.getState().addSession(
+      { sessionId: 's1', title: 'A', host: 'h', port: 22, username: 'u' }, 'p1',
+    );
+    startAutoForOwner.mockClear();
+    const { useToastStore } = await import('@/stores/toastStore');
+    const unsubscribe = useToastStore.subscribe(() => {
+      useTerminalStore.getState().removeSession('s2');
+    });
+    try {
+      await result.current('s1');
+      expect(useTerminalStore.getState().sessions).toHaveLength(0);
+      expect(startAutoForOwner).not.toHaveBeenCalled();
+      expect(invokeCloseSession).toHaveBeenCalledWith('s1');
+    } finally {
+      unsubscribe();
+    }
   });
 
   it('restored pre-broker sessions reconnect as fresh logical broker sessions', async () => {
@@ -341,7 +368,7 @@ describe('useReconnectSession', () => {
 
     const session = useTerminalStore.getState().sessions[0];
     expect(session?.status).toBe('error');
-    expect(session?.statusMessage).toBe('boom');
+    expect(session?.statusMessage).toBe((await import('@/locales')).t('error.operationFailed'));
   });
 
   it('prompts for a replacement key and retries when reconnecting with a missing keychain key', async () => {

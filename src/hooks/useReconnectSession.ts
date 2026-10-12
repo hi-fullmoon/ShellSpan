@@ -9,8 +9,8 @@ import {
 } from '@/lib/ipc/tauri';
 import { createLogger } from '@/lib/logger';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
-import { promptForMissingPassword } from '@/lib/connections/password-prompt';
-import { getErrorMessage, getLocalizedErrorMessage } from '@/lib/error';
+import { promptForMissingPassword, persistPromptedPassword } from '@/lib/connections/password-prompt';
+import { getErrorMessage, getToastErrorMessage } from '@/lib/error';
 import {
   ensureKeychainKeyForProfile,
   getMissingKeychainKeyTarget,
@@ -112,7 +112,7 @@ export function useReconnectSession(): (sessionId: string, automatic?: boolean) 
           setStatus(sessionId, {
             sessionId,
             status: 'error',
-            message: getLocalizedErrorMessage(error),
+            message: getToastErrorMessage(error),
           });
         }
         return;
@@ -155,13 +155,20 @@ export function useReconnectSession(): (sessionId: string, automatic?: boolean) 
         }
         terminalRegistry.rebindSession(sessionId, summary.sessionId);
         reconnectSession(sessionId, summary, profile.id);
+        invokeCloseSession(sessionId).catch((error) => {
+          logger.warn(`Failed to close replaced session ${sessionId}`, error);
+        });
+        await persistPromptedPassword(profileWithSavedSecrets, activeProfile);
+        const replacement = useTerminalStore.getState().sessions.find(
+          (item) => item.sessionId === summary.sessionId,
+        );
+        if (!replacement || replacement.status === 'error' || replacement.status === 'disconnected') {
+          return;
+        }
         void usePortForwardStore
           .getState()
           .startAutoForOwner(activeProfile, `terminal:${summary.sessionId}`);
         logger.info(`Reconnected session ${sessionId} as session ${summary.sessionId}`);
-        invokeCloseSession(sessionId).catch((error) => {
-          logger.warn(`Failed to close replaced session ${sessionId}`, error);
-        });
       };
 
       const limit = automatic ? AUTO_RECONNECT_DELAYS_MS.length : 1;
@@ -225,7 +232,7 @@ export function useReconnectSession(): (sessionId: string, automatic?: boolean) 
           setStatus(sessionId, {
             sessionId,
             status: 'error',
-            message: getLocalizedErrorMessage(error),
+            message: getToastErrorMessage(error),
           });
           return;
         }

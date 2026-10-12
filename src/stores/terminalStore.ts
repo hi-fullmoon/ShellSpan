@@ -359,6 +359,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
           ...session,
           status: event.status,
           statusMessage: event.message,
+          pendingConnection: event.status === 'error' ? false : session.pendingConnection,
           reconnecting:
             event.status === 'connecting' ? session.reconnecting : false,
         };

@@ -170,6 +170,15 @@ export function useConnectSession(): {
           handleConnectionError(error, () => {
             void connect(preparedProfile, options);
           });
+          const errorType = typeof error === 'object' && error !== null && 'type' in error
+            ? error.type : undefined;
+          if (errorType !== 'HostKeyUnknown' && errorType !== 'HostKeyMismatch') {
+            useTerminalStore.getState().setStatus(connectionAttemptId, {
+              sessionId: connectionAttemptId,
+              status: 'error',
+              message: getToastErrorMessage(error),
+            });
+          }
           return;
         }
       }

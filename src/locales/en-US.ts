@@ -691,6 +691,7 @@ export default {
   'terminal.notice.reconnectRetryIn': 'Retrying in {seconds}s',
   'terminal.notice.hintLabel': 'Hint',
   'terminal.notice.disconnectedHint': 'Session disconnected. Press Enter to reconnect',
+  'terminal.notice.connectionFailedHint': 'Connection not established. Press Enter to retry',
   'terminal.notice.closedLabel': 'Session closed',
   'terminal.notice.pressEnterReconnect': 'Press Enter to reconnect',
   'terminal.notice.writeFailedLabel': 'Write failed',

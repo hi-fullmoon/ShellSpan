@@ -38,7 +38,7 @@ const server = await createServer({
         export { agentTerminalLeaseState } from '/src/components/terminal/agent-terminal-lease-state.ts';
         export { createAgentTerminalLeaseCoordinator } from '/src/components/terminal/terminal-controller-layer.tsx';
         export { FitAddon } from '@xterm/addon-fit';
-        export { resolveTerminalTheme } from '/src/components/terminal/registry/terminal-registry.ts';
+        export { resolveTerminalTheme, terminalRegistry } from '/src/components/terminal/registry/terminal-registry.ts';
         export { TERMINAL_CONTAINER_CLASS } from '/src/components/terminal/registry/terminal-geometry.ts';
         export { ConfirmationDialog } from '/src/components/ui/confirmation-dialog.tsx';
         export { terminalInputReadiness } from '/src/components/terminal/terminal-input-readiness.ts';
@@ -530,6 +530,51 @@ try {
     const commandText = commandRows.slice(0, nextPrompt).join('');
     assert.ok(commandText.includes("printf '%s' 'wrapped-command'"), commandText);
     assert.ok(commandText.endsWith("/wrap'"), commandText);
+  }
+  for (const width of [1200, 400]) {
+    await page.setViewportSize({ width, height: 700 });
+    const failure = await page.evaluate(async () => {
+      const { terminalRegistry, useTerminalStore, t } = window.runtime;
+      const store = useTerminalStore.getState();
+      const id = store.beginConnectionAttempt({ title: 'SSH', host: '', port: 22, username: '' });
+      const message = t('error.authenticationFailed');
+      store.setStatus(id, { sessionId: id, status: 'error', message });
+      store.endConnectionAttempt(id);
+      const host = document.createElement('div');
+      host.style.cssText = 'position:fixed;inset:0;background:white';
+      document.body.appendChild(host);
+      const controller = terminalRegistry.create(id, store.setStatus, store.setClosed,
+        () => useTerminalStore.getState().sessions.find((s) => s.sessionId === id).status,
+        () => {});
+      controller.attach(host);
+      controller.focus();
+      await new Promise((resolve) => controller.terminal.write('\u001b[?25h', resolve));
+      await new Promise(requestAnimationFrame);
+      // WebGL draws the cursor on a canvas; check xterm's parsed cursor mode
+      // shared by both renderers rather than a DOM-only selector.
+      const cursorInitiallyVisible = !controller.terminal._core.coreService.isCursorHidden;
+      controller.writeConnectionFailure(message);
+      controller.writeConnectionFailure(message);
+      await new Promise((resolve) => controller.terminal.write('', resolve));
+      await new Promise(requestAnimationFrame);
+      const text = Array.from({ length: controller.terminal.buffer.active.length }, (_, index) =>
+        controller.terminal.buffer.active.getLine(index).translateToString(true)).join('');
+      const cursorVisible = !controller.terminal._core.coreService.isCursorHidden;
+      controller.rebindSession(`${id}-retry`);
+      await new Promise((resolve) => controller.terminal.write('', resolve));
+      await new Promise(requestAnimationFrame);
+      const cursorRestored = !controller.terminal._core.coreService.isCursorHidden;
+      terminalRegistry.dispose(`${id}-retry`);
+      store.removeSession(id);
+      host.remove();
+      return { text, message, hint: t('terminal.notice.connectionFailedHint'), cursorInitiallyVisible, cursorVisible, cursorRestored };
+    });
+    assert.ok(failure.text.includes(failure.message), failure.text);
+    assert.ok(failure.text.includes(failure.hint), failure.text);
+    assert.equal(failure.text.split(failure.message).length - 1, 1);
+    assert.equal(failure.cursorVisible, false);
+    assert.equal(failure.cursorInitiallyVisible, true);
+    assert.equal(failure.cursorRestored, true);
   }
   assert.deepEqual(errors, []);
   process.stdout.write('Terminal experience regressions passed with real xterm and WebKit at wide and narrow sizes.\n');

@@ -319,7 +319,11 @@ describe('useConnectSession', () => {
       'error',
     );
     expect(hostKeyDialog().open).toBe(false);
-    expect(useTerminalStore.getState().sessions).toHaveLength(0);
+    expect(useTerminalStore.getState().sessions).toHaveLength(1);
+    expect(useTerminalStore.getState().sessions[0]).toMatchObject({
+      status: 'error', pendingConnection: false, profileId: profile.id,
+      statusMessage: '操作失败，请重试；详细错误信息已记录到日志。',
+    });
   });
 
   it('shows the original message for non-recoverable Other errors', async () => {
@@ -349,6 +353,10 @@ describe('useConnectSession', () => {
       'error',
     );
     expect(hostKeyDialog().open).toBe(false);
+    expect(useTerminalStore.getState().sessions[0]).toMatchObject({
+      status: 'error', pendingConnection: false, profileId: passwordProfile.id,
+      statusMessage: '身份验证失败，请检查用户名、密码或 SSH 密钥。',
+    });
   });
 
   it('prompts for replacement key on keychain key not found and retries', async () => {

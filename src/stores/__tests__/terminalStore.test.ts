@@ -41,6 +41,22 @@ describe('terminalStore', () => {
     ]);
   });
 
+  it('retains a failed remote attempt for retry while removing cancelled attempts', () => {
+    const store = useTerminalStore.getState();
+    const pending = { title: 'Remote', host: 'host', port: 22, username: 'user', profileId: 'remote' };
+    const attemptId = store.beginConnectionAttempt(pending);
+    store.setStatus(attemptId, { sessionId: attemptId, status: 'error', message: 'Authentication failed' });
+    store.endConnectionAttempt(attemptId);
+    expect(useTerminalStore.getState().sessions).toMatchObject([{
+      ...pending, sessionId: attemptId, status: 'error', pendingConnection: false,
+      statusMessage: 'Authentication failed',
+    }]);
+    expect(useTerminalStore.getState().activeSessionId).toBe(attemptId);
+    const cancelled = store.beginConnectionAttempt(pending);
+    store.endConnectionAttempt(cancelled);
+    expect(useTerminalStore.getState().sessions).toHaveLength(1);
+  });
+
   it('replaces a connection placeholder in place with the real session', () => {
     const store = useTerminalStore.getState();
     store.beginConnectionAttempt(
