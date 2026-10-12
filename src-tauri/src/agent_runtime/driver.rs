@@ -321,7 +321,20 @@ async fn drive_agent_inner(
         } else {
             let turn_id = format!("turn-{}", Uuid::new_v4().simple());
             let step_id = format!("step-{}", Uuid::new_v4().simple());
-            if let Some(reason) = apply_pre_step_hooks(
+            let (_, pending) = sessions.driver_control(&entry.session_id)?;
+            let prepared_input = pending
+                .next_turn
+                .into_iter()
+                .filter(|message| !pending.paused_ids.contains(&message.message_id))
+                .take(1)
+                .chain(
+                    pending
+                        .next_step
+                        .into_iter()
+                        .filter(|message| !pending.paused_ids.contains(&message.message_id)),
+                )
+                .collect::<Vec<_>>();
+            let preparation = apply_pre_step_hooks(
                 sessions,
                 entry,
                 hooks,
@@ -333,21 +346,90 @@ async fn drive_agent_inner(
                 1,
                 config.retry_policy,
             )
-            .await?
-            {
+            .await;
+            let abandon_preparation = |reason: &str| {
+                sessions.abandon_step_preparation(
+                    &entry.session_id,
+                    &turn_id,
+                    &step_id,
+                    prepared_input
+                        .iter()
+                        .map(|message| message.message_id.clone())
+                        .collect(),
+                    reason,
+                )
+            };
+            // Preparation failures belong to the input that triggered them.
+            // Commit that input to the transcript before settling the failure;
+            // subsequent queued turns remain available for paused recovery.
+            if !entry.is_admitting() || entry.cancellation().is_cancelled() {
+                abandon_preparation("stoppedByUser")?;
+                return Ok(AgentDriverSettlement::Cancelled);
+            }
+            if !matches!(&preparation, Ok(None)) {
+                let admitted = entry.with_input_admission(|| {
+                    let claimed = sessions.begin_turn_step_checked(
+                        &entry.session_id,
+                        turn_id.clone(),
+                        step_id.clone(),
+                        Some(&prepared_input),
+                    )?;
+                    if claimed.is_some() {
+                        entry.set_scope(Some(AgentActiveScope {
+                            turn_id: turn_id.clone(),
+                            step_id: Some(step_id.clone()),
+                        }))?;
+                    }
+                    Ok(claimed)
+                })?;
+                match admitted {
+                    None => {
+                        abandon_preparation("stoppedByUser")?;
+                        return Ok(AgentDriverSettlement::Cancelled);
+                    }
+                    Some(None) => {
+                        abandon_preparation("inputChanged")?;
+                        continue;
+                    }
+                    Some(Some(_)) => {}
+                }
+            }
+            if let Some(reason) = preparation? {
+                close_open_scope(sessions, entry, &reason)?;
                 sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
                 entry.set_phase(AgentLifecyclePhase::Stopping)?;
                 return Ok(AgentDriverSettlement::Failed);
             }
-            entry.set_phase(AgentLifecyclePhase::Running)?;
-            let Some(_) =
-                sessions.begin_turn_step(&entry.session_id, turn_id.clone(), step_id.clone())?
-            else {
-                entry.set_phase(AgentLifecyclePhase::Idle)?;
-                append_status(sessions, entry, AgentSessionStatus::Idle, None)?;
-                return Ok(AgentDriverSettlement::Idle);
-            };
-            append_status(sessions, entry, AgentSessionStatus::Running, None)?;
+            let admitted = entry.with_input_admission(|| {
+                let claimed = sessions.begin_turn_step(
+                    &entry.session_id,
+                    turn_id.clone(),
+                    step_id.clone(),
+                )?;
+                if claimed.is_some() {
+                    entry.set_scope(Some(AgentActiveScope {
+                        turn_id: turn_id.clone(),
+                        step_id: Some(step_id.clone()),
+                    }))?;
+                    entry.set_phase(AgentLifecyclePhase::Running)?;
+                    append_status(sessions, entry, AgentSessionStatus::Running, None)?;
+                } else {
+                    entry.set_phase(AgentLifecyclePhase::Idle)?;
+                    append_status(sessions, entry, AgentSessionStatus::Idle, None)?;
+                }
+                Ok(claimed)
+            })?;
+            match admitted {
+                None => {
+                    abandon_preparation("stoppedByUser")?;
+                    return Ok(AgentDriverSettlement::Cancelled);
+                }
+                Some(None) => {
+                    abandon_preparation("inputChanged")?;
+                    return Ok(AgentDriverSettlement::Idle);
+                }
+                Some(Some(_)) => {}
+            }
             (turn_id, step_id, 1)
         };
         entry.set_scope(Some(AgentActiveScope {

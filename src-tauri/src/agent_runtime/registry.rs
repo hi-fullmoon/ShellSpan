@@ -46,6 +46,7 @@ pub(crate) struct AgentEntry {
     owner: Mutex<Option<std::sync::Weak<AgentEntry>>>,
     cancellation: CancellationToken,
     admitting: AtomicBool,
+    admission_gate: Mutex<()>,
     driver_active: AtomicBool,
     title_started: AtomicBool,
     phase: Mutex<AgentLifecyclePhase>,
@@ -74,6 +75,7 @@ impl AgentEntry {
             owner: Mutex::new(None),
             cancellation: CancellationToken::new(),
             admitting: AtomicBool::new(true),
+            admission_gate: Mutex::new(()),
             driver_active: AtomicBool::new(false),
             title_started: AtomicBool::new(false),
             phase: Mutex::new(initial_phase),
@@ -185,10 +187,28 @@ impl AgentEntry {
     }
 
     pub(crate) fn stop_admission(&self) -> Result<(), String> {
+        let _gate = self
+            .admission_gate
+            .lock()
+            .map_err(|_| "Agent admission lock is unavailable")?;
         self.admitting.store(false, Ordering::Release);
         self.set_phase(AgentLifecyclePhase::Stopping)?;
         self.record_lifecycle("stop-admission");
         Ok(())
+    }
+
+    pub(crate) fn with_input_admission<T>(
+        &self,
+        claim: impl FnOnce() -> Result<T, String>,
+    ) -> Result<Option<T>, String> {
+        let _gate = self
+            .admission_gate
+            .lock()
+            .map_err(|_| "Agent admission lock is unavailable")?;
+        if !self.is_admitting() || self.cancellation.is_cancelled() {
+            return Ok(None);
+        }
+        claim().map(Some)
     }
 
     pub(crate) fn is_admitting(&self) -> bool {
@@ -503,6 +523,48 @@ mod tests {
                 "detach-session",
             ]
         );
+    }
+
+    #[test]
+    fn stopped_admission_blocks_input_before_cancellation() {
+        let selection = provider();
+        let adapter = crate::llm::adapter::ModelAdapterFactory::create(
+            &crate::llm::registry::HttpModelAdapterFactory,
+            selection.clone(),
+            None,
+        )
+        .unwrap();
+        let entry = AgentEntry::new(
+            "session-admission".into(),
+            selection,
+            adapter,
+            None,
+            None,
+            AgentLifecyclePhase::Idle,
+        );
+        assert_eq!(
+            entry
+                .with_input_admission(|| {
+                    assert!(entry.admission_gate.try_lock().is_err());
+                    Ok(1)
+                })
+                .unwrap(),
+            Some(1)
+        );
+        entry.stop_admission().unwrap();
+        assert!(!entry.cancellation().is_cancelled());
+        let invoked = AtomicBool::new(false);
+        assert_eq!(
+            entry
+                .with_input_admission(|| {
+                    invoked.store(true, Ordering::Release);
+                    Ok(2)
+                })
+                .unwrap(),
+            None
+        );
+        assert!(!invoked.load(Ordering::Acquire));
+        assert_eq!(entry.phase().unwrap(), AgentLifecyclePhase::Stopping);
     }
 
     #[test]

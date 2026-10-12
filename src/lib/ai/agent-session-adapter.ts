@@ -218,6 +218,9 @@ export function projectAgentInbox(events: readonly AgentSessionEvent[]): readonl
     } else if (event.type === 'turn/end') {
       if (event.turnId) closedTurns.add(event.turnId);
       if (event.turnId === activeTurnId) activeTurnId = undefined;
+    } else if (event.type === 'step/preparation_abandoned') {
+      if (event.turnId) closedTurns.add(event.turnId);
+      if (event.turnId === activeTurnId) activeTurnId = undefined;
     } else if (event.type === 'agent/inbox/spliced') {
       for (const message of event.data.messages) {
         if (event.data.operation === 'enqueued') {

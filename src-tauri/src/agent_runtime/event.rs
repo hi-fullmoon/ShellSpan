@@ -893,6 +893,11 @@ pub(crate) enum AgentSessionEventPayload {
     },
     #[serde(rename = "compaction/start")]
     CompactionStart { reason: String },
+    #[serde(rename = "step/preparation_abandoned")]
+    StepPreparationAbandoned {
+        reason: String,
+        input_message_ids: Vec<String>,
+    },
     #[serde(rename = "compaction/summary")]
     CompactionSummary {
         summary: String,

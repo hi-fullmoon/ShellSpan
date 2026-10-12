@@ -285,6 +285,7 @@ function createChatProjection() {
   const projectQuestions = createQuestionProjector();
   const turns = new Map<string, TurnState>();
   const dirtyTurns = new Set<string>();
+  const abandonedPreparations = new Set<string>();
   const turnSnapshots = new Map<string, {
     process: AiTurnProcessNode;
     closing?: AiAssistantMessageNode;
@@ -1137,6 +1138,15 @@ function createChatProjection() {
         });
         break;
       }
+      case 'step/preparation_abandoned': {
+        if (event.turnId) abandonedPreparations.add(event.turnId);
+        const admitted = [...turns.values()]
+          .filter(turn => turn.startSeq !== undefined && !abandonedPreparations.has(turn.id))
+          .sort((left, right) => (right.startSeq ?? 0) - (left.startSeq ?? 0));
+        latestTurnId = admitted[0]?.id ?? null;
+        activeTurnId = admitted.find(turn => turn.endSeq === undefined)?.id ?? null;
+        break;
+      }
       default:
         // Future Event v5 extensions remain visible in Activity, never as guessed chat copy.
         break;
@@ -1248,6 +1258,9 @@ function createChatProjection() {
 
     const scopedArtifacts = new Map<string, AiArtifactNode[]>();
     for (const node of artifacts.values()) {
+      // A preparation attempt is audit evidence until its input is admitted.
+      if (node.artifactKind === 'compaction-attempt'
+        && (node.turnId === null || turns.get(node.turnId)?.startSeq === undefined)) continue;
       if (node.turnId === null) {
         projectedUnscoped.set(node.key, node);
         continue;
@@ -1279,6 +1292,7 @@ function createChatProjection() {
     ));
     let sessionStats: AiDurableSessionStats | undefined;
     for (const turn of orderedTurns) {
+      if (abandonedPreparations.has(turn.id)) continue;
       nodes.push(...(scopedPrompts.get(turn.id) ?? []).sort(topLevelSort));
       const users = (scopedUsers.get(turn.id) ?? []).sort(topLevelSort);
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   aggregateDurableSessionStats,
+  createAgentChatProjector,
   projectAgentChatNodes,
 } from '@/lib/ai/conversation-projection';
 import type {
@@ -114,6 +115,34 @@ function requestHeader(
 }
 
 describe('AI Phase 3 chat projection', () => {
+  it('keeps abandoned preparation evidence out of chat without hiding admitted failures', () => {
+    const attempt = sessionEvent(0, {
+      type: 'context/artifact', turnId: 'preparation', stepId: 'step-preparation',
+      data: { artifactId: 'attempt', kind: 'compaction-attempt', title: 'Summary attempt' },
+    });
+    const abandoned = sessionEvent(1, {
+      type: 'step/preparation_abandoned', turnId: 'preparation', stepId: 'step-preparation',
+      data: { reason: 'inputChanged', inputMessageIds: ['original-input'] },
+    });
+    const project = createAgentChatProjector();
+    expect(project([attempt]).some(node => node.kind === 'artifact')).toBe(false);
+    expect(project([attempt, abandoned])).toEqual([]);
+    const admitted = projectAgentChatNodes([
+      attempt,
+      sessionEvent(1, { type: 'turn/start', turnId: 'preparation' }),
+      sessionEvent(2, { type: 'turn/end', turnId: 'preparation', data: { reason: 'runtimeFailure: summary unavailable' } }),
+    ]);
+    expect(admitted.some(node => node.kind === 'artifact' && node.artifactId === 'attempt')).toBe(true);
+    expect(turnProcess(admitted, 'preparation').status).toBe('failed');
+    const continued = project([
+      attempt, abandoned,
+      sessionEvent(2, { type: 'turn/start', turnId: 'current' }),
+      sessionEvent(3, { type: 'turn/end', turnId: 'current', data: { reason: 'completed' } }),
+    ]);
+    expect(continued.every(node => node.turnId !== 'preparation')).toBe(true);
+    expect(turnProcess(continued, 'current').status).toBe('completed');
+  });
+
   it('keeps the fixture exhaustive over the current Event v5 union', () => {
     expect(new Set(agentSessionAllEventFamiliesFixture.map((event) => event.type)))
       .toEqual(new Set(ALL_AGENT_EVENT_TYPES));

@@ -66,3 +66,12 @@ remain in force; ordinary messages can queue while those gates are waiting.
 Validation covers the pure composer and admission coordinator, real native store
 write/replay, claim-prefix recovery, native image admission, real WebKit IndexedDB
 detach/acknowledge transactions, and Chromium rendering at wide/narrow widths.
+
+Pre-step preparation diagnostics do not consume an Inbox item. If the prepared
+input changes or admission stops before claiming it, `step/preparation_abandoned`
+records the attempt's Turn/Step identity, original `inputMessageIds`, and the
+reason (`inputChanged` or `stoppedByUser`). This event ends the preparation
+attempt without starting or completing a conversation turn. It is idempotent
+and leaves the Inbox and model Surface unchanged. Diagnostics and artifacts
+remain in the durable audit log; abandoned attempts are excluded from chat.
+`compaction-attempt` artifacts are shown in chat only after their turn is admitted.

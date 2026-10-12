@@ -541,6 +541,10 @@ export type AgentSessionEvent =
       sensitivity?: 'internal' | 'sensitiveRedacted';
     }>
   | AgentSessionEventWithData<'compaction/start', { reason: string }>
+  | AgentSessionEventWithData<'step/preparation_abandoned', {
+      reason: string;
+      inputMessageIds: readonly string[];
+    }>
   | AgentSessionEventWithData<'compaction/summary', {
       summary: string;
       replacedThroughSeq: number;

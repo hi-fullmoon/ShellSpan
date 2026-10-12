@@ -1118,6 +1118,16 @@ impl AgentSessionStore {
         turn_id: String,
         step_id: String,
     ) -> Result<Option<AgentClaimedStep>, String> {
+        self.begin_turn_step_checked(session_id, turn_id, step_id, None)
+    }
+
+    pub(crate) fn begin_turn_step_checked(
+        &self,
+        session_id: &str,
+        turn_id: String,
+        step_id: String,
+        expected_input: Option<&[AgentInboxMessage]>,
+    ) -> Result<Option<AgentClaimedStep>, String> {
         let mut inner = self.lock_configured()?;
         let record = inner
             .sessions
@@ -1128,6 +1138,14 @@ impl AgentSessionStore {
         }
         let turn_messages = record.inbox.turn_claim();
         let step_messages = record.inbox.step_claim();
+        if expected_input.is_some_and(|expected| {
+            !turn_messages
+                .iter()
+                .chain(&step_messages)
+                .eq(expected.iter())
+        }) {
+            return Ok(None);
+        }
         if turn_messages.is_empty() && step_messages.is_empty() {
             return Ok(None);
         }
@@ -1187,6 +1205,53 @@ impl AgentSessionStore {
         drop(inner);
         publish_events(publisher, &events);
         Ok(Some(AgentClaimedStep { messages }))
+    }
+
+    /// Preparation diagnostics remain in the audit log without consuming input.
+    pub(crate) fn abandon_step_preparation(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        step_id: &str,
+        input_message_ids: Vec<String>,
+        reason: &str,
+    ) -> Result<(), String> {
+        let mut inner = self.lock_configured()?;
+        let record = inner
+            .sessions
+            .get(session_id)
+            .ok_or("Agent session was not found")?;
+        let scoped = record
+            .events
+            .iter()
+            .filter(|event| event.turn_id.as_deref() == Some(turn_id))
+            .collect::<Vec<_>>();
+        if scoped.is_empty()
+            || scoped.iter().any(|event| {
+                matches!(
+                    event.payload,
+                    AgentSessionEventPayload::TurnStart
+                        | AgentSessionEventPayload::StepPreparationAbandoned { .. }
+                )
+            })
+        {
+            return Ok(());
+        }
+        let (events, publisher) = append_payloads_locked(
+            &mut inner,
+            session_id,
+            vec![(
+                Some(turn_id.into()),
+                Some(step_id.into()),
+                AgentSessionEventPayload::StepPreparationAbandoned {
+                    reason: reason.into(),
+                    input_message_ids,
+                },
+            )],
+        )?;
+        drop(inner);
+        publish_events(publisher, &events);
+        Ok(())
     }
 
     /// Serialize the last-step boundary with inbox mutations. Once TurnEnd is
@@ -3736,6 +3801,22 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
         Payload::StepEnd { reason } => {
             require_scope(event, true, true)?;
             validate_text(reason, "Step end reason", false, MAX_LABEL_BYTES)?;
+        }
+        Payload::StepPreparationAbandoned {
+            reason,
+            input_message_ids,
+        } => {
+            require_scope(event, true, true)?;
+            validate_text(
+                reason,
+                "Preparation abandonment reason",
+                false,
+                MAX_LABEL_BYTES,
+            )?;
+            validate_collection_allow_empty(input_message_ids, "Preparation input IDs")?;
+            for id in input_message_ids {
+                validate_identifier(id, "Preparation input ID")?;
+            }
         }
         Payload::UserMessage { message } => {
             require_scope(event, true, true)?;

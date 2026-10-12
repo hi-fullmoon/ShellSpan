@@ -1314,6 +1314,67 @@ async fn steer_arriving_during_a_model_call_becomes_the_next_step() {
 }
 
 #[tokio::test]
+async fn real_preparation_compaction_error_consumes_only_its_input() {
+    let root = tempfile::tempdir().unwrap();
+    let runtime = AgentRuntimeBuilder::new()
+        .model_factory(Arc::new(crate::llm::registry::HttpModelAdapterFactory))
+        .build();
+    runtime.configure(root.path().to_path_buf()).unwrap();
+    create(&runtime, "session-compaction-input");
+    runtime
+        .followup(
+            "session-compaction-input",
+            "oversized-question".into(),
+            "Explain this context. ".repeat(5_000),
+        )
+        .unwrap();
+    runtime
+        .followup(
+            "session-compaction-input",
+            "later-question".into(),
+            "Keep this question queued.".into(),
+        )
+        .unwrap();
+    runtime
+        .start("session-compaction-input", provider(), None)
+        .unwrap();
+    runtime
+        .await_idle("session-compaction-input")
+        .await
+        .unwrap();
+    let snapshot = runtime.session("session-compaction-input").unwrap();
+    assert_eq!(snapshot.status, AgentSessionStatus::Failed);
+    assert_eq!(snapshot.inbox.next_turn.len(), 1);
+    assert_eq!(snapshot.inbox.paused_ids, vec!["later-question"]);
+    let events = runtime
+        .events(AgentSessionEventsRequest {
+            session_id: "session-compaction-input".into(),
+            cursor: None,
+            limit: 128,
+        })
+        .unwrap()
+        .events;
+    assert!(events.iter().any(|event| matches!(
+        &event.payload, AgentSessionEventPayload::SessionEnded { reason: Some(reason), .. }
+            if reason.contains("no completed safe Step or Turn prefix")
+    )));
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(
+                &event.payload, AgentSessionEventPayload::UserMessage { message }
+                    if message.message_id == "oversized-question"
+            ))
+            .count(),
+        1
+    );
+    assert!(!events.iter().any(|event| matches!(
+        &event.payload,
+        AgentSessionEventPayload::RequestStart { .. }
+    )));
+}
+
+#[tokio::test]
 async fn typed_pre_step_hooks_append_bounded_context_or_reject_before_the_model() {
     let continue_hook = FixedPreStepHook::new(AgentPreStepDecision::Continue);
     let context_hook = FixedPreStepHook::new(AgentPreStepDecision::AppendContext {
@@ -1374,6 +1435,13 @@ async fn typed_pre_step_hooks_append_bounded_context_or_reject_before_the_model(
         )
         .unwrap();
     rejected
+        .followup(
+            "session-hook-rejected",
+            "message-after-rejected".into(),
+            "keep this queued".into(),
+        )
+        .unwrap();
+    rejected
         .start("session-hook-rejected", provider(), None)
         .unwrap();
     rejected.await_idle("session-hook-rejected").await.unwrap();
@@ -1381,7 +1449,36 @@ async fn typed_pre_step_hooks_append_bounded_context_or_reject_before_the_model(
     let snapshot = rejected.session("session-hook-rejected").unwrap();
     assert!(snapshot.ended);
     assert_eq!(snapshot.status, AgentSessionStatus::Failed);
+    assert_eq!(snapshot.inbox.next_turn.len(), 1);
+    assert_eq!(
+        snapshot.inbox.next_turn[0].message_id,
+        "message-after-rejected"
+    );
+    assert_eq!(snapshot.inbox.paused_ids, vec!["message-after-rejected"]);
     assert_eq!(rejected_adapter.request_count(), 0);
+    let failure_events = rejected
+        .events(AgentSessionEventsRequest {
+            session_id: "session-hook-rejected".into(),
+            cursor: None,
+            limit: 128,
+        })
+        .unwrap()
+        .events;
+    let user_position = failure_events
+        .iter()
+        .position(|event| {
+            matches!(
+                &event.payload,
+                AgentSessionEventPayload::UserMessage { message }
+                    if message.message_id == "message-hook-rejected"
+            )
+        })
+        .expect("preparation failure must retain its question in the transcript");
+    let end_position = failure_events
+        .iter()
+        .position(|event| matches!(&event.payload, AgentSessionEventPayload::TurnEnd { .. }))
+        .expect("preparation failure must close the admitted turn");
+    assert!(user_position < end_position);
     assert!(rejected
         .events(AgentSessionEventsRequest {
             session_id: "session-hook-rejected".into(),

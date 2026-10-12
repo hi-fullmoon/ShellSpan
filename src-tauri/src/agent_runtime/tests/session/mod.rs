@@ -1545,6 +1545,196 @@ fn append_failure_does_not_update_memory_or_publish() {
 }
 
 #[test]
+fn preparation_failure_claim_rejects_changed_input_and_survives_restart() {
+    for mutation in [
+        AgentInboxMutation::Remove {
+            item_id: "turn-a".into(),
+        },
+        AgentInboxMutation::Update {
+            item_id: "turn-a".into(),
+            content: "edited question".into(),
+        },
+        AgentInboxMutation::Reorder {
+            lane: AgentInboxLane::NextTurn,
+            ordered_item_ids: vec!["turn-b".into(), "turn-a".into()],
+        },
+    ] {
+        let (root, store) = configured();
+        create(&store);
+        store
+            .enqueue(
+                "session-1",
+                AgentInboxLane::NextTurn,
+                message("prior-input", "prior question"),
+            )
+            .unwrap();
+        store
+            .begin_turn_step("session-1", "prior-turn".into(), "prior-step".into())
+            .unwrap();
+        store
+            .append(
+                "session-1",
+                Some("prior-turn".into()),
+                Some("prior-step".into()),
+                AgentSessionEventPayload::StepEnd {
+                    reason: "completed".into(),
+                },
+            )
+            .unwrap();
+        store
+            .append(
+                "session-1",
+                Some("prior-turn".into()),
+                None,
+                AgentSessionEventPayload::TurnEnd {
+                    reason: "completed".into(),
+                },
+            )
+            .unwrap();
+        let boundary = store.all_events("session-1").unwrap().last().unwrap().seq;
+        let original = message("turn-a", "original question");
+        store
+            .enqueue("session-1", AgentInboxLane::NextTurn, original.clone())
+            .unwrap();
+        store
+            .enqueue(
+                "session-1",
+                AgentInboxLane::NextTurn,
+                message("turn-b", "next question"),
+            )
+            .unwrap();
+        let artifacts = super::super::AgentArtifactStore::default();
+        artifacts.configure(root.path()).unwrap();
+        let artifact = artifacts
+            .store_json(
+                "session-1",
+                "compaction-attempt",
+                "Preparation input",
+                &serde_json::json!({"inputMessageId": original.message_id}),
+            )
+            .unwrap();
+        store
+            .append(
+                "session-1",
+                Some("failed-turn".into()),
+                Some("failed-step".into()),
+                AgentSessionEventPayload::ContextArtifact {
+                    artifact_id: artifact.artifact_id.clone(),
+                    kind: artifact.kind,
+                    title: artifact.title,
+                    size_bytes: Some(artifact.size_bytes),
+                    media_type: Some(artifact.media_type),
+                    sha256: Some(artifact.sha256),
+                    sensitivity: Some(artifact.sensitivity),
+                },
+            )
+            .unwrap();
+        store
+            .append(
+                "session-1",
+                Some("failed-turn".into()),
+                Some("failed-step".into()),
+                AgentSessionEventPayload::CompactionStart {
+                    reason: "budgetThreshold".into(),
+                },
+            )
+            .unwrap();
+        store
+            .append(
+                "session-1",
+                Some("failed-turn".into()),
+                Some("failed-step".into()),
+                AgentSessionEventPayload::CompactionEnd {
+                    surface_generation: 1,
+                    replaced_through_seq: boundary,
+                    status: super::super::AgentCompactionStatus::Failed,
+                },
+            )
+            .unwrap();
+        let before = store.snapshot("session-1").unwrap();
+        store
+            .mutate_inbox(AgentInboxMutationInput {
+                session_id: "session-1".into(),
+                expected_revision: before.event_count,
+                client_operation_id: "change-during-preparation".into(),
+                mutation,
+            })
+            .unwrap();
+        let changed = store.snapshot("session-1").unwrap();
+        assert!(store
+            .begin_turn_step_checked(
+                "session-1",
+                "failed-turn".into(),
+                "failed-step".into(),
+                Some(&[original]),
+            )
+            .unwrap()
+            .is_none());
+        assert_eq!(store.snapshot("session-1").unwrap(), changed);
+        store
+            .abandon_step_preparation(
+                "session-1",
+                "failed-turn",
+                "failed-step",
+                vec!["turn-a".into()],
+                "inputChanged",
+            )
+            .unwrap();
+        let abandoned = store.snapshot("session-1").unwrap();
+        assert_eq!(abandoned.inbox, changed.inbox);
+        assert_eq!(abandoned.surface, changed.surface);
+        assert!(
+            matches!(store.all_events("session-1").unwrap().last().unwrap().payload,
+                AgentSessionEventPayload::StepPreparationAbandoned { ref input_message_ids, ref reason }
+                    if input_message_ids == &["turn-a"] && reason == "inputChanged"
+            )
+        );
+        store
+            .abandon_step_preparation(
+                "session-1",
+                "failed-turn",
+                "failed-step",
+                vec!["turn-a".into()],
+                "inputChanged",
+            )
+            .unwrap();
+        assert_eq!(store.snapshot("session-1").unwrap(), abandoned);
+        let restarted = AgentSessionStore::default();
+        restarted.configure(root.path().to_path_buf()).unwrap();
+        assert_eq!(restarted.snapshot("session-1").unwrap(), abandoned);
+        assert!(restarted
+            .all_events("session-1")
+            .unwrap()
+            .iter()
+            .any(|event| matches!(
+                &event.payload, AgentSessionEventPayload::ContextArtifact { artifact_id, .. }
+                    if artifact_id == &artifact.artifact_id
+            )));
+        let current = changed.inbox.next_turn[0].clone();
+        assert!(restarted
+            .begin_turn_step_checked(
+                "session-1",
+                "current-turn".into(),
+                "current-step".into(),
+                Some(&[current.clone()]),
+            )
+            .unwrap()
+            .is_some());
+        let events = restarted.all_events("session-1").unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(
+                    &event.payload, AgentSessionEventPayload::UserMessage { message }
+                        if message == &current
+                ))
+                .count(),
+            1
+        );
+    }
+}
+
+#[test]
 fn inbox_update_remove_and_reorder_commit_with_expected_revision() {
     let (root, store) = configured();
     create(&store);
