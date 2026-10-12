@@ -62,6 +62,7 @@ const profile: ConnectionProfile = {
 const terminalSession = {
   sessionId: 'session-1',
   title: 'API shell',
+  manualTitle: 'API shell',
   host: 'api.example.test',
   port: 22,
   username: 'deploy',
@@ -284,6 +285,7 @@ describe('CommandPalette', () => {
     act(() => document.dispatchEvent(new Event('shellspan:open-command-palette')));
     let input = screen.getByRole('textbox');
     fireEvent.change(input, { target: { value: 'API shell' } });
+    expect(screen.getByRole('button', { name: /API shell/ })).toBeInTheDocument();
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(useTerminalStore.getState().activeSessionId).toBe('session-1'));
     expect(useAppStore.getState().activeSection).toBe('terminal');

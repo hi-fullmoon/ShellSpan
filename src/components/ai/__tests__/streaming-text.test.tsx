@@ -91,11 +91,39 @@ describe('streaming text reveal', () => {
     );
     const { container, rerender } = render(markdown('# ShellSpan'));
     const heading = container.querySelector('h1 span');
+    const headingElement = container.querySelector('h1');
     expect(heading).toHaveAttribute('data-streaming');
     rerender(markdown('# ShellSpan\n\nTerminal workspace.\n\n- SSH\n- SFTP'));
+    expect(container.querySelector('h1')).toBe(headingElement);
     expect(container.querySelector('h1 span')).toBe(heading);
     expect(container.querySelector('p span')).toHaveAttribute('data-streaming');
     expect(container.querySelectorAll('li span[data-streaming]')).toHaveLength(2);
+  });
+
+  it('preserves streaming fragments and native selection when toolbar labels change', () => {
+    const markdown = (copyLabel: string) => (
+      <StreamingTextContext.Provider value>
+        <MarkdownContent copiedLabel="Copied" copyLabel={copyLabel} showCodeBlockActions={false}>
+          {'# ShellSpan'}
+        </MarkdownContent>
+      </StreamingTextContext.Provider>
+    );
+    const { container, rerender } = render(markdown('Copy'));
+    const fragment = container.querySelector('h1 span')!;
+    const textNode = fragment.firstChild!;
+    const selection = window.getSelection()!;
+    const range = document.createRange();
+    range.selectNodeContents(textNode);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    try {
+      rerender(markdown('复制'));
+      expect(container.querySelector('h1 span')).toBe(fragment);
+      expect(selection.anchorNode).toBe(textNode);
+      expect(selection.toString()).toBe('ShellSpan');
+    } finally {
+      selection.removeAllRanges();
+    }
   });
 
   it('bounds fragment nodes during a long uninterrupted stream without losing text', () => {

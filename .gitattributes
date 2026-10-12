@@ -1,6 +1,11 @@
 # git-cliff --prepend 按字节匹配文件头,CRLF 会导致识别失败、头部重复
 CHANGELOG.md text eol=lf
 
+# Streaming selection tests consume this document by character offset.
+AGENTS.md text eol=lf
+# Standalone Ajv output is compared byte-for-byte with generated LF source.
+src/lib/petdex/diagnostic-validators.js text eol=lf
+
 # Rust golden fixtures are compared with generated LF text. Keep checkout
 # bytes deterministic while the tests also tolerate an existing CRLF checkout.
 src-tauri/src/agent_runtime/testdata/*.golden.txt text eol=lf

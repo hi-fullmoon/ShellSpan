@@ -6,7 +6,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import Markdown, { type Components } from 'react-markdown';
+import Markdown, { type Components, type ExtraProps } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
 import { Check, Copy } from 'lucide-react';
@@ -208,6 +208,14 @@ function MarkdownCodeBlock({
   );
 }
 
+// Locale or code-toolbar labels may rebuild the components map. Keep this
+// element type stable so existing streaming fragments and selections survive.
+function MarkdownStreamingSpan({ children, node, ...props }: React.ComponentProps<'span'> & ExtraProps) {
+  return node?.properties.dataStreamText && typeof children === 'string'
+    ? <StreamingText sourceStart={node.position?.start.offset}>{children}</StreamingText>
+    : <span {...props}>{children}</span>;
+}
+
 export const MarkdownContent = React.memo(function MarkdownContent({
   children,
   copiedLabel,
@@ -230,11 +238,7 @@ export const MarkdownContent = React.memo(function MarkdownContent({
   // Stable element types preserve code/table DOM (focus and horizontal scroll)
   // when the growing chunk is parsed again.
   const components = useMemo<Components>(() => ({
-    span: ({ children: textChildren, node, ...spanProps }) => (
-      node?.properties.dataStreamText && typeof textChildren === 'string'
-        ? <StreamingText sourceStart={node.position?.start.offset}>{textChildren}</StreamingText>
-        : <span {...spanProps}>{textChildren}</span>
-    ),
+    span: MarkdownStreamingSpan,
     a: ({ children: linkChildren, href }) => <MarkdownLink href={href}>{linkChildren}</MarkdownLink>,
     blockquote: ({ children: quoteChildren }) => <blockquote>{quoteChildren}</blockquote>,
     code: ({ children: codeChildren, className }) => (
