@@ -182,6 +182,13 @@ describe('AiConversationNodeList', () => {
     fireEvent.click(details);
     expect(details).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText(message)).toBeVisible();
+    const panel = container.querySelector<HTMLElement>('.ai-error-details > [data-slot="collapsible-content"]');
+    expect(panel).toBeInTheDocument();
+    expect(getComputedStyle(panel!).height).toBe('var(--collapsible-panel-height)');
+    expect(getComputedStyle(panel!).overflow).toBe('hidden');
+    expect(getComputedStyle(panel!).transitionProperty).toBe('height, opacity');
+    fireEvent.click(details);
+    expect(details).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('renders output-limit continuation as a readable status without an error count', () => {

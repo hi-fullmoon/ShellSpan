@@ -453,7 +453,7 @@ function ErrorNodeView({ node }: { readonly node: AiConversationNodeOf<'error'> 
       <div className="ai-turn-error-copy block min-w-0 translate-y-px [overflow-wrap:anywhere]">
         <span className="ai-turn-error-title mr-1.5">{t('ai.requestFailed')}</span>
         <span>{errorNodeMessage(node, t)}</span>
-        <Collapsible>
+        <Collapsible className="ai-error-details">
           <CollapsibleTrigger className="text-muted-foreground underline underline-offset-4">{t('ai.error.details')}</CollapsibleTrigger>
           <CollapsibleContent>
             <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">
