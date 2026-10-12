@@ -317,23 +317,47 @@ mod tests {
     }
 
     #[test]
-    fn terminal_cancellation_interrupts_blocked_socket_io() {
-        let (mut client, _server) = socket_pair();
-        client
+    fn terminal_cancellation_interrupts_a_real_stalled_ssh_handshake() {
+        let (client, mut server) = socket_pair();
+        server
             .set_read_timeout(Some(Duration::from_secs(3)))
             .unwrap();
         let cancelled = Arc::new(AtomicBool::new(false));
         let watched = cancelled.clone();
+        let peer_cancelled = cancelled.clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let (release_peer, wait_for_release) = std::sync::mpsc::channel();
+        let peer = thread::spawn(move || {
+            let mut bytes = [0; 256];
+            // Wait for libssh2 to send its greeting before cancelling. Keep
+            // the peer open and silent so only cancellation can end the wait.
+            assert!(server.read(&mut bytes).unwrap() > 0);
+            let cancelled_at = Instant::now();
+            peer_cancelled.store(true, AtomicOrdering::SeqCst);
+            sender.send(cancelled_at).unwrap();
+            while server.read(&mut bytes).unwrap_or(0) != 0 {}
+            // Do not let peer closure wake the handshake under test.
+            wait_for_release
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap();
+            drop(server);
+        });
         let _guard =
-            TerminalConnectionGuard::new(Instant::now() + Duration::from_secs(3), move || {
+            TerminalConnectionGuard::new(Instant::now() + Duration::from_secs(10), move || {
                 watched.load(AtomicOrdering::SeqCst)
             });
         register(&client).unwrap();
-        cancelled.store(true, AtomicOrdering::SeqCst);
-        let started = Instant::now();
-        let mut bytes = [0; 1];
-        assert!(client.read(&mut bytes).map_or(true, |size| size == 0));
-        assert!(started.elapsed() < Duration::from_secs(1));
+        // Exercise the production SSH I/O path. A raw blocking Winsock recv
+        // already in progress need not wake when a cloned socket is shut down.
+        let mut session = Session::new().unwrap();
+        session.set_tcp_stream(client);
+        session.set_timeout(3_000);
+        assert!(session.handshake().is_err());
+        let returned_at = Instant::now();
+        let cancelled_at = receiver.recv_timeout(Duration::from_secs(1)).unwrap();
+        release_peer.send(()).unwrap();
+        peer.join().unwrap();
+        assert!(returned_at.duration_since(cancelled_at) < Duration::from_secs(1));
         assert_eq!(
             failure_reason().as_deref(),
             Some("SSH connection cancelled")
