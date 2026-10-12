@@ -14,7 +14,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
 #[cfg(unix)]
@@ -636,20 +636,23 @@ pub(crate) fn run_ssh_session<
                 }
                 session.set_blocking(false);
 
-                info!("SSH session connected session_id={session_id}");
                 publish_ssh_connection_ready(
                     || {
-                        emit_status(
-                            app,
-                            session_id,
-                            SessionStatus::Connected,
-                            Some("shell ready".to_string()),
-                        )
+                        let event = app
+                            .try_state::<crate::models::SessionManager>()
+                            .ok_or_else(|| "SSH connection cancelled".to_string())?
+                            .commit_connection_ready(
+                                session_id,
+                                crate::connection::terminal_deadline::complete,
+                            )?;
+                        app.emit(crate::SSH_STATUS_EVENT, event)
+                            .map_err(|error| error.to_string())
                     },
                     || activity.transition(ActivityPhase::Connected),
                     on_connected,
                 )
                 .map_err(|message| ConnectionError::Other { message })?;
+                info!("SSH session connected session_id={session_id}");
 
                 session_loop(
                     app,

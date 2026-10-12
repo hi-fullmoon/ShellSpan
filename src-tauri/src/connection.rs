@@ -9,6 +9,7 @@ use crate::sftp_pool::{connection_key, ConnectClaim, SftpPool, SFTP_POOL_GET_ABO
 use log::{debug, error, warn};
 use socket2::{SockRef, TcpKeepalive};
 use ssh2::Session;
+pub(crate) mod terminal_deadline;
 use std::{
     io::{Read, Write},
     net::{IpAddr, Ipv6Addr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs},
@@ -379,6 +380,18 @@ pub(crate) fn connect_tcp_stream(host: &str, port: u16) -> Result<TcpStream, Str
     // on the first one.
     let mut last_error = None;
     for socket_addr in socket_addrs {
+        if let Some(result) = terminal_deadline::connect(&socket_addr) {
+            match result {
+                Ok(tcp) => {
+                    configure_tcp_stream(&tcp).map_err(|error| error.to_string())?;
+                    return Ok(tcp);
+                }
+                Err(error) => {
+                    last_error = Some(std::io::Error::other(error));
+                    continue;
+                }
+            }
+        }
         let timeout = SCOPED_CONNECTION_IO.with(|slot| {
             slot.borrow()
                 .as_ref()
@@ -424,6 +437,8 @@ pub(crate) fn resolve_socket_addresses(host: &str, port: u16) -> Result<Vec<Sock
                 result = tokio::time::timeout_at(tokio::time::Instant::from_std(context.deadline), tokio::net::lookup_host(address.as_str())) => result.map_err(|_| "scoped DNS deadline".to_string())?.map(|addresses| addresses.take(32).collect()).map_err(|e| e.to_string()),
             }
         })?
+    } else if let Some(result) = terminal_deadline::resolve(&address) {
+        result?
     } else {
         address
             .as_str()
@@ -687,16 +702,22 @@ fn open_jump_bridge(
     // Accept and bridge concurrently with the client connect below.
     let scoped = SCOPED_CONNECTION_IO.with(|slot| slot.borrow().clone());
     let worker_scope = scoped.clone();
+    let terminal = terminal_deadline::bridge_context();
+    let worker_terminal = terminal.clone();
     let bridge_handle = thread::spawn(move || {
         match accept_bridge_with_timeout(
             &listener,
             Duration::from_secs(15),
             worker_scope.as_deref(),
+            worker_terminal.as_ref(),
         ) {
             Ok(server_stream) => {
-                if let Err(error) =
-                    bridge_channel_tcp(channel, server_stream, worker_scope.as_deref())
-                {
+                if let Err(error) = bridge_channel_tcp(
+                    channel,
+                    server_stream,
+                    worker_scope.as_deref(),
+                    worker_terminal.as_ref(),
+                ) {
                     warn!("Jump host bridge thread ended with error: {error}");
                 }
             }
@@ -711,6 +732,8 @@ fn open_jump_bridge(
             .lock()
             .expect("scoped worker registry")
             .push(bridge_handle);
+    } else if let Some(context) = terminal {
+        context.own_worker(bridge_handle);
     } else {
         // Long-lived ordinary terminal connections retain their existing owner.
         drop(bridge_handle);
@@ -731,10 +754,13 @@ fn accept_bridge_with_timeout(
     listener: &TcpListener,
     timeout: Duration,
     scoped: Option<&ScopedConnectionIo>,
+    terminal: Option<&terminal_deadline::BridgeCancellation>,
 ) -> Result<TcpStream, std::io::Error> {
     let deadline = std::time::Instant::now() + timeout;
     loop {
-        if scoped.is_some_and(ScopedConnectionIo::stopped) {
+        if scoped.is_some_and(ScopedConnectionIo::stopped)
+            || terminal.is_some_and(terminal_deadline::BridgeCancellation::stopped)
+        {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Interrupted,
                 "scoped bridge stopped",
@@ -760,6 +786,7 @@ fn bridge_channel_tcp(
     mut channel: ssh2::Channel,
     mut tcp: TcpStream,
     scoped: Option<&ScopedConnectionIo>,
+    terminal: Option<&terminal_deadline::BridgeCancellation>,
 ) -> Result<(), String> {
     tcp.set_nonblocking(true)
         .map_err(|error| format!("failed to set bridge TCP stream nonblocking: {error}"))?;
@@ -777,7 +804,9 @@ fn bridge_channel_tcp(
     let mut closing = false;
 
     loop {
-        if scoped.is_some_and(ScopedConnectionIo::stopped) {
+        if scoped.is_some_and(ScopedConnectionIo::stopped)
+            || terminal.is_some_and(terminal_deadline::BridgeCancellation::stopped)
+        {
             return Ok(());
         }
         let mut progressed = false;
@@ -1494,6 +1523,7 @@ fn skill_scoped_connection_cancellation_and_deadline_join_stalled_handshake() {
     }
 }
 fn register_scoped_socket(tcp: &TcpStream) -> Result<(), String> {
+    terminal_deadline::register(tcp)?;
     SCOPED_CONNECTION_IO.with(|slot| {
         if let Some(context) = slot.borrow().as_ref() {
             if context.cancellation.is_cancelled() || std::time::Instant::now() >= context.deadline

@@ -1775,6 +1775,31 @@ impl SessionManager {
         Ok(())
     }
 
+    /// Commit readiness while holding the same lock used by close(). A cancelled
+    /// or expired attempt cannot publish a connected status first.
+    pub(crate) fn commit_connection_ready(
+        &self,
+        session_id: &str,
+        validate: impl FnOnce() -> Result<(), String>,
+    ) -> Result<StatusEvent, String> {
+        let mut guard = self
+            .registry
+            .lock()
+            .map_err(|_| "session registry poisoned")?;
+        let managed = guard
+            .sessions
+            .get_mut(session_id)
+            .ok_or_else(|| "SSH connection cancelled".to_string())?;
+        validate()?;
+        let event = StatusEvent {
+            session_id: session_id.to_string(),
+            status: SessionStatus::Connected,
+            message: Some("shell ready".to_string()),
+        };
+        managed.status = event.clone();
+        Ok(event)
+    }
+
     pub(crate) fn mark_output_ready(&self, session_id: &str) -> Result<(), String> {
         let guard = self
             .registry
@@ -1891,6 +1916,44 @@ mod session_manager_tests {
                 | SessionCommand::Close => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn expired_readiness_validation_preserves_connecting_status() {
+        let manager = SessionManager::default();
+        let (sender, _receiver) = unbounded::<SessionCommand>();
+        manager
+            .insert("local-1".into(), managed_session(sender))
+            .unwrap();
+        let _guard = crate::connection::terminal_deadline::TerminalConnectionGuard::new(
+            std::time::Instant::now() - std::time::Duration::from_millis(1),
+            || false,
+        );
+        let error = manager
+            .commit_connection_ready("local-1", crate::connection::terminal_deadline::complete)
+            .unwrap_err();
+        assert!(error.contains("timed out"));
+        assert!(matches!(
+            manager.status("local-1").unwrap().status,
+            SessionStatus::Connecting
+        ));
+    }
+
+    #[test]
+    fn closed_session_cannot_commit_readiness() {
+        let manager = SessionManager::default();
+        let (sender, receiver) = unbounded::<SessionCommand>();
+        manager
+            .insert("local-1".into(), managed_session(sender))
+            .unwrap();
+        manager.close("local-1").unwrap();
+        assert!(matches!(receiver.recv().unwrap(), SessionCommand::Close));
+        assert!(manager
+            .commit_connection_ready("local-1", || panic!(
+                "closed session must not validate readiness"
+            ))
+            .unwrap_err()
+            .contains("cancelled"));
     }
 
     #[test]

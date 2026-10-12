@@ -4,16 +4,17 @@ use crate::directory_request_registry::{
     DirectoryRequestRegistry, DIRECTORY_REQUEST_SUPERSEDED_MESSAGE,
 };
 use crate::models::{
-    ClosedReasonKind, ConnectionPreflightRequest, ConnectionPreflightResult, CopyLocalPathsRequest,
-    CopyRemotePathRequest, CopyRemoteToRemoteRequest, CreateRemoteEntryRequest, CreateSessionError,
-    DeleteRemotePathRequest, DownloadRemotePathsRequest, HostKeyCheckRequest, HostKeyCheckResult,
-    KeyCredentialSummary, KnownHostEntry, LocalDirectoryListing, LocalFileEntry, LogFileInfo,
-    ManagedSession, OpenRemoteFileRequest, PortForwardStartRequest, PreflightCancellationRegistry,
-    ProfileRow, ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest,
-    RemoteDirectoryListing, RemoteDirectoryRequest, RemoteEntryOwners, RemoteEntryOwnersRequest,
-    RemoteFileKind, RemoteFileReadCancellationRegistry, RemoteFsError, RenameRemotePathRequest,
-    SessionCommand, SessionCommandSender, SessionCreateRequest, SessionIdentity, SessionStatus,
-    SessionSummary, SessionTerminalKind, SftpBookmarkRow, TransferBatchResult, TrustHostRequest,
+    ClosedReasonKind, ConnectionError, ConnectionPreflightRequest, ConnectionPreflightResult,
+    CopyLocalPathsRequest, CopyRemotePathRequest, CopyRemoteToRemoteRequest,
+    CreateRemoteEntryRequest, CreateSessionError, DeleteRemotePathRequest,
+    DownloadRemotePathsRequest, HostKeyCheckRequest, HostKeyCheckResult, KeyCredentialSummary,
+    KnownHostEntry, LocalDirectoryListing, LocalFileEntry, LogFileInfo, ManagedSession,
+    OpenRemoteFileRequest, PortForwardStartRequest, PreflightCancellationRegistry, ProfileRow,
+    ReadRemoteFileRequest, ReadRemoteFileResponse, RemoteConnectionRequest, RemoteDirectoryListing,
+    RemoteDirectoryRequest, RemoteEntryOwners, RemoteEntryOwnersRequest, RemoteFileKind,
+    RemoteFileReadCancellationRegistry, RemoteFsError, RenameRemotePathRequest, SessionCommand,
+    SessionCommandSender, SessionCreateRequest, SessionIdentity, SessionStatus, SessionSummary,
+    SessionTerminalKind, SftpBookmarkRow, TransferBatchResult, TrustHostRequest,
     UpdateRemotePermissionsRequest, UploadLocalPathsRequest, REMOTE_FILE_READ_CANCELLED_MESSAGE,
 };
 use crate::sftp_pool::SftpPool;
@@ -40,11 +41,9 @@ const LOCAL_OUTPUT_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const LOCAL_STARTUP_OUTPUT_BUFFER_LIMIT_BYTES: usize = 1_000_000;
 const LOCAL_READER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const LOCAL_SHELL_ENVIRONMENT_VARIABLE: &str = "SHELLSPAN_LOCAL_SHELL";
-/// How long the create_session command waits for the SSH worker's connect
-/// result. Must outlast the worker's full connect budget (every resolved TCP
-/// address plus the handshake and auth) so real connection errors win the race
-/// instead of surfacing as a broker-attachment timeout.
-pub(crate) const SSH_CONNECT_RESULT_WAIT: Duration = Duration::from_secs(30);
+/// The worker owns a 30-second network budget. Allow a bounded cleanup margin
+/// so its timeout error arrives before the result waiter expires.
+pub(crate) const SSH_CONNECT_RESULT_WAIT: Duration = Duration::from_secs(31);
 
 enum LocalWorkerActivity {
     Command(Result<SessionCommand, crossbeam_channel::RecvError>),
@@ -382,6 +381,7 @@ async fn create_remote_terminal_session(
         pool.clone(),
         connection_request,
         Some(connection_result_tx),
+        Instant::now() + crate::connection::terminal_deadline::TERMINAL_CONNECT_TIMEOUT,
     );
 
     let connection_result = match tauri::async_runtime::spawn_blocking(move || {
@@ -391,30 +391,22 @@ async fn create_remote_terminal_session(
     {
         Ok(Ok(result)) => result,
         Ok(Err(_timeout)) => {
-            if terminal_broker_enabled {
-                let cleanup_error = state.close(&session_id).err();
-                return Err(CreateSessionError::Other {
-                    message: attachment_failure_message(
-                        "timed out before SSH broker attachment completed",
-                        cleanup_error.into_iter().collect(),
-                    ),
-                });
-            }
-            warn!("Timeout waiting for connection result session_id={session_id}; falling back to async status updates");
-            return Ok(summary);
+            let cleanup_error = state.close(&session_id).err();
+            return Err(CreateSessionError::Other {
+                message: attachment_failure_message(
+                    "timed out before SSH broker attachment completed",
+                    cleanup_error.into_iter().collect(),
+                ),
+            });
         }
         Err(_) => {
-            if terminal_broker_enabled {
-                let cleanup_error = state.close(&session_id).err();
-                return Err(CreateSessionError::Other {
-                    message: attachment_failure_message(
-                        "SSH broker attachment waiter was cancelled",
-                        cleanup_error.into_iter().collect(),
-                    ),
-                });
-            }
-            warn!("Connection result task cancelled session_id={session_id}; falling back to async status updates");
-            return Ok(summary);
+            let cleanup_error = state.close(&session_id).err();
+            return Err(CreateSessionError::Other {
+                message: attachment_failure_message(
+                    "SSH broker attachment waiter was cancelled",
+                    cleanup_error.into_iter().collect(),
+                ),
+            });
         }
     };
 
@@ -3274,8 +3266,22 @@ pub(crate) fn spawn_ssh_thread(
     pool: SftpPool,
     connection_request: RemoteConnectionRequest,
     connection_result_tx: Option<std::sync::mpsc::Sender<Result<(), CreateSessionError>>>,
+    connection_deadline: Instant,
 ) {
     thread::spawn(move || {
+        let cancellation_app = app.clone();
+        let cancellation_session_id = session_id.clone();
+        let mut connection_guard =
+            crate::connection::terminal_deadline::TerminalConnectionGuard::new(
+                connection_deadline,
+                move || {
+                    cancellation_app
+                        .try_state::<SessionManager>()
+                        .is_none_or(|manager| {
+                            manager.target_state(&cancellation_session_id).is_err()
+                        })
+                },
+            );
         debug!("Spawned SSH worker session_id={session_id}");
         let _guard = PoolInvalidationGuard {
             pool: &pool,
@@ -3368,6 +3374,11 @@ pub(crate) fn spawn_ssh_thread(
             on_connected,
             &mut activity,
         );
+        let run_result = run_result.map_err(|error| {
+            crate::connection::terminal_deadline::failure_reason()
+                .map_or(error, |message| ConnectionError::Other { message })
+        });
+        connection_guard.finish();
 
         match run_result {
             Ok(message) => {

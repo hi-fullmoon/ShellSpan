@@ -748,14 +748,11 @@
     }
 
     #[test]
-    fn ssh_connect_result_wait_outlasts_full_tcp_connect_budget() {
-        use crate::connection::TCP_CONNECT_ATTEMPT_TIMEOUT;
-        // connect_tcp_stream tries every resolved address sequentially, so a
-        // dual-stack host can spend two full attempt timeouts before failing.
-        // The command wait must exceed that budget so the SSH worker reports
-        // the real connection error instead of the broker-attachment timeout.
+    fn ssh_connect_result_wait_allows_bounded_deadline_cleanup() {
+        use crate::connection::terminal_deadline::TERMINAL_CONNECT_TIMEOUT;
         assert!(
-            SSH_CONNECT_RESULT_WAIT > 2 * TCP_CONNECT_ATTEMPT_TIMEOUT,
-            "SSH_CONNECT_RESULT_WAIT must exceed the dual-stack TCP connect budget"
+            SSH_CONNECT_RESULT_WAIT > TERMINAL_CONNECT_TIMEOUT
+                && SSH_CONNECT_RESULT_WAIT <= TERMINAL_CONNECT_TIMEOUT + Duration::from_secs(1),
+            "The waiter must allow at most one second for deadline cleanup"
         );
     }
