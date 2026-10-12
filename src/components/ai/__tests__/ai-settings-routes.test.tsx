@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ResolvedModel } from '@/lib/ai/provider-contract';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
+import catalogModels from '../../../../protocol/llm/fixtures/resolved-models.json';
 
 const mocks = vi.hoisted(() => ({
   save: vi.fn(),
@@ -121,6 +122,7 @@ describe('route-backed AI settings', () => {
     render(<AiSettingsSection />);
     expect(screen.getByText('model-a')).toBeVisible();
     expect(screen.getByText('model-b')).toBeVisible();
+    expect(screen.queryByRole('button', { name: /settings.ai.showMoreModels/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'settings.ai.removeModel:model-b' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'settings.ai.editProvider' }));
     expect(mocks.save).not.toHaveBeenCalled();
@@ -133,6 +135,35 @@ describe('route-backed AI settings', () => {
 
     expect(screen.queryByText('settings.ai.providersEmpty')).not.toBeInTheDocument();
     expect(screen.queryByText('settings.ai.providersEmptyDescription')).not.toBeInTheDocument();
+  });
+
+  it('collapses a real catalog list and allows every model to be revealed and collapsed again', () => {
+    const models = catalogModels.slice(0, 6).map(({ resolved }) => resolved) as ResolvedModel[];
+    useLlmRoutesStore.setState({ modelsByRoute: { 'route-a': models } });
+
+    render(<AiSettingsSection />);
+
+    const list = screen.getByLabelText('settings.ai.modelsLabel:Connection A');
+    expect(list.querySelectorAll('span[data-slot="badge"]')).toHaveLength(3);
+    for (const [index, badge] of [...list.querySelectorAll('span[data-slot="badge"]')].entries()) {
+      expect(badge).toHaveAttribute('title', models[index].modelId);
+      expect(badge).toHaveClass('max-w-full');
+      expect(badge.firstElementChild).toHaveClass('truncate');
+    }
+    expect(screen.getByText(/settings.ai.modelCount:6/)).toBeVisible();
+    const expand = screen.getByRole('button', { name: 'settings.ai.showMoreModels:3' });
+    expect(expand).toHaveAttribute('aria-expanded', 'false');
+    expect(expand).toHaveTextContent('settings.ai.showMoreModels:3…');
+    expect(expand).toHaveAttribute('data-slot', 'badge');
+    expect(expand).toHaveClass('h-5');
+    expect(expand).toHaveAttribute('aria-controls', list.id);
+    fireEvent.click(expand);
+    expect(list.querySelectorAll('span[data-slot="badge"]')).toHaveLength(6);
+    const collapse = screen.getByRole('button', { name: 'settings.ai.collapseModels' });
+    expect(collapse).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(collapse);
+    expect(list.querySelectorAll('span[data-slot="badge"]')).toHaveLength(3);
+    expect(mocks.save).not.toHaveBeenCalled();
   });
 
   it('shows the provider empty state once a loaded snapshot has no routes', () => {

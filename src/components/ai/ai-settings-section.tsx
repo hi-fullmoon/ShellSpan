@@ -92,6 +92,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
   const [agentActionBusy, setAgentActionBusy] = useState(false);
   const [clearAgentOpen, setClearAgentOpen] = useState(false);
   const [recordsOpen, setRecordsOpen] = useState(false);
+  const [expandedModels, setExpandedModels] = useState<Record<string, boolean>>({});
   const routeSnapshot=useLlmRoutesStore(state=>state.snapshot);
   const modelsByRoute=useLlmRoutesStore(state=>state.modelsByRoute);
   const hydrateRoutes=useLlmRoutesStore(state=>state.hydrate);
@@ -184,6 +185,11 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
       >
         {providers.map((provider) => {
           const ProviderIcon = PRESET_ICONS[provider.preset];
+          const route = routeSnapshot?.routes.find(item => item.id === provider.id);
+          const routeModels = modelsByRoute[provider.id] ?? [];
+          const hasManyModels = routeModels.length > 3;
+          const modelsExpanded = expandedModels[provider.id] ?? false;
+          const visibleModels = hasManyModels && !modelsExpanded ? routeModels.slice(0, 3) : routeModels;
           const isDefault = routeSnapshot
             ? provider.id === routeSnapshot.defaultSelection?.routeId
             : provider.id === defaultProviderId;
@@ -206,17 +212,31 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
                     {isDefault && <Badge variant="secondary">{t('settings.ai.default')}</Badge>}
                   </div>
                   <p className="truncate text-xs text-muted-foreground">
-                    {(routeSnapshot?.routes.find(route=>route.id===provider.id)?.models
-                      ? Object.keys(routeSnapshot.routes.find(route=>route.id===provider.id)!.models!).join(', ')
+                    {(hasManyModels ? t('settings.ai.modelCount', { count: routeModels.length }) : route?.models
+                      ? Object.keys(route.models).join(', ')
                       : provider.model) || t('ai.modelMissing')} · {t(PRESET_DESCRIPTION_KEYS[provider.preset])}
                   </p>
-                  {routeSnapshot?.routes.find(route=>route.id===provider.id) && (
-                    <div className="flex flex-wrap gap-1" aria-label={t('settings.ai.modelsLabel', { name: provider.name })}>
-                      {(modelsByRoute[provider.id] ?? []).map(model=>(
-                        <Badge key={model.modelId} variant="secondary">
-                          {model.displayName ? `${model.displayName} (${model.modelId})` : model.modelId}
+                  {route && (
+                    <div id={`provider-models-${provider.id}`} className="flex min-w-0 flex-wrap items-center gap-1" aria-label={t('settings.ai.modelsLabel', { name: provider.name })}>
+                      {visibleModels.map(model=>(
+                        <Badge key={model.modelId} variant="secondary" className="max-w-full" title={model.displayName ? `${model.displayName} (${model.modelId})` : model.modelId}>
+                          <span className="truncate">{hasManyModels ? model.displayName || model.modelId : model.displayName ? `${model.displayName} (${model.modelId})` : model.modelId}</span>
                         </Badge>
                       ))}
+                      {hasManyModels && (
+                        <Badge
+                          render={<button type="button" />}
+                          variant="secondary"
+                          className="cursor-pointer"
+                          aria-label={modelsExpanded ? t('settings.ai.collapseModels') : t('settings.ai.showMoreModels', { count: routeModels.length - 3 })}
+                          title={modelsExpanded ? t('settings.ai.collapseModels') : t('settings.ai.showMoreModels', { count: routeModels.length - 3 })}
+                          aria-expanded={modelsExpanded}
+                          aria-controls={`provider-models-${provider.id}`}
+                          onClick={() => setExpandedModels(current => ({ ...current, [provider.id]: !modelsExpanded }))}
+                        >
+                          {modelsExpanded ? t('settings.ai.collapseModels') : `${t('settings.ai.showMoreModels', { count: routeModels.length - 3 })}…`}
+                        </Badge>
+                      )}
                     </div>
                   )}
                 </div>
