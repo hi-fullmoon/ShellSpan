@@ -22,6 +22,20 @@ describe('SectionNav', () => {
     expect(container.querySelector('[data-tauri-drag-region]')).not.toBeInTheDocument();
   });
 
+  it('centers minimum-width items with compact corners and decorative icons', () => {
+    render(<SectionNav />);
+
+    for (const button of screen.getAllByRole('button')) {
+      expect(button).toHaveClass('min-w-20', 'shrink-0', 'justify-center', 'gap-1', 'whitespace-nowrap', 'rounded-lg');
+      expect(button).not.toHaveClass('w-24');
+      expect(button.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+      expect(button.querySelector('svg')).not.toHaveClass('-translate-y-px');
+      expect(button.querySelector('svg')).toHaveClass('size-4');
+      expect(button.querySelector('span')).toHaveClass('[text-box:trim-both_cap_alphabetic]');
+    }
+    expect(screen.getByRole('button', { name: 'section.workbench' })).toHaveAttribute('aria-current', 'page');
+  });
+
   it('activates a section when WKWebView only delivers pointerup', () => {
     render(<SectionNav />);
     expect(useAppStore.getState().activeSection).toBe('workbench');

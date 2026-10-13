@@ -1,4 +1,5 @@
 import React from 'react';
+import { FolderIcon, LayoutDashboardIcon, SquareTerminalIcon, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/stores/appStore';
 import { useI18n } from '@/hooks/useI18n';
@@ -8,9 +9,10 @@ import type { AppSection } from '@/types';
 interface NavItemProps {
   section: AppSection;
   label: string;
+  icon: LucideIcon;
 }
 
-const NavItem: React.FC<NavItemProps> = ({ section, label }) => {
+const NavItem: React.FC<NavItemProps> = ({ section, label, icon: Icon }) => {
   const activeSection = useAppStore((state) => state.activeSection);
   const setActiveSection = useAppStore((state) => state.setActiveSection);
   const active = activeSection === section;
@@ -23,13 +25,14 @@ const NavItem: React.FC<NavItemProps> = ({ section, label }) => {
       type="button"
       aria-current={active ? 'page' : undefined}
       className={cn(
-        'flex items-center justify-center rounded-full px-3 py-1.5 text-xs font-medium transition-colors',
+        'flex min-w-20 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
         active
           ? 'bg-app-surface-muted text-app-text font-semibold'
           : 'text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
       )}
     >
-      <span className="text-center">{label}</span>
+      <Icon aria-hidden="true" className="size-4 shrink-0" />
+      <span className="text-center [text-box:trim-both_cap_alphabetic]">{label}</span>
     </button>
   );
 };
@@ -39,9 +42,9 @@ export const SectionNav: React.FC = () => {
 
   return (
     <nav aria-label={t('app.primaryNavigation')} className="flex h-full items-center gap-1">
-      <NavItem section="workbench" label={t('section.workbench')} />
-      <NavItem section="terminal" label={t('section.terminal')} />
-      <NavItem section="sftp" label={t('section.sftp')} />
+      <NavItem section="workbench" label={t('section.workbench')} icon={LayoutDashboardIcon} />
+      <NavItem section="terminal" label={t('section.terminal')} icon={SquareTerminalIcon} />
+      <NavItem section="sftp" label={t('section.sftp')} icon={FolderIcon} />
     </nav>
   );
 };
