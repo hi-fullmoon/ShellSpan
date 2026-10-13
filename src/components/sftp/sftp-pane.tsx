@@ -472,7 +472,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
             <div
               className={cn(
                 'h-[30px] overflow-hidden rounded-md transition-[width,background-color] duration-200 ease-out',
-                showSearch ? 'w-56 bg-app-surface-muted' : 'w-7 bg-transparent',
+                showSearch ? 'w-46 bg-app-surface-muted' : 'w-7 bg-transparent',
               )}
             >
               <div className="flex h-full w-46 items-center">
