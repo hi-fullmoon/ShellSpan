@@ -3,7 +3,7 @@ import { toast } from 'sonner';
 import { latestFailureRecovery } from '@/lib/ai/failure-recovery';
 import { aiErrorMessage } from '@/lib/ai/error-message';
 
-import { sharedAgentSessionAdapter, submissionMemoryFor } from '@/lib/ai/submission-memory';
+import { sharedAgentSessionAdapter, submissionMemoryFor, type AiSubmissionContext } from '@/lib/ai/submission-memory';
 import { AiSubmissionQueue } from '@/lib/ai/submission-queue';
 import { acknowledgeDetachedImageDraft, holdDetachedImageDraft } from '@/lib/ai/image-drafts';
 import { builtinSkillPreview } from '@/lib/ai/builtin-skills';
@@ -267,7 +267,7 @@ export function useAiSessionController({
   const [adapter] = useState(() => providedAdapter ?? sharedAgentSessionAdapter());
   const submissionMemory = useMemo(() => submissionMemoryFor(adapter), [adapter]);
   const canRestoreWorkbench = providedAdapter !== undefined || isTauriRuntime();
-  const terminalSessions = useTerminalStore((state) => state.sessions);
+  const activeTerminal = useTerminalStore((state) => state.sessions.find(item => item.sessionId === state.activeSessionId));
   const activeTerminalId = useTerminalStore((state) => state.activeSessionId);
   const browserProviders = useAiSettingsStore((state) => state.providers);
   const routeSnapshot = useLlmRoutesStore((state) => state.snapshot);
@@ -289,7 +289,6 @@ export function useAiSessionController({
     }
     return providers.find((item) => item.id === defaultProviderId) ?? providers[0];
   }, [defaultProviderId, providers, routeSnapshot]);
-  const activeTerminal = terminalSessions.find((item) => item.sessionId === activeTerminalId);
   const activePermissionBinding = useAgentPermissionStore((state) => state.bindings[activeTerminalId ?? '']);
   const historyScopeKey = activeTerminal ? terminalLoginScopeKey(activeTerminal) : null;
   // Session recovery depends on the terminal's durable target identity, not on
@@ -317,8 +316,20 @@ export function useAiSessionController({
     draft: useAiDraftStore.getState().drafts[`new:agent:${scope}:${activeTerminal?.sessionId ?? 'workspace'}`] ?? '',
   }));
   const [navigation, setNavigation] = useState(() => createAiWorkspaceNavigationState());
+  const navigationRef = useRef(navigation);
+  navigationRef.current = navigation;
+  const workspaceVisits = useRef(new Map<string, {
+    summary: AiSessionSummary | null;
+    navigation: AiWorkspaceNavigationState;
+    eligible: boolean;
+    sessions: readonly AiSessionSummary[];
+    context: AiSubmissionContext;
+  }>());
+  const refreshRestoredHistory = useRef(false);
   const scrollAnchorsRef = useRef<Record<string, AiScrollAnchor | undefined>>({});
   const [sessions, setSessions] = useState<readonly AiSessionSummary[]>([]);
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [archivingSessionId, setArchivingSessionId] = useState<string | null>(null);
@@ -420,6 +431,10 @@ export function useAiSessionController({
   const appliedWorkspaceRef = useRef(workspaceScopeKey);
   const workspaceChanging = appliedWorkspaceRef.current !== workspaceScopeKey;
   const submissionContextRef = useRef({ key: workspaceScopeKey });
+  const appliedSubmissionContext = useRef(submissionContextRef.current);
+  if (appliedWorkspaceRef.current === workspaceScopeKey) {
+    appliedSubmissionContext.current = submissionContextRef.current;
+  }
   // These handles point to application-owned state and survive panel unmounts.
   const { submissionQueues, sessionSubmissionQueues, submissionLedger, sessionSubmissionStates, submissionInputs, creationInputs } = useMemo(() => ({
     submissionQueues: { current: submissionMemory.queues },
@@ -435,6 +450,7 @@ export function useAiSessionController({
   // Initial history is only a convenience. It must never claim a workspace after
   // the user has begun a draft, chosen a project, or explicitly navigated.
   const automaticRestore = useRef({ key: workspaceScopeKey, eligible: true });
+  const appliedRestore = useRef(automaticRestore.current);
   const [completedRestore, setCompletedRestore] = useState<object | null>(null);
   if (automaticRestore.current.key !== workspaceScopeKey) {
     automaticRestore.current = { key: workspaceScopeKey, eligible: true };
@@ -511,20 +527,22 @@ export function useAiSessionController({
     draftOwnerRef.current = key;
   }, [navigationDraftKey]);
 
-  const resetComposer = useCallback((summary?: AiSessionSummary, restoreWorkspace = false): void => {
+  const resetComposer = useCallback((summary?: AiSessionSummary, restoreWorkspace = false, restoredSessionId?: string): void => {
     saveCurrentDraft();
     const recalled = restoreWorkspace ? submissionMemory.reopen(workspaceScopeKey) : undefined;
     submissionContextRef.current = recalled?.context ?? { key: workspaceScopeKey };
     for (const timeout of timeoutRef.current.values()) window.clearTimeout(timeout);
     timeoutRef.current.clear();
     updateOptimistic(() => []);
-    const key = navigationDraftKey(summary?.id ?? recalled?.state.sessionId ?? null);
+    const sessionId = summary?.id ?? restoredSessionId ?? recalled?.state.sessionId ?? null;
+    const saved = sessionId ? sessionSubmissionStates.current.get(sessionId) : undefined;
+    const key = navigationDraftKey(sessionId);
     draftOwnerRef.current = key;
     const next = createAiComposerState({
-      ...(summary ? sessionSubmissionStates.current.get(summary.id) : undefined),
+      ...saved,
       ...recalled?.state,
-      sessionId: summary?.id ?? recalled?.state.sessionId ?? null,
-      runtimeStatus: summary?.status ?? 'idle',
+      sessionId,
+      runtimeStatus: summary?.status ?? saved?.runtimeStatus ?? 'idle',
       terminal: summary !== undefined && (
         summary.subagent?.continuable === false
         || ['completed', 'cancelled', 'failed'].includes(summary.status)
@@ -882,10 +900,10 @@ export function useAiSessionController({
     return () => {
       saveCurrentDraft();
       mountedRef.current = false;
-      submissionMemory.remember(submissionContextRef.current, composerRef.current);
+      submissionMemory.remember(appliedSubmissionContext.current, composerRef.current);
       for (const timeout of timeoutRef.current.values()) window.clearTimeout(timeout);
       timeoutRef.current.clear();
-      submissionMemory.close(submissionContextRef.current);
+      submissionMemory.close(appliedSubmissionContext.current);
     };
   }, [submissionMemory, saveCurrentDraft]);
 
@@ -916,20 +934,54 @@ export function useAiSessionController({
       && isDirectReconnectedTerminal(previous.snapshot.value, activeTerminal)) {
       appliedWorkspaceRef.current = workspaceScopeKey;
       claimWorkspace();
+      appliedRestore.current = automaticRestore.current;
+      appliedSubmissionContext.current = submissionContextRef.current;
       setSkillNavigation((generation) => generation + 1);
       return;
     }
-    resetComposer(undefined, true);
+    if (appliedWorkspaceRef.current !== workspaceScopeKey) {
+      submissionMemory.remember(appliedSubmissionContext.current, composerRef.current);
+      submissionMemory.close(appliedSubmissionContext.current);
+      workspaceVisits.current.set(appliedWorkspaceRef.current, {
+        summary: previous?.summary ?? null,
+        navigation: navigationRef.current,
+        eligible: appliedRestore.current.eligible && !previous,
+        sessions: sessionsRef.current,
+        context: appliedSubmissionContext.current,
+      });
+      while (workspaceVisits.current.size > 32) {
+        const oldest = workspaceVisits.current.keys().next().value;
+        if (oldest !== undefined) workspaceVisits.current.delete(oldest);
+      }
+    }
+    const visit = workspaceVisits.current.get(workspaceScopeKey);
+    if (visit) {
+      workspaceVisits.current.delete(workspaceScopeKey);
+      automaticRestore.current.eligible = visit.eligible;
+    }
+    const rememberedSessionId = visit ? submissionMemory.stateFor(visit.context)?.sessionId : undefined;
+    const restoredSessionId = rememberedSessionId ?? visit?.summary?.id;
+    const restoredSummary = restoredSessionId === visit?.summary?.id ? visit?.summary
+      : restoredSessionId ? adapter.peek?.(restoredSessionId)?.summary : undefined;
+    resetComposer(restoredSummary ?? undefined, true, restoredSessionId);
+    appliedRestore.current = automaticRestore.current;
+    sessionListRequestRef.current++;
+    setSessions(visit?.sessions ?? []);
+    setSessionsLoading(false);
+    setSessionsError(null);
+    refreshRestoredHistory.current = visit?.navigation.route.kind === 'sessions';
+    appliedSubmissionContext.current = submissionContextRef.current;
     setNewExecutionSurface(useAgentPermissionStore.getState().getExecutionSurface(activeTerminal?.sessionId ?? ''));
     appliedWorkspaceRef.current = workspaceScopeKey;
     if (composerRef.current.draft || composerRef.current.pendingSubmissions.length || composerRef.current.failedDrafts.length) claimWorkspace();
     setOpenedSessionId(composerRef.current.sessionId);
-    setView(null);
+    const retained = composerRef.current.sessionId ? adapter.peek?.(composerRef.current.sessionId) ?? null : null;
+    setView(retained);
     setQueueMutation(null);
     queueOperationRef.current = null;
-    viewRef.current = null;
-    setNavigation(createAiWorkspaceNavigationState());
-  }, [activeTerminal?.sessionId, claimWorkspace, resetComposer, scope, workspaceScopeKey]);
+    viewRef.current = retained;
+    setNavigation(visit?.navigation ?? createAiWorkspaceNavigationState());
+  }, [activeTerminal?.sessionId, adapter, claimWorkspace, resetComposer, scope, submissionMemory, workspaceScopeKey]);
 
   useEffect(() => {
     // Wait for the old workspace's state to clear before choosing its successor.
@@ -1133,25 +1185,31 @@ export function useAiSessionController({
     : null;
 
   const refreshSessions = useCallback(async (): Promise<void> => {
+    const matchesScope = (): boolean => {
+      if (scope === 'workbench') return true;
+      const terminals = useTerminalStore.getState();
+      const terminal = terminals.sessions.find(item => item.sessionId === terminals.activeSessionId);
+      return (terminal ? terminalLoginScopeKey(terminal) : null) === historyScopeKey;
+    };
+    if (!matchesScope()) return;
     const requestId = ++sessionListRequestRef.current;
+    const canPublish = (): boolean => mountedRef.current && requestId === sessionListRequestRef.current && matchesScope();
     setSessionsLoading(true);
     setSessionsError(null);
     try {
       const scopeKey = scope === 'workbench'
         ? WORKBENCH_AI_TARGET_ID
         : historyScopeKey ?? '__no-terminal__';
-      const summaries = await listAllAiSessions(adapter, { scopeKey, limit: 200 }, () => (
-        mountedRef.current && requestId === sessionListRequestRef.current
-      ));
-      if (summaries && mountedRef.current && requestId === sessionListRequestRef.current) {
+      const summaries = await listAllAiSessions(adapter, { scopeKey, limit: 200 }, canPublish);
+      if (summaries && canPublish()) {
         setSessions(summaries);
       }
     } catch (error) {
-      if (mountedRef.current && requestId === sessionListRequestRef.current) {
+      if (canPublish()) {
         setSessionsError(normalizeAiSessionError(error).message);
       }
     } finally {
-      if (mountedRef.current && requestId === sessionListRequestRef.current) {
+      if (canPublish()) {
         setSessionsLoading(false);
       }
     }
@@ -1162,6 +1220,12 @@ export function useAiSessionController({
     setNavigation((current) => ({ ...current, route: { kind: 'sessions' } }));
     void refreshSessions();
   }, [claimWorkspace, refreshSessions]);
+
+  useEffect(() => {
+    if (workspaceChanging || !refreshRestoredHistory.current) return;
+    refreshRestoredHistory.current = false;
+    void refreshSessions();
+  }, [refreshSessions, workspaceChanging, workspaceScopeKey]);
 
   const subagentDirectoryKey = view
     ? [
@@ -1269,17 +1333,27 @@ export function useAiSessionController({
   }, [activeTerminal?.sessionId, adapter, createInputWithFrozenTargetRoot, dispatch, imageDraft.draft?.images.length,
     historicalSources, navigationDraftKey, now, openSession, operationId, provider, t]);
 
+  const forgetSessionVisits = useCallback((sessionId: string): void => {
+    submissionMemory.forgetClosedSession(sessionId);
+    for (const [key, visit] of workspaceVisits.current) {
+      const restoredSessionId = submissionMemory.stateFor(visit.context)?.sessionId ?? visit.summary?.id;
+      if (restoredSessionId === sessionId) workspaceVisits.current.delete(key);
+      else workspaceVisits.current.set(key, { ...visit, sessions: visit.sessions.filter(session => session.id !== sessionId) });
+    }
+  }, [submissionMemory]);
+
   useEffect(() => {
     const onSessionDeleted = (event: Event): void => {
       const sessionId = (event as CustomEvent<{ sessionId?: string }>).detail?.sessionId;
       if (!sessionId) return;
       adapter.evict?.(sessionId);
+      forgetSessionVisits(sessionId);
       setSessions((current) => current.filter((session) => session.id !== sessionId));
       if (viewRef.current?.summary.id === sessionId || openedSessionId === sessionId) newSession();
     };
     window.addEventListener('shellspan:ai-session-deleted', onSessionDeleted);
     return () => window.removeEventListener('shellspan:ai-session-deleted', onSessionDeleted);
-  }, [adapter, newSession, openedSessionId]);
+  }, [adapter, forgetSessionVisits, newSession, openedSessionId]);
 
   const archiveSession = useCallback((summary: AiSessionSummary): void => {
     if (archivePendingRef.current || summary.archived) return;
@@ -1295,6 +1369,7 @@ export function useAiSessionController({
     setArchivingSessionId(summary.id);
     void adapter.archive(summary.id).then(
       () => {
+        forgetSessionVisits(summary.id);
         if (viewRef.current?.summary.id === summary.id) newSession();
         void refreshSessions();
       },
@@ -1307,7 +1382,7 @@ export function useAiSessionController({
       archivePendingRef.current = false;
       if (mountedRef.current) setArchivingSessionId(null);
     });
-  }, [adapter, newSession, refreshSessions, sessions, t]);
+  }, [adapter, forgetSessionVisits, newSession, refreshSessions, sessions, t]);
 
   const deleteSession = useCallback((summary: AiSessionSummary): void => {
     if (deletePendingRef.current || !summary.archived) return;
@@ -1316,6 +1391,7 @@ export function useAiSessionController({
     setSessionsError(null);
     void adapter.delete(summary.id).then(
       () => {
+        forgetSessionVisits(summary.id);
         setSessions((current) => current.filter((session) => session.id !== summary.id));
         if (viewRef.current?.summary.id === summary.id) newSession();
         void refreshSessions();
@@ -1328,7 +1404,7 @@ export function useAiSessionController({
       deletePendingRef.current = false;
       if (mountedRef.current) setDeletingSessionId(null);
     });
-  }, [adapter, newSession, refreshSessions, t]);
+  }, [adapter, forgetSessionVisits, newSession, refreshSessions, t]);
 
   const executeQueueMutation = useCallback((intent: AiQueueMutationIntent, retry = false): void => {
     // React state alone cannot guard two clicks within the same render.

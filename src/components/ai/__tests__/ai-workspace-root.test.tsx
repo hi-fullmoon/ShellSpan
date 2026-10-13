@@ -85,6 +85,16 @@ beforeEach(async () => {
 afterEach(() => cleanup());
 
 describe('AiWorkspaceRoot Phase 3 skeleton', () => {
+  it('keeps durable identity independent of the displayed title and clears it for a new conversation', () => {
+    const view = taskTokenBudgetView();
+    const { container, rerender } = render(<AiWorkspaceRoot scope="terminal" view={view} title="Different display title" />);
+    const workspace = () => container.querySelector('[data-slot="ai-workspace-root"]');
+    expect(workspace()).toHaveAttribute('data-session-id', view.summary.id);
+    expect(screen.getByRole('heading', { name: 'Different display title' })).toBeVisible();
+    rerender(<AiWorkspaceRoot scope="terminal" view={null} />);
+    expect(workspace()).not.toHaveAttribute('data-session-id');
+  });
+
   it('preserves expanded tools and the draft after returning from tool details', async () => {
     const user = userEvent.setup();
     const base = agentView();

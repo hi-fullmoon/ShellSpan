@@ -499,6 +499,7 @@ export function AiWorkspaceRoot({
       data-slot="ai-workspace-root"
       data-phase={hero ? 'hero' : 'active'}
       data-session-kind={sessionKind}
+      data-session-id={view?.summary.id}
       data-ai-mode={surfaceMode}
       className="ai-workspace-root @container/ai-workspace flex size-full min-h-0 min-w-0 flex-col overflow-x-hidden"
       aria-label={t('ai.workspace')}

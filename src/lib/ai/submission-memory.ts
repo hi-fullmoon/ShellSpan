@@ -25,6 +25,13 @@ export class AiSubmissionMemory {
 
   close(context: AiSubmissionContext): void { this.closedWorkspaces.set(context.key, context); }
 
+  /** Remove automatic restoration links for archived/deleted conversations. */
+  forgetClosedSession(sessionId: string): void {
+    for (const [workspace, context] of this.closedWorkspaces) {
+      if (this.stateFor(context)?.sessionId === sessionId) this.closedWorkspaces.delete(workspace);
+    }
+  }
+
   stateFor(context: AiSubmissionContext): AiComposerState | undefined {
     const remembered = this.ledger.get(context);
     return remembered?.sessionId ? this.sessionStates.get(remembered.sessionId) ?? remembered : remembered;

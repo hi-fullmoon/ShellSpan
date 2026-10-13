@@ -22,6 +22,14 @@ it('restores the failed head and later messages after a view closes, with the or
   expect(reopened.state.failedDrafts.map(item => item.id)).toEqual(['A']);
   expect(reopened.state.pendingSubmissions.map(item => item.clientOperationId)).toEqual(['B', 'C']);
   expect(submissionMemoryFor({}).reopen(context.key)).toBeUndefined();
+  const anotherVisit = { key: 'terminal:another-visit' };
+  memory.remember(anotherVisit, reopened.state);
+  memory.close(anotherVisit);
+  memory.forgetClosedSession('session');
+  expect(memory.reopen(context.key)).toBeUndefined();
+  expect(memory.reopen(anotherVisit.key)).toBeUndefined();
+  expect(memory.stateFor(context)).toBe(reopened.state);
+  expect(memory.sessionStates.get('session')).toBe(reopened.state);
 });
 
 it('delivers late receipts to the new view without retaining the old listener', () => {
@@ -43,6 +51,10 @@ it('delivers late receipts to the new view without retaining the old listener', 
   expect(oldNotifications).toBe(1);
   expect(receipts).toEqual(['created-session']);
   expect(memory.reopen(context.key)?.state.sessionId).toBe('created-session');
+  const committed = reduceAiComposer(memory.stateFor(context)!, { type: 'submit.committed', clientOperationId: 'A' }).state;
+  memory.remember(context, committed);
+  expect(memory.reopen(context.key)).toBeUndefined();
+  expect(memory.stateFor(context)?.sessionId).toBe('created-session');
   closeNewView();
 });
 

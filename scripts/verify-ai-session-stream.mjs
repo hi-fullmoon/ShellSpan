@@ -1,67 +1,129 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { resolve } from 'node:path';
-import { createServer } from 'vite';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { parseArgs } from 'node:util';
+import { build, createServer, preview } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
-// Requires a native desktop and Rust/Tauri. Creates and removes one unique,
-// idle development session; no provider calls or shell commands are executed.
+// Requires a native desktop and Rust/Tauri. The default regression creates one
+// idle session without provider calls. --performance also reads stored journals
+// and creates temporary PTYs; model calls occur unless --no-model is supplied.
 const repository = resolve(import.meta.dirname, '..');
+const { values } = parseArgs({ options: {
+  performance: { type: 'boolean' }, baseline: { type: 'boolean' },
+  'no-model': { type: 'boolean' }, route: { type: 'string' }, model: { type: 'string' },
+  'cleanup-session': { type: 'string', multiple: true },
+  'baseline-ref': { type: 'string' },
+} });
+const performanceRun = values.performance === true;
+const baseline = values.baseline === true;
+const noModel = values['no-model'] === true;
+assert(Boolean(values.route) === Boolean(values.model), '--route and --model must be supplied together');
+assert(!values['baseline-ref'] || baseline, '--baseline-ref requires --baseline');
+const baselineRef = values['baseline-ref'] ?? 'HEAD';
+const baselineCommit = baseline ? execFileSync('git', ['rev-parse', '--verify', '--end-of-options', `${baselineRef}^{commit}`],
+  { cwd: repository, encoding: 'utf8' }).trim() : undefined;
+const baselineSources = baseline ? new Map([
+  'src/lib/ai/agent-session-adapter.ts',
+  'src/components/ai/workspace/use-ai-session-controller.ts',
+].map(path => [resolve(repository, path), execFileSync('git', ['show', `${baselineCommit}:${path}`], { cwd: repository, encoding: 'utf8' })])) : new Map();
 const token = randomUUID();
 let settle;
 const result = new Promise((resolveResult) => { settle = resolveResult; });
-const server = await createServer({
-  configFile: false,
-  root: repository,
-  cacheDir: resolve(repository, 'node_modules/.vite-agent-stream-native'),
-  resolve: { alias: { '@': resolve(repository, 'src') } },
-  plugins: [react(), tailwindcss(), {
-    name: 'native-agent-stream-result',
-    configureServer(vite) {
-      vite.middlewares.use(`/__agent-stream-result/${token}`, async (request, response) => {
-        if (request.method !== 'POST') { response.statusCode = 405; response.end(); return; }
-        try {
-          let body = '';
-          for await (const chunk of request) {
-            body += chunk;
-            if (body.length > 8192) throw new Error('Oversized test result');
-          }
-          const value = JSON.parse(body);
-          response.end('ok');
-          settle(value);
-        } catch {
-          response.statusCode = 400;
-          response.end();
-          settle({ ok: false, error: 'Invalid native test result' });
-        }
-      });
-    },
-  }],
-  server: { host: '127.0.0.1', port: 0, hmr: false, watch: null },
-});
+const page = performanceRun ? 'agent-panel-performance.native.html' : 'agent-session-stream.native.html';
+const output = performanceRun ? await mkdtemp(resolve(tmpdir(), 'shellspan-agent-performance-')) : undefined;
+const baselinePlugin = {
+  name: 'agent-panel-performance-baseline',
+  enforce: 'pre',
+  load(id) { return baselineSources.get(id.split('?')[0]); },
+};
+const attachResult = (vite) => {
+  vite.middlewares.use(`/__agent-stream-result/${token}`, async (request, response) => {
+    if (request.method !== 'POST') { response.statusCode = 405; response.end(); return; }
+    try {
+      const chunks = [];
+      let bytes = 0;
+      for await (const chunk of request) {
+        bytes += chunk.length;
+        if (bytes > 8192) throw new Error('Oversized test result');
+        chunks.push(chunk);
+      }
+      const value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      response.end('ok');
+      if (value.progress) { console.log(value.progress); return; }
+      settle(value);
+    } catch {
+      response.statusCode = 400;
+      response.end();
+      settle({ ok: false, error: 'Invalid native test result' });
+    }
+  });
+};
+const resultPlugin = { name: 'native-agent-stream-result', configureServer: attachResult, configurePreviewServer: attachResult };
+let server;
+try {
+  if (output) await build({
+    configFile: false, root: repository, logLevel: 'error',
+    resolve: { alias: { '@': resolve(repository, 'src') } },
+    plugins: [baselinePlugin, react(), tailwindcss()],
+    build: { outDir: output, emptyOutDir: true,
+      rolldownOptions: { input: resolve(repository, `src/lib/ai/__tests__/${page}`) } },
+  });
+  server = output ? await preview({
+    configFile: false, root: repository, plugins: [resultPlugin], build: { outDir: output },
+    preview: { host: '127.0.0.1', port: 0 },
+  }) : await createServer({
+    configFile: false,
+    root: repository,
+    cacheDir: resolve(repository, 'node_modules/.vite-agent-stream-native'),
+    resolve: { alias: { '@': resolve(repository, 'src') } },
+    plugins: [react(), tailwindcss(), resultPlugin],
+    server: { host: '127.0.0.1', port: 0, hmr: false, watch: null },
+  });
+} catch (error) {
+  if (output) await rm(output, { recursive: true, force: true });
+  throw error;
+}
 let child;
 let timer;
 try {
-  await server.listen();
+  if (!output) await server.listen();
   const address = server.httpServer.address();
   assert(address && typeof address !== 'string');
-  const devUrl = `http://127.0.0.1:${address.port}/src/lib/ai/__tests__/agent-session-stream.native.html?token=${token}`;
+  const url = new URL(`http://127.0.0.1:${address.port}/src/lib/ai/__tests__/${page}`);
+  url.searchParams.set('token', token);
+  url.searchParams.set('baseline', String(baseline));
+  url.searchParams.set('noModel', String(noModel));
+  if (values.route) { url.searchParams.set('route', values.route); url.searchParams.set('model', values.model); }
+  for (const id of values['cleanup-session'] ?? []) url.searchParams.append('cleanupSession', id);
+  const devUrl = url.href;
   child = spawn('pnpm', ['exec', 'tauri', 'dev', '--no-watch', '--config', JSON.stringify({
     identifier: 'com.shellspan-dev', build: { beforeDevCommand: '', devUrl },
+    ...(performanceRun && !values['cleanup-session']?.length ? { app: { windows: [{
+      label: 'main', title: 'Agent panel validation', width: 1480, height: 920,
+      minWidth: 1200, minHeight: 760, visible: true, focus: true, alwaysOnTop: true,
+      transparent: true, titleBarStyle: 'Overlay',
+    }] } } : {}),
   })], { cwd: repository, stdio: ['ignore', 'ignore', 'inherit'], detached: process.platform !== 'win32' });
   child.once('error', (error) => settle({ ok: false, error: error.message }));
   child.once('exit', (code) => settle({ ok: false, error: `Tauri exited before reporting results (${code})` }));
   timer = setTimeout(() => settle({ ok: false, error: 'Native stream regression timed out after 10 minutes' }), 600_000);
   const outcome = await result;
   assert.equal(outcome.ok, true, outcome.error);
-  console.log('Native Agent stream passed: pending subscription/snapshot cancellation, error publication, automatic gap recovery and cleanup.');
+  if (performanceRun) console.log(JSON.stringify({ baseline, baselineRef: baseline ? baselineRef : undefined, baselineCommit, productionBundle: true, ...outcome.metrics }));
+  else console.log('Native Agent stream passed: pending subscription/snapshot cancellation, error publication, automatic gap recovery and cleanup.');
 } finally {
   clearTimeout(timer);
   if (child?.pid && child.exitCode === null) {
     try { process.kill(process.platform === 'win32' ? child.pid : -child.pid, 'SIGTERM'); }
     catch (error) { if (error.code !== 'ESRCH') throw error; }
   }
-  await server.close();
+  if (output) {
+    await new Promise((resolveClose, reject) => server.httpServer.close(error => error ? reject(error) : resolveClose()));
+    await rm(output, { recursive: true, force: true });
+  } else await server.close();
 }

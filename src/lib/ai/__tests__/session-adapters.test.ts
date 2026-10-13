@@ -782,7 +782,7 @@ describe('AgentSessionAdapter', () => {
     await expect(adapter.answerQuestion(input)).rejects.toThrow('not visible');
     adapter.dispose();
   });
-  it('releases the current event subscription when UI switches sessions without stopping Runtime', async () => {
+  it('retains the warm subscription on navigation and releases it on disposal without stopping Runtime', async () => {
     const base = agentDependencies(agentSessionEventFixture);
     const disconnect = vi.fn();
     const state = {
@@ -805,9 +805,10 @@ describe('AgentSessionAdapter', () => {
     const unsubscribe = adapter.subscribe('session-fixture', vi.fn());
     await adapter.open('session-fixture');
     unsubscribe();
-    expect(disconnect).toHaveBeenCalledOnce();
+    expect(disconnect).not.toHaveBeenCalled();
     expect(dependencies.stop).not.toHaveBeenCalled();
     adapter.dispose();
+    expect(disconnect).toHaveBeenCalledOnce();
   });
 
   it('opens through the subscribe-first committed client and shares one event window', async () => {

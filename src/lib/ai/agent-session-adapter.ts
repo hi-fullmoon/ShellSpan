@@ -161,6 +161,7 @@ interface AgentAdapterEntry {
   readonly stopListening: () => void;
   connecting?: Promise<AiSessionView>;
   view?: AiSessionView;
+  leases: number;
 }
 
 function sessionSubagentSummary(
@@ -472,16 +473,37 @@ export function createAgentSessionAdapter(
     entries.delete(sessionId);
   };
 
+  // Retain a small warm working set. Native runtimes own execution; evicting
+  // a frontend subscription never stops a task or discards its durable journal.
+  const trim = (): void => {
+    const idle = [...entries].filter(([, entry]) => !entry.listeners.size && !entry.leases && !entry.connecting);
+    let events = idle.reduce((count, [, entry]) => count + entry.client.state().events.length, 0);
+    while (idle.length > 4 || events > 20_000) {
+      const oldest = idle.shift();
+      if (!oldest) break;
+      events -= oldest[1].client.state().events.length;
+      evict(oldest[0]);
+    }
+  };
+
   const ensureEntry = (sessionId: string): AgentAdapterEntry => {
     const existing = entries.get(sessionId);
-    if (existing) return existing;
+    if (existing) {
+      entries.delete(sessionId);
+      entries.set(sessionId, existing);
+      return existing;
+    }
     const client = dependencies.client(sessionId);
     const listeners = new Set<AiSessionListener>();
     const entry: AgentAdapterEntry = {
       project: createAgentSessionViewProjector(),
       client,
       listeners,
+      leases: 0,
       stopListening: client.onChange((state) => {
+        // Hidden sessions ingest committed events, but do not build chat,
+        // activity and metadata views until an observer needs them.
+        if (!listeners.size && !entry.leases) { trim(); return; }
         const view = entry.project(state);
         entry.view = view;
         for (const listener of listeners) listener(view);
@@ -499,6 +521,7 @@ export function createAgentSessionAdapter(
       return view;
     }).finally(() => {
       entry.connecting = undefined;
+      trim();
     });
     return entry.connecting;
   };
@@ -659,7 +682,7 @@ export function createAgentSessionAdapter(
     }
   };
 
-  return {
+  const adapter = {
     kind: 'agent',
     async list(input: ListSessionsInput): Promise<AiSessionSummaryPage> {
       const page = await dependencies.list({ cursor: input.cursor, limit: input.limit });
@@ -686,6 +709,13 @@ export function createAgentSessionAdapter(
     listSkills: (sessionId) => (dependencies.listSkills ?? invokeListAgentRuntimeSkills)(sessionId),
     create: createSession,
     open: openEntry,
+    peek(sessionId: string) {
+      const entry = entries.get(sessionId);
+      if (!entry?.view) return undefined;
+      ensureEntry(sessionId);
+      entry.view = entry.project(entry.client.state());
+      return entry.view;
+    },
     async selectModel(sessionId, provider) {
       await resumeEndedSession(sessionId);
       await (dependencies.selectModel ?? invokeSelectAgentRuntimeModel)({ sessionId, selection: { routeId: provider.id, modelId: provider.model, reasoningEffort: provider.reasoningEffort } });
@@ -717,20 +747,14 @@ export function createAgentSessionAdapter(
     subscribe(sessionId: string, listener: AiSessionListener): () => void {
       const entry = ensureEntry(sessionId);
       entry.listeners.add(listener);
-      if (entry.view) listener(entry.view);
+      if (entry.view) {
+        entry.view = entry.project(entry.client.state());
+        listener(entry.view);
+      }
       void openEntry(sessionId).catch(() => undefined);
       return () => {
         entry.listeners.delete(listener);
-        if (entry.listeners.size === 0) {
-          const connecting = entry.connecting;
-          if (connecting) {
-            void connecting.finally(() => {
-              if (entry.listeners.size === 0) entry.client.disconnect();
-            }).catch(() => undefined);
-          } else {
-            entry.client.disconnect();
-          }
-        }
+        trim();
       };
     },
     async submit(
@@ -864,6 +888,7 @@ export function createAgentSessionAdapter(
     },
     async archive(sessionId: string): Promise<void> {
       await dependencies.archive({ sessionId });
+      evict(sessionId);
     },
     async delete(sessionId: string): Promise<void> {
       await dependencies.delete({ sessionId });
@@ -934,5 +959,35 @@ export function createAgentSessionAdapter(
       }
       entries.clear();
     },
+  } satisfies AiSessionAdapter<'agent'>;
+
+  // Mutation/recovery work must retain its client even when the user switches
+  // terminals before the durable acknowledgement arrives.
+  const protect = <Args extends unknown[], Result>(
+    operation: (...args: Args) => Promise<Result>,
+    identify: (...args: Args) => string | null,
+  ) => async (...args: Args): Promise<Result> => {
+    const sessionId = identify(...args);
+    const entry = sessionId ? ensureEntry(sessionId) : undefined;
+    if (entry) entry.leases++;
+    try { return await operation(...args); }
+    finally { if (entry) entry.leases--; trim(); }
+  };
+  return {
+    ...adapter,
+    create: protect(adapter.create, input => input.request.sessionId),
+    open: protect(adapter.open, id => id),
+    submit: protect(adapter.submit, (id, input) => id ?? input.create?.request.sessionId ?? null),
+    answerQuestion: protect(adapter.answerQuestion, input => input.identity.sessionId),
+    selectModel: protect(adapter.selectModel, id => id),
+    setPermission: protect(adapter.setPermission, id => id),
+    setExecutionSurface: protect(adapter.setExecutionSurface, id => id),
+    bindProjectRoot: protect(adapter.bindProjectRoot, id => id),
+    stop: protect(adapter.stop, id => id),
+    mutateInbox: protect(adapter.mutateInbox, input => input.sessionId),
+    rename: protect(adapter.rename, input => input.sessionId),
+    refresh: protect(adapter.refresh, id => id),
+    retrySync: protect(adapter.retrySync, id => id),
+    retryModel: protect(adapter.retryModel, id => id),
   };
 }

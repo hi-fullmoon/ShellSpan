@@ -12,6 +12,7 @@
     "test:agent-diagnostics": "node scripts/verify-agent-diagnostics.mjs",
     "test:ai-streaming": "node scripts/verify-ai-streaming.mjs",
     "test:ai-session-stream": "node scripts/verify-ai-session-stream.mjs",
+    "test:agent-panel-performance": "node scripts/verify-ai-session-stream.mjs --performance",
     "test:image-draft-indexeddb": "node scripts/verify-image-draft-indexeddb.mjs",
     "test:submission-recovery": "node scripts/verify-submission-recovery.mjs",
     "test:document-upload": "node scripts/verify-document-upload.mjs",

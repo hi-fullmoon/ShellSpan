@@ -200,6 +200,8 @@ export interface AiSessionAdapter<Kind extends AiSessionKind = AiSessionKind> {
     input: Extract<AiCreateSessionInput, { readonly kind: Kind }>,
   ): Promise<AiSessionView>;
   open(sessionId: string): Promise<AiSessionView>;
+  /** Latest committed view in the warm cache; never starts IO or a runtime. */
+  peek?(sessionId: string): AiSessionView | undefined;
   selectModel?(sessionId: string, provider: AiProviderConfig): Promise<void>;
   setPermission?(sessionId: string, mode: import('@/types/agent-session').AgentSessionPermissionMode): Promise<void>;
   setExecutionSurface?(sessionId: string, surface: import('@/types/agent-session').AgentExecutionSurface): Promise<void>;
