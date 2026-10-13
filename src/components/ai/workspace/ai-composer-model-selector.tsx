@@ -106,6 +106,7 @@ export function AiComposerModelSelector({
   const [search, setSearch] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const paneNavigationItemRef = useRef<HTMLElement | null>(null);
   // The model pane pins its height to the tallest content seen in the current
   // open: filtering keeps the popup (and the search field) in place, while a
   // short model list keeps a content-sized popup without dead space.
@@ -144,7 +145,7 @@ export function AiComposerModelSelector({
     setModelPaneHeight(current => (current === next ? current : next));
   }, [open, pane, filteredGroups]);
   useEffect(() => {
-    if (open) return;
+    if (!open) return;
     tallestModelPaneRef.current = 0;
     setModelPaneHeight(undefined);
   }, [open]);
@@ -181,17 +182,27 @@ export function AiComposerModelSelector({
     : modelLabel;
 
   const close = (): void => {
+    paneNavigationItemRef.current = null;
     setOpen(false);
-    setPane('root');
-    setSearch('');
   };
 
   return (
     <DropdownMenu
       open={open}
-      onOpenChange={(nextOpen) => {
+      onOpenChange={(nextOpen, details) => {
+        // Drag-release activation removes the root item before Base UI's
+        // document mouseup handler checks whether that same target is inside.
+        if (!nextOpen && details.reason === 'cancel-open'
+          && details.event.target instanceof Node
+          && paneNavigationItemRef.current?.contains(details.event.target)) {
+          details.cancel();
+          return;
+        }
+        paneNavigationItemRef.current = null;
         setOpen(nextOpen);
-        if (!nextOpen) {
+        // Keep the current content and geometry throughout the exit animation.
+        // Reset navigation only when a new opening begins.
+        if (nextOpen) {
           setPane('root');
           setSearch('');
         }
@@ -281,7 +292,10 @@ export function AiComposerModelSelector({
               <DropdownMenuItem
                 closeOnClick={false}
                 className="ai-model-menu-cell min-h-9 min-w-56 gap-1 pr-[5px] pl-2 [&>:first-child]:flex-1"
-                onClick={() => setPane('model')}
+                onClick={(event) => {
+                  paneNavigationItemRef.current = event.currentTarget;
+                  setPane('model');
+                }}
               >
                 <span>{t('ai.workspace.model.model')}</span>
                 <span className="max-w-[250px] truncate" data-slot="ai-model-menu-value">{modelLabel}</span>
@@ -291,7 +305,10 @@ export function AiComposerModelSelector({
                 <DropdownMenuItem
                   closeOnClick={false}
                   className="ai-model-menu-cell min-h-9 min-w-56 gap-1 pr-[5px] pl-2 [&>:first-child]:flex-1"
-                  onClick={() => setPane('reasoning')}
+                  onClick={(event) => {
+                    paneNavigationItemRef.current = event.currentTarget;
+                    setPane('reasoning');
+                  }}
                 >
                   <span>{t('ai.workspace.model.reasoning')}</span>
                   <span className="max-w-[250px] truncate" data-slot="ai-model-menu-value">{reasoningLabel}</span>
