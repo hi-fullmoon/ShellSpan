@@ -6,7 +6,7 @@ const browser = await browserType.launch();
 try {
   const page = await browser.newPage();
   await page.goto(process.env.SHELLSPAN_TEST_URL ?? 'http://localhost:1420');
-  assert.ok(await page.evaluate(() => CSS.supports('text-box', 'trim-both cap alphabetic')),
+  assert.ok(await page.evaluate(() => CSS.supports('text-box', 'trim-both text alphabetic')),
     'Navigation alignment requires Chromium/Edge WebView2 133+ or Safari/WKWebView 18.2+');
   await page.evaluate(async () => {
     const { default: React } = await import('/node_modules/.vite/deps/react.js');
@@ -75,7 +75,7 @@ try {
         assert.equal(metrics.radius, 6);
         assert.ok(metrics.right <= width);
         assert.equal(metrics.active, 'page');
-        assert.equal(metrics.iconSize, 16);
+        assert.equal(metrics.iconSize, 14);
         assert.equal(metrics.height, 28);
         assert.equal(metrics.overflow, false);
         assert.equal(metrics.transform, 'none');

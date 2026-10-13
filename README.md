@@ -20,7 +20,7 @@ ShellSpan 是一款面向远程运维的桌面 SSH 客户端，集成终端、�
 - macOS：支持 Safari 18.2 / WKWebView 18.2 或更高版本的系统 WebKit。应用使用系统 WKWebView，安装其他浏览器不会更新它。
 - 浏览器开发与界面验证：Chromium / Edge 133+ 或 Safari 18.2+。
 
-顶部导航使用 `text-box: trim-both cap alphabetic` 按字体度量居中，不使用位置偏移。更旧的 WebView 不属于此界面对齐的支持范围。版本依据见 [Chrome 官方说明](https://developer.chrome.com/blog/css-text-box-trim)。
+顶部导航使用 `text-box: trim-both text alphabetic` 按字体度量居中，不使用位置偏移。更旧的 WebView 不属于此界面对齐的支持范围。版本依据见 [Chrome 官方说明](https://developer.chrome.com/blog/css-text-box-trim)。
 
 ## 产品截图
 

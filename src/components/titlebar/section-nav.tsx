@@ -25,14 +25,14 @@ const NavItem: React.FC<NavItemProps> = ({ section, label, icon: Icon }) => {
       type="button"
       aria-current={active ? 'page' : undefined}
       className={cn(
-        'flex min-w-20 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
+        'flex min-h-7 min-w-20 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
         active
           ? 'bg-app-surface-muted text-app-text font-semibold'
           : 'text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
       )}
     >
-      <Icon aria-hidden="true" className="size-4 shrink-0" />
-      <span className="text-center [text-box:trim-both_cap_alphabetic]">{label}</span>
+      <Icon aria-hidden="true" className="size-3.5 shrink-0" />
+      <span className="text-center [text-box:trim-both_text_alphabetic]">{label}</span>
     </button>
   );
 };
