@@ -170,6 +170,8 @@ export const TransferProgress: React.FC = () => {
         // A delete that finished (or was cancelled) leaves the remote entry
         // gone, so its row dims instead of staying red/struck through.
         const isDeleteFinished = op.kind === 'delete' && (isTransferComplete(op) || op.status === 'cancelled');
+        // The primary row stays mounted for the queue toggle's focus, but
+        // task actions must remount so a held press cannot target its successor.
         return (
           <div
             key={primary ? 'primary-transfer' : op.operationId}
@@ -197,7 +199,7 @@ export const TransferProgress: React.FC = () => {
             </div>
 
             {op.status === 'failed' ? (
-              <div className="flex shrink-0 items-center gap-1">
+              <div key={`failed-actions-${op.operationId}`} className="flex shrink-0 items-center gap-1">
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -250,7 +252,7 @@ export const TransferProgress: React.FC = () => {
               </div>
             )}
             {op.status !== 'failed' && (
-              <div className="flex shrink-0 items-center gap-1">
+              <div key={`transfer-actions-${op.operationId}`} className="flex shrink-0 items-center gap-1">
                 {(op.cancel || op.status === 'pending') && op.status !== 'cancelling' && op.status !== 'cancelled' && !isTransferComplete(op) && (
                   <Button variant="ghost" size="xs" onClick={() => op.cancel ? void cancelOperation(op.operationId) : removeOperation(op.operationId)}>
                     {t(op.status === 'pending' ? 'sftp.transfer.removeQueued' : 'common.cancel')}

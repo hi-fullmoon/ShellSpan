@@ -174,4 +174,30 @@ describe('transfer queue task transitions', () => {
     expect(screen.queryByText('正在撤销')).not.toBeInTheDocument();
     act(() => useTransferStore.setState({ operations: [] }));
   });
+
+  it('does not cancel the next task if the current task completes while its cancel button is pressed', async () => {
+    await initI18n('zh-CN');
+    useAppStore.setState({ locale: 'zh-CN' });
+    useTransferStore.setState({ operations: [] });
+    const cancelled: string[] = [];
+    const cancellable = (id: string): TransferOperation => ({
+      ...operation(id, 'running'),
+      cancel: async () => {
+        cancelled.push(id);
+        useTransferStore.getState().markOperationCancelled(id);
+      },
+    });
+    useTransferStore.getState().addOperation(cancellable('first'));
+    render(<TransferProgress />);
+    act(() => useTransferStore.getState().addOperation(cancellable('second')));
+    const user = userEvent.setup();
+    const cancel = screen.getByRole('button', { name: '取消' });
+    await user.pointer({ target: cancel, keys: '[MouseLeft>]' });
+    act(() => useTransferStore.getState().markOperationCompleted('first'));
+    expect(screen.getByText('second')).toBeInTheDocument();
+    await user.pointer({ target: screen.getByRole('button', { name: '取消' }), keys: '[/MouseLeft]' });
+    expect(cancelled).toEqual([]);
+    expect(useTransferStore.getState().operations.find((op) => op.operationId === 'second')?.status).toBe('running');
+    act(() => useTransferStore.setState({ operations: [] }));
+  });
 });
