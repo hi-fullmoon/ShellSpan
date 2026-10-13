@@ -14,6 +14,14 @@ ShellSpan is a desktop SSH client for remote system administration, with an inte
 - **Administration tools**: Local and remote monitoring and log viewing
 - **AI assistant**: Runs tasks within terminal sessions, with administration skills, operation approvals, and the ability to stop at any time
 
+## Runtime requirements
+
+- Windows: Microsoft Edge WebView2 Runtime 133 or later. The installer attempts to update older runtimes; this configuration does not replace checking the installed runtime version.
+- macOS: system WebKit supporting Safari 18.2 / WKWebView 18.2 or later. The app uses system WKWebView; installing another browser does not update it.
+- Browser development and UI verification: Chromium / Edge 133+ or Safari 18.2+.
+
+The top navigation uses `text-box: trim-both cap alphabetic` to center text using font metrics without positional offsets. Older webviews are outside the supported range for this alignment. See the [official Chrome documentation](https://developer.chrome.com/blog/css-text-box-trim) for browser support.
+
 ## Screenshots
 
 These screenshots show the macOS development build, including local monitoring, a local terminal, project file browsing, and the terminal agent.
