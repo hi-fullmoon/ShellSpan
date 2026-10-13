@@ -775,6 +775,13 @@ export default {
   'sftp.transfer.cancelled': 'Cancelled',
   'sftp.transfer.queued': 'Queued until the current operation finishes',
   'sftp.transfer.pending': 'Pending',
+  'sftp.transfer.items': 'items',
+  'sftp.transfer.removeQueued': 'Remove',
+  'sftp.transfer.expandQueue': 'Expand task queue',
+  'sftp.transfer.collapseQueue': 'Collapse task queue',
+  'sftp.transfer.waitingCount': '{count} waiting',
+  'sftp.transfer.failedCount': '{count} failed',
+  'sftp.transfer.taskCount': '{count} tasks',
 
   'sftp.transfers.title': 'Transfers',
   'sftp.transfers.clearCompleted': 'Clear completed',

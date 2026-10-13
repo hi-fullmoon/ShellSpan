@@ -1,8 +1,9 @@
 import React from 'react';
-import { CircleAlertIcon, FileIcon, Trash2Icon, XIcon } from 'lucide-react';
+import { ChevronDownIcon, ChevronUpIcon, CircleAlertIcon, FileIcon, Trash2Icon, XIcon } from 'lucide-react';
 import { cn, formatBytes } from '@/lib/utils';
 import { useI18n } from '@/hooks/useI18n';
 import { Button } from '@/components/ui/button';
+import { Progress } from '@/components/ui/progress';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useTransferStore, isTransferComplete, formatTransferProgress, type TransferOperation } from '@/stores/transferStore';
 
@@ -102,14 +103,34 @@ export const TransferProgress: React.FC = () => {
   const retryOperation = useTransferStore((state) => state.retryOperation);
   const cancelOperation = useTransferStore((state) => state.cancelOperation);
   const completedTimers = React.useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const [expanded, setExpanded] = React.useState(false);
+  const [primaryOperationId, setPrimaryOperationId] = React.useState<string>();
+  const queueId = React.useId();
 
-  // The store prepends new operations, so the list renders newest-first: a
-  // freshly queued batch lands on top while the running batch sinks to the
-  // bottom. A queued batch that starts keeps its row — the real operation
-  // reuses the pending row's id instead of being prepended as a new entry.
-  const orderedOperations = operations;
+  // Keep the visible task until it ends. Pending rows follow submission
+  // order; changing their presentation does not change the scheduler.
+  const visibleActiveOperation = operations.find((op) => op.operationId === primaryOperationId
+    && (op.status === 'running' || op.status === undefined || op.status === 'cancelling')
+    && !isTransferComplete(op));
+  const primaryOperation = visibleActiveOperation
+    ?? operations.find((op) => (op.status === 'running' || op.status === undefined) && !isTransferComplete(op))
+    ?? operations.find((op) => op.status === 'cancelling')
+    ?? operations.find((op) => op.status === 'failed')
+    ?? [...operations].reverse().find((op) => op.status === 'pending')
+    ?? operations[0];
+  const otherOperations = [
+    ...operations.filter((op) => op !== primaryOperation && op.status !== 'pending'),
+    ...[...operations].reverse().filter((op) => op !== primaryOperation && op.status === 'pending'),
+  ];
+  const waitingCount = otherOperations.filter((op) => op.status === 'pending').length;
+  const failedCount = otherOperations.filter((op) => op.status === 'failed').length;
 
   React.useEffect(() => {
+    setPrimaryOperationId(primaryOperation?.operationId);
+  }, [primaryOperation?.operationId]);
+
+  React.useEffect(() => {
+    if (operations.length === 0) setExpanded(false);
     const completedIds = new Set(
       operations.filter((operation) => operation.kind !== 'delete' && isTransferComplete(operation)).map((operation) => operation.operationId),
     );
@@ -140,21 +161,23 @@ export const TransferProgress: React.FC = () => {
 
   if (operations.length === 0) return null;
 
-  return (
-    <div className="max-h-64 shrink-0 overflow-y-auto border-t border-app-border/50 bg-app-surface">
-      {orderedOperations.map((op) => {
-        const progress = op.totalBytes > 0 ? Math.min(100, (op.processedBytes / op.totalBytes) * 100) : 0;
+  const renderOperation = (op: TransferOperation, primary: boolean) => {
+        const progress = op.totalBytes > 0 ? Math.max(0, Math.min(100, (op.processedBytes / op.totalBytes) * 100)) : 0;
+        const showProgress = op.totalBytes > 0 && op.kind !== 'delete'
+          && (op.status === 'running' || op.status === undefined) && !isTransferComplete(op);
         const speed = speeds.get(op.operationId);
-        const showSpeed = speed !== undefined && speed > 0 && op.status !== 'cancelling' && op.status !== 'cancelled' && !isTransferComplete(op);
+        const showSpeed = speed !== undefined && speed > 0 && (op.status === 'running' || op.status === undefined) && !isTransferComplete(op);
         // A delete that finished (or was cancelled) leaves the remote entry
         // gone, so its row dims instead of staying red/struck through.
         const isDeleteFinished = op.kind === 'delete' && (isTransferComplete(op) || op.status === 'cancelled');
         return (
           <div
-            key={op.operationId}
+            key={primary ? 'primary-transfer' : op.operationId}
             data-error-category={op.errorCategory}
-            className="relative flex h-8 items-center gap-1 border-b border-app-border/50 bg-app-surface-muted/60 px-2 text-xs last:border-b-0"
+            data-slot="transfer-task-row"
+            className={cn('flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-app-border/50 px-2 py-1 text-xs last:border-b-0', primary ? 'min-h-9' : 'min-h-8')}
           >
+            <div className="flex min-w-0 flex-1 basis-24 items-center gap-1">
             {op.kind === 'delete' ? (
               <Trash2Icon
                 className={cn('size-4 shrink-0 -translate-y-px', isDeleteFinished ? 'text-muted-foreground/40' : 'text-muted-foreground/70')}
@@ -171,13 +194,14 @@ export const TransferProgress: React.FC = () => {
             >
               {displayTransferPath(op)}
             </span>
+            </div>
 
             {op.status === 'failed' ? (
               <div className="flex shrink-0 items-center gap-1">
                 <Tooltip>
                   <TooltipTrigger
                     render={
-                      <span className="mr-2 flex cursor-help items-center gap-1 text-destructive">
+                      <span className="flex cursor-help items-center gap-1 text-destructive">
                         <CircleAlertIcon className="size-4" aria-hidden="true" />
                         {t(
                           op.kind === 'delete'
@@ -203,59 +227,74 @@ export const TransferProgress: React.FC = () => {
                 </Button>
               </div>
             ) : (
-              <div className="flex shrink-0 items-center gap-3 text-[11px]">
-                <span className="text-muted-foreground">
-                  {op.totalBytes > 0 && `${formatBytes(op.processedBytes)} / ${formatBytes(op.totalBytes)}`}
-                </span>
+              <div className={cn('flex max-w-full flex-wrap items-center gap-x-3 gap-y-1 tabular-nums', op.status !== 'pending' && '@max-[600px]/transfer:order-last @max-[600px]/transfer:w-full')}>
+                {showProgress && (
+                  <div className="flex w-24 shrink-0 items-center gap-1">
+                    <Progress value={progress} aria-label={displayTransferPath(op)} className="min-w-0 flex-1" />
+                    <span className="w-8 text-right">{Math.round(progress)}%</span>
+                  </div>
+                )}
+                {op.status !== 'pending' && op.totalBytes > 0 && <span className="whitespace-nowrap text-muted-foreground">
+                  {`${formatBytes(op.processedBytes)} / ${formatBytes(op.totalBytes)}`}
+                </span>}
                 {showSpeed && <span className="whitespace-nowrap text-muted-foreground/60">{formatBytes(speed)}/s</span>}
-                <span className={cn('min-w-12 whitespace-nowrap text-right', isTransferComplete(op) ? 'text-app-success' : op.status === 'pending' ? 'text-muted-foreground' : 'text-app-primary')}>
+                {(!showProgress || op.totalSteps > 0) && <span className={cn('whitespace-nowrap text-right', isTransferComplete(op) ? 'text-app-success' : 'text-muted-foreground')}>
                   {op.status === 'cancelling'
                     ? t(op.kind === 'delete' ? 'sftp.transfer.cancellingDelete' : 'sftp.transfer.cancelling')
                     : op.status === 'cancelled'
-                      ? t(op.kind === 'delete' ? 'sftp.transfer.cancellingDelete' : 'sftp.transfer.cancelled')
+                      ? t('sftp.transfer.cancelled')
                       : op.status === 'pending'
                         ? t('sftp.transfer.pending')
-                        : formatTransferProgress(op)}
-                </span>
-                {op.cancel && op.status !== 'cancelling' && op.status !== 'cancelled' && !isTransferComplete(op) && (
-                  <Button variant="link" size="xs" onClick={() => void cancelOperation(op.operationId)}>
-                    {t('common.cancel')}
+                        : <><span className={cn(isTransferComplete(op) && 'text-app-success')}>{formatTransferProgress(op)}</span>{op.totalSteps > 0 && ` ${t('sftp.transfer.items')}`}</>}
+                </span>}
+              </div>
+            )}
+            {op.status !== 'failed' && (
+              <div className="flex shrink-0 items-center gap-1">
+                {(op.cancel || op.status === 'pending') && op.status !== 'cancelling' && op.status !== 'cancelled' && !isTransferComplete(op) && (
+                  <Button variant="ghost" size="xs" onClick={() => op.cancel ? void cancelOperation(op.operationId) : removeOperation(op.operationId)}>
+                    {t(op.status === 'pending' ? 'sftp.transfer.removeQueued' : 'common.cancel')}
                   </Button>
                 )}
-                <Button
+                {(isTransferComplete(op) || op.status === 'cancelled') && <Button
                   variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
+                  size="icon-xs"
                   aria-label={t('common.close')}
-                  onClick={() =>
-                    // Dismissing a queued (pending) batch must cancel it too;
-                    // merely dropping the row would let it run later, which
-                    // reads as if the close did nothing.
-                    op.status === 'pending'
-                      ? void cancelOperation(op.operationId)
-                      : removeOperation(op.operationId)
-                  }
+                  onClick={() => removeOperation(op.operationId)}
                 >
                   <XIcon />
-                </Button>
+                </Button>}
               </div>
             )}
 
-            {op.status !== 'failed' &&
-              op.status !== 'pending' &&
-              op.status !== 'cancelling' &&
-              op.status !== 'cancelled' &&
-              !isTransferComplete(op) && (
-                <div
-                  data-slot="transfer-progress-track"
-                  className="absolute inset-x-2 bottom-0 h-[3px] overflow-hidden rounded-full bg-app-surface-muted"
-                >
-                  <div className="h-full bg-app-primary transition-all" style={{ width: `${progress}%` }} />
-                </div>
-              )}
+            {primary && otherOperations.length > 0 && (
+              <Button
+                variant="ghost"
+                size="xs"
+                className={cn('ml-auto shrink-0', failedCount > 0 && 'text-destructive')}
+                aria-label={t(expanded ? 'sftp.transfer.collapseQueue' : 'sftp.transfer.expandQueue')}
+                aria-expanded={expanded}
+                aria-controls={queueId}
+                onClick={() => setExpanded((value) => !value)}
+              >
+                {failedCount > 0
+                  ? t('sftp.transfer.failedCount', { count: failedCount })
+                  : waitingCount > 0
+                    ? t('sftp.transfer.waitingCount', { count: waitingCount })
+                    : t('sftp.transfer.taskCount', { count: otherOperations.length })}
+                {expanded ? <ChevronUpIcon data-icon="inline-end" /> : <ChevronDownIcon data-icon="inline-end" />}
+              </Button>
+            )}
           </div>
         );
-      })}
+  };
+
+  return (
+    <div className="@container/transfer shrink-0 border-t border-app-border/50 bg-app-surface">
+      {renderOperation(primaryOperation, true)}
+      <div id={queueId} hidden={!expanded || otherOperations.length === 0} className="max-h-64 overflow-y-auto border-t border-app-border/50">
+        {expanded && otherOperations.map((op) => renderOperation(op, false))}
+      </div>
     </div>
   );
 };

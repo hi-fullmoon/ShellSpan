@@ -95,21 +95,19 @@ describe('TransferProgress', () => {
     useTransferStore.setState({ operations: [failedUpload] });
     render(<TransferProgress />);
 
-    expect(screen.getByText('apple-touch-icon.png').parentElement).toHaveClass(
-      'h-8',
-      'bg-app-surface-muted/60',
-    );
+    expect(screen.getByText('apple-touch-icon.png').closest('[data-slot="transfer-task-row"]')).toHaveClass('min-h-9');
+    expect(screen.getByText('apple-touch-icon.png').parentElement).toHaveClass('gap-1');
   });
 
-  it('uses a 3px progress track aligned to the bottom edge for active transfers', () => {
+  it('shows an accessible inline progress bar for active transfers', () => {
     useTransferStore.setState({
       operations: [{ ...failedUpload, status: 'running' }],
     });
     render(<TransferProgress />);
 
-    expect(
-      document.body.querySelector('[data-slot="transfer-progress-track"]'),
-    ).toHaveClass('bottom-0', 'h-[3px]');
+    expect(screen.getByRole('progressbar', { name: 'apple-touch-icon.png' })).toHaveAttribute('aria-valuenow', '20');
+    expect(screen.getByText('20%')).toBeInTheDocument();
+    expect(document.body.querySelector('[data-slot="progress-track"]')).not.toHaveClass('absolute', 'bottom-0');
   });
 
   it('cancels an active download from its task row', async () => {
@@ -243,7 +241,7 @@ describe('TransferProgress', () => {
         {
           ...failedUpload,
           kind: 'delete',
-          status: 'running',
+          status: 'completed',
           processedBytes: 100,
           completedSteps: 1,
         },

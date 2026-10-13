@@ -775,6 +775,13 @@ export default {
   'sftp.transfer.cancelled': '已撤销',
   'sftp.transfer.queued': '已加入队列，等待当前操作完成',
   'sftp.transfer.pending': '排队中',
+  'sftp.transfer.items': '项',
+  'sftp.transfer.removeQueued': '移除',
+  'sftp.transfer.expandQueue': '展开任务队列',
+  'sftp.transfer.collapseQueue': '收起任务队列',
+  'sftp.transfer.waitingCount': '{count} 等待',
+  'sftp.transfer.failedCount': '{count} 失败',
+  'sftp.transfer.taskCount': '{count} 项任务',
 
   'sftp.transfers.title': '传输',
   'sftp.transfers.clearCompleted': '清除已完成',

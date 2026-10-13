@@ -440,9 +440,7 @@ describe('SftpContent upload queue', () => {
     );
   });
 
-  // Both the "cancel" link and the row's close (X) button must abort a queued
-  // batch; closing the row alone would let it run later.
-  it.each([{ buttonName: 'common.cancel' }, { buttonName: 'common.close' }])(
+  it.each([{ buttonName: 'sftp.transfer.removeQueued' }])(
     'cancels a queued batch from the pending transfer row ($buttonName)',
     async ({ buttonName }) => {
     // The first batch stays in flight so the second drop is queued; a conflict
@@ -531,7 +529,7 @@ describe('SftpContent upload queue', () => {
     expect(uploadWithPolicies).toHaveBeenCalledTimes(1);
   });
 
-  it('lists queued batches newest first', async () => {
+  it('lists queued batches in submission order', async () => {
     const firstUpload = new Promise<void>(() => {
       // Never settles: the first batch stays in flight for the whole test.
     });
@@ -552,12 +550,12 @@ describe('SftpContent upload queue', () => {
     await capturedOnDrop!(['/local/b.txt'], 'remote');
     await capturedOnDrop!(['/local/c.txt'], 'remote');
 
-    // The store prepends new operations and the list renders newest first:
-    // the later queued batch sits above the earlier one.
+    fireEvent.click(screen.getByRole('button', { name: 'sftp.transfer.expandQueue' }));
+    // Pending rows follow submission order even though the store prepends them.
     const rowB = await screen.findByText('b.txt');
     const rowC = await screen.findByText('c.txt');
     expect(
-      rowC.compareDocumentPosition(rowB) & Node.DOCUMENT_POSITION_FOLLOWING,
+      rowB.compareDocumentPosition(rowC) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 
@@ -597,6 +595,7 @@ describe('SftpContent upload queue', () => {
 
     await capturedOnDrop!(['/local/b.txt'], 'remote');
     await capturedOnDrop!(['/local/c.txt'], 'remote');
+    fireEvent.click(screen.getByRole('button', { name: 'sftp.transfer.expandQueue' }));
     await screen.findByText('b.txt');
     await screen.findByText('c.txt');
 
@@ -608,8 +607,8 @@ describe('SftpContent upload queue', () => {
       expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/c.txt'], '/remote', ['fail'], expect.any(String)),
     );
 
-    // Both batches turned their pending rows into the real operation: no new
-    // row was prepended, so the order (c above b) is unchanged.
+    // Both batches reuse their pending operation ids. The visible primary
+    // task remains stable while the other batch starts.
     expect(useTransferStore.getState().operations).toHaveLength(2);
     expect(
       useTransferStore.getState().operations.every((op) => op.status === 'running'),
@@ -617,7 +616,7 @@ describe('SftpContent upload queue', () => {
     const rowB = await screen.findByText('b.txt');
     const rowC = await screen.findByText('c.txt');
     expect(
-      rowC.compareDocumentPosition(rowB) & Node.DOCUMENT_POSITION_FOLLOWING,
+      rowB.compareDocumentPosition(rowC) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 
