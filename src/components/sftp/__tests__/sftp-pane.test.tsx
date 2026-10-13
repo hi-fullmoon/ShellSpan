@@ -289,6 +289,12 @@ describe('SftpPane', () => {
     expect(searchButton).toHaveClass('size-7');
     expect(terminalButton.className).toContain('[&_svg]:size-4');
     expect(searchButton.className).toContain('[&_svg]:size-4');
+    expect(searchButton.compareDocumentPosition(terminalButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.click(searchButton);
+    expect(screen.getByRole('textbox', { name: 'sftp.filter' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'sftp.hideFilter' })
+      .compareDocumentPosition(terminalButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('renders the right pane as local with a source switch action', () => {

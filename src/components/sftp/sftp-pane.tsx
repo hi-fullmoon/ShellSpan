@@ -466,17 +466,6 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
             </div>
           )}
           <div className="flex items-center gap-1.5">
-            {!isLocal && onOpenTerminal && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={onOpenTerminal}
-                className="size-7 shrink-0 rounded text-app-text-soft hover:bg-app-primary/10 hover:text-app-primary"
-                aria-label={t('sftp.openTerminalHere')}
-              >
-                <SquareTerminalIcon />
-              </Button>
-            )}
             {/* Search — animated expand from icon. The inner row keeps a fixed
                 width so the container clip-reveals it instead of squishing the
                 input during the width transition. */}
@@ -527,6 +516,17 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
                 </div>
               </div>
             </div>
+            {!isLocal && onOpenTerminal && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onOpenTerminal}
+                className="size-7 shrink-0 rounded text-app-text-soft hover:bg-app-primary/10 hover:text-app-primary"
+                aria-label={t('sftp.openTerminalHere')}
+              >
+                <SquareTerminalIcon />
+              </Button>
+            )}
             {!isLocal && remoteBookmarks.length > 0 && (
               <Button
                 variant="ghost"
