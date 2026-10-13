@@ -412,6 +412,21 @@ const ConnectionCard = React.memo<ConnectionCardProps>(
                 className="w-52 border border-app-border bg-app-surface p-1 text-app-text shadow-[var(--shadow-dialog)] ring-0"
               >
                 <DropdownMenuGroup>
+                  <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleToggleFavorite}>
+                    <StarIcon className={profile.favorite ? 'fill-current text-app-warning' : undefined} />
+                    {profile.favorite ? t('workbench.connections.unfavorite') : t('workbench.connections.favorite')}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleEdit}>
+                    <PencilIcon />
+                    {t('common.edit')}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleDuplicate}>
+                    <CopyIcon />
+                    {t('common.duplicate')}
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator className="mx-0 my-1" />
+                <DropdownMenuGroup>
                   <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleOpenHealth}>
                     <HeartPulseIcon />
                     {t('remoteHealth.open')}
@@ -427,21 +442,6 @@ const ConnectionCard = React.memo<ConnectionCardProps>(
                   <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleOverview}>
                     <InfoIcon />
                     {t('hostOverview.open')}
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
-                <DropdownMenuSeparator className="mx-0 my-1" />
-                <DropdownMenuGroup>
-                  <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleToggleFavorite}>
-                    <StarIcon className={profile.favorite ? 'fill-current text-app-warning' : undefined} />
-                    {profile.favorite ? t('workbench.connections.unfavorite') : t('workbench.connections.favorite')}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleEdit}>
-                    <PencilIcon />
-                    {t('common.edit')}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleDuplicate}>
-                    <CopyIcon />
-                    {t('common.duplicate')}
                   </DropdownMenuItem>
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator className="mx-0 my-1" />

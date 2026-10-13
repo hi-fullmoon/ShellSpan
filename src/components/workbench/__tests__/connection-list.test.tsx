@@ -467,15 +467,20 @@ describe('ConnectionList', () => {
     });
 
     const menuActionNames = [
+      'workbench.connections.favorite',
+      'common.edit',
+      'common.duplicate',
       'remoteHealth.open',
       'portForward.open',
       'hostQuickActions.open',
       'hostOverview.open',
-      'workbench.connections.favorite',
-      'common.edit',
-      'common.duplicate',
       'common.delete',
     ];
+
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(menuActionNames);
+    expect(Array.from(menu.querySelectorAll('[data-slot="dropdown-menu-group"]')).map(
+      (group) => within(group as HTMLElement).getAllByRole('menuitem').map((item) => item.textContent),
+    )).toEqual([menuActionNames.slice(0, 3), menuActionNames.slice(3, 7), menuActionNames.slice(7)]);
 
     for (const name of menuActionNames) {
       expect(screen.getByRole('menuitem', { name })).toBeInTheDocument();
