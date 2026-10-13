@@ -32,6 +32,7 @@ pub(crate) mod skills;
 mod stream_writer;
 mod subagent;
 mod surface;
+mod tool_output;
 mod tool_pipeline;
 mod user_questions;
 

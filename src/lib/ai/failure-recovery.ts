@@ -8,6 +8,8 @@ export type AiFailureRecovery = Readonly<{
 }>;
 
 export function modelFailureRecovery(error: AiErrorNode): AiFailureRecovery['kind'] {
+  // A later context pause supersedes an earlier provider failure on this turn.
+  if (error.message.startsWith('contextBudgetExceeded:')) return 'input';
   const failure = error.failure;
   if (!failure) return 'input';
   // Status and typed codes take precedence over a broad retryable category.

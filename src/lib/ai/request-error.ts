@@ -3,6 +3,7 @@ import type { LocaleKey } from '@/locales';
 /** Classify runtime diagnostics without exposing provider payloads in the summary. */
 export function requestErrorMessageKey(message: string): LocaleKey {
   const text = message.toLowerCase();
+  if (text.includes('contextbudgetexceeded:') || text.includes('compaction remained above') || text.includes('contexttoolarge')) return 'ai.error.contextBudgetExceeded';
   if (text.includes('model_not_found') || /model .+ does not exist/.test(text)) return 'ai.error.modelUnavailable';
   if (text.includes('semantic summary unavailable')) return 'ai.error.summaryUnavailable';
   if (/\b(401|403)\b|unauthorized|authentication|invalid_api_key/.test(text)) return 'ai.error.authentication';

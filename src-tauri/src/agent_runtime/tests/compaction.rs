@@ -37,6 +37,514 @@
             estimated_input_tokens: 13_200,
             estimated_input_bytes: 52_800,
             maximum_input_bytes: 57_344,
+            tool_message_sizes: Default::default(),
+            assistant_message_sizes: Default::default(),
+        }
+    }
+
+    #[test]
+    fn below_trigger_compaction_requires_meaningful_reduction_and_byte_headroom() {
+        let budget = budget();
+        assert!(ProjectedBudget {
+            input_tokens: 10_000,
+            input_bytes: 40_000
+        }
+        .fits_target(&budget));
+        assert!(!ProjectedBudget {
+            input_tokens: 12_500,
+            input_bytes: 50_000
+        }
+        .fits_target(&budget));
+        assert!(!ProjectedBudget {
+            input_tokens: 10_000,
+            input_bytes: 52_000
+        }
+        .fits_target(&budget));
+    }
+
+    #[test]
+    fn projection_matches_retained_occurrences_when_call_ids_are_reused() {
+        let previous = AgentSurfaceSnapshot {
+            generation: 0,
+            replaced_through_seq: None,
+            messages: [
+                include_str!("../../../../src-tauri/Cargo.toml"),
+                include_str!("../../../../AGENTS.md"),
+            ]
+            .into_iter()
+            .map(|content| AgentSurfaceMessage::Tool {
+                call_id: "reused".into(),
+                name: "read_file".into(),
+                status: AgentToolResultStatus::Completed,
+                content: content.into(),
+            })
+            .collect(),
+        };
+        let replacement = AgentSurfaceSnapshot {
+            generation: 1,
+            replaced_through_seq: Some(1),
+            messages: vec![previous.messages[1].clone()],
+        };
+        let request = ModelRequest::from_surface("cost".into(), &previous, String::new(), vec![]);
+        let sizes = request
+            .messages
+            .iter()
+            .map(|message| measure_model_messages(std::slice::from_ref(message), 0))
+            .collect::<Vec<_>>();
+        let mut budget = budget();
+        budget
+            .tool_message_sizes
+            .insert("reused".into(), sizes.clone());
+        budget.estimated_input_tokens = sizes.iter().map(|size| size.0).sum::<u64>() + 200;
+        budget.estimated_input_bytes = sizes.iter().map(|size| size.1).sum::<u64>() + 800;
+        let projected = budget_after_surface_replacement(&budget, &previous, &replacement);
+        assert_eq!(projected.input_tokens, sizes[1].0 + 200);
+        assert_eq!(projected.input_bytes, sizes[1].1 + 800);
+    }
+
+    #[test]
+    fn projection_removes_live_terminal_arguments_and_preserves_inherited_costs() {
+        use crate::agent_runtime::{ModelContentBlock, ModelMessage, ModelToolCall};
+        let texts = [
+            include_str!("../../../../AGENTS.md"),
+            include_str!("../../../../src-tauri/Cargo.toml"),
+        ];
+        let calls = texts
+            .iter()
+            .enumerate()
+            .map(|(index, text)| ModelToolCall {
+                call_id: format!("input-{index}"),
+                provider_call_id: None,
+                name: "write_terminal_input".into(),
+                arguments: serde_json::json!({"inputKind":"paste","text":text}),
+            })
+            .collect::<Vec<_>>();
+        let previous = AgentSurfaceSnapshot {
+            generation: 0,
+            replaced_through_seq: None,
+            messages: calls
+                .iter()
+                .enumerate()
+                .map(|(index, call)| AgentSurfaceMessage::Assistant {
+                    message_id: format!("input-{index}"),
+                    content: vec![AgentAssistantContentBlock::ToolCall {
+                        call: Box::new(crate::agent_runtime::model::recorded_tool_call(
+                            call.clone(),
+                        )),
+                    }],
+                    interrupted: false,
+                    replay: None,
+                })
+                .collect(),
+        };
+        let replacement = AgentSurfaceSnapshot {
+            generation: 1,
+            replaced_through_seq: Some(1),
+            messages: vec![previous.messages[1].clone()],
+        };
+        let mut request =
+            ModelRequest::from_surface("live-input".into(), &previous, String::new(), vec![]);
+        for (message, call) in request.messages.iter_mut().zip(&calls) {
+            let ModelMessage::Assistant { content, .. } = message else {
+                panic!()
+            };
+            let ModelContentBlock::ToolCall { call: historical } = &mut content[0] else {
+                panic!()
+            };
+            assert_ne!(historical.arguments, call.arguments);
+            historical.arguments = call.arguments.clone();
+        }
+        request.messages.insert(
+            0,
+            ModelMessage::Assistant {
+                content: vec![ModelContentBlock::Text {
+                    text: include_str!("../../../../src-tauri/Cargo.toml").into(),
+                }],
+                replay: None,
+                native_replay: None,
+            },
+        );
+        let sizes = request
+            .messages
+            .iter()
+            .map(|message| measure_model_messages(std::slice::from_ref(message), 0))
+            .collect::<Vec<_>>();
+        let mut budget = budget();
+        budget.assistant_message_sizes = sizes.clone();
+        budget.estimated_input_tokens = sizes.iter().map(|size| size.0).sum::<u64>() + 200;
+        budget.estimated_input_bytes = sizes.iter().map(|size| size.1).sum::<u64>() + 800;
+        let projected = budget_after_surface_replacement(&budget, &previous, &replacement);
+        assert_eq!(projected.input_tokens, 200 + sizes[0].0 + sizes[2].0);
+        assert_eq!(projected.input_bytes, 800 + sizes[0].1 + sizes[2].1);
+    }
+
+    #[tokio::test]
+    async fn prepared_budget_recovery_compacts_real_stored_input_once_and_honors_cancellation() {
+        let source = include_str!("../../../../src-tauri/Cargo.lock")
+            .char_indices()
+            .take_while(|(offset, ch)| offset + ch.len_utf8() <= 64 * 1024)
+            .map(|(_, ch)| ch)
+            .collect::<String>();
+        let root = tempfile::tempdir().unwrap();
+        let sessions = AgentSessionStore::default();
+        let artifacts = AgentArtifactStore::default();
+        sessions.configure(root.path().to_path_buf()).unwrap();
+        artifacts.configure(root.path()).unwrap();
+        sessions.create(serde_json::from_value(serde_json::json!({"sessionId":"session","taskId":"task","goal":"Inspect repository instructions","executionSurface":"direct"})).unwrap()).unwrap();
+        sessions
+            .enqueue(
+                "session",
+                crate::agent_runtime::AgentInboxLane::NextTurn,
+                AgentInboxMessage {
+                    message_id: "source".into(),
+                    client_submission_id: None,
+                    content: source.clone(),
+                    source: AgentMessageSource::user(),
+                    images: vec![],
+                    terminal_context: None,
+                },
+            )
+            .unwrap();
+        sessions
+            .begin_turn_step("session", "turn-old".into(), "step-old".into())
+            .unwrap();
+        // Commit actual repository input and close it through the real pause API.
+        // This test does not invent an assistant response or replay envelope.
+        sessions
+            .pause_for_input("session", "stoppedByUser")
+            .unwrap();
+        let previous = sessions.model_surface("session").unwrap();
+        let request =
+            ModelRequest::from_surface("prepared".into(), &previous, String::new(), vec![]);
+        let mut measured = budget();
+        let plain = measure_model_messages(&request.messages, 0);
+        measured.estimated_input_tokens = plain.0 + 200;
+        measured.estimated_input_bytes = plain.1 + 800;
+        assert!(!measured.fits_hard_limit());
+        let manager = AgentCompactionManager::new(sessions.clone(), artifacts);
+        let mut attempted = false;
+        assert!(crate::agent_runtime::driver::compact_prepared_budget(
+            &manager,
+            "session",
+            "turn-current",
+            "step-current",
+            previous.generation,
+            &measured,
+            &mut attempted,
+            &CancellationToken::new()
+        )
+        .await
+        .unwrap());
+        let updated = sessions.model_surface("session").unwrap();
+        assert!(updated.generation > previous.generation);
+        assert!(
+            budget_after_surface_replacement(&measured, &previous, &updated).fits_target(&measured)
+        );
+        assert!(!crate::agent_runtime::driver::compact_prepared_budget(
+            &manager,
+            "session",
+            "turn-current",
+            "step-current",
+            updated.generation,
+            &measured,
+            &mut attempted,
+            &CancellationToken::new()
+        )
+        .await
+        .unwrap());
+        assert_eq!(
+            sessions.model_surface("session").unwrap().generation,
+            updated.generation
+        );
+        let cancelled = CancellationToken::new();
+        cancelled.cancel();
+        let mut cancelled_attempt = false;
+        assert!(crate::agent_runtime::driver::compact_prepared_budget(
+            &manager,
+            "session",
+            "turn-current",
+            "step-current",
+            updated.generation,
+            &measured,
+            &mut cancelled_attempt,
+            &cancelled
+        )
+        .await
+        .is_err());
+        assert_eq!(
+            sessions.model_surface("session").unwrap().generation,
+            updated.generation
+        );
+        assert!(sessions.all_events("session").unwrap().iter().any(|event| matches!(&event.payload,AgentSessionEventPayload::UserMessage { message } if message.content == source)));
+    }
+
+    #[test]
+    fn projection_removes_private_metadata_with_the_replaced_assistant() {
+        use crate::agent_runtime::ModelMessage;
+        let previous = AgentSurfaceSnapshot {
+            generation: 0,
+            replaced_through_seq: None,
+            messages: vec![AgentSurfaceMessage::Assistant {
+                message_id: "manifest".into(),
+                content: vec![AgentAssistantContentBlock::Text {
+                    text: include_str!("../../../../src-tauri/Cargo.toml").into(),
+                }],
+                interrupted: false,
+                replay: None,
+            }],
+        };
+        let mut request =
+            ModelRequest::from_surface("cost".into(), &previous, String::new(), vec![]);
+        let ModelMessage::Assistant { native_replay, .. } = &mut request.messages[0] else {
+            panic!()
+        };
+        *native_replay = Some(
+            serde_json::json!({"reasoningDetails":include_str!("../../../../src-tauri/Cargo.lock")}),
+        );
+        let size = measure_model_messages(&request.messages, 0);
+        let mut budget = budget();
+        budget.assistant_message_sizes = vec![size];
+        budget.estimated_input_tokens = size.0 + 200;
+        budget.estimated_input_bytes = size.1 + 800;
+        let replacement = AgentSurfaceSnapshot {
+            generation: 1,
+            replaced_through_seq: Some(1),
+            messages: vec![],
+        };
+        let projected = budget_after_surface_replacement(&budget, &previous, &replacement);
+        assert_eq!(projected.input_tokens, 200);
+        assert_eq!(projected.input_bytes, 800);
+    }
+
+    #[tokio::test]
+    async fn prepared_budget_recovery_without_a_safe_prefix_does_not_mutate_history() {
+        let root = tempfile::tempdir().unwrap();
+        let sessions = AgentSessionStore::default();
+        let artifacts = AgentArtifactStore::default();
+        sessions.configure(root.path().to_path_buf()).unwrap();
+        artifacts.configure(root.path()).unwrap();
+        sessions.create(serde_json::from_value(serde_json::json!({"sessionId":"session","taskId":"task","goal":"Inspect repository input","executionSurface":"direct"})).unwrap()).unwrap();
+        let source = include_str!("../../../../src-tauri/Cargo.lock")
+            .char_indices()
+            .take_while(|(offset, ch)| offset + ch.len_utf8() <= 64 * 1024)
+            .map(|(_, ch)| ch)
+            .collect::<String>();
+        sessions
+            .enqueue(
+                "session",
+                crate::agent_runtime::AgentInboxLane::NextTurn,
+                AgentInboxMessage {
+                    message_id: "source".into(),
+                    client_submission_id: None,
+                    content: source,
+                    source: AgentMessageSource::user(),
+                    images: vec![],
+                    terminal_context: None,
+                },
+            )
+            .unwrap();
+        sessions
+            .begin_turn_step("session", "turn-current".into(), "step-current".into())
+            .unwrap();
+        let before = sessions.all_events("session").unwrap();
+        let surface = sessions.model_surface("session").unwrap();
+        let request =
+            ModelRequest::from_surface("prepared".into(), &surface, String::new(), vec![]);
+        let size = measure_model_messages(&request.messages, 0);
+        let mut measured = budget();
+        measured.estimated_input_tokens = size.0 + 200;
+        measured.estimated_input_bytes = size.1 + 800;
+        assert!(!measured.fits_hard_limit());
+        let manager = AgentCompactionManager::new(sessions.clone(), artifacts);
+        let mut attempted = false;
+        assert!(crate::agent_runtime::driver::compact_prepared_budget(
+            &manager,
+            "session",
+            "turn-current",
+            "step-current",
+            surface.generation,
+            &measured,
+            &mut attempted,
+            &CancellationToken::new()
+        )
+        .await
+        .unwrap_err()
+        .contains("no completed safe"));
+        assert!(attempted);
+        assert_eq!(sessions.all_events("session").unwrap(), before);
+        assert!(!crate::agent_runtime::driver::compact_prepared_budget(
+            &manager,
+            "session",
+            "turn-current",
+            "step-current",
+            surface.generation,
+            &measured,
+            &mut attempted,
+            &CancellationToken::new()
+        )
+        .await
+        .unwrap());
+        assert_eq!(sessions.all_events("session").unwrap(), before);
+    }
+
+    #[test]
+    fn retained_real_image_pixels_are_included_in_compaction_projection() {
+        use base64::Engine;
+        let (root, sessions, _) = configured_session();
+        let images = crate::agent_runtime::images::ImageStore::default();
+        images.configure(root.path()).unwrap();
+        let refs = images
+            .import(
+                &[crate::agent_runtime::images::ImageUpload {
+                    media_type: "image/png".into(),
+                    name: "ShellSpan icon".into(),
+                    data: base64::engine::general_purpose::STANDARD
+                        .encode(include_bytes!("../../../../src-tauri/icons/32x32.png")),
+                }],
+                &CancellationToken::new(),
+            )
+            .unwrap();
+        let mut events = sessions.all_events("session").unwrap();
+        for event in &mut events {
+            if let AgentSessionEventPayload::UserMessage { message } = &mut event.payload {
+                message.images = refs.clone();
+                break;
+            }
+        }
+        let surface = super::super::derive_surface(&events).unwrap();
+        let request =
+            ModelRequest::from_surface("image-budget".into(), &surface, String::new(), vec![]);
+        let mut budget = budget();
+        budget.reserved_tokens_per_image = 20_000;
+        let measured = measure_model_messages(&request.messages, budget.reserved_tokens_per_image);
+        budget.estimated_input_tokens = measured.0 + 200;
+        budget.estimated_input_bytes = measured.1 + 800;
+        let projection = projected_budget(
+            &surface,
+            &events,
+            events.last().unwrap().seq,
+            "checkpoint",
+            &budget,
+        );
+        assert!(projection.input_tokens >= 20_000);
+        assert!(!projection.fits_target(&budget));
+    }
+
+    #[test]
+    #[ignore = "requires a real historical session log supplied through SHELLSPAN_CONTEXT_AUDIT_LOG"]
+    fn historical_approval_budget_audit() {
+        let path = std::env::var("SHELLSPAN_CONTEXT_AUDIT_LOG").expect("provide the real log path");
+        let text = std::fs::read_to_string(path).unwrap();
+        let all: Vec<AgentSessionEvent> = text
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let failed = all.iter().position(|event| matches!(&event.payload, AgentSessionEventPayload::CompactionStart { reason } if reason.contains("smallest checkpoint projected"))).expect("log must contain the original budget failure");
+        let old_boundary = all[failed..]
+            .iter()
+            .find_map(|event| match event.payload {
+                AgentSessionEventPayload::CompactionEnd {
+                    replaced_through_seq,
+                    status: AgentCompactionStatus::Failed,
+                    ..
+                } => Some(replaced_through_seq),
+                _ => None,
+            })
+            .unwrap();
+        let events = &all[..failed];
+        let surface = super::super::derive_surface(events).unwrap();
+        let active_turn = events
+            .iter()
+            .rev()
+            .find_map(|event| event.turn_id.as_deref())
+            .unwrap();
+        let latest_complete = events.iter().rev().find(|event| matches!(&event.payload, AgentSessionEventPayload::StepEnd { reason } if reason == "toolsCompleted")).unwrap().seq;
+        let selected =
+            complete_compaction_boundaries(events, surface.replaced_through_seq, Some(active_turn))
+                .unwrap();
+        assert_eq!(selected.last().copied(), Some(latest_complete));
+        assert!(latest_complete > old_boundary);
+        for index in 0..events.len() {
+            if matches!(&events[index].payload, AgentSessionEventPayload::StepEnd { reason } if reason == "waitingForTool")
+            {
+                assert!(!complete_compaction_boundaries(
+                    &events[..=index],
+                    None,
+                    Some(active_turn)
+                )
+                .unwrap()
+                .contains(&events[index].seq));
+            }
+        }
+        let header_event = events
+            .iter()
+            .find(|event| {
+                matches!(
+                    event.payload,
+                    AgentSessionEventPayload::SessionCreated { .. }
+                )
+            })
+            .unwrap();
+        let mut header_value = serde_json::to_value(&header_event.payload).unwrap()["data"].clone();
+        header_value["sessionId"] = serde_json::json!(header_event.session_id);
+        header_value["createdAtUnixMs"] = serde_json::json!(header_event.time_unix_ms);
+        let header: AgentSessionHeader = serde_json::from_value(header_value).unwrap();
+        let (system_prompt, tools) = events
+            .iter()
+            .rev()
+            .find_map(|event| match &event.payload {
+                AgentSessionEventPayload::RequestHeader {
+                    system_prompt,
+                    tool_schemas,
+                    ..
+                } => Some((system_prompt.clone(), tool_schemas.clone())),
+                _ => None,
+            })
+            .unwrap();
+        let mut request =
+            ModelRequest::from_surface("historical-audit".into(), &surface, String::new(), tools);
+        // The archived header already includes ModelRequest's trust preamble.
+        request.system_prompt = system_prompt;
+        let (message_tokens, message_bytes) = measure_model_messages(&request.messages, 0);
+        let system_bytes = request.system_prompt.len() as u64;
+        let tool_bytes = serde_json::to_vec(&request.tools).unwrap().len() as u64;
+        let mut observed = budget();
+        observed.system_tokens = system_bytes.div_ceil(4);
+        observed.tool_schema_tokens = tool_bytes.div_ceil(4);
+        observed.message_tokens = message_tokens;
+        observed.estimated_input_tokens =
+            observed.system_tokens + observed.tool_schema_tokens + message_tokens;
+        observed.estimated_input_bytes = system_bytes + tool_bytes + message_bytes;
+        observed.compaction_target_tokens = 7864;
+        observed.compaction_threshold_tokens = 11141;
+        observed.usable_input_tokens = 13108;
+        observed.maximum_input_bytes = 52432;
+        let old = structured_checkpoint(&header, events, old_boundary, surface.generation);
+        let new = structured_checkpoint(&header, events, latest_complete, surface.generation);
+        let before = projected_budget(
+            &surface,
+            events,
+            old_boundary,
+            &render_checkpoint(&old, 2048),
+            &observed,
+        );
+        let after = projected_budget(
+            &surface,
+            events,
+            latest_complete,
+            &render_checkpoint(&new, 2048),
+            &observed,
+        );
+        assert!(after.input_tokens < before.input_tokens);
+        assert!(after.input_bytes < before.input_bytes);
+        assert!(
+            after.fits_target(&observed),
+            "{} tokens / {} bytes",
+            after.input_tokens,
+            after.input_bytes
+        );
+        if let Ok(report) = std::env::var("SHELLSPAN_CONTEXT_AUDIT_REPORT") {
+            std::fs::write(report, serde_json::to_vec_pretty(&serde_json::json!({"oldBoundary":old_boundary,"newBoundary":latest_complete,"systemTokens":observed.system_tokens,"toolSchemaTokens":observed.tool_schema_tokens,"messageTokens":observed.message_tokens,"beforeProjection":{"tokens":before.input_tokens,"bytes":before.input_bytes},"afterProjection":{"tokens":after.input_tokens,"bytes":after.input_bytes},"targetTokens":observed.compaction_target_tokens,"targetBytes":target_input_bytes(&observed),"mode":"readOnlyHistoricalReplayWithBoundedExtractiveCheckpoint"})).unwrap()).unwrap();
         }
     }
 

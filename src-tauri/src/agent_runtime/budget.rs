@@ -24,13 +24,57 @@ pub(crate) struct ModelSurfaceBudget {
     pub(crate) estimated_input_tokens: u64,
     pub(crate) estimated_input_bytes: u64,
     pub(crate) maximum_input_bytes: u64,
+    #[serde(skip)]
+    pub(crate) tool_message_sizes: std::collections::BTreeMap<String, Vec<(u64, u64)>>,
+    #[serde(skip)]
+    pub(crate) assistant_message_sizes: Vec<(u64, u64)>,
 }
 
 impl ModelSurfaceBudget {
+    pub(crate) fn fits_hard_limit(&self) -> bool {
+        self.estimated_input_tokens <= self.usable_input_tokens
+            && self.estimated_input_bytes <= self.maximum_input_bytes
+    }
+
+    pub(crate) fn diagnostic(&self) -> String {
+        format!(
+            "system={} tokens; tools={} tokens; messages={} tokens; total={} tokens/{} bytes; input limit={} tokens/{} bytes; output reserve={}; safety reserve={}; compaction target={}",
+            self.system_tokens, self.tool_schema_tokens, self.message_tokens,
+            self.estimated_input_tokens, self.estimated_input_bytes,
+            self.usable_input_tokens, self.maximum_input_bytes,
+            self.output_reserve_tokens, self.safety_reserve_tokens,
+            self.compaction_target_tokens,
+        )
+    }
+
     pub(crate) fn requires_compaction(&self) -> bool {
         self.estimated_input_tokens >= self.compaction_threshold_tokens
             || self.estimated_input_bytes >= self.maximum_input_bytes
     }
+}
+
+/// Counts only categories and sizes. Never persist request bodies in budget diagnostics.
+pub(crate) fn request_budget_breakdown(
+    request: &ModelRequest,
+    budget: &ModelSurfaceBudget,
+) -> serde_json::Value {
+    let mut categories = std::collections::BTreeMap::<&str, (u64, u64, u64)>::new();
+    for message in &request.messages {
+        let category = match message {
+            ModelMessage::User { .. } | ModelMessage::UserImages { .. } => "userAndRuntimeContext",
+            ModelMessage::Assistant { .. } => "assistantAndToolCalls",
+            ModelMessage::Tool { .. } => "toolResults",
+        };
+        let entry = categories.entry(category).or_default();
+        entry.0 += 1;
+        entry.1 += model_message_tokens(message, budget.reserved_tokens_per_image);
+        entry.2 += model_message_bytes(message);
+    }
+    let tool_results = request.messages.iter().filter_map(|message| match message {
+        ModelMessage::Tool { name, .. } => Some(serde_json::json!({"name": name, "tokens": model_message_tokens(message, budget.reserved_tokens_per_image), "bytes": model_message_bytes(message)})),
+        _ => None,
+    }).collect::<Vec<_>>();
+    serde_json::json!({"budget": budget, "messageCategories": categories, "toolResults": tool_results})
 }
 
 pub(crate) fn estimate_model_surface_budget(
@@ -90,13 +134,50 @@ pub(crate) fn estimate_model_surface_budget(
         estimated_input_tokens,
         estimated_input_bytes,
         maximum_input_bytes: usable_input_tokens.saturating_mul(4),
+        tool_message_sizes: request.messages.iter().fold(
+            std::collections::BTreeMap::<String, Vec<(u64, u64)>>::new(),
+            |mut sizes, message| {
+                if let ModelMessage::Tool { call_id, .. } = message {
+                    sizes.entry(call_id.clone()).or_default().push((
+                        model_message_tokens(message, image_reserve),
+                        model_message_bytes(message),
+                    ));
+                }
+                sizes
+            },
+        ),
+        assistant_message_sizes: request
+            .messages
+            .iter()
+            .filter_map(|message| {
+                matches!(message, ModelMessage::Assistant { .. }).then(|| {
+                    (
+                        model_message_tokens(message, image_reserve),
+                        model_message_bytes(message),
+                    )
+                })
+            })
+            .collect(),
     })
 }
 
 fn model_message_bytes(message: &ModelMessage) -> u64 {
-    serde_json::to_vec(message)
+    let normalized = serde_json::to_vec(message)
         .map(|value| value.len() as u64)
-        .unwrap_or(u64::MAX / 16)
+        .unwrap_or(u64::MAX / 16);
+    // Prepared provider replay is skipped by ModelMessage's audit serialization,
+    // but still travels on the wire. Include it in admission accounting.
+    if let ModelMessage::Assistant {
+        native_replay: Some(replay),
+        ..
+    } = message
+    {
+        normalized.saturating_add(
+            serde_json::to_vec(replay).map_or(u64::MAX / 16, |value| value.len() as u64),
+        )
+    } else {
+        normalized
+    }
 }
 
 pub(crate) fn measure_model_messages(
@@ -137,6 +218,31 @@ mod tests {
 
     use super::*;
     use crate::agent_runtime::{ModelContentBlock, ModelToolCall, ModelToolDefinition};
+
+    #[test]
+    fn prepared_private_metadata_is_counted_without_entering_diagnostics() {
+        let source = include_str!("../../../AGENTS.md");
+        let message = ModelMessage::Assistant {
+            content: vec![ModelContentBlock::Text {
+                text: source.into(),
+            }],
+            replay: None,
+            native_replay: Some(json!({"reasoningDetails":source})),
+        };
+        let normalized = serde_json::to_vec(&message).unwrap().len() as u64;
+        assert!(model_message_bytes(&message) > normalized + source.len() as u64);
+        let request = ModelRequest {
+            request_id: "budget".into(),
+            surface_generation: 0,
+            system_prompt: String::new(),
+            messages: vec![message],
+            tools: vec![],
+        };
+        let budget = estimate_model_surface_budget(&provider(16384), &request).unwrap();
+        let diagnostic = request_budget_breakdown(&request, &budget).to_string();
+        assert!(!diagnostic.contains(source.lines().next().unwrap()));
+        assert!(!diagnostic.contains("reasoningDetails"));
+    }
 
     fn provider(context: u64) -> AiProviderConfig {
         AiProviderConfig {

@@ -306,6 +306,10 @@ async fn drive_agent_inner(
             )
             .await?
             {
+                if reason.starts_with("contextBudgetExceeded:") {
+                    pause_context_budget(sessions, entry, compactions, &reason)?;
+                    return Ok(AgentDriverSettlement::Waiting);
+                }
                 close_open_scope(sessions, entry, &reason)?;
                 sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
                 entry.set_phase(AgentLifecyclePhase::Stopping)?;
@@ -395,6 +399,10 @@ async fn drive_agent_inner(
                 }
             }
             if let Some(reason) = preparation? {
+                if reason.starts_with("contextBudgetExceeded:") {
+                    pause_context_budget(sessions, entry, compactions, &reason)?;
+                    return Ok(AgentDriverSettlement::Waiting);
+                }
                 close_open_scope(sessions, entry, &reason)?;
                 sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
                 entry.set_phase(AgentLifecyclePhase::Stopping)?;
@@ -545,6 +553,10 @@ async fn drive_agent_inner(
             )
             .await?
             {
+                if reason.starts_with("contextBudgetExceeded:") {
+                    pause_context_budget(sessions, entry, compactions, &reason)?;
+                    return Ok(AgentDriverSettlement::Waiting);
+                }
                 close_open_scope(sessions, entry, &reason)?;
                 sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
                 entry.set_phase(AgentLifecyclePhase::Stopping)?;
@@ -641,6 +653,52 @@ fn child_budget_requires_handoff(
     ) && (plan.is_empty() || incomplete_plan_for_turn(events, turn_id))
 }
 
+fn pause_context_budget(
+    sessions: &AgentSessionStore,
+    entry: &Arc<AgentEntry>,
+    compactions: &AgentCompactionManager,
+    reason: &str,
+) -> Result<(), String> {
+    compactions.checkpoint_context(&entry.session_id, reason)?;
+    sessions.pause_for_input(&entry.session_id, reason)?;
+    entry.set_scope(None)?;
+    entry.set_phase(AgentLifecyclePhase::Idle)
+}
+
+pub(super) async fn compact_prepared_budget(
+    compactions: &AgentCompactionManager,
+    session_id: &str,
+    turn_id: &str,
+    step_id: &str,
+    surface_generation: u64,
+    budget: &super::ModelSurfaceBudget,
+    attempted: &mut bool,
+    cancellation: &tokio_util::sync::CancellationToken,
+) -> Result<bool, String> {
+    if *attempted || budget.fits_hard_limit() {
+        return Ok(false);
+    }
+    *attempted = true;
+    let outcome = compactions
+        .compact(
+            session_id,
+            turn_id,
+            step_id,
+            Some(turn_id),
+            "preparedProviderInputBudget",
+            budget,
+            true,
+            cancellation,
+        )
+        .await?;
+    if outcome.previous_generation != surface_generation
+        || outcome.surface_generation <= surface_generation
+    {
+        return Err("prepared context recovery did not advance the expected generation".into());
+    }
+    Ok(true)
+}
+
 async fn apply_pre_step_hooks(
     sessions: &AgentSessionStore,
     entry: &Arc<AgentEntry>,
@@ -707,7 +765,17 @@ async fn apply_pre_step_hooks(
             });
             messages
         }));
+    let raw_budget = estimate_model_surface_budget(&model.provider, &request)?;
+    if raw_budget.requires_compaction() {
+        compactions.record_budget(&entry.session_id, turn_id, step_id, &request, &raw_budget)?;
+    }
+    let request = tools
+        .bound_request_results(&entry.session_id, turn_id, step_id, request, raw_budget)
+        .await?;
     let budget = estimate_model_surface_budget(&model.provider, &request)?;
+    if budget.requires_compaction() {
+        compactions.record_budget(&entry.session_id, turn_id, step_id, &request, &budget)?;
+    }
     let context = AgentPreStepContext {
         session_id: entry.session_id.clone(),
         turn_id: turn_id.to_string(),
@@ -748,7 +816,7 @@ async fn apply_pre_step_hooks(
             AgentPreStepDecision::Compact { reason } => {
                 let active_turn_id = entry.scope()?.map(|scope| scope.turn_id);
                 let cancellation = entry.cancellation();
-                compactions
+                let result = compactions
                     .compact(
                         &entry.session_id,
                         turn_id,
@@ -759,7 +827,15 @@ async fn apply_pre_step_hooks(
                         false,
                         &cancellation,
                     )
-                    .await?;
+                    .await;
+                if cancellation.is_cancelled() {
+                    return Err("Agent operation cancelled".into());
+                }
+                if let Err(error) = result {
+                    if !budget.fits_hard_limit() {
+                        return Ok(Some(format!("contextBudgetExceeded: {}; {error}. Select a larger-context model or reduce attached input, then continue; completed work is preserved.", budget.diagnostic())));
+                    }
+                }
             }
         }
     }
@@ -854,6 +930,7 @@ async fn run_step(
     let mut pending_retry: Option<PendingRetry> = None;
     let mut cumulative_delay_ms = 0_u64;
     let mut prepared_call: Option<crate::llm::runtime::PreparedCall> = None;
+    let mut prepared_budget_recovery_attempted = false;
     let mut network_recovery_started_at: Option<Instant> = None;
     let mut network_recovery_round = 0_u32;
     loop {
@@ -972,6 +1049,21 @@ async fn run_step(
                         content.retain(|b| !matches!(b, AgentAssistantContentBlock::ToolCall { call } if call.name == super::skills::SKILL_TOOL));
                     }
                 }
+                if request
+                    .tools
+                    .iter()
+                    .any(|tool| tool.name == super::tool_output::READ_TOOL_RESULT)
+                {
+                    inherited = tools
+                        .materialize_inherited_results(
+                            &entry.session_id,
+                            turn_id,
+                            step_id,
+                            inherited,
+                            entry.cancellation(),
+                        )
+                        .await?;
+                }
                 let mut inherited_messages = ModelRequest::from_surface(
                     format!("{request_id}-inherited"),
                     &inherited,
@@ -1007,10 +1099,28 @@ async fn run_step(
             request
         };
         let request_surface_generation = request.surface_generation;
+        if prepared_call.is_none() {
+            let raw_budget = estimate_model_surface_budget(&model.provider, &request)?;
+            if raw_budget.requires_compaction() {
+                compactions.record_budget(
+                    &entry.session_id,
+                    turn_id,
+                    step_id,
+                    &request,
+                    &raw_budget,
+                )?;
+            }
+            request = tools
+                .bound_request_results(&entry.session_id, turn_id, step_id, request, raw_budget)
+                .await?;
+        }
         let budget = estimate_model_surface_budget(&model.provider, &request)?;
-        if budget.requires_compaction() {
+        // Retries retain the same prepared request. Its input was already
+        // admitted; compaction is only appropriate when assembling a new call.
+        if budget.requires_compaction() && prepared_call.is_none() {
+            compactions.record_budget(&entry.session_id, turn_id, step_id, &request, &budget)?;
             let before = request.surface_generation;
-            compactions
+            let result = compactions
                 .compact(
                     &entry.session_id,
                     turn_id,
@@ -1021,18 +1131,80 @@ async fn run_step(
                     false,
                     &entry.cancellation(),
                 )
-                .await?;
+                .await;
+            if entry.cancellation().is_cancelled() {
+                return Ok(StepSettlement::Cancelled);
+            }
             if sessions.snapshot(&entry.session_id)?.surface.generation != before {
                 continue;
             }
-            if budget.estimated_input_tokens > budget.usable_input_tokens
-                || budget.estimated_input_bytes > budget.maximum_input_bytes
-            {
-                return Ok(StepSettlement::Failed(
-                    "complete Skill input exceeds model budget".into(),
-                ));
+            if !budget.fits_hard_limit() {
+                let detail = result
+                    .err()
+                    .unwrap_or_else(|| "No smaller safe context was available".into());
+                let reason = format!("contextBudgetExceeded: {}; {detail}. Select a larger-context model or reduce attached input, then continue; completed work is preserved.", budget.diagnostic());
+                pause_context_budget(sessions, entry, &compactions, &reason)?;
+                return Ok(StepSettlement::Waiting);
             }
         }
+        // Preserve the existing early stop when even the unprepared input has
+        // exhausted the task budget; otherwise admit using the final input below.
+        if matches!(
+            sessions
+                .driver_metrics(&entry.session_id)?
+                .token_budget_decision(
+                    budget
+                        .estimated_input_tokens
+                        .saturating_add(budget.output_reserve_tokens),
+                    config.max_model_tokens_per_session
+                ),
+            super::driver_metrics::TaskTokenBudgetDecision::Stop
+        ) {
+            return Ok(stop_for_token_budget(
+                &compactions,
+                &entry.session_id,
+                turn_id,
+                step_id,
+                config.max_model_tokens_per_session,
+                &entry.cancellation(),
+            ));
+        }
+        if prepared_call.is_none() {
+            prepared_call = Some(model.prepare_request(request, "step", &entry.cancellation())?);
+        }
+        request = prepared_call
+            .as_ref()
+            .expect("prepared call")
+            .request(request_id.clone());
+        let budget = estimate_model_surface_budget(&model.provider, &request)?;
+        if !budget.fits_hard_limit() {
+            compactions.record_budget(&entry.session_id, turn_id, step_id, &request, &budget)?;
+            let recovery = compact_prepared_budget(
+                &compactions,
+                &entry.session_id,
+                turn_id,
+                step_id,
+                request.surface_generation,
+                &budget,
+                &mut prepared_budget_recovery_attempted,
+                &entry.cancellation(),
+            )
+            .await;
+            if entry.cancellation().is_cancelled() {
+                return Ok(StepSettlement::Cancelled);
+            }
+            if matches!(recovery, Ok(true)) {
+                prepared_call = None;
+                continue;
+            }
+            let detail = recovery
+                .err()
+                .unwrap_or_else(|| "bounded prepared-input recovery was exhausted".into());
+            let reason = format!("contextBudgetExceeded: prepared provider input exceeds the available context; {}; {detail}. Select a larger-context model or reduce attached input, then continue; completed work is preserved.", budget.diagnostic());
+            pause_context_budget(sessions, entry, &compactions, &reason)?;
+            return Ok(StepSettlement::Waiting);
+        }
+        // Admission uses the prepared request, including private replay overhead.
         match sessions
             .driver_metrics(&entry.session_id)?
             .token_budget_decision(
@@ -1079,11 +1251,7 @@ async fn run_step(
             }
             super::driver_metrics::TaskTokenBudgetDecision::Continue => {}
         }
-        if prepared_call.is_none() {
-            prepared_call = Some(model.prepare_request(request, "step", &entry.cancellation())?);
-        }
         let call = prepared_call.as_ref().expect("prepared call");
-        request = call.request(request_id.clone());
         let estimated_input_tokens = Some(budget.estimated_input_tokens);
         if entry.cancellation().is_cancelled() {
             return Ok(StepSettlement::Cancelled);
@@ -1358,9 +1526,9 @@ async fn run_step(
                     Ok(outcome) => outcome,
                     Err(_) if cancellation.is_cancelled() => return Ok(StepSettlement::Cancelled),
                     Err(compaction_error) => {
-                        return Ok(StepSettlement::Failed(format!(
-                            "contextTooLargeRecoveryFailed: {compaction_error}"
-                        )))
+                        let reason = format!("contextBudgetExceeded: provider rejected the context; {}; {compaction_error}. Select a larger-context model or reduce attached input, then continue; completed work is preserved.", budget.diagnostic());
+                        pause_context_budget(sessions, entry, &compactions, &reason)?;
+                        return Ok(StepSettlement::Waiting);
                     }
                 };
                 if outcome.previous_generation != before || outcome.surface_generation <= before {
@@ -1385,6 +1553,39 @@ async fn run_step(
                 });
                 attempt += 1;
                 request_reason = AgentRequestReason::Recovery;
+            }
+            Err(error) if error.kind == NormalizedModelErrorKind::ContextTooLarge => {
+                let partial = collected
+                    .lock()
+                    .map_err(|_| "model stream accumulator is unavailable".to_string())?
+                    .content();
+                let had_output = !partial.is_empty();
+                if had_output {
+                    append_interrupted_message(
+                        sessions,
+                        entry,
+                        turn_id,
+                        step_id,
+                        partial,
+                        AgentStopReason::Other,
+                    )?;
+                }
+                sessions.append(
+                    &entry.session_id,
+                    Some(turn_id.into()),
+                    Some(step_id.into()),
+                    request_failure_payload(
+                        &request_id,
+                        &error,
+                        attempt,
+                        config.retry_policy.max_attempts().max(attempt),
+                        cumulative_delay_ms,
+                        had_output,
+                    ),
+                )?;
+                let reason = format!("contextBudgetExceeded: provider rejected the context after bounded recovery; {}. Select a larger-context model or reduce attached input, then continue; completed work is preserved.", budget.diagnostic());
+                pause_context_budget(sessions, entry, &compactions, &reason)?;
+                return Ok(StepSettlement::Waiting);
             }
             Err(error) if error.retryable() => {
                 let network_failure = network_transport_failure(&error);
@@ -1611,8 +1812,10 @@ fn model_tools_for(
         // Human input has its own live-root admission boundary, independent of
         // historical native capability scopes retained by a resumed root.
         .filter(|tool| {
-            tool.name == super::user_questions::TOOL_NAME
-                || scope.tool_names.iter().any(|name| name == &tool.name)
+            (tool.name == super::user_questions::TOOL_NAME
+                || scope.tool_names.iter().any(|name| name == &tool.name))
+                && (tool.name != super::tool_output::READ_TOOL_RESULT
+                    || scope.effects.contains(&super::AgentSessionEffect::ReadOnly))
         })
         .collect()
 }

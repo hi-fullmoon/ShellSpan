@@ -295,6 +295,31 @@ impl AgentArtifactStore {
         Ok(bytes)
     }
 
+    pub(crate) fn copy_tool_result(
+        &self,
+        source_session_id: &str,
+        target_session_id: &str,
+        metadata: &AgentArtifactMetadata,
+    ) -> Result<(AgentArtifactMetadata, Vec<u8>), String> {
+        if !matches!(metadata.kind.as_str(), "tool-result" | "model-tool-result") {
+            return Err("Only tool-result artifacts can be inherited".into());
+        }
+        let bytes = self.retrieve(source_session_id, metadata, metadata.size_bytes as usize)?;
+        std::str::from_utf8(&bytes).map_err(|_| "Inherited tool result is not UTF-8")?;
+        let copied = self.store_bytes(
+            target_session_id,
+            &metadata.kind,
+            &metadata.title,
+            &metadata.media_type,
+            &bytes,
+            metadata.sensitivity,
+        )?;
+        if copied.artifact_id != metadata.artifact_id || copied.sha256 != metadata.sha256 {
+            return Err("Inherited tool-result identity changed".into());
+        }
+        Ok((copied, bytes))
+    }
+
     pub(crate) fn cleanup_unreferenced(
         &self,
         referenced: &HashSet<(String, String)>,

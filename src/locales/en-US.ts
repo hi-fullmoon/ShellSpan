@@ -1845,6 +1845,7 @@ export default {
   'ai.error.recovery.input': 'Review the error details and adjust the request or configuration before continuing.',
   'ai.error.modelUnavailable': 'The selected model does not exist or is unavailable to you. Check the model name and access permissions, or switch models and try again.',
   'ai.error.summaryUnavailable': 'Could not generate a conversation summary. Try again shortly; if the issue persists, continue in a new conversation.',
+  'ai.error.contextBudgetExceeded': 'The request exceeds the model’s available context. Completed operations and conversation history are preserved. Switch to a model with a larger context window or reduce attached input, then continue.',
   'ai.workspace.stopping': 'Stopping. You can write your next message; your draft will be kept.',
   'ai.workspace.stopped': 'Stopped',
   'ai.workspace.announce.stopping': 'Stopping. You can send once the current operation settles.',

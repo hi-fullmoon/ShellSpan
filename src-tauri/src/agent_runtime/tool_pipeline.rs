@@ -634,6 +634,65 @@ impl AgentToolPipeline {
         }
     }
 
+    pub(crate) async fn bound_request_results(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        step_id: &str,
+        request: ModelRequest,
+        budget: super::ModelSurfaceBudget,
+    ) -> Result<ModelRequest, String> {
+        let sessions = self.sessions.clone();
+        let artifacts = self.artifacts.clone();
+        let session_id = session_id.to_string();
+        let turn_id = turn_id.to_string();
+        let step_id = step_id.to_string();
+        tokio::task::spawn_blocking(move || {
+            let mut request = request;
+            super::tool_output::bound_request_results(
+                &sessions,
+                &artifacts,
+                &session_id,
+                &turn_id,
+                &step_id,
+                &mut request,
+                &budget,
+            )?;
+            Ok(request)
+        })
+        .await
+        .map_err(|error| format!("Tool output budget task failed: {error}"))?
+    }
+
+    pub(crate) async fn materialize_inherited_results(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        step_id: &str,
+        inherited: super::AgentSurfaceSnapshot,
+        cancellation: CancellationToken,
+    ) -> Result<super::AgentSurfaceSnapshot, String> {
+        let sessions = self.sessions.clone();
+        let artifacts = self.artifacts.clone();
+        let session_id = session_id.to_string();
+        let turn_id = turn_id.to_string();
+        let step_id = step_id.to_string();
+        tokio::task::spawn_blocking(move || {
+            super::tool_output::materialize_inherited_results(
+                &sessions,
+                &artifacts,
+                &session_id,
+                &turn_id,
+                &step_id,
+                &inherited,
+                &cancellation,
+            )?;
+            Ok(inherited)
+        })
+        .await
+        .map_err(|error| format!("Inherited tool-result transfer task failed: {error}"))?
+    }
+
     pub(crate) fn mark_scheduler_failure(
         &self,
         entry: &AgentEntry,
@@ -780,6 +839,11 @@ impl AgentToolPipeline {
                     if call.name == super::skills::SKILL_TOOL {
                         if !running.is_empty() { draining_barrier = true; continue; }
                         self.process_skill_call(entry, turn_id, step_id, request_id, target.clone(), call.clone()).await?;
+                        next += 1; committed += 1; continue;
+                    }
+                    if call.name == super::tool_output::READ_TOOL_RESULT {
+                        if !running.is_empty() { draining_barrier = true; continue; }
+                        self.process_result_read(entry, turn_id, step_id, request_id, target.clone(), call.clone()).await?;
                         next += 1; committed += 1; continue;
                     }
                     if call.name == super::user_questions::TOOL_NAME {
@@ -1094,6 +1158,157 @@ impl AgentToolPipeline {
         self.process_model_calls(entry, &turn, &step, &request, remaining)
             .await
             .map(Some)
+    }
+
+    async fn process_result_read(
+        &self,
+        entry: &Arc<AgentEntry>,
+        turn_id: &str,
+        step_id: &str,
+        request_id: &str,
+        target: AgentSessionTarget,
+        call: ModelToolCall,
+    ) -> Result<(), String> {
+        self.ensure_capability(
+            entry,
+            &call.name,
+            AgentSessionEffect::ReadOnly,
+            &target.target_id,
+        )?;
+        let task_id = self.sessions.snapshot(&entry.session_id)?.header.task_id;
+        let before = AgentBeforeToolContext {
+            session_id: entry.session_id.clone(),
+            task_id: task_id.clone(),
+            turn_id: turn_id.into(),
+            step_id: step_id.into(),
+            request_id: request_id.into(),
+            call_id: call.call_id.clone(),
+            name: call.name.clone(),
+            arguments: call.arguments.clone(),
+            target: target.clone(),
+        };
+        for decision in self.hooks.before_tool(&before)? {
+            if let AgentBeforeToolDecision::Reject { reason } = decision {
+                return Err(reason);
+            }
+        }
+        let recorded = RecordedToolCall {
+            call_id: call.call_id.clone(),
+            provider_call_id: call.provider_call_id.clone(),
+            name: call.name.clone(),
+            native_name: Some(call.name.clone()),
+            arguments: call.arguments.clone(),
+            title: Some("Read stored tool result".into()),
+            effect: Some(AgentSessionEffect::ReadOnly),
+            target: Some(target.clone()),
+        };
+        let payloads = vec![
+            AgentSessionEventPayload::ToolCall {
+                call: recorded.clone(),
+            },
+            AgentSessionEventPayload::ToolApproval {
+                request_id: request_id.into(),
+                call_id: call.call_id.clone(),
+                approval_id: None,
+                status: AgentToolApprovalStatus::Approved,
+                risk: Some(AgentSessionEffect::ReadOnly),
+                reason: Some("sessionToolResultReadAuthorized".into()),
+                expires_at_unix_ms: None,
+                prompt: None,
+            },
+            AgentSessionEventPayload::ToolExecution {
+                call_id: call.call_id.clone(),
+                status: AgentToolExecutionStatus::Dispatched,
+                idempotency: "yes".into(),
+            },
+        ];
+        self.sessions.append_batch(
+            &entry.session_id,
+            payloads
+                .into_iter()
+                .map(|payload| AgentScopedPayload {
+                    turn_id: Some(turn_id.into()),
+                    step_id: Some(step_id.into()),
+                    payload,
+                })
+                .collect(),
+        )?;
+        let sessions = self.sessions.clone();
+        let artifacts = self.artifacts.clone();
+        let session_id = entry.session_id.clone();
+        let arguments = call.arguments.clone();
+        let read = if entry.cancellation().is_cancelled() {
+            Err("cancelled".into())
+        } else {
+            tokio::task::spawn_blocking(move || {
+                super::tool_output::read_result(&sessions, &artifacts, &session_id, arguments)
+            })
+            .await
+            .map_err(|error| format!("Tool result read task failed: {error}"))?
+        };
+        let read = if entry.cancellation().is_cancelled() {
+            Err("cancelled".into())
+        } else {
+            read
+        };
+        let (status, summary, data) = match read {
+            Ok(data) => (
+                AgentToolResultStatus::Completed,
+                "Read stored tool result range".into(),
+                Some(data),
+            ),
+            Err(error) => (
+                if entry.cancellation().is_cancelled() {
+                    AgentToolResultStatus::Cancelled
+                } else {
+                    AgentToolResultStatus::Failed
+                },
+                error,
+                None,
+            ),
+        };
+        let preparation = NativeToolPreparation {
+            token: String::new(),
+            call: recorded,
+            requires_approval: false,
+            prompt: String::new(),
+            expires_at_unix_ms: 0,
+            idempotency: NativeToolIdempotency::Yes,
+            parallel: false,
+            exclusive: true,
+        };
+        let header = self.sessions.snapshot(&entry.session_id)?.header;
+        let request = NativeToolRequest {
+            session_id: entry.session_id.clone(),
+            task_id,
+            goal: header.goal,
+            success_criteria: header.success_criteria,
+            execution_surface: header.execution_surface,
+            turn_id: turn_id.into(),
+            step_id: step_id.into(),
+            request_id: request_id.into(),
+            model_call: call.clone(),
+            target: target.clone(),
+            permission_mode: header
+                .permission_mode
+                .unwrap_or(super::AgentSessionPermissionMode::RequestApproval),
+        };
+        self.finish_native(
+            &request,
+            &preparation,
+            Ok(Ok(NativeToolResult {
+                call_id: call.call_id,
+                native_name: call.name,
+                target_id: target.target_id,
+                effect: AgentSessionEffect::ReadOnly,
+                status,
+                summary,
+                data,
+                duration_ms: None,
+                evidence_refs: vec![],
+                artifacts: vec![],
+            })),
+        )
     }
 
     async fn process_skill_call(
@@ -1921,13 +2136,7 @@ impl AgentToolPipeline {
                     &format!("Output for {}", request.model_call.name),
                     data,
                 )?;
-                result.data = Some(serde_json::json!({
-                    "artifactRef": artifact.artifact_id,
-                    "sha256": artifact.sha256,
-                    "sizeBytes": artifact.size_bytes,
-                    "sensitivity": artifact.sensitivity,
-                    "truncated": true,
-                }));
+                result.data = Some(super::tool_output::result_reference(data, &artifact, 512));
                 stored_data_artifact = Some(artifact);
             }
         }

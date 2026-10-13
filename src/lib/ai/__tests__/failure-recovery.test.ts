@@ -92,5 +92,6 @@ describe('failure recovery', () => {
     const error = process?.kind === 'turnProcess' ? process.children.find((node): node is AiErrorNode => node.kind === 'error') : undefined;
     expect(error).toBeDefined();
     expect(modelFailureRecovery(error!)).toBe(expected);
+    expect(modelFailureRecovery({ ...error!, message: 'contextBudgetExceeded: completed work is preserved' })).toBe('input');
   });
 });

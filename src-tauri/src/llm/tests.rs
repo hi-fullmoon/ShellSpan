@@ -94,6 +94,7 @@ fn model_exposes_only_strict_runtime_pipeline_tools() {
             .map(|tool| tool.name.as_str())
             .collect::<Vec<_>>(),
         [
+            "read_tool_result",
             "skill",
             "ask_user_question",
             "run_terminal_command",

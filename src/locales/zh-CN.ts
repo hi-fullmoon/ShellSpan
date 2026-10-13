@@ -1843,6 +1843,7 @@ export default {
   'ai.error.recovery.input': '请根据错误详情调整请求或配置后继续。',
   'ai.error.modelUnavailable': '当前模型不存在或暂时无法访问，请检查模型名称和访问权限，或切换模型后重试。',
   'ai.error.summaryUnavailable': '暂时无法生成会话摘要，请稍后重试；如果仍然失败，可以新建会话继续。',
+  'ai.error.contextBudgetExceeded': '当前请求超出模型可用的上下文空间。已完成的操作和会话记录已保留，请切换支持更大上下文的模型或减少附加输入后继续。',
   'ai.workspace.stopping': '正在停止，可以先输入下一条消息。草稿会保留。',
   'ai.workspace.stopped': '已停止',
   'ai.workspace.announce.stopping': '正在停止，完成后即可发送。',

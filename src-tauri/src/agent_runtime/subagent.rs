@@ -1690,6 +1690,7 @@ fn delegated_scope(
                 "query_logs",
                 "inspect_child_agent",
                 "update_plan",
+                "read_tool_result",
             ],
             &[
                 AgentSessionEffect::None,
@@ -1717,6 +1718,7 @@ fn delegated_scope(
                 "transfer_file",
                 "inspect_child_agent",
                 "update_plan",
+                "read_tool_result",
             ],
             &[
                 AgentSessionEffect::None,

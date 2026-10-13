@@ -1343,7 +1343,12 @@ async fn real_preparation_compaction_error_consumes_only_its_input() {
         .await
         .unwrap();
     let snapshot = runtime.session("session-compaction-input").unwrap();
-    assert_eq!(snapshot.status, AgentSessionStatus::Failed);
+    assert_eq!(
+        snapshot.status,
+        AgentSessionStatus::Idle,
+        "{:?}",
+        snapshot.task.recovery
+    );
     assert_eq!(snapshot.inbox.next_turn.len(), 1);
     assert_eq!(snapshot.inbox.paused_ids, vec!["later-question"]);
     let events = runtime
@@ -1355,8 +1360,8 @@ async fn real_preparation_compaction_error_consumes_only_its_input() {
         .unwrap()
         .events;
     assert!(events.iter().any(|event| matches!(
-        &event.payload, AgentSessionEventPayload::SessionEnded { reason: Some(reason), .. }
-            if reason.contains("no completed safe Step or Turn prefix")
+        &event.payload, AgentSessionEventPayload::TurnEnd { reason, .. }
+            if reason.starts_with("contextBudgetExceeded:") && reason.contains("no completed safe Step or Turn prefix")
     )));
     assert_eq!(
         events
@@ -2147,13 +2152,23 @@ async fn maximum_write_file_arguments_fit_the_durable_event_boundary() {
         AgentSessionEventPayload::ToolResult { call_id, status, .. }
             if call_id == "call-write-max" && *status == AgentToolResultStatus::Completed
     )));
-    assert!(!events.iter().any(|event| matches!(
-        event.payload,
-        AgentSessionEventPayload::SessionEnded {
-            status: AgentSessionStatus::Failed,
-            ..
-        }
-    )));
+    assert!(
+        !events.iter().any(|event| matches!(
+            event.payload,
+            AgentSessionEventPayload::SessionEnded {
+                status: AgentSessionStatus::Failed,
+                ..
+            }
+        )),
+        "{:?}",
+        events
+            .iter()
+            .filter_map(|event| match &event.payload {
+                AgentSessionEventPayload::SessionEnded { reason, .. } => reason.clone(),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    );
 }
 
 #[tokio::test]
@@ -3221,8 +3236,18 @@ async fn retryable_failure_retries_but_typed_terminal_failures_end_the_session()
         runtime.start(&session_id, provider(), None).unwrap();
         runtime.await_idle(&session_id).await.unwrap();
         let snapshot = runtime.session(&session_id).unwrap();
-        assert!(snapshot.ended);
-        assert_eq!(snapshot.status, AgentSessionStatus::Failed);
+        assert_eq!(
+            snapshot.ended,
+            kind != NormalizedModelErrorKind::ContextTooLarge
+        );
+        assert_eq!(
+            snapshot.status,
+            if kind == NormalizedModelErrorKind::ContextTooLarge {
+                AgentSessionStatus::Idle
+            } else {
+                AgentSessionStatus::Failed
+            }
+        );
         let events = runtime
             .events(AgentSessionEventsRequest {
                 session_id,
@@ -3235,7 +3260,7 @@ async fn retryable_failure_retries_but_typed_terminal_failures_end_the_session()
             &event.payload,
             AgentSessionEventPayload::SessionEnded { reason: Some(reason), .. }
                 if reason.starts_with(prefix)
-        )));
+        ) || (kind == NormalizedModelErrorKind::ContextTooLarge && matches!(&event.payload, AgentSessionEventPayload::TurnEnd { reason } if reason.starts_with("contextBudgetExceeded:")))));
     }
 }
 
