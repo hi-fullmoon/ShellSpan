@@ -1,0 +1,8 @@
+Port 22
+HostKey /etc/ssh/ssh_host_ed25519_key
+PermitRootLogin no
+PasswordAuthentication yes
+KbdInteractiveAuthentication no
+AllowUsers shellspan
+Subsystem sftp internal-sftp
+LogLevel ERROR

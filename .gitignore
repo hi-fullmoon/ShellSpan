@@ -12,3 +12,4 @@ src-tauri/target
 /.phase3-acceptance/
 /.phase4-acceptance/
 /.drawer-review/
+/.sftp-cancellation/
