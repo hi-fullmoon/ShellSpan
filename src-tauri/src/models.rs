@@ -103,6 +103,8 @@ fn redact_secret(value: &Option<String>) -> Option<&'static str> {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SessionCreateRequest {
     #[serde(default)]
+    pub(crate) initial_directory: Option<String>,
+    #[serde(default)]
     pub(crate) operation_id: Option<String>,
     pub(crate) name: String,
     pub(crate) host: String,

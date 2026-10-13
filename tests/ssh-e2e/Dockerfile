@@ -20,6 +20,7 @@ RUN printf '%s\n' \
       'export LANG=C.UTF-8' \
       'printf "shellspan-bash-login-marker\\n"' \
       'source "$HOME/.bashrc"' \
+      'cd "$HOME"' \
       > /home/shellspan/.bash_profile \
     && printf '%s\n' \
       'export SHELLSPAN_BASH_PROFILE_ORDER="${SHELLSPAN_BASH_PROFILE_ORDER-}:bashrc"' \
@@ -28,6 +29,7 @@ RUN printf '%s\n' \
       'shellspan_fixture_function() { printf bash-function-ready; }' \
       'HISTFILE="$HOME/.bash_history"' \
       'history -s shellspan-bash-history-ready' \
+      'cd "$HOME"' \
       > /home/shellspan/.bashrc \
     && printf '%s\n' \
       'export SHELLSPAN_ZSH_PROFILE_ORDER="${SHELLSPAN_ZSH_PROFILE_ORDER-}:zshenv"' \
@@ -46,10 +48,12 @@ RUN printf '%s\n' \
       'shellspan_fixture_function() { printf zsh-function-ready; }' \
       'HISTFILE="$HOME/.zsh_history"' \
       'print -s shellspan-zsh-history-ready' \
+      'cd "$HOME"' \
       > /home/shellspan-zsh/.zshrc \
     && printf '%s\n' \
       'export SHELLSPAN_ZSH_PROFILE_ORDER="${SHELLSPAN_ZSH_PROFILE_ORDER-}:zlogin"' \
       'export SHELLSPAN_ZLOGIN_COUNT=$(( ${SHELLSPAN_ZLOGIN_COUNT:-0} + 1 ))' \
+      'cd "$HOME"' \
       > /home/shellspan-zsh/.zlogin \
     && chown shellspan:shellspan /home/shellspan/.bash_profile /home/shellspan/.bashrc \
     && chown shellspan-zsh:shellspan-zsh /home/shellspan-zsh/.zshenv /home/shellspan-zsh/.zprofile /home/shellspan-zsh/.zshrc /home/shellspan-zsh/.zlogin

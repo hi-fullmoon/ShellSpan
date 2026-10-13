@@ -245,6 +245,32 @@ fn detect_remote_login_shell(
     detect_remote_login_shell_identity(session, username).map(|identity| identity.shell)
 }
 
+pub(crate) fn initial_directory_input(directory: Option<&str>) -> Result<Option<String>, String> {
+    match directory {
+        None => Ok(None),
+        Some(path) if path.is_empty() || path.chars().any(char::is_control) => {
+            Err("invalid initial terminal directory".into())
+        }
+        // Restore ordinary terminal echo before changing directory, including
+        // when cd fails. The interactive shell consumes this line after its
+        // startup scripts; it is not evaluated by an SSH exec parent.
+        Some(path) => Ok(Some(format!(
+            "stty echo; cd -- {}\r",
+            quote_remote_posix(path)
+        ))),
+    }
+}
+
+fn initial_directory_pty_modes(directory: Option<&str>) -> Option<ssh2::PtyModes> {
+    directory.map(|_| {
+        let mut modes = ssh2::PtyModes::new();
+        // Prevent the PTY line discipline echoing queued setup before the
+        // shell's line editor reads and displays it.
+        modes.set_boolean(ssh2::PtyModeOpcode::ECHO, false);
+        modes
+    })
+}
+
 fn remote_integrated_shell_command(
     shell: TerminalShellKind,
     shell_executable: &str,
@@ -407,7 +433,7 @@ fn open_remote_pty_channel(
         channel
             .request_pty(
                 "xterm-256color",
-                None,
+                initial_directory_pty_modes(request.initial_directory.as_deref()),
                 Some((request.terminal_cols, request.terminal_rows, 0, 0)),
             )
             .map_err(|error| {
@@ -586,6 +612,18 @@ pub(crate) fn run_ssh_session<
                 } else {
                     channel.shell().map_err(|error| ConnectionError::Other {
                         message: format!("failed to start remote shell: {error}"),
+                    })?;
+                }
+
+                if let Some(input) = initial_directory_input(request.initial_directory.as_deref())
+                    .map_err(|message| ConnectionError::Other { message })?
+                {
+                    // Queue one complete line before exposing the transport.
+                    // This also applies to unsupported shells and SFTP failure.
+                    channel.write_all(input.as_bytes()).map_err(|error| {
+                        ConnectionError::Other {
+                            message: format!("failed to queue initial terminal directory: {error}"),
+                        }
                     })?;
                 }
 

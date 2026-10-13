@@ -220,7 +220,7 @@ describe('useConnectSession', () => {
     expect(useTerminalStore.getState().sessions[0]?.pendingConnection).toBeUndefined();
   });
 
-  it('opens a terminal in the requested remote directory with a safely quoted command', async () => {
+  it('passes the initial directory to shell startup without injecting terminal input', async () => {
     vi.mocked(invokeCreateSession).mockResolvedValueOnce(SUMMARY);
     const { result } = renderHook(() => useConnectSession());
 
@@ -230,10 +230,10 @@ describe('useConnectSession', () => {
       });
     });
 
-    expect(invokeWriteSession).toHaveBeenCalledWith(
-      's1',
-      "cd -- '/srv/Release Candidate/O'\\''Brien'\r",
-    );
+    expect(invokeCreateSession).toHaveBeenCalledWith(expect.objectContaining({
+      initialDirectory: "/srv/Release Candidate/O'Brien",
+    }));
+    expect(invokeWriteSession).not.toHaveBeenCalled();
     expect(useTerminalStore.getState().sessions).toHaveLength(1);
   });
 

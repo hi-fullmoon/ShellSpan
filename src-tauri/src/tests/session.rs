@@ -1,6 +1,182 @@
     use super::*;
 
     #[test]
+    fn initial_directory_input_quotes_paths_and_restores_echo() {
+        assert_eq!(
+            initial_directory_input(Some("/srv/O'Brien; data"))
+                .unwrap()
+                .unwrap(),
+            "stty echo; cd -- '/srv/O'\"'\"'Brien; data'\r"
+        );
+        assert_eq!(initial_directory_input(None).unwrap(), None);
+        for path in [
+            "",
+            "/tmp\nwhoami",
+            "/tmp\rwhoami",
+            "/tmp\0whoami",
+            "/tmp\twhoami",
+            "/tmp\u{3}whoami",
+            "/tmp\u{1b}whoami",
+            "/tmp\u{7f}whoami",
+        ] {
+            assert!(initial_directory_input(Some(path)).is_err());
+        }
+    }
+
+    fn verify_initial_directory_over_ssh(
+        username: &str,
+        integrated: bool,
+        without_sftp: bool,
+        missing_directory: bool,
+    ) {
+        let mut connection = crate::execution::fixture::isolated_ssh_connection();
+        connection.username = username.into();
+        if without_sftp {
+            connection.port = std::env::var("SHELLSPAN_E2E_SSH_NO_SFTP_PORT")
+                .unwrap()
+                .parse()
+                .unwrap();
+        }
+        let (_known_hosts, known_hosts_path) =
+            crate::connection::trusted_known_hosts_fixture(&connection.host, connection.port);
+        let session = crate::connection::open_authenticated_session(
+            crate::connection::connect_tcp_stream(&connection.host, connection.port).unwrap(),
+            username,
+            connection.auth_method,
+            connection.password.as_deref(),
+            None,
+            None,
+            &connection.host,
+            connection.port,
+            Some(&known_hosts_path),
+        )
+        .unwrap();
+        session.set_timeout(3_000);
+        let directory = format!("/tmp/shellspan-directory-{}-O'Brien; data", Uuid::new_v4());
+        if !missing_directory {
+            let mut setup = session.channel_session().unwrap();
+            setup
+                .exec(&format!("mkdir -- {}", quote_remote_posix(&directory)))
+                .unwrap();
+            setup.read_to_end(&mut Vec::new()).unwrap();
+            setup.wait_close().unwrap();
+            assert_eq!(setup.exit_status().unwrap(), 0);
+        }
+        let integration = if integrated {
+            Some(RemoteSshShellIntegration::prepare(&session, username).unwrap())
+        } else {
+            if without_sftp {
+                assert!(RemoteSshShellIntegration::prepare(&session, username).is_err());
+            }
+            None
+        };
+        let mut channel = session.channel_session().unwrap();
+        channel
+            .request_pty(
+                "xterm-256color",
+                initial_directory_pty_modes(Some(&directory)),
+                Some((180, 30, 0, 0)),
+            )
+            .unwrap();
+        channel.handle_extended_data(ExtendedData::Merge).unwrap();
+        if let Some(integration) = integration.as_ref() {
+            integration.start_shell(&mut channel).unwrap();
+        } else {
+            channel.shell().unwrap();
+        }
+        channel
+            .write_all(
+                initial_directory_input(Some(&directory))
+                    .unwrap()
+                    .unwrap()
+                    .as_bytes(),
+            )
+            .unwrap();
+        channel
+            .write_all(b"printf '__directory_result__%s|%s__\\n' \"$PWD\" \"${SHELLSPAN_ZSHENV_COUNT:-0}\"; stty -a; exit\r")
+            .unwrap();
+        session.set_blocking(false);
+        let deadline = Instant::now() + Duration::from_secs(8);
+        let mut output = Vec::new();
+        let mut buffer = [0_u8; 4096];
+        while Instant::now() < deadline && !channel.eof() {
+            match channel.read(&mut buffer) {
+                Ok(read) if read > 0 => output.extend_from_slice(&buffer[..read]),
+                Ok(_) => thread::sleep(Duration::from_millis(5)),
+                Err(error) if is_retryable_channel_error_kind(error.kind()) => {
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => panic!("initial directory SSH output failed: {error}"),
+            }
+        }
+        let exited = channel.eof();
+        session.set_blocking(true);
+        if let Some(integration) = integration {
+            integration.close(&session);
+        }
+        let _ = channel.close();
+        if !missing_directory {
+            let mut cleanup = session.channel_session().unwrap();
+            cleanup
+                .exec(&format!("rmdir -- {}", quote_remote_posix(&directory)))
+                .unwrap();
+            cleanup.read_to_end(&mut Vec::new()).unwrap();
+            cleanup.wait_close().unwrap();
+            assert_eq!(cleanup.exit_status().unwrap(), 0);
+        }
+        let display = String::from_utf8_lossy(&output);
+        assert!(exited, "initial directory SSH shell timed out: {display}");
+        let expected_directory = if missing_directory {
+            if username == "shellspan" {
+                "/home/shellspan"
+            } else {
+                "/home/shellspan-zsh"
+            }
+        } else {
+            &directory
+        };
+        let expected_count = if username == "shellspan-zsh" { 1 } else { 0 };
+        assert!(
+            display.contains(&format!(
+                "__directory_result__{expected_directory}|{expected_count}__"
+            )),
+            "directory or initialization changed: {display}"
+        );
+        assert!(
+            display.matches("stty echo; cd -- ").count() <= 1,
+            "initial directory input was echoed twice: {display}"
+        );
+        assert!(
+            !display.contains("-echo "),
+            "terminal echo stayed disabled: {display}"
+        );
+        if missing_directory {
+            assert!(
+                display.to_lowercase().contains("no such file or directory"),
+                "missing directory error hidden: {display}"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
+    fn initial_directory_ssh_integrated_shell_runs_after_login_scripts() {
+        for username in ["shellspan", "shellspan-zsh"] {
+            verify_initial_directory_over_ssh(username, true, false, false);
+            verify_initial_directory_over_ssh(username, true, false, true);
+        }
+    }
+
+    #[test]
+    #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
+    fn initial_directory_ssh_fallback_preserves_single_zshenv_and_echo() {
+        for username in ["shellspan", "shellspan-zsh", "shellspan-sh"] {
+            verify_initial_directory_over_ssh(username, false, true, false);
+        }
+        verify_initial_directory_over_ssh("shellspan-zsh", false, true, true);
+    }
+
+    #[test]
     fn session_wake_pair_passes_wakeups_and_drains_without_blocking() {
         let (waker, source) = session_wake_pair().expect("wake pair should be creatable");
 

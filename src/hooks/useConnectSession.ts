@@ -7,7 +7,6 @@ import {
   buildSessionCreateRequest,
   invokeCreateLocalSession,
   invokeCreateSession,
-  invokeWriteSession,
 } from '@/lib/ipc/tauri';
 import { useToastStore } from '@/stores/toastStore';
 import { createLogger } from '@/lib/logger';
@@ -20,7 +19,6 @@ import {
 } from '@/lib/connections/keychain-key-prompt';
 import { openHostKeyPrompt } from '@/lib/host/host-key-prompt';
 import { useProfileStore } from '@/stores/profileStore';
-import { buildChangeDirectoryCommand } from '@/lib/host/host-context';
 import { usePortForwardStore } from '@/stores/portForwardStore';
 import { t } from '@/locales';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
@@ -126,25 +124,11 @@ export function useConnectSession(): {
 
         try {
           const summary = await invokeCreateSession(
-            buildSessionCreateRequest(preparedProfile, 120, 30),
+            {
+              ...buildSessionCreateRequest(preparedProfile, 120, 30),
+              initialDirectory: options?.initialDirectory,
+            },
           );
-          if (options?.initialDirectory) {
-            const changeDirectoryCommand = buildChangeDirectoryCommand(options.initialDirectory);
-            if (changeDirectoryCommand) {
-              try {
-                await invokeWriteSession(summary.sessionId, changeDirectoryCommand);
-              } catch (error) {
-                logger.error(
-                  `failed to set initial directory session_id=${summary.sessionId}`,
-                  error,
-                );
-                useToastStore.getState().addToast(getToastErrorMessage(error), 'error');
-              }
-            }
-          }
-          // Do not expose the connected session to Agent execution until the
-          // initial-directory write (which includes Enter) is complete. This
-          // prevents it from interleaving with a paced terminal wrapper.
           resolveConnectionAttempt(connectionAttemptId, summary, profile.id);
           await persistPromptedPassword(profileWithSavedSecrets, preparedProfile);
           void usePortForwardStore

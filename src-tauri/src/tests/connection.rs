@@ -9,6 +9,7 @@
     #[test]
     fn session_request_summary_redacts_secret_values() {
         let request = SessionCreateRequest {
+            initial_directory: None,
             operation_id: Some("ssh-connect-test".to_string()),
             name: "demo".to_string(),
             host: "example.com".to_string(),

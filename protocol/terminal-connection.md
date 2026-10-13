@@ -1,5 +1,17 @@
 # Terminal connection deadlines
 
+“Open terminal here” supplies an optional `initialDirectory` in the session
+creation request. The backend rejects empty paths and control characters (which
+could be interpreted by the terminal line editor), quotes the path
+as one POSIX shell argument, and queues one setup line before publishing the
+connected transport. That line is consumed by the interactive shell after its
+startup scripts. The PTY initially disables ECHO to avoid premature duplicate
+echo; the setup line restores ECHO before changing directory, including when the
+directory does not exist. Ordinary fallback uses the standard SSH shell request,
+so Zsh does not load `.zshenv` through an additional exec parent. Directory errors
+remain visible in shell output. Sessions without an initial directory keep their
+existing PTY modes and startup behavior.
+
 An ordinary SSH terminal connection has one 30-second network deadline, starting
 when its backend worker is dispatched. DNS lookup, all resolved addresses, jump
 host setup, SSH handshake, authentication, broker attachment and shell startup

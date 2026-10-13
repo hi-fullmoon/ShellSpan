@@ -52,6 +52,14 @@ try {
   run(docker, [...compose, 'up', '-d', '--wait']);
   fixtureStarted = true;
   cargoTest(
+    'session::tests::initial_directory_ssh_integrated_shell_runs_after_login_scripts',
+    ['--ignored', '--exact'],
+  );
+  cargoTest(
+    'session::tests::initial_directory_ssh_fallback_preserves_single_zshenv_and_echo',
+    ['--ignored', '--exact'],
+  );
+  cargoTest(
     'session::tests::ordinary_ssh_bash_prepares_integration_with_compatible_startup',
     ['--ignored', '--exact'],
   );

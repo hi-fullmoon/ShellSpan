@@ -204,6 +204,7 @@ export interface SessionSummary {
 }
 
 export interface SessionCreateRequest {
+  initialDirectory?: string;
   operationId?: string;
   /** Frontend-only audit identity; older backends safely ignore this field. */
   profileId?: string;

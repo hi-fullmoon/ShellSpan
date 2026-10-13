@@ -287,6 +287,8 @@ async fn create_remote_terminal_session(
         error!("SSH session validation failed: {message}");
         CreateSessionError::Other { message }
     })?;
+    crate::session::initial_directory_input(request.initial_directory.as_deref())
+        .map_err(|message| CreateSessionError::Other { message })?;
 
     if let Err(message) = resolve_keychain_key_for_session(credentials, &mut request) {
         error!("Failed to resolve keychain key: {message}");
