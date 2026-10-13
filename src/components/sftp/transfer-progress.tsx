@@ -231,7 +231,7 @@ export const TransferProgress: React.FC = () => {
             ) : (
               <div className={cn('flex max-w-full flex-wrap items-center gap-x-3 gap-y-1 tabular-nums', op.status !== 'pending' && '@max-[600px]/transfer:order-last @max-[600px]/transfer:w-full')}>
                 {showProgress && (
-                  <div className="flex w-24 shrink-0 items-center gap-1">
+                  <div className="flex w-48 shrink-0 items-center gap-1">
                     <Progress value={progress} aria-label={displayTransferPath(op)} className="min-w-0 flex-1" />
                     <span className="w-8 text-right">{Math.round(progress)}%</span>
                   </div>

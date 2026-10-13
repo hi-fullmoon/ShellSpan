@@ -107,6 +107,7 @@ describe('TransferProgress', () => {
 
     expect(screen.getByRole('progressbar', { name: 'apple-touch-icon.png' })).toHaveAttribute('aria-valuenow', '20');
     expect(screen.getByText('20%')).toBeInTheDocument();
+    expect(screen.getByText('20%').parentElement).toHaveClass('w-48', 'shrink-0');
     expect(document.body.querySelector('[data-slot="progress-track"]')).not.toHaveClass('absolute', 'bottom-0');
   });
 
