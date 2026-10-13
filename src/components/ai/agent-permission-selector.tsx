@@ -195,7 +195,7 @@ export function AgentPermissionSelector({
           align="start"
           className={cn(
             composer
-              ? 'ai-permission-menu w-[240px] max-w-[calc(100vw-16px)] p-[3px]'
+              ? 'ai-permission-menu w-[280px] max-w-[calc(100vw-16px)] p-[3px]'
               : 'w-96 max-w-[calc(100vw-1rem)]',
           )}
         >
@@ -225,8 +225,10 @@ export function AgentPermissionSelector({
                           strokeWidth={1.6}
                         />
                         <span className="flex min-w-0 flex-col gap-0.5">
-                          <span className="flex items-center gap-1.5">
-                            <span>{t(option.composerLabel)}</span>
+                          <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                            <span data-slot="agent-permission-option-title" className="shrink-0 whitespace-nowrap">
+                              {t(option.composerLabel)}
+                            </span>
                             {option.mode === DEFAULT_AGENT_PERMISSION_MODE && (
                               <Badge variant="secondary" size="sm">
                                 {t('agent.permission.recommended')}
