@@ -86,6 +86,11 @@
   height: 14px;
 }
 
+/* ListEnd's lower arrow shifts its visible center below the title. */
+.ai-queue-header > svg:first-child {
+  transform: translateY(-1px);
+}
+
 .ai-task-strip-list > li {
   font-size: 13px;
   line-height: 20px;

@@ -39,6 +39,19 @@ try {
       const triggers = page.getByRole('button', { name: chinese ? '调整排队顺序' : 'Reorder queued input' });
       await triggers.first().waitFor();
       const header = page.locator('.ai-queue-header');
+      const titleGeometry = await header.evaluate(element => {
+        const icon = element.firstElementChild.getBoundingClientRect();
+        const label = element.querySelector('span').getBoundingClientRect();
+        const chevron = element.lastElementChild.getBoundingClientRect();
+        return {
+          iconOffset: icon.top + icon.height / 2 - (label.top + label.height / 2),
+          chevronOffset: chevron.top + chevron.height / 2 - (label.top + label.height / 2),
+          gap: label.left - icon.right,
+        };
+      });
+      assert.equal(titleGeometry.iconOffset, -1, 'Queue icon must compensate for its lower arrow to visually align with the title');
+      assert.equal(titleGeometry.chevronOffset, 0, 'Collapse icon must remain centered with the title');
+      assert.equal(titleGeometry.gap, 4, 'Queue title must retain the shared icon gap');
       const headerBorder = await header.evaluate(element => {
         const style = getComputedStyle(element);
         const row = element.closest('.ai-queue-dock').querySelector('.ai-queue-row + .ai-queue-row');
