@@ -186,7 +186,7 @@ export const TransferProgress: React.FC = () => {
                 aria-hidden="true"
               />
             ) : (
-              <FileIcon className="size-4 shrink-0 text-app-primary" aria-hidden="true" />
+              <FileIcon className="size-4 shrink-0 -translate-y-px text-app-primary" aria-hidden="true" />
             )}
             <span
               className={cn(

@@ -344,10 +344,12 @@ describe('TransferProgress', () => {
     );
   });
 
-  it('uses a compact 16px leading icon for transfer rows', () => {
+  it('keeps the compact file icon visually aligned with the filename', () => {
     useTransferStore.setState({ operations: [failedUpload] });
     render(<TransferProgress />);
 
-    expect(screen.getByText('apple-touch-icon.png').parentElement!.querySelector('svg')).toHaveClass('size-4');
+    const filenameGroup = screen.getByText('apple-touch-icon.png').parentElement!;
+    expect(filenameGroup).toHaveClass('items-center', 'gap-1');
+    expect(filenameGroup.querySelector('svg')).toHaveClass('size-4', 'shrink-0', '-translate-y-px');
   });
 });
