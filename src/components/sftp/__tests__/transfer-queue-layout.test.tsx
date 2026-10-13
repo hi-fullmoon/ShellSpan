@@ -55,6 +55,7 @@ describe('compact transfer queue with the real scheduler', () => {
       expect(toggle).toHaveAttribute('aria-expanded', 'false');
       const queue = document.getElementById(toggle.getAttribute('aria-controls')!);
       expect(queue).toHaveClass('max-h-64', 'overflow-y-auto');
+      expect(queue).not.toHaveClass('border-t');
       expect(queue).not.toBeVisible();
 
       toggle.focus();
@@ -63,6 +64,9 @@ describe('compact transfer queue with the real scheduler', () => {
       expect(queue).toBeVisible();
       const row = screen.getByText('first-waiting').closest('[data-slot="transfer-task-row"]')!;
       expect(row).toHaveClass('min-h-8', 'flex-wrap');
+      for (const taskRow of document.querySelectorAll('[data-slot="transfer-task-row"]')) {
+        expect(taskRow).toHaveClass('border-b', 'border-app-border/50', 'last:border-b-0');
+      }
       await user.click(within(row as HTMLElement).getByRole('button', { name: remove }));
       expect(screen.queryByText('first-waiting')).not.toBeInTheDocument();
       expect(useTransferStore.getState().operations.filter((op) => op.status === 'pending')).toHaveLength(1);

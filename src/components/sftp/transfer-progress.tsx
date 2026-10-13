@@ -294,7 +294,7 @@ export const TransferProgress: React.FC = () => {
   return (
     <div className="@container/transfer shrink-0 border-t border-app-border/50 bg-app-surface">
       {renderOperation(primaryOperation, true)}
-      <div id={queueId} hidden={!expanded || otherOperations.length === 0} className="max-h-64 overflow-y-auto border-t border-app-border/50">
+      <div id={queueId} hidden={!expanded || otherOperations.length === 0} className="max-h-64 overflow-y-auto">
         {expanded && otherOperations.map((op) => renderOperation(op, false))}
       </div>
     </div>
