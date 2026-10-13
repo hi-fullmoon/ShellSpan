@@ -19,6 +19,7 @@ import type { SftpDndPayload } from './sftp-dnd-context';
 
 export interface SftpFileListRowProps {
   entry: FileEntry;
+  filterQuery?: string;
   side: SftpSide;
   presentationSide?: SftpSide;
   selected: boolean;
@@ -76,6 +77,7 @@ function getKindLabel(
 
 export const SftpFileListRow = React.memo(function SftpFileListRow({
   entry,
+  filterQuery = '',
   side,
   presentationSide = side,
   selected,
@@ -95,6 +97,43 @@ export const SftpFileListRow = React.memo(function SftpFileListRow({
   const fontRef = useRef('');
   const [displayStem, setDisplayStem] = useState(nameStem);
   const [isFileNameTruncated, setIsFileNameTruncated] = useState(false);
+
+  const query = filterQuery.trim().toLowerCase();
+  const matches: Array<{ start: number; end: number }> = [];
+  if (query) {
+    const name = entry.name.toLowerCase();
+    let start = name.indexOf(query);
+    while (start !== -1) {
+      matches.push({ start, end: start + query.length });
+      start = name.indexOf(query, start + query.length);
+    }
+  }
+  const highlightSlice = (text: string, offset: number): React.ReactNode => {
+    const nodes: React.ReactNode[] = [];
+    let cursor = 0;
+    for (const match of matches) {
+      const start = Math.max(0, match.start - offset);
+      const end = Math.min(text.length, match.end - offset);
+      if (start >= end) continue;
+      nodes.push(text.slice(cursor, start));
+      nodes.push(
+        <mark key={match.start} className="rounded-[2px] bg-app-warning/30 text-inherit">
+          {text.slice(start, end)}
+        </mark>,
+      );
+      cursor = end;
+    }
+    nodes.push(text.slice(cursor));
+    return nodes;
+  };
+  const renderStem = (): React.ReactNode => {
+    if (displayStem === nameStem) return highlightSlice(displayStem, 0);
+    const characters = Array.from(displayStem);
+    const headLength = Math.ceil((characters.length - 1) / 2);
+    const head = characters.slice(0, headLength).join('');
+    const tail = characters.slice(headLength + 1).join('');
+    return <>{highlightSlice(head, 0)}…{highlightSlice(tail, nameStem.length - tail.length)}</>;
+  };
 
   const updateFileNameDisplay = useCallback(() => {
     const container = containerRef.current;
@@ -264,11 +303,11 @@ export const SftpFileListRow = React.memo(function SftpFileListRow({
               }
             >
               <span ref={fileNameRef} className="truncate">
-                {displayStem}
+                {renderStem()}
               </span>
-              {nameExtension && <span className="shrink-0">{nameExtension}</span>}
+              {nameExtension && <span className="shrink-0">{highlightSlice(nameExtension, nameStem.length)}</span>}
             </TooltipTrigger>
-            <TooltipContent className="break-all">{entry.name}</TooltipContent>
+            <TooltipContent className="break-all">{highlightSlice(entry.name, 0)}</TooltipContent>
           </Tooltip>
           {permissionText && (
             <span className={cn('truncate font-mono text-[11px]', mutedTextClass)}>

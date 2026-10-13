@@ -389,6 +389,7 @@ export const SftpFileList: React.FC<SftpFileListProps> = ({
                   ) : (
                     <SftpFileListRow
                       entry={entry!}
+                      filterQuery={filterQuery}
                       side={side}
                       presentationSide={presentationSide}
                       selected={selectedPaths.has(entry!.path)}

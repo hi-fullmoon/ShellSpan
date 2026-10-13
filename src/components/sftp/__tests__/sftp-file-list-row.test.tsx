@@ -18,10 +18,11 @@ const entry: FileEntry = {
   size: 100,
 };
 
-function renderRow() {
+function renderRow(filterQuery = '', fileEntry = entry) {
   return render(
     <SftpFileListRow
-      entry={entry}
+      entry={fileEntry}
+      filterQuery={filterQuery}
       side="local"
       selected={false}
       batchMode={false}
@@ -54,6 +55,25 @@ afterEach(() => {
 });
 
 describe('SftpFileListRow file name tooltip', () => {
+  it('highlights every literal match, ignoring case and surrounding whitespace', () => {
+    const { container } = renderRow(' A ', { ...entry, name: 'Alpha-A.txt' });
+    expect(Array.from(container.querySelectorAll('mark'), (mark) => mark.textContent)).toEqual(['A', 'a', 'A']);
+  });
+
+  it('highlights a match spanning the stem and extension without changing the name', () => {
+    const { container } = renderRow('e.tx');
+    expect(Array.from(container.querySelectorAll('mark'), (mark) => mark.textContent)).toEqual(['e', '.tx']);
+    expect(container.querySelector('[data-slot="tooltip-trigger"]')).toHaveTextContent(entry.name);
+  });
+
+  it('treats punctuation literally and removes highlights when the query is cleared', () => {
+    const { container, unmount } = renderRow('.txt');
+    expect(container.querySelector('mark')).toHaveTextContent('.txt');
+    unmount();
+    const cleared = renderRow('   ');
+    expect(cleared.container.querySelector('mark')).toBeNull();
+  });
+
   it('keeps the extension visible in a separate non-truncating element', () => {
     renderRow();
 
