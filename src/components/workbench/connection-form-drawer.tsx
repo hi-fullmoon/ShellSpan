@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   EyeIcon,
   EyeOffIcon,
+  FolderOpenIcon,
   KeyRound,
   Network,
   Server,
@@ -892,12 +893,14 @@ const KeyAuthInput: React.FC<KeyAuthInputProps> = ({
 
       <FormRow controlId={pathControlId} label={t('common.privateKey')} error={errors.privateKeyPath}>
         <div className="flex flex-col gap-1.5">
-          <div className="flex gap-2">
-            <Input id={pathControlId} aria-invalid={Boolean(errors.privateKeyPath)} aria-describedby={errors.privateKeyPath ? `${pathControlId}-error` : undefined} value={privateKeyPath} onChange={(e) => onPrivateKeyPathChange(e.target.value)} placeholder="/path/to/key" className="flex-1" autoComplete="off" autoCapitalize="none" />
-            <Button variant="outline" size="sm" className="shrink-0" onClick={onBrowse}>
-              {t('connection.form.browse')}
-            </Button>
-          </div>
+          <InputGroup className="h-9">
+            <InputGroupInput id={pathControlId} aria-invalid={Boolean(errors.privateKeyPath)} aria-describedby={errors.privateKeyPath ? `${pathControlId}-error` : undefined} value={privateKeyPath} onChange={(e) => onPrivateKeyPathChange(e.target.value)} placeholder="/path/to/key" className="min-w-0" autoComplete="off" autoCapitalize="none" />
+            <InputGroupAddon align="inline-end">
+              <InputGroupButton size="icon-sm" aria-label={t('connection.form.browse')} title={t('connection.form.browse')} onClick={onBrowse}>
+                <FolderOpenIcon aria-hidden="true" data-icon="inline-start" />
+              </InputGroupButton>
+            </InputGroupAddon>
+          </InputGroup>
           <span className="text-xs text-muted-foreground/70">{t('connection.form.privateKeyHint')}</span>
         </div>
       </FormRow>
