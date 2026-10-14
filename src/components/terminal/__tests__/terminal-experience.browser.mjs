@@ -35,6 +35,7 @@ const server = await createServer({
         export { TerminalPastePreview } from '/src/components/terminal/terminal-paste-preview.tsx';
         export { TerminalCloseDetails } from '/src/components/terminal/terminal-close-details.tsx';
         export { TerminalPane } from '/src/components/terminal/terminal-pane.tsx';
+        export { TerminalCarousel } from '/src/components/terminal/terminal-carousel.tsx';
         export { agentTerminalLeaseState } from '/src/components/terminal/agent-terminal-lease-state.ts';
         export { createAgentTerminalLeaseCoordinator } from '/src/components/terminal/terminal-controller-layer.tsx';
         export { FitAddon } from '@xterm/addon-fit';
@@ -613,6 +614,62 @@ try {
     assert.equal(failure.cursorInitiallyVisible, true);
     assert.equal(failure.cursorRestored, true);
   }
+  const carouselResize = await page.evaluate(async ({ output, identity }) => {
+    const { React, createRoot, TerminalCarousel, terminalRegistry, useTerminalStore } = window.runtime;
+    const store = useTerminalStore.getState();
+    const ids = Array.from({ length: 3 }, () => {
+      const sessionId = crypto.randomUUID();
+      store.addSession({ ...identity, sessionId });
+      return sessionId;
+    });
+    for (const id of ids) {
+      store.setStatus(id, { sessionId: id, status: 'disconnected' });
+      terminalRegistry.create(id, store.setStatus, store.setClosed,
+        () => useTerminalStore.getState().sessions.find((session) => session.sessionId === id).status,
+        () => {});
+    }
+    const sessions = useTerminalStore.getState().sessions.filter((session) => ids.includes(session.sessionId));
+    const host = document.createElement('div');
+    host.style.cssText = 'position:fixed;left:0;top:0;width:700px;height:500px;background:white';
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const activations = [];
+    const settlements = [];
+    root.render(React.createElement(TerminalCarousel, {
+      sessions, activeSessionId: ids[1], isActive: false, isVisible: true,
+      onActivate: (id) => activations.push(id), onSettle: (id) => settlements.push(id),
+    }));
+    const frame = () => new Promise(requestAnimationFrame);
+    try {
+      for (let i = 0; i < 10; i++) await frame();
+      await new Promise((resolve) => terminalRegistry.get(ids[1]).terminal.write(output, resolve));
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      activations.length = 0;
+      settlements.length = 0;
+      let terminalMounts = 0;
+      const observer = new MutationObserver((records) => {
+        for (const record of records) for (const node of record.addedNodes) {
+          if (node instanceof Element) terminalMounts += Number(node.matches('.xterm')) + node.querySelectorAll('.xterm').length;
+        }
+      });
+      observer.observe(host, { childList: true, subtree: true });
+      for (const width of [680, 600, 480, 350, 420, 560, 700]) {
+        host.style.width = `${width}px`;
+        for (let i = 0; i < 12; i++) await frame();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      observer.disconnect();
+      const viewport = host.querySelector('[data-terminal-carousel]');
+      const activePage = host.querySelector(`[data-terminal-carousel-page="${ids[1]}"]`);
+      const aligned = Math.abs(activePage.getBoundingClientRect().left - viewport.getBoundingClientRect().left) < 1;
+      return { activations, settlements, terminalMounts, aligned };
+    } finally {
+      root.unmount();
+      for (const id of ids) { terminalRegistry.dispose(id); store.removeSession(id); }
+      host.remove();
+    }
+  }, { output, identity });
+  assert.deepEqual(carouselResize, { activations: [], settlements: [], terminalMounts: 0, aligned: true });
   assert.deepEqual(errors, []);
   process.stdout.write('Terminal experience regressions passed with real xterm and WebKit at wide and narrow sizes.\n');
 } finally {

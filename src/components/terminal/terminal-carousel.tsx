@@ -91,6 +91,7 @@ export const TerminalCarousel: React.FC<TerminalCarouselProps> = ({
   };
 
   const finishInteraction = (): void => {
+    if (!interactionRef.current) return;
     const viewport = viewportRef.current;
     const currentSessions = sessionsRef.current;
     if (!viewport || currentSessions.length === 0) return;
@@ -150,9 +151,12 @@ export const TerminalCarousel: React.FC<TerminalCarouselProps> = ({
     };
 
     const handleScroll = (): void => {
+      // Layout changes and tab selection also generate native scroll events.
+      // Only a user gesture may select/settle a session: settling calls focus(),
+      // which fits and repaints xterm and bypasses its debounced resize path.
+      if (!interactionRef.current) return;
       const currentSessions = sessionsRef.current;
       if (currentSessions.length === 0) return;
-      interactionRef.current = true;
       const nearestIndex = getNearestIndex(viewport, currentSessions.length);
       expandMountedWindow(nearestIndex);
       if (nearestIndex !== reportedIndexRef.current) {
@@ -163,12 +167,21 @@ export const TerminalCarousel: React.FC<TerminalCarouselProps> = ({
       scheduleInteractionFinish();
     };
 
+    const handlePointerDown = (event: PointerEvent): void => {
+      if (event.pointerType !== 'touch') return;
+      interactionRef.current = true;
+      expandMountedWindow(getNearestIndex(viewport, sessionsRef.current.length));
+      scheduleInteractionFinish();
+    };
+
     viewport.addEventListener('wheel', handleWheel, { capture: true, passive: true });
+    viewport.addEventListener('pointerdown', handlePointerDown, { passive: true });
     viewport.addEventListener('scroll', handleScroll, { passive: true });
     viewport.addEventListener('scrollend', finishInteraction);
     return () => {
       if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current);
       viewport.removeEventListener('wheel', handleWheel, true);
+      viewport.removeEventListener('pointerdown', handlePointerDown);
       viewport.removeEventListener('scroll', handleScroll);
       viewport.removeEventListener('scrollend', finishInteraction);
     };
