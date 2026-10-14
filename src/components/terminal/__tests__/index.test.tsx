@@ -1,4 +1,5 @@
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, beforeAll, vi } from 'vitest';
+import { enableRealCanvas } from '@/test/real-canvas';
 import { act, render, screen, fireEvent, within } from '@testing-library/react';
 import Terminal from '../index';
 import { useTerminalStore } from '@/stores/terminalStore';
@@ -78,6 +79,7 @@ vi.mock('../terminal-context-menu', () => ({
 }));
 
 const initialState = useTerminalStore.getState();
+beforeAll(enableRealCanvas);
 const focusControllers: Array<{ controller: ReturnType<typeof terminalRegistry.create>; host: HTMLElement }> = [];
 
 function attachFocusController(sessionId: string) {

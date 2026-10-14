@@ -1,5 +1,6 @@
 allowBuilds:
   '@google/genai': true
+  canvas: true
   protobufjs: true
   react-intl-universal: true
 patchedDependencies:

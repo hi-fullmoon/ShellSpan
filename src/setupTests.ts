@@ -2,6 +2,7 @@ import '@testing-library/jest-dom';
 import { beforeEach, vi } from 'vitest';
 import { clearDirectoryListingCache } from '@/lib/sftp/directory-listing-cache';
 import { useAiDraftStore } from '@/stores/aiDraftStore';
+import '@/test/real-canvas';
 
 // The directory listing cache is module-level state; reset it between tests
 // so cached entries never leak across test cases.
@@ -90,9 +91,8 @@ Object.defineProperty(globalThis, 'ResizeObserver', {
   value: ResizeObserverMock,
 });
 
-// jsdom deliberately leaves canvas rendering unimplemented and prints an
-// error whenever getContext() is called. Return null silently so components
-// exercise their intended no-canvas/CSS fallback without changing layout.
+// Keep the existing no-canvas fallback for layout-free component tests.
+// Terminal suites use enableRealCanvas() to run xterm's real 2D renderer.
 Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
   configurable: true,
   value: vi.fn(() => null),

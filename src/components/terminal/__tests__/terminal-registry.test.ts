@@ -1,5 +1,6 @@
 import { act } from '@testing-library/react';
-import { describe, expect, it, beforeEach, vi } from 'vitest';
+import { describe, expect, it, beforeEach, beforeAll, vi } from 'vitest';
+import { enableRealCanvas } from '@/test/real-canvas';
 import type { Event as TauriEvent } from '@tauri-apps/api/event';
 import {
   appendTerminalOutput,
@@ -102,6 +103,7 @@ function createController(sessionId: string) {
 }
 
 describe('terminalRegistry', () => {
+  beforeAll(enableRealCanvas);
   beforeEach(() => {
     document.documentElement.dataset.theme = 'light';
     document.documentElement.style.setProperty('--app-surface', '#ffffff');
@@ -141,6 +143,18 @@ describe('terminalRegistry', () => {
     controller.attach(host);
     expect(host.firstChild).toBe(controller.container);
     expect(controller.terminal.options.overviewRuler).toEqual({ width: 10 });
+    const ruler = controller.terminal.element?.querySelector<HTMLCanvasElement>(
+      '.xterm-decoration-overview-ruler',
+    );
+    expect(ruler).toBeInstanceOf(HTMLCanvasElement);
+    // jsdom has no layout height; give the actual ruler a drawable surface.
+    ruler!.height = 1;
+    const context = ruler!.getContext('2d');
+    expect(context).not.toBeNull();
+    context!.fillStyle = '#ff0000';
+    context!.fillRect(0, 0, 1, 1);
+    expect(Array.from(context!.getImageData(0, 0, 1, 1).data)).toEqual([255, 0, 0, 255]);
+    expect(controller.terminal.textarea).toBeInstanceOf(HTMLTextAreaElement);
     controller.write('hello');
     expect(controller.terminal.buffer.active.length).toBeGreaterThan(0);
   });
