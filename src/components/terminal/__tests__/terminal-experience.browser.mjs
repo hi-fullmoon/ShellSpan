@@ -618,7 +618,7 @@ try {
   }
   for (const width of [1200, 400]) {
     await page.setViewportSize({ width, height: 700 });
-    const focusResult = await page.evaluate(async () => {
+    const focusResult = await page.evaluate(async (terminalOutput) => {
       const { React, createRoot, flushSync, TerminalCarousel, terminalRegistry, useTerminalStore,
         useAppStore, createAgentTerminalLeaseCoordinator } = window.runtime;
       const store = useTerminalStore.getState();
@@ -678,6 +678,19 @@ try {
         flushSync(() => store.setActiveSession(otherId));
         otherController.focus();
         await coordinator.handle({ ...lease, operationId: crypto.randomUUID() });
+        await new Promise((resolve) => controller.terminal.write(terminalOutput.replace(/\n/g, '\r\n'), resolve));
+        if (controller.terminal.buffer.active.type !== 'normal' || controller.terminal.buffer.active.baseY === 0) {
+          throw new Error('Scroll-button regression requires real terminal scrollback');
+        }
+        controller.terminal.scrollToTop();
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        if (controller.terminal.buffer.active.viewportY >= controller.terminal.buffer.active.baseY) {
+          throw new Error('Scroll-button regression requires the terminal to be away from the bottom');
+        }
+        if (Array.from(pane.querySelectorAll('button')).some((button) => /回到最新输出|有新输出|Jump to latest output|Jump to bottom/.test(button.textContent))) {
+          throw new Error('Terminal pane must not show the removed scroll button');
+        }
         const result = {
           otherInitiallyFocused, focused, focusedAfterFrame, duplicatePreservedFocus,
           nextCommandFocused: document.activeElement === controller.terminal.textarea,
@@ -702,7 +715,7 @@ try {
         store.removeSession(otherId);
         host.remove();
       }
-    });
+    }, output);
     assert.deepEqual(focusResult, {
       otherInitiallyFocused: true, focused: true, focusedAfterFrame: true, duplicatePreservedFocus: true,
       nextCommandFocused: true, selected: true, visible: true, rebindPreservedFocus: true,
