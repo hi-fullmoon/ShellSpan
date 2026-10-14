@@ -1,81 +1,81 @@
 # ShellSpan
 
-简体中文 · [English](./README.en.md)
+English · [简体中文](./README.zh-CN.md)
 
-ShellSpan 是一款面向远程运维的桌面 SSH 客户端，集成终端、文件管理、监控和 AI 助手。
+ShellSpan is a desktop SSH client for remote system administration, with an integrated terminal, file manager, monitoring tools, and AI assistant.
 
-[下载安装](https://github.com/hi-fullmoon/ShellSpan/releases/latest) · [问题反馈](https://github.com/hi-fullmoon/ShellSpan/issues) · [贡献指南](./CONTRIBUTING.md)
+[Download](https://github.com/hi-fullmoon/ShellSpan/releases/latest) · [Report an issue](https://github.com/hi-fullmoon/ShellSpan/issues) · [Contributing](./CONTRIBUTING.md)
 
-## 主要功能
+## Features
 
-- **终端**：SSH 与本地终端、多标签会话、跳板机和端口转发
-- **文件管理**：SFTP 双栏浏览、拖拽传输、断点续传和文件预览
-- **连接管理**：保存连接，支持密码与私钥认证，通过系统钥匙串管理凭证
-- **运维工具**：本机与远程监控、日志查看
-- **AI 助手**：结合终端会话执行任务，支持运维 Skill、操作审批和随时停止
+- **Terminal**: SSH and local terminals, tabbed sessions, jump hosts, and port forwarding
+- **File management**: Dual-pane SFTP browsing, drag-and-drop transfers, resumable transfers, and file previews
+- **Connection management**: Saved connections, password and private key authentication, and credentials managed through the system keychain
+- **Administration tools**: Local and remote monitoring and log viewing
+- **AI assistant**: Runs tasks within terminal sessions, with administration skills, operation approvals, and the ability to stop at any time
 
-## 运行环境
+## Runtime requirements
 
-- Windows：Microsoft Edge WebView2 Runtime 133 或更高版本。安装器发现旧版 Runtime 时会尝试更新；安装器配置不能替代安装后版本检查。
-- macOS：支持 Safari 18.2 / WKWebView 18.2 或更高版本的系统 WebKit。应用使用系统 WKWebView，安装其他浏览器不会更新它。
-- 浏览器开发与界面验证：Chromium / Edge 133+ 或 Safari 18.2+。
+- Windows: Microsoft Edge WebView2 Runtime 133 or later. The installer attempts to update older runtimes; this configuration does not replace checking the installed runtime version.
+- macOS: system WebKit supporting Safari 18.2 / WKWebView 18.2 or later. The app uses system WKWebView; installing another browser does not update it.
+- Browser development and UI verification: Chromium / Edge 133+ or Safari 18.2+.
 
-顶部导航使用 `text-box: trim-both text alphabetic` 按字体度量居中，不使用位置偏移。更旧的 WebView 不属于此界面对齐的支持范围。版本依据见 [Chrome 官方说明](https://developer.chrome.com/blog/css-text-box-trim)。
+The top navigation uses `text-box: trim-both text alphabetic` to center text using font metrics without positional offsets. Older webviews are outside the supported range for this alignment. See the [official Chrome documentation](https://developer.chrome.com/blog/css-text-box-trim) for browser support.
 
-## 产品截图
+## Screenshots
 
-以下为 macOS 开发版的实际界面，展示本机监控、本地终端、项目文件浏览和终端智能体。
+These screenshots show the macOS development build, including local monitoring, a local terminal, project file browsing, and the terminal agent.
 
-### 工作台
+### Workbench
 
-集中查看应用资源趋势、系统容量与连接健康状态。
+View application resource trends, system capacity, and connection health in one place.
 
-![ShellSpan 工作台：应用资源趋势、系统概览与连接健康](./docs/screenshots/workbench.jpg)
+![ShellSpan workbench: application resource trends, system overview, and connection health](./docs/screenshots/workbench.jpg)
 
-### 终端
+### Terminal
 
-在终端中查看项目提交记录与目录内容；支持本地 Shell 与 SSH 会话。
+View project commit history and directory contents in the terminal, with support for local shells and SSH sessions.
 
-![ShellSpan 终端：本地 Shell 中的项目提交记录与文件目录](./docs/screenshots/terminal.jpg)
+![ShellSpan terminal: project commit history and file listings in a local shell](./docs/screenshots/terminal.jpg)
 
-### 文件管理
+### File manager
 
-双栏浏览项目与文档目录；两侧可分别选择本地文件系统或远程 SFTP 连接。
+Browse project and document directories side by side. Each pane can independently use the local file system or a remote SFTP connection.
 
-![ShellSpan 文件管理：本地项目与文档目录的双栏浏览](./docs/screenshots/file-manager.jpg)
+![ShellSpan file manager: dual-pane browsing of local project and document directories](./docs/screenshots/file-manager.jpg)
 
-### AI 助手
+### AI assistant
 
-在终端中打开 AI 助手，用自然语言描述任务。终端智能体结合当前会话执行命令，并根据实际输出总结结果。
+Open the AI assistant in the terminal and describe a task in natural language. The terminal agent runs commands in the current session and summarizes the results based on their actual output.
 
-**使用示例：了解当前项目**
+**Example: Explore the current project**
 
-进入项目目录，打开终端右上角的 AI 助手，输入：
+Navigate to the project directory, open the AI assistant in the top-right corner of the terminal, and enter:
 
-> 请在当前终端执行只读命令，查看 package.json 的 name、version、scripts 和 dependencies，并列出 src 下的一级目录。然后用三句话总结项目技术栈与启动方式。不要修改文件，不要读取其他配置或凭据。
+> Run read-only commands in the current terminal to inspect the name, version, scripts, and dependencies in package.json, and list the immediate subdirectories under src. Then summarize the project's technology stack and how to start it in three sentences. Do not modify files or read other configuration files or credentials.
 
-图中为实际执行结果：左侧显示终端命令与目录列表，右侧整理项目依赖、目录结构和启动命令。
+The screenshot shows an actual run: terminal commands and directory listings appear on the left, while the assistant summarizes project dependencies, directory structure, and startup commands on the right.
 
-![ShellSpan 终端智能体：执行项目只读检查并总结技术栈与启动方式](./docs/screenshots/ai-assistant.jpg)
+![ShellSpan terminal agent: inspecting the project with read-only commands and summarizing its technology stack and startup instructions](./docs/screenshots/ai-assistant.jpg)
 
-## 技术栈
+## Technology stack
 
 Tauri 2 · Rust · React 19 · TypeScript · Tailwind CSS 4 · xterm.js
 
-## 本地开发
+## Local development
 
-环境要求：Node.js 24+、pnpm 11、Rust stable，以及 [Tauri 2 所需的系统依赖](https://v2.tauri.app/start/prerequisites/)。
+Requirements: Node.js 24+, pnpm 11, stable Rust, and the [system dependencies required by Tauri 2](https://v2.tauri.app/start/prerequisites/).
 
 ```bash
-pnpm install       # 安装依赖
-pnpm tauri:dev     # 启动桌面应用
-pnpm test          # 运行单元测试
-pnpm build         # 检查并构建前端
-pnpm tauri:build   # 构建桌面安装包
+pnpm install       # Install dependencies
+pnpm tauri:dev     # Start the desktop application
+pnpm test          # Run unit tests
+pnpm build         # Type-check and build the frontend
+pnpm tauri:build   # Build desktop installers
 ```
 
-主线数据库从版本 1 开始，首次启动创建 `~/.shellspan/shellspan-main.db`；开发模式使用 `~/.shellspan-dev/shellspan-main.db`。主线不导入旧数据库数据。
+The main branch starts with database schema version 1. First launch creates `~/.shellspan/shellspan-main.db`; development uses `~/.shellspan-dev/shellspan-main.db`. Data from previous databases is not imported.
 
-## 许可证
+## License
 
 [MIT](./LICENSE)
