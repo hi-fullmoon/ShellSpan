@@ -307,7 +307,7 @@ fn inheritance_transfer_denies_blank_scope_missing_capability_cancellation_and_b
     let boundary = parent_prefix(
         &sessions,
         &artifacts,
-        &[item.artifact_id.clone()],
+        std::slice::from_ref(&item.artifact_id),
         std::slice::from_ref(&item),
     );
     let inheritance = AgentSubagentInheritance::SafePrefix {

@@ -149,13 +149,12 @@ pub(crate) fn estimate_model_surface_budget(
         assistant_message_sizes: request
             .messages
             .iter()
-            .filter_map(|message| {
-                matches!(message, ModelMessage::Assistant { .. }).then(|| {
-                    (
-                        model_message_tokens(message, image_reserve),
-                        model_message_bytes(message),
-                    )
-                })
+            .filter(|message| matches!(message, ModelMessage::Assistant { .. }))
+            .map(|message| {
+                (
+                    model_message_tokens(message, image_reserve),
+                    model_message_bytes(message),
+                )
             })
             .collect(),
     })

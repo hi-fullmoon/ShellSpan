@@ -96,14 +96,11 @@ describe('Toaster', () => {
   });
 
   it('dismisses the toast on double-click', async () => {
-    useToastStore.getState().addToast('Double-click to dismiss', 'info', 3000);
+    const id = useToastStore.getState().addToast('Double-click to dismiss', 'info', 3000);
     render(<Toaster />);
 
-    await waitFor(() => {
-      expect(document.querySelector('[data-sonner-toast]')).toBeInTheDocument();
-    });
-
-    fireEvent.doubleClick(document.querySelector('[data-sonner-toast]')!);
+    const currentToast = await screen.findByTestId(id);
+    fireEvent.doubleClick(currentToast);
 
     await waitFor(() => {
       expect(useToastStore.getState().toasts).toHaveLength(0);
