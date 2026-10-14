@@ -14,7 +14,6 @@ import { readClipboardText } from '@/lib/clipboard';
 import { copyTerminalText } from './terminal-clipboard';
 import { terminalInputReadiness } from './terminal-input-readiness';
 import { TerminalSearch } from './terminal-search';
-import { TerminalScrollButton } from './terminal-scroll-button';
 import { TerminalPastePreview } from './terminal-paste-preview';
 import { eventMatchesShortcut } from '@/lib/shortcuts';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
@@ -489,7 +488,6 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           />
         )}
         <div ref={paneRef} data-terminal-measure-session={activeSession?.sessionId} className="h-full w-full p-0" />
-        {terminal && <TerminalScrollButton terminal={terminal} />}
       </div>
       <ConfirmationDialog
         open={Boolean(pendingPaste)}
