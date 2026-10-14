@@ -119,21 +119,33 @@ const Terminal: React.FC = () => {
     return id;
   }, []);
 
+  const pendingFocusFrameRef = useRef<number | null>(null);
   const focusSession = useCallback((sessionId: string): void => {
-    requestAnimationFrame(() => {
-      terminalRegistry.get(sessionId)?.focus();
+    if (pendingFocusFrameRef.current !== null) cancelAnimationFrame(pendingFocusFrameRef.current);
+    const controller = terminalRegistry.get(sessionId);
+    pendingFocusFrameRef.current = requestAnimationFrame(() => {
+      pendingFocusFrameRef.current = null;
+      if (useAppStore.getState().activeSection !== 'terminal'
+        || useTerminalStore.getState().activeSessionId !== sessionId
+        || !controller || controller.sessionId !== sessionId
+        || terminalRegistry.get(sessionId) !== controller) return;
+      controller.focus();
     });
   }, []);
 
-  // Switching back to the terminal section refocuses the terminal in the
-  // group the user focused last (or the active session when not split).
+  useEffect(() => () => {
+    if (pendingFocusFrameRef.current !== null) cancelAnimationFrame(pendingFocusFrameRef.current);
+  }, []);
+
+  // The selected session takes precedence over the previously focused group
+  // when an Agent switches the section and its target in the same UI commit.
   const prevSectionRef = useRef(activeSection);
   useEffect(() => {
     const prevSection = prevSectionRef.current;
     prevSectionRef.current = activeSection;
     if (prevSection === 'terminal' || activeSection !== 'terminal') return;
     const focusedGroup = split ? findTerminalGroup(split, focusedGroupRef.current) : null;
-    const sessionId = focusedGroup?.activeSessionId || activeSessionId;
+    const sessionId = activeSessionId || focusedGroup?.activeSessionId;
     if (sessionId) focusSession(sessionId);
   }, [activeSection, activeSessionId, split, focusSession]);
 

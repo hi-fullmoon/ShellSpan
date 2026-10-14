@@ -357,6 +357,14 @@ host-key prompt, another Agent owner, a disconnected terminal, or an unready
 output listener. Lease changes increment `revision` and emit an `acquired` or
 `released` frame.
 
+Before acknowledging a connected, output-ready Agent lease, the frontend selects
+and displays the lease's target terminal, commits its attachment, and verifies
+that the target xterm textarea owns DOM focus. It rechecks controller and lease
+identity after the UI commit. Failed focus leaves frontend readiness pending;
+the existing five-second readiness timeout releases the lease without PTY input.
+Deferred section/tab focus must revalidate the selected session and controller
+identity when it runs, and discard obsolete requests or requests after unmount.
+
 For `boundTerminal`, a turn guard protects the frozen source terminal from
 Agent `turn/start` until `turn/end`, cancellation, failure, session closure,
 rollout rollback, or user takeover. Individual commands still acquire their own

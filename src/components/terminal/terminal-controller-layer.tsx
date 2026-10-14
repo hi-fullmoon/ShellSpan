@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useReconnectSession } from '@/hooks/useReconnectSession';
 import { terminalRegistry } from './registry/terminal-registry';
@@ -413,14 +414,45 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
         || activeLeases.get(lease.sessionId)?.lease.operationId !== lease.operationId
       ) return;
 
+      let terminalFocused = false;
+      if (controller && controller.sessionId === lease.sessionId
+        && terminalRegistry.get(lease.sessionId) === controller) {
+        // Commit the target pane's attachment before focusing xterm. The backend
+        // cannot start writing the command until the readiness acknowledgement.
+        flushSync(() => {
+          useTerminalStore.getState().setActiveSession(lease.sessionId);
+          useAppStore.getState().setActiveSection('terminal');
+        });
+        // Switching sections can synchronously dispose or rebind a controller.
+        // Never focus the captured instance after its lease or identity changed.
+        if (disposed || activeLeases.get(lease.sessionId) !== active
+          || controller.sessionId !== lease.sessionId
+          || terminalRegistry.get(lease.sessionId) !== controller) return;
+        controller.focus();
+        if (disposed || activeLeases.get(lease.sessionId) !== active
+          || controller.sessionId !== lease.sessionId
+          || terminalRegistry.get(lease.sessionId) !== controller) return;
+        terminalFocused = Boolean(controller.terminal.textarea?.isConnected
+          && document.activeElement === controller.terminal.textarea
+          && useTerminalStore.getState().activeSessionId === lease.sessionId
+          && useAppStore.getState().activeSection === 'terminal');
+      }
+      const terminalConnected = useTerminalStore.getState().sessions.some(
+        (session) => session.sessionId === lease.sessionId && session.status === 'connected',
+      );
+      if (terminalConnected && outputListenerReady && !terminalFocused) {
+        // Leave readiness pending: the backend times out and releases the lease
+        // without writing anything if the target cannot receive focus.
+        logger.warn(`Target terminal focus failed before Agent input for ${lease.sessionId}`);
+        return;
+      }
+
       try {
         await invokeAgentTerminalLeaseReady({
           sessionId: lease.sessionId,
           agentSessionId: lease.agentSessionId,
           operationId: lease.operationId,
-          terminalConnected: useTerminalStore.getState().sessions.some(
-            (session) => session.sessionId === lease.sessionId && session.status === 'connected',
-          ),
+          terminalConnected,
           outputListenerReady,
           hasPendingUserInput: controller?.hasPendingUserInput() ?? false,
           hasUnverifiedUserSubmission: controller?.hasUnverifiedUserSubmission() ?? false,

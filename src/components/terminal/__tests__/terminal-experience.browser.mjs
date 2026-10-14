@@ -28,6 +28,7 @@ const server = await createServer({
       return `
         export { default as React } from 'react';
         export { createRoot } from 'react-dom/client';
+        export { flushSync } from 'react-dom';
         export { Terminal } from '@xterm/xterm';
         export { SearchAddon } from '@xterm/addon-search';
         export { TerminalSearch } from '/src/components/terminal/terminal-search.tsx';
@@ -36,6 +37,7 @@ const server = await createServer({
         export { TerminalCloseDetails } from '/src/components/terminal/terminal-close-details.tsx';
         export { TerminalPane } from '/src/components/terminal/terminal-pane.tsx';
         export { TerminalCarousel } from '/src/components/terminal/terminal-carousel.tsx';
+        export { default as TerminalWorkspace } from '/src/components/terminal/index.tsx';
         export { agentTerminalLeaseState } from '/src/components/terminal/agent-terminal-lease-state.ts';
         export { createAgentTerminalLeaseCoordinator } from '/src/components/terminal/terminal-controller-layer.tsx';
         export { FitAddon } from '@xterm/addon-fit';
@@ -613,6 +615,164 @@ try {
     assert.equal(failure.cursorVisible, false);
     assert.equal(failure.cursorInitiallyVisible, true);
     assert.equal(failure.cursorRestored, true);
+  }
+  for (const width of [1200, 400]) {
+    await page.setViewportSize({ width, height: 700 });
+    const focusResult = await page.evaluate(async () => {
+      const { React, createRoot, flushSync, TerminalCarousel, terminalRegistry, useTerminalStore,
+        useAppStore, createAgentTerminalLeaseCoordinator } = window.runtime;
+      const store = useTerminalStore.getState();
+      const id = store.beginConnectionAttempt(window.identity);
+      store.setStatus(id, { sessionId: id, status: 'disconnected' });
+      const controller = terminalRegistry.create(id, store.setStatus, store.setClosed,
+        () => useTerminalStore.getState().sessions.find((session) => session.sessionId === id).status,
+        () => {});
+      const otherId = store.beginConnectionAttempt(window.identity);
+      store.setStatus(otherId, { sessionId: otherId, status: 'disconnected' });
+      const otherController = terminalRegistry.create(otherId, store.setStatus, store.setClosed,
+        () => useTerminalStore.getState().sessions.find((session) => session.sessionId === otherId).status,
+        () => {});
+      const host = document.createElement('div');
+      host.style.cssText = 'position:fixed;inset:0;background:white';
+      document.body.appendChild(host);
+      const input = document.createElement('textarea');
+      host.appendChild(input);
+      const pane = document.createElement('div');
+      pane.style.cssText = 'position:relative;height:300px';
+      host.appendChild(pane);
+      const root = createRoot(pane);
+      window.dialogRoot.render(null);
+      const Surface = () => {
+        const section = useAppStore((state) => state.activeSection);
+        const activeId = useTerminalStore((state) => state.activeSessionId);
+        const sessions = useTerminalStore((state) => state.sessions);
+        return React.createElement(TerminalCarousel, {
+          sessions: sessions.filter((session) => session.sessionId === id || session.sessionId === otherId),
+          activeSessionId: activeId,
+          isActive: section === 'terminal', isVisible: section === 'terminal',
+          onActivate: store.setActiveSession, onSettle: () => {},
+        });
+      };
+      useAppStore.getState().setActiveSection('terminal');
+      store.setActiveSession(otherId);
+      flushSync(() => root.render(React.createElement(Surface)));
+      otherController.focus();
+      const otherInitiallyFocused = document.activeElement === otherController.terminal.textarea;
+      flushSync(() => useAppStore.getState().setActiveSection('workbench'));
+      input.focus();
+      const coordinator = createAgentTerminalLeaseCoordinator();
+      const reboundId = crypto.randomUUID();
+      const lease = {
+        sessionId: id, agentSessionId: crypto.randomUUID(), taskId: crypto.randomUUID(),
+        operationId: crypto.randomUUID(), acquiredAtUnixMs: Date.now(), state: 'acquired',
+      };
+      try {
+        await coordinator.handle(lease);
+        const focused = document.activeElement === controller.terminal.textarea;
+        await new Promise(requestAnimationFrame);
+        const focusedAfterFrame = document.activeElement === controller.terminal.textarea;
+        input.focus();
+        await coordinator.handle(lease);
+        await coordinator.handle({ ...lease, operationId: crypto.randomUUID(), state: 'activity', commandPhase: 'typing' });
+        const duplicatePreservedFocus = document.activeElement === input;
+        flushSync(() => store.setActiveSession(otherId));
+        otherController.focus();
+        await coordinator.handle({ ...lease, operationId: crypto.randomUUID() });
+        const result = {
+          otherInitiallyFocused, focused, focusedAfterFrame, duplicatePreservedFocus,
+          nextCommandFocused: document.activeElement === controller.terminal.textarea,
+          selected: useTerminalStore.getState().activeSessionId === id,
+          visible: useAppStore.getState().activeSection === 'terminal',
+        };
+        input.focus();
+        const pending = coordinator.handle({ ...lease, operationId: crypto.randomUUID() });
+        // Let acquisition capture its controller and await output readiness,
+        // then exercise the real reconnect/rebind lifecycle before it resumes.
+        await Promise.resolve();
+        terminalRegistry.rebindSession(id, reboundId);
+        await pending;
+        return { ...result, rebindPreservedFocus: document.activeElement === input };
+      } finally {
+        coordinator.dispose();
+        root.unmount();
+        terminalRegistry.dispose(id);
+        terminalRegistry.dispose(reboundId);
+        terminalRegistry.dispose(otherId);
+        store.removeSession(id);
+        store.removeSession(otherId);
+        host.remove();
+      }
+    });
+    assert.deepEqual(focusResult, {
+      otherInitiallyFocused: true, focused: true, focusedAfterFrame: true, duplicatePreservedFocus: true,
+      nextCommandFocused: true, selected: true, visible: true, rebindPreservedFocus: true,
+    });
+  }
+  for (const width of [1200, 400]) {
+    await page.setViewportSize({ width, height: 700 });
+    const splitFocus = await page.evaluate(async () => {
+      const { React, createRoot, flushSync, TerminalWorkspace, terminalRegistry,
+        useTerminalStore, useAppStore, createAgentTerminalLeaseCoordinator } = window.runtime;
+      const previousSessions = useTerminalStore.getState().sessions;
+      const ids = [crypto.randomUUID(), crypto.randomUUID()];
+      useTerminalStore.setState({ sessions: [], activeSessionId: null, restoredLayout: null });
+      useTerminalStore.getState().addRestoredSessions(ids.map((sessionId) => ({ ...window.identity, sessionId })));
+      useTerminalStore.setState({ activeSessionId: ids[0], restoredLayout: {
+        kind: 'split', orientation: 'horizontal', split: 0.5,
+        first: { kind: 'group', id: 'first', sessionIds: [ids[0]], activeSessionId: ids[0] },
+        second: { kind: 'group', id: 'second', sessionIds: [ids[1]], activeSessionId: ids[1] },
+      } });
+      useAppStore.setState({ activeSection: 'terminal', restoreWorkspace: false });
+      const host = document.createElement('div');
+      host.style.cssText = 'position:fixed;inset:0;background:white';
+      document.body.appendChild(host);
+      const input = document.createElement('textarea');
+      host.appendChild(input);
+      const surface = document.createElement('div');
+      surface.style.cssText = 'height:500px;position:relative';
+      host.appendChild(surface);
+      const root = createRoot(surface);
+      const coordinator = createAgentTerminalLeaseCoordinator();
+      const focusedIds = [];
+      const recordFocus = (event) => {
+        for (const id of ids) if (event.target === terminalRegistry.get(id)?.terminal.textarea) focusedIds.push(id);
+      };
+      try {
+        flushSync(() => root.render(React.createElement(TerminalWorkspace)));
+        await new Promise(requestAnimationFrame);
+        await new Promise(requestAnimationFrame);
+        const first = terminalRegistry.get(ids[0]);
+        first.focus();
+        const sourceInitiallyFocused = document.activeElement === first.terminal.textarea;
+        flushSync(() => useAppStore.getState().setActiveSection('workbench'));
+        input.focus();
+        document.addEventListener('focusin', recordFocus);
+        await coordinator.handle({
+          sessionId: ids[1], agentSessionId: crypto.randomUUID(), taskId: crypto.randomUUID(),
+          operationId: crypto.randomUUID(), acquiredAtUnixMs: Date.now(), state: 'acquired',
+        });
+        await new Promise(requestAnimationFrame);
+        await new Promise(requestAnimationFrame);
+        return {
+          sourceInitiallyFocused,
+          targetFocused: document.activeElement === terminalRegistry.get(ids[1]).terminal.textarea,
+          focusedOtherTerminal: focusedIds.includes(ids[0]),
+          targetFocusObserved: focusedIds.includes(ids[1]),
+          targetGroupSelected: surface.querySelector('[data-terminal-group="second"] [data-session-tab][aria-selected="true"]') !== null,
+        };
+      } finally {
+        document.removeEventListener('focusin', recordFocus);
+        coordinator.dispose();
+        root.unmount();
+        for (const id of ids) terminalRegistry.dispose(id);
+        useTerminalStore.setState({ sessions: previousSessions, activeSessionId: window.identity.sessionId, restoredLayout: null });
+        host.remove();
+      }
+    });
+    assert.deepEqual(splitFocus, {
+      sourceInitiallyFocused: true, targetFocused: true, focusedOtherTerminal: false,
+      targetFocusObserved: true, targetGroupSelected: true,
+    });
   }
   const carouselResize = await page.evaluate(async ({ output, identity }) => {
     const { React, createRoot, TerminalCarousel, terminalRegistry, useTerminalStore } = window.runtime;

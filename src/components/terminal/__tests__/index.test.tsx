@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { act, render, screen, fireEvent, within } from '@testing-library/react';
 import Terminal from '../index';
 import { useTerminalStore } from '@/stores/terminalStore';
+import { useAppStore } from '@/stores/appStore';
 import { terminalRegistry } from '../registry/terminal-registry';
 
 const mockConnect = vi.fn();
@@ -77,6 +78,19 @@ vi.mock('../terminal-context-menu', () => ({
 }));
 
 const initialState = useTerminalStore.getState();
+const focusControllers: Array<{ controller: ReturnType<typeof terminalRegistry.create>; host: HTMLElement }> = [];
+
+function attachFocusController(sessionId: string) {
+  const store = useTerminalStore.getState();
+  const controller = terminalRegistry.create(sessionId, store.setStatus, store.setClosed,
+    (id) => useTerminalStore.getState().sessions.find((session) => session.sessionId === id)?.status ?? 'disconnected',
+    () => {});
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  controller.attach(host);
+  focusControllers.push({ controller, host });
+  return controller;
+}
 
 describe('Terminal', () => {
   beforeEach(() => {
@@ -86,6 +100,11 @@ describe('Terminal', () => {
 
   afterEach(async () => {
     await new Promise((resolve) => setTimeout(resolve, 60));
+    for (const { controller, host } of focusControllers) {
+      controller.dispose();
+      host.remove();
+    }
+    focusControllers.length = 0;
   });
 
   it('renders the empty state with a new-connection button when there are no sessions', () => {
@@ -205,18 +224,47 @@ describe('Terminal', () => {
   });
 
   it('focuses the terminal when its active tab is clicked', async () => {
+    useAppStore.getState().setActiveSection('terminal');
     useTerminalStore.getState().addSession({
       sessionId: 's1', title: 'Session A', host: 'h', port: 22, username: 'u',
     });
-    const focus = vi.fn();
-    vi.spyOn(terminalRegistry, 'get').mockReturnValue({ focus } as never);
+    const controller = attachFocusController('s1');
 
     render(<Terminal />);
     fireEvent.pointerDown(screen.getByRole('tab'), { button: 0 });
     await act(async () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
 
-    expect(focus).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(controller.terminal.textarea);
   });
+
+  it.each(['sectionChanged', 'controllerReplaced', 'unmounted'] as const)(
+    'discards delayed focus when the terminal is %s before the next frame', async (transition) => {
+      useAppStore.getState().setActiveSection('terminal');
+      useTerminalStore.getState().addSession({
+        sessionId: 's1', title: 'Session A', host: 'h', port: 22, username: 'u',
+      });
+      const controller = attachFocusController('s1');
+      const input = document.createElement('textarea');
+      document.body.appendChild(input);
+      const view = render(<Terminal />);
+      try {
+        fireEvent.pointerDown(screen.getByRole('tab'), { button: 0 });
+        if (transition === 'sectionChanged') {
+          act(() => useAppStore.getState().setActiveSection('workbench'));
+        } else if (transition === 'controllerReplaced') {
+          controller.dispose();
+          attachFocusController('s1');
+        } else {
+          view.unmount();
+        }
+        input.focus();
+        await act(async () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+        expect(document.activeElement).toBe(input);
+      } finally {
+        input.remove();
+      }
+    },
+  );
 
   it('uses native scrolling to switch across multiple terminals without a settle lock', async () => {
     ['s1', 's2', 's3'].forEach((sessionId) => {
@@ -588,13 +636,14 @@ describe('Terminal', () => {
   });
 
   it('moves focus between split groups via the pane navigation event', async () => {
+    useAppStore.getState().setActiveSection('terminal');
     ['s1', 's2'].forEach((sessionId) => {
       useTerminalStore.getState().addSession({
         sessionId, title: sessionId, host: 'h', port: 22, username: 'u',
       });
     });
-    const focus = vi.fn();
-    vi.spyOn(terminalRegistry, 'get').mockReturnValue({ focus } as never);
+    const first = attachFocusController('s1');
+    const second = attachFocusController('s2');
 
     render(<Terminal />);
     fireEvent.contextMenu(screen.getAllByRole('tab')[0], { clientX: 10, clientY: 20 });
@@ -621,7 +670,8 @@ describe('Terminal', () => {
     expect(useTerminalStore.getState().activeSessionId).toBe('s1');
 
     await act(async () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
-    expect(focus).toHaveBeenCalled();
+    expect(document.activeElement).toBe(first.terminal.textarea);
+    expect(document.activeElement).not.toBe(second.terminal.textarea);
   });
 
   it('moves a pinned tab to the front of its split group', () => {

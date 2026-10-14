@@ -82,6 +82,14 @@ vi.mock('@/lib/ipc/tauri', () => ({
 }));
 
 const initialState = useTerminalStore.getState();
+const terminalHosts = new Set<HTMLElement>();
+
+function attachTerminal(id: string): void {
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  terminalHosts.add(host);
+  terminalRegistry.get(id)!.attach(host);
+}
 
 function addSession(id: string): void {
   useTerminalStore.getState().addSession({
@@ -177,6 +185,8 @@ describe('TerminalControllerLayer', () => {
   afterEach(() => {
     cleanupReact();
     terminalRegistry.disposeAll();
+    for (const host of terminalHosts) host.remove();
+    terminalHosts.clear();
     agentTerminalLeaseState.clearAll();
   });
 
@@ -456,6 +466,7 @@ describe('TerminalControllerLayer', () => {
       });
     });
     const controller = terminalRegistry.get('s1')!;
+    attachTerminal('s1');
     const release = vi.fn();
     const suppressInput = controller.suppressUserInput.bind(controller);
     vi.spyOn(controller, 'suppressUserInput').mockImplementation((onBlocked) => {
@@ -754,6 +765,7 @@ describe('TerminalControllerLayer', () => {
 
   it('reports every bounded ready preflight guard', async () => {
     const controller = seedController();
+    attachTerminal('s1');
     act(() => {
       addSession('s1');
       useTerminalStore.getState().setStatus('s1', {
@@ -781,6 +793,69 @@ describe('TerminalControllerLayer', () => {
     coordinator.dispose();
   });
 
+  it('acknowledges a connected target only after its input receives focus', async () => {
+    const controller = seedController();
+    attachTerminal('s1');
+    addSession('s1');
+    useTerminalStore.getState().setStatus('s1', { sessionId: 's1', status: 'connected' });
+    await controller.whenOutputReady();
+    const input = document.createElement('textarea');
+    document.body.appendChild(input);
+    input.focus();
+    let acknowledgedDuringFocus = false;
+    let observedFocus = false;
+    const recordFocus = (): void => {
+      observedFocus = document.activeElement === controller.terminal.textarea;
+      acknowledgedDuringFocus = vi.mocked(invokeAgentTerminalLeaseReady).mock.calls.length > 0;
+    };
+    controller.terminal.textarea!.addEventListener('focus', recordFocus);
+    const coordinator = createAgentTerminalLeaseCoordinator();
+    try {
+      await coordinator.handle(leaseEvent('operation-focused').payload);
+      expect(observedFocus).toBe(true);
+      expect(acknowledgedDuringFocus).toBe(false);
+      expect(document.activeElement).toBe(controller.terminal.textarea);
+      expect(invokeAgentTerminalLeaseReady).toHaveBeenCalledWith(expect.objectContaining({
+        sessionId: 's1', operationId: 'operation-focused',
+        terminalConnected: true, outputListenerReady: true,
+      }));
+    } finally {
+      controller.terminal.textarea!.removeEventListener('focus', recordFocus);
+      coordinator.dispose();
+      input.remove();
+    }
+  });
+
+  it.each(['detached', 'redirected'] as const)(
+    'keeps connected, output-ready input gated when target focus is %s', async (failure) => {
+      const controller = seedController();
+      attachTerminal('s1');
+      addSession('s1');
+      useTerminalStore.getState().setStatus('s1', { sessionId: 's1', status: 'connected' });
+      await controller.whenOutputReady();
+      const input = document.createElement('textarea');
+      document.body.appendChild(input);
+      input.focus();
+      const redirectFocus = (): void => input.focus();
+      if (failure === 'detached') controller.detach();
+      else controller.terminal.textarea!.addEventListener('focus', redirectFocus);
+      const coordinator = createAgentTerminalLeaseCoordinator();
+      try {
+        await coordinator.handle(leaseEvent('operation-focus-failed').payload);
+        expect(document.activeElement).toBe(input);
+        expect(invokeAgentTerminalLeaseReady).not.toHaveBeenCalled();
+        expect(agentTerminalLeaseState.get('s1')).toMatchObject({
+          operationId: 'operation-focus-failed', terminalOwned: true,
+        });
+        await expect(controller.writeUserInput('must remain blocked')).resolves.toBe(false);
+      } finally {
+        controller.terminal.textarea!.removeEventListener('focus', redirectFocus);
+        coordinator.dispose();
+        input.remove();
+      }
+    },
+  );
+
   it('rejects readiness when the terminal controller and output listener are unavailable', async () => {
     const coordinator = createAgentTerminalLeaseCoordinator();
     await coordinator.handle(leaseEvent('operation-missing', 'acquired', {
@@ -803,6 +878,7 @@ describe('TerminalControllerLayer', () => {
 
   it('does not acknowledge an operation after it is superseded while listeners initialize', async () => {
     const controller = seedController();
+    attachTerminal('s1');
     act(() => {
       addSession('s1');
       useTerminalStore.getState().setStatus('s1', {
