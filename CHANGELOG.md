@@ -2,6 +2,33 @@
 
 Notable changes to ShellSpan from v2.1.0 onward are documented in this file.
 
+## [v2.2.0](https://github.com/hi-fullmoon/ShellSpan/releases/tag/v2.2.0) - 2026-10-14
+
+### 新增功能
+
+- SFTP 文件列表高亮显示搜索匹配内容，便于定位文件。
+
+### 体验改进
+
+- 切换终端时保留 Agent 会话状态，减少重复加载。
+- 终端滚动条统一为 10px，并增加显示、隐藏过渡；遵循系统减少动态效果设置。
+- 移除终端跳转到最新输出按钮，调整分隔栏时减少终端重绘。
+- 优化顶部导航图标与文字对齐、连接菜单常用操作排序，以及 SFTP 搜索框、传输状态栏和进度条布局。
+- 优化 AI 队列标题和权限菜单排版，避免权限标题换行。
+
+### 问题修复
+
+- 修复 Agent 上下文预算恢复及继承工具结果处理问题。
+- 修复从 SFTP 打开终端时启动命令重复回显的问题。
+- 修复取消传输后松开指针可能误取消下一项任务的问题。
+- 修复模型菜单关闭期间内容变化的问题。
+- 修复 Agent 输入前未聚焦其绑定终端的问题。
+
+### 升级注意事项
+
+- Windows 需要 WebView2 Runtime 133 或更高版本。
+- macOS 尚未配置 Apple Developer ID 和公证，Windows 尚未配置发布者证书；更新包签名不替代操作系统代码签名。
+
 ## [v2.1.4](https://github.com/hi-fullmoon/ShellSpan/releases/tag/v2.1.4) - 2026-10-12
 
 ### 升级注意事项
