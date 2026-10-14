@@ -447,51 +447,53 @@ export function AiComposerSeat({
       data-composer-seat=""
       data-phase={phase}
       data-ai-mode={mode}
-      className="ai-composer-seat relative mx-auto flex w-full min-w-0 max-w-[calc(var(--ai-composer-card-max-width)+var(--ai-shell-clearance)+var(--ai-shell-clearance))] shrink-0 flex-col gap-[var(--ai-composer-stack-gap)] px-[var(--ai-shell-clearance)] py-2"
+      className="ai-composer-seat relative mx-auto flex max-h-full min-h-0 w-full min-w-0 max-w-[calc(var(--ai-composer-card-max-width)+var(--ai-shell-clearance)+var(--ai-shell-clearance))] flex-col gap-[var(--ai-composer-stack-gap)] overflow-y-auto px-[var(--ai-shell-clearance)] py-2"
     >
-      {mode === 'agent' && (
-        <AiTaskStrip steps={taskSteps} active={status === 'running' || status === 'waiting'} />
-      )}
-      {completion.dialog}
-      {mode === 'agent' && <AiQueueDock
-        items={queueItems}
-        mutation={queueMutation}
-        running={status === 'running'}
-        mutable={!stopping && queueMutable && !['completed', 'cancelled'].includes(status)}
-        resumeOnly={status === 'failed'}
-        onUpdate={onUpdateQueueItem}
-        onRemove={onRemoveQueueItem}
-        onSteer={onSteerQueueItem}
-        onResume={onResumeQueueItem}
-        onReorder={onReorderQueueLane}
-      />}
-      {statusNotices}
-      {mode === 'agent' && executionSurfaceNotice}
-      {pendingQuestion && <AiQuestionPanel key={questionKey(pendingQuestion.identity)} question={pendingQuestion} onAnswer={onAnswerQuestion} />}
-      {waitingApproval && pendingApproval && (
-        <div
-          data-slot="ai-approval-overlay"
-          className="min-h-0 min-w-0 [&>[data-slot=ai-approval-panel]]:max-h-[min(600px,45dvh)]"
-        >
-          <AiApprovalPanel
-            approval={{
-              ...pendingApproval,
-              arguments: approvalArguments ?? pendingApproval.arguments,
-            }}
-            decision={approvalDecision}
-            error={approvalError}
-            argumentsLoading={approvalArgumentsLoading}
-            argumentsError={approvalArgumentsError}
-            onApprove={() => onApprove?.()}
-            onReject={() => onReject?.()}
-            onOpenDetails={() => onOpenApprovalDetails?.()}
-          />
-        </div>
-      )}
+      <div data-slot="ai-composer-notices" className="flex shrink-0 flex-col gap-[var(--ai-composer-stack-gap)] empty:hidden">
+        {mode === 'agent' && (
+          <AiTaskStrip steps={taskSteps} active={status === 'running' || status === 'waiting'} />
+        )}
+        {completion.dialog}
+        {mode === 'agent' && <AiQueueDock
+          items={queueItems}
+          mutation={queueMutation}
+          running={status === 'running'}
+          mutable={!stopping && queueMutable && !['completed', 'cancelled'].includes(status)}
+          resumeOnly={status === 'failed'}
+          onUpdate={onUpdateQueueItem}
+          onRemove={onRemoveQueueItem}
+          onSteer={onSteerQueueItem}
+          onResume={onResumeQueueItem}
+          onReorder={onReorderQueueLane}
+        />}
+        {statusNotices}
+        {mode === 'agent' && executionSurfaceNotice}
+        {pendingQuestion && <AiQuestionPanel key={questionKey(pendingQuestion.identity)} question={pendingQuestion} onAnswer={onAnswerQuestion} />}
+        {waitingApproval && pendingApproval && (
+          <div
+            data-slot="ai-approval-overlay"
+            className="min-h-0 min-w-0 [&>[data-slot=ai-approval-panel]]:max-h-[min(600px,45dvh)]"
+          >
+            <AiApprovalPanel
+              approval={{
+                ...pendingApproval,
+                arguments: approvalArguments ?? pendingApproval.arguments,
+              }}
+              decision={approvalDecision}
+              error={approvalError}
+              argumentsLoading={approvalArgumentsLoading}
+              argumentsError={approvalArgumentsError}
+              onApprove={() => onApprove?.()}
+              onReject={() => onReject?.()}
+              onOpenDetails={() => onOpenApprovalDetails?.()}
+            />
+          </div>
+        )}
+      </div>
       {
-        <div ref={completionAnchor} className="ai-composer-input-anchor relative min-w-0">
+        <div ref={completionAnchor} className="ai-composer-input-anchor relative flex min-h-24 min-w-0 shrink flex-col">
           <InputGroup ref={cardRef} className={cn(
-            'h-auto flex-col items-stretch gap-0 overflow-hidden',
+            'h-auto min-h-0 flex-col items-stretch gap-0 overflow-hidden [&>.ai-composer-editor-wrap]:min-h-0 [&>.ai-composer-editor-wrap]:grid-rows-[minmax(0,1fr)]',
             dragActive && 'ring-2 ring-primary',
             !imageControls && (phase === 'hero' ? 'pt-1.5' : 'pt-2.5'),
           )} data-composer-card="" onClick={event => {
@@ -522,7 +524,7 @@ export function AiComposerSeat({
               onBlur={() => { completion.editorProps.onBlur(); skillCompletion.editorProps.onBlur(); }}
               data-testid="ai-workspace-composer"
               className={cn(
-                'w-full shrink-0 overflow-y-auto pt-1 pr-3 pb-0 pl-4 [field-sizing:content] max-h-[min(336px,42vh)]',
+                'w-full shrink overflow-y-auto pt-1 pr-3 pb-0 pl-4 [field-sizing:content] max-h-[min(336px,42vh)]',
                 phase === 'hero' ? 'min-h-13' : 'min-h-7',
               )}
               aria-describedby={unavailableReason ? availabilityHintId : undefined}
@@ -581,7 +583,7 @@ export function AiComposerSeat({
               </AiDraftAttachmentRail>
               </UnifiedAttachmentContext>
             </InputGroupAddon>}
-            <InputGroupAddon align="block-end" className="ai-composer-toolbar mt-3 min-h-10.5 min-w-0 justify-between gap-3 px-2 pt-0.5 pb-1.5 @max-[400px]/ai-workspace:gap-1 @max-[400px]/ai-workspace:px-[7px]" onClick={event => {
+            <InputGroupAddon align="block-end" className="ai-composer-toolbar mt-3 min-h-10.5 min-w-0 shrink-0 justify-between gap-3 px-2 pt-0.5 pb-1.5 @max-[400px]/ai-workspace:gap-1 @max-[400px]/ai-workspace:px-[7px]" onClick={event => {
               // Portal menu clicks bubble through React without occurring inside the toolbar.
               if (!event.currentTarget.contains(event.target as Node)) return;
               if (!(event.target as HTMLElement).closest('button, [role="button"]')) completion.editor.current?.focus();

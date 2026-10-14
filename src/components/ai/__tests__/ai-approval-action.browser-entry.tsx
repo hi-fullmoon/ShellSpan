@@ -31,15 +31,18 @@ export async function showComposer(approval: AiApprovalPanelProps['approval']) {
   const record = (action: string) => { document.body.dataset.action = action; };
   delete document.body.dataset.action;
   flushSync(() => root.render(
-    <main className="ai-panel-shell @container/ai-workspace flex h-dvh min-h-0 min-w-0 flex-col" data-ai-scope="terminal">
+    <main className="ai-panel-shell ai-workspace-root @container/ai-workspace flex h-dvh min-h-0 min-w-0 flex-col" data-ai-scope="terminal">
       <header className="h-14 shrink-0">Terminal Agent</header>
-      <div className="min-h-0 flex-1" />
-      <AiComposerSeat phase="active" status="waiting" pendingApproval={approval}
-        executionSurfaceNotice={<AgentTerminalBusyNotice disabled onSwitchDirect={() => { throw new Error('Execution surface is locked during approval'); }} />}
-        composerState={createAiComposerState({ phase: 'waitingApproval', runtimeStatus: 'waiting',
-          waitingApproval: true, sessionId: approval.sessionId, draft: 'preserved draft' })}
-        onApprove={() => record('approve')} onReject={() => record('reject')}
-        onOpenApprovalDetails={() => record('details')} />
+      <div data-slot="ai-workspace-body" className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="min-h-0 flex-1" />
+        <AiComposerSeat phase="active" status="waiting" pendingApproval={approval}
+          executionSurfaceNotice={<AgentTerminalBusyNotice disabled onSwitchDirect={() => { throw new Error('Execution surface is locked during approval'); }} />}
+          composerState={createAiComposerState({ phase: 'waitingApproval', runtimeStatus: 'waiting',
+            waitingApproval: true, sessionId: approval.sessionId, draft: 'preserved draft' })}
+          onApprove={() => record('approve')} onReject={() => record('reject')}
+          onSubmitGesture={() => record('queue')}
+          onOpenApprovalDetails={() => record('details')} />
+      </div>
     </main>,
   ));
 }

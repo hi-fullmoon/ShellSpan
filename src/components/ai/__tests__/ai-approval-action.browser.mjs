@@ -102,6 +102,8 @@ try {
           const { showComposer } = await import(args.entry);
           await showComposer(args.approval);
         }, { entry, approval: { ...approval, arguments: { path: longPath } } });
+        const multilineDraft = Array.from({ length: 20 }, (_, index) => `草稿第 ${index + 1} 行`).join('\n');
+        await page.locator('[data-composer-editor]').fill(multilineDraft);
         const composerGeometry = await page.locator('[data-composer-seat]').evaluate(seat => {
           const panel = seat.querySelector('[data-slot="ai-approval-panel"]').getBoundingClientRect();
           const input = seat.querySelector('[data-composer-card]').getBoundingClientRect();
@@ -113,8 +115,23 @@ try {
           `Approval and input must fit together at ${width}x520: ${JSON.stringify(composerGeometry)}`);
         assert.ok(composerGeometry.panelBottom <= composerGeometry.inputTop, 'Approval must be above the input');
         assert.ok(composerGeometry.footerBottom <= composerGeometry.height, 'Approval actions must remain visible');
-        assert.equal(await page.locator('[data-composer-editor]').textContent(), 'preserved draft');
-        await page.screenshot({ path: '/tmp/shellspan-approval-composer-audit.png' });
+        assert.equal(await page.locator('[data-composer-editor]').textContent(), multilineDraft);
+        const editorGeometry = await page.locator('[data-composer-editor]').evaluate(el => {
+          el.scrollTop = el.scrollHeight;
+          return { height: el.clientHeight, scrollHeight: el.scrollHeight, scrollTop: el.scrollTop };
+        });
+        assert.ok(editorGeometry.height > 0 && editorGeometry.scrollHeight > editorGeometry.height && editorGeometry.scrollTop > 0,
+          `The complete multiline draft must remain scrollable: ${JSON.stringify(editorGeometry)}`);
+        const primaryHit = await page.locator('.ai-composer-primary').evaluate(el => {
+          const box = el.getBoundingClientRect();
+          const target = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+          return { clickable: el.contains(target), box: box.toJSON(), target: target?.outerHTML.slice(0, 180),
+            card: el.closest('[data-composer-card]').getBoundingClientRect().toJSON() };
+        });
+        assert.ok(primaryHit.clickable, `The queue button must remain visible and reachable with a multiline draft: ${JSON.stringify(primaryHit)}`);
+        await page.screenshot({ path: `/tmp/shellspan-approval-composer-${engine.name()}-${width}.png` });
+        await page.locator('.ai-composer-primary').click();
+        assert.equal(await page.locator('body').getAttribute('data-action'), 'queue');
         const viewportGeometry = await page.locator('[data-slot="scroll-area-viewport"]').evaluate(el => ({
           height: el.clientHeight, scrollHeight: el.scrollHeight, overflow: getComputedStyle(el).overflowY,
           box: el.getBoundingClientRect().toJSON(),
@@ -133,7 +150,18 @@ try {
         assert.ok(hit.clickable, JSON.stringify({ hit, viewportGeometry }));
         await page.getByRole('button', { name: '取消', exact: true }).click();
         assert.equal(await page.locator('body').getAttribute('data-action'), 'reject');
-        assert.equal(await page.locator('[data-composer-editor]').textContent(), 'preserved draft');
+        assert.equal(await page.locator('[data-composer-editor]').textContent(), multilineDraft);
+        await page.setViewportSize({ width, height: 300 });
+        const compactGeometry = await page.locator('[data-composer-seat]').evaluate(el => ({
+          bottom: el.getBoundingClientRect().bottom, viewport: innerHeight,
+          height: el.clientHeight, scrollHeight: el.scrollHeight,
+        }));
+        assert.ok(compactGeometry.bottom <= compactGeometry.viewport && compactGeometry.scrollHeight > compactGeometry.height,
+          `A short window must keep the composer within the viewport and scrollable: ${JSON.stringify(compactGeometry)}`);
+        await page.locator('.ai-composer-primary').click();
+        assert.equal(await page.locator('body').getAttribute('data-action'), 'queue');
+        await page.getByRole('button', { name: '取消', exact: true }).click();
+        assert.equal(await page.locator('body').getAttribute('data-action'), 'reject');
         assert.deepEqual(errors, []);
         await page.close();
       }
