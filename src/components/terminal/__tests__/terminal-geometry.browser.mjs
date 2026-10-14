@@ -34,6 +34,49 @@ try {
   const address = server.httpServer.address();
   await page.goto(`http://127.0.0.1:${address.port}/geometry`);
   await page.waitForFunction(() => getComputedStyle(document.body).margin === '0px');
+  await page.evaluate(async () => {
+    const { TERMINAL_CONTAINER_CLASS } = await import('/src/components/terminal/registry/terminal-geometry.ts');
+    const { Terminal } = await import('/node_modules/@xterm/xterm/lib/xterm.mjs');
+    const container = document.createElement('div');
+    container.id = 'scrollbar-transition';
+    container.className = TERMINAL_CONTAINER_CLASS;
+    document.getElementById('pane').appendChild(container);
+    window.scrollbarTerminal = new Terminal({ rows: 10 });
+    window.scrollbarTerminal.open(container);
+    await new Promise((resolve) => window.scrollbarTerminal.write('\r\n'.repeat(40), resolve));
+  });
+  const scrollbar = page.locator('#scrollbar-transition .scrollbar.vertical');
+  await page.mouse.move(1200, 750);
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('#scrollbar-transition .scrollbar.vertical')).opacity === '0');
+  await page.mouse.move(100, 100);
+  await page.waitForFunction(() => document.querySelector('#scrollbar-transition .scrollbar.vertical').classList.contains('visible'));
+  assert.equal(await scrollbar.evaluate((bar) => getComputedStyle(bar).transitionDuration), '0.18s');
+  await page.waitForFunction(() => {
+    const opacity = Number(getComputedStyle(document.querySelector('#scrollbar-transition .scrollbar.vertical')).opacity);
+    return opacity > 0 && opacity < 1;
+  });
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('#scrollbar-transition .scrollbar.vertical')).opacity === '1');
+  await page.mouse.move(1200, 750);
+  await page.waitForFunction(() => document.querySelector('#scrollbar-transition .scrollbar.vertical').classList.contains('invisible'));
+  assert.equal(await scrollbar.evaluate((bar) => getComputedStyle(bar).transitionDuration), '0.3s');
+  assert.equal(await scrollbar.evaluate((bar) => getComputedStyle(bar).visibility), 'visible', 'The fading scrollbar must remain painted despite Tailwind invisible utility');
+  assert.equal(await scrollbar.evaluate((bar) => getComputedStyle(bar).pointerEvents), 'none', 'A fading scrollbar must not intercept terminal input');
+  await page.waitForFunction(() => {
+    const opacity = Number(getComputedStyle(document.querySelector('#scrollbar-transition .scrollbar.vertical')).opacity);
+    return opacity > 0 && opacity < 1;
+  });
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('#scrollbar-transition .scrollbar.vertical')).opacity === '0');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  assert.equal(await scrollbar.evaluate((bar) => getComputedStyle(bar).transitionDuration), '0s');
+  await page.mouse.move(100, 100);
+  await page.waitForFunction(() => document.querySelector('#scrollbar-transition .scrollbar.vertical').classList.contains('visible'));
+  assert.equal(await scrollbar.evaluate((bar) => getComputedStyle(bar).transitionDuration), '0s');
+  assert.equal(await scrollbar.evaluate((bar) => getComputedStyle(bar).pointerEvents), 'auto', 'A visible scrollbar must remain draggable');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.evaluate(() => {
+    window.scrollbarTerminal.dispose();
+    document.getElementById('scrollbar-transition').remove();
+  });
   for (const width of [1982, 1280, 640]) {
     await page.setViewportSize({ width, height: 800 });
     const edgeResult = await page.evaluate(async () => {

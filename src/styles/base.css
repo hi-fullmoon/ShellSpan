@@ -5,6 +5,25 @@
 
 @custom-variant dark (&:is([data-theme="dark"] *));
 
+.xterm .xterm-scrollable-element > .scrollbar.visible {
+  transition: opacity 180ms ease-out;
+}
+
+.xterm .xterm-scrollable-element > .scrollbar.invisible,
+.xterm .xterm-scrollable-element > .scrollbar.invisible.fade {
+  /* xterm hides with opacity; Tailwind's invisible utility must not skip the fade. */
+  visibility: visible;
+  transition: opacity 300ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .xterm .xterm-scrollable-element > .scrollbar.visible,
+  .xterm .xterm-scrollable-element > .scrollbar.invisible,
+  .xterm .xterm-scrollable-element > .scrollbar.invisible.fade {
+    transition: none;
+  }
+}
+
 /* File completion uses the popover surface directly, without a nested card. */
 .ai-completion-popup:has(> [data-file-completion]) {
   width: min(440px, var(--anchor-width));
