@@ -140,6 +140,7 @@ describe('terminalRegistry', () => {
     const host = document.createElement('div');
     controller.attach(host);
     expect(host.firstChild).toBe(controller.container);
+    expect(controller.terminal.options.overviewRuler).toEqual({ width: 10 });
     controller.write('hello');
     expect(controller.terminal.buffer.active.length).toBeGreaterThan(0);
   });

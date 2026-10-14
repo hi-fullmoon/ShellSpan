@@ -171,7 +171,7 @@ try {
         const container = document.createElement('div');
         container.className = TERMINAL_CONTAINER_CLASS;
         pane.appendChild(container);
-        const terminal = new Terminal({ fontSize, lineHeight: 1.2 });
+        const terminal = new Terminal({ fontSize, lineHeight: 1.2, overviewRuler: { width: 10 } });
         const fit = new FitAddon();
         terminal.loadAddon(fit);
         terminal.open(container);
@@ -222,6 +222,7 @@ try {
           await settle();
           const historyLength = terminal.buffer.active.length;
           const historyVisible = terminal.buffer.active.baseY > 0 && scrollbarVisible();
+          const scrollbarWidth = container.querySelector('.scrollbar.vertical').getBoundingClientRect().width;
           pane.style.height = '420px';
           handler.schedule();
           await settle();
@@ -233,7 +234,7 @@ try {
           const historyPreserved = terminal.buffer.active.length === historyLength
             && terminal.buffer.active.viewportY === 0
             && terminal.buffer.active.getLine(0).translateToString(true) === 'Terminal resize regression';
-          return { restored, remeasured, hiddenSkipped, shown, cancelled, historyVisible, historyPreserved };
+          return { restored, remeasured, hiddenSkipped, shown, cancelled, historyVisible, historyPreserved, scrollbarWidth };
         } finally {
           handler.cancel();
           terminal.dispose();
@@ -242,6 +243,7 @@ try {
           pane.style.height = '600px';
         }
       }, { fontSize });
+      assert.equal(resizeResult.scrollbarWidth, 10, `${width}px / ${fontSize}px font: scrollbar width`);
       for (const [scenario, passed] of Object.entries(resizeResult)) {
         assert.ok(passed, `${width}px / ${fontSize}px font: ${scenario}: ${JSON.stringify(resizeResult)}`);
       }

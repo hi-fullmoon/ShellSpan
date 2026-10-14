@@ -486,6 +486,7 @@ class TerminalControllerImpl implements TerminalController {
       cursorBlink: preferences.cursorBlink,
       cursorStyle: preferences.cursorStyle,
       scrollback: preferences.scrollback,
+      overviewRuler: { width: 10 },
       lineHeight: preferences.lineHeight,
       letterSpacing: preferences.letterSpacing,
     });
