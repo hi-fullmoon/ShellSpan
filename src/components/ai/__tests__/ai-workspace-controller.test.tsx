@@ -606,6 +606,7 @@ it('does not mount an empty image addon for stale image errors', () => {
     expect(screen.queryByTestId('image-draft')).not.toBeInTheDocument();
     expect(container.querySelector('.ai-image-draft-addon')).toBeNull();
   } finally {
+    cleanup();
     imageDraft.mockRestore();
   }
 });
@@ -1090,8 +1091,7 @@ describe('AiWorkspaceController', () => {
       summary: { ...base.summary, status: 'failed' },
       snapshot: { kind: 'agent', value: { ...base.snapshot.value, status: 'failed', ended: true } },
     };
-    render(<AiWorkspaceRoot scope="terminal" view={failed} readOnlySession
-      onContinueOnReconnectedTerminal={vi.fn()} />);
+    render(<AiWorkspaceRoot scope="terminal" view={failed} readOnlySession />);
     expect(screen.queryByRole('button', { name: 'Continue in reconnected terminal' })).toBeNull();
   });
 

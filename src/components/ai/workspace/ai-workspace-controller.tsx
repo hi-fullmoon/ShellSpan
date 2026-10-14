@@ -4,8 +4,10 @@ import {
 } from '@/lib/terminal/terminal-surface-semantics';
 import { useAppStore } from '@/stores/appStore';
 import { useTerminalStore } from '@/stores/terminalStore';
+import { useReconnectSession } from '@/hooks/useReconnectSession';
 import { AgentPermissionSelector } from '../agent-permission-selector';
 import { AgentExecutionSurfaceSelector } from '../agent-execution-surface-selector';
+import { AgentTerminalBusyNotice } from '../agent-terminal-busy-notice';
 import { AiComposerModelSelector } from './ai-composer-model-selector';
 import { AiWorkspaceRoot } from './ai-workspace-root';
 import { AiImageDraftControls } from './ai-image-attachments';
@@ -26,6 +28,7 @@ export function AiWorkspaceController({
   onClose,
 }: AiWorkspaceControllerProps): React.ReactNode {
   const controller = useAiSessionController({ scope, adapter });
+  const reconnectSession = useReconnectSession();
   const activeTerminalId = useTerminalStore((state) => state.activeSessionId);
   const activeTerminalStatus = useTerminalStore((state) => state.sessions.find(
     (candidate) => candidate.sessionId === state.activeSessionId,
@@ -147,10 +150,19 @@ export function AiWorkspaceController({
             />
           )
         : undefined}
+      executionSurfaceNotice={scope === 'terminal' && activeTerminalStatus === 'connected' && realTerminalState !== 'ready'
+        && controller.selectedExecutionSurface === 'boundTerminal' && !controller.readOnlySession
+        ? <AgentTerminalBusyNotice disabled={executionSurfaceLocked}
+            state={realTerminalState}
+            onSwitchDirect={() => controller.selectExecutionSurface('direct')} />
+        : undefined}
       onDraftChange={controller.setDraft}
       onSubmitGesture={controller.submit}
       onStop={controller.stop}
       onContinueOnReconnectedTerminal={controller.continueOnReconnectedTerminal ?? undefined}
+      onReconnectTerminal={scope === 'terminal' && activeTerminalId
+        && (activeTerminalStatus === 'disconnected' || activeTerminalStatus === 'error')
+        ? () => { void reconnectSession(activeTerminalId); } : undefined}
       historicalContinuationAvailable={controller.historicalContinuationAvailable}
       historicalContinuationBusy={controller.historicalContinuationBusy}
       historicalContinuationError={controller.historicalContinuationError}

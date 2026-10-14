@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AiComposerSeat } from '@/components/ai/workspace/ai-composer-seat';
 import { projectAgentInbox } from '@/lib/ai/agent-session-adapter';
 import { createAiComposerState, reduceAiComposer } from '@/lib/ai/composer-machine';
-import { initI18n } from '@/locales';
+import { initI18n, t } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { agentSessionEventFixture, sessionEvent } from '@/test/fixtures/agent-session';
 
@@ -16,6 +16,23 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('Composer queue visibility during submission', () => {
+  it.each(['waitingApproval', 'waitingQuestion'] as const)('shows and submits queue mode during %s without changing the saved preference', phase => {
+    let composer = createAiComposerState({ sessionId: 'session-fixture', runtimeStatus: 'waiting',
+      phase, waitingApproval: phase === 'waitingApproval', waitingQuestion: phase === 'waitingQuestion',
+      preferredBusyMode: 'steer', draft: 'Follow up after the decision' });
+    render(<AiComposerSeat phase="active" status="waiting" composerState={composer}
+      onBusyPreferenceChange={() => { throw new Error('Pending decisions must not change the preference'); }}
+      onSubmitGesture={(gesture, accelerated) => {
+        composer = reduceAiComposer(composer, { type: 'submit.requested', gesture, accelerated,
+          clientOperationId: 'queued-followup', now: 100, hasProvider: true, canCreateSession: true }).state;
+      }} />);
+    expect(screen.getByRole('button', { name: t('ai.workspace.busyPreference') })).toBeDisabled();
+    expect(screen.getByRole('button', { name: t('ai.workspace.queue.action') })).toBeEnabled();
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', ctrlKey: true });
+    expect(composer.pendingSubmissions[0].mode).toBe('nextTurn');
+    expect(composer.preferredBusyMode).toBe('steer');
+  });
+
   it.each([
     { name: 'new conversation', sessionId: null, running: false, steer: false },
     { name: 'idle conversation', sessionId: 'session-fixture', running: false, steer: false },

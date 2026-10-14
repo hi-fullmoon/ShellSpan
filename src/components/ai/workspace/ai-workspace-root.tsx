@@ -2,6 +2,7 @@ import { Activity, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { CircleAlertIcon, InfoIcon, MessageCircleQuestionIcon } from 'lucide-react';
 import { ShellSpanGlyph } from '@/components/brand/shellspan-mark';
 import { Spinner } from '@/components/ui/spinner';
+import { Button } from '@/components/ui/button';
 
 import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
@@ -232,6 +233,7 @@ export interface AiWorkspaceRootProps {
   readonly modelControl?: React.ReactNode;
   readonly permissionControl?: React.ReactNode;
   readonly executionSurfaceControl?: React.ReactNode;
+  readonly executionSurfaceNotice?: React.ReactNode;
   readonly composerState?: AiComposerState;
   readonly pendingNodes?: readonly AiConversationNode[];
   readonly announcement?: string | null;
@@ -267,6 +269,7 @@ export interface AiWorkspaceRootProps {
   readonly onSubmitGesture?: (gesture: 'keyboard' | 'primary', accelerated: boolean) => void;
   readonly onStop?: () => void;
   readonly onContinueOnReconnectedTerminal?: () => void;
+  readonly onReconnectTerminal?: () => void;
   readonly historicalContinuationAvailable?: boolean;
   readonly historicalContinuationBusy?: boolean;
   readonly historicalContinuationError?: string | null;
@@ -317,6 +320,7 @@ export function AiWorkspaceRoot({
   modelControl,
   permissionControl,
   executionSurfaceControl,
+  executionSurfaceNotice,
   composerState,
   pendingNodes = [],
   announcement,
@@ -352,6 +356,7 @@ export function AiWorkspaceRoot({
   onSubmitGesture,
   onStop,
   onContinueOnReconnectedTerminal,
+  onReconnectTerminal,
   historicalContinuationAvailable = false,
   historicalContinuationBusy = false,
   historicalContinuationError = null,
@@ -566,69 +571,6 @@ export function AiWorkspaceRoot({
         onNewSession={onNewSession && canStartAgent ? onNewSession : undefined}
       />
 
-      <AiWorkspaceErrorNotices
-        composerState={activeComposerState}
-        syncError={view?.syncError}
-        syncRecovery={view?.syncRecovery}
-        onRetrySync={onRetrySync}
-        onDismissError={onDismissError}
-        onRetryFailedDraft={onRetryFailedDraft}
-      />
-
-      <div
-        data-slot="ai-workspace-status-notices"
-        className="mx-auto flex w-full min-w-0 max-w-[calc(var(--ai-composer-card-max-width)+var(--ai-shell-clearance)+var(--ai-shell-clearance))] shrink-0 flex-col gap-1.5 px-[var(--ai-shell-clearance)] py-2 empty:hidden"
-      >
-        {historicalContinuationAvailable && (
-          <Alert variant="info" size="sm" role="status">
-            <InfoIcon aria-hidden="true" />
-            <AlertDescription>{t(historicalContinuationBusy
-              ? 'ai.workspace.sessions.continuePreparing'
-              : 'ai.workspace.sessions.continueComposerHint')}</AlertDescription>
-          </Alert>
-        )}
-        {historicalContinuationError && (
-          <Alert variant="destructiveSubtle" size="sm" className="items-center">
-            <CircleAlertIcon aria-hidden="true" />
-            <AlertDescription>{historicalContinuationError}</AlertDescription>
-          </Alert>
-        )}
-        {!readOnlySession && canResumeTokenBudgetedTask(view) && (
-          <Alert variant="info" size="sm" role="status" data-token-budget-notice="">
-            <InfoIcon aria-hidden="true" />
-            <AlertDescription>{t(view && hasTokenBudgetCheckpoint(view)
-              ? 'ai.workspace.tokenBudget.checkpointSaved'
-              : 'ai.workspace.tokenBudget.description')}</AlertDescription>
-          </Alert>
-        )}
-        {activeComposerState?.phase === 'stopping' && (
-          <Alert variant="info" size="sm" role="status">
-            <InfoIcon aria-hidden="true" />
-            <AlertDescription>{t('ai.workspace.stopping')}</AlertDescription>
-          </Alert>
-        )}
-        {surfaceMode === 'agent' && activeComposerState?.phase === 'waitingApproval' && !view?.pendingApproval && (
-          <Alert variant="info" size="sm">
-            <InfoIcon aria-hidden="true" />
-            <AlertTitle>{t('ai.workspace.approvalWaiting')}</AlertTitle>
-            <AlertDescription>{t('ai.workspace.approvalPhase5')}</AlertDescription>
-          </Alert>
-        )}
-        {activeComposerState?.phase === 'waitingQuestion' && !view?.pendingQuestion && (
-          <Alert variant="info" size="sm">
-            <InfoIcon aria-hidden="true" />
-            <AlertTitle>{t('ai.workspace.question.pending')}</AlertTitle>
-            <AlertDescription>{t('ai.workspace.announce.waitingQuestion')}</AlertDescription>
-          </Alert>
-        )}
-        {agentUnavailableReason && (
-          <Alert id={availabilityHintId} variant="info" size="sm" role="status" aria-label={t('agent.availability.title')}>
-            <InfoIcon aria-hidden="true" />
-            <AlertDescription className="min-w-0 break-words">{agentUnavailableReason}</AlertDescription>
-          </Alert>
-        )}
-      </div>
-
       <div
         ref={firstSubmitTransition.bodyRef}
         data-slot="ai-workspace-body"
@@ -688,6 +630,82 @@ export function AiWorkspaceRoot({
         </div>
 
         <AiComposerSeat
+          statusNotices={(
+            <>
+              <AiWorkspaceErrorNotices
+                composerState={activeComposerState}
+                syncError={view?.syncError}
+                syncRecovery={view?.syncRecovery}
+                onRetrySync={onRetrySync}
+                onDismissError={onDismissError}
+                onRetryFailedDraft={onRetryFailedDraft}
+              />
+
+              <div
+                data-slot="ai-workspace-status-notices"
+                className="flex w-full min-w-0 shrink-0 flex-col gap-1.5 empty:hidden"
+              >
+                {historicalContinuationAvailable && (
+                  <Alert variant="info" size="sm" role="status">
+                    <InfoIcon aria-hidden="true" />
+                    <AlertDescription>{t(historicalContinuationBusy
+                      ? 'ai.workspace.sessions.continuePreparing'
+                      : 'ai.workspace.sessions.continueComposerHint')}</AlertDescription>
+                  </Alert>
+                )}
+                {historicalContinuationError && (
+                  <Alert variant="destructiveSubtle" size="sm" className="items-center">
+                    <CircleAlertIcon aria-hidden="true" />
+                    <AlertDescription>{historicalContinuationError}</AlertDescription>
+                  </Alert>
+                )}
+                {!readOnlySession && canResumeTokenBudgetedTask(view) && (
+                  <Alert variant="info" size="sm" role="status" data-token-budget-notice="">
+                    <InfoIcon aria-hidden="true" />
+                    <AlertDescription>{t(view && hasTokenBudgetCheckpoint(view)
+                      ? 'ai.workspace.tokenBudget.checkpointSaved'
+                      : 'ai.workspace.tokenBudget.description')}</AlertDescription>
+                  </Alert>
+                )}
+                {activeComposerState?.phase === 'stopping' && (
+                  <Alert variant="info" size="sm" role="status">
+                    <InfoIcon aria-hidden="true" />
+                    <AlertDescription>{t('ai.workspace.stopping')}</AlertDescription>
+                  </Alert>
+                )}
+                {surfaceMode === 'agent' && activeComposerState?.phase === 'waitingApproval' && !view?.pendingApproval && (
+                  <Alert variant="info" size="sm">
+                    <InfoIcon aria-hidden="true" />
+                    <AlertTitle>{t('ai.workspace.approvalWaiting')}</AlertTitle>
+                    <AlertDescription>{t('ai.workspace.approvalPhase5')}</AlertDescription>
+                  </Alert>
+                )}
+                {activeComposerState?.phase === 'waitingQuestion' && !view?.pendingQuestion && (
+                  <Alert variant="info" size="sm">
+                    <InfoIcon aria-hidden="true" />
+                    <AlertTitle>{t('ai.workspace.question.pending')}</AlertTitle>
+                    <AlertDescription>{t('ai.workspace.announce.waitingQuestion')}</AlertDescription>
+                  </Alert>
+                )}
+                {(agentUnavailableReason || onContinueOnReconnectedTerminal) && (
+                  <Alert id={availabilityHintId} variant="info" size="sm" role="status" aria-label={t('agent.availability.title')}>
+                    <InfoIcon aria-hidden="true" />
+                    <AlertDescription className="flex min-w-0 flex-wrap items-center gap-1 break-words">
+                      <span className="min-w-0 flex-1 basis-48">{agentUnavailableReason
+                        ?? t('ai.workspace.sessions.previousTerminalReadOnly')}</span>
+                      {onReconnectTerminal ? <Button type="button" variant="ghost" size="sm"
+                        onClick={onReconnectTerminal}>{t('ai.workspace.status.reconnect')}</Button>
+                        : onContinueOnReconnectedTerminal ? <Button type="button" variant="ghost" size="sm"
+                        onClick={onContinueOnReconnectedTerminal}>{t('ai.workspace.continueOnReconnectedTerminal')}</Button>
+                        : !readOnlySession && canStartAgent && onOpenModel && <Button type="button" variant="ghost" size="sm"
+                          onClick={onOpenModel}>{t('ai.workspace.status.openSettings')}</Button>}
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </div>
+
+            </>
+          )}
           sessions={sessions}
           sessionsLoading={sessionsLoading}
           sessionsError={sessionsError}
@@ -711,6 +729,7 @@ export function AiWorkspaceRoot({
           contextUsage={surfaceMode === 'agent' && !readOnlySession ? view?.contextUsage : undefined}
           permissionControl={surfaceMode === 'agent' ? permissionControl : undefined}
           executionSurfaceControl={surfaceMode === 'agent' ? executionSurfaceControl : undefined}
+          executionSurfaceNotice={surfaceMode === 'agent' ? executionSurfaceNotice : undefined}
           composerState={activeComposerState}
           inbox={surfaceMode === 'agent' && !readOnlySession ? view?.inbox : undefined}
           taskSteps={surfaceMode === 'agent' && !readOnlySession ? taskSteps : undefined}

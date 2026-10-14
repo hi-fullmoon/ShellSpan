@@ -71,6 +71,8 @@ export interface AiComposerSeatProps extends ComposerHistoryProps {
   readonly contextUsage?: AiContextUsage;
   readonly permissionControl?: React.ReactNode;
   readonly executionSurfaceControl?: React.ReactNode;
+  readonly executionSurfaceNotice?: React.ReactNode;
+  readonly statusNotices?: React.ReactNode;
   readonly composerState?: AiComposerState;
   readonly inbox?: readonly AiInboxItem[];
   readonly taskSteps?: readonly AgentSessionPlanStep[];
@@ -124,6 +126,8 @@ export function AiComposerSeat({
   contextUsage,
   permissionControl,
   executionSurfaceControl,
+  executionSurfaceNotice,
+  statusNotices,
   composerState,
   inbox = [],
   taskSteps = [],
@@ -230,7 +234,8 @@ export function AiComposerSeat({
     || (stopPrimary
       ? onStop === undefined
       : unavailable || empty || (onSubmitGesture === undefined && onSubmit === undefined));
-  const busyPreference = composerState?.preferredBusyMode ?? 'queue';
+  const busyPreference = waitingApproval || waitingQuestion ? 'queue'
+    : composerState?.preferredBusyMode ?? 'queue';
   const primaryLabel = submitting
     ? t('ai.workspace.messagePending')
     : stopPrimary
@@ -448,7 +453,6 @@ export function AiComposerSeat({
         <AiTaskStrip steps={taskSteps} active={status === 'running' || status === 'waiting'} />
       )}
       {completion.dialog}
-      {pendingQuestion && <AiQuestionPanel key={questionKey(pendingQuestion.identity)} question={pendingQuestion} onAnswer={onAnswerQuestion} />}
       {mode === 'agent' && <AiQueueDock
         items={queueItems}
         mutation={queueMutation}
@@ -461,14 +465,36 @@ export function AiComposerSeat({
         onResume={onResumeQueueItem}
         onReorder={onReorderQueueLane}
       />}
+      {statusNotices}
+      {mode === 'agent' && executionSurfaceNotice}
+      {pendingQuestion && <AiQuestionPanel key={questionKey(pendingQuestion.identity)} question={pendingQuestion} onAnswer={onAnswerQuestion} />}
+      {waitingApproval && pendingApproval && (
+        <div
+          data-slot="ai-approval-overlay"
+          className="min-h-0 min-w-0 [&>[data-slot=ai-approval-panel]]:max-h-[min(600px,45dvh)]"
+        >
+          <AiApprovalPanel
+            approval={{
+              ...pendingApproval,
+              arguments: approvalArguments ?? pendingApproval.arguments,
+            }}
+            decision={approvalDecision}
+            error={approvalError}
+            argumentsLoading={approvalArgumentsLoading}
+            argumentsError={approvalArgumentsError}
+            onApprove={() => onApprove?.()}
+            onReject={() => onReject?.()}
+            onOpenDetails={() => onOpenApprovalDetails?.()}
+          />
+        </div>
+      )}
       {
         <div ref={completionAnchor} className="ai-composer-input-anchor relative min-w-0">
           <InputGroup ref={cardRef} className={cn(
             'h-auto flex-col items-stretch gap-0 overflow-hidden',
             dragActive && 'ring-2 ring-primary',
             !imageControls && (phase === 'hero' ? 'pt-1.5' : 'pt-2.5'),
-            waitingApproval && pendingApproval && 'invisible',
-          )} data-composer-card="" aria-hidden={waitingApproval && pendingApproval ? true : undefined} onClick={event => {
+          )} data-composer-card="" onClick={event => {
             if (event.target === event.currentTarget) completion.editor.current?.focus();
           }} onDragOver={event => {
             if (!isTauriRuntime() && event.dataTransfer.types.includes('Files')) { event.preventDefault(); setDragActive(attachmentsEnabled); }
@@ -594,6 +620,7 @@ export function AiComposerSeat({
                                 size="xs"
                                 className="ai-busy-preference-trigger h-7 min-w-0 @max-[640px]/ai-workspace:size-7 @max-[640px]/ai-workspace:shrink-0 @max-[640px]/ai-workspace:p-0 @max-[640px]/ai-workspace:[&_[data-icon=inline-end]]:hidden"
                                 aria-label={t('ai.workspace.busyPreference')}
+                                disabled={waitingApproval || waitingQuestion}
                               />
                             )}
                           />
@@ -690,26 +717,6 @@ export function AiComposerSeat({
               </div>
             </InputGroupAddon>
           </InputGroup>
-          {waitingApproval && pendingApproval && (
-            <div
-              data-slot="ai-approval-overlay"
-              className="absolute inset-x-0 bottom-0"
-            >
-              <AiApprovalPanel
-                approval={{
-                  ...pendingApproval,
-                  arguments: approvalArguments ?? pendingApproval.arguments,
-                }}
-                decision={approvalDecision}
-                error={approvalError}
-                argumentsLoading={approvalArgumentsLoading}
-                argumentsError={approvalArgumentsError}
-                onApprove={() => onApprove?.()}
-                onReject={() => onReject?.()}
-                onOpenDetails={() => onOpenApprovalDetails?.()}
-              />
-            </div>
-          )}
           <AiCompletionPopover anchor={completionAnchor} fixedHeight={mode === 'agent' && (completion.open || skillCompletion.open)} onDismiss={() => {
             skillCompletion.dismiss();
             completion.dismiss();

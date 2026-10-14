@@ -159,7 +159,7 @@ describe('AI workspace Phase 5 workflows', () => {
     expect(screen.getByText('Restart safely')).toBeVisible();
   });
 
-  it('overlays approval while preserving the Composer draft and exposes recoverable decisions', async () => {
+  it('places approval above the input while preserving the Composer draft and recoverable decisions', async () => {
     const user = userEvent.setup();
     const approve = vi.fn();
     const reject = vi.fn();
@@ -184,15 +184,15 @@ describe('AI workspace Phase 5 workflows', () => {
 
     const composerCard = container.querySelector<HTMLElement>('[data-composer-card]');
     const composerEditor = container.querySelector<HTMLElement>('[data-composer-editor]');
-    expect(composerCard).toHaveClass('invisible');
-    expect(composerCard).toHaveAttribute('aria-hidden', 'true');
+    expect(composerCard).toBeVisible();
+    expect(composerCard).not.toHaveAttribute('aria-hidden', 'true');
     expect(composerEditor).toHaveAttribute('contenteditable', 'true');
     expect(composerEditor).toHaveTextContent('preserved draft');
     const approval = screen.getByRole('group', { name: /Allow this command/ });
     const overlay = approval.closest<HTMLElement>('[data-slot="ai-approval-overlay"]');
     const composerAnchor = container.querySelector<HTMLElement>('.ai-composer-input-anchor');
-    expect(overlay).toHaveClass('absolute', 'inset-x-0', 'bottom-0');
-    expect(composerAnchor).toContainElement(overlay);
+    expect(overlay).not.toHaveClass('absolute');
+    expect(overlay!.compareDocumentPosition(composerCard!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(composerAnchor).toContainElement(composerCard);
     expect(approval).toBeVisible();
     const approvalBody = approval.querySelector<HTMLElement>('[data-slot="scroll-area"]');

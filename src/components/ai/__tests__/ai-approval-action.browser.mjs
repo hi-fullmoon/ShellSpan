@@ -97,6 +97,43 @@ try {
         assert.equal(geometry.overflow, false, `Approval overflows at ${width}px`);
         assert.ok(geometry.bottom <= geometry.viewport, 'Approval controls must stay within viewport');
         assert.equal(geometry.text, longPath, 'The approval path must not be truncated');
+        await page.setViewportSize({ width, height: 520 });
+        await page.evaluate(async args => {
+          const { showComposer } = await import(args.entry);
+          await showComposer(args.approval);
+        }, { entry, approval: { ...approval, arguments: { path: longPath } } });
+        const composerGeometry = await page.locator('[data-composer-seat]').evaluate(seat => {
+          const panel = seat.querySelector('[data-slot="ai-approval-panel"]').getBoundingClientRect();
+          const input = seat.querySelector('[data-composer-card]').getBoundingClientRect();
+          const footer = seat.querySelector('[data-slot="card-footer"]').getBoundingClientRect();
+          return { top: panel.top, panelBottom: panel.bottom, inputTop: input.top,
+            inputBottom: input.bottom, footerBottom: footer.bottom, height: innerHeight };
+        });
+        assert.ok(composerGeometry.top >= 0 && composerGeometry.inputBottom <= composerGeometry.height,
+          `Approval and input must fit together at ${width}x520: ${JSON.stringify(composerGeometry)}`);
+        assert.ok(composerGeometry.panelBottom <= composerGeometry.inputTop, 'Approval must be above the input');
+        assert.ok(composerGeometry.footerBottom <= composerGeometry.height, 'Approval actions must remain visible');
+        assert.equal(await page.locator('[data-composer-editor]').textContent(), 'preserved draft');
+        await page.screenshot({ path: '/tmp/shellspan-approval-composer-audit.png' });
+        const viewportGeometry = await page.locator('[data-slot="scroll-area-viewport"]').evaluate(el => ({
+          height: el.clientHeight, scrollHeight: el.scrollHeight, overflow: getComputedStyle(el).overflowY,
+          box: el.getBoundingClientRect().toJSON(),
+        }));
+        assert.notEqual(viewportGeometry.overflow, 'visible', JSON.stringify(viewportGeometry));
+        const hit = await page.getByRole('button', { name: '取消', exact: true }).evaluate(el => {
+          const b = el.getBoundingClientRect();
+          const top = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+          const panel = el.closest('[data-slot="ai-approval-panel"]');
+          return { clickable: el.contains(top), top: top?.outerHTML.slice(0, 120),
+            rows: getComputedStyle(panel).gridTemplateRows,
+            display: getComputedStyle(panel).display,
+            children: [...panel.children].map(c => ({ slot: c.dataset.slot,
+              height: c.clientHeight, box: c.getBoundingClientRect().toJSON() })) };
+        });
+        assert.ok(hit.clickable, JSON.stringify({ hit, viewportGeometry }));
+        await page.getByRole('button', { name: '取消', exact: true }).click();
+        assert.equal(await page.locator('body').getAttribute('data-action'), 'reject');
+        assert.equal(await page.locator('[data-composer-editor]').textContent(), 'preserved draft');
         assert.deepEqual(errors, []);
         await page.close();
       }

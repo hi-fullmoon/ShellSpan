@@ -17,7 +17,7 @@ export interface AiWorkspaceErrorNoticesProps {
   readonly onRetryFailedDraft?: (id: string) => void;
 }
 
-/** Workspace-level operation errors displayed below the session header. */
+/** Input and synchronization errors displayed above the composer. */
 export function AiWorkspaceErrorNotices({
   composerState,
   syncError,
@@ -32,7 +32,7 @@ export function AiWorkspaceErrorNotices({
   return (
     <div
       data-slot="ai-workspace-error-notices"
-      className="ai-workspace-error-notices mx-auto flex w-full min-w-0 max-w-[calc(var(--ai-composer-card-max-width)+var(--ai-shell-clearance)+var(--ai-shell-clearance))] shrink-0 flex-col gap-1.5 px-[var(--ai-shell-clearance)] pt-2"
+      className="ai-workspace-error-notices flex w-full min-w-0 shrink-0 flex-col gap-1.5"
     >
       {syncError && (
         <AiErrorNotice title={t('ai.workspace.recovery.title')}>

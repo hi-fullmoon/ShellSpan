@@ -136,26 +136,27 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(tool).toHaveAttribute('aria-expanded', 'false');
   });
 
-  it.each(['stopping', 'waitingApproval', 'waitingQuestion'] as const)('places %s notices above the conversation instead of beside the composer', (phase) => {
+  it.each(['stopping', 'waitingApproval', 'waitingQuestion'] as const)('places %s notices above the input inside the composer', (phase) => {
     const { container, rerender } = render(<AiWorkspaceRoot scope="terminal" view={agentView('running')}
       composerState={createAiComposerState({ phase, runtimeStatus: 'running' })} />);
-    const notices = container.querySelector('[data-slot="ai-workspace-status-notices"]')!;
+    const notices = container.querySelector<HTMLElement>('[data-slot="ai-workspace-status-notices"]')!;
     const body = container.querySelector('[data-slot="ai-workspace-body"]')!;
     const composer = container.querySelector('[data-slot="ai-composer-seat"]')!;
     const alert = notices.querySelector('[data-slot="alert"]');
     expect(alert).toHaveAttribute('data-size', 'sm');
     expect(alert).toHaveClass('border-primary/30', 'bg-primary/10');
     expect(alert?.querySelector(':scope > svg')).toHaveAttribute('aria-hidden', 'true');
-    expect(notices).toHaveClass('gap-1.5', 'py-2');
-    expect(notices.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(composer.querySelector('[data-slot="alert"]')).toBeNull();
+    expect(notices).toHaveClass('gap-1.5');
+    expect(body).toContainElement(notices);
+    expect(composer).toContainElement(notices);
+    expect(notices.compareDocumentPosition(composer.querySelector('[data-composer-card]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     rerender(<AiWorkspaceRoot scope="terminal" view={agentView('idle')}
       composerState={createAiComposerState({ phase: 'idle', runtimeStatus: 'idle' })} />);
     expect(notices).toBeEmptyDOMElement();
     expect(notices).toHaveClass('empty:hidden');
   });
 
-  it('places history and availability notices above the conversation with no continuation buttons', () => {
+  it('places history and availability notices above the input with a continuation action', () => {
     const { container } = render(<AiWorkspaceRoot scope="terminal" view={agentView('failed')}
       historicalContinuationAvailable historicalContinuationBusy historicalContinuationError="Connection lost"
       agentUnavailableReason="Connect a terminal" onContinueOnReconnectedTerminal={() => {}} />);
@@ -176,7 +177,45 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     }
     const availability = within(notices).getByRole('status', { name: 'Agent is unavailable' });
     expect(screen.getByRole('textbox')).toHaveAttribute('aria-describedby', availability.id);
-    expect(screen.queryByRole('button', { name: 'Continue in reconnected terminal' })).toBeNull();
+    expect(within(notices).getByRole('button', { name: 'Continue in reconnected terminal' })).toBeVisible();
+  });
+
+  it('shows the reconnect continuation action even without an unavailable error', async () => {
+    const user = userEvent.setup();
+    function ContinuedWorkspace() {
+      const [continued, setContinued] = useState(false);
+      return <>
+        <AiWorkspaceRoot scope="terminal" view={agentView('failed')} readOnlySession
+          onContinueOnReconnectedTerminal={() => setContinued(true)} />
+        <output>{continued ? 'continued' : 'pending'}</output>
+      </>;
+    }
+    const { container } = render(<ContinuedWorkspace />);
+    const notices = container.querySelector<HTMLElement>('[data-slot="ai-workspace-status-notices"]')!;
+    await user.click(within(notices).getByRole('button', { name: 'Continue in reconnected terminal' }));
+    expect(container.querySelector('output')).toHaveTextContent('continued');
+  });
+
+  it.each([
+    ['reconnect', 'Reconnect terminal'],
+    ['settings', 'Open AI settings'],
+  ] as const)('invokes the %s action from the availability notice without changing the draft', async (action, label) => {
+    const user = userEvent.setup();
+    function AvailabilityWorkspace() {
+      const [result, setResult] = useState('pending');
+      return <>
+        <AiWorkspaceRoot scope="terminal" view={null} agentUnavailableReason="Unavailable"
+          canStartAgent={action === 'settings'} defaultDraft="Unsent message"
+          onReconnectTerminal={action === 'reconnect' ? () => setResult('reconnected') : undefined}
+          onOpenModel={action === 'settings' ? () => setResult('settings opened') : undefined} />
+        <output>{result}</output>
+      </>;
+    }
+    const { container } = render(<AvailabilityWorkspace />);
+    const notices = container.querySelector<HTMLElement>('[data-slot="ai-workspace-status-notices"]')!;
+    await user.click(within(notices).getByRole('button', { name: label }));
+    expect(container.querySelector('output')).toHaveTextContent(action === 'reconnect' ? 'reconnected' : 'settings opened');
+    expect(screen.getByRole('textbox')).toHaveTextContent('Unsent message');
   });
 
   it('does not offer a continue task button after a step budget pause', () => {
@@ -266,7 +305,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(screen.queryByText(label)).toBeNull();
   });
 
-  it('places dismissible operation errors below the header instead of beside the composer', async () => {
+  it('places dismissible operation errors above the input inside the composer', async () => {
     const user = userEvent.setup();
     const error = {
       kind: 'unknown' as const,
@@ -301,8 +340,9 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
 
     expect(notices).toBeVisible();
     expect(header.compareDocumentPosition(notices) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(notices.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(composer).not.toContainElement(notices);
+    expect(body).toContainElement(notices);
+    expect(composer).toContainElement(notices);
+    expect(notices.compareDocumentPosition(composer.querySelector('[data-composer-card]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const operationError = screen.getByText(error.message).closest('[role="alert"]');
     expect(operationError).toHaveAttribute('data-size', 'sm');
     const availabilityNotice = screen.getByText(/The current model configuration/).closest('[role="status"]');

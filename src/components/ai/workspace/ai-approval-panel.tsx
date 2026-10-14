@@ -214,7 +214,7 @@ export function AiApprovalPanel({
         </CardAction>
       </CardHeader>
 
-      <ScrollArea className="min-h-0 min-w-0">
+      <ScrollArea className="h-full min-h-0 min-w-0">
         <ScrollAreaContent style={{ minWidth: 0 }}>
           <CardContent className="flex min-w-0 flex-col gap-3 px-4 pb-2">
             {!exactValue && (
