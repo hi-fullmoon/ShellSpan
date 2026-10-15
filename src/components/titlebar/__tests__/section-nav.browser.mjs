@@ -34,6 +34,7 @@ try {
     await nav.getByRole('button', { name: labels[0], exact: true }).waitFor();
     for (const width of [1200, 360]) {
       await page.setViewportSize({ width, height: 200 });
+      let initialBounds;
       for (const label of labels) {
         const button = nav.getByRole('button', { name: label, exact: true });
         await button.click();
@@ -41,6 +42,12 @@ try {
           await document.fonts.load(getComputedStyle(element).font, element.textContent);
           await document.fonts.ready;
         });
+        const bounds = await nav.getByRole('button').evaluateAll((buttons) => buttons.map((element) => {
+          const { x, y, width, height } = element.getBoundingClientRect();
+          return { x, y, width, height };
+        }));
+        initialBounds ??= bounds;
+        assert.deepEqual(bounds, initialBounds, `${locale}/${width}: switching tabs must preserve every tab's position and size`);
         const metrics = await button.evaluate((element) => {
           const bounds = element.getBoundingClientRect();
           const iconElement = element.querySelector('svg');

@@ -32,7 +32,12 @@ const NavItem: React.FC<NavItemProps> = ({ section, label, icon: Icon }) => {
       )}
     >
       <Icon aria-hidden="true" className="size-3.5 shrink-0" />
-      <span className="text-center [text-box:trim-both_text_alphabetic]">{label}</span>
+      <span
+        data-label={label}
+        className="text-center [text-box:trim-both_text_alphabetic] after:invisible after:block after:h-0 after:overflow-hidden after:font-semibold after:content-[attr(data-label)]"
+      >
+        {label}
+      </span>
     </button>
   );
 };
