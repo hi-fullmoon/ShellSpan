@@ -55,7 +55,12 @@ try {
     await page.evaluate((index) => {
       document.querySelectorAll('[role="tab"]')[index].click();
     }, SECTION_TAB_ORDER[name]);
-    await page.waitForTimeout(50);
+    await page.waitForFunction((index) => {
+      const tab = document.querySelectorAll('[role="tab"]')[index];
+      const panels = document.querySelectorAll('[role="tabpanel"]');
+      return panels.length === 1 && panels[0].id === tab.getAttribute('aria-controls') && !panels[0].hasAttribute('inert');
+    }, SECTION_TAB_ORDER[name]);
+    await page.waitForFunction(() => [...document.querySelectorAll('[role="tabpanel"] [data-slot="button"]')].every(button => button.getBoundingClientRect().height > 0));
   };
 
   for (const viewport of [{ width: 1280, height: 800 }, { width: 640, height: 720 }]) {
@@ -167,8 +172,27 @@ try {
     assert.equal(await page.getByRole('heading', { name: '桌面宠物', level: 2 }).count(), 1);
     assert.equal(await panel.locator('[data-slot="card"]').count(), 4);
     assert.equal(await panel.getByRole('switch').count(), 6);
-    assert.equal(await panel.locator('[data-slot="card-action"] [role="switch"]').count(), 1);
+    assert.ok(await panel.getByRole('switch').evaluateAll((controls) => controls.every((control) => {
+      const labels = (control.getAttribute('aria-labelledby') ?? '').split(/\s+/).map(id => document.getElementById(id));
+      return labels.some(label => label?.tagName === 'LABEL' && label.control && label.textContent.trim().length > 0);
+    })), 'every pet switch must retain its clickable text label');
+    assert.equal(await panel.locator('[data-slot="setting-control"] [role="switch"]').count(), 6);
     assert.equal(await panel.locator('#feedback-description').count(), 0);
+    const taskGroup = panel.locator('[data-slot="integration-group"]').nth(1);
+    assert.equal(await taskGroup.locator('[data-slot="separator"]').count(), 2);
+    const taskRows = await taskGroup.locator('[data-slot="field"]').evaluateAll(rows => rows.map(row => {
+      const label = row.querySelector('label').getBoundingClientRect();
+      const control = row.querySelector('[role="switch"]').getBoundingClientRect();
+      return { height: row.getBoundingClientRect().height, centerOffset: Math.abs(label.y + label.height / 2 - control.y - control.height / 2) };
+    }));
+    assert.deepEqual(taskRows.map(row => row.height), [40, 40, 40]);
+    assert.ok(taskRows.every(row => row.centerOffset <= 1), 'compact task labels and switches must stay on the same row');
+    assert.ok(await taskGroup.evaluate(group => {
+      const description = group.querySelector('#petdex-categories-description');
+      const card = group.querySelector('[data-slot="card"]');
+      return !card.contains(description) && description.getBoundingClientRect().bottom < card.getBoundingClientRect().top;
+    }), 'task description must be a subtitle above the settings card');
+    await page.screenshot({ path: `/tmp/shellspan-pet-subtitle-${viewport.width}.png` });
     const geometry = await panel.evaluate((element) => {
       const cards = [...element.querySelectorAll('[data-slot="integration-group"]')];
       return {
@@ -188,16 +212,30 @@ try {
         && getComputedStyle(title).fontSize === '12px';
     })), 'group titles should match other settings sections and sit above each card');
     assert.ok(geometry.switchesFit, `switches clipped at ${viewport.width}`);
-    await panel.locator('[data-slot="collapsible-trigger"]').click();
-    assert.ok(await panel.locator('[data-slot="collapsible-content"]').isVisible());
+    assert.equal(await panel.locator('[data-slot="collapsible-content"]:visible').count(), 0);
+    await panel.locator('[data-slot="collapsible-trigger"]').first().click();
+    assert.ok(await panel.locator('[data-slot="collapsible-content"]').first().isVisible());
+    const connectionDetails = panel.locator('[data-slot="collapsible-trigger"]').last();
+    await connectionDetails.scrollIntoViewIfNeeded();
+    await connectionDetails.focus();
+    await page.keyboard.press('Enter');
+    assert.equal(await connectionDetails.getAttribute('aria-expanded'), 'true');
+    assert.ok(await connectionDetails.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+      return hit === element || element.contains(hit);
+    }), 'connection diagnostics must remain reachable below the message settings');
+    await page.keyboard.press('Space');
+    assert.equal(await connectionDetails.getAttribute('aria-expanded'), 'false');
     await page.screenshot({ path: `/tmp/shellspan-integrations-${viewport.width}.png` });
 
     await openSection('feedback');
     assert.equal(await panel.getByRole('switch').count(), 0);
-    const feedbackButton = panel.locator('[data-slot="card-action"] button');
+    const feedbackButton = panel.locator('[data-slot="setting-control"] button');
     assert.equal(await feedbackButton.count(), 1);
     assert.equal(await feedbackButton.getAttribute('aria-describedby'), 'feedback-description');
     assert.equal(await panel.getByText('问题与建议', { exact: true }).count(), 1);
+    assert.equal(await panel.getByText('建议提供的信息', { exact: true }).count(), 1);
     const [feedbackPage, feedbackRequest] = await Promise.all([
       page.waitForEvent('popup'),
       page.context().waitForEvent('request', { predicate: (request) => request.url().startsWith('https://github.com/hi-fullmoon/ShellSpan/issues/new') }),

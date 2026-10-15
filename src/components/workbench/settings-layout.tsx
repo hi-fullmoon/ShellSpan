@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 interface SettingRowProps {
   children?: React.ReactNode;
   className?: string;
+  controlId?: string;
   description: React.ReactNode;
   descriptionId?: string;
   label: React.ReactNode;
@@ -16,6 +17,7 @@ interface SettingRowProps {
 export const SettingRow: React.FC<SettingRowProps> = ({
   children,
   className,
+  controlId,
   description,
   descriptionId,
   label,
@@ -28,7 +30,7 @@ export const SettingRow: React.FC<SettingRowProps> = ({
     )}
   >
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-      <FieldLabel id={labelId} className="text-sm font-medium text-foreground">
+      <FieldLabel id={labelId} htmlFor={controlId} className="text-sm font-medium text-foreground">
         {label}
       </FieldLabel>
       <FieldDescription id={descriptionId}>

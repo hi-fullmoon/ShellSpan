@@ -142,7 +142,7 @@ describe('SettingsPanel', () => {
     expect(screen.getByText('settings.experimental.description')).toBeInTheDocument();
     expect(screen.getByText('settings.experimental.petdex.title')).toBeInTheDocument();
     expect(screen.getByRole('switch', {
-      name: 'settings.experimental.petdex.enabled',
+      name: 'settings.experimental.petdex.title',
     })).not.toBeChecked();
     expect(screen.getByRole('button', {
       name: 'settings.experimental.petdex.testAction',
@@ -156,7 +156,7 @@ describe('SettingsPanel', () => {
       else expect(toggle).toBeChecked();
     }
     expect(screen.getByRole('switch', {
-      name: 'settings.experimental.petdex.enabled',
+      name: 'settings.experimental.petdex.title',
     })).toHaveAttribute(
       'aria-describedby',
       'petdex-integration-description petdex-privacy-description',
@@ -210,7 +210,7 @@ describe('SettingsPanel', () => {
     const view = render(<><SettingsPanel /><Toaster /></>);
     openSection('settings.experimental.title');
     const toggle = screen.getByRole('switch', {
-      name: 'settings.experimental.petdex.enabled',
+      name: 'settings.experimental.petdex.title',
     });
 
     fireEvent.click(toggle);
@@ -284,7 +284,7 @@ describe('SettingsPanel', () => {
 
     render(<><SettingsPanel /><Toaster /></>);
     const toggle = screen.getByRole('switch', {
-      name: 'settings.experimental.petdex.enabled',
+      name: 'settings.experimental.petdex.title',
     });
     fireEvent.click(toggle);
 
