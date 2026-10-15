@@ -1,21 +1,47 @@
+import { useEffect, useState } from 'react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/hooks/useI18n';
 
-export function AgentTerminalBusyNotice({ disabled, onSwitchDirect, state = 'busy' }: {
+interface AgentTerminalBusyNoticeProps {
   readonly disabled: boolean;
   readonly state?: 'busy' | 'initializing' | 'unavailable';
+  /** A new runtime rejection during this busy period, rather than a historical failure. */
+  readonly blockedAttempt?: string | null;
+  /** Changes on navigation, but stays stable when submitting creates a session. */
+  readonly context?: object;
   readonly onSwitchDirect?: () => void | Promise<void>;
-}): React.ReactNode {
+}
+
+export function AgentTerminalBusyNotice(props: AgentTerminalBusyNoticeProps): React.ReactNode {
+  const [owner, setOwner] = useState({ context: props.context, revision: 0 });
+  if (owner.context !== props.context) {
+    setOwner({ context: props.context, revision: owner.revision + 1 });
+  }
+  return <TerminalBusyFeedback key={`${props.state ?? 'busy'}:${owner.revision}`} {...props} />;
+}
+
+function TerminalBusyFeedback({ disabled, onSwitchDirect, state = 'busy', blockedAttempt = null }: AgentTerminalBusyNoticeProps): React.ReactNode {
   const { t } = useI18n();
+  const [delayElapsed, setDelayElapsed] = useState(false);
+  const [initialBlockedAttempt] = useState(blockedAttempt);
+  const blocked = blockedAttempt !== null && blockedAttempt !== initialBlockedAttempt;
+  useEffect(() => {
+    if (state !== 'busy') return;
+    const timer = setTimeout(() => setDelayElapsed(true), 1000);
+    return () => clearTimeout(timer);
+  }, [state]);
+  if (state === 'busy' && !delayElapsed && !blocked) return null;
+
+  const showAction = state !== 'busy' || blocked;
   return (
-    <Alert variant="warning" size="sm" role="status" data-slot="terminal-busy-notice">
+    <Alert variant={state === 'busy' && !blocked ? 'default' : 'warning'} size="sm" role="status" data-slot="terminal-busy-notice">
       <AlertDescription className="flex min-w-0 flex-wrap items-start gap-1">
         <span className="min-w-0 flex-1 basis-48 py-1">{t(state === 'busy'
-          ? 'agent.executionSurface.v1.busyComposerHint'
+          ? blocked ? 'agent.executionSurface.v1.busyComposerHint' : 'agent.executionSurface.v1.runningComposerHint'
           : state === 'initializing' ? 'agent.executionSurface.v1.initializingDescription'
             : 'agent.executionSurface.v1.unavailableDescription')}</span>
-        {onSwitchDirect && <Button type="button" variant="ghost" size="xs" className="text-[11px]" disabled={disabled} onClick={onSwitchDirect}>
+        {showAction && onSwitchDirect && <Button type="button" variant="ghost" size="xs" className="text-[11px]" disabled={disabled} onClick={onSwitchDirect}>
           {t('agent.executionSurface.v1.switchDirect')}
         </Button>}
       </AlertDescription>

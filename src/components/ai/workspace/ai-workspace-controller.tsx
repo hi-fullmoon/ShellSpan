@@ -1,4 +1,5 @@
 import type { AppSection } from '@/types';
+import { latestTerminalBusyAttempt } from '@/lib/ai/terminal-busy-feedback';
 import { useFocusStore } from '@/stores/focusStore';
 import { FocusNoTarget } from '@/components/focus/focus-no-target';
 import { FocusControls } from '@/components/focus/focus-controls';
@@ -46,7 +47,14 @@ export function AiWorkspaceController({
   const activeTerminalPromptReady = useTerminalStore((state) => state.sessions.find(
     (candidate) => candidate.sessionId === activeTerminalId,
   )?.promptReady);
+  const terminalGeneration = useTerminalStore((state) => state.sessions.find(
+    (candidate) => candidate.sessionId === activeTerminalId,
+  )?.terminalGeneration);
+  const terminalSessionId = useTerminalStore((state) => state.sessions.find(
+    (candidate) => candidate.sessionId === activeTerminalId,
+  )?.terminalSessionId);
   const session = controller.view?.snapshot.value;
+  const blockedAttempt = latestTerminalBusyAttempt(controller.view?.nodes ?? [], activeTerminalId);
   const configuringContinuation = controller.historicalContinuationAvailable;
   const existingSessionLocked = !configuringContinuation
     && Boolean(session?.archived || session?.header.subagent);
@@ -160,8 +168,12 @@ export function AiWorkspaceController({
         : undefined}
       executionSurfaceNotice={focusMode && activeTerminalStatus !== 'connected' ? <FocusNoTarget /> : scope === 'terminal' && activeTerminalStatus === 'connected' && realTerminalState !== 'ready'
         && controller.selectedExecutionSurface === 'boundTerminal' && !controller.readOnlySession
-        ? <AgentTerminalBusyNotice disabled={executionSurfaceLocked}
+        ? <AgentTerminalBusyNotice
+            key={JSON.stringify([activeTerminalId, terminalSessionId, terminalGeneration])}
+            context={controller.submissionContext}
+            disabled={executionSurfaceLocked}
             state={realTerminalState}
+            blockedAttempt={blockedAttempt}
             onSwitchDirect={focusMode ? undefined : () => controller.selectExecutionSurface('direct')} />
         : undefined}
       onDraftChange={controller.setDraft}
