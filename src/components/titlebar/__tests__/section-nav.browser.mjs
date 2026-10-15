@@ -66,6 +66,7 @@ try {
             textBox: getComputedStyle(labelElement).textBoxTrim,
             iconSize: icon.height,
             height: bounds.height,
+            weight: getComputedStyle(element).fontWeight,
             overflow: element.scrollWidth > element.clientWidth,
             transform: getComputedStyle(iconElement).transform,
             translate: getComputedStyle(iconElement).translate,
@@ -84,13 +85,17 @@ try {
         assert.equal(metrics.active, 'page');
         assert.equal(metrics.iconSize, 14);
         assert.equal(metrics.height, 28);
+        assert.equal(metrics.weight, '500');
+        for (const inactive of await nav.locator('button:not([aria-current])').all()) {
+          assert.equal(await inactive.evaluate((element) => getComputedStyle(element).fontWeight), '400');
+        }
         assert.equal(metrics.overflow, false);
         assert.equal(metrics.transform, 'none');
         assert.equal(metrics.translate, 'none');
       }
       await nav.getByRole('button', { name: labels[0], exact: true }).click();
       await page.evaluate(async () => { await document.fonts.ready; });
-      await nav.screenshot({ path: `/tmp/shellspan-section-nav-${locale}-${width}-${browserType.name()}.png` });
+      await nav.screenshot({ animations: 'disabled', path: `/tmp/shellspan-section-nav-${locale}-${width}-${browserType.name()}.png` });
     }
     const terminal = nav.getByRole('button', { name: labels[1], exact: true });
     await terminal.focus();

@@ -37,6 +37,21 @@ describe('SectionNav', () => {
     expect(screen.getByRole('button', { name: 'section.workbench' })).toHaveAttribute('aria-current', 'page');
   });
 
+  it('uses a visible selected surface and one weight step for emphasis', () => {
+    render(<SectionNav />);
+    const workbench = screen.getByRole('button', { name: 'section.workbench' });
+    const terminal = screen.getByRole('button', { name: 'section.terminal' });
+
+    expect(workbench).toHaveClass('bg-app-surface-muted', 'font-medium');
+    expect(terminal).toHaveClass('font-normal');
+    expect(workbench.querySelector('span')).toHaveClass('after:font-medium');
+
+    fireEvent.click(terminal, { detail: 0 });
+
+    expect(terminal).toHaveClass('bg-app-surface-muted', 'font-medium');
+    expect(workbench).toHaveClass('font-normal');
+  });
+
   it('activates a section when WKWebView only delivers pointerup', () => {
     render(<SectionNav />);
     expect(useAppStore.getState().activeSection).toBe('workbench');
