@@ -205,6 +205,8 @@ export default {
   'focus.targetLocked': '任务或审批未结束，目标已锁定',
   'focus.connectFirst': '先连接一台服务器，再开始任务。',
   'focus.useTerminalHint': '使用「{terminal}」作为操作目标，即可开始任务。',
+  'focus.targetClosed': 'Agent 目标终端已关闭。',
+  'focus.targetDisconnected': 'Agent 目标终端已断开连接。',
   'focus.useTerminal': '使用此终端',
   'focus.connect': '连接服务器',
   'focus.resize': '调整 Agent 与终端宽度',

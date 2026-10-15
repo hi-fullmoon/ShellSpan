@@ -205,6 +205,8 @@ export default {
   'focus.targetLocked': 'Target locked until the task or approval settles',
   'focus.connectFirst': 'Connect to a server to get started.',
   'focus.useTerminalHint': 'Use “{terminal}” as the target to get started.',
+  'focus.targetClosed': 'The Agent target terminal has been closed. ',
+  'focus.targetDisconnected': 'The Agent target terminal has disconnected. ',
   'focus.useTerminal': 'Use this terminal',
   'focus.connect': 'Connect server',
   'focus.resize': 'Resize Agent and terminals',

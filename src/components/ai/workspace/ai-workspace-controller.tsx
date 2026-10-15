@@ -158,7 +158,7 @@ export function AiWorkspaceController({
             />
           )
         : undefined}
-      executionSurfaceNotice={focusMode && !activeTerminalId ? <FocusNoTarget /> : scope === 'terminal' && activeTerminalStatus === 'connected' && realTerminalState !== 'ready'
+      executionSurfaceNotice={focusMode && activeTerminalStatus !== 'connected' ? <FocusNoTarget /> : scope === 'terminal' && activeTerminalStatus === 'connected' && realTerminalState !== 'ready'
         && controller.selectedExecutionSurface === 'boundTerminal' && !controller.readOnlySession
         ? <AgentTerminalBusyNotice disabled={executionSurfaceLocked}
             state={realTerminalState}

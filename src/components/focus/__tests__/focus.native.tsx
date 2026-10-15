@@ -286,6 +286,12 @@ async function verify() {
     closedTerminals.add(terminalIds[1]);
     flushSync(() => useTerminalStore.getState().removeSession(terminalIds[1]));
     assert(useFocusStore.getState().targetSessionId === terminalIds[1], 'Removing the target implicitly adopted another host');
+    await eventually(() => Boolean(host.querySelector('[data-slot="focus-start-notice"]')?.textContent?.includes(t('focus.targetClosed'))), 'Closing the target must explain that the Agent target was closed');
+    assert(!host.textContent?.includes(t('agent.availability.needsTerminal')), 'Closing the target must not ask to open an already connected terminal');
+    const recoveryNotice = host.querySelector<HTMLElement>('[data-slot="focus-start-notice"]')!;
+    assert(recoveryNotice.textContent?.includes(t('focus.useTerminalHint', { terminal: useTerminalStore.getState().sessions.find(s => s.sessionId === useTerminalStore.getState().activeSessionId)!.title })), 'Recovery must identify the connected replacement terminal');
+    assert(recoveryNotice.querySelector('button')?.textContent?.includes(t('focus.useTerminal')), 'Closing the target must offer explicit target selection');
+    checkStartNoticeStyle();
     await invokeCloseSession(terminalIds[2]);
     closedTerminals.add(terminalIds[2]);
     flushSync(() => useTerminalStore.getState().removeSession(terminalIds[2]));
