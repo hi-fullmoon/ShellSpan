@@ -8,6 +8,22 @@ import { InputGroupButton } from '../input-group';
 import { Toggle } from '../toggle';
 
 describe('Button', () => {
+  it('pairs small text and icon actions with matching dimensions and keyboard access', async () => {
+    render(<>
+      <Button size="sm"><DownloadIcon />Export</Button>
+      <Button size="icon-sm" aria-label="Download"><DownloadIcon /></Button>
+    </>);
+    const text = screen.getByRole('button', { name: 'Export' });
+    const icon = screen.getByRole('button', { name: 'Download' });
+    expect(text).toHaveClass('h-8', 'px-2.5', 'text-xs', 'gap-1');
+    expect(icon).toHaveClass('size-8');
+    for (const button of [text, icon]) expect(button.className).toContain('[&_svg]:size-3.5');
+    await userEvent.tab();
+    expect(text).toHaveFocus();
+    await userEvent.tab();
+    expect(icon).toHaveFocus();
+  });
+
   it('renders children', () => {
     render(<Button>Click me</Button>);
     expect(screen.getByRole('button', { name: /Click me/i })).toBeInTheDocument();

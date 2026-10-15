@@ -25,11 +25,10 @@ import { cn } from '@/lib/utils';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { CompactDialogHeader } from '@/components/ui/compact-dialog';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
-import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
@@ -129,14 +128,15 @@ interface SettingGroupLabelProps {
 
 const SettingGroupLabel: React.FC<SettingGroupLabelProps> = () => null;
 
-const IntegrationGroup: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => {
+const IntegrationGroup: React.FC<{ title: string; description?: string; descriptionId?: string; children: React.ReactNode }> = ({ title, description, descriptionId, children }) => {
   const titleId = React.useId();
   return (
     <section aria-labelledby={titleId} data-slot="integration-group" className="flex min-w-0 flex-col gap-1.5">
-      <div className="flex min-h-5 items-center gap-3 px-1">
+      <div className={cn('flex min-h-5 px-1', description ? 'flex-col gap-1' : 'items-center gap-3')}>
         <h3 id={titleId} className="text-xs font-medium text-muted-foreground">{title}</h3>
+        {description && <p id={descriptionId} className="text-xs leading-relaxed text-muted-foreground">{description}</p>}
       </div>
-      <Card size="sm" radius="compact" variant="outline">
+      <Card size="sm" radius="compact" variant="outline" className="gap-0 py-0">
         {children}
       </Card>
     </section>
@@ -196,6 +196,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const { t, locale, setLocale } = useI18n();
   const { theme, setTheme } = useTheme();
   const startupUpdateCheck = useAppStore((state) => state.startupUpdateCheck);
+  const showFocusMode = useAppStore((state) => state.showFocusMode);
+  const setShowFocusMode = useAppStore((state) => state.setShowFocusMode);
   const setStartupUpdateCheck = useAppStore((state) => state.setStartupUpdateCheck);
   const petdexEnabled = useAppStore((state) => state.petdexEnabled);
   const petdexRequestedEnabled = useAppStore((state) => state.petdexRequestedEnabled);
@@ -585,50 +587,43 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <TabsContent value="experimental" className="w-full">
               <div className="flex min-w-0 flex-col gap-3">
                 <IntegrationGroup title={t('settings.experimental.group.integration')}>
-                  <CardHeader>
-                    <CardTitle id="petdex-integration-label">{t('settings.experimental.petdex.title')}</CardTitle>
-                    <CardDescription id="petdex-integration-description">{t('settings.experimental.petdex.description')}</CardDescription>
-                    <CardAction>
+                  <SettingRow controlId="petdex-enabled" labelId="petdex-integration-label" label={t('settings.experimental.petdex.title')}
+                    descriptionId="petdex-integration-description" description={t('settings.experimental.petdex.description')}>
                       <Switch
+                        id="petdex-enabled"
                         aria-label={t('settings.experimental.petdex.enabled')}
                         aria-describedby="petdex-integration-description petdex-privacy-description"
                         aria-busy={petdexConfiguring}
                         checked={displayedPetdexEnabled}
                         onCheckedChange={(enabled) => handlePetdexEnabledChange(enabled)}
                       />
-                    </CardAction>
-                  </CardHeader>
+                  </SettingRow>
                 </IntegrationGroup>
-                <IntegrationGroup title={t('settings.experimental.group.tasks')}>
-                  <CardHeader>
-                    <CardTitle>{t('settings.experimental.petdex.categories')}</CardTitle>
-                    <CardDescription id="petdex-categories-description">{t('settings.experimental.petdex.categoriesDescription')}</CardDescription>
-                  </CardHeader>
-                  <CardContent className="flex flex-col gap-3">
-                    {(['ssh', 'sftp', 'ai'] as const).map((category) => (
-                      <div key={category} className="flex items-center justify-between gap-3">
-                        <Label htmlFor={`petdex-category-${category}`}>
-                          {t(`settings.experimental.petdex.category.${category}`)}
-                        </Label>
+                <IntegrationGroup title={t('settings.experimental.group.tasks')}
+                  description={t('settings.experimental.petdex.categoriesDescription')} descriptionId="petdex-categories-description">
+                  <div className="flex flex-col">
+                    {(['ssh', 'sftp', 'ai'] as const).map((category, index) => (
+                      <React.Fragment key={category}>
+                      {index > 0 && <Separator />}
+                      <SettingRow className="min-h-10 flex-row items-center gap-3 py-1 [&>[data-slot=setting-control]]:w-auto" controlId={`petdex-category-${category}`} label={t(`settings.experimental.petdex.category.${category}`)} description={null}>
                         <Switch
                           id={`petdex-category-${category}`}
+                          aria-label={t(`settings.experimental.petdex.category.${category}`)}
                           aria-describedby="petdex-categories-description"
                           aria-busy={petdexConfiguring}
                           checked={petdexCategories[category]}
                           onCheckedChange={(enabled) => handlePetdexEnabledChange(enabled, category)}
                         />
-                      </div>
+                      </SettingRow>
+                      </React.Fragment>
                     ))}
-                  </CardContent>
+                  </div>
                 </IntegrationGroup>
                 <IntegrationGroup title={t('settings.experimental.petdex.messages.title')}>
                   <PetdexMessageSettings />
                 </IntegrationGroup>
                 <IntegrationGroup title={t('settings.experimental.group.diagnostics')}>
-                  <CardHeader>
-                    <CardTitle id="petdex-status-label">{t('settings.experimental.petdex.status')}</CardTitle>
-                    <CardDescription>{t('settings.experimental.petdex.communicationNote')}</CardDescription>
-                    <CardAction>
+                  <SettingRow labelId="petdex-status-label" label={t('settings.experimental.petdex.status')} description={t('settings.experimental.petdex.communicationNote')}>
                       <div
                         role="status"
                         aria-label={t('settings.experimental.petdex.statusAnnouncement', {
@@ -648,9 +643,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                           {t(PETDEX_STATUS_LABEL_KEYS[petdexStatus])}
                         </Badge>
                       </div>
-                    </CardAction>
-                  </CardHeader>
-                  <CardContent className="flex min-w-0 flex-col gap-3">
+                  </SettingRow>
+                  <CardContent className="flex min-w-0 flex-col gap-3 px-3.5 pb-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <Button size="sm" variant="outline" type="button"
                         disabled={!petdexEnabled || testingPetdex || checkingPetdex || petdexConfiguring}
@@ -683,11 +677,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </TabsContent>
 
             <TabsContent value="feedback" className="w-full">
-              <Card size="sm" radius="compact" variant="outline">
-                <CardHeader>
-                  <CardTitle>{t('settings.feedback.reportTitle')}</CardTitle>
-                  <CardDescription id="feedback-description">{t('settings.feedback.privacy')}</CardDescription>
-                  <CardAction>
+              <SettingsGroup>
+                <SettingRow label={t('settings.feedback.reportTitle')} descriptionId="feedback-description" description={t('settings.feedback.privacy')}>
                     <Button
                       type="button"
                       size="sm"
@@ -699,9 +690,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       {t('settings.feedback.title')}
                       <ExternalLinkIcon data-icon="inline-end" />
                     </Button>
-                  </CardAction>
-                </CardHeader>
-              </Card>
+                </SettingRow>
+                <SettingRow label={t('settings.feedback.includeTitle')} description={t('settings.feedback.includeDescription')} />
+              </SettingsGroup>
             </TabsContent>
 
             <TabsContent value="general" className="w-full">
@@ -721,6 +712,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       </SelectGroup>
                     </SelectContent>
                   </Select>
+                </SettingRow>
+                <SettingRow label={t('settings.general.showFocusMode')} description={t('settings.general.showFocusModeDescription')}>
+                  <div className="flex justify-end">
+                    <Switch aria-label={t('settings.general.showFocusMode')} checked={showFocusMode} onCheckedChange={setShowFocusMode} />
+                  </div>
                 </SettingRow>
                 <SettingRow label={t('settings.general.startupUpdateCheck')} description={t('settings.general.startupUpdateCheckDescription')}>
                   <div className="flex justify-end">

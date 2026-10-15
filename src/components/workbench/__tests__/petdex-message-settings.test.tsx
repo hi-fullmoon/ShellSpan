@@ -38,10 +38,11 @@ it.each(['zh-CN', 'en-US'] as const)('renders default gates, readable labels, ke
   render(<StrictMode><Card><PetdexMessageSettings /></Card></StrictMode>);
   const test = screen.getByRole('button', { name: strings['settings.experimental.petdex.messages.test'] });
   expect(test).toBeDisabled();
-  expect(test.closest('[data-slot="card-action"]')).not.toBeNull();
+  expect(test.closest('[data-slot="card"]')).not.toBeNull();
   const message = screen.getByRole('switch', { name: strings['settings.experimental.petdex.messages.enabled'] });
   const details = screen.getByRole('switch', { name: strings['settings.experimental.petdex.messages.details'] });
   expect(message).not.toBeChecked();
+  expect(message).toHaveAccessibleDescription(`${strings['settings.experimental.petdex.messages.description']} ${strings['settings.experimental.petdex.messages.visibility']}`);
   expect(details).not.toBeChecked();
   expect(message).not.toBeDisabled();
   expect(details).toHaveAttribute('aria-describedby', 'petdex-message-risk');
@@ -49,6 +50,8 @@ it.each(['zh-CN', 'en-US'] as const)('renders default gates, readable labels, ke
   message.focus();
   await userEvent.tab();
   expect(details).toHaveFocus();
+  expect(screen.queryAllByRole('definition')).toHaveLength(0);
+  await userEvent.click(screen.getByRole('button', { name: strings['settings.experimental.petdex.messages.diagnostic'] }));
   expect(screen.getAllByRole('definition')).toHaveLength(4);
   expect(toast.getHistory()).toHaveLength(history);
 });

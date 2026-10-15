@@ -306,6 +306,7 @@ pub fn run() {
         .manage(SftpPool::default())
         .manage(RemoteIdentityCache::default())
         .manage(health::HealthState::default())
+        .manage(llm::connection_test::ConnectionTests::default())
         .invoke_handler(tauri::generate_handler![
             ai::ai_list_routes,
             ai::ai_get_route_api_key,
@@ -313,6 +314,8 @@ pub fn run() {
             ai::ai_list_route_models,
             ai::ai_resolve_selection,
             ai::ai_list_models,
+            llm::connection_test::ai_test_connection,
+            llm::connection_test::ai_cancel_connection_test,
             ai::ai_resolve_model,
             ai::ai_model_declaration_template,
             agent_runtime::agent_runtime_create_session,

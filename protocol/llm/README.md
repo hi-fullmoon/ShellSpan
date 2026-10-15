@@ -2,6 +2,19 @@
 
 `catalog.json` is ShellSpan's built-in exact-model catalog. It separates provider transport facts from model capability facts: each preset owns the adapter protocol and default compatibility behavior, while each model declares only its own capacities and capabilities plus any compatibility fields that differ from the preset.
 
+## Provider connection checks
+
+`ai_test_connection` accepts an unsaved provider configuration and a Tauri result
+channel. It returns an ephemeral request ID; `ai_cancel_connection_test` cancels
+that ID. Checks use the selected protocol adapter, model, reasoning option and
+temporary API key, falling back to the saved route credential when no temporary
+key is supplied. They send one short text request without tools or session
+history, cap output at 128 tokens and stop after 30 seconds without retries.
+No configuration or conversation is persisted. Results contain only elapsed
+milliseconds on success, or a normalized error kind and HTTP status on failure;
+provider bodies, generated text and credentials never enter the result channel.
+Closing the editor, changing configuration or saving cancels its pending check.
+
 ## Add a built-in model
 
 Add the exact wire model ID as a key under `presets.<provider>.models`. Every entry requires:

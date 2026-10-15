@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { FlaskConicalIcon } from 'lucide-react';
+import { ChevronDownIcon, FlaskConicalIcon } from 'lucide-react';
 import { toast } from 'sonner';
-import { CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { SettingRow } from './settings-layout';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
-import { Field, FieldGroup } from '@/components/ui/field';
+import { Separator } from '@/components/ui/separator';
 import { useAppStore } from '@/stores/appStore';
 import { useI18n } from '@/hooks/useI18n';
 import { getPetdexMessageDiagnostic, testPetdexMessage } from '@/lib/petdex/messages';
@@ -63,34 +63,33 @@ export function PetdexMessageSettings() {
     }
   };
   return <>
-    <CardHeader>
-      <CardTitle>{t('settings.experimental.petdex.messages.title')}</CardTitle>
-      <CardDescription>{t('settings.experimental.petdex.messages.description')}</CardDescription>
-      <CardAction><Button size="sm" variant="outline" type="button" disabled={!enabled || !messagesEnabled || configuring || testing} onClick={() => void test()}>
-        <FlaskConicalIcon data-icon="inline-start" />
-        {t(testing ? 'settings.experimental.petdex.testing' : 'settings.experimental.petdex.messages.test')}
-      </Button></CardAction>
-    </CardHeader>
-    <CardContent className="flex min-w-0 flex-col gap-3">
-      <FieldGroup>
-        <Field className="flex-row items-center justify-between gap-3">
-          <Label htmlFor="petdex-messages-enabled">{t('settings.experimental.petdex.messages.enabled')}</Label>
-          <Switch id="petdex-messages-enabled" checked={messagesEnabled} aria-busy={configuring} aria-describedby="petdex-message-description" onCheckedChange={(value) => void update('petdexMessagesEnabled', value)} />
-        </Field>
-        <Field className="flex-row items-center justify-between gap-3">
-          <Label htmlFor="petdex-message-details-enabled">{t('settings.experimental.petdex.messages.details')}</Label>
-          <Switch id="petdex-message-details-enabled" checked={detailsEnabled} aria-busy={configuring} aria-describedby="petdex-message-risk" onCheckedChange={(value) => void update('petdexMessageDetailsEnabled', value)} />
-        </Field>
-      </FieldGroup>
-      <p id="petdex-message-description" className="text-xs leading-relaxed text-muted-foreground">{t('settings.experimental.petdex.messages.visibility')}</p>
-      <p id="petdex-message-risk" className="text-xs leading-relaxed text-muted-foreground">{t('settings.experimental.petdex.messages.risk')}</p>
-      <dl className="flex min-w-0 flex-col gap-2" aria-label={t('settings.experimental.petdex.messages.diagnostic')}>
+      <SettingRow controlId="petdex-messages-enabled" label={t('settings.experimental.petdex.messages.enabled')} descriptionId="petdex-message-description" description={t('settings.experimental.petdex.messages.description')}>
+          <Switch id="petdex-messages-enabled" aria-label={t('settings.experimental.petdex.messages.enabled')} checked={messagesEnabled} aria-busy={configuring} aria-describedby="petdex-message-description petdex-message-visibility" onCheckedChange={(value) => void update('petdexMessagesEnabled', value)} />
+      </SettingRow>
+      <Separator />
+      <SettingRow controlId="petdex-message-details-enabled" label={t('settings.experimental.petdex.messages.details')} descriptionId="petdex-message-risk" description={t('settings.experimental.petdex.messages.risk')}>
+          <Switch id="petdex-message-details-enabled" aria-label={t('settings.experimental.petdex.messages.details')} checked={detailsEnabled} aria-busy={configuring} aria-describedby="petdex-message-risk" onCheckedChange={(value) => void update('petdexMessageDetailsEnabled', value)} />
+      </SettingRow>
+      <Separator />
+    <div className="flex min-w-0 flex-col gap-3 px-3.5 py-3">
+      <p id="petdex-message-visibility" className="text-xs leading-relaxed text-muted-foreground">{t('settings.experimental.petdex.messages.visibility')}</p>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant="outline" type="button" disabled={!enabled || !messagesEnabled || configuring || testing} onClick={() => void test()}>
+          <FlaskConicalIcon data-icon="inline-start" />{t(testing ? 'settings.experimental.petdex.testing' : 'settings.experimental.petdex.messages.test')}
+        </Button>
+      </div>
+      <Collapsible className="flex min-w-0 flex-col gap-2">
+      <CollapsibleTrigger render={<Button size="sm" variant="ghost" className="self-start" />}><ChevronDownIcon data-icon="inline-start" />{t('settings.experimental.petdex.messages.diagnostic')}</CollapsibleTrigger>
+      <CollapsibleContent>
+      <dl className="flex min-w-0 flex-col gap-2 text-xs [&>div]:flex [&>div]:flex-wrap [&>div]:justify-between [&>div]:gap-x-4 [&_dt]:text-muted-foreground" aria-label={t('settings.experimental.petdex.messages.diagnostic')}>
         {configurationFailed && <div><dt>{t('settings.experimental.petdex.messages.configuration')}</dt><dd>{t('settings.experimental.petdex.messages.configurationFailed')}</dd></div>}
         <div><dt>{t('settings.experimental.petdex.messages.diagnostic')}</dt><dd>{t(`settings.experimental.petdex.messages.status.${unavailable ? 'unavailable' : diagnostic?.status ?? 'disabled'}`)}</dd></div>
         <div><dt>{t('settings.experimental.petdex.messages.lastAccepted')}</dt><dd>{diagnostic?.lastAcceptedAt == null ? t('settings.experimental.petdex.never') : new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'medium' }).format(diagnostic.lastAcceptedAt)}</dd></div>
         <div><dt>{t('settings.experimental.petdex.messages.slots')}</dt><dd>{diagnostic?.usedSlotCount ?? 0} / 3</dd></div>
         <div><dt>{t('settings.experimental.petdex.messages.cleanup')}</dt><dd>{t(`settings.experimental.petdex.messages.cleanup.${diagnostic?.cleanupOutcome ?? 'notNeeded'}`)}</dd></div>
       </dl>
-    </CardContent>
+      </CollapsibleContent>
+      </Collapsible>
+    </div>
   </>;
 }

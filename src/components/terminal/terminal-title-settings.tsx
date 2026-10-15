@@ -52,7 +52,7 @@ export function TerminalTitleSettings({ profileId }: { profileId?: string }) {
     <Field className="min-w-0">
       <FieldLabel htmlFor={`${id}-preset`}>{t('terminal.title.template')}</FieldLabel>
       <Select items={items} value={!custom && TAB_TITLE_PRESETS.some((value) => value === draft) ? draft : 'custom'} onValueChange={(value) => {
-        if (value === 'custom') setCustom(true);
+        if (value === 'custom') { setCustom(true); if (valid) save(draft, true); }
         else if (value) { setCustom(false); setDraft(value); save(value, false); }
       }}>
         <SelectTrigger id={`${id}-preset`} className="w-full"><SelectValue /></SelectTrigger>
@@ -62,18 +62,18 @@ export function TerminalTitleSettings({ profileId }: { profileId?: string }) {
     </FieldGroup>
     <Field data-invalid={!valid || undefined}>
       <FieldLabel htmlFor={`${id}-template`}>{t('terminal.title.custom')}</FieldLabel>
-      <Input id={`${id}-template`} value={draft} maxLength={256} aria-invalid={!valid} aria-describedby={`${id}-help`} onChange={(event) => { setCustom(true); setDraft(event.target.value); }} onKeyDown={(event) => {
-        if (event.key === 'Enter' && valid) { event.preventDefault(); save(draft); }
+      <Input id={`${id}-template`} value={draft} maxLength={256} aria-invalid={!valid} aria-describedby={`${id}-help`} onChange={(event) => {
+        const value = event.target.value;
+        setCustom(true);
+        setDraft(value);
+        if (validTabTitleTemplate(value)) save(value, true);
       }} />
       <FieldDescription id={`${id}-help`}>{t('terminal.title.variables')}</FieldDescription>
       {!valid && <FieldDescription role="alert">{t('terminal.title.invalid')}</FieldDescription>}
     </Field>
-    <div className="flex min-w-0 flex-wrap items-center justify-between gap-3" data-title-actions>
+    {(preview !== null || scope) && <div className="flex min-w-0 flex-wrap items-center justify-between gap-3" data-title-actions>
     {preview !== null && <FieldDescription className="min-w-0 flex-1 break-all">{t('terminal.title.preview', { title: preview })}</FieldDescription>}
-    <div className="ml-auto flex shrink-0 flex-wrap gap-2">
-      <Button size="sm" disabled={!valid || (draft === template && custom === templateCustom && !inheritsGlobal)} onClick={() => save(draft)}>{t('common.save')}</Button>
-      {scope && <Button size="sm" variant="outline" disabled={!overrides[scope]} onClick={() => setOverride(scope, null)}>{t('terminal.title.inherit')}</Button>}
-    </div>
-    </div>
+    {scope && <Button className="ml-auto" size="sm" variant="outline" disabled={!overrides[scope]} onClick={() => setOverride(scope, null)}>{t('terminal.title.inherit')}</Button>}
+    </div>}
   </FieldGroup>;
 }

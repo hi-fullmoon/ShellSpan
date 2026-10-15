@@ -439,6 +439,15 @@ try {
       await targetTab.scrollIntoViewIfNeeded();
       await page.mouse.click(width - 10, 300);
       await targetIcon.waitFor({ state: 'visible' });
+      assert.equal(await targetIcon.evaluate(el => {
+        const reference = document.createElement('span');
+        reference.style.color = 'var(--app-success)';
+        el.append(reference);
+        const matches = getComputedStyle(el.querySelector('svg')).color === getComputedStyle(reference).color;
+        reference.remove();
+        return matches;
+      }), true, 'Target icon uses the theme success color');
+      await page.screenshot({ path: `/tmp/shellspan-target-icon-${width}-${active}.png` });
       assert.equal(await closeIcon.isVisible(), false);
       assert.equal(await targetTab.locator('[data-slot="focus-tab-target"]').count(), 1);
       const before = await closeTarget.boundingBox();

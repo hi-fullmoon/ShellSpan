@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import type { PetdexCategories, PetdexDiagnostic, PetdexTestResult, PetdexCheckResult } from '@/types';
 import { createLogger } from '@/lib/logger';
 import { createOperationId, findOperationId } from '@/lib/operation-id';
@@ -276,6 +276,61 @@ export async function invokeCloseSession(sessionId: string): Promise<void> {
 
 export async function invokeListAiModels(provider: AiProviderConnectionConfig): Promise<import('@/lib/ai/provider-contract').DiscoveredModel[]> {
   return invokeLogged<import('@/lib/ai/provider-contract').DiscoveredModel[]>('ai_list_models', { provider });
+}
+
+export async function invokeAiSetupModelDefinition(
+  config: AiProviderConnectionConfig,
+): Promise<import('@/lib/ai/provider-contract').ModelDefinition> {
+  const { apiKey: _apiKey, ...provider } = config;
+  try {
+    const model = await invoke<import('@/lib/ai/provider-contract').ResolvedModel>('ai_resolve_model', { provider });
+    return {
+      displayName: model.displayName,
+      contextWindow: model.contextWindow,
+      maxOutputTokens: model.maxOutputTokens,
+      toolCalling: model.toolCalling,
+      textInput: model.textInput,
+      imageInput: model.imageInput,
+      reasoning: model.reasoning,
+      compat: model.compat,
+      vision: model.vision,
+    };
+  } catch (reason) {
+    if (!(reason instanceof Error ? reason.message : String(reason)).includes('UNKNOWN_MODEL')) throw reason;
+    return invoke<import('@/lib/ai/provider-contract').ModelDefinition>('ai_model_declaration_template', { provider });
+  }
+}
+
+export async function invokeTestAiConnection(
+  provider: AiProviderConnectionConfig,
+  signal: AbortSignal,
+): Promise<import('@/types/ai').AiConnectionTestResult> {
+  type Result = import('@/types/ai').AiConnectionTestResult;
+  if (signal.aborted) return { type: 'failed', kind: 'cancelled' };
+  const onResult = new Channel<Result>();
+  let requestId: string | undefined;
+  let complete!: (result: Result) => void;
+  const completion = new Promise<Result>((resolve) => { complete = resolve; });
+  onResult.onmessage = complete;
+  const cancelRequest = (): void => {
+    if (requestId) {
+      void invoke('ai_cancel_connection_test', { requestId }).catch(() => undefined);
+    }
+  };
+  const cancel = (): void => {
+    cancelRequest();
+    complete({ type: 'failed', kind: 'cancelled' });
+  };
+  signal.addEventListener('abort', cancel, { once: true });
+  try {
+    // This command carries a transient key. Only the backend's credential-free result
+    // is exposed; do not log the command arguments or arbitrary provider bodies.
+    requestId = await invoke<string>('ai_test_connection', { provider, onResult });
+    if (signal.aborted) cancel();
+    return await completion;
+  } finally {
+    signal.removeEventListener('abort', cancel);
+  }
 }
 
 export function invokeListAiRoutes(): Promise<import('@/types/ai').RouteSnapshot> {
