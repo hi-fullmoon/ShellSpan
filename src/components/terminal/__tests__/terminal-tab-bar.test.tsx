@@ -152,7 +152,7 @@ describe('TerminalTabBar', () => {
     }
   });
 
-  it('separates tabs with a gap instead of divider separators', () => {
+  it('lays out adjacent tabs without gaps', () => {
     addSession('s1', 'A');
     addSession('s2', 'B');
     addSession('s3', 'C');
@@ -160,13 +160,13 @@ describe('TerminalTabBar', () => {
 
     render(<TerminalTabBar />);
 
-    expect(screen.getByRole('tablist')).toHaveClass('gap-1');
+    expect(screen.getByRole('tablist')).toHaveClass('gap-0');
     for (const tab of screen.getAllByRole('tab')) {
       expect(tab.querySelector('[data-tab-separator]')).not.toBeInTheDocument();
     }
   });
 
-  it('renders the insert indicator centered in the tab gap', () => {
+  it('renders insert indicators inside tab edges so they remain visible', () => {
     addSession('s1', 'A');
     addSession('s2', 'B');
 
@@ -174,17 +174,17 @@ describe('TerminalTabBar', () => {
 
     let tabs = screen.getAllByRole('tab');
     const gapIndicator = tabs[1].querySelector('[data-drop-indicator="left"]');
-    expect(gapIndicator).toHaveClass('left-[-3px]', '-translate-x-1/2');
+    expect(gapIndicator).toHaveClass('left-0');
 
     rerender(<TerminalTabBar externalInsertIndex={0} />);
     tabs = screen.getAllByRole('tab');
     const leadingIndicator = tabs[0].querySelector('[data-drop-indicator="left"]');
-    expect(leadingIndicator).toHaveClass('left-[-3px]', '-translate-x-1/2');
+    expect(leadingIndicator).toHaveClass('left-0');
 
     rerender(<TerminalTabBar externalInsertIndex={2} />);
     tabs = screen.getAllByRole('tab');
     const trailingIndicator = tabs[1].querySelector('[data-drop-indicator="right"]');
-    expect(trailingIndicator).toHaveClass('right-[-3px]', 'translate-x-1/2');
+    expect(trailingIndicator).toHaveClass('right-0');
 
     rerender(<TerminalTabBar externalInsertIndex={null} />);
     expect(document.querySelector('[data-drop-indicator]')).not.toBeInTheDocument();
@@ -251,24 +251,25 @@ describe('TerminalTabBar', () => {
     expect(onNewTabClick).toHaveBeenCalledTimes(1);
   });
 
-  it('uses a recessed strip with a bottom hairline and a raised active tab card', () => {
+  it('uses continuous full-height tabs with no outer inset or active shadow', () => {
     addSession('s1', 'A');
     addSession('s2', 'B');
     useTerminalStore.getState().setActiveSession('s1');
     const { container } = render(<TerminalTabBar />);
 
     const tabBar = container.querySelector('[data-terminal-tab-bar]');
-    expect(tabBar).toHaveClass('h-10', 'my-0', 'py-0', 'bg-app-bg');
-    expect(tabBar).toHaveClass('after:border-b', 'after:border-app-border/40');
-    expect(tabBar?.querySelector('[data-slot="scroll-area"]')).toHaveClass('h-10');
-    // Edge padding lives inside the scroll viewport so drop indicators
-    // flanking the first/last tab are not clipped at the scroll origin.
-    expect(screen.getByRole('tablist')).toHaveClass('py-0', 'gap-1', 'px-1');
+    expect(tabBar).toHaveClass('h-8', 'my-0', 'py-0', 'bg-app-surface-muted');
+    expect(tabBar).toHaveClass('after:border-b', 'after:border-app-border/50', 'after:bg-app-bg');
+    expect(tabBar?.querySelector('[data-slot="scroll-area"]')).toHaveClass('h-8');
+    expect(screen.getByRole('tablist')).toHaveClass('p-0', 'gap-0');
     for (const tab of screen.getAllByRole('tab')) {
-      expect(tab.parentElement).toHaveClass('h-10', 'py-1');
-      expect(tab).toHaveClass('h-8', 'w-42', 'px-1.5', 'gap-1');
+      expect(tab.parentElement).toHaveClass('h-8');
+      expect(tab.parentElement).not.toHaveClass('py-1');
+      expect(tab).toHaveClass('h-8', 'w-42', 'px-1.5', 'gap-1', 'border-x');
+      expect(tab).not.toHaveClass('border-t');
+      expect(tab).not.toHaveClass('border', 'shadow-xs');
     }
-    expect(screen.getAllByRole('tab')[0]).toHaveClass('h-8', 'rounded-md', 'border-app-border', 'bg-app-surface', 'text-app-text', 'shadow-xs');
+    expect(screen.getAllByRole('tab')[0]).toHaveClass('rounded-t-md', 'border-app-border/50', 'bg-app-bg', 'text-app-text');
     expect(screen.getAllByRole('tab')[1]).toHaveClass('border-transparent', 'bg-transparent', 'hover:bg-app-surface-muted');
 
     expect(screen.queryByRole('button', { name: 'terminal.newTab' })).not.toBeInTheDocument();
@@ -589,7 +590,23 @@ describe('TerminalTabBar', () => {
     expect(screen.queryByLabelText('unpin')).not.toBeInTheDocument();
   });
 
-  it('renders the session color as the background on the active tab', () => {
+  it('reserves the close action width and reveals it for keyboard focus', () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    useTerminalStore.getState().setActiveSession('s1');
+    render(<TerminalTabBar />);
+    const tabs = screen.getAllByRole('tab');
+    const close = within(tabs[1]).getByLabelText('close');
+    expect(close).toHaveClass('flex', 'h-5', 'w-5', 'invisible', 'group-focus-within:visible');
+    expect(close).not.toHaveClass('hidden');
+    fireEvent.keyDown(tabs[1], { key: 'Enter' });
+    expect(useTerminalStore.getState().activeSessionId).toBe('s2');
+    expect(close).toHaveClass('visible');
+    fireEvent.keyDown(tabs[0], { key: ' ' });
+    expect(useTerminalStore.getState().activeSessionId).toBe('s1');
+  });
+
+  it('renders the session color as a marker on the active tab', () => {
     addSession('s1', 'A');
     useTerminalStore.getState().setTabColor('s1', '#ef4444');
     useTerminalStore.getState().setActiveSession('s1');
@@ -597,12 +614,11 @@ describe('TerminalTabBar', () => {
     render(<TerminalTabBar />);
 
     const tab = screen.getByRole('tab');
-    expect(tab.style.backgroundColor).toBe(
-      'color-mix(in srgb, rgb(239, 68, 68) 25%, transparent)',
-    );
+    expect(tab.querySelector<HTMLElement>('[data-tab-color]')?.style.backgroundColor).toBe('rgb(239, 68, 68)');
+    expect(tab.style.backgroundColor).toBe('');
   });
 
-  it('renders the session color as the background on an inactive tab', () => {
+  it('keeps the session color marker on an inactive tab', () => {
     addSession('s1', 'A');
     addSession('s2', 'B');
     useTerminalStore.getState().setTabColor('s1', '#ef4444');
@@ -610,9 +626,7 @@ describe('TerminalTabBar', () => {
 
     render(<TerminalTabBar />);
 
-    expect(screen.getAllByRole('tab')[0].style.backgroundColor).toBe(
-      'color-mix(in srgb, rgb(239, 68, 68) 8%, transparent)',
-    );
+    expect(screen.getAllByRole('tab')[0].querySelector<HTMLElement>('[data-tab-color]')?.style.backgroundColor).toBe('rgb(239, 68, 68)');
   });
 
   it('draws the active tab border on the tab itself', () => {
@@ -622,19 +636,19 @@ describe('TerminalTabBar', () => {
     render(<TerminalTabBar />);
 
     const tab = screen.getByRole('tab');
-    expect(tab).toHaveClass('rounded-md', 'border-app-border');
+    expect(tab).toHaveClass('rounded-t-md', 'border-x', 'border-app-border/50');
     expect(tab.querySelector('[data-active-tab-indicator]')).toBeNull();
     expect(tab.style.borderColor).toBe('');
   });
 
-  it('uses the session color for the active border when set', () => {
+  it('keeps the active boundary neutral when a session color is set', () => {
     addSession('s1', 'A');
     useTerminalStore.getState().setTabColor('s1', '#ef4444');
     useTerminalStore.getState().setActiveSession('s1');
 
     render(<TerminalTabBar />);
 
-    expect(screen.getByRole('tab').style.borderColor).toBe('rgb(239, 68, 68)');
+    expect(screen.getByRole('tab').style.borderColor).toBe('');
   });
 
   it('does not draw a border on inactive tabs', () => {

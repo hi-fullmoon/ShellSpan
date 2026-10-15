@@ -89,15 +89,80 @@ try {
           inset: tab.getBoundingClientRect().top - bar.getBoundingClientRect().top,
           leadingInset: tab.getBoundingClientRect().left - bar.getBoundingClientRect().left,
           tabPaddingX: [tabStyle.paddingLeft, tabStyle.paddingRight],
+          borderTop: tabStyle.borderTopWidth,
+          borderLeft: tabStyle.borderLeftWidth,
+          borderBottom: tabStyle.borderBottomWidth,
         };
       }, selector);
+      const terminal = selector === '[data-terminal-tab-bar]';
       assert.deepEqual(sizes, {
-        bar: 40, viewport: 40, slot: 40, tab: 32, tabWidth: 168,
+        bar: terminal ? 32 : 40, viewport: terminal ? 32 : 40, slot: terminal ? 32 : 40, tab: 32, tabWidth: 168,
         margins: ['0px', '0px'], barPadding: ['0px', '0px'],
-        slotPadding: ['4px', '4px'], inset: 4,
-        leadingInset: 4, tabPaddingX: ['6px', '6px'],
+        slotPadding: terminal ? ['0px', '0px'] : ['4px', '4px'], inset: terminal ? 0 : 4,
+        leadingInset: terminal ? 0 : 4, tabPaddingX: ['6px', '6px'],
+        borderTop: terminal ? '0px' : '1px',
+        borderLeft: '1px',
+        borderBottom: terminal ? '0px' : '1px',
       });
     }
+    if (process.env.TAB_SCREENSHOT_DIR) {
+      await page.screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/terminal-tabs-${width}.png` });
+    }
+  }
+  await page.evaluate(async (localUser) => {
+    const { useTerminalStore } = await import('/tab-runtime.js');
+    for (let i = 0; i < 2; i++) {
+      useTerminalStore.getState().beginConnectionAttempt({
+        title: localUser.shell, host: 'localhost', port: 22, username: localUser.username,
+      });
+    }
+  }, { username: userInfo().username, shell: basename(userInfo().shell || process.env.SHELL) });
+  await page.locator('[data-terminal-tab-bar] [role="tab"]').nth(2).waitFor();
+  const appearances = ['light', 'dark'].flatMap((theme) => [400, 1280].map((width) => ({ theme, width })));
+  for (const { theme, width } of appearances) {
+    await page.evaluate((theme) => document.documentElement.setAttribute('data-theme', theme), theme);
+    await page.setViewportSize({ width, height: 720 });
+    const tabs = page.locator('[data-terminal-tab-bar] [role="tab"]');
+    for (let index = 0; index < 3; index++) {
+      // Pending tabs disable sorting via aria-disabled on their wrapper, but
+      // remain selectable. Use the pointer as a user would, without treating
+      // the sortable wrapper's state as a disabled tab action.
+      await tabs.nth(index).scrollIntoViewIfNeeded();
+      const tabBox = await tabs.nth(index).boundingBox();
+      assert.ok(tabBox);
+      await page.mouse.click(tabBox.x + tabBox.width / 2, tabBox.y + tabBox.height / 2);
+      await page.waitForFunction((index) => document.querySelectorAll('[data-terminal-tab-bar] [role="tab"]')[index].getAttribute('aria-selected') === 'true', index);
+      const geometry = await tabs.evaluateAll((elements) => elements.map((element) => {
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return { left: rect.left, right: rect.right, topBorder: style.borderTopWidth, bottomBorder: style.borderBottomWidth };
+      }));
+      assert.equal(geometry[0].right, geometry[1].left);
+      assert.equal(geometry[1].right, geometry[2].left);
+      assert.equal(geometry[index].topBorder, '0px');
+      assert.equal(geometry[index].bottomBorder, '0px');
+      await page.waitForFunction(() => {
+        const bar = document.querySelector('[data-terminal-tab-bar]');
+        return getComputedStyle(bar, '::after').backgroundColor === getComputedStyle(bar.querySelector('[role="tab"][aria-selected="true"]')).backgroundColor;
+      });
+      const boundary = await page.evaluate(() => {
+        const bar = document.querySelector('[data-terminal-tab-bar]');
+        const line = getComputedStyle(bar, '::after');
+        const active = getComputedStyle(bar.querySelector('[role="tab"][aria-selected="true"]'));
+        return { lineColor: line.borderBottomColor, sideColor: active.borderRightColor,
+          topColor: active.borderTopColor, leftColor: active.borderLeftColor,
+          leftWidth: active.borderLeftWidth, rightWidth: active.borderRightWidth,
+          lineBackground: line.backgroundColor, tabBackground: active.backgroundColor };
+      });
+      assert.equal(boundary.lineColor, boundary.sideColor);
+      assert.equal(boundary.topColor, boundary.sideColor);
+      assert.equal(boundary.leftColor, boundary.sideColor);
+      assert.equal(boundary.leftWidth, '1px');
+      assert.equal(boundary.rightWidth, '1px');
+      assert.equal(boundary.lineBackground, boundary.tabBackground);
+      if (process.env.TAB_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/terminal-tabs-${theme}-${width}-selected-${index}.png` });
+    }
+    if (process.env.TAB_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/terminal-tabs-multiple-${width}.png` });
   }
   {
     // Regression: the leading drop indicator (insert index 0) used to sit left
@@ -105,7 +170,8 @@ try {
     // bar in that drop state and require the indicator to stay inside the
     // viewport's content box.
     const leading = await page.evaluate(async () => {
-      const { React, createRoot, TerminalTabBar } = await import('/tab-runtime.js');
+      const { React, createRoot, TerminalTabBar, useTerminalStore } = await import('/tab-runtime.js');
+      useTerminalStore.getState().setActiveSession(useTerminalStore.getState().sessions[0].sessionId);
       const host = document.createElement('div');
       document.getElementById('root').append(host);
       createRoot(host).render(React.createElement(TerminalTabBar, { externalInsertIndex: 0 }));
@@ -131,7 +197,7 @@ try {
       `leading indicator ${leading.left}..${leading.right} outside viewport ${leading.viewportLeft}..${leading.viewportRight}`,
     );
   }
-  console.log('terminal and sftp tab bars: 40px bar, tab 168×32px, leading inset 4px, tab padding 6px');
+  console.log('Terminal and SFTP tab layout and visible drag indicators verified.');
 } finally {
   await browser?.close();
   await server.close();
