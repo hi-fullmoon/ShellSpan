@@ -606,7 +606,7 @@ describe('TerminalTabBar', () => {
     expect(useTerminalStore.getState().activeSessionId).toBe('s1');
   });
 
-  it('renders the session color as a marker on the active tab', () => {
+  it('renders the session color as the active tab background without a top strip', () => {
     addSession('s1', 'A');
     useTerminalStore.getState().setTabColor('s1', '#ef4444');
     useTerminalStore.getState().setActiveSession('s1');
@@ -614,11 +614,11 @@ describe('TerminalTabBar', () => {
     render(<TerminalTabBar />);
 
     const tab = screen.getByRole('tab');
-    expect(tab.querySelector<HTMLElement>('[data-tab-color]')?.style.backgroundColor).toBe('rgb(239, 68, 68)');
-    expect(tab.style.backgroundColor).toBe('');
+    expect(tab.querySelector('[data-tab-color]')).toBeNull();
+    expect(tab.style.backgroundColor).toBe('color-mix(in srgb, #ef4444 25%, var(--app-bg))');
   });
 
-  it('keeps the session color marker on an inactive tab', () => {
+  it('renders a subtler session background on an inactive tab', () => {
     addSession('s1', 'A');
     addSession('s2', 'B');
     useTerminalStore.getState().setTabColor('s1', '#ef4444');
@@ -626,7 +626,7 @@ describe('TerminalTabBar', () => {
 
     render(<TerminalTabBar />);
 
-    expect(screen.getAllByRole('tab')[0].querySelector<HTMLElement>('[data-tab-color]')?.style.backgroundColor).toBe('rgb(239, 68, 68)');
+    expect(screen.getAllByRole('tab')[0].style.backgroundColor).toBe('color-mix(in srgb, #ef4444 8%, var(--app-surface-muted))');
   });
 
   it('draws the active tab border on the tab itself', () => {
@@ -639,6 +639,24 @@ describe('TerminalTabBar', () => {
     expect(tab).toHaveClass('rounded-t-md', 'border-x', 'border-app-border/50');
     expect(tab.querySelector('[data-active-tab-indicator]')).toBeNull();
     expect(tab.style.borderColor).toBe('');
+  });
+
+  it('preserves the chosen color while switching and removes the background when cleared', () => {
+    addSession('s1', 'A');
+    addSession('s2', 'B');
+    useTerminalStore.getState().setTabColor('s1', '#f97316');
+    useTerminalStore.getState().setActiveSession('s1');
+    render(<TerminalTabBar />);
+    const [first, second] = screen.getAllByRole('tab');
+    fireEvent.pointerDown(second, { button: 0 });
+    expect(first.style.backgroundColor).toContain('8%');
+    expect(useTerminalStore.getState().sessions.find((session) => session.sessionId === 's1')?.color).toBe('#f97316');
+    fireEvent.keyDown(first, { key: 'Enter' });
+    expect(first.style.backgroundColor).toContain('25%');
+    act(() => useTerminalStore.getState().setTabColor('s1', undefined));
+    expect(first.style.backgroundColor).toBe('');
+    expect(first).toHaveClass('bg-app-bg', 'border-app-border/50');
+    expect(first.querySelector('[data-tab-color]')).toBeNull();
   });
 
   it('keeps the active boundary neutral when a session color is set', () => {

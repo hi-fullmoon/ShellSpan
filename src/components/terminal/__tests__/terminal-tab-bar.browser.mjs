@@ -285,7 +285,48 @@ try {
   await page.keyboard.press('Escape');
   await page.mouse.up();
   assert.equal(await page.locator('[data-sftp-tab-bar] [data-drop-indicator]').count(), 0);
-  console.log('Terminal and SFTP appearance, keyboard actions, pinning and drag indicators verified.');
+  for (const { theme, width } of appearances) {
+    await page.setViewportSize({ width, height: 720 });
+    await page.evaluate(async (theme) => {
+      document.documentElement.setAttribute('data-theme', theme);
+      const { useTerminalStore } = await import('/tab-runtime.js');
+      const first = useTerminalStore.getState().sessions[0].sessionId;
+      useTerminalStore.getState().setTabColor(first, '#f97316');
+      useTerminalStore.getState().setActiveSession(first);
+    }, theme);
+    const colored = page.locator('[data-terminal-tab-bar] [role="tab"]').first();
+    await page.waitForFunction(() => document.querySelector('[data-terminal-tab-bar] [role="tab"]').style.backgroundColor.includes('25%'));
+    const activeFill = await colored.evaluate((tab) => tab.style.backgroundColor);
+    assert.ok(activeFill.includes('var(--app-bg)'));
+    assert.equal(await colored.locator('[data-tab-color]').count(), 0);
+    // Wait for the actual background transition before capturing the result.
+    await colored.evaluate(async (tab) => { await Promise.all(tab.getAnimations().map((animation) => animation.finished)); });
+    const selectedBackground = await colored.evaluate((tab) => getComputedStyle(tab).backgroundColor);
+    assert.notEqual(selectedBackground, 'rgba(0, 0, 0, 0)');
+    if (process.env.TAB_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/terminal-tab-color-${theme}-${width}.png` });
+    await page.evaluate(async () => {
+      const { useTerminalStore } = await import('/tab-runtime.js');
+      useTerminalStore.getState().setActiveSession(useTerminalStore.getState().sessions[1].sessionId);
+    });
+    await page.waitForFunction(() => document.querySelector('[data-terminal-tab-bar] [role="tab"]').style.backgroundColor.includes('8%'));
+    assert.ok((await colored.evaluate((tab) => tab.style.backgroundColor)).includes('var(--app-surface-muted)'));
+    await colored.evaluate(async (tab) => { await Promise.all(tab.getAnimations().map((animation) => animation.finished)); });
+    const inactiveBackground = await colored.evaluate((tab) => getComputedStyle(tab).backgroundColor);
+    assert.notEqual(inactiveBackground, selectedBackground);
+    await colored.hover();
+    await colored.evaluate(async (tab) => { await Promise.all(tab.getAnimations().map((animation) => animation.finished)); });
+    assert.equal(await colored.evaluate((tab) => getComputedStyle(tab).backgroundColor), inactiveBackground);
+    if (process.env.TAB_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/terminal-tab-color-inactive-${theme}-${width}.png` });
+    await page.evaluate(async () => {
+      const { useTerminalStore } = await import('/tab-runtime.js');
+      useTerminalStore.getState().setTabColor(useTerminalStore.getState().sessions[0].sessionId, undefined);
+    });
+    await page.waitForFunction(() => document.querySelector('[data-terminal-tab-bar] [role="tab"]').style.backgroundColor === '');
+    await colored.evaluate(async (tab) => { await Promise.all(tab.getAnimations().map((animation) => animation.finished)); });
+    const neutralBackground = await colored.evaluate((tab) => getComputedStyle(tab).backgroundColor);
+    assert.notEqual(neutralBackground, inactiveBackground);
+  }
+  console.log('Terminal and SFTP appearance, keyboard actions, pinning, tab colors and drag indicators verified.');
 } finally {
   await browser?.close();
   await server.close();
