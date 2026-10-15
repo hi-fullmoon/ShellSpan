@@ -24,6 +24,10 @@ export interface AiProviderConnectionConfig extends AiProviderConfig {
   apiKey?: string;
 }
 
+export type AiConnectionTestResult =
+  | { type: 'success'; elapsedMs: number }
+  | { type: 'failed'; kind: 'cancelled' | 'retryable' | 'transport' | 'timeout' | 'emptyResponse' | 'protocol' | 'contextTooLarge' | 'authentication' | 'rateLimited' | 'terminal'; status?: number | null };
+
 export interface AiProviderProfile extends AiProviderConfig {
   name: string;
   preset: AiProviderPreset;

@@ -53,7 +53,9 @@ import { useI18n } from '@/hooks/useI18n';
 import { cn } from '@/lib/utils';
 import {
   invokeGetAiRouteApiKey,
+  invokeAiSetupModelDefinition,
   invokeListAiModels,
+  invokeTestAiConnection,
   isTauriRuntime,
 } from '@/lib/ipc/tauri';
 import type { LocaleKey } from '@/locales';
@@ -63,7 +65,9 @@ import {
   useAiSettingsStore,
 } from '@/stores/aiSettingsStore';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
+import { useToastStore } from '@/stores/toastStore';
 import type {
+  AiConnectionTestResult,
   AiProviderConnectionConfig,
   AiProviderKind,
   AiProviderPreset,
@@ -258,6 +262,25 @@ function isUnknownModelFailure(reason: unknown): boolean {
   return (reason instanceof Error ? reason.message : String(reason)).includes('UNKNOWN_MODEL');
 }
 
+export function connectionTestFailureKey(
+  result: Extract<AiConnectionTestResult, { type: 'failed' }>,
+  profile: ProviderProfileId,
+): LocaleKey {
+  if (result.status === 402) return 'settings.ai.testConnectionQuota';
+  if (result.status === 404) return profile === 'openrouter'
+    ? 'settings.ai.testConnectionNoEndpoint'
+    : 'settings.ai.testConnectionNotFound';
+  if (result.kind === 'authentication' || result.status === 403) return 'settings.ai.testConnectionAuth';
+  switch (result.kind) {
+    case 'timeout': return 'settings.ai.testConnectionTimeout';
+    case 'transport': return 'settings.ai.testConnectionNetwork';
+    case 'rateLimited': return 'settings.ai.testConnectionRateLimit';
+    case 'emptyResponse':
+    case 'protocol': return 'settings.ai.testConnectionResponse';
+    default: return 'settings.ai.testConnectionRejected';
+  }
+}
+
 export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
   open,
   provider,
@@ -278,6 +301,8 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
   const [apiKeyBusy, setApiKeyBusy] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const connectionTest = useRef<AbortController | undefined>(undefined);
   const [modelBusy, setModelBusy] = useState(false);
   const [modelDiscoveryError, setModelDiscoveryError] = useState<string>();
   const [feedback, setFeedback] = useState<Feedback>();
@@ -289,9 +314,20 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
   const modelRequestGeneration = useRef(0);
   const declarationRequestGeneration = useRef(0);
   const apiKeyRequestGeneration = useRef(0);
+  const cancelConnectionTest = (): void => {
+    connectionTest.current?.abort();
+    connectionTest.current = undefined;
+    setTesting(false);
+  };
+  useEffect(() => () => {
+    connectionTest.current?.abort();
+    connectionTest.current = undefined;
+  }, []);
+  useEffect(() => { cancelConnectionTest(); }, [open, provider, routeSnapshot, routeModels]);
   useEffect(() => { if (open && !routeSnapshot) void hydrateRoutes(); }, [open, routeSnapshot, hydrateRoutes]);
 
   const invalidateModelRequest = (): void => {
+    cancelConnectionTest();
     modelRequestGeneration.current += 1;
     declarationRequestGeneration.current += 1;
     setBusy(false);
@@ -483,6 +519,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
   };
 
   const handleModelsChange = (models: ProviderModelDraft[]): void => {
+    cancelConnectionTest();
     declarationRequestGeneration.current += 1;
     setModelCatalogMode('explicit');
     setProviderModels(models);
@@ -543,6 +580,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
   const handleDeclareModel = async (index: number): Promise<void> => {
     const model = providerModels[index];
     if (!draft || !model?.id.trim()) return;
+    cancelConnectionTest();
     const requestGeneration = declarationRequestGeneration.current + 1;
     declarationRequestGeneration.current = requestGeneration;
     const modelIdentity = model;
@@ -570,6 +608,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
 
   const handleResetModels = (): void => {
     if (!draft) return;
+    cancelConnectionTest();
     const profile = resolveProviderProfile(draft);
     const definition = PRESET_OPTIONS.find((item) => resolveProviderProfile(item) === profile);
     if (!definition) return;
@@ -591,6 +630,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
 
   const handleSave = async (): Promise<void> => {
     if (!draft || !canSave) return;
+    cancelConnectionTest();
     const saveGeneration = ++modelRequestGeneration.current;
     setBusy(true);
     setFeedback(undefined);
@@ -675,6 +715,43 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
       });
     } finally {
       if (modelRequestGeneration.current === saveGeneration) setBusy(false);
+    }
+  };
+
+  const handleTestConnection = async (): Promise<void> => {
+    if (!draft || !canTest || !defaultModelExists || modelFailure || busy || connectionTest.current) return;
+    const controller = new AbortController();
+    connectionTest.current = controller;
+    setTesting(true);
+    setFeedback(undefined);
+    try {
+      const selectedModel = providerModels.find((model) => model.id.trim() === draft.model);
+      const config = draftConfig(draft, provider?.id);
+      if (selectedModel) {
+        const definition = selectedModel.definition ?? await invokeAiSetupModelDefinition(config);
+        if (controller.signal.aborted) return;
+        config.modelDefinition = modelDefinitionForSave(selectedModel, definition);
+      }
+      const result = await invokeTestAiConnection(config, controller.signal);
+      if (controller.signal.aborted || connectionTest.current !== controller) return;
+      if (result.type === 'success') {
+        useToastStore.getState().addToast(t('settings.ai.testConnectionSuccess', { elapsed: result.elapsedMs }), 'success');
+      } else if (result.kind !== 'cancelled') {
+        const key = connectionTestFailureKey(result, config.profile);
+        const reason = t(key, { model: config.model });
+        useToastStore.getState().addToast(result.status
+          ? t('settings.ai.testConnectionHttpError', { status: result.status, reason })
+          : reason, 'error', 6000);
+      }
+    } catch {
+      if (!controller.signal.aborted && connectionTest.current === controller) {
+        useToastStore.getState().addToast(t('settings.ai.testConnectionConfigError'), 'error', 6000);
+      }
+    } finally {
+      if (connectionTest.current === controller) {
+        connectionTest.current = undefined;
+        setTesting(false);
+      }
     }
   };
 
@@ -979,56 +1056,68 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
             </Collapsible>
           </CompactDialogBody>
 
-          <CompactDialogFooter className="sm:justify-between">
-            <div className="flex w-full min-w-0 items-center gap-2 sm:flex-1">
+          <CompactDialogFooter className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1 sm:gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-1 sm:gap-2">
               {onDelete && (
-                <Button type="button" variant="destructiveOutline" size="xs" onClick={onDelete}>
+                <Button type="button" variant="destructiveOutline" size="xs" className="shrink-0" onClick={onDelete}>
                   {t('settings.ai.deleteProvider')}
                 </Button>
               )}
-              {feedback && (
-                <div
-                  role={feedback.kind === 'error' ? 'alert' : 'status'}
-                  aria-atomic="true"
-                  className={cn(
-                    'flex h-6 min-w-0 items-center gap-0.5 text-xs font-medium leading-none',
-                    feedback.kind === 'error' ? 'text-destructive' : 'text-app-success',
-                  )}
-                >
-                  <span className="truncate">
-                    {t(feedback.labelKey ?? (feedback.kind === 'error' ? 'settings.ai.connectionFailed' : 'settings.ai.ready'))}
-                  </span>
-                  <TooltipProvider delay={250}>
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <Button
-                            type="button"
-                            variant="plain"
-                            size="xs"
-                            className="size-4 shrink-0 p-0"
-                            aria-label={`${t(feedback.labelKey ?? (feedback.kind === 'error' ? 'settings.ai.connectionFailed' : 'settings.ai.ready'))}: ${feedback.message}`}
-                          />
-                        }
-                      >
-                        {feedback.kind === 'error' ? <CircleAlertIcon /> : <CheckCircle2Icon />}
-                      </TooltipTrigger>
-                      <TooltipContent align="start" className="max-w-sm break-words">
-                        {feedback.message}
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                </div>
-              )}
             </div>
-            <div className="flex justify-end gap-2">
+            <div className="flex shrink-0 justify-end gap-1 sm:gap-2">
               <Button type="button" variant="outline" size="sm" onClick={() => handleOpenChange(false)}>
                 {t('common.cancel')}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                title={t('settings.ai.testConnectionHint')}
+                disabled={!canTest || !defaultModelExists || Boolean(modelFailure) || busy || modelBusy || testing}
+                aria-busy={testing}
+                onClick={() => void handleTestConnection()}
+              >
+                {testing && <Spinner data-icon="inline-start" />}
+                {t(testing ? 'settings.ai.testingConnection' : 'settings.ai.testConnection')}
               </Button>
               <Button type="submit" size="sm" disabled={!canSave || busy}>
                 {t('common.save')}
               </Button>
             </div>
+            {feedback && (
+              <div
+                role={feedback.kind === 'error' ? 'alert' : 'status'}
+                aria-atomic="true"
+                className={cn(
+                  'col-span-2 flex h-6 min-w-0 items-center gap-0.5 text-xs font-medium leading-none',
+                  feedback.kind === 'error' ? 'text-destructive' : 'text-app-success',
+                )}
+              >
+                <span className="truncate">
+                  {t(feedback.labelKey ?? (feedback.kind === 'error' ? 'settings.ai.connectionFailed' : 'settings.ai.ready'))}
+                </span>
+                <TooltipProvider delay={250}>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          type="button"
+                          variant="plain"
+                          size="xs"
+                          className="size-4 shrink-0 p-0"
+                          aria-label={`${t(feedback.labelKey ?? (feedback.kind === 'error' ? 'settings.ai.connectionFailed' : 'settings.ai.ready'))}: ${feedback.message}`}
+                        />
+                      }
+                    >
+                      {feedback.kind === 'error' ? <CircleAlertIcon /> : <CheckCircle2Icon />}
+                    </TooltipTrigger>
+                    <TooltipContent align="start" className="max-w-sm break-words">
+                      {feedback.message}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+            )}
           </CompactDialogFooter>
         </form>
       </CompactDialogContent>

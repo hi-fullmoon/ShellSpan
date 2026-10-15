@@ -2,6 +2,7 @@
 pub(crate) mod adapter;
 mod adapters;
 pub(crate) mod config;
+pub(crate) mod connection_test;
 pub(crate) mod discovery;
 pub(crate) mod errors;
 pub(crate) mod registry;
