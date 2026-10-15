@@ -6,6 +6,12 @@
   z-index: 1;
 }
 
+/* Absolute offsets start inside the tab's 1px border. Align the leading
+   insertion mark with the strip edge without moving it outside the viewport. */
+.session-tab-slot:first-child > .session-tab > [data-drop-indicator='left'] {
+  left: -1px;
+}
+
 .session-tab-slot:has([aria-selected='false']) > .session-tab::after {
   content: '';
   position: absolute;

@@ -2,6 +2,8 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, act, within } from '@testing-library/react';
 import { TerminalTabBar } from '../terminal-tab-bar';
 import { useTerminalStore } from '@/stores/terminalStore';
+import { useAppStore } from '@/stores/appStore';
+import { resolveTerminalTheme } from '../registry/terminal-registry';
 
 vi.mock('@/lib/ipc/tauri', () => ({
   invokeCloseSession: vi.fn().mockResolvedValue(undefined),
@@ -269,7 +271,7 @@ describe('TerminalTabBar', () => {
       expect(tab).not.toHaveClass('border-t');
       expect(tab).not.toHaveClass('border', 'shadow-xs');
     }
-    expect(screen.getAllByRole('tab')[0]).toHaveClass('rounded-t-md', 'border-app-border/50', 'bg-app-bg', 'text-app-text');
+    expect(screen.getAllByRole('tab')[0]).toHaveClass('rounded-t-md', 'border-app-border/50', 'bg-app-surface', 'text-app-text');
     expect(screen.getAllByRole('tab')[1]).toHaveClass('border-transparent', 'bg-transparent', 'hover:bg-app-surface-muted');
 
     expect(screen.queryByRole('button', { name: 'terminal.newTab' })).not.toBeInTheDocument();
@@ -629,6 +631,30 @@ describe('TerminalTabBar', () => {
     expect(screen.getAllByRole('tab')[0].style.backgroundColor).toBe('color-mix(in srgb, #ef4444 8%, var(--app-surface-muted))');
   });
 
+  it('uses the terminal theme for an uncolored active tab and restores app surface', () => {
+    addSession('s1', 'A');
+    const previousScheme = useAppStore.getState().terminalColorScheme;
+    try {
+      useAppStore.getState().setTerminalColorScheme('dracula');
+      render(<TerminalTabBar />);
+      const tab = screen.getByRole('tab');
+      expect(tab.style.backgroundColor).toBe('rgb(40, 42, 54)');
+      expect(tab.style.color).not.toBe('');
+      expect(resolveTerminalTheme('dracula')?.background).toBe('#282a36');
+      act(() => useTerminalStore.getState().setTabColor('s1', '#f97316'));
+      expect(tab.style.backgroundColor).toBe('color-mix(in srgb, #f97316 25%, var(--app-bg))');
+      expect(tab.style.color).toBe('');
+      act(() => useTerminalStore.getState().setTabColor('s1', undefined));
+      expect(tab.style.backgroundColor).toBe('rgb(40, 42, 54)');
+      act(() => useAppStore.getState().setTerminalColorScheme('app'));
+      expect(tab.style.backgroundColor).toBe('');
+      expect(tab.style.color).toBe('');
+      expect(tab).toHaveClass('bg-app-surface');
+    } finally {
+      act(() => useAppStore.getState().setTerminalColorScheme(previousScheme));
+    }
+  });
+
   it('draws the active tab border on the tab itself', () => {
     addSession('s1', 'A');
     useTerminalStore.getState().setActiveSession('s1');
@@ -655,7 +681,7 @@ describe('TerminalTabBar', () => {
     expect(first.style.backgroundColor).toContain('25%');
     act(() => useTerminalStore.getState().setTabColor('s1', undefined));
     expect(first.style.backgroundColor).toBe('');
-    expect(first).toHaveClass('bg-app-bg', 'border-app-border/50');
+    expect(first).toHaveClass('bg-app-surface', 'border-app-border/50');
     expect(first.querySelector('[data-tab-color]')).toBeNull();
   });
 

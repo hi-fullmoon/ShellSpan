@@ -25,6 +25,7 @@ const server = await createServer({
         export { TerminalTabBar } from '/src/components/terminal/terminal-tab-bar.tsx';
         export { useTerminalStore } from '/src/stores/terminalStore.ts';
         export { useAppStore } from '/src/stores/appStore.ts';
+        export { resolveTerminalTheme } from '/src/components/terminal/registry/terminal-registry.ts';
         export { SftpTabBar } from '/src/components/sftp/sftp-tab-bar.tsx';
         export { useSftpStore } from '/src/stores/sftpStore.ts';
       `;
@@ -131,7 +132,12 @@ try {
       await sftpTabs.nth(index).click();
       await page.waitForFunction(() => {
         const bar = document.querySelector('[data-sftp-tab-bar]');
-        return getComputedStyle(bar, '::after').backgroundColor === getComputedStyle(bar.querySelector('[role="tab"][aria-selected="true"]')).backgroundColor;
+        const probe = document.createElement('div');
+        probe.style.backgroundColor = 'var(--app-surface)';
+        document.body.append(probe);
+        const expected = getComputedStyle(probe).backgroundColor;
+        probe.remove();
+        return expected === getComputedStyle(bar.querySelector('[role="tab"][aria-selected="true"]')).backgroundColor;
       });
       const borders = await page.evaluate(() => {
         const bar = document.querySelector('[data-sftp-tab-bar]');
@@ -176,7 +182,13 @@ try {
       assert.equal(geometry[index].bottomBorder, '0px');
       await page.waitForFunction(() => {
         const bar = document.querySelector('[data-terminal-tab-bar]');
-        return getComputedStyle(bar, '::after').backgroundColor === getComputedStyle(bar.querySelector('[role="tab"][aria-selected="true"]')).backgroundColor;
+        const surface = getComputedStyle(document.documentElement).getPropertyValue('--app-surface').trim();
+        const probe = document.createElement('div');
+        probe.style.backgroundColor = surface;
+        document.body.append(probe);
+        const expected = getComputedStyle(probe).backgroundColor;
+        probe.remove();
+        return expected === getComputedStyle(bar.querySelector('[role="tab"][aria-selected="true"]')).backgroundColor;
       });
       const boundary = await page.evaluate(() => {
         const bar = document.querySelector('[data-terminal-tab-bar]');
@@ -192,7 +204,6 @@ try {
       assert.equal(boundary.leftColor, boundary.sideColor);
       assert.equal(boundary.leftWidth, '1px');
       assert.equal(boundary.rightWidth, '1px');
-      assert.equal(boundary.lineBackground, boundary.tabBackground);
       if (process.env.TAB_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/terminal-tabs-${theme}-${width}-selected-${index}.png` });
     }
     const appearance = await page.evaluate(() => {
@@ -211,7 +222,9 @@ try {
     assert.deepEqual(appearance[0], appearance[1], `${theme} ${width}px terminal/SFTP appearance differs`);
     if (process.env.TAB_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/terminal-tabs-multiple-${width}.png` });
   }
-  {
+  for (const { theme, width } of appearances) {
+    await page.setViewportSize({ width, height: 720 });
+    await page.evaluate((theme) => document.documentElement.setAttribute('data-theme', theme), theme);
     // Regression: the leading drop indicator (insert index 0) used to sit left
     // of the scroll viewport's clip origin and was never painted. Render the
     // bar in that drop state and require the indicator to stay inside the
@@ -235,6 +248,7 @@ try {
         right: iRect.x + iRect.width,
         viewportLeft: vRect.x,
         viewportRight: vRect.x + vRect.width,
+        width: iRect.width,
       };
       host.remove();
       return geometry;
@@ -243,6 +257,8 @@ try {
       leading.left >= leading.viewportLeft && leading.right <= leading.viewportRight,
       `leading indicator ${leading.left}..${leading.right} outside viewport ${leading.viewportLeft}..${leading.viewportRight}`,
     );
+    assert.equal(leading.left, leading.viewportLeft, 'terminal leading indicator must be flush with the viewport');
+    assert.equal(leading.width, 2);
   }
   await page.setViewportSize({ width: 1280, height: 720 });
   const sftpTabs = page.locator('[data-sftp-tab-bar] [role="tab"]');
@@ -269,22 +285,32 @@ try {
     const { useSftpStore } = await import('/tab-runtime.js');
     return useSftpStore.getState().connections.some((connection) => connection.pinned);
   }), false);
-  const dragBox = await sftpTabs.nth(1).boundingBox();
-  assert.ok(dragBox);
-  await page.mouse.move(dragBox.x + 60, dragBox.y + 16);
-  await page.mouse.down();
-  await page.mouse.move(dragBox.x + 80, dragBox.y + 16);
-  await page.waitForFunction(() => document.body.classList.contains('tab-dragging'));
-  await page.mouse.move(2, dragBox.y + 16, { steps: 8 });
-  const indicator = page.locator('[data-sftp-tab-bar] [data-drop-indicator="left"]').first();
-  await indicator.waitFor();
-  const indicatorBox = await indicator.boundingBox();
-  const viewportBox = await page.locator('[data-sftp-tab-bar] [data-slot="scroll-area-viewport"]').boundingBox();
-  assert.ok(indicatorBox && viewportBox);
-  assert.ok(indicatorBox.x >= viewportBox.x);
-  await page.keyboard.press('Escape');
-  await page.mouse.up();
-  assert.equal(await page.locator('[data-sftp-tab-bar] [data-drop-indicator]').count(), 0);
+  for (const { theme, width } of appearances) {
+    await page.setViewportSize({ width, height: 720 });
+    await page.evaluate((theme) => document.documentElement.setAttribute('data-theme', theme), theme);
+    const orderBefore = await sftpTabs.evaluateAll((tabs) => tabs.map((tab) => tab.dataset.sftpTab));
+    await sftpTabs.nth(1).scrollIntoViewIfNeeded();
+    const dragBox = await sftpTabs.nth(1).boundingBox();
+    assert.ok(dragBox);
+    await page.mouse.move(dragBox.x + 60, dragBox.y + 16);
+    await page.mouse.down();
+    await page.mouse.move(dragBox.x + 80, dragBox.y + 16);
+    await page.waitForFunction(() => document.body.classList.contains('tab-dragging'));
+    await page.mouse.move(2, dragBox.y + 16, { steps: 8 });
+    const indicator = page.locator('[data-sftp-tab-bar] [data-drop-indicator="left"]').first();
+    await indicator.waitFor();
+    const indicatorBox = await indicator.boundingBox();
+    const viewportBox = await page.locator('[data-sftp-tab-bar] [data-slot="scroll-area-viewport"]').boundingBox();
+    assert.ok(indicatorBox && viewportBox);
+    assert.equal(indicatorBox.x, viewportBox.x, 'SFTP leading indicator must be flush with the viewport');
+    assert.equal(indicatorBox.width, 2);
+    assert.ok(indicatorBox.y >= viewportBox.y && indicatorBox.y + indicatorBox.height <= viewportBox.y + viewportBox.height);
+    if (process.env.TAB_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/sftp-leading-indicator-${theme}-${width}.png` });
+    await page.keyboard.press('Escape');
+    await page.mouse.up();
+    assert.equal(await page.locator('[data-sftp-tab-bar] [data-drop-indicator]').count(), 0);
+    assert.deepEqual(await sftpTabs.evaluateAll((tabs) => tabs.map((tab) => tab.dataset.sftpTab)), orderBefore);
+  }
   for (const { theme, width } of appearances) {
     await page.setViewportSize({ width, height: 720 });
     await page.evaluate(async (theme) => {
@@ -326,7 +352,27 @@ try {
     const neutralBackground = await colored.evaluate((tab) => getComputedStyle(tab).backgroundColor);
     assert.notEqual(neutralBackground, inactiveBackground);
   }
-  console.log('Terminal and SFTP appearance, keyboard actions, pinning, tab colors and drag indicators verified.');
+  const schemes = ['oneDark', 'solarizedDark', 'dracula', 'nord', 'gruvboxDark', 'tokyoNight', 'catppuccinMocha', 'light', 'app'];
+  for (const { theme, scheme } of ['light', 'dark'].flatMap((theme) => schemes.map((scheme) => ({ theme, scheme })))) {
+    await page.evaluate((theme) => document.documentElement.setAttribute('data-theme', theme), theme);
+    const expectedBackground = await page.evaluate(async (scheme) => {
+      const { useAppStore, useTerminalStore, resolveTerminalTheme } = await import('/tab-runtime.js');
+      useAppStore.getState().setTerminalColorScheme(scheme);
+      useTerminalStore.getState().setActiveSession(useTerminalStore.getState().sessions[0].sessionId);
+      const probe = document.createElement('div');
+      probe.style.backgroundColor = resolveTerminalTheme(scheme).background;
+      document.body.append(probe);
+      const background = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return background;
+    }, scheme);
+    await page.waitForFunction((background) => {
+      const tab = document.querySelector('[data-terminal-tab-bar] [role="tab"][aria-selected="true"]');
+      return getComputedStyle(tab).backgroundColor === background;
+    }, expectedBackground);
+    if (process.env.TAB_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/terminal-tab-surface-${theme}-${scheme}.png` });
+  }
+  console.log('Terminal and SFTP appearance, keyboard actions, pinning, tab colors and terminal surfaces verified.');
 } finally {
   await browser?.close();
   await server.close();

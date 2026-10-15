@@ -393,7 +393,7 @@ describe('SftpTabBar', () => {
       expect(tab.parentElement).not.toHaveClass('py-1');
       expect(tab).toHaveClass('h-8', 'w-42', 'px-1.5', 'gap-1');
     }
-    expect(tabs[0]).toHaveClass('h-8', 'rounded-t-md', 'border-x', 'border-app-border/50', 'bg-app-bg', 'text-app-text');
+    expect(tabs[0]).toHaveClass('h-8', 'rounded-t-md', 'border-x', 'border-app-border/50', 'bg-app-surface', 'text-app-text');
     expect(tabs[0]).not.toHaveClass('border', 'border-t', 'shadow-xs');
     const close = tabs[1].querySelector('[aria-label="close"]');
     expect(close).toHaveClass('flex', 'invisible', 'group-hover:visible', 'group-focus-within:visible');

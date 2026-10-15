@@ -27,6 +27,7 @@ import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { TerminalCloseDetails } from './terminal-close-details';
 import type { SessionStatus } from '@/types';
 import '@/components/ui/session-tab-bar.css';
+import { resolveTerminalTheme } from './registry/terminal-registry';
 
 const DRAG_OVERLAY_CURSOR_GAP = 2;
 
@@ -85,6 +86,8 @@ const SessionTab: React.FC<SessionTabProps> = ({
   onTogglePin,
 }) => {
   const { t } = useI18n();
+  const colorScheme = useAppStore((state) => state.terminalColorScheme);
+  const terminalTheme = colorScheme === 'app' ? undefined : resolveTerminalTheme(colorScheme);
   return (
     <div
       role="tab"
@@ -115,12 +118,15 @@ const SessionTab: React.FC<SessionTabProps> = ({
       className={cn(
         'session-tab group relative flex h-8 w-42 shrink-0 items-center gap-1 rounded-t-md border-x border-transparent px-1.5 text-left text-xs outline-none transition-[background-color,color,opacity] select-none focus-visible:ring-2 focus-visible:ring-app-tab-accent focus-visible:ring-inset',
         active
-          ? 'border-app-border/50 bg-app-bg text-app-text'
+          ? 'border-app-border/50 bg-app-surface text-app-text'
           : 'border-transparent bg-transparent text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
         dragging ? 'cursor-default opacity-80' : 'cursor-pointer',
       )}
       style={session.color ? {
         backgroundColor: `color-mix(in srgb, ${session.color} ${active ? 25 : 8}%, var(${active ? '--app-bg' : '--app-surface-muted'}))`,
+      } : active && terminalTheme ? {
+        backgroundColor: terminalTheme.background,
+        color: terminalTheme.foreground,
       } : undefined}
     >
       {showDropIndicatorLeft && (
