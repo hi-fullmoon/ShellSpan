@@ -180,7 +180,7 @@ it('auto-restores an orphaned subagent when its parent no longer exists', async 
     ...child,
     summary: {
       ...child.summary,
-      parentSessionId: 'deleted-parent',
+      parentSessionId: 'agent-terminal-1-deleted-parent',
       subagent: {
         descriptorId: 'descriptor-orphan',
         role: 'explorer',
@@ -205,7 +205,7 @@ it('allows human follow-up only for a continuable subagent', async () => {
     ...childBase,
     summary: {
       ...childBase.summary,
-      parentSessionId: 'parent-session',
+      parentSessionId: 'agent-terminal-1-parent-session',
       subagent: {
         descriptorId: 'descriptor-child',
         role: 'explorer',
@@ -219,7 +219,7 @@ it('allows human follow-up only for a continuable subagent', async () => {
         ...childBase.snapshot.value,
         header: {
           ...childBase.snapshot.value.header,
-          parentSessionId: 'parent-session',
+          parentSessionId: 'agent-terminal-1-parent-session',
           subagent: {
             descriptorId: 'descriptor-child',
             parentTaskId: 'parent-task',
