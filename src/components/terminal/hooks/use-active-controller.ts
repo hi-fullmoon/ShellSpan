@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
+import { useFocusStore } from '@/stores/focusStore';
 
 interface SearchOptions {
   caseSensitive?: boolean;
@@ -17,6 +18,8 @@ export function useActiveController(
   clearSearch: () => void;
 } {
   const attachedIdRef = useRef<string | null>(null);
+  const focusEnabled = useFocusStore(state => state.enabled);
+  const terminalOpen = useFocusStore(state => state.terminalOpen);
   const controller = useSyncExternalStore(terminalRegistry.subscribe, () =>
     activeSessionId === null ? undefined : terminalRegistry.get(activeSessionId),
   );
@@ -53,6 +56,12 @@ export function useActiveController(
       attachedIdRef.current = null;
     };
   }, [activeSessionId, controller, paneRef, shouldAttach]);
+
+  // Mode switches change both pane width and header height in one commit.
+  // Fit before paint instead of displaying the previous grid for the resize debounce.
+  useLayoutEffect(() => {
+    if (shouldAttach && (!focusEnabled || terminalOpen)) controller?.fit();
+  }, [controller, shouldAttach, focusEnabled, terminalOpen]);
 
   useEffect(() => {
     if (!shouldFocus || activeSessionId === null) return;

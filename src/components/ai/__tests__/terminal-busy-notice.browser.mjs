@@ -39,14 +39,14 @@ try {
           historicalContinuationAvailable: true,
           defaultDraft: 'hello', onSubmit: ({ content }) => setSent(content),
           executionSurfaceNotice: direct ? null : h(AgentTerminalBusyNotice, {
-            disabled: false, onSwitchDirect: () => setDirect(true),
+            disabled: false, state: 'unavailable', onSwitchDirect: () => setDirect(true),
           }),
         }), h('output', null, sent));
     }
     ReactDOM.createRoot(document.getElementById('root')).render(h(Preview));
     return { action: t(action === 'reconnect' ? 'ai.workspace.status.reconnect'
       : action === 'continue' ? 'ai.workspace.continueOnReconnectedTerminal' : 'ai.workspace.status.openSettings'),
-      direct: t('agent.executionSurface.v1.switchDirect'), busy: t('agent.executionSurface.v1.busyComposerHint') };
+      direct: t('agent.executionSurface.v1.switchDirect'), notice: t('agent.executionSurface.v1.unavailableDescription') };
   }, { locale, action });
   const notice = page.locator('[data-slot="terminal-busy-notice"]');
   await notice.waitFor({ timeout: 10000 }).catch(error => assert.fail(`${error.message}\n${errors.join('\n')}`));
@@ -56,7 +56,7 @@ try {
     const input = composer?.querySelector('[data-composer-card]');
     return Boolean(input && el.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING);
   }), true, 'Workspace status notices must be above the input in the composer');
-  assert.ok((await notice.textContent()).includes(labels.busy));
+  assert.ok((await notice.textContent()).includes(labels.notice));
   for (const width of [1000, 420, 320]) {
     await page.setViewportSize({ width, height: 640 });
     const fits = await notice.evaluate(el => {
@@ -102,7 +102,7 @@ try {
   const editor = page.locator('[contenteditable="true"]');
   await editor.press('Enter');
   await page.waitForFunction(() => document.querySelector('output')?.textContent === 'hello');
-  assert.equal(await notice.count(), 1, 'Chat must remain available while busy');
+  assert.equal(await notice.count(), 1, 'Chat must remain available when visible commands are unavailable');
   await page.screenshot({ path: '/tmp/shellspan-terminal-busy-notice.png' });
   await page.getByRole('button', { name: labels.direct, exact: true }).click();
   await notice.waitFor({ state: 'detached' });

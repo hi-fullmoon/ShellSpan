@@ -862,6 +862,27 @@ impl AgentRuntime {
         self.sessions.create(request)
     }
 
+    pub(crate) fn continue_on_target(
+        &self,
+        request: CreateAgentSessionRequest,
+    ) -> Result<AgentSessionSnapshot, String> {
+        let entry = request
+            .continued_from_session_id
+            .as_deref()
+            .map(|source| self.agents.get(source))
+            .transpose()?
+            .flatten();
+        let _reserved = if let Some(entry) = &entry {
+            if !entry.try_acquire_archive() {
+                return Err("target switch requires a settled source driver".into());
+            }
+            Some(ActiveDriverLease(Arc::clone(entry)))
+        } else {
+            None
+        };
+        self.sessions.continue_on_target(request)
+    }
+
     pub(crate) fn select_model(
         &self,
         session_id: &str,

@@ -1,12 +1,83 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { useTerminalStore } from '../terminalStore';
 import type { TerminalWorkspaceSession } from '../terminalStore';
+import type { TerminalSplitState } from '@/components/terminal/terminal-split';
 
 const initialState = useTerminalStore.getState();
 
 describe('terminalStore', () => {
   beforeEach(() => {
     useTerminalStore.setState(initialState, true);
+  });
+
+  it('keeps selection, order and split state in separate workspaces over the same connections', () => {
+    const store = useTerminalStore.getState();
+    for (const sessionId of ['one', 'two', 'three']) {
+      store.addSession({ sessionId, title: sessionId, host: 'localhost', username: 'user', port: 22 });
+    }
+    store.setActiveSession('one');
+    const split: TerminalSplitState = { kind: 'split', orientation: 'horizontal', split: 0.35,
+      first: { kind: 'group', id: 'first', sessionIds: ['one', 'two'], activeSessionId: 'one' },
+      second: { kind: 'group', id: 'second', sessionIds: ['three'], activeSessionId: 'three' } };
+    store.setWorkspaceSplit(split);
+    store.setWorkspaceFocusedSlot('second');
+    const connection = useTerminalStore.getState().sessions[0];
+    store.switchWorkspace('focus');
+    expect(useTerminalStore.getState().workspaceSplit).toBeNull();
+    expect(useTerminalStore.getState().sessions[0]).toBe(connection);
+    store.setActiveSession('two');
+    store.reorderSessions('three', 0);
+    store.switchWorkspace('terminal');
+    expect(useTerminalStore.getState().activeSessionId).toBe('one');
+    expect(useTerminalStore.getState().sessions.map(session => session.sessionId)).toEqual(['one', 'two', 'three']);
+    expect(useTerminalStore.getState().workspaceSplit).toEqual(split);
+    expect(useTerminalStore.getState().workspaceFocusedSlot).toBe('second');
+    store.switchWorkspace('focus');
+    expect(useTerminalStore.getState().activeSessionId).toBe('two');
+    expect(useTerminalStore.getState().sessions.map(session => session.sessionId)).toEqual(['three', 'one', 'two']);
+    expect(useTerminalStore.getState().workspaceSplit).toBeNull();
+  });
+
+  it('reconciles hidden workspaces when shared connections are replaced, disconnected or closed', () => {
+    const store = useTerminalStore.getState();
+    for (const sessionId of ['one', 'two']) store.addSession({ sessionId, title: sessionId, host: 'localhost', username: 'user', port: 22 });
+    store.setActiveSession('one');
+    store.setWorkspaceSplit({ kind: 'split', orientation: 'vertical', split: 0.6,
+      first: { kind: 'group', id: 'first', sessionIds: ['one'], activeSessionId: 'one' },
+      second: { kind: 'group', id: 'second', sessionIds: ['two'], activeSessionId: 'two' } });
+    store.switchWorkspace('focus');
+    store.reconnectSession('one', { sessionId: 'replacement', title: 'Replacement', host: 'localhost', username: 'user', port: 22 });
+    store.setStatus('replacement', { sessionId: 'replacement', status: 'disconnected' });
+    store.switchWorkspace('terminal');
+    expect(useTerminalStore.getState().activeSessionId).toBe('replacement');
+    expect(useTerminalStore.getState().sessions.find(session => session.sessionId === 'replacement')?.status).toBe('disconnected');
+    expect(useTerminalStore.getState().workspaceSplit?.first).toMatchObject({ sessionIds: ['replacement'], activeSessionId: 'replacement' });
+    store.switchWorkspace('focus');
+    store.removeSession('replacement');
+    store.switchWorkspace('terminal');
+    expect(useTerminalStore.getState().activeSessionId).toBe('two');
+    expect(useTerminalStore.getState().workspaceSplit).toBeNull();
+    expect(useTerminalStore.getState().sessions.map(session => session.sessionId)).toEqual(['two']);
+  });
+
+  it('keeps an asynchronous connection replacement in both views without stealing their selections', () => {
+    const store = useTerminalStore.getState();
+    store.addSession({ sessionId: 'existing', title: 'Existing', host: 'localhost', username: 'user', port: 22 });
+    store.switchWorkspace('focus');
+    store.beginConnectionAttempt({ title: 'Local', host: 'localhost', username: 'user', port: 22 }, 'pending');
+    store.switchWorkspace('terminal');
+    expect(useTerminalStore.getState().activeSessionId).toBe('existing');
+    store.resolveConnectionAttempt('pending', { sessionId: 'connected', title: 'Local', host: 'localhost', username: 'user', port: 22 });
+    expect(useTerminalStore.getState().activeSessionId).toBe('existing');
+    store.switchWorkspace('focus');
+    expect(useTerminalStore.getState().activeSessionId).toBe('connected');
+    store.removeSession('connected');
+    store.removeSession('existing');
+    store.switchWorkspace('terminal');
+    expect(useTerminalStore.getState().sessions).toEqual([]);
+    expect(useTerminalStore.getState().activeSessionId).toBeNull();
+    store.switchWorkspace('focus');
+    expect(useTerminalStore.getState().activeSessionId).toBeNull();
   });
 
   it('adds a session and marks it active', () => {

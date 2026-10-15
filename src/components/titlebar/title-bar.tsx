@@ -8,12 +8,14 @@ import { Button } from '@/components/ui/button';
 import { useAiPanelStore } from '@/stores/aiPanelStore';
 import { useAppStore } from '@/stores/appStore';
 import { useI18n } from '@/hooks/useI18n';
+import { useFocusStore } from '@/stores/focusStore';
 
 export const TitleBar: React.FC = () => {
   const platform = usePlatform();
   const isMacOS = platform === 'macos';
   const { t } = useI18n();
   const activeSection = useAppStore((state) => state.activeSection);
+  const focusEnabled = useFocusStore(state => state.enabled);
   const panelSection = activeSection === 'terminal' ? 'terminal' : 'workbench';
   const aiOpen = useAiPanelStore((state) => (
     activeSection !== 'sftp' && state.panelOpenBySection[panelSection]
@@ -36,10 +38,10 @@ export const TitleBar: React.FC = () => {
     >
       <SectionNav />
       <div
-        className={cn('flex h-full items-center gap-2', isMacOS && 'pr-2')}
+        className={cn('flex h-full min-w-0 items-center gap-2', isMacOS && 'pr-2')}
         data-slot="titlebar-actions"
       >
-        {activeSection !== 'sftp' && (
+        {activeSection !== 'sftp' && !focusEnabled && (
           <Button
             variant={aiOpen ? 'secondary' : 'ghost'}
             size="icon"

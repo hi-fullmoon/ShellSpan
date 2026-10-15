@@ -47,6 +47,7 @@ const server = await createServer({
         export { terminalInputReadiness } from '/src/components/terminal/terminal-input-readiness.ts';
         export { copyTerminalText } from '/src/components/terminal/terminal-clipboard.ts';
         export { useTerminalStore } from '/src/stores/terminalStore.ts';
+        export { useFocusStore } from '/src/stores/focusStore.ts';
         export { useToastStore } from '/src/stores/toastStore.ts';
         export { useAppStore } from '/src/stores/appStore.ts';
         export { initI18n, t } from '/src/locales/index.ts';
@@ -725,7 +726,7 @@ try {
     await page.setViewportSize({ width, height: 700 });
     const splitFocus = await page.evaluate(async () => {
       const { React, createRoot, flushSync, TerminalWorkspace, terminalRegistry,
-        useTerminalStore, useAppStore, createAgentTerminalLeaseCoordinator } = window.runtime;
+        useTerminalStore, useFocusStore, useAppStore, createAgentTerminalLeaseCoordinator } = window.runtime;
       const previousSessions = useTerminalStore.getState().sessions;
       const ids = [crypto.randomUUID(), crypto.randomUUID()];
       useTerminalStore.setState({ sessions: [], activeSessionId: null, restoredLayout: null });
@@ -755,18 +756,58 @@ try {
         await new Promise(requestAnimationFrame);
         await new Promise(requestAnimationFrame);
         const first = terminalRegistry.get(ids[0]);
+        const second = terminalRegistry.get(ids[1]);
+        const store = useTerminalStore.getState();
+        flushSync(() => store.switchWorkspace('focus'));
+        const focusStartsUnsplit = surface.querySelectorAll('[data-terminal-group]').length === 0;
+        flushSync(() => {
+          store.setActiveSession(ids[1]);
+          store.reorderSessions(ids[1], 0);
+        });
+        flushSync(() => store.switchWorkspace('terminal'));
+        await new Promise(requestAnimationFrame);
+        const terminalRestored = surface.querySelectorAll('[data-terminal-group]').length === 2
+          && useTerminalStore.getState().activeSessionId === ids[0]
+          && useTerminalStore.getState().sessions[0].sessionId === ids[0];
+        flushSync(() => store.switchWorkspace('focus'));
+        await new Promise(requestAnimationFrame);
+        const focusRestored = useTerminalStore.getState().activeSessionId === ids[1]
+          && useTerminalStore.getState().sessions[0].sessionId === ids[1]
+          && surface.querySelectorAll('[data-terminal-group]').length === 0;
+        const controllersRetained = terminalRegistry.get(ids[0]) === first && terminalRegistry.get(ids[1]) === second;
+        const activePage = surface.querySelector(`[data-terminal-carousel-page="${ids[1]}"]`);
+        const carousel = surface.querySelector('[data-terminal-carousel]');
+        const activePageAligned = activePage && carousel
+          && Math.abs(activePage.getBoundingClientRect().left - carousel.getBoundingClientRect().left) <= 1;
+        flushSync(() => store.switchWorkspace('terminal'));
+        await new Promise(requestAnimationFrame);
+        await coordinator.handle({
+          sessionId: ids[1], agentSessionId: `focus-agent-${crypto.randomUUID()}`, taskId: crypto.randomUUID(),
+          operationId: crypto.randomUUID(), acquiredAtUnixMs: Date.now(), state: 'acquired',
+        });
+        const focusCommandRouted = useFocusStore.getState().enabled && useTerminalStore.getState().workspace === 'focus';
+        flushSync(() => useFocusStore.getState().leave());
+        const normalSelectionPreserved = useTerminalStore.getState().activeSessionId === ids[0];
         first.focus();
         const sourceInitiallyFocused = document.activeElement === first.terminal.textarea;
+        flushSync(() => {
+          useFocusStore.getState().enter();
+          store.setActiveSession(ids[0]);
+        });
         flushSync(() => useAppStore.getState().setActiveSection('workbench'));
         input.focus();
         document.addEventListener('focusin', recordFocus);
         await coordinator.handle({
-          sessionId: ids[1], agentSessionId: crypto.randomUUID(), taskId: crypto.randomUUID(),
+          sessionId: ids[1], agentSessionId: `agent-${crypto.randomUUID()}`, taskId: crypto.randomUUID(),
           operationId: crypto.randomUUID(), acquiredAtUnixMs: Date.now(), state: 'acquired',
         });
         await new Promise(requestAnimationFrame);
         await new Promise(requestAnimationFrame);
         return {
+          workspaceIsolation: Boolean(focusStartsUnsplit && terminalRestored && focusRestored && controllersRetained && activePageAligned),
+          commandWorkspaceRouting: focusCommandRouted && normalSelectionPreserved
+            && !useFocusStore.getState().enabled && useTerminalStore.getState().workspace === 'terminal'
+            && useTerminalStore.getState().workspaceViews.focus.activeSessionId === ids[0],
           sourceInitiallyFocused,
           targetFocused: document.activeElement === terminalRegistry.get(ids[1]).terminal.textarea,
           focusedOtherTerminal: focusedIds.includes(ids[0]),
@@ -776,13 +817,17 @@ try {
       } finally {
         document.removeEventListener('focusin', recordFocus);
         coordinator.dispose();
+        useFocusStore.getState().leave();
         root.unmount();
         for (const id of ids) terminalRegistry.dispose(id);
         useTerminalStore.setState({ sessions: previousSessions, activeSessionId: window.identity.sessionId, restoredLayout: null });
+        useTerminalStore.setState({ workspace: 'terminal', workspaceViews: {}, workspaceSplit: null, workspaceFocusedSlot: 'first' });
         host.remove();
       }
     });
     assert.deepEqual(splitFocus, {
+      workspaceIsolation: true,
+      commandWorkspaceRouting: true,
       sourceInitiallyFocused: true, targetFocused: true, focusedOtherTerminal: false,
       targetFocusObserved: true, targetGroupSelected: true,
     });

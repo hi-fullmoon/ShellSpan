@@ -19,7 +19,7 @@ import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner } from '@/components/ui/spinner';
-import { PinIcon, XIcon } from 'lucide-react';
+import { PinIcon, TargetIcon, XIcon } from 'lucide-react';
 import { invokeCloseSession } from '@/lib/ipc/tauri';
 import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
@@ -28,6 +28,7 @@ import { TerminalCloseDetails } from './terminal-close-details';
 import type { SessionStatus } from '@/types';
 import '@/components/ui/session-tab-bar.css';
 import { resolveTerminalTheme } from './registry/terminal-registry';
+import { useFocusStore } from '@/stores/focusStore';
 
 const DRAG_OVERLAY_CURSOR_GAP = 2;
 
@@ -87,6 +88,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
 }) => {
   const { t } = useI18n();
   const colorScheme = useAppStore((state) => state.terminalColorScheme);
+  const agentTarget = useFocusStore(state => state.enabled && state.targetSessionId === session.sessionId);
   const terminalTheme = colorScheme === 'app' ? undefined : resolveTerminalTheme(colorScheme);
   return (
     <div
@@ -110,6 +112,14 @@ const SessionTab: React.FC<SessionTabProps> = ({
         onContextMenu(session, e.clientX, e.clientY);
       }}
       onKeyDown={(e) => {
+        if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+          e.preventDefault();
+          if (!session.pendingConnection) {
+            const rect = e.currentTarget.getBoundingClientRect();
+            onContextMenu(session, rect.left, rect.bottom);
+          }
+          return;
+        }
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           onActivate(session.sessionId);
@@ -148,6 +158,9 @@ const SessionTab: React.FC<SessionTabProps> = ({
           <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full ring-1 ring-app-bg/60', sessionStatusDotClass(session.status))} />
         )}
         <span className={cn('block flex-1 truncate text-left text-xs leading-none font-medium')}>{session.title}</span>
+        {agentTarget && (session.pinned || session.pendingConnection) && <span data-slot="focus-tab-target" role="img" aria-label={t('focus.agentTarget')} title={t('focus.agentTarget')} className="flex size-4 shrink-0 items-center justify-center text-app-text-soft">
+          <TargetIcon aria-hidden="true" className="size-3" />
+        </span>}
       </div>
       {!session.pendingConnection &&
         (session.pinned ? (
@@ -167,17 +180,21 @@ const SessionTab: React.FC<SessionTabProps> = ({
           <button
             type="button"
             aria-label="close"
+            title={agentTarget ? t('focus.agentTarget') : undefined}
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
               onClose(session.sessionId);
             }}
             className={cn(
-              'flex h-5 w-5 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text',
-              !dragging && active ? 'visible' : 'invisible group-hover:visible group-focus-within:visible',
+              'group/close flex h-5 w-5 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text',
+              agentTarget || (!dragging && active) ? 'visible' : 'invisible group-hover:visible group-focus-within:visible',
             )}
           >
-            <XIcon className="h-3 w-3" strokeWidth={1.5} />
+            {agentTarget && <span data-slot="focus-tab-target" role="img" aria-label={t('focus.agentTarget')} className="flex size-4 items-center justify-center group-hover:hidden group-focus-visible/close:hidden">
+              <TargetIcon aria-hidden="true" className="size-3" />
+            </span>}
+            <XIcon aria-hidden="true" className={cn('size-3', agentTarget && 'hidden group-hover:block group-focus-visible/close:block')} strokeWidth={1.5} />
           </button>
         ))}
     </div>
@@ -580,7 +597,8 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   const draggedOriginalIndex = draggingSessionId ? sessions.findIndex((s) => s.sessionId === draggingSessionId) : -1;
   const effectiveInsertIndex = displayedInsertIndex !== null && displayedInsertIndex === draggedOriginalIndex ? null : displayedInsertIndex;
 
-  const shouldHide = !forceVisible && sessions.length === 1 && terminalHideSingleTabBar && !sessions[0]?.pendingConnection;
+  const focusEnabled = useFocusStore(state => state.enabled);
+  const shouldHide = !forceVisible && !focusEnabled && sessions.length === 1 && terminalHideSingleTabBar && !sessions[0]?.pendingConnection;
 
   return (
     <div
@@ -608,7 +626,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
         onDragCancel={handleDragCancel}
       >
         <SortableContext items={sessions.map((s) => s.sessionId)} strategy={() => null}>
-          <ScrollArea viewportRef={scrollRef} horizontal vertical={false} size="thin" onWheel={handleWheel} className="h-8 min-w-0 flex-1">
+          <ScrollArea viewportRef={scrollRef} horizontal vertical={false} size="thin" onWheel={handleWheel} className="isolate z-10 h-8 min-w-0 flex-1 [&>[data-slot=scroll-area-scrollbar]]:z-30">
             <div role="tablist" className="flex min-w-0 items-center gap-0 p-0">
               {sessions.map((session, index) => {
                 const isDragging = draggingSessionId === session.sessionId;

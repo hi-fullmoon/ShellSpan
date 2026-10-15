@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { TerminalLayoutNode } from '@/components/terminal/terminal-split';
+import { getTerminalGroups, pruneEmptyTerminalGroups, replaceTerminalSessionId, type TerminalLayoutNode, type TerminalSplitState } from '@/components/terminal/terminal-split';
 import type {
   ClosedEvent,
   SessionStatus,
@@ -74,9 +74,56 @@ const brokerIdentity = (
     : {};
 };
 
+export type TerminalWorkspace = 'terminal' | 'focus';
+
+interface WorkspaceView {
+  activeSessionId: string | null;
+  order: string[];
+  split: TerminalSplitState | null;
+  focusedSlot: string;
+}
+
+function reconcileWorkspace(view: WorkspaceView, sessions: TerminalSession[]): WorkspaceView {
+  const available = new Set(sessions.map(session => session.sessionId));
+  const replacements = new Map(sessions.filter(session => session.replacesSessionId)
+    .map(session => [session.replacesSessionId!, session.sessionId]));
+  const resolve = (id: string): string => replacements.get(id) ?? id;
+  const order = [...new Set([...view.order.map(resolve).filter(id => available.has(id)), ...available])];
+  const selected = view.activeSessionId ? resolve(view.activeSessionId) : null;
+  const activeSessionId = selected && available.has(selected) ? selected : order[0] ?? null;
+  let layout: TerminalLayoutNode | null = view.split;
+  for (const [before, after] of replacements) {
+    if (layout) layout = replaceTerminalSessionId(layout, before, after);
+  }
+  const prune = (node: TerminalLayoutNode): TerminalLayoutNode => node.kind === 'split'
+    ? { ...node, first: prune(node.first), second: prune(node.second) }
+    : { ...node, sessionIds: node.sessionIds.filter(id => available.has(id)),
+      activeSessionId: available.has(node.activeSessionId) ? node.activeSessionId
+        : node.sessionIds.find(id => available.has(id)) ?? '' };
+  layout = layout ? pruneEmptyTerminalGroups(prune(layout)) : null;
+  if (layout) {
+    const groups = getTerminalGroups(layout);
+    const assigned = new Set(groups.flatMap(group => group.sessionIds));
+    const group = groups.find(item => item.id === view.focusedSlot) ?? groups[0];
+    // New shared connections become available without replacing the workspace's selection.
+    group.sessionIds = [...group.sessionIds, ...order.filter(id => !assigned.has(id))];
+  }
+  const split = layout?.kind === 'split' ? layout : null;
+  const focusedSlot = split && getTerminalGroups(split).some(group => group.id === view.focusedSlot)
+    ? view.focusedSlot : split ? getTerminalGroups(split)[0].id : 'first';
+  return { activeSessionId, order, split, focusedSlot };
+}
+
 interface TerminalState {
   sessions: TerminalSession[];
   activeSessionId: string | null;
+  workspace: TerminalWorkspace;
+  workspaceViews: Partial<Record<TerminalWorkspace, WorkspaceView>>;
+  workspaceSplit: TerminalSplitState | null;
+  workspaceFocusedSlot: string;
+  switchWorkspace: (workspace: TerminalWorkspace) => void;
+  setWorkspaceSplit: (update: TerminalSplitState | null | ((current: TerminalSplitState | null) => TerminalSplitState | null)) => void;
+  setWorkspaceFocusedSlot: (slot: string) => void;
   restoredLayout: TerminalLayoutNode | null;
   beginConnectionAttempt: (
     pending: PendingTerminalConnection,
@@ -125,6 +172,25 @@ interface TerminalState {
 export const useTerminalStore = create<TerminalState>()((set) => ({
   sessions: [],
   activeSessionId: null,
+  workspace: 'terminal',
+  workspaceViews: {},
+  workspaceSplit: null,
+  workspaceFocusedSlot: 'first',
+  switchWorkspace: (workspace) => set(state => {
+    if (state.workspace === workspace) return state;
+    const current: WorkspaceView = { activeSessionId: state.activeSessionId,
+      order: state.sessions.map(session => session.sessionId), split: state.workspaceSplit,
+      focusedSlot: state.workspaceFocusedSlot };
+    const next = reconcileWorkspace(state.workspaceViews[workspace] ?? {
+      activeSessionId: state.activeSessionId, order: current.order, split: null, focusedSlot: 'first',
+    }, state.sessions);
+    const byId = new Map(state.sessions.map(session => [session.sessionId, session]));
+    return { workspace, workspaceViews: { ...state.workspaceViews, [state.workspace]: current },
+      sessions: sortSessions(next.order.map(id => byId.get(id)!)), activeSessionId: next.activeSessionId,
+      workspaceSplit: next.split, workspaceFocusedSlot: next.focusedSlot };
+  }),
+  setWorkspaceSplit: (update) => set(state => ({ workspaceSplit: typeof update === 'function' ? update(state.workspaceSplit) : update })),
+  setWorkspaceFocusedSlot: (workspaceFocusedSlot) => set({ workspaceFocusedSlot }),
   restoredLayout: null,
   beginConnectionAttempt: (pending, attemptId = `pending-${generateId()}`) => {
     set((state) => {
@@ -501,7 +567,17 @@ function refreshTabTitles(): void {
 }
 
 useTerminalStore.subscribe((state, previous) => {
-  if (state.sessions !== previous.sessions) refreshTabTitles();
+  if (state.sessions !== previous.sessions) {
+    if (state.workspace === previous.workspace && Object.keys(state.workspaceViews).length > 0) {
+      const workspaceViews = { ...state.workspaceViews };
+      for (const workspace of ['terminal', 'focus'] as const) {
+        const view = workspaceViews[workspace];
+        if (workspace !== state.workspace && view) workspaceViews[workspace] = reconcileWorkspace(view, state.sessions);
+      }
+      useTerminalStore.setState({ workspaceViews });
+    }
+    refreshTabTitles();
+  }
 });
 useAppStore.subscribe((state, previous) => {
   if (state.terminalTabTitleTemplate !== previous.terminalTabTitleTemplate

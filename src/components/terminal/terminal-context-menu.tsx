@@ -14,6 +14,7 @@ import type { TerminalSplitDirection } from './terminal-split';
 import { TerminalCloseDetails } from './terminal-close-details';
 import { copyTerminalText } from './terminal-clipboard';
 import { useAppStore } from '@/stores/appStore';
+import { useFocusStore } from '@/stores/focusStore';
 
 const MENU_WIDTH = 256;
 const MENU_HEIGHT = 480;
@@ -34,16 +35,18 @@ const TAB_COLORS = [
 interface MenuItemProps {
   onClick: () => void;
   disabled?: boolean;
+  title?: string;
   children: React.ReactNode;
 }
 
-const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, children }) => (
+const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, title, children }) => (
   <button
     type="button"
     role="menuitem"
     tabIndex={-1}
     onClick={onClick}
     disabled={disabled}
+    title={title}
     className="flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-xs text-app-text transition-colors hover:bg-app-primary/10 hover:text-app-primary disabled:pointer-events-none disabled:opacity-40"
   >
     <span className="leading-4">{children}</span>
@@ -82,6 +85,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   onUnsplit,
 }) => {
   const { t } = useI18n();
+  const focus = useFocusStore();
   const sessions = useTerminalStore((state) => state.sessions);
   const removeSession = useTerminalStore((state) => state.removeSession);
   const updateTitle = useTerminalStore((state) => state.updateTitle);
@@ -297,6 +301,15 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
             style={{ left, top }}
             onKeyDown={handleMenuKeyDown}
           >
+        {focus.enabled && <>
+          <MenuItem disabled={focus.busy || focus.targetSessionId === target.sessionId
+            || sessions.find(s => s.sessionId === target.sessionId)?.status !== 'connected'}
+            title={focus.busy ? t('focus.targetLocked') : undefined}
+            onClick={() => { if (focus.setTarget(target.sessionId)) onClose(); }}>
+            {focus.targetSessionId === target.sessionId ? t('focus.agentTarget') : t('focus.setTarget')}
+          </MenuItem>
+          <Separator className="my-0.5" />
+        </>}
         <MenuItem onClick={handleTogglePin}>
           {target.pinned ? t('terminal.tab.unpin') : t('terminal.tab.pin')}
         </MenuItem>

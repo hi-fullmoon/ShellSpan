@@ -239,6 +239,16 @@ pub(crate) fn agent_runtime_create_session(
 }
 
 #[tauri::command]
+pub(crate) fn agent_runtime_continue_on_target(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    request: CreateAgentSessionRequest,
+) -> Result<AgentSessionSnapshot, String> {
+    configure_runtime(&app, &runtime)?;
+    runtime.continue_on_target(request)
+}
+
+#[tauri::command]
 pub(crate) async fn agent_runtime_spawn_subagent(
     app: AppHandle,
     runtime: State<'_, AgentRuntime>,

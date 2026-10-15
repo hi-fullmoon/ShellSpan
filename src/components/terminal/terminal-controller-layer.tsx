@@ -1,10 +1,11 @@
 import React, { useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
-import { useTerminalStore } from '@/stores/terminalStore';
+import { useTerminalStore, type TerminalWorkspace } from '@/stores/terminalStore';
 import { useReconnectSession } from '@/hooks/useReconnectSession';
 import { terminalRegistry } from './registry/terminal-registry';
 import { terminalInputReadiness } from './terminal-input-readiness';
 import { useAppStore } from '@/stores/appStore';
+import { useFocusStore } from '@/stores/focusStore';
 import {
   invokeGetAgentRuntimeSession,
   invokeAgentTerminalLeaseReady,
@@ -22,6 +23,12 @@ import type { AgentSessionEvent, AgentTerminalLeaseEvent } from '@/types/agent-s
 
 const logger = createLogger('agent-terminal-lease');
 export const TAKEOVER_CONFIRMATION_TIMEOUT_MS = 5_000;
+
+function rootWorkspace(sessionId: string): TerminalWorkspace | undefined {
+  if (sessionId.startsWith('focus-agent-')) return 'focus';
+  if (sessionId.startsWith('agent-')) return 'terminal';
+  return undefined;
+}
 
 async function refreshTerminalIntegrationState(sessionId: string): Promise<void> {
   try {
@@ -100,6 +107,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
   const turnSurfaces = new Map<string, { sessionId: string; operationId: string; turnId?: string }>();
   const currentTurns = new Map<string, string>();
   const pendingTurnBindings = new Map<string, Promise<void>>();
+  const workspaceOwners = new Map<string, TerminalWorkspace>();
   const fencedTurns = new Map<string, string | undefined>();
   const pendingTurnStops = new Map<string, {
     operationId: string;
@@ -126,6 +134,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
   };
 
   const clearTurn = (agentSessionId: string): void => {
+    workspaceOwners.delete(agentSessionId);
     const pendingStop = pendingTurnStops.get(agentSessionId);
     if (pendingStop) clearTimeout(pendingStop.timer);
     pendingTurnStops.delete(agentSessionId);
@@ -420,8 +429,14 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
         // Commit the target pane's attachment before focusing xterm. The backend
         // cannot start writing the command until the readiness acknowledgement.
         flushSync(() => {
+          // Reveal commands in their owning workspace without overwriting the
+          // other workspace's selected tab or split layout.
+          const workspace = workspaceOwners.get(lease.agentSessionId) ?? rootWorkspace(lease.agentSessionId);
+          if (workspace === 'focus') useFocusStore.getState().enter();
+          else if (workspace === 'terminal') useFocusStore.getState().leave();
           useTerminalStore.getState().setActiveSession(lease.sessionId);
           useAppStore.getState().setActiveSection('terminal');
+          if (useFocusStore.getState().enabled) useFocusStore.getState().setTerminalOpen(true);
         });
         // Switching sections can synchronously dispose or rebind a controller.
         // Never focus the captured instance after its lease or identity changed.
@@ -480,9 +495,21 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
         }
         currentTurns.set(event.sessionId, event.turnId);
         const turnId = event.turnId;
-        const binding = invokeGetAgentRuntimeSession({ sessionId: event.sessionId }).then((snapshot) => {
+        const binding = invokeGetAgentRuntimeSession({ sessionId: event.sessionId }).then(async (snapshot) => {
           if (disposed || currentTurns.get(event.sessionId) !== turnId) return;
           if (snapshot.header.executionSurface !== 'boundTerminal') return;
+          let workspace = rootWorkspace(event.sessionId);
+          let parentId = snapshot.header.parentSessionId;
+          const visited = new Set([event.sessionId]);
+          while (!workspace && parentId && !visited.has(parentId)) {
+            visited.add(parentId);
+            workspace = workspaceOwners.get(parentId) ?? rootWorkspace(parentId);
+            if (workspace) break;
+            const parent = await invokeGetAgentRuntimeSession({ sessionId: parentId });
+            if (disposed || currentTurns.get(event.sessionId) !== turnId) return;
+            parentId = parent.header.parentSessionId;
+          }
+          if (workspace) workspaceOwners.set(event.sessionId, workspace);
           const sessionId = snapshot.header.target?.sessionId;
           if (!sessionId || turnSurfaces.has(event.sessionId)) return;
           const controller = terminalRegistry.get(sessionId);
@@ -564,6 +591,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       turnSurfaces.clear();
       currentTurns.clear();
       pendingTurnBindings.clear();
+      workspaceOwners.clear();
       fencedTurns.clear();
       for (const pending of pendingTurnStops.values()) clearTimeout(pending.timer);
       pendingTurnStops.clear();

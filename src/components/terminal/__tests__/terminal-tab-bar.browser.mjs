@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 import { webkit } from 'playwright';
+import { createCanvas, loadImage } from 'canvas';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const server = await createServer({
@@ -25,6 +26,7 @@ const server = await createServer({
         export { TerminalTabBar } from '/src/components/terminal/terminal-tab-bar.tsx';
         export { useTerminalStore } from '/src/stores/terminalStore.ts';
         export { useAppStore } from '/src/stores/appStore.ts';
+        export { useFocusStore } from '/src/stores/focusStore.ts';
         export { resolveTerminalTheme } from '/src/components/terminal/registry/terminal-registry.ts';
         export { SftpTabBar } from '/src/components/sftp/sftp-tab-bar.tsx';
         export { useSftpStore } from '/src/stores/sftpStore.ts';
@@ -204,6 +206,29 @@ try {
       assert.equal(boundary.leftColor, boundary.sideColor);
       assert.equal(boundary.leftWidth, '1px');
       assert.equal(boundary.rightWidth, '1px');
+      await page.mouse.move(width / 2, 400);
+      await page.waitForTimeout(250);
+      const strip = page.locator('[data-terminal-tab-bar]');
+      const samples = await strip.evaluate(bar => {
+        const bounds = bar.getBoundingClientRect();
+        const tabs = [...bar.querySelectorAll('[role="tab"]')].map(tab => ({
+          active: tab.getAttribute('aria-selected') === 'true', bounds: tab.getBoundingClientRect(),
+        })).map(tab => ({ active: tab.active,
+          left: Math.max(bounds.left, tab.bounds.left), right: Math.min(bounds.right, tab.bounds.right) }));
+        const active = tabs.find(tab => tab.active);
+        const inactive = tabs.find(tab => !tab.active && tab.right - tab.left > 8);
+        return { active: Math.floor((active.left + active.right) / 2 - bounds.left),
+          inactive: inactive ? Math.floor((inactive.left + inactive.right) / 2 - bounds.left) : null };
+      });
+      const image = await loadImage(await strip.screenshot({ animations: 'disabled' }));
+      const canvas = createCanvas(image.width, image.height);
+      const context = canvas.getContext('2d');
+      context.drawImage(image, 0, 0);
+      const pixel = (x, y) => [...context.getImageData(x, y, 1, 1).data];
+      assert.deepEqual(pixel(samples.active, image.height - 1), pixel(samples.active, image.height - 5),
+        `The active tab must cover the bottom separator (${theme}, ${width}px, tab ${index})`);
+      if (samples.inactive !== null) assert.notDeepEqual(pixel(samples.inactive, image.height - 1), pixel(samples.inactive, image.height - 5),
+        `The separator remains visible below inactive tabs (${theme}, ${width}px)`);
       if (process.env.TAB_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/terminal-tabs-${theme}-${width}-selected-${index}.png` });
     }
     const appearance = await page.evaluate(() => {
@@ -372,7 +397,66 @@ try {
     }, expectedBackground);
     if (process.env.TAB_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/terminal-tab-surface-${theme}-${scheme}.png` });
   }
-  console.log('Terminal and SFTP appearance, keyboard actions, pinning, tab colors and terminal surfaces verified.');
+  for (const width of [400, 1280]) {
+    await page.setViewportSize({ width, height: 720 });
+    const bar = page.locator('[data-terminal-tab-bar]');
+    await bar.evaluate(element => { element.style.maxWidth = '320px'; });
+    const viewport = bar.locator('[data-slot="scroll-area-viewport"]');
+    await viewport.evaluate(element => { element.scrollLeft = 0; });
+    const thumb = bar.locator('[data-slot="scroll-area-thumb"]');
+    await thumb.waitFor();
+    const thumbBox = await thumb.boundingBox();
+    assert.ok(thumbBox && thumbBox.width > 0 && thumbBox.height > 0);
+    const x = thumbBox.x + thumbBox.width / 2;
+    const y = thumbBox.y + thumbBox.height / 2;
+    assert.equal(await page.evaluate(({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest('[data-slot="scroll-area-scrollbar"]')), { x, y }), true,
+      'The tab scrollbar must paint above the selected tab and receive pointer input');
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + 40, y, { steps: 5 });
+    await page.mouse.up();
+    assert.ok(await viewport.evaluate(element => element.scrollLeft > 0), 'The tab scrollbar must remain draggable');
+    await bar.evaluate(element => { element.style.maxWidth = ''; });
+  }
+  // A target remains marked after a connection error and while another tab is active.
+  await page.evaluate(async () => {
+    const { useTerminalStore, useFocusStore } = await import('/tab-runtime.js');
+    const sessionId = useTerminalStore.getState().sessions[0].sessionId;
+    useFocusStore.setState({ enabled: true, targetSessionId: sessionId });
+    useTerminalStore.getState().setStatus(sessionId, { status: 'error', message: 'Connection ended' });
+  });
+  const targetTab = page.locator('[data-terminal-tab-bar] [role="tab"]').first();
+  const closeTarget = targetTab.locator('button[aria-label="close"]');
+  const targetIcon = closeTarget.locator('[data-slot="focus-tab-target"]');
+  const closeIcon = closeTarget.locator('svg.lucide-x');
+  for (const width of [400, 1280]) {
+    await page.setViewportSize({ width, height: 720 });
+    for (const active of [true, false]) {
+      await page.evaluate(async (active) => {
+        const { useTerminalStore } = await import('/tab-runtime.js');
+        useTerminalStore.getState().setActiveSession(useTerminalStore.getState().sessions[active ? 0 : 1].sessionId);
+      }, active);
+      await targetTab.scrollIntoViewIfNeeded();
+      await page.mouse.click(width - 10, 300);
+      await targetIcon.waitFor({ state: 'visible' });
+      assert.equal(await closeIcon.isVisible(), false);
+      assert.equal(await targetTab.locator('[data-slot="focus-tab-target"]').count(), 1);
+      const before = await closeTarget.boundingBox();
+      assert.equal(before.width, 20);
+      assert.equal(before.height, 20);
+      await targetTab.hover({ position: { x: 30, y: 16 } });
+      await closeIcon.waitFor({ state: 'visible' });
+      assert.equal(await targetIcon.isVisible(), false);
+      assert.deepEqual(await closeTarget.boundingBox(), before);
+      await page.mouse.move(width - 10, 300);
+      await closeTarget.focus();
+      await closeIcon.waitFor({ state: 'visible' });
+      assert.equal(await targetIcon.isVisible(), false);
+    }
+  }
+  await closeTarget.click();
+  await page.getByRole('alertdialog').waitFor();
+  console.log('Terminal and SFTP appearance, keyboard actions, pinning, target icon hover, tab colors and terminal surfaces verified.');
 } finally {
   await browser?.close();
   await server.close();

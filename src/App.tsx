@@ -30,6 +30,7 @@ import { KeychainKeyPromptDialog } from '@/components/terminal/keychain-key-prom
 import { HostKeyDialogHost } from '@/components/terminal/host-key-dialog-host';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { AiPanel } from '@/components/ai/ai-panel';
+import { FocusLayout } from '@/components/focus/focus-layout';
 import { flushTerminalWorkspace } from '@/lib/terminal/terminal-workspace-persistence';
 import { flushSftpWorkspace } from '@/lib/sftp/sftp-workspace-persistence';
 import { flushAiSettingsPreferences } from '@/stores/aiSettingsStore';
@@ -234,13 +235,13 @@ export const App: React.FC = () => {
   return (
     <AppShell>
       <div className="relative flex min-h-0 flex-1">
-        <MainContent>
+        <FocusLayout><MainContent>
           <AppSections
             onCheckForUpdates={checkForUpdates}
             onOpenAbout={openAbout}
             onRequestExit={requestUserExit}
           />
-        </MainContent>
+        </MainContent></FocusLayout>
         <AiPanel />
       </div>
 

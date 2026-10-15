@@ -199,6 +199,7 @@ export interface AiSessionAdapter<Kind extends AiSessionKind = AiSessionKind> {
   create(
     input: Extract<AiCreateSessionInput, { readonly kind: Kind }>,
   ): Promise<AiSessionView>;
+  continueOnTarget?(input: Extract<AiCreateSessionInput, { readonly kind: Kind }>): Promise<AiSessionView>;
   open(sessionId: string): Promise<AiSessionView>;
   /** Latest committed view in the warm cache; never starts IO or a runtime. */
   peek?(sessionId: string): AiSessionView | undefined;

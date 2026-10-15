@@ -214,6 +214,7 @@ function subagentLineage(
 }
 
 export interface AiWorkspaceRootProps {
+  readonly headerActions?: React.ReactNode;
   readonly mode?: 'ask' | 'agent';
   readonly imageControls?: React.ReactNode;
   readonly onPasteImages?: (files: File[]) => void | Promise<void>;
@@ -307,6 +308,7 @@ export interface AiWorkspaceRootProps {
 
 export function AiWorkspaceRoot({
   mode,
+  headerActions,
   imageControls, onPasteImages, hasImages, imageBusy, imageSubmissionId, imageLocked,
   submissionContext,
   view,
@@ -526,6 +528,7 @@ export function AiWorkspaceRoot({
       ) : null}
       <Activity mode={route.kind === 'toolDetails' || route.kind === 'artifactDetails' ? 'hidden' : 'visible'}>
       <AiSessionHeader
+        extraActions={headerActions}
         title={resolvedTitle}
         context={mode
           ? t(surfaceMode === 'agent' ? 'ai.terminal.scopeDescription' : 'ai.workbench.scopeDescription')

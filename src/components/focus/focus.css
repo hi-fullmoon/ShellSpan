@@ -1,0 +1,30 @@
+.focus-layout { container-type: inline-size; }
+.focus-frame[data-focus] {
+  grid-template-columns: minmax(0, var(--focus-agent-width)) 1px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+.focus-frame[data-focus] > [data-slot='focus-agent'] { grid-column: 1; grid-row: 1; }
+.focus-frame[data-focus] > .focus-gutter { grid-column: 2; grid-row: 1; display: flex; }
+.focus-gutter > [data-slot='focus-divider'] { height: 100%; }
+.focus-frame[data-focus] > [data-slot='focus-terminal'] { grid-column: 3; grid-row: 1; }
+.focus-frame[data-focus][data-terminal-open='false'] { grid-template-columns: minmax(0, 1fr); }
+.focus-frame[data-focus][data-terminal-open='false'] > .focus-gutter { display: none; }
+@container (width > 700px) {
+  /* The pane divider owns the leading edge. Keep the tab's border box so
+     selection and dragging do not change its size or text position. */
+  .focus-frame[data-focus] > [data-slot='focus-terminal'] [data-terminal-tab-bar] .session-tab-slot:first-child > .session-tab {
+    border-left-color: transparent;
+  }
+}
+@container (max-width: 700px) {
+  .focus-frame[data-focus][data-terminal-open='true'] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 3fr) minmax(0, 2fr);
+  }
+  .focus-frame[data-focus] > .focus-gutter { display: none; }
+  .focus-frame[data-focus][data-terminal-open='true'] > [data-slot='focus-terminal'] {
+    grid-column: 1;
+    grid-row: 2;
+    border-top: 1px solid var(--app-border);
+  }
+}

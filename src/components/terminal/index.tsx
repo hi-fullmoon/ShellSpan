@@ -58,6 +58,7 @@ const Terminal: React.FC = () => {
   const { t } = useI18n();
   const sessions = useTerminalStore((state) => state.sessions);
   const activeSessionId = useTerminalStore((state) => state.activeSessionId);
+  const workspace = useTerminalStore((state) => state.workspace);
   const activeSession = sessions.find((session) => session.sessionId === activeSessionId) ?? null;
   const restoreWorkspace = useAppStore((state) => state.restoreWorkspace);
   const activeSection = useAppStore((state) => state.activeSection);
@@ -71,18 +72,15 @@ const Terminal: React.FC = () => {
     y: number;
     slot: TerminalGroupSlot | null;
   } | null>(null);
-  const [split, setSplit] = useState<TerminalSplitState | null>(() => {
-    const restored = useTerminalStore.getState().restoredLayout;
-    return restored?.kind === 'split'
-      ? ensureUniqueTerminalGroupIds(restored) as TerminalSplitState
-      : null;
-  });
+  const split = useTerminalStore(state => state.workspaceSplit);
+  const setSplit = useTerminalStore(state => state.setWorkspaceSplit);
   const [dropPreview, setDropPreview] = useState<DropPreview | null>(null);
   const terminalAreaRef = useRef<HTMLDivElement>(null);
-  const focusedGroupRef = useRef<TerminalGroupSlot>('first');
-  // Mirror of focusedGroupRef for rendering: mutating a ref does not trigger a
-  // re-render, so the focus ring and activeGroup props read this state instead.
-  const [focusedSlot, setFocusedSlot] = useState<TerminalGroupSlot>('first');
+  const focusedSlot = useTerminalStore(state => state.workspaceFocusedSlot);
+  const focusedGroupRef = useRef<TerminalGroupSlot>(focusedSlot);
+  focusedGroupRef.current = focusedSlot;
+  // Group focus belongs to the workspace; the ref is used by event callbacks.
+  const setFocusedSlot = useTerminalStore(state => state.setWorkspaceFocusedSlot);
   const nextGroupIdRef = useRef(
     split
       ? Math.max(3, ...getTerminalGroups(split).map((group) => {
@@ -109,6 +107,8 @@ const Terminal: React.FC = () => {
   }, []);
 
   const createGroupId = useCallback((): TerminalGroupSlot => {
+    const current = useTerminalStore.getState().workspaceSplit;
+    if (current) for (const group of getTerminalGroups(current)) usedGroupIdsRef.current.add(group.id);
     let id = `group-${nextGroupIdRef.current}`;
     while (usedGroupIdsRef.current.has(id)) {
       nextGroupIdRef.current += 1;
@@ -123,9 +123,11 @@ const Terminal: React.FC = () => {
   const focusSession = useCallback((sessionId: string): void => {
     if (pendingFocusFrameRef.current !== null) cancelAnimationFrame(pendingFocusFrameRef.current);
     const controller = terminalRegistry.get(sessionId);
+    const requestedWorkspace = useTerminalStore.getState().workspace;
     pendingFocusFrameRef.current = requestAnimationFrame(() => {
       pendingFocusFrameRef.current = null;
       if (useAppStore.getState().activeSection !== 'terminal'
+        || useTerminalStore.getState().workspace !== requestedWorkspace
         || useTerminalStore.getState().activeSessionId !== sessionId
         || !controller || controller.sessionId !== sessionId
         || terminalRegistry.get(sessionId) !== controller) return;
@@ -152,6 +154,16 @@ const Terminal: React.FC = () => {
   useEffect(() => {
     if (restoredLayoutAppliedRef.current) return;
     restoredLayoutAppliedRef.current = true;
+    const state = useTerminalStore.getState();
+    const restored = state.restoredLayout;
+    if (restored?.kind === 'split') {
+      const restoredSplit = ensureUniqueTerminalGroupIds(restored) as TerminalSplitState;
+      if (state.workspace === 'terminal') setSplit(restoredSplit);
+      else useTerminalStore.setState({ workspaceViews: { ...state.workspaceViews,
+        terminal: { activeSessionId: state.workspaceViews.terminal?.activeSessionId ?? state.activeSessionId,
+          order: state.workspaceViews.terminal?.order ?? sessions.map(session => session.sessionId),
+          split: restoredSplit, focusedSlot: 'first' } } });
+    }
     useTerminalStore.getState().clearRestoredLayout();
   }, []);
 
@@ -164,15 +176,27 @@ const Terminal: React.FC = () => {
   }, [restoreWorkspace]);
 
   useEffect(() => {
+    setNewSessionDialogOpen(false);
+    setTabSwitcherOpen(false);
+    setContextMenu(null);
+    setDropPreview(null);
+    if (activeSessionId) focusSession(activeSessionId);
+  }, [workspace]);
+
+  useEffect(() => {
     if (!restoreWorkspace || sessions.some((session) => session.pendingConnection)) return;
-    stageTerminalWorkspace(serializeTerminalWorkspace(sessions, split));
+    const normal = useTerminalStore.getState().workspaceViews.terminal;
+    const savedSplit = workspace === 'focus' ? normal?.split ?? null : split;
+    const savedSessions = workspace === 'focus' && normal
+      ? normal.order.flatMap(id => sessions.filter(session => session.sessionId === id)) : sessions;
+    stageTerminalWorkspace(serializeTerminalWorkspace(savedSessions, savedSplit));
     const timer = window.setTimeout(() => {
       void flushTerminalWorkspace().catch((error) => {
         logger.error('failed to save terminal workspace', error);
       });
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [restoreWorkspace, sessions, split]);
+  }, [restoreWorkspace, sessions, split, workspace]);
 
   useEffect(() => {
     const handleNewTabRequest = (): void => setNewSessionDialogOpen((previous) => !previous);
@@ -816,7 +840,7 @@ const Terminal: React.FC = () => {
           onTabDragCancel={() => setDropPreview(null)}
         />
       )}
-      <div ref={terminalAreaRef} className="relative min-h-0 flex-1">
+      <div key={workspace} ref={terminalAreaRef} className="relative min-h-0 flex-1">
         {sessions.length === 0 ? (
           <div className="flex h-full items-center justify-center">
             <EmptyState
