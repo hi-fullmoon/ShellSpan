@@ -177,7 +177,10 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     }
     const availability = within(notices).getByRole('status', { name: 'Agent is unavailable' });
     expect(screen.getByRole('textbox')).toHaveAttribute('aria-describedby', availability.id);
-    expect(within(notices).getByRole('button', { name: 'Continue in reconnected terminal' })).toBeVisible();
+    const continuation = within(notices).getByRole('button', { name: 'Continue in reconnected terminal' });
+    expect(continuation).toBeVisible();
+    expect(continuation).toHaveClass('h-6', 'text-[11px]');
+    expect(continuation).not.toHaveClass('h-8');
   });
 
   it('shows the reconnect continuation action even without an unavailable error', async () => {
@@ -213,6 +216,8 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     }
     const { container } = render(<AvailabilityWorkspace />);
     const notices = container.querySelector<HTMLElement>('[data-slot="ai-workspace-status-notices"]')!;
+    expect(within(notices).getByRole('button', { name: label })).toHaveClass('h-6', 'text-[11px]');
+    expect(within(notices).getByRole('button', { name: label })).not.toHaveClass('h-8');
     await user.click(within(notices).getByRole('button', { name: label }));
     expect(container.querySelector('output')).toHaveTextContent(action === 'reconnect' ? 'reconnected' : 'settings opened');
     expect(screen.getByRole('textbox')).toHaveTextContent('Unsent message');

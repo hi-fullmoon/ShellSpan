@@ -10,12 +10,12 @@ export function AgentTerminalBusyNotice({ disabled, onSwitchDirect, state = 'bus
   const { t } = useI18n();
   return (
     <Alert variant="warning" size="sm" role="status" data-slot="terminal-busy-notice">
-      <AlertDescription className="flex min-w-0 flex-wrap items-center gap-1">
-        <span className="min-w-0 flex-1 basis-48">{t(state === 'busy'
+      <AlertDescription className="flex min-w-0 flex-wrap items-start gap-1">
+        <span className="min-w-0 flex-1 basis-48 py-1">{t(state === 'busy'
           ? 'agent.executionSurface.v1.busyComposerHint'
           : state === 'initializing' ? 'agent.executionSurface.v1.initializingDescription'
             : 'agent.executionSurface.v1.unavailableDescription')}</span>
-        <Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={onSwitchDirect}>
+        <Button type="button" variant="ghost" size="xs" className="text-[11px]" disabled={disabled} onClick={onSwitchDirect}>
           {t('agent.executionSurface.v1.switchDirect')}
         </Button>
       </AlertDescription>

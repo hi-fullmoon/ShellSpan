@@ -688,16 +688,16 @@ export function AiWorkspaceRoot({
                   </Alert>
                 )}
                 {(agentUnavailableReason || onContinueOnReconnectedTerminal) && (
-                  <Alert id={availabilityHintId} variant="info" size="sm" role="status" aria-label={t('agent.availability.title')}>
+                  <Alert id={availabilityHintId} variant="info" size="sm" role="status" aria-label={t('agent.availability.title')} className="[&:has(button)>svg]:translate-y-1">
                     <InfoIcon aria-hidden="true" />
-                    <AlertDescription className="flex min-w-0 flex-wrap items-center gap-1 break-words">
+                    <AlertDescription className="flex min-w-0 flex-wrap items-start gap-1 break-words [&:has(>button)>span]:py-1">
                       <span className="min-w-0 flex-1 basis-48">{agentUnavailableReason
                         ?? t('ai.workspace.sessions.previousTerminalReadOnly')}</span>
-                      {onReconnectTerminal ? <Button type="button" variant="ghost" size="sm"
+                      {onReconnectTerminal ? <Button type="button" variant="ghost" size="xs" className="text-[11px]"
                         onClick={onReconnectTerminal}>{t('ai.workspace.status.reconnect')}</Button>
-                        : onContinueOnReconnectedTerminal ? <Button type="button" variant="ghost" size="sm"
+                        : onContinueOnReconnectedTerminal ? <Button type="button" variant="ghost" size="xs" className="text-[11px]"
                         onClick={onContinueOnReconnectedTerminal}>{t('ai.workspace.continueOnReconnectedTerminal')}</Button>
-                        : !readOnlySession && canStartAgent && onOpenModel && <Button type="button" variant="ghost" size="sm"
+                        : !readOnlySession && canStartAgent && onOpenModel && <Button type="button" variant="ghost" size="xs" className="text-[11px]"
                           onClick={onOpenModel}>{t('ai.workspace.status.openSettings')}</Button>}
                     </AlertDescription>
                   </Alert>
