@@ -1,5 +1,6 @@
 import React from 'react';
-import { FolderIcon, LayoutDashboardIcon, SquareTerminalIcon, type LucideIcon } from 'lucide-react';
+import { FocusIcon, FolderIcon, LayoutDashboardIcon, SquareTerminalIcon, type LucideIcon } from 'lucide-react';
+import { useFocusStore } from '@/stores/focusStore';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/stores/appStore';
 import { useI18n } from '@/hooks/useI18n';
@@ -7,7 +8,7 @@ import { useTrackpadSafeActivation } from '@/hooks/useTrackpadSafeActivation';
 import type { AppSection } from '@/types';
 
 interface NavItemProps {
-  section: AppSection;
+  section: AppSection | 'focus';
   label: string;
   icon: LucideIcon;
 }
@@ -15,8 +16,12 @@ interface NavItemProps {
 const NavItem: React.FC<NavItemProps> = ({ section, label, icon: Icon }) => {
   const activeSection = useAppStore((state) => state.activeSection);
   const setActiveSection = useAppStore((state) => state.setActiveSection);
-  const active = activeSection === section;
-  const activate = React.useCallback(() => setActiveSection(section), [section, setActiveSection]);
+  const focusEnabled = useFocusStore(state => state.enabled);
+  const active = section === 'focus' ? focusEnabled : !focusEnabled && activeSection === section;
+  const activate = React.useCallback(() => {
+    if (section === 'focus') useFocusStore.getState().enter();
+    else { useFocusStore.getState().leave(); setActiveSection(section); }
+  }, [section, setActiveSection]);
   const activation = useTrackpadSafeActivation(activate);
 
   return (
@@ -50,6 +55,7 @@ export const SectionNav: React.FC = () => {
       <NavItem section="workbench" label={t('section.workbench')} icon={LayoutDashboardIcon} />
       <NavItem section="terminal" label={t('section.terminal')} icon={SquareTerminalIcon} />
       <NavItem section="sftp" label={t('section.sftp')} icon={FolderIcon} />
+      <NavItem section="focus" label={t('section.focus')} icon={FocusIcon} />
     </nav>
   );
 };

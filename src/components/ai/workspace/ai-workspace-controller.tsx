@@ -1,4 +1,6 @@
 import type { AppSection } from '@/types';
+import { useFocusStore } from '@/stores/focusStore';
+import { FocusNoTarget } from '@/components/focus/focus-no-target';
 import {
   terminalConnectionPresentationState,
 } from '@/lib/terminal/terminal-surface-semantics';
@@ -17,6 +19,7 @@ import {
 } from './use-ai-session-controller';
 
 export interface AiWorkspaceControllerProps {
+  readonly focusMode?: boolean;
   readonly scope: Extract<AppSection, 'terminal' | 'workbench'>;
   readonly adapter?: AiSessionControllerAdapter;
   readonly onClose?: () => void;
@@ -24,20 +27,22 @@ export interface AiWorkspaceControllerProps {
 
 export function AiWorkspaceController({
   scope,
+  focusMode = false,
   adapter,
   onClose,
 }: AiWorkspaceControllerProps): React.ReactNode {
-  const controller = useAiSessionController({ scope, adapter });
+  const controller = useAiSessionController({ scope, adapter, focusMode });
   const reconnectSession = useReconnectSession();
-  const activeTerminalId = useTerminalStore((state) => state.activeSessionId);
+  const focusTargetId = useFocusStore(state => state.targetSessionId);
+  const activeTerminalId = useTerminalStore((state) => focusMode ? focusTargetId : state.activeSessionId);
   const activeTerminalStatus = useTerminalStore((state) => state.sessions.find(
-    (candidate) => candidate.sessionId === state.activeSessionId,
+    (candidate) => candidate.sessionId === activeTerminalId,
   )?.status);
   const activeTerminalIntegrationState = useTerminalStore((state) => state.sessions.find(
-    (candidate) => candidate.sessionId === state.activeSessionId,
+    (candidate) => candidate.sessionId === activeTerminalId,
   )?.integrationState);
   const activeTerminalPromptReady = useTerminalStore((state) => state.sessions.find(
-    (candidate) => candidate.sessionId === state.activeSessionId,
+    (candidate) => candidate.sessionId === activeTerminalId,
   )?.promptReady);
   const session = controller.view?.snapshot.value;
   const configuringContinuation = controller.historicalContinuationAvailable;
@@ -140,7 +145,7 @@ export function AiWorkspaceController({
             />
         )
         : undefined}
-      executionSurfaceControl={scope === 'terminal' && activeTerminalId
+      executionSurfaceControl={!focusMode && scope === 'terminal' && activeTerminalId
         ? (
             <AgentExecutionSurfaceSelector
               surface={controller.selectedExecutionSurface}
@@ -150,11 +155,11 @@ export function AiWorkspaceController({
             />
           )
         : undefined}
-      executionSurfaceNotice={scope === 'terminal' && activeTerminalStatus === 'connected' && realTerminalState !== 'ready'
+      executionSurfaceNotice={focusMode && !activeTerminalId ? <FocusNoTarget /> : scope === 'terminal' && activeTerminalStatus === 'connected' && realTerminalState !== 'ready'
         && controller.selectedExecutionSurface === 'boundTerminal' && !controller.readOnlySession
         ? <AgentTerminalBusyNotice disabled={executionSurfaceLocked}
             state={realTerminalState}
-            onSwitchDirect={() => controller.selectExecutionSurface('direct')} />
+            onSwitchDirect={focusMode ? undefined : () => controller.selectExecutionSurface('direct')} />
         : undefined}
       onDraftChange={controller.setDraft}
       onSubmitGesture={controller.submit}

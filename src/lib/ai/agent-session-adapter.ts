@@ -19,6 +19,7 @@ import {
   invokeResumeAgentRuntime,
   invokeRetryAgentModel,
   invokeCreateAgentRuntimeSession,
+  invokeContinueAgentRuntimeOnTarget,
   invokeGetPendingAgentRuntimeApprovalArguments,
   invokeGetAgentRuntimeArtifact,
   invokeListAgentRuntimeSessions,
@@ -708,6 +709,10 @@ export function createAgentSessionAdapter(
     listFileReferences: (sessionId, query, signal) => (dependencies.listFileReferences ?? invokeListAgentFileReferences)(sessionId, query, signal),
     listSkills: (sessionId) => (dependencies.listSkills ?? invokeListAgentRuntimeSkills)(sessionId),
     create: createSession,
+    async continueOnTarget(input) {
+      await invokeContinueAgentRuntimeOnTarget(input.request);
+      return openEntry(input.request.sessionId);
+    },
     open: openEntry,
     peek(sessionId: string) {
       const entry = entries.get(sessionId);

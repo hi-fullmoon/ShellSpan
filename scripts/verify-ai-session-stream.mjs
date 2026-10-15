@@ -15,11 +15,14 @@ import tailwindcss from '@tailwindcss/vite';
 const repository = resolve(import.meta.dirname, '..');
 const { values } = parseArgs({ options: {
   performance: { type: 'boolean' }, baseline: { type: 'boolean' },
+  focus: { type: 'boolean' },
   'no-model': { type: 'boolean' }, route: { type: 'string' }, model: { type: 'string' },
   'cleanup-session': { type: 'string', multiple: true },
   'baseline-ref': { type: 'string' },
 } });
 const performanceRun = values.performance === true;
+const focusRun = values.focus === true;
+assert(!focusRun || !performanceRun, '--focus and --performance are separate regressions');
 const baseline = values.baseline === true;
 const noModel = values['no-model'] === true;
 assert(Boolean(values.route) === Boolean(values.model), '--route and --model must be supplied together');
@@ -35,6 +38,7 @@ const token = randomUUID();
 let settle;
 const result = new Promise((resolveResult) => { settle = resolveResult; });
 const page = performanceRun ? 'agent-panel-performance.native.html' : 'agent-session-stream.native.html';
+const pagePath = focusRun ? 'src/components/focus/__tests__/focus.native.html' : `src/lib/ai/__tests__/${page}`;
 const output = performanceRun ? await mkdtemp(resolve(tmpdir(), 'shellspan-agent-performance-')) : undefined;
 const baselinePlugin = {
   name: 'agent-panel-performance-baseline',
@@ -94,7 +98,7 @@ try {
   if (!output) await server.listen();
   const address = server.httpServer.address();
   assert(address && typeof address !== 'string');
-  const url = new URL(`http://127.0.0.1:${address.port}/src/lib/ai/__tests__/${page}`);
+  const url = new URL(`http://127.0.0.1:${address.port}/${pagePath}`);
   url.searchParams.set('token', token);
   url.searchParams.set('baseline', String(baseline));
   url.searchParams.set('noModel', String(noModel));
@@ -115,6 +119,7 @@ try {
   const outcome = await result;
   assert.equal(outcome.ok, true, outcome.error);
   if (performanceRun) console.log(JSON.stringify({ baseline, baselineRef: baseline ? baselineRef : undefined, baselineCommit, productionBundle: true, ...outcome.metrics }));
+  else if (focusRun) console.log('Native focus regression passed: real local terminals, explicit targets, collapse/restore, continuation IPC, and responsive geometry. No model or remote commands were executed.');
   else console.log('Native Agent stream passed: pending subscription/snapshot cancellation, error publication, automatic gap recovery and cleanup.');
 } finally {
   clearTimeout(timer);

@@ -197,6 +197,17 @@ export default {
 
   'section.workbench': '工作台',
   'section.terminal': '终端',
+  'section.focus': '专注',
+  'focus.agentTarget': 'Agent 目标',
+  'focus.collapseTerminal': '收起终端',
+  'focus.expandTerminal': '展开终端',
+  'focus.setTarget': '设为 Agent 目标',
+  'focus.targetLocked': '任务或审批未结束，目标已锁定',
+  'focus.connectFirst': '连接服务器后，在终端页签的右键菜单中设为 Agent 目标即可开始。',
+  'focus.connect': '连接服务器',
+  'focus.resize': '调整 Agent 与终端宽度',
+  'focus.continueFirst': '请先向新目标发送消息，再选择该服务器的项目或技能。',
+  'focus.visibleRequired': '该历史会话使用后台执行，请新建专注会话以使用可视执行。',
   'section.sftp': 'SFTP',
   'section.settings': '设置',
 

@@ -8,6 +8,7 @@ import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import type { ShortcutAction } from '@/types';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useAiPanelStore } from '@/stores/aiPanelStore';
+import { useFocusStore } from '@/stores/focusStore';
 
 // The leader binding and its sub-keys live in the terminal input layer
 // (terminal-leader.ts), not at the document level.
@@ -46,15 +47,24 @@ export function useAppShortcuts(): void {
 
       event.preventDefault();
       const { openSettings, setActiveSection } = useAppStore.getState();
+      const focus = useFocusStore.getState();
+      if (focus.enabled && (
+        action === 'newTerminalTab' || action === 'switchTerminalTab'
+        || action === 'findTerminal' || action === 'nextTerminalTab'
+        || action === 'previousTerminalTab'
+      )) focus.setTerminalOpen(true);
 
       switch (action) {
         case 'openWorkbench':
+          useFocusStore.getState().leave();
           setActiveSection('workbench');
           break;
         case 'openTerminal':
+          useFocusStore.getState().leave();
           setActiveSection('terminal');
           break;
         case 'openSftp':
+          useFocusStore.getState().leave();
           setActiveSection('sftp');
           break;
         case 'openSettings':
@@ -64,6 +74,11 @@ export function useAppShortcuts(): void {
           document.dispatchEvent(new Event('shellspan:open-command-palette'));
           break;
         case 'toggleAiPanel':
+          if (useFocusStore.getState().enabled) {
+            const focus = useFocusStore.getState();
+            focus.setTerminalOpen(!focus.terminalOpen);
+            break;
+          }
           if (activeSection === 'sftp') break;
           useAiPanelStore.getState().toggleOpen(activeSection);
           break;

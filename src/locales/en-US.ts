@@ -197,6 +197,17 @@ export default {
 
   'section.workbench': 'Workbench',
   'section.terminal': 'Terminal',
+  'section.focus': 'Focus',
+  'focus.agentTarget': 'Agent target',
+  'focus.collapseTerminal': 'Hide terminals',
+  'focus.expandTerminal': 'Show terminals',
+  'focus.setTarget': 'Set as Agent target',
+  'focus.targetLocked': 'Target locked until the task or approval settles',
+  'focus.connectFirst': 'Connect a server, then use its terminal tab context menu to set the Agent target.',
+  'focus.connect': 'Connect server',
+  'focus.resize': 'Resize Agent and terminals',
+  'focus.continueFirst': 'Send a message to the new target before choosing its project or skills.',
+  'focus.visibleRequired': 'This historical session uses Direct execution. Start a new focus conversation for visible execution.',
   'section.sftp': 'SFTP',
   'section.settings': 'Settings',
 

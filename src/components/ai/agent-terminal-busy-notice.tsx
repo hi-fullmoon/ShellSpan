@@ -5,7 +5,7 @@ import { useI18n } from '@/hooks/useI18n';
 export function AgentTerminalBusyNotice({ disabled, onSwitchDirect, state = 'busy' }: {
   readonly disabled: boolean;
   readonly state?: 'busy' | 'initializing' | 'unavailable';
-  readonly onSwitchDirect: () => void | Promise<void>;
+  readonly onSwitchDirect?: () => void | Promise<void>;
 }): React.ReactNode {
   const { t } = useI18n();
   return (
@@ -15,9 +15,9 @@ export function AgentTerminalBusyNotice({ disabled, onSwitchDirect, state = 'bus
           ? 'agent.executionSurface.v1.busyComposerHint'
           : state === 'initializing' ? 'agent.executionSurface.v1.initializingDescription'
             : 'agent.executionSurface.v1.unavailableDescription')}</span>
-        <Button type="button" variant="ghost" size="xs" className="text-[11px]" disabled={disabled} onClick={onSwitchDirect}>
+        {onSwitchDirect && <Button type="button" variant="ghost" size="xs" className="text-[11px]" disabled={disabled} onClick={onSwitchDirect}>
           {t('agent.executionSurface.v1.switchDirect')}
-        </Button>
+        </Button>}
       </AlertDescription>
     </Alert>
   );

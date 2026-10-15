@@ -585,6 +585,26 @@ impl AgentSessionStore {
         &self,
         request: CreateAgentSessionRequest,
     ) -> Result<AgentSessionSnapshot, String> {
+        self.create_with_target_switch(request, false)
+    }
+
+    pub(crate) fn continue_on_target(
+        &self,
+        request: CreateAgentSessionRequest,
+    ) -> Result<AgentSessionSnapshot, String> {
+        if request.continued_from_session_id.is_none()
+            || request.execution_surface != super::AgentExecutionSurface::BoundTerminal
+        {
+            return Err("target switch requires a source Session and visible execution".into());
+        }
+        self.create_with_target_switch(request, true)
+    }
+
+    fn create_with_target_switch(
+        &self,
+        request: CreateAgentSessionRequest,
+        allow_target_switch: bool,
+    ) -> Result<AgentSessionSnapshot, String> {
         validate_create_request(&request)?;
 
         let mut inner = self.lock_configured()?;
@@ -602,6 +622,28 @@ impl AgentSessionStore {
                 .sessions
                 .get(source_id)
                 .ok_or_else(|| "continuation source Session was not found".to_string())?;
+            if allow_target_switch {
+                if source.header.execution_surface != super::AgentExecutionSurface::BoundTerminal
+                    || !target_switch_settled(source)?
+                {
+                    return Err("target switch requires a settled source Session".into());
+                }
+                let mut descendants = vec![source_id];
+                let mut visited = HashSet::new();
+                while let Some(parent_id) = descendants.pop() {
+                    if !visited.insert(parent_id) {
+                        continue;
+                    }
+                    for child in inner.sessions.values().filter(|child| {
+                        child.header.parent_session_id.as_deref() == Some(parent_id)
+                    }) {
+                        if !target_switch_settled(child)? {
+                            return Err("target switch requires settled child Sessions".into());
+                        }
+                        descendants.push(child.header.session_id.as_str());
+                    }
+                }
+            }
             if source.header.subagent.is_some()
                 || !source
                     .header
@@ -609,7 +651,7 @@ impl AgentSessionStore {
                     .as_ref()
                     .zip(request.target.as_ref())
                     .is_some_and(|(old, current)| {
-                        same_terminal_login(old, current)
+                        (same_terminal_login(old, current) || allow_target_switch)
                             && old.session_id != current.session_id
                             && old.target_id != current.target_id
                     })
@@ -2802,6 +2844,29 @@ fn append_payloads_locked(
         .petdex
         .observe(session_id, &record.events, &appended, record.status, false);
     Ok((appended, inner.publisher.clone()))
+}
+
+fn target_switch_settled(record: &AgentSessionRecord) -> Result<bool, String> {
+    let snapshot = record.snapshot()?;
+    let open_turn = record
+        .events
+        .iter()
+        .rev()
+        .find_map(|event| match event.payload {
+            AgentSessionEventPayload::TurnStart => Some(true),
+            AgentSessionEventPayload::TurnEnd { .. }
+            | AgentSessionEventPayload::SessionEnded { .. } => Some(false),
+            _ => None,
+        })
+        .unwrap_or(false);
+    Ok(!open_turn
+        && !matches!(
+            snapshot.status,
+            AgentSessionStatus::Running | AgentSessionStatus::Waiting
+        )
+        && !snapshot.uncertain_native_effects
+        && snapshot.inbox.next_step.is_empty()
+        && snapshot.inbox.next_turn.is_empty())
 }
 
 fn validate_model_retry_record(record: &AgentSessionRecord, turn_id: &str) -> Result<(), String> {

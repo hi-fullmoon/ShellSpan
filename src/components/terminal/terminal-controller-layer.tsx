@@ -5,6 +5,7 @@ import { useReconnectSession } from '@/hooks/useReconnectSession';
 import { terminalRegistry } from './registry/terminal-registry';
 import { terminalInputReadiness } from './terminal-input-readiness';
 import { useAppStore } from '@/stores/appStore';
+import { useFocusStore } from '@/stores/focusStore';
 import {
   invokeGetAgentRuntimeSession,
   invokeAgentTerminalLeaseReady,
@@ -422,6 +423,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
         flushSync(() => {
           useTerminalStore.getState().setActiveSession(lease.sessionId);
           useAppStore.getState().setActiveSection('terminal');
+          if (useFocusStore.getState().enabled) useFocusStore.getState().setTerminalOpen(true);
         });
         // Switching sections can synchronously dispose or rebind a controller.
         // Never focus the captured instance after its lease or identity changed.

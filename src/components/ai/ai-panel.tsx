@@ -10,6 +10,7 @@ import {
   WorkbenchAskController,
 } from './workspace/ai-workspace-controller';
 import './styles/styles.css';
+import { useFocusStore } from '@/stores/focusStore';
 
 const AI_PANEL_DEFAULT_WIDTH = 400;
 const AI_PANEL_MIN_WIDTH = 320;
@@ -315,11 +316,12 @@ export const AiPanel: React.FC = () => {
   const workbenchOpen = useAiPanelStore((state) => state.panelOpenBySection.workbench);
   const terminalOpen = useAiPanelStore((state) => state.panelOpenBySection.terminal);
   const setOpen = useAiPanelStore((state) => state.setOpen);
+  const focusEnabled = useFocusStore(state => state.enabled);
   return (
     <>
       <AiPanelShell
         open={workbenchOpen}
-        visible={activeSection === 'workbench'}
+        visible={!focusEnabled && activeSection === 'workbench'}
         panelTitle={t('ai.workbench.title')}
         scope="workbench"
         onOpenChange={(nextOpen) => setOpen(nextOpen, 'workbench')}
@@ -328,7 +330,7 @@ export const AiPanel: React.FC = () => {
       </AiPanelShell>
       <AiPanelShell
         open={terminalOpen}
-        visible={activeSection === 'terminal'}
+        visible={!focusEnabled && activeSection === 'terminal'}
         panelTitle={t('ai.terminal.title')}
         scope="terminal"
         onOpenChange={(nextOpen) => setOpen(nextOpen, 'terminal')}

@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useFocusStore } from '@/stores/focusStore';
+import { canSwitchFocusTarget } from '@/lib/ai/focus-target';
 import { toast } from 'sonner';
 import { latestFailureRecovery } from '@/lib/ai/failure-recovery';
 import { aiErrorMessage } from '@/lib/ai/error-message';
@@ -86,6 +88,7 @@ type AiAnnouncement = Extract<AiComposerEffect, { type: 'announce' }>['reason'];
 export type AiSessionControllerAdapter = AiSessionAdapter<'agent'>;
 
 export interface UseAiSessionControllerInput {
+  readonly focusMode?: boolean;
   readonly scope: Extract<AppSection, 'terminal' | 'workbench'>;
   readonly adapter?: AiSessionControllerAdapter;
   readonly now?: () => number;
@@ -259,6 +262,7 @@ function sameOptimistic(
 /** Interpret Composer effects against the Agent adapter while committed views stay adapter-owned. */
 export function useAiSessionController({
   scope,
+  focusMode = false,
   adapter: providedAdapter,
   now = Date.now,
   operationId = generateId,
@@ -267,8 +271,11 @@ export function useAiSessionController({
   const [adapter] = useState(() => providedAdapter ?? sharedAgentSessionAdapter());
   const submissionMemory = useMemo(() => submissionMemoryFor(adapter), [adapter]);
   const canRestoreWorkbench = providedAdapter !== undefined || isTauriRuntime();
-  const activeTerminal = useTerminalStore((state) => state.sessions.find(item => item.sessionId === state.activeSessionId));
-  const activeTerminalId = useTerminalStore((state) => state.activeSessionId);
+  const focusTargetId = useFocusStore(state => state.targetSessionId);
+  const initialFocusSessionId = useRef(focusMode ? useFocusStore.getState().conversationSessionId : null).current;
+  const focusRestored = useRef(false);
+  const activeTerminal = useTerminalStore((state) => state.sessions.find(item => item.sessionId === (focusMode ? focusTargetId : state.activeSessionId)));
+  const activeTerminalId = useTerminalStore((state) => focusMode ? focusTargetId : state.activeSessionId);
   const browserProviders = useAiSettingsStore((state) => state.providers);
   const routeSnapshot = useLlmRoutesStore((state) => state.snapshot);
   const routeModels = useLlmRoutesStore((state) => state.modelsByRoute);
@@ -309,11 +316,13 @@ export function useAiSessionController({
   const [historicalContinuationBusy, setHistoricalContinuationBusy] = useState(false);
   const [historicalContinuationError, setHistoricalContinuationError] = useState<string | null>(null);
   const historicalContinuationPendingRef = useRef(false);
-  const [openedSessionId, setOpenedSessionId] = useState<string | null>(null);
+  const [openedSessionId, setOpenedSessionId] = useState<string | null>(initialFocusSessionId);
   const [optimistic, setOptimistic] = useState<readonly AiOptimisticSubmission[]>([]);
   const [announcement, setAnnouncement] = useState<AiAnnouncement | null>(null);
   const [composer, setComposer] = useState(() => createAiComposerState({
-    draft: useAiDraftStore.getState().drafts[`new:agent:${scope}:${activeTerminal?.sessionId ?? 'workspace'}`] ?? '',
+    ...(initialFocusSessionId ? submissionMemory.sessionStates.get(initialFocusSessionId) : undefined),
+    sessionId: initialFocusSessionId,
+    draft: useAiDraftStore.getState().drafts[initialFocusSessionId ? sessionRouteKey('agent', initialFocusSessionId) : focusMode ? 'new:agent:focus' : `new:agent:${scope}:${activeTerminal?.sessionId ?? 'workspace'}`] ?? '',
   }));
   const [navigation, setNavigation] = useState(() => createAiWorkspaceNavigationState());
   const navigationRef = useRef(navigation);
@@ -354,7 +363,7 @@ export function useAiSessionController({
   const [retryingModelSession, setRetryingModelSession] = useState<string | null>(null);
   const modelRetryPending = useRef(false);
   const [newExecutionSurface, setNewExecutionSurface] = useState<AgentExecutionSurface>(
-    () => useAgentPermissionStore.getState().getExecutionSurface(activeTerminalId ?? ''),
+    () => focusMode ? 'boundTerminal' : useAgentPermissionStore.getState().getExecutionSurface(activeTerminalId ?? ''),
   );
   const settingsPending = useRef(false);
   const currentProviderConfig = useCallback((): AiProviderConfig => {
@@ -425,7 +434,7 @@ export function useAiSessionController({
   const effectExecutorRef = useRef<(effect: AiComposerEffect, context?: { key: string }) => void>(() => undefined);
   const sessionListRequestRef = useRef(0);
 
-  const workspaceScopeKey = scope === 'workbench'
+  const workspaceScopeKey = focusMode ? 'agent:focus' : scope === 'workbench'
     ? 'ask:workbench'
     : `agent:terminal:${activeTerminal?.sessionId ?? 'disconnected'}`;
   const appliedWorkspaceRef = useRef(workspaceScopeKey);
@@ -456,8 +465,9 @@ export function useAiSessionController({
     automaticRestore.current = { key: workspaceScopeKey, eligible: true };
   }
   const claimWorkspace = useCallback(() => { automaticRestore.current.eligible = false; }, []);
-  const canStartAgent = scope === 'workbench'
-    || activeTerminal?.status === 'connected';
+  const visibleExecutionRequired = focusMode && Boolean(view && view.snapshot.value.header.executionSurface !== 'boundTerminal');
+  const canStartAgent = !visibleExecutionRequired && (scope === 'workbench'
+    || activeTerminal?.status === 'connected');
   const terminalUnavailableReason = scope === 'terminal' && !canStartAgent
     ? t('agent.availability.needsTerminal')
     : null;
@@ -499,11 +509,11 @@ export function useAiSessionController({
   const navigationDraftKey = useCallback((sessionId: string | null): string => (
     sessionId
       ? sessionRouteKey('agent', sessionId)
-      : `new:agent:${scope}:${activeTerminal?.sessionId ?? 'workspace'}`
-  ), [activeTerminal?.sessionId, scope]);
+      : focusMode ? 'new:agent:focus' : `new:agent:${scope}:${activeTerminal?.sessionId ?? 'workspace'}`
+  ), [activeTerminal?.sessionId, focusMode, scope]);
   // Keep the editor's owner until its draft is saved, even after the active
   // terminal has changed in the store.
-  const draftOwnerRef = useRef(navigationDraftKey(null));
+  const draftOwnerRef = useRef(navigationDraftKey(initialFocusSessionId));
 
   const saveCurrentDraft = useCallback((): void => {
     useAiDraftStore.getState().saveDraft(draftOwnerRef.current, composerRef.current.draft);
@@ -573,7 +583,7 @@ export function useAiSessionController({
     coldSkillSession.current = null;
     terminalDirectory.current = null;
     setSkillRoot(null);
-  }, [workspaceScopeKey, openedSessionId]);
+  }, [workspaceScopeKey, openedSessionId, focusMode ? activeTerminal?.sessionId : null]);
 
   const createInput = useCallback((
     content: string,
@@ -607,7 +617,7 @@ export function useAiSessionController({
     if (scope !== 'terminal' || !activeTerminal || activeTerminal.status !== 'connected') {
       throw new Error(t('ai.workspace.error.connectedTerminalRequired'));
     }
-    const sessionId = `agent-${activeTerminal.sessionId}-${operationId()}`;
+    const sessionId = `${focusMode ? 'focus-agent' : 'agent'}-${activeTerminal.sessionId}-${operationId()}`;
     return {
       kind: 'agent',
       request: {
@@ -618,13 +628,13 @@ export function useAiSessionController({
         permissionMode: permissionMode(
           useAgentPermissionStore.getState().getMode(activeTerminal.sessionId),
         ),
-        executionSurface: newExecutionSurface,
+        executionSurface: focusMode ? 'boundTerminal' : newExecutionSurface,
         successCriteria: intent.successCriteria,
       },
     };
-  }, [activeTerminal, newExecutionSurface, operationId, scope, t]);
+  }, [activeTerminal, focusMode, newExecutionSurface, operationId, scope, t]);
 
-  const projectKey = `${workspaceScopeKey}:${openedSessionId ?? 'new'}:${skillNavigation}`;
+  const projectKey = `${workspaceScopeKey}:${openedSessionId ?? 'new'}:${skillNavigation}:${focusMode ? activeTerminal?.sessionId ?? '' : ''}`;
   const projectEpoch = useRef({ key: projectKey });
   if (projectEpoch.current.key !== projectKey) projectEpoch.current = { key: projectKey };
   const resolveProjectRoot = useCallback(async (root?: string): Promise<string | null> => {
@@ -667,6 +677,9 @@ export function useAiSessionController({
     };
   }, [createInput, resolveProjectRoot]);
   const ensureProjectSession = useCallback(async (root?: string): Promise<string> => {
+    if (focusMode && viewRef.current && viewRef.current.snapshot.value.header.target?.sessionId !== activeTerminal?.sessionId) {
+      throw new Error(t('focus.continueFirst'));
+    }
     const epoch = projectEpoch.current;
     let sessionId = viewRef.current?.summary.id ?? openedSessionId;
     if (sessionId && root !== undefined) {
@@ -708,7 +721,7 @@ export function useAiSessionController({
     }
     if (projectEpoch.current !== epoch) throw new Error('Cancelled');
     return sessionId;
-  }, [adapter, claimWorkspace, createInput, openedSessionId, resolveProjectRoot, skillNavigation, t]);
+  }, [activeTerminal?.sessionId, adapter, claimWorkspace, createInput, focusMode, openedSessionId, resolveProjectRoot, skillNavigation, t]);
 
   const listSkills = useCallback(async (root?: string): Promise<import('@/types/agent-skill').SkillUserList> => {
     // Browsing bundled instructions must not create a cold Session or freeze a directory.
@@ -930,6 +943,10 @@ export function useAiSessionController({
 
   useEffect(() => {
     const previous = viewRef.current;
+    if (focusMode && appliedWorkspaceRef.current === workspaceScopeKey) {
+      if (focusRestored.current) return;
+      focusRestored.current = true;
+    }
     if (scope === 'terminal' && previous?.snapshot.kind === 'agent'
       && isDirectReconnectedTerminal(previous.snapshot.value, activeTerminal)) {
       appliedWorkspaceRef.current = workspaceScopeKey;
@@ -960,7 +977,7 @@ export function useAiSessionController({
       automaticRestore.current.eligible = visit.eligible;
     }
     const rememberedSessionId = visit ? submissionMemory.stateFor(visit.context)?.sessionId : undefined;
-    const restoredSessionId = rememberedSessionId ?? visit?.summary?.id;
+    const restoredSessionId = rememberedSessionId ?? visit?.summary?.id ?? initialFocusSessionId ?? undefined;
     const restoredSummary = restoredSessionId === visit?.summary?.id ? visit?.summary
       : restoredSessionId ? adapter.peek?.(restoredSessionId)?.summary : undefined;
     resetComposer(restoredSummary ?? undefined, true, restoredSessionId);
@@ -981,7 +998,7 @@ export function useAiSessionController({
     queueOperationRef.current = null;
     viewRef.current = retained;
     setNavigation(visit?.navigation ?? createAiWorkspaceNavigationState());
-  }, [activeTerminal?.sessionId, adapter, claimWorkspace, resetComposer, scope, submissionMemory, workspaceScopeKey]);
+  }, [activeTerminal?.sessionId, adapter, claimWorkspace, focusMode, initialFocusSessionId, resetComposer, scope, submissionMemory, workspaceScopeKey]);
 
   useEffect(() => {
     // Wait for the old workspace's state to clear before choosing its successor.
@@ -995,7 +1012,7 @@ export function useAiSessionController({
       || (automaticRestore.current === restore && (established || restore.eligible)));
     const open = async (): Promise<void> => {
       let sessionId = openedSessionId;
-      if (!sessionId && ((scope === 'workbench' && canRestoreWorkbench) || activeTerminal)) {
+      if (!sessionId && !focusMode && ((scope === 'workbench' && canRestoreWorkbench) || activeTerminal)) {
         if (!canPublish()) return;
         const summaries = await listAllAiSessions(adapter, {
           ...(scope === 'workbench'
@@ -1134,8 +1151,18 @@ export function useAiSessionController({
   const canContinueHistoricalView = scope === 'terminal' && historicalTargetUnavailable
     && visibleView?.snapshot.kind === 'agent'
     && Boolean(provider)
-    && canContinueHistoricalConversation(visibleView.snapshot.value, activeTerminal);
-  const agentUnavailableReason = oneShotSubagent
+    && (focusMode ? canSwitchFocusTarget(visibleView, activeTerminal) : canContinueHistoricalConversation(visibleView.snapshot.value, activeTerminal));
+  useLayoutEffect(() => {
+    if (!focusMode) return;
+    const busy = composer.phase === 'submitting' || composer.phase === 'stopping' || settingsBusy || imageDraft.busy
+      || historicalContinuationBusy || Boolean(openedSessionId && !view)
+      || composer.pendingSubmissions.length > 0
+      || Boolean(view && !canSwitchFocusTarget(view, activeTerminal, true));
+    useFocusStore.getState().setBusy(busy);
+    useFocusStore.getState().setConversation(openedSessionId);
+  }, [focusMode, composer.phase, composer.pendingSubmissions.length, settingsBusy, imageDraft.busy, historicalContinuationBusy, openedSessionId, view, activeTerminal]);
+  useEffect(() => () => { if (focusMode) useFocusStore.getState().setBusy(false); }, [focusMode]);
+  const agentUnavailableReason = visibleExecutionRequired ? t('focus.visibleRequired') : oneShotSubagent
     ? t('ai.workspace.subagents.oneShotReadOnly')
     : canContinueHistoricalView ? terminalUnavailableReason
       : sessionProviderResolution.error
@@ -1186,6 +1213,7 @@ export function useAiSessionController({
 
   const refreshSessions = useCallback(async (): Promise<void> => {
     const matchesScope = (): boolean => {
+      if (focusMode) return true;
       if (scope === 'workbench') return true;
       const terminals = useTerminalStore.getState();
       const terminal = terminals.sessions.find(item => item.sessionId === terminals.activeSessionId);
@@ -1200,9 +1228,9 @@ export function useAiSessionController({
       const scopeKey = scope === 'workbench'
         ? WORKBENCH_AI_TARGET_ID
         : historyScopeKey ?? '__no-terminal__';
-      const summaries = await listAllAiSessions(adapter, { scopeKey, limit: 200 }, canPublish);
+      const summaries = await listAllAiSessions(adapter, { ...(focusMode ? {} : { scopeKey }), limit: 200 }, canPublish);
       if (summaries && canPublish()) {
-        setSessions(summaries);
+        setSessions(focusMode ? summaries.filter(s => s.id.startsWith('focus-agent-')) : summaries);
       }
     } catch (error) {
       if (canPublish()) {
@@ -1213,7 +1241,7 @@ export function useAiSessionController({
         setSessionsLoading(false);
       }
     }
-  }, [adapter, historyScopeKey, scope]);
+  }, [adapter, focusMode, historyScopeKey, scope]);
 
   const openSessions = useCallback((): void => {
     claimWorkspace();
@@ -1239,6 +1267,7 @@ export function useAiSessionController({
   }, [refreshSessions, subagentDirectoryKey]);
 
   const openSession = useCallback((summary: AiSessionSummary): void => {
+    if (focusMode && !summary.id.startsWith('focus-agent-')) return;
     claimWorkspace();
     setHistoricalContinuationError(null);
     const retainedView = viewRef.current?.summary.id === summary.id ? viewRef.current : null;
@@ -1257,7 +1286,7 @@ export function useAiSessionController({
       route: { kind: 'conversation', sessionId: summary.id },
       returnFocus: null,
     }));
-  }, [claimWorkspace, resetComposer]);
+  }, [claimWorkspace, focusMode, resetComposer]);
 
   const newSession = useCallback((): void => {
     claimWorkspace();
@@ -1285,11 +1314,11 @@ export function useAiSessionController({
     const message = content.trim();
     const current = viewRef.current;
     const terminalState = useTerminalStore.getState();
-    const terminalNow = terminalState.sessions.find((session) => session.sessionId === terminalState.activeSessionId);
+    const terminalNow = terminalState.sessions.find((session) => session.sessionId === (focusMode ? useFocusStore.getState().targetSessionId : terminalState.activeSessionId));
     if (!message || historicalContinuationPendingRef.current
       || terminalNow?.sessionId !== activeTerminal?.sessionId || !provider
       || current?.snapshot.kind !== 'agent'
-      || !canContinueHistoricalConversation(current.snapshot.value, terminalNow)) return;
+      || !(focusMode ? canSwitchFocusTarget(current, terminalNow) : canContinueHistoricalConversation(current.snapshot.value, terminalNow))) return;
     if (imageDraft.draft?.images.length) {
       setHistoricalContinuationError(t('ai.workspace.sessions.continueImagesUnavailable'));
       return;
@@ -1300,13 +1329,17 @@ export function useAiSessionController({
     setHistoricalContinuationBusy(true);
     setHistoricalContinuationError(null);
     const context = submissionContextRef.current;
-    void createInputWithFrozenTargetRoot(message).then(input => adapter.create({
-      ...input,
-      request: {
-        ...input.request,
-        continuedFromSessionId: current.summary.id,
-      },
-    })).then((created) => {
+    void createInputWithFrozenTargetRoot(message).then(input => {
+      const create = focusMode ? adapter.continueOnTarget : adapter.create;
+      if (!create) throw new Error('Target continuation is unavailable');
+      return create({
+        ...input,
+        request: {
+          ...input.request,
+          continuedFromSessionId: current.summary.id,
+        },
+      });
+    }).then((created) => {
       if (!mountedRef.current || submissionContextRef.current !== context
         || viewRef.current?.summary.id !== current.summary.id) return;
       const latestDraft = composerRef.current.draft;
@@ -1330,7 +1363,7 @@ export function useAiSessionController({
       historicalContinuationPendingRef.current = false;
       if (mountedRef.current) setHistoricalContinuationBusy(false);
     });
-  }, [activeTerminal?.sessionId, adapter, createInputWithFrozenTargetRoot, dispatch, imageDraft.draft?.images.length,
+  }, [activeTerminal?.sessionId, adapter, focusMode, createInputWithFrozenTargetRoot, dispatch, imageDraft.draft?.images.length,
     historicalSources, navigationDraftKey, now, openSession, operationId, provider, t]);
 
   const forgetSessionVisits = useCallback((sessionId: string): void => {
@@ -1635,7 +1668,7 @@ export function useAiSessionController({
         ? useAgentPermissionStore.getState().getMode(activeTerminal.sessionId)
         : preferredAgentPermission
       : permissionModeForUi(visibleView.snapshot.value.header.permissionMode),
-    selectedExecutionSurface: canContinueHistoricalView ? newExecutionSurface : visibleView?.snapshot.value.header.executionSurface
+    selectedExecutionSurface: focusMode ? 'boundTerminal' : canContinueHistoricalView ? newExecutionSurface : visibleView?.snapshot.value.header.executionSurface
       ?? newExecutionSurface,
     settingsBusy,
     selectModel: (provider) => changeSettings(async (sessionId) => {
@@ -1719,7 +1752,7 @@ export function useAiSessionController({
         && !viewRef.current?.snapshot.value.header.subagent;
       if (scope === 'terminal' && viewRef.current?.snapshot.value.header.target?.sessionId !== activeTerminal?.sessionId
         && viewRef.current?.snapshot.kind === 'agent'
-        && canContinueHistoricalConversation(viewRef.current.snapshot.value, activeTerminal)) {
+        && (focusMode ? canSwitchFocusTarget(viewRef.current, activeTerminal) : canContinueHistoricalConversation(viewRef.current.snapshot.value, activeTerminal))) {
         startHistoricalContinuation(composerRef.current.draft);
         return;
       }

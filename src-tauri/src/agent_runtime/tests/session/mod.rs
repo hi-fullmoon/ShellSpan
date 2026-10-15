@@ -598,6 +598,140 @@ fn pre_surface_semantics_v1_sessions_restore_frozen_values_without_rewrite() {
 }
 
 #[test]
+fn focus_target_switch_preserves_history_and_freezes_new_authority() {
+    let (root, store) = configured();
+    let old_target = target();
+    let original = CreateAgentSessionRequest {
+        session_id: "focus-source".into(),
+        task_id: "focus-source-task".into(),
+        goal: "Inspect current host".into(),
+        parent_session_id: None,
+        continued_from_session_id: None,
+        target: Some(old_target.clone()),
+        permission_mode: Some(AgentSessionPermissionMode::RequestApproval),
+        execution_surface: AgentExecutionSurface::BoundTerminal,
+        success_criteria: vec![],
+        capability_scope: None,
+        subagent: None,
+    };
+    store.create(original.clone()).unwrap();
+    let destination = AgentSessionTarget {
+        kind: "remote".into(),
+        target_id: "terminal-focus-destination".into(),
+        session_id: "focus-destination".into(),
+        profile_id: Some("focus-profile".into()),
+        host: Some("192.0.2.24".into()),
+        port: Some(22),
+        username: Some("dev".into()),
+        cwd: None,
+        local_root: None,
+        root_path: None,
+        label: None,
+    };
+    let request = CreateAgentSessionRequest {
+        session_id: "focus-continuation".into(),
+        task_id: "focus-continuation-task".into(),
+        continued_from_session_id: Some(original.session_id.clone()),
+        target: Some(destination.clone()),
+        ..original
+    };
+    assert!(
+        store.create(request.clone()).is_err(),
+        "ordinary continuation cannot cross logins"
+    );
+    let source = store.snapshot("focus-source").unwrap();
+    let continued = store.continue_on_target(request.clone()).unwrap();
+    assert_eq!(continued.header.target, Some(destination));
+    assert_eq!(
+        continued.header.execution_surface,
+        AgentExecutionSurface::BoundTerminal
+    );
+    assert_eq!(store.snapshot("focus-source").unwrap(), source);
+    assert!(continued.inbox.next_step.is_empty());
+    assert_eq!(
+        store.continue_on_target(request.clone()).unwrap(),
+        continued
+    );
+    assert!(store
+        .continue_on_target(CreateAgentSessionRequest {
+            execution_surface: AgentExecutionSurface::Direct,
+            ..request.clone()
+        })
+        .is_err());
+    let restored = AgentSessionStore::default();
+    restored.configure(root.path().to_path_buf()).unwrap();
+    assert_eq!(restored.snapshot("focus-continuation").unwrap(), continued);
+    store
+        .append(
+            "focus-source",
+            Some("focus-turn".into()),
+            None,
+            AgentSessionEventPayload::TurnStart,
+        )
+        .unwrap();
+    assert!(store
+        .continue_on_target(CreateAgentSessionRequest {
+            session_id: "focus-busy-destination".into(),
+            task_id: "focus-busy-task".into(),
+            ..request
+        })
+        .unwrap_err()
+        .contains("settled"));
+}
+
+#[test]
+fn focus_target_switch_rejects_unsettled_descendants_of_an_idle_source() {
+    let (_root, store) = configured();
+    let original = CreateAgentSessionRequest {
+        session_id: "session-1".into(),
+        task_id: "task-1".into(),
+        goal: "Inspect source target".into(),
+        parent_session_id: None,
+        continued_from_session_id: None,
+        target: Some(target()),
+        permission_mode: Some(AgentSessionPermissionMode::RequestApproval),
+        execution_surface: AgentExecutionSurface::BoundTerminal,
+        success_criteria: vec![],
+        capability_scope: None,
+        subagent: None,
+    };
+    store.create(original.clone()).unwrap();
+    let (child, descriptor) = child_request();
+    store
+        .create_child_with_descriptor("session-1", child, descriptor)
+        .unwrap();
+    store
+        .append(
+            "child-1",
+            Some("child-turn".into()),
+            None,
+            AgentSessionEventPayload::TurnStart,
+        )
+        .unwrap();
+    let source = store.snapshot("session-1").unwrap();
+    assert_eq!(source.status, AgentSessionStatus::Idle);
+    let request = CreateAgentSessionRequest {
+        session_id: "focus-child-switch".into(),
+        task_id: "focus-child-switch-task".into(),
+        continued_from_session_id: Some("session-1".into()),
+        target: Some(AgentSessionTarget {
+            target_id: "target-2".into(),
+            session_id: "terminal-2".into(),
+            ..target()
+        }),
+        ..original
+    };
+    assert!(store
+        .continue_on_target(request.clone())
+        .unwrap_err()
+        .contains("settled child"));
+    assert!(store.snapshot("focus-child-switch").is_err());
+    assert_eq!(store.snapshot("session-1").unwrap(), source);
+    store.cancel("child-1").unwrap();
+    assert!(store.continue_on_target(request).is_ok());
+}
+
+#[test]
 fn terminal_continuation_links_full_history_without_rebinding_the_old_target() {
     let (root, store) = configured();
     let old_target = target();

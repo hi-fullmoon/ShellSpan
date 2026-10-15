@@ -299,6 +299,10 @@ export async function invokeCreateAgentRuntimeSession(
   return invokeLogged<AgentSessionSnapshot>('agent_runtime_create_session', { request });
 }
 
+export function invokeContinueAgentRuntimeOnTarget(request: CreateAgentSessionRequest): Promise<AgentSessionSnapshot> {
+  return invokeLogged<AgentSessionSnapshot>('agent_runtime_continue_on_target', { request });
+}
+
 export async function invokeStartAgentRuntime(
   input: AgentRuntimeStartInput,
 ): Promise<AgentSessionSnapshot> {

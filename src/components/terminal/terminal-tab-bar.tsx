@@ -28,6 +28,8 @@ import { TerminalCloseDetails } from './terminal-close-details';
 import type { SessionStatus } from '@/types';
 import '@/components/ui/session-tab-bar.css';
 import { resolveTerminalTheme } from './registry/terminal-registry';
+import { useFocusStore } from '@/stores/focusStore';
+import { Badge } from '@/components/ui/badge';
 
 const DRAG_OVERLAY_CURSOR_GAP = 2;
 
@@ -87,6 +89,8 @@ const SessionTab: React.FC<SessionTabProps> = ({
 }) => {
   const { t } = useI18n();
   const colorScheme = useAppStore((state) => state.terminalColorScheme);
+  const agentTarget = useFocusStore(state => state.enabled && state.targetSessionId === session.sessionId);
+  const focusEnabled = useFocusStore(state => state.enabled);
   const terminalTheme = colorScheme === 'app' ? undefined : resolveTerminalTheme(colorScheme);
   return (
     <div
@@ -110,6 +114,14 @@ const SessionTab: React.FC<SessionTabProps> = ({
         onContextMenu(session, e.clientX, e.clientY);
       }}
       onKeyDown={(e) => {
+        if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+          e.preventDefault();
+          if (!session.pendingConnection) {
+            const rect = e.currentTarget.getBoundingClientRect();
+            onContextMenu(session, rect.left, rect.bottom);
+          }
+          return;
+        }
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           onActivate(session.sessionId);
@@ -117,6 +129,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
       }}
       className={cn(
         'session-tab group relative flex h-8 w-42 shrink-0 items-center gap-1 rounded-t-md border-x border-transparent px-1.5 text-left text-xs outline-none transition-[background-color,color,opacity] select-none focus-visible:ring-2 focus-visible:ring-app-tab-accent focus-visible:ring-inset',
+        focusEnabled && 'h-10',
         active
           ? 'border-app-border/50 bg-app-surface text-app-text'
           : 'border-transparent bg-transparent text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
@@ -148,6 +161,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
           <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full ring-1 ring-app-bg/60', sessionStatusDotClass(session.status))} />
         )}
         <span className={cn('block flex-1 truncate text-left text-xs leading-none font-medium')}>{session.title}</span>
+        {agentTarget && <Badge variant="secondary" size="sm">{t('focus.agentTarget')}</Badge>}
       </div>
       {!session.pendingConnection &&
         (session.pinned ? (
@@ -580,7 +594,8 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   const draggedOriginalIndex = draggingSessionId ? sessions.findIndex((s) => s.sessionId === draggingSessionId) : -1;
   const effectiveInsertIndex = displayedInsertIndex !== null && displayedInsertIndex === draggedOriginalIndex ? null : displayedInsertIndex;
 
-  const shouldHide = !forceVisible && sessions.length === 1 && terminalHideSingleTabBar && !sessions[0]?.pendingConnection;
+  const focusEnabled = useFocusStore(state => state.enabled);
+  const shouldHide = !forceVisible && !focusEnabled && sessions.length === 1 && terminalHideSingleTabBar && !sessions[0]?.pendingConnection;
 
   return (
     <div
