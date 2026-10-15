@@ -62,14 +62,51 @@ async function verify() {
   try {
     await useProfileStore.getState().hydrateFromDb();
     flushSync(() => root.render(<NativeFocusWorkspace />));
+    flushSync(() => useFocusStore.getState().enter());
+    await eventually(() => host.querySelectorAll('[data-slot="focus-start-notice"]').length === 1, 'Missing single focus onboarding notice');
+    const checkStartNoticeStyle = () => {
+      const notice = host.querySelector<HTMLElement>('[data-slot="focus-start-notice"]')!;
+      const action = notice.querySelector<HTMLButtonElement>('button')!;
+      const description = notice.querySelector<HTMLElement>('[data-slot="alert-description"]')!;
+      const text = description.querySelector<HTMLElement>(':scope > span')!;
+      const icon = notice.querySelector<SVGElement>(':scope > svg')!;
+      const actionStyle = getComputedStyle(action);
+      assert(actionStyle.fontSize === '11px' && action.getBoundingClientRect().height === 24, 'Focus notice action differs from the existing compact Agent notices');
+      assert(actionStyle.borderTopWidth === '0px', 'Focus notice action added an outline absent from similar notices');
+      assert(getComputedStyle(description).alignItems === 'flex-start', 'Focus notice uses different text/action alignment');
+      assert(Math.abs(icon.getBoundingClientRect().top - text.getBoundingClientRect().top - parseFloat(getComputedStyle(text).paddingTop)) <= 1, 'Focus notice icon does not align with its first text line');
+      const noticeBox = notice.getBoundingClientRect();
+      const actionBox = action.getBoundingClientRect();
+      assert(actionBox.left >= noticeBox.left && actionBox.right <= noticeBox.right, 'Focus notice action overflows a narrow panel');
+    };
+    const initialContainer = host.querySelector<HTMLElement>('.focus-layout')!;
+    for (const width of [1280, 400, 320]) {
+      initialContainer.style.width = `${Math.min(width, innerWidth)}px`;
+      await new Promise(r => setTimeout(r, 100));
+      checkStartNoticeStyle();
+    }
+    assert(!host.textContent?.includes(t('agent.availability.needsTerminal')), 'Focus duplicates the generic terminal availability notice');
+    assert(host.querySelector('[data-slot="focus-start-notice"]')?.textContent?.includes(t('focus.connectFirst')), 'Empty focus does not explain how to start');
+    let connectRequested = false;
+    const observeConnect = () => { connectRequested = true; };
+    document.addEventListener('shellspan:new-terminal-tab', observeConnect);
+    try { flushSync(() => (host.querySelector('[data-slot="focus-start-notice"] button') as HTMLButtonElement).click()); }
+    finally { document.removeEventListener('shellspan:new-terminal-tab', observeConnect); }
+    assert(connectRequested && useFocusStore.getState().terminalOpen, 'Focus onboarding did not open terminal creation');
     for (let index = 0; index < 3; index++) {
       const summary = await invokeCreateLocalSession(100, 25);
       terminalIds.push(summary.sessionId);
       flushSync(() => useTerminalStore.getState().addSession(summary));
     }
     await eventually(() => useTerminalStore.getState().sessions.every(s => s.status === 'connected'), 'Native PTYs did not become connected');
-    flushSync(() => useFocusStore.getState().enter());
-    await eventually(() => Boolean(host.querySelector('[data-slot="titlebar-actions"] [data-slot="focus-controls"]')), 'Focus controls missing from titlebar');
+    const offeredTerminal = useTerminalStore.getState().activeSessionId;
+    await eventually(() => host.querySelector('[data-slot="focus-start-notice"] button')?.textContent?.trim() === t('focus.useTerminal'), 'Connected terminal was not offered as a target');
+    checkStartNoticeStyle();
+    flushSync(() => (host.querySelector('[data-slot="focus-start-notice"] button') as HTMLButtonElement).click());
+    assert(useFocusStore.getState().targetSessionId === offeredTerminal, 'Onboarding adopted a different terminal from the one displayed');
+    await eventually(() => !host.querySelector('[data-slot="focus-start-notice"]'), 'Focus onboarding did not clear after selecting a target');
+    await eventually(() => Boolean(host.querySelector('[data-slot="focus-terminal-header"] [data-slot="focus-controls"]')), 'Focus controls missing from terminal header');
+    assert(!host.querySelector('[data-slot="titlebar-actions"] [data-slot="focus-controls"]'), 'Terminal toggle still occupies the titlebar');
     assert(!host.querySelector('[data-slot="focus-terminal-target"]'), 'The redundant target toolbar must be removed');
     assert(!host.querySelector('[data-slot="ai-workspace-header"] [data-slot="focus-target-selector"]'), 'Agent target selection still occupies the conversation header');
     assert(!host.querySelector('[data-slot="titlebar-actions"] [data-slot="focus-target-selector"]'), 'Agent target selection still occupies the titlebar');
@@ -85,12 +122,23 @@ async function verify() {
     assert(useFocusStore.getState().targetSessionId === terminalIds[0], 'Viewing another tab changed Agent target');
     const assertMatchingHeaders = () => {
       const left = host.querySelector<HTMLElement>('[data-slot="ai-workspace-header"]')!;
-      const right = host.querySelector<HTMLElement>('[data-terminal-tab-bar]')!;
+      const right = host.querySelector<HTMLElement>('[data-slot="focus-terminal-header"]')!;
       assert(left.getBoundingClientRect().height === 40 && right.getBoundingClientRect().height === 40, 'Focus panel headers must both remain 40px high');
-      assert(getComputedStyle(left).borderBottomColor === getComputedStyle(right, '::after').borderBottomColor, 'Focus panel header borders use different colors');
-      assert(getComputedStyle(left).borderBottomWidth === getComputedStyle(right, '::after').borderBottomWidth, 'Focus panel header borders use different widths');
+      assert(getComputedStyle(left).borderBottomColor === getComputedStyle(right).borderBottomColor, 'Focus panel header borders use different colors');
+      assert(getComputedStyle(left).borderBottomWidth === getComputedStyle(right).borderBottomWidth, 'Focus panel header borders use different widths');
     };
     assertMatchingHeaders();
+    const serverHeader = host.querySelector<HTMLElement>('[data-slot="focus-terminal-header"]')!;
+    assert(serverHeader.textContent?.includes(useTerminalStore.getState().sessions.find(s => s.sessionId === terminalIds[1])!.title), 'Server header does not show the viewed terminal');
+    const headerAdopt = Array.from(serverHeader.querySelectorAll<HTMLButtonElement>('button')).find(b => b.getAttribute('aria-label') === t('focus.setTarget'));
+    assert(headerAdopt, 'Server header has no explicit Agent target action');
+    flushSync(() => headerAdopt.click());
+    assert(useFocusStore.getState().targetSessionId === terminalIds[1], 'Server header did not set the viewed terminal as Agent target');
+    const serverName = serverHeader.querySelector('h2')!;
+    const targetBadge = serverHeader.querySelector('[data-slot="badge"]')!;
+    assert(serverName.parentElement === targetBadge.parentElement, 'Agent target badge must share the server name row');
+    assert(Math.abs(targetBadge.getBoundingClientRect().left - serverName.getBoundingClientRect().right - 4) <= 1, 'Agent target badge must sit beside the server name');
+    flushSync(() => { useFocusStore.getState().setTarget(terminalIds[0]); useTerminalStore.getState().setActiveSession(terminalIds[1]); });
     const openTargetMenu = (id: string) => {
       const tab = host.querySelector<HTMLElement>(`[data-session-tab="${id}"]`)!;
       flushSync(() => tab.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true })));
@@ -104,12 +152,17 @@ async function verify() {
     assert(!host.querySelector('[data-slot="agent-execution-surface-trigger-content"]'), 'Focus must not offer execution modes');
     const toggleTerminal = () => {
       const label = t(useFocusStore.getState().terminalOpen ? 'focus.collapseTerminal' : 'focus.expandTerminal');
-      const button = Array.from(host.querySelectorAll<HTMLButtonElement>('[data-slot="focus-controls"] button')).find(b => b.getAttribute('aria-label') === label);
-      assert(button, 'The titlebar terminal toggle is inaccessible');
+      const header = useFocusStore.getState().terminalOpen ? 'focus-terminal-header' : 'ai-workspace-header';
+      const button = host.querySelector<HTMLButtonElement>(`[data-slot="${header}"] [data-slot="focus-controls"] button`);
+      assert(button?.getAttribute('aria-label') === label && button.getBoundingClientRect().width > 0, 'The panel terminal toggle is inaccessible');
       flushSync(() => button.click());
     };
     toggleTerminal();
     assert(getComputedStyle(host.querySelector('[data-slot="focus-terminal"]')!).display === 'none', 'Terminal collapse failed');
+    const collapsedActions = host.querySelector('.ai-session-actions')!;
+    const historyAction = collapsedActions.querySelector<HTMLButtonElement>(`button[aria-label="${t('ai.history')}"]`)!;
+    const expandAction = collapsedActions.querySelector('[data-slot="focus-controls"] button')!;
+    assert(historyAction.getBoundingClientRect().right <= expandAction.getBoundingClientRect().left, 'Terminal expand action must follow history');
     toggleTerminal();
     for (let index = 0; index < terminalIds.length; index++) assert(terminalRegistry.get(terminalIds[index]) === controllers[index], 'Collapse replaced a terminal controller');
     const targetBeforeShortcut = useFocusStore.getState().targetSessionId;
@@ -154,13 +207,15 @@ async function verify() {
       assert(!host.querySelector('[data-slot="focus-target-selector"]'), 'The redundant target selector must be removed');
       const sessionHeader = host.querySelector<HTMLElement>('[data-slot="ai-workspace-header"]')!;
       const sessionHeaderBox = sessionHeader.getBoundingClientRect();
-      const terminalHeader = host.querySelector<HTMLElement>('[data-terminal-tab-bar]')!;
+      const terminalHeader = host.querySelector<HTMLElement>('[data-slot="focus-terminal-header"]')!;
       const terminalHeaderBox = terminalHeader.getBoundingClientRect();
       assertMatchingHeaders();
       if (focusContainer.clientWidth > 700) assert(Math.abs(sessionHeaderBox.bottom - terminalHeaderBox.bottom) <= 1, 'Focus panel header bottom edges do not align');
       assert(sessionHeaderBox.height === 40, 'Conversation header height changed');
       const resizedTerminal = host.querySelector('[data-slot="focus-terminal"]')!.getBoundingClientRect();
       assert(terminalHeaderBox.left >= resizedTerminal.left && terminalHeaderBox.right <= resizedTerminal.right, 'Terminal tabs overflow the panel');
+      const tabStripBox = host.querySelector('[data-terminal-tab-bar]')!.getBoundingClientRect();
+      assert(tabStripBox.height === 32 && Math.abs(tabStripBox.top - terminalHeaderBox.bottom) <= 1, 'Compact terminal tabs must form a separate row below the server header');
       const targetBeforeMenu = useFocusStore.getState().targetSessionId;
       openTargetMenu(terminalIds[0]);
       await eventually(() => Boolean(document.querySelector('[role="menu"]')), 'Tab context menu did not open');
@@ -178,8 +233,8 @@ async function verify() {
       const headerActions = host.querySelector('[data-slot="titlebar-actions"]')!;
       assert(headerActions.scrollWidth <= headerActions.clientWidth + 1, `Focus controls overflow their action row: ${locale}/${theme}/${width}`);
       const controlsBox = host.querySelector('[data-slot="focus-controls"]')!.getBoundingClientRect();
-      const titlebarBox = headerActions.getBoundingClientRect();
-      assert(controlsBox.top >= titlebarBox.top && controlsBox.bottom <= titlebarBox.bottom, 'Focus controls increased the titlebar height');
+      assert(controlsBox.top >= terminalHeaderBox.top && controlsBox.bottom <= terminalHeaderBox.bottom, 'Focus controls overflow the terminal header');
+      assert(Math.abs(terminalToggle.getBoundingClientRect().height - 28) <= 1, 'Terminal toggle differs from the shared panel action size');
       const navButtons = host.querySelectorAll('nav button');
       assert(navButtons.length === 4, 'The shared navigation should expose four workspaces');
       assert(Array.from(navButtons).every(button => Math.abs(button.getBoundingClientRect().height - navButtons[0].getBoundingClientRect().height) <= 1), 'Focus navigation differs from the system navigation height');
@@ -193,7 +248,7 @@ async function verify() {
         flushSync(() => useTerminalStore.getState().setActiveSession(terminalIds[0]));
         assert(firstTab.getAttribute('aria-selected') === 'true', 'The first terminal tab did not activate');
         const firstTabStyle = getComputedStyle(firstTab);
-        assert(firstTab.getBoundingClientRect().height === 40, 'Focus tab height differs from its panel header');
+        assert(firstTab.getBoundingClientRect().height === 32, 'Focus terminal tabs are not compact');
         assert(firstTabStyle.borderLeftColor === 'rgba(0, 0, 0, 0)', 'The first selected tab doubles the pane divider');
         assert(firstTabStyle.borderLeftWidth === '1px' && firstTab.getBoundingClientRect().width === originalTabWidth, 'The leading-border fix shifted tab geometry');
         assert(Math.abs(firstTab.getBoundingClientRect().left - divider.getBoundingClientRect().right) <= 1, 'The first tab does not meet the pane divider');
@@ -237,7 +292,7 @@ async function verify() {
     const previousHideSingle = useAppStore.getState().terminalHideSingleTabBar;
     try {
       flushSync(() => useAppStore.setState({ terminalHideSingleTabBar: true }));
-      assert(host.querySelector('[data-terminal-tab-bar]')!.getBoundingClientRect().height === 40, 'Focus hid the only tab and made target selection unreachable');
+      assert(host.querySelector('[data-terminal-tab-bar]')!.getBoundingClientRect().height === 32, 'Focus hid the only tab and made target selection unreachable');
     } finally { flushSync(() => useAppStore.setState({ terminalHideSingleTabBar: previousHideSingle })); }
   } finally {
     root.unmount();

@@ -4,6 +4,7 @@ import { useFocusStore } from '@/stores/focusStore';
 import { useAppStore } from '@/stores/appStore';
 import { cn } from '@/lib/utils';
 import { FocusAgent, FocusDivider } from './focus-workspace';
+import { FocusTerminalHeader } from './focus-terminal-header';
 import './focus.css';
 
 export function FocusLayout({ children }: { children: ReactNode }): ReactNode {
@@ -16,7 +17,10 @@ export function FocusLayout({ children }: { children: ReactNode }): ReactNode {
       style={{ '--focus-agent-width': `${split * 100}%` } as CSSProperties}>
       <div data-slot="focus-agent" className={cn('ai-panel-shell min-h-0 min-w-0 overflow-hidden bg-card font-sans text-sm leading-[22px] text-foreground', !enabled && 'hidden')}><FocusAgent /></div>
       <div className={cn('focus-gutter min-h-0', (!enabled || !terminalOpen) && 'hidden')}><FocusDivider /></div>
-      <div data-slot="focus-terminal" className={cn('flex min-h-0 min-w-0 flex-1 overflow-hidden', enabled && !terminalOpen && 'hidden')}>{children}</div>
+      <div data-slot="focus-terminal" className={cn('flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden', enabled && !terminalOpen && 'hidden')}>
+        <FocusTerminalHeader />
+        <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">{children}</div>
+      </div>
     </div>
   </div>;
 }

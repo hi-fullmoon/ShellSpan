@@ -9,7 +9,6 @@ import { useAiPanelStore } from '@/stores/aiPanelStore';
 import { useAppStore } from '@/stores/appStore';
 import { useI18n } from '@/hooks/useI18n';
 import { useFocusStore } from '@/stores/focusStore';
-import { FocusControls } from '@/components/focus/focus-controls';
 
 export const TitleBar: React.FC = () => {
   const platform = usePlatform();
@@ -42,7 +41,6 @@ export const TitleBar: React.FC = () => {
         className={cn('flex h-full min-w-0 items-center gap-2', isMacOS && 'pr-2')}
         data-slot="titlebar-actions"
       >
-        <FocusControls />
         {activeSection !== 'sftp' && !focusEnabled && (
           <Button
             variant={aiOpen ? 'secondary' : 'ghost'}

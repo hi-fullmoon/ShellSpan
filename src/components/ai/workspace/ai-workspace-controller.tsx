@@ -1,6 +1,7 @@
 import type { AppSection } from '@/types';
 import { useFocusStore } from '@/stores/focusStore';
 import { FocusNoTarget } from '@/components/focus/focus-no-target';
+import { FocusControls } from '@/components/focus/focus-controls';
 import {
   terminalConnectionPresentationState,
 } from '@/lib/terminal/terminal-surface-semantics';
@@ -34,6 +35,7 @@ export function AiWorkspaceController({
   const controller = useAiSessionController({ scope, adapter, focusMode });
   const reconnectSession = useReconnectSession();
   const focusTargetId = useFocusStore(state => state.targetSessionId);
+  const terminalOpen = useFocusStore(state => state.terminalOpen);
   const activeTerminalId = useTerminalStore((state) => focusMode ? focusTargetId : state.activeSessionId);
   const activeTerminalStatus = useTerminalStore((state) => state.sessions.find(
     (candidate) => candidate.sessionId === activeTerminalId,
@@ -82,6 +84,7 @@ export function AiWorkspaceController({
   const openAiSettings = (): void => useAppStore.getState().openSettings('ai');
   return (
     <AiWorkspaceRoot
+      headerActions={focusMode && !terminalOpen ? <FocusControls /> : undefined}
       mode={scope === 'workbench' ? 'ask' : 'agent'}
       view={controller.view}
       restoringSession={controller.restoringSession}

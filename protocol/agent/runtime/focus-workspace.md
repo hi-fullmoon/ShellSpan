@@ -3,11 +3,14 @@
 Focus is an application layout over the existing terminal workspace. It keeps
 one Agent conversation on the left and the existing terminal tabs/splits on the
 right. Hiding the right side does not close connections or dispose controllers.
-Terminal tabs are the right panel header. Both panel headers stay 40px high and
-use the same border token. Target selection is an explicit tab context-menu action,
-also reachable with Shift+F10 or the context-menu key. The target tab is marked
-with an Agent target badge. The terminal toggle remains in the application
-titlebar. There is no separate target toolbar or focus page-header row.
+The right panel has a 40px server header above its standard 32px terminal tabs.
+The server header shows the viewed server identity and status, with explicit
+Agent target selection and terminal collapse actions. Both panel headers use the
+same border token. Target selection is also a tab context-menu action, reachable
+with Shift+F10 or the context-menu key. The target tab is marked
+with an Agent target badge. The terminal toggle occupies the server header;
+when collapsed, an expand action appears in the conversation header.
+There is no separate target toolbar or focus page-header row.
 Visible command input reopens the right side before the existing lease readiness
 and actual xterm focus acknowledgement. There is no execution-surface selector.
 Terminal creation, search and navigation shortcuts reveal a collapsed terminal

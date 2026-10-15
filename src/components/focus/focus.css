@@ -9,9 +9,6 @@
 .focus-frame[data-focus] > [data-slot='focus-terminal'] { grid-column: 3; grid-row: 1; }
 .focus-frame[data-focus][data-terminal-open='false'] { grid-template-columns: minmax(0, 1fr); }
 .focus-frame[data-focus][data-terminal-open='false'] > .focus-gutter { display: none; }
-/* Tabs are the terminal panel header in focus mode. */
-.focus-frame[data-focus] > [data-slot='focus-terminal'] [data-terminal-tab-bar]:not(.h-0) { height: 2.5rem; }
-.focus-frame[data-focus] > [data-slot='focus-terminal'] [data-terminal-tab-bar] :is([data-slot='scroll-area'], [role='tablist'], .session-tab-slot, .session-tab) { height: 100%; }
 @container (width > 700px) {
   /* The pane divider owns the leading edge. Keep the tab's border box so
      selection and dragging do not change its size or text position. */

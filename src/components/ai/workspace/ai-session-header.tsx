@@ -18,6 +18,7 @@ export interface AiSessionHeaderProps {
   readonly status: AiSessionStatus;
   readonly mode?: 'ask' | 'agent';
   readonly lineage?: React.ReactNode;
+  readonly extraActions?: React.ReactNode;
   readonly onClose?: () => void;
   readonly onHistory?: () => void;
   readonly historyOpen?: boolean;
@@ -32,6 +33,7 @@ export function AiSessionHeader({
   status,
   mode = 'agent',
   lineage,
+  extraActions,
   onClose,
   onHistory,
   historyOpen = false,
@@ -116,6 +118,8 @@ export function AiSessionHeader({
             <TooltipContent>{t('ai.newConversation')}</TooltipContent>
           </Tooltip>
         )}
+
+        {extraActions}
 
         {onClose && (
           <Tooltip>
