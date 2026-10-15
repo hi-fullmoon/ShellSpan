@@ -626,7 +626,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
         onDragCancel={handleDragCancel}
       >
         <SortableContext items={sessions.map((s) => s.sessionId)} strategy={() => null}>
-          <ScrollArea viewportRef={scrollRef} horizontal vertical={false} size="thin" onWheel={handleWheel} className="h-8 min-w-0 flex-1">
+          <ScrollArea viewportRef={scrollRef} horizontal vertical={false} size="thin" onWheel={handleWheel} className="isolate h-8 min-w-0 flex-1 [&>[data-slot=scroll-area-scrollbar]]:z-30">
             <div role="tablist" className="flex min-w-0 items-center gap-0 p-0">
               {sessions.map((session, index) => {
                 const isDragging = draggingSessionId === session.sessionId;

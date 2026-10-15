@@ -373,6 +373,27 @@ try {
     }, expectedBackground);
     if (process.env.TAB_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/terminal-tab-surface-${theme}-${scheme}.png` });
   }
+  for (const width of [400, 1280]) {
+    await page.setViewportSize({ width, height: 720 });
+    const bar = page.locator('[data-terminal-tab-bar]');
+    await bar.evaluate(element => { element.style.maxWidth = '320px'; });
+    const viewport = bar.locator('[data-slot="scroll-area-viewport"]');
+    await viewport.evaluate(element => { element.scrollLeft = 0; });
+    const thumb = bar.locator('[data-slot="scroll-area-thumb"]');
+    await thumb.waitFor();
+    const thumbBox = await thumb.boundingBox();
+    assert.ok(thumbBox && thumbBox.width > 0 && thumbBox.height > 0);
+    const x = thumbBox.x + thumbBox.width / 2;
+    const y = thumbBox.y + thumbBox.height / 2;
+    assert.equal(await page.evaluate(({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest('[data-slot="scroll-area-scrollbar"]')), { x, y }), true,
+      'The tab scrollbar must paint above the selected tab and receive pointer input');
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + 40, y, { steps: 5 });
+    await page.mouse.up();
+    assert.ok(await viewport.evaluate(element => element.scrollLeft > 0), 'The tab scrollbar must remain draggable');
+    await bar.evaluate(element => { element.style.maxWidth = ''; });
+  }
   // A target remains marked after a connection error and while another tab is active.
   await page.evaluate(async () => {
     const { useTerminalStore, useFocusStore } = await import('/tab-runtime.js');
