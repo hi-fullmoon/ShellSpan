@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 import { webkit } from 'playwright';
+import { createCanvas, loadImage } from 'canvas';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const server = await createServer({
@@ -205,6 +206,29 @@ try {
       assert.equal(boundary.leftColor, boundary.sideColor);
       assert.equal(boundary.leftWidth, '1px');
       assert.equal(boundary.rightWidth, '1px');
+      await page.mouse.move(width / 2, 400);
+      await page.waitForTimeout(250);
+      const strip = page.locator('[data-terminal-tab-bar]');
+      const samples = await strip.evaluate(bar => {
+        const bounds = bar.getBoundingClientRect();
+        const tabs = [...bar.querySelectorAll('[role="tab"]')].map(tab => ({
+          active: tab.getAttribute('aria-selected') === 'true', bounds: tab.getBoundingClientRect(),
+        })).map(tab => ({ active: tab.active,
+          left: Math.max(bounds.left, tab.bounds.left), right: Math.min(bounds.right, tab.bounds.right) }));
+        const active = tabs.find(tab => tab.active);
+        const inactive = tabs.find(tab => !tab.active && tab.right - tab.left > 8);
+        return { active: Math.floor((active.left + active.right) / 2 - bounds.left),
+          inactive: inactive ? Math.floor((inactive.left + inactive.right) / 2 - bounds.left) : null };
+      });
+      const image = await loadImage(await strip.screenshot({ animations: 'disabled' }));
+      const canvas = createCanvas(image.width, image.height);
+      const context = canvas.getContext('2d');
+      context.drawImage(image, 0, 0);
+      const pixel = (x, y) => [...context.getImageData(x, y, 1, 1).data];
+      assert.deepEqual(pixel(samples.active, image.height - 1), pixel(samples.active, image.height - 5),
+        `The active tab must cover the bottom separator (${theme}, ${width}px, tab ${index})`);
+      if (samples.inactive !== null) assert.notDeepEqual(pixel(samples.inactive, image.height - 1), pixel(samples.inactive, image.height - 5),
+        `The separator remains visible below inactive tabs (${theme}, ${width}px)`);
       if (process.env.TAB_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/terminal-tabs-${theme}-${width}-selected-${index}.png` });
     }
     const appearance = await page.evaluate(() => {
