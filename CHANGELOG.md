@@ -2,6 +2,20 @@
 
 Notable changes to ShellSpan from v2.1.0 onward are documented in this file.
 
+## [v2.2.1](https://github.com/hi-fullmoon/ShellSpan/releases/tag/v2.2.1) - 2026-10-15
+
+### 体验改进
+
+- 调整终端与 SFTP 会话标签的外观，使标签与内容区域衔接更自然，并改善拖动排序时的插入位置提示。
+- 顶部导航保留清晰的选中底色，调轻文字字重，并避免切换页面时标签宽度和位置发生跳动。
+- 将 AI 执行提示和恢复操作集中到输入框上方，优化紧凑提示中的图标与操作对齐。
+
+### 问题修复
+
+- 修复等待审批时多行草稿不可见或难以访问的问题，保留输入区域与审批内容的滚动能力。
+- 修复终端会话自定义颜色未作为标签背景显示的问题。
+- 终端没有可回滚内容时隐藏滚动条，减少无效的视觉提示。
+
 ## [v2.2.0](https://github.com/hi-fullmoon/ShellSpan/releases/tag/v2.2.0) - 2026-10-14
 
 ### 新增功能
