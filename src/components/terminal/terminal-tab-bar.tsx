@@ -19,7 +19,7 @@ import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner } from '@/components/ui/spinner';
-import { PinIcon, XIcon } from 'lucide-react';
+import { PinIcon, TargetIcon, XIcon } from 'lucide-react';
 import { invokeCloseSession } from '@/lib/ipc/tauri';
 import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
@@ -29,7 +29,6 @@ import type { SessionStatus } from '@/types';
 import '@/components/ui/session-tab-bar.css';
 import { resolveTerminalTheme } from './registry/terminal-registry';
 import { useFocusStore } from '@/stores/focusStore';
-import { Badge } from '@/components/ui/badge';
 
 const DRAG_OVERLAY_CURSOR_GAP = 2;
 
@@ -159,7 +158,9 @@ const SessionTab: React.FC<SessionTabProps> = ({
           <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full ring-1 ring-app-bg/60', sessionStatusDotClass(session.status))} />
         )}
         <span className={cn('block flex-1 truncate text-left text-xs leading-none font-medium')}>{session.title}</span>
-        {agentTarget && <Badge variant="secondary" size="sm">{t('focus.agentTarget')}</Badge>}
+        {agentTarget && (session.pinned || session.pendingConnection) && <span data-slot="focus-tab-target" role="img" aria-label={t('focus.agentTarget')} title={t('focus.agentTarget')} className="flex size-4 shrink-0 items-center justify-center text-app-text-soft">
+          <TargetIcon aria-hidden="true" className="size-3" />
+        </span>}
       </div>
       {!session.pendingConnection &&
         (session.pinned ? (
@@ -179,17 +180,21 @@ const SessionTab: React.FC<SessionTabProps> = ({
           <button
             type="button"
             aria-label="close"
+            title={agentTarget ? t('focus.agentTarget') : undefined}
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
               onClose(session.sessionId);
             }}
             className={cn(
-              'flex h-5 w-5 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text',
-              !dragging && active ? 'visible' : 'invisible group-hover:visible group-focus-within:visible',
+              'group/close flex h-5 w-5 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text',
+              agentTarget || (!dragging && active) ? 'visible' : 'invisible group-hover:visible group-focus-within:visible',
             )}
           >
-            <XIcon className="h-3 w-3" strokeWidth={1.5} />
+            {agentTarget && <span data-slot="focus-tab-target" role="img" aria-label={t('focus.agentTarget')} className="flex size-4 items-center justify-center group-hover:hidden group-focus-visible/close:hidden">
+              <TargetIcon aria-hidden="true" className="size-3" />
+            </span>}
+            <XIcon aria-hidden="true" className={cn('size-3', agentTarget && 'hidden group-hover:block group-focus-visible/close:block')} strokeWidth={1.5} />
           </button>
         ))}
     </div>

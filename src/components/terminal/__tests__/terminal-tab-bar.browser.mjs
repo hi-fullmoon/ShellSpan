@@ -25,6 +25,7 @@ const server = await createServer({
         export { TerminalTabBar } from '/src/components/terminal/terminal-tab-bar.tsx';
         export { useTerminalStore } from '/src/stores/terminalStore.ts';
         export { useAppStore } from '/src/stores/appStore.ts';
+        export { useFocusStore } from '/src/stores/focusStore.ts';
         export { resolveTerminalTheme } from '/src/components/terminal/registry/terminal-registry.ts';
         export { SftpTabBar } from '/src/components/sftp/sftp-tab-bar.tsx';
         export { useSftpStore } from '/src/stores/sftpStore.ts';
@@ -372,7 +373,45 @@ try {
     }, expectedBackground);
     if (process.env.TAB_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/terminal-tab-surface-${theme}-${scheme}.png` });
   }
-  console.log('Terminal and SFTP appearance, keyboard actions, pinning, tab colors and terminal surfaces verified.');
+  // A target remains marked after a connection error and while another tab is active.
+  await page.evaluate(async () => {
+    const { useTerminalStore, useFocusStore } = await import('/tab-runtime.js');
+    const sessionId = useTerminalStore.getState().sessions[0].sessionId;
+    useFocusStore.setState({ enabled: true, targetSessionId: sessionId });
+    useTerminalStore.getState().setStatus(sessionId, { status: 'error', message: 'Connection ended' });
+  });
+  const targetTab = page.locator('[data-terminal-tab-bar] [role="tab"]').first();
+  const closeTarget = targetTab.locator('button[aria-label="close"]');
+  const targetIcon = closeTarget.locator('[data-slot="focus-tab-target"]');
+  const closeIcon = closeTarget.locator('svg.lucide-x');
+  for (const width of [400, 1280]) {
+    await page.setViewportSize({ width, height: 720 });
+    for (const active of [true, false]) {
+      await page.evaluate(async (active) => {
+        const { useTerminalStore } = await import('/tab-runtime.js');
+        useTerminalStore.getState().setActiveSession(useTerminalStore.getState().sessions[active ? 0 : 1].sessionId);
+      }, active);
+      await targetTab.scrollIntoViewIfNeeded();
+      await page.mouse.click(width - 10, 300);
+      await targetIcon.waitFor({ state: 'visible' });
+      assert.equal(await closeIcon.isVisible(), false);
+      assert.equal(await targetTab.locator('[data-slot="focus-tab-target"]').count(), 1);
+      const before = await closeTarget.boundingBox();
+      assert.equal(before.width, 20);
+      assert.equal(before.height, 20);
+      await targetTab.hover({ position: { x: 30, y: 16 } });
+      await closeIcon.waitFor({ state: 'visible' });
+      assert.equal(await targetIcon.isVisible(), false);
+      assert.deepEqual(await closeTarget.boundingBox(), before);
+      await page.mouse.move(width - 10, 300);
+      await closeTarget.focus();
+      await closeIcon.waitFor({ state: 'visible' });
+      assert.equal(await targetIcon.isVisible(), false);
+    }
+  }
+  await closeTarget.click();
+  await page.getByRole('alertdialog').waitFor();
+  console.log('Terminal and SFTP appearance, keyboard actions, pinning, target icon hover, tab colors and terminal surfaces verified.');
 } finally {
   await browser?.close();
   await server.close();

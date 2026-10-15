@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { TerminalContextMenu } from '@/components/terminal/terminal-context-menu';
 import { TerminalControllerLayer } from '@/components/terminal/terminal-controller-layer';
 import { TerminalTabBar } from '@/components/terminal/terminal-tab-bar';
-import { TerminalPane } from '@/components/terminal/terminal-pane';
+import { TerminalCarousel } from '@/components/terminal/terminal-carousel';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import { useFocusStore } from '@/stores/focusStore';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
@@ -39,9 +39,9 @@ function NativeTerminals() {
     <TerminalTabBar onTabActivate={id => useTerminalStore.getState().setActiveSession(id)}
       onTabContextMenu={(session, x, y) => setContext({ session, x, y })} />
     <TerminalContextMenu open={Boolean(context)} session={context?.session ?? null} x={context?.x ?? 0} y={context?.y ?? 0} onClose={() => setContext(null)} />
-    <div className="relative min-h-0 flex-1">{sessions.map(s => <div key={s.sessionId} className="absolute inset-0" hidden={s.sessionId !== active}>
-      <TerminalPane activeSession={s} isActive={s.sessionId === active} isVisible={s.sessionId === active} />
-    </div>)}</div>
+    <div className="relative min-h-0 flex-1"><TerminalCarousel sessions={sessions} activeSessionId={active} isActive isVisible
+      onActivate={id => useTerminalStore.getState().setActiveSession(id)}
+      onSettle={id => terminalRegistry.get(id)?.focus()} /></div>
   </div>;
 }
 
@@ -119,6 +119,31 @@ async function verify() {
     flushSync(() => { assert(useFocusStore.getState().setTarget(terminalIds[0]), 'Cannot restore first explicit target'); });
     const controllers = terminalIds.map(id => terminalRegistry.get(id));
     flushSync(() => useTerminalStore.getState().setActiveSession(terminalIds[1]));
+    const switchingContainer = host.querySelector<HTMLElement>('.focus-layout')!;
+    for (const width of [1280, 400]) {
+      switchingContainer.style.width = `${Math.min(width, innerWidth)}px`;
+      await new Promise(r => setTimeout(r, 160));
+      for (const enabled of [false, true, false, true]) {
+        flushSync(() => enabled ? useFocusStore.getState().enter() : useFocusStore.getState().leave());
+        const controller = terminalRegistry.get(useTerminalStore.getState().activeSessionId!)!;
+        const expected = controller.fitAddon.proposeDimensions();
+        assert(expected && controller.terminal.cols === expected.cols && controller.terminal.rows === expected.rows,
+          `Workspace switch painted a stale terminal grid: ${width}/${enabled}`);
+        const dimensions = { cols: controller.terminal.cols, rows: controller.terminal.rows };
+        await new Promise(requestAnimationFrame);
+        await new Promise(requestAnimationFrame);
+        const carousel = host.querySelector<HTMLElement>('[data-terminal-carousel]')!;
+        const activePage = carousel.querySelector<HTMLElement>(`[data-terminal-carousel-page="${controller.sessionId}"]`)!;
+        assert(Math.abs(activePage.getBoundingClientRect().left - carousel.getBoundingClientRect().left) <= 1,
+          'Workspace switch displaced the active carousel page');
+        await new Promise(r => setTimeout(r, 160));
+        assert(controller.terminal.cols === dimensions.cols && controller.terminal.rows === dimensions.rows,
+          'Workspace switch resized the terminal again after painting');
+        for (let index = 0; index < terminalIds.length; index++) assert(terminalRegistry.get(terminalIds[index]) === controllers[index], 'Workspace switch replaced a terminal controller');
+      }
+    }
+    switchingContainer.style.width = '';
+    flushSync(() => useTerminalStore.getState().setActiveSession(terminalIds[1]));
     assert(useFocusStore.getState().targetSessionId === terminalIds[0], 'Viewing another tab changed Agent target');
     const assertMatchingHeaders = () => {
       const left = host.querySelector<HTMLElement>('[data-slot="ai-workspace-header"]')!;
@@ -148,7 +173,10 @@ async function verify() {
     assert(adopt, 'Explicit adoption action missing');
     flushSync(() => adopt.click());
     assert(useFocusStore.getState().targetSessionId === terminalIds[1], 'Adoption did not switch target');
-    assert(host.querySelector(`[data-session-tab="${terminalIds[1]}"] [data-slot="badge"]`), 'Target tab badge missing');
+    const tabTarget = host.querySelector<HTMLElement>(`[data-session-tab="${terminalIds[1]}"] [data-slot="focus-tab-target"]`)!;
+    assert(tabTarget?.getAttribute('aria-label') === t('focus.agentTarget'), 'Target tab icon lacks a readable label');
+    assert(tabTarget.getBoundingClientRect().width === 16, 'Target tab indicator must remain compact');
+    assert(!tabTarget.closest('[data-session-tab]')!.querySelector('[data-slot="badge"]'), 'Target tab still contains a wide text badge');
     assert(!host.querySelector('[data-slot="agent-execution-surface-trigger-content"]'), 'Focus must not offer execution modes');
     const toggleTerminal = () => {
       const label = t(useFocusStore.getState().terminalOpen ? 'focus.collapseTerminal' : 'focus.expandTerminal');

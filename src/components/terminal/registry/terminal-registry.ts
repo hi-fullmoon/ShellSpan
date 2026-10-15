@@ -386,6 +386,7 @@ export interface TerminalController {
   };
   attach(host: HTMLElement): void;
   detach(): void;
+  fit(): void;
   focus(): void;
   simulateInput(data: string): void;
   hasPendingUserInput(): boolean;
@@ -1025,7 +1026,7 @@ class TerminalControllerImpl implements TerminalController {
     });
   }
 
-  focus(): void {
+  fit(): void {
     if (this.disposed) return;
 
     // A restored terminal can be opened while the whole terminal section is
@@ -1053,7 +1054,11 @@ class TerminalControllerImpl implements TerminalController {
         // Ignore redraw failures on a terminal being detached concurrently.
       }
     }
+  }
 
+  focus(): void {
+    if (this.disposed) return;
+    this.fit();
     try {
       this.terminal.focus();
     } catch {
