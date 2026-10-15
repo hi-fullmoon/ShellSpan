@@ -4,6 +4,28 @@ import { FitAddon } from '@xterm/addon-fit';
 
 export const TERMINAL_CONTAINER_CLASS = 'h-full w-full [&_.xterm-viewport]:opacity-0 [&>.terminal.xterm]:h-full [&>.terminal.xterm]:p-[4px_0_4px_4px]';
 
+export function installTerminalScrollbarVisibility(terminal: Terminal) {
+  // xterm's pixel-based scrollbar dimensions can lag behind a resize or clear.
+  // The active buffer is authoritative about whether there is history to scroll.
+  const update = () => {
+    terminal.element?.toggleAttribute('data-no-scrollback', terminal.buffer.active.baseY === 0);
+  };
+  const listeners = [
+    terminal.onRender(update),
+    terminal.onResize(update),
+    terminal.onScroll(update),
+    terminal.onWriteParsed(update),
+    terminal.buffer.onBufferChange(update),
+  ];
+  update();
+  return {
+    dispose() {
+      listeners.forEach((listener) => listener.dispose());
+      terminal.element?.removeAttribute('data-no-scrollback');
+    },
+  };
+}
+
 export function createTerminalResizeHandler(
   terminal: Terminal,
   fit: FitAddon,

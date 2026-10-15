@@ -3,7 +3,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import { WebglAddon } from '@xterm/addon-webgl';
-import { createTerminalResizeHandler, measureTerminalGeometry, TERMINAL_CONTAINER_CLASS } from './terminal-geometry';
+import { createTerminalResizeHandler, installTerminalScrollbarVisibility, measureTerminalGeometry, TERMINAL_CONTAINER_CLASS } from './terminal-geometry';
 import { installTerminalEdgeBackground } from './terminal-edge-background';
 import { terminalInputReadiness } from '../terminal-input-readiness';
 import { getTerminalScrollState } from '@/components/terminal/terminal-scroll-state';
@@ -447,6 +447,7 @@ class TerminalControllerImpl implements TerminalController {
   private resizeRetryAttempts = 0;
   private rendererInitialized = false;
   private edgeBackground?: IDisposable;
+  private scrollbarVisibility?: IDisposable;
   private webglAddon?: WebglAddon;
   private webglContextLossDisposable?: IDisposable;
   private pendingOutputCharacters = 0;
@@ -909,6 +910,7 @@ class TerminalControllerImpl implements TerminalController {
     if (this.opened) {
       this.setupRenderer();
       this.edgeBackground ??= installTerminalEdgeBackground(this.terminal);
+      this.scrollbarVisibility ??= installTerminalScrollbarVisibility(this.terminal);
     }
 
     this.updateElementStyles();
@@ -1409,6 +1411,7 @@ class TerminalControllerImpl implements TerminalController {
     this.linkProviderDisposable?.dispose();
     this.disposeWebglRenderer();
     this.edgeBackground?.dispose();
+    this.scrollbarVisibility?.dispose();
     this.terminal.dispose();
     clearTerminalOutput(this.sessionId);
     this.outputListeners.clear();

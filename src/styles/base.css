@@ -5,6 +5,12 @@
 
 @custom-variant dark (&:is([data-theme="dark"] *));
 
+.xterm[data-no-scrollback] .xterm-scrollable-element > .scrollbar.vertical {
+  opacity: 0;
+  pointer-events: none;
+  transition: none;
+}
+
 .xterm .xterm-scrollable-element > .scrollbar.visible {
   transition: opacity 180ms ease-out;
 }

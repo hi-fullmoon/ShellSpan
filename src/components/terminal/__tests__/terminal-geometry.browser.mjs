@@ -35,7 +35,7 @@ try {
   await page.goto(`http://127.0.0.1:${address.port}/geometry`);
   await page.waitForFunction(() => getComputedStyle(document.body).margin === '0px');
   await page.evaluate(async () => {
-    const { TERMINAL_CONTAINER_CLASS } = await import('/src/components/terminal/registry/terminal-geometry.ts');
+    const { installTerminalScrollbarVisibility, TERMINAL_CONTAINER_CLASS } = await import('/src/components/terminal/registry/terminal-geometry.ts');
     const { Terminal } = await import('/node_modules/@xterm/xterm/lib/xterm.mjs');
     const container = document.createElement('div');
     container.id = 'scrollbar-transition';
@@ -43,6 +43,7 @@ try {
     document.getElementById('pane').appendChild(container);
     window.scrollbarTerminal = new Terminal({ rows: 10 });
     window.scrollbarTerminal.open(container);
+    window.scrollbarVisibility = installTerminalScrollbarVisibility(window.scrollbarTerminal);
     await new Promise((resolve) => window.scrollbarTerminal.write('\r\n'.repeat(40), resolve));
   });
   const scrollbar = page.locator('#scrollbar-transition .scrollbar.vertical');
@@ -56,6 +57,26 @@ try {
     return opacity > 0 && opacity < 1;
   });
   await page.waitForFunction(() => getComputedStyle(document.querySelector('#scrollbar-transition .scrollbar.vertical')).opacity === '1');
+  await page.mouse.wheel(0, -300);
+  await page.waitForFunction(() => window.scrollbarTerminal.buffer.active.viewportY < window.scrollbarTerminal.buffer.active.baseY);
+  const slider = page.locator('#scrollbar-transition .scrollbar.vertical .slider');
+  const thumb = await slider.boundingBox();
+  const track = await scrollbar.boundingBox();
+  assert.ok(thumb && track, 'History scrollbar must have a draggable thumb');
+  await page.mouse.move(thumb.x + thumb.width / 2, thumb.y + thumb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(thumb.x + thumb.width / 2, track.y + track.height - 1, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForFunction(() => window.scrollbarTerminal.buffer.active.viewportY === window.scrollbarTerminal.buffer.active.baseY);
+  await page.evaluate(async () => {
+    const terminal = window.scrollbarTerminal;
+    terminal.scrollToTop();
+    const position = terminal.buffer.active.viewportY;
+    await new Promise((resolve) => terminal.write('More output\r\n', resolve));
+    if (terminal.buffer.active.viewportY !== position) throw new Error('New output moved the history viewport');
+    await new Promise((resolve) => terminal.write('\x1b[2J\x1b[H', resolve));
+  });
+  assert.equal(await page.evaluate(() => window.scrollbarTerminal.element.hasAttribute('data-no-scrollback')), false, 'Erasing the visible screen must preserve scrollable history');
   await page.mouse.move(1200, 750);
   await page.waitForFunction(() => document.querySelector('#scrollbar-transition .scrollbar.vertical').classList.contains('invisible'));
   assert.equal(await scrollbar.evaluate((bar) => getComputedStyle(bar).transitionDuration), '0.3s');
@@ -73,7 +94,29 @@ try {
   assert.equal(await scrollbar.evaluate((bar) => getComputedStyle(bar).transitionDuration), '0s');
   assert.equal(await scrollbar.evaluate((bar) => getComputedStyle(bar).pointerEvents), 'auto', 'A visible scrollbar must remain draggable');
   await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.evaluate(async () => {
+    window.scrollbarTerminal.clear();
+  });
+  await page.waitForFunction(() => {
+    const terminal = window.scrollbarTerminal;
+    const bar = terminal.element.querySelector('.scrollbar.vertical');
+    return terminal.buffer.active.baseY === 0 && getComputedStyle(bar).opacity === '0';
+  });
+  assert.equal(await scrollbar.evaluate((bar) => getComputedStyle(bar).pointerEvents), 'none');
+  await page.evaluate(async () => {
+    await new Promise((resolve) => window.scrollbarTerminal.write('\r\n'.repeat(40), resolve));
+  });
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('#scrollbar-transition .scrollbar.vertical')).opacity === '1');
+  await page.evaluate(async () => {
+    await new Promise((resolve) => window.scrollbarTerminal.write('\x1b[?1049hPrompt', resolve));
+  });
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('#scrollbar-transition .scrollbar.vertical')).opacity === '0');
+  await page.evaluate(async () => {
+    await new Promise((resolve) => window.scrollbarTerminal.write('\x1b[?1049l', resolve));
+  });
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('#scrollbar-transition .scrollbar.vertical')).opacity === '1');
   await page.evaluate(() => {
+    window.scrollbarVisibility.dispose();
     window.scrollbarTerminal.dispose();
     document.getElementById('scrollbar-transition').remove();
   });
@@ -207,7 +250,7 @@ try {
       assert.ok(result.gap >= 0 && result.gap < 20 + result.cellWidth, JSON.stringify(result));
       if (width === 1982) assert.ok(result.dimensions.cols > 120);
       const resizeResult = await page.evaluate(async ({ fontSize }) => {
-        const { createTerminalResizeHandler, TERMINAL_CONTAINER_CLASS } = await import('/src/components/terminal/registry/terminal-geometry.ts');
+        const { createTerminalResizeHandler, installTerminalScrollbarVisibility, TERMINAL_CONTAINER_CLASS } = await import('/src/components/terminal/registry/terminal-geometry.ts');
         const { Terminal } = await import('/node_modules/@xterm/xterm/lib/xterm.mjs');
         const { FitAddon } = await import('/node_modules/@xterm/addon-fit/lib/addon-fit.mjs');
         const pane = document.getElementById('pane');
@@ -218,6 +261,7 @@ try {
         const fit = new FitAddon();
         terminal.loadAddon(fit);
         terminal.open(container);
+        const visibility = installTerminalScrollbarVisibility(terminal);
         fit.fit();
         const initialRows = terminal.rows;
         const sent = [];
@@ -279,6 +323,7 @@ try {
             && terminal.buffer.active.getLine(0).translateToString(true) === 'Terminal resize regression';
           return { restored, remeasured, hiddenSkipped, shown, cancelled, historyVisible, historyPreserved, scrollbarWidth };
         } finally {
+          visibility.dispose();
           handler.cancel();
           terminal.dispose();
           container.remove();
