@@ -2,6 +2,16 @@
   --ai-composer-stack-gap: 7px;
 }
 
+.ai-composer-seat [data-slot='ai-composer-notices'] > :is(
+  [data-slot='ai-workspace-status-notices'],
+  [data-slot='ai-workspace-error-notices'],
+  [data-slot='terminal-busy-notice'],
+  [data-slot='focus-start-notice']
+) {
+  width: calc(100% - 16px);
+  margin-inline: auto;
+}
+
 .ai-composer-seat[data-phase='active'] {
   background: var(--ai-canvas);
 }

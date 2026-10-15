@@ -65,6 +65,18 @@ try {
       return el.scrollWidth <= el.clientWidth && button.right <= box.right && button.bottom <= box.bottom;
     });
     assert.ok(fits, `Notice and action must fit at ${width}px`);
+    const noticeWidths = await page.locator('[data-slot="ai-composer-notices"]').evaluate(el => {
+      const input = el.parentElement.querySelector('[data-composer-card]').getBoundingClientRect();
+      const boxes = [...el.querySelectorAll('[data-slot="ai-workspace-status-notices"] > [data-slot="alert"], [data-slot="terminal-busy-notice"]')]
+        .map(notice => notice.getBoundingClientRect());
+      return { inputWidth: input.width, inputCenter: input.x + input.width / 2,
+        boxes: boxes.map(box => ({ width: box.width, center: box.x + box.width / 2 })) };
+    });
+    for (const box of noticeWidths.boxes) {
+      assert.ok(Math.abs(box.width - (noticeWidths.inputWidth - 16)) < 1,
+        `All composer notices share a narrower width at ${width}px`);
+      assert.ok(Math.abs(box.center - noticeWidths.inputCenter) < 1, 'Notices stay centered above the input');
+    }
     const availability = page.getByRole('status').filter({ has: page.getByRole('button', { name: labels.action, exact: true }) });
     for (const target of [notice, availability]) {
       const geometry = await target.evaluate(el => {

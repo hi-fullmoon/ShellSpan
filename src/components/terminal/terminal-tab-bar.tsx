@@ -158,7 +158,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
           <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full ring-1 ring-app-bg/60', sessionStatusDotClass(session.status))} />
         )}
         <span className={cn('block flex-1 truncate text-left text-xs leading-none font-medium')}>{session.title}</span>
-        {agentTarget && (session.pinned || session.pendingConnection) && <span data-slot="focus-tab-target" role="img" aria-label={t('focus.agentTarget')} title={t('focus.agentTarget')} className="flex size-4 shrink-0 items-center justify-center text-app-text-soft">
+        {agentTarget && (session.pinned || session.pendingConnection) && <span data-slot="focus-tab-target" role="img" aria-label={t('focus.agentTarget')} title={t('focus.agentTarget')} className="flex size-4 shrink-0 items-center justify-center text-app-success">
           <TargetIcon aria-hidden="true" className="size-3" />
         </span>}
       </div>
@@ -191,7 +191,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
               agentTarget || (!dragging && active) ? 'visible' : 'invisible group-hover:visible group-focus-within:visible',
             )}
           >
-            {agentTarget && <span data-slot="focus-tab-target" role="img" aria-label={t('focus.agentTarget')} className="flex size-4 items-center justify-center group-hover:hidden group-focus-visible/close:hidden">
+            {agentTarget && <span data-slot="focus-tab-target" role="img" aria-label={t('focus.agentTarget')} className="flex size-4 items-center justify-center text-app-success group-hover:hidden group-focus-visible/close:hidden">
               <TargetIcon aria-hidden="true" className="size-3" />
             </span>}
             <XIcon aria-hidden="true" className={cn('size-3', agentTarget && 'hidden group-hover:block group-focus-visible/close:block')} strokeWidth={1.5} />
