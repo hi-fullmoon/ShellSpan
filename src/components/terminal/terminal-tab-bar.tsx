@@ -26,7 +26,7 @@ import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { TerminalCloseDetails } from './terminal-close-details';
 import type { SessionStatus } from '@/types';
-import './terminal-tab-bar.css';
+import '@/components/ui/session-tab-bar.css';
 
 const DRAG_OVERLAY_CURSOR_GAP = 2;
 
@@ -113,7 +113,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
         }
       }}
       className={cn(
-        'terminal-session-tab group relative flex h-8 w-42 shrink-0 items-center gap-1 rounded-t-md border-x border-transparent px-1.5 text-left text-xs outline-none transition-[background-color,color,opacity] select-none focus-visible:ring-2 focus-visible:ring-app-tab-accent focus-visible:ring-inset',
+        'session-tab group relative flex h-8 w-42 shrink-0 items-center gap-1 rounded-t-md border-x border-transparent px-1.5 text-left text-xs outline-none transition-[background-color,color,opacity] select-none focus-visible:ring-2 focus-visible:ring-app-tab-accent focus-visible:ring-inset',
         active
           ? 'border-app-border/50 bg-app-bg text-app-text'
           : 'border-transparent bg-transparent text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
@@ -205,7 +205,7 @@ const SortableTab: React.FC<SortableTabProps> = ({
   return (
     <div
       ref={setNodeRef}
-      className="terminal-session-slot h-8 shrink-0"
+      className="session-tab-slot h-8 shrink-0"
       {...attributes}
       {...listeners}
       style={{

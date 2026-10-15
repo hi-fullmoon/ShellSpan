@@ -94,15 +94,14 @@ try {
           borderBottom: tabStyle.borderBottomWidth,
         };
       }, selector);
-      const terminal = selector === '[data-terminal-tab-bar]';
       assert.deepEqual(sizes, {
-        bar: terminal ? 32 : 40, viewport: terminal ? 32 : 40, slot: terminal ? 32 : 40, tab: 32, tabWidth: 168,
+        bar: 32, viewport: 32, slot: 32, tab: 32, tabWidth: 168,
         margins: ['0px', '0px'], barPadding: ['0px', '0px'],
-        slotPadding: terminal ? ['0px', '0px'] : ['4px', '4px'], inset: terminal ? 0 : 4,
-        leadingInset: terminal ? 0 : 4, tabPaddingX: ['6px', '6px'],
-        borderTop: terminal ? '0px' : '1px',
+        slotPadding: ['0px', '0px'], inset: 0,
+        leadingInset: 0, tabPaddingX: ['6px', '6px'],
+        borderTop: '0px',
         borderLeft: '1px',
-        borderBottom: terminal ? '0px' : '1px',
+        borderBottom: '0px',
       });
     }
     if (process.env.TAB_SCREENSHOT_DIR) {
@@ -118,10 +117,44 @@ try {
     }
   }, { username: userInfo().username, shell: basename(userInfo().shell || process.env.SHELL) });
   await page.locator('[data-terminal-tab-bar] [role="tab"]').nth(2).waitFor();
+  await page.evaluate(async () => {
+    const { useSftpStore } = await import('/tab-runtime.js');
+    useSftpStore.getState().addLocalConnection();
+    useSftpStore.getState().addLocalConnection();
+  });
   const appearances = ['light', 'dark'].flatMap((theme) => [400, 1280].map((width) => ({ theme, width })));
   for (const { theme, width } of appearances) {
     await page.evaluate((theme) => document.documentElement.setAttribute('data-theme', theme), theme);
     await page.setViewportSize({ width, height: 720 });
+    const sftpTabs = page.locator('[data-sftp-tab-bar] [role="tab"]');
+    for (let index = 0; index < 3; index++) {
+      await sftpTabs.nth(index).click();
+      await page.waitForFunction(() => {
+        const bar = document.querySelector('[data-sftp-tab-bar]');
+        return getComputedStyle(bar, '::after').backgroundColor === getComputedStyle(bar.querySelector('[role="tab"][aria-selected="true"]')).backgroundColor;
+      });
+      const borders = await page.evaluate(() => {
+        const bar = document.querySelector('[data-sftp-tab-bar]');
+        const tab = bar.querySelector('[role="tab"][aria-selected="true"]');
+        const style = getComputedStyle(tab);
+        return { top: style.borderTopWidth, bottom: style.borderBottomWidth,
+          left: style.borderLeftWidth, right: style.borderRightWidth,
+          color: style.borderRightColor, line: getComputedStyle(bar, '::after').borderBottomColor,
+          height: tab.getBoundingClientRect().height };
+      });
+      assert.equal(borders.height, 32);
+      assert.equal(borders.top, '0px');
+      assert.equal(borders.bottom, '0px');
+      assert.equal(borders.left, '1px');
+      assert.equal(borders.right, '1px');
+      assert.equal(borders.color, borders.line);
+      const before = await sftpTabs.nth(index).locator('span').first().boundingBox();
+      await sftpTabs.nth((index + 1) % 3).hover();
+      const after = await sftpTabs.nth(index).locator('span').first().boundingBox();
+      assert.ok(before && after);
+      assert.equal(before.width, after.width);
+      assert.equal(before.height, after.height);
+    }
     const tabs = page.locator('[data-terminal-tab-bar] [role="tab"]');
     for (let index = 0; index < 3; index++) {
       // Pending tabs disable sorting via aria-disabled on their wrapper, but
@@ -162,6 +195,20 @@ try {
       assert.equal(boundary.lineBackground, boundary.tabBackground);
       if (process.env.TAB_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/terminal-tabs-${theme}-${width}-selected-${index}.png` });
     }
+    const appearance = await page.evaluate(() => {
+      const properties = ['height', 'width', 'backgroundColor', 'borderTopWidth', 'borderBottomWidth',
+        'borderLeftWidth', 'borderRightWidth', 'borderLeftColor', 'borderRightColor',
+        'borderTopLeftRadius', 'borderTopRightRadius', 'boxShadow', 'paddingLeft', 'paddingRight'];
+      return ['[data-terminal-tab-bar]', '[data-sftp-tab-bar]'].map((selector) => {
+        const bar = document.querySelector(selector);
+        const tab = bar.querySelector('[role="tab"][aria-selected="true"]');
+        const style = getComputedStyle(tab);
+        const line = getComputedStyle(bar, '::after');
+        return { tab: properties.map((property) => style[property]),
+          strip: getComputedStyle(bar).backgroundColor, line: line.borderBottomColor };
+      });
+    });
+    assert.deepEqual(appearance[0], appearance[1], `${theme} ${width}px terminal/SFTP appearance differs`);
     if (process.env.TAB_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/terminal-tabs-multiple-${width}.png` });
   }
   {
@@ -197,7 +244,48 @@ try {
       `leading indicator ${leading.left}..${leading.right} outside viewport ${leading.viewportLeft}..${leading.viewportRight}`,
     );
   }
-  console.log('Terminal and SFTP tab layout and visible drag indicators verified.');
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const sftpTabs = page.locator('[data-sftp-tab-bar] [role="tab"]');
+  await sftpTabs.first().focus();
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await sftpTabs.nth(1).evaluate((tab) => tab === document.activeElement), true);
+  await page.keyboard.press('Enter');
+  assert.equal(await sftpTabs.nth(1).getAttribute('aria-selected'), 'true');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('Space');
+  assert.equal(await sftpTabs.first().getAttribute('aria-selected'), 'true');
+  await page.evaluate(async () => {
+    const { useSftpStore } = await import('/tab-runtime.js');
+    useSftpStore.getState().togglePin(useSftpStore.getState().connections[0].id);
+  });
+  // Pinned sortable wrappers are aria-disabled for dragging; their unpin
+  // action remains usable by the pointer.
+  const unpin = page.locator('[data-sftp-tab-bar] button[aria-label="unpin"]');
+  await unpin.waitFor();
+  const unpinBox = await unpin.boundingBox();
+  assert.ok(unpinBox);
+  await page.mouse.click(unpinBox.x + unpinBox.width / 2, unpinBox.y + unpinBox.height / 2);
+  assert.equal(await page.evaluate(async () => {
+    const { useSftpStore } = await import('/tab-runtime.js');
+    return useSftpStore.getState().connections.some((connection) => connection.pinned);
+  }), false);
+  const dragBox = await sftpTabs.nth(1).boundingBox();
+  assert.ok(dragBox);
+  await page.mouse.move(dragBox.x + 60, dragBox.y + 16);
+  await page.mouse.down();
+  await page.mouse.move(dragBox.x + 80, dragBox.y + 16);
+  await page.waitForFunction(() => document.body.classList.contains('tab-dragging'));
+  await page.mouse.move(2, dragBox.y + 16, { steps: 8 });
+  const indicator = page.locator('[data-sftp-tab-bar] [data-drop-indicator="left"]').first();
+  await indicator.waitFor();
+  const indicatorBox = await indicator.boundingBox();
+  const viewportBox = await page.locator('[data-sftp-tab-bar] [data-slot="scroll-area-viewport"]').boundingBox();
+  assert.ok(indicatorBox && viewportBox);
+  assert.ok(indicatorBox.x >= viewportBox.x);
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  assert.equal(await page.locator('[data-sftp-tab-bar] [data-drop-indicator]').count(), 0);
+  console.log('Terminal and SFTP appearance, keyboard actions, pinning and drag indicators verified.');
 } finally {
   await browser?.close();
   await server.close();

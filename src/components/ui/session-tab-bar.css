@@ -1,0 +1,22 @@
+.session-tab-slot:first-child > .session-tab {
+  border-top-left-radius: 0;
+}
+
+.session-tab[aria-selected='true'] {
+  z-index: 1;
+}
+
+.session-tab-slot:has([aria-selected='false']) > .session-tab::after {
+  content: '';
+  position: absolute;
+  right: -1px;
+  top: 8px;
+  width: 1px;
+  height: 16px;
+  background: var(--app-resize-divider);
+  pointer-events: none;
+}
+
+.session-tab-slot:has(+ .session-tab-slot [aria-selected='true']) > .session-tab::after {
+  display: none;
+}

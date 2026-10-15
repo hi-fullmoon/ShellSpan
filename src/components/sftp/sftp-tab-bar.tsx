@@ -23,6 +23,7 @@ import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
 import { countActiveTransfersForOwners, useTransferStore } from '@/stores/transferStore';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Spinner } from '@/components/ui/spinner';
+import '@/components/ui/session-tab-bar.css';
 
 const DRAG_OVERLAY_CURSOR_GAP = 2;
 
@@ -88,9 +89,9 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
         }
       }}
       className={cn(
-        'group relative flex h-8 w-42 shrink-0 items-center gap-1 rounded-md border px-1.5 text-left text-xs outline-none transition-[background-color,border-color,color,opacity,box-shadow] select-none focus-visible:ring-2 focus-visible:ring-app-tab-accent focus-visible:ring-inset',
+        'session-tab group relative flex h-8 w-42 shrink-0 items-center gap-1 rounded-t-md border-x border-transparent px-1.5 text-left text-xs outline-none transition-[background-color,color,opacity] select-none focus-visible:ring-2 focus-visible:ring-app-tab-accent focus-visible:ring-inset',
         active
-          ? 'border-app-border bg-app-surface text-app-text shadow-xs'
+          ? 'border-app-border/50 bg-app-bg text-app-text'
           : 'border-transparent bg-transparent text-app-text-soft hover:bg-app-surface-muted hover:text-app-text',
         dragging ? 'cursor-default opacity-80' : 'cursor-pointer',
       )}
@@ -98,15 +99,13 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
       {showDropIndicatorLeft && (
         <div
           data-drop-indicator="left"
-          // Absolute offsets start at the tab's inner border edge. Account
-          // for that 1px border when centering in the 4px gap between tabs.
-          className="pointer-events-none absolute left-[-3px] top-1/2 z-10 h-6 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-app-primary"
+          className="pointer-events-none absolute left-0 top-1/2 z-10 h-6 w-0.5 -translate-y-1/2 rounded-full bg-app-primary"
         />
       )}
       {showDropIndicatorRight && (
         <div
           data-drop-indicator="right"
-          className="pointer-events-none absolute right-[-3px] top-1/2 z-10 h-6 w-0.5 translate-x-1/2 -translate-y-1/2 rounded-full bg-app-primary"
+          className="pointer-events-none absolute right-0 top-1/2 z-10 h-6 w-0.5 -translate-y-1/2 rounded-full bg-app-primary"
         />
       )}
       <div className="flex min-w-0 flex-1 items-center gap-1">
@@ -138,7 +137,7 @@ const ConnectionTab: React.FC<ConnectionTabProps> = ({
             }}
             className={cn(
               'flex h-5 w-5 shrink-0 items-center justify-center rounded text-app-text-soft transition-all hover:bg-app-border hover:text-app-text',
-              !dragging && active ? 'flex' : 'hidden group-hover:flex',
+              !dragging && active ? 'visible' : 'invisible group-hover:visible group-focus-within:visible',
             )}
           >
             <XIcon className="h-3 w-3" strokeWidth={1.5} />
@@ -177,7 +176,7 @@ const SortableTab: React.FC<SortableTabProps> = ({
   return (
     <div
       ref={setNodeRef}
-      className="h-10 shrink-0 py-1"
+      className="session-tab-slot h-8 shrink-0"
       {...attributes}
       {...listeners}
       style={{
@@ -475,7 +474,7 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
         if ((e.target as HTMLElement).closest('[data-sftp-tab]')) return;
         onNewTabClick();
       }}
-      className="group/tabbar relative my-0 flex h-10 items-start bg-app-bg py-0 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-app-border/40"
+      className="group/tabbar relative my-0 flex h-8 items-start bg-app-surface-muted py-0 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-app-border/50 after:bg-app-bg"
     >
       <DndContext
         sensors={sensors}
@@ -486,11 +485,8 @@ export const SftpTabBar: React.FC<SftpTabBarProps> = ({ onNewTabClick, onTabCont
         onDragCancel={handleDragCancel}
       >
         <SortableContext items={connections.map((c) => c.id)} strategy={() => null}>
-          <ScrollArea viewportRef={scrollRef} horizontal vertical={false} size="thin" className="h-10 min-w-0 flex-1">
-            {/* The leading/trailing padding lives inside the scroll viewport so
-                the drop indicators flanking the first/last tab stay inside the
-                overflow clip instead of being cut off at the scroll origin. */}
-            <div role="tablist" className="flex min-w-0 items-center gap-1 px-1 py-0">
+          <ScrollArea viewportRef={scrollRef} horizontal vertical={false} size="thin" className="h-8 min-w-0 flex-1">
+            <div role="tablist" className="flex min-w-0 items-center gap-0 p-0">
               {connections.map((connection, index) => {
                 const isDragging = draggingConnectionId === connection.id;
                 const draggedIndex = draggingConnectionId ? connections.findIndex((c) => c.id === draggingConnectionId) : -1;

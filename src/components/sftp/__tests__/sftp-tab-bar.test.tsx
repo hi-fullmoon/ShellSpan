@@ -197,7 +197,7 @@ describe('SftpTabBar', () => {
     expect(useSftpStore.getState().activeConnectionId).toBe(idB);
   });
 
-  it('separates tabs with a gap instead of divider separators', () => {
+  it('lays out continuous tabs without outer inset', () => {
     addConnection('Conn A');
     addConnection('Conn B');
     addConnection('Conn C');
@@ -207,7 +207,7 @@ describe('SftpTabBar', () => {
 
     render(<SftpTabBar />);
 
-    expect(screen.getByRole('tablist')).toHaveClass('gap-1', 'px-1');
+    expect(screen.getByRole('tablist')).toHaveClass('gap-0', 'p-0');
     for (const tab of screen.getAllByRole('tab')) {
       expect(tab.querySelector('[data-tab-separator]')).not.toBeInTheDocument();
     }
@@ -252,13 +252,13 @@ describe('SftpTabBar', () => {
     const separator = tabs[0].querySelector('[data-tab-separator]');
     const indicator = tabs[1].querySelector('[data-drop-indicator="left"]');
     expect(separator).not.toBeInTheDocument();
-    expect(indicator).toHaveClass('left-[-3px]', '-translate-x-1/2');
+    expect(indicator).toHaveClass('left-0');
 
     await act(async () => {
       fireEvent.pointerMove(document, { pointerType: 'mouse', buttons: 1, clientX: 0, clientY: 10 });
     });
     const leadingIndicator = tabs[0].querySelector('[data-drop-indicator="left"]');
-    expect(leadingIndicator).toHaveClass('left-[-3px]', '-translate-x-1/2');
+    expect(leadingIndicator).toHaveClass('left-0');
 
     await act(async () => {
       fireEvent.pointerUp(document, { pointerType: 'mouse', clientX: 0, clientY: 10 });
@@ -303,7 +303,7 @@ describe('SftpTabBar', () => {
     });
 
     const indicator = tabs[2].querySelector('[data-drop-indicator="right"]');
-    expect(indicator).toHaveClass('right-[-3px]', 'translate-x-1/2');
+    expect(indicator).toHaveClass('right-0');
     const draggedId = tabs[0].dataset.sftpTab;
     const overlayTab = Array.from(document.querySelectorAll<HTMLElement>(`[data-sftp-tab="${draggedId}"]`))
       .find((tab) => tab !== tabs[0]);
@@ -375,7 +375,7 @@ describe('SftpTabBar', () => {
     expect(onNewTabClick).toHaveBeenCalled();
   });
 
-  it('uses a recessed strip with a bottom hairline and a raised active tab card', () => {
+  it('matches the compact terminal tab strip and preserves action width', () => {
     addConnection('Conn A');
     addConnection('Conn B');
     const connections = useSftpStore.getState().connections;
@@ -384,17 +384,20 @@ describe('SftpTabBar', () => {
     const { container } = render(<SftpTabBar />);
 
     const tabs = screen.getAllByRole('tab');
-    expect(container.firstChild).toHaveClass('h-10', 'my-0', 'py-0', 'bg-app-bg');
-    expect(container.firstChild).toHaveClass('after:border-b', 'after:border-app-border/40');
-    expect(container.querySelector('[data-slot="scroll-area"]')).toHaveClass('h-10');
-    // Edge padding lives inside the scroll viewport so drop indicators
-    // flanking the first/last tab are not clipped at the scroll origin.
-    expect(screen.getByRole('tablist')).toHaveClass('py-0', 'gap-1', 'px-1');
+    expect(container.firstChild).toHaveClass('h-8', 'my-0', 'py-0', 'bg-app-surface-muted');
+    expect(container.firstChild).toHaveClass('after:border-b', 'after:border-app-border/50', 'after:bg-app-bg');
+    expect(container.querySelector('[data-slot="scroll-area"]')).toHaveClass('h-8');
+    expect(screen.getByRole('tablist')).toHaveClass('p-0', 'gap-0');
     for (const tab of tabs) {
-      expect(tab.parentElement).toHaveClass('h-10', 'py-1');
+      expect(tab.parentElement).toHaveClass('h-8', 'session-tab-slot');
+      expect(tab.parentElement).not.toHaveClass('py-1');
       expect(tab).toHaveClass('h-8', 'w-42', 'px-1.5', 'gap-1');
     }
-    expect(tabs[0]).toHaveClass('h-8', 'rounded-md', 'border-app-border', 'bg-app-surface', 'text-app-text', 'shadow-xs');
+    expect(tabs[0]).toHaveClass('h-8', 'rounded-t-md', 'border-x', 'border-app-border/50', 'bg-app-bg', 'text-app-text');
+    expect(tabs[0]).not.toHaveClass('border', 'border-t', 'shadow-xs');
+    const close = tabs[1].querySelector('[aria-label="close"]');
+    expect(close).toHaveClass('flex', 'invisible', 'group-hover:visible', 'group-focus-within:visible');
+    expect(close).not.toHaveClass('hidden');
     expect(tabs[1]).toHaveClass('border-transparent', 'bg-transparent', 'hover:bg-app-surface-muted');
   });
 
@@ -407,7 +410,7 @@ describe('SftpTabBar', () => {
     render(<SftpTabBar />);
 
     const tabs = screen.getAllByRole('tab');
-    expect(tabs[0]).toHaveClass('rounded-md', 'border-app-border');
+    expect(tabs[0]).toHaveClass('rounded-t-md', 'border-x', 'border-app-border/50');
     expect(tabs[0].querySelector('[data-active-tab-indicator]')).toBeNull();
   });
 
