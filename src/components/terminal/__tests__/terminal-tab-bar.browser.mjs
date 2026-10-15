@@ -44,6 +44,20 @@ const server = await createServer({
 });
 
 let browser;
+async function assertTabSeparators(tabs) {
+  const states = await tabs.evaluateAll(elements => elements.map((tab, index) => {
+    const style = getComputedStyle(tab, '::after');
+    return {
+      visible: style.content !== 'none' && style.content !== 'normal' && style.display !== 'none',
+      expected: index < elements.length - 1 && tab.getAttribute('aria-selected') === 'false'
+        && elements[index + 1].getAttribute('aria-selected') === 'false',
+    };
+  }));
+  for (const [index, state] of states.entries()) {
+    assert.equal(state.visible, state.expected, `Tab ${index}: separators only appear between adjacent inactive tabs`);
+  }
+}
+
 try {
   await server.listen();
   browser = await webkit.launch();
@@ -97,6 +111,7 @@ try {
           borderBottom: tabStyle.borderBottomWidth,
         };
       }, selector);
+      await assertTabSeparators(page.locator(`${selector} [role="tab"]`));
       assert.deepEqual(sizes, {
         bar: 32, viewport: 32, slot: 32, tab: 32, tabWidth: 168,
         margins: ['0px', '0px'], barPadding: ['0px', '0px'],
@@ -132,6 +147,7 @@ try {
     const sftpTabs = page.locator('[data-sftp-tab-bar] [role="tab"]');
     for (let index = 0; index < 3; index++) {
       await sftpTabs.nth(index).click();
+      await assertTabSeparators(sftpTabs);
       await page.waitForFunction(() => {
         const bar = document.querySelector('[data-sftp-tab-bar]');
         const probe = document.createElement('div');
@@ -173,6 +189,7 @@ try {
       assert.ok(tabBox);
       await page.mouse.click(tabBox.x + tabBox.width / 2, tabBox.y + tabBox.height / 2);
       await page.waitForFunction((index) => document.querySelectorAll('[data-terminal-tab-bar] [role="tab"]')[index].getAttribute('aria-selected') === 'true', index);
+      await assertTabSeparators(tabs);
       const geometry = await tabs.evaluateAll((elements) => elements.map((element) => {
         const rect = element.getBoundingClientRect();
         const style = getComputedStyle(element);

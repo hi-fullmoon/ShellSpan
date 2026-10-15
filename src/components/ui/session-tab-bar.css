@@ -12,7 +12,7 @@
   left: -1px;
 }
 
-.session-tab-slot:has([aria-selected='false']) > .session-tab::after {
+.session-tab-slot:has([aria-selected='false']):has(+ .session-tab-slot) > .session-tab::after {
   content: '';
   position: absolute;
   right: -1px;
