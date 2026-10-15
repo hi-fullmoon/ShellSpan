@@ -17,7 +17,8 @@ The server header shows the viewed server identity and status, with explicit
 Agent target selection and terminal collapse actions. Both panel headers use the
 same border token. Target selection is also a tab context-menu action, reachable
 with Shift+F10 or the context-menu key. The target tab is marked
-with an Agent target badge. The terminal toggle occupies the server header;
+with a compact target icon with an accessible label and hover title. The server
+header retains the Agent target text badge. The terminal toggle occupies the server header;
 when collapsed, an expand action appears in the conversation header.
 There is no separate target toolbar or focus page-header row.
 Visible command input reopens the right side before the existing lease readiness

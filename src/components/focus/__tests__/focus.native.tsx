@@ -73,10 +73,13 @@ async function verify() {
       const actionStyle = getComputedStyle(action);
       assert(actionStyle.fontSize === '11px' && action.getBoundingClientRect().height === 24, 'Focus notice action differs from the existing compact Agent notices');
       assert(actionStyle.borderTopWidth === '0px', 'Focus notice action added an outline absent from similar notices');
-      assert(getComputedStyle(description).alignItems === 'flex-start', 'Focus notice uses different text/action alignment');
-      assert(Math.abs(icon.getBoundingClientRect().top - text.getBoundingClientRect().top - parseFloat(getComputedStyle(text).paddingTop)) <= 1, 'Focus notice icon does not align with its first text line');
+      assert(getComputedStyle(description).alignItems === 'center', 'Focus notice text and action must be vertically centered');
       const noticeBox = notice.getBoundingClientRect();
       const actionBox = action.getBoundingClientRect();
+      const centerY = (box: DOMRect) => box.top + box.height / 2;
+      assert(Math.abs(centerY(icon.getBoundingClientRect()) - centerY(noticeBox)) <= 1, 'Focus notice icon is not vertically centered');
+      const textBox = text.getBoundingClientRect();
+      if (actionBox.left >= textBox.right) assert(Math.abs(centerY(textBox) - centerY(actionBox)) <= 1, 'Focus notice inline text and button are not centered');
       assert(actionBox.left >= noticeBox.left && actionBox.right <= noticeBox.right, 'Focus notice action overflows a narrow panel');
     };
     const initialContainer = host.querySelector<HTMLElement>('.focus-layout')!;
