@@ -256,7 +256,7 @@
   --app-text-soft: #a1a1aa;
   --app-border: rgba(255, 255, 255, 0.09);
   --app-primary: #b3b3b8;
-  --app-resize-divider: color-mix(in srgb, var(--app-border) 50%, transparent);
+  --app-resize-divider: var(--app-border);
   --app-resize-divider-active: #b3b3b8;
   --app-primary-text: #191a1b;
   --app-button: #353638;

@@ -22,7 +22,7 @@ export function FocusDivider(): React.ReactNode {
   return <div data-slot="focus-divider" role="separator" tabIndex={0} aria-label={t('focus.resize')}
     aria-orientation="vertical" aria-valuemin={30} aria-valuemax={75} aria-valuenow={Math.round(split * 100)}
     data-separator={separatorState}
-    className={cn(RESIZABLE_HANDLE_CLASS_NAME, splitPaneDividerClassName('horizontal', 'subtle'), 'cursor-col-resize touch-none before:absolute before:inset-y-0 before:left-1/2 before:w-1 before:-translate-x-1/2')}
+    className={cn(RESIZABLE_HANDLE_CLASS_NAME, splitPaneDividerClassName('horizontal', 'default'), 'cursor-col-resize touch-none before:absolute before:inset-y-0 before:left-1/2 before:w-1 before:-translate-x-1/2')}
     onPointerEnter={() => { if (!drag.current) setSeparatorState('hover'); }}
     onPointerLeave={() => { if (!drag.current) setSeparatorState(undefined); }}
     onPointerDown={e => {

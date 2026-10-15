@@ -353,8 +353,10 @@ function readAppColor(variable: string, lightFallback: string, darkFallback: str
 }
 
 export function resolveTerminalTheme(colorScheme: TerminalColorScheme): TerminalTheme {
-  if (colorScheme !== 'app') return TERMINAL_COLOR_THEMES[colorScheme];
+  if (colorScheme !== 'app') return { ...TERMINAL_COLOR_THEMES[colorScheme], overviewRulerBorder: '#00000000' };
   return {
+    // Keep search markers without xterm's default full-height ruler border.
+    overviewRulerBorder: '#00000000',
     background: readAppColor('--app-surface', '#ffffff', '#202122'),
     foreground: readAppColor('--app-text', '#0f172a', '#d4d4d8'),
     cursor: readAppColor('--app-primary', '#1e293b', '#b3b3b8'),

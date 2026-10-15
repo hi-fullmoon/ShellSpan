@@ -197,13 +197,14 @@ describe('terminalRegistry', () => {
     ['tokyoNight', '#1a1b26', '#f7768e', '#c0caf5'],
     ['catppuccinMocha', '#1e1e2e', '#f38ba8', '#cdd6f4'],
   ] as const)('resolves the %s theme', (scheme, background, red, foreground) => {
-    expect(resolveTerminalTheme(scheme)).toMatchObject({ background, foreground, red });
+    expect(resolveTerminalTheme(scheme)).toMatchObject({ background, foreground, red, overviewRulerBorder: '#00000000' });
   });
 
   it('resolves app CSS variables and refreshes them after an app theme change', () => {
     const controller = createController('s1');
     controller.attach(document.createElement('div'));
     expect(controller.terminal.options.theme).toMatchObject({
+      overviewRulerBorder: '#00000000',
       background: '#ffffff',
       foreground: '#0f172a',
       cursor: '#1e293b',
