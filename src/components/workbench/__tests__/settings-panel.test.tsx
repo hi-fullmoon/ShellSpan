@@ -71,6 +71,18 @@ vi.mock('@/hooks/useTheme', () => ({
 }));
 
 describe('SettingsPanel', () => {
+  it('toggles focus mode visibility from general settings', () => {
+    useAppStore.getState().setShowFocusMode(false);
+    render(<SettingsPanel />);
+    const toggle = screen.getByRole('switch', { name: 'settings.general.showFocusMode' });
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
+    expect(useAppStore.getState().showFocusMode).toBe(true);
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+    expect(useAppStore.getState().showFocusMode).toBe(false);
+  });
+
   beforeEach(() => {
     petdexMocks.configure.mockReset().mockResolvedValue({ ...disabled, revision: 3 });
     petdexMocks.getStatus.mockReset().mockResolvedValue(disabled);
@@ -125,7 +137,7 @@ describe('SettingsPanel', () => {
       screen.getByRole('button', { name: 'settings.general.checkUpdate' }),
     ).toBeInTheDocument();
     expect(screen.queryByText('settings.terminal.fontSize')).not.toBeInTheDocument();
-    expect(screen.getAllByRole('switch')).toHaveLength(3);
+    expect(screen.getAllByRole('switch')).toHaveLength(4);
 
     openSection('settings.appearance.title');
     expect(screen.getByText('settings.appearance.theme')).toBeInTheDocument();
@@ -186,7 +198,7 @@ describe('SettingsPanel', () => {
       screen.getByRole('button', { name: 'settings.general.checkUpdate' }),
     ).toBeInTheDocument();
     expect(screen.queryByText('settings.appearance.theme')).not.toBeInTheDocument();
-    expect(screen.getAllByRole('switch')).toHaveLength(3);
+    expect(screen.getAllByRole('switch')).toHaveLength(4);
 
     openSection('settings.terminal.title');
     expect(screen.getByText('settings.terminal.fontSize')).toBeInTheDocument();
@@ -386,7 +398,7 @@ describe('SettingsPanel', () => {
     expect(settingsDialog.className).not.toMatch(/(?:^|\s)max-h-\[min\(48rem/);
   });
 
-  it('uses the small button scale throughout every settings section', async () => {
+  it('uses the same 32px scale for action buttons and selects throughout settings', async () => {
     render(<SettingsPanel />);
     await waitFor(() => {});
 
@@ -399,12 +411,13 @@ describe('SettingsPanel', () => {
       'settings.ai.title',
       'settings.shortcuts.title',
       'settings.experimental.title',
+      'settings.feedback.title',
     ];
 
     for (const title of sectionTitles) {
       openSection(title);
       within(settingsDialog).getAllByRole('button')
-        .filter((button) => button.getAttribute('data-slot') !== 'dialog-close')
+        .filter((button) => button.getAttribute('data-slot') === 'button')
         .forEach((button) => {
           expect(button.className).toMatch(/(?:^|\s)(?:h-8|size-8)(?:\s|$)/);
         });
@@ -464,7 +477,7 @@ describe('SettingsPanel', () => {
     expect(settingsCard).toHaveAttribute('data-variant', 'outline');
     expect(settingsCard).toHaveAttribute('data-radius', 'compact');
     expect(updateRow?.closest('[data-slot="card"]')).toBe(settingsCard);
-    expect(settingsCard?.querySelectorAll('[data-slot="separator"]')).toHaveLength(4);
+    expect(settingsCard?.querySelectorAll('[data-slot="separator"]')).toHaveLength(5);
     expect(settingsGroups).toHaveClass('flex-col', 'gap-3');
     expect(settingsGroups?.firstElementChild).toHaveClass('gap-1.5');
 

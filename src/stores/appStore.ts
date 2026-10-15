@@ -51,6 +51,7 @@ interface AppPreferences extends PetdexMessagePreferences {
   profileName: string;
   profileAvatar: string;
   startupUpdateCheck: boolean;
+  showFocusMode: boolean;
   petdexEnabled: boolean;
   petdexCategories: PetdexCategories;
   startupSection: AppSection;
@@ -115,6 +116,7 @@ interface AppState extends AppPreferences {
   setProfileName: (name: string) => void;
   setProfileAvatar: (avatar: string) => void;
   setStartupUpdateCheck: (enabled: boolean) => void;
+  setShowFocusMode: (enabled: boolean) => void;
   setPetdexEnabled: (enabled: boolean) => Promise<PetdexDiagnostic>;
   setPetdexCategory: (category: keyof PetdexCategories, enabled: boolean) => Promise<PetdexDiagnostic>;
   setStartupSection: (section: AppSection) => void;
@@ -151,7 +153,7 @@ interface AppState extends AppPreferences {
 const PREFERENCE_KEYS: readonly (keyof AppPreferences)[] = [
   'terminalTabTitleTemplate', 'terminalTabTitleOverrides',
   'terminalTabTitleCustom', 'terminalTabTitleCustomOverrides',
-  'theme', 'locale', 'profileName', 'profileAvatar', 'startupUpdateCheck', 'startupSection',
+  'theme', 'locale', 'profileName', 'profileAvatar', 'startupUpdateCheck', 'showFocusMode', 'startupSection',
   'terminalFontSize', 'terminalFontFamily', 'terminalCursorBlink',
   'terminalCursorStyle', 'terminalCopyOnSelect', 'terminalScrollback',
   'terminalColorScheme', 'terminalMultiLinePasteWarning',
@@ -175,6 +177,7 @@ function getDefaultPreferences(): AppPreferences {
     profileName: '',
     profileAvatar: '',
     startupUpdateCheck: true,
+    showFocusMode: false,
     petdexEnabled: false,
     ...DEFAULT_PETDEX_MESSAGE_PREFERENCES,
     petdexCategories: { ...DEFAULT_PETDEX_CATEGORIES },
@@ -275,6 +278,7 @@ function entriesToPreferences(entries: [string, string][]): Partial<AppPreferenc
     profileName: sanitizeProfileName(prefs.profileName),
     profileAvatar: sanitizeProfileAvatar(prefs.profileAvatar),
     startupUpdateCheck: (prefs.startupUpdateCheck as boolean) ?? defaults.startupUpdateCheck,
+    showFocusMode: typeof prefs.showFocusMode === 'boolean' ? prefs.showFocusMode : defaults.showFocusMode,
     petdexEnabled: (prefs.petdexEnabled as boolean) ?? defaults.petdexEnabled,
     petdexCategories: normalizePetdexCategories(prefs.petdexCategories),
     ...normalizePetdexMessagePreferences(prefs),
@@ -486,6 +490,7 @@ export const useAppStore = create<AppState>()(
     setProfileName: (name) => set({ profileName: sanitizeProfileName(name) }),
     setProfileAvatar: (avatar) => set({ profileAvatar: sanitizeProfileAvatar(avatar) }),
     setStartupUpdateCheck: (startupUpdateCheck) => set({ startupUpdateCheck }),
+    setShowFocusMode: (showFocusMode) => set({ showFocusMode }),
     setPetdexEnabled: (enabled) => updatePetdexConfiguration({ enabled }),
     setPetdexCategory: (category, enabled) => updatePetdexConfiguration({ categories: { [category]: enabled } }),
     setPetdexMessagePreference: (key, enabled) => updatePetdexConfiguration({ [key]: enabled }),
@@ -551,6 +556,7 @@ useAppStore.subscribe(
     profileName: state.profileName,
     profileAvatar: state.profileAvatar,
     startupUpdateCheck: state.startupUpdateCheck,
+    showFocusMode: state.showFocusMode,
     petdexEnabled: state.petdexEnabled,
     petdexCategories: state.petdexCategories,
     petdexMessagesEnabled: state.petdexMessagesEnabled,

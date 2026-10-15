@@ -49,13 +49,14 @@ const NavItem: React.FC<NavItemProps> = ({ section, label, icon: Icon }) => {
 
 export const SectionNav: React.FC = () => {
   const { t } = useI18n();
+  const showFocusMode = useAppStore(state => state.showFocusMode);
 
   return (
     <nav aria-label={t('app.primaryNavigation')} className="flex h-full items-center gap-1">
       <NavItem section="workbench" label={t('section.workbench')} icon={LayoutDashboardIcon} />
       <NavItem section="terminal" label={t('section.terminal')} icon={SquareTerminalIcon} />
       <NavItem section="sftp" label={t('section.sftp')} icon={FolderIcon} />
-      <NavItem section="focus" label={t('section.focus')} icon={FocusIcon} />
+      {showFocusMode && <NavItem section="focus" label={t('section.focus')} icon={FocusIcon} />}
     </nav>
   );
 };

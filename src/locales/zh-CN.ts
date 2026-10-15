@@ -1203,6 +1203,8 @@ export default {
   'settings.general.checkingUpdate': '检查中...',
   'settings.general.retry': '重试',
   'settings.general.startupUpdateCheck': '启动时检查更新',
+  'settings.general.showFocusMode': '显示专注模式',
+  'settings.general.showFocusModeDescription': '在顶部导航中显示专注模式入口。',
   'settings.general.confirmBeforeExit': '退出前确认',
   'settings.general.confirmBeforeExitDescription': '关闭窗口或退出应用前询问确认。',
   'settings.general.restoreWorkspace': '恢复上次工作区',

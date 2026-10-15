@@ -23,6 +23,18 @@ try {
   });
   const nav = page.locator('#section-nav-review nav');
   await nav.waitFor();
+  assert.equal(await nav.getByRole('button').count(), 3);
+  await page.evaluate(async () => {
+    const { useAppStore } = await import('/src/stores/appStore.ts');
+    useAppStore.getState().setShowFocusMode(true);
+  });
+  await nav.getByRole('button').nth(3).waitFor();
+  assert.equal(await nav.getByRole('button').count(), 4);
+  await page.evaluate(async () => {
+    const { useAppStore } = await import('/src/stores/appStore.ts');
+    useAppStore.getState().setShowFocusMode(false);
+  });
+  await nav.getByRole('button').nth(3).waitFor({ state: 'detached' });
   for (const [locale, labels] of [
     ['zh-CN', ['工作台', '终端', 'SFTP']],
     ['en-US', ['Workbench', 'Terminal', 'SFTP']],

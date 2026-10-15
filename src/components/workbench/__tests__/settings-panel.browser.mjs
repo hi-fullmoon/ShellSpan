@@ -50,7 +50,7 @@ try {
   await settingsDialog.waitFor();
   await page.locator('[role="tabpanel"]').waitFor();
 
-  const SECTION_TAB_ORDER = { general: 0, terminal: 2, shortcuts: 5, experimental: 6, feedback: 7 };
+  const SECTION_TAB_ORDER = { general: 0, appearance: 1, terminal: 2, sftp: 3, ai: 4, shortcuts: 5, experimental: 6, feedback: 7 };
   const openSection = async (name) => {
     await page.evaluate((index) => {
       document.querySelectorAll('[role="tab"]')[index].click();
@@ -61,10 +61,26 @@ try {
       return panels.length === 1 && panels[0].id === tab.getAttribute('aria-controls') && !panels[0].hasAttribute('inert');
     }, SECTION_TAB_ORDER[name]);
     await page.waitForFunction(() => [...document.querySelectorAll('[role="tabpanel"] [data-slot="button"]')].every(button => button.getBoundingClientRect().height > 0));
+    const actions = await page.locator('[role="tabpanel"] [data-slot="button"]').evaluateAll(buttons => buttons.map(button => ({
+      label: button.textContent || button.getAttribute('aria-label'),
+      height: button.getBoundingClientRect().height,
+      iconSize: button.querySelector('svg')?.getBoundingClientRect().height,
+      gap: getComputedStyle(button).columnGap,
+    })));
+    for (const action of actions) {
+      assert.equal(action.height, 32, `${name}/${action.label}: action height`);
+      if (action.iconSize !== undefined) assert.equal(action.iconSize, 14, `${name}/${action.label}: icon size`);
+      assert.equal(action.gap, '4px', `${name}/${action.label}: icon and text gap`);
+    }
+    const selectHeights = await page.locator('[role="tabpanel"] [data-slot="select-trigger"]').evaluateAll(selects => selects.map(select => select.getBoundingClientRect().height));
+    for (const height of selectHeights) assert.equal(height, 32, `${name}: Select must match action button height`);
   };
 
   for (const viewport of [{ width: 1280, height: 800 }, { width: 640, height: 720 }]) {
     await page.setViewportSize(viewport);
+    await openSection('general');
+    await page.screenshot({ path: `/tmp/shellspan-settings-buttons-${viewport.width}.png` });
+    for (const section of ['appearance', 'sftp', 'ai']) await openSection(section);
     await openSection('general');
 
     const general = await page.evaluate(() => {
@@ -132,13 +148,13 @@ try {
     await page.getByRole('option', { name: '自定义模板', exact: true }).click();
     assert.ok(await page.getByLabel('页签标题模板', { exact: true }).getByText('自定义模板', { exact: true }).isVisible());
     await titleInput.fill('${user}@${host} #${index}');
-    await page.getByRole('button', { name: '保存', exact: true }).click();
+    assert.equal(await page.getByRole('button', { name: '保存', exact: true }).count(), 0);
     assert.equal(await page.evaluate(async () => (await import('/settings-runtime.js')).useAppStore.getState().terminalTabTitleTemplate), '${user}@${host} #${index}');
     await titleInput.fill('${unknown}');
     assert.equal(await titleInput.getAttribute('aria-invalid'), 'true');
-    assert.ok(await page.getByRole('button', { name: '保存', exact: true }).isDisabled());
+    assert.equal(await page.evaluate(async () => (await import('/settings-runtime.js')).useAppStore.getState().terminalTabTitleTemplate), '${user}@${host} #${index}');
     await titleInput.fill('${name}');
-    await titleInput.press('Enter');
+    assert.equal(await page.evaluate(async () => (await import('/settings-runtime.js')).useAppStore.getState().terminalTabTitleTemplate), '${name}');
     assert.ok(await page.getByLabel('页签标题模板', { exact: true }).getByText('自定义模板', { exact: true }).isVisible());
     const titleLayout = await page.locator('[data-terminal-title-settings]').evaluate((element) => {
       const input = element.querySelector('[data-slot="input"]');

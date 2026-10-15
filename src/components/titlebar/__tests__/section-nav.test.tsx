@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { SectionNav } from '../section-nav';
 import { useAppStore } from '@/stores/appStore';
 
@@ -20,6 +20,16 @@ describe('SectionNav', () => {
     const { container } = render(<SectionNav />);
 
     expect(container.querySelector('[data-tauri-drag-region]')).not.toBeInTheDocument();
+  });
+
+  it('hides focus mode by default and responds to the visibility preference', () => {
+    render(<SectionNav />);
+    expect(useAppStore.getState().showFocusMode).toBe(false);
+    expect(screen.queryByRole('button', { name: 'section.focus' })).not.toBeInTheDocument();
+    act(() => useAppStore.getState().setShowFocusMode(true));
+    expect(screen.getByRole('button', { name: 'section.focus' })).toBeVisible();
+    act(() => useAppStore.getState().setShowFocusMode(false));
+    expect(screen.queryByRole('button', { name: 'section.focus' })).not.toBeInTheDocument();
   });
 
   it('centers minimum-width items with compact corners and decorative icons', () => {

@@ -196,6 +196,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const { t, locale, setLocale } = useI18n();
   const { theme, setTheme } = useTheme();
   const startupUpdateCheck = useAppStore((state) => state.startupUpdateCheck);
+  const showFocusMode = useAppStore((state) => state.showFocusMode);
+  const setShowFocusMode = useAppStore((state) => state.setShowFocusMode);
   const setStartupUpdateCheck = useAppStore((state) => state.setStartupUpdateCheck);
   const petdexEnabled = useAppStore((state) => state.petdexEnabled);
   const petdexRequestedEnabled = useAppStore((state) => state.petdexRequestedEnabled);
@@ -710,6 +712,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       </SelectGroup>
                     </SelectContent>
                   </Select>
+                </SettingRow>
+                <SettingRow label={t('settings.general.showFocusMode')} description={t('settings.general.showFocusModeDescription')}>
+                  <div className="flex justify-end">
+                    <Switch aria-label={t('settings.general.showFocusMode')} checked={showFocusMode} onCheckedChange={setShowFocusMode} />
+                  </div>
                 </SettingRow>
                 <SettingRow label={t('settings.general.startupUpdateCheck')} description={t('settings.general.startupUpdateCheckDescription')}>
                   <div className="flex justify-end">

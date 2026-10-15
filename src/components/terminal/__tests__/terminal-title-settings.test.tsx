@@ -42,7 +42,7 @@ it('previews deduplication and persists a custom template identical to the prese
   fireEvent.change(screen.getByRole('textbox'), { target: { value: '${name} · ${host} ' } });
   fireEvent.change(screen.getByRole('textbox'), { target: { value: '${name} · ${host}' } });
   expect(screen.getByText('预览：server · server')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  expect(screen.queryByRole('button', { name: '保存' })).not.toBeInTheDocument();
   expect(useAppStore.getState().terminalTabTitleCustomOverrides.profile).toBe(true);
   view.unmount();
   render(<TerminalTitleSettings profileId="profile" />);
@@ -52,22 +52,34 @@ it('previews deduplication and persists a custom template identical to the prese
 
 it('pins an inherited template and resumes inheritance when the override is removed', () => {
   render(<TerminalTitleSettings profileId="profile" />);
-  const save = screen.getByRole('button', { name: '保存' });
-  expect(save).not.toBeDisabled();
-  fireEvent.click(save);
-  expect(useAppStore.getState().terminalTabTitleOverrides.profile).toBe('${name}');
-  expect(save).toBeDisabled();
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: '${name} custom' } });
+  expect(useAppStore.getState().terminalTabTitleOverrides.profile).toBe('${name} custom');
   act(() => useAppStore.getState().setTerminalTabTitleTemplate('${host}'));
-  expect(screen.getByRole('textbox')).toHaveValue('${name}');
+  expect(screen.getByRole('textbox')).toHaveValue('${name} custom');
   fireEvent.click(screen.getByRole('button', { name: '使用全局默认' }));
   expect(useAppStore.getState().terminalTabTitleOverrides.profile).toBeUndefined();
   expect(screen.getByRole('textbox')).toHaveValue('${host}');
-  expect(save).not.toBeDisabled();
+  expect(screen.getByRole('button', { name: '使用全局默认' })).toBeDisabled();
 });
 
 it('does not allow invalid drafts to be saved as overrides', () => {
   render(<TerminalTitleSettings profileId="profile" />);
   fireEvent.change(screen.getByRole('textbox'), { target: { value: '${unknown}' } });
-  expect(screen.getByRole('button', { name: '保存' })).toBeDisabled();
+  expect(screen.getByRole('textbox')).toHaveAttribute('aria-invalid', 'true');
   expect(useAppStore.getState().terminalTabTitleOverrides.profile).toBeUndefined();
+});
+
+it('saves valid global edits immediately and preserves the last valid value during invalid edits', () => {
+  render(<TerminalTitleSettings />);
+  const input = screen.getByRole('textbox');
+  fireEvent.change(input, { target: { value: '${host} custom' } });
+  expect(useAppStore.getState().terminalTabTitleTemplate).toBe('${host} custom');
+  expect(useAppStore.getState().terminalTabTitleCustom).toBe(true);
+  fireEvent.change(input, { target: { value: '${unknown}' } });
+  expect(input).toHaveValue('${unknown}');
+  expect(useAppStore.getState().terminalTabTitleTemplate).toBe('${host} custom');
+  fireEvent.change(input, { target: { value: '${name}' } });
+  expect(useAppStore.getState().terminalTabTitleTemplate).toBe('${name}');
+  expect(useAppStore.getState().terminalTabTitleCustom).toBe(true);
+  expect(screen.queryByRole('button', { name: '保存' })).not.toBeInTheDocument();
 });

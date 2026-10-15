@@ -1205,6 +1205,8 @@ export default {
   'settings.general.checkingUpdate': 'Checking...',
   'settings.general.retry': 'Retry',
   'settings.general.startupUpdateCheck': 'Check for updates on startup',
+  'settings.general.showFocusMode': 'Show focus mode',
+  'settings.general.showFocusModeDescription': 'Show the focus mode entry in the top navigation.',
   'settings.general.confirmBeforeExit': 'Confirm before quitting',
   'settings.general.confirmBeforeExitDescription': 'Ask for confirmation before closing the window or quitting the app.',
   'settings.general.restoreWorkspace': 'Restore last workspace',
