@@ -31,14 +31,14 @@ describe('AI panel width contract', () => {
 });
 
 describe('AI panel shell divider contract', () => {
-  it('derives the resting divider from the shell border at half strength in both themes', () => {
+  it('uses half-strength shell borders in light mode and full-strength borders in dark mode', () => {
     const baseCss = readFileSync('src/styles/base.css', 'utf8');
     const dividers = [...baseCss.matchAll(/--app-resize-divider:\s*([^;]+);/g)]
       .map(([match, value]) => value.trim());
 
     expect(dividers).toEqual([
       'color-mix(in srgb, var(--app-border) 50%, transparent)',
-      'color-mix(in srgb, var(--app-border) 50%, transparent)',
+      'var(--app-border)',
     ]);
   });
 
