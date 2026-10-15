@@ -14,7 +14,7 @@ import { questionKey } from '@/types/agent-question';
 import { useImageDraft } from './use-image-draft';
 import { sessionProviderConfig } from '@/lib/ai/session-settings';
 import { initialSessionIntent } from '@/lib/ai/session-intent';
-import { isTopLevelAiSession, listAllAiSessions } from '@/lib/ai/session-list';
+import { belongsToAiWorkspace, isTopLevelAiSession, listAllAiSessions } from '@/lib/ai/session-list';
 import type { AiProviderConfig } from '@/types/ai';
 import { requireVision } from '@/lib/ai/vision-contract';
 import { loadResolvedModel } from '@/lib/ai/provider-contract';
@@ -1021,7 +1021,8 @@ export function useAiSessionController({
           archived: false,
           limit: 100,
         }, canPublish);
-        sessionId = summaries?.find((summary) => isTopLevelAiSession(summary, summaries))?.id ?? null;
+        sessionId = summaries?.find((summary) => belongsToAiWorkspace(summary, scope, focusMode, summaries)
+          && isTopLevelAiSession(summary, summaries))?.id ?? null;
       }
       if (!canPublish() || !sessionId) return;
       const publish = (next: AiSessionView): void => {
@@ -1230,7 +1231,7 @@ export function useAiSessionController({
         : historyScopeKey ?? '__no-terminal__';
       const summaries = await listAllAiSessions(adapter, { ...(focusMode ? {} : { scopeKey }), limit: 200 }, canPublish);
       if (summaries && canPublish()) {
-        setSessions(focusMode ? summaries.filter(s => s.id.startsWith('focus-agent-')) : summaries);
+        setSessions(summaries.filter(summary => belongsToAiWorkspace(summary, scope, focusMode, summaries)));
       }
     } catch (error) {
       if (canPublish()) {
@@ -1267,7 +1268,7 @@ export function useAiSessionController({
   }, [refreshSessions, subagentDirectoryKey]);
 
   const openSession = useCallback((summary: AiSessionSummary): void => {
-    if (focusMode && !summary.id.startsWith('focus-agent-')) return;
+    if (!belongsToAiWorkspace(summary, scope, focusMode, sessionsRef.current)) return;
     claimWorkspace();
     setHistoricalContinuationError(null);
     const retainedView = viewRef.current?.summary.id === summary.id ? viewRef.current : null;
@@ -1286,7 +1287,7 @@ export function useAiSessionController({
       route: { kind: 'conversation', sessionId: summary.id },
       returnFocus: null,
     }));
-  }, [claimWorkspace, focusMode, resetComposer]);
+  }, [claimWorkspace, focusMode, resetComposer, scope]);
 
   const newSession = useCallback((): void => {
     claimWorkspace();

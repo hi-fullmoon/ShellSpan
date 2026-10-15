@@ -1,8 +1,23 @@
 import { describe, expect, it, vi } from 'vitest';
-import { isTopLevelAiSession, listAllAiSessions } from '../session-list';
+import { belongsToAiWorkspace, isTopLevelAiSession, listAllAiSessions } from '../session-list';
 import type { AiSessionSummary, AiSessionSummaryPage } from '../session-adapter';
 
 describe('session pagination', () => {
+  it('isolates Terminal and Focus history and restoration for the same terminal', () => {
+    const terminal = { id: 'agent-local-session-task' };
+    const focus = { id: 'focus-agent-local-session-task' };
+    expect(belongsToAiWorkspace(terminal, 'terminal', false)).toBe(true);
+    expect(belongsToAiWorkspace(focus, 'terminal', false)).toBe(false);
+    expect(belongsToAiWorkspace(terminal, 'terminal', true)).toBe(false);
+    expect(belongsToAiWorkspace(focus, 'terminal', true)).toBe(true);
+    expect(belongsToAiWorkspace({ id: 'ask-workbench-task' }, 'workbench', false)).toBe(true);
+    const child = { id: 'session-child', parentSessionId: focus.id };
+    const nested = { id: 'session-nested', parentSessionId: child.id };
+    expect(belongsToAiWorkspace(nested, 'terminal', false, [focus, child, nested])).toBe(false);
+    expect(belongsToAiWorkspace(nested, 'terminal', true, [focus, child, nested])).toBe(true);
+    expect(belongsToAiWorkspace(child, 'terminal', false)).toBe(false);
+    expect(belongsToAiWorkspace(nested, 'terminal', false)).toBe(false);
+  });
   it('hides an owned child but promotes it when the parent is absent', () => {
     const parent: AiSessionSummary = {
       id: 'parent', kind: 'agent', title: 'Parent', updatedAt: '2026-09-18T00:00:00Z',

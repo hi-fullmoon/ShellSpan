@@ -115,6 +115,11 @@ async function verify() {
     flushSync(() => { assert(useFocusStore.getState().setTarget(terminalIds[2]), 'Cannot adopt a newer explicit target'); });
     flushSync(() => useFocusStore.getState().leave());
     assert(!useFocusStore.getState().setTarget(terminalIds[1]), 'An Agent target changed outside focus mode');
+    flushSync(() => useTerminalStore.getState().setActiveSession(terminalIds[1]));
+    flushSync(() => useFocusStore.getState().enter());
+    assert(useTerminalStore.getState().activeSessionId === terminalIds[2], 'Focus did not restore its own selected terminal');
+    flushSync(() => useFocusStore.getState().leave());
+    assert(useTerminalStore.getState().activeSessionId === terminalIds[1], 'Focus changed the ordinary terminal selection');
     flushSync(() => useFocusStore.getState().enter());
     flushSync(() => { assert(useFocusStore.getState().setTarget(terminalIds[0]), 'Cannot restore first explicit target'); });
     const controllers = terminalIds.map(id => terminalRegistry.get(id));

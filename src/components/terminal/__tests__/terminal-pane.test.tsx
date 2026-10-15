@@ -1,16 +1,20 @@
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+import { describe, expect, it, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { Terminal } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
+import { SearchAddon } from '@xterm/addon-search';
+import { enableRealCanvas } from '@/test/real-canvas';
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { COPY_ON_SELECT_DEBOUNCE_MS, TerminalPane } from '../terminal-pane';
 import { resetTerminalLeader } from '../terminal-leader';
-import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
+import { terminalRegistry, type TerminalController } from '@/components/terminal/registry/terminal-registry';
 import { useTerminalStore, type TerminalSession as TerminalSessionState } from '@/stores/terminalStore';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import { agentTerminalLeaseState } from '../agent-terminal-lease-state';
 
 const toastMocks = vi.hoisted(() => ({ error: vi.fn() }));
 const backingTerminals: Terminal[] = [];
+beforeAll(enableRealCanvas);
 afterEach(() => {
   for (const terminal of backingTerminals.splice(0)) terminal.dispose();
 });
@@ -100,12 +104,16 @@ function setAgentLease(overrides: Partial<Parameters<typeof agentTerminalLeaseSt
 function makeMockTerminal(selection = '') {
   const handlers: Array<(event: KeyboardEvent) => boolean> = [];
   const selectionHandlers: Array<() => void> = [];
-  // Keep real xterm buffers and events for the scroll controls while retaining
-  // the existing interaction spies used by these legacy selection tests.
+  // Exercise the real xterm mount, fit, search and focus lifecycle while retaining
+  // the existing interaction observations used by these legacy selection tests.
   const backingTerminal = new Terminal();
+  const fitAddon = new FitAddon();
+  const searchAddon = new SearchAddon();
+  backingTerminal.loadAddon(fitAddon);
+  backingTerminal.loadAddon(searchAddon);
+  const element = document.createElement('div');
   backingTerminals.push(backingTerminal);
   const terminal = Object.create(backingTerminal, Object.getOwnPropertyDescriptors({
-    cols: 80,
     getSelection: vi.fn().mockReturnValue(selection),
     getSelectionPosition: vi.fn().mockReturnValue(
       selection
@@ -119,7 +127,7 @@ function makeMockTerminal(selection = '') {
     clear: vi.fn(),
     write: vi.fn(),
     paste: vi.fn(),
-    element: document.createElement('div'),
+    element,
     onSelectionChange: vi.fn((handler: () => void) => {
       selectionHandlers.push(handler);
       return { dispose: vi.fn() };
@@ -136,15 +144,15 @@ function makeMockTerminal(selection = '') {
 
   const controller = {
     terminal,
-    searchAddon: {
-      findNext: vi.fn(),
-      findPrevious: vi.fn(),
-      clearDecorations: vi.fn(),
-    },
-    attach: vi.fn(),
-    detach: vi.fn(),
-    focus: vi.fn(),
-  };
+    searchAddon,
+    attach: vi.fn((host: HTMLElement) => {
+      host.appendChild(element);
+      if (!backingTerminal.element) backingTerminal.open(element);
+    }),
+    detach: vi.fn(() => element.remove()),
+    fit: vi.fn(() => fitAddon.fit()),
+    focus: vi.fn(() => backingTerminal.focus()),
+  } satisfies Pick<TerminalController, 'terminal' | 'searchAddon' | 'attach' | 'detach' | 'fit' | 'focus'>;
 
   Object.assign(terminal, { __controller: controller });
   (terminalRegistry.get as ReturnType<typeof vi.fn>).mockReturnValue(controller);
@@ -165,6 +173,38 @@ function mouseEventAt(
 }
 
 describe('TerminalPane', () => {
+  it('attaches the real xterm before fitting the visible pane', () => {
+    const terminal = makeMockTerminal();
+    const controller = terminalRegistry.get('s1')!;
+    const { container } = render(<TerminalPane activeSession={makeSession()} />);
+    expect(container.querySelector('.xterm textarea')).toBeInTheDocument();
+    expect(controller.fit).toHaveBeenCalledOnce();
+    expect(vi.mocked(controller.attach).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(controller.fit).mock.invocationCallOrder[0]);
+    expect(terminal.element?.isConnected).toBe(true);
+    act(() => controller.focus());
+    expect(document.activeElement).toBe(container.querySelector('.xterm textarea'));
+  });
+
+  it('defers mounting and fitting a hidden pane and detaches it when hidden again', () => {
+    const terminal = makeMockTerminal();
+    const controller = terminalRegistry.get('s1')!;
+    const session = makeSession();
+    const view = render(<TerminalPane activeSession={session} isVisible={false} />);
+    expect(controller.attach).not.toHaveBeenCalled();
+    expect(controller.fit).not.toHaveBeenCalled();
+    expect(terminal.element?.isConnected).toBe(false);
+
+    view.rerender(<TerminalPane activeSession={session} isVisible />);
+    expect(view.container.querySelector('.xterm textarea')).toBeInTheDocument();
+    expect(controller.fit).toHaveBeenCalledOnce();
+
+    view.rerender(<TerminalPane activeSession={session} isVisible={false} />);
+    expect(controller.detach).toHaveBeenCalledOnce();
+    expect(controller.fit).toHaveBeenCalledOnce();
+    expect(terminal.element?.isConnected).toBe(false);
+  });
+
   it('renders the pane host without a search toggle button', () => {
     const { container } = render(<TerminalPane activeSession={makeSession()} />);
     expect(screen.queryByRole('button', { name: 'terminal.tab.search' })).not.toBeInTheDocument();

@@ -1,5 +1,31 @@
 import type { AiSessionAdapter, AiSessionSummary, ListSessionsInput } from './session-adapter';
 
+/** Terminal and Focus have separate conversation histories over shared targets. */
+export function belongsToAiWorkspace(
+  summary: Pick<AiSessionSummary, 'id' | 'parentSessionId'>,
+  scope: 'workbench' | 'terminal',
+  focusMode: boolean,
+  sessions: readonly Pick<AiSessionSummary, 'id' | 'parentSessionId'>[] = [],
+): boolean {
+  if (scope === 'workbench') return true;
+  let current = summary;
+  const visited = new Set<string>();
+  while (current.parentSessionId) {
+    if (visited.has(current.id)) return false;
+    visited.add(current.id);
+    const parentId = current.parentSessionId;
+    const parent = sessions.find(session => session.id === parentId);
+    if (!parent) {
+      // Known root identities still identify ownership when the parent is archived.
+      if (parentId.startsWith('focus-agent-')) return focusMode;
+      if (parentId.startsWith('agent-')) return !focusMode;
+      return false;
+    }
+    current = parent;
+  }
+  return current.id.startsWith('focus-agent-') === focusMode;
+}
+
 /** A subagent remains top-level when its durable parent is no longer listed. */
 export function isTopLevelAiSession(
   summary: AiSessionSummary,

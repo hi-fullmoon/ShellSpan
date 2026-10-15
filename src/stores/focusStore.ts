@@ -38,12 +38,17 @@ export const useFocusStore = create<FocusState>()((set, get) => ({
   split: savedSplit(),
   enter: () => {
     const terminal = useTerminalStore.getState();
-    const current = terminal.sessions.find(s => s.sessionId === terminal.activeSessionId && s.status === 'connected');
+    terminal.switchWorkspace('focus');
+    const workspace = useTerminalStore.getState();
+    const current = workspace.sessions.find(s => s.sessionId === workspace.activeSessionId && s.status === 'connected');
     set(state => ({ enabled: true, hasOpened: true,
       targetSessionId: state.hasOpened ? state.targetSessionId : current?.sessionId ?? null }));
     useAppStore.getState().setActiveSection('terminal');
   },
-  leave: () => set({ enabled: false }),
+  leave: () => {
+    useTerminalStore.getState().switchWorkspace('terminal');
+    set({ enabled: false });
+  },
   setTerminalOpen: (terminalOpen) => set({ terminalOpen }),
   setTarget: (sessionId) => {
     const state = get();
