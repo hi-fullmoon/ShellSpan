@@ -64,7 +64,12 @@ export function AiSessionHeader({
           <span className="flex min-w-0 items-center gap-1">
             <h2 className="ai-session-title min-w-0 truncate text-sm font-medium leading-5 text-foreground">{title}</h2>
           </span>
-          <span className="ai-session-context truncate text-[11px] leading-[15px] text-muted-foreground">{context}</span>
+          <Tooltip>
+            <TooltipTrigger render={<span tabIndex={0} className="ai-session-context truncate text-[11px] leading-[15px] text-muted-foreground" />}>
+              {context}
+            </TooltipTrigger>
+            <TooltipContent role="tooltip">{context}</TooltipContent>
+          </Tooltip>
         </span>
         <span className="sr-only">{statusLabel}</span>
       </div>

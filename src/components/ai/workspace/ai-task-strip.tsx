@@ -86,7 +86,7 @@ export function AiTaskStrip({ steps, active = true }: AiTaskStripProps): React.R
                 <TaskStatusIcon status={displayStatus(step)} />
               </span>
               <span className="sr-only">{t(`ai.workspace.tasks.status.${displayStatus(step)}`)}: </span>
-              <span className="min-w-0 truncate">
+              <span className="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]">
                 {step.title}
               </span>
             </li>

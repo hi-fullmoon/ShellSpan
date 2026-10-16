@@ -14,7 +14,8 @@ describe('composer disclaimer', () => {
     const notice = screen.getByText(locale === 'zh-CN'
       ? '内容由AI生成，请仔细甄别'
       : 'AI-generated content. Please review carefully.');
-    expect(notice).toHaveClass('text-center', 'text-[11px]', 'text-[var(--ai-text-caption)]', 'opacity-70', 'shrink-0');
+    expect(notice).toHaveClass('text-center', 'text-[11px]', 'text-muted-foreground', 'shrink-0');
+    expect(notice).not.toHaveClass('opacity-70', 'text-[var(--ai-text-caption)]');
     expect(container.querySelector('.ai-composer-input-anchor')?.nextElementSibling).toBe(notice);
     expect(notice).toBeVisible();
   });

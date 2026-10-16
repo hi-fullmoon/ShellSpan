@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useEffect, useState } from 'react';
 
+import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiContextUsage } from '@/lib/ai/session-adapter';
@@ -27,10 +27,6 @@ function formatTokens(value: number): string {
 export function AiContextMeter({ usage }: { readonly usage?: AiContextUsage }): React.ReactNode {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
-  const [placement, setPlacement] = useState<{ left: number; bottom: number; width: number }>();
-  const rootRef = useRef<HTMLSpanElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
   const available = usage !== undefined
     && Number.isFinite(usage.usedTokens)
     && usage.usedTokens >= 0
@@ -39,48 +35,6 @@ export function AiContextMeter({ usage }: { readonly usage?: AiContextUsage }): 
 
   useEffect(() => {
     if (!available && open) setOpen(false);
-  }, [available, open]);
-
-  const updatePlacement = useCallback((): void => {
-    const trigger = triggerRef.current;
-    if (!trigger) return;
-    const rect = trigger.getBoundingClientRect();
-    const viewportWidth = Math.max(window.innerWidth, 16);
-    const width = Math.min(264, viewportWidth - 16);
-    setPlacement({
-      left: Math.max(8, Math.min(rect.right - width, viewportWidth - width - 8)),
-      bottom: Math.max(8, window.innerHeight - rect.top + 8),
-      width,
-    });
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!open || !available) return undefined;
-    updatePlacement();
-    window.addEventListener('resize', updatePlacement);
-    window.addEventListener('scroll', updatePlacement, true);
-    return () => {
-      window.removeEventListener('resize', updatePlacement);
-      window.removeEventListener('scroll', updatePlacement, true);
-    };
-  }, [available, open, updatePlacement]);
-
-  useEffect(() => {
-    if (!open || !available) return undefined;
-    const onPointerDown = (event: PointerEvent): void => {
-      if (event.target instanceof Node
-        && (rootRef.current?.contains(event.target) || panelRef.current?.contains(event.target))) return;
-      setOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
   }, [available, open]);
 
   if (!available || !usage) return null;
@@ -105,18 +59,14 @@ export function AiContextMeter({ usage }: { readonly usage?: AiContextUsage }): 
       : [];
 
   return (
-    <span ref={rootRef} className="ai-context-meter relative inline-flex shrink-0">
-      <Tooltip>
+    <Popover open={open} onOpenChange={setOpen}>
+      <span className="ai-context-meter relative inline-flex shrink-0">
+      <Tooltip disabled={open}>
         <TooltipTrigger
           render={(
-            <button
-              ref={triggerRef}
-              type="button"
-              className="ai-context-meter-trigger grid size-7 shrink-0 cursor-pointer place-items-center p-0"
+            <PopoverTrigger
+              render={<button type="button" className="ai-context-meter-trigger grid size-7 shrink-0 cursor-pointer place-items-center p-0" />}
               aria-label={ariaLabel}
-              aria-haspopup="dialog"
-              aria-expanded={open}
-              onClick={() => setOpen((current) => !current)}
             />
           )}
         >
@@ -134,14 +84,13 @@ export function AiContextMeter({ usage }: { readonly usage?: AiContextUsage }): 
         </TooltipTrigger>
         <TooltipContent>{ariaLabel}</TooltipContent>
       </Tooltip>
-      {open && placement && createPortal((
-        <div
-          ref={panelRef}
-          className="ai-context-meter-panel"
-          role="dialog"
+      </span>
+        <PopoverContent
+          side="top" align="end" sideOffset={8} collisionPadding={8}
+          className="ai-context-meter-panel block w-[264px] max-w-[calc(100vw-16px)] max-h-(--available-height) overflow-y-auto overscroll-contain"
           aria-label={t('ai.workspace.contextUsage.title')}
-          style={placement}
         >
+          <PopoverTitle className="sr-only">{t('ai.workspace.contextUsage.title')}</PopoverTitle>
           <div className="ai-context-meter-header flex min-w-0 items-center gap-1.5 whitespace-nowrap">
             <span>{t('ai.workspace.contextUsage.used')}</span>
             <strong>{percent}%</strong>
@@ -177,8 +126,7 @@ export function AiContextMeter({ usage }: { readonly usage?: AiContextUsage }): 
               ? 'ai.workspace.contextUsage.reportedNote'
               : 'ai.workspace.contextUsage.estimatedNote')}
           </p>
-        </div>
-      ), document.body)}
-    </span>
+        </PopoverContent>
+    </Popover>
   );
 }

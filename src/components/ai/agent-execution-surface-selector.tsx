@@ -1,7 +1,9 @@
 import { ChevronDownIcon, MonitorCogIcon, SquareTerminalIcon } from 'lucide-react';
+import { useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { AiControlTooltip } from './ai-control-tooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -79,6 +81,7 @@ export function AgentExecutionSurfaceSelector({
   onSurfaceChange,
 }: AgentExecutionSurfaceSelectorProps): React.ReactNode {
   const { t } = useI18n();
+  const [open, setOpen] = useState(false);
   const presentation = resolveTerminalSurfacePresentation(
     surface,
     realTerminalState,
@@ -99,13 +102,16 @@ export function AgentExecutionSurfaceSelector({
     .join(' ') || undefined;
 
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <AiControlTooltip menuOpen={open} controlDisabled={disabled}
+        className="max-w-[154px] flex-[0_1_auto] @max-[640px]/ai-workspace:shrink-0"
+        label={`${t('agent.executionSurface')}: ${t(current.label)} · ${accessibleDescription}`}>
       <DropdownMenuTrigger
         render={(
           <Button
             variant="ghost"
             size="xs"
-            className="ai-execution-surface-trigger h-7 min-w-0 max-w-[154px] flex-[0_1_auto] px-[7px] @max-[480px]/ai-workspace:size-7 @max-[480px]/ai-workspace:shrink-0 @max-[480px]/ai-workspace:p-0 @max-[480px]/ai-workspace:[&_[data-icon=inline-end]]:hidden"
+            className="ai-execution-surface-trigger h-7 min-w-0 max-w-[154px] flex-[0_1_auto] px-[7px] @max-[640px]/ai-workspace:size-7 @max-[640px]/ai-workspace:shrink-0 @max-[640px]/ai-workspace:p-0 @max-[640px]/ai-workspace:[&_[data-icon=inline-end]]:hidden"
             data-execution-surface={surface}
             data-terminal-surface-state={presentation.state}
             data-real-terminal-state={presentation.realTerminalState}
@@ -120,10 +126,11 @@ export function AgentExecutionSurfaceSelector({
           className="ai-composer-control-content inline-flex min-w-0 items-center gap-1 leading-none"
         >
           <CurrentIcon data-icon="inline-start" strokeWidth={1.75} />
-          <span className="ai-execution-surface-label max-w-24 truncate @max-[480px]/ai-workspace:hidden">{t(current.label)}</span>
+          <span className="ai-execution-surface-label max-w-24 truncate @max-[640px]/ai-workspace:hidden">{t(current.label)}</span>
           <ChevronDownIcon data-icon="inline-end" />
         </span>
       </DropdownMenuTrigger>
+      </AiControlTooltip>
       <DropdownMenuContent
         side="top"
         sideOffset={8}

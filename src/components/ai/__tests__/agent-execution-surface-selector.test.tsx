@@ -73,8 +73,8 @@ describe('AgentExecutionSurfaceSelector', () => {
     const trigger = screen.getByRole('button', { name: 'Command execution: Direct' });
     expect(trigger).toHaveClass(
       'flex-[0_1_auto]',
-      '@max-[480px]/ai-workspace:size-7',
-      '@max-[480px]/ai-workspace:[&_[data-icon=inline-end]]:hidden',
+      '@max-[640px]/ai-workspace:size-7',
+      '@max-[640px]/ai-workspace:[&_[data-icon=inline-end]]:hidden',
     );
     expect(trigger.querySelector('[data-slot="agent-execution-surface-trigger-content"]')).toHaveClass(
       'ai-composer-control-content',
@@ -84,7 +84,7 @@ describe('AgentExecutionSurfaceSelector', () => {
       'leading-none',
     );
     expect(trigger.querySelector('.ai-execution-surface-label'))
-      .toHaveClass('@max-[480px]/ai-workspace:hidden');
+      .toHaveClass('@max-[640px]/ai-workspace:hidden');
     expect(trigger).toHaveAttribute('data-execution-surface', 'direct');
     expect(trigger).toHaveAttribute('data-terminal-surface-state', 'direct');
     expect(trigger).toHaveAttribute('data-real-terminal-state', 'unavailable');

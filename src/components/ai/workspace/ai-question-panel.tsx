@@ -154,7 +154,7 @@ export function AiQuestionPanel({
       data-question-id={question.identity.questionRequestId}
       data-collapsed={collapsed || undefined}
     >
-      <CardHeader className="ai-question-panel-header min-h-[70px] shrink-0 gap-[3px] px-[18px] pt-[11px] pb-2 max-[421px]:min-h-[66px] max-[421px]:px-3 max-[421px]:pt-2.5 max-[421px]:pb-[7px]">
+      <CardHeader className="ai-question-panel-header min-h-[70px] shrink-0 gap-[3px] px-[18px] pt-[11px] pb-2 @max-[421px]/ai-workspace:min-h-[66px] @max-[421px]/ai-workspace:px-3 @max-[421px]/ai-workspace:pt-2.5 @max-[421px]/ai-workspace:pb-[7px]">
         <CardDescription>
           {currentQuestion.header ?? t('ai.workspace.question.title')}
         </CardDescription>
@@ -189,7 +189,7 @@ export function AiQuestionPanel({
       </CardHeader>
       {!collapsed && (
         <>
-          <CardContent className="ai-question-panel-content min-h-0 overflow-x-hidden overflow-y-auto px-4 pt-px pb-1.5 max-[421px]:px-2.5 max-[421px]:pt-0">
+          <CardContent className="ai-question-panel-content min-h-0 overflow-x-hidden overflow-y-auto px-4 pt-px pb-1.5 @max-[421px]/ai-workspace:px-2.5 @max-[421px]/ai-workspace:pt-0">
             <FieldGroup className="ai-question-list gap-0">
               <FieldSet
                 key={currentQuestion.id}
@@ -300,7 +300,7 @@ export function AiQuestionPanel({
               </FieldSet>
             </FieldGroup>
           </CardContent>
-          <CardFooter className="ai-question-panel-footer min-h-12 shrink-0 justify-between gap-2.5 px-3.5 pt-1.5 pb-[7px] max-[421px]:flex-wrap max-[421px]:px-2.5">
+          <CardFooter className="ai-question-panel-footer min-h-12 shrink-0 justify-between gap-2.5 px-3.5 pt-1.5 pb-[7px] @max-[421px]/ai-workspace:flex-wrap @max-[421px]/ai-workspace:px-2.5">
             <div className="ai-question-pagination flex shrink-0 items-center gap-0.5">
               <Button
                 type="button"
@@ -326,12 +326,12 @@ export function AiQuestionPanel({
                 <ChevronRightIcon aria-hidden="true" />
               </Button>
             </div>
-            <div className="ai-question-footer-message min-w-0 flex-1 max-[421px]:order-3 max-[421px]:basis-full">
+            <div className="ai-question-footer-message min-w-0 flex-1 @max-[421px]/ai-workspace:order-3 @max-[421px]/ai-workspace:basis-full">
               {error && <FieldError role="alert">{error}</FieldError>}
             </div>
             <div className="ai-question-footer-actions flex shrink-0 items-center gap-1.5">
               <Button
-                className="min-w-[68px] max-[421px]:min-w-auto"
+                className="min-w-[68px] @max-[421px]/ai-workspace:min-w-auto"
                 type="button"
                 variant="outline"
                 size="sm"
@@ -341,7 +341,7 @@ export function AiQuestionPanel({
                 {t('ai.workspace.question.decline')}
               </Button>
               <Button
-                className="min-w-[68px] max-[421px]:min-w-auto"
+                className="min-w-[68px] @max-[421px]/ai-workspace:min-w-auto"
                 type="button"
                 size="sm"
                 disabled={pending || invalid || !onAnswer}

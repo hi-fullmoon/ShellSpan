@@ -1,4 +1,5 @@
 import { AiComposerEditor } from './ai-composer-editor';
+import { AiControlTooltip } from '../ai-control-tooltip';
 import { AiCompletionPopover } from './ai-completion-popover';
 import { useFileCompletion } from './use-file-completion';
 import { useSkillCompletion } from './use-skill-completion';
@@ -670,10 +671,12 @@ export function AiComposerSeat({
 
               <div className="ai-composer-trailing flex min-w-0 flex-[1_1_auto] items-center justify-end gap-1.5 @max-[400px]/ai-workspace:gap-[3px]">
                 {modelControl ?? (modelLabel && (
+                  <AiControlTooltip controlDisabled={!onOpenModel} className="max-w-full flex-[0_1_auto]"
+                    label={t('ai.workspace.model.trigger', { selection: modelLabel })}>
                   <Button
                     variant="ghost"
                     size="xs"
-                    className="ai-model-trigger h-7 min-w-0 max-w-full flex-[0_1_auto] overflow-hidden pr-1.5 pl-2"
+                    className="ai-model-trigger h-7 min-w-0 max-w-full flex-[0_1_auto] overflow-hidden pr-1.5 pl-2 @max-[400px]/ai-workspace:px-1"
                     disabled={!onOpenModel}
                     onClick={onOpenModel}
                     aria-label={t('ai.workspace.model.trigger', { selection: modelLabel })}
@@ -681,6 +684,7 @@ export function AiComposerSeat({
                     <span className="ai-model-trigger-name min-w-0 max-w-60 flex-[0_1_auto] truncate">{modelLabel}</span>
                     <ChevronDownIcon data-icon="inline-end" />
                   </Button>
+                  </AiControlTooltip>
                 ))}
                 <AiContextMeter usage={contextUsage} />
                 <Tooltip disabled={submitDisabled}>
@@ -727,7 +731,7 @@ export function AiComposerSeat({
           </AiCompletionPopover>
         </div>
       }
-      <p className="m-0 shrink-0 text-center text-[11px] leading-4 text-[var(--ai-text-caption)] opacity-70" data-slot="ai-composer-disclaimer">
+      <p className="m-0 shrink-0 text-center text-[11px] leading-4 text-muted-foreground" data-slot="ai-composer-disclaimer">
         {t('ai.workspace.composerDisclaimer')}
       </p>
       <span className="sr-only" aria-live="polite">

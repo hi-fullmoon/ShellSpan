@@ -42,7 +42,7 @@ export function AiWorkspaceErrorNotices({
                   .format(syncRecovery.lastSyncedAt),
               })}</>}
             </span>}
-            {onRetrySync && <Button type="button" variant="outline" size="xs" className="h-5 self-start text-[10px]"
+            {onRetrySync && <Button type="button" variant="outline" size="xs" className="self-start text-[11px]"
               disabled={syncRecovery?.retrying} aria-busy={syncRecovery?.retrying || undefined}
               onClick={() => { void onRetrySync(); }}>
               {t(syncRecovery?.retrying ? 'ai.error.streamSyncRetrying' : 'ai.error.streamSyncRetry')}
@@ -57,6 +57,7 @@ export function AiWorkspaceErrorNotices({
             <Button
               variant="ghost"
               size="xs"
+              className="text-[11px]"
               aria-label={t('ai.workspace.recovery.dismiss')}
               onClick={onDismissError}
             >
@@ -72,7 +73,7 @@ export function AiWorkspaceErrorNotices({
           key={failed.id}
           title={t('ai.workspace.recovery.title')}
           label={t('ai.workspace.failedDraft')}
-          action={onRetryFailedDraft && <Button type="button" variant="ghost" size="xs" className="h-5 shrink-0 text-[10px]"
+          action={onRetryFailedDraft && <Button type="button" variant="ghost" size="xs" className="shrink-0 text-[11px]"
             disabled={composerState.phase === 'stopping'} onClick={() => onRetryFailedDraft(failed.id)}>
             {t('common.retry')}
           </Button>}

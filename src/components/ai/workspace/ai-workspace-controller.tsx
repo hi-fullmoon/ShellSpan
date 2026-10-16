@@ -134,6 +134,7 @@ export function AiWorkspaceController({
       canStartAgent={controller.canStartAgent}
       agentUnavailableReason={controller.agentUnavailableReason}
       historyScopeLabel={controller.historyScopeLabel}
+      terminalConnected={activeTerminalStatus === 'connected'}
       readOnlySession={controller.readOnlySession}
       historicalTargetUnavailable={controller.historicalTargetUnavailable}
       providerLabel={controller.providerLabel}

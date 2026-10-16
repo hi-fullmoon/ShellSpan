@@ -85,6 +85,22 @@ beforeEach(async () => {
 afterEach(() => cleanup());
 
 describe('AiWorkspaceRoot Phase 3 skeleton', () => {
+  it.each(['zh-CN', 'en-US'] as const)('keeps the Agent header consistent with terminal availability in %s', async locale => {
+    useAppStore.setState({ locale });
+    await initI18n(locale);
+    const { container, rerender } = render(<AiWorkspaceRoot mode="agent" scope="terminal" view={null} />);
+    const context = (): HTMLElement => container.querySelector('.ai-session-context')!;
+    expect(context()).toHaveTextContent(locale === 'zh-CN' ? '未连接终端' : 'No connected terminal');
+    const target = 'root@175.178.66.45:22';
+    rerender(<AiWorkspaceRoot mode="agent" scope="terminal" view={null} historyScopeLabel={target} terminalConnected />);
+    expect(context()).toHaveTextContent(target);
+    expect(context()).toHaveTextContent(locale === 'zh-CN' ? '已连接' : 'Connected');
+    rerender(<AiWorkspaceRoot mode="agent" scope="terminal" view={null} historyScopeLabel={target} terminalConnected={false} />);
+    expect(context()).toHaveTextContent(target);
+    expect(context()).toHaveTextContent(locale === 'zh-CN' ? '未连接' : 'Disconnected');
+    rerender(<AiWorkspaceRoot mode="ask" scope="workbench" view={null} />);
+    expect(context()).toHaveTextContent(locale === 'zh-CN' ? '不读取终端' : 'No terminal context');
+  });
   it('keeps durable identity independent of the displayed title and clears it for a new conversation', () => {
     const view = taskTokenBudgetView();
     const { container, rerender } = render(<AiWorkspaceRoot scope="terminal" view={view} title="Different display title" />);

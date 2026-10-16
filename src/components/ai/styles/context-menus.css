@@ -34,8 +34,6 @@
   --ai-action-hover: var(--accent);
   --ai-accent: var(--primary);
   --ai-shadow-dialog: var(--shadow-dialog);
-  position: fixed;
-  z-index: 100;
   box-sizing: border-box;
   border: 0;
   border-radius: 10px;

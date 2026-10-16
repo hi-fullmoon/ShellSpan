@@ -89,6 +89,9 @@ describe('AI task strip', () => {
     expect(screen.getAllByRole('listitem')).toHaveLength(2);
     expect(screen.queryByText('更新配置')).toBeNull();
     expect(screen.getByText(longTitle)).toBeVisible();
+    expect(screen.getByText(longTitle)).not.toHaveClass('truncate');
+    expect(screen.getByText(longTitle)).toHaveClass('whitespace-pre-wrap', '[overflow-wrap:anywhere]');
+    expect(screen.getByRole('list')).toHaveClass('max-h-[180px]', 'overflow-y-auto');
     expect(container.querySelector('[title]')).toBeNull();
 
     rerender(<AiTaskStrip steps={referenceSteps.map((step) => ({ ...step, status: 'completed' }))} />);

@@ -1666,7 +1666,7 @@ describe('AiWorkspaceController', () => {
     render(<AiWorkspaceController scope="terminal" adapter={agent} />);
 
     const direct = await screen.findByRole('button', { name: 'Command execution: Direct' });
-    expect(direct).toBeDisabled();
+    await waitFor(() => expect(direct).toBeDisabled());
     act(() => publish?.(idle));
     await waitFor(() => expect(direct).toBeEnabled());
 

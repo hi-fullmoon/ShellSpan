@@ -21,7 +21,7 @@ describe('localized workspace errors', () => {
     let dismissed = false;
     render(<AiWorkspaceErrorNotices composerState={state} onRetryFailedDraft={id => retried.push(id)} onDismissError={() => { dismissed = true; }} />);
     const retry = screen.getByRole('button', { name: t('common.retry') });
-    expect(retry).toHaveClass('h-5', 'shrink-0', 'text-[10px]');
+    expect(retry).toHaveClass('h-6', 'shrink-0', 'text-[11px]');
     for (const button of screen.getAllByRole('button')) expect(button.querySelector('svg')).toBeNull();
     const dismiss = screen.getByRole('button', { name: t('ai.workspace.recovery.dismiss') });
     expect(dismiss).toHaveTextContent(t('ai.workspace.recovery.dismiss'));

@@ -19,6 +19,13 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('AiSessionHeader', () => {
+  it('reveals the full connection context on keyboard focus', async () => {
+    const user = userEvent.setup();
+    const context = 'Agent · root@175.178.66.45:22 · Connected';
+    render(<AiSessionHeader title="查看for you部署位置" context={context} status="idle" />);
+    await user.tab();
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(context);
+  });
   it('uses compact action buttons while preserving their labels and callbacks', async () => {
     const user = userEvent.setup();
     const onHistory = vi.fn();

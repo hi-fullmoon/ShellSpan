@@ -31,4 +31,29 @@ describe('AI panel native tooltip removal', () => {
     expect(trigger).toHaveAttribute('aria-description', expect.stringContaining('idle'));
     expect(trigger).not.toHaveAttribute('title');
   });
+
+  it('shows the execution mode on keyboard focus and closes its tooltip when opening the menu', async () => {
+    const user = userEvent.setup();
+    render(<AgentExecutionSurfaceSelector surface="direct" />);
+    await user.tab();
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Direct');
+    await user.keyboard('{Enter}');
+    expect(await screen.findByRole('menu')).toBeVisible();
+    expect(screen.queryByRole('tooltip')).toBeNull();
+  });
+  it('keeps disabled compact controls readable without enabling their actions', async () => {
+    const user = userEvent.setup();
+    let parentClicks = 0;
+    let parentKeys = 0;
+    render(<div onClick={() => { parentClicks++; }} onKeyDown={() => { parentKeys++; }}><AgentExecutionSurfaceSelector disabled surface="direct" /></div>);
+    await user.tab();
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Direct');
+    await user.click(screen.getByRole('button').parentElement!);
+    expect(parentClicks).toBe(0);
+    await user.keyboard('{Enter}');
+    await user.keyboard(' ');
+    expect(parentKeys).toBe(0);
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(screen.getByRole('button')).toBeDisabled();
+  });
 });

@@ -402,5 +402,8 @@ describe('Stage 6A question form', () => {
     expect(screen.getByRole('textbox')).toBeVisible();
     expect(screen.queryByText('Submit')).not.toBeInTheDocument();
     expect(screen.getAllByText('What next?')[0]).toBeVisible();
+    const footer = document.querySelector('.ai-question-panel-footer');
+    expect(footer).toHaveClass('@max-[421px]/ai-workspace:flex-wrap');
+    expect(footer).not.toHaveClass('max-[421px]:flex-wrap');
   });
 });

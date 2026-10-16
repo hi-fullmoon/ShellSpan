@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
 import { aiErrorMessage } from '@/lib/ai/error-message';
+import { terminalLoginLabel } from '@/lib/ai/terminal-login-scope';
 import type { AiConversationNode } from '@/lib/ai/conversation-node';
 import { canResumeTokenBudgetedTask, hasTokenBudgetCheckpoint, taskBudgetArtifactTitleKey } from '@/lib/ai/task-token-budget';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -263,6 +264,7 @@ export interface AiWorkspaceRootProps {
   readonly canStartAgent?: boolean;
   readonly agentUnavailableReason?: string | null;
   readonly historyScopeLabel?: string | null;
+  readonly terminalConnected?: boolean;
   readonly readOnlySession?: boolean;
   readonly historicalTargetUnavailable?: boolean;
   readonly onDraftChange?: (value: string) => void;
@@ -351,6 +353,7 @@ export function AiWorkspaceRoot({
   canStartAgent = false,
   agentUnavailableReason: rawAgentUnavailableReason = null,
   historyScopeLabel = null,
+  terminalConnected = canStartAgent,
   readOnlySession = false,
   historicalTargetUnavailable = false,
   onDraftChange,
@@ -422,6 +425,18 @@ export function AiWorkspaceRoot({
     ? t('agent.emptyDescription')
     : t('ai.workbench.empty');
   const surfaceMode = mode ?? 'agent';
+  const sessionTarget = view?.snapshot.value.header.target;
+  const historicalTargetLabel = sessionTarget?.kind === 'local'
+    ? t('ai.workspace.localTarget')
+    : sessionTarget && (terminalLoginLabel(sessionTarget) ?? sessionTarget.label ?? sessionTarget.host);
+  const terminalContext = readOnlySession || historicalTargetUnavailable
+    ? t('ai.terminal.readOnlyContext', { target: historicalTargetLabel || t('section.terminal') })
+    : historyScopeLabel || terminalConnected
+      ? t(terminalConnected ? 'ai.terminal.connectedContext' : 'ai.terminal.disconnectedContext', { target: historyScopeLabel ?? t('section.terminal') })
+      : t('ai.terminal.noTerminalContext');
+  const headerContext = !mode
+    ? t(scope === 'terminal' ? 'section.terminal' : 'section.workbench')
+    : surfaceMode === 'agent' ? terminalContext : t('ai.workbench.scopeDescription');
   const availabilityHintId = useId();
   const historicalComposerEnabled = readOnlySession && historicalContinuationAvailable;
   const historicalComposerDisplay = readOnlySession
@@ -530,9 +545,7 @@ export function AiWorkspaceRoot({
       <AiSessionHeader
         extraActions={headerActions}
         title={resolvedTitle}
-        context={mode
-          ? t(surfaceMode === 'agent' ? 'ai.terminal.scopeDescription' : 'ai.workbench.scopeDescription')
-          : t(scope === 'terminal' ? 'section.terminal' : 'section.workbench')}
+        context={headerContext}
         status={status}
         mode={surfaceMode}
         lineage={onOpenSession && lineage

@@ -181,9 +181,14 @@
   border-radius: 10px;
 }
 
-@media (max-width: 420px) {
+@container ai-workspace (max-width: 420px) {
   .ai-question-panel,
-  .ai-approval-panel,
+  .ai-approval-panel {
+    border-radius: 14px;
+  }
+}
+
+@media (max-width: 420px) {
   .ai-composer-add-menu,
   .ai-completion-popup {
     border-radius: 14px;
@@ -195,10 +200,4 @@
   background: var(--ai-code-block);
   color: var(--ai-text);
   font: var(--ai-font-markdown-code-block-small);
-}
-
-@container ai-workspace (max-width: 420px) {
-  .ai-approval-panel {
-    border-radius: 14px;
-  }
 }

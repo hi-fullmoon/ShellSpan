@@ -4,6 +4,7 @@ import { ChevronDownIcon, ChevronRightIcon, SearchIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { Separator } from '@/components/ui/separator';
+import { AiControlTooltip } from '../ai-control-tooltip';
 import { invokeResolveAiSelection, isTauriRuntime } from '@/lib/ipc/tauri';
 import { useResolvedModel } from '@/lib/ai/provider-contract';
 import {
@@ -208,12 +209,15 @@ export function AiComposerModelSelector({
         }
       }}
     >
+      <AiControlTooltip menuOpen={open} controlDisabled={disabled || current === undefined || groups.length === 0}
+        className="max-w-full flex-[0_1_auto]"
+        label={t('ai.workspace.model.trigger', { selection: triggerLabel })}>
       <DropdownMenuTrigger
         render={(
           <Button
             variant="ghost"
             size="xs"
-            className="ai-model-trigger h-7 min-w-0 max-w-full flex-[0_1_auto] overflow-hidden pr-1.5 pl-2"
+            className="ai-model-trigger h-7 min-w-0 max-w-full flex-[0_1_auto] overflow-hidden pr-1.5 pl-2 @max-[400px]/ai-workspace:px-1"
             disabled={disabled || current === undefined || groups.length === 0}
             aria-label={t('ai.workspace.model.trigger', { selection: triggerLabel })}
           />
@@ -221,13 +225,14 @@ export function AiComposerModelSelector({
       >
         <span className="ai-model-trigger-name min-w-0 max-w-60 flex-[0_1_auto] truncate">{modelLabel}</span>
         {hasReasoning && (
-          <span className="ai-model-trigger-reasoning min-w-0 shrink-0 truncate">{reasoningLabel}</span>
+          <span className="ai-model-trigger-reasoning min-w-0 shrink-0 truncate @max-[640px]/ai-workspace:hidden">{reasoningLabel}</span>
         )}
         <ChevronDownIcon
           data-icon="inline-end"
           data-open={open ? '' : undefined}
         />
       </DropdownMenuTrigger>
+      </AiControlTooltip>
       <DropdownMenuContent
         side="top"
         sideOffset={8}
