@@ -156,9 +156,9 @@ fn inspect(node: Node<'_>, script: &str, input: Cwds, depth: usize) -> Result<Fl
                     {
                         for cwd in &input {
                             if resolve_path(path, cwd.as_deref()).is_some_and(|path| {
-                                super::protected_delete_path_native(&path.to_string_lossy())
+                                super::call_policy::hard_delete_path_native(&path.to_string_lossy())
                             }) {
-                                return Err("AGENT_CRITICAL_OPERATION_DENIED: deleting a system resource is blocked; do not retry through a different tool or script".into());
+                                return Err("AGENT_CRITICAL_OPERATION_DENIED: deleting a whole protected system tree or kernel resource is blocked; do not retry through a different tool or script".into());
                             }
                         }
                     }
@@ -309,7 +309,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn quoted_escaped_and_relative_protected_paths_are_rejected_without_execution() {
+    fn quoted_escaped_and_relative_resources_follow_normal_approval() {
         for command in [
             "rm -rf \"/etc\"",
             "rm -rf '/etc'",
@@ -329,13 +329,30 @@ mod tests {
             "if true; then cd /etc; rm hosts; fi",
             "for item in one; do cd /etc && rm hosts; done",
         ] {
-            assert!(
+            let hard_denied = matches!(
+                command,
+                "rm -rf \"/etc\""
+                    | "rm -rf '/etc'"
+                    | "sudo rm -rf \"/etc\""
+                    | "LC_ALL=C rm -rf '/etc'"
+                    | "mkfs.ext4 /dev/sda"
+            );
+            assert_eq!(
                 reject_destructive(command, Some("/workspace")).is_err(),
+                hard_denied,
                 "{command}"
             );
         }
-        assert!(reject_destructive("rm ./hosts", Some("/etc")).is_err());
-        assert!(reject_destructive("cd /etc && rm hosts", None).is_err());
+        assert!(reject_destructive("rm ./hosts", Some("/etc")).is_ok());
+        assert!(reject_destructive("cd /etc && rm hosts", None).is_ok());
+        for command in [
+            "cd /usr && rm -rf local",
+            "rm /tmp/../etc",
+            "rm -rf /proc/1",
+            "rm -rf /usr/local/bin",
+        ] {
+            assert!(reject_destructive(command, None).is_err(), "{command}");
+        }
     }
 
     #[test]

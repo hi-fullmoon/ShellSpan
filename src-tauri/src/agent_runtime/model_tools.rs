@@ -146,7 +146,7 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
         },
         ModelToolDefinition {
             name: "trash_file".into(),
-            description: "Move one regular LOCAL file within the frozen workspace to the system trash, never permanently delete it. First use read_file with metadataOnly to obtain its SHA-256, then pass expectedSha256. Directories, symlinks, system resources and remote targets are rejected. Use this for local deletion instead of rm or scripts. A failure never authorizes permanent deletion. Recovery is through the system trash; do not promise an in-app undo or secure erasure.".into(),
+            description: "Move one regular LOCAL file within the frozen workspace to the system trash, never permanently delete it. First use read_file with metadataOnly to obtain its SHA-256, then pass expectedSha256. Directories, symlinks, protected system trees, kernel resources, ShellSpan application storage and remote targets are rejected. Concrete application files under system directories use the session permission mode. Use this for local deletion instead of rm or scripts. A failure never authorizes permanent deletion. Recovery is through the system trash; do not promise an in-app undo or secure erasure.".into(),
             input_schema: object_schema(
                 &["path", "expectedSha256"],
                 json!({"path": bounded_string(4096), "expectedSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}),

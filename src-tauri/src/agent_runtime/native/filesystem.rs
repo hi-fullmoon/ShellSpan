@@ -265,7 +265,7 @@ fn validate_trash_file(call: &AgentToolCallNative) -> Result<PathBuf, String> {
     };
     let root = canonical_local_root(Path::new(root))?;
     let path = resolve_local_existing(&root, &arguments.path, false)?;
-    if super::protected_delete_path_native(&path.to_string_lossy()) {
+    if super::call_policy::hard_delete_path_native(&path.to_string_lossy()) {
         return Err(
             "AGENT_CRITICAL_OPERATION_DENIED: system files cannot be moved to trash by the Agent"
                 .into(),

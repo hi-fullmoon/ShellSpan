@@ -292,10 +292,85 @@ pub(crate) fn enforce_native_call_policy_native(
                 AgentEffectKindNative::StateChange | AgentEffectKindNative::Destructive
             )
     };
-    if critical_write {
+    if critical_write
+        && !(call.tool_name == "trash_file"
+            && scope
+                .paths
+                .iter()
+                .all(|path| !hard_delete_path_native(path)))
+    {
         return Err("AGENT_CRITICAL_OPERATION_DENIED: native policy rejects state changes on critical paths".into());
     }
     Ok(())
+}
+
+/// Whole system trees and kernel interfaces remain unavailable in every mode.
+/// Concrete application resources below system directories use normal approval.
+pub(crate) fn hard_delete_path_native(path: &str) -> bool {
+    let path = path.replace('\\', "/");
+    let path = path.trim_end_matches('/');
+    // macOS exposes /etc and /var through fixed /private aliases. Apply the
+    // same tree policy to either spelling without resolving remote symlinks.
+    let path = path
+        .strip_prefix("/private")
+        .filter(|suffix| {
+            *suffix == "/etc"
+                || suffix.starts_with("/etc/")
+                || *suffix == "/var"
+                || suffix.starts_with("/var/")
+        })
+        .unwrap_or(path);
+    path.is_empty()
+        || [
+            "/etc",
+            "/bin",
+            "/sbin",
+            "/usr",
+            "/usr/bin",
+            "/usr/sbin",
+            "/usr/lib",
+            "/usr/lib64",
+            "/usr/share",
+            "/usr/local",
+            "/usr/local/bin",
+            "/usr/local/lib",
+            "/usr/local/share",
+            "/etc/systemd",
+            "/etc/systemd/system",
+            "/System",
+            "/System/Library",
+            "/usr/libexec",
+            "/usr/local/libexec",
+            "/lib",
+            "/lib64",
+            "/System/Volumes",
+            "/System/Volumes/Data",
+            "/Library",
+            "/var",
+            "/var/lib",
+            "/var/db",
+            "/boot",
+            "/root",
+            "/home",
+            "/private",
+            "/private/etc",
+            "/private/var",
+            "/private/var/db",
+        ]
+        .contains(&path)
+        || ["/dev", "/proc", "/sys", "/System"]
+            .iter()
+            .any(|root| path == *root || path.starts_with(&format!("{root}/")))
+        || path.eq_ignore_ascii_case("C:")
+        || [
+            "C:/Windows",
+            "C:/Windows/System32",
+            "C:/Windows/SysWOW64",
+            "C:/Program Files",
+            "C:/Program Files (x86)",
+        ]
+        .iter()
+        .any(|root| path.eq_ignore_ascii_case(root))
 }
 
 #[cfg(test)]
@@ -484,12 +559,12 @@ mod tests {
         for command in [
             "rm -rf /",
             "pwd && /bin/rm -rf /etc",
-            "unlink /etc/passwd",
-            "rmdir /System/Library",
+            "unlink /proc/1/mem",
+            "rmdir /System",
             "mkfs.ext4 /dev/sda",
             "wipefs /dev/sda",
             "sudo -n rm -rf /etc",
-            "env command /bin/rm /etc/passwd",
+            "env command /bin/rm /etc",
             "timeout 5 rm -rf /",
         ] {
             assert!(
@@ -505,6 +580,125 @@ mod tests {
                 "{command}"
             );
         }
+    }
+
+    #[test]
+    fn hard_delete_boundary_distinguishes_roots_from_application_resources() {
+        for path in [
+            "/",
+            "/etc/",
+            "/usr/local/bin",
+            "/System/Library",
+            "/proc/1/mem",
+            "/usr/libexec",
+            "/usr/local/libexec",
+            "/lib",
+            "/lib64",
+            "/System/Volumes",
+            "/System/Volumes/Data",
+            "/System/Library/Frameworks",
+            "/private/etc/systemd/system",
+            "/private/var/lib",
+            "c:/WINDOWS/System32",
+        ] {
+            assert!(hard_delete_path_native(path), "{path}");
+        }
+        for path in [
+            "/etc/mihomo",
+            "/usr/local/bin/mihomo",
+            "/etc/systemd/system/mihomo.service",
+            "/private/etc/systemd/system/mihomo.service",
+            "/private/var/lib/mihomo",
+            "C:/Program Files/Mihomo/mihomo.exe",
+        ] {
+            assert!(!hard_delete_path_native(path), "{path}");
+        }
+    }
+
+    #[test]
+    fn system_tree_deletion_is_denied_before_permission_mode_review() {
+        let registry = super::super::ToolRegistryNative::from_builtin_manifest().unwrap();
+        for command in [
+            "rm -rf /usr/libexec",
+            "sudo rm -rf '/System/Volumes'",
+            "cd /usr && rm -rf ./libexec",
+            "rm -rf /usr/local/bin/../../libexec",
+            "rm -rf /private/etc/systemd/system",
+            "rm -rf /private/var/lib",
+            "rm -rf /System/Library/Frameworks",
+            "rm -rf /private/etc/./systemd/system",
+        ] {
+            let mut call = terminal_call();
+            call.tool_name = "exec_command".into();
+            call.arguments = json!({"command":command, "explanation":"Check system tree policy", "channel":"direct"});
+            let scope = inspect_call_policy_scope_native(&call).unwrap();
+            let effect = super::super::assess_effect_native(
+                &registry.executable("exec_command").unwrap().descriptor,
+                &call,
+            )
+            .unwrap();
+            // This check precedes review for every mode, including Full access.
+            assert!(
+                enforce_native_call_policy_native(&call, &effect, &scope)
+                    .unwrap_err()
+                    .starts_with("AGENT_CRITICAL_OPERATION_DENIED"),
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn concrete_system_deletion_uses_permission_mode_without_weakening_other_writes() {
+        let mut call = terminal_call();
+        call.tool_name = "exec_command".into();
+        call.arguments = json!({
+            "command": "systemctl stop mihomo; rm -rf /usr/local/bin/mihomo /etc/systemd/system/mihomo.service /root/mihomo_config /etc/mihomo",
+            "explanation": "Uninstall the specified mihomo resources",
+            "channel": "direct"
+        });
+        let scope = inspect_call_policy_scope_native(&call).unwrap();
+        let registry = super::super::ToolRegistryNative::from_builtin_manifest().unwrap();
+        let destructive = super::super::assess_effect_native(
+            &registry.executable("exec_command").unwrap().descriptor,
+            &call,
+        )
+        .unwrap();
+        assert_eq!(destructive.kind, AgentEffectKindNative::Destructive);
+        assert!(enforce_native_call_policy_native(&call, &destructive, &scope).is_ok());
+        for mode in [
+            AgentPermissionModeNative::RequestApproval,
+            AgentPermissionModeNative::ScopedAutopilot,
+            AgentPermissionModeNative::Operator,
+        ] {
+            assert_eq!(
+                super::super::auto_review::review_call(mode, &call, &destructive, &scope)
+                    .requires_approval,
+                mode != AgentPermissionModeNative::Operator
+            );
+        }
+        call.tool_name = "trash_file".into();
+        call.arguments = json!({"path":"/etc/mihomo/config.yaml", "expectedSha256":"0".repeat(64)});
+        let scope = inspect_call_policy_scope_native(&call).unwrap();
+        let destructive = super::super::assess_effect_native(
+            &registry.executable("trash_file").unwrap().descriptor,
+            &call,
+        )
+        .unwrap();
+        assert!(enforce_native_call_policy_native(&call, &destructive, &scope).is_ok());
+        for mode in [
+            AgentPermissionModeNative::RequestApproval,
+            AgentPermissionModeNative::ScopedAutopilot,
+            AgentPermissionModeNative::Operator,
+        ] {
+            assert_eq!(
+                super::super::auto_review::review_call(mode, &call, &destructive, &scope)
+                    .requires_approval,
+                mode != AgentPermissionModeNative::Operator
+            );
+        }
+        call.arguments = json!({"path":"/etc", "expectedSha256":"0".repeat(64)});
+        let scope = inspect_call_policy_scope_native(&call).unwrap();
+        assert!(enforce_native_call_policy_native(&call, &destructive, &scope).is_err());
     }
 
     #[test]

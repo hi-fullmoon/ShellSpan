@@ -116,8 +116,12 @@ The stored `operator` / `fullAccess` values retain their original full-access
 approval semantics and UI name. Operator skips per-call approval, including for
 sensitive file operations. Other modes keep their approval rules. Native deny
 rules still apply in every mode. Structured writes to protected
-system resources and local ShellSpan application storage are denied. Literal
-system-deletion/formatting commands are rejected where recognized; complex
+system resources (except concrete resources deleted through `trash_file`) and
+local ShellSpan application storage are denied. Deleting concrete application
+resources such as `/usr/local/bin/mihomo` or `/etc/systemd/system/mihomo.service`
+uses normal approval: request-approval and automatic modes require approval,
+while Full access auto-authorizes. Recognized deletion of whole protected system
+trees, kernel resources and formatting commands remains denied in every mode; complex
 scripts are not proven safe by this check; operator nevertheless auto-authorizes
 them as requested by the user.
 
@@ -128,6 +132,12 @@ and pipeline cwd changes local, and normalizes `.`/`..` before checking delete
 targets. Unrelated dynamic arguments do not suppress checks on known targets.
 The scan has explicit depth and cwd-state limits. It does not execute expansions,
 resolve arbitrary variable values or provide a general shell sandbox.
+
+Whole-tree protection includes `/usr/libexec`, `/usr/local/libexec`, `/lib`
+and `/lib64`. The OS-owned `/System` namespace is protected recursively,
+including `/System/Volumes`. The fixed macOS `/private/etc` and `/private/var`
+aliases use the same delete policy as `/etc` and `/var`; concrete application
+resources beneath those aliases still follow the session permission mode.
 
 Local structured-file review and execution share the same no-follow root-chain
 validation. A symlink ancestor is rejected before approval and rechecked during
@@ -146,7 +156,8 @@ Reading a protected source for a backup does not itself become a protected write
 root and appropriate role capability. Arguments are exactly `{path,
 expectedSha256}`. Use `read_file` with `metadataOnly` first. The file must be a
 regular file within that root, at most 64 MiB; directories, symlink traversal,
-remote targets, changed digests and protected system files are rejected. The
+remote targets, changed digests, kernel resources and ShellSpan application
+storage are rejected. Concrete system-directory files use normal approval. The
 digest and path are rechecked before dispatch to the platform trash API. The
 result is `{path, trashed: true, recovery: "systemTrash"}` only after success.
 Operator may automatically trash a file; other modes approve
