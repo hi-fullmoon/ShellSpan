@@ -2,6 +2,18 @@
 
 Notable changes to ShellSpan from v2.1.0 onward are documented in this file.
 
+## [v2.3.1](https://github.com/hi-fullmoon/ShellSpan/releases/tag/v2.3.1) - 2026-10-16
+
+### 体验改进
+
+- 调整 AI 面板的任务列表、提问区域、上下文用量和控件提示，改善窄面板中的显示与操作体验，并简化通知操作按钮。
+
+### 问题修复
+
+- 修复切换会话后，过期审批请求的处理结果可能影响当前请求的问题。
+- 修复停止请求失败时，已经接收的消息被误判为发送失败并阻塞后续消息的问题；切换或关闭面板后仍能正确恢复会话停止状态，并保留草稿和错误提示。
+- 修复删除具体系统目录应用资源时未正确遵循会话权限模式的问题：请求审批和自动模式仍需确认，完全访问模式可自动授权；整棵系统目录、内核资源和 ShellSpan 应用数据继续受保护，结构化文件删除仍使用系统回收站。
+
 ## [v2.3.0](https://github.com/hi-fullmoon/ShellSpan/releases/tag/v2.3.0) - 2026-10-15
 
 ### 新增功能
