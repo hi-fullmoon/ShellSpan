@@ -1,37 +1,37 @@
-# 贡献指南
+# Contributing
 
-感谢你的贡献！请遵循以下规范，以确保代码质量和一致性。
+Thank you for contributing! Please follow these guidelines to maintain code quality and consistency.
 
-## 开发环境
+## Development Environment
 
-- **Node.js**: >=24 <25（推荐使用 nvm）
-- **包管理器**: pnpm 10.33.0
-- **Rust**: latest stable（用于 Tauri）
+- **Node.js**: >=24 <25 (nvm recommended)
+- **Package manager**: pnpm 10.33.0
+- **Rust**: latest stable (for Tauri)
 
 ```bash
-# 安装依赖
+# Install dependencies
 pnpm install
 
-# 启动开发服务器
+# Start the development server
 pnpm dev
 
-# 启动 Tauri 开发模式
+# Start Tauri in development mode
 pnpm tauri:dev
 
-# 构建
+# Build
 pnpm build
 
-# 运行测试
+# Run tests
 pnpm test
 ```
 
-## 提交规范
+## Commit Guidelines
 
-> **注意**: 所有 git commit message 必须使用英文。
+> **Note**: All Git commit messages must be written in English.
 
-我们遵循 [Conventional Commits](https://www.conventionalcommits.org/) 规范。
+We follow the [Conventional Commits](https://www.conventionalcommits.org/) specification.
 
-### 格式
+### Format
 
 ```
 <type>(<scope>): <subject>
@@ -41,36 +41,36 @@ pnpm test
 <footer>
 ```
 
-### 类型
+### Types
 
-| 类型 | 用途 | 示例 |
+| Type | Purpose | Example |
 |------|------|------|
-| `feat` | 新功能 | `feat(term): add split pane support` |
-| `fix` | 修复 bug | `fix(ui): resolve button click issue` |
-| `docs` | 文档更新 | `docs(readme): update install guide` |
-| `style` | 代码格式 | `style: format code` |
-| `refactor` | 代码重构 | `refactor(store): refactor settings store` |
-| `perf` | 性能优化 | `perf(term): optimize terminal rendering` |
-| `test` | 测试相关 | `test(hooks): add useTerminal tests` |
-| `chore` | 工具/构建 | `chore(deps): upgrade dependencies` |
-| `ci` | CI 配置 | `ci: add automated tests` |
-| `build` | 构建系统 | `build: configure vite optimization` |
-| `revert` | 回滚 | `revert: revert feat(term) split pane` |
+| `feat` | New features | `feat(term): add split pane support` |
+| `fix` | Bug fixes | `fix(ui): resolve button click issue` |
+| `docs` | Documentation updates | `docs(readme): update install guide` |
+| `style` | Code formatting | `style: format code` |
+| `refactor` | Code refactoring | `refactor(store): refactor settings store` |
+| `perf` | Performance improvements | `perf(term): optimize terminal rendering` |
+| `test` | Tests | `test(hooks): add useTerminal tests` |
+| `chore` | Tooling and maintenance | `chore(deps): upgrade dependencies` |
+| `ci` | CI configuration | `ci: add automated tests` |
+| `build` | Build system | `build: configure vite optimization` |
+| `revert` | Reverts | `revert: revert feat(term) split pane` |
 
-### 作用域
+### Scopes
 
-- `ui` - UI 组件
-- `term` - 终端功能
-- `settings` - 设置面板
-- `i18n` - 国际化
-- `store` - Zustand 状态存储
-- `hook` - 自定义 Hook
-- `tauri` - Tauri 后端/命令
-- `deps` - 依赖更新
-- `build` - 构建配置
-- `test` - 测试
+- `ui` - UI components
+- `term` - Terminal features
+- `settings` - Settings panel
+- `i18n` - Internationalization
+- `store` - Zustand stores
+- `hook` - Custom hooks
+- `tauri` - Tauri backend and commands
+- `deps` - Dependency updates
+- `build` - Build configuration
+- `test` - Tests
 
-### 示例
+### Examples
 
 ```
 feat(term): add split pane support
@@ -93,100 +93,100 @@ fix(ui): resolve settings panel scroll lag
 chore(deps): upgrade React to 19.2.5
 ```
 
-## 代码规范
+## Coding Standards
 
 ### TypeScript
 
-- 启用严格模式 (strict: true)
-- 禁用 `any`，使用 `unknown` + 类型守卫
-- interface: PascalCase（例如 `TerminalConfig`）
-- type 别名: PascalCase（例如 `ThemeType`）
+- Enable strict mode (`strict: true`).
+- Do not use `any`; use `unknown` with type guards.
+- Use PascalCase for interfaces (e.g., `TerminalConfig`).
+- Use PascalCase for type aliases (e.g., `ThemeType`).
 
 ### React
 
-- 使用箭头函数的函数组件
-- props 类型命名为 `XxxProps`（例如 `ButtonProps`）
-- 自定义 Hook 以 `use` 为前缀
-- useEffect 依赖数组必须完整
-- 使用函数式状态更新
+- Use arrow functions for function components.
+- Name props types `XxxProps` (e.g., `ButtonProps`).
+- Prefix custom hooks with `use`.
+- Include all dependencies in `useEffect` dependency arrays.
+- Use functional state updates.
 
-### 文件组织
+### File Organization
 
 ```
 src/
-  components/       # 可复用 UI 组件
+  components/       # Reusable UI components
     Button.tsx
     Terminal/
       index.tsx
       Terminal.tsx
       TerminalHeader.tsx
       types.ts
-  hooks/            # 自定义 Hooks
+  hooks/            # Custom hooks
     useTerminal.ts
-  stores/           # Zustand 状态存储
+  stores/           # Zustand stores
     settingsStore.ts
-  lib/              # 工具函数
+  lib/              # Utilities
     utils.ts
-  types.ts          # 全局类型
-  locales/          # 国际化
+  types.ts          # Global types
+  locales/          # Internationalization
 ```
 
-### 命名规范
+### Naming Conventions
 
-- 组件文件: PascalCase.tsx
-- 工具文件: camelCase.ts
-- 常量: UPPER_SNAKE_CASE
-- CSS 类: 优先使用 Tailwind，自定义类使用 kebab-case
+- Component files: PascalCase.tsx
+- Utility files: camelCase.ts
+- Constants: UPPER_SNAKE_CASE
+- CSS classes: prefer Tailwind; use kebab-case for custom classes.
 
-## 提交前检查清单
+## Pre-commit Checklist
 
-提交前请确认：
+Before committing, confirm that:
 
-- [ ] `pnpm build` 成功（tsc + vite build）
-- [ ] `pnpm test` 通过
-- [ ] 无 `console.log` / `debugger` / `TODO`
-- [ ] commit message 符合规范
-- [ ] Tauri 命令已测试（如修改了 `src-tauri/`）
+- [ ] `pnpm build` succeeds (tsc + vite build).
+- [ ] `pnpm test` passes.
+- [ ] No `console.log` / `debugger` / `TODO` remains.
+- [ ] The commit message follows the guidelines.
+- [ ] Tauri commands have been tested (if `src-tauri/` was modified).
 
-## 自动化提交前检查
+## Automated Pre-commit Checks
 
-Git Hooks 已配置为自动检查：
+Git hooks are configured to perform these checks automatically:
 
-1. **提交信息格式** - 必须符合 Conventional Commits
-2. **调试代码检测** - 标记 console.log / debugger / TODO
-3. **大文件警告** - 改动超过 500 行时警告
-4. **TypeScript 检查** - 运行 `tsc --noEmit`
+1. **Commit message format** - Require Conventional Commits.
+2. **Debug code detection** - Flag console.log / debugger / TODO.
+3. **Large change warning** - Warn when changes exceed 500 lines.
+4. **TypeScript check** - Run `tsc --noEmit`.
 
-## 代码审查
+## Code Review
 
-发布版本、整理 changelog 和处理失败发布请参考 [发布流程](./docs/releasing.md)。
+See the [release process](./docs/releasing.md) for publishing releases, maintaining the changelog, and handling failed releases.
 
-所有提交都需要经过代码审查。审查重点：
+All contributions require code review. Reviews focus on:
 
-### 安全性
-- Tauri 命令参数校验
-- 不得暴露敏感路径
-- 终端输入净化
+### Security
+- Validate Tauri command arguments.
+- Do not expose sensitive paths.
+- Sanitize terminal input.
 
-### 性能
-- 避免不必要的重渲染
-- 大数据列表使用虚拟滚动
-- 终端输出缓冲区管理
+### Performance
+- Avoid unnecessary re-renders.
+- Use virtualization for large lists.
+- Manage terminal output buffers.
 
-### 可访问性
-- 键盘导航
-- 正确的 ARIA 标签
-- 颜色对比度
+### Accessibility
+- Keyboard navigation
+- Correct ARIA labels
+- Color contrast
 
-## 问题反馈
+## Reporting Issues
 
-发现 bug 或有功能建议？请创建 issue：
+Found a bug or have a feature suggestion? Open an issue:
 
-1. 使用清晰的标题
-2. 描述复现步骤（针对 bug）
-3. 说明预期行为
-4. 提供环境信息（操作系统、Node 版本等）
+1. Use a clear title.
+2. Describe the steps to reproduce (for bugs).
+3. Explain the expected behavior.
+4. Include environment details (operating system, Node.js version, etc.).
 
-## 许可证
+## License
 
-提交代码即表示你同意以 MIT 许可证授权。
+By contributing code, you agree to license your contributions under the MIT License.
