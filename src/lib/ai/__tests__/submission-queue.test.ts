@@ -60,6 +60,53 @@ describe('continuous admission', () => {
     expect(state.pendingSubmissions.map(item => item.sessionId)).toEqual(['created', 'created', 'created']);
   });
 
+  it('keeps a durable admission successful when its trailing stop fails and drains later work', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const received: string[] = [];
+    const paused: boolean[] = [];
+    const failures: unknown[] = [];
+    const stopError = new Error('Stop disconnected');
+    const queue = new AiSubmissionQueue('session', async (sessionId, input) => {
+      received.push(input.clientOperationId);
+      paused.push(Boolean(input.paused));
+      if (input.clientOperationId === 'A') await gate;
+      return { sessionId: sessionId!, clientOperationId: input.clientOperationId, mode: input.mode };
+    }, async () => { throw stopError; }, (sessionId, error) => {
+      expect(sessionId).toBe('session');
+      failures.push(error);
+    });
+    const input = (id: string): AiSubmitInput => ({ clientOperationId: id, content: id, mode: 'nextTurn',
+      provider: { id: 'local', kind: 'openAiCompatible', profile: 'generic', baseUrl: '', model: 'local', requiresApiKey: false } });
+    const first = queue.enqueue('A', async () => input('A'));
+    const later = queue.enqueue('B', async () => input('B'));
+    await Promise.resolve();
+    queue.pause();
+    release();
+    expect((await first).clientOperationId).toBe('A');
+    expect((await later).clientOperationId).toBe('B');
+    await queue.enqueue('C', async () => input('C'));
+    expect(received).toEqual(['A', 'B', 'C']);
+    expect(paused).toEqual([false, true, false]);
+    expect(failures).toEqual([stopError]);
+  });
+
+  it('preserves a stop failure when a committed message is reconciled later', () => {
+    let state = createAiComposerState({ sessionId: 'session', runtimeStatus: 'running', draft: 'A' });
+    state = reduceAiComposer(state, { type: 'submit.requested', gesture: 'keyboard', accelerated: false,
+      clientOperationId: 'A', now: 1, hasProvider: true, canCreateSession: true }).state;
+    const error = { kind: 'offline' as const, message: 'Stop disconnected', retryable: true };
+    state = reduceAiComposer(state, { type: 'error.reported', error }).state;
+    state = reduceAiComposer(state, { type: 'submit.accepted', receipt: {
+      sessionId: 'session', clientOperationId: 'A', mode: 'nextTurn',
+    } }).state;
+    state = reduceAiComposer(state, { type: 'submit.committed', clientOperationId: 'A' }).state;
+    expect(state.pendingSubmissions).toEqual([]);
+    expect(state.failedDrafts).toEqual([]);
+    expect(state.lastError).toBe(error);
+    expect(reduceAiComposer(state, { type: 'error.dismissed' }).state.lastError).toBeNull();
+  });
+
   it('serializes actual asynchronous work and binds later work to the first receipt', async () => {
     const order: string[] = [];
     const owners: (string | null)[] = [];

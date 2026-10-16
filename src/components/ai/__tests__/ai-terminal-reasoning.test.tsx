@@ -42,7 +42,9 @@ describe('terminal reasoning display', () => {
     expect(view.container.querySelector('.ai-reasoning-body p')).toBe(firstParagraph);
     expect(mutations).toHaveLength(0);
     expect(view.container.querySelector('.ai-reasoning-body [data-reveal]')).not.toBeNull();
-    expect(view.container.querySelector('.ai-reasoning-body')).toHaveTextContent('许可证');
+    expect(view.container.querySelector('.ai-reasoning-body')).toHaveTextContent(
+      'By contributing code, you agree to license your contributions under the MIT License.',
+    );
     observer.disconnect();
   });
 

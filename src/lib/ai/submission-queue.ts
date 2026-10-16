@@ -18,7 +18,8 @@ export class AiSubmissionQueue {
 
   constructor(sessionId: string | null, private readonly submit: (
     sessionId: string | null, input: AiSubmitInput<'agent'>,
-  ) => Promise<AiSubmitReceipt>, private readonly stop?: (sessionId: string) => Promise<void>) {
+  ) => Promise<AiSubmitReceipt>, private readonly stop?: (sessionId: string) => Promise<void>,
+  private readonly onStopError?: (sessionId: string, error: unknown) => void) {
     this.sessionId = sessionId;
   }
 
@@ -57,7 +58,15 @@ export class AiSubmissionQueue {
           const input = { ...entry.input, paused: entry.paused || entry.input.paused };
           const receipt = await this.submit(this.sessionId, input);
           this.sessionId = receipt.sessionId;
-          if (entry.paused && !input.paused) await this.stop?.(receipt.sessionId);
+          if (entry.paused && !input.paused) {
+            try {
+              await this.stop?.(receipt.sessionId);
+            } catch (error) {
+              // Admission is already durable. A control failure must not retain
+              // this entry as a failed send or block later paused admissions.
+              this.onStopError?.(receipt.sessionId, error);
+            }
+          }
           if (receipt.paused) this.pause();
           this.entries.shift();
           entry.resolve(receipt);

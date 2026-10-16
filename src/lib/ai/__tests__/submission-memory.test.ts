@@ -73,3 +73,40 @@ it('uses the new view settlement when a previous view worker finishes later', ()
   memory.remember(oldContext, late);
   expect(memory.stateFor(newContext)?.pendingSubmissions.map(item => item.clientOperationId)).toEqual(['B']);
 });
+
+it.each(['stop.succeeded', 'stop.failed'] as const)('settles %s for a hidden session without changing its successor', type => {
+  const memory = submissionMemoryFor({});
+  const original = { key: 'terminal:stop' };
+  const successor = { key: original.key };
+  const stopping = reduceAiComposer(createAiComposerState({ sessionId: 'A', runtimeStatus: 'running' }),
+    { type: 'stop.requested' }).state;
+  memory.remember(original, stopping);
+  memory.close(original);
+  const other = createAiComposerState({ sessionId: 'B', draft: 'B draft', runtimeStatus: 'running' });
+  memory.remember(successor, other);
+  const error = { kind: 'offline' as const, message: 'Stop disconnected', retryable: true };
+  memory.settleSession(original, 'A', type === 'stop.failed' ? { type, error } : { type });
+  expect(memory.stateFor(successor)).toBe(other);
+  const restored = createAiComposerState({ ...memory.sessionStates.get('A'), draft: 'continue' });
+  expect(restored.phase).toBe(type === 'stop.succeeded' ? 'idle' : 'error');
+  expect(restored.lastError).toEqual(type === 'stop.failed' ? error : null);
+  const synchronized = reduceAiComposer(restored, { type: 'runtime.synchronized', sessionId: 'A',
+    status: type === 'stop.succeeded' ? 'cancelled' : 'running', terminal: false, waitingApproval: false }).state;
+  const submission = reduceAiComposer(synchronized, { type: 'submit.requested', gesture: 'keyboard',
+    accelerated: false, clientOperationId: 'continue', now: 1, hasProvider: true, canCreateSession: true });
+  expect(submission.effects[0].type).toBe('submit');
+});
+
+it('settles stop against the latest visit and preserves its draft', () => {
+  const memory = submissionMemoryFor({});
+  const oldVisit = { key: 'terminal:revisit-stop' };
+  const newVisit = { key: oldVisit.key };
+  const stopping = reduceAiComposer(createAiComposerState({ sessionId: 'A', runtimeStatus: 'running' }),
+    { type: 'stop.requested' }).state;
+  memory.remember(oldVisit, stopping);
+  memory.remember(newVisit, { ...stopping, draft: 'new visit draft' });
+  memory.settleSession(oldVisit, 'A', { type: 'stop.succeeded' });
+  expect(memory.stateFor(newVisit)).toMatchObject({ phase: 'idle', draft: 'new visit draft', sessionId: 'A' });
+  memory.settleSession(oldVisit, 'missing-session', { type: 'stop.succeeded' });
+  expect(memory.sessionStates.has('missing-session')).toBe(false);
+});

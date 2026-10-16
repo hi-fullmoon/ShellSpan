@@ -772,9 +772,17 @@ export function useAiSessionController({
     if (effect.type === 'stop') {
       void imageDraft.cancel(true);
       (submissionQueues.current.get(context) ?? sessionSubmissionQueues.current.get(effect.sessionId))?.pause();
+      const settleStop = (event: Extract<AiComposerEvent, { type: 'stop.succeeded' | 'stop.failed' }>): void => {
+        if (mountedRef.current && submissionContextRef.current.key === context.key
+          && composerRef.current.sessionId === effect.sessionId) {
+          dispatch(event);
+        } else {
+          submissionMemory.settleSession(context, effect.sessionId, event);
+        }
+      };
       void adapter.stop(effect.sessionId).then(
-        () => { if (isCurrent()) dispatch({ type: 'stop.succeeded' }); },
-        (error: unknown) => { if (isCurrent()) dispatch({ type: 'stop.failed', error: normalizeAiSessionError(error) }); },
+        () => settleStop({ type: 'stop.succeeded' }),
+        (error: unknown) => settleStop({ type: 'stop.failed', error: normalizeAiSessionError(error) }),
       );
       return;
     }
@@ -814,7 +822,10 @@ export function useAiSessionController({
     let queue = (payload.sessionId ? sessionSubmissionQueues.current.get(payload.sessionId) : undefined)
       ?? submissionQueues.current.get(context);
     if (!queue) {
-      queue = new AiSubmissionQueue(payload.sessionId, (sessionId, input) => adapter.submit(sessionId, input), sessionId => adapter.stop(sessionId));
+      queue = new AiSubmissionQueue(payload.sessionId, (sessionId, input) => adapter.submit(sessionId, input),
+        sessionId => adapter.stop(sessionId), (sessionId, error) => {
+          submissionMemory.settleSession(context, sessionId, { type: 'error.reported', error: normalizeAiSessionError(error) });
+        });
     }
     submissionQueues.current.set(context, queue);
     if (payload.sessionId) sessionSubmissionQueues.current.set(payload.sessionId, queue);
@@ -1825,7 +1836,10 @@ export function useAiSessionController({
             queued: composer.runtimeStatus === 'running' || composer.runtimeStatus === 'waiting' });
           if (!op.create) {
             const queue = submissionQueues.current.get(context)
-              ?? new AiSubmissionQueue(op.sessionId, (sessionId, input) => adapter.submit(sessionId, input), sessionId => adapter.stop(sessionId));
+              ?? new AiSubmissionQueue(op.sessionId, (sessionId, input) => adapter.submit(sessionId, input),
+                sessionId => adapter.stop(sessionId), (sessionId, error) => {
+                  submissionMemory.settleSession(context, sessionId, { type: 'error.reported', error: normalizeAiSessionError(error) });
+                });
             queue.bindSession(op.sessionId);
             submissionQueues.current.set(context, queue);
           }

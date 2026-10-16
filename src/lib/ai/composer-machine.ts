@@ -347,7 +347,9 @@ export function reduceAiComposer(
           phase: state.phase === 'stopping' ? 'stopping' : state.detached !== null && state.detached.clientOperationId !== event.clientOperationId
             ? 'submitting'
             : runtimePhase(state),
-          lastError: remainingFailedDrafts.length === 0 ? null : state.lastError,
+          lastError: remainingFailedDrafts.length === 0 && state.failedDrafts.some(item => (
+            item.id === event.clientOperationId && item.error === state.lastError
+          )) ? null : state.lastError,
         },
         effects: [],
       };

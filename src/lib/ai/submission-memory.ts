@@ -1,5 +1,5 @@
 import { createAgentSessionAdapter } from './agent-session-adapter';
-import type { AiComposerState } from './composer-machine';
+import { reduceAiComposer, type AiComposerEvent, type AiComposerState } from './composer-machine';
 import type { AiCreateSessionInput, AiSessionAdapter, AiSubmitInput } from './session-adapter';
 import type { AiSubmissionQueue } from './submission-queue';
 
@@ -21,6 +21,13 @@ export class AiSubmissionMemory {
     this.ledger.set(context, state);
     if (state.sessionId) this.sessionStates.set(state.sessionId, state);
     for (const listener of [...this.listeners]) listener(context, state);
+  }
+
+  /** Control receipts belong to the session, including after navigation/unmount. */
+  settleSession(context: AiSubmissionContext, sessionId: string, event: AiComposerEvent): void {
+    const previous = this.sessionStates.get(sessionId);
+    if (!previous) return;
+    this.remember(context, reduceAiComposer(previous, event).state);
   }
 
   close(context: AiSubmissionContext): void { this.closedWorkspaces.set(context.key, context); }
