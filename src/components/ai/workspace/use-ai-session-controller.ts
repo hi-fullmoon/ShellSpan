@@ -4,6 +4,7 @@ import { canSwitchFocusTarget } from '@/lib/ai/focus-target';
 import { toast } from 'sonner';
 import { latestFailureRecovery } from '@/lib/ai/failure-recovery';
 import { aiErrorMessage } from '@/lib/ai/error-message';
+import { ApprovalDecisionGuard } from '@/lib/ai/approval-decision';
 
 import { sharedAgentSessionAdapter, submissionMemoryFor, type AiSubmissionContext } from '@/lib/ai/submission-memory';
 import { AiSubmissionQueue } from '@/lib/ai/submission-queue';
@@ -346,6 +347,7 @@ export function useAiSessionController({
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const deletePendingRef = useRef(false);
   const [approvalDecision, setApprovalDecision] = useState<'approve' | 'reject' | null>(null);
+  const [approvalGuard] = useState(() => new ApprovalDecisionGuard());
   const [approvalError, setApprovalError] = useState<string | null>(null);
   const [approvalArgumentsPreview, setApprovalArgumentsPreview] = useState<Readonly<{
     key: string;
@@ -538,6 +540,9 @@ export function useAiSessionController({
   }, [navigationDraftKey]);
 
   const resetComposer = useCallback((summary?: AiSessionSummary, restoreWorkspace = false, restoredSessionId?: string): void => {
+    approvalGuard.reset();
+    setApprovalDecision(null);
+    setApprovalError(null);
     saveCurrentDraft();
     const recalled = restoreWorkspace ? submissionMemory.reopen(workspaceScopeKey) : undefined;
     submissionContextRef.current = recalled?.context ?? { key: workspaceScopeKey };
@@ -567,7 +572,7 @@ export function useAiSessionController({
       expectedNextSeq: null, delivery: item.state === 'confirming' ? 'confirming' : 'pending' })));
     setComposer(next);
     setAnnouncement(null);
-  }, [navigationDraftKey, saveCurrentDraft, submissionMemory, updateOptimistic, workspaceScopeKey]);
+  }, [approvalGuard, navigationDraftKey, saveCurrentDraft, submissionMemory, updateOptimistic, workspaceScopeKey]);
 
   const coldSkillSession = useRef<Promise<AiSessionView> | null>(null);
   const terminalDirectory = useRef<{
@@ -1176,9 +1181,14 @@ export function useAiSessionController({
     ? approvalIdentityKey(view.pendingApproval)
     : null;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    approvalGuard.reset();
     setApprovalDecision(null);
     setApprovalError(null);
+    return () => { approvalGuard.reset(); };
+  }, [approvalGuard, pendingApprovalKey, workspaceScopeKey, openedSessionId]);
+
+  useEffect(() => {
     const approval = view?.pendingApproval;
     if (!approval || !needsVolatileApprovalArguments(approval)) {
       setApprovalArgumentsPreview(null);
@@ -1594,15 +1604,25 @@ export function useAiSessionController({
 
   const decideApproval = useCallback((decision: 'approve' | 'reject'): void => {
     const approval = viewRef.current?.pendingApproval;
-    if (!approval || approvalDecision !== null) return;
+    if (!approval) return;
+    const request = approvalGuard.begin(submissionContextRef.current, approvalIdentityKey(approval), decision);
+    if (!request) return;
     setApprovalDecision(decision);
     setApprovalError(null);
-    const operation = decision === 'approve' ? adapter.approve(approval) : adapter.reject(approval);
-    void operation.catch((error: unknown) => {
+    const failed = (error: unknown): void => {
+      const current = viewRef.current?.pendingApproval;
+      if (!mountedRef.current || !approvalGuard.fail(request, submissionContextRef.current,
+        current ? approvalIdentityKey(current) : null)) return;
       setApprovalDecision(null);
       setApprovalError(normalizeAiSessionError(error).message);
-    });
-  }, [adapter, approvalDecision]);
+    };
+    try {
+      const operation = decision === 'approve' ? adapter.approve(approval) : adapter.reject(approval);
+      void operation.catch(failed);
+    } catch (error) {
+      failed(error);
+    }
+  }, [adapter, approvalGuard]);
 
   const loadOlder = useCallback((): void => {
     const current = viewRef.current;
