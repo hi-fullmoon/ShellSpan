@@ -1,7 +1,4 @@
-import { RefreshCwIcon, XIcon } from 'lucide-react';
-
 import { Button } from '@/components/ui/button';
-import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/hooks/useI18n';
 import { aiErrorMessage } from '@/lib/ai/error-message';
 import type { AiComposerState } from '@/lib/ai/composer-machine';
@@ -45,10 +42,9 @@ export function AiWorkspaceErrorNotices({
                   .format(syncRecovery.lastSyncedAt),
               })}</>}
             </span>}
-            {onRetrySync && <Button type="button" variant="outline" size="xs" className="h-5 self-start text-[10px] [&_svg]:size-2.5"
+            {onRetrySync && <Button type="button" variant="outline" size="xs" className="h-5 self-start text-[10px]"
               disabled={syncRecovery?.retrying} aria-busy={syncRecovery?.retrying || undefined}
               onClick={() => { void onRetrySync(); }}>
-              {syncRecovery?.retrying ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
               {t(syncRecovery?.retrying ? 'ai.error.streamSyncRetrying' : 'ai.error.streamSyncRetry')}
             </Button>}
           </span>
@@ -60,11 +56,11 @@ export function AiWorkspaceErrorNotices({
           action={onDismissError && (
             <Button
               variant="ghost"
-              size="icon-xs"
+              size="xs"
               aria-label={t('ai.workspace.recovery.dismiss')}
               onClick={onDismissError}
             >
-              <XIcon />
+              {t('ai.workspace.recovery.dismiss')}
             </Button>
           )}
         >
@@ -76,9 +72,9 @@ export function AiWorkspaceErrorNotices({
           key={failed.id}
           title={t('ai.workspace.recovery.title')}
           label={t('ai.workspace.failedDraft')}
-          action={onRetryFailedDraft && <Button type="button" variant="ghost" size="xs" className="h-5 shrink-0 text-[10px] [&_svg]:size-2.5"
+          action={onRetryFailedDraft && <Button type="button" variant="ghost" size="xs" className="h-5 shrink-0 text-[10px]"
             disabled={composerState.phase === 'stopping'} onClick={() => onRetryFailedDraft(failed.id)}>
-            <RefreshCwIcon data-icon="inline-start" />{t('common.retry')}
+            {t('common.retry')}
           </Button>}
         >
           {failed.content || (failed.hasImages ? t('ai.workspace.images.attachments') : '')}

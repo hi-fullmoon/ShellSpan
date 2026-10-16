@@ -84,15 +84,13 @@ try {
       assert.equal(await button.count(), 1);
       const geometry = await button.evaluate(element => {
         const rect = element.getBoundingClientRect();
-        const icon = element.querySelector('svg').getBoundingClientRect();
         const row = element.closest('.ai-turn-error').getBoundingClientRect();
-        return { height: rect.height, icon: icon.width, gap: getComputedStyle(element).columnGap,
+        return { height: rect.height, icons: element.querySelectorAll('svg').length,
           fits: rect.right <= row.right && rect.left >= row.left,
           overflow: document.documentElement.scrollWidth > innerWidth };
       });
       assert.equal(geometry.height, 24);
-      assert.equal(geometry.icon, 12);
-      assert.equal(geometry.gap, '4px');
+      assert.equal(geometry.icons, 0);
       assert.equal(geometry.fits, true);
       assert.equal(geometry.overflow, false);
       const details = page.locator('.ai-turn-process').last().locator('.ai-error-details [data-slot="collapsible-trigger"]');

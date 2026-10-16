@@ -353,8 +353,10 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     const availabilityNotice = screen.getByText(/The current model configuration/).closest('[role="status"]');
     expect(availabilityNotice).toHaveAttribute('data-size', 'sm');
     const dismiss = screen.getByRole('button', { name: 'Dismiss error' });
-    expect(dismiss.closest('[data-slot="alert-action"]')).toHaveClass('absolute', 'top-1/2', '-translate-y-1/2');
-    expect(operationError?.querySelector('[data-slot="alert-description"]')).not.toContainElement(dismiss);
+    expect(dismiss.parentElement).toHaveClass('shrink-0', 'items-center');
+    expect(operationError?.querySelector('[data-slot="alert-description"]')).toContainElement(dismiss);
+    expect(dismiss).toHaveTextContent('Dismiss error');
+    expect(dismiss.querySelector('svg')).toBeNull();
     expect(operationError).toHaveClass('bg-destructive/5', 'items-center');
     expect(screen.getAllByText('Action failed')[0]).toHaveClass('sr-only');
     expect(screen.getByRole('textbox').textContent).toBe('new input');

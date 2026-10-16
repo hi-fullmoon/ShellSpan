@@ -1,6 +1,6 @@
 import { CircleAlertIcon } from 'lucide-react';
 
-import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
 
 export interface AiErrorNoticeProps
@@ -40,8 +40,8 @@ export function AiErrorNotice({
           )}
           <span>{children}</span>
         </span>
+        {action && <span className="-my-1 flex shrink-0 items-center">{action}</span>}
       </AlertDescription>
-      {action && <AlertAction className="top-1/2 flex -translate-y-1/2 items-center">{action}</AlertAction>}
     </Alert>
   );
 }

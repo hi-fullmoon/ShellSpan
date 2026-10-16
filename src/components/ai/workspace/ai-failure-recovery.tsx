@@ -1,7 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react';
-import { RefreshCwIcon, SettingsIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiFailureRecovery } from '@/lib/ai/failure-recovery';
 
@@ -34,14 +32,13 @@ export function AiFailureRecoveryAction({ turnId }: { readonly turnId: string | 
   }
   if (recovery.kind === 'settings') {
     return context.onSettings && <Button type="button" variant="ghost" size="xs" disabled={context.busy} onClick={context.onSettings}>
-      <SettingsIcon data-icon="inline-start" />{t('ai.error.recovery.settings')}
+      {t('ai.error.recovery.settings')}
     </Button>;
   }
   if (!context.onRetry) return null;
   const seconds = Math.max(0, Math.ceil(((retryAt ?? 0) - now) / 1000));
   return <Button type="button" variant="ghost" size="xs" disabled={context.busy || seconds > 0}
     aria-busy={context.busy || undefined} onClick={() => context.onRetry?.(recovery.turnId)}>
-    {context.busy ? <Spinner data-icon="inline-start" aria-hidden="true" /> : <RefreshCwIcon data-icon="inline-start" />}
     {context.busy ? t('ai.error.recovery.retrying') : seconds > 0 ? t('ai.error.recovery.cooldown', { seconds }) : t('common.retry')}
   </Button>;
 }

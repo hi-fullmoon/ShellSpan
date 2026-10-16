@@ -10,22 +10,26 @@ try {
     const { default: React } = await import('/node_modules/.vite/deps/react.js');
     const { default: ReactDOM } = await import('/node_modules/.vite/deps/react-dom_client.js');
     const { AiErrorNotice } = await import('/src/components/ai/workspace/ai-error-notice.tsx');
+    const { AiWorkspaceErrorNotices } = await import('/src/components/ai/workspace/ai-workspace-error-notices.tsx');
+    const { createAiComposerState } = await import('/src/lib/ai/composer-machine.ts');
+    const { initI18n } = await import('/src/locales/index.ts');
+    const { useAppStore } = await import('/src/stores/appStore.ts');
+    useAppStore.setState({ locale: 'en-US' });
+    await initI18n('en-US');
     const { Alert, AlertDescription } = await import('/src/components/ui/alert.tsx');
-    const { Button } = await import('/src/components/ui/button.tsx');
-    const { XIcon, InfoIcon } = await import('/node_modules/.vite/deps/lucide-react.js');
+    const { InfoIcon } = await import('/node_modules/.vite/deps/lucide-react.js');
     const host = document.createElement('main');
     host.id = 'notice-check';
     host.style.cssText = 'position:fixed;inset:0;background:var(--background);padding:16px;z-index:100';
     document.body.append(host);
     const h = React.createElement;
     ReactDOM.createRoot(host).render(h('div', { className: 'flex flex-col gap-3' },
-      h(AiErrorNotice, {
-        title: 'Error',
-        action: h(Button, {
-          size: 'icon-xs', variant: 'ghost', 'aria-label': 'Dismiss error',
-          onClick: () => host.dataset.dismissed = 'true',
-        }, h(XIcon)),
-      }, 'IMAGE_MODEL_UNSUPPORTED: image input is not enabled for this model'),
+      h(AiWorkspaceErrorNotices, {
+        composerState: createAiComposerState({
+          phase: 'error', lastError: { kind: 'unknown', message: 'The connection was interrupted while synchronizing the current Agent session. Please reconnect and retry.', retryable: true },
+        }),
+        onDismissError: () => host.dataset.dismissed = 'true',
+      }),
       h(Alert, { variant: 'info', size: 'sm', role: 'status' },
         h(InfoIcon, { 'aria-hidden': true }),
         h(AlertDescription, { className: 'min-w-0 break-words' },
@@ -35,6 +39,8 @@ try {
     ));
   });
   await page.locator('#notice-check button').waitFor();
+  assert.equal(await page.locator('#notice-check button svg').count(), 0);
+  assert.ok((await page.locator('#notice-check button').innerText()).trim());
   await page.evaluate(() => document.fonts.ready);
   let wideHeight;
   for (const width of [1280, 640, 320]) {
@@ -50,7 +56,7 @@ try {
         descriptions: alerts.map(alert => rect(alert.querySelector('[data-slot="alert-description"]'))),
         icons: alerts.map(alert => rect(alert.querySelector(':scope > svg'))),
         lineHeights: alerts.map(alert => parseFloat(getComputedStyle(alert.querySelector('[data-slot="alert-description"]')).lineHeight)),
-        description: rect(alerts[0].querySelector('[data-slot="alert-description"]')),
+        description: rect(alerts[0].querySelector('[data-slot="alert-description"] > span')),
         button: rect(host.querySelector('button')),
         overflow: host.scrollWidth > host.clientWidth,
       };
@@ -61,7 +67,10 @@ try {
       assert.equal(error.height, plainError.height, 'Dismiss control must not increase height');
       wideHeight = error.height;
     }
-    if (width === 320) assert.ok(error.height > wideHeight, 'Long errors must wrap');
+    if (width === 320) {
+      assert.ok(plainError.height > wideHeight, 'Long errors must wrap');
+      assert.ok(error.height > wideHeight, 'Long dismissible errors must wrap');
+    }
     assert.equal(geometry.overflow, false);
     geometry.alerts.forEach((alert, index) => {
       const text = geometry.descriptions[index];
@@ -82,7 +91,6 @@ try {
     assert.ok(geometry.button.y >= error.y && geometry.button.bottom <= error.bottom);
     assert.ok(Math.abs(geometry.button.y + geometry.button.height / 2 - error.y - error.height / 2) < 1);
     assert.equal(geometry.button.height, 24, 'Keep the dismiss hit area');
-    console.log(JSON.stringify({ width, ...geometry }));
     if (width === 640) await page.locator('#notice-check').screenshot({ path: '/tmp/shellspan-notice-alignment.png' });
   }
   await page.locator('#notice-check button').focus();

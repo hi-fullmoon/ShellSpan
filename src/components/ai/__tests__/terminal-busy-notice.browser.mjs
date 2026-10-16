@@ -79,6 +79,7 @@ try {
     }
     const availability = page.getByRole('status').filter({ has: page.getByRole('button', { name: labels.action, exact: true }) });
     for (const target of [notice, availability]) {
+      assert.equal(await target.locator('button svg').count(), 0, 'Notice actions must remain text-only');
       const geometry = await target.evaluate(el => {
         const box = el.getBoundingClientRect();
         const button = el.querySelector('button').getBoundingClientRect();
