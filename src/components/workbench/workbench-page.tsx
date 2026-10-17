@@ -72,6 +72,7 @@ interface WorkbenchPageHeaderProps extends Omit<React.ComponentProps<'header'>, 
   description?: React.ReactNode;
   titleMeta?: React.ReactNode;
   actions?: React.ReactNode;
+  compactActions?: boolean;
 }
 
 export const WorkbenchPageHeader: React.FC<WorkbenchPageHeaderProps> = ({
@@ -80,6 +81,7 @@ export const WorkbenchPageHeader: React.FC<WorkbenchPageHeaderProps> = ({
   description,
   titleMeta,
   actions,
+  compactActions = false,
   children,
   className,
   ...props
@@ -92,10 +94,12 @@ export const WorkbenchPageHeader: React.FC<WorkbenchPageHeaderProps> = ({
     )}
     {...props}
   >
-    <div className="flex flex-col gap-2 @min-[64rem]:flex-row @min-[64rem]:items-center @min-[64rem]:justify-between">
+    <div className={cn('flex flex-col gap-2', compactActions
+      ? '@min-[48rem]:flex-row @min-[48rem]:items-center @min-[48rem]:justify-between'
+      : '@min-[64rem]:flex-row @min-[64rem]:items-center @min-[64rem]:justify-between')}>
       <div
         data-slot="workbench-page-header-copy"
-        className="flex h-9 min-w-0 shrink-0 items-center gap-2 @min-[64rem]:flex-1"
+        className={cn('flex h-9 min-w-0 shrink-0 items-center gap-2', compactActions ? '@min-[48rem]:flex-1' : '@min-[64rem]:flex-1')}
       >
         <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
           <Icon className="size-4" aria-hidden />
@@ -113,7 +117,9 @@ export const WorkbenchPageHeader: React.FC<WorkbenchPageHeaderProps> = ({
       {actions && (
         <div
           data-slot="workbench-page-header-actions"
-          className="-m-1 flex h-10 min-w-0 flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden @min-[64rem]:m-0 @min-[64rem]:h-8 @min-[64rem]:shrink-0 @min-[64rem]:overflow-visible @min-[64rem]:p-0 @min-[64rem]:justify-end [&>button]:shrink-0"
+          className={cn('-m-1 flex h-10 min-w-0 flex-nowrap items-center gap-2 overflow-x-auto overflow-y-hidden p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>button]:shrink-0', compactActions
+            ? '@min-[48rem]:m-0 @min-[48rem]:h-8 @min-[48rem]:shrink-0 @min-[48rem]:overflow-visible @min-[48rem]:p-0 @min-[48rem]:justify-end'
+            : '@min-[64rem]:m-0 @min-[64rem]:h-8 @min-[64rem]:shrink-0 @min-[64rem]:overflow-visible @min-[64rem]:p-0 @min-[64rem]:justify-end')}
         >
           {actions}
         </div>

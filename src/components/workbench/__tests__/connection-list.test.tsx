@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { ConnectionList } from '../connection-list';
 import type { ConnectionProfile } from '@/types';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
+import { saveConnectionSort } from '@/lib/connections/connection-sort';
 
 vi.mock('@/hooks/useI18n', () => ({
   useI18n: () => ({
@@ -29,6 +30,7 @@ const makeProfile = (overrides?: Partial<ConnectionProfile>): ConnectionProfile 
 
 describe('ConnectionList', () => {
   beforeEach(() => {
+    localStorage.clear();
     useRecentProfilesStore.setState({ recentIds: [], initialized: true });
   });
 
@@ -38,6 +40,8 @@ describe('ConnectionList', () => {
 
   it('renders an empty state with a new-connection button when there are no profiles', () => {
     const onAdd = vi.fn();
+    const onImport = vi.fn();
+    const onExport = vi.fn();
     render(
       <ConnectionList
         profiles={[]}
@@ -49,8 +53,8 @@ describe('ConnectionList', () => {
         onConnectSftp={() => {}}
         onDuplicate={() => {}}
         onToggleFavorite={() => {}}
-        onImport={() => {}}
-        onExport={() => {}}
+        onImport={onImport}
+        onExport={onExport}
       />,
     );
 
@@ -62,15 +66,156 @@ describe('ConnectionList', () => {
       screen.getByRole('button', { name: 'workbench.connections.new' }),
     ).toBeInTheDocument();
     const actionNames = [
-      'workbench.connections.import',
-      'workbench.connections.export',
       'workbench.connections.new',
+      'workbench.connections.actions',
     ];
+    const more = screen.getByRole('button', { name: 'workbench.connections.actions' });
+    const headerActions = more.closest('[data-slot="workbench-page-header-actions"]');
+    expect(within(headerActions as HTMLElement).getAllByRole('button')).toEqual(actionNames.map(name => screen.getByRole('button', { name })));
+    expect(more).toHaveClass('size-8', 'bg-secondary', 'focus-visible:bg-accent', 'data-popup-open:bg-accent');
+    expect(more).toHaveTextContent('');
+    expect(more).not.toHaveClass('border', 'bg-background');
     for (const name of actionNames) {
       const button = screen.getByRole('button', { name });
-      expect(button).toHaveTextContent(name);
       expect(button.querySelector('[data-icon="inline-start"]')).toBeInTheDocument();
     }
+    expect(screen.queryByRole('button', { name: 'workbench.connections.import' })).not.toBeInTheDocument();
+    fireEvent.click(more);
+    expect(screen.getByRole('menuitem', { name: 'workbench.connections.import' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'workbench.connections.export' })).toBeInTheDocument();
+    expect(screen.getByRole('menu')).toHaveClass('w-max', 'min-w-0');
+    fireEvent.click(screen.getByRole('menuitem', { name: 'workbench.connections.import' }));
+    expect(onImport).toHaveBeenCalledOnce();
+    fireEvent.click(more);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'workbench.connections.export' }));
+    expect(onExport).toHaveBeenCalledOnce();
+  });
+
+  it('falls back to the host for blank names and keeps key authentication separate from group labels', () => {
+    render(<ConnectionList
+      profiles={[makeProfile({ name: '  ', authMethod: 'key', group: 'Work' })]}
+      initialized onAdd={() => {}} onEdit={() => {}} onDelete={() => {}}
+      onConnectTerminal={() => {}} onConnectSftp={() => {}} onDuplicate={() => {}}
+      onToggleFavorite={() => {}} onImport={() => {}} onExport={() => {}}
+    />);
+    expect(screen.getByText('192.168.1.1')).toHaveClass('font-medium');
+    expect(screen.getByLabelText('connection.form.auth.key').querySelector('svg')).toBeInTheDocument();
+    expect(screen.getByText('Work').closest('[data-slot="badge"]')).not.toBeNull();
+    expect(screen.getByLabelText('connection.form.auth.key').parentElement).toHaveClass('min-w-0', 'flex-nowrap');
+    expect(screen.getByLabelText('connection.form.auth.key').parentElement).not.toHaveClass('shrink-0');
+  });
+
+  it('sorts filtered results, displays readable labels, and remembers the choice after remount', async () => {
+    const profiles = [
+      makeProfile({ id: 'z', name: 'Zulu', favorite: true, group: 'team' }),
+      makeProfile({ id: 'a', name: 'Alpha', favorite: true, group: 'team' }),
+      makeProfile({ id: 'b', name: 'Beta', group: 'other' }),
+    ];
+    const props = { profiles, initialized: true, onAdd() {}, onEdit() {}, onDelete() {},
+      onConnectTerminal() {}, onConnectSftp() {}, onDuplicate() {}, onToggleFavorite() {}, onImport() {}, onExport() {} };
+    const view = render(<ConnectionList {...props} />);
+    const names = () => Array.from(view.container.querySelectorAll('[data-connection-text="name"]')).map(el => el.textContent);
+    const trigger = () => screen.getByRole('button', { name: 'workbench.connections.sortLabel' });
+    expect(names()).toEqual(['Zulu', 'Alpha', 'Beta']);
+    expect(trigger()).toHaveAttribute('aria-description', 'workbench.connections.sort.default');
+    expect(trigger()).toHaveClass('size-8', 'bg-secondary');
+    expect(trigger()).toHaveTextContent('');
+    expect(trigger().querySelector('.lucide-list')).toBeInTheDocument();
+    await userEvent.click(trigger());
+    const optionIcons = [
+      ['default', 'lucide-list'], ['name', 'lucide-arrow-down-a-z'],
+      ['recent', 'lucide-history'], ['created', 'lucide-calendar-plus'],
+    ];
+    for (const [mode, iconClass] of optionIcons) {
+      const option = await screen.findByRole('menuitemradio', { name: `workbench.connections.sort.${mode}` });
+      expect(option.querySelector(`.${iconClass}`)).toBeInTheDocument();
+    }
+    expect(await screen.findByRole('menuitemradio', { name: 'workbench.connections.sort.default' })).toHaveAttribute('aria-checked', 'true');
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'workbench.connections.sort.name' }));
+    await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+    expect(names()).toEqual(['Alpha', 'Beta', 'Zulu']);
+    expect(trigger().querySelector('.lucide-arrow-down-a-z')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'workbench.connections.filter.favorites' }));
+    expect(names()).toEqual(['Alpha', 'Zulu']);
+    fireEvent.click(screen.getByRole('button', { name: 'workbench.connections.filter.all' }));
+    await userEvent.click(screen.getByRole('combobox', { name: 'workbench.connections.groupFilter' }));
+    await userEvent.click(await screen.findByRole('option', { name: 'team' }));
+    expect(names()).toEqual(['Alpha', 'Zulu']);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Alpha' } });
+    expect(names()).toEqual(['Alpha']);
+    view.unmount();
+    const restored = render(<ConnectionList {...props} />);
+    expect(trigger()).toHaveAttribute('aria-description', 'workbench.connections.sort.name');
+    expect(Array.from(restored.container.querySelectorAll('[data-connection-text="name"]')).map(el => el.textContent)).toEqual(['Alpha', 'Beta', 'Zulu']);
+    await userEvent.click(trigger());
+    expect(await screen.findByRole('menuitemradio', { name: 'workbench.connections.sort.name' })).toHaveAttribute('aria-checked', 'true');
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'workbench.connections.sort.default' }));
+    expect(Array.from(restored.container.querySelectorAll('[data-connection-text="name"]')).map(el => el.textContent)).toEqual(['Zulu', 'Alpha', 'Beta']);
+  });
+
+  it.each([
+    ['default', 'lucide-list', ['Zulu', 'Alpha', 'Beta']],
+    ['name', 'lucide-arrow-down-a-z', ['Alpha', 'Beta', 'Zulu']],
+    ['recent', 'lucide-history', ['Zulu', 'Beta', 'Alpha']],
+    ['created', 'lucide-calendar-plus', ['Alpha', 'Beta', 'Zulu']],
+  ] as const)('restores %s sorting with its icon and preserves exact connection action targets', async (mode, icon, expected) => {
+    saveConnectionSort(mode);
+    useRecentProfilesStore.setState({ recentIds: ['z', 'b'] });
+    const profiles = [
+      makeProfile({ id: 'z', name: 'Zulu', createdAt: 10 }),
+      makeProfile({ id: 'a', name: 'Alpha', createdAt: 30 }),
+      makeProfile({ id: 'b', name: 'Beta', createdAt: 20 }),
+    ];
+    const onConnectTerminal = vi.fn();
+    const onConnectSftp = vi.fn();
+    const { container } = render(<ConnectionList
+      profiles={profiles} initialized onAdd={() => {}} onEdit={() => {}} onDelete={() => {}}
+      onConnectTerminal={onConnectTerminal} onConnectSftp={onConnectSftp} onDuplicate={() => {}}
+      onToggleFavorite={() => {}} onImport={() => {}} onExport={() => {}}
+    />);
+    const names = () => Array.from(container.querySelectorAll('[data-connection-text="name"]')).map(el => el.textContent);
+    const trigger = screen.getByRole('button', { name: 'workbench.connections.sortLabel' });
+    expect(trigger.querySelector(`.${icon}`)).toBeInTheDocument();
+    expect(names()).toEqual(expected);
+    const first = profiles.find(profile => profile.name === expected[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: 'workbench.connections.connectTerminal' })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: 'workbench.connections.connectSftp' })[0]);
+    expect(onConnectTerminal).toHaveBeenCalledWith(first);
+    expect(onConnectSftp).toHaveBeenCalledWith(first);
+    expect(profiles.map(profile => profile.name)).toEqual(['Zulu', 'Alpha', 'Beta']);
+    if (mode === 'recent') {
+      act(() => useRecentProfilesStore.setState({ recentIds: ['a', 'z', 'b'] }));
+      expect(names()).toEqual(['Alpha', 'Zulu', 'Beta']);
+      fireEvent.click(screen.getByRole('button', { name: 'workbench.connections.filter.recent' }));
+      expect(names()).toEqual(['Alpha', 'Zulu', 'Beta']);
+    }
+    await userEvent.click(trigger);
+    expect(await screen.findByRole('menuitemradio', { name: `workbench.connections.sort.${mode}` })).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('keeps every advertised search field searchable without changing the selected profile', () => {
+    const profile = makeProfile({
+      name: 'Production', host: 'server.example.org', username: 'operator', port: 2222,
+      group: 'Operations', tags: ['critical'], notes: 'nightly backup',
+      jumpHost: { host: 'bastion.example.org', username: 'gateway', port: 22, authMethod: 'password' },
+    });
+    const onConnectTerminal = vi.fn();
+    render(<ConnectionList
+      profiles={[profile]} initialized onAdd={() => {}} onEdit={() => {}} onDelete={() => {}}
+      onConnectTerminal={onConnectTerminal} onConnectSftp={() => {}} onDuplicate={() => {}}
+      onToggleFavorite={() => {}} onImport={() => {}} onExport={() => {}}
+    />);
+    const search = screen.getByRole('textbox');
+    for (const query of ['production', 'SERVER.EXAMPLE', 'operator', '2222', 'bastion', 'gateway', 'Operations', 'critical', 'nightly']) {
+      fireEvent.change(search, { target: { value: query } });
+      expect(screen.getByText('Production')).toBeInTheDocument();
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'workbench.connections.connectTerminal' }));
+    expect(onConnectTerminal).toHaveBeenCalledWith(profile);
+    fireEvent.change(search, { target: { value: 'does not match' } });
+    expect(screen.getByText('workbench.connections.filteredEmpty')).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: '' } });
+    expect(screen.getByText('Production')).toBeInTheDocument();
   });
 
   it('calls onAdd when the empty-state new-connection button is clicked', () => {
@@ -98,7 +243,7 @@ describe('ConnectionList', () => {
     expect(onAdd).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps the shared search field at a fixed width', () => {
+  it('lets connection search shrink in narrow containers and describes searchable fields', () => {
     render(
       <ConnectionList
         profiles={[]}
@@ -121,10 +266,11 @@ describe('ConnectionList', () => {
     expect(search.parentElement).toHaveAttribute('data-slot', 'input-group');
     expect(search.parentElement).toHaveClass(
       'min-w-0',
-      'w-64',
-      'max-w-full',
-      'flex-none',
+      'flex-1',
+      'max-w-64',
+      '@min-[48rem]:flex-none',
     );
+    expect(search).not.toHaveAttribute('title');
   });
 
   it('renders the profile list in a grid capped at three columns', () => {
@@ -145,6 +291,12 @@ describe('ConnectionList', () => {
     );
 
     expect(screen.getByText('My Server')).toBeInTheDocument();
+    expect(screen.getByText('My Server')).toHaveClass('font-medium');
+    expect(screen.getByText('root@192.168.1.1:22')).toHaveClass('text-muted-foreground');
+    const auth = screen.getByLabelText('connection.form.auth.password');
+    expect(auth).toHaveAttribute('tabindex', '0');
+    expect(auth.querySelector('svg')).toBeInTheDocument();
+    expect(auth).not.toHaveAttribute('data-slot', 'badge');
     expect(
       screen.queryByText('workbench.connections.empty'),
     ).not.toBeInTheDocument();
@@ -156,12 +308,51 @@ describe('ConnectionList', () => {
     expect(grid).not.toHaveClass('items-start');
   });
 
+  it('keeps labels on one line and exposes all tags through the overflow popover', async () => {
+    const tags = ['Api', 'linux', 'tag', 'test', 'test2', 'test3', 'a-very-long-tag-that-exceeds-the-label-area'];
+    const { container } = render(<ConnectionList
+      profiles={[makeProfile({ group: 'Development', tags })]} initialized
+      onAdd={() => {}} onEdit={() => {}} onDelete={() => {}}
+      onConnectTerminal={() => {}} onConnectSftp={() => {}} onDuplicate={() => {}}
+      onToggleFavorite={() => {}} onImport={() => {}} onExport={() => {}}
+    />);
+    expect(container.querySelector('[data-slot="connection-identity"]')).toHaveClass('min-w-[50%]');
+    expect(container.querySelector('[data-slot="connection-labels"]')).toHaveClass('flex-nowrap', 'max-w-[45%]');
+    expect(screen.getByText('My Server')).toBeInTheDocument();
+    expect(screen.getByText('root@192.168.1.1:22')).toBeInTheDocument();
+    for (const label of ['Development', tags[0]]) {
+      expect(screen.getByText(label)).toHaveClass('truncate');
+      expect(screen.getByText(label)).not.toHaveAttribute('title');
+      expect(screen.getByText(label).closest('[data-slot="badge"]')).toHaveClass(label === 'Development' ? 'max-w-[min(6rem,40%)]' : 'max-w-24');
+    }
+    expect(screen.getByText('Development').closest('[data-slot="badge"]')).toHaveClass('shrink-0');
+    expect(container.querySelector('.group')).toHaveClass('@container/connection-card');
+    expect(screen.getByText(tags[0]).closest('[data-slot="badge"]')).toHaveClass('hidden', '@min-[25rem]/connection-card:inline-flex');
+    expect(screen.queryByText('linux')).not.toBeInTheDocument();
+    const more = screen.getByRole('button', { name: 'workbench.connections.moreTags' });
+    expect(within(more).getByText('+7')).toHaveClass('@min-[25rem]/connection-card:hidden');
+    expect(within(more).getByText('+6')).toHaveClass('hidden', '@min-[25rem]/connection-card:inline');
+    await userEvent.click(more);
+    const popover = await screen.findByRole('dialog', { name: 'connection.form.tags' });
+    for (const tag of tags) {
+      const text = within(popover).getByText(tag);
+      expect(text).toHaveClass('truncate');
+      expect(text).not.toHaveAttribute('title');
+      expect(text.closest('[data-slot="badge"]')).toHaveClass('max-w-24');
+    }
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'connection.form.tags' })).not.toBeInTheDocument());
+    expect(more).toHaveFocus();
+    expect(container.querySelector('[title]')).toBeNull();
+  });
+
   it('keeps connection-card actions aligned at the bottom of equal-height rows', () => {
     render(
       <ConnectionList
         profiles={[
           makeProfile({ id: 'with-notes', name: 'Host with notes', notes: 'Personal host' }),
           makeProfile({ id: 'without-notes', name: 'Host without notes' }),
+          makeProfile({ id: 'blank-notes', name: 'Host with blank notes', notes: '   ' }),
         ]}
         initialized={true}
         onAdd={() => {}}
@@ -179,10 +370,19 @@ describe('ConnectionList', () => {
     const terminalActions = screen.getAllByRole('button', {
       name: 'workbench.connections.connectTerminal',
     });
-    expect(terminalActions).toHaveLength(2);
+    expect(terminalActions).toHaveLength(3);
     terminalActions.forEach((action) => {
       expect(action.closest('.mt-auto')).not.toBeNull();
     });
+    for (const name of ['Host with notes', 'Host without notes', 'Host with blank notes']) {
+      const card = screen.getByText(name).closest('.group');
+      const notes = card?.querySelector('[data-slot="connection-notes"]');
+      expect(notes).toHaveClass('min-h-4');
+      if (name !== 'Host with notes') {
+        expect(notes).toBeEmptyDOMElement();
+        expect(notes?.querySelector('[data-slot="tooltip-trigger"]')).toBeNull();
+      }
+    }
   });
 
   it('keeps connection notes on one line without a native title tooltip', () => {

@@ -38,6 +38,24 @@ describe('WorkbenchPageContent', () => {
 });
 
 describe('WorkbenchPageHeader', () => {
+  it('only lowers the single-row threshold for pages with compact actions', () => {
+    const { container, rerender } = render(<WorkbenchPageHeader icon={ServerIcon} title="Connections" actions={<button>New</button>} />);
+    const row = () => container.querySelector('header > div');
+    expect(row()).toHaveClass('@min-[64rem]:flex-row');
+    rerender(<WorkbenchPageHeader compactActions icon={ServerIcon} title="Connections" actions={<button>New</button>} />);
+    expect(row()).toHaveClass('@min-[48rem]:flex-row');
+    expect(row()).not.toHaveClass('@min-[64rem]:flex-row');
+    expect(container.querySelector('[data-slot="workbench-page-header-actions"]')).toHaveClass('@min-[48rem]:h-8');
+    rerender(<WorkbenchPageHeader compactActions={false} icon={ServerIcon} title="Logs" actions={<button>Refresh</button>} />);
+    expect(row()).toHaveClass('@min-[64rem]:flex-row', '@min-[64rem]:items-center', '@min-[64rem]:justify-between');
+    expect(row()).not.toHaveClass('@min-[48rem]:flex-row');
+    expect(container.querySelector('[data-slot="workbench-page-header-copy"]')).toHaveClass('@min-[64rem]:flex-1');
+    expect(container.querySelector('[data-slot="workbench-page-header-actions"]')).toHaveClass(
+      '@min-[64rem]:m-0', '@min-[64rem]:h-8', '@min-[64rem]:shrink-0',
+      '@min-[64rem]:overflow-visible', '@min-[64rem]:p-0', '@min-[64rem]:justify-end',
+    );
+    expect(container.querySelector('header')).not.toHaveAttribute('compactActions');
+  });
   it('aligns with page content on the 10px grid and uses a compact title block', () => {
     const { container, getByRole } = render(
       <WorkbenchPageHeader icon={ServerIcon} title="Connections" />,

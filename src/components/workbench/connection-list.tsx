@@ -6,11 +6,14 @@ import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state'
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Badge } from '@/components/ui/badge';
+import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/components/ui/popover';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -22,6 +25,8 @@ import { PortForwardDialog } from './port-forward-dialog';
 import { HostQuickActionsDialog } from './host-quick-actions-dialog';
 import type { ConnectionProfile } from '@/types';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
+import { CONNECTION_SORT_MODES, isConnectionSortMode, readConnectionSort, saveConnectionSort, sortConnections } from '@/lib/connections/connection-sort';
+import { cn } from '@/lib/utils';
 import {
   CopyIcon,
   DownloadIcon,
@@ -40,10 +45,22 @@ import {
   CableIcon,
   HeartPulseIcon,
   ZapIcon,
+  KeyRoundIcon,
+  LockKeyholeIcon,
+  ListIcon,
+  ArrowDownAZIcon,
+  HistoryIcon,
+  CalendarPlusIcon,
 } from 'lucide-react';
 import { WorkbenchPage, WorkbenchPageContent, WorkbenchPageHeader, WorkbenchSearchInput, WorkbenchPageToolbar } from './workbench-page';
 
 const CARD_ACTION_DEBOUNCE_MS = 500;
+const SORT_ICONS = {
+  default: ListIcon,
+  name: ArrowDownAZIcon,
+  recent: HistoryIcon,
+  created: CalendarPlusIcon,
+} as const;
 // Keep column changes in the same layout pass as AI-panel resizing.
 export const ConnectionCardGrid = ({ children }: { children: React.ReactNode }) => (
   <div className="@container/connections w-full">
@@ -85,7 +102,9 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
   onImport,
   onExport,
 }) => {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const [sortMode, setSortMode] = useState(readConnectionSort);
+  const SortIcon = SORT_ICONS[sortMode];
   const [query, setQuery] = useState('');
   const [activityFilter, setActivityFilter] = useState<'all' | 'favorites' | 'recent'>('all');
   const [groupFilter, setGroupFilter] = useState('all');
@@ -93,6 +112,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
   const [forwardProfile, setForwardProfile] = useState<ConnectionProfile>();
   const [quickActionProfile, setQuickActionProfile] = useState<ConnectionProfile>();
   const recentIds = useRecentProfilesStore((state) => state.recentIds);
+  const sortItems = CONNECTION_SORT_MODES.map(value => ({ value, label: t(`workbench.connections.sort.${value}`) }));
 
   const groups = useMemo(
     () =>
@@ -127,6 +147,10 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
       return true;
     });
   }, [profiles, normalizedQuery, activityFilter, groupFilter, recentIds]);
+  const sortedProfiles = useMemo(
+    () => sortConnections(filteredProfiles, sortMode, recentIds, locale),
+    [filteredProfiles, sortMode, recentIds, locale],
+  );
 
   useEffect(() => {
     const handleOpenHostTool = (event: Event): void => {
@@ -150,6 +174,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
     <TooltipProvider>
       <WorkbenchPage>
         <WorkbenchPageHeader
+          compactActions
           icon={ServerIcon}
           title={t('workbench.connections.title')}
           description={t('workbench.connections.count', {
@@ -158,24 +183,46 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
           })}
           actions={
             <>
-              <WorkbenchSearchInput
+              <Tooltip>
+                <TooltipTrigger render={<WorkbenchSearchInput
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder={t('workbench.connections.searchPlaceholder')}
                 aria-label={t('workbench.connections.searchPlaceholder')}
-              />
-              <Button variant="outline" size="sm" onClick={onImport}>
-                <DownloadIcon data-icon="inline-start" />
-                {t('workbench.connections.import')}
-              </Button>
-              <Button variant="outline" size="sm" onClick={onExport}>
-                <UploadIcon data-icon="inline-start" />
-                {t('workbench.connections.export')}
-              </Button>
+                containerClassName="max-w-64 flex-1 @min-[48rem]:flex-none"
+                />} />
+                <TooltipContent>{t('workbench.connections.searchHint')}</TooltipContent>
+              </Tooltip>
               <Button variant="default" size="sm" onClick={onAdd}>
                 <PlusIcon data-icon="inline-start" />
                 {t('workbench.connections.new')}
               </Button>
+              <DropdownMenu>
+                <Tooltip>
+                  <TooltipTrigger render={
+                    <DropdownMenuTrigger render={
+                      <Button variant="secondary" size="icon-sm"
+                        className="shrink-0 focus-visible:bg-accent data-popup-open:bg-accent"
+                        aria-label={t('workbench.connections.actions')} />
+                    } />
+                  }>
+                    <EllipsisIcon aria-hidden data-icon="inline-start" />
+                  </TooltipTrigger>
+                  <TooltipContent>{t('workbench.connections.actions')}</TooltipContent>
+                </Tooltip>
+                <DropdownMenuContent align="end" className="w-max min-w-0">
+                  <DropdownMenuGroup>
+                    <DropdownMenuItem onClick={onImport}>
+                      <DownloadIcon />
+                      {t('workbench.connections.import')}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={onExport}>
+                      <UploadIcon />
+                      {t('workbench.connections.export')}
+                    </DropdownMenuItem>
+                  </DropdownMenuGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </>
           }
         />
@@ -187,9 +234,41 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
                 {t(`workbench.connections.filter.${filter}`)}
               </Button>
             ))}
+            <div className="ml-auto inline-flex shrink-0">
+              <DropdownMenu>
+                <Tooltip>
+                  <TooltipTrigger render={
+                    <DropdownMenuTrigger render={
+                      <Button variant="secondary" size="icon-sm"
+                        className="focus-visible:bg-accent data-popup-open:bg-accent"
+                        aria-label={t('workbench.connections.sortLabel')}
+                        aria-description={t(`workbench.connections.sort.${sortMode}`)} />
+                    } />
+                  }>
+                    <SortIcon aria-hidden />
+                  </TooltipTrigger>
+                  <TooltipContent>{t('workbench.connections.sortLabel')} · {t(`workbench.connections.sort.${sortMode}`)}</TooltipContent>
+                </Tooltip>
+                <DropdownMenuContent align="end" className="w-max">
+                  <DropdownMenuRadioGroup value={sortMode} onValueChange={(value) => {
+                    if (!isConnectionSortMode(value)) return;
+                    setSortMode(value);
+                    saveConnectionSort(value);
+                  }}>
+                    {sortItems.map(item => {
+                      const Icon = SORT_ICONS[item.value];
+                      return <DropdownMenuRadioItem key={item.value} value={item.value} closeOnClick>
+                        <Icon aria-hidden />
+                        {item.label}
+                      </DropdownMenuRadioItem>;
+                    })}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
             {groups.length > 0 && (
               <Select value={groupFilter} onValueChange={(value) => setGroupFilter(value ?? 'all')}>
-                <SelectTrigger size="sm" className="ml-auto w-40" aria-label={t('workbench.connections.groupFilter')}>
+                <SelectTrigger size="sm" className="w-40" aria-label={t('workbench.connections.groupFilter')}>
                   <SelectValue>{groupFilter === 'all' ? t('workbench.connections.allGroups') : groupFilter}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
@@ -225,7 +304,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
               />
             ) : (
               <ConnectionCardGrid>
-                {filteredProfiles.map((profile) => (
+                {sortedProfiles.map((profile) => (
                   <ConnectionCard
                     key={profile.id}
                     profile={profile}
@@ -267,8 +346,8 @@ interface ConnectionCardProps {
   onQuickActions: (profile: ConnectionProfile) => void;
 }
 
-const ConnectionNotes: React.FC<{ notes: string }> = ({ notes }) => {
-  const notesRef = useRef<HTMLParagraphElement>(null);
+const ConnectionText: React.FC<{ text: string; className?: string; kind?: string }> = ({ text, className, kind = 'label' }) => {
+  const notesRef = useRef<HTMLSpanElement>(null);
   const [isTruncated, setIsTruncated] = useState(false);
 
   const updateTruncation = useCallback(() => {
@@ -286,16 +365,17 @@ const ConnectionNotes: React.FC<{ notes: string }> = ({ notes }) => {
     const observer = new ResizeObserver(updateTruncation);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [notes, updateTruncation]);
+  }, [text, updateTruncation]);
 
   return (
     <Tooltip disabled={!isTruncated}>
       <TooltipTrigger
-        render={<p ref={notesRef} className="truncate text-xs text-muted-foreground" onFocus={updateTruncation} onMouseEnter={updateTruncation} />}
+        render={<span ref={notesRef} data-connection-text={kind} tabIndex={isTruncated ? 0 : undefined}
+          className={cn('block min-w-0 truncate', className)} onFocus={updateTruncation} onMouseEnter={updateTruncation} />}
       >
-        {notes}
+        {text}
       </TooltipTrigger>
-      <TooltipContent className="max-w-sm whitespace-pre-wrap break-words">{notes}</TooltipContent>
+      <TooltipContent className="max-w-sm whitespace-pre-wrap break-words">{text}</TooltipContent>
     </Tooltip>
   );
 };
@@ -315,6 +395,10 @@ const ConnectionCard = React.memo<ConnectionCardProps>(
     onQuickActions,
   }) => {
     const { t } = useI18n();
+    const displayName = profile.name.trim() || profile.host;
+    const tags = profile.tags ?? [];
+    const authLabel = profile.authMethod === 'password' ? t('connection.form.auth.password') : t('connection.form.auth.key');
+    const AuthIcon = profile.authMethod === 'password' ? LockKeyholeIcon : KeyRoundIcon;
     const handleConnectTerminal = useDebouncedCallback(() => onConnectTerminal(profile), CARD_ACTION_DEBOUNCE_MS);
     const handleConnectSftp = useDebouncedCallback(() => onConnectSftp(profile), CARD_ACTION_DEBOUNCE_MS);
     const handleOpenHealth = useDebouncedCallback(() => onOpenHealth(profile), CARD_ACTION_DEBOUNCE_MS);
@@ -327,15 +411,15 @@ const ConnectionCard = React.memo<ConnectionCardProps>(
     const handleQuickActions = useDebouncedCallback(() => onQuickActions(profile), CARD_ACTION_DEBOUNCE_MS);
 
     return (
-      <ManagementCard>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex min-w-0 items-center gap-2">
+      <ManagementCard className="@container/connection-card">
+        <div className="flex items-center justify-between gap-2">
+          <div data-slot="connection-identity" className="flex min-w-[50%] flex-1 items-center gap-2">
             <ManagementCardIcon>
               <MonitorIcon />
             </ManagementCardIcon>
             <div className="flex min-w-0 flex-col">
               <span className="flex min-w-0 items-center gap-1">
-                <span className="truncate text-sm font-medium text-app-text">{profile.name}</span>
+                <ConnectionText text={displayName} kind="name" className="text-sm font-medium text-app-text" />
                 {profile.favorite && (
                   <StarIcon className="size-3.5 shrink-0 fill-current text-app-warning" aria-label={t('workbench.connections.filter.favorites')} />
                 )}
@@ -345,20 +429,48 @@ const ConnectionCard = React.memo<ConnectionCardProps>(
               </span>
             </div>
           </div>
-          <div className="flex flex-wrap gap-1">
-            <Badge variant={profile.authMethod === 'password' ? 'secondary' : 'outline'}>
-              {profile.authMethod === 'password' ? t('connection.form.auth.password') : t('connection.form.auth.key')}
-            </Badge>
-            {profile.jumpHost && <Badge variant="outline">{t('connection.form.jumpHost')}</Badge>}
-            {profile.group && <Badge variant="secondary">{profile.group}</Badge>}
-            {(profile.tags ?? []).map((tag) => (
-              <Badge key={tag} variant="outline">
-                {tag}
+          <div data-slot="connection-labels" className="flex min-w-0 max-w-[45%] flex-nowrap items-center gap-1">
+            <Tooltip>
+              <TooltipTrigger render={<span tabIndex={0} aria-label={authLabel} className="inline-flex size-5 shrink-0 items-center justify-center text-muted-foreground" />}>
+                <AuthIcon className="size-3.5" aria-hidden />
+              </TooltipTrigger>
+              <TooltipContent>{authLabel}</TooltipContent>
+            </Tooltip>
+            {profile.jumpHost && <Badge variant="outline" className={cn('min-w-0 max-w-24 shrink',
+              profile.group && tags.length > 1 && 'hidden @min-[25rem]/connection-card:inline-flex',
+            )}><span className="truncate">{t('connection.form.jumpHost')}</span></Badge>}
+            {profile.group && <Badge variant="secondary" className="min-w-0 max-w-[min(6rem,40%)] shrink-0"><ConnectionText text={profile.group} /></Badge>}
+            {tags[0] && (
+              <Badge variant="outline" className={cn('min-w-0 max-w-24 shrink',
+                tags.length > 1 && 'hidden @min-[25rem]/connection-card:inline-flex',
+              )}>
+                <ConnectionText text={tags[0]} />
               </Badge>
-            ))}
+            )}
+            {tags.length > 1 && (
+              <Popover>
+                <PopoverTrigger
+                  aria-label={t('workbench.connections.moreTags', { count: tags.length })}
+                  render={<Badge variant="outline" render={<button type="button" />} />}
+                >
+                  <span className="@min-[25rem]/connection-card:hidden">+{tags.length}</span>
+                  <span className="hidden @min-[25rem]/connection-card:inline">+{tags.length - 1}</span>
+                </PopoverTrigger>
+                <PopoverContent align="end">
+                  <PopoverTitle>{t('connection.form.tags')}</PopoverTitle>
+                  <div className="flex flex-wrap gap-1">
+                    {tags.map(tag => <Badge key={tag} variant="outline" className="min-w-0 max-w-24">
+                      <ConnectionText text={tag} />
+                    </Badge>)}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            )}
           </div>
         </div>
-        {profile.notes && <ConnectionNotes notes={profile.notes} />}
+        <div className="min-h-4" data-slot="connection-notes">
+          {profile.notes?.trim() && <ConnectionText text={profile.notes} kind="notes" className="text-xs text-muted-foreground" />}
+        </div>
         {profile.jumpHost && (
           <div className="rounded-lg border border-app-border bg-muted px-2.5 py-2">
             <div className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground">{t('connection.form.jumpHost')}</div>
@@ -397,7 +509,7 @@ const ConnectionCard = React.memo<ConnectionCardProps>(
                           variant="ghost"
                           size="icon"
                           className="size-8"
-                          aria-label={t('workbench.connections.moreActions', { name: profile.name })}
+                          aria-label={t('workbench.connections.moreActions', { name: displayName })}
                         />
                       }
                     />
@@ -405,7 +517,7 @@ const ConnectionCard = React.memo<ConnectionCardProps>(
                 >
                   <EllipsisIcon data-icon="inline-start" />
                 </TooltipTrigger>
-                <TooltipContent>{t('workbench.connections.moreActions', { name: profile.name })}</TooltipContent>
+                <TooltipContent>{t('workbench.connections.moreActions', { name: displayName })}</TooltipContent>
               </Tooltip>
               <DropdownMenuContent
                 align="start"
