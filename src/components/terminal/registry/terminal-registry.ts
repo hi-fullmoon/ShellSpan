@@ -1449,7 +1449,10 @@ interface TerminalRegistry {
   subscribe(listener: () => void): () => void;
 }
 
-export const terminalRegistry: TerminalRegistry = (() => {
+// Agent event callbacks and mounted panes can outlive a module hot update.
+// Keep their registry identity shared with controllers created after that update.
+const retainedRegistry = import.meta.hot?.data?.terminalRegistry as TerminalRegistry | undefined;
+export const terminalRegistry: TerminalRegistry = retainedRegistry ?? (() => {
   const controllers = new Map<string, TerminalController>();
   const listeners = new Set<() => void>();
   let preferences = DEFAULT_TERMINAL_PREFERENCES;
@@ -1540,3 +1543,9 @@ export const terminalRegistry: TerminalRegistry = (() => {
     },
   };
 })();
+
+if (import.meta.hot?.data) {
+  import.meta.hot.dispose((data) => {
+    data.terminalRegistry = terminalRegistry;
+  });
+}

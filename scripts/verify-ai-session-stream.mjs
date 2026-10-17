@@ -16,12 +16,15 @@ const repository = resolve(import.meta.dirname, '..');
 const { values } = parseArgs({ options: {
   performance: { type: 'boolean' }, baseline: { type: 'boolean' },
   focus: { type: 'boolean' },
+  'terminal-readiness': { type: 'boolean' },
   'no-model': { type: 'boolean' }, route: { type: 'string' }, model: { type: 'string' },
   'cleanup-session': { type: 'string', multiple: true },
   'baseline-ref': { type: 'string' },
 } });
 const performanceRun = values.performance === true;
 const focusRun = values.focus === true;
+const terminalReadinessRun = values['terminal-readiness'] === true;
+assert(!terminalReadinessRun || (!focusRun && !performanceRun), '--terminal-readiness is a separate regression');
 assert(!focusRun || !performanceRun, '--focus and --performance are separate regressions');
 const baseline = values.baseline === true;
 const noModel = values['no-model'] === true;
@@ -38,7 +41,8 @@ const token = randomUUID();
 let settle;
 const result = new Promise((resolveResult) => { settle = resolveResult; });
 const page = performanceRun ? 'agent-panel-performance.native.html' : 'agent-session-stream.native.html';
-const pagePath = focusRun ? 'src/components/focus/__tests__/focus.native.html' : `src/lib/ai/__tests__/${page}`;
+const pagePath = terminalReadinessRun ? 'src/components/terminal/__tests__/terminal-readiness.native.html'
+  : focusRun ? 'src/components/focus/__tests__/focus.native.html' : `src/lib/ai/__tests__/${page}`;
 const output = performanceRun ? await mkdtemp(resolve(tmpdir(), 'shellspan-agent-performance-')) : undefined;
 const baselinePlugin = {
   name: 'agent-panel-performance-baseline',
@@ -46,6 +50,18 @@ const baselinePlugin = {
   load(id) { return baselineSources.get(id.split('?')[0]); },
 };
 const attachResult = (vite) => {
+  if (terminalReadinessRun) vite.middlewares.use(`/__terminal-registry-reload/${token}`, async (request, response) => {
+    if (request.method !== 'POST') { response.statusCode = 405; response.end(); return; }
+    try {
+      const module = vite.moduleGraph.getModuleById(resolve(repository, 'src/components/terminal/registry/terminal-registry.ts'));
+      assert(module, 'Terminal registry module was not loaded');
+      await vite.reloadModule(module);
+      response.end('ok');
+    } catch (error) {
+      response.statusCode = 500;
+      response.end(String(error));
+    }
+  });
   vite.middlewares.use(`/__agent-stream-result/${token}`, async (request, response) => {
     if (request.method !== 'POST') { response.statusCode = 405; response.end(); return; }
     try {
@@ -86,7 +102,7 @@ try {
     cacheDir: resolve(repository, 'node_modules/.vite-agent-stream-native'),
     resolve: { alias: { '@': resolve(repository, 'src') } },
     plugins: [react(), tailwindcss(), resultPlugin],
-    server: { host: '127.0.0.1', port: 0, hmr: false, watch: null },
+    server: { host: '127.0.0.1', port: 0, hmr: terminalReadinessRun ? undefined : false, watch: null },
   });
 } catch (error) {
   if (output) await rm(output, { recursive: true, force: true });
@@ -119,6 +135,7 @@ try {
   const outcome = await result;
   assert.equal(outcome.ok, true, outcome.error);
   if (performanceRun) console.log(JSON.stringify({ baseline, baselineRef: baseline ? baselineRef : undefined, baselineCommit, productionBundle: true, ...outcome.metrics }));
+  else if (terminalReadinessRun) console.log('Native terminal readiness passed: registry identity across hot updates, existing and new local PTY output.');
   else if (focusRun) console.log('Native focus regression passed: real local terminals, explicit targets, collapse/restore, continuation IPC, and responsive geometry. No model or remote commands were executed.');
   else console.log('Native Agent stream passed: pending subscription/snapshot cancellation, error publication, automatic gap recovery and cleanup.');
 } finally {
