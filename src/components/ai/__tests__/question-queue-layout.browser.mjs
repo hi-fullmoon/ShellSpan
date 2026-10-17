@@ -71,8 +71,8 @@ try {
       const q = await question.boundingBox();
       const k = await queue.boundingBox();
       const c = await composer.boundingBox();
-      assert.ok(q.y >= 0 && q.y + q.height + 6 <= k.y, 'Question must sit above the queue with a visible gap');
-      assert.ok(k.y + k.height + 6 <= c.y, 'Queue must not overlap the composer');
+      assert.ok(k.y >= 0 && k.y + k.height + 6 <= q.y, 'Queue must sit above the question with a visible gap');
+      assert.ok(q.y + q.height + 6 <= c.y, 'Question must sit above the composer with a visible gap');
       assert.equal(q.x, k.x);
       assert.equal(k.x, c.x);
       assert.equal(q.width, k.width);
