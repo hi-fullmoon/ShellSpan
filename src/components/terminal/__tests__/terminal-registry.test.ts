@@ -471,7 +471,7 @@ describe('terminalRegistry', () => {
     expect(controller.resizeObserver).not.toBe(firstObserver);
   });
 
-  it('debounces resize for 100ms and drops an unchanged grid size', async () => {
+  it('coalesces resize within a frame, keeps updating during a drag, and drops an unchanged grid size', async () => {
     const originalResizeObserver = globalThis.ResizeObserver;
     const callbacks = new Map<ResizeObserver, ResizeObserverCallback>();
     class RecordingResizeObserver implements ResizeObserver {
@@ -508,11 +508,10 @@ describe('terminalRegistry', () => {
       const resizeCallback = callbacks.get(controller.resizeObserver!)!;
       resizeCallback([], controller.resizeObserver!);
       resizeCallback([], controller.resizeObserver!);
-      vi.advanceTimersByTime(99);
       expect(invokeResizeSession).not.toHaveBeenCalled();
 
       await act(async () => {
-        vi.advanceTimersByTime(1);
+        vi.advanceTimersToNextFrame();
         await Promise.resolve();
         await Promise.resolve();
         await Promise.resolve();
@@ -521,9 +520,21 @@ describe('terminalRegistry', () => {
       expect(invokeResizeSession).toHaveBeenCalledOnce();
       expect(invokeResizeSession).toHaveBeenCalledWith('s1', 101, 31);
 
+      vi.mocked(controller.fitAddon.proposeDimensions).mockReturnValue({ cols: 102, rows: 32 });
       resizeCallback([], controller.resizeObserver!);
-      vi.advanceTimersByTime(100);
-      expect(invokeResizeSession).toHaveBeenCalledOnce();
+      await act(async () => {
+        vi.advanceTimersToNextFrame();
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(invokeResizeSession).toHaveBeenCalledTimes(2);
+      expect(invokeResizeSession).toHaveBeenLastCalledWith('s1', 102, 32);
+
+      resizeCallback([], controller.resizeObserver!);
+      vi.advanceTimersToNextFrame();
+      expect(invokeResizeSession).toHaveBeenCalledTimes(2);
     } finally {
       terminalRegistry.disposeAll();
       vi.useRealTimers();

@@ -10,6 +10,8 @@ import {
 import { terminalRegistry } from '../registry/terminal-registry';
 import { agentTerminalLeaseState } from '../agent-terminal-lease-state';
 import { useTerminalStore } from '@/stores/terminalStore';
+import { useFocusStore } from '@/stores/focusStore';
+import { useAppStore } from '@/stores/appStore';
 import { t } from '@/locales';
 import type { Event } from '@tauri-apps/api/event';
 import type {
@@ -825,6 +827,43 @@ describe('TerminalControllerLayer', () => {
       controller.terminal.textarea!.removeEventListener('focus', recordFocus);
       coordinator.dispose();
       input.remove();
+    }
+  });
+
+  it('keeps Terminal selected across Focus command leases after leaving Focus', async () => {
+    const previousFocus = useFocusStore.getState();
+    const previousSection = useAppStore.getState().activeSection;
+    const controller = seedController();
+    attachTerminal('s1');
+    addSession('s1');
+    useTerminalStore.getState().setStatus('s1', { sessionId: 's1', status: 'connected' });
+    await controller.whenOutputReady();
+    const coordinator = createAgentTerminalLeaseCoordinator();
+    try {
+      useFocusStore.getState().enter();
+      expect(useFocusStore.getState().setTarget('s1')).toBe(true);
+      useFocusStore.getState().leave();
+      useAppStore.getState().setActiveSection('terminal');
+      for (const operationId of ['focus-command-1', 'focus-command-2']) {
+        await coordinator.handle(leaseEvent(operationId, 'acquired', {
+          agentSessionId: 'focus-agent-1',
+        }).payload);
+        expect(useFocusStore.getState().enabled).toBe(false);
+        expect(useFocusStore.getState().targetSessionId).toBe('s1');
+        expect(useTerminalStore.getState().workspace).toBe('terminal');
+        expect(useAppStore.getState().activeSection).toBe('terminal');
+        expect(document.activeElement).toBe(controller.terminal.textarea);
+        expect(invokeAgentTerminalLeaseReady).toHaveBeenCalledWith(expect.objectContaining({
+          operationId, terminalConnected: true, outputListenerReady: true,
+        }));
+        await coordinator.handle(leaseEvent(operationId, 'released', {
+          agentSessionId: 'focus-agent-1',
+        }).payload);
+      }
+    } finally {
+      coordinator.dispose();
+      useFocusStore.setState(previousFocus);
+      useAppStore.getState().setActiveSection(previousSection);
     }
   });
 

@@ -429,11 +429,10 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
         // Commit the target pane's attachment before focusing xterm. The backend
         // cannot start writing the command until the readiness acknowledgement.
         flushSync(() => {
-          // Reveal commands in their owning workspace without overwriting the
-          // other workspace's selected tab or split layout.
+          // Focus commands use whichever terminal workspace the user is viewing.
+          // A lease must not re-enter Focus after the user has left it.
           const workspace = workspaceOwners.get(lease.agentSessionId) ?? rootWorkspace(lease.agentSessionId);
-          if (workspace === 'focus') useFocusStore.getState().enter();
-          else if (workspace === 'terminal') useFocusStore.getState().leave();
+          if (workspace === 'terminal') useFocusStore.getState().leave();
           useTerminalStore.getState().setActiveSession(lease.sessionId);
           useAppStore.getState().setActiveSection('terminal');
           if (useFocusStore.getState().enabled) useFocusStore.getState().setTerminalOpen(true);

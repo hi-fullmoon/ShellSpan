@@ -949,7 +949,7 @@ class TerminalControllerImpl implements TerminalController {
     this.host = null;
   }
 
-  // Drop any scheduled debounced resize so a disposed or rebound
+  // Drop any scheduled resize frame so a disposed or rebound
   // controller never reflows or sends a resize IPC for a stale session.
   private cancelPendingResize(): void {
     this.resizeHandler?.cancel();

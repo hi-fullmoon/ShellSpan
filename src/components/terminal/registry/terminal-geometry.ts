@@ -32,23 +32,26 @@ export function createTerminalResizeHandler(
   container: HTMLElement,
   onResize: (cols: number, rows: number) => void,
 ) {
-  let timer: number | undefined;
+  let frame: number | undefined;
   const cancel = () => {
-    window.clearTimeout(timer);
-    timer = undefined;
+    if (frame !== undefined) window.cancelAnimationFrame(frame);
+    frame = undefined;
   };
   const measure = () => {
     if (container.offsetParent === null) return undefined;
     return fit.proposeDimensions();
   };
   const schedule = () => {
-    // A return to the current grid (or a hidden pane) invalidates any older resize.
-    cancel();
     const dimensions = measure();
-    if (!dimensions || (dimensions.cols === terminal.cols && dimensions.rows === terminal.rows)) return;
-    // Coalesce WebGL reflows while dragging to avoid stretching stale glyphs.
-    timer = window.setTimeout(() => {
-      timer = undefined;
+    // A return to the current grid (or a hidden pane) invalidates any older resize.
+    if (!dimensions || (dimensions.cols === terminal.cols && dimensions.rows === terminal.rows)) {
+      cancel();
+      return;
+    }
+    // Keep resizing during a drag, with at most one xterm reflow per frame.
+    if (frame !== undefined) return;
+    frame = window.requestAnimationFrame(() => {
+      frame = undefined;
       // Layout may have changed before ResizeObserver delivers its next callback.
       const latest = measure();
       if (!latest || (latest.cols === terminal.cols && latest.rows === terminal.rows)) return;
@@ -58,7 +61,7 @@ export function createTerminalResizeHandler(
         return;
       }
       onResize(terminal.cols, terminal.rows);
-    }, 100);
+    });
   };
   return { schedule, cancel };
 }

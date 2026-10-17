@@ -22,9 +22,11 @@ header retains the Agent target text badge. The terminal toggle occupies the ser
 when collapsed, an expand action appears in the conversation header.
 There is no separate target toolbar or focus page-header row.
 Visible command input reopens the right side before the existing lease readiness
-and actual xterm focus acknowledgement. Root Agent commands reveal their owning
-Terminal or Focus workspace before selecting the execution terminal, preserving
-the other view's selection and layout. There is no execution-surface selector.
+and actual xterm focus acknowledgement. Focus Agent commands select the execution
+terminal in the currently viewed terminal workspace; after the user leaves Focus,
+later commands do not re-enter it. The Focus target and its saved layout remain
+unchanged while Terminal is viewed. Ordinary Terminal Agent commands reveal the
+Terminal workspace. There is no execution-surface selector.
 Terminal creation, search and navigation shortcuts reveal a collapsed terminal
 panel, while navigation continues to leave the Agent target unchanged.
 

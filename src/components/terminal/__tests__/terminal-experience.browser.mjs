@@ -866,15 +866,21 @@ try {
         const carousel = surface.querySelector('[data-terminal-carousel]');
         const activePageAligned = activePage && carousel
           && Math.abs(activePage.getBoundingClientRect().left - carousel.getBoundingClientRect().left) <= 1;
-        flushSync(() => store.switchWorkspace('terminal'));
+        flushSync(() => {
+          useFocusStore.getState().enter();
+          useFocusStore.getState().leave();
+        });
         await new Promise(requestAnimationFrame);
         await coordinator.handle({
           sessionId: ids[1], agentSessionId: `focus-agent-${crypto.randomUUID()}`, taskId: crypto.randomUUID(),
           operationId: crypto.randomUUID(), acquiredAtUnixMs: Date.now(), state: 'acquired',
         });
-        const focusCommandRouted = useFocusStore.getState().enabled && useTerminalStore.getState().workspace === 'focus';
-        flushSync(() => useFocusStore.getState().leave());
-        const normalSelectionPreserved = useTerminalStore.getState().activeSessionId === ids[0];
+        const focusCommandRouted = !useFocusStore.getState().enabled
+          && useTerminalStore.getState().workspace === 'terminal'
+          && useTerminalStore.getState().activeSessionId === ids[1]
+          && document.activeElement === second.terminal.textarea;
+        const focusSelectionPreserved = useTerminalStore.getState().workspaceViews.focus.activeSessionId === ids[1];
+        flushSync(() => store.setActiveSession(ids[0]));
         first.focus();
         const sourceInitiallyFocused = document.activeElement === first.terminal.textarea;
         flushSync(() => {
@@ -892,7 +898,7 @@ try {
         await new Promise(requestAnimationFrame);
         return {
           workspaceIsolation: Boolean(focusStartsUnsplit && terminalRestored && focusRestored && controllersRetained && activePageAligned),
-          commandWorkspaceRouting: focusCommandRouted && normalSelectionPreserved
+          commandWorkspaceRouting: focusCommandRouted && focusSelectionPreserved
             && !useFocusStore.getState().enabled && useTerminalStore.getState().workspace === 'terminal'
             && useTerminalStore.getState().workspaceViews.focus.activeSessionId === ids[0],
           sourceInitiallyFocused,

@@ -283,7 +283,7 @@ try {
 
           pane.style.height = '200px';
           handler.schedule();
-          // The timer must measure current layout even before another observer delivery.
+          // The frame must measure current layout even before another observer delivery.
           pane.style.height = '420px';
           await settle();
           const remeasured = terminal.rows === fit.proposeDimensions().rows && sent.length === 1;
@@ -304,6 +304,16 @@ try {
           handler.cancel();
           await settle();
           const cancelled = terminal.rows === initialRows;
+          for (const height of [240, 320, 400, 480]) {
+            pane.style.height = `${height}px`;
+            handler.schedule();
+            handler.schedule();
+            const countBeforeFrame = sent.length;
+            await new Promise(requestAnimationFrame);
+            if (terminal.rows !== fit.proposeDimensions().rows || sent.length !== countBeforeFrame + 1) {
+              throw new Error('Continuous resize must update once per animation frame');
+            }
+          }
           pane.style.height = '600px';
           await write('\r\n'.repeat(initialRows + 10));
           await settle();
