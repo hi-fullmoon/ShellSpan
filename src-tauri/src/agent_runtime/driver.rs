@@ -761,7 +761,7 @@ async fn apply_pre_step_hooks(
                 });
             }
             messages.push(ModelMessage::User {
-                content: message.content,
+                content: crate::ai_attachment::model_content(&message.content),
             });
             messages
         }));

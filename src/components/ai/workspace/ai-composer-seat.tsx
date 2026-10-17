@@ -228,7 +228,7 @@ export function AiComposerSeat({
   };
   const documents = useDocumentImport(
     attachmentOwner,
-    rawDraft, updateRawDraft, terminal || unavailable || submitting || imageLocked,
+    () => rawDraftRef.current, updateRawDraft, terminal || unavailable || submitting || imageLocked,
   );
   const empty = draft.trim().length === 0 && !hasImages && !message.documents.length;
   const stopPrimary = running && (empty || unavailable || (mode === 'ask'));
@@ -236,6 +236,7 @@ export function AiComposerSeat({
     || stopping
     || submitting
     || documents.busy
+    || documents.hasUnresolvedChatReference()
     || (!stopPrimary && mode === 'ask' && running && !empty)
     || (stopPrimary
       ? onStop === undefined
@@ -427,6 +428,7 @@ export function AiComposerSeat({
     wasStopping.current = stopping;
   }, [stopping, completion.editor]);
   const submit = (gesture: 'keyboard' | 'primary', accelerated = false): void => {
+    if (!documents.canSubmit()) return;
     if (submitDisabled) {
       if (gesture === 'keyboard' && !empty && blockedSubmitReason && announcedBlock.current !== blockedSubmitReason) {
         announcedBlock.current = blockedSubmitReason;

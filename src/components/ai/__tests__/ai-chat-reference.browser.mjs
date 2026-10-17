@@ -50,6 +50,15 @@ try {
     assert.equal(layout.overflow, false);
     await page.screenshot({ path: `/tmp/shellspan-chat-reference-${width}.png` });
   }
+  await page.getByRole('textbox').press('Enter');
+  const submitted = page.locator('[data-chat-reference-submission]');
+  await submitted.filter({ hasText: 'shellspanDocumentMessage' }).waitFor({ state: 'attached' });
+  const message = JSON.parse(await submitted.textContent());
+  assert.equal(message.documents[0].chatTitle, 'Check nginx now.');
+  assert.deepEqual(JSON.parse(message.documents[0].text).messages, [
+    { role: 'user', text: 'Check nginx now.' },
+    { role: 'assistant', text: 'Checking now.' },
+  ]);
   assert.deepEqual(errors, []);
 } finally {
   await browser?.close();

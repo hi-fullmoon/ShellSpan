@@ -3,6 +3,7 @@ import { chatReferenceFile } from '../chat-reference';
 import { projectAgentChatNodes } from '../conversation-projection';
 import { agentSessionEventFixture } from '@/test/fixtures/agent-session';
 import type { AiSessionSummary } from '../session-adapter';
+import type { AiConversationNode } from '../conversation-node';
 
 const summary: AiSessionSummary = {
   id: agentSessionEventFixture[0].sessionId, kind: 'agent', title: 'Check nginx now.',
@@ -28,5 +29,14 @@ describe('chat references', () => {
 
   it('rejects a conversation without text instead of attaching an empty reference', () => {
     expect(() => chatReferenceFile(summary, [])).toThrow('CHAT_REFERENCE_EMPTY');
+  });
+
+  it('rejects an unfinished assistant message instead of silently omitting it', () => {
+    const markStreaming = (nodes: readonly AiConversationNode[]): AiConversationNode[] => nodes.map(node => {
+      if (node.kind === 'turnProcess') return { ...node, children: node.children.map(child => child.kind === 'assistantMessage' ? { ...child, state: 'streaming' as const } : child) };
+      return node.kind === 'assistantMessage' ? { ...node, state: 'streaming' } : node;
+    });
+    const nodes = markStreaming(projectAgentChatNodes(agentSessionEventFixture));
+    expect(() => chatReferenceFile(summary, nodes)).toThrow('CHAT_REFERENCE_READ');
   });
 });

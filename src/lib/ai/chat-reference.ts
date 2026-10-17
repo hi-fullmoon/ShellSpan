@@ -13,7 +13,8 @@ export function chatReferenceFile(summary: AiSessionSummary, nodes: readonly AiC
       else if (node.kind === 'userMessage' && node.delivery === 'committed') {
         const message = decodeDocumentMessage(node.content);
         if (message.text.trim()) messages.push({ role: 'user', text: message.text });
-      } else if (node.kind === 'assistantMessage' && node.state !== 'streaming') {
+      } else if (node.kind === 'assistantMessage') {
+        if (node.state === 'streaming') throw new Error('CHAT_REFERENCE_READ');
         const text = node.blocks.filter(block => block.type === 'text').map(block => block.text).join('\n');
         if (text.trim()) messages.push({ role: 'assistant', text });
       }

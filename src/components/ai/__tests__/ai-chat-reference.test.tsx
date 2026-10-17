@@ -9,6 +9,7 @@ import { decodeDocumentMessage, encodeDocumentMessage } from '@/lib/ai/document-
 import type { AiSessionSummary } from '@/lib/ai/session-adapter';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
+import { useToastStore } from '@/stores/toastStore';
 
 const summary: AiSessionSummary = {
   id: agentSessionEventFixture[0].sessionId, kind: 'agent', title: 'Check nginx now.',
@@ -57,4 +58,32 @@ it('rejects invalid conversation display metadata', () => {
     { id: 'history', name: 'history.txt', size: 1, text: 'x', chatTitle: 42 },
   ] });
   expect(decodeDocumentMessage(content)).toEqual({ text: content, documents: [] });
+});
+
+it('does not submit a failed history reference with Enter and allows retrying the reference', async () => {
+  const user = userEvent.setup();
+  const submissions: string[] = [];
+  let emptyHistory = true;
+  useToastStore.setState({ toasts: [] });
+  render(<AiComposerSeat phase="active" status="idle" sessions={[summary]}
+    onReadSession={async () => chatReferenceFile(summary, emptyHistory ? [] : projectAgentChatNodes(agentSessionEventFixture))}
+    onSubmit={value => { submissions.push(value); }} />);
+  const editor = screen.getByRole('textbox');
+  await user.type(editor, '@nginx');
+  await user.click(await screen.findByRole('option', { name: summary.title }));
+  await waitFor(() => expect(useToastStore.getState().toasts.some(toast => toast.variant === 'error')).toBe(true));
+  expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+  await user.keyboard('{Enter}');
+  expect(submissions).toHaveLength(0);
+  emptyHistory = false;
+  await user.clear(editor);
+  await user.type(editor, '@nginx');
+  await user.click(await screen.findByRole('option', { name: summary.title }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled());
+  await user.keyboard('{Enter}');
+  expect(submissions).toHaveLength(1);
+  expect(JSON.parse(decodeDocumentMessage(submissions[0]).documents[0].text).messages).toEqual([
+    { role: 'user', text: 'Check nginx now.' },
+    { role: 'assistant', text: 'Checking now.' },
+  ]);
 });

@@ -6,7 +6,7 @@ import { decodeDocumentMessage, encodeDocumentMessage, type DocumentAttachment }
 import { extractDocument } from '@/lib/ai/document-extract';
 import { invokeReadAiAttachment } from '@/lib/ipc/tauri';
 
-export function useDocumentImport(scope: string, draft: string, update: (text: string) => void, disabled: boolean) {
+export function useDocumentImport(scope: string, draft: () => string, update: (text: string) => void, disabled: boolean) {
   const { t } = useI18n();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
@@ -14,6 +14,13 @@ export function useDocumentImport(scope: string, draft: string, update: (text: s
   const operation = useRef<AbortController | null>(null);
   const latest = useRef({ scope, draft, update, disabled });
   latest.current = { scope, draft, update, disabled };
+  const references = useRef({ scope, titles: new Set<string>() });
+  if (references.current.scope !== scope) references.current = { scope, titles: new Set() };
+  const hasUnresolvedChatReference = () => {
+    const current = decodeDocumentMessage(latest.current.draft());
+    return [...references.current.titles].some(title => current.text.includes(title)
+      && !current.documents.some(document => document.chatTitle === title));
+  };
   const cancel = () => { operation.current?.abort(); operation.current = null; setBusy(false); setPending([]); };
   useEffect(() => {
     cancel();
@@ -21,19 +28,20 @@ export function useDocumentImport(scope: string, draft: string, update: (text: s
   }, [scope]);
 
   async function run(load: (signal: AbortSignal) => Promise<readonly File[]>, chatTitle?: string): Promise<boolean> {
+    if (chatTitle !== undefined) references.current.titles.add(chatTitle);
     if (operation.current || latest.current.disabled) return false;
     const controller = new AbortController();
     operation.current = controller;
     // Claim the current workspace immediately, before asynchronous history restore
     // can replace the conversation while the selected files are still parsing.
-    latest.current.update(latest.current.draft);
+    latest.current.update(latest.current.draft());
     setBusy(true);
     const isCurrent = () => !controller.signal.aborted && latest.current.scope === scope && !latest.current.disabled;
     try {
       const files = await load(controller.signal);
       if (!isCurrent() || !files.length) return false;
       validateDocumentBatch(files);
-      const existing = decodeDocumentMessage(latest.current.draft);
+      const existing = decodeDocumentMessage(latest.current.draft());
       validateDocumentBatch([...existing.documents, ...files]);
       if (chatTitle === undefined) setPending(files);
       const documents: DocumentAttachment[] = [];
@@ -42,10 +50,10 @@ export function useDocumentImport(scope: string, draft: string, update: (text: s
           ...(chatTitle !== undefined ? { chatTitle } : {}) });
         if (!isCurrent()) return false;
         // Enforce aggregate limits before parsing another file, without truncation.
-        const current = decodeDocumentMessage(latest.current.draft);
+        const current = decodeDocumentMessage(latest.current.draft());
         encodeDocumentMessage(current.text, [...current.documents, ...documents], true, current.skills);
       }
-      const current = decodeDocumentMessage(latest.current.draft);
+      const current = decodeDocumentMessage(latest.current.draft());
       if (chatTitle !== undefined && !current.text.includes(chatTitle)) return false;
       latest.current.update(encodeDocumentMessage(current.text, [...current.documents, ...documents], true, current.skills));
       return true;
@@ -59,6 +67,8 @@ export function useDocumentImport(scope: string, draft: string, update: (text: s
 
   return {
     busy, pending, cancel,
+    hasUnresolvedChatReference,
+    canSubmit: () => !operation.current && !hasUnresolvedChatReference(),
     addFrom: run,
     addFiles: (files: readonly File[]) => run(async () => files),
     addPaths: (paths: readonly string[]) => run(async signal => {

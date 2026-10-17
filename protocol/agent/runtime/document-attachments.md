@@ -57,6 +57,26 @@ attachments, images, system prompts, reasoning and tool output are excluded.
 Empty or incomplete history is rejected. Cancellation and workspace changes
 invalidate a pending reference import, just as for document extraction.
 
+Agent model requests render validated document envelopes as explicitly untrusted
+reference data followed by the current user request. `chatTitle` identifies quoted
+historical conversation messages: the model should use them to answer questions
+about that conversation without resuming its old tasks. This rendering applies to
+both replayed messages (including image messages) and pending step input; durable
+storage retains the original envelope.
+The system prompt also treats embedded roles, commands and task plans as quoted
+data. A request to summarize a reference must be answered from that data without
+continuing its tasks or inspecting the current machine. The reference itself
+never authorizes tool execution; existing permission checks still apply.
+
+Import starts synchronously when a chat is selected. Sending is blocked until
+the reference payload is ready; a failed or cancelled import cannot silently
+fall back to sending only the chat title. Remove the unresolved title or select
+the chat again to retry. Unsynchronized history and streaming assistant text are
+rejected instead of exporting a partial conversation. Normal limits reject
+oversized history without truncating it. "Complete" here means the selected
+snapshot's committed human text and settled assistant text; tools, reasoning,
+images and prior attachments remain outside the reference export.
+
 ## Extraction and limits
 
 - PDF.js extracts PDF text. CMaps and standard font resources are bundled locally.
@@ -138,3 +158,13 @@ multimodal PDF support or OCR. Model context budgets still apply.
 - `pnpm test:document-upload` exercises real PDF, DOCX, XLSX and text uploads,
   preview, submission, removal, failures and navigation in Chromium and WebKit at
   narrow and wide widths. It uses PDF-lib, ExcelJS and Mammoth's actual DOCX fixture.
+- `node scripts/verify-chat-reference-live.mjs --history PATH --context PATH --database PATH`
+  exports a real titled history through the production projection and tests a real
+  configured MiniMax route with keychain credentials. `--context` is the Session
+  log containing the reported summary question. Debug Cargo tests use the
+  development credential namespace, so pass the development route database.
+  Three requests cover a clean summary, the original preceding context, and exact
+  first/middle/last recall. Available tool schemas remain enabled; any returned
+  tool proposal fails the test and is never executed. Evidence in a private temp
+  directory includes per-request reference hashes, model usage and visible replies.
+  The ignored live test incurs real provider usage and is excluded from normal tests.

@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client';
+import { useState } from 'react';
 import { AiComposerSeat } from '../workspace/ai-composer-seat';
 import { chatReferenceFile } from '@/lib/ai/chat-reference';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
@@ -13,9 +14,13 @@ const summary = {
   updatedAt: new Date(agentSessionEventFixture[0].timeUnixMs).toISOString(),
   status: 'idle' as const, scopeKey: 'terminal-fixture', archived: false,
 };
-createRoot(document.getElementById('root')!).render(
-  <main className="ai-panel-shell p-3">
+function ReferencePage() {
+  const [submission, setSubmission] = useState('');
+  return <main className="ai-panel-shell flex h-dvh flex-col justify-end p-3">
     <AiComposerSeat phase="active" status="idle" sessions={[summary]}
-      onReadSession={async () => chatReferenceFile(summary, projectAgentChatNodes(agentSessionEventFixture))} />
-  </main>,
-);
+      onReadSession={async () => chatReferenceFile(summary, projectAgentChatNodes(agentSessionEventFixture))}
+      onSubmit={setSubmission} />
+    <output hidden data-chat-reference-submission="">{submission}</output>
+  </main>;
+}
+createRoot(document.getElementById('root')!).render(<ReferencePage />);

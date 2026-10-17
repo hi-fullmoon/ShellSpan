@@ -168,7 +168,7 @@ export function useFileCompletion({ text, update, query, listDirectories, scopeK
     { label: t('ai.workspace.addMenu.history'), options: normalized && !context.sessionsLoading && !context.sessionsError && context.onSession
       ? (context.sessions ?? []).filter(session => session.id !== context.currentSessionId && !session.archived && isTopLevelAiSession(session, context.sessions ?? []) && matches(session.title))
         .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).map(session => ({ key: `chat:${session.id}`, label: session.title, detail: t('ai.workspace.addMenu.chat'), icon: <MessageCircleIcon data-icon="inline-start" />,
-          choose: () => { replaceToken(`${session.title} `); requestAnimationFrame(() => context.onSession?.(session)); },
+          choose: () => { replaceToken(`${session.title} `); context.onSession?.(session); },
         }))
       : normalized && context.sessionsError ? [{ key: 'retry-history', label: t('ai.workspace.addMenu.retry'), icon: <RefreshCwIcon data-icon="inline-start" />, choose: () => context.onRefreshSessions?.() }] : [],
       notice: !normalized ? t(context.agent ? 'ai.workspace.addMenu.mentionSearchHint' : 'ai.workspace.addMenu.searchHistoryHint') : context.sessionsLoading ? t('ai.workspace.addMenu.loading') : undefined,

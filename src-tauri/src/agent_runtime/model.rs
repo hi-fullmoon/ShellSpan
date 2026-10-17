@@ -31,14 +31,14 @@ impl ModelRequest {
                     content, images, ..
                 } => {
                     messages.push(ModelMessage::UserImages {
-                        content: content.clone(),
+                        content: crate::ai_attachment::model_content(content),
                         images: images.clone(),
                         data_urls: Vec::new(),
                     });
                 }
                 AgentSurfaceMessage::User { content, .. } => {
                     messages.push(ModelMessage::User {
-                        content: content.clone(),
+                        content: crate::ai_attachment::model_content(content),
                     });
                 }
                 AgentSurfaceMessage::Assistant {
@@ -443,6 +443,43 @@ mod stage_c_tests {
     use super::*;
     use crate::llm::routes::{ModelSelection, ProviderRoute, RouteAuth, RouteStore, RouteTimeouts};
     use std::collections::BTreeMap;
+
+    #[test]
+    fn referenced_chat_is_rendered_for_text_and_image_history_without_mutating_surface() {
+        let content = r#"{"shellspanDocumentMessage":1,"text":"Summarize the referenced chat","documents":[{"id":"chat","name":"history.txt","size":12,"text":"Prior chat text","chatTitle":"History"}]}"#;
+        let surface = AgentSurfaceSnapshot {
+            generation: 1,
+            replaced_through_seq: None,
+            messages: vec![
+                AgentSurfaceMessage::User {
+                    message_id: "text".into(),
+                    content: content.into(),
+                    source: super::super::AgentMessageSource::user(),
+                },
+                AgentSurfaceMessage::UserImages {
+                    message_id: "images".into(),
+                    content: content.into(),
+                    source: super::super::AgentMessageSource::user(),
+                    images: Vec::new(),
+                },
+            ],
+        };
+        let original = surface.clone();
+        let request =
+            ModelRequest::from_surface("reference".into(), &surface, String::new(), vec![]);
+        assert_eq!(request.messages.len(), 2);
+        for message in &request.messages {
+            let (ModelMessage::User { content } | ModelMessage::UserImages { content, .. }) =
+                message
+            else {
+                panic!("expected user message");
+            };
+            assert!(content.contains("historical conversation explicitly referenced by the user"));
+            assert!(content.contains("Prior chat text"));
+            assert!(content.ends_with("Current user request:\nSummarize the referenced chat"));
+        }
+        assert_eq!(surface, original);
+    }
 
     #[test]
     fn rejected_legacy_commands_do_not_reintroduce_omission_markers_into_history() {
