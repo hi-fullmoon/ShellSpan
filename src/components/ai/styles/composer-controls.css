@@ -1,3 +1,28 @@
+.ai-composer-toolbar[data-measuring] > * {
+  flex: none;
+  width: max-content;
+}
+
+.ai-composer-toolbar .ai-composer-tools {
+  flex-shrink: 0;
+}
+
+.ai-composer-toolbar[data-compact]:not([data-compact='full']) .ai-model-trigger-name {
+  max-width: 96px;
+}
+
+.ai-composer-toolbar[data-compact]:not([data-compact='full']) .ai-model-trigger-reasoning,
+.ai-composer-toolbar:is([data-compact='surface'], [data-compact='permission']) :is(.ai-execution-surface-label, .ai-execution-surface-trigger [data-icon='inline-end']),
+.ai-composer-toolbar[data-compact='permission'] :is(.ai-permission-trigger-label, .ai-permission-trigger [data-icon='inline-end']) {
+  display: none;
+}
+
+.ai-composer-toolbar:is([data-compact='surface'], [data-compact='permission']) .ai-execution-surface-trigger,
+.ai-composer-toolbar[data-compact='permission'] .ai-permission-trigger {
+  width: 28px;
+  padding-inline: 0;
+}
+
 .ai-image-rail-viewport {
   scroll-snap-type: none;
   scrollbar-width: none;

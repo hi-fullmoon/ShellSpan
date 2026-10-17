@@ -166,7 +166,7 @@ export function AgentPermissionSelector({
             <Button
               variant={composer ? 'ghost' : 'outline'}
               size={composer ? 'xs' : 'sm'}
-              className={cn(composer && 'ai-permission-trigger h-7 min-w-0 max-w-[154px] shrink-0 px-[7px] @max-[640px]/ai-workspace:size-7 @max-[640px]/ai-workspace:p-0 @max-[640px]/ai-workspace:[&_[data-icon=inline-end]]:hidden')}
+              className={cn(composer && 'ai-permission-trigger h-7 min-w-0 max-w-[154px] shrink-0 px-[7px]')}
               disabled={disabled || !connected}
               aria-label={composer
                 ? t('agent.permission.composerAria', { mode: t(triggerLabel) })
@@ -187,7 +187,7 @@ export function AgentPermissionSelector({
               strokeWidth={1.75}
               className={cn(visibleMode === 'fullAccess' && 'text-app-warning')}
             />
-            <span className={cn(composer && 'ai-permission-trigger-label truncate @max-[640px]/ai-workspace:hidden')}>
+            <span className={cn(composer && 'ai-permission-trigger-label truncate')}>
               {t(triggerLabel)}
             </span>
             <ChevronDownIcon data-icon="inline-end" />

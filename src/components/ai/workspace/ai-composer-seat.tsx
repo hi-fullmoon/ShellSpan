@@ -1,4 +1,5 @@
 import { AiComposerEditor } from './ai-composer-editor';
+import { observeComposerToolbar } from './composer-toolbar-layout';
 import { AiControlTooltip } from '../ai-control-tooltip';
 import { AiCompletionPopover } from './ai-completion-popover';
 import { useFileCompletion } from './use-file-completion';
@@ -170,6 +171,10 @@ export function AiComposerSeat({
   const { t } = useI18n();
   const toast = useToast();
   const cardRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const toolbar = cardRef.current?.querySelector<HTMLElement>('.ai-composer-toolbar');
+    if (toolbar) return observeComposerToolbar(toolbar);
+  }, []);
   const documentInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
   const [localDraft, setLocalDraft] = useState(defaultDraft);
