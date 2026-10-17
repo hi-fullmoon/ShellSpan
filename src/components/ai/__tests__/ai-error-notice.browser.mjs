@@ -79,12 +79,12 @@ try {
       assert.equal(icon.height, 14);
       assert.equal(text.x - icon.right, 4, 'Icon and text spacing must be 4px');
       if (width === 1280) {
-        assert.ok(Math.abs(icon.y + icon.height / 2 - alert.y - alert.height / 2 + (index === 1 ? 1 : 0)) < 0.1,
-          'Single-line icons must be vertically centered');
+        assert.ok(Math.abs(icon.y + icon.height / 2 - alert.y - alert.height / 2 + 1) < 0.1,
+          'Single-line icons must retain the compact notice optical correction');
       }
       assert.ok(Math.abs(text.y + text.height / 2 - alert.y - alert.height / 2) < 0.1,
         'Text must remain centered without a fixed optical offset');
-      assert.ok(Math.abs(icon.y + icon.height / 2 - text.y - geometry.lineHeights[index] / 2 + (index === 1 ? 1 : 0)) < 0.1,
+      assert.ok(Math.abs(icon.y + icon.height / 2 - text.y - geometry.lineHeights[index] / 2 + 1) < 0.1,
         'Icons must align with the first text line, including wrapped notices');
     });
     assert.ok(geometry.description.right <= geometry.button.x, 'Text must not overlap the button');

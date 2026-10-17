@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { createServer } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
-import { webkit } from 'playwright';
+import { chromium, webkit } from 'playwright';
 
 const root = path.resolve(import.meta.dirname, '../../../..');
 const server = await createServer({
@@ -33,7 +33,8 @@ const server = await createServer({
           error: { kind: 'offline', message: 'Disconnected', retryable: true },
         }).state;
         createRoot(document.getElementById('root')).render(React.createElement(AiWorkspaceErrorNotices, {
-          composerState: { ...failed, lastError: undefined },
+          composerState: failed,
+          onDismissError: () => { document.body.dataset.dismissed = 'true'; },
           onRetryFailedDraft: id => { document.body.dataset.retried = id; },
         }));
       `;
@@ -50,14 +51,17 @@ const server = await createServer({
 let browser;
 try {
   await server.listen();
-  browser = await webkit.launch();
+  for (const engine of [chromium, webkit]) {
+  browser = await engine.launch();
   const page = await browser.newPage();
   for (const locale of ['zh-CN', 'en-US']) {
-    for (const width of [1280, 400]) {
+    for (const width of [1280, 400, 240]) {
       await page.setViewportSize({ width, height: 400 });
       await page.goto(`${server.resolvedUrls.local[0]}retry-review?locale=${locale}`);
       const button = page.getByRole('button', { name: locale === 'zh-CN' ? '重试' : 'Retry', exact: true });
       await button.waitFor();
+      await page.evaluate(() => document.fonts.ready);
+      assert.equal(await page.locator('[data-ai-error-notice] button svg').count(), 0);
       const geometry = await button.evaluate(el => {
         const rect = el.getBoundingClientRect();
         const notice = el.closest('[data-ai-error-notice]').getBoundingClientRect();
@@ -65,21 +69,27 @@ try {
         return { height: rect.height, border: style.borderTopWidth,
           fits: rect.top >= notice.top && rect.bottom <= notice.bottom && rect.right <= notice.right,
           gap: style.columnGap, fontSize: style.fontSize,
-          iconWidth: el.querySelector('svg').getBoundingClientRect().width,
-          iconHeight: el.querySelector('svg').getBoundingClientRect().height };
+          icons: el.querySelectorAll('svg').length,
+          icon: (() => {
+            const icon = el.closest('[data-ai-error-notice]').querySelector(':scope > svg').getBoundingClientRect();
+            const text = el.closest('[data-ai-error-notice]').querySelector('[data-slot="alert-description"] > span').getBoundingClientRect();
+            return { center: icon.y + icon.height / 2, textCenter: text.y + 8 };
+          })() };
       });
-      assert.equal(geometry.height, 20);
-      assert.equal(geometry.iconWidth, 10);
-      assert.equal(geometry.iconHeight, 10);
+      assert.equal(geometry.height, 24);
+      assert.equal(geometry.icons, 0);
+      assert.ok(Math.abs(geometry.icon.center - geometry.icon.textCenter + 1) < 0.1, JSON.stringify(geometry));
       assert.equal(geometry.border, '0px');
       assert.equal(geometry.gap, '4px');
-      assert.equal(geometry.fontSize, '10px');
+      assert.equal(geometry.fontSize, '11px');
       assert.equal(geometry.fits, true);
-      await page.screenshot({ path: `/tmp/shellspan-retry-${locale}-${width}.png` });
+      await page.screenshot({ path: `/tmp/shellspan-retry-${engine.name()}-${locale}-${width}.png` });
       await button.focus();
       await page.keyboard.press('Enter');
       assert.equal(await page.locator('body').getAttribute('data-retried'), 'retry-review');
     }
+  }
+  await browser.close();
   }
   console.log('Retry rendering and keyboard interaction passed at wide and narrow widths in both locales.');
 } finally {
