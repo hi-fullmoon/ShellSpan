@@ -714,6 +714,7 @@ export default {
   'terminal.feedback.pasteUnavailable': '目标终端当前无法接收粘贴，请在终端就绪后重试',
 
   'terminal.message.shellReady': 'Shell 已就绪',
+  'terminal.resize.dimensions': '{cols} 列 × {rows} 行',
 
   'terminal.notice.preparing': '正在准备终端...',
   'terminal.notice.reconnectingLabel': '正在重连',

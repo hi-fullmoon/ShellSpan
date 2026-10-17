@@ -228,11 +228,7 @@ describe('TerminalPane', () => {
     // hairline directly above the lease bar; a top border here would stack
     // into a doubled line.
     expect(bar).toHaveClass(
-      'grid',
-      'grid-cols-[auto_minmax(0,1fr)_auto]',
-      'gap-x-3',
-      'px-2',
-      'py-[5px]',
+      '@container/terminal-lease',
       'border-b',
       'border-app-border/50',
     );
@@ -244,10 +240,14 @@ describe('TerminalPane', () => {
     expect(identity).toHaveClass('h-6', 'text-xs');
     expect(identity).not.toHaveAttribute('title');
     expect(bar).not.toHaveTextContent('[Agent] $ echo [REDACTED]');
-    const separator = screen.getByTestId('agent-terminal-lease-separator');
-    expect(separator).toHaveClass('relative', 'h-5');
-    expect(separator.querySelector('[data-slot="separator"]'))
-      .toHaveClass('absolute', 'top-1/2', 'h-3.5', '-translate-y-1/2');
+    expect(bar.querySelector('.agent-terminal-lease-layout')).toHaveClass(
+      'flex', 'items-center',
+    );
+    expect(bar.querySelector('.agent-terminal-lease-description')).toHaveClass('min-w-0', 'flex-1', 'truncate');
+    expect(bar.querySelector('.agent-terminal-lease-status')).not.toHaveClass('flex-wrap');
+    expect(bar.querySelector('.agent-terminal-input-state')).not.toHaveClass('hidden');
+    expect(bar.querySelector('.agent-terminal-lease-status')).toContainElement(identity);
+    expect(bar.querySelector('.agent-terminal-lease-status')).toContainElement(bar.querySelector('.agent-terminal-input-state'));
     expect(screen.getByRole('button', { name: 'terminal.agentLease.takeover' }))
       .toHaveAttribute('data-slot', 'button');
     expect(screen.getByRole('button', { name: 'terminal.agentLease.takeover' }))

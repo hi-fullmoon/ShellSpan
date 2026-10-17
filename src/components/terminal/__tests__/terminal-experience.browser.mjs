@@ -36,6 +36,7 @@ const server = await createServer({
         export { TerminalPastePreview } from '/src/components/terminal/terminal-paste-preview.tsx';
         export { TerminalCloseDetails } from '/src/components/terminal/terminal-close-details.tsx';
         export { TerminalPane } from '/src/components/terminal/terminal-pane.tsx';
+        export { TerminalResizeIndicator } from '/src/components/terminal/terminal-resize-indicator.tsx';
         export { TerminalCarousel } from '/src/components/terminal/terminal-carousel.tsx';
         export { default as TerminalWorkspace } from '/src/components/terminal/index.tsx';
         export { agentTerminalLeaseState } from '/src/components/terminal/agent-terminal-lease-state.ts';
@@ -287,6 +288,41 @@ try {
   await latest.waitFor();
   // TerminalCarousel unmounts inactive panes. Remounting must keep unread state.
   await page.evaluate(() => window.unmountControls());
+  await page.setViewportSize({ width: 1000, height: 600 });
+  await page.evaluate(() => {
+    const { React, createRoot, TerminalResizeIndicator } = window.runtime;
+    window.resizeHost = document.createElement('div');
+    document.getElementById('pane').appendChild(window.resizeHost);
+    window.resizeRoot = createRoot(window.resizeHost);
+    window.resizeRoot.render(React.createElement(TerminalResizeIndicator, { terminal: window.terminal }));
+  });
+  await page.waitForTimeout(50);
+  assert.equal(await page.getByTestId('terminal-resize-indicator').count(), 0);
+  await page.evaluate(() => {
+    const host = document.getElementById('pane');
+    host.style.width = '700px';
+    host.style.height = '300px';
+    window.fit.fit();
+  });
+  const resizeIndicator = page.getByTestId('terminal-resize-indicator');
+  await resizeIndicator.waitFor();
+  assert.equal(await resizeIndicator.innerText(), await page.evaluate(() => `${window.terminal.cols} × ${window.terminal.rows}`));
+  assert.equal(await resizeIndicator.evaluate(element => getComputedStyle(element).pointerEvents), 'none');
+  assert.equal(await resizeIndicator.evaluate(element => {
+    const badge = element.firstElementChild.getBoundingClientRect();
+    const pane = document.getElementById('pane').getBoundingClientRect();
+    return Math.abs(badge.x + badge.width / 2 - pane.x - pane.width / 2) < 1
+      && Math.abs(badge.y + badge.height / 2 - pane.y - pane.height / 2) < 1;
+  }), true, 'Resize indicator must be centered inside its own terminal pane');
+  await page.screenshot({ path: '/tmp/shellspan-terminal-resize.png' });
+  await resizeIndicator.waitFor({ state: 'detached' });
+  await page.evaluate(() => {
+    window.resizeRoot.unmount();
+    window.resizeHost.remove();
+    document.getElementById('pane').style.width = '';
+    document.getElementById('pane').style.height = '360px';
+    window.fit.fit();
+  });
   await latest.waitFor({ state: 'detached' });
   await page.evaluate(() => window.renderControls(false));
   await latest.waitFor();
@@ -541,6 +577,57 @@ try {
       await coordinator.handle({ ...lease, state: 'activity', commandPhase: 'typing' });
       coordinator.dispose();
     });
+  }
+  for (const locale of ['en-US', 'zh-CN']) {
+    await page.evaluate(async locale => {
+      window.runtime.useAppStore.setState({ locale });
+      await window.runtime.initI18n(locale);
+      const store = window.runtime.agentTerminalLeaseState;
+      const lease = store.get(window.identity.sessionId);
+      store.update(lease.sessionId, lease.operationId, current => ({ ...current, terminalOwned: false }));
+    }, locale);
+    for (const width of [1280, 760, 600, 420, 320]) {
+      await page.setViewportSize({ width, height: 800 });
+      const bar = page.getByTestId('agent-terminal-lease-bar');
+      const geometry = await bar.evaluate(element => {
+        const bounds = element.getBoundingClientRect();
+        const selectors = ['.agent-terminal-lease-status', '.agent-terminal-lease-description', '.agent-terminal-takeover'];
+        return { width: element.clientWidth, overflow: element.scrollWidth > element.clientWidth,
+          items: selectors.map(selector => {
+            const rect = element.querySelector(selector).getBoundingClientRect();
+            return { left: rect.left - bounds.left, right: rect.right - bounds.left, top: rect.top, bottom: rect.bottom };
+          }) };
+      });
+      assert.equal(geometry.overflow, false, `Lease bar must fit ${locale} at ${width}px`);
+      assert.ok(geometry.items.every(item => item.left >= 0 && item.right <= geometry.width + 1));
+      const [status, description, action] = geometry.items;
+      assert.ok(description.left >= status.right && action.left >= description.right,
+        'Status, description and takeover must not overlap');
+      assert.ok(Math.abs(status.top - action.top) < 1 && Math.abs(status.bottom - action.bottom) < 1,
+        'Status and takeover must stay on one row');
+      assert.ok(description.top >= status.top && description.bottom <= status.bottom,
+        'Description must stay within the same row');
+      assert.equal(await bar.locator('.agent-terminal-input-state').isVisible(), true);
+      await bar.evaluate(async element => {
+        await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished));
+      });
+      const iconAlignment = await bar.locator('.agent-terminal-lease-status [data-slot="badge"]').evaluateAll(badges => badges.map(badge => {
+        const bounds = badge.getBoundingClientRect();
+        const icon = badge.querySelector('svg').getBoundingClientRect();
+        const label = badge.querySelector('span');
+        return {
+          iconOnly: getComputedStyle(label).display === 'none',
+          horizontal: Math.abs(icon.x + icon.width / 2 - bounds.x - bounds.width / 2),
+          vertical: Math.abs(icon.y + icon.height / 2 - bounds.y - bounds.height / 2),
+        };
+      }));
+      for (const alignment of iconAlignment) {
+        assert.ok(alignment.vertical < 0.1, `Badge icon must be vertically centered at ${locale} ${width}px`);
+        if (alignment.iconOnly) assert.ok(alignment.horizontal < 0.1,
+          `Icon-only badge must be horizontally centered at ${locale} ${width}px: ${JSON.stringify(alignment)}`);
+      }
+      await bar.screenshot({ path: `/tmp/shellspan-terminal-lease-${locale}-${width}.png` });
+    }
   }
   await page.getByTestId('agent-terminal-lease-bar').getByRole('button', { name: '停止并接管', exact: true }).click();
   await page.getByTestId('agent-terminal-lease-bar').waitFor({ state: 'detached' });

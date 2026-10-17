@@ -714,6 +714,7 @@ export default {
   'terminal.feedback.pasteUnavailable': 'The target terminal cannot accept pasted text right now. Try again when it is ready.',
 
   'terminal.message.shellReady': 'Shell ready',
+  'terminal.resize.dimensions': '{cols} columns × {rows} rows',
 
   'terminal.notice.preparing': 'Preparing terminal...',
   'terminal.notice.reconnectingLabel': 'Reconnecting',

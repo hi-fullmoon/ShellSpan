@@ -14,12 +14,12 @@ import { readClipboardText } from '@/lib/clipboard';
 import { copyTerminalText } from './terminal-clipboard';
 import { terminalInputReadiness } from './terminal-input-readiness';
 import { TerminalSearch } from './terminal-search';
+import { TerminalResizeIndicator } from './terminal-resize-indicator';
 import { TerminalPastePreview } from './terminal-paste-preview';
 import { eventMatchesShortcut } from '@/lib/shortcuts';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import type { ShortcutBindings } from '@/types';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { Spinner as ButtonSpinner } from '@/components/ui/spinner';
 import {
   Tooltip,
@@ -32,8 +32,9 @@ import {
   type AgentTerminalLeaseView,
 } from '@/components/terminal/agent-terminal-lease-state';
 import {
-  BotIcon,
-  CircleStopIcon,
+  SquareTerminalIcon,
+  LockKeyholeIcon,
+  SquareIcon,
 } from 'lucide-react';
 
 const effectiveShortcuts = (): ShortcutBindings => ({
@@ -78,7 +79,7 @@ const AgentTerminalLeaseBar: React.FC<{
 
   return (
     <div
-      className="agent-terminal-lease-bar grid shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 border-b border-app-border/50 bg-app-surface px-2 py-[5px]"
+      className="agent-terminal-lease-bar @container/terminal-lease shrink-0 border-b border-app-border/50 bg-app-surface"
       role="status"
       aria-live="polite"
       aria-atomic="true"
@@ -87,51 +88,43 @@ const AgentTerminalLeaseBar: React.FC<{
       data-terminal-owned={lease.terminalOwned || undefined}
       data-input-blocked={lease.inputBlocked || undefined}
     >
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger
-            render={(
-              <Badge
-                variant="outline"
-                className="agent-terminal-lease-identity h-6"
-                data-testid="agent-terminal-lease-identity"
-              />
-            )}
+      <div className="agent-terminal-lease-layout flex min-w-0 items-center gap-3 px-2 py-1.5">
+        <div className="agent-terminal-lease-status flex shrink-0 items-center gap-1">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger
+                render={(
+                  <Badge
+                    variant="outline"
+                    className="agent-terminal-lease-identity h-6 @max-[400px]/terminal-lease:size-6 @max-[400px]/terminal-lease:p-0 @max-[400px]/terminal-lease:has-data-[icon=inline-start]:pl-0"
+                    data-testid="agent-terminal-lease-identity"
+                    aria-label={t('terminal.agentLease.visibleCommandLabel')}
+                  />
+                )}
+              >
+                <SquareTerminalIcon data-icon="inline-start" />
+                <span className="hidden @min-[400px]/terminal-lease:inline">{t('terminal.agentLease.visibleCommandLabel')}</span>
+              </TooltipTrigger>
+              <TooltipContent>{t('terminal.agentLease.agentIdentity', { id: lease.agentSessionId })}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <Badge
+            variant={lease.terminalOwned ? 'secondary' : 'outline'}
+            className="agent-terminal-input-state h-6 shrink-0 @max-[520px]/terminal-lease:size-6 @max-[520px]/terminal-lease:p-0 @max-[520px]/terminal-lease:has-data-[icon=inline-start]:pl-0"
+            aria-hidden="true"
+            title={inputLabel}
           >
-            <BotIcon data-icon="inline-start" />
-            {t('terminal.agentLease.visibleCommandLabel')}
-          </TooltipTrigger>
-          <TooltipContent>{t('terminal.agentLease.agentIdentity', { id: lease.agentSessionId })}</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-      <div className="flex min-w-0 items-center gap-3">
+            <LockKeyholeIcon data-icon="inline-start" />
+            <span className="hidden @min-[520px]/terminal-lease:inline">{inputLabel}</span>
+          </Badge>
+        </div>
         <span
-          className="relative h-5 w-px shrink-0"
+          className="agent-terminal-lease-description min-w-0 flex-1 truncate text-xs text-app-text-soft"
           aria-hidden="true"
-          data-testid="agent-terminal-lease-separator"
-        >
-          <Separator
-            orientation="vertical"
-            className="absolute inset-x-0 top-1/2 h-3.5 -translate-y-1/2"
-          />
-        </span>
-        <span
-          className="min-w-0 truncate text-xs text-app-text-soft"
-          aria-hidden="true"
+          title={interactionHint}
         >
           {activityLabel}
         </span>
-      </div>
-      <span className="sr-only">{interactionHint}</span>
-      <div className="flex shrink-0 items-center gap-2">
-        <Badge
-          variant={lease.terminalOwned ? 'secondary' : 'outline'}
-          className="agent-terminal-input-state hidden h-6 shrink-0 sm:inline-flex"
-          aria-hidden="true"
-        >
-          <span className="agent-terminal-input-state-dot" />
-          {inputLabel}
-        </Badge>
         <Button
           type="button"
           variant="outline"
@@ -147,11 +140,12 @@ const AgentTerminalLeaseBar: React.FC<{
           {lease.takeoverRequested ? (
             <ButtonSpinner data-icon="inline-start" aria-hidden="true" />
           ) : (
-            <CircleStopIcon data-icon="inline-start" />
+            <SquareIcon data-icon="inline-start" />
           )}
           {t('terminal.agentLease.takeover')}
         </Button>
       </div>
+      <span className="sr-only">{interactionHint}</span>
     </div>
   );
 };
@@ -488,6 +482,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           />
         )}
         <div ref={paneRef} data-terminal-measure-session={activeSession?.sessionId} className="h-full w-full p-0" />
+        {isVisible && terminal && <TerminalResizeIndicator key={activeSessionId} terminal={terminal} />}
       </div>
       <ConfirmationDialog
         open={Boolean(pendingPaste)}
