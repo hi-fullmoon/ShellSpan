@@ -191,6 +191,8 @@ export default {
   'ai.workspace.question.declinedAnswer': 'The user declined to answer this question. Continue with the available information; explain any limitations if required information is missing.',
   'ai.workspace.question.collapse': 'Collapse question',
   'ai.workspace.question.expand': 'Expand question',
+  'ai.workspace.userMessage.expand': 'Show more',
+  'ai.workspace.userMessage.collapse': 'Show less',
   'app.name': 'ShellSpan',
   'app.tagline': 'A clean and elegant SSH workbench',
   'app.primaryNavigation': 'Primary sections',

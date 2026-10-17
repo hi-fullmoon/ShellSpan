@@ -162,6 +162,7 @@ import { AiCommittedImages } from './ai-image-attachments';
 import { AiDocumentAttachments } from './ai-document-attachments';
 import { AiDraftAttachmentRail, UnifiedAttachmentContext } from './ai-image-draft-rail';
 import { decodeDocumentMessage } from '@/lib/ai/document-message';
+import { AiUserMessageText } from './ai-user-message-text';
 
 function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'userMessage'> }) {
   const { t } = useI18n();
@@ -192,7 +193,7 @@ function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'us
       {(message.text || node.delivery === 'failed') && (
         <Bubble role="user">
           {pendingIndicator}
-          <span className="ai-user-message-text">{message.text}</span>
+          <AiUserMessageText key={message.text} text={message.text} />
           {node.delivery === 'failed' && (
             <span className="ai-user-delivery mt-0.5 block" data-state={node.delivery}>
               {t('ai.workspace.messageNotSent')}

@@ -191,6 +191,8 @@ export default {
   'ai.workspace.question.declinedAnswer': '用户拒绝回答本题。请根据已有信息继续；如缺少必要信息，请说明限制。',
   'ai.workspace.question.collapse': '收起问题',
   'ai.workspace.question.expand': '展开问题',
+  'ai.workspace.userMessage.expand': '展开',
+  'ai.workspace.userMessage.collapse': '收起',
   'app.name': 'ShellSpan',
   'app.tagline': '简洁优雅的 SSH 工作台',
   'app.primaryNavigation': '主要板块',
