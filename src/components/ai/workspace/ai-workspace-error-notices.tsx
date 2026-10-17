@@ -50,7 +50,7 @@ export function AiWorkspaceErrorNotices({
           </span>
         </AiErrorNotice>
       )}
-      {composerState?.lastError && (
+      {composerState?.lastError && !composerState.failedDrafts.some(failed => failed.error.deliveryUnknown && failed.error === composerState.lastError) && (
         <AiErrorNotice
           title={t('ai.workspace.recovery.title')}
           action={onDismissError && (
@@ -72,10 +72,10 @@ export function AiWorkspaceErrorNotices({
         <AiErrorNotice
           key={failed.id}
           title={t('ai.workspace.recovery.title')}
-          label={t('ai.workspace.failedDraft')}
+          label={t(failed.error.deliveryUnknown ? 'ai.workspace.messageUnconfirmed' : 'ai.workspace.failedDraft')}
           action={onRetryFailedDraft && <Button type="button" variant="ghost" size="xs" className="shrink-0 text-[11px]"
             disabled={composerState.phase === 'stopping'} onClick={() => onRetryFailedDraft(failed.id)}>
-            {t('common.retry')}
+            {t(failed.error.deliveryUnknown ? 'ai.workspace.retryOriginal' : 'common.retry')}
           </Button>}
         >
           {failed.content || (failed.hasImages ? t('ai.workspace.images.attachments') : '')}

@@ -18,6 +18,7 @@ const server = await createServer({
         import { createRoot } from 'react-dom/client';
         import { AiWorkspaceErrorNotices } from '/src/components/ai/workspace/ai-workspace-error-notices.tsx';
         import { createAiComposerState, reduceAiComposer } from '/src/lib/ai/composer-machine.ts';
+        import { AiPreparationTimeoutError, normalizeAiSessionError } from '/src/lib/ai/session-error.ts';
         import { initI18n } from '/src/locales/index.ts';
         import { useAppStore } from '/src/stores/appStore.ts';
         import '/src/styles/base.css';
@@ -30,7 +31,7 @@ const server = await createServer({
         }).state;
         const failed = reduceAiComposer(started, {
           type: 'submit.failed', clientOperationId: 'retry-review',
-          error: { kind: 'offline', message: 'Disconnected', retryable: true },
+          error: normalizeAiSessionError(new AiPreparationTimeoutError()),
         }).state;
         createRoot(document.getElementById('root')).render(React.createElement(AiWorkspaceErrorNotices, {
           composerState: failed,
@@ -62,6 +63,9 @@ try {
       await button.waitFor();
       await page.evaluate(() => document.fonts.ready);
       assert.equal(await page.locator('[data-ai-error-notice] button svg').count(), 0);
+      assert.equal(await page.getByText(locale === 'zh-CN'
+        ? '消息准备超时，尚未发送。请检查终端连接后重试。'
+        : 'Message preparation timed out before sending. Check the terminal connection and retry.', { exact: true }).count(), 1);
       const geometry = await button.evaluate(el => {
         const rect = el.getBoundingClientRect();
         const notice = el.closest('[data-ai-error-notice]').getBoundingClientRect();

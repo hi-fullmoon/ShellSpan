@@ -1,7 +1,7 @@
 import { AgentSessionCommittedClient, type AgentSessionStreamState } from '@/lib/ai/agent-session-client';
 import { createCommittedEventProjection } from './committed-event-projection';
 import { fallbackSessionTitle } from './session-title';
-import { normalizeAiSessionError } from './session-error';
+import { AiAdmissionUnconfirmedError, normalizeAiSessionError } from './session-error';
 import { invokeAnswerAgentRuntimeQuestion, invokeListAgentRuntimeSkills, invokeListAgentFileReferences } from '@/lib/ipc/tauri';
 import { projectQuestions } from './question-projection';
 import { modelRetryConfirmation } from './failure-recovery';
@@ -388,7 +388,8 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
     committedOperationIds: events.flatMap((event) => {
       switch (event.type) {
         case 'agent/inbox/spliced':
-          return event.data.messages.flatMap(message => message.source.label === 'model-failure-retry' && message.clientSubmissionId ? [message.clientSubmissionId] : []);
+          return event.data.operation === 'enqueued'
+            ? event.data.messages.flatMap(message => message.clientSubmissionId ? [message.clientSubmissionId] : []) : [];
         case 'question/answered':
           return [event.data.submission.clientOperationId];
         case 'agent/inbox/item_resumed':
@@ -658,28 +659,54 @@ export function createAgentSessionAdapter(
     ));
     const isPaused = (snapshot: AgentSessionSnapshot | null | undefined): boolean => snapshot?.status === 'failed'
       || Boolean(snapshot?.inbox.pausedIds?.includes(input.clientOperationId));
-    const request = command().then(snapshot => ({ kind: 'accepted' as const, snapshot }), error => ({ kind: 'error' as const, error: error as unknown }));
-    // A missing IPC reply does not mean that the durable write failed. Reconcile
-    // independently, so an already accepted input cannot block later messages.
-    for (;;) {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const result = await Promise.race([request, new Promise<{ kind: 'pending' }>(resolve => {
-        timer = setTimeout(() => resolve({ kind: 'pending' }), 3000);
-      })]);
-      clearTimeout(timer);
-      if (result.kind === 'accepted') return isPaused(result.snapshot);
-      if (result.kind === 'error' && /different payload|SUBMISSION_CONFLICT/.test(String(result.error))) throw result.error;
-      try {
-        const state = await entry.client.reconnect();
-        entry.view = entry.project(state);
-        for (const listener of entry.listeners) listener(entry.view);
-        if (confirmed(state.events)) return isPaused(state.snapshot);
-      } catch {
-        // An unknown receipt remains unknown; don't invent a failed delivery.
-        if (result.kind === 'error') await new Promise(resolve => setTimeout(resolve, 3000));
-        continue;
+    let resolveObserved!: (result: { kind: 'observed'; paused: boolean }) => void;
+    const observed = new Promise<{ kind: 'observed'; paused: boolean }>(resolve => { resolveObserved = resolve; });
+    const listener: AiSessionListener = view => {
+      if (view.committedOperationIds?.includes(input.clientOperationId)) {
+        resolveObserved({ kind: 'observed', paused: isPaused(view.snapshot.value) });
       }
-      if (result.kind === 'error') throw result.error;
+    };
+    entry.listeners.add(listener);
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+    let pollTimer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      deadlineTimer = setTimeout(() => reject(new AiAdmissionUnconfirmedError()), 15_000);
+    });
+    try {
+      const request = command().then(snapshot => ({ kind: 'accepted' as const, snapshot }), error => ({ kind: 'error' as const, error: error as unknown }));
+      // A live durable receipt also settles a missing IPC reply immediately.
+      for (;;) {
+        const result = await Promise.race([request, observed, deadline, new Promise<{ kind: 'pending' }>(resolve => {
+          pollTimer = setTimeout(() => resolve({ kind: 'pending' }), 3000);
+        })]);
+        clearTimeout(pollTimer);
+        if (result.kind === 'observed') return result.paused;
+        if (result.kind === 'accepted') return isPaused(result.snapshot);
+        if (result.kind === 'error' && /different payload|SUBMISSION_CONFLICT/.test(String(result.error))) throw result.error;
+        let refreshed: AgentSessionStreamState;
+        try {
+          const refresh = await Promise.race([
+            entry.client.reconnect().then(state => ({ kind: 'refreshed' as const, state })), observed, deadline,
+          ]);
+          if (refresh.kind === 'observed') return refresh.paused;
+          refreshed = refresh.state;
+        } catch (error) {
+          if (error instanceof AiAdmissionUnconfirmedError) throw error;
+          // Unreachable storage cannot establish that the message was rejected.
+          await Promise.race([observed, deadline, new Promise<void>(resolve => {
+            pollTimer = setTimeout(resolve, 3000);
+          })]);
+          continue;
+        }
+        entry.view = entry.project(refreshed);
+        for (const subscribed of entry.listeners) subscribed(entry.view);
+        if (confirmed(refreshed.events)) return isPaused(refreshed.snapshot);
+        if (result.kind === 'error') throw result.error;
+      }
+    } finally {
+      clearTimeout(deadlineTimer);
+      clearTimeout(pollTimer);
+      entry.listeners.delete(listener);
     }
   };
 

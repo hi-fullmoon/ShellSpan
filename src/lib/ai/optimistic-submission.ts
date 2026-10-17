@@ -2,7 +2,7 @@ import type { AiConversationNode, AiUserMessageNode } from './conversation-node'
 import type { AiDetachedSubmission } from './composer-machine';
 import type { AiInboxItem } from './session-adapter';
 
-export type AiOptimisticDelivery = 'pending' | 'accepted' | 'confirming' | 'failed' | 'timedOut';
+export type AiOptimisticDelivery = 'pending' | 'accepted' | 'confirming' | 'unconfirmed' | 'failed' | 'timedOut';
 
 export interface AiOptimisticSubmission extends AiDetachedSubmission {
   readonly scopeKey: string;
@@ -41,13 +41,15 @@ export function reconcileOptimisticSubmissions(
   submissions: readonly AiOptimisticSubmission[],
   committedNodes: readonly AiConversationNode[],
   committedInbox: readonly AiInboxItem[] = [],
+  durableOperationIds: readonly string[] = [],
 ): {
   readonly remaining: readonly AiOptimisticSubmission[];
   readonly committedOperationIds: readonly string[];
 } {
   const committedOperationIds: string[] = [];
   const remaining = submissions.filter((submission) => {
-    const committed = committedNodes.some((node) => committedOperationId(node, submission))
+    const committed = durableOperationIds.includes(submission.clientOperationId)
+      || committedNodes.some((node) => committedOperationId(node, submission))
       || committedInbox.some((item) => (
         item.clientSubmissionId === submission.clientOperationId
         || (item.clientSubmissionId === undefined && item.id === submission.clientOperationId)
@@ -74,7 +76,7 @@ function optimisticNode(submission: AiOptimisticSubmission): AiUserMessageNode {
     content: submission.content,
     delivery: submission.delivery === 'failed' || submission.delivery === 'timedOut'
       ? 'failed'
-      : submission.delivery === 'confirming' ? 'confirming' : 'pending',
+      : submission.delivery === 'confirming' || submission.delivery === 'unconfirmed' ? submission.delivery : 'pending',
   };
 }
 
@@ -89,7 +91,7 @@ export function withOptimisticConversationNodes(
   const visible = submissions.filter((submission) => (
     submission.scopeKey === scopeKey
     && (submission.mode === 'start' || submission.startsTurn
-      || submission.delivery === 'failed' || submission.delivery === 'timedOut')
+      || submission.delivery === 'failed' || submission.delivery === 'timedOut' || submission.delivery === 'unconfirmed')
     && (submission.sessionId === null || sessionId === null || submission.sessionId === sessionId)
     && !committedInbox.some((item) => (
       item.clientSubmissionId === submission.clientOperationId

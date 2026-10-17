@@ -133,7 +133,8 @@ export const AiConversation = memo(function AiConversation({
   const running = status === 'running' || status === 'waiting';
   let latestUserIndex = -1;
   for (let index = allNodes.length - 1; index >= 0; index -= 1) {
-    if (allNodes[index]?.kind === 'userMessage') {
+    const node = allNodes[index];
+    if (node?.kind === 'userMessage' && node.delivery === 'committed') {
       latestUserIndex = index;
       break;
     }
@@ -154,9 +155,9 @@ export const AiConversation = memo(function AiConversation({
   const showAskThinking = (running || pending) && runningIndicator === 'ask' && !visibleResponseStarted;
   const processResponseStarted = latestProcess?.children.some((node) => node.kind !== 'contextInjection' || isUserVisibleContextInjection(node));
   const showAgentThinking =
-    (pending || status === 'running') &&
+    status === 'running' &&
     runningIndicator === 'agent' &&
-    status !== 'waiting' &&
+    (latestUserIndex >= 0 || Boolean(latestProcess?.hasStartBoundary)) &&
     !visibleResponseStarted &&
     !processResponseStarted &&
     !latestProcess?.hasEndBoundary;

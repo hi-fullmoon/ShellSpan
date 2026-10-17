@@ -4,6 +4,9 @@ import { initI18n } from '@/locales';
 import { useImageDraft } from '../workspace/use-image-draft';
 import { useAiSessionController } from '../workspace/use-ai-session-controller';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
+import { useAppStore } from '@/stores/appStore';
+import { AiWorkspaceRoot } from '../workspace/ai-workspace-root';
+import '@/styles/base.css';
 
 export async function mountImagePreparation(host: HTMLElement, owner: string) {
   await initI18n('en-US');
@@ -21,6 +24,7 @@ export async function mountImagePreparation(host: HTMLElement, owner: string) {
 /** The real adapter encounters the absent native IPC transport in this browser.
  * No backend, model responses, or storage APIs are replaced by the test. */
 export async function mountDisconnectedController(host: HTMLElement) {
+  useAppStore.setState({ locale: 'en-US' });
   await initI18n('en-US');
   useAiSettingsStore.setState({ providers: [{ id: 'local-offline', name: 'Local', preset: 'ollama',
     kind: 'ollama', profile: 'ollama', baseUrl: 'http://127.0.0.1:11434', model: 'llama3.2', requiresApiKey: false }],
@@ -29,8 +33,12 @@ export async function mountDisconnectedController(host: HTMLElement) {
   function Controller() {
     const controller = useAiSessionController({ scope: 'workbench' });
     useImperativeHandle(api, () => controller);
-    return <pre>{JSON.stringify({ failed: controller.composer.failedDrafts.map(item => item.content),
-      pending: controller.composer.pendingSubmissions.map(item => item.content) })}</pre>;
+    return <div className="flex h-screen min-h-0 flex-col">
+      <AiWorkspaceRoot scope="workbench" view={controller.view} composerState={controller.composer}
+        pendingNodes={controller.pendingNodes} onDraftChange={controller.setDraft}
+        onSubmitGesture={controller.submit} onRetryFailedDraft={controller.retryFailedDraft}
+        onDismissError={controller.dismissError} />
+    </div>;
   }
   const root = createRoot(host);
   root.render(<Controller />);

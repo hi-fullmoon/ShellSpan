@@ -34,7 +34,7 @@ describe('continuous admission', () => {
       provider: { id: 'local', kind: 'openAiCompatible', profile: 'generic', baseUrl: '', model: 'local', requiresApiKey: false } });
     const a = queue.enqueue('A', async () => input('A'));
     const b = queue.enqueue('B', async () => input('B'));
-    await Promise.resolve();
+    await expect.poll(() => order).toEqual(['A:false']);
     queue.pause();
     release();
     await Promise.all([a, b]);
@@ -80,7 +80,7 @@ describe('continuous admission', () => {
       provider: { id: 'local', kind: 'openAiCompatible', profile: 'generic', baseUrl: '', model: 'local', requiresApiKey: false } });
     const first = queue.enqueue('A', async () => input('A'));
     const later = queue.enqueue('B', async () => input('B'));
-    await Promise.resolve();
+    await expect.poll(() => received).toEqual(['A']);
     queue.pause();
     release();
     expect((await first).clientOperationId).toBe('A');
@@ -123,8 +123,7 @@ describe('continuous admission', () => {
     const a = queue.enqueue('A', async () => prepare('A'));
     const b = queue.enqueue('B', async () => prepare('B'));
     const c = queue.enqueue('C', async () => prepare('C'));
-    await Promise.resolve();
-    expect(order).toEqual(['A']);
+    await expect.poll(() => order).toEqual(['A']);
     release();
     await Promise.all([a, b, c]);
     expect(order).toEqual(['A', 'B', 'C']);

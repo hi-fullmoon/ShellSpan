@@ -4,9 +4,10 @@ import path from 'node:path';
 import { webkit } from 'playwright';
 import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const server = await createServer({ root, configFile: false, logLevel: 'error', plugins: [react()],
+const server = await createServer({ root, configFile: false, logLevel: 'error', plugins: [react(), tailwindcss()],
   resolve: { alias: { '@': path.join(root, 'src') } }, server: { host: '127.0.0.1', port: 0 } });
 let browser;
 try {
@@ -98,6 +99,29 @@ try {
   });
   assert.deepEqual(recovered.ids, original);
   assert.deepEqual(recovered.contents, ['A', 'B', 'C']);
+  // Real unavailable IPC: the head fails while later inputs have never started.
+  await new Promise(resolve => setTimeout(resolve, 16_000));
+  const waiting = await page.evaluate(() => window.controllerView.api.current.composer.pendingSubmissions.map(item => item.state));
+  assert.deepEqual(waiting, ['queued', 'queued']);
+  assert.equal(await page.locator('[data-ai-processing]').count(), 0);
+  assert.equal(await page.locator('.ai-queue-row [data-slot="spinner"]').count(), 0);
+  const retry = page.getByRole('button', { name: 'Retry', exact: true });
+  await page.evaluate(() => window.controllerView.api.current.setDraft('Preserve my new draft'));
+  await retry.click();
+  await page.waitForFunction(() => window.controllerView.api.current.composer.failedDrafts.length === 1);
+  const retried = await page.evaluate(() => {
+    const state = window.controllerView.api.current.composer;
+    return { id: state.failedDrafts[0].id, pending: state.pendingSubmissions.map(item => item.clientOperationId), draft: state.draft };
+  });
+  assert.equal(retried.id, original[0]);
+  assert.deepEqual(retried.pending, original.slice(1));
+  assert.equal(retried.draft, 'Preserve my new draft');
+  for (const width of [900, 320]) {
+    await page.setViewportSize({ width, height: 800 });
+    await page.screenshot({ path: `/tmp/shellspan-submission-recovery-${width}.png` });
+    assert.equal(await page.locator('[data-ai-processing]').count(), 0);
+    assert.equal(await page.locator('.ai-queue-row [data-slot="spinner"]').count(), 0);
+  }
   await page.evaluate(() => window.controllerView.unmount());
   assert.deepEqual(errors, [], 'no unhandled browser errors');
 } finally { await browser?.close(); await server.close(); }

@@ -1,6 +1,18 @@
 import type { AiSessionError } from './session-adapter';
 import type { LocaleKey } from '@/locales';
 
+export class AiAdmissionUnconfirmedError extends Error {
+  constructor() {
+    super('AGENT_ADMISSION_UNCONFIRMED');
+  }
+}
+
+export class AiPreparationTimeoutError extends Error {
+  constructor() {
+    super('AGENT_PREPARATION_TIMEOUT');
+  }
+}
+
 export function sessionArchiveErrorMessage(error: unknown, t: (key: LocaleKey) => string): string {
   const { message } = normalizeAiSessionError(error);
   return t(/AGENT_SESSION_ARCHIVE_BUSY|a running Agent Session cannot be archived|only an ended Agent Session can be archived/.test(message)
@@ -10,6 +22,9 @@ export function sessionArchiveErrorMessage(error: unknown, t: (key: LocaleKey) =
 
 /** Convert Agent Runtime, Tauri, and transport failures into one recoverable UI error. */
 export function normalizeAiSessionError(error: unknown): AiSessionError {
+  if (error instanceof AiAdmissionUnconfirmedError) {
+    return { kind: 'unknown', message: error.message, retryable: true, deliveryUnknown: true };
+  }
   const message = error instanceof Error
     ? error.message
     : typeof error === 'string'

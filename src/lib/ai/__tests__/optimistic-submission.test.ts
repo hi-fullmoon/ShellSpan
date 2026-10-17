@@ -41,6 +41,12 @@ function committed(changes: Partial<AiUserMessageNode> = {}): AiUserMessageNode 
 }
 
 describe('optimistic submission reconcile', () => {
+  it('reconciles retained receipts after a message leaves both the inbox and transcript', () => {
+    expect(reconcileOptimisticSubmissions([pending({ delivery: 'unconfirmed' })], [], [], ['operation-1']))
+      .toEqual({ remaining: [], committedOperationIds: ['operation-1'] });
+    const nodes = withOptimisticConversationNodes([], [pending({ delivery: 'unconfirmed' })], pending().scopeKey, 'session-1');
+    expect(nodes[0]).toMatchObject({ kind: 'userMessage', delivery: 'unconfirmed' });
+  });
   it('atomically replaces an exact operation id with one committed user node', () => {
     const result = reconcileOptimisticSubmissions([pending()], [committed()]);
     expect(result.remaining).toEqual([]);

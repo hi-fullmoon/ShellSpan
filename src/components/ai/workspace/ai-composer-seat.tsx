@@ -246,8 +246,8 @@ export function AiComposerSeat({
     ? t('ai.workspace.messagePending')
     : stopPrimary
       ? t('ai.workspace.stop')
-      : running
-        ? busyPreference === 'queue'
+      : running || (mode === 'agent' && Boolean(composerState?.pendingSubmissions.length || composerState?.failedDrafts.length))
+        ? !running || busyPreference === 'queue'
           ? t('ai.workspace.queue.action')
           : t('ai.workspace.steer.action')
         : t('ai.send');
@@ -271,6 +271,7 @@ export function AiComposerSeat({
         hasImages: pending.hasImages,
         state: 'pending',
         confirming: pending.state === 'confirming',
+        waitingForAdmission: pending.state === 'queued',
         source: 'user',
       });
     }

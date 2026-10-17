@@ -250,10 +250,11 @@ export function AiQueueDock({
                     || ((item.hasImages || item.images?.length) ? t('ai.workspace.images.attachments') : '')}</span>
                   {item.paused && <Badge variant="secondary">{t('ai.workspace.queue.paused')}</Badge>}
                   {item.confirming && <Badge variant="secondary">{t('ai.workspace.messageConfirming')}</Badge>}
+                  {item.waitingForAdmission && <Badge variant="secondary">{t('ai.workspace.queue.waitingAdmission')}</Badge>}
                   {item.redirected && <Badge variant="secondary" title={t('ai.workspace.queue.redirectedDescription')}>{t('ai.workspace.queue.redirected')}</Badge>}
                   {item.lane === 'nextStep' && <Badge variant="secondary">{t(item.state === 'pending'
                     ? 'ai.workspace.queue.lane.nextStep' : 'ai.workspace.queue.waitingNextStep')}</Badge>}
-                  {item.state === 'pending' && (
+                  {item.state === 'pending' && !item.waitingForAdmission && !item.confirming && (
                     <Spinner aria-label={t('ai.workspace.queue.state.pending')} />
                   )}
                   <span className="sr-only">

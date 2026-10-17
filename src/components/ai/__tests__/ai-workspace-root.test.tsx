@@ -992,7 +992,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
 
     expect(screen.queryByRole('tab')).toBeNull();
     expect(screen.getByRole('log', { name: 'AI conversation' })).toBeVisible();
-    expect(screen.getAllByText('Processing')).toHaveLength(1);
+    expect(screen.queryByText('Processing')).toBeNull();
   });
 
   it('gives every icon-only workspace action an accessible name and tooltip', () => {

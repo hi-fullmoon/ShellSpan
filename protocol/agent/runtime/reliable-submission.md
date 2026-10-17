@@ -22,6 +22,24 @@ acknowledgement does not imply model completion. Only native acknowledgement
 promises text-message durability across process exit. Detached image bytes and
 operation identity are also retained in IndexedDB until native acknowledgement.
 
+Only the queue head is sending or confirming; later local inputs remain waiting
+to send and do not start receipt timers. Preparation has its own 15-second limit;
+expiry is an unsent, retryable failure and cannot start native admission when the
+old preparation eventually resolves. Retry invalidates the stalled local creation
+and directory probe. Later inputs can use the session established by the retry
+without waiting for their original creation probe. Submission order is retained
+by a stable ordinal across failures, retries and removal of earlier receipts,
+including inputs with identical timestamps. Admission listens for live durable
+receipts as well as IPC replies. Receipt reconciliation is bounded to 15 seconds,
+including an unavailable reconnect. Expiry retains an explicitly unconfirmed
+operation with a check-and-retry action using the same identity; it never claims
+the message was not sent. Both definitive rejection and unconfirmed delivery
+hold later admissions. A late durable receipt clears the matching recovery state
+and releases the held queue without resending that head. All user enqueue
+receipts remain available for reconciliation after consumption/removal.
+Admission acknowledgement does not synthesize a running runtime. Processing is
+shown only for a running runtime with a committed user input or admitted turn.
+
 Admission queues, frozen inputs and composer submission state are owned by the
 application and shared through the session adapter. Closing a panel releases its
 view subscription, not its queue. Reopening restores original operation IDs and

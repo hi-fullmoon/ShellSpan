@@ -10,6 +10,7 @@ export type AiComposerPhase = 'idle' | 'running' | 'waitingApproval' | 'waitingQ
 
 export interface AiDetachedSubmission {
   readonly hasImages?: boolean;
+  readonly admissionOrder?: number;
   readonly clientOperationId: string;
   readonly sessionId: string | null;
   readonly content: string;
@@ -20,6 +21,9 @@ export interface AiDetachedSubmission {
 
 export interface AiFailedDraft {
   readonly hasImages?: boolean;
+  readonly admissionOrder?: number;
+  readonly startsTurn?: boolean;
+  readonly createdAtUnixMs?: number;
   readonly id: string;
   readonly content: string;
   readonly mode: AiSubmissionMode;
@@ -27,7 +31,7 @@ export interface AiFailedDraft {
 }
 
 export type AiPendingSubmission = AiDetachedSubmission & {
-  readonly state: 'sending' | 'accepted' | 'confirming';
+  readonly state: 'queued' | 'sending' | 'accepted' | 'confirming';
   readonly startsTurn?: boolean;
 };
 
@@ -77,7 +81,8 @@ export type AiComposerEvent =
       canCreateSession: boolean;
     }>
   | Readonly<{ type: 'submit.accepted'; receipt: AiSubmitReceipt }>
-  | Readonly<{ type: 'submit.committed'; clientOperationId: string }>
+  | Readonly<{ type: 'submit.started'; clientOperationId: string }>
+  | Readonly<{ type: 'submit.committed'; clientOperationId: string; sessionId?: string }>
   | Readonly<{ type: 'submit.failed'; clientOperationId: string; error: AiSessionError }>
   | Readonly<{ type: 'submit.timedOut'; clientOperationId: string; error: AiSessionError }>
   | Readonly<{
@@ -133,27 +138,31 @@ function beginSubmission(
   draft: string,
   failedDrafts = state.failedDrafts,
 ): AiComposerTransition {
+  const orderedPayload = { ...payload, admissionOrder: payload.admissionOrder ?? (
+    [...state.pendingSubmissions, ...state.failedDrafts]
+      .reduce((order, item) => Math.max(order, item.admissionOrder ?? 0), 0) + 1
+  ) };
   return {
     state: {
       ...state,
       phase: 'submitting',
       draft,
-      detached: payload,
+      detached: orderedPayload,
       pendingSubmissions: [
         ...state.pendingSubmissions.filter((item) => item.clientOperationId !== payload.clientOperationId),
         {
-          ...payload,
-          state: 'sending',
+          ...orderedPayload,
+          state: 'queued',
           // Capture the gesture's intent before acceptance changes the runtime status.
-          startsTurn: payload.mode !== 'nextStep'
+          startsTurn: payload.mode === 'start' || (payload.mode !== 'nextStep'
             && state.pendingSubmissions.length === 0
-            && state.runtimeStatus !== 'running' && state.runtimeStatus !== 'waiting',
+            && state.runtimeStatus !== 'running' && state.runtimeStatus !== 'waiting'),
         },
       ],
       failedDrafts,
       lastError: null,
     },
-    effects: [{ type: 'submit', payload }, { type: 'focusEditor' }],
+    effects: [{ type: 'submit', payload: orderedPayload }, { type: 'focusEditor' }],
   };
 }
 
@@ -166,7 +175,9 @@ function settleFailure(
   if (!pending) return { state, effects: [] };
   const failedDrafts = [
         ...state.failedDrafts.filter((entry) => entry.id !== clientOperationId),
-        { id: clientOperationId, content: pending.content, mode: pending.mode, hasImages: pending.hasImages, error },
+        { id: clientOperationId, content: pending.content, mode: pending.mode, hasImages: pending.hasImages, error,
+          admissionOrder: pending.admissionOrder, startsTurn: pending.startsTurn,
+          createdAtUnixMs: pending.createdAtUnixMs },
       ];
   return {
     state: {
@@ -294,16 +305,25 @@ export function reduceAiComposer(
         sessionId: state.sessionId,
         content: failed.content,
         mode: failed.mode,
-        createdAtUnixMs: event.now,
+        createdAtUnixMs: failed.createdAtUnixMs ?? event.now,
         retryOf: failed.id,
+        admissionOrder: failed.admissionOrder,
       };
-      return beginSubmission(
+      const transition = beginSubmission(
         state,
         payload,
         state.draft,
         state.failedDrafts.filter((entry) => entry.id !== failed.id),
       );
+      const pending = transition.state.pendingSubmissions.map(item => item.clientOperationId === failed.id
+        ? { ...item, startsTurn: failed.startsTurn ?? item.startsTurn } : item
+      ).sort((left, right) => (left.admissionOrder ?? 0) - (right.admissionOrder ?? 0));
+      return { ...transition, state: { ...transition.state, pendingSubmissions: pending } };
     }
+    case 'submit.started':
+      return { state: { ...state, pendingSubmissions: state.pendingSubmissions.map(item => (
+        item.clientOperationId === event.clientOperationId ? { ...item, state: 'sending' } : item
+      )) }, effects: [] };
     case 'submit.accepted':
       if (!state.pendingSubmissions.some((item) => (
         item.clientOperationId === event.receipt.clientOperationId
@@ -313,12 +333,7 @@ export function reduceAiComposer(
       return {
         state: {
           ...state,
-          phase: state.phase === 'stopping' ? 'stopping' : runtimePhase({
-            runtimeStatus: state.runtimeStatus === 'idle' ? 'running' : state.runtimeStatus,
-            waitingApproval: state.waitingApproval,
-            waitingQuestion: state.waitingQuestion,
-          }),
-          runtimeStatus: state.runtimeStatus === 'idle' ? 'running' : state.runtimeStatus,
+          phase: state.phase === 'stopping' ? 'stopping' : runtimePhase(state),
           sessionId: event.receipt.sessionId,
           detached: state.detached?.clientOperationId === event.receipt.clientOperationId
             ? null
@@ -332,13 +347,15 @@ export function reduceAiComposer(
         effects: [],
       };
     case 'submit.committed':
-      if (!state.pendingSubmissions.some((item) => item.clientOperationId === event.clientOperationId)) {
+      if (!state.pendingSubmissions.some((item) => item.clientOperationId === event.clientOperationId)
+        && !state.failedDrafts.some(item => item.id === event.clientOperationId)) {
         return { state, effects: [] };
       }
       const remainingFailedDrafts = state.failedDrafts.filter((item) => item.id !== event.clientOperationId);
       return {
         state: {
           ...state,
+          sessionId: state.sessionId ?? event.sessionId ?? null,
           pendingSubmissions: state.pendingSubmissions.filter((item) => (
             item.clientOperationId !== event.clientOperationId
           )),
@@ -347,7 +364,7 @@ export function reduceAiComposer(
           phase: state.phase === 'stopping' ? 'stopping' : state.detached !== null && state.detached.clientOperationId !== event.clientOperationId
             ? 'submitting'
             : runtimePhase(state),
-          lastError: remainingFailedDrafts.length === 0 && state.failedDrafts.some(item => (
+          lastError: state.failedDrafts.some(item => (
             item.id === event.clientOperationId && item.error === state.lastError
           )) ? null : state.lastError,
         },
@@ -355,7 +372,7 @@ export function reduceAiComposer(
       };
     case 'submit.timedOut':
       return { state: { ...state, pendingSubmissions: state.pendingSubmissions.map(item => (
-        item.clientOperationId === event.clientOperationId ? { ...item, state: 'confirming' } : item
+        item.clientOperationId === event.clientOperationId && item.state !== 'queued' ? { ...item, state: 'confirming' } : item
       )) }, effects: [] };
     case 'submit.failed':
       return settleFailure(state, event.clientOperationId, event.error);

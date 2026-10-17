@@ -627,8 +627,8 @@ export function AiWorkspaceRoot({
               nodes={conversationNodes}
               renderers={surfaceMode === 'ask' ? aiAskConversationNodeRenderers : undefined}
               runningIndicator={historicalTargetUnavailable ? 'none' : surfaceMode}
-              pending={activeComposerState?.phase === 'submitting'
-                || Boolean(pendingSubmissions?.some(submission => submission.startsTurn))}
+              pending={surfaceMode === 'ask' && (activeComposerState?.phase === 'submitting'
+                || Boolean(pendingSubmissions?.some(submission => submission.startsTurn)))}
               submittedOperationId={submittedOperationId}
               imageSubmissionId={imageSubmissionId}
               status={status}

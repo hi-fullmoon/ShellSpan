@@ -32,7 +32,7 @@ import {
   withOptimisticConversationNodes,
   type AiOptimisticSubmission,
 } from '@/lib/ai/optimistic-submission';
-import { normalizeAiSessionError, sessionArchiveErrorMessage } from '@/lib/ai/session-error';
+import { AiPreparationTimeoutError, normalizeAiSessionError, sessionArchiveErrorMessage } from '@/lib/ai/session-error';
 import { canContinueOnReconnectedTerminal, isDirectReconnectedTerminal } from '@/lib/ai/reconnected-terminal';
 import {
   type AiConversationNode,
@@ -831,6 +831,7 @@ export function useAiSessionController({
     if (payload.sessionId) sessionSubmissionQueues.current.set(payload.sessionId, queue);
     // Capture provider, target and terminal context at the send gesture, before
     // another draft or navigation can change them. Retry reuses the queue entry.
+    let frozenInput: AiSubmitInput<'agent'> | undefined;
     const prepared = (async (): Promise<AiSubmitInput<'agent'>> => {
         const bound = submissionInputs.current.get(payload.clientOperationId);
         if (bound) return bound;
@@ -852,6 +853,7 @@ export function useAiSessionController({
           queued: submission.startsTurn === false,
           ...(payload.mode === 'nextStep' && targetTurnId ? { targetTurnId } : {}),
         };
+        frozenInput = base;
         const cold = payload.sessionId === null ? await coldSkillSession.current : null;
         if (cold) queue.bindSession(cold.summary.id);
         const create = await creating;
@@ -862,17 +864,40 @@ export function useAiSessionController({
     })();
     void prepared.catch(() => undefined);
     const releaseImage = payload.hasImages ? holdDetachedImageDraft(payload.clientOperationId) : undefined;
-    const confirming = window.setTimeout(() => {
-      settle({ type: 'submit.timedOut', clientOperationId: payload.clientOperationId,
-        error: normalizeAiSessionError(new Error(t('ai.workspace.error.commitTimeout'))) });
-      if (isCurrent()) {
-        updateOptimistic(current => current.map(item => item.clientOperationId === payload.clientOperationId
-          ? { ...item, delivery: 'confirming' } : item));
-      }
-    }, OPTIMISTIC_COMMIT_TIMEOUT_MS);
+    let confirming: number | undefined;
+    const started = (): void => {
+      settle({ type: 'submit.started', clientOperationId: payload.clientOperationId });
+      confirming = window.setTimeout(() => {
+        settle({ type: 'submit.timedOut', clientOperationId: payload.clientOperationId,
+          error: normalizeAiSessionError(new Error(t('ai.workspace.error.commitTimeout'))) });
+        if (isCurrent()) {
+          updateOptimistic(current => current.map(item => item.clientOperationId === payload.clientOperationId
+            ? { ...item, delivery: 'confirming' } : item));
+        }
+      }, OPTIMISTIC_COMMIT_TIMEOUT_MS);
+    };
     void (async () => {
       try {
-        const receipt = await queue.enqueue(payload.clientOperationId, () => prepared);
+        const receipt = await queue.enqueue(payload.clientOperationId,
+          () => queue.boundSessionId && frozenInput ? Promise.resolve(frozenInput) : prepared,
+          started, (sessionId, committed) => (
+          adapter.subscribe(sessionId, next => {
+            if (!next.committedOperationIds?.includes(payload.clientOperationId)) return;
+            queueMicrotask(() => {
+              committed(next.status === 'failed' || next.snapshot.value.inbox.pausedIds?.includes(payload.clientOperationId));
+              settle({ type: 'submit.committed', clientOperationId: payload.clientOperationId, sessionId });
+              if (submissionInputs.current.get(payload.clientOperationId)?.images?.length) {
+                void acknowledgeDetachedImageDraft(payload.clientOperationId).then(() => {
+                  submissionInputs.current.delete(payload.clientOperationId);
+                }).catch(() => undefined);
+              }
+              if (isCurrent()) {
+                setOpenedSessionId(sessionId);
+                adoptDraft(sessionId);
+              }
+            });
+          })
+        ));
         window.clearTimeout(confirming);
         sessionSubmissionQueues.current.set(receipt.sessionId, queue);
         settle({ type: 'submit.accepted', receipt });
@@ -910,12 +935,16 @@ export function useAiSessionController({
         timeoutRef.current.set(payload.clientOperationId, timeout);
       } catch (error) {
         window.clearTimeout(confirming);
+        if (error instanceof AiPreparationTimeoutError) {
+          creationInputs.current.delete(context);
+          if (isCurrent()) terminalDirectory.current = null;
+        }
         const normalized = normalizeAiSessionError(error);
         settle({ type: 'submit.failed', clientOperationId: payload.clientOperationId, error: normalized });
         if (!isCurrent()) return;
         updateOptimistic((current) => current.map((item) => (
           item.clientOperationId === payload.clientOperationId
-            ? { ...item, delivery: 'failed', error: normalized.message }
+            ? { ...item, delivery: normalized.deliveryUnknown ? 'unconfirmed' : 'failed', error: normalized.message }
             : item
         )));
       } finally {
@@ -1107,11 +1136,22 @@ export function useAiSessionController({
 
   useEffect(() => {
     if (!view) return;
-    const result = reconcileOptimisticSubmissions(optimisticRef.current, view.nodes, view.inbox);
+    const result = reconcileOptimisticSubmissions(optimisticRef.current, view.nodes, view.inbox, view.committedOperationIds);
     if (!sameOptimistic(result.remaining, optimisticRef.current)) {
       updateOptimistic(() => result.remaining);
     }
-    for (const clientOperationId of result.committedOperationIds) {
+    const known = new Set([
+      ...result.committedOperationIds,
+      ...(view.committedOperationIds ?? []).filter(id => composerRef.current.pendingSubmissions.some(item => item.clientOperationId === id)
+        || composerRef.current.failedDrafts.some(item => item.id === id)),
+    ]);
+    for (const clientOperationId of known) {
+      const failed = composerRef.current.failedDrafts.find(item => item.id === clientOperationId);
+      if (failed) {
+        (sessionSubmissionQueues.current.get(view.summary.id) ?? submissionQueues.current.get(submissionContextRef.current))?.acknowledge({
+          sessionId: view.summary.id, clientOperationId, mode: failed.mode,
+        });
+      }
       const timeout = timeoutRef.current.get(clientOperationId);
       if (timeout !== undefined) window.clearTimeout(timeout);
       timeoutRef.current.delete(clientOperationId);
@@ -1938,10 +1978,10 @@ export function useAiSessionController({
       signal.throwIfAborted();
       if (!sessions.some(session => session.id === summary.id && session.kind === summary.kind && !session.archived)) throw new Error('CHAT_REFERENCE_READ');
       let referenced: AiSessionView;
-      try { referenced = await adapter.open(summary.id); }
+      try { referenced = await (adapter.retrySync ? adapter.retrySync(summary.id) : adapter.open(summary.id)); }
       catch { throw new Error('CHAT_REFERENCE_READ'); }
       signal.throwIfAborted();
-      if (referenced.canLoadOlder) throw new Error('CHAT_REFERENCE_READ');
+      if (referenced.canLoadOlder || referenced.syncError || referenced.summary.id !== summary.id) throw new Error('CHAT_REFERENCE_READ');
       return chatReferenceFile(referenced.summary, referenced.nodes);
     },
     archiveSession,

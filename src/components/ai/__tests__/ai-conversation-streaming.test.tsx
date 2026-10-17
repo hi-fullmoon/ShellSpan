@@ -110,20 +110,22 @@ it('lays out every row immediately after history has been paged', async () => {
 
 it('shows processing before the first Agent output and preserves waiting and Ask feedback', async () => {
   await initI18n('zh-CN');
+  const user = projectAgentChatNodes(skillsCapture as unknown as AgentSessionEvent[]).find(node => node.kind === 'userMessage');
+  if (!user) throw new Error('Recorded session must contain a committed user input');
   const { container, rerender } = render(
     <AiConversation nodes={[]} status="running" throughSeq={null} />,
   );
   expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
-  expect(container.querySelector('[data-ai-thinking-indicator]')).toBeInTheDocument();
+  expect(container.querySelector('[data-ai-thinking-indicator]')).toBeNull();
 
-  rerender(<AiConversation nodes={[]} status="running" pending throughSeq={null} />);
+  rerender(<AiConversation nodes={[user]} status="running" pending throughSeq={null} />);
   expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
   expect(container.querySelectorAll('[data-ai-thinking-indicator]')).toHaveLength(1);
   expect(container.querySelector('[data-ai-thinking-indicator] .shimmer')?.textContent).toBe('处理中');
   expect(container.querySelector('[data-ai-thinking-indicator] [data-slot="spinner"]')).toBeInTheDocument();
 
   rerender(<AiConversation nodes={[]} status="idle" pending throughSeq={null} />);
-  expect(container.querySelector('[data-ai-thinking-indicator]')).toBeInTheDocument();
+  expect(container.querySelector('[data-ai-thinking-indicator]')).toBeNull();
 
   rerender(<AiConversation nodes={[]} status="failed" throughSeq={null} />);
   expect(container.querySelector('[data-ai-thinking-indicator]')).toBeNull();

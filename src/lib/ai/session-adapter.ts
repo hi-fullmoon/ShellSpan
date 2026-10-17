@@ -45,6 +45,7 @@ export type AiSessionSourceSnapshot = Readonly<{
 export interface AiInboxItem {
   readonly hasImages?: boolean;
   readonly confirming?: boolean;
+  readonly waitingForAdmission?: boolean;
   readonly redirected?: boolean;
   readonly paused?: boolean;
   readonly id: string;
@@ -83,6 +84,7 @@ export interface AiSessionError {
   readonly kind: 'auth' | 'rateLimit' | 'offline' | 'conflict' | 'cancelled' | 'terminal' | 'unknown';
   readonly message: string;
   readonly retryable: boolean;
+  readonly deliveryUnknown?: boolean;
   readonly currentRevision?: number;
 }
 
