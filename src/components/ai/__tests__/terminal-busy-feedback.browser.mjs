@@ -39,16 +39,17 @@ try {
     assert.deepEqual(await input.boundingBox(), before, 'Short commands must not move the composer');
     await show({ state: 'ready' });
     await page.waitForTimeout(1050);
-    assert.equal(await notice.count(), 0, 'Returning to the prompt cancels pending feedback');
+    assert.equal(await notice.count(), 0, 'Returning to the prompt keeps feedback hidden');
 
     await show({ state: 'busy' });
-    await notice.waitFor();
-    assert.equal(await notice.textContent(), labels.running);
-    assert.equal(await notice.getByRole('button').count(), 0, 'Ordinary activity needs no recovery action');
-    assert.equal(await notice.evaluate(el => el.classList.contains('text-app-warning')), false);
+    await page.waitForTimeout(1100);
+    assert.equal(await notice.count(), 0, 'Sustained terminal activity must remain silent');
     for (const width of [960, 420, 320]) {
       await page.setViewportSize({ width, height: 520 });
-      assert.ok(await notice.evaluate(el => el.scrollWidth <= el.clientWidth), `Activity feedback fits at ${width}px`);
+      const busyBox = await input.boundingBox();
+      await show({ state: 'ready' });
+      assert.deepEqual(await input.boundingBox(), busyBox, `Terminal activity must not move the composer at ${width}px`);
+      await show({ state: 'busy' });
       await page.screenshot({ path: `/tmp/shellspan-busy-passive-${locale}-${width}.png` });
     }
     await page.locator('[contenteditable="true"]').press('Enter');
@@ -79,11 +80,12 @@ try {
     await page.waitForTimeout(700);
     await show({ state: 'busy', terminal: 'b' });
     await page.waitForTimeout(400);
-    assert.equal(await notice.count(), 0, 'Switching terminals cancels the previous delay');
+    assert.equal(await notice.count(), 0, 'Switching terminals keeps ordinary activity silent');
     await show({ state: 'busy', terminal: 'b', generation: 2 });
     await page.waitForTimeout(700);
-    assert.equal(await notice.count(), 0, 'Reconnecting starts a fresh delay');
-    await notice.waitFor();
+    assert.equal(await notice.count(), 0, 'Reconnecting keeps ordinary activity silent');
+    await page.waitForTimeout(400);
+    assert.equal(await notice.count(), 0, 'Reconnected terminal activity stays silent');
     await show({ state: 'unavailable' });
     assert.ok((await notice.textContent()).includes(labels.unavailable), 'Unavailable state is distinct and immediate');
     assert.deepEqual(errors, []);

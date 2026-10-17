@@ -2034,7 +2034,6 @@ export default {
   'agent.executionSurface.v1.initializingDescription': 'Real-terminal command support is initializing. Use Direct for now.',
   'agent.executionSurface.v1.readyDescription': 'Runs visibly with cooperative shell lifecycle. Use Direct for security-sensitive or untrusted code.',
   'agent.executionSurface.v1.busyDescription': 'This terminal is running a foreground program. Wait for the prompt to return, or use Direct.',
-  'agent.executionSurface.v1.runningComposerHint': 'The terminal is running a command. You can keep chatting.',
   'agent.executionSurface.v1.busyComposerHint': 'The Agent could not run a command because the terminal is busy. Wait for the prompt to return or switch to Direct.',
   'agent.executionSurface.v1.switchDirect': 'Switch to Direct',
   'ai.workspace.status.openSettings': 'Open AI settings',

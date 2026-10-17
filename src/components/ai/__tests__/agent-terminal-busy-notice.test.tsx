@@ -17,7 +17,7 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('terminal busy feedback', () => {
-  it('keeps short commands silent and cancels pending feedback on return to the prompt', async () => {
+  it('keeps short commands silent before and after returning to the prompt', async () => {
     const { rerender } = render(<StrictMode><AgentTerminalBusyNotice disabled={false} /></StrictMode>);
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
     await elapse(100);
@@ -26,21 +26,19 @@ describe('terminal busy feedback', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
-  it.each(['en-US', 'zh-CN'] as const)('shows sustained activity without a warning or action in %s', async locale => {
+  it.each(['en-US', 'zh-CN'] as const)('keeps sustained activity silent in %s', async locale => {
     useAppStore.setState({ locale });
     await initI18n(locale);
     const { unmount } = render(<AgentTerminalBusyNotice disabled={false} onSwitchDirect={() => undefined} />);
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
     await elapse(1100);
-    const notice = screen.getByRole('status');
-    expect(notice).toHaveTextContent(t('agent.executionSurface.v1.runningComposerHint'));
-    expect(notice).not.toHaveClass('text-app-warning');
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
     unmount();
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
-  it('starts a fresh delay when the terminal or connection generation changes', async () => {
+  it('stays silent when the terminal or connection generation changes', async () => {
     const { rerender } = render(<AgentTerminalBusyNotice key="terminal-a:1" disabled={false} />);
     await elapse(700);
     rerender(<AgentTerminalBusyNotice key="terminal-b:1" disabled={false} />);
@@ -50,7 +48,7 @@ describe('terminal busy feedback', () => {
     await elapse(700);
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
     await elapse(400);
-    expect(screen.getByRole('status')).toHaveTextContent(t('agent.executionSurface.v1.runningComposerHint'));
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
   it('shows a new runtime rejection immediately and supports keyboard switching', async () => {
@@ -75,8 +73,19 @@ describe('terminal busy feedback', () => {
     const { rerender } = render(<AgentTerminalBusyNotice disabled={false} blockedAttempt="old-attempt" />);
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
     await elapse(1100);
-    expect(screen.getByRole('status')).toHaveTextContent(t('agent.executionSurface.v1.runningComposerHint'));
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
     rerender(<AgentTerminalBusyNotice disabled={false} blockedAttempt="new-attempt" />);
+    expect(screen.getByRole('status')).toHaveTextContent(t('agent.executionSurface.v1.busyComposerHint'));
+  });
+
+  it('hides resolved rejections and shows subsequent rejections without a switch action in Focus', () => {
+    const { rerender } = render(<AgentTerminalBusyNotice disabled={false} />);
+    rerender(<AgentTerminalBusyNotice disabled={false} blockedAttempt="attempt-1" />);
+    expect(screen.getByRole('status')).toHaveTextContent(t('agent.executionSurface.v1.busyComposerHint'));
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    rerender(<AgentTerminalBusyNotice disabled={false} blockedAttempt={null} />);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    rerender(<AgentTerminalBusyNotice disabled={false} blockedAttempt="attempt-2" />);
     expect(screen.getByRole('status')).toHaveTextContent(t('agent.executionSurface.v1.busyComposerHint'));
   });
 
@@ -88,10 +97,10 @@ describe('terminal busy feedback', () => {
     rerender(<AgentTerminalBusyNotice disabled={false} context={{}} blockedAttempt="historical-attempt" />);
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
     await elapse(1100);
-    expect(screen.getByRole('status')).toHaveTextContent(t('agent.executionSurface.v1.runningComposerHint'));
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
-  it('keeps unavailable and initializing feedback immediate and resets the busy delay', async () => {
+  it('keeps unavailable and initializing feedback immediate and hides ordinary activity', async () => {
     const { rerender } = render(<AgentTerminalBusyNotice disabled={false} />);
     await elapse(1100);
     rerender(<AgentTerminalBusyNotice disabled={false} state="unavailable" />);

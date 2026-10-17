@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/hooks/useI18n';
@@ -23,25 +23,18 @@ export function AgentTerminalBusyNotice(props: AgentTerminalBusyNoticeProps): Re
 
 function TerminalBusyFeedback({ disabled, onSwitchDirect, state = 'busy', blockedAttempt = null }: AgentTerminalBusyNoticeProps): React.ReactNode {
   const { t } = useI18n();
-  const [delayElapsed, setDelayElapsed] = useState(false);
   const [initialBlockedAttempt] = useState(blockedAttempt);
   const blocked = blockedAttempt !== null && blockedAttempt !== initialBlockedAttempt;
-  useEffect(() => {
-    if (state !== 'busy') return;
-    const timer = setTimeout(() => setDelayElapsed(true), 1000);
-    return () => clearTimeout(timer);
-  }, [state]);
-  if (state === 'busy' && !delayElapsed && !blocked) return null;
+  if (state === 'busy' && !blocked) return null;
 
-  const showAction = state !== 'busy' || blocked;
   return (
-    <Alert variant={state === 'busy' && !blocked ? 'default' : 'warning'} size="sm" role="status" data-slot="terminal-busy-notice">
+    <Alert variant="warning" size="sm" role="status" data-slot="terminal-busy-notice">
       <AlertDescription className="flex min-w-0 flex-wrap items-start gap-1">
         <span className="min-w-0 flex-1 basis-48 py-1">{t(state === 'busy'
-          ? blocked ? 'agent.executionSurface.v1.busyComposerHint' : 'agent.executionSurface.v1.runningComposerHint'
+          ? 'agent.executionSurface.v1.busyComposerHint'
           : state === 'initializing' ? 'agent.executionSurface.v1.initializingDescription'
             : 'agent.executionSurface.v1.unavailableDescription')}</span>
-        {showAction && onSwitchDirect && <Button type="button" variant="ghost" size="xs" className="text-[11px]" disabled={disabled} onClick={onSwitchDirect}>
+        {onSwitchDirect && <Button type="button" variant="ghost" size="xs" className="text-[11px]" disabled={disabled} onClick={onSwitchDirect}>
           {t('agent.executionSurface.v1.switchDirect')}
         </Button>}
       </AlertDescription>

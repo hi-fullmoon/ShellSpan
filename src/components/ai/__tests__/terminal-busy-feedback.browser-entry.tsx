@@ -21,7 +21,6 @@ export async function initialize(locale: Locale) {
   useAppStore.setState({ locale });
   await initI18n(locale);
   return {
-    running: t('agent.executionSurface.v1.runningComposerHint'),
     blocked: t('agent.executionSurface.v1.busyComposerHint'),
     direct: t('agent.executionSurface.v1.switchDirect'),
     unavailable: t('agent.executionSurface.v1.unavailableDescription'),
