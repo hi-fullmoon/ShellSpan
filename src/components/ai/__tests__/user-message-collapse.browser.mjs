@@ -70,8 +70,10 @@ try {
         await toggle.waitFor();
         assert.deepEqual(await toggle.evaluate(element => {
           const style = getComputedStyle(element);
-          return [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft];
-        }), ['0px', '0px', '0px', '0px'], 'Expand and collapse controls have no padding');
+          return [style.height, style.paddingRight, style.paddingLeft, style.borderTopWidth, style.textDecorationLine];
+        }), ['24px', '0px', '0px', '0px', 'underline'], 'Expand and collapse controls remain borderless with a persistent link affordance');
+        assert.notEqual(await toggle.evaluate(element => getComputedStyle(element).color),
+          await text.evaluate(element => getComputedStyle(element).color), 'Action color distinguishes the toggle from message text');
         assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
         const clampedHeight = (await text.boundingBox()).height;
         assert.equal(await text.textContent(), fullText, 'Clamping preserves the complete original text');
@@ -90,16 +92,17 @@ try {
         await page.getByRole('button', { name: expand, exact: true }).waitFor();
         assert.equal((await text.boundingBox()).height, 66);
         await page.mouse.move(0, 0);
-        const plainColor = await page.getByRole('button', { name: expand, exact: true }).evaluate(element => getComputedStyle(element).color);
         await page.locator('main').screenshot({ path: `/tmp/shellspan-user-message-${engine.name()}-${locale}.png` });
         await page.getByRole('button', { name: expand, exact: true }).hover();
         await page.getByRole('button', { name: expand, exact: true }).evaluate(async element => {
           await Promise.all(element.getAnimations().map(animation => animation.finished));
         });
         assert.equal(await page.getByRole('button', { name: expand, exact: true }).evaluate(element =>
-          getComputedStyle(element).backgroundColor), 'rgba(0, 0, 0, 0)', 'Hover must keep the toggle background transparent');
-        assert.notEqual(await page.getByRole('button', { name: expand, exact: true }).evaluate(element =>
-          getComputedStyle(element).color), plainColor, 'Hover changes only the text color');
+          getComputedStyle(element).backgroundColor), 'rgba(0, 0, 0, 0)', 'Hover keeps the link background transparent');
+        assert.ok(await page.getByRole('button', { name: expand, exact: true }).evaluate(element => {
+          const style = getComputedStyle(element);
+          return style.borderTopWidth === '0px' && style.textDecorationLine === 'underline';
+        }), 'Hover preserves the borderless underlined action');
         await page.locator('main').screenshot({ path: `/tmp/shellspan-user-message-hover-${engine.name()}-${locale}.png` });
         await page.mouse.move(0, 0);
         await page.locator('main').evaluate(element => { element.style.width = '900px'; });

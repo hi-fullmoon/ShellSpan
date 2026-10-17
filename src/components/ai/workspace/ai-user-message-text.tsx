@@ -31,7 +31,7 @@ export function AiUserMessageText({ text }: { readonly text: string }): React.Re
         {text}
       </span>
       {overflow && (
-        <Button variant="plain" size="xs" className="mt-1 p-0 hover:text-primary" aria-expanded={expanded} aria-controls={id}
+        <Button variant="link" size="xs" className="mt-1 p-0 underline" aria-expanded={expanded} aria-controls={id}
           onClick={() => setExpanded(value => !value)}>
           {t(expanded ? 'ai.workspace.userMessage.collapse' : 'ai.workspace.userMessage.expand')}
         </Button>
