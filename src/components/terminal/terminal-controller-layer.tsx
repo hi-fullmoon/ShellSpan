@@ -114,6 +114,10 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
     timer: ReturnType<typeof setTimeout>;
   }>();
 
+  const runsBehindFocus = (agentSessionId: string): boolean =>
+    useFocusStore.getState().enabled
+    && (workspaceOwners.get(agentSessionId) ?? rootWorkspace(agentSessionId)) === 'terminal';
+
   const releaseResources = (active: ActiveLeaseResources, focus: boolean): boolean => {
     const { lease, controller } = active;
     const current = activeLeases.get(lease.sessionId);
@@ -124,6 +128,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
     active.releaseInput?.();
     if (
       focus
+      && !runsBehindFocus(lease.agentSessionId)
       && controller
       && terminalRegistry.get(lease.sessionId) === controller
       && controller.sessionId === lease.sessionId
@@ -423,9 +428,12 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
         || activeLeases.get(lease.sessionId)?.lease.operationId !== lease.operationId
       ) return;
 
+      // PTY writes target the leased transport, not the DOM keyboard focus.
+      // A Terminal Agent may keep running while the user works in Focus.
+      const backgroundInFocus = runsBehindFocus(lease.agentSessionId);
       let terminalFocused = false;
       if (controller && controller.sessionId === lease.sessionId
-        && terminalRegistry.get(lease.sessionId) === controller) {
+        && terminalRegistry.get(lease.sessionId) === controller && !backgroundInFocus) {
         // Commit the target pane's attachment before focusing xterm. The backend
         // cannot start writing the command until the readiness acknowledgement.
         flushSync(() => {
@@ -454,7 +462,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       const terminalConnected = useTerminalStore.getState().sessions.some(
         (session) => session.sessionId === lease.sessionId && session.status === 'connected',
       );
-      if (terminalConnected && outputListenerReady && !terminalFocused) {
+      if (terminalConnected && outputListenerReady && !backgroundInFocus && !terminalFocused) {
         // Leave readiness pending: the backend times out and releases the lease
         // without writing anything if the target cannot receive focus.
         logger.warn(`Target terminal focus failed before Agent input for ${lease.sessionId}`);

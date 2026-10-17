@@ -362,6 +362,11 @@ and displays the lease's target terminal, commits its attachment, and verifies
 that the target xterm textarea owns DOM focus. It rechecks controller and lease
 identity after the UI commit. Failed focus leaves frontend readiness pending;
 the existing five-second readiness timeout releases the lease without PTY input.
+When a Terminal-workspace Agent runs while the user is viewing Focus, acquisition
+and release preserve the viewed workspace, selection, target and keyboard focus.
+In this case DOM focus is not a readiness requirement: commands write to the
+leased PTY directly. Controller identity, connected transport, output readiness,
+pending/unverified input and credential-prompt checks remain required.
 Deferred section/tab focus must revalidate the selected session and controller
 identity when it runs, and discard obsolete requests or requests after unmount.
 

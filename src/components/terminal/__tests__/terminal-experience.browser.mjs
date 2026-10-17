@@ -736,7 +736,7 @@ try {
     await page.setViewportSize({ width, height: 700 });
     const focusResult = await page.evaluate(async (terminalOutput) => {
       const { React, createRoot, flushSync, TerminalCarousel, terminalRegistry, useTerminalStore,
-        useAppStore, createAgentTerminalLeaseCoordinator } = window.runtime;
+        useAppStore, useFocusStore, agentTerminalLeaseState, createAgentTerminalLeaseCoordinator } = window.runtime;
       const store = useTerminalStore.getState();
       const id = store.beginConnectionAttempt(window.identity);
       store.setStatus(id, { sessionId: id, status: 'disconnected' });
@@ -813,6 +813,30 @@ try {
           selected: useTerminalStore.getState().activeSessionId === id,
           visible: useAppStore.getState().activeSection === 'terminal',
         };
+        flushSync(() => useFocusStore.getState().enter());
+        flushSync(() => store.setActiveSession(otherId));
+        input.focus();
+        const focusTarget = useFocusStore.getState().targetSessionId;
+        try {
+          for (let command = 0; command < 2; command++) {
+            const backgroundLease = { ...lease, agentSessionId: 'agent-background-terminal', operationId: crypto.randomUUID() };
+            await coordinator.handle(backgroundLease);
+            assertBackgroundView();
+            if (!agentTerminalLeaseState.get(id)?.terminalOwned) throw new Error('Background command must retain terminal ownership');
+            if (await controller.writeUserInput('blocked')) throw new Error('Background lease must still block user input');
+            await coordinator.handle({ ...backgroundLease, state: 'released' });
+            assertBackgroundView();
+          }
+        } finally {
+          flushSync(() => useFocusStore.getState().leave());
+        }
+        function assertBackgroundView() {
+          if (!useFocusStore.getState().enabled || useTerminalStore.getState().workspace !== 'focus'
+            || useTerminalStore.getState().activeSessionId !== otherId
+            || useFocusStore.getState().targetSessionId !== focusTarget
+            || useAppStore.getState().activeSection !== 'terminal'
+            || document.activeElement !== input) throw new Error('Background command changed the Focus workspace or keyboard focus');
+        }
         input.focus();
         const pending = coordinator.handle({ ...lease, operationId: crypto.randomUUID() });
         // Let acquisition capture its controller and await output readiness,
@@ -918,9 +942,22 @@ try {
         flushSync(() => useAppStore.getState().setActiveSection('workbench'));
         input.focus();
         document.addEventListener('focusin', recordFocus);
-        await coordinator.handle({
+        const terminalLease = {
           sessionId: ids[1], agentSessionId: `agent-${crypto.randomUUID()}`, taskId: crypto.randomUUID(),
           operationId: crypto.randomUUID(), acquiredAtUnixMs: Date.now(), state: 'acquired',
+        };
+        await coordinator.handle(terminalLease);
+        await new Promise(requestAnimationFrame);
+        const backgroundPreservedFocus = useFocusStore.getState().enabled
+          && useTerminalStore.getState().workspace === 'focus'
+          && useTerminalStore.getState().activeSessionId === ids[0]
+          && useAppStore.getState().activeSection === 'workbench'
+          && document.activeElement === input && focusedIds.length === 0;
+        await coordinator.handle({ ...terminalLease, state: 'released' });
+        const releasePreservedFocus = document.activeElement === input;
+        flushSync(() => useFocusStore.getState().leave());
+        await coordinator.handle({
+          ...terminalLease, operationId: crypto.randomUUID(),
         });
         await new Promise(requestAnimationFrame);
         await new Promise(requestAnimationFrame);
@@ -930,6 +967,7 @@ try {
             && !useFocusStore.getState().enabled && useTerminalStore.getState().workspace === 'terminal'
             && useTerminalStore.getState().workspaceViews.focus.activeSessionId === ids[0],
           sourceInitiallyFocused,
+          backgroundPreservedFocus, releasePreservedFocus,
           targetFocused: document.activeElement === terminalRegistry.get(ids[1]).terminal.textarea,
           focusedOtherTerminal: focusedIds.includes(ids[0]),
           targetFocusObserved: focusedIds.includes(ids[1]),
@@ -950,6 +988,7 @@ try {
       workspaceIsolation: true,
       commandWorkspaceRouting: true,
       sourceInitiallyFocused: true, targetFocused: true, focusedOtherTerminal: false,
+      backgroundPreservedFocus: true, releasePreservedFocus: true,
       targetFocusObserved: true, targetGroupSelected: true,
     });
   }
