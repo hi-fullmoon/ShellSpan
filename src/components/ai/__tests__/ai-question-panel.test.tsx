@@ -51,6 +51,13 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('Stage 6A question form', () => {
+  it('keeps question decisions text-only, including disabled submission', () => {
+    render(<AiQuestionPanel question={question} onAnswer={async () => {}} />);
+    for (const name of ['Decline to answer', 'Submit']) {
+      expect(screen.getByRole('button', { name }).querySelector('svg')).toBeNull();
+    }
+    expect(screen.getByRole('button', { name: 'Submit' })).toBeDisabled();
+  });
   it('records a refusal per question and submits when every question is resolved', async () => {
     const submissions: AnswerQuestionInput[] = [];
     const user = userEvent.setup();

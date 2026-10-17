@@ -324,6 +324,7 @@ export function AiSessionRecordsDialog({ onOpenChange }: {
       </DialogContent>
 
       <ConfirmationDialog
+        textOnlyActions
         open={deleteTarget !== null}
         onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
         title={t('settings.ai.records.deleteTitle')}

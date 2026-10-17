@@ -298,6 +298,7 @@ export function AgentPermissionSelector({
       )}
 
       <ConfirmationDialog
+        textOnlyActions
         open={fullAccessDialogOpen}
         onOpenChange={(open) => {
           setFullAccessDialogOpen(open);

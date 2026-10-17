@@ -453,6 +453,7 @@ export function AiSessionBrowser({
       </ScrollArea>
 
       <ConfirmationDialog
+        textOnlyActions
         open={archiveTarget !== null}
         onOpenChange={(open) => { if (!open) setArchiveTarget(null); }}
         title={t('ai.workspace.sessions.archiveConfirmTitle')}
@@ -467,6 +468,7 @@ export function AiSessionBrowser({
       />
 
       <ConfirmationDialog
+        textOnlyActions
         open={deleteTarget !== null}
         onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
         title={t('ai.workspace.sessions.deleteConfirmTitle')}
@@ -537,7 +539,6 @@ export function AiSessionBrowser({
                 onRename?.(renameTarget, title);
               }}
             >
-              {renamingId !== null && <Spinner data-icon="inline-start" />}
               {t('common.save')}
             </AlertDialogAction>
           </AlertDialogFooter>

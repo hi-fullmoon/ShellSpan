@@ -55,6 +55,7 @@ export function AiSessionRecordsDeleteAll({ records, disabled, t, onBusyChange, 
         {t('settings.ai.records.deleteAll')}
       </Button>
       <ConfirmationDialog
+        textOnlyActions
         open={targets !== null}
         onOpenChange={(open) => { if (!open && !running.current) setTargets(null); }}
         title={t('settings.ai.records.deleteAllTitle')}

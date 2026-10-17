@@ -1345,6 +1345,9 @@ describe('AiWorkspaceController', () => {
     await user.type(screen.getByRole('textbox'), 'draft survives approval');
 
     act(() => publish?.(pending));
+    for (const name of ['Allow once', 'Cancel']) {
+      expect(screen.getByRole('button', { name }).querySelector('svg')).toBeNull();
+    }
     expect(screen.getByTestId('ai-workspace-composer')).toHaveAttribute('contenteditable', 'true');
     await user.click(screen.getByRole('button', { name: 'Allow once' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Approval conflict');

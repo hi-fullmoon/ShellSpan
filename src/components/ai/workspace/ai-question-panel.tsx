@@ -39,7 +39,6 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
-import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/hooks/useI18n';
 import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
 import {
@@ -347,7 +346,6 @@ export function AiQuestionPanel({
                 disabled={pending || invalid || !onAnswer}
                 onClick={() => void submit()}
               >
-                {pending && <Spinner data-icon="inline-start" />}
                 {t(
                   pending
                     ? 'ai.workspace.question.submitting'

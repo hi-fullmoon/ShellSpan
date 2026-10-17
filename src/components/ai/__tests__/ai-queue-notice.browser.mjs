@@ -37,6 +37,7 @@ try {
       await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/?locale=${locale}`);
       const details = page.getByRole('button', { name: locale === 'zh-CN' ? '技术详情' : 'Technical details' });
       await details.waitFor();
+      assert.equal(await details.locator('svg').count(), 0, 'Notice details action stays text-only');
       assert.equal(await details.getAttribute('aria-expanded'), 'false');
       assert.equal(await page.getByText('Agent Runtime revision conflict:', { exact: false }).count(), 0);
       const geometry = await page.getByRole('alert').evaluate(element => {

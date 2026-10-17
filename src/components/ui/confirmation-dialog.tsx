@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils';
 type ConfirmationDialogMediaVariant = 'default' | 'warning' | 'destructive';
 
 export interface ConfirmationDialogProps {
+  textOnlyActions?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: React.ReactNode;
@@ -39,6 +40,7 @@ export interface ConfirmationDialogProps {
 
 /** Shared compact layout for actions that require an explicit second confirmation. */
 export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
+  textOnlyActions = false,
   open,
   onOpenChange,
   title,
@@ -95,7 +97,7 @@ export const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
             aria-busy={confirmPending}
             onClick={onConfirm}
           >
-            {confirmPending && <Spinner data-icon="inline-start" aria-hidden="true" />}
+            {confirmPending && !textOnlyActions && <Spinner data-icon="inline-start" aria-hidden="true" />}
             {confirmLabel}
           </AlertDialogAction>
         </CompactAlertDialogFooter>

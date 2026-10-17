@@ -35,13 +35,12 @@ try {
         const text = el.querySelector('[data-slot="alert-description"] > span');
         const icon = el.querySelector(':scope > svg').getBoundingClientRect();
         const button = el.querySelector('button').getBoundingClientRect();
-        const actionIcon = el.querySelector('button > svg').getBoundingClientRect();
         const box = el.getBoundingClientRect();
         const textBox = text.getBoundingClientRect();
         const style = getComputedStyle(text);
         const firstLine = textBox.top + parseFloat(style.paddingTop) + parseFloat(style.lineHeight) / 2;
         return { iconOffset: icon.top + icon.height / 2 - firstLine,
-          actionIconOffset: actionIcon.top + actionIcon.height / 2 - (button.top + button.height / 2),
+          actionIcons: el.querySelectorAll('button svg').length,
           gap: textBox.left - icon.right, buttonHeight: button.height,
           buttonOffset: button.top + button.height / 2 - firstLine,
           inline: button.left >= textBox.right, height: box.height,
@@ -50,7 +49,7 @@ try {
       assert.equal(geometry.iconOffset, -1.5, `Icon must align to the first text line: ${locale}/${width}`);
       assert.equal(geometry.gap, 4, 'Icon and text retain the shared spacing');
       assert.equal(geometry.buttonHeight, 24, 'Action retains its compact size');
-      assert.equal(geometry.actionIconOffset, -0.5, 'Action icon retains its local optical correction');
+      assert.equal(geometry.actionIcons, 0, 'Notice actions stay text-only');
       assert.ok(geometry.fits, `Notice must fit: ${locale}/${width}`);
       if (geometry.inline) assert.equal(geometry.buttonOffset, 0, 'Inline action aligns to the first line');
       if (width === 1280) assert.equal(geometry.height, 38, 'Wide notice retains its original height');

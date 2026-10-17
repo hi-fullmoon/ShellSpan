@@ -1,4 +1,4 @@
-import { ChevronDownIcon, CircleAlertIcon, TriangleAlertIcon } from 'lucide-react';
+import { CircleAlertIcon, TriangleAlertIcon } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -22,7 +22,6 @@ export function AiQueueNotice({ conflict, error }: {
         {error && <Collapsible key={error} className="mt-1 min-w-0">
           <CollapsibleTrigger render={<Button variant="ghost" size="xs" />} className="group gap-1 text-[11px]">
             {t('ai.workspace.queue.errorDetails')}
-            <ChevronDownIcon data-icon="inline-end" className="group-data-[panel-open]:rotate-180" />
           </CollapsibleTrigger>
           <CollapsibleContent>
             <div className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap rounded-md bg-muted p-2 font-mono text-xs text-muted-foreground [overflow-wrap:anywhere]">

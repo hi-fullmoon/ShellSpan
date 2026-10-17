@@ -195,6 +195,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(screen.getByRole('textbox')).toHaveAttribute('aria-describedby', availability.id);
     const continuation = within(notices).getByRole('button', { name: 'Continue in reconnected terminal' });
     expect(continuation).toBeVisible();
+    expect(continuation.querySelector('svg')).toBeNull();
     expect(continuation).toHaveClass('h-6', 'text-[11px]');
     expect(continuation).not.toHaveClass('h-8');
   });

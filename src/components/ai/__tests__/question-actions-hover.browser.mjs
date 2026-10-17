@@ -50,6 +50,18 @@ try {
     }));
   });
   const buttons = page.locator('.ai-question-panel-actions button');
+  await buttons.first().waitFor();
+  for (const width of [320, 720]) {
+    await page.setViewportSize({ width, height: 600 });
+    const decisions = page.locator('.ai-question-footer-actions button');
+    assert.equal(await decisions.count(), 2);
+    assert.equal(await decisions.locator('svg').count(), 0, 'Question decisions remain text-only');
+    for (const button of await decisions.all()) {
+      assert.ok((await button.innerText()).trim());
+      assert.equal(await button.evaluate(element => element.scrollWidth > element.clientWidth), false);
+    }
+    await page.screenshot({ path: join(screenshots, `${width}-text-actions.png`) });
+  }
   await buttons.first().click();
   for (const width of [380, 720]) {
     await page.setViewportSize({ width, height: 400 });

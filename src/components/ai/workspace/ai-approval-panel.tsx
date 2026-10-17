@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { ChevronRightIcon, ShieldAlertIcon } from 'lucide-react';
+import { ShieldAlertIcon } from 'lucide-react';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -282,7 +282,6 @@ export function AiApprovalPanel({
 
             <Button variant="ghost" size="xs" className="self-start" onClick={onOpenDetails}>
               {t('ai.workspace.approval.fullParameters')}
-              <ChevronRightIcon data-icon="inline-end" />
             </Button>
 
             {error && (
@@ -296,11 +295,9 @@ export function AiApprovalPanel({
 
       <CardFooter className="ai-approval-panel-footer shrink-0 justify-end gap-2 px-4 pt-2 pb-3">
         <Button size="sm" variant="outline" disabled={pending} onClick={onReject} aria-label={t('ai.workspace.approval.reject')}>
-          {decision === 'reject' && <Spinner data-icon="inline-start" />}
           {t('ai.workspace.approval.reject')}
         </Button>
         <Button size="sm" variant="warning" disabled={pending || volatileArgumentsMissing} aria-busy={argumentsLoading || undefined} onClick={onApprove} aria-label={t(approval.toolName === 'trash_file' ? 'ai.workspace.approval.action.trashFile' : 'ai.workspace.approval.approveOnce')}>
-          {decision === 'approve' && <Spinner data-icon="inline-start" />}
           {t(approval.toolName === 'trash_file' ? 'ai.workspace.approval.action.trashFile' : 'ai.workspace.approval.approveOnce')}
         </Button>
       </CardFooter>

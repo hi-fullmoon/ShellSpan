@@ -352,6 +352,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
       />
 
       <ConfirmationDialog
+        textOnlyActions
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
         title={t('settings.ai.deleteProviderTitle', { name: selectedProvider?.name ?? '' })}
@@ -365,6 +366,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
       />
 
       <ConfirmationDialog
+        textOnlyActions
         open={clearAgentOpen}
         onOpenChange={setClearAgentOpen}
         title={t('settings.ai.agent.clearTitle')}

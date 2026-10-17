@@ -1,4 +1,4 @@
-import { InfoIcon, PlusIcon, SquareTerminalIcon } from 'lucide-react';
+import { InfoIcon } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/hooks/useI18n';
@@ -19,14 +19,14 @@ export function FocusNoTarget(): React.ReactNode {
     <span className="min-w-0 flex-1 basis-48 py-1">{targetUnavailable
       ? t(target ? 'focus.targetDisconnected' : 'focus.targetClosed') : null}{candidate
       ? t('focus.useTerminalHint', { terminal: candidate.title }) : t('focus.connectFirst')}</span>
-    <Button type="button" size="xs" variant="ghost" className="shrink-0 text-[11px] [&>svg]:-translate-y-[0.5px]" disabled={busy} onClick={() => {
+    <Button type="button" size="xs" variant="ghost" className="shrink-0 text-[11px]" disabled={busy} onClick={() => {
       const focus = useFocusStore.getState();
       if (candidate) focus.setTarget(candidate.sessionId);
       else {
         focus.setTerminalOpen(true);
         document.dispatchEvent(new Event('shellspan:new-terminal-tab'));
       }
-    }}>{candidate ? <SquareTerminalIcon data-icon="inline-start" /> : <PlusIcon data-icon="inline-start" />}
+    }}>
       {t(candidate ? 'focus.useTerminal' : 'focus.connect')}
     </Button>
   </AlertDescription></Alert>;
