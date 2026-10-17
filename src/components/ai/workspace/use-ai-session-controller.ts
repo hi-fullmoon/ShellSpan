@@ -1703,6 +1703,17 @@ export function useAiSessionController({
   const reconnectedSnapshot = canContinueReconnectedView && visibleView?.snapshot.kind === 'agent'
     ? visibleView.snapshot.value : null;
 
+  const terminalInsertions = useAiDraftStore(state => state.terminalInsertions);
+  useEffect(() => {
+    if (scope !== 'terminal' || !activeTerminalId || workspaceChanging) return;
+    const owner = `${focusMode ? 'focus' : 'terminal'}:${activeTerminalId}`;
+    if (!terminalInsertions[owner]) return;
+    const text = useAiDraftStore.getState().takeTerminalText(owner);
+    if (!text) return;
+    claimWorkspace();
+    dispatch({ type: 'draft.changed', value: [composerRef.current.draft, text].filter(Boolean).join('\n\n') });
+  }, [activeTerminalId, claimWorkspace, dispatch, focusMode, scope, terminalInsertions, workspaceChanging]);
+
   return {
     submissionContext: submissionContextRef.current,
     imageDraft: {

@@ -3,7 +3,7 @@ import { DEFAULT_TAB_TITLE_TEMPLATE, normalizeTabTitleOverrides, validTabTitleTe
 import { subscribeWithSelector } from 'zustand/middleware';
 import { shallow } from 'zustand/shallow';
 import { changeLocale } from '@/locales';
-import type { AppSection, Locale, PetdexDiagnostic, SettingsSection, SftpConflictPolicy, ShortcutAction, ShortcutBindings, TerminalBellStyle, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily, TerminalRightClickBehavior, ThemeMode, WorkbenchTab } from '@/types';
+import type { AppSection, Locale, PetdexDiagnostic, SettingsSection, SftpConflictPolicy, ShortcutAction, ShortcutBindings, TerminalBellStyle, TerminalColorScheme, TerminalCursorStyle, TerminalFontFamily, ThemeMode, WorkbenchTab } from '@/types';
 import {
   invokeLoadPreferences,
   invokeSavePreferences,
@@ -69,7 +69,6 @@ interface AppPreferences extends PetdexMessagePreferences {
   terminalLetterSpacing: number;
   terminalUrlDetection: boolean;
   terminalTrimTrailingWhitespace: boolean;
-  terminalRightClickBehavior: TerminalRightClickBehavior;
   terminalBellStyle: TerminalBellStyle;
   confirmBeforeExit: boolean;
   restoreWorkspace: boolean;
@@ -134,7 +133,6 @@ interface AppState extends AppPreferences {
   setTerminalLetterSpacing: (letterSpacing: number) => void;
   setTerminalUrlDetection: (enabled: boolean) => void;
   setTerminalTrimTrailingWhitespace: (enabled: boolean) => void;
-  setTerminalRightClickBehavior: (behavior: TerminalRightClickBehavior) => void;
   setTerminalBellStyle: (style: TerminalBellStyle) => void;
   setConfirmBeforeExit: (enabled: boolean) => void;
   setRestoreWorkspace: (enabled: boolean) => void;
@@ -159,7 +157,7 @@ const PREFERENCE_KEYS: readonly (keyof AppPreferences)[] = [
   'terminalColorScheme', 'terminalMultiLinePasteWarning',
   'terminalLargePasteWarning', 'terminalAutoReconnect',
   'terminalLineHeight', 'terminalLetterSpacing', 'terminalUrlDetection',
-  'terminalTrimTrailingWhitespace', 'terminalRightClickBehavior',
+  'terminalTrimTrailingWhitespace',
   'terminalBellStyle', 'confirmBeforeExit', 'restoreWorkspace',
   'sftpShowHiddenFiles', 'sftpConflictPolicy', 'sftpRetryCount',
   'sftpDownloadDirectory', 'sftpCompletionNotification',
@@ -196,7 +194,6 @@ function getDefaultPreferences(): AppPreferences {
     terminalLetterSpacing: 0,
     terminalUrlDetection: true,
     terminalTrimTrailingWhitespace: true,
-    terminalRightClickBehavior: 'paste',
     terminalBellStyle: 'none',
     confirmBeforeExit: true,
     restoreWorkspace: true,
@@ -297,7 +294,6 @@ function entriesToPreferences(entries: [string, string][]): Partial<AppPreferenc
     terminalLetterSpacing: (prefs.terminalLetterSpacing as number) ?? defaults.terminalLetterSpacing,
     terminalUrlDetection: (prefs.terminalUrlDetection as boolean) ?? defaults.terminalUrlDetection,
     terminalTrimTrailingWhitespace: (prefs.terminalTrimTrailingWhitespace as boolean) ?? defaults.terminalTrimTrailingWhitespace,
-    terminalRightClickBehavior: (prefs.terminalRightClickBehavior as TerminalRightClickBehavior) ?? defaults.terminalRightClickBehavior,
     terminalBellStyle: (prefs.terminalBellStyle as TerminalBellStyle) ?? defaults.terminalBellStyle,
     confirmBeforeExit: (prefs.confirmBeforeExit as boolean) ?? defaults.confirmBeforeExit,
     restoreWorkspace: (prefs.restoreWorkspace as boolean) ?? defaults.restoreWorkspace,
@@ -510,7 +506,6 @@ export const useAppStore = create<AppState>()(
     setTerminalLetterSpacing: (terminalLetterSpacing) => set({ terminalLetterSpacing }),
     setTerminalUrlDetection: (terminalUrlDetection) => set({ terminalUrlDetection }),
     setTerminalTrimTrailingWhitespace: (terminalTrimTrailingWhitespace) => set({ terminalTrimTrailingWhitespace }),
-    setTerminalRightClickBehavior: (terminalRightClickBehavior) => set({ terminalRightClickBehavior }),
     setTerminalBellStyle: (terminalBellStyle) => set({ terminalBellStyle }),
     setTerminalTabTitleTemplate: (template, custom = false) => {
       if (validTabTitleTemplate(template)) set({ terminalTabTitleTemplate: template, terminalTabTitleCustom: custom });
@@ -576,7 +571,6 @@ useAppStore.subscribe(
     terminalLetterSpacing: state.terminalLetterSpacing,
     terminalUrlDetection: state.terminalUrlDetection,
     terminalTrimTrailingWhitespace: state.terminalTrimTrailingWhitespace,
-    terminalRightClickBehavior: state.terminalRightClickBehavior,
     terminalBellStyle: state.terminalBellStyle,
     terminalTabTitleTemplate: state.terminalTabTitleTemplate,
     terminalTabTitleOverrides: state.terminalTabTitleOverrides,

@@ -47,7 +47,6 @@ import type {
   TerminalColorScheme,
   TerminalCursorStyle,
   TerminalFontFamily,
-  TerminalRightClickBehavior,
   ThemeMode,
 } from '@/types';
 import { invokePickLocalFolder } from '@/lib/ipc/tauri';
@@ -235,8 +234,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const setTerminalUrlDetection = useAppStore((state) => state.setTerminalUrlDetection);
   const terminalTrimTrailingWhitespace = useAppStore((state) => state.terminalTrimTrailingWhitespace);
   const setTerminalTrimTrailingWhitespace = useAppStore((state) => state.setTerminalTrimTrailingWhitespace);
-  const terminalRightClickBehavior = useAppStore((state) => state.terminalRightClickBehavior);
-  const setTerminalRightClickBehavior = useAppStore((state) => state.setTerminalRightClickBehavior);
   const terminalBellStyle = useAppStore((state) => state.terminalBellStyle);
   const setTerminalBellStyle = useAppStore((state) => state.setTerminalBellStyle);
   const confirmBeforeExit = useAppStore((state) => state.confirmBeforeExit);
@@ -870,25 +867,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       onCheckedChange={setTerminalTrimTrailingWhitespace}
                     />
                   </div>
-                </SettingRow>
-                <SettingRow label={t('settings.terminal.rightClickBehavior')} description={t('settings.terminal.rightClickBehaviorDescription')}>
-                  <Select
-                    value={terminalRightClickBehavior}
-                    onValueChange={(value) => setTerminalRightClickBehavior(value as TerminalRightClickBehavior)}
-                  >
-                    <SelectTrigger size="sm" aria-label={t('settings.terminal.rightClickBehavior')}>
-                      <SelectValue>{t(`settings.terminal.rightClickBehavior.${terminalRightClickBehavior}`)}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        {(['paste', 'copyPaste', 'none'] as const).map((behavior) => (
-                          <SelectItem key={behavior} value={behavior}>
-                            {t(`settings.terminal.rightClickBehavior.${behavior}`)}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
                 </SettingRow>
                 <SettingRow label={t('settings.terminal.urlDetection')} description={t('settings.terminal.urlDetectionDescription')}>
                   <div className="flex justify-end">

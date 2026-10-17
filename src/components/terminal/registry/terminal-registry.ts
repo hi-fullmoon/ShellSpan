@@ -488,6 +488,7 @@ class TerminalControllerImpl implements TerminalController {
       fontSize: preferences.fontSize,
       theme: resolveTerminalTheme(preferences.colorScheme),
       cursorBlink: preferences.cursorBlink,
+      rightClickSelectsWord: false,
       cursorStyle: preferences.cursorStyle,
       scrollback: preferences.scrollback,
       overviewRuler: { width: 10 },

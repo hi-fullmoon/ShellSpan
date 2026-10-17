@@ -310,7 +310,6 @@ describe('appStore', () => {
     state.setTerminalLetterSpacing(1);
     state.setTerminalUrlDetection(false);
     state.setTerminalTrimTrailingWhitespace(false);
-    state.setTerminalRightClickBehavior('copyPaste');
     state.setTerminalBellStyle('sound');
 
     expect(useAppStore.getState()).toMatchObject({
@@ -324,7 +323,6 @@ describe('appStore', () => {
       terminalLetterSpacing: 1,
       terminalUrlDetection: false,
       terminalTrimTrailingWhitespace: false,
-      terminalRightClickBehavior: 'copyPaste',
       terminalBellStyle: 'sound',
     });
   });

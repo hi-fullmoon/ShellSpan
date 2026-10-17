@@ -68,7 +68,6 @@ beforeEach(() => {
     terminalMultiLinePasteWarning: true,
     terminalLargePasteWarning: true,
     terminalTrimTrailingWhitespace: true,
-    terminalRightClickBehavior: 'paste',
     shortcuts: { ...DEFAULT_SHORTCUTS },
   });
   (terminalRegistry.get as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
@@ -448,7 +447,7 @@ describe('TerminalPane', () => {
     expect(document.querySelector('svg.animate-spin')).toBeNull();
   });
 
-  it('pastes clipboard text on right click', async () => {
+  it('opens the content menu without pasting on right click', async () => {
     vi.mocked(navigator.clipboard.readText).mockResolvedValue('pasted text');
     const terminal = makeMockTerminal();
     render(<TerminalPane activeSession={makeSession()} />);
@@ -459,45 +458,16 @@ describe('TerminalPane', () => {
 
     terminal.element?.dispatchEvent(event);
 
-    expect(event.defaultPrevented).toBe(true);
-    await vi.waitFor(() => {
-      expect(terminal.paste).toHaveBeenCalledWith('pasted text');
-    });
-  });
-
-  it('drops an asynchronous clipboard result after the pane switches sessions', async () => {
-    let resolveRead!: (text: string) => void;
-    const readPromise = new Promise<string>((resolve) => {
-      resolveRead = resolve;
-    });
-    vi.mocked(navigator.clipboard.readText).mockReturnValue(readPromise);
-    const firstTerminal = makeMockTerminal();
-    const { rerender } = render(
-      <TerminalPane activeSession={makeSession({ sessionId: 's1' })} />,
-    );
-
-    firstTerminal.element?.dispatchEvent(
-      new MouseEvent('contextmenu', { bubbles: true, cancelable: true }),
-    );
-    const secondTerminal = makeMockTerminal();
-    rerender(<TerminalPane activeSession={makeSession({ sessionId: 's2' })} />);
-
-    resolveRead('stale paste');
-    await act(async () => {
-      await readPromise;
-      await Promise.resolve();
-    });
-
-    expect(firstTerminal.paste).not.toHaveBeenCalled();
-    expect(secondTerminal.paste).not.toHaveBeenCalled();
+    expect(await screen.findByRole('menu', { name: 'terminal.menu.label' })).toBeInTheDocument();
+    expect(terminal.paste).not.toHaveBeenCalled();
   });
 
   it('confirms before pasting multiple lines', async () => {
-    vi.mocked(navigator.clipboard.readText).mockResolvedValue('echo one\necho two');
     const terminal = makeMockTerminal();
     render(<TerminalPane activeSession={makeSession()} />);
 
-    terminal.element?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    terminal.element?.querySelector('textarea')?.focus();
+    await userEvent.paste('echo one\necho two');
 
     expect(await screen.findByText('terminal.pasteWarning.title')).toBeInTheDocument();
     expect(terminal.paste).not.toHaveBeenCalled();
@@ -509,12 +479,12 @@ describe('TerminalPane', () => {
   });
 
   it('confirms a pending paste into the session where it started', async () => {
-    vi.mocked(navigator.clipboard.readText).mockResolvedValue('echo one\necho two');
     const firstTerminal = makeMockTerminal();
     const firstController = (firstTerminal as typeof firstTerminal & { __controller: unknown }).__controller;
     const { rerender } = render(<TerminalPane activeSession={makeSession({ sessionId: 's1' })} />);
 
-    firstTerminal.element?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    firstTerminal.element?.querySelector('textarea')?.focus();
+    await userEvent.paste('echo one\necho two');
     expect(await screen.findByText('terminal.pasteWarning.title')).toBeInTheDocument();
 
     const secondTerminal = makeMockTerminal();
@@ -570,20 +540,6 @@ describe('TerminalPane', () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-
-  it('copies a selection on right click in copy-or-paste mode', async () => {
-    useAppStore.setState({ terminalRightClickBehavior: 'copyPaste' });
-    const terminal = makeMockTerminal('selected');
-    render(<TerminalPane activeSession={makeSession()} />);
-
-    terminal.element?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-
-    await vi.waitFor(() => {
-      expect(navigator.clipboard.writeText).toHaveBeenCalledWith('selected');
-    });
-    expect(navigator.clipboard.readText).not.toHaveBeenCalled();
-    expect(terminal.paste).not.toHaveBeenCalled();
   });
 
   it('does not copy selected text when copy on select is disabled', () => {

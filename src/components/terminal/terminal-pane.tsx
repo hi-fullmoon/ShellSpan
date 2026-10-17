@@ -10,12 +10,12 @@ import { installTerminalSelectionGuard } from '@/components/terminal/terminal-se
 import { useTerminalStore, type TerminalSession as TerminalSessionState } from '@/stores/terminalStore';
 import { useToast } from '@/hooks/useToast';
 import { getPlatform } from '@/lib/platform';
-import { readClipboardText } from '@/lib/clipboard';
 import { copyTerminalText } from './terminal-clipboard';
 import { terminalInputReadiness } from './terminal-input-readiness';
 import { TerminalSearch } from './terminal-search';
 import { TerminalResizeIndicator } from './terminal-resize-indicator';
 import { TerminalPastePreview } from './terminal-paste-preview';
+import { TerminalContentMenu } from './terminal-content-menu';
 import { eventMatchesShortcut } from '@/lib/shortcuts';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import type { ShortcutBindings } from '@/types';
@@ -200,7 +200,6 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const multiLinePasteWarning = useAppStore((state) => state.terminalMultiLinePasteWarning);
   const largePasteWarning = useAppStore((state) => state.terminalLargePasteWarning);
   const trimTrailingWhitespace = useAppStore((state) => state.terminalTrimTrailingWhitespace);
-  const rightClickBehavior = useAppStore((state) => state.terminalRightClickBehavior);
   const colorScheme = useAppStore((state) => state.terminalColorScheme);
   const terminalTheme = colorScheme === 'app' ? undefined : resolveTerminalTheme(colorScheme);
   const terminalSurfaceStyle: React.CSSProperties = {
@@ -275,6 +274,25 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     setSearchOpen(false);
     focus();
   }, [clearSearch, focus]);
+
+  const pasteText = useCallback((text: string): void => {
+    if (!activeSessionId || !text || !terminal) return;
+    const session = useTerminalStore.getState().sessions.find(item => item.sessionId === activeSessionId);
+    if (currentSessionIdRef.current !== activeSessionId || session?.status !== 'connected'
+      || terminalRegistry.get(activeSessionId)?.terminal !== terminal
+      || terminalInputReadiness.isPreparing(activeSessionId)
+      || agentTerminalLeaseState.get(activeSessionId)) {
+      showError(t('terminal.feedback.pasteUnavailable'));
+      return;
+    }
+    if ((multiLinePasteWarning && /[\r\n]/.test(text))
+      || (largePasteWarning && new Blob([text]).size > 5 * 1024)) {
+      setPendingPaste({ sessionId: activeSessionId, text,
+        target: `${session.title} (${session.username}@${session.host}:${session.port})` });
+      return;
+    }
+    terminal.paste(text);
+  }, [activeSessionId, terminal, multiLinePasteWarning, largePasteWarning, showError, t]);
 
   useEffect(() => {
     if (!isActive) return;
@@ -377,47 +395,6 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     });
 
     const element = terminal.element;
-    const pasteText = (text: string): void => {
-      if (!activeSessionId) return;
-      if (activeSession?.status !== 'connected' || terminalInputReadiness.isPreparing(activeSessionId)) {
-        showError(t('terminal.feedback.pasteUnavailable'));
-        return;
-      }
-      const isMultiLine = /[\r\n]/.test(text);
-      const isLarge = new Blob([text]).size > 5 * 1024;
-      if ((multiLinePasteWarning && isMultiLine) || (largePasteWarning && isLarge)) {
-        setPendingPaste({
-          sessionId: activeSessionId,
-          text,
-          target: activeSession ? `${activeSession.title} (${activeSession.username}@${activeSession.host}:${activeSession.port})` : activeSessionId,
-        });
-        return;
-      }
-      terminal.paste(text);
-    };
-    const handleContextMenu = (event: MouseEvent): void => {
-      event.preventDefault();
-      if (activeSession?.status !== 'connected') return;
-
-      if (rightClickBehavior === 'none') return;
-      if (rightClickBehavior === 'copyPaste') {
-        const selection = terminal.getSelection();
-        if (selection) {
-          const copiedText = trimTrailingWhitespace
-            ? selection.replace(/[ \t]+(?=\r?$)/gm, '')
-            : selection;
-          void copyTerminalText(copiedText);
-          return;
-        }
-      }
-
-      void readClipboardText()
-        .then((text) => {
-          if (currentSessionIdRef.current !== activeSessionId) return;
-          if (text) pasteText(text);
-        })
-        .catch(() => showError(t('terminal.feedback.pasteFailed')));
-    };
     const handlePaste = (event: ClipboardEvent): void => {
       const text = event.clipboardData?.getData('text/plain');
       if (!text) return;
@@ -425,18 +402,16 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       event.stopPropagation();
       pasteText(text);
     };
-    element?.addEventListener('contextmenu', handleContextMenu);
-    element?.addEventListener('paste', handlePaste);
+    element?.addEventListener('paste', handlePaste, true);
 
     return () => {
       if (copyTimeout !== null) window.clearTimeout(copyTimeout);
       selectionDisposable.dispose();
-      element?.removeEventListener('contextmenu', handleContextMenu);
-      element?.removeEventListener('paste', handlePaste);
+      element?.removeEventListener('paste', handlePaste, true);
       // Reset key handler to avoid stale closures when session changes.
       terminal.attachCustomKeyEventHandler(() => true);
     };
-  }, [activeLease, activeSession, activeSessionId, terminal, searchOpen, handleOpenSearch, handleCloseSearch, showError, t, copyOnSelect, largePasteWarning, multiLinePasteWarning, rightClickBehavior, trimTrailingWhitespace]);
+  }, [activeLease, activeSession, activeSessionId, terminal, searchOpen, handleOpenSearch, handleCloseSearch, showError, t, copyOnSelect, largePasteWarning, multiLinePasteWarning, trimTrailingWhitespace, pasteText]);
 
   // useActiveController opens xterm in a layout effect only when visible.
   // Install after that effect, including the first hidden -> visible transition.
@@ -482,7 +457,9 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
             label={t('terminal.agentLease.inputBlockedPrompt')}
           />
         )}
-        <div ref={paneRef} data-terminal-measure-session={activeSession?.sessionId} className="h-full w-full p-0" />
+        <TerminalContentMenu session={activeSession} terminal={terminal} onPaste={pasteText} onSearch={handleOpenSearch}>
+          <div ref={paneRef} data-terminal-measure-session={activeSession?.sessionId} className="h-full w-full p-0" />
+        </TerminalContentMenu>
         {isVisible && terminal && <TerminalResizeIndicator key={activeSessionId} terminal={terminal} boundary={resizeBoundaryRef} />}
       </div>
       <ConfirmationDialog
