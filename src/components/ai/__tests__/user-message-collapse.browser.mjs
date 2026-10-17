@@ -30,16 +30,26 @@ try {
         const { default: ReactDOM } = await import('/@id/react-dom/client');
         const { AiUserMessageText } = await import('/src/components/ai/workspace/ai-user-message-text.tsx');
         const { Message, Bubble } = await import('/src/components/ai/chat-primitives.tsx');
+        const { aiConversationNodeRenderers } = await import('/src/components/ai/workspace/ai-conversation-node-seat.tsx');
+        const { encodeDocumentMessage } = await import('/src/lib/ai/document-message.ts');
         const { initI18n } = await import('/src/locales/index.ts');
         const { useAppStore } = await import('/src/stores/appStore.ts');
         await import('/src/styles/base.css');
         await import('/src/components/ai/styles/styles.css');
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        window.showMessage = async (text, locale) => {
+        window.showMessage = async (text, locale, chat = false) => {
           await initI18n(locale);
           useAppStore.setState({ locale });
           const h = React.createElement;
-          root.render(h('main', { className: 'ai-panel-shell p-4', style: { width: 900 } },
+          root.render(h('main', { className: 'ai-panel-shell p-4', style: { width: 900 } }, chat ?
+            h(aiConversationNodeRenderers.userMessage, { node: {
+              kind: 'userMessage', key: 'message', sourceKind: 'agent', sessionId: 'session',
+              turnId: 'turn', stepId: null, firstSeq: 1, lastSeq: 1, timestamp: '2026-10-17T00:00:00Z',
+              messageId: 'message', delivery: 'committed', content: encodeDocumentMessage(text, [
+                { id: 'file', name: 'package.json', text, size: new Blob([text]).size },
+                { id: 'chat', name: 'conversation.md', text, size: new Blob([text]).size, chatTitle: '了解AI助手功能' },
+              ]),
+            } }) :
             h(Message, { role: 'user' }, h(Bubble, { role: 'user' },
               h(AiUserMessageText, { key: text, text })))));
           await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -94,6 +104,28 @@ try {
         await page.mouse.move(0, 0);
         await page.locator('main').evaluate(element => { element.style.width = '900px'; });
         await page.waitForFunction(() => !document.querySelector('button[aria-expanded]'));
+      }
+      const question = '了解AI助手功能 会话主要说明了什么';
+      await page.evaluate(text => window.showMessage(text, 'zh-CN', true), question);
+      await page.locator('.ai-chat-reference').waitFor();
+      for (const width of [614, 320]) {
+        await page.locator('main').evaluate((element, width) => { element.style.width = `${width}px`; }, width);
+        const bubble = page.locator('.ai-message-bubble-content');
+        assert.equal(await page.locator('.ai-user-message-text').textContent(), question);
+        assert.deepEqual(await bubble.evaluate(element => {
+          const style = getComputedStyle(element);
+          return [style.fontSize, style.borderRadius, style.padding];
+        }), ['14px', '22px', '10px 16px']);
+        assert.equal(await page.locator('.ai-chat-reference [data-slot="attachment-title"]').evaluate(element => getComputedStyle(element).fontSize), '14px');
+        assert.equal(await page.locator('.ai-chat-reference [data-slot="attachment-title"]').evaluate(element => getComputedStyle(element).fontWeight), '400', 'Chat reference titles use regular weight');
+        const reference = await page.locator('.ai-chat-reference').boundingBox();
+        const file = await page.locator('[data-document-name="package.json"]').boundingBox();
+        assert.ok(reference.y >= file.y + file.height + 5, 'References occupy their own row below attachments');
+        const bounds = await bubble.boundingBox();
+        assert.ok(Math.abs(reference.x + reference.width - bounds.x - bounds.width) < 1, 'Reference and message align on the right');
+        assert.equal(bounds.y - reference.y - reference.height, 6);
+        assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width, 'Message stays within the narrow pane');
+        await page.locator('main').screenshot({ path: `/tmp/shellspan-chat-reference-${engine.name()}-${width}.png` });
       }
       assert.deepEqual(errors, []);
     } finally {

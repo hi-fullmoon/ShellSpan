@@ -167,6 +167,8 @@ import { AiUserMessageText } from './ai-user-message-text';
 function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'userMessage'> }) {
   const { t } = useI18n();
   const message = decodeDocumentMessage(node.content);
+  const files = message.documents.filter(document => document.chatTitle === undefined);
+  const references = message.documents.filter(document => document.chatTitle !== undefined);
   const pendingIndicator = node.delivery === 'confirming' || node.delivery === 'unconfirmed' ? (
     <Badge variant="secondary">{t(node.delivery === 'unconfirmed' ? 'ai.workspace.messageUnconfirmed' : 'ai.workspace.messageConfirming')}</Badge>
   ) : node.delivery === 'pending' ? (
@@ -180,13 +182,14 @@ function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'us
         </Badge>
       )}
       {Boolean(node.images?.length || message.documents.length) && (
-        <div className="relative w-max min-w-0 max-w-full">
+        <div className="ai-user-attachments relative flex w-max min-w-0 max-w-full flex-col items-end gap-1.5">
           {!message.text && pendingIndicator}
           <UnifiedAttachmentContext value={true}>
-            <AiDraftAttachmentRail unified count={(node.images?.length ?? 0) + message.documents.length}>
+            {Boolean(node.images?.length || files.length) && <AiDraftAttachmentRail unified count={(node.images?.length ?? 0) + files.length}>
               <AiCommittedImages sessionId={node.sessionId} images={node.images} />
-              <AiDocumentAttachments composer documents={message.documents} />
-            </AiDraftAttachmentRail>
+              <AiDocumentAttachments composer documents={files} />
+            </AiDraftAttachmentRail>}
+            <AiDocumentAttachments composer documents={references} />
           </UnifiedAttachmentContext>
         </div>
       )}

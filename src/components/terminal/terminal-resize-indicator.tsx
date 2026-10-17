@@ -1,8 +1,8 @@
-import { useEffect, useLayoutEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useState, type RefObject } from 'react';
 import type { Terminal } from '@xterm/xterm';
 import { useI18n } from '@/hooks/useI18n';
 
-export function TerminalResizeIndicator({ terminal }: { terminal: Terminal }): React.ReactNode {
+export function TerminalResizeIndicator({ terminal, boundary }: { terminal: Terminal; boundary?: RefObject<HTMLDivElement | null> }): React.ReactNode {
   const { t } = useI18n();
   const [size, setSize] = useState<{ cols: number; rows: number } | null>(null);
   useLayoutEffect(() => {
@@ -11,7 +11,16 @@ export function TerminalResizeIndicator({ terminal }: { terminal: Terminal }): R
   }, [terminal]);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let previousBounds = boundary?.current?.getBoundingClientRect();
     const subscription = terminal.onResize(next => {
+      const bounds = boundary?.current?.getBoundingClientRect();
+      if (bounds && previousBounds && bounds.width === previousBounds.width && bounds.height === previousBounds.height) {
+        // Internal layout changes must also dismiss a hint for the old grid.
+        clearTimeout(timer);
+        setSize(null);
+        return;
+      }
+      previousBounds = bounds;
       setSize(next);
       clearTimeout(timer);
       timer = setTimeout(() => setSize(null), 800);
@@ -20,7 +29,7 @@ export function TerminalResizeIndicator({ terminal }: { terminal: Terminal }): R
       subscription.dispose();
       clearTimeout(timer);
     };
-  }, [terminal]);
+  }, [terminal, boundary]);
 
   if (!size) return null;
   return (

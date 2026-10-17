@@ -32,6 +32,22 @@
   line-height: 22px;
 }
 
+.ai-user-attachments > .ai-chat-reference[data-slot='attachment'] {
+  align-self: flex-end;
+}
+
+.ai-message-user:has(.ai-chat-reference) .ai-chat-reference [data-slot='attachment-title'] {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 24px;
+}
+
+.ai-message-user:has(.ai-chat-reference) .ai-message-bubble-user .ai-message-bubble-content {
+  padding: 10px 16px;
+  background: color-mix(in srgb, var(--ai-bubble) 70%, var(--card));
+  font-size: 14px;
+}
+
 .ai-message-bubble-assistant,
 .ai-message-bubble-assistant .ai-message-bubble-content {
   max-width: 100% !important;

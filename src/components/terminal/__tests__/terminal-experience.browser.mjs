@@ -294,7 +294,7 @@ try {
     window.resizeHost = document.createElement('div');
     document.getElementById('pane').appendChild(window.resizeHost);
     window.resizeRoot = createRoot(window.resizeHost);
-    window.resizeRoot.render(React.createElement(TerminalResizeIndicator, { terminal: window.terminal }));
+    window.resizeRoot.render(React.createElement(TerminalResizeIndicator, { terminal: window.terminal, boundary: { current: document.getElementById('pane') } }));
   });
   await page.waitForTimeout(50);
   assert.equal(await page.getByTestId('terminal-resize-indicator').count(), 0);
@@ -315,7 +315,35 @@ try {
       && Math.abs(badge.y + badge.height / 2 - pane.y - pane.height / 2) < 1;
   }), true, 'Resize indicator must be centered inside its own terminal pane');
   await page.screenshot({ path: '/tmp/shellspan-terminal-resize.png' });
+  await page.evaluate(() => {
+    document.getElementById('pane').style.paddingTop = '40px';
+    window.runtime.flushSync(() => window.fit.fit());
+  });
+  assert.equal(await resizeIndicator.count(), 0, 'Toolbar changes immediately dismiss an existing resize hint');
+  await page.evaluate(() => {
+    document.getElementById('pane').style.paddingTop = '';
+    window.fit.fit();
+  });
+  assert.equal(await resizeIndicator.count(), 0, 'Internal layout changes dismiss stale dimensions without showing new ones');
+  await page.evaluate(() => {
+    document.getElementById('pane').style.width = '740px';
+    window.fit.fit();
+  });
+  await resizeIndicator.waitFor();
+  assert.equal(await resizeIndicator.innerText(), await page.evaluate(() => `${window.terminal.cols} × ${window.terminal.rows}`), 'Resizing remains enabled after toolbar transitions');
   await resizeIndicator.waitFor({ state: 'detached' });
+  const rowsBeforeToolbar = await page.evaluate(() => window.terminal.rows);
+  await page.evaluate(() => {
+    document.getElementById('pane').style.paddingTop = '40px';
+    window.fit.fit();
+  });
+  assert.notEqual(await page.evaluate(() => window.terminal.rows), rowsBeforeToolbar, 'Toolbar space still updates the terminal grid');
+  assert.equal(await resizeIndicator.count(), 0, 'Internal toolbar changes do not display a resize hint');
+  await page.evaluate(() => {
+    document.getElementById('pane').style.paddingTop = '';
+    window.fit.fit();
+  });
+  assert.equal(await resizeIndicator.count(), 0, 'Removing the toolbar does not display a resize hint');
   await page.evaluate(() => {
     window.resizeRoot.unmount();
     window.resizeHost.remove();

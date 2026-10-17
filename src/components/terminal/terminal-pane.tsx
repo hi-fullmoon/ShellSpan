@@ -193,6 +193,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   isVisible = true,
 }) => {
   const paneRef = useRef<HTMLDivElement>(null);
+  const resizeBoundaryRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
   const { error: showError } = useToast();
   const copyOnSelect = useAppStore((state) => state.terminalCopyOnSelect);
@@ -445,7 +446,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   }, [terminal, isVisible]);
 
   return (
-    <div className="relative flex h-full w-full flex-col overflow-hidden bg-app-bg">
+    <div ref={resizeBoundaryRef} className="relative flex h-full w-full flex-col overflow-hidden bg-app-bg">
       {activeLease && (
         <AgentTerminalLeaseBar lease={activeLease} />
       )}
@@ -482,7 +483,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           />
         )}
         <div ref={paneRef} data-terminal-measure-session={activeSession?.sessionId} className="h-full w-full p-0" />
-        {isVisible && terminal && <TerminalResizeIndicator key={activeSessionId} terminal={terminal} />}
+        {isVisible && terminal && <TerminalResizeIndicator key={activeSessionId} terminal={terminal} boundary={resizeBoundaryRef} />}
       </div>
       <ConfirmationDialog
         open={Boolean(pendingPaste)}
