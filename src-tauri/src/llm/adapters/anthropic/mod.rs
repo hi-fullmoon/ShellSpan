@@ -1,7 +1,9 @@
 use super::common::{
     ensure_nonempty_response, MAX_PROVIDER_TOOL_ARGUMENT_BYTES, MAX_PROVIDER_TOOL_CALL_ID_BYTES,
 };
-use crate::llm::{adapter::*, errors::*, transport::*, types::*, usage::*};
+use crate::llm::{
+    adapter::*, config::AiProviderConfig, errors::*, transport::*, types::*, usage::*,
+};
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use serde_json::{json, Map, Value};
@@ -165,6 +167,10 @@ pub(in crate::llm) struct AnthropicMessagesAdapter {
 
 #[async_trait]
 impl ModelAdapter for AnthropicMessagesAdapter {
+    fn compaction_model(&self) -> Option<(Arc<dyn ModelAdapter>, AiProviderConfig)> {
+        self.http.compaction_model()
+    }
+
     fn replay_codec(&self) -> &'static dyn ReplayCodec {
         &ANTHROPIC_REPLAY_CODEC
     }

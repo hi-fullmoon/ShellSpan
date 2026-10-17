@@ -73,6 +73,10 @@ pub(in crate::llm) struct OllamaAdapter {
 
 #[async_trait]
 impl ModelAdapter for OllamaAdapter {
+    fn compaction_model(&self) -> Option<(Arc<dyn ModelAdapter>, AiProviderConfig)> {
+        self.http.compaction_model()
+    }
+
     fn replay_codec(&self) -> &'static dyn ReplayCodec {
         &OLLAMA_REPLAY_CODEC
     }

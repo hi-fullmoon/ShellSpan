@@ -30,6 +30,11 @@ pub(crate) trait ModelStreamSink: Send + Sync {
 pub(crate) trait ModelAdapter: Send + Sync {
     fn replay_codec(&self) -> &'static dyn ReplayCodec;
 
+    /// A credential-preserving adapter for bounded continuation summaries.
+    fn compaction_model(&self) -> Option<(Arc<dyn ModelAdapter>, AiProviderConfig)> {
+        None
+    }
+
     async fn stream(
         &self,
         request: ModelRequest,
@@ -65,6 +70,10 @@ pub(crate) struct ImageResolvingAdapter {
 #[cfg(test)]
 #[async_trait]
 impl ModelAdapter for ImageResolvingAdapter {
+    fn compaction_model(&self) -> Option<(Arc<dyn ModelAdapter>, AiProviderConfig)> {
+        self.inner.compaction_model()
+    }
+
     fn replay_codec(&self) -> &'static dyn ReplayCodec {
         self.inner.replay_codec()
     }

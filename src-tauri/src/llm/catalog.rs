@@ -445,6 +445,22 @@ pub(crate) fn resolve(provider: &AiProviderConfig) -> Result<ResolvedModel, Stri
     })
 }
 
+/// Summary generation has its own output policy; the user's selected model is unchanged.
+pub(crate) fn compaction_provider(provider: &AiProviderConfig) -> Result<AiProviderConfig, String> {
+    let model = resolve(provider)?;
+    let mut summary = provider.clone();
+    summary.reasoning_effort = ["off", "none", "minimal", "low"]
+        .iter()
+        .find_map(|id| model.reasoning.iter().find(|option| option.id == *id))
+        .map(|option| option.id.clone())
+        .or_else(|| provider.reasoning_effort.clone());
+    let mut definition = model.definition.clone();
+    definition.max_output_tokens = definition.max_output_tokens.min(2048);
+    summary.model_definition = Some(definition);
+    resolve(&summary)?;
+    Ok(summary)
+}
+
 pub(crate) fn apply_reasoning(
     body: &mut Value,
     model: &ResolvedModel,

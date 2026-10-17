@@ -1,6 +1,9 @@
 mod continuation_tests {
     include!("continuation.rs");
 }
+mod live_compaction_tests {
+    include!("live_compaction.rs");
+}
 mod archive_tests {
     include!("archive.rs");
 }

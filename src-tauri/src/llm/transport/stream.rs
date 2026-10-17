@@ -35,6 +35,22 @@ pub(in crate::llm) struct HttpConfig {
 }
 
 impl HttpConfig {
+    pub(in crate::llm) fn compaction_model(
+        &self,
+    ) -> Option<(
+        std::sync::Arc<dyn crate::llm::adapter::ModelAdapter>,
+        AiProviderConfig,
+    )> {
+        let provider = crate::llm::catalog::compaction_provider(&self.provider).ok()?;
+        let adapter = crate::llm::registry::create_adapter(Self {
+            client: self.client.clone(),
+            provider: provider.clone(),
+            api_key: self.api_key.clone(),
+            timeouts: self.timeouts,
+        });
+        Some((adapter, provider))
+    }
+
     pub(in crate::llm) fn validate(
         &self,
         request: &ModelRequest,

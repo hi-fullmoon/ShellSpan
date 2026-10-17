@@ -99,6 +99,10 @@ pub(in crate::llm) struct ChatCompletionsAdapter {
 
 #[async_trait]
 impl ModelAdapter for ChatCompletionsAdapter {
+    fn compaction_model(&self) -> Option<(Arc<dyn ModelAdapter>, AiProviderConfig)> {
+        self.http.compaction_model()
+    }
+
     fn replay_codec(&self) -> &'static dyn ReplayCodec {
         &CHAT_COMPLETIONS_REPLAY_CODEC
     }

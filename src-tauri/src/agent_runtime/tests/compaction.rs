@@ -43,6 +43,73 @@
     }
 
     #[test]
+    fn summary_reasoning_does_not_consume_json_budget_and_both_remain_bounded() {
+        use super::super::{ModelStreamSink, StreamDelta};
+        let source = include_str!("../compaction.rs");
+        let reasoning = source
+            .chars()
+            .take(SUMMARY_OUTPUT_BYTES + 1)
+            .collect::<String>();
+        let sink = SummarySink::default();
+        sink.emit(StreamDelta::Reasoning {
+            index: 0,
+            text: reasoning,
+        })
+        .unwrap();
+        sink.emit(StreamDelta::Text {
+            index: 1,
+            text: include_str!("../../../../package.json").into(),
+        })
+        .unwrap();
+        assert!(sink
+            .emit(StreamDelta::Reasoning {
+                index: 0,
+                text: source.into()
+            })
+            .is_err());
+        assert!(sink
+            .emit(StreamDelta::Text {
+                index: 1,
+                text: source.into()
+            })
+            .is_err());
+    }
+
+    #[test]
+    fn summary_policy_preserves_selected_model_and_bounds_multifragment_time() {
+        let provider: AiProviderConfig = serde_json::from_value(serde_json::json!({
+            "id":"deepseek", "kind":"openAiCompatible", "profile":"deepseek",
+            "baseUrl":"https://api.deepseek.com", "model":"deepseek-v4-pro", "reasoningEffort":"high", "requiresApiKey":true
+        })).unwrap();
+        let summary = crate::llm::catalog::compaction_provider(&provider).unwrap();
+        assert_eq!(provider.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(summary.reasoning_effort.as_deref(), Some("off"));
+        assert_eq!(summary.model, provider.model);
+        let main_model = crate::llm::catalog::resolve(&provider).unwrap();
+        let summary_model = crate::llm::catalog::resolve(&summary).unwrap();
+        assert_eq!(main_model.context_window, summary_model.context_window);
+        assert_eq!(summary_model.max_output_tokens, 2048);
+        let mut body = serde_json::json!({});
+        crate::llm::catalog::apply_reasoning(
+            &mut body,
+            &summary_model,
+            summary.reasoning_effort.clone(),
+        );
+        assert_eq!(body["thinking"]["type"], "disabled");
+        let chunk = summary_chunk_bytes(
+            summary_model.context_window,
+            summary_model.max_output_tokens,
+            4096,
+        );
+        assert_eq!(summary_deadline_seconds(chunk, chunk), 45);
+        assert_eq!(summary_deadline_seconds(chunk * 4, chunk), 105);
+        assert_eq!(
+            summary_deadline_seconds(SUMMARY_MAX_SOURCE_BYTES, chunk),
+            180
+        );
+    }
+
+    #[test]
     fn below_trigger_compaction_requires_meaningful_reduction_and_byte_headroom() {
         let budget = budget();
         assert!(ProjectedBudget {
@@ -1815,7 +1882,10 @@
             .unwrap();
         assert!(result.failure.unwrap().contains("inputBudget"));
         let calls = fixture.calls.lock().unwrap();
-        assert!(calls.len() > 8);
+        assert!(
+            calls.len() >= 2,
+            "partial output must exercise actual retry attempts"
+        );
         let bytes: u64 = calls
             .iter()
             .map(|request| {
@@ -1828,6 +1898,10 @@
             })
             .sum();
         assert!(bytes <= SUMMARY_MAX_TOTAL_INPUT_BYTES as u64);
+        assert!(
+            bytes > (SUMMARY_MAX_TOTAL_INPUT_BYTES - SUMMARY_MAX_REQUEST_BYTES) as u64,
+            "recovery should consume the allowed input budget before refusing another request"
+        );
         assert!(result.checkpoint.is_none());
     }
     #[tokio::test]

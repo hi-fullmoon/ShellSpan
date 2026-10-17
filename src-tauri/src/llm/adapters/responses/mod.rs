@@ -183,6 +183,10 @@ pub(in crate::llm) struct ResponsesAdapter {
 
 #[async_trait]
 impl ModelAdapter for ResponsesAdapter {
+    fn compaction_model(&self) -> Option<(Arc<dyn ModelAdapter>, AiProviderConfig)> {
+        self.http.compaction_model()
+    }
+
     fn replay_codec(&self) -> &'static dyn ReplayCodec {
         &RESPONSES_REPLAY_CODEC
     }
