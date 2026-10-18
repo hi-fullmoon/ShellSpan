@@ -16,6 +16,7 @@ const repository = resolve(import.meta.dirname, '..');
 const { values } = parseArgs({ options: {
   performance: { type: 'boolean' }, baseline: { type: 'boolean' },
   focus: { type: 'boolean' },
+  'focus-background': { type: 'boolean' },
   'terminal-readiness': { type: 'boolean' },
   'no-model': { type: 'boolean' }, route: { type: 'string' }, model: { type: 'string' },
   'cleanup-session': { type: 'string', multiple: true },
@@ -23,11 +24,14 @@ const { values } = parseArgs({ options: {
 } });
 const performanceRun = values.performance === true;
 const focusRun = values.focus === true;
+const focusBackgroundRun = values['focus-background'] === true;
+assert(!focusBackgroundRun || (!focusRun && !values.performance && !values['terminal-readiness']), '--focus-background is a separate regression');
 const terminalReadinessRun = values['terminal-readiness'] === true;
 assert(!terminalReadinessRun || (!focusRun && !performanceRun), '--terminal-readiness is a separate regression');
 assert(!focusRun || !performanceRun, '--focus and --performance are separate regressions');
 const baseline = values.baseline === true;
 const noModel = values['no-model'] === true;
+assert(!focusBackgroundRun || !noModel, '--focus-background requires real model calls');
 assert(Boolean(values.route) === Boolean(values.model), '--route and --model must be supplied together');
 assert(!values['baseline-ref'] || baseline, '--baseline-ref requires --baseline');
 const baselineRef = values['baseline-ref'] ?? 'HEAD';
@@ -41,7 +45,8 @@ const token = randomUUID();
 let settle;
 const result = new Promise((resolveResult) => { settle = resolveResult; });
 const page = performanceRun ? 'agent-panel-performance.native.html' : 'agent-session-stream.native.html';
-const pagePath = terminalReadinessRun ? 'src/components/terminal/__tests__/terminal-readiness.native.html'
+const pagePath = focusBackgroundRun ? 'src/components/terminal/__tests__/focus-background.native.html'
+  : terminalReadinessRun ? 'src/components/terminal/__tests__/terminal-readiness.native.html'
   : focusRun ? 'src/components/focus/__tests__/focus.native.html' : `src/lib/ai/__tests__/${page}`;
 const output = performanceRun ? await mkdtemp(resolve(tmpdir(), 'shellspan-agent-performance-')) : undefined;
 const baselinePlugin = {
@@ -135,6 +140,7 @@ try {
   const outcome = await result;
   assert.equal(outcome.ok, true, outcome.error);
   if (performanceRun) console.log(JSON.stringify({ baseline, baselineRef: baseline ? baselineRef : undefined, baselineCommit, productionBundle: true, ...outcome.metrics }));
+  else if (focusBackgroundRun) console.log('Native Focus background regression passed: two real visible commands completed on the leased PTY, with Focus selection and keyboard focus preserved.');
   else if (terminalReadinessRun) console.log('Native terminal readiness passed: registry identity across hot updates, existing and new local PTY output.');
   else if (focusRun) console.log('Native focus regression passed: real local terminals, explicit targets, collapse/restore, continuation IPC, and responsive geometry. No model or remote commands were executed.');
   else console.log('Native Agent stream passed: pending subscription/snapshot cancellation, error publication, automatic gap recovery and cleanup.');
