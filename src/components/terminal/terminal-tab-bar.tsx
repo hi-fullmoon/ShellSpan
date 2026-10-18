@@ -20,7 +20,7 @@ import { useAppStore } from '@/stores/appStore';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner } from '@/components/ui/spinner';
 import { PinIcon, TargetIcon, XIcon } from 'lucide-react';
-import { invokeCloseSession } from '@/lib/ipc/tauri';
+import { useCloseTerminal } from '@/hooks/useCloseTerminal';
 import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
@@ -275,7 +275,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
   const sessions = controlledSessions ?? storeSessions;
   const activeSessionId = controlledActiveSessionId === undefined ? storeActiveSessionId : controlledActiveSessionId;
   const setActiveSession = useTerminalStore((state) => state.setActiveSession);
-  const removeSession = useTerminalStore((state) => state.removeSession);
+  const closeTerminal = useCloseTerminal();
   const reorderSessions = useTerminalStore((state) => state.reorderSessions);
   const togglePin = useTerminalStore((state) => state.togglePin);
 
@@ -434,8 +434,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
 
   const confirmCloseSession = (): void => {
     if (closingSessionId) {
-      removeSession(closingSessionId);
-      invokeCloseSession(closingSessionId).catch(() => {});
+      void closeTerminal(closingSessionId);
     }
     setClosingSessionId(null);
   };

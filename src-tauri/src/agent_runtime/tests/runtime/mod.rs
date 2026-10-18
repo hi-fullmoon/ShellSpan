@@ -1,6 +1,9 @@
 mod continuation_tests {
     include!("continuation.rs");
 }
+mod terminal_close_tests {
+    include!("terminal_close.rs");
+}
 mod live_compaction_tests {
     include!("live_compaction.rs");
 }

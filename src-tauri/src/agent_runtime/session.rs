@@ -2417,6 +2417,26 @@ impl AgentSessionStore {
             .snapshot()
     }
 
+    pub(crate) fn terminal_root_sessions(&self, terminal_id: &str) -> Result<Vec<String>, String> {
+        let inner = self.lock_configured()?;
+        Ok(inner
+            .sessions
+            .values()
+            .map(AgentSessionRecord::list_item)
+            .filter(|item| {
+                !item.ended
+                    && !item.archived
+                    && item.header.subagent.is_none()
+                    && item
+                        .header
+                        .target
+                        .as_ref()
+                        .is_some_and(|target| target.session_id == terminal_id)
+            })
+            .map(|item| item.header.session_id)
+            .collect())
+    }
+
     pub(crate) fn model_surface(&self, session_id: &str) -> Result<AgentSurfaceSnapshot, String> {
         validate_identifier(session_id, "sessionId")?;
         let inner = self.lock_configured()?;

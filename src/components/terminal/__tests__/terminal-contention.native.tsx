@@ -8,10 +8,12 @@ import { AppShell, MainContent } from '@/components/layout/app-shell';
 import { FocusLayout } from '@/components/focus/focus-layout';
 import { AiPanel } from '@/components/ai/ai-panel';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { Toaster } from '@/components/ui/sonner';
 import { useAiPanelStore } from '@/stores/aiPanelStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useFocusStore } from '@/stores/focusStore';
 import { useAppStore } from '@/stores/appStore';
+import { useToastStore } from '@/stores/toastStore';
 import { initI18n, t } from '@/locales';
 import {
   invokeCreateLocalSession, invokeCloseSession, invokeListAiRoutes, invokeGetAgentTerminalOwner, invokeGetTerminalBrokerSnapshot,
@@ -67,6 +69,17 @@ function submitDraft(focus: boolean) {
   button.click();
 }
 
+async function confirmTabClose(id: string) {
+  const button = document.querySelector<HTMLButtonElement>(`[data-session-tab="${id}"] button[aria-label="close"]`);
+  assert(button, 'Production close button is missing');
+  flushSync(() => button.click());
+  await eventually(() => !!document.querySelector('[role="alertdialog"]'), 'Close confirmation is missing');
+  const confirm = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button'))
+    .find(candidate => candidate.textContent === t('common.close'));
+  assert(confirm, 'Close confirmation action is missing');
+  flushSync(() => confirm.click());
+}
+
 async function verify() {
   const cleanupIds = new URL(location.href).searchParams.getAll('cleanupSession');
   if (cleanupIds.length) {
@@ -80,15 +93,19 @@ async function verify() {
   }
   await initI18n(useAppStore.getState().locale);
   document.documentElement.dataset.theme = 'light';
-  const selection = (await invokeListAiRoutes()).defaultSelection;
-  assert(selection, 'A configured real model is required');
+  const noModel = new URL(location.href).searchParams.get('noModel') === 'true';
+  const selection = noModel ? null : (await invokeListAiRoutes()).defaultSelection;
   const root = createRoot(document.getElementById('root')!);
   const ids = [`agent-contention-${crypto.randomUUID()}`, `focus-agent-contention-${crypto.randomUUID()}`];
   const created: string[] = [];
   const completed = new Map<string, number>();
   let failure: string | undefined;
   let takingOver = false;
+  let closingTerminal = false;
   let terminalId: string | undefined;
+  let otherTerminalId: string | undefined;
+  let terminalClosed = false;
+  let otherTerminalClosed = false;
   let output = '';
   const cleanups: (() => void)[] = [];
   try {
@@ -99,7 +116,7 @@ async function verify() {
         <FocusLayout><MainContent><TerminalWorkspace /></MainContent></FocusLayout>
         <AiPanel />
       </div>
-    </AppShell></TooltipProvider>));
+    </AppShell><Toaster /></TooltipProvider>));
     const bounds = document.getElementById('root')!.getBoundingClientRect();
     assert(bounds.width >= innerWidth - 1 && bounds.height >= innerHeight - 1, 'The real application shell must fill the viewport');
     const session = await invokeCreateLocalSession(100, 25);
@@ -108,6 +125,48 @@ async function verify() {
     await eventually(() => useTerminalStore.getState().sessions.some(item => item.sessionId === terminalId && item.status === 'connected' && item.promptReady), 'Real local terminal never became ready');
     const controller = terminalRegistry.get(terminalId);
     assert(controller, 'No real terminal controller');
+    if (noModel) {
+      await reportProgress('Checking real PTY close and durable Agent cancellation without model credentials.');
+      cleanups.push(controller.subscribeOutput(chunk => { output += chunk; }));
+      for (const [index, id] of ids.entries()) {
+        await invokeCreateAgentRuntimeSession({ sessionId: id, taskId: id, goal: 'Check terminal close.',
+          executionSurface: index === 0 ? 'boundTerminal' : 'direct',
+          target: { kind: 'local', targetId: `terminal-${terminalId}`, sessionId: terminalId },
+        });
+        created.push(id);
+      }
+      const other = await invokeCreateLocalSession(100, 25);
+      otherTerminalId = other.sessionId;
+      flushSync(() => useTerminalStore.getState().addSession(other));
+      const unrelated = `agent-contention-${crypto.randomUUID()}`;
+      await invokeCreateAgentRuntimeSession({ sessionId: unrelated, taskId: unrelated, goal: 'Check independent terminal.',
+        executionSurface: 'boundTerminal', target: { kind: 'local', targetId: `terminal-${other.sessionId}`, sessionId: other.sessionId },
+      });
+      created.push(unrelated);
+      const marker = `close-running-${crypto.randomUUID()}`;
+      assert(await controller.writeUserInput(`printf '%s%s\\n' '${marker.slice(0, 16)}' '${marker.slice(16)}'; sleep 30\r`), 'Real terminal input was rejected');
+      await eventually(() => output.includes(marker), 'Real command did not start');
+      await confirmTabClose(terminalId);
+      await eventually(() => !useTerminalStore.getState().sessions.some(item => item.sessionId === terminalId), 'Successful close must remove its tab');
+      terminalClosed = true;
+      for (const id of ids) {
+        const snapshot = await invokeGetAgentRuntimeSession({ sessionId: id });
+        assert(snapshot.ended && snapshot.status === 'cancelled', 'Closing must cancel durable Agent tasks on both execution surfaces');
+      }
+      assert(!(await invokeGetAgentRuntimeSession({ sessionId: unrelated })).ended, 'Another terminal task must remain unchanged');
+      await invokeCloseSession(other.sessionId);
+      otherTerminalClosed = true;
+      const toastsBefore = useToastStore.getState().toasts.length;
+      await confirmTabClose(other.sessionId);
+      await eventually(() => useToastStore.getState().toasts.length > toastsBefore, 'Real close error must produce a Toast');
+      assert(useTerminalStore.getState().sessions.some(item => item.sessionId === other.sessionId), 'Failed close must retain its tab');
+      const toasts = useToastStore.getState().toasts;
+      assert(toasts[toasts.length - 1]?.message === t('terminal.tab.closeFailed', { title: other.title }), 'Close failure must use localized feedback');
+      await eventually(() => Array.from(document.querySelectorAll('[data-sonner-toast]'))
+        .some(toast => toast.textContent?.includes(t('terminal.tab.closeFailed', { title: other.title }))), 'Close error Toast must be visibly rendered');
+      return;
+    }
+    assert(selection, 'A configured real model is required');
     const identity = (await invokeGetTerminalBrokerSnapshot(terminalId)).session;
     assert(identity, 'Missing broker identity for the real PTY');
     const operations = new Set<string>();
@@ -119,7 +178,7 @@ async function verify() {
       if (!ids.includes(payload.sessionId)) return;
       if (payload.type === 'request/failure') failure = `Real model failure: ${payload.data.failure.kind}`;
       if (payload.type === 'tool/result') {
-        if (takingOver && payload.sessionId === ids[0] && payload.data.status !== 'completed') return;
+        if ((closingTerminal || takingOver && payload.sessionId === ids[0]) && payload.data.status !== 'completed') return;
         let result: unknown = payload.data.data;
         if (result && typeof result === 'object' && 'artifactRef' in result && typeof result.artifactRef === 'string') {
           try {
@@ -259,6 +318,48 @@ async function verify() {
     flushSync(() => newSession.click());
     await eventually(() => useTerminalTaskNavigation.getState().request === null, 'Obsolete task navigation was not cancelled');
     assert(!workspaceRoot(false)?.dataset.sessionId, 'A late task lookup must not overwrite a newer conversation visit');
+
+    await reportProgress('Checking real running-terminal close, Agent cancellation and close failure feedback.');
+    const other = await invokeCreateLocalSession(100, 25);
+    otherTerminalId = other.sessionId;
+    flushSync(() => useTerminalStore.getState().addSession(other));
+    const unrelated = `agent-contention-${crypto.randomUUID()}`;
+    await invokeCreateAgentRuntimeSession({ sessionId: unrelated, taskId: unrelated, goal: 'Remain idle.',
+      executionSurface: 'boundTerminal', permissionMode: 'operator',
+      target: { kind: 'local', targetId: `terminal-${other.sessionId}`, sessionId: other.sessionId },
+    });
+    created.push(unrelated);
+    await invokeStartAgentRuntime({ sessionId: unrelated, selection });
+    const closeRunning = `close-running-${crypto.randomUUID()}`;
+    const closeFinished = `close-finished-${crypto.randomUUID()}`;
+    await send(ids[1], exactCommandPrompt(`${command(closeRunning, 0)}; ${command(closeFinished, 30)}`));
+    await eventually(() => output.includes(closeRunning)
+      && agentTerminalLeaseState.get(terminalId!)?.commandPhase === 'running', 'Close requires a real running command', 180_000);
+    closingTerminal = true;
+    await confirmTabClose(terminalId);
+    await eventually(() => !useTerminalStore.getState().sessions.some(item => item.sessionId === terminalId), 'Successful close must remove the tab');
+    terminalClosed = true;
+    for (const id of ids) {
+      const snapshot = await invokeGetAgentRuntimeSession({ sessionId: id });
+      assert(snapshot.ended && snapshot.status === 'cancelled', 'Closing must stop every associated Agent');
+    }
+    assert(await invokeGetAgentTerminalOwner(terminalId) === null, 'Closing must release Agent ownership');
+    assert(!output.includes(closeFinished), 'Closing must interrupt the running command');
+    const unrelatedSnapshot = await invokeGetAgentRuntimeSession({ sessionId: unrelated });
+    assert(!unrelatedSnapshot.ended, 'Closing one terminal must preserve Agents on another terminal');
+
+    // A stale tab whose transport was already closed produces a real backend
+    // error, without replacing IPC or the production close hook.
+    await invokeCloseSession(other.sessionId);
+    otherTerminalClosed = true;
+    const toastsBefore = useToastStore.getState().toasts.length;
+    await confirmTabClose(other.sessionId);
+    await eventually(() => useToastStore.getState().toasts.length > toastsBefore, 'Close failure must show a Toast');
+    assert(useTerminalStore.getState().sessions.some(item => item.sessionId === other.sessionId), 'Close failure must retain the tab');
+    const toasts = useToastStore.getState().toasts;
+    assert(toasts[toasts.length - 1]?.message === t('terminal.tab.closeFailed', { title: other.title }), 'Close failure must use the localized message');
+    await eventually(() => Array.from(document.querySelectorAll('[data-sonner-toast]'))
+      .some(toast => toast.textContent?.includes(t('terminal.tab.closeFailed', { title: other.title }))), 'Close error Toast must be visibly rendered');
   } finally {
     for (const cleanup of cleanups.reverse()) cleanup();
     root.unmount();
@@ -267,7 +368,8 @@ async function verify() {
       await invokeArchiveAgentRuntimeSession({ sessionId: id });
       await invokeDeleteAgentRuntimeSession({ sessionId: id });
     }
-    if (terminalId) { await invokeCloseSession(terminalId); terminalRegistry.dispose(terminalId); }
+    if (terminalId) { if (!terminalClosed) await invokeCloseSession(terminalId); terminalRegistry.dispose(terminalId); }
+    if (otherTerminalId) { if (!otherTerminalClosed) await invokeCloseSession(otherTerminalId); terminalRegistry.dispose(otherTerminalId); }
   }
 }
 void verify().then(() => ({ ok: true }), (error: unknown) => ({ ok: false,

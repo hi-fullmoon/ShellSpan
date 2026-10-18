@@ -30,6 +30,19 @@ struct TerminalAdmissionGuard {
     committed: bool,
 }
 
+pub(crate) struct TerminalCloseGuard {
+    terminals: Arc<Mutex<HashSet<String>>>,
+    terminal_id: String,
+}
+
+impl Drop for TerminalCloseGuard {
+    fn drop(&mut self) {
+        if let Ok(mut terminals) = self.terminals.lock() {
+            terminals.remove(&self.terminal_id);
+        }
+    }
+}
+
 impl Drop for TerminalAdmissionGuard {
     fn drop(&mut self) {
         if !self.committed {
@@ -133,6 +146,7 @@ impl AgentRuntimeBuilder {
             handles: Arc::new(Mutex::new(HashMap::new())),
             restored_inputs_paused: Arc::new(Mutex::new(false)),
             terminal_submission_gate: Arc::new(Mutex::new(())),
+            closing_terminals: Arc::new(Mutex::new(HashSet::new())),
             models: self.models,
             hooks: self.hooks,
             tools: tool_pipeline,
@@ -154,6 +168,7 @@ pub(crate) struct AgentRuntime {
     handles: Arc<Mutex<HashMap<String, super::AgentHandle>>>,
     restored_inputs_paused: Arc<Mutex<bool>>,
     terminal_submission_gate: Arc<Mutex<()>>,
+    closing_terminals: Arc<Mutex<HashSet<String>>>,
     models: ModelRegistry,
     hooks: AgentHookBus,
     tools: AgentToolPipeline,
@@ -810,6 +825,60 @@ impl AgentRuntime {
         self.native_engine.terminal_closed(session_id)
     }
 
+    pub(crate) fn begin_terminal_close(
+        &self,
+        terminal_id: &str,
+    ) -> Result<TerminalCloseGuard, String> {
+        // Serialize with the final registration in start(), without holding a
+        // synchronous lock while waiting for model/tool cancellation.
+        let _handles = self
+            .handles
+            .lock()
+            .map_err(|_| "Agent handle registry is unavailable")?;
+        let mut terminals = self
+            .closing_terminals
+            .lock()
+            .map_err(|_| "TERMINAL_ADMISSION_UNAVAILABLE")?;
+        if !terminals.insert(terminal_id.to_string()) {
+            return Err("TERMINAL_CLOSE_IN_PROGRESS".into());
+        }
+        Ok(TerminalCloseGuard {
+            terminals: Arc::clone(&self.closing_terminals),
+            terminal_id: terminal_id.to_string(),
+        })
+    }
+
+    fn require_open_terminal_target(&self, session_id: &str) -> Result<(), String> {
+        let snapshot = self.sessions.snapshot(session_id)?;
+        if let Some(target) = snapshot.header.target {
+            if self
+                .closing_terminals
+                .lock()
+                .map_err(|_| "TERMINAL_ADMISSION_UNAVAILABLE")?
+                .contains(&target.session_id)
+            {
+                return Err("TERMINAL_CLOSE_IN_PROGRESS".into());
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn stop_terminal_agents(&self, terminal_id: &str) -> Result<(), String> {
+        let associated = self.sessions.terminal_root_sessions(terminal_id)?;
+        for id in &associated {
+            if let Some(entry) = self.agents.get(id)? {
+                entry.stop_admission()?;
+            }
+        }
+        let mut failure = None;
+        for id in associated {
+            if let Err(error) = self.cancel(&id).await {
+                failure.get_or_insert(error);
+            }
+        }
+        failure.map_or(Ok(()), Err)
+    }
+
     pub(crate) fn prepare_for_shutdown(
         &self,
         sessions: &crate::models::SessionManager,
@@ -1104,6 +1173,7 @@ impl AgentRuntime {
         provider: AiProviderConfig,
         api_key: Option<String>,
     ) -> Result<AgentSessionSnapshot, String> {
+        self.require_open_terminal_target(session_id)?;
         if self.agents.get(session_id)?.is_some() {
             self.wake(session_id)?;
             return self.sessions.snapshot(session_id);
@@ -1165,6 +1235,10 @@ impl AgentRuntime {
                 return Err("Agent handle registry is unavailable".into());
             }
         };
+        if let Err(error) = self.require_open_terminal_target(session_id) {
+            self.agents.detach(session_id)?;
+            return Err(error);
+        }
         if handles.contains_key(session_id) {
             self.agents.detach(session_id)?;
             return Err("Agent Session already has an owning handle".into());
@@ -1354,6 +1428,7 @@ impl AgentRuntime {
         session_id: &str,
         submission_id: &str,
     ) -> Result<(), String> {
+        self.require_open_terminal_target(session_id)?;
         let snapshot = self.sessions.snapshot(session_id)?;
         if snapshot.header.execution_surface != super::AgentExecutionSurface::BoundTerminal {
             return Ok(());
@@ -1530,6 +1605,7 @@ impl AgentRuntime {
     }
 
     pub(crate) async fn resume(&self, session_id: &str) -> Result<AgentSessionSnapshot, String> {
+        self.require_open_terminal_target(session_id)?;
         let snapshot = self.sessions.snapshot(session_id)?;
         if snapshot.archived || snapshot.header.subagent.is_some() {
             return Err("only an unarchived root Session can be resumed".into());

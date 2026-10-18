@@ -1,5 +1,21 @@
 # Terminal connection deadlines
 
+## Explicit close
+
+`close_session` is asynchronous. While a close is pending, the Agent runtime rejects
+new starts and submissions targeting that transport. It stops input admission and
+cancels associated root Agents (including descendant Agents and pending tools),
+then cleans terminal leases, closes the broker generation with `UserClosed`, and
+requests transport shutdown. Failures propagate to the caller. The frontend removes
+each tab only after success; failures retain that tab and show a localized Toast.
+Bulk closing settles each terminal independently. Agent conversations remain in history.
+
+Local shutdown requests termination of the shell. SSH shutdown closes the channel;
+detached remote services may continue. Closing does not assert that uncertain remote
+effects were rolled back and does not replay commands automatically.
+
+## Connection deadlines
+
 “Open terminal here” supplies an optional `initialDirectory` in the session
 creation request. The backend rejects empty paths and control characters (which
 could be interpreted by the terminal line editor), quotes the path

@@ -4,7 +4,7 @@ import { useI18n } from '@/hooks/useI18n';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { useConnectSession } from '@/hooks/useConnectSession';
-import { invokeCloseSession } from '@/lib/ipc/tauri';
+import { useCloseTerminal } from '@/hooks/useCloseTerminal';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { CompactPromptDialog } from '@/components/ui/compact-dialog';
 import { Separator } from '@/components/ui/separator';
@@ -87,7 +87,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   const { t } = useI18n();
   const focus = useFocusStore();
   const sessions = useTerminalStore((state) => state.sessions);
-  const removeSession = useTerminalStore((state) => state.removeSession);
+  const closeTerminal = useCloseTerminal();
   const updateTitle = useTerminalStore((state) => state.updateTitle);
   const togglePin = useTerminalStore((state) => state.togglePin);
   const setTabColor = useTerminalStore((state) => state.setTabColor);
@@ -154,8 +154,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   })();
 
   const closeSession = (sessionId: string): void => {
-    removeSession(sessionId);
-    invokeCloseSession(sessionId).catch(() => {});
+    void closeTerminal(sessionId);
   };
 
   const handleDuplicate = (): void => {

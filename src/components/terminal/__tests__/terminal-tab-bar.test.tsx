@@ -192,7 +192,7 @@ describe('TerminalTabBar', () => {
     expect(document.querySelector('[data-drop-indicator]')).not.toBeInTheDocument();
   });
 
-  it('close button asks for confirmation before removing a session', () => {
+  it('close button asks for confirmation before removing a session', async () => {
     addSession('s1', 'A');
     addSession('s2', 'B');
     useTerminalStore.getState().setActiveSession('s2');
@@ -211,7 +211,7 @@ describe('TerminalTabBar', () => {
     // Session is kept until the dialog is confirmed
     expect(useTerminalStore.getState().sessions.some((s) => s.sessionId === 's1')).toBe(true);
 
-    fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'common.close' })); });
     const state = useTerminalStore.getState();
     expect(state.sessions.some((s) => s.sessionId === 's1')).toBe(false);
     expect(state.activeSessionId).toBe('s2');
@@ -547,7 +547,7 @@ describe('TerminalTabBar', () => {
     expect(useTerminalStore.getState().sessions.map((s) => s.sessionId)).toEqual(['s1', 's2']);
   });
 
-  it('does not initiate a drag when clicking the close button (pointerDown stopped)', () => {
+  it('does not initiate a drag when clicking the close button (pointerDown stopped)', async () => {
     addSession('s1', 'A');
     addSession('s2', 'B');
     useTerminalStore.getState().setActiveSession('s2');
@@ -557,7 +557,7 @@ describe('TerminalTabBar', () => {
     const closeButtons = screen.getAllByLabelText('close');
     fireEvent.pointerDown(closeButtons[0], { clientX: 5, clientY: 5 });
     fireEvent.click(closeButtons[0]);
-    fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'common.close' })); });
 
     const state = useTerminalStore.getState();
     expect(state.sessions.some((s) => s.sessionId === 's1')).toBe(false);

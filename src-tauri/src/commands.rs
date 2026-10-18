@@ -1163,21 +1163,19 @@ pub(crate) fn get_terminal_broker_snapshot(
 }
 
 #[tauri::command]
-pub(crate) fn close_session(
+pub(crate) async fn close_session(
     state: State<'_, SessionManager>,
     agent_runtime: State<'_, crate::agent_runtime::AgentRuntime>,
     session_id: String,
 ) -> Result<(), String> {
     info!("Closing SSH session session_id={session_id}");
-    if let Err(error) = agent_runtime.terminal_closed(&session_id) {
-        warn!("Failed to clean Agent terminal lease session_id={session_id}: {error}");
-    }
-    if let Err(error) = agent_runtime.close_terminal_broker_transport(
+    let _closing = agent_runtime.begin_terminal_close(&session_id)?;
+    agent_runtime.stop_terminal_agents(&session_id).await?;
+    agent_runtime.terminal_closed(&session_id)?;
+    agent_runtime.close_terminal_broker_transport(
         &session_id,
         crate::terminal_broker::TerminalGenerationCloseReason::UserClosed,
-    ) {
-        warn!("Failed to close terminal broker generation session_id={session_id}: {error}");
-    }
+    )?;
     let result = state.close(&session_id);
     if let Err(error) = &result {
         warn!("Failed to close SSH session session_id={session_id}: {error}");

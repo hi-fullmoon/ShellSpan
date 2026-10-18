@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, within, act } from '@testing-library/react';
 import { TerminalContextMenu } from '../terminal-context-menu';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useProfileStore } from '@/stores/profileStore';
@@ -212,7 +212,7 @@ describe('TerminalContextMenu', () => {
     document.removeEventListener('shellspan:close-terminal-tab', eventListener);
   });
 
-  it('close others leaves only the target session', () => {
+  it('close others leaves only the target session', async () => {
     addSession('s1', 'A');
     addSession('s2', 'B');
     addSession('s3', 'C');
@@ -233,7 +233,7 @@ describe('TerminalContextMenu', () => {
 
     // Confirm via AlertDialog
     const dialog = screen.getByRole('alertdialog');
-    fireEvent.click(within(dialog).getByText('common.close'));
+    await act(async () => { fireEvent.click(within(dialog).getByText('common.close')); });
 
     expect(
       useTerminalStore.getState().sessions.map((s) => s.sessionId),
@@ -298,7 +298,7 @@ describe('TerminalContextMenu', () => {
     document.removeEventListener('shellspan:connect-profile', listener);
   });
 
-  it('keeps the source split scope after the parent closes the context menu', () => {
+  it('keeps the source split scope after the parent closes the context menu', async () => {
     addSession('s1', 'A');
     addSession('s2', 'B');
     addSession('s3', 'C');
@@ -326,13 +326,13 @@ describe('TerminalContextMenu', () => {
         onClose={onClose}
       />,
     );
-    fireEvent.click(within(screen.getByRole('alertdialog')).getByText('common.close'));
+    await act(async () => { fireEvent.click(within(screen.getByRole('alertdialog')).getByText('common.close')); });
 
     expect(useTerminalStore.getState().sessions.map((item) => item.sessionId))
       .toEqual(['s1', 's2', 's4']);
   });
 
-  it('close others skips pinned sessions', () => {
+  it('close others skips pinned sessions', async () => {
     addSession('s1', 'A');
     addSession('s2', 'B');
     addSession('s3', 'C');
@@ -354,7 +354,7 @@ describe('TerminalContextMenu', () => {
 
     // Confirm via AlertDialog
     const dialog = screen.getByRole('alertdialog');
-    fireEvent.click(within(dialog).getByText('common.close'));
+    await act(async () => { fireEvent.click(within(dialog).getByText('common.close')); });
 
     expect(
       useTerminalStore.getState().sessions.map((s) => s.sessionId),
@@ -362,7 +362,7 @@ describe('TerminalContextMenu', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('close to the right removes sessions after the target', () => {
+  it('close to the right removes sessions after the target', async () => {
     addSession('s1', 'A');
     addSession('s2', 'B');
     addSession('s3', 'C');
@@ -383,7 +383,7 @@ describe('TerminalContextMenu', () => {
 
     // Confirm via AlertDialog
     const dialog = screen.getByRole('alertdialog');
-    fireEvent.click(within(dialog).getByText('common.close'));
+    await act(async () => { fireEvent.click(within(dialog).getByText('common.close')); });
 
     expect(
       useTerminalStore.getState().sessions.map((s) => s.sessionId),
@@ -391,7 +391,7 @@ describe('TerminalContextMenu', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('close to the right skips pinned sessions', () => {
+  it('close to the right skips pinned sessions', async () => {
     addSession('s1', 'A');
     addSession('s2', 'B');
     addSession('s3', 'C');
@@ -413,7 +413,7 @@ describe('TerminalContextMenu', () => {
 
     // Confirm via AlertDialog
     const dialog = screen.getByRole('alertdialog');
-    fireEvent.click(within(dialog).getByText('common.close'));
+    await act(async () => { fireEvent.click(within(dialog).getByText('common.close')); });
 
     expect(
       useTerminalStore.getState().sessions.map((s) => s.sessionId),
@@ -421,7 +421,7 @@ describe('TerminalContextMenu', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('close to the right only affects tabs within the provided tab order', () => {
+  it('close to the right only affects tabs within the provided tab order', async () => {
     addSession('s1', 'A');
     addSession('s2', 'B');
     addSession('s3', 'C');
@@ -443,7 +443,7 @@ describe('TerminalContextMenu', () => {
     fireEvent.click(screen.getByText('terminal.tab.closeToRight'));
 
     const dialog = screen.getByRole('alertdialog');
-    fireEvent.click(within(dialog).getByText('common.close'));
+    await act(async () => { fireEvent.click(within(dialog).getByText('common.close')); });
 
     // s2 and s4 belong to other split groups and survive.
     expect(
@@ -451,7 +451,7 @@ describe('TerminalContextMenu', () => {
     ).toEqual(['s1', 's2', 's4']);
   });
 
-  it('close others only affects tabs within the provided tab order', () => {
+  it('close others only affects tabs within the provided tab order', async () => {
     addSession('s1', 'A');
     addSession('s2', 'B');
     addSession('s3', 'C');
@@ -473,7 +473,7 @@ describe('TerminalContextMenu', () => {
     fireEvent.click(screen.getByText('terminal.tab.closeOthers'));
 
     const dialog = screen.getByRole('alertdialog');
-    fireEvent.click(within(dialog).getByText('common.close'));
+    await act(async () => { fireEvent.click(within(dialog).getByText('common.close')); });
 
     expect(
       useTerminalStore.getState().sessions.map((s) => s.sessionId),
