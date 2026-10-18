@@ -25,7 +25,9 @@ restored before commands and on shell exit, including EOF; other terminal settin
 made by prompt hooks remain in effect. EXIT and INT handlers are reconciled at
 each prompt so runtime replacements and removals retain their semantics, including
 the shell's positional arguments and the interrupted command's exit status. Ignored
-SIGINT remains ignored by foreground programs. On Bash 4+, prompt cancellation
+SIGINT remains ignored by foreground programs. Bash 3 retains default SIGINT
+handling when no user INT trap is installed, so Readline cancels the current input
+instead of resuming it after a no-op signal trap. On Bash 4+, prompt cancellation
 feedback respects Readline's echo-control setting and the configured interrupt
 character; its marker appears on a separate line to preserve the cancelled input
 after Readline has returned the cursor to column zero. Raw output is never stripped

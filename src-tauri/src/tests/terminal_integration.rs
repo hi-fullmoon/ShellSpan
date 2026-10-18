@@ -1392,7 +1392,7 @@
 
             // Exercise real line editing and preserve intentional empty output lines.
             writer
-                .write_all(b"printf 'EDIT:%s\\n' abx\x7fc\x1b[D\x04c; printf 'first\\n\\nlast\\n'; stty -a; printf 'bash-major:%s\\n' \"${BASH_VERSINFO[0]}\"\r")
+                .write_all(b"printf 'EDIT:%s\\n' abx\x7fc\x1b[D\x04c; printf 'first\\n\\nlast\\n'; stty -a; printf 'bash-major:%s\\n' \"${BASH_VERSINFO[0]}\"; if (( BASH_VERSINFO[0] < 4 )); then [[ -z $(trap -p INT) ]] && printf 'BASH3-DEFAULT-INT\\n'; fi\r")
                 .unwrap();
             writer.flush().unwrap();
             receive_prompts(&mut bytes, 62);
@@ -1414,6 +1414,12 @@
                 .unwrap()[1]
                 .parse::<u32>()
                 .unwrap();
+            if major < 4 {
+                assert!(
+                    output.contains("BASH3-DEFAULT-INT\r\n"),
+                    "Bash 3 must retain default prompt cancellation without a user INT handler: {output:?}"
+                );
+            }
             let changed_modes =
                 regex::Regex::new(r"(?:^|[\s;])-(?:echo|icrnl|echoctl)(?:[\s;]|$)").unwrap();
             assert!(

@@ -582,6 +582,13 @@ __shellspan_guard_prompt_tty() {{
   __shellspan_current_trap=$(trap -p INT)
   if [[ $__shellspan_current_trap != "$__shellspan_int_trap" || -z "$__shellspan_int_trap" ]]; then
     __shellspan_previous_int_trap=$__shellspan_current_trap
+    # Bash 3.2 can resume Readline's current input after a trapped SIGINT.
+    # With no user handler, retain its default cancellation rather than adding
+    # a no-op trap. Only Bash 4+ needs our prompt interrupt feedback wrapper.
+    if (( BASH_VERSINFO[0] < 4 )) && [[ -z "$__shellspan_current_trap" ]]; then
+      __shellspan_int_trap=
+      return
+    fi
     if [[ -n "$__shellspan_current_trap" ]]; then
       local -a __shellspan_int_args
       builtin eval "__shellspan_int_args=(${{__shellspan_current_trap#trap -- }})"
