@@ -436,11 +436,9 @@ impl AgentRuntime {
         drop(gate);
         let _ = self.models.images.boundary("afterInbox", &token);
         // Inbox commit is the acknowledgement. A wake failure cannot undo acceptance.
-        if !paused {
-            if self.wake(&input.session_id).is_err() {
-                if let Some(guard) = reservation.as_mut() {
-                    guard.committed = false;
-                }
+        if !paused && self.wake(&input.session_id).is_err() {
+            if let Some(guard) = reservation.as_mut() {
+                guard.committed = false;
             }
         }
         drop(reservation);
