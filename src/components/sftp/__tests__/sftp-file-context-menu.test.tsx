@@ -63,6 +63,11 @@ describe('SftpFileContextMenu', () => {
 
   it('renders all menu items for a remote file', () => {
     renderMenu();
+    for (const item of screen.getAllByRole('menuitem')) {
+      expect(item.lastElementChild).toHaveClass('relative', 'top-px', 'leading-4');
+      expect(item).toHaveClass('items-center', 'gap-1');
+      expect(item.firstElementChild).toHaveClass('size-3.5');
+    }
     expect(screen.getByText('sftp.contextMenu.newFile')).toBeInTheDocument();
     expect(screen.getByText('common.newFolder')).toBeInTheDocument();
     expect(screen.getByText('sftp.contextMenu.uploadFile')).toBeInTheDocument();

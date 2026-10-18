@@ -181,7 +181,7 @@ export const WorkbenchSidebar: React.FC<WorkbenchSidebarProps> = ({
         >
           <DropdownMenuGroup>
             <DropdownMenuItem
-              className="flex items-center gap-2 px-1.5 pt-1.5 pb-2"
+              className="flex items-center gap-1 px-1.5 pt-1.5 pb-2"
               onClick={() => setProfileDialogOpen(true)}
             >
               <UserAvatar avatar={profileAvatar} name={displayName} className="size-10 shrink-0" iconClassName="size-5" />

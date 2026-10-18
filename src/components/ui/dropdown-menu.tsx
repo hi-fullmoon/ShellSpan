@@ -6,6 +6,16 @@ import { Menu as MenuPrimitive } from "@base-ui/react/menu"
 import { cn } from "@/lib/utils"
 import { ChevronRightIcon, CheckIcon } from "lucide-react"
 
+// Font glyphs sit slightly above the center of their line box. Keep the
+// correction on text only, so icons and menu hit areas retain their geometry.
+function alignMenuText(children: React.ReactNode) {
+  return React.Children.map(children, child =>
+    typeof child === "string" || typeof child === "number"
+      ? <span data-slot="menu-item-label" className="relative top-px">{child}</span>
+      : child
+  )
+}
+
 const menuPopupClassName = "z-50 max-h-(--available-height) origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 outline-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:overflow-hidden data-closed:fade-out-0 data-closed:zoom-out-95"
 
 function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {
@@ -86,6 +96,7 @@ function DropdownMenuLabel({
 
 function DropdownMenuItem({
   className,
+  children,
   inset,
   variant = "default",
   ...props
@@ -103,7 +114,9 @@ function DropdownMenuItem({
         className
       )}
       {...props}
-    />
+    >
+      {alignMenuText(children)}
+    </MenuPrimitive.Item>
   )
 }
 
@@ -129,7 +142,7 @@ function DropdownMenuSubTrigger({
       )}
       {...props}
     >
-      {children}
+      {alignMenuText(children)}
       <ChevronRightIcon className="ml-auto" />
     </MenuPrimitive.SubmenuTrigger>
   )
@@ -185,7 +198,7 @@ function DropdownMenuCheckboxItem({
           />
         </MenuPrimitive.CheckboxItemIndicator>
       </span>
-      {children}
+      {alignMenuText(children)}
     </MenuPrimitive.CheckboxItem>
   )
 }
@@ -226,7 +239,7 @@ function DropdownMenuRadioItem({
           />
         </MenuPrimitive.RadioItemIndicator>
       </span>
-      {children}
+      {alignMenuText(children)}
     </MenuPrimitive.RadioItem>
   )
 }
@@ -252,7 +265,7 @@ function DropdownMenuShortcut({
     <span
       data-slot="dropdown-menu-shortcut"
       className={cn(
-        "ml-auto text-xs tracking-widest text-muted-foreground group-focus/dropdown-menu-item:text-accent-foreground",
+        "relative top-px ml-auto text-xs tracking-widest text-muted-foreground group-focus/dropdown-menu-item:text-accent-foreground",
         className
       )}
       {...props}

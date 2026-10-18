@@ -630,7 +630,10 @@ describe('ConnectionList', () => {
     )).toEqual([menuActionNames.slice(0, 3), menuActionNames.slice(3, 7), menuActionNames.slice(7)]);
 
     for (const name of menuActionNames) {
-      expect(screen.getByRole('menuitem', { name })).toBeInTheDocument();
+      const item = screen.getByRole('menuitem', { name });
+      expect(item).toHaveClass('items-center', 'gap-1', '[&>svg]:size-4', '[&>svg]:self-center');
+      expect(item.querySelectorAll(':scope > svg')).toHaveLength(1);
+      expect(item.querySelector(':scope > span')).toHaveClass('relative', 'top-px');
     }
     expect(screen.queryByRole('menuitem', { name: 'deployment.openForHost' })).not.toBeInTheDocument();
   });

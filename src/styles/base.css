@@ -376,7 +376,7 @@
 
 .workbench-user-menu [data-slot='dropdown-menu-item'] {
   min-height: 30px;
-  gap: 8px;
+  gap: 4px;
   border-radius: 10px;
   padding: 5px 10px;
   color: var(--popover-foreground);

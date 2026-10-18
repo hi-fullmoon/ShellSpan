@@ -57,8 +57,8 @@ export const ConnectionCardGrid = ({ children }: { children: React.ReactNode }) 
   </div>
 );
 const CONNECTION_MENU_ITEM_CLASS =
-  'gap-2 px-2.5 py-1.5 text-xs text-app-text focus:bg-app-primary/10 focus:text-app-primary [&_svg]:text-muted-foreground focus:[&_svg]:text-app-primary';
-const CONNECTION_MENU_DESTRUCTIVE_ITEM_CLASS = 'gap-2 px-2.5 py-1.5 text-xs';
+  'gap-1 px-2.5 py-1.5 text-xs [&>svg]:size-4 [&>svg]:self-center text-app-text focus:bg-app-primary/10 focus:text-app-primary [&_svg]:text-muted-foreground focus:[&_svg]:text-app-primary';
+const CONNECTION_MENU_DESTRUCTIVE_ITEM_CLASS = 'gap-1 px-2.5 py-1.5 text-xs [&>svg]:size-4 [&>svg]:self-center';
 
 export interface ConnectionListProps {
   profiles: ConnectionProfile[];
@@ -474,41 +474,41 @@ const ConnectionCard = React.memo<ConnectionCardProps>(
                 <DropdownMenuGroup>
                   <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleToggleFavorite}>
                     <StarIcon className={profile.favorite ? 'fill-current text-app-warning' : undefined} />
-                    {profile.favorite ? t('workbench.connections.unfavorite') : t('workbench.connections.favorite')}
+                    <span className="relative top-px">{profile.favorite ? t('workbench.connections.unfavorite') : t('workbench.connections.favorite')}</span>
                   </DropdownMenuItem>
                   <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleEdit}>
                     <PencilIcon />
-                    {t('common.edit')}
+                    <span className="relative top-px">{t('common.edit')}</span>
                   </DropdownMenuItem>
                   <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleDuplicate}>
                     <CopyIcon />
-                    {t('common.duplicate')}
+                    <span className="relative top-px">{t('common.duplicate')}</span>
                   </DropdownMenuItem>
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator className="mx-0 my-1" />
                 <DropdownMenuGroup>
                   <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleOpenHealth}>
                     <HeartPulseIcon />
-                    {t('remoteHealth.open')}
+                    <span className="relative top-px">{t('remoteHealth.open')}</span>
                   </DropdownMenuItem>
                   <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handlePortForward}>
                     <CableIcon />
-                    {t('portForward.open')}
+                    <span className="relative top-px">{t('portForward.open')}</span>
                   </DropdownMenuItem>
                   <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleQuickActions}>
                     <ZapIcon />
-                    {t('hostQuickActions.open')}
+                    <span className="relative top-px">{t('hostQuickActions.open')}</span>
                   </DropdownMenuItem>
                   <DropdownMenuItem className={CONNECTION_MENU_ITEM_CLASS} onClick={handleOverview}>
                     <InfoIcon />
-                    {t('hostOverview.open')}
+                    <span className="relative top-px">{t('hostOverview.open')}</span>
                   </DropdownMenuItem>
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator className="mx-0 my-1" />
                 <DropdownMenuGroup>
                   <DropdownMenuItem variant="destructive" className={CONNECTION_MENU_DESTRUCTIVE_ITEM_CLASS} onClick={handleDelete}>
                     <Trash2Icon />
-                    {t('common.delete')}
+                    <span className="relative top-px">{t('common.delete')}</span>
                   </DropdownMenuItem>
                 </DropdownMenuGroup>
               </DropdownMenuContent>

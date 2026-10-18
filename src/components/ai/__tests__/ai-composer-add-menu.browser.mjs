@@ -12,6 +12,7 @@ try {
     const { AiComposerAddMenu } = await import('/src/components/ai/workspace/ai-composer-add-menu.tsx');
     await import('/src/components/ai/styles/styles.css');
     const shell = document.createElement('div');
+    shell.id = 'attachment-menu-check';
     shell.className = 'ai-panel-shell';
     shell.style.cssText = 'position:fixed;bottom:20px;left:20px;width:calc(100% - 40px);z-index:100';
     const host = document.createElement('div');
@@ -66,7 +67,8 @@ try {
     }
     await page.keyboard.press('Escape');
     await page.locator('.ai-composer-add-menu').waitFor({ state: 'hidden' });
-    console.log(`Verified ${geometry.length} menu icons at ${width}px`);
+    // Closing restores focus after the exit animation; wait before testing Tab.
+    await page.waitForFunction(() => document.activeElement?.matches('.ai-composer-add'));
   }
 
   // Keyboard focus on the shadcn trigger draws one ring: the shell's fallback
@@ -75,7 +77,7 @@ try {
     const probe = document.createElement('button');
     probe.className = 'focus-outline-probe';
     probe.textContent = 'probe';
-    document.querySelector('.ai-panel-shell').append(probe);
+    document.getElementById('attachment-menu-check').append(probe);
   });
   const probe = page.locator('.focus-outline-probe');
   await probe.focus();
