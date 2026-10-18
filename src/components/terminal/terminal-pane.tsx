@@ -16,6 +16,7 @@ import { TerminalSearch } from './terminal-search';
 import { TerminalResizeIndicator } from './terminal-resize-indicator';
 import { TerminalPastePreview } from './terminal-paste-preview';
 import { TerminalContentMenu } from './terminal-content-menu';
+import { openTerminalTask, terminalTaskWorkspace } from './agent-terminal-task-navigation';
 import { eventMatchesShortcut } from '@/lib/shortcuts';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import type { ShortcutBindings } from '@/types';
@@ -123,8 +124,11 @@ const AgentTerminalLeaseBar: React.FC<{
           aria-hidden="true"
           title={interactionHint}
         >
-          {activityLabel}
+          {t(terminalTaskWorkspace(lease) === 'focus' ? 'terminal.occupancy.focus' : 'terminal.occupancy.terminal')} · {activityLabel}
         </span>
+        <Button variant="ghost" size="xs" className="shrink-0" onClick={() => {
+          if (!openTerminalTask(lease)) showError(t('terminal.occupancy.navigationBlocked'));
+        }}>{t('terminal.occupancy.viewTask')}</Button>
         <Button
           type="button"
           variant="outline"

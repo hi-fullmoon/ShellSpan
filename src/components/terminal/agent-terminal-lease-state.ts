@@ -1,6 +1,7 @@
 import type { AgentTerminalLeaseEvent } from '@/types/agent-session';
 
 export interface AgentTerminalLeaseView extends AgentTerminalLeaseEvent {
+  readonly workspace?: 'terminal' | 'focus';
   readonly state: 'acquired';
   /** False while the same Agent turn continues between commands; input stays locked. */
   readonly terminalOwned: boolean;

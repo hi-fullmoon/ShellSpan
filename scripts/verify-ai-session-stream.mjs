@@ -17,6 +17,7 @@ const { values } = parseArgs({ options: {
   performance: { type: 'boolean' }, baseline: { type: 'boolean' },
   focus: { type: 'boolean' },
   'focus-background': { type: 'boolean' },
+  'terminal-contention': { type: 'boolean' },
   'terminal-readiness': { type: 'boolean' },
   'no-model': { type: 'boolean' }, route: { type: 'string' }, model: { type: 'string' },
   'cleanup-session': { type: 'string', multiple: true },
@@ -25,6 +26,8 @@ const { values } = parseArgs({ options: {
 const performanceRun = values.performance === true;
 const focusRun = values.focus === true;
 const focusBackgroundRun = values['focus-background'] === true;
+const terminalContentionRun = values['terminal-contention'] === true;
+assert(!terminalContentionRun || (!focusBackgroundRun && !focusRun && !performanceRun && !values['terminal-readiness']), '--terminal-contention is a separate regression');
 assert(!focusBackgroundRun || (!focusRun && !values.performance && !values['terminal-readiness']), '--focus-background is a separate regression');
 const terminalReadinessRun = values['terminal-readiness'] === true;
 assert(!terminalReadinessRun || (!focusRun && !performanceRun), '--terminal-readiness is a separate regression');
@@ -45,7 +48,8 @@ const token = randomUUID();
 let settle;
 const result = new Promise((resolveResult) => { settle = resolveResult; });
 const page = performanceRun ? 'agent-panel-performance.native.html' : 'agent-session-stream.native.html';
-const pagePath = focusBackgroundRun ? 'src/components/terminal/__tests__/focus-background.native.html'
+const pagePath = terminalContentionRun ? 'src/components/terminal/__tests__/terminal-contention.native.html'
+  : focusBackgroundRun ? 'src/components/terminal/__tests__/focus-background.native.html'
   : terminalReadinessRun ? 'src/components/terminal/__tests__/terminal-readiness.native.html'
   : focusRun ? 'src/components/focus/__tests__/focus.native.html' : `src/lib/ai/__tests__/${page}`;
 const output = performanceRun ? await mkdtemp(resolve(tmpdir(), 'shellspan-agent-performance-')) : undefined;
@@ -128,8 +132,8 @@ try {
   const devUrl = url.href;
   child = spawn('pnpm', ['exec', 'tauri', 'dev', '--no-watch', '--config', JSON.stringify({
     identifier: 'com.shellspan-dev', build: { beforeDevCommand: '', devUrl },
-    ...(performanceRun && !values['cleanup-session']?.length ? { app: { windows: [{
-      label: 'main', title: 'Agent panel validation', width: 1480, height: 920,
+    ...((performanceRun || terminalContentionRun) && !values['cleanup-session']?.length ? { app: { windows: [{
+      label: 'main', title: terminalContentionRun ? 'Terminal contention validation' : 'Agent panel validation', width: 1480, height: 920,
       minWidth: 1200, minHeight: 760, visible: true, focus: true, alwaysOnTop: true,
       transparent: true, titleBarStyle: 'Overlay',
     }] } } : {}),
@@ -140,6 +144,8 @@ try {
   const outcome = await result;
   assert.equal(outcome.ok, true, outcome.error);
   if (performanceRun) console.log(JSON.stringify({ baseline, baselineRef: baseline ? baselineRef : undefined, baselineCommit, productionBundle: true, ...outcome.metrics }));
+  else if (terminalContentionRun && values['cleanup-session']?.length) console.log('Native contention fixture cleanup completed.');
+  else if (terminalContentionRun) console.log('Native terminal contention passed: two real Agents, one PTY, conflict draft retention, task navigation, manual retry, simultaneous admission and confirmed takeover.');
   else if (focusBackgroundRun) console.log('Native Focus background regression passed: two real visible commands completed on the leased PTY, with Focus selection and keyboard focus preserved.');
   else if (terminalReadinessRun) console.log('Native terminal readiness passed: registry identity across hot updates, existing and new local PTY output.');
   else if (focusRun) console.log('Native focus regression passed: real local terminals, explicit targets, collapse/restore, continuation IPC, and responsive geometry. No model or remote commands were executed.');

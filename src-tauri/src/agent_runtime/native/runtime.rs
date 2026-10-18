@@ -328,6 +328,10 @@ impl NativeToolEngine {
         self.terminal_leases.release_turn(agent_session_id)
     }
 
+    pub(crate) fn terminal_turn_owner(&self, session_id: &str) -> Result<Option<String>, String> {
+        self.terminal_leases.turn_owner(session_id)
+    }
+
     pub(crate) fn begin_terminal_turn(
         &self,
         terminal_session_id: &str,

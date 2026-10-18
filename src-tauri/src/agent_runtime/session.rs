@@ -1548,6 +1548,19 @@ impl AgentSessionStore {
         self.enqueue_submission(session_id, lane, message, false, None)
     }
 
+    pub(crate) fn has_submission(
+        &self,
+        session_id: &str,
+        submission_id: &str,
+    ) -> Result<bool, String> {
+        let inner = self.lock_configured()?;
+        let record = inner
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| "Agent session was not found".to_string())?;
+        Ok(find_submission(record, submission_id).is_some())
+    }
+
     pub(crate) fn enqueue_submission(
         &self,
         session_id: &str,

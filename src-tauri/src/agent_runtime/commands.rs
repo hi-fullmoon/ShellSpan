@@ -38,6 +38,15 @@ pub(crate) struct AgentTerminalLeaseControlInput {
 }
 
 #[tauri::command]
+pub(crate) fn agent_runtime_terminal_owner(
+    runtime: State<'_, AgentRuntime>,
+    session_id: String,
+) -> Result<Option<String>, String> {
+    super::session::validate_identifier(&session_id, "terminal session id")?;
+    runtime.terminal_turn_owner(&session_id)
+}
+
+#[tauri::command]
 pub(crate) fn agent_runtime_terminal_lease_ready(
     app: AppHandle,
     runtime: State<'_, AgentRuntime>,

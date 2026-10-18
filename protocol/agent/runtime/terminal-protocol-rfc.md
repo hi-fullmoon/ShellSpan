@@ -370,6 +370,15 @@ pending/unverified input and credential-prompt checks remain required.
 Deferred section/tab focus must revalidate the selected session and controller
 identity when it runs, and discard obsolete requests or requests after unmount.
 
+Visible-terminal submissions reserve the terminal turn owner before durable inbox
+admission. Competing Agent submissions fail with `TERMINAL_AGENT_CONFLICT` and
+are not queued for automatic execution when ownership is released. Retrying an
+already committed client submission still returns its original receipt. Failed
+admission releases a newly acquired reservation. Terminal and Focus display the
+same owner, link to its conversation, and retain the losing workspace's draft.
+Release invites an explicit retry after inspecting the terminal's current state.
+Takeover continues to require backend fencing before user input is restored.
+
 For `boundTerminal`, a turn guard protects the frozen source terminal from
 Agent `turn/start` until `turn/end`, cancellation, failure, session closure,
 rollout rollback, or user takeover. Individual commands still acquire their own

@@ -2086,6 +2086,7 @@ fn mutation_publish_observes_the_already_committed_log() {
 fn client_submission_ids_are_idempotent_per_session_and_survive_restart() {
     let (root, store) = configured();
     create(&store);
+    assert!(!store.has_submission("session-1", "submission-1").unwrap());
     let first = store
         .enqueue(
             "session-1",
@@ -2101,6 +2102,11 @@ fn client_submission_ids_are_idempotent_per_session_and_survive_restart() {
         )
         .unwrap();
     assert_eq!(retry.event_count, first.event_count);
+    assert!(store.has_submission("session-1", "submission-1").unwrap());
+    assert!(!store.has_submission("session-1", "not-admitted").unwrap());
+    assert!(store
+        .has_submission("missing-session", "submission-1")
+        .is_err());
     assert!(store
         .enqueue(
             "session-1",
@@ -2141,6 +2147,9 @@ fn client_submission_ids_are_idempotent_per_session_and_survive_restart() {
     let restarted = AgentSessionStore::default();
     restarted.configure(root.path().to_path_buf()).unwrap();
     let recovered = restarted.snapshot("session-1").unwrap();
+    assert!(restarted
+        .has_submission("session-1", "submission-1")
+        .unwrap());
     assert_eq!(
         recovered.inbox.next_turn[0].client_submission_id.as_deref(),
         Some("submission-1")
@@ -2156,6 +2165,18 @@ fn client_submission_ids_are_idempotent_per_session_and_survive_restart() {
             .event_count,
         recovered.event_count
     );
+    restarted
+        .claim("session-1", AgentInboxLane::NextTurn)
+        .unwrap();
+    assert!(restarted
+        .snapshot("session-1")
+        .unwrap()
+        .inbox
+        .next_turn
+        .is_empty());
+    assert!(restarted
+        .has_submission("session-1", "submission-1")
+        .unwrap());
 }
 
 #[test]

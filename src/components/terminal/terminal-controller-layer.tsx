@@ -402,6 +402,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       }
       agentTerminalLeaseState.set({
         ...acquiredLease,
+        workspace: workspaceOwners.get(lease.agentSessionId) ?? rootWorkspace(lease.agentSessionId),
         acquiredAtUnixMs: turnStartedAtUnixMs,
         terminalOwned: true,
         inputBlocked: false,
@@ -519,6 +520,8 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
           if (workspace) workspaceOwners.set(event.sessionId, workspace);
           const sessionId = snapshot.header.target?.sessionId;
           if (!sessionId || turnSurfaces.has(event.sessionId)) return;
+          const existingOwner = agentTerminalLeaseState.get(sessionId);
+          if (existingOwner && existingOwner.agentSessionId !== event.sessionId) return;
           const controller = terminalRegistry.get(sessionId);
           const operationId = `turn:${turnId}`;
           if (controller) {
@@ -545,6 +548,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
           agentTerminalLeaseState.set({
             sessionId,
             agentSessionId: event.sessionId,
+            workspace,
             taskId: snapshot.header.taskId,
             operationId,
             acquiredAtUnixMs: event.timeUnixMs,

@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useFocusStore } from '@/stores/focusStore';
+import { agentTerminalLeaseState } from '@/components/terminal/agent-terminal-lease-state';
+import { useTerminalTaskNavigation } from '@/components/terminal/agent-terminal-task-navigation';
 import { canSwitchFocusTarget } from '@/lib/ai/focus-target';
 import { toast } from 'sonner';
 import { latestFailureRecovery } from '@/lib/ai/failure-recovery';
@@ -1704,6 +1706,44 @@ export function useAiSessionController({
     ? visibleView.snapshot.value : null;
 
   const terminalInsertions = useAiDraftStore(state => state.terminalInsertions);
+  const terminalOccupancy = useSyncExternalStore(agentTerminalLeaseState.subscribe, () => agentTerminalLeaseState.get(activeTerminalId));
+  useEffect(() => {
+    if (!terminalOccupancy && composer.lastError?.message === 'TERMINAL_AGENT_CONFLICT') dispatch({ type: 'error.dismissed' });
+  }, [composer.lastError, dispatch, terminalOccupancy]);
+  const taskRequest = useTerminalTaskNavigation(state => state.request);
+  useEffect(() => {
+    if (!taskRequest || scope !== 'terminal' || workspaceChanging
+      || taskRequest.workspace !== (focusMode ? 'focus' : 'terminal')
+      || taskRequest.terminalSessionId !== activeTerminalId) return;
+    let alive = true;
+    const navigationContext = submissionContextRef.current;
+    const isCurrentTaskRequest = (): boolean => alive
+      && useTerminalTaskNavigation.getState().request === taskRequest
+      && submissionContextRef.current === navigationContext;
+    void (async () => {
+      let next = await adapter.open(taskRequest.agentSessionId);
+      const visited = new Set<string>();
+      while (next.summary.parentSessionId) {
+        if (!isCurrentTaskRequest()) return;
+        if (visited.has(next.summary.id)) throw new Error('Agent task ancestry contains a cycle');
+        visited.add(next.summary.id);
+        next = await adapter.open(next.summary.parentSessionId);
+      }
+      if (!isCurrentTaskRequest()) return;
+      openSession(next.summary);
+      useTerminalTaskNavigation.getState().setRequest(null);
+    })().catch(() => {
+      if (!isCurrentTaskRequest()) return;
+      useTerminalTaskNavigation.getState().setRequest(null);
+      toast.error(t('terminal.occupancy.openFailed'));
+    }).finally(() => {
+      if (alive && useTerminalTaskNavigation.getState().request === taskRequest
+        && submissionContextRef.current !== navigationContext) {
+        useTerminalTaskNavigation.getState().setRequest(null);
+      }
+    });
+    return () => { alive = false; };
+  }, [activeTerminalId, adapter, focusMode, openSession, scope, taskRequest, workspaceChanging]);
   useEffect(() => {
     if (scope !== 'terminal' || !activeTerminalId || workspaceChanging) return;
     const owner = `${focusMode ? 'focus' : 'terminal'}:${activeTerminalId}`;
@@ -1829,6 +1869,13 @@ export function useAiSessionController({
     setDraft: (value) => { claimWorkspace(); dispatch({ type: 'draft.changed', value }); },
     setBusyPreference: (value) => dispatch({ type: 'preference.changed', value }),
     submit: (gesture, accelerated = false) => {
+      const owner = agentTerminalLeaseState.get(activeTerminal?.sessionId ?? null);
+      const ownSession = viewRef.current?.summary.id ?? composerRef.current.sessionId;
+      const surface = viewRef.current?.snapshot.value.header.executionSurface ?? newExecutionSurface;
+      if (scope === 'terminal' && (focusMode || surface === 'boundTerminal') && owner && owner.agentSessionId !== ownSession) {
+        dispatch({ type: 'error.reported', error: { kind: 'conflict', message: 'TERMINAL_AGENT_CONFLICT', retryable: true } });
+        return;
+      }
       claimWorkspace();
       const context = submissionContextRef.current;
       const effectiveAccelerated = accelerated

@@ -16,6 +16,8 @@ it.each([
 describe.each([['zh-CN', zhCN], ['en-US', enUS]] as const)('AI error messages in %s', (_locale, messages) => {
   it.each([
     ['AGENT_UNSAFE_FILE_ROOT: symlink ancestor', 'ai.error.unsafeFileRoot'],
+    ['TERMINAL_AGENT_CONFLICT: agent-owning-task', 'terminal.occupancy.conflict'],
+    ['Error: TERMINAL_AGENT_CONFLICT', 'terminal.occupancy.conflict'],
     ['ephemeralInputUnavailable: no input was executed', 'ai.error.ephemeralInputUnavailable'],
     ['Error: ephemeralInputRecoveryRequired: repeated historical input', 'ai.error.ephemeralInputRecoveryRequired'],
     ['IMAGE_MODEL_UNSUPPORTED: image input is not enabled for this model', 'ai.workspace.images.error.model'],

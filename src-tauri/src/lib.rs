@@ -350,6 +350,7 @@ pub fn run() {
             agent_runtime::agent_runtime_inject,
             agent_runtime::agent_runtime_cancel,
             agent_runtime::agent_runtime_terminal_lease_ready,
+            agent_runtime::agent_runtime_terminal_owner,
             agent_runtime::agent_runtime_takeover_terminal,
             agent_runtime::agent_runtime_interrupt,
             agent_runtime::agent_runtime_resume,

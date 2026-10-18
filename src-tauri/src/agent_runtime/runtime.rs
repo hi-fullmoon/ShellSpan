@@ -24,6 +24,20 @@ use super::{
     AgentRequestReason, AgentSessionEventPayload, AgentToolFailedHook, ModelAdapterFactory,
 };
 
+struct TerminalAdmissionGuard {
+    engine: Arc<NativeToolEngine>,
+    agent_session_id: String,
+    committed: bool,
+}
+
+impl Drop for TerminalAdmissionGuard {
+    fn drop(&mut self) {
+        if !self.committed {
+            let _ = self.engine.release_terminal_turn(&self.agent_session_id);
+        }
+    }
+}
+
 pub(crate) struct AgentRuntimeBuilder {
     sessions: AgentSessionStore,
     models: ModelRegistry,
@@ -118,6 +132,7 @@ impl AgentRuntimeBuilder {
             agents,
             handles: Arc::new(Mutex::new(HashMap::new())),
             restored_inputs_paused: Arc::new(Mutex::new(false)),
+            terminal_submission_gate: Arc::new(Mutex::new(())),
             models: self.models,
             hooks: self.hooks,
             tools: tool_pipeline,
@@ -138,6 +153,7 @@ pub(crate) struct AgentRuntime {
     agents: AgentRegistry,
     handles: Arc<Mutex<HashMap<String, super::AgentHandle>>>,
     restored_inputs_paused: Arc<Mutex<bool>>,
+    terminal_submission_gate: Arc<Mutex<()>>,
     models: ModelRegistry,
     hooks: AgentHookBus,
     tools: AgentToolPipeline,
@@ -219,6 +235,7 @@ impl AgentRuntime {
         target_turn_id: Option<&str>,
     ) -> Result<AgentSessionSnapshot, String> {
         use super::images::{digest, ImageOperation};
+        self.check_terminal_submission_owner(&input.session_id, &input.client_operation_id)?;
         super::images::validate_upload_envelope(&input.images)?;
         if input.content.len() > super::MAX_AGENT_MESSAGE_BYTES {
             return Err("IMAGE_TEXT_LIMIT".into());
@@ -375,6 +392,15 @@ impl AgentRuntime {
         source
             .metadata
             .insert("imageFingerprint".into(), fingerprint.into());
+        let terminal_gate = self
+            .terminal_submission_gate
+            .lock()
+            .map_err(|_| "TERMINAL_ADMISSION_UNAVAILABLE")?;
+        let mut reservation = self.reserve_terminal_submission(
+            &input.session_id,
+            &input.client_operation_id,
+            paused,
+        )?;
         let snapshot = self.sessions.enqueue_submission(
             &input.session_id,
             input.lane,
@@ -389,12 +415,21 @@ impl AgentRuntime {
             paused,
             target_turn_id,
         )?;
+        if let Some(guard) = reservation.as_mut() {
+            guard.committed = !snapshot.ended && !paused;
+        }
         drop(gate);
         let _ = self.models.images.boundary("afterInbox", &token);
         // Inbox commit is the acknowledgement. A wake failure cannot undo acceptance.
         if !paused {
-            let _ = self.wake(&input.session_id);
+            if self.wake(&input.session_id).is_err() {
+                if let Some(guard) = reservation.as_mut() {
+                    guard.committed = false;
+                }
+            }
         }
+        drop(reservation);
+        drop(terminal_gate);
         Ok(snapshot)
     }
 
@@ -817,14 +852,16 @@ impl AgentRuntime {
         self.sessions.set_publisher(Arc::new(move |event| {
             if matches!(event.payload, super::AgentSessionEventPayload::TurnStart) {
                 tools.clear_ephemeral_terminal_results(&event.session_id);
-                if let Err(error) = native_engine.release_terminal_turn(&event.session_id) {
-                    log::warn!("Failed to clear previous Agent terminal turn guard: {error}");
-                }
                 if let Ok(snapshot) = sessions.snapshot(&event.session_id) {
                     if snapshot.header.execution_surface
                         == super::AgentExecutionSurface::BoundTerminal
                     {
                         if let Some(target) = &snapshot.header.target {
+                            if native_engine.terminal_turn_owner(&target.session_id).ok().flatten().as_deref() != Some(&event.session_id) {
+                                if let Err(error) = native_engine.release_terminal_turn(&event.session_id) {
+                                    log::warn!("Failed to clear previous Agent terminal turn guard: {error}");
+                                }
+                            }
                             if let Err(error) = native_engine
                                 .begin_terminal_turn(&target.session_id, &event.session_id)
                             {
@@ -1224,7 +1261,14 @@ impl AgentRuntime {
         paused: bool,
         target_turn_id: Option<&str>,
     ) -> Result<AgentSessionSnapshot, String> {
+        self.check_terminal_submission_owner(session_id, &client_submission_id)?;
         let terminal_context = self.prepare_terminal_context(session_id, terminal_context)?;
+        let terminal_gate = self
+            .terminal_submission_gate
+            .lock()
+            .map_err(|_| "TERMINAL_ADMISSION_UNAVAILABLE")?;
+        let mut reservation =
+            self.reserve_terminal_submission(session_id, &client_submission_id, paused)?;
         let snapshot = self.sessions.enqueue_submission(
             session_id,
             lane,
@@ -1239,17 +1283,94 @@ impl AgentRuntime {
             paused,
             target_turn_id,
         )?;
+        if let Some(guard) = reservation.as_mut() {
+            guard.committed = !snapshot.ended && !paused;
+        }
         // Admission is durable. Scheduling failure cannot turn this receipt into
         // a failed send; the input remains available for explicit continuation.
         if !paused && !snapshot.ended {
             if let Err(error) = self.wake(session_id) {
+                if let Some(guard) = reservation.as_mut() {
+                    guard.committed = false;
+                }
                 log::warn!(
                     "Agent input accepted but scheduling failed: {}",
                     crate::redaction::redact_sensitive_text(&error)
                 );
             }
         }
+        drop(reservation);
+        drop(terminal_gate);
         Ok(snapshot)
+    }
+
+    pub(crate) fn terminal_turn_owner(&self, session_id: &str) -> Result<Option<String>, String> {
+        self.native_engine.terminal_turn_owner(session_id)
+    }
+
+    fn reserve_terminal_submission(
+        &self,
+        session_id: &str,
+        submission_id: &str,
+        paused: bool,
+    ) -> Result<Option<TerminalAdmissionGuard>, String> {
+        self.check_terminal_submission_owner(session_id, submission_id)?;
+        let snapshot = self.sessions.snapshot(session_id)?;
+        if paused
+            || snapshot.ended
+            || self.agents.get(session_id)?.is_none()
+            || snapshot.header.execution_surface != super::AgentExecutionSurface::BoundTerminal
+        {
+            return Ok(None);
+        }
+        if self.sessions.has_submission(session_id, submission_id)? {
+            return Ok(None);
+        }
+        let Some(target) = snapshot.header.target else {
+            return Ok(None);
+        };
+        if self.terminal_turn_owner(&target.session_id)?.as_deref() == Some(session_id) {
+            return Ok(None);
+        }
+        // Atomic acquisition closes the gap between two simultaneous submissions.
+        self.native_engine
+            .begin_terminal_turn(&target.session_id, session_id)
+            .map_err(|error| {
+                if error.contains("Agent owner") {
+                    "TERMINAL_AGENT_CONFLICT".into()
+                } else {
+                    error
+                }
+            })?;
+        Ok(Some(TerminalAdmissionGuard {
+            engine: Arc::clone(&self.native_engine),
+            agent_session_id: session_id.to_string(),
+            committed: false,
+        }))
+    }
+
+    fn check_terminal_submission_owner(
+        &self,
+        session_id: &str,
+        submission_id: &str,
+    ) -> Result<(), String> {
+        let snapshot = self.sessions.snapshot(session_id)?;
+        if snapshot.header.execution_surface != super::AgentExecutionSurface::BoundTerminal {
+            return Ok(());
+        }
+        let Some(target) = snapshot.header.target else {
+            return Ok(());
+        };
+        let Some(owner) = self.terminal_turn_owner(&target.session_id)? else {
+            return Ok(());
+        };
+        if owner == session_id {
+            return Ok(());
+        }
+        if self.sessions.has_submission(session_id, submission_id)? {
+            return Ok(());
+        }
+        Err(format!("TERMINAL_AGENT_CONFLICT: {owner}"))
     }
 
     #[cfg(test)]

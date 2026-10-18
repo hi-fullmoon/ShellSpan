@@ -566,6 +566,10 @@ export async function invokeArchiveAgentRuntimeSession(
   return invokeLogged<AgentSessionSnapshot>('agent_runtime_archive_session', { input });
 }
 
+export async function invokeGetAgentTerminalOwner(sessionId: string): Promise<string | null> {
+  return invokeLogged<string | null>('agent_runtime_terminal_owner', { sessionId });
+}
+
 export async function invokeAgentTerminalLeaseReady(
   input: AgentTerminalLeaseControlInput,
 ): Promise<boolean> {

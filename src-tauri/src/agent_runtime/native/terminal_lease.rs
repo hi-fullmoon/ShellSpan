@@ -172,6 +172,15 @@ impl TerminalLeaseManager {
         }
     }
 
+    pub(crate) fn turn_owner(&self, session_id: &str) -> Result<Option<String>, String> {
+        Ok(self
+            .turn_guards
+            .lock()
+            .map_err(|_| TerminalLeaseError::Unavailable.to_string())?
+            .get(session_id)
+            .cloned())
+    }
+
     pub(crate) fn begin_turn(
         &self,
         session_id: &str,

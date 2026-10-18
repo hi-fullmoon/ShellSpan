@@ -9,6 +9,7 @@ export function aiErrorMessage(message: string, t: (key: LocaleKey, values?: Rec
   if (diagnostic.startsWith('ephemeralInputUnavailable:')) return t('ai.error.ephemeralInputUnavailable');
   if (diagnostic.startsWith('ephemeralInputRecoveryRequired:')) return t('ai.error.ephemeralInputRecoveryRequired');
   const code = /^(?:Error:\s*)?([A-Z][A-Z0-9_]+)(?=:|\s|$)/.exec(message.trim())?.[1];
+  if (code === 'TERMINAL_AGENT_CONFLICT') return t('terminal.occupancy.conflict');
   if (code === 'INVALID_MODEL_SELECTION') return t('ai.error.invalidModelSelection');
   if (code === 'AGENT_PREPARATION_TIMEOUT') return t('ai.workspace.error.preparationTimeout');
   if (code === 'AGENT_CRITICAL_OPERATION_DENIED') return t('ai.error.criticalOperationDenied');

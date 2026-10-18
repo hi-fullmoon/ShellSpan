@@ -1,0 +1,268 @@
+import { createRoot } from 'react-dom/client';
+import { flushSync } from 'react-dom';
+import TerminalWorkspace from '../index';
+import { terminalRegistry } from '../registry/terminal-registry';
+import { agentTerminalLeaseState } from '../agent-terminal-lease-state';
+import { useTerminalTaskNavigation } from '../agent-terminal-task-navigation';
+import { AppShell, MainContent } from '@/components/layout/app-shell';
+import { FocusLayout } from '@/components/focus/focus-layout';
+import { AiPanel } from '@/components/ai/ai-panel';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import { useAiPanelStore } from '@/stores/aiPanelStore';
+import { useTerminalStore } from '@/stores/terminalStore';
+import { useFocusStore } from '@/stores/focusStore';
+import { useAppStore } from '@/stores/appStore';
+import { initI18n, t } from '@/locales';
+import {
+  invokeCreateLocalSession, invokeCloseSession, invokeListAiRoutes, invokeGetAgentTerminalOwner, invokeGetTerminalBrokerSnapshot,
+  invokeCreateAgentRuntimeSession, invokeStartAgentRuntime, invokeAgentRuntimeFollowup,
+  invokeGetAgentRuntimeSession, invokeCancelAgentRuntime, invokeArchiveAgentRuntimeSession,
+  invokeDeleteAgentRuntimeSession, invokeGetAgentRuntimeArtifact, listenToAgentRuntimeSession, listenToAgentTerminalLease,
+} from '@/lib/ipc/tauri';
+import '@/styles/base.css';
+
+function assert(value: unknown, message: string): asserts value {
+  if (!value) throw new Error(message);
+}
+async function eventually(check: () => boolean | Promise<boolean>, message: string, timeout = 30_000) {
+  const deadline = Date.now() + timeout;
+  while (!await check()) {
+    assert(Date.now() < deadline, message);
+    await new Promise(resolve => setTimeout(resolve, 40));
+  }
+}
+async function reportProgress(progress: string) {
+  await fetch(`/__agent-stream-result/${new URL(location.href).searchParams.get('token')}`, {
+    method: 'POST', body: JSON.stringify({ progress }),
+  });
+}
+function workspaceRoot(focus: boolean): HTMLElement | null {
+  return document.querySelector(focus
+    ? '[data-slot="focus-agent"] [data-slot="ai-workspace-root"]'
+    : '[data-slot="ai-panel"][data-ai-scope="terminal"] [data-slot="ai-workspace-root"]');
+}
+function draftEditor(focus: boolean): HTMLElement {
+  const editor = workspaceRoot(focus)?.querySelector<HTMLElement>('[data-composer-editor]');
+  assert(editor, 'Production composer editor is missing');
+  return editor;
+}
+function draftText(focus: boolean): string {
+  return draftEditor(focus).innerText.trimEnd();
+}
+async function setDraft(focus: boolean, text: string) {
+  const editor = draftEditor(focus);
+  editor.focus();
+  const range = document.createRange();
+  range.selectNodeContents(editor);
+  const selection = window.getSelection();
+  assert(selection, 'No browser text selection');
+  selection.removeAllRanges();
+  selection.addRange(range);
+  assert(document.execCommand('insertText', false, text), 'Native editor insertion failed');
+  await eventually(() => draftText(focus) === text, 'The production editor did not retain its draft');
+}
+function submitDraft(focus: boolean) {
+  const button = workspaceRoot(focus)?.querySelector<HTMLButtonElement>('.ai-composer-primary');
+  assert(button && !button.disabled, 'Production submit action is unavailable');
+  button.click();
+}
+
+async function verify() {
+  const cleanupIds = new URL(location.href).searchParams.getAll('cleanupSession');
+  if (cleanupIds.length) {
+    for (const id of cleanupIds) {
+      assert(/^(?:focus-)?agent-contention-[0-9a-f-]{36}$/.test(id), 'Cleanup is restricted to contention test sessions');
+      await invokeCancelAgentRuntime({ sessionId: id });
+      await invokeArchiveAgentRuntimeSession({ sessionId: id });
+      await invokeDeleteAgentRuntimeSession({ sessionId: id });
+    }
+    return;
+  }
+  await initI18n(useAppStore.getState().locale);
+  document.documentElement.dataset.theme = 'light';
+  const selection = (await invokeListAiRoutes()).defaultSelection;
+  assert(selection, 'A configured real model is required');
+  const root = createRoot(document.getElementById('root')!);
+  const ids = [`agent-contention-${crypto.randomUUID()}`, `focus-agent-contention-${crypto.randomUUID()}`];
+  const created: string[] = [];
+  const completed = new Map<string, number>();
+  let failure: string | undefined;
+  let takingOver = false;
+  let terminalId: string | undefined;
+  let output = '';
+  const cleanups: (() => void)[] = [];
+  try {
+    useAppStore.setState({ activeSection: 'terminal', restoreWorkspace: false });
+    useAiPanelStore.getState().setOpen(true, 'terminal');
+    flushSync(() => root.render(<TooltipProvider><AppShell>
+      <div className="relative flex min-h-0 min-w-0 flex-1">
+        <FocusLayout><MainContent><TerminalWorkspace /></MainContent></FocusLayout>
+        <AiPanel />
+      </div>
+    </AppShell></TooltipProvider>));
+    const bounds = document.getElementById('root')!.getBoundingClientRect();
+    assert(bounds.width >= innerWidth - 1 && bounds.height >= innerHeight - 1, 'The real application shell must fill the viewport');
+    const session = await invokeCreateLocalSession(100, 25);
+    terminalId = session.sessionId;
+    flushSync(() => useTerminalStore.getState().addSession(session));
+    await eventually(() => useTerminalStore.getState().sessions.some(item => item.sessionId === terminalId && item.status === 'connected' && item.promptReady), 'Real local terminal never became ready');
+    const controller = terminalRegistry.get(terminalId);
+    assert(controller, 'No real terminal controller');
+    const identity = (await invokeGetTerminalBrokerSnapshot(terminalId)).session;
+    assert(identity, 'Missing broker identity for the real PTY');
+    const operations = new Set<string>();
+    cleanups.push(await listenToAgentTerminalLease(({ payload }) => {
+      if (payload.sessionId === terminalId && ids.includes(payload.agentSessionId) && payload.state === 'acquired') operations.add(payload.operationId);
+    }));
+    cleanups.push(controller.subscribeOutput(chunk => { output += chunk; }));
+    cleanups.push(await listenToAgentRuntimeSession(async ({ payload }) => {
+      if (!ids.includes(payload.sessionId)) return;
+      if (payload.type === 'request/failure') failure = `Real model failure: ${payload.data.failure.kind}`;
+      if (payload.type === 'tool/result') {
+        if (takingOver && payload.sessionId === ids[0] && payload.data.status !== 'completed') return;
+        let result: unknown = payload.data.data;
+        if (result && typeof result === 'object' && 'artifactRef' in result && typeof result.artifactRef === 'string') {
+          try {
+            const artifact = await invokeGetAgentRuntimeArtifact({ sessionId: payload.sessionId, artifactId: result.artifactRef, maxBytes: 16 * 1024 * 1024 });
+            assert(!artifact.truncated && artifact.metadata.kind === 'tool-result', 'Terminal proof requires the complete persisted tool result');
+            assert('sha256' in result && artifact.metadata.sha256 === result.sha256, 'Tool-result artifact identity changed');
+            const bytes = Uint8Array.from(atob(artifact.bodyBase64), character => character.charCodeAt(0));
+            result = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+          } catch (error) {
+            failure = `Cannot read complete terminal execution proof: ${error instanceof Error ? error.message : String(error)}`;
+            return;
+          }
+        }
+        if (payload.data.status !== 'completed' || !result || typeof result !== 'object'
+          || !('channel' in result) || result.channel !== 'terminal'
+          || !('exitCode' in result) || result.exitCode !== 0
+          || !('terminalSessionId' in result) || result.terminalSessionId !== identity.terminalSessionId
+          || !('terminalGeneration' in result) || result.terminalGeneration !== identity.terminalGeneration
+          || !('operationId' in result) || typeof result.operationId !== 'string' || !operations.has(result.operationId)) {
+          failure = `Real terminal tool failed proof: status=${payload.data.status}; keys=${result && typeof result === 'object' ? Object.keys(result).join(',') : typeof result}`;
+        } else completed.set(payload.sessionId, (completed.get(payload.sessionId) ?? 0) + 1);
+      }
+    }));
+    for (const id of ids) {
+      await invokeCreateAgentRuntimeSession({ sessionId: id, taskId: id, goal: 'Execute the user requested command on the bound visible terminal.',
+        executionSurface: 'boundTerminal', permissionMode: 'operator',
+        target: { kind: 'local', targetId: `terminal-${terminalId}`, sessionId: terminalId },
+        capabilityScope: { toolNames: ['run_terminal_command'], effects: ['none', 'readOnly', 'stateChange'], targetIds: [`terminal-${terminalId}`] },
+      });
+      created.push(id);
+      await reportProgress(`Starting real ${id.startsWith('focus-') ? 'Focus' : 'Terminal'} Agent through the configured model route.`);
+      await invokeStartAgentRuntime({ sessionId: id, selection });
+    }
+    useTerminalTaskNavigation.getState().setRequest({ workspace: 'terminal', agentSessionId: ids[0], terminalSessionId: terminalId });
+    await eventually(() => workspaceRoot(false)?.dataset.sessionId === ids[0], 'Terminal task did not open in the production UI');
+    flushSync(() => { useFocusStore.getState().enter(); useFocusStore.getState().setTarget(session.sessionId); });
+    useTerminalTaskNavigation.getState().setRequest({ workspace: 'focus', agentSessionId: ids[1], terminalSessionId: terminalId });
+    await eventually(() => workspaceRoot(true)?.dataset.sessionId === ids[1], 'Focus task did not open in the production UI');
+    const markerA = `contention-a-${crypto.randomUUID()}`;
+    const markerB = `contention-b-${crypto.randomUUID()}`;
+    const command = (marker: string, delay: number) => `sleep ${delay}; printf '%s%s\\n' '${marker.slice(0, 16)}' '${marker.slice(16)}'`;
+    const exactCommandPrompt = (command: string) => `Call run_terminal_command exactly once on the bound visible terminal with this exact command. Do not use Direct, background execution, other tools, or alter the command. Reply done after it completes.\n${command}`;
+    const prompt = (marker: string, delay: number) => exactCommandPrompt(command(marker, delay));
+    const send = (id: string, content: string, messageId = crypto.randomUUID()) => invokeAgentRuntimeFollowup({ sessionId: id, messageId, clientSubmissionId: messageId, content });
+    await send(ids[0], prompt(markerA, 10));
+    await eventually(() => agentTerminalLeaseState.get(terminalId!)?.agentSessionId === ids[0]
+      && agentTerminalLeaseState.get(terminalId!)?.terminalOwned === true, 'First Agent never acquired the real PTY', 180_000);
+    assert(await invokeGetAgentTerminalOwner(terminalId) === ids[0], 'Backend owner differs from first Agent');
+    await reportProgress('First real Agent owns the PTY; checking competing submission and task navigation.');
+    await eventually(() => document.querySelectorAll('[data-slot="ai-workspace-root"] [data-slot="terminal-occupancy-notice"]').length === 2, 'Both production workspaces must display terminal ownership');
+    for (const split of [0.3, 0.6]) {
+      flushSync(() => useFocusStore.getState().setSplit(split));
+      await new Promise(requestAnimationFrame);
+      const panel = workspaceRoot(true);
+      const notice = panel?.querySelector<HTMLElement>('[data-slot="terminal-occupancy-notice"]');
+      const terminal = document.querySelector<HTMLElement>('[data-slot="focus-terminal"]');
+      assert(panel && notice && terminal, 'Production Focus panes are missing');
+      assert(document.querySelector<HTMLElement>('[data-slot="focus-layout"]')!.clientWidth >= innerWidth - 1, 'Focus must use the full application content width');
+      assert(panel.clientWidth >= 300 && terminal.clientWidth >= 320, 'Focus and terminal must both have usable widths');
+      assert(notice.scrollWidth <= notice.clientWidth, 'Occupancy notice must fit the real resizable panel');
+      assert(notice.querySelectorAll('button').length === 2, 'Task navigation and confirmed takeover must both be visible');
+    }
+    const draftB = prompt(markerB, 0);
+    await setDraft(true, draftB);
+    submitDraft(true);
+    await eventually(() => workspaceRoot(true)?.textContent?.includes(t('terminal.occupancy.conflict')) === true, 'Focus submit must display conflict in the production composer');
+    assert(draftText(true) === draftB, 'Rejected Focus submit must retain its full draft');
+    const retryId = crypto.randomUUID();
+    let rejected = false;
+    try { await send(ids[1], draftB, retryId); } catch (error) { rejected = String(error).includes('TERMINAL_AGENT_CONFLICT'); }
+    assert(rejected, 'Backend must reject competing admission');
+    assert(agentTerminalLeaseState.get(terminalId)?.agentSessionId === ids[0], 'Conflict must not replace the displayed owner');
+    assert(await controller.writeUserInput('blocked') === false, 'User input must remain blocked');
+    const taskButton = Array.from(workspaceRoot(true)!.querySelectorAll<HTMLButtonElement>('[data-slot="terminal-occupancy-notice"] button'))
+      .find(button => button.textContent === t('terminal.occupancy.viewTask'));
+    assert(taskButton, 'Production task entry is missing');
+    taskButton.click();
+    await eventually(() => workspaceRoot(false)?.dataset.sessionId === ids[0], 'View task did not open the actual owning conversation');
+    assert(!useFocusStore.getState().enabled, 'Terminal task entry must open the Terminal workspace');
+    await eventually(async () => {
+      assert(!failure, failure ?? 'Model failed');
+      return completed.get(ids[0]) === 1 && output.includes(markerA) && await invokeGetAgentTerminalOwner(terminalId!) === null;
+    }, 'First Agent did not finish and release ownership', 180_000);
+    assert(!completed.has(ids[1]) && !output.includes(markerB), 'Rejected input must never run automatically after release');
+    const before = await invokeGetAgentRuntimeSession({ sessionId: ids[1] });
+    assert(before.inbox.nextTurn.length === 0 && before.inbox.nextStep.length === 0, 'Rejected input must not be queued');
+    flushSync(() => useFocusStore.getState().enter());
+    assert(draftText(true) === draftB, 'Focus must retain the rejected draft until explicit retry');
+    submitDraft(true);
+    await eventually(async () => {
+      assert(!failure, failure ?? 'Model failed');
+      return completed.get(ids[1]) === 1 && output.includes(markerB) && await invokeGetAgentTerminalOwner(terminalId!) === null;
+    }, 'Explicit retry from the second real Agent did not complete', 180_000);
+    const concurrentMarkers = ids.map(() => `contention-race-${crypto.randomUUID()}`);
+    await reportProgress('Manual retry completed; checking simultaneous admission and confirmed takeover.');
+    const race = await Promise.allSettled(ids.map((id, index) => send(id, prompt(concurrentMarkers[index], 2))));
+    const winner = race.findIndex(result => result.status === 'fulfilled');
+    assert(winner >= 0 && race.filter(result => result.status === 'fulfilled').length === 1, 'Exactly one simultaneous Agent submission must be accepted');
+    const loser = 1 - winner;
+    const losingResult = race[loser];
+    assert(losingResult.status === 'rejected' && String(losingResult.reason).includes('TERMINAL_AGENT_CONFLICT'), 'Simultaneous loser must receive an explicit conflict');
+    await eventually(async () => {
+      assert(!failure, failure ?? 'Model failed');
+      return output.includes(concurrentMarkers[winner]) && await invokeGetAgentTerminalOwner(terminalId!) === null;
+    }, 'Simultaneous winner did not finish', 180_000);
+    assert(!output.includes(concurrentMarkers[loser]), 'Simultaneous loser must never execute after the winner releases');
+
+    const takeoverMarker = `contention-takeover-${crypto.randomUUID()}`;
+    const runningMarker = `contention-running-${crypto.randomUUID()}`;
+    await send(ids[0], exactCommandPrompt(`${command(runningMarker, 0)}; ${command(takeoverMarker, 20)}`));
+    await eventually(() => agentTerminalLeaseState.get(terminalId!)?.agentSessionId === ids[0]
+      && agentTerminalLeaseState.get(terminalId!)?.commandPhase === 'running'
+      && output.includes(runningMarker), 'Takeover requires a command proven to be running on the real PTY', 180_000);
+    takingOver = true;
+    agentTerminalLeaseState.get(terminalId)!.requestTakeover();
+    assert(await controller.writeUserInput('blocked') === false, 'Requesting takeover must not immediately unlock input');
+    await eventually(async () => !agentTerminalLeaseState.get(terminalId!)
+      && await invokeGetAgentTerminalOwner(terminalId!) === null, 'Takeover did not confirm backend fencing');
+    await eventually(async () => (await invokeGetTerminalBrokerSnapshot(terminalId!)).session?.promptReady === true,
+      'The real shell did not return to a ready prompt after takeover');
+    assert(await controller.writeUserInput('\u000c') === true, 'Confirmed takeover must restore real user input');
+    assert(!output.includes(takeoverMarker), 'Cancelled command must not complete after takeover');
+    flushSync(() => useFocusStore.getState().leave());
+    flushSync(() => useTerminalTaskNavigation.getState().setRequest({
+      workspace: 'terminal', agentSessionId: ids[0], terminalSessionId: terminalId!,
+    }));
+    const newSession = Array.from(workspaceRoot(false)?.querySelectorAll<HTMLButtonElement>('button') ?? [])
+      .find(button => button.getAttribute('aria-label') === t('ai.newConversation'));
+    assert(newSession && !newSession.disabled, 'Production new-conversation action is unavailable');
+    flushSync(() => newSession.click());
+    await eventually(() => useTerminalTaskNavigation.getState().request === null, 'Obsolete task navigation was not cancelled');
+    assert(!workspaceRoot(false)?.dataset.sessionId, 'A late task lookup must not overwrite a newer conversation visit');
+  } finally {
+    for (const cleanup of cleanups.reverse()) cleanup();
+    root.unmount();
+    for (const id of created) {
+      await invokeCancelAgentRuntime({ sessionId: id });
+      await invokeArchiveAgentRuntimeSession({ sessionId: id });
+      await invokeDeleteAgentRuntimeSession({ sessionId: id });
+    }
+    if (terminalId) { await invokeCloseSession(terminalId); terminalRegistry.dispose(terminalId); }
+  }
+}
+void verify().then(() => ({ ok: true }), (error: unknown) => ({ ok: false,
+  error: error instanceof Error ? `${error.message}\n${error.stack ?? ''}` : String(error),
+})).then(result => fetch(`/__agent-stream-result/${new URL(location.href).searchParams.get('token')}`, { method: 'POST', body: JSON.stringify(result) }));
