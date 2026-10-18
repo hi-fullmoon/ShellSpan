@@ -61,7 +61,7 @@ export function AiTaskStrip({ steps, active = true }: AiTaskStripProps): React.R
     <Collapsible
       open={open}
       onOpenChange={setOpen}
-      className="ai-task-strip mx-auto w-[calc(100%-32px)] min-w-0 max-w-[calc(var(--ai-composer-card-max-width)-32px)] shrink-0 overflow-hidden box-border @max-[400px]/ai-workspace:w-[calc(100%-20px)]"
+      className="ai-task-strip w-full min-w-0 shrink-0 overflow-hidden box-border"
       data-slot="ai-task-strip"
     >
       <CollapsibleTrigger

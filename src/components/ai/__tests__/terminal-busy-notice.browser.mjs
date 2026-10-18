@@ -18,6 +18,7 @@ try {
     const { default: ReactDOM } = await import(domUrl);
     const { AiWorkspaceRoot } = await import('/src/components/ai/workspace/ai-workspace-root.tsx');
     const { AgentTerminalBusyNotice } = await import('/src/components/ai/agent-terminal-busy-notice.tsx');
+    const { AiTaskStrip } = await import('/src/components/ai/workspace/ai-task-strip.tsx');
     const { initI18n, t } = await import('/src/locales/index.ts');
     const { useAppStore } = await import('/src/stores/appStore.ts');
     await import('/src/styles/base.css');
@@ -38,9 +39,11 @@ try {
           onOpenModel: unavailable && action === 'settings' ? () => setUnavailable(false) : undefined,
           historicalContinuationAvailable: true,
           defaultDraft: 'hello', onSubmit: ({ content }) => setSent(content),
-          executionSurfaceNotice: direct ? null : h(AgentTerminalBusyNotice, {
+          executionSurfaceNotice: h(React.Fragment, null,
+            h(AiTaskStrip, { steps: [{ id: 'inspect', title: t('ai.workspace.tasks.title'), status: 'inProgress' }] }),
+            direct ? null : h(AgentTerminalBusyNotice, {
             disabled: false, state: 'unavailable', onSwitchDirect: () => setDirect(true),
-          }),
+          })),
         }), h('output', null, sent));
     }
     ReactDOM.createRoot(document.getElementById('root')).render(h(Preview));
@@ -67,7 +70,8 @@ try {
     assert.ok(fits, `Notice and action must fit at ${width}px`);
     const noticeWidths = await page.locator('[data-slot="ai-composer-notices"]').evaluate(el => {
       const input = el.parentElement.querySelector('[data-composer-card]').getBoundingClientRect();
-      const boxes = [...el.querySelectorAll('[data-slot="ai-workspace-status-notices"] > [data-slot="alert"], [data-slot="terminal-busy-notice"]')]
+      const boxes = [el, ...el.children, ...el.querySelectorAll('[data-slot="ai-workspace-status-notices"] > [data-slot="alert"], [data-slot="terminal-busy-notice"]')]
+        .filter(notice => notice.getBoundingClientRect().width > 0)
         .map(notice => notice.getBoundingClientRect());
       return { inputWidth: input.width, inputCenter: input.x + input.width / 2,
         boxes: boxes.map(box => ({ width: box.width, center: box.x + box.width / 2 })) };
