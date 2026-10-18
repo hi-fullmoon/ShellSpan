@@ -30,16 +30,19 @@ import { useSftpConnection } from '@/hooks/useSftpConnection';
 import { useSftpConnectionOpener } from '@/hooks/useSftpConnectionOpener';
 import { useSystemFileDrop } from '@/hooks/useSystemFileDrop';
 import { useToast } from '@/hooks/useToast';
-import { invokeCancelRemoteCopy, invokeCopyRemoteToRemote } from '@/lib/ipc/tauri';
+import { getBackendDirectoryListRequestKey, nextDirectoryListRequestId } from '@/hooks/utils';
+import { invokeCancelRemoteCopy, invokeCopyRemoteToRemote, invokeListLocalDirectory, invokeListRemoteDirectory } from '@/lib/ipc/tauri';
 import { getLocalizedErrorMessage } from '@/lib/error';
 import { normalizePortablePath, parentPortablePath } from '@/lib/path-utils';
 import {
+  cancelQueuedPathOperation,
   registerPathOwnerCancellation,
   runPathOperation,
   useTransferStore,
 } from '@/stores/transferStore';
 import type { ConnectionProfile, UploadConflictPolicy } from '@/types';
 import { serializeSftpWorkspace } from '@/lib/sftp/sftp-workspace';
+import { isTransferTargetCurrent } from '@/lib/sftp/transfer-target';
 import {
   clearSftpWorkspace,
   flushSftpWorkspace,
@@ -196,6 +199,9 @@ interface SftpContentProps {
 }
 
 interface UploadQueue {
+  // Bound once at enqueue time; conflict resolution must never use a newer
+  // render's pane connections or action callbacks.
+  process: () => Promise<void>;
   paths: string[];
   destination: string;
   side: 'local' | 'remote';
@@ -290,7 +296,6 @@ export const SftpContent: React.FC<SftpContentProps> = ({
   // is still running (or waiting on a conflict dialog) is queued instead of
   // rejected.
   const uploadChainRef = useRef<Promise<void>>(Promise.resolve());
-  const pendingUploadBatchesRef = useRef(0);
   // Signalled by handleUploadConflictResolution when the active batch ends
   // (completed or cancelled), releasing the next queued batch.
   const uploadBatchDoneRef = useRef<(() => void) | null>(null);
@@ -353,6 +358,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
       return;
     }
 
+    let detachedListing: Awaited<ReturnType<typeof invokeListLocalDirectory>> | Awaited<ReturnType<typeof invokeListRemoteDirectory>> | undefined;
     while (queue.index < queue.paths.length) {
       // Read the latest entries on every conflict check: a refresh landing
       // while the queue waits on a conflict dialog must not be judged against
@@ -360,8 +366,19 @@ export const SftpContent: React.FC<SftpContentProps> = ({
       const latestConnection = useSftpStore
         .getState()
         .connections.find((candidate) => candidate.id === connection.id);
-      const latestEntries =
-        (queue.side === 'local' ? latestConnection?.localEntries : latestConnection?.remoteEntries) ?? [];
+      const originalSource = getSftpPaneSource(connection, queue.side);
+      // A pane may now show another host/directory. Never use that listing to
+      // decide whether an original destination entry can be overwritten.
+      const latestEntries = isTransferTargetCurrent(connection, latestConnection, queue.side, queue.destination)
+        ? (queue.side === 'local' ? latestConnection.localEntries : latestConnection.remoteEntries)
+        : (detachedListing ??= originalSource === 'local'
+          ? await invokeListLocalDirectory(queue.destination)
+          : await invokeListRemoteDirectory({
+            ...getSftpPaneConnection(connection, queue.side), path: queue.destination,
+            requestKey: getBackendDirectoryListRequestKey(`${connection.id}:conflict:${queue.operationId}`),
+            requestId: nextDirectoryListRequestId(`${connection.id}:conflict:${queue.operationId}`),
+          })).entries;
+      if (queue.cancelled) return;
       const existingByName = new Map(latestEntries.map((entry) => [entry.name, entry]));
       // Names claimed earlier in this batch are not in the listing yet, but
       // they will be once the upload runs. Count them as conflicts too,
@@ -526,7 +543,12 @@ export const SftpContent: React.FC<SftpContentProps> = ({
                 await removeTransferResumeCandidate(operationId);
               }
               targetRemote.invalidatePaneListingCache();
-              void targetRemote.loadRemoteDirectory(queue.destination);
+              await targetRemote.loadRemoteDirectory(queue.destination, () => isTransferTargetCurrent(
+                connection,
+                useSftpStore.getState().connections.find((item) => item.id === connection.id),
+                queue.side,
+                queue.destination,
+              ));
             } catch (copyError) {
               const operation = useTransferStore.getState().operations.find(
                 (item) => item.operationId === operationId,
@@ -594,31 +616,48 @@ export const SftpContent: React.FC<SftpContentProps> = ({
   }, [addTransferOperation, connection, error, info, leftIsLocal, leftRemote, localActions, markTransferCancelled, markTransferCompleted, markTransferFailed, markTransferRunning, remoteActions, rightIsLocal, rightRemote, t]);
 
   const refreshAfterQueue = useCallback(
-    async (side: 'local' | 'remote') => {
+    async (side: 'local' | 'remote', destination: string) => {
       const source = side === 'local' ? leftSource : rightSource;
-      const path = side === 'local' ? connection.localPath : connection.remotePath;
+      const isCurrentTarget = () => {
+        const current = useSftpStore.getState().connections.find((item) => item.id === connection.id);
+        return isTransferTargetCurrent(connection, current, side, destination);
+      };
+      // Invalidate the original cache even when it is no longer visible.
+      if (source === 'remote') (side === 'local' ? leftRemote : rightRemote).invalidatePaneListingCache();
+      if (!isCurrentTarget()) return;
+      const path = destination;
       if (source === 'local') {
-        await (side === 'local' ? loadLocalDirectory(path) : loadRightLocalDirectory(path));
+        await (side === 'local' ? loadLocalDirectory(path, isCurrentTarget) : loadRightLocalDirectory(path, isCurrentTarget));
       } else {
         const target = side === 'local' ? leftRemote : rightRemote;
-        target.invalidatePaneListingCache();
-        await target.loadRemoteDirectory(path);
+        await target.loadRemoteDirectory(path, isCurrentTarget);
       }
-      setPaneState(connection.id, side, { selectedPaths: [] });
+      // Completion never clears selection: the user may have selected new
+      // entries while the transfer was running, even in the same directory.
     },
-    [connection.id, connection.localPath, connection.remotePath, leftRemote, leftSource, loadLocalDirectory, loadRightLocalDirectory, rightRemote, rightSource, setPaneState],
+    [connection, leftRemote, leftSource, loadLocalDirectory, loadRightLocalDirectory, rightRemote, rightSource],
   );
 
   // Appends a batch to the FIFO chain. Each batch owns uploadQueueRef while it
   // runs; a batch paused on a conflict dialog holds the chain until the dialog
   // flow signals completion through uploadBatchDoneRef.
   const enqueueUploadBatch = useCallback(
-    (queue: UploadQueue) => {
-      // A drop that arrives while another batch is still running (or waiting
-      // on a conflict dialog) is queued instead of rejected; surface it as a
-      // pending row in the transfer list rather than a transient toast.
+    (input: Omit<UploadQueue, 'process'>) => {
+      const queue: UploadQueue = {
+        ...input,
+        process: async () => {
+          try {
+            await processUploadQueue();
+          } catch (batchError) {
+            if (queue.operationId && !queue.cancelled) markTransferFailed(queue.operationId, getLocalizedErrorMessage(batchError));
+            if (uploadQueueRef.current === queue) releaseUploadBatch();
+          }
+        },
+      };
+      // Register every batch before dispatch, including conflict waits, so its
+      // original route remains available throughout the task lifecycle.
       let pendingOperationId: string | undefined;
-      if (pendingUploadBatchesRef.current > 0 || uploadQueueRef.current) {
+      {
         const operationId = `${connection.id}-queued-${crypto.randomUUID()}`;
         pendingOperationId = operationId;
         queue.operationId = operationId;
@@ -637,26 +676,40 @@ export const SftpContent: React.FC<SftpContentProps> = ({
                   ? 'upload'
                   : 'remote-copy',
           ownerId: connection.id,
+          route: {
+            source: {
+              host: queue.sourceLocal ? undefined : (() => {
+                const remote = getSftpPaneConnection(connection, queue.sourceSide ?? 'local');
+                return `${remote.username}@${remote.host}:${remote.port}`;
+              })(),
+              path: queue.paths.join('\n'),
+            },
+            destination: {
+              host: targetLocal ? undefined : (() => {
+                const remote = getSftpPaneConnection(connection, queue.side);
+                return `${remote.username}@${remote.host}:${remote.port}`;
+              })(),
+              path: queue.destination,
+            },
+          },
           currentPath: queue.paths[0],
           totalBytes: 0,
           processedBytes: 0,
           totalSteps: queue.paths.length,
           completedSteps: 0,
           status: 'pending',
-          cancel: async () => {
-            queue.cancelled = true;
-            removeTransferOperation(operationId);
-          },
+          cancel: async () => cancelBatch(),
         });
       }
       let unregisterOwnerCancellation = (): void => {};
       const cancelBatch = (): void => {
         queue.cancelled = true;
+        if (queue.operationId) cancelQueuedPathOperation(queue.operationId);
         if (pendingOperationId) {
           const operation = useTransferStore
             .getState()
             .operations.find((item) => item.operationId === pendingOperationId);
-          if (operation?.status === 'pending') {
+          if (operation?.status === 'pending' || operation?.status === 'cancelling') {
             removeTransferOperation(pendingOperationId);
           }
         }
@@ -669,7 +722,6 @@ export const SftpContent: React.FC<SftpContentProps> = ({
         cancelBatch,
       );
       ownedUploadBatchCancelsRef.current.add(cancelBatch);
-      pendingUploadBatchesRef.current += 1;
       const runBatch = async (): Promise<void> => {
         try {
           // The pending row stays in place: the batch's real operation reuses
@@ -677,7 +729,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
           // replaced by a new entry at the top of the store.
           if (queue.cancelled) return;
           uploadQueueRef.current = queue;
-          await processUploadQueue();
+          await queue.process();
           // processUploadQueue returns early while a conflict dialog is open;
           // handleUploadConflictResolution drives the queue to its end and
           // clears uploadQueueRef, then signals uploadBatchDoneRef.
@@ -699,10 +751,12 @@ export const SftpContent: React.FC<SftpContentProps> = ({
             }
           }
           if (!queue.cancelled && uploadQueueMountedRef.current) {
-            await refreshAfterQueue(queue.side);
+            await refreshAfterQueue(queue.side, queue.destination);
           }
+        } catch (batchError) {
+          logger.warn('Failed to refresh transfer destination', batchError);
+          if (uploadQueueRef.current === queue) releaseUploadBatch();
         } finally {
-          pendingUploadBatchesRef.current -= 1;
           unregisterOwnerCancellation();
           ownedUploadBatchCancelsRef.current.delete(cancelBatch);
         }
@@ -710,7 +764,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
       // Catch so a failed batch never rejects the chain and starves later ones.
       uploadChainRef.current = uploadChainRef.current.then(runBatch, runBatch);
     },
-    [addTransferOperation, connection.id, leftIsLocal, processUploadQueue, refreshAfterQueue, releaseUploadBatch, removeTransferOperation, rightIsLocal],
+    [addTransferOperation, connection, leftIsLocal, markTransferFailed, processUploadQueue, refreshAfterQueue, releaseUploadBatch, removeTransferOperation, rightIsLocal],
   );
 
   const handleUploadConflictResolution = async (
@@ -736,7 +790,7 @@ export const SftpContent: React.FC<SftpContentProps> = ({
 
     queue.index += 1;
     setUploadConflict(undefined);
-    await processUploadQueue();
+    await queue.process();
     if (!uploadQueueRef.current) {
       // Batch finished: the queued chain task refreshes and releases the next
       // batch.

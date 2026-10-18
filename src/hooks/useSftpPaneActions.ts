@@ -32,6 +32,7 @@ import { getLocalizedErrorMessage, getToastErrorMessage } from '@/lib/error';
 import type { FileEntry } from '@/components/sftp/utils';
 import type { ReadRemoteFileResponse, RemoteFileEntry, RemoteFileKind, UploadConflictPolicy } from '@/types';
 import { useAppStore } from '@/stores/appStore';
+import { isTransferTargetCurrent } from '@/lib/sftp/transfer-target';
 
 const logger = createLogger('sftp');
 
@@ -257,6 +258,17 @@ export function useSftpPaneActions(
     setPaneState(connection.id, side, { selectedPaths: [] });
   }, [connection.id, setPaneState, side]);
 
+  const reloadAfterTransfer = useCallback(async () => {
+    const canApply = () => isTransferTargetCurrent(
+      connection,
+      useSftpStore.getState().connections.find((item) => item.id === connection.id),
+      side,
+      path,
+    );
+    if (isLocal) await loadLocalDirectory(path, canApply);
+    else await loadRemoteDirectory(path, canApply);
+  }, [connection, isLocal, loadLocalDirectory, loadRemoteDirectory, path, side]);
+
   const onOpen = useCallback(
     (entry: FileEntry) => {
       if (entry.kind !== 'directory') return;
@@ -395,8 +407,7 @@ export function useSftpPaneActions(
           path,
           t('sftp.copySuffix'),
         );
-        await reload();
-        clearSelection();
+        await reloadAfterTransfer();
       } catch (err) {
         logger.warn('Local paste failed', err);
         error(getToastErrorMessage(err));
@@ -430,7 +441,7 @@ export function useSftpPaneActions(
             try {
               await invokeCopyRemoteToRemote(request);
               markOperationCompleted(operationId);
-              void reload();
+              void reloadAfterTransfer();
             } catch (copyError) {
               const operation = useTransferStore.getState().operations.find(
                 (item) => item.operationId === operationId,
@@ -449,6 +460,10 @@ export function useSftpPaneActions(
           addOperation({
             operationId,
             kind: 'remote-copy',
+            route: {
+              source: { host: `${clipboard.sourceConnection.username}@${clipboard.sourceConnection.host}:${clipboard.sourceConnection.port}`, path: clipboard.sourcePath },
+              destination: { host: `${remoteConnection.username}@${remoteConnection.host}:${remoteConnection.port}`, path },
+            },
             ownerId: connection.id,
             connectionId: clipboard.sourceConnectionKey,
             paths: [clipboard.sourcePath],
@@ -465,12 +480,11 @@ export function useSftpPaneActions(
           await runRemoteCopy();
         }
       });
-      clearSelection();
     } catch (err) {
       logger.warn('Paste failed', err);
       error(getToastErrorMessage(err));
     }
-  }, [addOperation, clearSelection, connection.id, connection.remoteClipboard, copyRemotePath, isLocal, localClipboard, markOperationCancelled, markOperationCompleted, markOperationFailed, markOperationRunning, path, runAfterPathsIdle, reload, remoteConnection, remoteConnectionKey, t, error]);
+  }, [addOperation, connection.id, connection.remoteClipboard, copyRemotePath, isLocal, localClipboard, markOperationCancelled, markOperationCompleted, markOperationFailed, markOperationRunning, path, runAfterPathsIdle, reloadAfterTransfer, remoteConnection, remoteConnectionKey, t, error]);
 
   const onCopyName = useCallback(
     async (entry?: FileEntry) => {
@@ -632,13 +646,12 @@ export function useSftpPaneActions(
         [{ connectionId: remoteConnectionKey, paths: targetPaths }],
         () => uploadLocalPaths(files, path, undefined, policies),
       );
-      await reload();
-      clearSelection();
+      await reloadAfterTransfer();
     } catch (err) {
       logger.warn('Failed to upload files', err);
       error(getToastErrorMessage(err));
     }
-  }, [clearSelection, isLocal, path, reload, remoteConnectionKey, runAfterPathsIdle, uploadLocalPaths, error]);
+  }, [isLocal, path, reloadAfterTransfer, remoteConnectionKey, runAfterPathsIdle, uploadLocalPaths, error]);
 
   const onUploadFolders = useCallback(async () => {
     if (isLocal) return;
@@ -654,13 +667,12 @@ export function useSftpPaneActions(
         [{ connectionId: remoteConnectionKey, paths: targetPaths }],
         () => uploadLocalPaths(folders, path, undefined, policies),
       );
-      await reload();
-      clearSelection();
+      await reloadAfterTransfer();
     } catch (err) {
       logger.warn('Failed to upload folders', err);
       error(getToastErrorMessage(err));
     }
-  }, [clearSelection, isLocal, path, reload, remoteConnectionKey, runAfterPathsIdle, uploadLocalPaths, error]);
+  }, [isLocal, path, reloadAfterTransfer, remoteConnectionKey, runAfterPathsIdle, uploadLocalPaths, error]);
 
   const uploadWithPolicies = useCallback(
     async (localPaths: string[], destinationDirectory: string, policies: UploadConflictPolicy[], operationId?: string) => {
@@ -709,6 +721,7 @@ export function useSftpPaneActions(
       addOperation({
         operationId: resolvedOperationId,
         kind: 'upload',
+        route: { source: { path: sourcePaths.join('\n') }, destination: { path: destinationDirectory } },
         ownerId: connection.id,
         currentPath: sourcePaths[0],
         totalBytes: 0,

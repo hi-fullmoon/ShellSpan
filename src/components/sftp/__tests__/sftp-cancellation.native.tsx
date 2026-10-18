@@ -17,6 +17,7 @@ import {
 } from '@/lib/ipc/tauri';
 import { configSchema, type SftpCancellationConfig } from './sftp-cancellation.contract';
 import '@/styles/base.css';
+import { verifySftpSwitch } from './sftp-switch.native';
 
 interface Observation {
   started: number;
@@ -205,6 +206,7 @@ async function verify(): Promise<void> {
     cancelCurrent('download-cancel');
     await Promise.all(downloads);
     checkQueue('download');
+    outcome.switching = await verifySftpSwitch(root, connection, config, () => interrupted);
     outcome.ok = true;
   } catch (error) {
     outcome.error = message(error);

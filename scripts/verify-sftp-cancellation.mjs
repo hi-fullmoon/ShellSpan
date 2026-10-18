@@ -25,6 +25,8 @@ const filenames = {
 };
 const timeoutMs = 10 * 60_000;
 let containerCreated = false;
+let switchContainerCreated = false;
+const switchName = `${name}-switch`;
 let child;
 let server;
 let resultResponse;
@@ -138,8 +140,28 @@ try {
     }
   }
   evidence.hostFingerprint = fingerprint;
+  docker('run', '-d', '--name', switchName, '--label', 'shellspan.test=sftp-cancellation', '-p', '127.0.0.1::22', image);
+  switchContainerCreated = true;
+  command('docker', ['exec', '-i', switchName, 'chpasswd'], { input: `shellspan:${password}\n`, stdio: ['pipe', 'ignore', 'pipe'] });
+  const switchPort = Number(JSON.parse(docker('inspect', switchName))[0].NetworkSettings.Ports['22/tcp'][0].HostPort);
+  let switchFingerprint;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    try {
+      const match = docker('exec', switchName, 'ssh-keygen', '-lf', '/etc/ssh/ssh_host_ed25519_key.pub').match(/SHA256:[A-Za-z0-9+/]+/);
+      assert(match, 'Second SSH server fingerprint missing');
+      switchFingerprint = `ED25519 ${match[0]}`;
+      break;
+    } catch (error) {
+      if (attempt === 29) throw error;
+      await delay(200);
+    }
+  }
+  for (const serverName of [name, switchName]) {
+    docker('exec', serverName, 'mkdir', '-p', '/home/shellspan/switch-target', '/home/shellspan/elsewhere');
+    docker('exec', serverName, 'chown', '-R', 'shellspan:shellspan', '/home/shellspan/switch-target', '/home/shellspan/elsewhere');
+  }
   const config = {
-    port, password, fingerprint, inputDirectory, downloadDirectory,
+    port, password, fingerprint, switchPort, switchFingerprint, inputDirectory, downloadDirectory,
     ...Object.fromEntries(Object.entries(filenames).map(([key, filename]) => [key, resolve(inputDirectory, filename)])),
   };
   const html = 'src/components/sftp/__tests__/sftp-cancellation.native.html';
@@ -160,6 +182,25 @@ try {
           response.setHeader('Content-Type', 'application/json');
           response.setHeader('Cache-Control', 'no-store');
           response.end(JSON.stringify({ abort: abortRequested }));
+        });
+        vite.middlewares.use(`/__sftp-stage/${token}`, async (request, response) => {
+          try {
+            const stage = await readJson(request);
+            assert(['switch-active', 'switch-tooltip', 'capture-wide', 'capture-narrow', 'switch-conflict', 'switch-download', 'switch-copy', 'switch-complete'].includes(stage), 'Invalid test stage');
+            const capture = process.env.SFTP_CAPTURE === '1';
+            if (!stage.startsWith('capture-')) console.log(`Native verification: ${stage}`);
+            if (capture && stage === 'switch-active') docker('update', '--cpus', '0.02', name);
+            if (capture && stage.startsWith('capture-')) {
+              console.log(`Screenshot ready: ${resolve(directory, stage)} (create .done to continue)`);
+              const deadline = Date.now() + 45_000;
+              while (!abortRequested && Date.now() < deadline) {
+                try { await access(resolve(directory, `${stage}.done`)); break; }
+                catch { await delay(200); }
+              }
+              if (stage === 'capture-narrow') docker('update', '--cpus', '0.5', name);
+            }
+            response.end('ok');
+          } catch { response.writeHead(400).end(); }
         });
         vite.middlewares.use(`/__sftp-result/${token}`, async (request, response) => {
           try {
@@ -183,7 +224,8 @@ try {
   });
   await server.listen();
   const devUrl = `http://127.0.0.1:${server.httpServer.address().port}/${html}?token=${token}`;
-  child = spawn('pnpm', ['exec', 'tauri', 'dev', '--no-watch', '--config', JSON.stringify({
+  child = spawn('pnpm', ['exec', 'tauri', 'dev', '--no-watch',
+    ...(process.env.SFTP_CAPTURE_RUNNER ? ['--runner', process.env.SFTP_CAPTURE_RUNNER] : []), '--config', JSON.stringify({
     identifier: 'com.shellspan-dev', build: { beforeDevCommand: '', devUrl },
     app: { windows: [{ label: 'main', title: 'ShellSpan native SFTP cancellation regression', width: 1200, height: 760 }] },
   })], { cwd: repository, stdio: ['ignore', 'ignore', 'pipe'], detached: true });
@@ -221,6 +263,18 @@ try {
   evidence.remoteFiles = docker('exec', name, 'ls', '-A', '/home/shellspan/upload').split('\n');
   assert(!evidence.remoteFiles.some((filename) => filename.includes(filenames.largeA)), 'Cancelled upload left a target or temporary file');
   evidence.cancelledUploadFilesAbsent = true;
+  evidence.switchChecksums = {};
+  for (const filename of [filenames.largeA, filenames.smallB, filenames.smallC]) {
+    const actual = docker('exec', name, 'sha256sum', `/home/shellspan/switch-target/${filename}`).split(/\s+/)[0];
+    assert.equal(actual, evidence.inputs[filename], `Switching changed uploaded content: ${filename}`);
+    evidence.switchChecksums[filename] = actual;
+  }
+  const copiedChecksum = docker('exec', switchName, 'sha256sum', '/home/shellspan/switch-target/cancel-a.bin').split(/\s+/)[0];
+  assert.equal(copiedChecksum, evidence.inputs[filenames.largeA], 'Cross-host copy changed content after switch');
+  evidence.switchCopyChecksum = copiedChecksum;
+  assert.equal(await checksum(resolve(downloadDirectory, filenames.largeA)), evidence.inputs[filenames.largeA], 'Download changed content after switch');
+  assert.equal(docker('exec', switchName, 'ls', '-A', '/home/shellspan/switch-target'), filenames.largeA, 'Original upload task wrote to switched host');
+  assert.equal(docker('exec', switchName, 'ls', '-A', '/home/shellspan/elsewhere'), '', 'Original task wrote to switched directory');
   evidence.ok = true;
 } catch (error) {
   evidence.error = error.message;
@@ -250,6 +304,10 @@ try {
       assert(!docker('ps', '-a', '--filter', `name=^/${name}$`, '--format', '{{.Names}}'), 'Test container still exists');
     } catch (error) { cleanupErrors.push(`Container cleanup: ${error.message}`); }
   }
+  if (switchContainerCreated) {
+    try { docker('rm', '-f', switchName); }
+    catch (error) { cleanupErrors.push(`Switch container cleanup: ${error.message}`); }
+  }
   process.removeListener('SIGINT', interrupt);
   process.removeListener('SIGTERM', interrupt);
   evidence.cleanupErrors = cleanupErrors;
@@ -260,4 +318,4 @@ try {
 }
 
 assert.equal(evidence.ok, true, `${evidence.error ?? cleanupErrors.join('; ')}\nEvidence: ${resolve(directory, 'result.json')}`);
-console.log(`Native SSH cancellation passed; upload/download queues and SHA256 checks passed; temporary resources cleaned. Evidence: ${resolve(directory, 'result.json')}`);
+console.log(`Native SSH transfers passed: cancellation, queues, host/directory switching and SHA256 checks; temporary resources cleaned. Evidence: ${resolve(directory, 'result.json')}`);

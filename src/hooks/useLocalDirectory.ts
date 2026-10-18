@@ -15,7 +15,7 @@ import {
 import type { ReadRemoteFileResponse } from '@/types';
 
 export function useLocalDirectory(connection: SftpConnection, side: SftpSide = 'local'): {
-  loadLocalDirectory: (path?: string) => Promise<void>;
+  loadLocalDirectory: (path?: string, canApply?: () => boolean) => Promise<void>;
   openLocalPath: (path: string) => Promise<void>;
   previewLocalFile: (path: string) => Promise<ReadRemoteFileResponse>;
 } {
@@ -25,10 +25,11 @@ export function useLocalDirectory(connection: SftpConnection, side: SftpSide = '
   const setError = useSftpStore((state) => state.setError);
 
   const loadLocalDirectory = useCallback(
-    async (path?: string) => {
+    async (path?: string, canApply: () => boolean = () => true) => {
+      if (!canApply()) return;
       const requestKey = `${connection.id}:${side}`;
       const requestId = nextDirectoryListRequestId(requestKey);
-      const isLatest = () => isLatestDirectoryListRequest(requestKey, requestId);
+      const isLatest = () => isLatestDirectoryListRequest(requestKey, requestId) && canApply();
       setLoading(connection.id, side, true);
       setError(connection.id, side);
       try {

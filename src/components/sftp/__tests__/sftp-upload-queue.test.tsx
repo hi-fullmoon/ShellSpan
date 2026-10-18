@@ -228,7 +228,7 @@ describe('SftpContent upload queue', () => {
         ['/local/a.txt', '/local/b.txt'],
         '/remote',
         ['overwrite', 'overwrite'],
-        undefined,
+        expect.any(String),
       ),
     );
   });
@@ -256,7 +256,7 @@ describe('SftpContent upload queue', () => {
     // The queue must be free again: a later drop is processed normally.
     await capturedOnDrop!(['/local/c.txt'], 'remote');
     await waitFor(() =>
-      expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/c.txt'], '/remote', ['fail'], undefined),
+      expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/c.txt'], '/remote', ['fail'], expect.any(String)),
     );
   });
 
@@ -354,7 +354,7 @@ describe('SftpContent upload queue', () => {
       expect(connectionMocks.downloadRemotePaths).toHaveBeenCalledWith(
         ['/remote/file.txt'],
         '/local',
-        undefined,
+        expect.any(String),
         ['overwrite'],
       ),
     );
@@ -428,7 +428,7 @@ describe('SftpContent upload queue', () => {
     // becomes the real upload operation in place (same operation id).
     fireEvent.click(screen.getByRole('button', { name: 'sftp.conflict.overwrite' }));
     await waitFor(() =>
-      expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/a.txt'], '/remote', ['overwrite'], undefined),
+      expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/a.txt'], '/remote', ['overwrite'], expect.any(String)),
     );
     await waitFor(() =>
       expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/c.txt'], '/remote', ['fail'], expect.any(String)),
@@ -463,7 +463,7 @@ describe('SftpContent upload queue', () => {
 
     await capturedOnDrop!(['/local/a.txt'], 'remote');
     await waitFor(() =>
-      expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/a.txt'], '/remote', ['fail'], undefined),
+      expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/a.txt'], '/remote', ['fail'], expect.any(String)),
     );
 
     await capturedOnDrop!(['/local/c.txt'], 'remote');
@@ -474,10 +474,13 @@ describe('SftpContent upload queue', () => {
     );
 
     // Cancelling the pending row removes it and drops the queued batch.
-    fireEvent.click(await screen.findByRole('button', { name: buttonName }));
+    fireEvent.click(await screen.findByRole('button', { name: 'sftp.transfer.expandQueue' }));
+    const queuedRow = (await screen.findByText('c.txt')).closest('[data-slot="transfer-task-row"]');
+    expect(queuedRow).not.toBeNull();
+    fireEvent.click(within(queuedRow as HTMLElement).getByRole('button', { name: buttonName }));
     await waitFor(() =>
       expect(
-        useTransferStore.getState().operations.every((op) => op.status !== 'pending'),
+        useTransferStore.getState().operations.every((op) => op.currentPath !== '/local/c.txt'),
       ).toBe(true),
     );
 
@@ -644,7 +647,7 @@ describe('SftpContent upload queue', () => {
         ['/local/a.txt', '/other/a.txt'],
         '/remote',
         ['fail', 'overwrite'],
-        undefined,
+        expect.any(String),
       ),
     );
   });
@@ -682,7 +685,7 @@ describe('SftpContent upload queue', () => {
         ['/local/a.txt', '/local/b.txt'],
         '/remote',
         ['overwrite', 'overwrite'],
-        undefined,
+        expect.any(String),
       ),
     );
   });

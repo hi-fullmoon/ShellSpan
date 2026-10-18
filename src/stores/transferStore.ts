@@ -14,6 +14,10 @@ const retryingOperationIds = new Set<string>();
 export type TransferOperationKind = 'upload' | 'download' | 'delete' | 'remote-copy';
 
 export interface TransferOperation {
+  route?: {
+    source: { host?: string; path: string };
+    destination: { host?: string; path: string };
+  };
   operationId: string;
   kind: TransferOperationKind;
   ownerId?: string;

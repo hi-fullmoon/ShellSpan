@@ -803,6 +803,8 @@ export default {
   'sftp.transfer.completed': '已完成',
   'sftp.transfer.failed': '失败',
   'sftp.transfer.uploadFailed': '上传失败',
+  'sftp.transfer.source': '来源',
+  'sftp.transfer.destination': '目标',
   'sftp.transfer.downloadFailed': '下载失败',
   'sftp.transfer.remoteCopyFailed': '远程传输失败',
   'sftp.transfer.interrupted': '应用重启导致任务中断。请确认路径后点击重试以续传。',

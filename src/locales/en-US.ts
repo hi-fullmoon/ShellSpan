@@ -803,6 +803,8 @@ export default {
   'sftp.transfer.completed': 'Completed',
   'sftp.transfer.failed': 'Failed',
   'sftp.transfer.uploadFailed': 'Upload failed',
+  'sftp.transfer.source': 'Source',
+  'sftp.transfer.destination': 'Destination',
   'sftp.transfer.downloadFailed': 'Download failed',
   'sftp.transfer.remoteCopyFailed': 'Remote transfer failed',
   'sftp.transfer.interrupted': 'Interrupted by an app restart. Review the paths, then retry to resume.',

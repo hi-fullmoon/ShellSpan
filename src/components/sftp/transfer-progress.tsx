@@ -188,14 +188,24 @@ export const TransferProgress: React.FC = () => {
             ) : (
               <FileIcon className="size-4 shrink-0 -translate-y-px text-app-primary" aria-hidden="true" />
             )}
-            <span
-              className={cn(
-                'min-w-0 flex-1 truncate font-medium',
-                op.kind === 'delete' ? (isDeleteFinished ? 'text-muted-foreground/70' : 'text-app-text/70') : 'text-app-text',
-              )}
-            >
-              {displayTransferPath(op)}
-            </span>
+            <Tooltip>
+              <TooltipTrigger render={
+                <span
+                  className={cn(
+                    'min-w-0 flex-1 truncate font-medium',
+                    op.kind === 'delete' ? (isDeleteFinished ? 'text-muted-foreground/70' : 'text-app-text/70') : 'text-app-text',
+                  )}
+                  tabIndex={op.route ? 0 : undefined}
+                />
+              }>
+                {displayTransferPath(op)}
+              </TooltipTrigger>
+              <TooltipContent className="max-h-[70vh] overflow-y-auto whitespace-pre-wrap break-all">
+                {op.route
+                  ? `${t('sftp.transfer.source')}: ${op.route.source.host ?? t('sftp.local')}\n${op.route.source.path}\n${t('sftp.transfer.destination')}: ${op.route.destination.host ?? t('sftp.local')}\n${op.route.destination.path}`
+                  : op.currentPath}
+              </TooltipContent>
+            </Tooltip>
             </div>
 
             {op.status === 'failed' ? (

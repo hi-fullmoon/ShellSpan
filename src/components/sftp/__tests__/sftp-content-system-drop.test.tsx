@@ -161,7 +161,7 @@ describe('SftpContent system drop', () => {
     );
 
     capturedOnDrop!(['/local/file.txt'], 'remote');
-    await waitFor(() => expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/file.txt'], '/remote', ['fail'], undefined));
+    await waitFor(() => expect(uploadWithPolicies).toHaveBeenCalledWith(['/local/file.txt'], '/remote', ['fail'], expect.any(String)));
     expect(copyWithPolicies).not.toHaveBeenCalled();
   });
 
@@ -195,7 +195,7 @@ describe('SftpContent system drop', () => {
     );
 
     capturedOnDrop!(['/remote/file.txt'], 'local');
-    await waitFor(() => expect(copyWithPolicies).toHaveBeenCalledWith(['/remote/file.txt'], '/local', ['fail'], undefined));
+    await waitFor(() => expect(copyWithPolicies).toHaveBeenCalledWith(['/remote/file.txt'], '/local', ['fail'], expect.any(String)));
     expect(uploadWithPolicies).not.toHaveBeenCalled();
   });
 

@@ -34,6 +34,7 @@ import { createLogger } from '@/lib/logger';
 import { getErrorMessage, getLocalizedErrorMessage } from '@/lib/error';
 import { promptForMissingKeychainKey } from '@/lib/connections/keychain-key-prompt';
 import { normalizePortablePath } from '@/lib/path-utils';
+import { isTransferTargetCurrent } from '@/lib/sftp/transfer-target';
 import { useAppStore } from '@/stores/appStore';
 import { useProfileStore } from '@/stores/profileStore';
 import {
@@ -110,7 +111,7 @@ async function runWithConfiguredRetries(
 }
 
 export function useSftpConnection(connection: SftpConnection, side: SftpSide = 'remote'): {
-  loadRemoteDirectory: (path?: string) => Promise<void>;
+  loadRemoteDirectory: (path?: string, canApply?: () => boolean) => Promise<void>;
   createRemoteEntry: (parentPath: string, name: string, kind: 'file' | 'directory') => Promise<void>;
   renameRemotePath: (path: string, newName: string) => Promise<void>;
   copyRemotePath: (sourcePath: string, destinationDirectory: string) => Promise<void>;
@@ -277,10 +278,11 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
   );
 
   const loadRemoteDirectory = useCallback(
-    async (path?: string) => {
+    async (path?: string, canApply: () => boolean = () => true) => {
+      if (!canApply()) return;
       const requestKey = `${connection.id}:${side}`;
       const requestId = nextDirectoryListRequestId(requestKey);
-      const isLatest = () => isLatestDirectoryListRequest(requestKey, requestId);
+      const isLatest = () => isLatestDirectoryListRequest(requestKey, requestId) && canApply();
       const backendRequestKey = getBackendDirectoryListRequestKey(requestKey);
       const requestedPath = path ?? '';
       const cached = getCachedDirectoryListing(directoryCacheScope, requestedPath);
@@ -415,7 +417,12 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
             operationId,
           });
           markOperationCompleted(operationId);
-          await loadRemoteDirectory(panePath);
+          await loadRemoteDirectory(panePath, () => isTransferTargetCurrent(
+            connection,
+            useSftpStore.getState().connections.find((item) => item.id === connection.id),
+            side,
+            panePath,
+          ));
         } catch (copyError) {
           const operation = useTransferStore.getState().operations.find(
             (item) => item.operationId === operationId,
@@ -439,6 +446,10 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
       addOperation({
         operationId,
         kind: 'remote-copy',
+        route: {
+          source: { host: `${remoteConnection.username}@${remoteConnection.host}:${remoteConnection.port}`, path: sourcePath },
+          destination: { host: `${remoteConnection.username}@${remoteConnection.host}:${remoteConnection.port}`, path: destinationDirectory },
+        },
         ownerId: connection.id,
         connectionId: remoteConnectionKey,
         paths: [sourcePath],
@@ -457,7 +468,7 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
       });
       await runCopy();
     },
-    [remoteConnection, remoteConnectionKey, connection.id, panePath, loadRemoteDirectory, addOperation, markOperationRunning, markOperationFailed, markOperationCompleted, markOperationCancelled],
+    [remoteConnection, remoteConnectionKey, connection, side, panePath, loadRemoteDirectory, addOperation, markOperationRunning, markOperationFailed, markOperationCompleted, markOperationCancelled],
   );
 
   const deleteRemotePaths = useCallback(
@@ -548,6 +559,10 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         addOperation({
           operationId,
           kind: 'upload',
+          route: {
+            source: { path: localPaths.join('\n') },
+            destination: { host: `${remoteConnection.username}@${remoteConnection.host}:${remoteConnection.port}`, path: destinationDirectory },
+          },
           ownerId: connection.id,
           connectionId: remoteConnectionKey,
           paths: currentTargetPaths,
@@ -652,6 +667,10 @@ export function useSftpConnection(connection: SftpConnection, side: SftpSide = '
         addOperation({
           operationId,
           kind: 'download',
+          route: {
+            source: { host: `${remoteConnection.username}@${remoteConnection.host}:${remoteConnection.port}`, path: remotePaths.join('\n') },
+            destination: { path: destinationDirectory },
+          },
           ownerId: connection.id,
           connectionId: remoteConnectionKey,
           paths: currentRemotePaths,
