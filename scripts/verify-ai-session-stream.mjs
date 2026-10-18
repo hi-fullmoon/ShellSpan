@@ -18,6 +18,7 @@ const { values } = parseArgs({ options: {
   focus: { type: 'boolean' },
   'focus-background': { type: 'boolean' },
   'terminal-contention': { type: 'boolean' },
+  'native-binary': { type: 'string' },
   'terminal-readiness': { type: 'boolean' },
   'no-model': { type: 'boolean' }, route: { type: 'string' }, model: { type: 'string' },
   'cleanup-session': { type: 'string', multiple: true },
@@ -27,6 +28,7 @@ const performanceRun = values.performance === true;
 const focusRun = values.focus === true;
 const focusBackgroundRun = values['focus-background'] === true;
 const terminalContentionRun = values['terminal-contention'] === true;
+assert(!values['native-binary'] || terminalContentionRun, '--native-binary requires --terminal-contention and a binary built for the fixed verification entry');
 assert(!terminalContentionRun || (!focusBackgroundRun && !focusRun && !performanceRun && !values['terminal-readiness']), '--terminal-contention is a separate regression');
 assert(!focusBackgroundRun || (!focusRun && !values.performance && !values['terminal-readiness']), '--focus-background is a separate regression');
 const terminalReadinessRun = values['terminal-readiness'] === true;
@@ -45,6 +47,11 @@ const baselineSources = baseline ? new Map([
   'src/components/ai/workspace/use-ai-session-controller.ts',
 ].map(path => [resolve(repository, path), execFileSync('git', ['show', `${baselineCommit}:${path}`], { cwd: repository, encoding: 'utf8' })])) : new Map();
 const token = randomUUID();
+// Keep the compiled macOS application identity stable between contention runs.
+// The per-run token belongs in an HTTP redirect, not in Tauri's compiled config.
+const contentionEntryPath = '/__native-agent-entry';
+const contentionPort = 1432;
+let contentionEntryUrl;
 let settle;
 const result = new Promise((resolveResult) => { settle = resolveResult; });
 const page = performanceRun ? 'agent-panel-performance.native.html' : 'agent-session-stream.native.html';
@@ -59,6 +66,13 @@ const baselinePlugin = {
   load(id) { return baselineSources.get(id.split('?')[0]); },
 };
 const attachResult = (vite) => {
+  if (terminalContentionRun) vite.middlewares.use(contentionEntryPath, (request, response) => {
+    if (request.method !== 'GET' || !contentionEntryUrl) { response.statusCode = 404; response.end(); return; }
+    response.statusCode = 302;
+    response.setHeader('Cache-Control', 'no-store');
+    response.setHeader('Location', contentionEntryUrl);
+    response.end();
+  });
   if (terminalReadinessRun) vite.middlewares.use(`/__terminal-registry-reload/${token}`, async (request, response) => {
     if (request.method !== 'POST') { response.statusCode = 405; response.end(); return; }
     try {
@@ -111,7 +125,8 @@ try {
     cacheDir: resolve(repository, 'node_modules/.vite-agent-stream-native'),
     resolve: { alias: { '@': resolve(repository, 'src') } },
     plugins: [react(), tailwindcss(), resultPlugin],
-    server: { host: '127.0.0.1', port: 0, hmr: terminalReadinessRun ? undefined : false, watch: null },
+    server: { host: '127.0.0.1', port: terminalContentionRun ? contentionPort : 0,
+      strictPort: terminalContentionRun, hmr: terminalReadinessRun ? undefined : false, watch: null },
   });
 } catch (error) {
   if (output) await rm(output, { recursive: true, force: true });
@@ -129,10 +144,13 @@ try {
   url.searchParams.set('noModel', String(noModel));
   if (values.route) { url.searchParams.set('route', values.route); url.searchParams.set('model', values.model); }
   for (const id of values['cleanup-session'] ?? []) url.searchParams.append('cleanupSession', id);
-  const devUrl = url.href;
-  child = spawn('pnpm', ['exec', 'tauri', 'dev', '--no-watch', '--config', JSON.stringify({
+  contentionEntryUrl = url.href;
+  const devUrl = terminalContentionRun ? `http://127.0.0.1:${contentionPort}${contentionEntryPath}` : url.href;
+  child = values['native-binary']
+    ? spawn(resolve(values['native-binary']), [], { cwd: repository, stdio: ['ignore', 'ignore', 'inherit'], detached: process.platform !== 'win32' })
+    : spawn('pnpm', ['exec', 'tauri', 'dev', '--no-watch', '--config', JSON.stringify({
     identifier: 'com.shellspan-dev', build: { beforeDevCommand: '', devUrl },
-    ...((performanceRun || terminalContentionRun) && !values['cleanup-session']?.length ? { app: { windows: [{
+    ...((terminalContentionRun || performanceRun && !values['cleanup-session']?.length) ? { app: { windows: [{
       label: 'main', title: terminalContentionRun ? 'Terminal contention validation' : 'Agent panel validation', width: 1480, height: 920,
       minWidth: 1200, minHeight: 760, visible: true, focus: true, alwaysOnTop: true,
       transparent: true, titleBarStyle: 'Overlay',
