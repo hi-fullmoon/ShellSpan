@@ -21,7 +21,7 @@ const server = await createServer({
         export { createRoot } from 'react-dom/client';
         export { flushSync } from 'react-dom';
         export { TerminalPane } from '/src/components/terminal/terminal-pane.tsx';
-        export { terminalContextTarget, clearTerminalScreen } from '/src/components/terminal/terminal-content-menu.tsx';
+        export { terminalContextTarget } from '/src/components/terminal/terminal-content-menu.tsx';
         export { terminalRegistry } from '/src/components/terminal/registry/terminal-registry.ts';
         export { useAppStore } from '/src/stores/appStore.ts';
         export { useTerminalStore } from '/src/stores/terminalStore.ts';
@@ -211,22 +211,7 @@ try {
         await page.keyboard.press('Escape');
       }
       await menu.waitFor({ state: 'hidden' });
-      const cleared = await page.evaluate(async output => {
-        const terminal = window.terminal;
-        terminal.reset();
-        await new Promise(resolve => terminal.write(output.replace(/\n/g, '\r\n'), resolve));
-        const buffer = terminal.buffer.active;
-        const before = { x: buffer.cursorX, y: buffer.cursorY, base: buffer.baseY,
-          history: Array.from({ length: buffer.baseY }, (_, index) => buffer.getLine(index).translateToString(true)) };
-        window.runtime.clearTerminalScreen(terminal);
-        await new Promise(resolve => terminal.write('', resolve));
-        return { before, after: { x: buffer.cursorX, y: buffer.cursorY, base: buffer.baseY,
-          history: Array.from({ length: buffer.baseY }, (_, index) => buffer.getLine(index).translateToString(true)) },
-          screenEmpty: Array.from({ length: terminal.rows }, (_, index) => buffer.getLine(buffer.baseY + index).translateToString(true)).every(line => !line) };
-      }, output);
-      assert.ok(cleared.before.base > 0, 'Clear-screen regression requires real scrollback');
-      assert.deepEqual(cleared.after, cleared.before, 'Clear screen must retain cursor coordinates and history');
-      assert.equal(cleared.screenEmpty, true);
+      // Connected clear-screen behavior is verified in terminal-clear-screen.native.tsx.
       await page.evaluate(() => {
         window.root.unmount();
         window.runtime.terminalRegistry.dispose(window.session.sessionId);

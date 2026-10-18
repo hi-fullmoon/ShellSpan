@@ -20,6 +20,7 @@ const { values } = parseArgs({ options: {
   'terminal-contention': { type: 'boolean' },
   'native-binary': { type: 'string' },
   'terminal-readiness': { type: 'boolean' },
+  'terminal-clear-screen': { type: 'boolean' },
   'no-model': { type: 'boolean' }, route: { type: 'string' }, model: { type: 'string' },
   'cleanup-session': { type: 'string', multiple: true },
   'baseline-ref': { type: 'string' },
@@ -32,6 +33,8 @@ assert(!values['native-binary'] || terminalContentionRun, '--native-binary requi
 assert(!terminalContentionRun || (!focusBackgroundRun && !focusRun && !performanceRun && !values['terminal-readiness']), '--terminal-contention is a separate regression');
 assert(!focusBackgroundRun || (!focusRun && !values.performance && !values['terminal-readiness']), '--focus-background is a separate regression');
 const terminalReadinessRun = values['terminal-readiness'] === true;
+const terminalClearScreenRun = values['terminal-clear-screen'] === true;
+assert(!terminalClearScreenRun || (!terminalReadinessRun && !terminalContentionRun && !focusBackgroundRun && !focusRun && !performanceRun), '--terminal-clear-screen is a separate regression');
 assert(!terminalReadinessRun || (!focusRun && !performanceRun), '--terminal-readiness is a separate regression');
 assert(!focusRun || !performanceRun, '--focus and --performance are separate regressions');
 const baseline = values.baseline === true;
@@ -56,6 +59,7 @@ let settle;
 const result = new Promise((resolveResult) => { settle = resolveResult; });
 const page = performanceRun ? 'agent-panel-performance.native.html' : 'agent-session-stream.native.html';
 const pagePath = terminalContentionRun ? 'src/components/terminal/__tests__/terminal-contention.native.html'
+  : terminalClearScreenRun ? 'src/components/terminal/__tests__/terminal-clear-screen.native.html'
   : focusBackgroundRun ? 'src/components/terminal/__tests__/focus-background.native.html'
   : terminalReadinessRun ? 'src/components/terminal/__tests__/terminal-readiness.native.html'
   : focusRun ? 'src/components/focus/__tests__/focus.native.html' : `src/lib/ai/__tests__/${page}`;
@@ -169,6 +173,7 @@ try {
   else if (terminalContentionRun) console.log('Native terminal contention passed: two real Agents, one PTY, conflict draft retention, task navigation, manual retry, simultaneous admission, confirmed takeover, running-Agent close and close-error Toast.');
   else if (focusBackgroundRun) console.log('Native Focus background regression passed: two real visible commands completed on the leased PTY, with Focus selection and keyboard focus preserved.');
   else if (terminalReadinessRun) console.log('Native terminal readiness passed: registry identity across hot updates, existing and new local PTY output.');
+  else if (terminalClearScreenRun) console.log('Native terminal clear-screen passed: production controller, native IPC and real local PTY.');
   else if (focusRun) console.log('Native focus regression passed: real local terminals, explicit targets, collapse/restore, continuation IPC, and responsive geometry. No model or remote commands were executed.');
   else console.log('Native Agent stream passed: pending subscription/snapshot cancellation, error publication, automatic gap recovery and cleanup.');
 } finally {

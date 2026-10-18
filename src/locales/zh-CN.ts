@@ -1317,6 +1317,8 @@ export default {
   'terminal.menu.source': '终端：{target}',
   'terminal.menu.revealPath': '在文件管理器中定位',
   'terminal.menu.clearScreen': '清屏',
+  'terminal.menu.clearUnavailable': '暂时无法安全清屏：无法确认完整的 Shell 编辑区，已保留全部内容。',
+  'terminal.menu.clearBlocked': '终端当前无法清屏，请在 Shell 就绪且未被 Agent 占用时重试。',
   'terminal.menu.clearHistory': '清除滚动历史…',
   'terminal.menu.clearHistoryDescription': '清除当前终端的滚动历史，清除后无法恢复。当前屏幕内容将保留。',
   'terminal.menu.reconnect': '重新连接',

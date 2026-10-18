@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { Terminal } from '@xterm/xterm';
 import { ContextMenu, ContextMenuContent, ContextMenuGroup, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
@@ -26,9 +26,23 @@ export function wantsTerminalMenu(terminal: Terminal, shiftKey: boolean): boolea
   return shiftKey || terminal.modes.mouseTrackingMode === 'none';
 }
 
-export function clearTerminalScreen(terminal: Terminal): void {
-  // Preserve the shell's cursor position as well as its scrollback.
-  terminal.write('\u001b[2J');
+export async function clearTerminalScreen(terminal: Terminal, sessionId: string): Promise<'requested' | 'unavailable' | 'blocked'> {
+  // Inspect the buffer only after previously queued output has been parsed.
+  await new Promise<void>(resolve => terminal.write('', resolve));
+  const session = useTerminalStore.getState().sessions.find(item => item.sessionId === sessionId);
+  const controller = terminalRegistry.get(sessionId);
+  if (terminal.buffer.active.type !== 'normal' || controller?.terminal !== terminal || session?.status !== 'connected'
+    || terminalInputReadiness.isPreparing(sessionId) || agentTerminalLeaseState.get(sessionId)) return 'blocked';
+  // Terminal cells do not identify an editing region. Guessing from isWrapped
+  // loses hard newlines; restoring CUP also destroys the pending-wrap state.
+  // Leave the entire emulator untouched when a shell cannot redraw safely.
+  if (session.integrationState !== 'ready' || controller.hasUnconfirmedLineBreak()) return 'unavailable';
+  if (!session.promptReady || controller.hasUnverifiedUserSubmission()) return 'blocked';
+  // Let the shell redraw its full prompt and current editing buffer. Await the
+  // production input path, including native ownership admission and IPC errors.
+  if (!await controller.writeUserInput('\u000c')) return 'blocked';
+  terminal.scrollToBottom();
+  return 'requested';
 }
 
 /** Use xterm's public cell coordinates so wrapped links and wide glyphs stay accurate. */
@@ -90,8 +104,9 @@ export function TerminalContentMenu({ session, terminal, onPaste, onSearch, chil
   const valid = (): boolean => Boolean(mounted.current && currentTerminal.current === terminal && sessionId && terminal && terminalRegistry.get(sessionId)?.terminal === terminal
     && useTerminalStore.getState().sessions.some(item => item.sessionId === sessionId));
   const connected = session?.status === 'connected';
-  const canPaste = connected && !terminalInputReadiness.isPreparing(sessionId ?? null)
-    && !agentTerminalLeaseState.get(sessionId ?? null);
+  const preparing = useSyncExternalStore(terminalInputReadiness.subscribe, () => terminalInputReadiness.isPreparing(sessionId ?? null));
+  const lease = useSyncExternalStore(agentTerminalLeaseState.subscribe, () => agentTerminalLeaseState.get(sessionId ?? null));
+  const canPaste = connected && !preparing && !lease;
   const shortcuts = useAppStore(state => state.shortcuts);
   const mac = getPlatform() === 'macos';
   const hint = (value: string): React.ReactNode => <span className="ml-auto pl-4 text-muted-foreground">{value}</span>;
@@ -175,7 +190,11 @@ export function TerminalContentMenu({ session, terminal, onPaste, onSearch, chil
         </ContextMenuGroup></>}
         <ContextMenuSeparator />
         <ContextMenuGroup>
-          <ContextMenuItem disabled={!connected || terminal?.buffer.active.type !== 'normal'} onClick={() => run(() => { if (terminal) clearTerminalScreen(terminal); })}>{t('terminal.menu.clearScreen')}</ContextMenuItem>
+          <ContextMenuItem disabled={!canPaste || terminal?.buffer.active.type !== 'normal' || (session?.integrationState === 'ready' && !session.promptReady)} onClick={() => run(() => {
+            if (terminal && sessionId) void clearTerminalScreen(terminal, sessionId).then(result => {
+              if (result !== 'requested' && valid()) showError(t(result === 'unavailable' ? 'terminal.menu.clearUnavailable' : 'terminal.menu.clearBlocked'));
+            }).catch(() => { if (valid()) showError(t('terminal.notice.writeFailedLabel')); });
+          })}>{t('terminal.menu.clearScreen')}</ContextMenuItem>
           <ContextMenuItem disabled={terminal?.buffer.active.type !== 'normal' || !terminal?.buffer.normal.baseY} onClick={() => run(() => { restoreFocus.current = false; setClearTarget(terminal); })}>{t('terminal.menu.clearHistory')}</ContextMenuItem>
           {(session?.status === 'disconnected' || session?.status === 'error') && <ContextMenuItem onClick={() => run(() => { restoreFocus.current = false; void reconnect(sessionId!); })}>{t('terminal.menu.reconnect')}</ContextMenuItem>}
         </ContextMenuGroup>

@@ -37,6 +37,7 @@ import type {
   TerminalFontFamily,
 } from '@/types';
 import type { IBuffer, IBufferCellPosition, IDisposable, ILink } from '@xterm/xterm';
+import { useTerminalStore } from '@/stores/terminalStore';
 
 const logger = createLogger('terminal');
 
@@ -392,6 +393,7 @@ export interface TerminalController {
   focus(): void;
   simulateInput(data: string): void;
   hasPendingUserInput(): boolean;
+  hasUnconfirmedLineBreak(): boolean;
   hasUnverifiedUserSubmission(): boolean;
   hasKnownCredentialPrompt(): boolean;
   suppressUserInput(onBlocked?: () => void): () => void;
@@ -432,6 +434,7 @@ class TerminalControllerImpl implements TerminalController {
   private readonly userInputBlockedListeners = new Set<() => void>();
   private agentInputBlockedFeedbackRef = false;
   private pendingUserInputText = '';
+  private lastInputLineBreak: { terminalSessionId?: string; generation?: number; revision?: number } | null = null;
   private unverifiedUserSubmission = false;
   private recentOutputTail = '';
   private reconnectRequestedRef = false;
@@ -1094,6 +1097,15 @@ class TerminalControllerImpl implements TerminalController {
     return this.pendingUserInputText.length > 0;
   }
 
+  hasUnconfirmedLineBreak(): boolean {
+    if (!this.lastInputLineBreak) return false;
+    const session = useTerminalStore.getState().sessions.find(item => item.sessionId === this.sessionId);
+    return !session?.promptReady || session.terminalSessionId !== this.lastInputLineBreak.terminalSessionId
+      || session.terminalGeneration !== this.lastInputLineBreak.generation
+      || session.integrationStateRevision === undefined || this.lastInputLineBreak.revision === undefined
+      || session.integrationStateRevision <= this.lastInputLineBreak.revision;
+  }
+
   hasUnverifiedUserSubmission(): boolean {
     return this.unverifiedUserSubmission;
   }
@@ -1222,6 +1234,14 @@ class TerminalControllerImpl implements TerminalController {
       return Promise.resolve(false);
     }
     if (!this.canWriteUserInput()) return Promise.resolve(false);
+    if (/[\r\n\u0003]/.test(data)) {
+      // Do not parse shell syntax to decide whether Enter completed a command.
+      // Only a newer, trusted prompt event confirms that no accepted
+      // continuation lines remain. Ctrl+U and ordinary PTY output cannot do so.
+      const session = useTerminalStore.getState().sessions.find(item => item.sessionId === this.sessionId);
+      this.lastInputLineBreak = { terminalSessionId: session?.terminalSessionId,
+        generation: session?.terminalGeneration, revision: session?.integrationStateRevision };
+    }
     this.trackUserInput(data);
     return this.writeInput(data).then(() => true);
   }
@@ -1329,6 +1349,7 @@ class TerminalControllerImpl implements TerminalController {
     }
     this.pendingOutputCharacters = 0;
     this.pendingUserInputText = '';
+    this.lastInputLineBreak = null;
     this.unverifiedUserSubmission = false;
     this.recentOutputTail = '';
     this.userInputSuppressions = 0;

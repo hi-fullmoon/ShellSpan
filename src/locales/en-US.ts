@@ -1319,6 +1319,8 @@ export default {
   'terminal.menu.source': 'Terminal: {target}',
   'terminal.menu.revealPath': 'Reveal in file manager',
   'terminal.menu.clearScreen': 'Clear screen',
+  'terminal.menu.clearUnavailable': 'Cannot safely clear the screen: the complete shell editing region is unknown. All content has been preserved.',
+  'terminal.menu.clearBlocked': 'Cannot clear the terminal now. Retry when the shell is ready and no Agent owns the terminal.',
   'terminal.menu.clearHistory': 'Clear scrollback…',
   'terminal.menu.clearHistoryDescription': 'Clear this terminal’s scrollback history. This cannot be undone. The current screen will be preserved.',
   'terminal.menu.reconnect': 'Reconnect',
