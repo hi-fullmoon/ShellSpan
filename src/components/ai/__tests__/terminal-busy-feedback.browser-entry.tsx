@@ -5,6 +5,7 @@ import { useAppStore } from '@/stores/appStore';
 import type { Locale } from '@/types';
 import { AgentTerminalBusyNotice } from '../agent-terminal-busy-notice';
 import { AiComposerSeat } from '../workspace/ai-composer-seat';
+import { AiWorkspaceRoot } from '../workspace/ai-workspace-root';
 import '@/styles/base.css';
 import '../styles/styles.css';
 
@@ -38,6 +39,17 @@ export function show(state: FeedbackState) {
           state={state.state} blockedAttempt={state.blockedAttempt} disabled={Boolean(state.locked)}
           onSwitchDirect={() => { document.body.dataset.switched = 'true'; }} />}
       />
+    </main>,
+  ));
+}
+
+export function showContention(blocked: boolean) {
+  flushSync(() => root.render(
+    <main className="ai-panel-shell h-dvh min-h-0" data-ai-scope="terminal">
+      <AiWorkspaceRoot view={null} scope="terminal" canStartAgent defaultDraft="hello"
+        terminalConflict={blocked}
+        agentUnavailableReason={blocked ? t('terminal.occupancy.submitBlocked') : null}
+        onSubmit={({ content }) => { document.body.dataset.contentionSent = content; }} />
     </main>,
   ));
 }

@@ -125,6 +125,7 @@ export interface AiSessionController {
   readonly modelLabel: string;
   readonly canStartAgent: boolean;
   readonly agentUnavailableReason: string | null;
+  readonly terminalConflict: boolean;
   readonly historyScopeLabel: string | null;
   readonly readOnlySession: boolean;
   readonly historicalTargetUnavailable: boolean;
@@ -1221,7 +1222,12 @@ export function useAiSessionController({
     useFocusStore.getState().setConversation(openedSessionId);
   }, [focusMode, composer.phase, composer.pendingSubmissions.length, settingsBusy, imageDraft.busy, historicalContinuationBusy, openedSessionId, view, activeTerminal]);
   useEffect(() => () => { if (focusMode) useFocusStore.getState().setBusy(false); }, [focusMode]);
-  const agentUnavailableReason = visibleExecutionRequired ? t('focus.visibleRequired') : oneShotSubagent
+  const selectedExecutionSurface = focusMode ? 'boundTerminal' : canContinueHistoricalView ? newExecutionSurface
+    : visibleView?.snapshot.value.header.executionSurface ?? newExecutionSurface;
+  const terminalOccupancy = useSyncExternalStore(agentTerminalLeaseState.subscribe, () => agentTerminalLeaseState.get(activeTerminalId));
+  const terminalConflict = scope === 'terminal' && selectedExecutionSurface === 'boundTerminal'
+    && Boolean(terminalOccupancy && terminalOccupancy.agentSessionId !== (visibleView?.summary.id ?? composer.sessionId));
+  const agentUnavailableReason = terminalConflict ? t('terminal.occupancy.submitBlocked') : visibleExecutionRequired ? t('focus.visibleRequired') : oneShotSubagent
     ? t('ai.workspace.subagents.oneShotReadOnly')
     : canContinueHistoricalView ? terminalUnavailableReason
       : sessionProviderResolution.error
@@ -1706,10 +1712,12 @@ export function useAiSessionController({
     ? visibleView.snapshot.value : null;
 
   const terminalInsertions = useAiDraftStore(state => state.terminalInsertions);
-  const terminalOccupancy = useSyncExternalStore(agentTerminalLeaseState.subscribe, () => agentTerminalLeaseState.get(activeTerminalId));
   useEffect(() => {
-    if (!terminalOccupancy && composer.lastError?.message === 'TERMINAL_AGENT_CONFLICT') dispatch({ type: 'error.dismissed' });
-  }, [composer.lastError, dispatch, terminalOccupancy]);
+    if (composer.lastError?.message === 'TERMINAL_AGENT_CONFLICT'
+      && (terminalConflict || !terminalOccupancy || terminalOccupancy.agentSessionId === (visibleView?.summary.id ?? composer.sessionId))) {
+      dispatch({ type: 'error.dismissed' });
+    }
+  }, [composer.lastError, composer.sessionId, dispatch, terminalConflict, terminalOccupancy, visibleView?.summary.id]);
   const taskRequest = useTerminalTaskNavigation(state => state.request);
   useEffect(() => {
     if (!taskRequest || scope !== 'terminal' || workspaceChanging
@@ -1791,8 +1799,7 @@ export function useAiSessionController({
         ? useAgentPermissionStore.getState().getMode(activeTerminal.sessionId)
         : preferredAgentPermission
       : permissionModeForUi(visibleView.snapshot.value.header.permissionMode),
-    selectedExecutionSurface: focusMode ? 'boundTerminal' : canContinueHistoricalView ? newExecutionSurface : visibleView?.snapshot.value.header.executionSurface
-      ?? newExecutionSurface,
+    selectedExecutionSurface,
     settingsBusy,
     selectModel: (provider) => changeSettings(async (sessionId) => {
       if (!adapter.selectModel) throw new Error('Model selection is unavailable');
@@ -1839,6 +1846,7 @@ export function useAiSessionController({
       ?? provider?.model ?? '',
     canStartAgent,
     agentUnavailableReason,
+    terminalConflict,
     historyScopeLabel: scope === 'terminal' && activeTerminal
       ? terminalLoginLabel(activeTerminal) : null,
     readOnlySession,
@@ -1871,8 +1879,7 @@ export function useAiSessionController({
     submit: (gesture, accelerated = false) => {
       const owner = agentTerminalLeaseState.get(activeTerminal?.sessionId ?? null);
       const ownSession = viewRef.current?.summary.id ?? composerRef.current.sessionId;
-      const surface = viewRef.current?.snapshot.value.header.executionSurface ?? newExecutionSurface;
-      if (scope === 'terminal' && (focusMode || surface === 'boundTerminal') && owner && owner.agentSessionId !== ownSession) {
+      if (scope === 'terminal' && selectedExecutionSurface === 'boundTerminal' && owner && owner.agentSessionId !== ownSession) {
         dispatch({ type: 'error.reported', error: { kind: 'conflict', message: 'TERMINAL_AGENT_CONFLICT', retryable: true } });
         return;
       }

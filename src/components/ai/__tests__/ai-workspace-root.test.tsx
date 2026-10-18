@@ -84,6 +84,38 @@ beforeEach(async () => {
 
 afterEach(() => cleanup());
 
+it('warns and blocks pointer and keyboard submission during terminal contention, then preserves the draft for manual sending', async () => {
+  const user = userEvent.setup();
+  const sent: string[] = [];
+  const props = {
+    view: null,
+    scope: 'terminal' as const,
+    canStartAgent: true,
+    defaultDraft: 'hello',
+    onSubmit: ({ content }: { content: string }) => { sent.push(content); },
+  };
+  const { container, rerender } = render(<AiWorkspaceRoot {...props}
+    terminalConflict agentUnavailableReason="Another Agent owns the terminal" />);
+  const warning = await screen.findByRole('status', { name: 'Agent is unavailable' });
+  expect(warning).toHaveTextContent('Another Agent owns the terminal');
+  expect(warning).toHaveClass('text-app-warning');
+  const send = container.querySelector<HTMLButtonElement>('.ai-composer-primary')!;
+  expect(send).toBeDisabled();
+  await user.click(send);
+  const editor = screen.getByRole('textbox');
+  await user.click(editor);
+  await user.keyboard('{Enter}');
+  expect(sent).toEqual([]);
+  expect(editor).toHaveTextContent('hello');
+  rerender(<AiWorkspaceRoot {...props} />);
+  expect(screen.queryByText('Another Agent owns the terminal')).not.toBeInTheDocument();
+  expect(send).toBeEnabled();
+  expect(sent).toEqual([]);
+  expect(editor).toHaveTextContent('hello');
+  await user.click(send);
+  expect(sent).toEqual(['hello']);
+});
+
 describe('AiWorkspaceRoot Phase 3 skeleton', () => {
   it.each(['zh-CN', 'en-US'] as const)('keeps the Agent header consistent with terminal availability in %s', async locale => {
     useAppStore.setState({ locale });

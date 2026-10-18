@@ -133,6 +133,7 @@ export function AiWorkspaceController({
       renameError={controller.renameError}
       canStartAgent={controller.canStartAgent}
       agentUnavailableReason={controller.agentUnavailableReason}
+      terminalConflict={controller.terminalConflict}
       historyScopeLabel={controller.historyScopeLabel}
       terminalConnected={activeTerminalStatus === 'connected'}
       readOnlySession={controller.readOnlySession}

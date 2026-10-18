@@ -88,6 +88,30 @@ try {
     assert.equal(await notice.count(), 0, 'Reconnected terminal activity stays silent');
     await show({ state: 'unavailable' });
     assert.ok((await notice.textContent()).includes(labels.unavailable), 'Unavailable state is distinct and immediate');
+    const showContention = blocked => page.evaluate(async blocked => {
+      const entry = await import('/src/components/ai/__tests__/terminal-busy-feedback.browser-entry.tsx');
+      entry.showContention(blocked);
+    }, blocked);
+    await showContention(true);
+    const warning = page.locator('[data-slot="ai-workspace-status-notices"] [role="status"]');
+    await warning.waitFor();
+    assert.equal(await warning.evaluate(el => el.classList.contains('text-app-warning')), true);
+    const send = page.locator('.ai-composer-primary');
+    assert.equal(await send.isDisabled(), true, 'Contention disables sending before a submission');
+    await page.locator('[data-composer-editor]').press('Enter');
+    assert.equal(await page.evaluate(() => document.body.dataset.contentionSent), undefined);
+    for (const width of [960, 420, 320]) {
+      await page.setViewportSize({ width, height: 640 });
+      assert.equal(await warning.evaluate(el => el.scrollWidth <= el.clientWidth), true, `Contention warning fits at ${width}px`);
+      await page.screenshot({ path: `/tmp/shellspan-contention-warning-${locale}-${width}.png` });
+    }
+    await showContention(false);
+    assert.equal(await warning.count(), 0, 'Release clears the warning');
+    assert.equal(await send.isEnabled(), true, 'Release restores manual sending');
+    assert.equal(await page.evaluate(() => document.body.dataset.contentionSent), undefined, 'Release must not automatically send the draft');
+    assert.equal(await page.locator('[data-composer-editor]').innerText(), 'hello');
+    await send.click();
+    assert.equal(await page.evaluate(() => document.body.dataset.contentionSent), 'hello');
     assert.deepEqual(errors, []);
     await page.close();
   }

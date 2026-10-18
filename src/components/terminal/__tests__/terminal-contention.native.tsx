@@ -186,8 +186,10 @@ async function verify() {
     }
     const draftB = prompt(markerB, 0);
     await setDraft(true, draftB);
-    submitDraft(true);
-    await eventually(() => workspaceRoot(true)?.textContent?.includes(t('terminal.occupancy.conflict')) === true, 'Focus submit must display conflict in the production composer');
+    await eventually(() => workspaceRoot(true)?.textContent?.includes(t('terminal.occupancy.submitBlocked')) === true, 'Focus must warn before a conflicting submission');
+    const blockedSubmit = workspaceRoot(true)?.querySelector<HTMLButtonElement>('.ai-composer-primary');
+    assert(blockedSubmit?.disabled, 'Focus must disable sending while another Agent owns the terminal');
+    blockedSubmit.click();
     assert(draftText(true) === draftB, 'Rejected Focus submit must retain its full draft');
     const retryId = crypto.randomUUID();
     let rejected = false;
@@ -209,6 +211,9 @@ async function verify() {
     const before = await invokeGetAgentRuntimeSession({ sessionId: ids[1] });
     assert(before.inbox.nextTurn.length === 0 && before.inbox.nextStep.length === 0, 'Rejected input must not be queued');
     flushSync(() => useFocusStore.getState().enter());
+    await eventually(() => !workspaceRoot(true)?.textContent?.includes(t('terminal.occupancy.submitBlocked'))
+      && workspaceRoot(true)?.querySelector<HTMLButtonElement>('.ai-composer-primary')?.disabled === false,
+    'Focus must restore manual sending after terminal ownership is released');
     assert(draftText(true) === draftB, 'Focus must retain the rejected draft until explicit retry');
     submitDraft(true);
     await eventually(async () => {

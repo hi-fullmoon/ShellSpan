@@ -755,6 +755,7 @@ export default {
   'terminal.occupancy.viewTask': '查看任务',
   'terminal.occupancy.released': '终端占用已解除。请检查当前终端状态，再手动重试；未发送的消息不会自动执行。',
   'terminal.occupancy.conflict': '终端正由另一个 Agent 任务占用，消息未发送。请查看占用任务，或在占用解除后检查终端状态并手动重试。',
+  'terminal.occupancy.submitBlocked': '终端正由另一个 Agent 任务占用，暂时无法发送。请在终端顶部查看任务或停止并接管，待占用解除后手动发送。',
   'terminal.occupancy.navigationBlocked': '当前专注任务尚未结束，无法切换目标终端。请先停止当前任务。',
   'terminal.occupancy.openFailed': '无法打开占用任务，请刷新后重试。',
   'terminal.agentLease.inputBlockedLabel': 'Agent 正在占用此终端',

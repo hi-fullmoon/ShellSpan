@@ -1,5 +1,5 @@
 import { Activity, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { CircleAlertIcon, InfoIcon, MessageCircleQuestionIcon } from 'lucide-react';
+import { CircleAlertIcon, InfoIcon, MessageCircleQuestionIcon, TriangleAlertIcon } from 'lucide-react';
 import { ShellSpanGlyph } from '@/components/brand/shellspan-mark';
 import { Spinner } from '@/components/ui/spinner';
 import { Button } from '@/components/ui/button';
@@ -263,6 +263,7 @@ export interface AiWorkspaceRootProps {
   readonly renameError?: string | null;
   readonly canStartAgent?: boolean;
   readonly agentUnavailableReason?: string | null;
+  readonly terminalConflict?: boolean;
   readonly historyScopeLabel?: string | null;
   readonly terminalConnected?: boolean;
   readonly readOnlySession?: boolean;
@@ -352,6 +353,7 @@ export function AiWorkspaceRoot({
   renameError = null,
   canStartAgent = false,
   agentUnavailableReason: rawAgentUnavailableReason = null,
+  terminalConflict = false,
   historyScopeLabel = null,
   terminalConnected = canStartAgent,
   readOnlySession = false,
@@ -704,17 +706,17 @@ export function AiWorkspaceRoot({
                   </Alert>
                 )}
                 {(agentUnavailableReason || onContinueOnReconnectedTerminal) && (
-                  <Alert id={availabilityHintId} variant="info" size="sm" role="status" aria-label={t('agent.availability.title')} className="[&:has(button)>svg]:translate-y-1">
-                    <InfoIcon aria-hidden="true" />
+                  <Alert id={availabilityHintId} variant={terminalConflict ? 'warning' : 'info'} size="sm" role="status" aria-label={t('agent.availability.title')} className="[&:has(button)>svg]:translate-y-1">
+                    {terminalConflict ? <TriangleAlertIcon aria-hidden="true" /> : <InfoIcon aria-hidden="true" />}
                     <AlertDescription className="flex min-w-0 flex-wrap items-start gap-1 break-words [&:has(>button)>span]:py-1">
                       <span className="min-w-0 flex-1 basis-48">{agentUnavailableReason
                         ?? t('ai.workspace.sessions.previousTerminalReadOnly')}</span>
-                      {onReconnectTerminal ? <Button type="button" variant="ghost" size="xs" className="text-[11px]"
+                      {!terminalConflict && (onReconnectTerminal ? <Button type="button" variant="ghost" size="xs" className="text-[11px]"
                         onClick={onReconnectTerminal}>{t('ai.workspace.status.reconnect')}</Button>
                         : onContinueOnReconnectedTerminal ? <Button type="button" variant="ghost" size="xs" className="text-[11px]"
                         onClick={onContinueOnReconnectedTerminal}>{t('ai.workspace.continueOnReconnectedTerminal')}</Button>
                         : !readOnlySession && canStartAgent && onOpenModel && <Button type="button" variant="ghost" size="xs" className="text-[11px]"
-                          onClick={onOpenModel}>{t('ai.workspace.status.openSettings')}</Button>}
+                          onClick={onOpenModel}>{t('ai.workspace.status.openSettings')}</Button>)}
                     </AlertDescription>
                   </Alert>
                 )}

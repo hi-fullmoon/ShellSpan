@@ -755,6 +755,7 @@ export default {
   'terminal.occupancy.viewTask': 'View task',
   'terminal.occupancy.released': 'The terminal has been released. Check its current state and retry manually. Unsent messages will not run automatically.',
   'terminal.occupancy.conflict': 'Another Agent task owns this terminal. Your message was not sent. View the task, or check the terminal state and retry manually after it is released.',
+  'terminal.occupancy.submitBlocked': 'Another Agent task owns this terminal. Sending is unavailable. View the task or stop and take over from the terminal header, then send manually after it is released.',
   'terminal.occupancy.navigationBlocked': 'Stop the current Focus task before switching its target terminal.',
   'terminal.occupancy.openFailed': 'Unable to open the owning task. Refresh and try again.',
   'terminal.agentLease.inputBlockedLabel': 'Agent owns this terminal',
