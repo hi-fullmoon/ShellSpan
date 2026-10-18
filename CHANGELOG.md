@@ -2,6 +2,19 @@
 
 Notable changes to ShellSpan from v2.1.0 onward are documented in this file.
 
+## [v2.4.4](https://github.com/hi-fullmoon/ShellSpan/releases/tag/v2.4.4) - 2026-10-18
+
+### 问题修复
+
+- 修复 Bash 终端连续按回车时可能产生额外空行的问题，并保留命令原始输出。
+- 修复终端清屏时提示符或正在输入的内容丢失的问题；清屏成功后同时取消文本选区。
+- 改善 Bash 提示符的终端模式恢复，保留自定义提示符、信号处理和作业控制语义，并规避 macOS 旧版 Bash 中内部终端设置操作的进程组竞争。
+- 修复 macOS Bash 3.2 在没有自定义 INT 处理器时按 Ctrl+C 可能继续保留当前输入、无法返回新提示符的问题。
+
+### 升级注意事项
+
+- Bash 输入与提示符修复适用于新建的本地及 SSH 终端，现有会话需要重新打开或重新连接后生效。
+
 ## [v2.4.3](https://github.com/hi-fullmoon/ShellSpan/releases/tag/v2.4.3) - 2026-10-18
 
 ### 问题修复
