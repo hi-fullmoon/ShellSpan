@@ -105,66 +105,13 @@ describe('ConnectionList', () => {
     expect(screen.getByLabelText('connection.form.auth.key').parentElement).not.toHaveClass('shrink-0');
   });
 
-  it('sorts filtered results, displays readable labels, and remembers the choice after remount', async () => {
-    const profiles = [
-      makeProfile({ id: 'z', name: 'Zulu', favorite: true, group: 'team' }),
-      makeProfile({ id: 'a', name: 'Alpha', favorite: true, group: 'team' }),
-      makeProfile({ id: 'b', name: 'Beta', group: 'other' }),
-    ];
-    const props = { profiles, initialized: true, onAdd() {}, onEdit() {}, onDelete() {},
-      onConnectTerminal() {}, onConnectSftp() {}, onDuplicate() {}, onToggleFavorite() {}, onImport() {}, onExport() {} };
-    const view = render(<ConnectionList {...props} />);
-    const names = () => Array.from(view.container.querySelectorAll('[data-connection-text="name"]')).map(el => el.textContent);
-    const trigger = () => screen.getByRole('button', { name: 'workbench.connections.sortLabel' });
-    expect(names()).toEqual(['Zulu', 'Alpha', 'Beta']);
-    expect(trigger()).toHaveAttribute('aria-description', 'workbench.connections.sort.default');
-    expect(trigger()).toHaveClass('size-8', 'bg-secondary');
-    expect(trigger()).toHaveTextContent('');
-    expect(trigger().querySelector('.lucide-list')).toBeInTheDocument();
-    await userEvent.click(trigger());
-    const optionIcons = [
-      ['default', 'lucide-list'], ['name', 'lucide-arrow-down-a-z'],
-      ['recent', 'lucide-history'], ['created', 'lucide-calendar-plus'],
-    ];
-    for (const [mode, iconClass] of optionIcons) {
-      const option = await screen.findByRole('menuitemradio', { name: `workbench.connections.sort.${mode}` });
-      expect(option.querySelector(`.${iconClass}`)).toBeInTheDocument();
-    }
-    expect(await screen.findByRole('menuitemradio', { name: 'workbench.connections.sort.default' })).toHaveAttribute('aria-checked', 'true');
-    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'workbench.connections.sort.name' }));
-    await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
-    expect(names()).toEqual(['Alpha', 'Beta', 'Zulu']);
-    expect(trigger().querySelector('.lucide-arrow-down-a-z')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'workbench.connections.filter.favorites' }));
-    expect(names()).toEqual(['Alpha', 'Zulu']);
-    fireEvent.click(screen.getByRole('button', { name: 'workbench.connections.filter.all' }));
-    await userEvent.click(screen.getByRole('combobox', { name: 'workbench.connections.groupFilter' }));
-    await userEvent.click(await screen.findByRole('option', { name: 'team' }));
-    expect(names()).toEqual(['Alpha', 'Zulu']);
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Alpha' } });
-    expect(names()).toEqual(['Alpha']);
-    view.unmount();
-    const restored = render(<ConnectionList {...props} />);
-    expect(trigger()).toHaveAttribute('aria-description', 'workbench.connections.sort.name');
-    expect(Array.from(restored.container.querySelectorAll('[data-connection-text="name"]')).map(el => el.textContent)).toEqual(['Alpha', 'Beta', 'Zulu']);
-    await userEvent.click(trigger());
-    expect(await screen.findByRole('menuitemradio', { name: 'workbench.connections.sort.name' })).toHaveAttribute('aria-checked', 'true');
-    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'workbench.connections.sort.default' }));
-    expect(Array.from(restored.container.querySelectorAll('[data-connection-text="name"]')).map(el => el.textContent)).toEqual(['Zulu', 'Alpha', 'Beta']);
-  });
-
-  it.each([
-    ['default', 'lucide-list', ['Zulu', 'Alpha', 'Beta']],
-    ['name', 'lucide-arrow-down-a-z', ['Alpha', 'Beta', 'Zulu']],
-    ['recent', 'lucide-history', ['Zulu', 'Beta', 'Alpha']],
-    ['created', 'lucide-calendar-plus', ['Alpha', 'Beta', 'Zulu']],
-  ] as const)('restores %s sorting with its icon and preserves exact connection action targets', async (mode, icon, expected) => {
+  it.each(['default', 'name', 'recent', 'created'] as const)('ignores saved %s sorting and keeps filtering in profile order', async (mode) => {
     saveConnectionSort(mode);
-    useRecentProfilesStore.setState({ recentIds: ['z', 'b'] });
+    useRecentProfilesStore.setState({ recentIds: ['a', 'z'] });
     const profiles = [
-      makeProfile({ id: 'z', name: 'Zulu', createdAt: 10 }),
-      makeProfile({ id: 'a', name: 'Alpha', createdAt: 30 }),
-      makeProfile({ id: 'b', name: 'Beta', createdAt: 20 }),
+      makeProfile({ id: 'z', name: 'Zulu', favorite: true, group: 'team', createdAt: 10 }),
+      makeProfile({ id: 'a', name: 'Alpha', favorite: true, group: 'team', createdAt: 30 }),
+      makeProfile({ id: 'b', name: 'Beta', group: 'other', createdAt: 20 }),
     ];
     const onConnectTerminal = vi.fn();
     const onConnectSftp = vi.fn();
@@ -174,23 +121,23 @@ describe('ConnectionList', () => {
       onToggleFavorite={() => {}} onImport={() => {}} onExport={() => {}}
     />);
     const names = () => Array.from(container.querySelectorAll('[data-connection-text="name"]')).map(el => el.textContent);
-    const trigger = screen.getByRole('button', { name: 'workbench.connections.sortLabel' });
-    expect(trigger.querySelector(`.${icon}`)).toBeInTheDocument();
-    expect(names()).toEqual(expected);
-    const first = profiles.find(profile => profile.name === expected[0]);
+    expect(screen.queryByRole('button', { name: 'workbench.connections.sortLabel' })).not.toBeInTheDocument();
+    expect(names()).toEqual(['Zulu', 'Alpha', 'Beta']);
+    expect(screen.getByRole('combobox', { name: 'workbench.connections.groupFilter' })).toHaveClass('ml-auto');
     fireEvent.click(screen.getAllByRole('button', { name: 'workbench.connections.connectTerminal' })[0]);
     fireEvent.click(screen.getAllByRole('button', { name: 'workbench.connections.connectSftp' })[0]);
-    expect(onConnectTerminal).toHaveBeenCalledWith(first);
-    expect(onConnectSftp).toHaveBeenCalledWith(first);
-    expect(profiles.map(profile => profile.name)).toEqual(['Zulu', 'Alpha', 'Beta']);
-    if (mode === 'recent') {
-      act(() => useRecentProfilesStore.setState({ recentIds: ['a', 'z', 'b'] }));
-      expect(names()).toEqual(['Alpha', 'Zulu', 'Beta']);
-      fireEvent.click(screen.getByRole('button', { name: 'workbench.connections.filter.recent' }));
-      expect(names()).toEqual(['Alpha', 'Zulu', 'Beta']);
+    expect(onConnectTerminal).toHaveBeenCalledWith(profiles[0]);
+    expect(onConnectSftp).toHaveBeenCalledWith(profiles[0]);
+    for (const filter of ['favorites', 'recent']) {
+      fireEvent.click(screen.getByRole('button', { name: `workbench.connections.filter.${filter}` }));
+      expect(names()).toEqual(['Zulu', 'Alpha']);
     }
-    await userEvent.click(trigger);
-    expect(await screen.findByRole('menuitemradio', { name: `workbench.connections.sort.${mode}` })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'workbench.connections.filter.all' }));
+    await userEvent.click(screen.getByRole('combobox', { name: 'workbench.connections.groupFilter' }));
+    await userEvent.click(await screen.findByRole('option', { name: 'team' }));
+    expect(names()).toEqual(['Zulu', 'Alpha']);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Alpha' } });
+    expect(names()).toEqual(['Alpha']);
   });
 
   it('keeps every advertised search field searchable without changing the selected profile', () => {

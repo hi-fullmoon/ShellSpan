@@ -12,8 +12,6 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -25,7 +23,6 @@ import { PortForwardDialog } from './port-forward-dialog';
 import { HostQuickActionsDialog } from './host-quick-actions-dialog';
 import type { ConnectionProfile } from '@/types';
 import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
-import { CONNECTION_SORT_MODES, isConnectionSortMode, readConnectionSort, saveConnectionSort, sortConnections } from '@/lib/connections/connection-sort';
 import { cn } from '@/lib/utils';
 import {
   CopyIcon,
@@ -47,20 +44,10 @@ import {
   ZapIcon,
   KeyRoundIcon,
   LockKeyholeIcon,
-  ListIcon,
-  ArrowDownAZIcon,
-  HistoryIcon,
-  CalendarPlusIcon,
 } from 'lucide-react';
 import { WorkbenchPage, WorkbenchPageContent, WorkbenchPageHeader, WorkbenchSearchInput, WorkbenchPageToolbar } from './workbench-page';
 
 const CARD_ACTION_DEBOUNCE_MS = 500;
-const SORT_ICONS = {
-  default: ListIcon,
-  name: ArrowDownAZIcon,
-  recent: HistoryIcon,
-  created: CalendarPlusIcon,
-} as const;
 // Keep column changes in the same layout pass as AI-panel resizing.
 export const ConnectionCardGrid = ({ children }: { children: React.ReactNode }) => (
   <div className="@container/connections w-full">
@@ -102,9 +89,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
   onImport,
   onExport,
 }) => {
-  const { t, locale } = useI18n();
-  const [sortMode, setSortMode] = useState(readConnectionSort);
-  const SortIcon = SORT_ICONS[sortMode];
+  const { t } = useI18n();
   const [query, setQuery] = useState('');
   const [activityFilter, setActivityFilter] = useState<'all' | 'favorites' | 'recent'>('all');
   const [groupFilter, setGroupFilter] = useState('all');
@@ -112,7 +97,6 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
   const [forwardProfile, setForwardProfile] = useState<ConnectionProfile>();
   const [quickActionProfile, setQuickActionProfile] = useState<ConnectionProfile>();
   const recentIds = useRecentProfilesStore((state) => state.recentIds);
-  const sortItems = CONNECTION_SORT_MODES.map(value => ({ value, label: t(`workbench.connections.sort.${value}`) }));
 
   const groups = useMemo(
     () =>
@@ -147,10 +131,6 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
       return true;
     });
   }, [profiles, normalizedQuery, activityFilter, groupFilter, recentIds]);
-  const sortedProfiles = useMemo(
-    () => sortConnections(filteredProfiles, sortMode, recentIds, locale),
-    [filteredProfiles, sortMode, recentIds, locale],
-  );
 
   useEffect(() => {
     const handleOpenHostTool = (event: Event): void => {
@@ -234,41 +214,9 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
                 {t(`workbench.connections.filter.${filter}`)}
               </Button>
             ))}
-            <div className="ml-auto inline-flex shrink-0">
-              <DropdownMenu>
-                <Tooltip>
-                  <TooltipTrigger render={
-                    <DropdownMenuTrigger render={
-                      <Button variant="secondary" size="icon-sm"
-                        className="focus-visible:bg-accent data-popup-open:bg-accent"
-                        aria-label={t('workbench.connections.sortLabel')}
-                        aria-description={t(`workbench.connections.sort.${sortMode}`)} />
-                    } />
-                  }>
-                    <SortIcon aria-hidden />
-                  </TooltipTrigger>
-                  <TooltipContent>{t('workbench.connections.sortLabel')} · {t(`workbench.connections.sort.${sortMode}`)}</TooltipContent>
-                </Tooltip>
-                <DropdownMenuContent align="end" className="w-max">
-                  <DropdownMenuRadioGroup value={sortMode} onValueChange={(value) => {
-                    if (!isConnectionSortMode(value)) return;
-                    setSortMode(value);
-                    saveConnectionSort(value);
-                  }}>
-                    {sortItems.map(item => {
-                      const Icon = SORT_ICONS[item.value];
-                      return <DropdownMenuRadioItem key={item.value} value={item.value} closeOnClick>
-                        <Icon aria-hidden />
-                        {item.label}
-                      </DropdownMenuRadioItem>;
-                    })}
-                  </DropdownMenuRadioGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
             {groups.length > 0 && (
               <Select value={groupFilter} onValueChange={(value) => setGroupFilter(value ?? 'all')}>
-                <SelectTrigger size="sm" className="w-40" aria-label={t('workbench.connections.groupFilter')}>
+                <SelectTrigger size="sm" className="ml-auto w-40" aria-label={t('workbench.connections.groupFilter')}>
                   <SelectValue>{groupFilter === 'all' ? t('workbench.connections.allGroups') : groupFilter}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
@@ -304,7 +252,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
               />
             ) : (
               <ConnectionCardGrid>
-                {sortedProfiles.map((profile) => (
+                {filteredProfiles.map((profile) => (
                   <ConnectionCard
                     key={profile.id}
                     profile={profile}
