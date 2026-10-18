@@ -32,6 +32,14 @@ after Readline has returned the cursor to column zero. Raw output is never strip
 of empty lines. The shared bootstrap applies this behavior to newly opened local
 and SSH Bash sessions. Already running sessions need to be reopened or reconnected.
 
+Private `stty` maintenance runs via `exec` in command-substitution children that
+inherit the shell's process group, instead of creating short-lived foreground
+jobs. This avoids the parent/child `setpgid` race observed with macOS Bash 3.2
+without changing the user's `monitor` option or the process groups of user jobs.
+Existing `PROMPT_COMMAND` callbacks retain their original execution semantics;
+their own external foreground commands can still encounter the upstream race.
+Those diagnostics are not filtered or hidden by ShellSpan.
+
 ## Connection deadlines
 
 “Open terminal here” supplies an optional `initialDirectory` in the session

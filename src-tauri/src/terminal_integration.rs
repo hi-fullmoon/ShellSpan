@@ -489,9 +489,19 @@ __shellspan_previous_exit_trap=$(trap -p EXIT)
 __shellspan_previous_int_trap=$(trap -p INT)
 __shellspan_exit_trap=
 __shellspan_int_trap=
+__shellspan_stty() {{
+  local __shellspan_stty_output __shellspan_stty_status=0
+  # In Bash 3, launching a short foreground job races the parent's setpgid
+  # with the child's redundant call on macOS. Command substitution keeps this
+  # private helper in the shell's group; exec avoids another Bash child job.
+  # User commands, prompt hooks and their monitor setting remain untouched.
+  __shellspan_stty_output=$(exec stty "$@" </dev/tty) || __shellspan_stty_status=$?
+  builtin printf '%s' "$__shellspan_stty_output"
+  return "$__shellspan_stty_status"
+}}
 __shellspan_restore_prompt_tty() {{
   if [[ ${{#__shellspan_prompt_tty_state[@]}} -ne 0 ]]; then
-    if command stty "${{__shellspan_prompt_tty_state[@]}}" </dev/tty 2>/dev/null; then
+    if __shellspan_stty "${{__shellspan_prompt_tty_state[@]}}" 2>/dev/null; then
       __shellspan_prompt_tty_state=()
     fi
   fi
@@ -536,7 +546,7 @@ __shellspan_guard_prompt_tty() {{
   fi
   if [[ ${{#__shellspan_prompt_tty_state[@]}} -eq 0 ]]; then
     local __shellspan_tty_settings __shellspan_flag __shellspan_pattern __shellspan_readline_settings
-    __shellspan_tty_settings=$(command stty -a </dev/tty 2>/dev/null) || return
+    __shellspan_tty_settings=$(__shellspan_stty -a 2>/dev/null) || return
     for __shellspan_flag in icrnl echoctl; do
       __shellspan_pattern="(^|[[:space:];])${{__shellspan_flag}}([[:space:];]|$)"
       if [[ $__shellspan_tty_settings =~ $__shellspan_pattern ]]; then
@@ -559,7 +569,7 @@ __shellspan_guard_prompt_tty() {{
       __shellspan_prompt_interrupt_label=${{BASH_REMATCH[2]}}
     fi
   fi
-  command stty -icrnl -echoctl </dev/tty 2>/dev/null || __shellspan_restore_prompt_tty
+  __shellspan_stty -icrnl -echoctl 2>/dev/null || __shellspan_restore_prompt_tty
   # User commands may replace or remove traps. Reconcile at every prompt,
   # preserving the newest handler rather than only the startup profile's trap.
   local __shellspan_current_trap

@@ -1206,6 +1206,19 @@
         run_bash_repeated_enter_acceptance(false, true);
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_bash_concurrent_prompt_helpers_preserve_job_control() {
+        for _ in 0..3 {
+            let workers: Vec<_> = (0..4)
+                .map(|_| thread::spawn(|| run_bash_keyboard_acceptance(false, true, "")))
+                .collect();
+            for worker in workers {
+                worker.join().unwrap();
+            }
+        }
+    }
+
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     #[ignore = "requires SHELLSPAN_ENTER_SSH_TARGET and existing SSH authentication"]
@@ -1222,6 +1235,17 @@
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn run_bash_repeated_enter_acceptance(remote: bool, remove_exit_trap: bool) {
+        // Keep the real settings change and slow hook without making the hook
+        // itself create foreground jobs subject to macOS Bash 3's setpgid race.
+        run_bash_keyboard_acceptance(
+            remote,
+            remove_exit_trap,
+            ": \"$(exec stty -ixon </dev/tty)\" \"$(exec sleep 0.01)\"",
+        );
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn run_bash_keyboard_acceptance(remote: bool, remove_exit_trap: bool, prompt_command: &str) {
         use portable_pty::{native_pty_system, PtySize};
         use std::io::Write;
         use std::sync::mpsc;
@@ -1231,9 +1255,12 @@
         let home = tempfile::tempdir().unwrap();
         // A real prompt command creates the same cooked-mode window as slow
         // profile hooks/control-channel writes, without changing transport data.
-        let profile = "PS1='enter-probe$ '; PROMPT_COMMAND='stty -ixon; sleep 0.01'\n\
-            trap 'status=$?; printf \"exit-mode-start\\n\"; stty -a; printf \"exit-mode-end\\nexit-status=%s\\nexit-arg=%s\\n\" \"$status\" \"$1\"' EXIT\n";
-        fs::write(home.path().join(".bash_profile"), profile).unwrap();
+        let profile = format!(
+            "PS1='enter-probe$ '; PROMPT_COMMAND={}\n\
+            trap 'status=$?; printf \"exit-mode-start\\n\"; stty -a; printf \"exit-mode-end\\nexit-status=%s\\nexit-arg=%s\\n\" \"$status\" \"$1\"' EXIT\n",
+            shell_single_quote(prompt_command)
+        );
+        fs::write(home.path().join(".bash_profile"), &profile).unwrap();
         let target = remote
             .then(|| std::env::var("SHELLSPAN_ENTER_SSH_TARGET").expect("SSH target required"));
         let mut remote_root = None;
@@ -1321,6 +1348,7 @@
                 }
             }
         });
+        let mut owned_job_group: Option<libc::pid_t> = None;
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut bytes = Vec::new();
             let receive_prompts = |bytes: &mut Vec<u8>, expected: usize| {
@@ -1372,10 +1400,12 @@
             assert!(contents.contains("EDIT:abc"), "{contents:?}");
             assert!(contents.contains("first\n\nlast"), "{contents:?}");
             let output = String::from_utf8_lossy(&bytes);
-            assert!(
-                output.contains("-ixon"),
-                "prompt hook settings were overwritten: {output:?}"
-            );
+            if !prompt_command.is_empty() {
+                assert!(
+                    output.contains("-ixon"),
+                    "prompt hook settings were overwritten: {output:?}"
+                );
+            }
             let major = regex::Regex::new(r"bash-major:(\d+)")
                 .unwrap()
                 .captures(&output)
@@ -1502,6 +1532,88 @@
             writer.write_all(b"set -o emacs\r").unwrap();
             writer.flush().unwrap();
             receive_prompts(&mut bytes, 152);
+            let mut final_prompt = 153;
+            if !remote {
+                let terminal_fd = pair.master.as_raw_fd().unwrap();
+                let shell_pid = child.process_id().unwrap() as libc::pid_t;
+                assert_eq!(
+                    unsafe { libc::tcgetpgrp(terminal_fd) },
+                    shell_pid,
+                    "the shell did not regain its terminal"
+                );
+                writer
+                    .write_all(b"/bin/sh -c 'printf \"JOB-READY:%s\\n\" \"$$\"; exec sleep 30'\r")
+                    .unwrap();
+                writer.flush().unwrap();
+                let ready = regex::Regex::new(r"JOB-READY:(\d+)").unwrap();
+                let deadline = Instant::now() + Duration::from_secs(15);
+                while !ready.is_match(&String::from_utf8_lossy(&bytes)) {
+                    bytes.extend(
+                        receiver
+                            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                            .unwrap(),
+                    );
+                }
+                let group = ready.captures(&String::from_utf8_lossy(&bytes)).unwrap()[1]
+                    .parse::<libc::pid_t>()
+                    .unwrap();
+                owned_job_group = Some(group);
+                assert_ne!(
+                    group, shell_pid,
+                    "foreground command shares the shell's process group"
+                );
+                assert_eq!(unsafe { libc::tcgetpgrp(terminal_fd) }, group);
+                writer.write_all(b"\x1a").unwrap();
+                writer.flush().unwrap();
+                receive_prompts(&mut bytes, 153);
+                writer.write_all(b"[[ -n $(jobs -s -p %+) ]] && printf 'JOB-STOPPED\\n'; bg %+; [[ -n $(jobs -r -p %+) ]] && printf 'JOB-BACKGROUND\\n'\r").unwrap();
+                writer.flush().unwrap();
+                receive_prompts(&mut bytes, 154);
+                let output = String::from_utf8_lossy(&bytes);
+                assert!(
+                    output.contains("JOB-STOPPED\r\n"),
+                    "Ctrl+Z did not stop the foreground job: {output:?}"
+                );
+                assert!(
+                    output.contains("JOB-BACKGROUND\r\n"),
+                    "bg did not resume the job: {output:?}"
+                );
+                writer.write_all(b"fg %+\r").unwrap();
+                writer.flush().unwrap();
+                let deadline = Instant::now() + Duration::from_secs(15);
+                while unsafe { libc::tcgetpgrp(terminal_fd) } != group {
+                    assert!(
+                        Instant::now() < deadline,
+                        "fg did not restore the job's terminal ownership"
+                    );
+                    thread::sleep(Duration::from_millis(5));
+                }
+                writer.write_all(b"\x03").unwrap();
+                writer.flush().unwrap();
+                receive_prompts(&mut bytes, 155);
+                writer.write_all(b"printf 'JOB-INT-status:%s\\n' \"$?\"; [[ -o monitor ]] && printf 'MONITOR-ON\\n'; set +m\r").unwrap();
+                writer.flush().unwrap();
+                receive_prompts(&mut bytes, 156);
+                writer
+                    .write_all(b"[[ ! -o monitor ]] && printf 'MONITOR-OFF\\n'; set -m\r")
+                    .unwrap();
+                writer.flush().unwrap();
+                receive_prompts(&mut bytes, 157);
+                let output = String::from_utf8_lossy(&bytes);
+                assert!(
+                    output.contains("JOB-INT-status:130\r\n"),
+                    "Ctrl+C failed after fg: {output:?}"
+                );
+                assert!(
+                    output.contains("MONITOR-ON\r\n"),
+                    "helpers disabled job control: {output:?}"
+                );
+                assert!(
+                    output.contains("MONITOR-OFF\r\n"),
+                    "helpers overrode the user's monitor setting: {output:?}"
+                );
+                final_prompt = 158;
+            }
             let final_command: &[u8] = if remove_exit_trap {
                 b"trap - EXIT; false\r"
             } else {
@@ -1509,7 +1621,7 @@
             };
             writer.write_all(final_command).unwrap();
             writer.flush().unwrap();
-            receive_prompts(&mut bytes, 153);
+            receive_prompts(&mut bytes, final_prompt);
             writer.write_all(b"\x04").unwrap();
             writer.flush().unwrap();
             let deadline = Instant::now() + Duration::from_secs(15);
@@ -1519,6 +1631,12 @@
                 bytes.extend(chunk);
             }
             let output = String::from_utf8_lossy(&bytes);
+            if prompt_command.is_empty() {
+                assert!(
+                    !output.contains("setpgid"),
+                    "internal prompt helpers triggered a process-group warning: {output:?}"
+                );
+            }
             if !remote {
                 let mut modes = std::mem::MaybeUninit::<libc::termios>::uninit();
                 // The owned master FD remains open after the shell exits.
@@ -1541,7 +1659,11 @@
                 );
                 assert_eq!(
                     modes.c_iflag & libc::IXON,
-                    0,
+                    if prompt_command.is_empty() {
+                        libc::IXON
+                    } else {
+                        0
+                    },
                     "prompt hook IXON setting was lost on EOF"
                 );
             }
@@ -1590,6 +1712,15 @@
                 "EOF exit status changed: {output:?}"
             );
         }));
+        if let Some(group) = owned_job_group {
+            // Reap only this fixture's job on assertion failure, without leaving
+            // a background process holding the PTY output reader open.
+            if unsafe { libc::getsid(group) } == child.process_id().unwrap() as libc::pid_t {
+                unsafe {
+                    libc::kill(-group, libc::SIGKILL);
+                }
+            }
+        }
         if child.try_wait().unwrap().is_none() {
             child.kill().unwrap();
         }
