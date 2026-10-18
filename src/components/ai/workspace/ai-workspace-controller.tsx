@@ -3,7 +3,6 @@ import { latestTerminalBusyAttempt } from '@/lib/ai/terminal-busy-feedback';
 import { useFocusStore } from '@/stores/focusStore';
 import { FocusNoTarget } from '@/components/focus/focus-no-target';
 import { FocusControls } from '@/components/focus/focus-controls';
-import { AgentTerminalOccupancyNotice } from '@/components/terminal/agent-terminal-occupancy-notice';
 import {
   terminalConnectionPresentationState,
 } from '@/lib/terminal/terminal-surface-semantics';
@@ -169,7 +168,6 @@ export function AiWorkspaceController({
           )
         : undefined}
       executionSurfaceNotice={<>
-        {scope === 'terminal' && controller.selectedExecutionSurface === 'boundTerminal' && <AgentTerminalOccupancyNotice sessionId={activeTerminalId} agentSessionId={controller.view?.summary.id ?? controller.composer.sessionId} />}
         {focusMode && activeTerminalStatus !== 'connected' ? <FocusNoTarget /> : scope === 'terminal' && activeTerminalStatus === 'connected' && realTerminalState !== 'ready'
         && controller.selectedExecutionSurface === 'boundTerminal' && !controller.readOnlySession
         ? <AgentTerminalBusyNotice

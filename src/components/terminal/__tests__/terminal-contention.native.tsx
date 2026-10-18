@@ -169,14 +169,16 @@ async function verify() {
       && agentTerminalLeaseState.get(terminalId!)?.terminalOwned === true, 'First Agent never acquired the real PTY', 180_000);
     assert(await invokeGetAgentTerminalOwner(terminalId) === ids[0], 'Backend owner differs from first Agent');
     await reportProgress('First real Agent owns the PTY; checking competing submission and task navigation.');
-    await eventually(() => document.querySelectorAll('[data-slot="ai-workspace-root"] [data-slot="terminal-occupancy-notice"]').length === 2, 'Both production workspaces must display terminal ownership');
+    await eventually(() => !!document.querySelector('[data-slot="focus-terminal"] [data-testid="agent-terminal-lease-bar"]'), 'Terminal header must display terminal ownership');
     for (const split of [0.3, 0.6]) {
       flushSync(() => useFocusStore.getState().setSplit(split));
       await new Promise(requestAnimationFrame);
       const panel = workspaceRoot(true);
-      const notice = panel?.querySelector<HTMLElement>('[data-slot="terminal-occupancy-notice"]');
       const terminal = document.querySelector<HTMLElement>('[data-slot="focus-terminal"]');
+      const notice = terminal?.querySelector<HTMLElement>('[data-testid="agent-terminal-lease-bar"]');
       assert(panel && notice && terminal, 'Production Focus panes are missing');
+      assert(!document.querySelector('[data-slot="ai-workspace-root"] [data-slot="terminal-occupancy-notice"]'), 'Composers must not repeat terminal ownership');
+      assert(!document.querySelector('[data-slot="ai-workspace-root"] [data-slot="terminal-occupancy-released"]'), 'Composers must not retain ownership release notices');
       assert(document.querySelector<HTMLElement>('[data-slot="focus-layout"]')!.clientWidth >= innerWidth - 1, 'Focus must use the full application content width');
       assert(panel.clientWidth >= 300 && terminal.clientWidth >= 320, 'Focus and terminal must both have usable widths');
       assert(notice.scrollWidth <= notice.clientWidth, 'Occupancy notice must fit the real resizable panel');
@@ -193,7 +195,7 @@ async function verify() {
     assert(rejected, 'Backend must reject competing admission');
     assert(agentTerminalLeaseState.get(terminalId)?.agentSessionId === ids[0], 'Conflict must not replace the displayed owner');
     assert(await controller.writeUserInput('blocked') === false, 'User input must remain blocked');
-    const taskButton = Array.from(workspaceRoot(true)!.querySelectorAll<HTMLButtonElement>('[data-slot="terminal-occupancy-notice"] button'))
+    const taskButton = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-slot="focus-terminal"] [data-testid="agent-terminal-lease-bar"] button'))
       .find(button => button.textContent === t('terminal.occupancy.viewTask'));
     assert(taskButton, 'Production task entry is missing');
     taskButton.click();

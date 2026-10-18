@@ -580,7 +580,7 @@ try {
   for (const width of [1280, 420]) {
     await page.setViewportSize({ width, height: 800 });
     const bar = page.getByTestId('agent-terminal-lease-bar');
-    await bar.getByText('正在输入命令…', { exact: true }).waitFor();
+    await bar.locator('.agent-terminal-lease-description').filter({ hasText: '正在输入命令…' }).waitFor();
     const typingBar = await bar.boundingBox();
     const takeover = bar.getByRole('button', { name: '停止并接管', exact: true });
     const typingButton = await takeover.boundingBox();
@@ -595,7 +595,7 @@ try {
       await coordinator.handle({ ...lease, state: 'activity', commandPhase: 'running' });
       coordinator.dispose();
     });
-    await bar.getByText('Agent 正在此终端执行命令', { exact: true }).waitFor();
+    await bar.locator('.agent-terminal-lease-description').filter({ hasText: 'Agent 正在此终端执行命令' }).waitFor();
     assert.deepEqual(await bar.boundingBox(), typingBar);
     assert.deepEqual(await takeover.boundingBox(), typingButton);
     await page.evaluate(async () => {
