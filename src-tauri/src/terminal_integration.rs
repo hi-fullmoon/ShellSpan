@@ -481,31 +481,109 @@ __shellspan_command_active=0
 __shellspan_prompt_ready=0
 __shellspan_pending_line=
 __shellspan_previous_prompt_command=${{PROMPT_COMMAND-}}
-__shellspan_prompt_tty_state=
+__shellspan_prompt_tty_state=()
+__shellspan_prompt_echo_control=0
+__shellspan_debug_prompt_echo_control=0
+__shellspan_prompt_interrupt_label='^C'
 __shellspan_previous_exit_trap=$(trap -p EXIT)
+__shellspan_previous_int_trap=$(trap -p INT)
+__shellspan_exit_trap=
+__shellspan_int_trap=
 __shellspan_restore_prompt_tty() {{
-  if [[ -n "$__shellspan_prompt_tty_state" ]]; then
-    if command stty "$__shellspan_prompt_tty_state" </dev/tty 2>/dev/null; then
-      __shellspan_prompt_tty_state=
+  if [[ ${{#__shellspan_prompt_tty_state[@]}} -ne 0 ]]; then
+    if command stty "${{__shellspan_prompt_tty_state[@]}}" </dev/tty 2>/dev/null; then
+      __shellspan_prompt_tty_state=()
     fi
+  fi
+}}
+__shellspan_run_previous_trap() {{
+  local __shellspan_trap=$1 __shellspan_trap_status=$2
+  shift 2
+  [[ -n "$__shellspan_trap" ]] || return "$__shellspan_trap_status"
+  local -a __shellspan_trap_args
+  # Let Bash decode its own shell-quoted `trap -p` output.
+  builtin eval "__shellspan_trap_args=(${{__shellspan_trap#trap -- }})"
+  if (exit "$__shellspan_trap_status"); then
+    builtin eval -- "${{__shellspan_trap_args[0]}}"
+  else
+    builtin eval -- "${{__shellspan_trap_args[0]}}"
   fi
 }}
 __shellspan_on_exit() {{
   local __shellspan_exit_status=$?
   __shellspan_prompt_ready=0
   __shellspan_restore_prompt_tty
-  if [[ -n "$__shellspan_previous_exit_trap" ]]; then
-    local -a __shellspan_exit_args
-    # Let Bash decode its own shell-quoted `trap -p` output.
-    builtin eval "__shellspan_exit_args=(${{__shellspan_previous_exit_trap#trap -- }})"
-    # Preserve $? for the previous handler without triggering errexit before it.
-    if (exit "$__shellspan_exit_status"); then
-      builtin eval -- "${{__shellspan_exit_args[0]}}"
-    else
-      builtin eval -- "${{__shellspan_exit_args[0]}}"
+  __shellspan_run_previous_trap "$__shellspan_previous_exit_trap" "$__shellspan_exit_status" "$@"
+  return "$__shellspan_exit_status"
+}}
+__shellspan_on_interrupt() {{
+  local __shellspan_int_status=$?
+  # Bash 4+ normally echoes SIGINT through ECHOCTL at the input prompt.
+  # Restore that feedback only while our prompt guard suppresses kernel echo.
+  if (( BASH_VERSINFO[0] >= 4 )) && [[ $__shellspan_debug_prompt_echo_control -eq 1 ]]; then
+    # Readline has already returned the cursor to column zero. Keep the
+    # cancelled input intact and put its cancellation marker on the next line.
+    builtin printf '\r\n%s' "$__shellspan_prompt_interrupt_label"
+  fi
+  __shellspan_run_previous_trap "$__shellspan_previous_int_trap" "$__shellspan_int_status" "$@"
+  return "$__shellspan_int_status"
+}}
+__shellspan_guard_prompt_tty() {{
+  # Canonical input needs CR-to-NL translation when Readline is disabled.
+  if [[ ! -o emacs && ! -o vi ]]; then
+    __shellspan_restore_prompt_tty
+    return
+  fi
+  if [[ ${{#__shellspan_prompt_tty_state[@]}} -eq 0 ]]; then
+    local __shellspan_tty_settings __shellspan_flag __shellspan_pattern __shellspan_readline_settings
+    __shellspan_tty_settings=$(command stty -a </dev/tty 2>/dev/null) || return
+    for __shellspan_flag in icrnl echoctl; do
+      __shellspan_pattern="(^|[[:space:];])${{__shellspan_flag}}([[:space:];]|$)"
+      if [[ $__shellspan_tty_settings =~ $__shellspan_pattern ]]; then
+        __shellspan_prompt_tty_state+=("$__shellspan_flag")
+      else
+        __shellspan_prompt_tty_state+=("-$__shellspan_flag")
+      fi
+    done
+    __shellspan_pattern='(^|[[:space:];])echo([[:space:];]|$)'
+    __shellspan_prompt_echo_control=0
+    if [[ ${{__shellspan_prompt_tty_state[1]}} == echoctl && $__shellspan_tty_settings =~ $__shellspan_pattern ]]; then
+      __shellspan_readline_settings=$(bind -v 2>/dev/null)
+      __shellspan_pattern='(^|[[:space:]])set[[:space:]]+echo-control-characters[[:space:]]+on([[:space:]]|$)'
+      if [[ $__shellspan_readline_settings =~ $__shellspan_pattern ]]; then
+        __shellspan_prompt_echo_control=1
+      fi
+    fi
+    __shellspan_pattern='(^|[[:space:];])intr[[:space:]]*=[[:space:]]*([^[:space:];]+)'
+    if [[ $__shellspan_tty_settings =~ $__shellspan_pattern ]]; then
+      __shellspan_prompt_interrupt_label=${{BASH_REMATCH[2]}}
     fi
   fi
-  return "$__shellspan_exit_status"
+  command stty -icrnl -echoctl </dev/tty 2>/dev/null || __shellspan_restore_prompt_tty
+  # User commands may replace or remove traps. Reconcile at every prompt,
+  # preserving the newest handler rather than only the startup profile's trap.
+  local __shellspan_current_trap
+  __shellspan_current_trap=$(trap -p EXIT)
+  if [[ $__shellspan_current_trap != "$__shellspan_exit_trap" || -z "$__shellspan_exit_trap" ]]; then
+    __shellspan_previous_exit_trap=$__shellspan_current_trap
+    trap '__shellspan_on_exit "$@"' EXIT
+    __shellspan_exit_trap=$(trap -p EXIT)
+  fi
+  __shellspan_current_trap=$(trap -p INT)
+  if [[ $__shellspan_current_trap != "$__shellspan_int_trap" || -z "$__shellspan_int_trap" ]]; then
+    __shellspan_previous_int_trap=$__shellspan_current_trap
+    if [[ -n "$__shellspan_current_trap" ]]; then
+      local -a __shellspan_int_args
+      builtin eval "__shellspan_int_args=(${{__shellspan_current_trap#trap -- }})"
+      # An ignored SIGINT must stay ignored by commands and their children.
+      if [[ -z "${{__shellspan_int_args[0]}}" ]]; then
+        __shellspan_int_trap=$__shellspan_current_trap
+        return
+      fi
+    fi
+    trap '__shellspan_on_interrupt "$@"' INT
+    __shellspan_int_trap=$(trap -p INT)
+  fi
 }}
 __shellspan_emit() {{
   [[ $__shellspan_integration_active -eq 1 ]] || return 0
@@ -516,15 +594,6 @@ __shellspan_emit() {{
 }}
 __shellspan_prompt_cycle() {{
   local __shellspan_status=$?
-  # Readline restores cooked mode between prompts. Do not translate an
-  # ahead-of-prompt Enter into an echoed newline; Readline will consume the
-  # queued CR in raw mode. Commands regain their previous terminal mode.
-  if [[ -z "$__shellspan_prompt_tty_state" ]]; then
-    __shellspan_prompt_tty_state=$(command stty -g </dev/tty 2>/dev/null) || __shellspan_prompt_tty_state=
-    if [[ -n "$__shellspan_prompt_tty_state" ]]; then
-      command stty -icrnl -echoctl </dev/tty 2>/dev/null || __shellspan_restore_prompt_tty
-    fi
-  fi
   if [[ $__shellspan_command_active -eq 0 && $__shellspan_prompt_ready -eq 1 ]]; then
     local __shellspan_late_line
     __shellspan_late_line=$__shellspan_pending_line
@@ -540,6 +609,7 @@ __shellspan_prompt_cycle() {{
   if [[ -n "$__shellspan_previous_prompt_command" ]]; then
     builtin eval -- "$__shellspan_previous_prompt_command"
   fi
+  __shellspan_guard_prompt_tty
   if [[ $__shellspan_command_active -eq 1 ]]; then
     __shellspan_emit E "$__shellspan_status" "$PWD"
     __shellspan_command_active=0
@@ -553,8 +623,14 @@ __shellspan_capture_line() {{
 }}
 __shellspan_preexec() {{
   local __shellspan_debug_command=$BASH_COMMAND
+  # Bash also runs DEBUG before a signal trap, with BASH_COMMAND still naming
+  # the interrupted command. Remember the guard before preexec restores it.
+  __shellspan_debug_prompt_echo_control=0
+  if [[ ${{#__shellspan_prompt_tty_state[@]}} -ne 0 ]]; then
+    __shellspan_debug_prompt_echo_control=$__shellspan_prompt_echo_control
+  fi
   case "$__shellspan_debug_command" in
-    __shellspan_prompt_cycle|__shellspan_capture_line|__shellspan_preexec|__shellspan_on_exit) return ;;
+    __shellspan_prompt_cycle|__shellspan_capture_line|__shellspan_preexec|__shellspan_on_exit|__shellspan_on_exit\ *|__shellspan_on_interrupt|__shellspan_on_interrupt\ *) return ;;
   esac
   if [[ $__shellspan_prompt_ready -eq 1 && ${{BASH_SUBSHELL:-0}} -eq 0 ]]; then
     local __shellspan_line
@@ -571,7 +647,6 @@ __shellspan_preexec() {{
   fi
 }}
 PROMPT_COMMAND=__shellspan_prompt_cycle
-trap '__shellspan_on_exit' EXIT
 trap '__shellspan_preexec' DEBUG
 if (( BASH_VERSINFO[0] >= 4 )); then
   if ! bind -x '"\C-x\C-g":__shellspan_capture_line' || ! bind '"\C-j":"\C-x\C-g\C-m"'; then

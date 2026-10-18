@@ -1197,18 +1197,31 @@
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn native_bash_repeated_enter_does_not_echo_ahead_of_prompts() {
-        run_bash_repeated_enter_acceptance(false);
+        run_bash_repeated_enter_acceptance(false, false);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn native_bash_restores_prompt_modes_after_user_removes_exit_trap() {
+        run_bash_repeated_enter_acceptance(false, true);
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     #[ignore = "requires SHELLSPAN_ENTER_SSH_TARGET and existing SSH authentication"]
     fn ssh_bash_repeated_enter_does_not_echo_ahead_of_prompts() {
-        run_bash_repeated_enter_acceptance(true);
+        run_bash_repeated_enter_acceptance(true, false);
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
-    fn run_bash_repeated_enter_acceptance(remote: bool) {
+    #[test]
+    #[ignore = "requires SHELLSPAN_ENTER_SSH_TARGET and existing SSH authentication"]
+    fn ssh_bash_restores_prompt_modes_after_user_removes_exit_trap() {
+        run_bash_repeated_enter_acceptance(true, true);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn run_bash_repeated_enter_acceptance(remote: bool, remove_exit_trap: bool) {
         use portable_pty::{native_pty_system, PtySize};
         use std::io::Write;
         use std::sync::mpsc;
@@ -1218,8 +1231,8 @@
         let home = tempfile::tempdir().unwrap();
         // A real prompt command creates the same cooked-mode window as slow
         // profile hooks/control-channel writes, without changing transport data.
-        let profile = "PS1='enter-probe$ '; PROMPT_COMMAND='sleep 0.01'\n\
-            trap 'status=$?; printf \"exit-mode-start\\n\"; stty -a; printf \"exit-mode-end\\nexit-status=%s\\n\" \"$status\"' EXIT\n";
+        let profile = "PS1='enter-probe$ '; PROMPT_COMMAND='stty -ixon; sleep 0.01'\n\
+            trap 'status=$?; printf \"exit-mode-start\\n\"; stty -a; printf \"exit-mode-end\\nexit-status=%s\\nexit-arg=%s\\n\" \"$status\" \"$1\"' EXIT\n";
         fs::write(home.path().join(".bash_profile"), profile).unwrap();
         let target = remote
             .then(|| std::env::var("SHELLSPAN_ENTER_SSH_TARGET").expect("SSH target required"));
@@ -1283,7 +1296,7 @@
                 "-oConnectTimeout=8",
                 target,
                 &format!(
-                    "exec bash --noprofile --rcfile {}/bashrc -i",
+                    "bash --noprofile --rcfile {}/bashrc -i; status=$?; printf 'outer-mode-start\\n'; stty -a; printf 'outer-mode-end\\nouter-status=%s\\n' \"$status\"; exit \"$status\"",
                     shell_single_quote(remote_root.as_ref().unwrap())
                 ),
             ]);
@@ -1347,16 +1360,28 @@
                 "{contents:?}"
             );
 
-            // Commands must regain their exact mode and keep intentional empty lines.
+            // Exercise real line editing and preserve intentional empty output lines.
             writer
-                .write_all(b"printf 'first\\n\\nlast\\n'; stty -a\r")
+                .write_all(b"printf 'EDIT:%s\\n' abx\x7fc\x1b[D\x04c; printf 'first\\n\\nlast\\n'; stty -a; printf 'bash-major:%s\\n' \"${BASH_VERSINFO[0]}\"\r")
                 .unwrap();
             writer.flush().unwrap();
             receive_prompts(&mut bytes, 62);
             terminal = vt100::Parser::new(300, 120, 0);
             terminal.process(&bytes);
             let contents = terminal.screen().contents();
+            assert!(contents.contains("EDIT:abc"), "{contents:?}");
             assert!(contents.contains("first\n\nlast"), "{contents:?}");
+            let output = String::from_utf8_lossy(&bytes);
+            assert!(
+                output.contains("-ixon"),
+                "prompt hook settings were overwritten: {output:?}"
+            );
+            let major = regex::Regex::new(r"bash-major:(\d+)")
+                .unwrap()
+                .captures(&output)
+                .unwrap()[1]
+                .parse::<u32>()
+                .unwrap();
             let changed_modes =
                 regex::Regex::new(r"(?:^|[\s;])-(?:echo|icrnl|echoctl)(?:[\s;]|$)").unwrap();
             assert!(
@@ -1378,12 +1403,113 @@
                 "{contents:?}"
             );
 
+            writer.write_all(b"typed-before-cancel").unwrap();
+            writer.flush().unwrap();
+            let deadline = Instant::now() + Duration::from_secs(15);
+            while !String::from_utf8_lossy(&bytes).contains("typed-before-cancel") {
+                bytes.extend(
+                    receiver
+                        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                        .unwrap(),
+                );
+            }
+            let interrupt_start = bytes.len();
             writer.write_all(b"\x03").unwrap();
             writer.flush().unwrap();
             receive_prompts(&mut bytes, 143);
-            writer.write_all(b"stty -ixon; false\r").unwrap();
+            if major >= 4 {
+                assert!(
+                    String::from_utf8_lossy(&bytes[interrupt_start..]).contains("^C"),
+                    "Ctrl+C feedback was lost"
+                );
+            }
+            writer
+                .write_all(b"printf 'INT-status:%s\\n' \"$?\"\r")
+                .unwrap();
             writer.flush().unwrap();
             receive_prompts(&mut bytes, 144);
+            if major >= 4 {
+                assert!(
+                    String::from_utf8_lossy(&bytes).contains("INT-status:130\r\n"),
+                    "Ctrl+C status changed"
+                );
+            }
+
+            // Runtime signal handlers must still run once, with the original status.
+            writer
+                .write_all(b"set -- user-signal-arg; trap 'printf \"CUSTOM-INT:%s\\n\" \"$?\"; printf \"CUSTOM-ARG:%s\\n\" \"$1\"' INT\r")
+                .unwrap();
+            writer.flush().unwrap();
+            receive_prompts(&mut bytes, 145);
+            writer.write_all(b"\x03").unwrap();
+            writer.flush().unwrap();
+            receive_prompts(&mut bytes, 146);
+            assert!(
+                String::from_utf8_lossy(&bytes).contains("CUSTOM-ARG:user-signal-arg\r\n"),
+                "custom INT handler received internal arguments"
+            );
+            if major >= 4 {
+                assert_eq!(
+                    String::from_utf8_lossy(&bytes)
+                        .matches("CUSTOM-INT:130\r\n")
+                        .count(),
+                    1,
+                    "custom INT handler lost its status or ran repeatedly"
+                );
+            }
+
+            // Ignoring INT at a prompt must remain inherited by foreground programs.
+            writer.write_all(b"trap '' INT\r").unwrap();
+            writer.flush().unwrap();
+            receive_prompts(&mut bytes, 147);
+            writer
+                .write_all(
+                    b"printf 'ignore-ready\\n'; sleep 0.4 && printf 'IGNORED-INT-SURVIVED\\n'\r",
+                )
+                .unwrap();
+            writer.flush().unwrap();
+            let deadline = Instant::now() + Duration::from_secs(15);
+            while !String::from_utf8_lossy(&bytes).contains("ignore-ready\r\n") {
+                bytes.extend(
+                    receiver
+                        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                        .unwrap(),
+                );
+            }
+            writer.write_all(b"\x03").unwrap();
+            writer.flush().unwrap();
+            receive_prompts(&mut bytes, 148);
+            assert!(
+                String::from_utf8_lossy(&bytes).contains("IGNORED-INT-SURVIVED\r\n"),
+                "ignored SIGINT was reset for a foreground program"
+            );
+            writer.write_all(b"trap - INT\r").unwrap();
+            writer.flush().unwrap();
+            receive_prompts(&mut bytes, 149);
+            // Without Readline, the canonical line discipline must translate Enter.
+            writer.write_all(b"set +o emacs\r").unwrap();
+            writer.flush().unwrap();
+            receive_prompts(&mut bytes, 150);
+            writer
+                .write_all(b"printf 'NO-EDITING-ENTER-WORKS\\n'\r")
+                .unwrap();
+            writer.flush().unwrap();
+            receive_prompts(&mut bytes, 151);
+            assert!(
+                String::from_utf8_lossy(&bytes).contains("NO-EDITING-ENTER-WORKS\r\n"),
+                "Enter no longer submitted a command with line editing disabled"
+            );
+            writer.write_all(b"set -o emacs\r").unwrap();
+            writer.flush().unwrap();
+            receive_prompts(&mut bytes, 152);
+            let final_command: &[u8] = if remove_exit_trap {
+                b"trap - EXIT; false\r"
+            } else {
+                b"false\r"
+            };
+            writer.write_all(final_command).unwrap();
+            writer.flush().unwrap();
+            receive_prompts(&mut bytes, 153);
             writer.write_all(b"\x04").unwrap();
             writer.flush().unwrap();
             let deadline = Instant::now() + Duration::from_secs(15);
@@ -1393,9 +1519,62 @@
                 bytes.extend(chunk);
             }
             let output = String::from_utf8_lossy(&bytes);
+            if !remote {
+                let mut modes = std::mem::MaybeUninit::<libc::termios>::uninit();
+                // The owned master FD remains open after the shell exits.
+                assert_eq!(
+                    unsafe {
+                        libc::tcgetattr(pair.master.as_raw_fd().unwrap(), modes.as_mut_ptr())
+                    },
+                    0
+                );
+                let modes = unsafe { modes.assume_init() };
+                assert_ne!(
+                    modes.c_iflag & libc::ICRNL,
+                    0,
+                    "ICRNL was not restored on EOF"
+                );
+                assert_ne!(
+                    modes.c_lflag & libc::ECHOCTL,
+                    0,
+                    "ECHOCTL was not restored on EOF"
+                );
+                assert_eq!(
+                    modes.c_iflag & libc::IXON,
+                    0,
+                    "prompt hook IXON setting was lost on EOF"
+                );
+            }
+            if remove_exit_trap {
+                assert!(
+                    !output.contains("exit-mode-start\r\n"),
+                    "removed EXIT handler ran again"
+                );
+                if !remote {
+                    return;
+                }
+            } else {
+                assert!(
+                    output.contains("exit-arg=user-signal-arg\r\n"),
+                    "EXIT handler lost the shell's positional arguments"
+                );
+            }
+            let (start, end, status) = if remove_exit_trap {
+                (
+                    "outer-mode-start\r\n",
+                    "outer-mode-end\r\n",
+                    "outer-status=1\r\n",
+                )
+            } else {
+                (
+                    "exit-mode-start\r\n",
+                    "exit-mode-end\r\n",
+                    "exit-status=1\r\n",
+                )
+            };
             let exit_modes = output
-                .split_once("exit-mode-start\r\n")
-                .and_then(|(_, tail)| tail.split_once("exit-mode-end\r\n"))
+                .split_once(start)
+                .and_then(|(_, tail)| tail.split_once(end))
                 .map(|(modes, _)| modes)
                 .expect("previous EXIT handler did not report terminal settings");
             assert!(
@@ -1407,7 +1586,7 @@
                 "user terminal settings were lost: {output:?}"
             );
             assert!(
-                output.contains("exit-status=1\r\n"),
+                output.contains(status),
                 "EOF exit status changed: {output:?}"
             );
         }));

@@ -16,15 +16,21 @@ effects were rolled back and does not replay commands automatically.
 
 ## Bash prompt input
 
-Integrated Bash sessions keep `ICRNL` and `ECHOCTL` disabled while waiting for
-input at a prompt. Readline still displays typed input and handles Enter; a CR
+Integrated Bash sessions with Readline enabled keep `ICRNL` and `ECHOCTL` disabled
+while waiting for input at a prompt. Disabling line editing restores the flags so
+canonical input can still translate Enter. Readline displays typed input; a CR
 arriving while Bash is running prompt hooks stays queued as CR instead of being
-echoed by the cooked PTY as an extra newline. The integration saves the terminal
-mode before this adjustment and restores it before executing a command and on
-shell exit, including EOF. Existing EXIT handlers retain their exit status and
-run after restoration. Raw output is never stripped of empty lines. The shared
-bootstrap applies this behavior to newly opened local and SSH Bash sessions;
-already running sessions need to be reopened or reconnected.
+echoed by the cooked PTY as an extra newline. Only these two flags are saved and
+restored before commands and on shell exit, including EOF; other terminal settings
+made by prompt hooks remain in effect. EXIT and INT handlers are reconciled at
+each prompt so runtime replacements and removals retain their semantics, including
+the shell's positional arguments and the interrupted command's exit status. Ignored
+SIGINT remains ignored by foreground programs. On Bash 4+, prompt cancellation
+feedback respects Readline's echo-control setting and the configured interrupt
+character; its marker appears on a separate line to preserve the cancelled input
+after Readline has returned the cursor to column zero. Raw output is never stripped
+of empty lines. The shared bootstrap applies this behavior to newly opened local
+and SSH Bash sessions. Already running sessions need to be reopened or reconnected.
 
 ## Connection deadlines
 
