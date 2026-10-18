@@ -11,6 +11,8 @@ mod execution;
 mod health;
 mod identity_cache;
 mod keychain;
+#[cfg(debug_assertions)]
+mod keychain_diagnostics;
 mod known_hosts;
 mod llm;
 mod local_fs;
@@ -275,6 +277,10 @@ pub fn run() {
             let runtime = app.state::<agent_runtime::AgentRuntime>();
             agent_runtime::configure_runtime(app.handle(), &runtime)?;
             runtime.configure_credentials(credentials)?;
+            #[cfg(debug_assertions)]
+            if std::env::args_os().any(|argument| argument == "--check-keychain-access") {
+                keychain_diagnostics::start(app.handle().clone())?;
+            }
             #[cfg(not(target_os = "macos"))]
             menu::initialize_tray(app)?;
             Ok(())

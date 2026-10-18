@@ -34,7 +34,7 @@
     "test:terminal-rollout:macos": "node scripts/verify-terminal-broker-macos.mjs",
     "review:frontend": "pnpm test && pnpm build",
     "preview": "vite preview",
-    "tauri:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
+    "tauri:dev": "node scripts/dev.mjs",
     "tauri:build": "tauri build",
     "preversion": "node scripts/reject-package-version.mjs",
     "release:prepare": "node scripts/bump-version.mjs",

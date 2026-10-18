@@ -148,7 +148,9 @@ try {
   const devUrl = terminalContentionRun ? `http://127.0.0.1:${contentionPort}${contentionEntryPath}` : url.href;
   child = values['native-binary']
     ? spawn(resolve(values['native-binary']), [], { cwd: repository, stdio: ['ignore', 'ignore', 'inherit'], detached: process.platform !== 'win32' })
-    : spawn('pnpm', ['exec', 'tauri', 'dev', '--no-watch', '--config', JSON.stringify({
+    : spawn('pnpm', ['exec', 'tauri', 'dev', '--no-watch',
+      ...(process.platform === 'darwin' ? ['--runner', resolve(repository, 'scripts/dev-cargo-runner.mjs')] : []),
+      '--config', resolve(repository, 'src-tauri/tauri.dev.conf.json'), '--config', JSON.stringify({
     identifier: 'com.shellspan-dev', build: { beforeDevCommand: '', devUrl },
     ...((terminalContentionRun || performanceRun && !values['cleanup-session']?.length) ? { app: { windows: [{
       label: 'main', title: terminalContentionRun ? 'Terminal contention validation' : 'Agent panel validation', width: 1480, height: 920,
