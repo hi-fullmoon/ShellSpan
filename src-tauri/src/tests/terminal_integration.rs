@@ -1194,6 +1194,251 @@
         run_native_visible_command_acceptance("/bin/bash", TerminalShellKind::Bash);
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn native_bash_repeated_enter_does_not_echo_ahead_of_prompts() {
+        run_bash_repeated_enter_acceptance(false);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    #[ignore = "requires SHELLSPAN_ENTER_SSH_TARGET and existing SSH authentication"]
+    fn ssh_bash_repeated_enter_does_not_echo_ahead_of_prompts() {
+        run_bash_repeated_enter_acceptance(true);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn run_bash_repeated_enter_acceptance(remote: bool) {
+        use portable_pty::{native_pty_system, PtySize};
+        use std::io::Write;
+        use std::sync::mpsc;
+        use std::time::Instant;
+
+        let (_fixture, integration) = prepare_test_integration(TerminalShellKind::Bash);
+        let home = tempfile::tempdir().unwrap();
+        // A real prompt command creates the same cooked-mode window as slow
+        // profile hooks/control-channel writes, without changing transport data.
+        let profile = "PS1='enter-probe$ '; PROMPT_COMMAND='sleep 0.01'\n\
+            trap 'status=$?; printf \"exit-mode-start\\n\"; stty -a; printf \"exit-mode-end\\nexit-status=%s\\n\" \"$status\"' EXIT\n";
+        fs::write(home.path().join(".bash_profile"), profile).unwrap();
+        let target = remote
+            .then(|| std::env::var("SHELLSPAN_ENTER_SSH_TARGET").expect("SSH target required"));
+        let mut remote_root = None;
+        if let Some(target) = &target {
+            let output = std::process::Command::new("ssh")
+                .args([
+                    "-oBatchMode=yes",
+                    "-oConnectTimeout=8",
+                    target,
+                    "umask 077; mktemp -d /tmp/shellspan-enter.XXXXXXXX",
+                ])
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "SSH temporary directory failed");
+            let root = String::from_utf8(output.stdout).unwrap().trim().to_string();
+            assert!(
+                root.starts_with("/tmp/shellspan-enter.") && !root.contains(char::is_whitespace)
+            );
+            let mut upload = std::process::Command::new("ssh")
+                .args([
+                    "-oBatchMode=yes",
+                    target,
+                    &format!("umask 077; cat > {}/bashrc", shell_single_quote(&root)),
+                ])
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            // Execute the production remote bootstrap in a real SSH PTY. The
+            // isolated control stream is not used for screen assertions.
+            upload
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(
+                    format!(
+                        "{profile}{}",
+                        bash_bootstrap(Path::new("/dev/null"), false, false)
+                    )
+                    .as_bytes(),
+                )
+                .unwrap();
+            assert!(upload.wait().unwrap().success());
+            remote_root = Some(root);
+        }
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 300,
+                cols: 120,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        let mut reader = pair.master.try_clone_reader().unwrap();
+        let mut writer = pair.master.take_writer().unwrap();
+        let mut command = if let Some(target) = &target {
+            let mut command = CommandBuilder::new("ssh");
+            command.args([
+                "-tt",
+                "-oBatchMode=yes",
+                "-oConnectTimeout=8",
+                target,
+                &format!(
+                    "exec bash --noprofile --rcfile {}/bashrc -i",
+                    shell_single_quote(remote_root.as_ref().unwrap())
+                ),
+            ]);
+            command
+        } else {
+            let mut command = CommandBuilder::new("/bin/bash");
+            command.env("HOME", home.path());
+            integration.configure_command(&mut command).unwrap();
+            command
+        };
+        command.env("TERM", "xterm-256color");
+        command.env("BASH_SILENCE_DEPRECATION_WARNING", "1");
+        let mut child = pair.slave.spawn_command(command).unwrap();
+        drop(pair.slave);
+        let mut control = integration.start_reader(|_| Ok(()), |_| {});
+        let (sender, receiver) = mpsc::channel();
+        let output_thread = thread::spawn(move || {
+            let mut buffer = [0; 4096];
+            while let Ok(count) = reader.read(&mut buffer) {
+                if count == 0 || sender.send(buffer[..count].to_vec()).is_err() {
+                    break;
+                }
+            }
+        });
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut bytes = Vec::new();
+            let receive_prompts = |bytes: &mut Vec<u8>, expected: usize| {
+                let deadline = Instant::now() + Duration::from_secs(15);
+                while String::from_utf8_lossy(bytes)
+                    .matches("enter-probe$ ")
+                    .count()
+                    < expected
+                {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    bytes.extend(
+                        receiver
+                            .recv_timeout(remaining)
+                            .expect("Bash prompt timed out"),
+                    );
+                }
+            };
+            receive_prompts(&mut bytes, 1);
+            for _ in 0..60 {
+                writer.write_all(b"\r").unwrap();
+                writer.flush().unwrap();
+                thread::sleep(Duration::from_millis(5));
+            }
+            receive_prompts(&mut bytes, 61);
+            let mut terminal = vt100::Parser::new(300, 120, 0);
+            terminal.process(&bytes);
+            let contents = terminal.screen().contents();
+            assert_eq!(
+                contents.lines().count(),
+                61,
+                "unexpected blank lines: {contents:?}"
+            );
+            assert!(
+                contents
+                    .lines()
+                    .all(|line| line.trim_end() == "enter-probe$"),
+                "{contents:?}"
+            );
+
+            // Commands must regain their exact mode and keep intentional empty lines.
+            writer
+                .write_all(b"printf 'first\\n\\nlast\\n'; stty -a\r")
+                .unwrap();
+            writer.flush().unwrap();
+            receive_prompts(&mut bytes, 62);
+            terminal = vt100::Parser::new(300, 120, 0);
+            terminal.process(&bytes);
+            let contents = terminal.screen().contents();
+            assert!(contents.contains("first\n\nlast"), "{contents:?}");
+            let changed_modes =
+                regex::Regex::new(r"(?:^|[\s;])-(?:echo|icrnl|echoctl)(?:[\s;]|$)").unwrap();
+            assert!(
+                !changed_modes.is_match(&String::from_utf8_lossy(&bytes)),
+                "command inherited prompt modes: {contents:?}"
+            );
+
+            // A single transport burst must not lose or echo any of its Enters.
+            writer.write_all(&[b'\r'; 80]).unwrap();
+            writer.flush().unwrap();
+            receive_prompts(&mut bytes, 142);
+            terminal = vt100::Parser::new(300, 120, 0);
+            terminal.process(&bytes);
+            let contents = terminal.screen().contents();
+            let tail: Vec<_> = contents.lines().rev().take(80).collect();
+            assert_eq!(tail.len(), 80);
+            assert!(
+                tail.iter().all(|line| line.trim_end() == "enter-probe$"),
+                "{contents:?}"
+            );
+
+            writer.write_all(b"\x03").unwrap();
+            writer.flush().unwrap();
+            receive_prompts(&mut bytes, 143);
+            writer.write_all(b"stty -ixon; false\r").unwrap();
+            writer.flush().unwrap();
+            receive_prompts(&mut bytes, 144);
+            writer.write_all(b"\x04").unwrap();
+            writer.flush().unwrap();
+            let deadline = Instant::now() + Duration::from_secs(15);
+            while let Ok(chunk) =
+                receiver.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            {
+                bytes.extend(chunk);
+            }
+            let output = String::from_utf8_lossy(&bytes);
+            let exit_modes = output
+                .split_once("exit-mode-start\r\n")
+                .and_then(|(_, tail)| tail.split_once("exit-mode-end\r\n"))
+                .map(|(modes, _)| modes)
+                .expect("previous EXIT handler did not report terminal settings");
+            assert!(
+                !changed_modes.is_match(exit_modes),
+                "exit inherited prompt modes: {output:?}"
+            );
+            assert!(
+                exit_modes.contains("-ixon"),
+                "user terminal settings were lost: {output:?}"
+            );
+            assert!(
+                output.contains("exit-status=1\r\n"),
+                "EOF exit status changed: {output:?}"
+            );
+        }));
+        if child.try_wait().unwrap().is_none() {
+            child.kill().unwrap();
+        }
+        child.wait().unwrap();
+        control.stop();
+        drop(writer);
+        drop(pair.master);
+        output_thread.join().unwrap();
+        if let (Some(target), Some(root)) = (&target, &remote_root) {
+            let cleanup = std::process::Command::new("ssh")
+                .args([
+                    "-oBatchMode=yes",
+                    target,
+                    &format!(
+                        "rm -f -- {}/bashrc; rmdir -- {}",
+                        shell_single_quote(root),
+                        shell_single_quote(root)
+                    ),
+                ])
+                .status()
+                .unwrap();
+            assert!(cleanup.success(), "SSH test cleanup failed");
+        }
+        if let Err(error) = result {
+            std::panic::resume_unwind(error);
+        }
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn macos_native_zsh_visible_commands_preserve_shell_state_and_raw_display() {

@@ -14,6 +14,18 @@ Local shutdown requests termination of the shell. SSH shutdown closes the channe
 detached remote services may continue. Closing does not assert that uncertain remote
 effects were rolled back and does not replay commands automatically.
 
+## Bash prompt input
+
+Integrated Bash sessions keep `ICRNL` and `ECHOCTL` disabled while waiting for
+input at a prompt. Readline still displays typed input and handles Enter; a CR
+arriving while Bash is running prompt hooks stays queued as CR instead of being
+echoed by the cooked PTY as an extra newline. The integration saves the terminal
+mode before this adjustment and restores it before executing a command and on
+shell exit, including EOF. Existing EXIT handlers retain their exit status and
+run after restoration. Raw output is never stripped of empty lines. The shared
+bootstrap applies this behavior to newly opened local and SSH Bash sessions;
+already running sessions need to be reopened or reconnected.
+
 ## Connection deadlines
 
 “Open terminal here” supplies an optional `initialDirectory` in the session

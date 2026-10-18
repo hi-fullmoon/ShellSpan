@@ -481,6 +481,32 @@ __shellspan_command_active=0
 __shellspan_prompt_ready=0
 __shellspan_pending_line=
 __shellspan_previous_prompt_command=${{PROMPT_COMMAND-}}
+__shellspan_prompt_tty_state=
+__shellspan_previous_exit_trap=$(trap -p EXIT)
+__shellspan_restore_prompt_tty() {{
+  if [[ -n "$__shellspan_prompt_tty_state" ]]; then
+    if command stty "$__shellspan_prompt_tty_state" </dev/tty 2>/dev/null; then
+      __shellspan_prompt_tty_state=
+    fi
+  fi
+}}
+__shellspan_on_exit() {{
+  local __shellspan_exit_status=$?
+  __shellspan_prompt_ready=0
+  __shellspan_restore_prompt_tty
+  if [[ -n "$__shellspan_previous_exit_trap" ]]; then
+    local -a __shellspan_exit_args
+    # Let Bash decode its own shell-quoted `trap -p` output.
+    builtin eval "__shellspan_exit_args=(${{__shellspan_previous_exit_trap#trap -- }})"
+    # Preserve $? for the previous handler without triggering errexit before it.
+    if (exit "$__shellspan_exit_status"); then
+      builtin eval -- "${{__shellspan_exit_args[0]}}"
+    else
+      builtin eval -- "${{__shellspan_exit_args[0]}}"
+    fi
+  fi
+  return "$__shellspan_exit_status"
+}}
 __shellspan_emit() {{
   [[ $__shellspan_integration_active -eq 1 ]] || return 0
   builtin printf '%s\0' "$@" 2>/dev/null >"$__shellspan_control_path" || {{
@@ -490,6 +516,15 @@ __shellspan_emit() {{
 }}
 __shellspan_prompt_cycle() {{
   local __shellspan_status=$?
+  # Readline restores cooked mode between prompts. Do not translate an
+  # ahead-of-prompt Enter into an echoed newline; Readline will consume the
+  # queued CR in raw mode. Commands regain their previous terminal mode.
+  if [[ -z "$__shellspan_prompt_tty_state" ]]; then
+    __shellspan_prompt_tty_state=$(command stty -g </dev/tty 2>/dev/null) || __shellspan_prompt_tty_state=
+    if [[ -n "$__shellspan_prompt_tty_state" ]]; then
+      command stty -icrnl -echoctl </dev/tty 2>/dev/null || __shellspan_restore_prompt_tty
+    fi
+  fi
   if [[ $__shellspan_command_active -eq 0 && $__shellspan_prompt_ready -eq 1 ]]; then
     local __shellspan_late_line
     __shellspan_late_line=$__shellspan_pending_line
@@ -519,7 +554,7 @@ __shellspan_capture_line() {{
 __shellspan_preexec() {{
   local __shellspan_debug_command=$BASH_COMMAND
   case "$__shellspan_debug_command" in
-    __shellspan_prompt_cycle|__shellspan_capture_line|__shellspan_preexec) return ;;
+    __shellspan_prompt_cycle|__shellspan_capture_line|__shellspan_preexec|__shellspan_on_exit) return ;;
   esac
   if [[ $__shellspan_prompt_ready -eq 1 && ${{BASH_SUBSHELL:-0}} -eq 0 ]]; then
     local __shellspan_line
@@ -531,10 +566,12 @@ __shellspan_preexec() {{
     fi
     __shellspan_prompt_ready=0
     __shellspan_command_active=1
+    __shellspan_restore_prompt_tty
     __shellspan_emit S "$__shellspan_line" "$PWD"
   fi
 }}
 PROMPT_COMMAND=__shellspan_prompt_cycle
+trap '__shellspan_on_exit' EXIT
 trap '__shellspan_preexec' DEBUG
 if (( BASH_VERSINFO[0] >= 4 )); then
   if ! bind -x '"\C-x\C-g":__shellspan_capture_line' || ! bind '"\C-j":"\C-x\C-g\C-m"'; then
