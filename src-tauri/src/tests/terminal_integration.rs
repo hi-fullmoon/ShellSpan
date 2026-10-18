@@ -1359,11 +1359,13 @@
                     < expected
                 {
                     let remaining = deadline.saturating_duration_since(Instant::now());
-                    bytes.extend(
-                        receiver
-                            .recv_timeout(remaining)
-                            .expect("Bash prompt timed out"),
-                    );
+                    bytes.extend(receiver.recv_timeout(remaining).unwrap_or_else(|error| {
+                        panic!(
+                            "Bash prompt timed out ({error}): expected {expected}, received {}; output: {:?}",
+                            String::from_utf8_lossy(bytes).matches("enter-probe$ ").count(),
+                            String::from_utf8_lossy(bytes)
+                        )
+                    }));
                 }
             };
             receive_prompts(&mut bytes, 1);
