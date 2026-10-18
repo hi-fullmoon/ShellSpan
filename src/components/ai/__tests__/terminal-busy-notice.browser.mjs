@@ -20,6 +20,8 @@ try {
     const { AiWorkspaceRoot } = await import('/src/components/ai/workspace/ai-workspace-root.tsx');
     const { AgentTerminalBusyNotice } = await import('/src/components/ai/agent-terminal-busy-notice.tsx');
     const { AiTaskStrip } = await import('/src/components/ai/workspace/ai-task-strip.tsx');
+    const { Alert, AlertDescription } = await import('/src/components/ui/alert.tsx');
+    const { AiErrorNotice } = await import('/src/components/ai/workspace/ai-error-notice.tsx');
     const { initI18n, t } = await import('/src/locales/index.ts');
     const { useAppStore } = await import('/src/stores/appStore.ts');
     await import('/src/styles/base.css');
@@ -41,6 +43,10 @@ try {
           historicalContinuationAvailable: true,
           defaultDraft: 'hello', onSubmit: ({ content }) => setSent(content),
           executionSurfaceNotice: h(React.Fragment, null,
+            longText && h(Alert, { variant: 'info', size: 'sm', role: 'status' },
+              h(AlertDescription, null, t('terminal.occupancy.released'))),
+            longText && h(AiErrorNotice, { title: t('ai.workspace.recovery.title') },
+              t('ai.error.streamSyncPersistent')),
             h(AiTaskStrip, { steps: [{ id: 'inspect', title: t('ai.workspace.tasks.title'), status: 'inProgress' }] }),
             direct ? null : h(AgentTerminalBusyNotice, {
             disabled: false, state: 'unavailable', onSwitchDirect: () => setDirect(true),
@@ -61,8 +67,16 @@ try {
     return Boolean(input && el.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING);
   }), true, 'Workspace status notices must be above the input in the composer');
   assert.ok((await notice.textContent()).includes(labels.notice));
-  for (const width of [1000, 420, 320]) {
-    await page.setViewportSize({ width, height: 640 });
+  for (const width of [1000, 640, 420, 320]) {
+    await page.setViewportSize({ width, height: longText ? 900 : 640 });
+    const wrapping = await page.locator('[data-slot="ai-composer-notices"] [data-slot="alert-description"]').evaluateAll(elements =>
+      elements.map(el => ({ wrap: getComputedStyle(el).textWrap,
+        fits: el.scrollWidth <= el.clientWidth })));
+    assert.ok(wrapping.length > 0, 'Notice descriptions must be rendered');
+    for (const description of wrapping) {
+      assert.equal(description.wrap, 'wrap', `Notice text uses natural wrapping at ${width}px`);
+      assert.ok(description.fits, `Notice text must fit at ${width}px`);
+    }
     const fits = await notice.evaluate(el => {
       const box = el.getBoundingClientRect();
       const button = el.querySelector('button').getBoundingClientRect();

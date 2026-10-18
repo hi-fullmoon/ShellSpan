@@ -7,6 +7,10 @@
   margin-inline: auto;
 }
 
+.ai-composer-seat [data-slot='ai-composer-notices'] [data-slot='alert-description'] {
+  text-wrap: wrap;
+}
+
 .ai-composer-seat [data-slot='ai-composer-notices'] [data-slot='alert-description']:has(> button) {
   justify-content: flex-end;
 }
