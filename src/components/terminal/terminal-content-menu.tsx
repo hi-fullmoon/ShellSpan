@@ -41,6 +41,7 @@ export async function clearTerminalScreen(terminal: Terminal, sessionId: string)
   // Let the shell redraw its full prompt and current editing buffer. Await the
   // production input path, including native ownership admission and IPC errors.
   if (!await controller.writeUserInput('\u000c')) return 'blocked';
+  terminal.clearSelection();
   terminal.scrollToBottom();
   return 'requested';
 }

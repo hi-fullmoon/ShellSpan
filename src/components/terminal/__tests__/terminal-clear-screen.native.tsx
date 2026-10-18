@@ -27,9 +27,9 @@ async function progress(message: string) {
   await fetch(`/__agent-stream-result/${token}`, { method: 'POST', body: JSON.stringify({ progress: message }) });
 }
 
-function NativeTerminal() {
+function NativeTerminal({ observeIntegration = true }: { observeIntegration?: boolean }) {
   const session = useTerminalStore(state => state.sessions.find(item => item.sessionId === state.activeSessionId) ?? null);
-  return <TooltipProvider><TerminalControllerLayer /><TerminalPane activeSession={session} /><Toaster /></TooltipProvider>;
+  return <TooltipProvider>{observeIntegration && <TerminalControllerLayer />}<TerminalPane activeSession={session} /><Toaster /></TooltipProvider>;
 }
 
 async function verify() {
@@ -38,6 +38,7 @@ async function verify() {
   assert(host, 'Missing native test root');
   const root = createRoot(host);
   let id: string | undefined;
+  let closed = false;
   try {
     useAppStore.getState().setActiveSection('terminal');
     flushSync(() => root.render(<NativeTerminal />));
@@ -65,6 +66,13 @@ async function verify() {
         const b = terminal.buffer.active;
         return Array.from({ length: terminal.rows }, (_, i) => b.getLine(b.baseY + i)?.translateToString(true) ?? '').join('\n');
       };
+      const selectCurrentLine = () => {
+        const b = terminal.buffer.active;
+        terminal.select(0, b.baseY + b.cursorY, Math.max(1, Math.min(8, b.cursorX)));
+        assert(terminal.hasSelection(), 'Selection regression requires a real xterm selection');
+        return JSON.stringify({ text: terminal.getSelection(), position: terminal.getSelectionPosition() });
+      };
+      const selection = () => JSON.stringify({ text: terminal.getSelection(), position: terminal.getSelectionPosition() });
       if (live?.integrationState !== 'ready') {
         assert(live?.integrationReason === 'unsupportedShell', 'Unsupported-shell regression requires a genuinely unsupported native shell');
         terminal.input("PS1='clear-prompt-first\nclear-prompt-last$ '\r", true);
@@ -77,7 +85,9 @@ async function verify() {
             lines: Array.from({ length: b.length }, (_, i) => b.getLine(i)?.translateToString(false)) });
         };
         const before = snapshot();
+        const unsupportedSelection = selectCurrentLine();
         assert(await clearTerminalScreen(terminal, id) === 'unavailable', 'Unsupported shell must explicitly reject unsafe clearing');
+        assert(selection() === unsupportedSelection, 'Unsupported clearing removed or changed the selection');
         assert(snapshot() === before, 'Without a trustworthy editing boundary, clearing must preserve the full multiline prompt and input');
         const screen = terminal.element?.querySelector('.xterm-screen');
         assert(screen, 'Missing rendered terminal screen');
@@ -88,6 +98,7 @@ async function verify() {
         clearItem.click();
         await eventually(() => Array.from(document.querySelectorAll('[data-sonner-toast]')).some(item => item.textContent?.includes(t('terminal.menu.clearUnavailable'))), 'Unsupported clear-screen action did not render its explanatory Toast');
         assert(snapshot() === before, 'Production menu changed unsupported-shell input');
+        assert(selection() === unsupportedSelection, 'Rejected production menu action removed the selection');
         terminal.input("'\r", true);
         await eventually(() => visible().split('\n').some(line => line === 'second-unsubmitted'), 'Preserving the display changed the submitted multiline command');
         terminal.input(`printf '\\033[2J\\033[10;1H'; printf '%0*d' ${terminal.cols} 0; sleep 2; printf Z; sleep 1\r`, true);
@@ -99,7 +110,9 @@ async function verify() {
         terminal.input("printf '\\033[?1049hALTERNATE-NATIVE'; sleep 1; printf '\\033[?1049l'\r", true);
         await eventually(() => terminal.buffer.active.type === 'alternate' && visible().includes('ALTERNATE-NATIVE'), 'Real foreground program did not enter the alternate screen');
         const alternate = snapshot();
+        const alternateSelection = selectCurrentLine();
         assert(await clearTerminalScreen(terminal, id) === 'blocked', 'Alternate-screen clearing must be blocked');
+        assert(selection() === alternateSelection, 'Blocked alternate-screen clearing removed the selection');
         assert(snapshot() === alternate, 'Clearing modified the real alternate-screen program');
         await eventually(() => terminal.buffer.active.type === 'normal', 'Real alternate-screen program did not restore its display');
         await progress('Unsupported native shell preserved multiline input, pending wrap and foreground output.');
@@ -114,7 +127,9 @@ async function verify() {
         const endX = terminal.buffer.active.cursorX;
         terminal.input('\u001b[D\u001b[D', true);
         await eventually(() => terminal.buffer.active.cursorX === endX - 2, 'Real Zsh did not move the editing cursor');
+        selectCurrentLine();
         assert(await clearTerminalScreen(terminal, id) === 'requested', 'Production Zsh redraw was rejected');
+        assert(!terminal.hasSelection(), 'Successful Zsh clearing retained the selection');
         await eventually(() => !visible().includes(marker) && visible().includes('retained-zsh-input'), 'Real Zsh redraw lost editing input or retained previous output');
         assert(terminal.buffer.active.cursorX === endX - 2, 'Zsh redraw moved the editing cursor within the command');
         terminal.input('X\r', true);
@@ -140,13 +155,16 @@ async function verify() {
       terminal.scrollToTop();
       assert(terminal.buffer.active.viewportY < terminal.buffer.active.baseY, 'History-view regression requires a scrolled viewport');
       const beforeBlocked = visible();
+      const blockedSelection = selectCurrentLine();
       const releaseInput = controller.suppressUserInput();
       try {
         assert(await clearTerminalScreen(terminal, id) === 'blocked', 'Clearing bypassed production input suppression');
         assert(visible() === beforeBlocked, 'Rejected clear-screen input changed the display');
+        assert(selection() === blockedSelection, 'Production input rejection removed or changed the selection');
         assert(terminal.buffer.active.viewportY === 0, 'Rejected clear-screen input moved the history viewport');
       } finally { releaseInput(); }
       assert(await clearTerminalScreen(terminal, id) === 'requested', 'Production controller rejected shell redraw');
+      assert(!terminal.hasSelection(), 'Successful clearing retained the selection');
       assert(terminal.buffer.active.viewportY === terminal.buffer.active.baseY, 'Successful clearing did not return from history to the live prompt');
       try {
         await eventually(() => !visible().includes(marker) && visible().includes('retained-native-input'), 'Clearing lost the prompt or unsubmitted input');
@@ -192,11 +210,29 @@ async function verify() {
       assert(visible() === controlFlow, 'Clearing erased an unfinished control-flow command');
       terminal.input('then echo control-flow-native; fi\r', true);
       await eventually(() => visible().split('\n').includes('control-flow-native'), 'The real control-flow command changed after clearing');
+      await eventually(() => !controller.hasUnconfirmedLineBreak(), 'Write-failure regression requires a confirmed idle prompt');
+      // Suspend native event observation to exercise the real close/write race:
+      // the UI retains its last connected snapshot while the backend is gone.
+      // The production input writer and native IPC remain unchanged.
+      flushSync(() => root.render(<NativeTerminal observeIntegration={false} />));
+      for (const type of ['data', 'status', 'closed'] as const) {
+        controller.unlisten[type]?.();
+        controller.unlisten[type] = undefined;
+      }
+      await invokeCloseSession(id);
+      closed = true;
+      const failedSelection = selectCurrentLine();
+      let writeFailure: unknown;
+      try { await clearTerminalScreen(terminal, id); }
+      catch (error) { writeFailure = error; }
+      assert(writeFailure === 'TERMINAL_BROKER_STALE_TRANSPORT' || writeFailure === 'TERMINAL_BROKER_TRANSPORT_NOT_FOUND',
+        `Closed native backend did not produce the expected real IPC write failure: ${String(writeFailure)}`);
+      assert(selection() === failedSelection, 'Failed native IPC clearing removed or changed the selection');
       await progress('Native input, multiline prompt, cursor editing, wrapped input and independent scrollback passed.');
     } finally { unsubscribe(); }
   } finally {
     if (id) {
-      try { await invokeCloseSession(id); }
+      try { if (!closed) await invokeCloseSession(id); }
       finally { terminalRegistry.dispose(id); useTerminalStore.getState().removeSession(id); }
     }
     root.unmount();
