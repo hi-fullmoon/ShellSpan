@@ -351,7 +351,7 @@ describe('SettingsPanel', () => {
     expect(tabList).toHaveAttribute('aria-orientation', 'vertical');
     expect(tabList).toHaveAttribute('data-variant', 'sidebar');
     expect(tabList).toHaveClass('w-full', 'flex-col', 'items-stretch');
-    expect(tabList.closest('aside')).toHaveClass('w-44');
+    expect(tabList.closest('aside')).toHaveClass('min-h-0', 'w-36', '@min-[48rem]:w-52');
   });
 
   it('gives the selected settings menu a clear accent fill without an indicator or border', async () => {
@@ -385,14 +385,18 @@ describe('SettingsPanel', () => {
     const settingsDialog = screen.getByRole('dialog', { name: 'workbench.settings.title' });
 
     expect(settingsDialog).toHaveClass(
+      '[&_[data-slot=card]]:border-[0.5px]',
+      '[&_[data-slot=card]]:border-border/60',
+      '[&_[data-slot=separator]]:border-t-[0.5px]',
+      '[&_[data-slot=separator]]:border-border/50',
       '[&_[data-slot=input]]:h-8',
       '[&_[data-slot=input-group]]:h-8',
       '[&_[data-slot=select-trigger]]:h-8',
       '[&_[data-slot=select-trigger]]:min-w-36',
     );
     expect(settingsDialog).toHaveClass(
-      'h-[min(48rem,calc(100vh-2rem))]',
-      'w-[min(64rem,calc(100vw-2rem))]',
+      'h-[min(52rem,calc(100vh-2rem))]',
+      'w-[min(76rem,calc(100vw-2rem))]',
       'max-w-none',
     );
     expect(settingsDialog.className).not.toMatch(/(?:^|\s)max-h-\[min\(48rem/);
@@ -473,13 +477,13 @@ describe('SettingsPanel', () => {
     const settingsCard = startupRow?.closest('[data-slot="card"]');
     const settingsGroups = settingsCard?.closest('[data-slot="settings-groups"]');
 
-    expect(startupRow).toHaveClass('min-h-14', 'px-3.5', 'py-2', '@min-[32rem]:flex-row');
+    expect(startupRow).toHaveClass('min-h-14', 'px-4', 'py-2.5', '@min-[32rem]:flex-row');
     expect(settingsCard).toHaveAttribute('data-variant', 'outline');
     expect(settingsCard).toHaveAttribute('data-radius', 'compact');
     expect(updateRow?.closest('[data-slot="card"]')).toBe(settingsCard);
     expect(settingsCard?.querySelectorAll('[data-slot="separator"]')).toHaveLength(5);
     expect(settingsGroups).toHaveClass('flex-col', 'gap-3');
-    expect(settingsGroups?.firstElementChild).toHaveClass('gap-1.5');
+    expect(settingsGroups?.firstElementChild).toHaveClass('gap-2');
 
     openSection('settings.terminal.title');
     const terminalGroups = screen
@@ -495,18 +499,20 @@ describe('SettingsPanel', () => {
     ]);
   });
 
-  it('keeps section chrome and shortcut rows compact', async () => {
+  it('places the section heading inside the content scroller and keeps shortcut rows compact', async () => {
     render(<SettingsPanel />);
     await waitFor(() => {});
 
     const sectionHeader = screen
       .getByRole('heading', { name: 'settings.general.title', level: 2 })
       .parentElement?.parentElement;
-    expect(sectionHeader).toHaveClass('py-2');
+    expect(sectionHeader).toHaveClass('mb-5');
+    expect(sectionHeader?.closest('[data-slot="scroll-area"]')).toBeTruthy();
+    expect(sectionHeader?.closest('section')).toHaveClass('min-h-0', 'flex-1');
 
     const contentScroller = screen.getByRole('tabpanel').closest('[data-slot="scroll-area"]');
     const viewport = contentScroller?.querySelector('[data-slot="scroll-area-viewport"]');
-    expect(viewport?.firstElementChild).toHaveClass('p-3.5', 'max-w-3xl');
+    expect(viewport?.firstElementChild).toHaveClass('px-4', 'max-w-4xl', 'pb-6');
 
     openSection('settings.shortcuts.title');
     const shortcutRow = screen.getByText('settings.shortcuts.newTerminalTab').parentElement;

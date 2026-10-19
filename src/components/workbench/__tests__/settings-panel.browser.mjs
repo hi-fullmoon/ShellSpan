@@ -79,8 +79,22 @@ try {
   for (const viewport of [{ width: 1280, height: 800 }, { width: 640, height: 720 }]) {
     await page.setViewportSize(viewport);
     await openSection('general');
-    await page.screenshot({ path: `/tmp/shellspan-settings-buttons-${viewport.width}.png` });
-    for (const section of ['appearance', 'sftp', 'ai']) await openSection(section);
+    await page.getByRole('heading', { name: '通用', exact: true }).click();
+    const dividerInsets = await page.locator('[data-slot="settings-group"] [data-slot="separator"]').evaluateAll(dividers => dividers.map(divider => {
+      const line = divider.getBoundingClientRect();
+      const group = divider.parentElement.getBoundingClientRect();
+      return { left: line.left - group.left, right: group.right - line.right };
+    }));
+    assert.ok(dividerInsets.every(({ left, right }) => left >= 15 && Math.abs(left - right) <= 1), `setting dividers must have equal insets: ${JSON.stringify(dividerInsets)}`);
+    assert.ok(await page.locator('section [data-slot="scroll-area-viewport"]').evaluate(viewport => {
+      const close = document.querySelector('[data-slot="dialog-close"]');
+      return viewport.getBoundingClientRect().top >= close.getBoundingClientRect().bottom;
+    }), 'scrolling settings must stay below the fixed close button');
+    await page.screenshot({ path: `/tmp/shellspan-settings-buttons-${viewport.width}.png`, animations: 'disabled' });
+    for (const section of ['appearance', 'sftp', 'ai']) {
+      await openSection(section);
+      await page.screenshot({ path: `/tmp/shellspan-settings-${section}-${viewport.width}.png` });
+    }
     await openSection('general');
 
     const general = await page.evaluate(() => {
@@ -100,14 +114,14 @@ try {
     // Below ~720px the content column drops under the 32rem container query,
     // so rows stack the control under the label instead of sitting side by side.
     const stacked = viewport.width <= 720;
-    const rowMin = stacked ? 80 : 48;
-    const rowMax = stacked ? 100 : 58;
+    const rowMin = stacked ? 90 : 56;
+    const rowMax = stacked ? 125 : 76;
 
     assert.ok(
       general.rowHeights.every((height) => height >= rowMin && height <= rowMax),
       `general rows outside ${rowMin}..${rowMax}px at ${viewport.width}: ${general.rowHeights.join(',')}`,
     );
-    assert.ok(general.sectionHeader <= 56, `general section header ${general.sectionHeader}px exceeds 56px at ${viewport.width}`);
+    assert.ok(general.sectionHeader >= 50 && general.sectionHeader <= 110, `section heading must fit its title and description at ${viewport.width}: ${general.sectionHeader}px`);
     assert.ok(general.dialogHeight <= general.viewportHeight, 'settings dialog exceeds viewport height');
     assert.match(general.rowDescriptionLeading, /^1[6-9]px$/, `description line height ${general.rowDescriptionLeading} is not compact`);
 
@@ -225,7 +239,7 @@ try {
       const card = group.querySelector('[data-slot="card"]');
       return title.id === group.getAttribute('aria-labelledby')
         && title.getBoundingClientRect().bottom < card.getBoundingClientRect().top
-        && getComputedStyle(title).fontSize === '12px';
+        && getComputedStyle(title).fontSize === '14px';
     })), 'group titles should match other settings sections and sit above each card');
     assert.ok(geometry.switchesFit, `switches clipped at ${viewport.width}`);
     assert.equal(await panel.locator('[data-slot="collapsible-content"]:visible').count(), 0);
@@ -263,9 +277,33 @@ try {
     assert.ok(await feedbackButton.evaluate((element) => element === document.activeElement));
     assert.ok(await panel.evaluate((element) => element.scrollWidth <= element.clientWidth), `feedback overflow at ${viewport.width}`);
     await page.screenshot({ path: `/tmp/shellspan-feedback-${viewport.width}.png` });
+
+    // Exercise the real preference controls, including translated narrow layouts.
+    await openSection('appearance');
+    await page.getByRole('combobox', { name: '主题', exact: true }).click();
+    await page.getByRole('option', { name: '深色', exact: true }).click();
+    assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark');
+    await page.getByRole('option', { name: '深色', exact: true }).waitFor({ state: 'hidden' });
+    await page.screenshot({ path: `/tmp/shellspan-settings-dark-${viewport.width}.png`, animations: 'disabled' });
+    await page.getByRole('combobox', { name: '语言', exact: true }).click();
+    await page.getByRole('option', { name: 'English', exact: true }).click();
+    await page.getByRole('heading', { name: 'Appearance', exact: true }).waitFor();
+    assert.ok(await page.getByRole('tabpanel').evaluate(element => element.scrollWidth <= element.clientWidth), 'English settings must fit');
+    await page.screenshot({ path: `/tmp/shellspan-settings-english-${viewport.width}.png` });
+    await page.getByRole('combobox', { name: 'Language', exact: true }).click();
+    await page.getByRole('option', { name: '简体中文', exact: true }).click();
+    await page.getByRole('heading', { name: '外观', exact: true }).waitFor();
+    await page.getByRole('combobox', { name: '主题', exact: true }).click();
+    await page.getByRole('option', { name: '浅色', exact: true }).click();
+    await openSection('terminal');
+    await page.getByLabel('自定义模板', { exact: true }).scrollIntoViewIfNeeded();
+    await page.getByRole('tab', { name: '通用', exact: true }).focus();
+    await page.keyboard.press('Enter');
+    await page.getByRole('heading', { name: '通用', exact: true }).waitFor();
+    assert.equal(await page.locator('section [data-slot="scroll-area-viewport"]').evaluate(element => element.scrollTop), 0, 'category changes reset content scroll');
   }
 
-  console.log('settings panel: rows 56px, shortcut rows 44px, section header ≤56px, no overflow at 640/1280px');
+  console.log('settings panel: responsive settings rows, readable controls, keyboard actions and no overflow at 640/1280px');
 } finally {
   await browser?.close();
   await server.close();

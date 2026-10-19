@@ -27,7 +27,6 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { CompactDialogHeader } from '@/components/ui/compact-dialog';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -130,9 +129,9 @@ const SettingGroupLabel: React.FC<SettingGroupLabelProps> = () => null;
 const IntegrationGroup: React.FC<{ title: string; description?: string; descriptionId?: string; children: React.ReactNode }> = ({ title, description, descriptionId, children }) => {
   const titleId = React.useId();
   return (
-    <section aria-labelledby={titleId} data-slot="integration-group" className="flex min-w-0 flex-col gap-1.5">
+    <section aria-labelledby={titleId} data-slot="integration-group" className="flex min-w-0 flex-col gap-2">
       <div className={cn('flex min-h-5 px-1', description ? 'flex-col gap-1' : 'items-center gap-3')}>
-        <h3 id={titleId} className="text-xs font-medium text-muted-foreground">{title}</h3>
+        <h3 id={titleId} className="text-sm font-medium text-foreground">{title}</h3>
         {description && <p id={descriptionId} className="text-xs leading-relaxed text-muted-foreground">{description}</p>}
       </div>
       <Card size="sm" radius="compact" variant="outline" className="gap-0 py-0">
@@ -484,26 +483,25 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     closeRecorder();
   };
 
-  const ActiveSectionIcon = activeSectionMeta.icon;
-
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => onOpenChange(nextOpen)}>
       <DialogContent
-        className="flex h-[min(48rem,calc(100vh-2rem))] w-[min(64rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden border-app-border/70 bg-card p-0 [&_[data-slot=dialog-close]]:size-8 [&_[data-slot=input]]:h-8 [&_[data-slot=input-group]]:h-8 [&_[data-slot=select-trigger]]:h-8 [&_[data-slot=select-trigger]]:min-w-36 sm:rounded-xl"
+        className="flex h-[min(52rem,calc(100vh-2rem))] w-[min(76rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden bg-background p-0 [&_[data-slot=card]]:border-[0.5px] [&_[data-slot=card]]:border-border/60 [&_[data-slot=separator]]:border-t-[0.5px] [&_[data-slot=separator]]:border-border/50 [&_[data-slot=dialog-close]]:size-8 [&_[data-slot=input]]:h-8 [&_[data-slot=input-group]]:h-8 [&_[data-slot=select-trigger]]:h-8 [&_[data-slot=select-trigger]]:min-w-36 sm:rounded-xl"
       >
         <TooltipProvider>
-          <CompactDialogHeader
-            title={t('workbench.settings.title')}
-            description={t('settings.description')}
-          />
-
           <Tabs
             value={activeSection}
             onValueChange={handleSectionChange}
             orientation="vertical"
             className="@container min-h-0 flex-1 flex-row gap-0 overflow-hidden"
           >
-            <aside className="flex w-44 shrink-0 flex-col border-r border-app-border/50 bg-muted/30 p-2">
+            <aside className="flex min-h-0 w-36 shrink-0 flex-col border-r-[0.5px] border-border/50 bg-muted/30 @min-[48rem]:w-52">
+            <DialogHeader className="shrink-0 px-4 pb-4 pt-5 text-left">
+              <DialogTitle>{t('workbench.settings.title')}</DialogTitle>
+              <DialogDescription className="sr-only">{t('settings.description')}</DialogDescription>
+            </DialogHeader>
+            <ScrollArea className="min-h-0 flex-1">
+            <div className="px-2 pb-4">
             <TabsList
               variant="sidebar"
               aria-label={t('settings.sectionNavigation')}
@@ -520,16 +518,18 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 );
               })}
             </TabsList>
+            </div>
+            </ScrollArea>
             </aside>
 
-            <section className="flex min-w-0 flex-1 flex-col bg-background">
-              <div className="flex shrink-0 items-center gap-2.5 border-b border-app-border/40 px-4 py-2">
-                <div className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                  <ActiveSectionIcon className="size-3.5" aria-hidden />
-                </div>
+            <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+              <div aria-hidden="true" className="h-10 shrink-0" />
+              <ScrollArea viewportRef={settingsViewportRef} className="min-h-0 flex-1">
+                <div data-slot="settings-content" className="@container mx-auto w-full max-w-4xl px-4 pb-6 @min-[48rem]:px-6">
+              <div data-slot="settings-section-header" className="mb-5 flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
-                  <h2 className="text-sm font-semibold text-foreground">{t(activeSectionMeta.titleKey)}</h2>
-                  <p className="truncate text-xs text-muted-foreground">{t(activeSectionMeta.descriptionKey)}</p>
+                  <h2 className="text-xl font-semibold tracking-tight text-foreground">{t(activeSectionMeta.titleKey)}</h2>
+                  <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{t(activeSectionMeta.descriptionKey)}</p>
                 </div>
                 {activeSection === 'shortcuts' && (
                   <Button
@@ -546,8 +546,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 )}
               </div>
 
-              <ScrollArea viewportRef={settingsViewportRef} className="min-h-0 flex-1">
-                <div className="@container mx-auto w-full max-w-3xl p-3.5">
             <TabsContent value="appearance" className="w-full">
               <SettingsGrid>
                 <SettingRow label={t('settings.appearance.theme')} description={t('settings.appearance.themeDescription')}>
