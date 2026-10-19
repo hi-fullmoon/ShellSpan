@@ -130,8 +130,10 @@ const IntegrationGroup: React.FC<{ title: string; description?: string; descript
   const titleId = React.useId();
   return (
     <section aria-labelledby={titleId} data-slot="integration-group" className="flex min-w-0 flex-col gap-2">
-      <div className={cn('flex min-h-5 px-1', description ? 'flex-col gap-1' : 'items-center gap-3')}>
-        <h3 id={titleId} className="text-sm font-medium text-foreground">{title}</h3>
+      <div className="flex min-w-0 flex-col gap-1 px-1">
+        <div data-slot="settings-group-header" className="flex min-h-8 min-w-0 items-center">
+          <h3 id={titleId} className="min-w-0 text-sm font-medium break-words text-foreground">{title}</h3>
+        </div>
         {description && <p id={descriptionId} className="text-xs leading-relaxed text-muted-foreground">{description}</p>}
       </div>
       <Card size="sm" radius="compact" variant="outline" className="gap-0 py-0">
@@ -692,6 +694,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
             <TabsContent value="general" className="w-full">
               <SettingsGrid>
+                <SettingGroupLabel>{t('settings.general.appBehavior')}</SettingGroupLabel>
                 <SettingRow label={t('settings.general.startupSection')} description={t('settings.general.startupSectionDescription')}>
                   <Select value={startupSection} onValueChange={(value) => setStartupSection(value as AppSection)}>
                     <SelectTrigger size="sm" aria-label={t('settings.general.startupSection')}>

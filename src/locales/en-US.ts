@@ -1224,6 +1224,7 @@ export default {
   'update.restartDialog.later': 'Later',
   'update.restartDialog.installNow': 'Restart and Install',
 
+  'settings.general.appBehavior': 'App behavior',
   'settings.general.softwareUpdate': 'Software updates',
   'settings.general.update': 'Update',
   'settings.general.currentVersion': 'Version {version}',

@@ -74,6 +74,19 @@ try {
     }
     const selectHeights = await page.locator('[role="tabpanel"] [data-slot="select-trigger"]').evaluateAll(selects => selects.map(select => select.getBoundingClientRect().height));
     for (const height of selectHeights) assert.equal(height, 32, `${name}: Select must match action button height`);
+    const headers = await page.locator('[role="tabpanel"] [data-slot="settings-group"] [data-slot="settings-group-header"]').evaluateAll(elements => elements.map(header => {
+      const rect = header.getBoundingClientRect();
+      const card = header.nextElementSibling.getBoundingClientRect();
+      const title = header.querySelector('h3').getBoundingClientRect();
+      const button = header.querySelector('button')?.getBoundingClientRect();
+      return { height: rect.height, gap: card.top - rect.bottom,
+        centerOffset: button ? Math.abs(title.top + title.height / 2 - button.top - button.height / 2) : 0 };
+    }));
+    for (const header of headers) {
+      assert.equal(header.height, 32, `${name}: consistent group header height`);
+      assert.equal(header.gap, 8, `${name}: group header to card gap`);
+      assert.ok(header.centerOffset <= 1, `${name}: title and action must be vertically centered`);
+    }
   };
 
   for (const viewport of [{ width: 1280, height: 800 }, { width: 640, height: 720 }]) {
@@ -136,7 +149,7 @@ try {
     await openSection('terminal');
     const overflow = await page.evaluate(() => {
       const viewportEl = document.querySelector('[role="tabpanel"]').closest('[data-slot="scroll-area"]');
-      const groupTitleRow = document.querySelector('[data-slot="settings-group"] div.min-h-5');
+      const groupTitleRow = document.querySelector('[data-slot="settings-group-header"]');
       return {
         horizontal: viewportEl.scrollWidth - viewportEl.clientWidth,
         cardCount: document.querySelectorAll('[data-slot="settings-group"]').length,
@@ -147,7 +160,7 @@ try {
     assert.ok(overflow.horizontal <= 0, `terminal section overflows horizontally by ${overflow.horizontal}px at ${viewport.width}`);
     assert.equal(overflow.cardCount, 4, 'terminal section should render 4 groups');
     assert.ok(overflow.firstCardRadius.length > 0, 'settings cards should carry a compact radius');
-    assert.ok(overflow.groupTitleRow <= 22, `group title row ${overflow.groupTitleRow}px exceeds 22px at ${viewport.width}`);
+    assert.equal(overflow.groupTitleRow, 32, `group title row must be 32px at ${viewport.width}`);
     const titleInput = page.getByLabel('自定义模板', { exact: true });
     await titleInput.scrollIntoViewIfNeeded();
     await page.getByLabel('页签标题模板', { exact: true }).click();

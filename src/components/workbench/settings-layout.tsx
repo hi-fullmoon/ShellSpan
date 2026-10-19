@@ -72,9 +72,9 @@ export const SettingsGroup: React.FC<SettingsGroupProps> = ({
       className="flex min-w-0 flex-col gap-2"
     >
       {(title || action) && (
-        <div className="flex min-h-5 items-center justify-between gap-3 px-1">
+        <div data-slot="settings-group-header" className="flex min-h-8 min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 px-1">
           {title && (
-            <h3 id={titleId} className="text-sm font-medium text-foreground">
+            <h3 id={titleId} className="min-w-0 flex-1 text-sm font-medium break-words text-foreground">
               {title}
             </h3>
           )}

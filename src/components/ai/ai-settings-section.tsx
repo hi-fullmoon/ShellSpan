@@ -177,7 +177,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
         title={t('settings.ai.providers')}
         titleId="ai-model-providers-heading"
         action={(
-          <Button size="sm" onClick={() => setAddOpen(true)}>
+          <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
             <PlusIcon data-icon="inline-start" />
             {t('settings.ai.addProvider')}
           </Button>
