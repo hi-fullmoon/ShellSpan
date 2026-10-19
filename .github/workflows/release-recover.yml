@@ -1,0 +1,58 @@
+name: Recover Unpublished Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Unpublished version tag to recover
+        required: true
+        type: string
+      expected_tag_object:
+        description: Exact previous tag object SHA from git ls-remote (not the peeled commit)
+        required: true
+        type: string
+      target_sha:
+        description: Exact reviewed release commit SHA
+        required: true
+        type: string
+      reason:
+        description: Reason for recovering the unpublished version
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  recover:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: publish-release
+      cancel-in-progress: false
+    steps:
+      - name: Checkout recovery tools from main
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - name: Require target to be current main
+        env:
+          TARGET_SHA: ${{ inputs.target_sha }}
+        run: test "$TARGET_SHA" = "$(git rev-parse HEAD)"
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Recover unpublished tag and request release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          EXPECTED_TAG_OBJECT: ${{ inputs.expected_tag_object }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+          RECOVERY_REASON: ${{ inputs.reason }}
+        run: node scripts/recover-release.mjs

@@ -1,6 +1,7 @@
 name: Quality Gate
 
 on:
+  workflow_dispatch:
   workflow_call:
     inputs:
       ref:

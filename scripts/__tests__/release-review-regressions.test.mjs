@@ -194,6 +194,28 @@ describe('release preparation recovery', () => {
     expect(readVersions(directory).version).toBe('0.1.1');
     expect(await readFile(path.join(directory, 'release-notes/0.1.1.md'), 'utf8')).toContain(notes);
     expect(JSON.parse(await readFile(path.join(directory, 'release-notes/0.1.1.json'), 'utf8')).version).toBe('0.1.1');
+    // Explicit unpublished recovery keeps the allocated version while forcing
+    // another notes review; no automatic version increment is involved.
+    writePreparedVersion('0.1.1', { version: '0.1.1' }, notes, directory, true);
+    expect(readVersions(directory).version).toBe('0.1.1');
+    expect(await readFile(path.join(directory, 'release-notes/0.1.1.md'), 'utf8')).toContain('release-review-required');
+    expect(() => writePreparedVersion('0.1.2', { version: '0.1.2' }, notes, directory, true)).toThrow(/Invalid prepared/);
+  });
+
+  it('restores existing notes and metadata when unpublished recovery fails Cargo validation', async () => {
+    const directory = await copyManifests();
+    const { version } = readVersions(directory);
+    await mkdir(path.join(directory, 'release-notes'));
+    for (const suffix of ['md', 'json']) {
+      await copyFile(path.join(root, `release-notes/${version}.${suffix}`), path.join(directory, `release-notes/${version}.${suffix}`));
+    }
+    const before = await originalFiles(directory);
+    const note = await readFile(path.join(directory, `release-notes/${version}.md`));
+    const meta = await readFile(path.join(directory, `release-notes/${version}.json`));
+    expect(() => writePreparedVersion(version, { version }, notes, directory, true)).toThrow(/cargo/);
+    expect(await originalFiles(directory)).toEqual(before);
+    expect(await readFile(path.join(directory, `release-notes/${version}.md`))).toEqual(note);
+    expect(await readFile(path.join(directory, `release-notes/${version}.json`))).toEqual(meta);
   });
 
   it('blocks the actual pnpm version command before any manifest changes', async () => {

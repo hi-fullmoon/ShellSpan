@@ -39,6 +39,7 @@
     "tauri:build": "tauri build",
     "preversion": "node scripts/reject-package-version.mjs",
     "release:prepare": "node scripts/bump-version.mjs",
+    "release:validate": "node scripts/release-quality.mjs request",
     "release:check": "node scripts/release-notes.mjs check",
     "changelog": "node scripts/release-notes.mjs sync",
     "check:rust:includes": "node scripts/check-rust-includes.mjs",

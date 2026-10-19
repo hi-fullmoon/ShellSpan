@@ -82,3 +82,5 @@ pnpm check:llm:catalog
 - 除非用户明确要求，否则不要创建 commit、tag 或推送。
 
 提交信息使用英文 Conventional Commits。统一使用 `pnpm release:prepare` 准备版本文件和待审核说明，不创建 commit 或 tag；仅在用户明确要求准备发布时运行。不要使用包管理器内置的 `pnpm version` 或 `npm version`，`preversion` 会在其修改版本之前拒绝执行。审核后执行 `pnpm changelog` 同步当前版本说明、`pnpm release:check` 校验。发布细节见 `docs/releasing.md`。
+
+发布先验证代码，后分配版本：最终代码提交必须先通过 main 的完整 Quality Gate，必要时用 `pnpm release:validate` 请求验证。准备后仅允许版本字段、当前说明、元数据与 changelog 变化。未公开失败版本需要修复时保留版本号，通过检查后用 `pnpm release:prepare --reuse-unpublished` 重新审核说明，再通过 Recover Unpublished Release 工作流受控恢复标签；禁止直接强推。已公开版本（含预发布）永远不可覆盖或移动。

@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { assertPreparedQuality } from './release-quality.mjs';
 import { walkFiles, buildUpdaterManifest } from './build-updater-json.mjs';
 import { command, checkNotes, readVersions, latestStable, assertBaseline, assertRemoteTag, REPOSITORY } from './release-notes.mjs';
 
@@ -18,7 +19,12 @@ export function assertDraft(release) {
 export function findReleaseByTag(tag) {
   // GitHub's by-tag endpoint excludes drafts, even for an authenticated writer.
   const releases = JSON.parse(command('gh', ['api', '--paginate', '--slurp', `repos/${REPOSITORY}/releases?per_page=100`])).flat();
-  return releases.find(release => release.tag_name === tag);
+  const matching = releases.filter(release => release.tag_name === tag);
+  // A public record must never be hidden by an unpublished draft in the list.
+  const published = matching.find(release => !release.draft);
+  if (published) return published;
+  if (matching.length > 1) throw new Error(`Ambiguous release drafts for ${tag}`);
+  return matching[0];
 }
 
 export async function sha256(file) {
@@ -92,6 +98,8 @@ async function publish() {
   if (process.env.RELEASE_TAG !== tag) throw new Error('Release tag/version mismatch');
   const { meta, notes } = checkNotes(version);
   assertBaseline(meta, latestStable());
+  assertPreparedQuality(meta);
+  assertRemoteTag(tag);
   let release = findReleaseByTag(tag);
   assertDraft(release);
   const tauri = JSON.parse(await readFile('src-tauri/tauri.conf.json', 'utf8'));

@@ -5,6 +5,8 @@ import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
 import { parse as parseToml } from 'smol-toml';
 import semver from 'semver';
+import { assertQuality } from './release-quality.mjs';
+import { assertDraft, findReleaseByTag } from './publish-release.mjs';
 import {
   command, readVersions, validVersion, latestStable, assertBaseline,
   REPOSITORY, REVIEW_MARKER, VERSION_FILES,
@@ -29,10 +31,12 @@ export function generateCandidates(baseSha, headSha, cwd = process.cwd()) {
   ], cwd);
 }
 
-export async function prepareVersion(requested) {
+export async function prepareVersion(requested, reuse = false) {
   const { version: current } = readVersions();
   if (command('git', ['status', '--porcelain'])) throw new Error('Commit or move pending changes before preparing a release');
-  let next = requested;
+  const headSha = command('git', ['rev-parse', 'HEAD']);
+  const qualityRunId = assertQuality(headSha);
+  let next = reuse ? current : requested;
   if (!next) {
     const rl = createInterface({ input: stdin, output: stdout });
     try {
@@ -43,32 +47,43 @@ export async function prepareVersion(requested) {
   }
   if (['patch', 'minor', 'major'].includes(next)) next = semver.inc(current, next);
   validVersion(next);
-  if (!semver.gt(next, current)) throw new Error('The next version must be greater than the current version');
-  if (command('git', ['tag', '--list', `v${next}`])) throw new Error('The release tag already exists locally');
-  if (command('git', ['ls-remote', '--tags', 'origin', `refs/tags/v${next}`])) throw new Error('The release tag already exists remotely');
+  if (!reuse && !semver.gt(next, current)) throw new Error('The next version must be greater than the current version');
+  if (reuse) {
+    assertDraft(findReleaseByTag(`v${next}`));
+    if (!existsSync(`release-notes/${next}.md`) || !existsSync(`release-notes/${next}.json`)) {
+      throw new Error('No allocated version notes to prepare again');
+    }
+  } else {
+    if (command('git', ['tag', '--list', `v${next}`])) throw new Error('The release tag already exists locally');
+    if (command('git', ['ls-remote', '--tags', 'origin', `refs/tags/v${next}`])) throw new Error('The release tag already exists remotely');
+  }
   const baseTag = latestStable();
   command('git', ['fetch', 'origin', `refs/tags/${baseTag}:refs/tags/${baseTag}`]);
   const baseSha = command('git', ['rev-parse', `${baseTag}^{commit}`]);
-  const headSha = command('git', ['rev-parse', 'HEAD']);
   command('git', ['merge-base', '--is-ancestor', baseSha, headSha]);
-  const meta = { version: next, repository: REPOSITORY, baseTag, baseSha, headSha, date: new Date().toISOString().slice(0, 10) };
+  const meta = { version: next, repository: REPOSITORY, baseTag, baseSha, headSha, qualityRunId, date: new Date().toISOString().slice(0, 10) };
   assertBaseline(meta, baseTag);
   const candidates = generateCandidates(baseSha, headSha);
-  writePreparedVersion(next, meta, candidates);
+  writePreparedVersion(next, meta, candidates, process.cwd(), reuse);
   console.log(`已准备 v${next}，变更范围 ${baseTag}..${headSha.slice(0, 7)}。\n编辑 release-notes/${next}.md 后运行 pnpm changelog 和 pnpm release:check。\n未创建提交、标签或推送。`);
 }
 
-export function writePreparedVersion(next, meta, candidates, root = process.cwd()) {
+export function writePreparedVersion(next, meta, candidates, root = process.cwd(), reuse = false) {
   validVersion(next);
   const { version: current, packageName } = readVersions(root);
-  if (meta.version !== next || !semver.gt(next, current)) throw new Error('Invalid prepared version');
+  if (meta.version !== next || !(reuse ? next === current : semver.gt(next, current))) throw new Error('Invalid prepared version');
   const notesDirectory = path.join(root, 'release-notes');
   const notesPath = path.join(notesDirectory, `${next}.md`);
   const metaPath = path.join(notesDirectory, `${next}.json`);
-  if (existsSync(notesPath) || existsSync(metaPath)) throw new Error('Release notes already exist; refusing to overwrite reviewed content');
+  if (!reuse && (existsSync(notesPath) || existsSync(metaPath))) throw new Error('Release notes already exist; refusing to overwrite reviewed content');
 
   const files = VERSION_FILES.map(file => path.join(root, file));
   const original = new Map(files.map(file => [file, readFileSync(file)]));
+  if (reuse) {
+    for (const file of [notesPath, metaPath]) {
+      if (existsSync(file)) original.set(file, readFileSync(file));
+    }
+  }
   const changes = new Map();
   for (const file of files.slice(0, 2)) {
     const json = JSON.parse(original.get(file).toString('utf8'));
@@ -95,6 +110,11 @@ export function writePreparedVersion(next, meta, candidates, root = process.cwd(
       createdDirectory = true;
     }
     for (const [file, content] of additions) {
+      if (original.has(file)) {
+        touched.push(file);
+        writeFileSync(file, content);
+        continue;
+      }
       const descriptor = openSync(file, 'wx');
       created.push(file);
       try {
@@ -136,7 +156,7 @@ export function writePreparedVersion(next, meta, candidates, root = process.cwd(
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  prepareVersion(process.argv[2]).catch(error => {
+  prepareVersion(process.argv[2], process.argv[2] === '--reuse-unpublished').catch(error => {
     console.error(error.message);
     process.exitCode = 1;
   });

@@ -1,5 +1,6 @@
 import { appendFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { assertPreparedQuality } from './release-quality.mjs';
 import { command, readVersions, checkNotes, latestStable, assertBaseline, assertRemoteTag, REPOSITORY } from './release-notes.mjs';
 
 try {
@@ -7,6 +8,7 @@ try {
   const { version } = readVersions();
   if (tag !== `v${version}`) throw new Error('Tag must exactly match all four repository versions, including prerelease suffix');
   const { meta, notes } = checkNotes(version);
+  assertPreparedQuality(meta);
   assertBaseline(meta, latestStable());
   const releases = JSON.parse(command('gh', ['api', '--paginate', '--slurp', `repos/${REPOSITORY}/releases?per_page=100`])).flat();
   if (releases.some(release => release.tag_name === tag && !release.draft)) {
