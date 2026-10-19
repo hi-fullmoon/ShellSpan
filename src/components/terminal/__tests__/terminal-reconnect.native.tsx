@@ -16,6 +16,8 @@ import { useTerminalStore } from '@/stores/terminalStore';
 import { useAppStore } from '@/stores/appStore';
 import { initI18n } from '@/locales';
 import { readTerminalCurrentDirectory } from '@/lib/terminal/terminal-current-directory';
+import { useCloseTerminal } from '@/hooks/useCloseTerminal';
+import { useToastStore } from '@/stores/toastStore';
 import '@/styles/base.css';
 
 function assert(value: unknown, message: string): asserts value { if (!value) throw new Error(message); }
@@ -27,11 +29,13 @@ async function eventually(check: () => boolean, message: string) {
   }
 }
 let agent: AiSessionController | undefined;
+let closeTerminal: ReturnType<typeof useCloseTerminal> | undefined;
 function NativeAgent() {
   agent = useAiSessionController({ scope: 'terminal' });
   return <div data-agent-id={agent.view?.summary.id}>{agent.composer.draft}</div>;
 }
 function NativeWorkspace({ panel }: { panel: boolean }) {
+  closeTerminal = useCloseTerminal();
   const session = useTerminalStore(state => state.sessions.find(item => item.sessionId === state.activeSessionId) ?? null);
   return <TooltipProvider><TerminalControllerLayer /><TerminalPane activeSession={session} />
     {panel && <NativeAgent />}<Toaster /></TooltipProvider>;
@@ -144,6 +148,18 @@ async function verify() {
     const events = await invokeGetCommittedAgentRuntimeEvents({ sessionId: agentId, limit: 100 });
     assert(events.events.filter(event => event.type === 'session/terminal_reconnected').length === 3, 'Native rebind events were not durably committed');
     assert(!events.events.some(event => event.type === 'turn/start' || event.type === 'request/start'), 'Reconnect started execution without human input');
+    const closing = live()!;
+    await eventually(() => Boolean(live()?.promptReady), 'Reconnected shell did not reach its prompt');
+    const closingController = terminalRegistry.get(closing.sessionId);
+    assert(closingController && closeTerminal, 'Missing production close path');
+    assert(await closingController.writeUserInput('unset HISTFILE; TMOUT=1\r'), 'Final idle-timeout input was rejected');
+    await eventually(() => live()?.status === 'disconnected', 'Reconnected shell did not disconnect after idle timeout');
+    const toastsBeforeClose = useToastStore.getState().toasts.length;
+    await closeTerminal(closing.sessionId);
+    assert(!useTerminalStore.getState().sessions.some(item => item.sessionId === closing.sessionId), 'Closing the disconnected terminal retained its tab');
+    assert(useToastStore.getState().toasts.length === toastsBeforeClose, 'Closing a disconnected terminal reported a false error');
+    assert((await invokeGetAgentRuntimeSession({ sessionId: agentId })).ended, 'Closing must settle the associated Agent');
+    await invokeCloseSession(closing.sessionId);
   } finally {
     root.unmount();
     if (created) {

@@ -1724,16 +1724,17 @@ impl SessionManager {
             .registry
             .lock()
             .map_err(|_| "session registry poisoned".to_string())?;
-        let send_result = guard
-            .sessions
-            .get(session_id)
-            .ok_or_else(|| format!("session {session_id} not found"))
-            .and_then(|managed| {
-                enqueue_session_command(managed, SessionCommand::Close, session_id)
-                    .map_err(|error| error.to_string())
-            });
-        guard.sessions.remove(session_id);
-        send_result
+        let Some(managed) = guard.sessions.remove(session_id) else {
+            return Ok(());
+        };
+        // A disconnected command channel means its worker has already exited.
+        // Missing sessions and exited workers both satisfy the close request.
+        if managed.sender.send(SessionCommand::Close).is_ok() {
+            if let Some(waker) = managed.waker.as_ref() {
+                waker.wake();
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn status(&self, session_id: &str) -> Result<StatusEvent, String> {
@@ -2026,6 +2027,81 @@ mod session_manager_tests {
         ));
         assert!(matches!(receiver.recv().unwrap(), SessionCommand::Close));
         assert!(manager.status("local-1").is_err());
+    }
+
+    #[test]
+    fn closing_a_missing_or_already_closed_session_is_idempotent() {
+        let manager = SessionManager::default();
+        manager.close("missing").unwrap();
+        let (sender, receiver) = unbounded();
+        manager
+            .insert("local-1".into(), managed_session(sender))
+            .unwrap();
+        manager.close("local-1").unwrap();
+        manager.close("local-1").unwrap();
+        assert!(matches!(receiver.recv().unwrap(), SessionCommand::Close));
+        assert!(receiver.try_recv().is_err());
+        assert!(manager.status("local-1").is_err());
+    }
+
+    #[test]
+    fn closing_an_exited_worker_removes_only_its_session() {
+        let manager = SessionManager::default();
+        let (sender, receiver) = unbounded();
+        manager
+            .insert("local-1".into(), managed_session(sender))
+            .unwrap();
+        drop(receiver);
+        let (other_sender, other_receiver) = unbounded();
+        manager
+            .insert("other".into(), managed_session(other_sender))
+            .unwrap();
+        manager.close("local-1").unwrap();
+        assert!(manager.status("local-1").is_err());
+        assert!(manager.status("other").is_ok());
+        assert!(other_receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn concurrent_closes_send_one_command_and_both_succeed() {
+        let manager = SessionManager::default();
+        let (sender, receiver) = unbounded();
+        manager
+            .insert("local-1".into(), managed_session(sender))
+            .unwrap();
+        let barrier = Arc::new(std::sync::Barrier::new(3));
+        let workers: Vec<_> = (0..2)
+            .map(|_| {
+                let manager = manager.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    manager.close("local-1")
+                })
+            })
+            .collect();
+        barrier.wait();
+        for worker in workers {
+            worker.join().unwrap().unwrap();
+        }
+        assert!(matches!(receiver.recv().unwrap(), SessionCommand::Close));
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn close_does_not_hide_registry_failures() {
+        let manager = SessionManager::default();
+        let registry = manager.registry.clone();
+        assert!(std::thread::spawn(move || {
+            let _guard = registry.lock().unwrap();
+            panic!("poison the registry to exercise its actual failure path");
+        })
+        .join()
+        .is_err());
+        assert_eq!(
+            manager.close("missing").unwrap_err(),
+            "session registry poisoned"
+        );
     }
 }
 #[cfg(test)]

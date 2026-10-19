@@ -104,6 +104,7 @@ async function verify() {
   let closingTerminal = false;
   let terminalId: string | undefined;
   let otherTerminalId: string | undefined;
+  let idleTerminalId: string | undefined;
   let terminalClosed = false;
   let otherTerminalClosed = false;
   let output = '';
@@ -158,12 +159,21 @@ async function verify() {
       otherTerminalClosed = true;
       const toastsBefore = useToastStore.getState().toasts.length;
       await confirmTabClose(other.sessionId);
-      await eventually(() => useToastStore.getState().toasts.length > toastsBefore, 'Real close error must produce a Toast');
-      assert(useTerminalStore.getState().sessions.some(item => item.sessionId === other.sessionId), 'Failed close must retain its tab');
-      const toasts = useToastStore.getState().toasts;
-      assert(toasts[toasts.length - 1]?.message === t('terminal.tab.closeFailed', { title: other.title }), 'Close failure must use localized feedback');
-      await eventually(() => Array.from(document.querySelectorAll('[data-sonner-toast]'))
-        .some(toast => toast.textContent?.includes(t('terminal.tab.closeFailed', { title: other.title }))), 'Close error Toast must be visibly rendered');
+      await eventually(() => !useTerminalStore.getState().sessions.some(item => item.sessionId === other.sessionId), 'An already-closed backend must still remove its tab');
+      assert(useToastStore.getState().toasts.length === toastsBefore, 'Idempotent close must not report an error');
+      await invokeCloseSession(other.sessionId);
+      const idle = await invokeCreateLocalSession(100, 25);
+      idleTerminalId = idle.sessionId;
+      flushSync(() => useTerminalStore.getState().addSession(idle));
+      await eventually(() => Boolean(useTerminalStore.getState().sessions.find(item => item.sessionId === idle.sessionId)?.promptReady), 'Idle-timeout terminal did not reach its prompt');
+      const idleController = terminalRegistry.get(idle.sessionId);
+      assert(idleController, 'Missing idle-timeout terminal controller');
+      assert(await idleController.writeUserInput('unset HISTFILE; TMOUT=1\r'), 'Idle-timeout input was rejected');
+      await eventually(() => useTerminalStore.getState().sessions.find(item => item.sessionId === idle.sessionId)?.status === 'disconnected', 'Real shell did not disconnect after its idle timeout');
+      const idleToastsBefore = useToastStore.getState().toasts.length;
+      await confirmTabClose(idle.sessionId);
+      await eventually(() => !useTerminalStore.getState().sessions.some(item => item.sessionId === idle.sessionId), 'Idle-disconnected terminal tab was retained');
+      assert(useToastStore.getState().toasts.length === idleToastsBefore, 'Closing an idle-disconnected terminal must not report an error');
       return;
     }
     assert(selection, 'A configured real model is required');
@@ -319,7 +329,7 @@ async function verify() {
     await eventually(() => useTerminalTaskNavigation.getState().request === null, 'Obsolete task navigation was not cancelled');
     assert(!workspaceRoot(false)?.dataset.sessionId, 'A late task lookup must not overwrite a newer conversation visit');
 
-    await reportProgress('Checking real running-terminal close, Agent cancellation and close failure feedback.');
+    await reportProgress('Checking real running-terminal close, Agent cancellation and repeated close.');
     const other = await invokeCreateLocalSession(100, 25);
     otherTerminalId = other.sessionId;
     flushSync(() => useTerminalStore.getState().addSession(other));
@@ -348,18 +358,15 @@ async function verify() {
     const unrelatedSnapshot = await invokeGetAgentRuntimeSession({ sessionId: unrelated });
     assert(!unrelatedSnapshot.ended, 'Closing one terminal must preserve Agents on another terminal');
 
-    // A stale tab whose transport was already closed produces a real backend
-    // error, without replacing IPC or the production close hook.
+    // A stale tab whose transport was already closed still completes normally
+    // through real IPC and the production close hook.
     await invokeCloseSession(other.sessionId);
     otherTerminalClosed = true;
     const toastsBefore = useToastStore.getState().toasts.length;
     await confirmTabClose(other.sessionId);
-    await eventually(() => useToastStore.getState().toasts.length > toastsBefore, 'Close failure must show a Toast');
-    assert(useTerminalStore.getState().sessions.some(item => item.sessionId === other.sessionId), 'Close failure must retain the tab');
-    const toasts = useToastStore.getState().toasts;
-    assert(toasts[toasts.length - 1]?.message === t('terminal.tab.closeFailed', { title: other.title }), 'Close failure must use the localized message');
-    await eventually(() => Array.from(document.querySelectorAll('[data-sonner-toast]'))
-      .some(toast => toast.textContent?.includes(t('terminal.tab.closeFailed', { title: other.title }))), 'Close error Toast must be visibly rendered');
+    await eventually(() => !useTerminalStore.getState().sessions.some(item => item.sessionId === other.sessionId), 'An already-closed backend must still remove its tab');
+    assert(useToastStore.getState().toasts.length === toastsBefore, 'Idempotent close must not report an error');
+    await invokeCloseSession(other.sessionId);
   } finally {
     for (const cleanup of cleanups.reverse()) cleanup();
     root.unmount();
@@ -370,6 +377,7 @@ async function verify() {
     }
     if (terminalId) { if (!terminalClosed) await invokeCloseSession(terminalId); terminalRegistry.dispose(terminalId); }
     if (otherTerminalId) { if (!otherTerminalClosed) await invokeCloseSession(otherTerminalId); terminalRegistry.dispose(otherTerminalId); }
+    if (idleTerminalId) { await invokeCloseSession(idleTerminalId); terminalRegistry.dispose(idleTerminalId); }
   }
 }
 void verify().then(() => ({ ok: true }), (error: unknown) => ({ ok: false,

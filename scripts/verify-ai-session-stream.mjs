@@ -175,8 +175,8 @@ try {
   assert.equal(outcome.ok, true, outcome.error);
   if (performanceRun) console.log(JSON.stringify({ baseline, baselineRef: baseline ? baselineRef : undefined, baselineCommit, productionBundle: true, ...outcome.metrics }));
   else if (terminalContentionRun && values['cleanup-session']?.length) console.log('Native contention fixture cleanup completed.');
-  else if (terminalContentionRun && noModel) console.log('Native terminal close passed: real PTY command, production close confirmation, durable Agent cancellation, unrelated terminal preservation and real close-error Toast. No model calls were made.');
-  else if (terminalContentionRun) console.log('Native terminal contention passed: two real Agents, one PTY, conflict draft retention, task navigation, manual retry, simultaneous admission, confirmed takeover, running-Agent close and close-error Toast.');
+  else if (terminalContentionRun && noModel) console.log('Native terminal close passed: real PTY command, production close confirmation, durable Agent cancellation, unrelated terminal preservation, idle disconnect and idempotent close without error Toasts. No model calls were made.');
+  else if (terminalContentionRun) console.log('Native terminal contention passed: two real Agents, one PTY, conflict draft retention, task navigation, manual retry, simultaneous admission, confirmed takeover, running-Agent close and idempotent stale-tab cleanup.');
   else if (focusBackgroundRun) console.log('Native Focus background regression passed: two real visible commands completed on the leased PTY, with Focus selection and keyboard focus preserved.');
   else if (terminalReadinessRun) console.log('Native terminal readiness passed: registry identity across hot updates, existing and new local PTY output.');
   else if (terminalClearScreenRun) console.log('Native terminal clear-screen passed: production controller, native IPC and real local PTY.');

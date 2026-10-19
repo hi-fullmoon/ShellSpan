@@ -114,6 +114,11 @@ Generation 1 begins when the first transport is attached. Every reconnect or
 replacement transport increments `terminalGeneration` before output or input is
 accepted. A generation never returns from `closed` to `open`.
 
+Terminal close is idempotent: after associated Agents have settled and terminal
+ownership has been released, an absent transport or an exited command worker
+counts as closed. The UI removes the tab without an error notification. Registry,
+Agent settlement and ownership failures still propagate and retain the tab.
+
 `generationStarted` records the transport kind and geometry. `generationClosed`
 records a stable reason code such as `userClosed`, `remoteExit`,
 `transportDisconnected`, `replaced`, or `brokerShutdown`. Human-readable error
