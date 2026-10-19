@@ -480,8 +480,13 @@ describe('SettingsPanel', () => {
     expect(startupRow).toHaveClass('min-h-14', 'px-4', 'py-2.5', '@min-[32rem]:flex-row');
     expect(settingsCard).toHaveAttribute('data-variant', 'outline');
     expect(settingsCard).toHaveAttribute('data-radius', 'compact');
-    expect(updateRow?.closest('[data-slot="card"]')).toBe(settingsCard);
-    expect(settingsCard?.querySelectorAll('[data-slot="separator"]')).toHaveLength(5);
+    const updateCard = updateRow?.closest('[data-slot="card"]');
+    expect(updateCard).not.toBe(settingsCard);
+    expect(screen.getByText('settings.general.startupUpdateCheck').closest('[data-slot="card"]')).toBe(updateCard);
+    expect(screen.getByRole('heading', { name: 'settings.general.softwareUpdate' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'settings.general.checkUpdate' })).toHaveClass('border-input', 'bg-background');
+    expect(settingsCard?.querySelectorAll('[data-slot="separator"]')).toHaveLength(3);
+    expect(updateCard?.querySelectorAll('[data-slot="separator"]')).toHaveLength(1);
     expect(settingsGroups).toHaveClass('flex-col', 'gap-3');
     expect(settingsGroups?.firstElementChild).toHaveClass('gap-2');
 

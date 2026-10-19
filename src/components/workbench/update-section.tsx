@@ -73,7 +73,7 @@ export const UpdateSection: React.FC = () => {
 
       <div data-slot="update-actions" className="flex min-h-8 w-full flex-col items-stretch justify-center gap-2 @min-[32rem]:w-auto @min-[32rem]:min-w-44 @min-[32rem]:shrink-0 @min-[32rem]:items-end">
         {!downloading && !downloaded && (
-          <Button size="sm" disabled={checking} onClick={() => void runCheck('manual')}>
+          <Button variant="outline" size="sm" disabled={checking} onClick={() => void runCheck('manual')}>
             <RefreshCwIcon data-icon="inline-start" className={cn(checking && 'animate-spin')} />
             {checking ? t('settings.general.checkingUpdate') : t('settings.general.checkUpdate')}
           </Button>

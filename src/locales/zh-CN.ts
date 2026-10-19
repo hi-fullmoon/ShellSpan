@@ -1222,6 +1222,7 @@ export default {
   'update.restartDialog.later': '稍后',
   'update.restartDialog.installNow': '立即重启安装',
 
+  'settings.general.softwareUpdate': '软件更新',
   'settings.general.update': '更新',
   'settings.general.currentVersion': '当前版本：{version}',
   'settings.general.checkUpdate': '检查更新',

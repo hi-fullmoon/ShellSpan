@@ -713,15 +713,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     <Switch aria-label={t('settings.general.showFocusMode')} checked={showFocusMode} onCheckedChange={setShowFocusMode} />
                   </div>
                 </SettingRow>
-                <SettingRow label={t('settings.general.startupUpdateCheck')} description={t('settings.general.startupUpdateCheckDescription')}>
-                  <div className="flex justify-end">
-                    <Switch
-                      aria-label={t('settings.general.startupUpdateCheck')}
-                      checked={startupUpdateCheck}
-                      onCheckedChange={setStartupUpdateCheck}
-                    />
-                  </div>
-                </SettingRow>
                 <SettingRow label={t('settings.general.confirmBeforeExit')} description={t('settings.general.confirmBeforeExitDescription')}>
                   <div className="flex justify-end">
                     <Switch aria-label={t('settings.general.confirmBeforeExit')} checked={confirmBeforeExit} onCheckedChange={setConfirmBeforeExit} />
@@ -736,7 +727,17 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     <Switch aria-label={t('settings.general.restoreWorkspace')} checked={restoreWorkspace} onCheckedChange={setRestoreWorkspace} />
                   </div>
                 </SettingRow>
+                <SettingGroupLabel>{t('settings.general.softwareUpdate')}</SettingGroupLabel>
                 <UpdateSection />
+                <SettingRow label={t('settings.general.startupUpdateCheck')} description={t('settings.general.startupUpdateCheckDescription')}>
+                  <div className="flex justify-end">
+                    <Switch
+                      aria-label={t('settings.general.startupUpdateCheck')}
+                      checked={startupUpdateCheck}
+                      onCheckedChange={setStartupUpdateCheck}
+                    />
+                  </div>
+                </SettingRow>
               </SettingsGrid>
             </TabsContent>
 
