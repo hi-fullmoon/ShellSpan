@@ -40,7 +40,7 @@ pub(crate) const TERMINAL_TARGET_UNAVAILABLE_PREFIX: &str = "terminalTargetUnava
 
 pub(crate) fn terminal_target_unavailable(reason: &str) -> String {
     format!(
-        "{TERMINAL_TARGET_UNAVAILABLE_PREFIX} {reason}; reconnect the terminal and continue in a new Agent session"
+        "{TERMINAL_TARGET_UNAVAILABLE_PREFIX} {reason}; reconnect the terminal and verify its execution state before continuing"
     )
 }
 
@@ -92,7 +92,7 @@ mod target_availability_tests {
 
         assert!(is_terminal_target_unavailable(&error));
         assert!(!error.contains("terminal-1"));
-        assert!(error.contains("continue in a new Agent session"));
+        assert!(error.contains("verify its execution state"));
         assert_eq!(
             normalize_terminal_target_lookup_error(
                 "terminal-1",

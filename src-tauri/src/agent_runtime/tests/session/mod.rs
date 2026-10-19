@@ -4,6 +4,7 @@ include!("reliable_submission.rs");
 include!("model_retry.rs");
 include!("stream_performance.rs");
 include!("recorded_ui.rs");
+include!("terminal_reconnect.rs");
 
 #[test]
 fn driver_metrics_and_snapshot_cache_follow_commits_and_replay() {

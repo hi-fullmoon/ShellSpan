@@ -20,6 +20,7 @@ import {
   invokeRetryAgentModel,
   invokeCreateAgentRuntimeSession,
   invokeContinueAgentRuntimeOnTarget,
+  invokeReconnectAgentTerminal,
   invokeGetPendingAgentRuntimeApprovalArguments,
   invokeGetAgentRuntimeArtifact,
   invokeListAgentRuntimeSessions,
@@ -103,6 +104,7 @@ export interface AgentSessionAdapterDependencies {
   readonly selectModel?: typeof invokeSelectAgentRuntimeModel;
   readonly setPermission?: typeof invokeSetAgentRuntimePermission;
   readonly setExecutionSurface?: typeof invokeSetAgentRuntimeExecutionSurface;
+  readonly reconnectTerminal?: typeof invokeReconnectAgentTerminal;
   readonly submitImages?: typeof invokeSubmitAgentImages;
   readonly listFileReferences?: typeof invokeListAgentFileReferences;
   readonly listSkills?: typeof invokeListAgentRuntimeSkills;
@@ -352,6 +354,10 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
     if (event.type === 'session/model_selected') header.modelSelection = event.data.provider;
     if (event.type === 'session/permission_changed') header.permissionMode = event.data.mode;
     if (event.type === 'session/execution_surface_changed') header.executionSurface = event.data.surface;
+    if (event.type === 'session/terminal_reconnected') {
+      header.target = event.data.target;
+      header.permissionMode = 'requestApproval';
+    }
   }
   const task = activity.plan === undefined
     ? state.snapshot.task
@@ -359,7 +365,7 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
       ? (({ plan: _plan, ...rest }) => rest)(state.snapshot.task)
       : { ...state.snapshot.task, plan: activity.plan };
   return {
-    summary: sessionSummary(state.snapshot, state.events, activity.status, events),
+    summary: sessionSummary({ ...state.snapshot, header }, state.events, activity.status, events),
     snapshot: {
       kind: 'agent',
       value: {
@@ -733,12 +739,26 @@ export function createAgentSessionAdapter(
         throw new Error('Committed question answer is not visible yet');
       }
     },
-    listFileReferences: (sessionId, query, signal) => (dependencies.listFileReferences ?? invokeListAgentFileReferences)(sessionId, query, signal),
-    listSkills: (sessionId) => (dependencies.listSkills ?? invokeListAgentRuntimeSkills)(sessionId),
+    async listFileReferences(sessionId, query, signal) {
+      await resumeEndedSession(sessionId);
+      if (signal.aborted) throw new Error('Cancelled');
+      return (dependencies.listFileReferences ?? invokeListAgentFileReferences)(sessionId, query, signal);
+    },
+    async listSkills(sessionId) {
+      await resumeEndedSession(sessionId);
+      return (dependencies.listSkills ?? invokeListAgentRuntimeSkills)(sessionId);
+    },
     create: createSession,
     async continueOnTarget(input) {
       await invokeContinueAgentRuntimeOnTarget(input.request);
       return openEntry(input.request.sessionId);
+    },
+    async reconnectTerminal(sessionId, previousSessionId, terminalSessionId) {
+      await (dependencies.reconnectTerminal ?? invokeReconnectAgentTerminal)({ sessionId, previousSessionId, terminalSessionId });
+      const entry = ensureEntry(sessionId);
+      entry.view = entry.project(await entry.client.reconnect());
+      for (const listener of entry.listeners) listener(entry.view);
+      return entry.view;
     },
     open: openEntry,
     peek(sessionId: string) {
@@ -1014,6 +1034,7 @@ export function createAgentSessionAdapter(
     selectModel: protect(adapter.selectModel, id => id),
     setPermission: protect(adapter.setPermission, id => id),
     setExecutionSurface: protect(adapter.setExecutionSurface, id => id),
+    reconnectTerminal: protect(adapter.reconnectTerminal, id => id),
     bindProjectRoot: protect(adapter.bindProjectRoot, id => id),
     stop: protect(adapter.stop, id => id),
     mutateInbox: protect(adapter.mutateInbox, input => input.sessionId),

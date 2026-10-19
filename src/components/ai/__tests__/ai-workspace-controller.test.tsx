@@ -1993,7 +1993,7 @@ it('keeps a new target directory when an old cold Session creation fails late', 
   expect(agent.listSkills).toHaveBeenCalledWith('new');
 });
 
-it('keeps a failed Agent visible through a direct SSH reconnect and starts a fresh checked continuation', async () => {
+it('keeps the old Agent visible and never starts a new task when terminal rebinding is unavailable', async () => {
   useTerminalStore.setState({
     activeSessionId: 'old',
     sessions: [{ sessionId: 'old', title: 'Remote', host: 'example.test', port: 22,
@@ -2033,14 +2033,10 @@ it('keeps a failed Agent visible through a direct SSH reconnect and starts a fre
   }, 'p1'));
   await waitFor(() => expect(result.current.view?.summary.id).toBe('agent-old'));
   act(() => useTerminalStore.getState().setStatus('new', { sessionId: 'new', status: 'connected' }));
-  await waitFor(() => expect(result.current.continueOnReconnectedTerminal).not.toBeNull());
-  act(() => result.current.continueOnReconnectedTerminal?.());
-  await waitFor(() => expect(submit).toHaveBeenCalledWith(null, expect.objectContaining({
-    content: expect.stringContaining('Run checks'),
-    create: expect.objectContaining({ request: expect.objectContaining({
-      target: expect.objectContaining({ sessionId: 'new' }),
-    }) }),
-  })));
+  expect(result.current.continueOnReconnectedTerminal).toBeNull();
+  expect(result.current.historicalContinuationAvailable).toBe(false);
+  expect(result.current.view?.summary.id).toBe('agent-old');
+  expect(submit).not.toHaveBeenCalled();
 });
 
 it('shares an explicitly frozen cold Session between paths and Skills and never guesses a root', async () => {

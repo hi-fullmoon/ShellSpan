@@ -1,6 +1,49 @@
     use super::*;
     use crate::terminal_screen::TerminalScreenBuffer;
 
+    #[test]
+    fn terminal_reconnect_verifies_backend_ancestry_and_rejects_unrelated_transports() {
+        let broker = TerminalSessionBroker::enabled_for_test(512, 1_048_576, 1_048_576);
+        let geometry = TerminalGeometry::new(80, 24);
+        broker
+            .attach_transport("original", None, TerminalTransportKind::LocalPty, geometry)
+            .unwrap();
+        broker
+            .attach_transport("unrelated", None, TerminalTransportKind::LocalPty, geometry)
+            .unwrap();
+        broker
+            .attach_transport(
+                "replacement",
+                Some("original"),
+                TerminalTransportKind::LocalPty,
+                geometry,
+            )
+            .unwrap();
+        assert!(broker
+            .is_replacement_transport("original", "replacement")
+            .unwrap());
+        assert!(!broker
+            .is_replacement_transport("unrelated", "replacement")
+            .unwrap());
+        broker
+            .attach_transport(
+                "second",
+                Some("replacement"),
+                TerminalTransportKind::LocalPty,
+                geometry,
+            )
+            .unwrap();
+        assert!(broker
+            .is_replacement_transport("original", "second")
+            .unwrap());
+        assert!(broker
+            .is_replacement_transport("replacement", "second")
+            .unwrap());
+        assert!(broker
+            .is_replacement_transport("original", "replacement")
+            .is_err());
+    }
+
     fn attach_ready_user_ssh_transport(
         broker: &TerminalSessionBroker,
         transport_session_id: &str,

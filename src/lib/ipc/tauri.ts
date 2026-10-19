@@ -358,6 +358,10 @@ export function invokeContinueAgentRuntimeOnTarget(request: CreateAgentSessionRe
   return invokeLogged<AgentSessionSnapshot>('agent_runtime_continue_on_target', { request });
 }
 
+export function invokeReconnectAgentTerminal(input: { sessionId: string; previousSessionId: string; terminalSessionId: string }): Promise<AgentSessionSnapshot> {
+  return invokeLogged<AgentSessionSnapshot>('agent_runtime_reconnect_terminal', { input });
+}
+
 export async function invokeStartAgentRuntime(
   input: AgentRuntimeStartInput,
 ): Promise<AgentSessionSnapshot> {

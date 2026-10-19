@@ -39,6 +39,8 @@ export interface TerminalSession {
   pendingConnection?: boolean;
   /** Ephemeral predecessor used to keep split layout stable while a connection id changes. */
   replacesSessionId?: string;
+  /** Bounded, in-memory reconnect ancestry; never used as backend authorization. */
+  replacedSessionIds?: readonly string[];
 }
 
 export interface PendingTerminalConnection {
@@ -399,6 +401,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
         color: old.color,
         reconnecting: true,
         replacesSessionId: oldSessionId,
+        replacedSessionIds: [...(old.replacedSessionIds ?? []), oldSessionId].slice(-32),
       };
       const sessions = state.sessions.filter(
         (session) => session.sessionId !== oldSessionId,

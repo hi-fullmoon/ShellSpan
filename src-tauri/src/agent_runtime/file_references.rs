@@ -76,6 +76,23 @@ pub(crate) fn bound_scope(event: &super::AgentSessionEvent) -> Option<&SkillScop
         _ => None,
     }
 }
+
+/// Preserve the pinned directory identity while advancing only the verified transport target.
+pub(crate) fn current_bound_scope(events: &[super::AgentSessionEvent]) -> Option<SkillScope> {
+    let mut scope = None;
+    for event in events {
+        if let Some(bound) = bound_scope(event) {
+            scope.get_or_insert_with(|| bound.clone());
+        }
+        if let AgentSessionEventPayload::SessionTerminalReconnected { target, .. } = &event.payload
+        {
+            if let Some(scope) = &mut scope {
+                scope.target = target.clone();
+            }
+        }
+    }
+    scope
+}
 fn representable(path: &str) -> bool {
     !path.chars().any(|c| {
         c.is_control() || c == '"' || c == '\\' || c == ':' || matches!(c, '\u{2028}' | '\u{2029}')
@@ -332,12 +349,7 @@ impl FileReferenceRuntime {
             .clone()
             .try_acquire_owned()
             .map_err(|_| "Busy")?;
-        let expected_scope = self
-            .sessions
-            .all_events(&input.session_id)?
-            .iter()
-            .find_map(bound_scope)
-            .cloned();
+        let expected_scope = current_bound_scope(&self.sessions.all_events(&input.session_id)?);
         let request = FileReferenceRequest {
             target,
             expected_scope: expected_scope.clone(),

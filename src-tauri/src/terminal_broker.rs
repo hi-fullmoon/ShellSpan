@@ -878,6 +878,7 @@ impl SubscriberSet {
 
 #[derive(Debug)]
 struct SessionRecord {
+    predecessor_transport_session_ids: Vec<String>,
     terminal_session_id: String,
     terminal_generation: u64,
     transport_session_id: String,
@@ -923,6 +924,7 @@ impl SessionRecord {
         interactive_tools_enabled: bool,
     ) -> Self {
         Self {
+            predecessor_transport_session_ids: Vec::new(),
             terminal_session_id,
             terminal_generation,
             transport_session_id,
@@ -1414,7 +1416,18 @@ impl TerminalSessionBroker {
             .retain(|closed_id| closed_id != &terminal_session_id);
         let interactive_tools_enabled =
             effective_interactive_tools_for_transport(&state, transport_kind);
-        let record = SessionRecord::open(
+        let mut predecessors = state
+            .sessions
+            .get(&terminal_session_id)
+            .map(|record| record.predecessor_transport_session_ids.clone())
+            .unwrap_or_default();
+        if let Some(previous) = predecessor_transport_session_id {
+            predecessors.push(previous.to_owned());
+        }
+        if predecessors.len() > 32 {
+            predecessors.drain(..predecessors.len() - 32);
+        }
+        let mut record = SessionRecord::open(
             terminal_session_id.clone(),
             terminal_generation,
             transport_session_id.to_string(),
@@ -1422,6 +1435,7 @@ impl TerminalSessionBroker {
             geometry,
             interactive_tools_enabled,
         );
+        record.predecessor_transport_session_ids = predecessors;
         state.sessions.insert(terminal_session_id.clone(), record);
         state.transports.insert(
             transport_session_id.to_string(),
@@ -1435,6 +1449,21 @@ impl TerminalSessionBroker {
             terminal_session_id,
             terminal_generation,
         }))
+    }
+
+    pub(crate) fn is_replacement_transport(
+        &self,
+        previous: &str,
+        current: &str,
+    ) -> Result<bool, String> {
+        let state = self.lock()?;
+        let attachment = current_attachment(&state, current)?;
+        let record = &state.sessions[&attachment.terminal_session_id];
+        Ok(record.open
+            && record
+                .predecessor_transport_session_ids
+                .iter()
+                .any(|id| id == previous))
     }
 
     pub(crate) fn attachment_for_transport(

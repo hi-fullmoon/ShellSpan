@@ -97,6 +97,21 @@ it('projects model, permission, and execution surface changes over an older snap
   expect(view.activityNodes.some(node => node.kind === 'unknown')).toBe(false);
 });
 
+it('projects a reconnected target and resets permission without changing conversation identity', () => {
+  const target = { kind: 'remote' as const, targetId: 'terminal-new', sessionId: 'new', host: 'example.com', port: 22, username: 'user' };
+  const base = snapshot();
+  const event: AgentSessionEvent = {
+    ...agentSessionEventFixture[0]!, seq: 1, type: 'session/terminal_reconnected',
+    data: { previousSessionId: 'old', target },
+  };
+  const state = { snapshot: base, events: [event], lastCommittedSeq: 1, hasTerminalEvent: false };
+  const view = agentSessionView(state);
+  expect(view.summary.id).toBe(base.header.sessionId);
+  expect(view.summary.targetId).toBe('terminal-new');
+  expect(view.snapshot.value.header).toMatchObject({ target, permissionMode: 'requestApproval' });
+  expect(createAgentSessionViewProjector()(state)).toEqual(view);
+});
+
 it('clears a stale snapshot plan when a newer turn starts', () => {
   const persisted = snapshot();
   const view = agentSessionView({

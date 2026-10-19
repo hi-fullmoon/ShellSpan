@@ -22,6 +22,17 @@ async fn terminal_close_blocks_admission_and_stops_durable_tasks_on_both_surface
             .unwrap();
     }
     let closing = runtime.begin_terminal_close("terminal-a").unwrap();
+    for (previous, replacement) in [("terminal-a", "replacement"), ("previous", "terminal-a")] {
+        assert!(runtime
+            .reconnect_terminal(
+                &crate::models::SessionManager::default(),
+                "bound",
+                previous,
+                replacement
+            )
+            .unwrap_err()
+            .starts_with("TERMINAL_RECONNECT_BUSY"));
+    }
     assert!(runtime.begin_terminal_close("terminal-a").is_err());
     for id in ["bound", "direct"] {
         assert_eq!(

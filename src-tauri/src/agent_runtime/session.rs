@@ -588,6 +588,55 @@ impl AgentSessionStore {
         self.create_with_target_switch(request, false)
     }
 
+    pub(crate) fn reconnect_terminal(
+        &self,
+        session_id: &str,
+        previous_session_id: &str,
+        target: AgentSessionTarget,
+    ) -> Result<AgentSessionSnapshot, String> {
+        let mut inner = self.lock_configured()?;
+        let record = inner
+            .sessions
+            .get(session_id)
+            .ok_or("Agent session was not found")?;
+        if record.header.target.as_ref() == Some(&target) {
+            return record.snapshot();
+        }
+        let mut descendants = vec![session_id.to_owned()];
+        let mut visited = HashSet::new();
+        while let Some(parent) = descendants.pop() {
+            if !visited.insert(parent.clone()) {
+                continue;
+            }
+            for child in inner
+                .sessions
+                .values()
+                .filter(|child| child.header.parent_session_id.as_deref() == Some(&parent))
+            {
+                if !target_switch_settled(child)? {
+                    return Err("terminal reconnect requires settled child Sessions".into());
+                }
+                descendants.push(child.header.session_id.clone());
+            }
+        }
+        let (events, publisher) = append_payloads_locked(
+            &mut inner,
+            session_id,
+            vec![(
+                None,
+                None,
+                AgentSessionEventPayload::SessionTerminalReconnected {
+                    previous_session_id: previous_session_id.into(),
+                    target,
+                },
+            )],
+        )?;
+        let snapshot = inner.sessions[session_id].snapshot()?;
+        drop(inner);
+        publish_events(publisher, &events);
+        Ok(snapshot)
+    }
+
     pub(crate) fn continue_on_target(
         &self,
         request: CreateAgentSessionRequest,
@@ -3195,6 +3244,44 @@ fn validate_event_transition(
     record: &AgentSessionRecord,
     event: &AgentSessionEvent,
 ) -> Result<(), String> {
+    if let AgentSessionEventPayload::SessionTerminalReconnected {
+        previous_session_id,
+        target,
+    } = &event.payload
+    {
+        let old = record
+            .header
+            .target
+            .as_ref()
+            .ok_or("terminal reconnect requires a target")?;
+        let mut expected = old.clone();
+        expected.session_id = target.session_id.clone();
+        expected.target_id = target.target_id.clone();
+        if record.archived
+            || record.header.subagent.is_some()
+            || record.header.capability_scope.is_some()
+            || old.session_id != *previous_session_id
+            || old.session_id == target.session_id
+            || old.target_id == target.target_id
+            || expected != *target
+            || !target_switch_settled(record)?
+        {
+            return Err(
+                "terminal reconnect requires a settled root Session and the same target identity"
+                    .into(),
+            );
+        }
+        let recovery = record.snapshot()?.recovery;
+        if matches!(
+            recovery.status,
+            super::AgentRecoveryStatus::Available
+                | super::AgentRecoveryStatus::Required
+                | super::AgentRecoveryStatus::Reconciling
+        ) {
+            return Err("terminal reconnect requires reconciled effects".into());
+        }
+        return Ok(());
+    }
     if matches!(event.payload, AgentSessionEventPayload::SessionResumed {}) {
         return if record.ended && !record.archived && record.header.subagent.is_none() {
             Ok(())
@@ -3424,11 +3511,8 @@ fn validate_event_transition(
         }
         AgentSessionEventPayload::FileReferenceScopeBound { scope } => {
             if record.header.target.as_ref() != Some(&scope.target)
-                || record
-                    .events
-                    .iter()
-                    .filter_map(super::file_references::bound_scope)
-                    .any(|previous| previous != scope)
+                || super::file_references::current_bound_scope(&record.events)
+                    .is_some_and(|previous| previous != *scope)
             {
                 return Err("File reference root identity changed".into());
             }
@@ -3439,11 +3523,8 @@ fn validate_event_transition(
                 if record.header.target.as_ref() != Some(&snapshot.scope.target) {
                     return Err("Skills observation changed the frozen target".into());
                 }
-                if record
-                    .events
-                    .iter()
-                    .filter_map(super::file_references::bound_scope)
-                    .any(|previous| *previous != snapshot.scope)
+                if super::file_references::current_bound_scope(&record.events)
+                    .is_some_and(|previous| previous != snapshot.scope)
                 {
                     return Err("Skills root identity changed during observation".into());
                 }
@@ -3874,6 +3955,10 @@ fn apply_event(record: &mut AgentSessionRecord, event: &AgentSessionEvent) -> Re
         AgentSessionEventPayload::SessionExecutionSurfaceChanged { surface } => {
             record.header.execution_surface = *surface;
         }
+        AgentSessionEventPayload::SessionTerminalReconnected { target, .. } => {
+            record.header.target = Some(target.clone());
+            record.header.permission_mode = Some(AgentSessionPermissionMode::RequestApproval);
+        }
         AgentSessionEventPayload::SessionProjectRootBound { root } => {
             if let Some(target) = record.header.target.as_mut() {
                 if target.kind == "local" {
@@ -4045,6 +4130,14 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
         }
         Payload::SessionExecutionSurfaceChanged { .. } => {
             require_scope(event, false, false)?;
+        }
+        Payload::SessionTerminalReconnected {
+            previous_session_id,
+            target,
+        } => {
+            require_scope(event, false, false)?;
+            validate_identifier(previous_session_id, "previousSessionId")?;
+            validate_session_target(target)?;
         }
         Payload::SessionRenamed {
             title,

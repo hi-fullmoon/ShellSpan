@@ -1934,7 +1934,7 @@ export default {
   'ai.workspace.queue.paused': '已暂停',
   'ai.workspace.queue.resume': '发送这条消息',
   'ai.workspace.continueOnReconnectedTerminal': '在重连终端继续',
-  'ai.workspace.reconnectContinuePrompt': '请在新的 SSH 终端继续这项未完成任务：{goal}\n\n之前的终端已断线。不要假定先前的更改已执行或未执行；再次更改前先检查当前状态并核实不确定的结果。',
+  'ai.workspace.reconnectFailed': '暂时无法恢复终端关联。请等待当前操作结束，确认未完成操作的结果后重试。',
   'ai.workspace.tokenBudget.title': '本任务已达到累计模型用量上限',
   'ai.workspace.tokenBudget.description': '这次模型请求没有发送，已完成的操作会保留。在输入框发送消息即可继续，并开始新的任务用量周期。',
   'ai.workspace.tokenBudget.checkpointSaved': '已保存任务目标、当前进度和剩余事项。在输入框发送消息即可继续，并开始新的任务用量周期。',

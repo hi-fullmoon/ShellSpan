@@ -208,6 +208,13 @@ fn append_surface_events<'a>(
                     });
                 }
             }
+            AgentSessionEventPayload::SessionTerminalReconnected { .. } => {
+                messages.push(AgentSurfaceMessage::User {
+                    message_id: format!("terminal-reconnected-{}", event.seq),
+                    content: "The terminal connection was replaced. Conversation history is preserved, but previous shell state, environment, process handles and approvals are not valid for the new connection. Inspect the current directory and relevant execution state before acting. Never replay a previous command merely because the terminal reconnected. Follow the next explicit human input.".into(),
+                    source: AgentMessageSource::runtime("Terminal reconnected".into()),
+                });
+            }
             AgentSessionEventPayload::SkillCatalogPublished { catalog } => {
                 let mut source = AgentMessageSource::runtime("Skills catalog".into());
                 source.kind = super::AgentMessageSourceKind::SkillCatalog;

@@ -326,6 +326,7 @@ pub fn run() {
             ai::ai_model_declaration_template,
             agent_runtime::agent_runtime_create_session,
             agent_runtime::agent_runtime_continue_on_target,
+            agent_runtime::agent_runtime_reconnect_terminal,
             agent_runtime::agent_runtime_start,
             agent_runtime::agent_runtime_select_model,
             agent_runtime::agent_runtime_set_permission,

@@ -257,6 +257,43 @@ pub(crate) fn agent_runtime_continue_on_target(
     runtime.continue_on_target(request)
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentTerminalReconnectInput {
+    session_id: String,
+    previous_session_id: String,
+    terminal_session_id: String,
+}
+
+#[tauri::command]
+pub(crate) async fn agent_runtime_reconnect_terminal(
+    app: AppHandle,
+    runtime: State<'_, AgentRuntime>,
+    sessions: State<'_, crate::models::SessionManager>,
+    input: AgentTerminalReconnectInput,
+) -> Result<AgentSessionSnapshot, String> {
+    for value in [
+        &input.session_id,
+        &input.previous_session_id,
+        &input.terminal_session_id,
+    ] {
+        super::session::validate_identifier(value, "sessionId")?;
+    }
+    let runtime = runtime.inner().clone();
+    let sessions = sessions.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        configure_runtime(&app, &runtime)?;
+        runtime.reconnect_terminal(
+            &sessions,
+            &input.session_id,
+            &input.previous_session_id,
+            &input.terminal_session_id,
+        )
+    })
+    .await
+    .map_err(|error| format!("terminal reconnect worker failed: {error}"))?
+}
+
 #[tauri::command]
 pub(crate) async fn agent_runtime_spawn_subagent(
     app: AppHandle,

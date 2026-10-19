@@ -320,6 +320,9 @@ export function useAiSessionController({
   const [historicalContinuationBusy, setHistoricalContinuationBusy] = useState(false);
   const [historicalContinuationError, setHistoricalContinuationError] = useState<string | null>(null);
   const historicalContinuationPendingRef = useRef(false);
+  const terminalReconnectAttempt = useRef<string | null>(null);
+  const terminalReconnectPending = useRef(false);
+  const [terminalReconnectBusy, setTerminalReconnectBusy] = useState(false);
   const [openedSessionId, setOpenedSessionId] = useState<string | null>(initialFocusSessionId);
   const [optimistic, setOptimistic] = useState<readonly AiOptimisticSubmission[]>([]);
   const [announcement, setAnnouncement] = useState<AiAnnouncement | null>(null);
@@ -1062,13 +1065,22 @@ export function useAiSessionController({
       let sessionId = openedSessionId;
       if (!sessionId && !focusMode && ((scope === 'workbench' && canRestoreWorkbench) || activeTerminal)) {
         if (!canPublish()) return;
-        const summaries = await listAllAiSessions(adapter, {
+        let summaries = await listAllAiSessions(adapter, {
           ...(scope === 'workbench'
             ? { scopeKey: WORKBENCH_AI_TARGET_ID }
             : { targetId: `terminal-${activeTerminal!.sessionId}` }),
           archived: false,
           limit: 100,
         }, canPublish);
+        if (!summaries?.length && scope === 'terminal' && activeTerminal?.replacesSessionId) {
+          // A closed panel may not have observed the transport replacement.
+          // Restore the latest predecessor conversation before rebinding it.
+          for (const predecessor of [...new Set([activeTerminal.replacesSessionId, ...(activeTerminal.replacedSessionIds ?? []).slice().reverse()])]) {
+            if (!canPublish()) return;
+            summaries = await listAllAiSessions(adapter, { targetId: `terminal-${predecessor}`, archived: false, limit: 100 }, canPublish);
+            if (summaries?.length) break;
+          }
+        }
         sessionId = summaries?.find((summary) => belongsToAiWorkspace(summary, scope, focusMode, summaries)
           && isTopLevelAiSession(summary, summaries))?.id ?? null;
       }
@@ -1207,11 +1219,61 @@ export function useAiSessionController({
     && visibleView.snapshot.value.header.target?.sessionId !== activeTerminal?.sessionId);
   const readOnlySession = oneShotSubagent || historicalTargetUnavailable;
   const canContinueReconnectedView = scope === 'terminal' && visibleView?.snapshot.kind === 'agent'
-    && canContinueOnReconnectedTerminal(visibleView.snapshot.value, activeTerminal) && hasProvider;
+    && canContinueOnReconnectedTerminal(visibleView.snapshot.value, activeTerminal)
+    && Boolean(adapter.reconnectTerminal);
+  const directTerminalReconnect = scope === 'terminal'
+    && isDirectReconnectedTerminal(visibleView?.snapshot.value, activeTerminal);
   const canContinueHistoricalView = scope === 'terminal' && historicalTargetUnavailable
+    && !directTerminalReconnect
     && visibleView?.snapshot.kind === 'agent'
     && Boolean(provider)
     && (focusMode ? canSwitchFocusTarget(visibleView, activeTerminal) : canContinueHistoricalConversation(visibleView.snapshot.value, activeTerminal));
+  const reconnectAgentTerminal = useCallback((): void => {
+    const current = viewRef.current;
+    if (!adapter.reconnectTerminal || !current || !activeTerminal || terminalReconnectPending.current
+      || !canContinueOnReconnectedTerminal(current.snapshot.value, activeTerminal)) return;
+    const terminalId = activeTerminal.sessionId;
+    const previousId = current.snapshot.value.header.target!.sessionId;
+    terminalReconnectPending.current = true;
+    setTerminalReconnectBusy(true);
+    const reconnect = adapter.reconnectTerminal;
+    const restore = async (): Promise<AiSessionView> => {
+      for (let attempt = 0; ; attempt++) {
+        try { return await reconnect(current.summary.id, previousId, terminalId); }
+        catch (error: unknown) {
+          if (attempt >= 4 || !normalizeAiSessionError(error).message.includes('TERMINAL_RECONNECT_BUSY')) throw error;
+          await new Promise(resolve => setTimeout(resolve, 100 * 2 ** attempt));
+          const state = useTerminalStore.getState();
+          const selected = focusMode ? useFocusStore.getState().targetSessionId : state.activeSessionId;
+          if (!mountedRef.current || viewRef.current?.summary.id !== current.summary.id || selected !== terminalId) throw error;
+        }
+      }
+    };
+    void restore().then((updated) => {
+      if (!mountedRef.current || viewRef.current?.summary.id !== current.summary.id) return;
+      const state = useTerminalStore.getState();
+      const selected = focusMode ? useFocusStore.getState().targetSessionId : state.activeSessionId;
+      if (selected !== terminalId) return;
+      viewRef.current = updated;
+      setView(updated);
+    }).catch((error: unknown) => {
+      const state = useTerminalStore.getState();
+      const selected = focusMode ? useFocusStore.getState().targetSessionId : state.activeSessionId;
+      if (mountedRef.current && viewRef.current?.summary.id === current.summary.id && selected === terminalId) {
+        dispatch({ type: 'error.reported', error: { ...normalizeAiSessionError(error), message: t('ai.workspace.reconnectFailed') } });
+      }
+    }).finally(() => {
+      terminalReconnectPending.current = false;
+      if (mountedRef.current) setTerminalReconnectBusy(false);
+    });
+  }, [activeTerminal, adapter, dispatch, focusMode, t]);
+  useEffect(() => {
+    if (terminalReconnectBusy || !canContinueReconnectedView || !visibleView || !activeTerminal) return;
+    const key = JSON.stringify([visibleView.summary.id, activeTerminal.sessionId]);
+    if (terminalReconnectAttempt.current === key) return;
+    terminalReconnectAttempt.current = key;
+    reconnectAgentTerminal();
+  }, [activeTerminal, canContinueReconnectedView, reconnectAgentTerminal, terminalReconnectBusy, visibleView]);
   useLayoutEffect(() => {
     if (!focusMode) return;
     const busy = composer.phase === 'submitting' || composer.phase === 'stopping' || settingsBusy || imageDraft.busy
@@ -1708,9 +1770,6 @@ export function useAiSessionController({
     adapter.loadArtifact(sessionId, artifactId, maxBytes)
   ), [adapter]);
 
-  const reconnectedSnapshot = canContinueReconnectedView && visibleView?.snapshot.kind === 'agent'
-    ? visibleView.snapshot.value : null;
-
   const terminalInsertions = useAiDraftStore(state => state.terminalInsertions);
   useEffect(() => {
     if (composer.lastError?.message === 'TERMINAL_AGENT_CONFLICT'
@@ -1973,17 +2032,7 @@ export function useAiSessionController({
       });
     },
     stop: () => dispatch({ type: 'stop.requested' }),
-    continueOnReconnectedTerminal: reconnectedSnapshot ? () => {
-      const current = viewRef.current;
-      if (current?.snapshot.kind !== 'agent'
-        || !canContinueOnReconnectedTerminal(current.snapshot.value, activeTerminal)) return;
-      const content = t('ai.workspace.reconnectContinuePrompt', {
-        goal: reconnectedSnapshot.header.goal,
-      });
-      newSession();
-      dispatch({ type: 'submit.requested', gesture: 'primary', accelerated: false,
-        content, clientOperationId: operationId(), now: now(), hasProvider, canCreateSession: canStartAgent });
-    } : null,
+    continueOnReconnectedTerminal: canContinueReconnectedView ? reconnectAgentTerminal : null,
     historicalContinuationAvailable: canContinueHistoricalView,
     historicalContinuationBusy,
     historicalContinuationError,

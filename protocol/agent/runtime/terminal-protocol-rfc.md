@@ -298,8 +298,21 @@ matches its frozen identity, preparation reports `terminalTargetUnavailable`.
 The rejected call remains durable evidence, later calls from the same model
 step are recorded as not started, and the Agent Session fails immediately so a
 model cannot accumulate repeated failed probes against the stale target. A
-reconnect creates a new trust boundary and requires continuation in a new Agent
-Session; the old target is never rebound.
+reconnect creates a new execution trust boundary while preserving the Agent
+conversation. `agent_runtime_reconnect_terminal` verifies the backend Broker's
+bounded transport ancestry and the live local/SSH identity before recording
+`session/terminal_reconnected` in the same Agent Session. Only settled root
+Sessions with empty inboxes, settled children and reconciled native effects may
+rebind. The target's explicit project root and all conversation events remain;
+the target/transport IDs change and permission resets to `requestApproval`.
+Old approvals, leases and process handles never authorize the new target.
+Pinned file/Skills directory identity remains unchanged; its transport target
+advances with the reconnect event, and Skills catalogs are observed afresh.
+The asynchronous reconnect command writes its journal off the UI thread and
+waits for an overlapping terminal close before retrying the binding.
+Rebinding neither resumes a turn nor submits input: the next explicit human
+message must inspect current execution state and must not replay earlier commands.
+Uncertain operations remain blocked for reconciliation.
 
 `commandStart` moves `submitted` to `running`. A matching, accepted cooperative
 `commandEnd`

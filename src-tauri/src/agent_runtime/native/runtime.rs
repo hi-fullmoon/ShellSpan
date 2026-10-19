@@ -186,6 +186,15 @@ impl NativeToolEngine {
         )
     }
 
+    pub(crate) fn is_replacement_transport(
+        &self,
+        previous: &str,
+        current: &str,
+    ) -> Result<bool, String> {
+        self.terminal_broker
+            .is_replacement_transport(previous, current)
+    }
+
     pub(crate) fn terminal_broker_attachment(
         &self,
         transport_session_id: &str,

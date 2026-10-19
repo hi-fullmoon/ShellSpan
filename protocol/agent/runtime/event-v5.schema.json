@@ -48,6 +48,7 @@
         "session/model_selected",
         "session/permission_changed",
         "session/execution_surface_changed",
+        "session/terminal_reconnected",
         "session/project_root_bound",
         "session/renamed",
         "step/input_claim",
@@ -931,6 +932,47 @@
                   "direct",
                   "boundTerminal"
                 ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "session/terminal_reconnected"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["data"],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["previousSessionId", "target"],
+            "properties": {
+              "previousSessionId": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "target": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "targetId", "sessionId"],
+                "properties": {
+                  "kind": { "enum": ["local", "remote"] },
+                  "targetId": { "type": "string", "minLength": 1, "maxLength": 128 },
+                  "sessionId": { "type": "string", "minLength": 1, "maxLength": 128 },
+                  "label": { "type": "string" },
+                  "profileId": { "type": "string" },
+                  "host": { "type": "string" },
+                  "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+                  "username": { "type": "string" },
+                  "cwd": { "type": "string" },
+                  "rootPath": { "type": "string" },
+                  "localRoot": { "type": "string" }
+                }
               }
             }
           }

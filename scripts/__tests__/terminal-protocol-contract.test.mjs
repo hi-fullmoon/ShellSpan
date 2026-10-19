@@ -12,6 +12,17 @@ async function readJson(relativePath) {
 }
 
 describe('terminal execution Phase 0 protocol contract', () => {
+  it('validates durable terminal reconnect events without accepting process targets or unknown fields', async () => {
+    const validator = new Ajv2020({ allErrors: true, strict: true });
+    const validate = validator.compile(await readJson('event-v5.schema.json'));
+    const event = { version: 5, sessionId: 'agent', seq: 5, timeUnixMs: 1_000,
+      type: 'session/terminal_reconnected', data: { previousSessionId: 'old',
+        target: { kind: 'remote', targetId: 'terminal-new', sessionId: 'new', host: 'example.com', port: 22, username: 'user', rootPath: '/srv' } } };
+    expect(validate(event), validator.errorsText(validate.errors)).toBe(true);
+    expect(validate({ ...event, data: { target: event.data.target } })).toBe(false);
+    expect(validate({ ...event, data: { ...event.data, approved: true } })).toBe(false);
+    expect(validate({ ...event, data: { ...event.data, target: { ...event.data.target, kind: 'process' } } })).toBe(false);
+  });
   it('keeps automatic review evidence native-owned and output-only', async () => {
     const validator = new Ajv2020({ allErrors: true, strict: true });
     const validate = validator.compile(await readJson('tool-contract.schema.json'));

@@ -245,10 +245,7 @@ impl SkillRuntime {
         }
         let events = self.sessions.all_events(session_id)?;
         // Root identity stays pinned across refreshes, including empty directories and retirement.
-        let expected_scope = events
-            .iter()
-            .find_map(super::file_references::bound_scope)
-            .cloned();
+        let expected_scope = super::file_references::current_bound_scope(&events);
         let request = SkillReadRequest {
             target: header.target.expect("validated target"),
             expected_scope,
@@ -311,6 +308,12 @@ impl SkillRuntime {
     }
     fn last_good(&self, session_id: &str) -> Result<Option<SkillSnapshot>, String> {
         for event in self.sessions.all_events(session_id)?.iter().rev() {
+            if matches!(
+                event.payload,
+                AgentSessionEventPayload::SessionTerminalReconnected { .. }
+            ) {
+                return Ok(None);
+            }
             if let AgentSessionEventPayload::SkillCatalogObserved { observation } = &event.payload {
                 match observation.status {
                     SkillObservationStatus::Complete => return Ok(observation.snapshot.clone()),

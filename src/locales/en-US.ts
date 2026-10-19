@@ -1936,7 +1936,7 @@ export default {
   'ai.workspace.queue.paused': 'Paused',
   'ai.workspace.queue.resume': 'Send this message',
   'ai.workspace.continueOnReconnectedTerminal': 'Continue in reconnected terminal',
-  'ai.workspace.reconnectContinuePrompt': 'Continue this unfinished task in a new SSH terminal: {goal}\n\nThe previous terminal disconnected. Do not assume an earlier change was or was not applied. Inspect the current state and verify uncertain outcomes before making another change.',
+  'ai.workspace.reconnectFailed': 'Unable to restore the terminal binding yet. Wait for the current operation to settle, verify unfinished outcomes, then retry.',
   'ai.workspace.tokenBudget.title': 'This task reached its cumulative model token limit',
   'ai.workspace.tokenBudget.description': 'The next model request was not sent; completed work is preserved. Send a message in the composer to continue with a new task usage period.',
   'ai.workspace.tokenBudget.checkpointSaved': 'The task goal, progress, and remaining work have been saved. Send a message in the composer to continue with a new task usage period.',

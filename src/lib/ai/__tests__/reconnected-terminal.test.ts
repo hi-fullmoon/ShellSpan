@@ -25,7 +25,7 @@ const terminal: TerminalSession = {
 };
 
 describe('reconnected terminal Agent continuation', () => {
-  it('offers a fresh continuation only for the direct replacement of the same SSH target', () => {
+  it('allows rebinding only to a replacement of the same SSH target', () => {
     expect(canContinueOnReconnectedTerminal(snapshot, terminal)).toBe(true);
     expect(canContinueOnReconnectedTerminal(snapshot, { ...terminal, host: 'other.example.com' })).toBe(false);
     expect(canContinueOnReconnectedTerminal(snapshot, { ...terminal, profileId: 'other' })).toBe(false);
@@ -33,7 +33,7 @@ describe('reconnected terminal Agent continuation', () => {
     expect(canContinueOnReconnectedTerminal(snapshot, { ...terminal, status: 'disconnected' })).toBe(false);
   });
 
-  it('does not offer a new task while a write effect needs reconciliation or the root is live', () => {
+  it('blocks rebinding while effects need reconciliation or the root is live', () => {
     expect(canContinueOnReconnectedTerminal({
       ...snapshot,
       recovery: { ...snapshot.recovery, status: 'required', kind: 'executionInFlight' },
@@ -42,10 +42,22 @@ describe('reconnected terminal Agent continuation', () => {
     expect(isDirectReconnectedTerminal({ ...snapshot, status: 'running', ended: false }, {
       ...terminal, status: 'connecting',
     })).toBe(true);
-    expect(canContinueOnReconnectedTerminal({ ...snapshot, ended: false }, terminal)).toBe(false);
+    expect(canContinueOnReconnectedTerminal({ ...snapshot, status: 'idle', ended: false }, terminal)).toBe(true);
     expect(canContinueOnReconnectedTerminal({
       ...snapshot,
       header: { ...snapshot.header, target: { ...snapshot.header.target!, rootPath: '/srv' } },
-    }, terminal)).toBe(false);
+    }, terminal)).toBe(true);
+  });
+
+  it('retains local projects and repeated reconnect ancestry', () => {
+    const local: AgentSessionSnapshot = { ...snapshot, header: { ...snapshot.header, target: {
+      kind: 'local', targetId: 'terminal-old', sessionId: 'old', cwd: '/tmp/project',
+    } } };
+    expect(canContinueOnReconnectedTerminal(local, {
+      ...terminal, host: 'local', port: 0, replacesSessionId: 'intermediate', replacedSessionIds: ['old', 'intermediate'],
+    })).toBe(true);
+    expect(canContinueOnReconnectedTerminal({ ...snapshot, inbox: {
+      nextStep: [], nextTurn: [{ messageId: 'pending', content: 'Pending user input', source: { kind: 'user', label: 'User', producerId: 'human' } }],
+    } }, terminal)).toBe(false);
   });
 });
