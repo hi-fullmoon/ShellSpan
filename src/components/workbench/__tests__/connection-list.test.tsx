@@ -123,7 +123,17 @@ describe('ConnectionList', () => {
     const names = () => Array.from(container.querySelectorAll('[data-connection-text="name"]')).map(el => el.textContent);
     expect(screen.queryByRole('button', { name: 'workbench.connections.sortLabel' })).not.toBeInTheDocument();
     expect(names()).toEqual(['Zulu', 'Alpha', 'Beta']);
-    expect(screen.getByRole('combobox', { name: 'workbench.connections.groupFilter' })).toHaveClass('ml-auto');
+    const groupTrigger = screen.getByRole('combobox', { name: 'workbench.connections.groupFilter' });
+    expect(groupTrigger).toHaveClass('h-6', 'max-w-40', 'min-w-0', 'gap-1');
+    const separator = groupTrigger.previousElementSibling;
+    expect(separator).toHaveAttribute('data-slot', 'separator');
+    expect(separator).toHaveAttribute('aria-hidden', 'true');
+    expect(separator).toHaveClass('mx-0.5', 'h-3', 'data-vertical:self-center');
+    expect(groupTrigger).not.toHaveClass('ml-auto', 'w-40', 'border', 'bg-secondary');
+    expect(groupTrigger).toHaveTextContent('workbench.connections.allGroups');
+    expect(groupTrigger.querySelector('[data-slot="select-value"]')).toHaveClass('truncate');
+    expect(groupTrigger.querySelector('[data-icon="inline-start"]')).not.toBeInTheDocument();
+    expect(groupTrigger.querySelector('[data-icon="inline-end"]')).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole('button', { name: 'workbench.connections.connectTerminal' })[0]);
     fireEvent.click(screen.getAllByRole('button', { name: 'workbench.connections.connectSftp' })[0]);
     expect(onConnectTerminal).toHaveBeenCalledWith(profiles[0]);
@@ -135,6 +145,8 @@ describe('ConnectionList', () => {
     fireEvent.click(screen.getByRole('button', { name: 'workbench.connections.filter.all' }));
     await userEvent.click(screen.getByRole('combobox', { name: 'workbench.connections.groupFilter' }));
     await userEvent.click(await screen.findByRole('option', { name: 'team' }));
+    expect(groupTrigger).toHaveTextContent('team');
+    expect(groupTrigger).toHaveClass('bg-secondary');
     expect(names()).toEqual(['Zulu', 'Alpha']);
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Alpha' } });
     expect(names()).toEqual(['Alpha']);

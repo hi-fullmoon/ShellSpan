@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Select as SelectPrimitive } from '@base-ui/react/select';
 import { useI18n } from '@/hooks/useI18n';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { Button } from '@/components/ui/button';
+import { Separator } from '@/components/ui/separator';
 import { PanelEmptyState, PanelLoadingState } from '@/components/ui/empty-state';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -15,7 +17,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectValue } from '@/components/ui/select';
 import { IconActionButton } from './icon-action-button';
 import { ManagementCard, ManagementCardIcon } from './management-card';
 import { HostOverviewDialog } from './host-overview-dialog';
@@ -26,6 +28,7 @@ import { useRecentProfilesStore } from '@/stores/recentProfilesStore';
 import { cn } from '@/lib/utils';
 import {
   CopyIcon,
+  ChevronDownIcon,
   DownloadIcon,
   EllipsisIcon,
   FolderIcon,
@@ -215,21 +218,30 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
               </Button>
             ))}
             {groups.length > 0 && (
-              <Select value={groupFilter} onValueChange={(value) => setGroupFilter(value ?? 'all')}>
-                <SelectTrigger size="sm" className="ml-auto w-40" aria-label={t('workbench.connections.groupFilter')}>
-                  <SelectValue>{groupFilter === 'all' ? t('workbench.connections.allGroups') : groupFilter}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="all">{t('workbench.connections.allGroups')}</SelectItem>
-                    {groups.map((group) => (
-                      <SelectItem key={group} value={group}>
-                        {group}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+              <>
+                <Separator orientation="vertical" aria-hidden="true" className="mx-0.5 h-3 data-vertical:self-center" />
+                <Select
+                  items={[{ value: 'all', label: t('workbench.connections.allGroups') }, ...groups.map(group => ({ value: group, label: group }))]}
+                  value={groupFilter} onValueChange={(value) => setGroupFilter(value ?? 'all')}>
+                  <SelectPrimitive.Trigger
+                    render={<Button variant={groupFilter === 'all' ? 'ghost' : 'secondary'} size="xs" />}
+                    className="min-w-0 max-w-40 shrink focus-visible:bg-accent data-popup-open:bg-accent"
+                    aria-label={t('workbench.connections.groupFilter')}>
+                    <SelectValue />
+                    <SelectPrimitive.Icon><ChevronDownIcon aria-hidden data-icon="inline-end" /></SelectPrimitive.Icon>
+                  </SelectPrimitive.Trigger>
+                  <SelectContent align="start" alignItemWithTrigger={false}>
+                    <SelectGroup>
+                      <SelectItem value="all">{t('workbench.connections.allGroups')}</SelectItem>
+                      {groups.map((group) => (
+                        <SelectItem key={group} value={group}>
+                          {group}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </>
             )}
           </WorkbenchPageToolbar>
         )}
