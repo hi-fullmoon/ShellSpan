@@ -152,6 +152,64 @@ describe('ConnectionList', () => {
     expect(names()).toEqual(['Alpha']);
   });
 
+  it('combines multiple tag alternatives with group, activity and search filters, and clears them', async () => {
+    const profiles = [
+      makeProfile({ id: 'a', name: 'Alpha', group: 'Work', tags: ['production', 'database'], favorite: true }),
+      makeProfile({ id: 'b', name: 'Beta', group: 'Home', tags: ['staging'], favorite: true }),
+      makeProfile({ id: 'c', name: 'Gamma', group: 'Work', tags: ['staging'] }),
+      makeProfile({ id: 'd', name: 'Delta', group: 'Work' }),
+    ];
+    const { container, rerender } = render(<ConnectionList
+      profiles={profiles} initialized onAdd={() => {}} onEdit={() => {}} onDelete={() => {}}
+      onConnectTerminal={() => {}} onConnectSftp={() => {}} onDuplicate={() => {}}
+      onToggleFavorite={() => {}} onImport={() => {}} onExport={() => {}}
+    />);
+    const names = () => Array.from(container.querySelectorAll('[data-connection-text="name"]')).map(el => el.textContent);
+    const trigger = screen.getByRole('button', { name: 'workbench.connections.tagFilter' });
+    expect(trigger).toHaveClass('h-6', 'max-w-40', 'min-w-0', 'gap-1');
+    expect(trigger).not.toHaveClass('border', 'bg-secondary');
+    expect(trigger).toHaveTextContent('workbench.connections.allTags');
+    await userEvent.click(trigger);
+    const productionTag = await screen.findByRole('menuitemcheckbox', { name: 'production' });
+    expect(screen.getByRole('menu')).toHaveClass('w-max', 'max-w-[min(16rem,var(--available-width))]');
+    expect(within(productionTag).getByTitle('production')).toHaveClass('min-w-0', 'truncate');
+    await userEvent.click(productionTag);
+    expect(trigger).toHaveTextContent('production');
+    expect(trigger).toHaveClass('bg-secondary');
+    expect(names()).toEqual(['Alpha']);
+    await userEvent.click(screen.getByRole('menuitemcheckbox', { name: 'staging' }));
+    expect(trigger).toHaveTextContent('workbench.connections.selectedTags');
+    expect(screen.getByRole('menuitemcheckbox', { name: 'production' })).toBeChecked();
+    expect(screen.getByRole('menuitemcheckbox', { name: 'staging' })).toBeChecked();
+    expect(names()).toEqual(['Alpha', 'Beta', 'Gamma']);
+    await userEvent.keyboard('{Escape}');
+    expect(trigger).toHaveFocus();
+    await userEvent.click(screen.getByRole('combobox', { name: 'workbench.connections.groupFilter' }));
+    await userEvent.click(await screen.findByRole('option', { name: 'Work' }));
+    expect(names()).toEqual(['Alpha', 'Gamma']);
+    await userEvent.click(screen.getByRole('button', { name: 'workbench.connections.filter.favorites' }));
+    expect(names()).toEqual(['Alpha']);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Gamma' } });
+    expect(names()).toEqual([]);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '' } });
+    await userEvent.click(screen.getByRole('button', { name: 'workbench.connections.filter.all' }));
+    await userEvent.click(trigger);
+    await userEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'production' }));
+    expect(names()).toEqual(['Gamma']);
+    await userEvent.click(screen.getByRole('menuitemcheckbox', { name: 'workbench.connections.allTags' }));
+    expect(names()).toEqual(['Alpha', 'Gamma', 'Delta']);
+    expect(trigger).toHaveTextContent('workbench.connections.allTags');
+    await userEvent.click(screen.getByRole('menuitemcheckbox', { name: 'production' }));
+    await userEvent.keyboard('{Escape}');
+    rerender(<ConnectionList
+      profiles={profiles.map(profile => ({ ...profile, tags: undefined }))} initialized
+      onAdd={() => {}} onEdit={() => {}} onDelete={() => {}} onConnectTerminal={() => {}}
+      onConnectSftp={() => {}} onDuplicate={() => {}} onToggleFavorite={() => {}} onImport={() => {}} onExport={() => {}}
+    />);
+    expect(screen.queryByRole('button', { name: 'workbench.connections.tagFilter' })).not.toBeInTheDocument();
+    expect(names()).toEqual(['Alpha', 'Gamma', 'Delta']);
+  });
+
   it('keeps every advertised search field searchable without changing the selected profile', () => {
     const profile = makeProfile({
       name: 'Production', host: 'server.example.org', username: 'operator', port: 2222,

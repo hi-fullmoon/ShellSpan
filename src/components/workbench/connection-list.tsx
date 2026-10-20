@@ -12,6 +12,7 @@ import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@/compone
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuCheckboxItem,
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -96,6 +97,7 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
   const [query, setQuery] = useState('');
   const [activityFilter, setActivityFilter] = useState<'all' | 'favorites' | 'recent'>('all');
   const [groupFilter, setGroupFilter] = useState('all');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [overviewProfile, setOverviewProfile] = useState<ConnectionProfile>();
   const [forwardProfile, setForwardProfile] = useState<ConnectionProfile>();
   const [quickActionProfile, setQuickActionProfile] = useState<ConnectionProfile>();
@@ -110,6 +112,12 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
   );
 
   const normalizedQuery = query.trim().toLowerCase();
+  const tags = useMemo(
+    () => [...new Set(profiles.flatMap(profile => profile.tags ?? []).map(tag => tag.trim()).filter(Boolean))]
+      .sort((left, right) => left.localeCompare(right)),
+    [profiles],
+  );
+  const activeTags = useMemo(() => selectedTags.filter(tag => tags.includes(tag)), [selectedTags, tags]);
   const filteredProfiles = useMemo(() => {
     return profiles.filter((profile) => {
       const haystack = [
@@ -131,9 +139,10 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
       if (activityFilter === 'favorites' && !profile.favorite) return false;
       if (activityFilter === 'recent' && !recentIds.includes(profile.id)) return false;
       if (groupFilter !== 'all' && profile.group !== groupFilter) return false;
+      if (activeTags.length > 0 && !profile.tags?.some(tag => activeTags.includes(tag.trim()))) return false;
       return true;
     });
-  }, [profiles, normalizedQuery, activityFilter, groupFilter, recentIds]);
+  }, [profiles, normalizedQuery, activityFilter, groupFilter, recentIds, activeTags]);
 
   useEffect(() => {
     const handleOpenHostTool = (event: Event): void => {
@@ -217,31 +226,65 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
                 {t(`workbench.connections.filter.${filter}`)}
               </Button>
             ))}
+            {(groups.length > 0 || tags.length > 0) && (
+              <Separator orientation="vertical" aria-hidden="true" className="mx-0.5 h-3 data-vertical:self-center" />
+            )}
             {groups.length > 0 && (
-              <>
-                <Separator orientation="vertical" aria-hidden="true" className="mx-0.5 h-3 data-vertical:self-center" />
-                <Select
-                  items={[{ value: 'all', label: t('workbench.connections.allGroups') }, ...groups.map(group => ({ value: group, label: group }))]}
-                  value={groupFilter} onValueChange={(value) => setGroupFilter(value ?? 'all')}>
-                  <SelectPrimitive.Trigger
-                    render={<Button variant={groupFilter === 'all' ? 'ghost' : 'secondary'} size="xs" />}
+              <Select
+                items={[{ value: 'all', label: t('workbench.connections.allGroups') }, ...groups.map(group => ({ value: group, label: group }))]}
+                value={groupFilter} onValueChange={(value) => setGroupFilter(value ?? 'all')}>
+                <SelectPrimitive.Trigger
+                  render={<Button variant={groupFilter === 'all' ? 'ghost' : 'secondary'} size="xs" />}
+                  className="min-w-0 max-w-40 shrink focus-visible:bg-accent data-popup-open:bg-accent"
+                  aria-label={t('workbench.connections.groupFilter')}>
+                  <SelectValue />
+                  <SelectPrimitive.Icon><ChevronDownIcon aria-hidden data-icon="inline-end" /></SelectPrimitive.Icon>
+                </SelectPrimitive.Trigger>
+                <SelectContent align="start" alignItemWithTrigger={false}>
+                  <SelectGroup>
+                    <SelectItem value="all">{t('workbench.connections.allGroups')}</SelectItem>
+                    {groups.map((group) => (
+                      <SelectItem key={group} value={group}>
+                        {group}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            )}
+            {tags.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger render={
+                  <Button variant={activeTags.length === 0 ? 'ghost' : 'secondary'} size="xs"
                     className="min-w-0 max-w-40 shrink focus-visible:bg-accent data-popup-open:bg-accent"
-                    aria-label={t('workbench.connections.groupFilter')}>
-                    <SelectValue />
-                    <SelectPrimitive.Icon><ChevronDownIcon aria-hidden data-icon="inline-end" /></SelectPrimitive.Icon>
-                  </SelectPrimitive.Trigger>
-                  <SelectContent align="start" alignItemWithTrigger={false}>
-                    <SelectGroup>
-                      <SelectItem value="all">{t('workbench.connections.allGroups')}</SelectItem>
-                      {groups.map((group) => (
-                        <SelectItem key={group} value={group}>
-                          {group}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </>
+                    aria-label={t('workbench.connections.tagFilter')} />
+                }>
+                  <span className="min-w-0 truncate">
+                    {activeTags.length === 0 ? t('workbench.connections.allTags') : activeTags.length === 1
+                      ? activeTags[0] : t('workbench.connections.selectedTags', { count: activeTags.length })}
+                  </span>
+                  <ChevronDownIcon aria-hidden data-icon="inline-end" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-max max-w-[min(16rem,var(--available-width))]">
+                  <DropdownMenuGroup>
+                    <DropdownMenuCheckboxItem checked={activeTags.length === 0} closeOnClick={false}
+                      onCheckedChange={() => setSelectedTags([])}>
+                      {t('workbench.connections.allTags')}
+                    </DropdownMenuCheckboxItem>
+                  </DropdownMenuGroup>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuGroup>
+                    {tags.map(tag => (
+                      <DropdownMenuCheckboxItem key={tag} checked={activeTags.includes(tag)} closeOnClick={false}
+                        onCheckedChange={checked => setSelectedTags(current => checked
+                          ? [...current.filter(value => tags.includes(value) && value !== tag), tag]
+                          : current.filter(value => tags.includes(value) && value !== tag))}>
+                        <span className="min-w-0 truncate" title={tag}>{tag}</span>
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
           </WorkbenchPageToolbar>
         )}
