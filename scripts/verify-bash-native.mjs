@@ -19,8 +19,7 @@ const binaries = artifacts.filter(event => event.reason === 'compiler-artifact'
   && event.profile?.test && event.target?.name === 'shell_span_lib' && event.executable);
 assert.equal(binaries.length, 1, 'Expected exactly one native library test executable');
 
-const exactTest = 'terminal_integration::tests::native_bash_concurrent_prompt_helpers_preserve_job_control';
-for (let round = 0; round < rounds; round++) {
+function runTest(exactTest) {
   const run = spawnSync(binaries[0].executable, [
     exactTest,
     '--exact', '--nocapture', '--test-threads=1',
@@ -30,5 +29,9 @@ for (let round = 0; round < rounds; round++) {
   process.stderr.write(run.stderr ?? '');
   assertCommandSucceeded(run, exactTest);
   assertCargoTestsRan(run.stdout, exactTest, exactTest);
+}
+runTest('local_terminal_input::tests::macos_interrupt_routing_preserves_native_tty_controls');
+for (let round = 0; round < rounds; round++) {
+  runTest('terminal_integration::tests::native_bash_concurrent_prompt_helpers_preserve_job_control');
 }
 console.log(`Native Bash concurrency checks passed ${rounds} consecutive rounds`);

@@ -28,6 +28,42 @@ struct MacOsInput {
     terminal: std::fs::File,
 }
 
+#[cfg(all(test, target_os = "macos"))]
+#[derive(Clone, Copy, Default)]
+struct InterruptTrace {
+    phase: u8,
+    flags: libc::tcflag_t,
+    intr: u8,
+    foreground: libc::pid_t,
+    session: libc::pid_t,
+    count: i32,
+    members: usize,
+    permission_error: i32,
+}
+
+#[cfg(all(test, target_os = "macos"))]
+thread_local! {
+    static INTERRUPT_TRACE: std::cell::Cell<Option<InterruptTrace>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(all(test, target_os = "macos"))]
+fn trace(update: impl FnOnce(&mut InterruptTrace)) {
+    INTERRUPT_TRACE.with(|last| {
+        let mut value = last.get().unwrap_or_default();
+        update(&mut value);
+        last.set(Some(value));
+    });
+}
+
+#[cfg(all(test, target_os = "macos"))]
+pub(crate) fn interrupt_diagnostic() -> String {
+    INTERRUPT_TRACE.with(|last| {
+        let value = last.get().unwrap_or_default();
+        format!("phase={} flags={} intr={} foreground={} session={} count={} members={} permission_error={}",
+            value.phase, value.flags, value.intr, value.foreground, value.session, value.count, value.members, value.permission_error)
+    })
+}
+
 #[cfg(target_os = "macos")]
 fn readline_interrupt(
     fd: std::os::fd::RawFd,
@@ -42,6 +78,12 @@ fn readline_interrupt(
     }
     let modes = unsafe { modes.assume_init() };
     let intr = modes.c_cc[libc::VINTR];
+    #[cfg(test)]
+    trace(|state| {
+        state.phase = 1;
+        state.flags = modes.c_lflag;
+        state.intr = intr;
+    });
     if modes.c_lflag & libc::ISIG == 0
         || modes.c_lflag & (libc::ICANON | libc::ECHO) != 0
         || intr == libc::_POSIX_VDISABLE
@@ -51,6 +93,12 @@ fn readline_interrupt(
     }
     let foreground = unsafe { libc::tcgetpgrp(fd) };
     let session = unsafe { libc::tcgetsid(fd) };
+    #[cfg(test)]
+    trace(|state| {
+        state.phase = 2;
+        state.foreground = foreground;
+        state.session = session;
+    });
     (foreground > 0 && foreground == session).then_some((foreground, modes))
 }
 
@@ -62,6 +110,11 @@ fn foreground_members(group: libc::pid_t) -> Option<Vec<libc::pid_t>> {
     let count = unsafe {
         libc::proc_listpgrppids(group, members.as_mut_ptr().cast(), capacity as libc::c_int)
     };
+    #[cfg(test)]
+    trace(|state| {
+        state.phase = 3;
+        state.count = count;
+    });
     if count <= 0 || count as usize >= members.len() {
         return None;
     }
@@ -71,20 +124,31 @@ fn foreground_members(group: libc::pid_t) -> Option<Vec<libc::pid_t>> {
     });
     members.sort_unstable();
     members.dedup();
+    #[cfg(test)]
+    trace(|state| {
+        state.phase = 4;
+        state.members = members.len();
+    });
     if !members.contains(&group) {
         return None;
     }
     // Probe permission before delivering anything. Native PTY input remains the
     // fallback for another uid or an incomplete process-group snapshot.
-    if members
-        .iter()
-        .any(|pid| unsafe { libc::kill(*pid, 0) } != 0)
-    {
-        return None;
+    for pid in &members {
+        if unsafe { libc::kill(*pid, 0) } != 0 {
+            #[cfg(test)]
+            trace(|state| {
+                state.permission_error =
+                    std::io::Error::last_os_error().raw_os_error().unwrap_or(-1);
+            });
+            return None;
+        }
     }
     // Deliver to existing peers before the shell can fork its next prompt's
     // command substitutions. Those new children must not receive this SIGINT.
     members.sort_by_key(|pid| *pid == group);
+    #[cfg(test)]
+    trace(|state| state.phase = 5);
     Some(members)
 }
 
@@ -93,10 +157,16 @@ impl Write for MacOsInput {
     fn write(&mut self, input: &[u8]) -> std::io::Result<usize> {
         use std::os::fd::AsRawFd;
         let fd = self.terminal.as_raw_fd();
+        #[cfg(test)]
+        if input == b"\x03" {
+            INTERRUPT_TRACE.with(|last| last.set(None));
+        }
         if let Some((group, _)) = readline_interrupt(fd, input) {
             if let Some(members) = foreground_members(group) {
                 if let Some((current_group, modes)) = readline_interrupt(fd, input) {
                     if current_group == group {
+                        #[cfg(test)]
+                        trace(|state| state.phase = 6);
                         if modes.c_lflag & libc::NOFLSH == 0
                             && unsafe { libc::tcflush(fd, libc::TCIOFLUSH) } != 0
                         {
@@ -117,6 +187,8 @@ impl Write for MacOsInput {
                                 }
                             }
                         }
+                        #[cfg(test)]
+                        trace(|state| state.phase = 7);
                         return Ok(input.len());
                     }
                 }

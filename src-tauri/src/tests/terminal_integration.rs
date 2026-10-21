@@ -1820,6 +1820,11 @@ trap - DEBUG
             );
         }));
         if result.is_err() && std::env::var_os("SHELLSPAN_BASH_FAILURE_DIAGNOSTICS").is_some() {
+            #[cfg(target_os = "macos")]
+            eprintln!(
+                "Bash input routing: {}",
+                crate::local_terminal_input::interrupt_diagnostic()
+            );
             eprintln!("Bash modes immediately before SIGINT: {interrupt_modes:?}");
             let fd = pair.master.as_raw_fd().unwrap();
             let mut modes = std::mem::MaybeUninit::<libc::termios>::uninit();
@@ -1838,19 +1843,34 @@ trap - DEBUG
                 processes.refresh_processes_specifics(
                     sysinfo::ProcessesToUpdate::All,
                     true,
-                    sysinfo::ProcessRefreshKind::nothing(),
+                    sysinfo::ProcessRefreshKind::nothing().with_exe(sysinfo::UpdateKind::Always),
                 );
                 let mut parents = vec![sysinfo::Pid::from_u32(pid)];
+                let mut sampled_children = 0;
                 while let Some(parent) = parents.pop() {
                     for (pid, process) in processes.processes() {
                         if process.parent() == Some(parent) {
                             parents.push(*pid);
                             eprintln!(
-                                "Bash failure descendant: pid={} parent={} group={} status={:?} name={:?}",
+                                "Bash failure descendant: pid={} parent={} group={} status={:?} name={:?} exe={:?}",
                                 pid.as_u32(), parent.as_u32(),
                                 unsafe { libc::getpgid(pid.as_u32() as libc::pid_t) },
-                                process.status(), process.name()
+                                process.status(), process.name(), process.exe()
                             );
+                            if cfg!(target_os = "macos") && sampled_children < 2 {
+                                sampled_children += 1;
+                                if let Ok(trace) = tempfile::NamedTempFile::new() {
+                                    let sampled = std::process::Command::new("sample")
+                                        .args([&pid.as_u32().to_string(), "1", "-file"])
+                                        .arg(trace.path())
+                                        .output();
+                                    if sampled.is_ok_and(|output| output.status.success()) {
+                                        if let Ok(trace) = fs::read_to_string(trace.path()) {
+                                            eprintln!("Bash descendant stack pid={pid}: {trace}");
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
