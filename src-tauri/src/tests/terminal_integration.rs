@@ -1832,6 +1832,26 @@ trap - DEBUG
                 );
             }
             if let Some(pid) = child.process_id() {
+                let mut processes = sysinfo::System::new();
+                processes.refresh_processes_specifics(
+                    sysinfo::ProcessesToUpdate::All,
+                    true,
+                    sysinfo::ProcessRefreshKind::nothing(),
+                );
+                let mut parents = vec![sysinfo::Pid::from_u32(pid)];
+                while let Some(parent) = parents.pop() {
+                    for (pid, process) in processes.processes() {
+                        if process.parent() == Some(parent) {
+                            parents.push(*pid);
+                            eprintln!(
+                                "Bash failure descendant: pid={} parent={} group={} status={:?} name={:?}",
+                                pid.as_u32(), parent.as_u32(),
+                                unsafe { libc::getpgid(pid.as_u32() as libc::pid_t) },
+                                process.status(), process.name()
+                            );
+                        }
+                    }
+                }
                 if cfg!(target_os = "macos") {
                     if let Ok(trace) = tempfile::NamedTempFile::new() {
                         let sampled = std::process::Command::new("sample")
