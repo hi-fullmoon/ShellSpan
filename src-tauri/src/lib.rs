@@ -16,6 +16,7 @@ mod keychain_diagnostics;
 mod known_hosts;
 mod llm;
 mod local_fs;
+mod local_terminal_input;
 mod log_reader;
 mod menu;
 mod models;

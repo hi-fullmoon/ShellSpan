@@ -547,6 +547,11 @@ pub(crate) fn create_local_session(
     } else if !cfg!(target_os = "windows") {
         command.arg("-l");
     }
+    let mut writer =
+        crate::local_terminal_input::take_writer(pair.master.as_ref()).map_err(|error| {
+            error!("Failed to take local terminal writer session_id={session_id}: {error}");
+            format!("failed to write local terminal: {error}")
+        })?;
     let mut child = pair.slave.spawn_command(command).map_err(|error| {
         error!("Failed to start local shell session_id={session_id} shell={shell}: {error}");
         format!("failed to start local shell: {error}")
@@ -555,10 +560,6 @@ pub(crate) fn create_local_session(
     let mut reader = pair.master.try_clone_reader().map_err(|error| {
         error!("Failed to clone local terminal reader session_id={session_id}: {error}");
         format!("failed to read local terminal: {error}")
-    })?;
-    let mut writer = pair.master.take_writer().map_err(|error| {
-        error!("Failed to take local terminal writer session_id={session_id}: {error}");
-        format!("failed to write local terminal: {error}")
     })?;
     let master = pair.master;
     let (tx, rx) = unbounded::<SessionCommand>();

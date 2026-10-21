@@ -45,6 +45,13 @@ Existing `PROMPT_COMMAND` callbacks retain their original execution semantics;
 their own external foreground commands can still encounter the upstream race.
 Those diagnostics are not filtered or hidden by ShellSpan.
 
+On macOS, a standalone configured interrupt byte at the local session leader's
+raw, non-echoing prompt is delivered as SIGINT to a fixed snapshot of its current
+foreground process group. The shell is signalled last so its replacement prompt
+cannot accidentally pass the same interrupt to newly forked command substitutions.
+The input path respects VINTR, ISIG and NOFLSH. Canonical input, foreground jobs,
+multi-byte writes and incomplete or unauthorized snapshots retain native PTY input.
+
 ## Connection deadlines
 
 “Open terminal here” supplies an optional `initialDirectory` in the session
