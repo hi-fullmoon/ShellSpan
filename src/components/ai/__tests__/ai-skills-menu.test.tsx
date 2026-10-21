@@ -24,9 +24,10 @@ describe('slash skill menu', () => {
     for (let count = 0; count < 3; count++) {
       await user.clear(editor);
       await user.type(editor, '/');
-      expect(screen.getAllByRole('option')).toHaveLength(builtinSkillPreview.entries.length);
+      expect(await screen.findAllByRole('option')).toHaveLength(builtinSkillPreview.entries.length);
       expect(screen.queryByText('Loading skills…')).toBeNull();
       await user.keyboard('{Escape}');
+      await waitFor(() => expect(screen.queryByRole('listbox')).toBeNull());
     }
     expect(requests).toBe(1);
   });
