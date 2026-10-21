@@ -1,10 +1,17 @@
+use crate::terminal_integration::TerminalShellKind;
 use portable_pty::MasterPty;
 use std::io::Write;
 
-pub(crate) fn take_writer(master: &dyn MasterPty) -> Result<Box<dyn Write + Send>, String> {
+pub(crate) fn take_writer(
+    master: &dyn MasterPty,
+    shell: TerminalShellKind,
+) -> Result<Box<dyn Write + Send>, String> {
     let writer = master.take_writer().map_err(|error| error.to_string())?;
     #[cfg(target_os = "macos")]
     {
+        if shell != TerminalShellKind::Bash {
+            return Ok(writer);
+        }
         use std::os::fd::FromRawFd;
         let fd = master
             .as_raw_fd()
@@ -19,7 +26,10 @@ pub(crate) fn take_writer(master: &dyn MasterPty) -> Result<Box<dyn Write + Send
         }))
     }
     #[cfg(not(target_os = "macos"))]
-    Ok(writer)
+    {
+        let _ = shell;
+        Ok(writer)
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -37,7 +47,10 @@ struct InterruptTrace {
     foreground: libc::pid_t,
     session: libc::pid_t,
     count: i32,
-    members: usize,
+    info_bytes: i32,
+    run_state: i32,
+    output_pending: i32,
+    polls: u32,
     permission_error: i32,
 }
 
@@ -59,8 +72,8 @@ fn trace(update: impl FnOnce(&mut InterruptTrace)) {
 pub(crate) fn interrupt_diagnostic() -> String {
     INTERRUPT_TRACE.with(|last| {
         let value = last.get().unwrap_or_default();
-        format!("phase={} flags={} intr={} foreground={} session={} count={} members={} permission_error={}",
-            value.phase, value.flags, value.intr, value.foreground, value.session, value.count, value.members, value.permission_error)
+        format!("phase={} flags={} intr={} foreground={} session={} thread_bytes={} info_bytes={} run_state={} output_pending={} polls={} inspection_error={}",
+            value.phase, value.flags, value.intr, value.foreground, value.session, value.count, value.info_bytes, value.run_state, value.output_pending, value.polls, value.permission_error)
     })
 }
 
@@ -103,53 +116,56 @@ fn readline_interrupt(
 }
 
 #[cfg(target_os = "macos")]
-fn foreground_members(group: libc::pid_t) -> Option<Vec<libc::pid_t>> {
-    let mut members = vec![0 as libc::pid_t; 4096];
-    let capacity = std::mem::size_of_val(members.as_slice());
-    // libproc's convenience function returns a PID count, not a byte count.
+fn input_thread_waiting(fd: std::os::fd::RawFd, pid: libc::pid_t) -> Option<bool> {
+    let mut pending: libc::c_int = 0;
+    if unsafe { libc::ioctl(fd, libc::TIOCOUTQ, &mut pending) } != 0 {
+        return None;
+    }
+    #[cfg(test)]
+    trace(|state| state.output_pending = pending);
+    if pending != 0 {
+        return Some(false);
+    }
+    // PROC_PIDLISTTHREADS is defined as flavor 6 in macOS sys/proc_info.h.
+    const PROC_PIDLISTTHREADS: libc::c_int = 6;
+    let mut threads = [0_u64; 2];
     let count = unsafe {
-        libc::proc_listpgrppids(group, members.as_mut_ptr().cast(), capacity as libc::c_int)
+        libc::proc_pidinfo(
+            pid,
+            PROC_PIDLISTTHREADS,
+            0,
+            threads.as_mut_ptr().cast(),
+            std::mem::size_of_val(&threads) as libc::c_int,
+        )
     };
     #[cfg(test)]
     trace(|state| {
         state.phase = 3;
         state.count = count;
     });
-    if count <= 0 || count as usize >= members.len() {
+    if count as usize != std::mem::size_of::<u64>() || threads[0] == 0 {
         return None;
     }
-    members.truncate(count as usize);
-    members.retain(|pid| {
-        *pid > 0 && unsafe { libc::getpgid(*pid) == group && libc::getsid(*pid) == group }
-    });
-    members.sort_unstable();
-    members.dedup();
+    let mut info = std::mem::MaybeUninit::<libc::proc_threadinfo>::uninit();
+    let size = std::mem::size_of::<libc::proc_threadinfo>();
+    let received = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTHREADINFO,
+            threads[0],
+            info.as_mut_ptr().cast(),
+            size as libc::c_int,
+        )
+    };
     #[cfg(test)]
-    trace(|state| {
-        state.phase = 4;
-        state.members = members.len();
-    });
-    if !members.contains(&group) {
+    trace(|state| state.info_bytes = received);
+    if received as usize != size {
         return None;
     }
-    // Probe permission before delivering anything. Native PTY input remains the
-    // fallback for another uid or an incomplete process-group snapshot.
-    for pid in &members {
-        if unsafe { libc::kill(*pid, 0) } != 0 {
-            #[cfg(test)]
-            trace(|state| {
-                state.permission_error =
-                    std::io::Error::last_os_error().raw_os_error().unwrap_or(-1);
-            });
-            return None;
-        }
-    }
-    // Deliver to existing peers before the shell can fork its next prompt's
-    // command substitutions. Those new children must not receive this SIGINT.
-    members.sort_by_key(|pid| *pid == group);
+    let info = unsafe { info.assume_init() };
     #[cfg(test)]
-    trace(|state| state.phase = 5);
-    Some(members)
+    trace(|state| state.run_state = info.pth_run_state);
+    Some(info.pth_run_state == libc::TH_STATE_WAITING)
 }
 
 #[cfg(target_os = "macos")]
@@ -162,36 +178,32 @@ impl Write for MacOsInput {
             INTERRUPT_TRACE.with(|last| last.set(None));
         }
         if let Some((group, _)) = readline_interrupt(fd, input) {
-            if let Some(members) = foreground_members(group) {
-                if let Some((current_group, modes)) = readline_interrupt(fd, input) {
-                    if current_group == group {
-                        #[cfg(test)]
-                        trace(|state| state.phase = 6);
-                        if modes.c_lflag & libc::NOFLSH == 0
-                            && unsafe { libc::tcflush(fd, libc::TCIOFLUSH) } != 0
-                        {
-                            return Err(std::io::Error::last_os_error());
-                        }
-                        for pid in members {
-                            // Skip peers that exited or left this terminal's
-                            // foreground group after the snapshot.
-                            if unsafe { libc::getpgid(pid) } != group
-                                || unsafe { libc::getsid(pid) } != group
-                            {
-                                continue;
-                            }
-                            if unsafe { libc::kill(pid, libc::SIGINT) } != 0 {
-                                let error = std::io::Error::last_os_error();
-                                if error.raw_os_error() != Some(libc::ESRCH) {
-                                    return Err(error);
-                                }
-                            }
-                        }
-                        #[cfg(test)]
-                        trace(|state| state.phase = 7);
-                        return Ok(input.len());
-                    }
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(50);
+            let mut was_waiting = false;
+            // Legacy Readline can longjmp out of fileno() on SIGINT, leaving a
+            // libc FILE lock inherited by its next command-substitution child.
+            // Serialize the interrupt with the single Bash thread's idle input
+            // wait, outside redisplay/stdio, then use the native line discipline.
+            loop {
+                if readline_interrupt(fd, input).map(|state| state.0) != Some(group) {
+                    break;
                 }
+                #[cfg(test)]
+                trace(|state| state.polls += 1);
+                match input_thread_waiting(fd, group) {
+                    Some(true) if was_waiting => {
+                        #[cfg(test)]
+                        trace(|state| state.phase = 5);
+                        break;
+                    }
+                    None => break,
+                    Some(true) => was_waiting = true,
+                    Some(false) => was_waiting = false,
+                }
+                if std::time::Instant::now() >= deadline {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
             }
         }
         self.writer.write(input)
@@ -214,7 +226,7 @@ mod tests {
     fn macos_interrupt_routing_preserves_native_tty_controls() {
         let pair = native_pty_system().openpty(PtySize::default()).unwrap();
         let mut reader = pair.master.try_clone_reader().unwrap();
-        let mut writer = take_writer(pair.master.as_ref()).unwrap();
+        let mut writer = take_writer(pair.master.as_ref(), TerminalShellKind::Bash).unwrap();
         let mut command = CommandBuilder::new("/bin/bash");
         command.args(["--noprofile", "--norc", "-i"]);
         command.env("PS1", "input-probe$ ");
@@ -252,7 +264,15 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(1));
             };
             assert_eq!(group as u32, child.process_id().unwrap());
-            assert!(foreground_members(group).unwrap().contains(&group));
+            let deadline = Instant::now() + Duration::from_secs(15);
+            while input_thread_waiting(fd, group) != Some(true) {
+                assert!(
+                    Instant::now() < deadline,
+                    "Bash did not reach a verified idle input wait: {}",
+                    interrupt_diagnostic()
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
             assert!(readline_interrupt(fd, b"x").is_none());
             assert!(readline_interrupt(fd, b"\x03x").is_none());
             let mut modes = original;

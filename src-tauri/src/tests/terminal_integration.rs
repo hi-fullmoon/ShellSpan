@@ -360,7 +360,7 @@
             .unwrap();
         let mut reader = pair.master.try_clone_reader().unwrap();
         let writer = Arc::new(Mutex::new(
-            crate::local_terminal_input::take_writer(pair.master.as_ref()).unwrap(),
+            crate::local_terminal_input::take_writer(pair.master.as_ref(), shell).unwrap(),
         ));
         let (_fixture, integration) = prepare_test_integration(shell);
         let integration_root = integration.bootstrap_root.path().to_path_buf();
@@ -1342,7 +1342,15 @@ trap - DEBUG
             })
             .unwrap();
         let mut reader = pair.master.try_clone_reader().unwrap();
-        let mut writer = crate::local_terminal_input::take_writer(pair.master.as_ref()).unwrap();
+        let mut writer = crate::local_terminal_input::take_writer(
+            pair.master.as_ref(),
+            if remote {
+                TerminalShellKind::Unsupported
+            } else {
+                TerminalShellKind::Bash
+            },
+        )
+        .unwrap();
         let mut command = if let Some(target) = &target {
             let mut command = CommandBuilder::new("ssh");
             command.args([
@@ -2018,7 +2026,7 @@ trap - DEBUG
             .unwrap();
         let mut reader = pair.master.try_clone_reader().unwrap();
         let writer = Arc::new(Mutex::new(
-            crate::local_terminal_input::take_writer(pair.master.as_ref()).unwrap(),
+            crate::local_terminal_input::take_writer(pair.master.as_ref(), shell).unwrap(),
         ));
         let (_fixture, integration) = prepare_test_integration(shell);
         let _history_fixture = if shell == TerminalShellKind::WindowsPowerShell {

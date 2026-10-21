@@ -547,8 +547,8 @@ pub(crate) fn create_local_session(
     } else if !cfg!(target_os = "windows") {
         command.arg("-l");
     }
-    let mut writer =
-        crate::local_terminal_input::take_writer(pair.master.as_ref()).map_err(|error| {
+    let mut writer = crate::local_terminal_input::take_writer(pair.master.as_ref(), shell_kind)
+        .map_err(|error| {
             error!("Failed to take local terminal writer session_id={session_id}: {error}");
             format!("failed to write local terminal: {error}")
         })?;
