@@ -1793,6 +1793,63 @@ trap - DEBUG
                 "EOF exit status changed: {output:?}"
             );
         }));
+        if result.is_err() && std::env::var_os("SHELLSPAN_BASH_FAILURE_DIAGNOSTICS").is_some() {
+            let fd = pair.master.as_raw_fd().unwrap();
+            let mut modes = std::mem::MaybeUninit::<libc::termios>::uninit();
+            if unsafe { libc::tcgetattr(fd, modes.as_mut_ptr()) } == 0 {
+                let modes = unsafe { modes.assume_init() };
+                eprintln!(
+                    "Bash failure terminal: foreground={}, shell={:?}, iflag={}, lflag={}",
+                    unsafe { libc::tcgetpgrp(fd) },
+                    child.process_id(),
+                    modes.c_iflag,
+                    modes.c_lflag
+                );
+            }
+            if let Some(pid) = child.process_id() {
+                let status = std::process::Command::new("ps")
+                    .args([
+                        "-o",
+                        "pid,ppid,pgid,stat,wchan,command",
+                        "-p",
+                        &pid.to_string(),
+                    ])
+                    .output()
+                    .unwrap();
+                eprintln!(
+                    "Bash failure process: {}",
+                    String::from_utf8_lossy(&status.stdout)
+                );
+            }
+            writer.write_all(b"\x0c").unwrap();
+            writer.flush().unwrap();
+            let mut diagnostic = Vec::new();
+            let deadline = Instant::now() + Duration::from_secs(1);
+            while let Ok(chunk) =
+                receiver.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            {
+                diagnostic.extend(chunk);
+            }
+            eprintln!(
+                "Bash failure redraw: {:?}",
+                String::from_utf8_lossy(&diagnostic)
+            );
+            writer
+                .write_all(b"printf 'SHELLSPAN_POST_INTERRUPT:%s\\n' \"$?\"\r")
+                .unwrap();
+            writer.flush().unwrap();
+            diagnostic.clear();
+            let deadline = Instant::now() + Duration::from_secs(1);
+            while let Ok(chunk) =
+                receiver.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            {
+                diagnostic.extend(chunk);
+            }
+            eprintln!(
+                "Bash failure input probe: {:?}",
+                String::from_utf8_lossy(&diagnostic)
+            );
+        }
         if let Some(group) = owned_job_group {
             // Reap only this fixture's job on assertion failure, without leaving
             // a background process holding the PTY output reader open.

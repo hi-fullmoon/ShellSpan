@@ -1,0 +1,37 @@
+name: Bash Native Diagnostics
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bash:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: 1.95.0
+      - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: src-tauri -> target
+          cache-on-failure: true
+      - run: pnpm build
+      - name: Run native Bash stress checks
+        env:
+          SHELLSPAN_BASH_FAILURE_DIAGNOSTICS: '1'
+        run: |
+          /bin/bash --version
+          uname -a
+          for iteration in {1..20}; do
+            cargo test --manifest-path src-tauri/Cargo.toml --locked native_bash_concurrent_prompt_helpers_preserve_job_control -- --nocapture --test-threads=1 || exit "$?"
+          done
