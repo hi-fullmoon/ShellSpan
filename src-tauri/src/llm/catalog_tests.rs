@@ -256,12 +256,12 @@ fn budgets_use_exact_same_output_context_and_per_model_image_estimate() {
 }
 
 #[tokio::test]
-async fn unknown_tool_capability_is_rejected_before_connecting() {
+async fn unsupported_tool_capability_is_rejected_before_connecting() {
     use super::adapter::ModelAdapterFactory;
     let mut p = provider("private");
     p.base_url = "http://127.0.0.1:1".into(); // No server; a transport error would prove late rejection.
     p.model_definition = Some(fixture_definition(p.kind, 32768));
-    p.model_definition.as_mut().unwrap().tool_calling = Support::Unknown;
+    p.model_definition.as_mut().unwrap().tool_calling = Support::Unsupported;
     let adapter = super::registry::HttpModelAdapterFactory
         .create(p, None)
         .unwrap();
@@ -295,4 +295,57 @@ async fn unknown_tool_capability_is_rejected_before_connecting() {
     );
     assert!(error.message.contains("tool calling"));
     assert_eq!(error.code.as_deref(), Some("UNSUPPORTED_OPTION"));
+}
+
+#[test]
+fn unknown_tool_capability_passes_transport_validation() {
+    use super::adapter::ModelAdapterFactory;
+    let mut p = provider("private");
+    p.model_definition = Some(declaration_template(&p).unwrap());
+    let config = super::transport::HttpConfig {
+        client: reqwest::Client::new(),
+        provider: p.clone(),
+        api_key: None,
+        timeouts: Default::default(),
+    };
+    let request = super::types::ModelRequest {
+        request_id: "unknown-tools".into(),
+        surface_generation: 0,
+        system_prompt: String::new(),
+        messages: vec![],
+        tools: crate::agent_runtime::default_model_tools(),
+    };
+    assert!(!request.tools.is_empty());
+    assert_eq!(
+        config.validate(&request).unwrap().tool_calling,
+        Support::Unknown
+    );
+    let prepared = super::runtime::PreparedModel {
+        adapter: super::registry::HttpModelAdapterFactory
+            .create(p.clone(), None)
+            .unwrap(),
+        route: super::routes::ProviderRoute {
+            id: p.id.clone(),
+            revision: 1,
+            display_name: "Custom model".into(),
+            adapter_id: "chat-completions".into(),
+            base_url: p.base_url.clone(),
+            auth: super::routes::RouteAuth::None,
+            replay_domain_id: "custom".into(),
+            preset_id: p.profile.clone(),
+            models: Some(std::collections::BTreeMap::from([(
+                p.model.clone(),
+                p.model_definition.clone().unwrap(),
+            )])),
+            model_overrides: None,
+            defaults: None,
+            retry_policy: Default::default(),
+            timeouts: Default::default(),
+        },
+        provider: p,
+        images: None,
+    };
+    assert!(prepared
+        .prepare_request(request, "step", &tokio_util::sync::CancellationToken::new())
+        .is_ok());
 }

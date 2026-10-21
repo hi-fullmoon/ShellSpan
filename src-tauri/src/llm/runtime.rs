@@ -77,7 +77,7 @@ impl PreparedModel {
             images.resolve_request(&self.provider, &mut request, cancellation)?;
         }
         let model = catalog::resolve(&self.provider)?;
-        if !request.tools.is_empty() && model.tool_calling != catalog::Support::Supported {
+        if !request.tools.is_empty() && model.tool_calling == catalog::Support::Unsupported {
             return Err("UNSUPPORTED_OPTION: tool calling".into());
         }
         let mut content = request.clone();

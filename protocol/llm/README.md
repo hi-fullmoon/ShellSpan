@@ -22,7 +22,7 @@ Add the exact wire model ID as a key under `presets.<provider>.models`. Every en
 - `displayName` is optional presentation text; selectors fall back to the exact wire model ID when it is absent.
 - `contextWindow`: combined input and output capacity.
 - `maxOutputTokens`: maximum output capacity; it must not exceed `contextWindow`.
-- `toolCalling`, `textInput`, and `imageInput`: explicit `supported`, `unsupported`, or `unknown` states. Missing facts never grant a capability.
+- `toolCalling`, `textInput`, and `imageInput`: explicit `supported`, `unsupported`, or `unknown` states. Unknown tool support allows tools to be sent to the provider; only explicit `unsupported` blocks tool calling locally. Text and image input still require explicit support.
 - `reasoning`: selectable reasoning levels in display order. Each item has a stable `id`, a `displayName`, and an optional provider-specific string `wireValue`. A missing `wireValue` sends the `id`; explicit `null` offers the selector value without sending a reasoning parameter. Use an empty list for a non-reasoning model.
 
 `compat` is optional. It is a partial override of the preset's `compat`; include only fields whose wire behavior differs for this model. A model cannot override `protocol`, because the route's adapter owns it.

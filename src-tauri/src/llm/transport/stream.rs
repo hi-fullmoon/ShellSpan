@@ -63,11 +63,11 @@ impl HttpConfig {
             coded_error(NormalizedModelErrorKind::Terminal, error, code)
         })?;
         if !request.tools.is_empty()
-            && model.tool_calling != crate::llm::catalog::Support::Supported
+            && model.tool_calling == crate::llm::catalog::Support::Unsupported
         {
             return Err(coded_error(
                 NormalizedModelErrorKind::Terminal,
-                "tool calling is not explicitly supported",
+                "tool calling is explicitly unsupported",
                 "UNSUPPORTED_OPTION",
             ));
         }
