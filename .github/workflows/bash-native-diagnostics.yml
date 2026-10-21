@@ -32,6 +32,4 @@ jobs:
         run: |
           /bin/bash --version
           uname -a
-          for _ in {1..20}; do
-            cargo test --manifest-path src-tauri/Cargo.toml --locked native_bash_concurrent_prompt_helpers_preserve_job_control -- --nocapture --test-threads=1 || exit "$?"
-          done
+          node scripts/verify-bash-native.mjs

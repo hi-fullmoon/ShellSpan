@@ -1375,6 +1375,7 @@ trap - DEBUG
             }
         });
         let mut owned_job_group: Option<libc::pid_t> = None;
+        let mut interrupt_modes = None;
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut bytes = Vec::new();
             let receive_prompts = |bytes: &mut Vec<u8>, expected: usize| {
@@ -1509,6 +1510,15 @@ trap - DEBUG
                 );
             }
             let interrupt_start = bytes.len();
+            if !remote {
+                let mut modes = std::mem::MaybeUninit::<libc::termios>::uninit();
+                if unsafe { libc::tcgetattr(pair.master.as_raw_fd().unwrap(), modes.as_mut_ptr()) }
+                    == 0
+                {
+                    let modes = unsafe { modes.assume_init() };
+                    interrupt_modes = Some((modes.c_iflag, modes.c_lflag));
+                }
+            }
             writer.write_all(b"\x03").unwrap();
             writer.flush().unwrap();
             receive_prompts(&mut bytes, 143);
@@ -1523,6 +1533,13 @@ trap - DEBUG
                 .unwrap();
             writer.flush().unwrap();
             receive_prompts(&mut bytes, 144);
+            assert!(
+                regex::Regex::new(r"(?:^|\r\n)INT-status:\d+\r\n")
+                    .unwrap()
+                    .is_match(&String::from_utf8_lossy(&bytes)),
+                "default SIGINT did not cancel the input: {:?}",
+                String::from_utf8_lossy(&bytes)
+            );
             if major >= 4 {
                 assert!(
                     String::from_utf8_lossy(&bytes).contains("INT-status:130\r\n"),
@@ -1801,6 +1818,7 @@ trap - DEBUG
             );
         }));
         if result.is_err() && std::env::var_os("SHELLSPAN_BASH_FAILURE_DIAGNOSTICS").is_some() {
+            eprintln!("Bash modes immediately before SIGINT: {interrupt_modes:?}");
             let fd = pair.master.as_raw_fd().unwrap();
             let mut modes = std::mem::MaybeUninit::<libc::termios>::uninit();
             if unsafe { libc::tcgetattr(fd, modes.as_mut_ptr()) } == 0 {
@@ -1814,6 +1832,19 @@ trap - DEBUG
                 );
             }
             if let Some(pid) = child.process_id() {
+                if cfg!(target_os = "macos") {
+                    if let Ok(trace) = tempfile::NamedTempFile::new() {
+                        let sampled = std::process::Command::new("sample")
+                            .args([&pid.to_string(), "1", "-file"])
+                            .arg(trace.path())
+                            .output();
+                        if sampled.is_ok_and(|output| output.status.success()) {
+                            if let Ok(trace) = fs::read_to_string(trace.path()) {
+                                eprintln!("Bash failure stack: {trace}");
+                            }
+                        }
+                    }
+                }
                 if let Ok(status) = std::process::Command::new("ps")
                     .args([
                         "-o",
@@ -1835,6 +1866,7 @@ trap - DEBUG
                     "input probe",
                     b"printf 'SHELLSPAN_POST_INTERRUPT:%s\\n' \"$?\"\r".as_slice(),
                 ),
+                ("canonical newline probe", b"\n".as_slice()),
             ] {
                 if let Err(error) = writer.write_all(input).and_then(|()| writer.flush()) {
                     eprintln!("Bash failure {label} unavailable: {error}");
