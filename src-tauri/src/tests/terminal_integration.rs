@@ -1378,17 +1378,25 @@ trap - DEBUG
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut bytes = Vec::new();
             let receive_prompts = |bytes: &mut Vec<u8>, expected: usize| {
+                let prompt_count = |bytes: &[u8]| {
+                    let mut terminal = vt100::Parser::new(300, 120, 0);
+                    terminal.process(bytes);
+                    terminal
+                        .screen()
+                        .contents()
+                        .lines()
+                        .filter(|line| line.starts_with("enter-probe$"))
+                        .count()
+                };
                 let deadline = Instant::now() + Duration::from_secs(15);
-                while String::from_utf8_lossy(bytes)
-                    .matches("enter-probe$ ")
-                    .count()
-                    < expected
-                {
+                // Readline can redraw PS1 on the same line before delivering a
+                // signal trap. A redraw is not another completed prompt cycle.
+                while prompt_count(bytes) < expected {
                     let remaining = deadline.saturating_duration_since(Instant::now());
                     bytes.extend(receiver.recv_timeout(remaining).unwrap_or_else(|error| {
                         panic!(
                             "Bash prompt timed out ({error}): expected {expected}, received {}; output: {:?}",
-                            String::from_utf8_lossy(bytes).matches("enter-probe$ ").count(),
+                            prompt_count(bytes),
                             String::from_utf8_lossy(bytes)
                         )
                     }));
