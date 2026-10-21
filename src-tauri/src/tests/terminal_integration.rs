@@ -1402,6 +1402,18 @@ trap - DEBUG
                     }));
                 }
             };
+            let wait_for_readline = || {
+                if !remote {
+                    wait_until(Duration::from_secs(15), || {
+                        let mut modes = std::mem::MaybeUninit::<libc::termios>::uninit();
+                        unsafe {
+                            libc::tcgetattr(pair.master.as_raw_fd().unwrap(), modes.as_mut_ptr())
+                                == 0
+                                && modes.assume_init().c_lflag & (libc::ICANON | libc::ECHO) == 0
+                        }
+                    });
+                }
+            };
             receive_prompts(&mut bytes, 1);
             for _ in 0..60 {
                 writer.write_all(b"\r").unwrap();
@@ -1483,6 +1495,9 @@ trap - DEBUG
             );
 
             let signal_phase_start = bytes.len();
+            // Kernel echo during prompt setup does not prove Readline consumed
+            // the input. Require the actual editor mode before typing it.
+            wait_for_readline();
             writer.write_all(b"typed-before-cancel").unwrap();
             writer.flush().unwrap();
             let deadline = Instant::now() + Duration::from_secs(15);
@@ -1524,15 +1539,7 @@ trap - DEBUG
             // PS1 is written before Readline switches the terminal to raw input.
             // Sending a signal in that window tests prompt setup rather than
             // the installed handler at an input prompt.
-            if !remote {
-                wait_until(Duration::from_secs(15), || {
-                    let mut modes = std::mem::MaybeUninit::<libc::termios>::uninit();
-                    unsafe {
-                        libc::tcgetattr(pair.master.as_raw_fd().unwrap(), modes.as_mut_ptr()) == 0
-                            && modes.assume_init().c_lflag & libc::ICANON == 0
-                    }
-                });
-            }
+            wait_for_readline();
             writer.write_all(b"\x03").unwrap();
             writer.flush().unwrap();
             receive_prompts(&mut bytes, 146);
@@ -1807,7 +1814,7 @@ trap - DEBUG
                 );
             }
             if let Some(pid) = child.process_id() {
-                let status = std::process::Command::new("ps")
+                if let Ok(status) = std::process::Command::new("ps")
                     .args([
                         "-o",
                         "pid,ppid,pgid,stat,wchan,command",
@@ -1815,40 +1822,36 @@ trap - DEBUG
                         &pid.to_string(),
                     ])
                     .output()
-                    .unwrap();
+                {
+                    eprintln!(
+                        "Bash failure process: {}",
+                        String::from_utf8_lossy(&status.stdout)
+                    );
+                }
+            }
+            for (label, input) in [
+                ("redraw", b"\x0c".as_slice()),
+                (
+                    "input probe",
+                    b"printf 'SHELLSPAN_POST_INTERRUPT:%s\\n' \"$?\"\r".as_slice(),
+                ),
+            ] {
+                if let Err(error) = writer.write_all(input).and_then(|()| writer.flush()) {
+                    eprintln!("Bash failure {label} unavailable: {error}");
+                    break;
+                }
+                let mut diagnostic = Vec::new();
+                let deadline = Instant::now() + Duration::from_secs(1);
+                while let Ok(chunk) =
+                    receiver.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                {
+                    diagnostic.extend(chunk);
+                }
                 eprintln!(
-                    "Bash failure process: {}",
-                    String::from_utf8_lossy(&status.stdout)
+                    "Bash failure {label}: {:?}",
+                    String::from_utf8_lossy(&diagnostic)
                 );
             }
-            writer.write_all(b"\x0c").unwrap();
-            writer.flush().unwrap();
-            let mut diagnostic = Vec::new();
-            let deadline = Instant::now() + Duration::from_secs(1);
-            while let Ok(chunk) =
-                receiver.recv_timeout(deadline.saturating_duration_since(Instant::now()))
-            {
-                diagnostic.extend(chunk);
-            }
-            eprintln!(
-                "Bash failure redraw: {:?}",
-                String::from_utf8_lossy(&diagnostic)
-            );
-            writer
-                .write_all(b"printf 'SHELLSPAN_POST_INTERRUPT:%s\\n' \"$?\"\r")
-                .unwrap();
-            writer.flush().unwrap();
-            diagnostic.clear();
-            let deadline = Instant::now() + Duration::from_secs(1);
-            while let Ok(chunk) =
-                receiver.recv_timeout(deadline.saturating_duration_since(Instant::now()))
-            {
-                diagnostic.extend(chunk);
-            }
-            eprintln!(
-                "Bash failure input probe: {:?}",
-                String::from_utf8_lossy(&diagnostic)
-            );
         }
         if let Some(group) = owned_job_group {
             // Reap only this fixture's job on assertion failure, without leaving
