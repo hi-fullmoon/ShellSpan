@@ -13,7 +13,13 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Inspect native PTY session APIs
-        run: python3 scripts/diagnose-macos-pty.py
+        run: python3 scripts/diagnose-macos-pty.py > /tmp/shellspan-pty-apis.json
+      - name: Save native API diagnostics
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: native-pty-apis
+          path: /tmp/shellspan-pty-apis.json
+          retention-days: 1
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
