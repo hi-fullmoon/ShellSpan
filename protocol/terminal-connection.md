@@ -38,6 +38,9 @@ Private `stty` maintenance runs via `exec` in command-substitution children that
 inherit the shell's process group, instead of creating short-lived foreground
 jobs. This avoids the parent/child `setpgid` race observed with macOS Bash 3.2
 without changing the user's `monitor` option or the process groups of user jobs.
+Restoring `$?` before forwarding an EXIT or INT handler also uses a builtin
+function rather than a foreground subshell, preserving the status and positional
+arguments without creating a job or emitting an extra SIGCHLD.
 Existing `PROMPT_COMMAND` callbacks retain their original execution semantics;
 their own external foreground commands can still encounter the upstream race.
 Those diagnostics are not filtered or hidden by ShellSpan.

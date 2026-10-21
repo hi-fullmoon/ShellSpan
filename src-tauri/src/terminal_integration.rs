@@ -506,6 +506,9 @@ __shellspan_restore_prompt_tty() {{
     fi
   fi
 }}
+__shellspan_return_status() {{
+  return "$1"
+}}
 __shellspan_run_previous_trap() {{
   local __shellspan_trap=$1 __shellspan_trap_status=$2
   shift 2
@@ -513,7 +516,9 @@ __shellspan_run_previous_trap() {{
   local -a __shellspan_trap_args
   # Let Bash decode its own shell-quoted `trap -p` output.
   builtin eval "__shellspan_trap_args=(${{__shellspan_trap#trap -- }})"
-  if (exit "$__shellspan_trap_status"); then
+  # Establish $? with a builtin function, without creating a foreground job
+  # while Bash is handling a signal or exiting.
+  if __shellspan_return_status "$__shellspan_trap_status"; then
     builtin eval -- "${{__shellspan_trap_args[0]}}"
   else
     builtin eval -- "${{__shellspan_trap_args[0]}}"

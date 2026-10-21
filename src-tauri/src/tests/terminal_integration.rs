@@ -1174,7 +1174,7 @@
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
-    fn wait_until(timeout: Duration, predicate: impl Fn() -> bool) {
+    fn wait_until(timeout: Duration, mut predicate: impl FnMut() -> bool) {
         use std::time::Instant;
         let deadline = Instant::now() + timeout;
         while !predicate() {
@@ -1204,6 +1204,32 @@
     #[test]
     fn native_bash_restores_prompt_modes_after_user_removes_exit_trap() {
         run_bash_repeated_enter_acceptance(false, true);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn bash_previous_trap_preserves_status_and_arguments_without_spawning_a_job() {
+        let script = format!(
+            "{}\n{}",
+            bash_bootstrap(Path::new("/dev/null"), false, false),
+            r#"set -T
+trap 'if [[ ${BASH_SUBSHELL:-0} != 0 ]]; then builtin printf "unexpected-subshell\n"; fi' DEBUG
+for status in 0 1 130; do
+  __shellspan_run_previous_trap "trap -- 'printf \"status:%s arg:%s\\n\" \"\$?\" \"\$1\"' SIGINT" "$status" user-argument
+done
+trap - DEBUG
+"#,
+        );
+        let output = std::process::Command::new("/bin/bash")
+            .args(["--noprofile", "--norc", "-c", &script])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(
+            std::str::from_utf8(&output.stdout).unwrap(),
+            "status:0 arg:user-argument\nstatus:1 arg:user-argument\nstatus:130 arg:user-argument\n"
+        );
+        assert!(output.stderr.is_empty(), "{output:?}");
     }
 
     #[cfg(target_os = "macos")]
@@ -1375,6 +1401,13 @@
                 thread::sleep(Duration::from_millis(5));
             }
             receive_prompts(&mut bytes, 61);
+            if prompt_command.is_empty() {
+                assert!(
+                    !String::from_utf8_lossy(&bytes).contains("setpgid"),
+                    "prompt helpers triggered a process-group warning: {:?}",
+                    String::from_utf8_lossy(&bytes)
+                );
+            }
             let mut terminal = vt100::Parser::new(300, 120, 0);
             terminal.process(&bytes);
             let contents = terminal.screen().contents();
@@ -1441,6 +1474,7 @@
                 "{contents:?}"
             );
 
+            let signal_phase_start = bytes.len();
             writer.write_all(b"typed-before-cancel").unwrap();
             writer.flush().unwrap();
             let deadline = Instant::now() + Duration::from_secs(15);
@@ -1479,12 +1513,25 @@
                 .unwrap();
             writer.flush().unwrap();
             receive_prompts(&mut bytes, 145);
+            // PS1 is written before Readline switches the terminal to raw input.
+            // Sending a signal in that window tests prompt setup rather than
+            // the installed handler at an input prompt.
+            if !remote {
+                wait_until(Duration::from_secs(15), || {
+                    let mut modes = std::mem::MaybeUninit::<libc::termios>::uninit();
+                    unsafe {
+                        libc::tcgetattr(pair.master.as_raw_fd().unwrap(), modes.as_mut_ptr()) == 0
+                            && modes.assume_init().c_lflag & libc::ICANON == 0
+                    }
+                });
+            }
             writer.write_all(b"\x03").unwrap();
             writer.flush().unwrap();
             receive_prompts(&mut bytes, 146);
             assert!(
                 String::from_utf8_lossy(&bytes).contains("CUSTOM-ARG:user-signal-arg\r\n"),
-                "custom INT handler received internal arguments"
+                "custom INT handler did not report the original arguments: {:?}",
+                String::from_utf8_lossy(&bytes)
             );
             if major >= 4 {
                 assert_eq!(
@@ -1493,6 +1540,13 @@
                         .count(),
                     1,
                     "custom INT handler lost its status or ran repeatedly"
+                );
+            }
+            if prompt_command.is_empty() {
+                let output = String::from_utf8_lossy(&bytes[signal_phase_start..]);
+                assert!(
+                    !output.contains("setpgid"),
+                    "signal helpers triggered a process-group warning: {output:?}"
                 );
             }
 
@@ -1571,6 +1625,23 @@
                     "foreground command shares the shell's process group"
                 );
                 assert_eq!(unsafe { libc::tcgetpgrp(terminal_fd) }, group);
+                // The shell prints JOB-READY before exec. Wait for the actual
+                // foreground program so Ctrl+Z cannot race /bin/sh startup.
+                let pid = sysinfo::Pid::from_u32(group as u32);
+                let mut processes = sysinfo::System::new();
+                wait_until(Duration::from_secs(15), || {
+                    processes.refresh_processes_specifics(
+                        sysinfo::ProcessesToUpdate::Some(&[pid]),
+                        true,
+                        sysinfo::ProcessRefreshKind::nothing()
+                            .with_exe(sysinfo::UpdateKind::Always),
+                    );
+                    processes
+                        .process(pid)
+                        .and_then(|process| process.exe())
+                        .and_then(|exe| exe.file_name())
+                        .is_some_and(|name| name == "sleep")
+                });
                 writer.write_all(b"\x1a").unwrap();
                 writer.flush().unwrap();
                 receive_prompts(&mut bytes, 153);
@@ -1639,12 +1710,6 @@
                 bytes.extend(chunk);
             }
             let output = String::from_utf8_lossy(&bytes);
-            if prompt_command.is_empty() {
-                assert!(
-                    !output.contains("setpgid"),
-                    "internal prompt helpers triggered a process-group warning: {output:?}"
-                );
-            }
             if !remote {
                 let mut modes = std::mem::MaybeUninit::<libc::termios>::uninit();
                 // The owned master FD remains open after the shell exits.
