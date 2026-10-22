@@ -54,7 +54,7 @@ function Row({ id, children }: {
 function render() {
   flushSync(() => root.render(
     <main className="ai-panel-shell h-dvh w-full min-w-0" data-ai-scope="workbench">
-      <MessageScroller key={revision} followKey={String(answer.length)} turnAnchorKey={followFromStart ? undefined : 'user'}
+      <MessageScroller key={revision} followKey={String(answer.length)} generating={streaming} turnAnchorKey={followFromStart ? undefined : 'user'}
         initialAnchor={initialAnchor} onAnchorChange={(anchor) => { saved = anchor; }}>
         <Row key="history" id="history" scrollItemId="history">
           <AssistantMessageContent blocks={[{ type: 'text', text: history }]} streaming={false} />

@@ -22,13 +22,32 @@ const recorded = withOptimisticConversationNodes(history, [{
 const root = createRoot(document.getElementById('root')!);
 function PagedHistory() {
   const [start, setStart] = useState(Math.max(1, Math.floor(history.length / 2)));
-  return <main className="ai-panel-shell flex h-dvh min-h-0 w-full flex-col" data-ai-scope="workbench">
+  return <main className="ai-workspace-root ai-panel-shell flex h-dvh min-h-0 w-full flex-col" data-ai-scope="workbench">
     <AiConversation nodes={history.slice(start)} status="completed" throughSeq={null}
       canLoadOlder={start > 0} onLoadOlder={() => setStart(current => Math.max(0, current - 1))} />
   </main>;
 }
 await initI18n('en-US');
 Object.assign(window, {
+  recordedEventTypes: taskTokenBudgetEvidence.continuedEvents.map(event => event.type),
+  renderRecordedEvents(length: number, status: 'running' | 'completed' = 'running', submitting = false) {
+    const events = taskTokenBudgetEvidence.continuedEvents;
+    const next = events[length];
+    const projected = projectAgentChatNodes(events.slice(0, length));
+    const nodes = submitting && next?.type === 'user/message'
+      ? withOptimisticConversationNodes(projected, [{
+        clientOperationId: next.data.message.clientSubmissionId ?? next.data.message.messageId,
+        sessionId: next.sessionId, scopeKey: 'layout', expectedNextSeq: next.seq,
+        delivery: 'pending', mode: 'nextTurn', startsTurn: true,
+        content: next.data.message.content, createdAtUnixMs: next.timeUnixMs,
+      }], 'layout', next.sessionId)
+      : projected;
+    flushSync(() => root.render(
+      <main className="ai-workspace-root ai-panel-shell flex h-dvh min-h-0 w-full flex-col" data-ai-scope="workbench">
+        <AiConversation nodes={nodes} status={status} throughSeq={null} />
+      </main>,
+    ));
+  },
   renderPagedHistory() {
     flushSync(() => root.render(<PagedHistory />));
   },
@@ -43,16 +62,16 @@ Object.assign(window, {
       content: 'Explain this document.', createdAtUnixMs: 1,
     }] : [])], 'layout', null);
     flushSync(() => root.render(
-      <main className="ai-panel-shell flex h-dvh min-h-0 w-full flex-col" data-ai-scope="workbench">
+      <main className="ai-workspace-root ai-panel-shell flex h-dvh min-h-0 w-full flex-col" data-ai-scope="workbench">
         <AiConversation nodes={nodes} status="running" throughSeq={null} canLoadOlder={canLoadOlder} />
       </main>,
     ));
   },
   turnNodes: recorded.map(node => ({ key: node.key, kind: node.kind })),
-  renderTurnPrefix(length: number) {
+  renderTurnPrefix(length: number, status: 'running' | 'completed' = 'running') {
     flushSync(() => root.render(
-      <main className="ai-panel-shell flex h-dvh min-h-0 w-full flex-col" data-ai-scope="workbench">
-        <AiConversation nodes={recorded.slice(0, length)} status="running" throughSeq={null} />
+      <main className="ai-workspace-root ai-panel-shell flex h-dvh min-h-0 w-full flex-col" data-ai-scope="workbench">
+        <AiConversation nodes={recorded.slice(0, length)} status={status} throughSeq={null} />
       </main>,
     ));
   },

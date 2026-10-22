@@ -108,6 +108,39 @@ try {
         assert.ok(Math.abs(distant.offset - 20) < 2,
           `${engine.name()} ${width} ${motion}: a submission from distant history must reach the top: ${JSON.stringify(distant)}`);
         await page.screenshot({ path: `/tmp/shellspan-distant-turn-${engine.name()}-${width}-${motion}.png` });
+        // A top-aligned submission must still allow navigation to the end of
+        // a long message through the native scrollport.
+        await page.evaluate(text => window.renderDocumentTurn(text, false), document);
+        await page.waitForTimeout(1600);
+        await viewport.hover();
+        await page.mouse.wheel(0, 100000);
+        await page.waitForFunction(() => {
+          const viewport = document.querySelector('[data-message-scroller-viewport]');
+          return Math.abs(viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop) < 2;
+        });
+        assert.ok(await viewport.evaluate(element => {
+          const rows = element.querySelectorAll('[data-message-id]');
+          return rows[rows.length - 1].getBoundingClientRect().bottom <= element.getBoundingClientRect().bottom;
+        }), 'Scrolling down must expose the final message completely');
+        await page.reload();
+        await page.waitForFunction(() => Boolean(window.renderTurnPrefix));
+        const eventTypes = await page.evaluate(() => window.recordedEventTypes);
+        const completedUser = eventTypes.lastIndexOf('user/message');
+        await page.evaluate(length => window.renderRecordedEvents(length), completedUser);
+        await page.locator('[data-slot="message-scroller"]:not(.invisible)').waitFor();
+        await page.evaluate(length => window.renderRecordedEvents(length, 'running', true), completedUser);
+        await page.waitForTimeout(1300);
+        assert.ok((await metrics()).spacer > 0, 'The running turn must reserve top-alignment space');
+        const beforeCompletion = await viewport.evaluate(element => element.scrollTop);
+        await page.evaluate(length => window.renderRecordedEvents(length, 'completed'), eventTypes.length);
+        await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-message-scroller-spacer]')).display === 'none');
+        const completedPosition = await viewport.evaluate(element => ({ top: element.scrollTop,
+          end: Math.max(0, element.scrollHeight - element.clientHeight) }));
+        assert.ok(Math.abs(completedPosition.top - Math.min(beforeCompletion, completedPosition.end)) < 2,
+          `Completion may clamp past-end space but must preserve history reading: ${JSON.stringify({ beforeCompletion, completedPosition })}`);
+        assert.equal(await page.locator('[data-slot="message-scroller"]').getAttribute('data-following'), 'false',
+          'Releasing completed turn space must not resume following');
+        await page.screenshot({ path: `/tmp/shellspan-completed-space-${engine.name()}-${width}-${motion}.png` });
         await page.close();
       }
       }

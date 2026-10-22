@@ -13,7 +13,7 @@ const server = await createServer({
   appType: 'custom',
   plugins: [react(), tailwindcss()],
   resolve: { alias: { '@': `${root}src/` } },
-  server: { host: '127.0.0.1', port: 0 },
+  server: { host: '127.0.0.1', port: 0, hmr: false },
 });
 server.middlewares.use('/__text-reveal', async (_request, response) => {
   response.setHeader('Content-Type', 'text/html');
@@ -39,6 +39,83 @@ try {
         await page.evaluate(source => window.streamingCheck.resetFollowing(source), document);
         await page.locator('[data-slot="message-scroller"]:not(.invisible)').waitFor();
         await page.evaluate(() => document.fonts.ready);
+        // Read a growing answer from its turn anchor with small native wheel
+        // gestures. Each gesture must move locally rather than resume tailing.
+        await page.evaluate(source => {
+          window.streamingCheck.reset(source);
+          window.streamingCheck.append(source);
+        }, document);
+        await page.locator('[data-slot="message-scroller"]:not(.invisible)').waitFor();
+        const scrollport = page.locator('[data-message-scroller-viewport]');
+        await scrollport.hover();
+        await page.mouse.wheel(0, -100000);
+        await page.waitForFunction(() => document.querySelector('[data-message-scroller-viewport]').scrollTop < 2);
+        await page.locator('[data-ai-node-key="user"]').evaluate(element => element.scrollIntoView({ block: 'start', behavior: 'instant' }));
+        await page.waitForTimeout(80);
+        await page.evaluate(source => {
+          const chunks = source.split('\n\n');
+          let index = 0;
+          window.concurrentScrollStream = window.setInterval(() => {
+            window.streamingCheck.append('\n\n' + chunks[index++ % chunks.length]);
+          }, 16);
+        }, document);
+        for (let step = 0; step < 3; step++) {
+          const before = await scrollport.evaluate(element => element.scrollTop);
+          await page.mouse.wheel(0, 40);
+          await page.waitForTimeout(120);
+          const after = await scrollport.evaluate(element => ({ top: element.scrollTop,
+            remaining: element.scrollHeight - element.clientHeight - element.scrollTop }));
+          assert.ok(after.top > before && after.top - before <= 60,
+            `A small downward gesture must not jump: ${JSON.stringify({ before, after })}`);
+          assert.ok(after.remaining > 100, 'Reading must remain detached from the answer tail');
+          await page.evaluate(source => window.streamingCheck.append('\n\n' + source), document);
+          await page.waitForTimeout(80);
+          assert.ok(Math.abs(await scrollport.evaluate(element => element.scrollTop) - after.top) < 2,
+            'Continuing generation must preserve the manually chosen position');
+        }
+        await page.evaluate(() => window.clearInterval(window.concurrentScrollStream));
+        // A short anchored turn may currently share the physical bottom edge.
+        // A downward reading gesture there must not opt into following when
+        // the next streamed batch makes the answer taller than the viewport.
+        await page.evaluate(source => window.streamingCheck.reset(source), document);
+        await page.locator('[data-slot="message-scroller"]:not(.invisible)').waitFor();
+        await scrollport.hover();
+        await page.mouse.wheel(0, 40);
+        await page.waitForTimeout(80);
+        const shortTurnTop = await scrollport.evaluate(element => element.scrollTop);
+        await page.evaluate(source => window.streamingCheck.append(source), document);
+        await page.waitForTimeout(150);
+        assert.ok(Math.abs(await scrollport.evaluate(element => element.scrollTop) - shortTurnTop) < 2,
+          'Streaming past a short turn must not turn downward reading into tail following');
+        await scrollport.focus();
+        await page.keyboard.press('Home');
+        await page.waitForFunction(() => document.querySelector('[data-message-scroller-viewport]').scrollTop === 0);
+        await page.evaluate(source => window.streamingCheck.finishAnswer(source), document);
+        await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-message-scroller-spacer]')).display === 'none');
+        await page.waitForTimeout(100);
+        assert.equal(await scrollport.evaluate(element => element.scrollTop), 0,
+          'Completion must preserve history reading after releasing reserved space');
+        assert.equal(await page.locator('[data-slot="message-scroller"]').getAttribute('data-following'), 'false');
+        await scrollport.hover();
+        const remaining = await scrollport.evaluate(element => element.scrollHeight - element.clientHeight - element.scrollTop);
+        assert.ok(remaining > 100, 'Completed repository Markdown must still have a real scroll range');
+        await page.mouse.wheel(0, remaining);
+        await page.waitForFunction(() => {
+          const viewport = document.querySelector('[data-message-scroller-viewport]');
+          return Math.abs(viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop) <= 1
+            && document.querySelector('[data-slot="message-scroller"]').dataset.following === 'true';
+        }, undefined, { timeout: 3000 }).catch(async error => {
+          const state = await scrollport.evaluate(element => ({ top: element.scrollTop, height: element.scrollHeight,
+            client: element.clientHeight, following: element.parentElement.dataset.following }));
+          throw new Error(`${browserType.name()} ${width}: completed-wheel follow ${JSON.stringify(state)}`, { cause: error });
+        });
+        const endGap = await scrollport.evaluate(element => {
+          const last = [...element.querySelectorAll('[data-message-id]')].at(-1);
+          return element.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom;
+        });
+        assert.ok(endGap <= 17, `The completed answer must have only its normal bottom padding: ${endGap}`);
+        await page.evaluate(source => window.streamingCheck.resetFollowing(source), document);
+        await page.locator('[data-slot="message-scroller"]:not(.invisible)').waitFor();
         const layoutFollow = await page.evaluate(async source => {
           const viewport = document.querySelector('[data-message-scroller-viewport]');
           const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
@@ -348,6 +425,22 @@ try {
           return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
         }, document);
         assert.ok(resumedGap <= 8, 'Jump to latest must resume synchronous streaming follow');
+        // Reopen a turn that was explicitly following its answer. Its saved
+        // bottom intent must take precedence over the question's turn anchor.
+        await page.evaluate(source => window.streamingCheck.reset(source), document);
+        await page.locator('[data-slot="message-scroller"]:not(.invisible)').waitFor();
+        await page.evaluate(source => window.streamingCheck.append(source), document);
+        await scrollport.hover();
+        await page.locator('[data-slot="message-scroller-button"]').click();
+        await page.waitForFunction(() => window.streamingCheck.anchor()?.atBottom === true);
+        await page.evaluate(() => window.streamingCheck.reopen());
+        await page.locator('[data-slot="message-scroller"]:not(.invisible)').waitFor();
+        const reopenedGap = await page.evaluate(source => {
+          window.streamingCheck.append('\n\n' + source);
+          const viewport = document.querySelector('[data-message-scroller-viewport]');
+          return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
+        }, document);
+        assert.ok(reopenedGap <= 8, 'Reopening at the bottom must preserve synchronous streaming follow');
         assert.deepEqual(errors, []);
         console.log(`${browserType.name()} ${width}px: first arrivals, selection-preserving completion, history, stable height and reduced motion passed`);
         await page.close();
