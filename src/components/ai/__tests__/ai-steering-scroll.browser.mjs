@@ -42,11 +42,15 @@ try {
             assert.equal(await viewport.evaluate(element => element.scrollHeight > element.clientHeight), true,
               `${scenario}: the recorded transcript must overflow the short viewport`);
             await viewport.hover();
-            await page.mouse.wheel(0, following ? 10000 : -10000);
+            await viewport.focus();
+            await page.keyboard.press('Home');
+            await page.waitForFunction(() => document.querySelector('[data-message-scroller-viewport]').scrollTop === 0);
+            if (following) await page.locator('[data-slot="message-scroller-button"]').click();
             await page.waitForFunction(following => {
               const viewport = document.querySelector('[data-message-scroller-viewport]');
               return following ? viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 8 : viewport.scrollTop === 0;
             }, following);
+            if (following) await page.locator('[data-slot="message-scroller"][data-following="true"]').waitFor();
             const firstTop = await page.locator('[data-ai-node-key="user:initial"]').evaluate(element => element.getBoundingClientRect().top);
             // Capture every frame, not just the final position: a transient
             // top-alignment followed by compensation also interrupts reading.
@@ -67,6 +71,17 @@ try {
               await page.waitForFunction(() => {
                 const viewport = document.querySelector('[data-message-scroller-viewport]');
                 return Math.abs(viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop) <= 8;
+              }, undefined, { timeout: 3000 }).catch(async error => {
+                const state = await page.evaluate(() => {
+                  const viewport = document.querySelector('[data-message-scroller-viewport]');
+                  return { top: viewport.scrollTop, height: viewport.scrollHeight, client: viewport.clientHeight,
+                    spacer: document.querySelector('[data-message-scroller-spacer]')?.getBoundingClientRect().height,
+                    content: document.querySelector('[data-slot="message-scroller-content"]')?.getBoundingClientRect().height,
+                    style: viewport.style.scrollBehavior,
+                    following: document.querySelector('[data-following]')?.getAttribute('data-following'),
+                    anchors: [...document.querySelectorAll('[data-scroll-anchor="true"]')].map(element => element.getAttribute('data-message-id')) };
+                });
+                throw new Error(`${scenario}: ${JSON.stringify(state)}`, { cause: error });
               });
             } else {
               assert.ok(samples.every(top => Math.abs(top) <= 1), `${scenario}: reading moved: ${JSON.stringify(samples)}`);
@@ -78,28 +93,16 @@ try {
               const viewport = document.querySelector('[data-message-scroller-viewport]');
               return following ? Math.abs(viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop) <= 8 : viewport.scrollTop === 0;
             }, following);
-            const submissionSamples = await page.evaluate(async () => {
+            await page.evaluate(() => window.timeline.nextTurn());
+            assert.equal(await page.locator('[data-message-id="user:new-turn-step"]').getAttribute('data-scroll-anchor'), 'true',
+              `${scenario}: a new question must create a top-aligned turn anchor`);
+            await page.waitForFunction(() => {
               const viewport = document.querySelector('[data-message-scroller-viewport]');
-              const samples = [];
-              window.timeline.nextTurn();
-              const start = performance.now();
-              while (performance.now() - start < 400) {
-                await new Promise(requestAnimationFrame);
-                samples.push(viewport.scrollTop);
-              }
-              return samples;
+              const anchor = document.querySelector('[data-message-id="user:new-turn-step"]');
+              const content = anchor.parentElement;
+              const inset = Number.parseFloat(getComputedStyle(content).paddingBlockStart) || 0;
+              return Math.abs(anchor.getBoundingClientRect().top - viewport.getBoundingClientRect().top - inset) < 2;
             });
-            assert.equal(await page.locator('[data-message-id="user:queued"]').getAttribute('data-scroll-anchor'), 'false',
-              `${scenario}: a new question must not create a top-aligned turn anchor`);
-            if (following) {
-              await page.waitForFunction(() => {
-                const viewport = document.querySelector('[data-message-scroller-viewport]');
-                return Math.abs(viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop) <= 8;
-              });
-            } else {
-              assert.ok(submissionSamples.every(top => Math.abs(top) <= 1),
-                `${scenario}: submitting a question moved the reading position: ${JSON.stringify(submissionSamples)}`);
-            }
             if (motion === 'reduce') await page.screenshot({
               path: `/tmp/shellspan-steering-scroll-${engine.name()}-${width}-${following ? 'following' : 'reading'}.png`,
             });

@@ -485,7 +485,7 @@ describe('MessageScroller', () => {
     expect(userItem).toHaveAttribute('data-scroll-anchor', 'true');
   });
 
-  it('follows an initially mounted short turn and restores its live edge', async () => {
+  it('keeps an initially mounted short turn anchored as it grows and restores its reading position', async () => {
     let itemCount = 2;
     let scrollTop = 0;
     let savedAnchor: AiScrollAnchor | undefined;
@@ -541,18 +541,18 @@ describe('MessageScroller', () => {
       .toHaveAttribute('data-scroll-anchor', 'true');
 
     fireEvent.scroll(container.querySelector('[data-message-scroller-viewport]')!);
-    expect(savedAnchor).toEqual(expect.objectContaining({ atBottom: true }));
+    expect(savedAnchor).toEqual(expect.objectContaining({ atBottom: false }));
     itemCount = 3;
     rerender(thread());
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    expect(scrollTop).toBe(200);
+    await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 0)); });
+    expect(scrollTop).toBe(100);
 
     unmount();
     scrollTop = 0;
     const restored = render(thread(savedAnchor));
-    await waitFor(() => expect(scrollTop).toBe(200));
+    await waitFor(() => expect(scrollTop).toBe(100));
     fireEvent.scroll(restored.container.querySelector('[data-message-scroller-viewport]')!);
-    expect(savedAnchor).toEqual(expect.objectContaining({ atBottom: true }));
+    expect(savedAnchor).toEqual(expect.objectContaining({ atBottom: false }));
   });
 
   it('preserves a saved live-edge position instead of replaying the turn anchor', async () => {

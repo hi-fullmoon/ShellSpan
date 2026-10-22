@@ -30,13 +30,13 @@ try {
         await page.waitForFunction(() => Boolean(window.renderDocumentTurn));
         await page.evaluate(text => window.renderDocumentTurn(text, false), document);
         await page.locator('[data-slot="message-scroller"]:not(.invisible)').waitFor();
+        await page.locator('button[aria-expanded="false"][aria-controls]').last().click();
         const viewport = page.locator('[data-message-scroller-viewport]');
+        await page.waitForTimeout(200);
+        await viewport.hover();
         await viewport.focus();
         await page.keyboard.press('Home');
-        await page.waitForFunction(() => {
-          const viewport = document.querySelector('[data-message-scroller-viewport]');
-          return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop > 500;
-        });
+        await page.waitForFunction(() => document.querySelector('[data-message-scroller-viewport]').scrollTop < 2);
         const positions = await page.evaluate(async text => {
           const viewport = document.querySelector('[data-message-scroller-viewport]');
           const positions = [viewport.scrollTop];
@@ -54,12 +54,18 @@ try {
           const viewport = document.querySelector('[data-message-scroller-viewport]');
           return Math.abs(viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop) <= 1;
         });
-        assert.equal(await page.locator('[data-message-scroller-spacer]').evaluate(element => element.hidden), true);
+        assert.equal(await page.locator('[data-message-scroller-spacer]').evaluate(element => element.hidden), false);
+        assert.ok(await page.evaluate(() => {
+          const viewport = document.querySelector('[data-message-scroller-viewport]');
+          const anchor = document.querySelector('[data-scroll-anchor="true"]');
+          return Math.abs(anchor.getBoundingClientRect().top - viewport.getBoundingClientRect().top - 20) < 2;
+        }), 'Submission must place the new question at the top');
         await page.waitForTimeout(500);
         assert.equal(await page.locator('[data-slot="message-scroller-button"]').getAttribute('data-active'), 'false',
           'The real conversation must hide the jump button after reaching the bottom');
         assert.equal(await page.locator('[data-slot="message-scroller-button"]').isVisible(), false,
           'The loading button must be absent after a submission scrolls from history to the bottom');
+        await viewport.hover();
         await viewport.focus();
         await page.keyboard.press('Home');
         await page.locator('[data-slot="message-scroller-button"]').waitFor({ state: 'visible' });
@@ -70,5 +76,5 @@ try {
       }
     } finally { await browser.close(); }
   }
-  console.log('Conversation submissions reach the bottom from history in Chromium and WebKit at 360px and 900px');
+  console.log('Conversation submissions align the question at the top and retain bottom navigation in Chromium and WebKit at 360px and 900px');
 } finally { await server.close(); }

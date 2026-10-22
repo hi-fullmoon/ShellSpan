@@ -131,6 +131,16 @@ export const AiConversation = memo(function AiConversation({
     onLoadOlder,
   );
   const running = status === 'running' || status === 'waiting';
+  const submitting = allNodes.some(node => node.kind === 'userMessage'
+    && (node.delivery === 'pending' || node.delivery === 'confirming' || node.delivery === 'unconfirmed'));
+  let latestTurnIndex = -1;
+  for (let index = allNodes.length - 1; index >= 0; index -= 1) {
+    const node = allNodes[index];
+    if (node.kind === 'userMessage' && node.inputKind !== 'steer') {
+      latestTurnIndex = index;
+      break;
+    }
+  }
   let latestUserIndex = -1;
   for (let index = allNodes.length - 1; index >= 0; index -= 1) {
     const node = allNodes[index];
@@ -174,8 +184,8 @@ export const AiConversation = memo(function AiConversation({
       className="min-h-0 flex-1"
       contentClassName="ai-conversation-content mx-auto min-w-0 w-[min(calc(100%-var(--ai-shell-clearance)-var(--ai-transcript-extra-inset)-var(--ai-shell-clearance)-var(--ai-transcript-extra-inset)),var(--ai-chat-content-max-width))] gap-4 px-0 pt-5 pb-7"
       followKey={followKey(nodes, throughSeq)}
-      scrollToBottomKeys={latestUserIndex >= 0 ? [conversationItemId(allNodes[latestUserIndex])] : []}
-      generating={pending || (status === 'running' && !latestProcess?.hasEndBoundary)}
+      turnAnchorKey={latestTurnIndex >= 0 ? conversationItemId(allNodes[latestTurnIndex]) : undefined}
+      generating={pending || submitting || (status === 'running' && !latestProcess?.hasEndBoundary)}
       ariaLabel={t('ai.conversation')}
       initialAnchor={initialAnchor}
       onAnchorChange={saveAnchor}
@@ -196,7 +206,7 @@ export const AiConversation = memo(function AiConversation({
           node={node}
           renderers={renderers}
           deferMessageActions={node.kind === 'assistantMessage' && (running || pending) && footerTurns.has(`${node.sessionId}:${node.turnId}`)}
-          scrollAnchor={false}
+          scrollAnchor={index + startIndex === latestTurnIndex}
           scrollItemId={conversationItemId(node)}
           scrollItemClassName={cn(
             'flex flex-col gap-4',
