@@ -527,7 +527,7 @@ describe('SftpPane', () => {
     fireEvent.change(input, { target: { value: 'report' } });
     expect(input).toHaveValue('report');
 
-    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.keyDown(input, { key: 'Escape' });
 
     expect(input).toHaveValue('');
     expect(input.tabIndex).toBe(-1);

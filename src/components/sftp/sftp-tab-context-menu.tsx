@@ -3,6 +3,9 @@ import { createPortal } from 'react-dom';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Separator } from '@/components/ui/separator';
 import { useI18n } from '@/hooks/useI18n';
+import { usePlatform } from '@/hooks/usePlatform';
+import { getShortcutKeys } from '@/lib/shortcuts';
+import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import { useSftpStore, type SftpConnection } from '@/stores/sftpStore';
 import { PromptDialog } from './sftp-dialogs';
 import type { ConnectionProfile } from '@/types';
@@ -45,7 +48,10 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
   onClose,
 }) => {
   const { t } = useI18n();
+  const platform = usePlatform();
+  const closeBinding = useAppStore((state) => state.shortcuts.closeSftpTab ?? DEFAULT_SHORTCUTS.closeSftpTab);
   const connections = useSftpStore((state) => state.connections);
+  const activeConnectionId = useSftpStore((state) => state.activeConnectionId);
   const removeConnection = useSftpStore((state) => state.removeConnection);
   const updateTitle = useSftpStore((state) => state.updateTitle);
   const togglePin = useSftpStore((state) => state.togglePin);
@@ -236,6 +242,9 @@ export const SftpTabContextMenu: React.FC<SftpTabContextMenuProps> = ({
         <Separator className="my-0.5" />
         <MenuItem onClick={handleClose}>
           {t('common.close')}
+          {target.id === activeConnectionId && closeBinding && (
+            <span className="ml-3 text-app-text-soft">{getShortcutKeys(closeBinding, platform).join('+')}</span>
+          )}
         </MenuItem>
         <MenuItem onClick={handleCloseOthers}>
           {t('sftp.tab.closeOthers')}

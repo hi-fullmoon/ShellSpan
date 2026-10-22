@@ -94,7 +94,7 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
   },
   {
     id: 'sftp',
-    actions: ['newSftpConnection'],
+    actions: ['newSftpConnection', 'findSftp', 'closeSftpTab', 'switchSftpTab', 'nextSftpTab', 'previousSftpTab'],
   },
 ];
 
@@ -175,6 +175,8 @@ const SettingsGrid: React.FC<{ children: React.ReactNode }> = ({ children }) => 
 
 const ShortcutKeys: React.FC<{ shortcut: string }> = ({ shortcut }) => {
   const platform = usePlatform();
+  const { t } = useI18n();
+  if (!shortcut) return <span className="text-xs text-muted-foreground">{t('settings.shortcuts.unassigned')}</span>;
   return (
     <KbdGroup>
       {getShortcutKeys(shortcut, platform).map((key, index) => (
@@ -435,6 +437,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       previousTerminalTab: t('settings.shortcuts.previousTerminalTab'),
       findTerminal: t('settings.shortcuts.findTerminal'),
       newSftpConnection: t('settings.shortcuts.newSftpConnection'),
+      findSftp: t('settings.shortcuts.findSftp'),
+      closeSftpTab: t('settings.shortcuts.closeSftpTab'),
+      switchSftpTab: t('settings.shortcuts.switchSftpTab'),
+      nextSftpTab: t('settings.shortcuts.nextSftpTab'),
+      previousSftpTab: t('settings.shortcuts.previousSftpTab'),
       terminalLeader: t('settings.shortcuts.terminalLeader'),
       terminalFocusLeft: t('settings.shortcuts.terminalFocusLeft'),
       terminalFocusDown: t('settings.shortcuts.terminalFocusDown'),
@@ -1110,7 +1117,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                                     aria-label={t('settings.shortcuts.resetOne', { action: shortcutLabels[action] })}
                                   />
                                 }
-                                onClick={() => resetShortcut(action)}
+                                onClick={() => {
+                                  const conflict = findShortcutConflict({ ...DEFAULT_SHORTCUTS, ...shortcuts }, action, DEFAULT_SHORTCUTS[action]);
+                                  if (conflict) {
+                                    setEditingAction(action);
+                                    setConflictAction(conflict);
+                                    return;
+                                  }
+                                  resetShortcut(action);
+                                }}
                               >
                                 <RotateCcwIcon />
                               </TooltipTrigger>

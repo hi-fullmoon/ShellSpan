@@ -42,7 +42,7 @@ describe('SectionNav', () => {
       expect(button.querySelector('svg')).not.toHaveClass('-translate-y-px');
       expect(button.querySelector('svg')).toHaveClass('size-3.5');
       expect(button).toHaveClass('min-h-7');
-      expect(button.querySelector('span')).toHaveClass('[text-box:trim-both_text_alphabetic]');
+      expect(button.querySelector('span')).toHaveClass('[text-box:trim-both_cap_alphabetic]');
     }
     expect(screen.getByRole('button', { name: 'section.workbench' })).toHaveAttribute('aria-current', 'page');
   });

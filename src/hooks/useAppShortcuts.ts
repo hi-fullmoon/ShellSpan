@@ -9,6 +9,7 @@ import type { ShortcutAction } from '@/types';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useAiPanelStore } from '@/stores/aiPanelStore';
 import { useFocusStore } from '@/stores/focusStore';
+import { useSftpStore } from '@/stores/sftpStore';
 
 // The leader binding and its sub-keys live in the terminal input layer
 // (terminal-leader.ts), not at the document level.
@@ -20,7 +21,7 @@ export function useAppShortcuts(): void {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.defaultPrevented || event.repeat) return;
+      if (event.defaultPrevented || event.repeat || event.isComposing) return;
 
       const effectiveShortcuts = { ...DEFAULT_SHORTCUTS, ...shortcuts };
       const activeSection = useAppStore.getState().activeSection;
@@ -42,8 +43,11 @@ export function useAppShortcuts(): void {
       if (
         SHORTCUT_SCOPES[action] !== 'global'
         && event.target instanceof Element
-        && event.target.closest('[role="dialog"]')
-      ) return;
+        && event.target.closest('[role="dialog"], [role="alertdialog"]')
+      ) {
+        event.preventDefault();
+        return;
+      }
 
       event.preventDefault();
       const { openSettings, setActiveSection } = useAppStore.getState();
@@ -97,6 +101,25 @@ export function useAppShortcuts(): void {
         case 'newSftpConnection':
           document.dispatchEvent(new Event('shellspan:new-sftp-connection'));
           break;
+        case 'findSftp':
+          document.dispatchEvent(new Event('shellspan:find-sftp'));
+          break;
+        case 'closeSftpTab':
+          document.dispatchEvent(new Event('shellspan:close-sftp-tab'));
+          break;
+        case 'switchSftpTab':
+          document.dispatchEvent(new Event('shellspan:switch-sftp-tab'));
+          break;
+        case 'nextSftpTab':
+        case 'previousSftpTab': {
+          const sftp = useSftpStore.getState();
+          if (sftp.connections.length < 2) break;
+          const currentIndex = sftp.connections.findIndex((connection) => connection.id === sftp.activeConnectionId);
+          const direction = action === 'nextSftpTab' ? 1 : -1;
+          const nextIndex = (currentIndex + direction + sftp.connections.length) % sftp.connections.length;
+          sftp.setActiveConnection(sftp.connections[nextIndex].id);
+          break;
+        }
         case 'nextTerminalTab':
         case 'previousTerminalTab': {
           const terminal = useTerminalStore.getState();

@@ -3,6 +3,20 @@ import type { ShortcutAction, ShortcutBindings } from '@/types';
 
 const MODIFIER_KEYS = new Set(['Control', 'Meta', 'Alt', 'Shift']);
 
+function shortcutKey(key: string, shifted: boolean): string {
+  // Shift+[ / Shift+] are reported as braces by browser keyboard events.
+  if (shifted && key === '{') return '[';
+  if (shifted && key === '}') return ']';
+  return key === ' ' ? 'space' : key.toLowerCase();
+}
+
+function overlappingChord(binding: string): string {
+  const parts = binding.toLowerCase().split('+');
+  const key = shortcutKey(parts.pop() ?? '', parts.includes('shift'));
+  // A portable mod chord accepts Control too, including on macOS.
+  return [...new Set(parts.map((part) => part === 'ctrl' ? 'mod' : part))].sort().concat(key).join('+');
+}
+
 export type ShortcutScope = 'global' | 'terminal' | 'sftp';
 
 export const SHORTCUT_SCOPES: Record<ShortcutAction, ShortcutScope> = {
@@ -19,6 +33,11 @@ export const SHORTCUT_SCOPES: Record<ShortcutAction, ShortcutScope> = {
   previousTerminalTab: 'terminal',
   findTerminal: 'terminal',
   newSftpConnection: 'sftp',
+  findSftp: 'sftp',
+  closeSftpTab: 'sftp',
+  switchSftpTab: 'sftp',
+  nextSftpTab: 'sftp',
+  previousSftpTab: 'sftp',
   terminalLeader: 'terminal',
   terminalFocusLeft: 'terminal',
   terminalFocusDown: 'terminal',
@@ -50,15 +69,17 @@ export function findShortcutConflict(
   action: ShortcutAction,
   candidate: string,
 ): ShortcutAction | null {
+  if (!candidate) return null;
   const candidateIsLeaderKey = isLeaderShortcutAction(action);
   for (const other of Object.keys(bindings) as ShortcutAction[]) {
-    if (other === action || bindings[other] !== candidate) continue;
+    if (other === action || !bindings[other]) continue;
     const otherIsLeaderKey = isLeaderShortcutAction(other);
     // Leader sub-keys share one namespace; a chord never collides with them.
     if (candidateIsLeaderKey || otherIsLeaderKey) {
-      if (candidateIsLeaderKey && otherIsLeaderKey) return other;
+      if (candidateIsLeaderKey && otherIsLeaderKey && bindings[other] === candidate) return other;
       continue;
     }
+    if (overlappingChord(bindings[other]) !== overlappingChord(candidate)) continue;
     // Chords collide only within the same scope, or against a global one.
     if (
       SHORTCUT_SCOPES[action] === 'global'
@@ -74,7 +95,7 @@ export function findShortcutConflict(
 export function shortcutFromKeyboardEvent(event: KeyboardEvent, preserveCtrl = false): string | null {
   if (!event.key || MODIFIER_KEYS.has(event.key)) return null;
 
-  const key = event.key.toLowerCase() === ' ' ? 'space' : event.key.toLowerCase();
+  const key = shortcutKey(event.key, event.shiftKey);
   const parts: string[] = [];
   // 'mod' folds Cmd (macOS) and Ctrl (elsewhere) into one portable token.
   // Callers that need a literal Control binding (e.g. the terminal leader,
@@ -101,8 +122,8 @@ export function shortcutFromBareKeyEvent(event: KeyboardEvent): string | null {
 export function eventMatchesShortcut(event: KeyboardEvent, shortcut?: string): boolean {
   if (!shortcut || !event.key) return false;
   const parts = shortcut.split('+');
-  const key = parts[parts.length - 1];
-  const eventKey = event.key.toLowerCase() === ' ' ? 'space' : event.key.toLowerCase();
+  const key = shortcutKey(parts[parts.length - 1], parts.includes('shift'));
+  const eventKey = shortcutKey(event.key, event.shiftKey);
 
   // 'ctrl' requires literally Control (no Cmd); 'mod' accepts either.
   const modifierMatch = parts.includes('ctrl')

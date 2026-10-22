@@ -9,6 +9,7 @@ import {
   invokeSavePreferences,
 } from '@/lib/ipc/tauri';
 import { createLogger } from '@/lib/logger';
+import { findShortcutConflict } from '@/lib/shortcuts';
 import { configurePetdexSettings, newestMessageDiagnostic, type PetdexMessageDiagnostic, type PetdexSettings } from '@/lib/petdex/messages';
 import { DEFAULT_PETDEX_MESSAGE_PREFERENCES, normalizePetdexMessagePreferences, type PetdexMessagePreferences } from '@/lib/petdex/message-preferences';
 import { DEFAULT_PETDEX_CATEGORIES, normalizePetdexCategories, resolvePetdexSettings } from '@/lib/petdex/preferences';
@@ -16,6 +17,12 @@ import type { PetdexConfigurationPatch } from '@/lib/petdex/preferences';
 import type { PetdexCategories } from '@/types';
 
 const logger = createLogger('appStore');
+
+// These actions were added to an existing persisted shortcut map. An older
+// customization takes precedence when a newly introduced default overlaps it.
+const SFTP_SHORTCUT_MIGRATION_ACTIONS: readonly ShortcutAction[] = [
+  'findSftp', 'closeSftpTab', 'switchSftpTab', 'nextSftpTab', 'previousSftpTab',
+];
 
 export const DEFAULT_SHORTCUTS: ShortcutBindings = {
   openWorkbench: 'mod+1',
@@ -31,6 +38,11 @@ export const DEFAULT_SHORTCUTS: ShortcutBindings = {
   previousTerminalTab: 'mod+shift+[',
   findTerminal: 'mod+f',
   newSftpConnection: 'mod+k',
+  findSftp: 'mod+f',
+  closeSftpTab: 'mod+w',
+  switchSftpTab: 'mod+shift+o',
+  nextSftpTab: 'mod+shift+]',
+  previousSftpTab: 'mod+shift+[',
   terminalLeader: 'ctrl+b',
   terminalFocusLeft: 'h',
   terminalFocusDown: 'j',
@@ -214,15 +226,22 @@ export function mergeShortcutBindings(value: unknown): ShortcutBindings {
   const stored = value && typeof value === 'object'
     ? value as Partial<Record<ShortcutAction, unknown>>
     : {};
-  return Object.fromEntries(
+  const merged = Object.fromEntries(
     (Object.entries(DEFAULT_SHORTCUTS) as Array<[ShortcutAction, string]>).map(
       ([action, fallback]) => {
         const candidate = stored[action];
-        const usable = typeof candidate === 'string' && candidate.length > 0;
+        const usable = typeof candidate === 'string'
+          && (candidate.length > 0 || SFTP_SHORTCUT_MIGRATION_ACTIONS.includes(action));
         return [action, usable ? candidate : fallback];
       },
     ),
   ) as ShortcutBindings;
+  for (const action of SFTP_SHORTCUT_MIGRATION_ACTIONS) {
+    if (stored[action] === undefined && findShortcutConflict(merged, action, merged[action])) {
+      merged[action] = '';
+    }
+  }
+  return merged;
 }
 
 export const PROFILE_NAME_MAX_LENGTH = 32;

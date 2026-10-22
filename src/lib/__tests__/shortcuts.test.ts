@@ -9,6 +9,18 @@ import {
 import { DEFAULT_SHORTCUTS } from '@/stores/appStore';
 
 describe('shortcuts', () => {
+  it('records and matches shifted brackets consistently', () => {
+    for (const [key, base] of [['{', '['], ['}', ']']]) {
+      const event = new KeyboardEvent('keydown', { key, metaKey: true, shiftKey: true });
+      expect(shortcutFromKeyboardEvent(event)).toBe(`mod+shift+${base}`);
+      expect(eventMatchesShortcut(event, `mod+shift+${base}`)).toBe(true);
+    }
+  });
+  it('keeps legacy brace bindings working and detects equivalent chords', () => {
+    const event = new KeyboardEvent('keydown', { key: '}', ctrlKey: true, shiftKey: true });
+    expect(eventMatchesShortcut(event, 'mod+shift+}')).toBe(true);
+    expect(findShortcutConflict({ ...DEFAULT_SHORTCUTS, closeSftpTab: 'ctrl+shift+}' }, 'findSftp', 'mod+shift+]')).toBe('closeSftpTab');
+  });
   it('normalizes Command and Control to a portable modifier', () => {
     expect(shortcutFromKeyboardEvent(new KeyboardEvent('keydown', { key: '2', metaKey: true }))).toBe('mod+2');
     expect(shortcutFromKeyboardEvent(new KeyboardEvent('keydown', { key: '2', ctrlKey: true }))).toBe('mod+2');

@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Section navigation verification</title></head>
+  <body>
+    <div id="section-nav-review" style="height:40px; padding-inline:16px"></div>
+    <script type="module">
+      import React from 'react';
+      import ReactDOM from 'react-dom/client';
+      import '/src/styles/base.css';
+      import { SectionNav } from '../section-nav';
+      import { initI18n } from '@/locales';
+      await initI18n('zh-CN');
+      ReactDOM.createRoot(document.getElementById('section-nav-review')).render(React.createElement(SectionNav));
+    </script>
+  </body>
+</html>

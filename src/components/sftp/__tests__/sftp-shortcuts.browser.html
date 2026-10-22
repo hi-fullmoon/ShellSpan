@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SFTP shortcuts verification</title>
+  </head>
+  <body>
+    <script type="module">
+      import React from 'react';
+      import ReactDOM from 'react-dom/client';
+      import '/src/styles/base.css';
+      import { SftpTabSwitcher } from '../sftp-tab-switcher';
+      import { useAppShortcuts } from '@/hooks/useAppShortcuts';
+      import { useSftpStore } from '@/stores/sftpStore';
+      import { useAppStore } from '@/stores/appStore';
+
+      useAppStore.setState({ activeSection: 'sftp' });
+      for (let index = 0; index < 20; index++) useSftpStore.getState().addLocalConnection();
+      function Surface() {
+        useAppShortcuts();
+        React.useEffect(() => { document.body.dataset.sftpShortcutsReady = 'true'; }, []);
+        return React.createElement(SftpTabSwitcher);
+      }
+      const host = document.createElement('div');
+      document.body.append(host);
+      ReactDOM.createRoot(host).render(React.createElement(Surface));
+    </script>
+  </body>
+</html>

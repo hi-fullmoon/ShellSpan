@@ -652,6 +652,24 @@ describe('SettingsPanel', () => {
     expect(screen.queryByText('settings.shortcuts.recordPrompt')).not.toBeInTheDocument();
   });
 
+  it('checks conflicts before resetting a single SFTP shortcut', async () => {
+    useAppStore.setState({ shortcuts: { ...DEFAULT_SHORTCUTS, findSftp: 'mod+shift+f', newSftpConnection: 'mod+f' } });
+    render(<SettingsPanel />);
+    openSection('settings.shortcuts.title');
+    const row = screen.getByText('settings.shortcuts.findSftp').parentElement!;
+    fireEvent.click(within(row).getByRole('button', { name: 'settings.shortcuts.resetOne' }));
+    expect(await screen.findByText('settings.shortcuts.conflict')).toBeInTheDocument();
+    expect(useAppStore.getState().shortcuts.findSftp).toBe('mod+shift+f');
+  });
+
+  it('shows migrated unassigned SFTP shortcuts with a readable label', () => {
+    useAppStore.setState({ shortcuts: { ...DEFAULT_SHORTCUTS, findSftp: '' } });
+    render(<SettingsPanel />);
+    openSection('settings.shortcuts.title');
+    const row = screen.getByText('settings.shortcuts.findSftp').parentElement!;
+    expect(within(row).getByText('settings.shortcuts.unassigned')).toBeInTheDocument();
+  });
+
   it('rejects modifier chords when recording a leader sub-key', async () => {
     render(<SettingsPanel />);
     await waitFor(() => {});

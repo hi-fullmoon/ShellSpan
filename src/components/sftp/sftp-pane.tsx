@@ -18,7 +18,9 @@ import type { FileEntry } from './utils';
 import type { SftpDndPayload } from './sftp-dnd-context';
 import { parentPortablePath, parentPosixPath } from '@/lib/path-utils';
 import { hasActivePathOperation, useTransferStore } from '@/stores/transferStore';
-import { useAppStore } from '@/stores/appStore';
+import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
+import { eventMatchesShortcut, getShortcutKeys } from '@/lib/shortcuts';
+import { usePlatform } from '@/hooks/usePlatform';
 
 export interface SftpPaneProps {
   connection: SftpConnection;
@@ -59,6 +61,9 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     ref,
   ) => {
     const { t } = useI18n();
+    const platform = usePlatform();
+    const findShortcut = useAppStore((state) => state.shortcuts.findSftp ?? DEFAULT_SHORTCUTS.findSftp);
+    const paneRef = useRef<HTMLDivElement | null>(null);
     const showHiddenFiles = useAppStore((state) => state.sftpShowHiddenFiles);
     const { active } = useDndContext();
     const { setNodeRef, isOver } = useDroppable({
@@ -68,6 +73,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
 
     const mergedRef = useCallback(
       (node: HTMLDivElement | null) => {
+        paneRef.current = node;
         setNodeRef(node);
         if (typeof ref === 'function') {
           ref(node);
@@ -165,7 +171,10 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
         return;
       }
       const handleKeyDown = (event: KeyboardEvent): void => {
-        if (event.key === 'Escape') {
+        if (event.key === 'Escape' && !event.defaultPrevented
+          && event.target instanceof Element && paneRef.current?.contains(event.target)
+          && !event.target.closest('[role="dialog"], [role="alertdialog"]')) {
+          event.preventDefault();
           setShowSearch(false);
           setSearchQuery('');
         }
@@ -174,15 +183,16 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
       return () => document.removeEventListener('keydown', handleKeyDown);
     }, [blankContextMenu, bookmarkMenu, fileContextMenu, showSearch]);
 
-    // Cmd/Ctrl+F opens the search. The handler lives on the pane root so the
-    // bubbled keydown only fires when focus is inside this pane (e.g. the
-    // file list), never the sibling pane.
-    const handlePaneKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>): void => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
-        event.preventDefault();
+    useEffect(() => {
+      const openSearch = (): void => {
+        const focusedPane = document.activeElement?.closest('[data-sftp-pane]');
+        if (focusedPane ? focusedPane !== paneRef.current : side !== 'local') return;
         setShowSearch(true);
-      }
-    }, []);
+        searchInputRef.current?.focus();
+      };
+      document.addEventListener('shellspan:find-sftp', openSearch);
+      return () => document.removeEventListener('shellspan:find-sftp', openSearch);
+    }, [side]);
 
     useEffect(() => {
       if (connecting || restorePending) return;
@@ -442,7 +452,16 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
     return (
       <div
         ref={mergedRef}
-        onKeyDown={handlePaneKeyDown}
+        data-sftp-pane={side}
+        onKeyDown={(event) => {
+          if (event.defaultPrevented || event.repeat || event.nativeEvent.isComposing
+            || (event.target as Element).closest('[role="dialog"], [role="alertdialog"]')) return;
+          if (eventMatchesShortcut(event.nativeEvent, findShortcut)) {
+            event.preventDefault();
+            setShowSearch(true);
+            searchInputRef.current?.focus();
+          }
+        }}
         aria-busy={connecting || undefined}
         className="flex h-full flex-col overflow-hidden bg-app-surface"
       >
@@ -493,6 +512,7 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
                     showSearch ? 'text-app-text hover:bg-app-border/50' : 'text-app-text-soft hover:bg-app-border/50 hover:text-app-text',
                   )}
                   aria-label={showSearch ? t('sftp.hideFilter') : t('sftp.showFilter')}
+                  title={showSearch ? t('sftp.hideFilter') : findShortcut ? `${t('sftp.showFilter')} (${getShortcutKeys(findShortcut, platform).join('+')})` : t('sftp.showFilter')}
                 >
                   <SearchIcon />
                 </Button>

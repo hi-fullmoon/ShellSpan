@@ -14,6 +14,7 @@ interface NavItemProps {
 }
 
 const NavItem: React.FC<NavItemProps> = ({ section, label, icon: Icon }) => {
+  const { locale } = useI18n();
   const activeSection = useAppStore((state) => state.activeSection);
   const setActiveSection = useAppStore((state) => state.setActiveSection);
   const focusEnabled = useFocusStore(state => state.enabled);
@@ -39,7 +40,12 @@ const NavItem: React.FC<NavItemProps> = ({ section, label, icon: Icon }) => {
       <Icon aria-hidden="true" className="size-3.5 shrink-0" />
       <span
         data-label={label}
-        className="text-center [text-box:trim-both_text_alphabetic] after:invisible after:block after:h-0 after:overflow-hidden after:font-medium after:content-[attr(data-label)]"
+        className={cn(
+          'text-center after:invisible after:block after:h-0 after:overflow-hidden after:font-medium after:content-[attr(data-label)]',
+          locale === 'zh-CN' && section !== 'sftp'
+            ? 'relative -top-px [text-box:trim-both_text_alphabetic]'
+            : '[text-box:trim-both_cap_alphabetic]',
+        )}
       >
         {label}
       </span>

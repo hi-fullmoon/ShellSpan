@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { SplitPane } from '@/components/ui/split-pane';
 import { SftpPane } from './sftp-pane';
 import { SftpTabBar } from './sftp-tab-bar';
+import { SftpTabSwitcher } from './sftp-tab-switcher';
 import { SftpTabContextMenu } from './sftp-tab-context-menu';
 import { SftpNewConnectionMenu } from './sftp-new-connection-menu';
 import { PromptDialog, PermissionsDialog } from './sftp-dialogs';
@@ -104,6 +105,7 @@ const Sftp: React.FC = () => {
   if (!connection) {
     return (
       <div className="flex h-full flex-col bg-app-bg">
+        <SftpTabSwitcher />
         <SftpTabBar
           onNewTabClick={() => setNewConnectionMenuOpen(true)}
           onTabContextMenu={(conn, x, y) => setTabContextMenu({ connection: conn, x, y })}
@@ -155,6 +157,7 @@ const Sftp: React.FC = () => {
 
   return (
     <>
+      <SftpTabSwitcher />
       <SftpContent
         key={connection.id}
         connection={connection}

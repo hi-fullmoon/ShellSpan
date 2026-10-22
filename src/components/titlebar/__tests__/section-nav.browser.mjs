@@ -5,22 +5,9 @@ const browserType = process.env.SHELLSPAN_TEST_BROWSER === 'webkit' ? webkit : c
 const browser = await browserType.launch();
 try {
   const page = await browser.newPage();
-  await page.goto(process.env.SHELLSPAN_TEST_URL ?? 'http://localhost:1420');
-  assert.ok(await page.evaluate(() => CSS.supports('text-box', 'trim-both text alphabetic')),
+  await page.goto(new URL('/src/components/titlebar/__tests__/section-nav.browser.html', process.env.SHELLSPAN_TEST_URL ?? 'http://localhost:1420').href);
+  assert.ok(await page.evaluate(() => CSS.supports('text-box', 'trim-both cap alphabetic')),
     'Navigation alignment requires Chromium/Edge WebView2 133+ or Safari/WKWebView 18.2+');
-  await page.evaluate(async () => {
-    const { default: React } = await import('/node_modules/.vite/deps/react.js');
-    const { default: ReactDOM } = await import('/node_modules/.vite/deps/react-dom_client.js');
-    const { SectionNav } = await import('/src/components/titlebar/section-nav.tsx');
-    const { initI18n } = await import('/src/locales/index.ts');
-    await initI18n('zh-CN');
-    document.getElementById('root').style.display = 'none';
-    const root = document.createElement('div');
-    root.id = 'section-nav-review';
-    root.style.cssText = 'height:40px; padding-inline:16px';
-    document.body.append(root);
-    ReactDOM.createRoot(root).render(React.createElement(SectionNav));
-  });
   const nav = page.locator('#section-nav-review nav');
   await nav.waitFor();
   assert.equal(await nav.getByRole('button').count(), 3);
@@ -76,6 +63,7 @@ try {
             right: bounds.right,
             active: element.getAttribute('aria-current'),
             textBox: getComputedStyle(labelElement).textBoxTrim,
+            textEdge: getComputedStyle(labelElement).textBoxEdge,
             iconSize: icon.height,
             height: bounds.height,
             weight: getComputedStyle(element).fontWeight,
@@ -90,8 +78,10 @@ try {
         assert.equal(metrics.gap, 4);
         assert.ok(Math.abs(metrics.offset) < 1, `${label}: content must be centered`);
         assert.equal(metrics.verticalOffset, 0, `${label}: icon must be vertically centered`);
-        assert.ok(Math.abs(metrics.textVerticalOffset) < 0.1, `${label}: label must be vertically centered`);
+        const expectedTextOffset = locale === 'zh-CN' && label !== 'SFTP' ? -1 : 0;
+        assert.ok(Math.abs(metrics.textVerticalOffset - expectedTextOffset) < 0.1, `${label}: preserve the language-specific optical alignment`);
         assert.equal(metrics.textBox, 'trim-both');
+        assert.equal(metrics.textEdge, locale === 'zh-CN' && label !== 'SFTP' ? 'text alphabetic' : 'cap alphabetic');
         assert.equal(metrics.radius, 6);
         assert.ok(metrics.right <= width);
         assert.equal(metrics.active, 'page');
