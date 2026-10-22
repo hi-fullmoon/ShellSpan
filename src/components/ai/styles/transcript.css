@@ -32,6 +32,19 @@
   line-height: 22px;
 }
 
+@keyframes ai-user-bubble-enter {
+  from { opacity: 0.35; }
+  to { opacity: 1; }
+}
+
+.ai-user-bubble-enter {
+  animation: ai-user-bubble-enter 160ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-user-bubble-enter { animation: none; }
+}
+
 .ai-user-attachments > .ai-chat-reference[data-slot='attachment'] {
   align-self: flex-end;
 }

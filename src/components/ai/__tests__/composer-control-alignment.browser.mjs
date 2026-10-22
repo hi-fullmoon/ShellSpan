@@ -8,6 +8,7 @@ import tailwindcss from '@tailwindcss/vite';
 const centerY = rect => rect.y + rect.height / 2;
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const server = await createServer({ root, configFile: false, appType: 'custom', logLevel: 'error',
+  cacheDir: `/tmp/shellspan-composer-alignment-${process.pid}`,
   plugins: [react(), tailwindcss()], resolve: { alias: { '@': `${root}src/` } },
   server: { host: '127.0.0.1', port: 0 } });
 server.middlewares.use(async (request, response, next) => {
@@ -57,7 +58,8 @@ try {
         const executionSurfaceControl = () => h(AgentExecutionSurfaceSelector, {
           surface: 'boundTerminal', realTerminalState: 'ready',
         });
-        ReactDOM.createRoot(document.getElementById('root')).render(
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        const render = (status = 'idle') => root.render(
           h('main', {
             className: 'ai-panel-shell @container/ai-workspace flex flex-col gap-4 p-4',
             'data-ai-scope': 'terminal',
@@ -67,10 +69,12 @@ try {
             executionSurfaceControl(),
           ),
           h(AiComposerSeat, {
-            phase: 'active', status: 'idle', modelLabel: 'MiniMax-M3 · Default',
+            phase: 'active', status, modelLabel: 'MiniMax-M3 · Default',
             permissionControl: permissionControl(), executionSurfaceControl: executionSurfaceControl(),
           })),
         );
+        window.setComposerStatus = render;
+        render();
       }, locale);
       await page.locator('.ai-composer-control-content').first().waitFor({ timeout: 10_000 })
         .catch(error => assert.fail(`${error.message}\n${pageErrors.join('\n')}`));
@@ -177,6 +181,22 @@ try {
           'Execution text must return when a docked panel expands');
       }
       assert.deepEqual(pageErrors, [], 'Rendering the real composer must not raise browser errors');
+      await page.locator('main').evaluate(element => { element.style.width = ''; });
+      await page.evaluate(() => window.setComposerStatus('running'));
+      await composer.locator('.ai-busy-preference-trigger').waitFor();
+      let preservedSurface = false;
+      for (const width of [1100, 900, 800, 760, 720, 700, 680, 664, 640, 600, 540, 480, 360]) {
+        await page.setViewportSize({ width, height: 300 });
+        await page.waitForTimeout(80);
+        const visible = selector => composer.locator(selector).evaluate(element => getComputedStyle(element).display !== 'none');
+        const busy = await visible('.ai-busy-preference-label');
+        const surface = await visible('.ai-execution-surface-label');
+        if (!busy && surface) preservedSurface = true;
+        assert.ok(surface || !busy, `Queue text must collapse before execution text at ${width}px`);
+        if (!busy) assert.equal(await composer.locator('.ai-busy-preference-trigger').evaluate(element => element.getBoundingClientRect().width), 28);
+        if (width === 664) await page.screenshot({ path: `/tmp/shellspan-composer-priority-${engine.name()}-${locale}.png` });
+      }
+      assert.ok(preservedSurface, 'Execution text must remain visible after queue text collapses');
     } finally {
       await browser.close();
     }

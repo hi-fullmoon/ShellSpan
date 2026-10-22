@@ -166,6 +166,9 @@ import { AiUserMessageText } from './ai-user-message-text';
 
 function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'userMessage'> }) {
   const { t } = useI18n();
+  // Keep the same animation across receipt updates; committed history never
+  // starts a send animation when it is mounted or reopened.
+  const reveal = useRef(node.delivery === 'pending');
   const message = decodeDocumentMessage(node.content);
   const files = message.documents.filter(document => document.chatTitle === undefined);
   const references = message.documents.filter(document => document.chatTitle !== undefined);
@@ -194,7 +197,7 @@ function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'us
         </div>
       )}
       {(message.text || node.delivery === 'failed') && (
-        <Bubble role="user">
+        <Bubble role="user" className={reveal.current ? 'ai-user-bubble-enter' : undefined}>
           {pendingIndicator}
           <AiUserMessageText key={message.text} text={message.text} />
           {node.delivery === 'failed' && (
