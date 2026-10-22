@@ -8,143 +8,80 @@ import { chromium, webkit } from 'playwright';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const document = await readFile(new URL('../../../../AGENTS.md', import.meta.url), 'utf8');
-const server = await createServer({
-  root, configFile: false, appType: 'custom', logLevel: 'error',
+const server = await createServer({ root, configFile: false, appType: 'custom', logLevel: 'error',
   cacheDir: `/tmp/shellspan-turn-anchor-${process.pid}`,
-  plugins: [react(), tailwindcss()],
-  resolve: { alias: { '@': `${root}src` } },
-  server: { host: '127.0.0.1', port: 0, hmr: false },
-});
+  plugins: [react(), tailwindcss()], resolve: { alias: { '@': `${root}src` } },
+  server: { host: '127.0.0.1', port: 0, hmr: false } });
 server.middlewares.use('/__turn-anchor', async (_request, response) => {
   response.setHeader('Content-Type', 'text/html');
   response.end(await server.transformIndexHtml('/__turn-anchor',
     '<html><body><div id="root"></div><script type="module" src="/src/components/ai/__tests__/ai-turn-anchor.browser.tsx"></script></body></html>'));
 });
-await server.listen();
-const address = server.httpServer.address();
 try {
+  await server.listen();
   for (const engine of [chromium, webkit]) {
     const browser = await engine.launch();
     try {
-      for (const width of [360, 900]) {
-      for (const motion of ['no-preference', 'reduce']) {
-        const page = await browser.newPage({ viewport: { width, height: 700 }, reducedMotion: motion });
-        await page.goto(`http://127.0.0.1:${address.port}/__turn-anchor`);
-        await page.waitForFunction(() => Boolean(window.renderTurnPrefix));
-        const nodes = await page.evaluate(() => window.turnNodes);
-        const users = nodes.flatMap((node, index) => node.kind === 'userMessage' ? [index] : []);
-        assert.ok(users.length > 1, 'The submitted prompt must follow recorded history');
-        const last = users.at(-1);
-        await page.evaluate(length => window.renderTurnPrefix(length), last);
+      for (const width of [360, 900]) for (const reducedMotion of ['no-preference', 'reduce']) {
+        const page = await browser.newPage({ viewport: { width, height: 700 }, reducedMotion });
+        await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__turn-anchor`);
+        await page.waitForFunction(() => Boolean(window.renderExistingComposer));
+        await page.evaluate(() => window.renderExistingComposer());
         await page.locator('[data-slot="message-scroller"]:not(.invisible)').waitFor();
-        await page.evaluate(() => document.fonts.ready);
-        const samples = await page.evaluate(async length => {
-          const viewport = document.querySelector('[data-message-scroller-viewport]');
-          const positions = [viewport.scrollTop];
-          window.renderTurnPrefix(length);
-          const start = performance.now();
-          while (performance.now() - start < 800) {
-            await new Promise(requestAnimationFrame);
-            positions.push(viewport.scrollTop);
-          }
-          return positions;
-        }, last + 1);
-        const positions = new Set(samples.map(Math.round));
-        if (motion === 'reduce') assert.ok(positions.size <= 2, 'Reduced motion must position immediately');
-        else assert.ok(positions.size > 3, `Expected intermediate scroll positions: ${JSON.stringify(samples)}`);
-        const metrics = () => page.evaluate(() => {
-          const viewport = document.querySelector('[data-message-scroller-viewport]');
-          const anchor = document.querySelector('[data-scroll-anchor="true"]');
-          const spacer = document.querySelector('[data-message-scroller-spacer]');
-          return { offset: anchor.getBoundingClientRect().top - viewport.getBoundingClientRect().top,
-            top: viewport.scrollTop, end: viewport.scrollHeight - viewport.clientHeight,
-            spacer: spacer.hidden ? 0 : spacer.getBoundingClientRect().height };
-        });
-        await page.waitForFunction(() => {
-          const anchor = document.querySelector('[data-scroll-anchor="true"]');
-          const viewport = document.querySelector('[data-message-scroller-viewport]');
-          return Math.abs(anchor.getBoundingClientRect().top - viewport.getBoundingClientRect().top - 20) < 2;
-        });
-        const aligned = await metrics();
-        assert.ok(aligned.spacer > 0, JSON.stringify(aligned));
-        await page.screenshot({ path: `/tmp/shellspan-turn-anchor-${engine.name()}-${width}.png` });
-        await page.setViewportSize({ width, height: 600 });
-        await page.waitForTimeout(150);
-        const grown = await metrics();
-        assert.ok(grown.spacer < aligned.spacer, JSON.stringify({ aligned, grown }));
+        const editor = page.locator('[contenteditable]');
         const viewport = page.locator('[data-message-scroller-viewport]');
-        await viewport.hover();
-        await page.mouse.wheel(0, -250);
-        await page.waitForTimeout(200);
-        const reading = await metrics();
-        await page.evaluate(length => window.renderTurnPrefix(length), nodes.length);
-        await page.waitForTimeout(100);
-        assert.ok(Math.abs((await metrics()).top - reading.top) < 2, 'Parent updates must preserve reading position');
-        if (motion === 'no-preference') {
-          await page.reload();
-          await page.waitForFunction(() => Boolean(window.renderTurnPrefix));
-          await page.evaluate(length => window.renderTurnPrefix(length), last);
-          await page.locator('[data-slot="message-scroller"]:not(.invisible)').waitFor();
-          await viewport.hover();
-          await page.evaluate(length => window.renderTurnPrefix(length), last + 1);
-          await page.waitForFunction(() => document.querySelector('[data-message-scroller-viewport]').style.scrollBehavior === 'smooth');
-          await page.mouse.wheel(0, -200);
-          await page.waitForTimeout(200);
-          const interrupted = await metrics();
-          await page.waitForTimeout(600);
-          assert.ok(Math.abs((await metrics()).top - interrupted.top) < 2, 'Wheel input must stop the transition');
-          assert.equal(await viewport.evaluate(element => element.style.scrollBehavior), '');
-        }
-        await page.reload();
-        await page.waitForFunction(() => Boolean(window.renderDocumentTurn));
-        await page.evaluate(text => window.renderDocumentTurn(text, false), document);
-        await page.locator('[data-slot="message-scroller"]:not(.invisible)').waitFor();
+        await editor.fill(document.split('\n').filter(Boolean).slice(0, 6).join('\n'));
         await viewport.focus();
-        await page.keyboard.press('Home');
-        await page.waitForTimeout(200);
-        await page.evaluate(text => window.renderDocumentTurn(text, true), document);
-        await page.waitForTimeout(1600);
-        const distant = await metrics();
-        assert.ok(Math.abs(distant.offset - 20) < 2,
-          `${engine.name()} ${width} ${motion}: a submission from distant history must reach the top: ${JSON.stringify(distant)}`);
-        await page.screenshot({ path: `/tmp/shellspan-distant-turn-${engine.name()}-${width}-${motion}.png` });
-        // A top-aligned submission must still allow navigation to the end of
-        // a long message through the native scrollport.
-        await page.evaluate(text => window.renderDocumentTurn(text, false), document);
-        await page.waitForTimeout(1600);
+        await page.keyboard.press('End');
         await viewport.hover();
-        await page.mouse.wheel(0, 100000);
+        await page.mouse.wheel(0, -100);
+        await page.waitForFunction(() => document.querySelector('[data-slot="message-scroller"]').dataset.following === 'false');
+        await editor.focus();
+        await page.evaluate(() => {
+          window.submissionFrames = [];
+          document.addEventListener('keydown', () => {
+            let remaining = 20;
+            const sample = () => {
+              const viewport = document.querySelector('[data-message-scroller-viewport]');
+              const content = document.querySelector('[data-slot="message-scroller-content"]');
+              window.submissionFrames.push({ top: viewport.scrollTop,
+                end: Math.max(0, viewport.scrollHeight - viewport.clientHeight),
+                visibility: getComputedStyle(viewport.parentElement).visibility,
+                opacity: getComputedStyle(content).opacity,
+                anchors: content.querySelectorAll('[data-scroll-anchor="true"]').length });
+              if (--remaining > 0) requestAnimationFrame(sample);
+            };
+            requestAnimationFrame(sample);
+          }, { once: true, capture: true });
+        });
+        await editor.press('Enter');
+        await page.waitForFunction(() => window.submissionFrames.length === 20);
+        const frames = await page.evaluate(() => window.submissionFrames);
+        assert.ok(frames.every(frame => frame.visibility === 'visible' && frame.opacity === '1'
+          && frame.anchors === 0 && frame.top >= -1 && frame.top <= frame.end + 1),
+        `Submission must remain visible and inside its real scroll range: ${JSON.stringify(frames)}`);
+        assert.ok(frames.every((frame, index) => index === 0
+          || Math.abs(frame.end - frames[index - 1].end) > 1 || frame.top >= frames[index - 1].top - 1),
+        `Submission must not reverse direction after its layout settles: ${JSON.stringify(frames)}`);
         await page.waitForFunction(() => {
           const viewport = document.querySelector('[data-message-scroller-viewport]');
-          return Math.abs(viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop) < 2;
+          return document.querySelector('[contenteditable]').textContent === ''
+            && viewport.parentElement.dataset.following === 'true'
+            && Math.abs(viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop) <= 2;
         });
-        assert.ok(await viewport.evaluate(element => {
-          const rows = element.querySelectorAll('[data-message-id]');
-          return rows[rows.length - 1].getBoundingClientRect().bottom <= element.getBoundingClientRect().bottom;
-        }), 'Scrolling down must expose the final message completely');
-        await page.reload();
-        await page.waitForFunction(() => Boolean(window.renderTurnPrefix));
-        const eventTypes = await page.evaluate(() => window.recordedEventTypes);
-        const completedUser = eventTypes.lastIndexOf('user/message');
-        await page.evaluate(length => window.renderRecordedEvents(length), completedUser);
-        await page.locator('[data-slot="message-scroller"]:not(.invisible)').waitFor();
-        await page.evaluate(length => window.renderRecordedEvents(length, 'running', true), completedUser);
-        await page.waitForTimeout(1300);
-        assert.ok((await metrics()).spacer > 0, 'The running turn must reserve top-alignment space');
-        const beforeCompletion = await viewport.evaluate(element => element.scrollTop);
-        await page.evaluate(length => window.renderRecordedEvents(length, 'completed'), eventTypes.length);
-        await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-message-scroller-spacer]')).display === 'none');
-        const completedPosition = await viewport.evaluate(element => ({ top: element.scrollTop,
-          end: Math.max(0, element.scrollHeight - element.clientHeight) }));
-        assert.ok(Math.abs(completedPosition.top - Math.min(beforeCompletion, completedPosition.end)) < 2,
-          `Completion may clamp past-end space but must preserve history reading: ${JSON.stringify({ beforeCompletion, completedPosition })}`);
-        assert.equal(await page.locator('[data-slot="message-scroller"]').getAttribute('data-following'), 'false',
-          'Releasing completed turn space must not resume following');
-        await page.screenshot({ path: `/tmp/shellspan-completed-space-${engine.name()}-${width}-${motion}.png` });
+        assert.equal(await page.locator('[data-scroll-anchor="true"]').count(), 0,
+          'Submitting a question must not top-align it');
+        assert.equal(await page.locator('[data-message-scroller-spacer]').evaluate(element => getComputedStyle(element).display), 'none');
+        assert.equal(await page.locator('[data-slot="message-scroller-content"]').evaluate(element => element.style.minHeight), '');
+        await viewport.hover();
+        const tail = await viewport.evaluate(element => element.scrollTop);
+        await page.mouse.wheel(0, 400);
+        await page.waitForTimeout(200);
+        assert.ok(Math.abs(await viewport.evaluate(element => element.scrollTop) - tail) < 2,
+          'The bottom must not expose additional empty scroll range');
         await page.close();
-      }
       }
     } finally { await browser.close(); }
   }
-  console.log('Turn alignment, long-distance submission and manual interruption passed in Chromium and WebKit at 360px and 900px with both motion settings');
+  console.log('New questions resume bottom following without top anchors or reserved space in Chromium and WebKit at 360px and 900px');
 } finally { await server.close(); }

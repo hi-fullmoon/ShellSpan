@@ -184,7 +184,7 @@ export const AiConversation = memo(function AiConversation({
       className="min-h-0 flex-1"
       contentClassName="ai-conversation-content mx-auto min-w-0 w-[min(calc(100%-var(--ai-shell-clearance)-var(--ai-transcript-extra-inset)-var(--ai-shell-clearance)-var(--ai-transcript-extra-inset)),var(--ai-chat-content-max-width))] gap-4 px-0 pt-5 pb-7"
       followKey={followKey(nodes, throughSeq)}
-      turnAnchorKey={latestTurnIndex >= 0 ? conversationItemId(allNodes[latestTurnIndex]) : undefined}
+      scrollToBottomKeys={latestTurnIndex >= 0 ? [conversationItemId(allNodes[latestTurnIndex])] : []}
       generating={pending || submitting || (status === 'running' && !latestProcess?.hasEndBoundary)}
       ariaLabel={t('ai.conversation')}
       initialAnchor={initialAnchor}
@@ -206,7 +206,6 @@ export const AiConversation = memo(function AiConversation({
           node={node}
           renderers={renderers}
           deferMessageActions={node.kind === 'assistantMessage' && (running || pending) && footerTurns.has(`${node.sessionId}:${node.turnId}`)}
-          scrollAnchor={index + startIndex === latestTurnIndex}
           scrollItemId={conversationItemId(node)}
           scrollItemClassName={cn(
             'flex flex-col gap-4',
