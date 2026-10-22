@@ -79,6 +79,12 @@ export function AiQuestionPanel({
   const [error, setError] = useState<string | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
+  // A rejected acknowledgement does not prove the answer was rejected.
+  // Keep the exact operation retryable until committed state removes the form.
+  const editingLocked = pending || !!draft?.submission;
+  const submissionError = error ?? (!pending && draft?.submission
+    ? t('ai.workspace.question.submitFailed')
+    : null);
   const answers: readonly QuestionAnswer[] =
     draft?.answers ??
     question.questions.map((q) => ({ id: q.id, selected: [] }));
@@ -89,6 +95,7 @@ export function AiQuestionPanel({
     new TextEncoder().encode(currentAnswer.custom ?? '').length > 8192;
   const invalid = answers.some(isAnswerInvalid);
   const update = (answer: QuestionAnswer): void => {
+    if (pending || useAgentQuestionStore.getState().drafts[key]?.submission) return;
     useAgentQuestionStore
       .getState()
       .setDraft(key, {
@@ -97,6 +104,7 @@ export function AiQuestionPanel({
     setError(null);
   };
   const updateSelection = (selected: string[]): void => {
+    if (pending || useAgentQuestionStore.getState().drafts[key]?.submission) return;
     update({
       id: currentQuestion.id,
       selected,
@@ -114,14 +122,14 @@ export function AiQuestionPanel({
   };
   const submit = async (nextAnswers = answers): Promise<void> => {
     if (pending || nextAnswers.some(isAnswerInvalid) || !onAnswer) return;
-    const input = (nextAnswers === answers ? draft?.submission : undefined) ?? {
+    const input = useAgentQuestionStore.getState().drafts[key]?.submission ?? {
       identity: question.identity,
       clientOperationId: crypto.randomUUID(),
       answers: nextAnswers,
     };
     useAgentQuestionStore
       .getState()
-      .setDraft(key, { answers: nextAnswers, submission: input });
+      .setDraft(key, { answers: input.answers, submission: input });
     setPending(true);
     setError(null);
     try {
@@ -133,7 +141,7 @@ export function AiQuestionPanel({
     }
   };
   const decline = (): void => {
-    if (pending || !onAnswer || draft?.submission) return;
+    if (pending || !onAnswer || useAgentQuestionStore.getState().drafts[key]?.submission) return;
     const nextAnswers = answers.map((answer) => answer.id === currentQuestion.id
       ? { id: answer.id, selected: [], custom: t('ai.workspace.question.declinedAnswer') }
       : answer);
@@ -193,7 +201,7 @@ export function AiQuestionPanel({
               <FieldSet
                 key={currentQuestion.id}
                 className="ai-question-item gap-[5px] p-0"
-                disabled={pending}
+                disabled={editingLocked}
               >
                 <FieldLegend className="sr-only">
                   {currentQuestion.header ?? currentQuestion.question}
@@ -214,7 +222,7 @@ export function AiQuestionPanel({
                           key={option.label}
                           className="ai-question-option relative h-auto min-h-8 w-full max-w-full shrink items-start justify-start gap-[7px] px-[5px] py-[3px] text-left whitespace-normal"
                           value={option.label}
-                          disabled={pending}
+                          disabled={editingLocked}
                           aria-label={option.label}
                           aria-description={option.description}
                         >
@@ -255,7 +263,7 @@ export function AiQuestionPanel({
                 <Field
                   className="ai-question-custom-field mt-0 gap-[3px]"
                   data-invalid={tooLong || undefined}
-                  data-disabled={pending || undefined}
+                  data-disabled={editingLocked || undefined}
                 >
                   <FieldLabel className="sr-only" htmlFor={inputId}>
                     {t(
@@ -270,7 +278,7 @@ export function AiQuestionPanel({
                       id={inputId}
                       rows={1}
                       value={currentAnswer.custom ?? ''}
-                      disabled={pending}
+                      disabled={editingLocked}
                       aria-invalid={tooLong || undefined}
                       maxLength={8192}
                       placeholder={t('ai.workspace.question.answerPlaceholder')}
@@ -326,7 +334,7 @@ export function AiQuestionPanel({
               </Button>
             </div>
             <div className="ai-question-footer-message min-w-0 flex-1 @max-[421px]/ai-workspace:order-3 @max-[421px]/ai-workspace:basis-full">
-              {error && <FieldError role="alert">{error}</FieldError>}
+              {submissionError && <FieldError role="alert">{submissionError}</FieldError>}
             </div>
             <div className="ai-question-footer-actions flex shrink-0 items-center gap-1.5">
               <Button

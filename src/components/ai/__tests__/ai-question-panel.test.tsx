@@ -125,6 +125,62 @@ describe('Stage 6A question form', () => {
     expect(original.answers).toEqual([{ id: 'choice', selected: ['B'] }]);
   });
 
+  it.each(['single', 'multi', 'text'] as const)(
+    'locks %s answers after an unconfirmed submission and preserves the retry after remount',
+    async (kind) => {
+      const multi = kind === 'multi';
+      const textOnly = kind === 'text';
+      const user = userEvent.setup();
+      const submissions: AnswerQuestionInput[] = [];
+      const props = {
+        question: {
+          ...question,
+          questions: [{ ...question.questions[0], multi_select: multi,
+            options: textOnly ? undefined : question.questions[0].options }],
+        },
+        onAnswer: async (input: AnswerQuestionInput): Promise<void> => {
+          submissions.push(input);
+          if (submissions.length === 1) throw new Error('Submission not confirmed');
+        },
+      };
+      const first = render(<AiQuestionPanel {...props} />);
+      if (!textOnly) await user.click(screen.getByRole('button', { name: 'B' }));
+      if (multi || textOnly) await user.type(screen.getByRole('textbox'), 'Original detail');
+      await user.click(screen.getByRole('button', { name: 'Submit' }));
+      await screen.findByRole('alert');
+
+      const original = submissions[0];
+      const expectLocked = async (): Promise<void> => {
+        const text = screen.getByRole('textbox');
+        if (!textOnly) {
+          const alternative = screen.getByRole('button', { name: 'A (Recommended)' });
+          expect(alternative).toBeDisabled();
+          expect(screen.getByRole('button', { name: 'B' })).toBeDisabled();
+          await user.click(alternative);
+          expect(screen.getByRole('button', { name: 'B' })).toHaveAttribute('aria-pressed', 'true');
+        }
+        expect(text).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Decline to answer' })).toBeDisabled();
+        await user.type(text, 'Changed answer');
+        // A queued change handler must not discard the saved operation either.
+        fireEvent.change(text, { target: { value: 'Changed answer' } });
+        expect(text).toHaveValue(multi || textOnly ? 'Original detail' : '');
+        expect(Object.values(useAgentQuestionStore.getState().drafts)[0].submission).toEqual(original);
+        expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled();
+        expect(screen.getByRole('alert')).toHaveTextContent('same answers');
+      };
+
+      await expectLocked();
+      first.unmount();
+      render(<AiQuestionPanel {...props} />);
+      await expectLocked();
+      await user.click(screen.getByRole('button', { name: 'Submit' }));
+      await waitFor(() => expect(submissions).toHaveLength(2));
+      expect(submissions[1]).toEqual(original);
+      await waitFor(() => expect(useAgentQuestionStore.getState().drafts).toEqual({}));
+    },
+  );
+
   it.each([false, true])(
     'custom input has correct single/multi semantics (%s)',
     async (multi) => {
