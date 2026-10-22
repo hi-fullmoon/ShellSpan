@@ -46,7 +46,7 @@ try {
           inline: button.left >= textBox.right, height: box.height,
           fits: el.scrollWidth <= el.clientWidth && button.right <= box.right && button.bottom <= box.bottom };
       });
-      assert.equal(geometry.iconOffset, -1.5, `Icon must align to the first text line: ${locale}/${width}`);
+      assert.equal(geometry.iconOffset, 0, `Icon must align to the first text line: ${locale}/${width}`);
       assert.equal(geometry.gap, 4, 'Icon and text retain the shared spacing');
       assert.equal(geometry.buttonHeight, 24, 'Action retains its compact size');
       assert.equal(geometry.actionIcons, 0, 'Notice actions stay text-only');

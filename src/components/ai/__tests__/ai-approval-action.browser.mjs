@@ -50,17 +50,31 @@ try {
         }
         await page.evaluate(() => document.documentElement.classList.remove('dark'));
         const action = page.locator('[data-slot="ai-approval-action"]');
+        const checkImpactAlignment = async () => {
+          const geometry = await page.getByRole('note').evaluate(el => {
+            const icon = el.querySelector(':scope > svg').getBoundingClientRect();
+            const text = el.querySelector('[data-slot="alert-description"] > span');
+            const box = text.getBoundingClientRect();
+            return { offset: icon.y + icon.height / 2 - box.y - parseFloat(getComputedStyle(text).lineHeight) / 2,
+              gap: box.x - icon.right, overflow: el.scrollWidth > el.clientWidth };
+          });
+          assert.equal(geometry.offset, 0, 'Impact icon aligns with the first text line');
+          assert.equal(geometry.gap, 4);
+          assert.equal(geometry.overflow, false);
+        };
         await page.getByText('列出目录内容', { exact: true }).waitFor();
         assert.ok(await action.getByText('/apps/for-you', { exact: true }).isVisible());
         assert.ok(await page.getByText('175.178.66.45', { exact: true }).isVisible());
         assert.equal(await page.locator('#ai-approval-title').evaluate(el => el === document.activeElement), true);
         await page.screenshot({ path: `/tmp/ai-approval-action-${engine.name()}-${width}.png` });
+        await checkImpactAlignment();
         for (const [label, expected] of [['查看技术详情', 'details'], ['取消', 'reject'], ['允许执行一次', 'approve']]) {
           await page.getByRole('button', { name: label, exact: true }).click();
           assert.equal(await page.locator('body').getAttribute('data-action'), expected);
         }
         await show({}, 'en-US');
         await page.getByText('List directory contents', { exact: true }).waitFor();
+        await checkImpactAlignment();
         for (const [toolName, label] of [['read_file', '读取文件'], ['write_file', '写入文件'], ['edit_file', '编辑文件'], ['search_text', '搜索文件名或文件内容']]) {
           await show({ toolName, arguments: { path: '/apps/for-you', query: 'TODO' } });
           await page.getByText(label, { exact: true }).waitFor();

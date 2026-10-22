@@ -4,7 +4,7 @@ import { chromium, webkit } from 'playwright';
 const browser = await (process.env.SHELLSPAN_TEST_ENGINE === 'webkit' ? webkit : chromium).launch();
 try {
   for (const { locale, action, longText } of ['zh-CN', 'en-US'].flatMap(locale =>
-    ['reconnect', 'continue', 'settings', 'none'].flatMap(action =>
+    ['reconnect', 'continue', 'settings', 'none', 'history'].flatMap(action =>
       [false, true].map(longText => ({ locale, action, longText }))))) {
   const page = await browser.newPage();
   const errors = [];
@@ -36,7 +36,9 @@ try {
       return h('main', { className: 'ai-panel-shell p-4', 'data-ai-scope': 'terminal' },
         h(AiWorkspaceRoot, {
           scope: 'terminal', view: null, canStartAgent: true,
-          agentUnavailableReason: unavailable ? t(longText ? 'terminal.occupancy.conflict' : 'agent.availability.needsTerminal') : null,
+          readOnlySession: action === 'history',
+          agentUnavailableReason: unavailable ? t(action === 'history' ? 'ai.workspace.sessions.previousTerminalReadOnly'
+            : longText ? 'terminal.occupancy.conflict' : 'agent.availability.needsTerminal') : null,
           onReconnectTerminal: unavailable && action === 'reconnect' ? () => setUnavailable(false) : undefined,
           onContinueOnReconnectedTerminal: unavailable && action === 'continue' ? () => setUnavailable(false) : undefined,
           onOpenModel: unavailable && action === 'settings' ? () => setUnavailable(false) : undefined,
@@ -97,7 +99,7 @@ try {
       assert.ok(Math.abs(box.center - noticeWidths.inputCenter) < 1, 'Notices stay centered above the input');
     }
     const availability = statusNotices.getByRole('status', { name: locale === 'zh-CN' ? 'Agent 当前不可用' : 'Agent is unavailable' });
-    if (action === 'none') {
+    if (action === 'none' || action === 'history') {
       const geometry = await availability.evaluate(el => {
         const icon = el.querySelector(':scope > svg').getBoundingClientRect();
         const text = el.querySelector('[data-slot="alert-description"] > span');
@@ -105,11 +107,11 @@ try {
         return { offset: icon.y + icon.height / 2 - box.y - parseFloat(getComputedStyle(text).lineHeight) / 2,
           gap: box.x - icon.right };
       });
-      assert.equal(geometry.offset, -2, `Availability icon keeps its optical alignment at ${width}px`);
+      assert.equal(geometry.offset, action === 'history' ? 0 : -2, `Availability icon keeps its first-line alignment for ${action} at ${width}px`);
       assert.equal(geometry.gap, 4);
-      await availability.screenshot({ path: `/tmp/shellspan-availability-${locale}-${width}${longText ? '-long' : ''}.png` });
+      await availability.screenshot({ path: `/tmp/shellspan-availability-${action}-${locale}-${width}${longText ? '-long' : ''}.png` });
     }
-    for (const target of action === 'none' ? [notice] : [notice, availability]) {
+    for (const target of action === 'none' || action === 'history' ? [notice] : [notice, availability]) {
       assert.equal(await target.locator('button svg').count(), 0, 'Notice actions must remain text-only');
       const geometry = await target.evaluate(el => {
         const box = el.getBoundingClientRect();
@@ -148,7 +150,7 @@ try {
     }
     await page.screenshot({ path: `/tmp/shellspan-terminal-action-notices-${locale}-${action}-${width}${longText ? '-long' : ''}.png` });
   }
-  if (action === 'none') {
+  if (action === 'none' || action === 'history') {
     await page.close();
     continue;
   }

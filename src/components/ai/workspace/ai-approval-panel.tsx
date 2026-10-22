@@ -267,7 +267,7 @@ export function AiApprovalPanel({
             )}
 
             <Alert
-              className="items-center [&>svg]:translate-y-0"
+              className="items-center [&>svg]:translate-y-px"
               variant={destructive ? 'destructive' : 'warning'}
               size="sm"
               role="note"
