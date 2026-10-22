@@ -244,6 +244,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     }
     const { container } = render(<ContinuedWorkspace />);
     const notices = container.querySelector<HTMLElement>('[data-slot="ai-workspace-status-notices"]')!;
+    expect(within(notices).getByText('The terminal has reconnected. Restore the binding to continue this conversation. Earlier commands will not run automatically.')).toBeVisible();
     await user.click(within(notices).getByRole('button', { name: 'Continue in reconnected terminal' }));
     expect(container.querySelector('output')).toHaveTextContent('continued');
   });

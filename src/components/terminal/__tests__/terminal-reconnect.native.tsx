@@ -111,6 +111,7 @@ async function verify() {
       const replacement = live()!.sessionId;
       terminals.add(replacement);
       assert(replacement !== previous, 'Reconnect did not create a real replacement PTY');
+      assert(live()!.brokerReplacedSessionIds?.includes(previous), 'Real broker rollover lost verified ancestry');
       await eventually(() => agent?.view?.snapshot.value.header.target?.sessionId === replacement,
         `Agent did not rebind to native replacement: ${agent?.composer.lastError?.message ?? 'no error'}`);
       assert(agent!.view!.summary.id === agentId, 'Reconnect replaced the Agent conversation ID');
@@ -160,6 +161,26 @@ async function verify() {
     assert(useToastStore.getState().toasts.length === toastsBeforeClose, 'Closing a disconnected terminal reported a false error');
     assert((await invokeGetAgentRuntimeSession({ sessionId: agentId })).ended, 'Closing must settle the associated Agent');
     await invokeCloseSession(closing.sessionId);
+
+    // Restore exactly the persisted workspace fields: broker identities do not
+    // survive a process restart. Exercise the production Enter reconnect path.
+    flushSync(() => useTerminalStore.getState().addRestoredSessions([{
+      sessionId: closing.sessionId, title: closing.title, host: closing.host,
+      port: closing.port, username: closing.username, profileId: closing.profileId,
+    }]));
+    await eventually(() => Boolean(terminalRegistry.get(closing.sessionId)), 'Restored terminal was not mounted');
+    terminalRegistry.get(closing.sessionId)!.terminal.input('\r', true);
+    await eventually(() => live()?.sessionId !== closing.sessionId && live()?.status === 'connected',
+      'Restored terminal did not establish a fresh connection');
+    terminals.add(live()!.sessionId);
+    await eventually(() => agent?.view?.summary.id === agentId && agent.readOnlySession,
+      'Restored terminal did not retain the earlier conversation as read-only history');
+    assert(live()!.brokerReplacedSessionIds?.length === 0, 'Restored transport was treated as a verified replacement');
+    assert(!agent!.continueOnReconnectedTerminal, 'Restored transport offered an impossible rebind');
+    assert(!agent!.composer.lastError, 'Restored transport attempted an invalid automatic rebind');
+    const restoredEvents = await invokeGetCommittedAgentRuntimeEvents({ sessionId: agentId, limit: 100 });
+    assert(restoredEvents.events.filter(event => event.type === 'session/terminal_reconnected').length === 3,
+      'Restoring workspace history rebound the old conversation');
   } finally {
     root.unmount();
     if (created) {

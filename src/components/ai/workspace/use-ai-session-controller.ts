@@ -35,7 +35,7 @@ import {
   type AiOptimisticSubmission,
 } from '@/lib/ai/optimistic-submission';
 import { AiPreparationTimeoutError, normalizeAiSessionError, sessionArchiveErrorMessage } from '@/lib/ai/session-error';
-import { canContinueOnReconnectedTerminal, isDirectReconnectedTerminal } from '@/lib/ai/reconnected-terminal';
+import { canContinueOnReconnectedTerminal, isDirectReconnectedTerminal, terminalReconnectErrorKey } from '@/lib/ai/reconnected-terminal';
 import {
   type AiConversationNode,
   type AiConversationNodeOf,
@@ -1236,6 +1236,7 @@ export function useAiSessionController({
     const previousId = current.snapshot.value.header.target!.sessionId;
     terminalReconnectPending.current = true;
     setTerminalReconnectBusy(true);
+    dispatch({ type: 'error.dismissed' });
     const reconnect = adapter.reconnectTerminal;
     const restore = async (): Promise<AiSessionView> => {
       for (let attempt = 0; ; attempt++) {
@@ -1256,11 +1257,13 @@ export function useAiSessionController({
       if (selected !== terminalId) return;
       viewRef.current = updated;
       setView(updated);
+      dispatch({ type: 'error.dismissed' });
     }).catch((error: unknown) => {
       const state = useTerminalStore.getState();
       const selected = focusMode ? useFocusStore.getState().targetSessionId : state.activeSessionId;
       if (mountedRef.current && viewRef.current?.summary.id === current.summary.id && selected === terminalId) {
-        dispatch({ type: 'error.reported', error: { ...normalizeAiSessionError(error), message: t('ai.workspace.reconnectFailed') } });
+        const normalized = normalizeAiSessionError(error);
+        dispatch({ type: 'error.reported', error: { ...normalized, message: t(terminalReconnectErrorKey(normalized.message)) } });
       }
     }).finally(() => {
       terminalReconnectPending.current = false;

@@ -390,7 +390,45 @@ describe('terminalStore', () => {
       terminalSessionId: 'terminal-stable',
       terminalGeneration: 2,
       replacesSessionId: 'transport-1',
+      brokerReplacedSessionIds: ['transport-1'],
     });
+  });
+
+  it('starts broker ancestry fresh after restoring a terminal across restart', () => {
+    const store = useTerminalStore.getState();
+    store.addRestoredSessions([{
+      sessionId: 'before-restart', title: 'Remote', host: 'h', port: 22, username: 'u',
+    }]);
+    store.reconnectSession('before-restart', {
+      sessionId: 'after-restart', terminalSessionId: 'fresh-broker', terminalGeneration: 1,
+      title: 'Remote', host: 'h', port: 22, username: 'u',
+    });
+    expect(useTerminalStore.getState().sessions[0]).toMatchObject({
+      replacedSessionIds: ['before-restart'], brokerReplacedSessionIds: [],
+    });
+    store.reconnectSession('after-restart', {
+      sessionId: 'next', terminalSessionId: 'fresh-broker', terminalGeneration: 2,
+      title: 'Remote', host: 'h', port: 22, username: 'u',
+    });
+    expect(useTerminalStore.getState().sessions[0]).toMatchObject({
+      replacedSessionIds: ['before-restart', 'after-restart'],
+      brokerReplacedSessionIds: ['after-restart'],
+    });
+  });
+
+  it('does not inherit broker identity or verified ancestry from a replaced transport', () => {
+    const store = useTerminalStore.getState();
+    store.addSession({
+      sessionId: 'old', terminalSessionId: 'broker-old', terminalGeneration: 1,
+      title: 'Local', host: 'local', port: 0, username: 'u',
+    });
+    store.reconnectSession('old', {
+      sessionId: 'new', title: 'Local', host: 'local', port: 0, username: 'u',
+    });
+    const terminal = useTerminalStore.getState().sessions[0]!;
+    expect(terminal.terminalSessionId).toBeUndefined();
+    expect(terminal.terminalGeneration).toBeUndefined();
+    expect(terminal.brokerReplacedSessionIds).toEqual([]);
   });
 
   it('tracks reconnecting until the connection status settles', () => {
@@ -450,15 +488,18 @@ describe('terminalStore', () => {
       profileId: 'profile-1',
       terminalSessionId: 'must-not-survive-restart',
       terminalGeneration: 99,
+      brokerReplacedSessionIds: ['earlier-transport'],
     } as TerminalWorkspaceSession & {
       terminalSessionId: string;
       terminalGeneration: number;
+      brokerReplacedSessionIds: string[];
     };
 
     useTerminalStore.getState().addRestoredSessions([restored]);
 
     expect(useTerminalStore.getState().sessions[0]?.terminalSessionId).toBeUndefined();
     expect(useTerminalStore.getState().sessions[0]?.terminalGeneration).toBeUndefined();
+    expect(useTerminalStore.getState().sessions[0]?.brokerReplacedSessionIds).toBeUndefined();
   });
 
   it('stores restored layout alongside restored sessions', () => {

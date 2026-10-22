@@ -710,7 +710,8 @@ export function AiWorkspaceRoot({
                     {terminalConflict ? <TriangleAlertIcon aria-hidden="true" /> : <InfoIcon aria-hidden="true" />}
                     <AlertDescription className="flex min-w-0 flex-wrap items-start gap-1 break-words [&:has(>button)>span]:py-1">
                       <span className="min-w-0 flex-1 basis-48">{agentUnavailableReason
-                        ?? t('ai.workspace.sessions.previousTerminalReadOnly')}</span>
+                        ?? t(onContinueOnReconnectedTerminal
+                          ? 'ai.workspace.reconnectAvailable' : 'ai.workspace.sessions.previousTerminalReadOnly')}</span>
                       {!terminalConflict && (onReconnectTerminal ? <Button type="button" variant="ghost" size="xs" className="text-[11px]"
                         onClick={onReconnectTerminal}>{t('ai.workspace.status.reconnect')}</Button>
                         : onContinueOnReconnectedTerminal ? <Button type="button" variant="ghost" size="xs" className="text-[11px]"

@@ -167,6 +167,13 @@ reconnect command additionally verifies backend transport ancestry and live
 identity, requires settled work and reconciled effects, and records the rebind
 with reset approval policy in the original conversation. It never replays work.
 
+The frontend offers this rebind only when consecutive broker generations confirm
+the replacement in the current process. Layout replacement IDs alone preserve
+history selection but do not establish reconnect eligibility. Restored workspace
+rows have no broker identity after a restart: their next connection starts a new
+broker lineage, and earlier conversations remain read-only without an automatic
+rebind attempt. The user can start a new conversation on that terminal.
+
 ## Visible command typing
 
 The frontend lease-ready acknowledgement accepts optional `reducedMotion`.

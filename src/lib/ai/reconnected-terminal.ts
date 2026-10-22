@@ -27,6 +27,7 @@ export function canContinueOnReconnectedTerminal(
   terminal: TerminalSession | null | undefined,
 ): boolean {
   if (!isDirectReconnectedTerminal(snapshot, terminal) || !snapshot || !terminal
+    || !terminal.brokerReplacedSessionIds?.includes(snapshot.header.target!.sessionId)
     || ['running', 'waiting'].includes(snapshot.status) || snapshot.uncertainNativeEffects
     || snapshot.header.capabilityScope
     || snapshot.inbox.nextTurn.length || snapshot.inbox.nextStep.length) return false;
@@ -35,4 +36,15 @@ export function canContinueOnReconnectedTerminal(
     || snapshot.recovery.kind === 'executionInFlight'
     || snapshot.recovery.kind === 'authorizedBeforeExecute') return false;
   return terminal.status === 'connected';
+}
+
+export function terminalReconnectErrorKey(message: string):
+  'ai.workspace.reconnectFailed' | 'ai.workspace.reconnectUnverified' | 'ai.workspace.reconnectUnsettled' {
+  if (/verified replacement transport|TERMINAL_BROKER_(?:TRANSPORT_NOT_FOUND|STALE_TRANSPORT)/.test(message)) {
+    return 'ai.workspace.reconnectUnverified';
+  }
+  if (/TERMINAL_RECONNECT_BUSY|settled|reconciled|execution lease/.test(message)) {
+    return 'ai.workspace.reconnectUnsettled';
+  }
+  return 'ai.workspace.reconnectFailed';
 }

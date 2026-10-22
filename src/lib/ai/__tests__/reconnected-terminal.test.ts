@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canContinueOnReconnectedTerminal, isDirectReconnectedTerminal } from '../reconnected-terminal';
+import { canContinueOnReconnectedTerminal, isDirectReconnectedTerminal, terminalReconnectErrorKey } from '../reconnected-terminal';
 import type { AgentSessionSnapshot } from '@/types/agent-session';
 import type { TerminalSession } from '@/stores/terminalStore';
 
@@ -21,10 +21,29 @@ const snapshot: AgentSessionSnapshot = {
 
 const terminal: TerminalSession = {
   sessionId: 'new', replacesSessionId: 'old', profileId: 'profile-1',
+  brokerReplacedSessionIds: ['old'],
   title: 'Remote', host: 'example.com', port: 22, username: 'user', status: 'connected',
 };
 
 describe('reconnected terminal Agent continuation', () => {
+  it('keeps restored history visible without offering an unverified rebind', () => {
+    const restored = { ...terminal, brokerReplacedSessionIds: [] };
+    expect(isDirectReconnectedTerminal(snapshot, restored)).toBe(true);
+    expect(canContinueOnReconnectedTerminal(snapshot, restored)).toBe(false);
+    expect(canContinueOnReconnectedTerminal(snapshot, { ...terminal, brokerReplacedSessionIds: undefined })).toBe(false);
+  });
+
+  it('distinguishes connection ancestry errors from unsettled operations', () => {
+    expect(terminalReconnectErrorKey('terminal reconnect requires a verified replacement transport'))
+      .toBe('ai.workspace.reconnectUnverified');
+    expect(terminalReconnectErrorKey('TERMINAL_BROKER_STALE_TRANSPORT'))
+      .toBe('ai.workspace.reconnectUnverified');
+    expect(terminalReconnectErrorKey('TERMINAL_RECONNECT_BUSY: wait for terminal closure to settle'))
+      .toBe('ai.workspace.reconnectUnsettled');
+    expect(terminalReconnectErrorKey('terminal reconnect requires a settled driver'))
+      .toBe('ai.workspace.reconnectUnsettled');
+    expect(terminalReconnectErrorKey('IPC unavailable')).toBe('ai.workspace.reconnectFailed');
+  });
   it('allows rebinding only to a replacement of the same SSH target', () => {
     expect(canContinueOnReconnectedTerminal(snapshot, terminal)).toBe(true);
     expect(canContinueOnReconnectedTerminal(snapshot, { ...terminal, host: 'other.example.com' })).toBe(false);

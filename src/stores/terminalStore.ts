@@ -41,6 +41,8 @@ export interface TerminalSession {
   replacesSessionId?: string;
   /** Bounded, in-memory reconnect ancestry; never used as backend authorization. */
   replacedSessionIds?: readonly string[];
+  /** Ancestry confirmed by consecutive broker generations in this process. */
+  brokerReplacedSessionIds?: readonly string[];
 }
 
 export interface PendingTerminalConnection {
@@ -67,10 +69,9 @@ const sortSessions = (sessions: TerminalSession[]): TerminalSession[] => {
 
 const brokerIdentity = (
   summary: SessionSummary,
-  fallback?: Pick<TerminalSession, 'terminalSessionId' | 'terminalGeneration'>,
 ): Pick<TerminalSession, 'terminalSessionId' | 'terminalGeneration'> | Record<string, never> => {
-  const terminalSessionId = summary.terminalSessionId ?? fallback?.terminalSessionId;
-  const terminalGeneration = summary.terminalGeneration ?? fallback?.terminalGeneration;
+  const terminalSessionId = summary.terminalSessionId;
+  const terminalGeneration = summary.terminalGeneration;
   return terminalSessionId && terminalGeneration
     ? { terminalSessionId, terminalGeneration }
     : {};
@@ -385,9 +386,12 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
       // never resurrect it.
       if (oldIndex === -1) return state;
       const old = state.sessions[oldIndex];
+      const brokerContinued = Boolean(old.terminalSessionId
+        && summary.terminalSessionId === old.terminalSessionId
+        && summary.terminalGeneration === (old.terminalGeneration ?? 0) + 1);
       const newSession: TerminalSession = {
         sessionId: summary.sessionId,
-        ...brokerIdentity(summary, old),
+        ...brokerIdentity(summary),
         title: old.title ?? summary.title,
         baseTitle: old.baseTitle ?? old.title,
         manualTitle: old.manualTitle,
@@ -402,6 +406,8 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
         reconnecting: true,
         replacesSessionId: oldSessionId,
         replacedSessionIds: [...(old.replacedSessionIds ?? []), oldSessionId].slice(-32),
+        brokerReplacedSessionIds: brokerContinued
+          ? [...(old.brokerReplacedSessionIds ?? []), oldSessionId].slice(-32) : [],
       };
       const sessions = state.sessions.filter(
         (session) => session.sessionId !== oldSessionId,
