@@ -47,6 +47,8 @@ describe('localized workspace errors', () => {
     const button = screen.getByRole('button');
     expect(button).toHaveTextContent(t(retrying ? 'ai.error.streamSyncRetrying' : 'ai.error.streamSyncRetry'));
     expect(button.querySelector('svg')).toBeNull();
+    expect(button).toHaveClass('h-6', 'px-2', 'text-[11px]', 'hover:bg-accent');
+    expect(button).not.toHaveClass('border', 'bg-background');
     if (retrying) expect(button).toBeDisabled();
     else expect(button).toBeEnabled();
     fireEvent.click(button);

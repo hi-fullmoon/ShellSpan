@@ -96,6 +96,37 @@ try {
   await page.locator('#notice-check button').focus();
   await page.keyboard.press('Enter');
   assert.equal(await page.locator('#notice-check').getAttribute('data-dismissed'), 'true');
+  await page.evaluate(async () => {
+    const { default: React } = await import('/node_modules/.vite/deps/react.js');
+    const { default: ReactDOM } = await import('/node_modules/.vite/deps/react-dom_client.js');
+    const { AiWorkspaceErrorNotices } = await import('/src/components/ai/workspace/ai-workspace-error-notices.tsx');
+    const host = document.createElement('div');
+    host.id = 'sync-notice-check';
+    document.querySelector('#notice-check').replaceChildren(host);
+    ReactDOM.createRoot(host).render(React.createElement(AiWorkspaceErrorNotices, {
+      syncError: { kind: 'unknown', message: 'Connection interrupted', retryable: true },
+      syncRecovery: { attempts: 3, retrying: false },
+      onRetrySync: async () => { host.dataset.retried = 'true'; },
+    }));
+  });
+  const retry = page.locator('#sync-notice-check button');
+  await retry.waitFor();
+  for (const width of [640, 320]) {
+    await page.setViewportSize({ width, height: 800 });
+    const style = await retry.evaluate(button => {
+      const css = getComputedStyle(button);
+      return { height: button.getBoundingClientRect().height, fontSize: css.fontSize,
+        border: css.borderTopWidth, fits: button.closest('[role="alert"]').scrollWidth <= button.closest('[role="alert"]').clientWidth };
+    });
+    assert.equal(style.height, 24);
+    assert.equal(style.fontSize, '11px');
+    assert.equal(style.border, '0px', 'Retry uses the same borderless notice action style');
+    assert.ok(style.fits);
+    await page.locator('#sync-notice-check').screenshot({ path: `/tmp/shellspan-sync-notice-${width}.png` });
+  }
+  await retry.focus();
+  await page.keyboard.press('Enter');
+  assert.equal(await page.locator('#sync-notice-check').getAttribute('data-retried'), 'true');
 } finally {
   await browser.close();
 }

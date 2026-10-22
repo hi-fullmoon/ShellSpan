@@ -42,7 +42,7 @@ export function AiWorkspaceErrorNotices({
                   .format(syncRecovery.lastSyncedAt),
               })}</>}
             </span>}
-            {onRetrySync && <Button type="button" variant="outline" size="xs" className="self-start text-[11px]"
+            {onRetrySync && <Button type="button" variant="ghost" size="xs" className="self-start text-[11px]"
               disabled={syncRecovery?.retrying} aria-busy={syncRecovery?.retrying || undefined}
               onClick={() => { void onRetrySync(); }}>
               {t(syncRecovery?.retrying ? 'ai.error.streamSyncRetrying' : 'ai.error.streamSyncRetry')}
