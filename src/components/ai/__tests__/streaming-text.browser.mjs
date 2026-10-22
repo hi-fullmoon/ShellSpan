@@ -10,6 +10,7 @@ const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const server = await createServer({
   configFile: false,
   root,
+  cacheDir: `/tmp/shellspan-streaming-text-${process.pid}`,
   appType: 'custom',
   plugins: [react(), tailwindcss()],
   resolve: { alias: { '@': `${root}src/` } },
@@ -39,6 +40,75 @@ try {
         await page.evaluate(source => window.streamingCheck.resetFollowing(source), document);
         await page.locator('[data-slot="message-scroller"]:not(.invisible)').waitFor();
         await page.evaluate(() => document.fonts.ready);
+        // An untouched turn pins its question only until the reply fills the
+        // viewport. From that boundary onward it must follow streamed output.
+        await page.evaluate(source => window.streamingCheck.reset(source), document);
+        await page.locator('[data-slot="message-scroller"]:not(.invisible)').waitFor();
+        assert.equal(await page.locator('[data-slot="message-scroller"]').getAttribute('data-scroll-mode'), 'anchored');
+        await page.evaluate(() => window.streamingCheck.append('README.md\n\n'));
+        assert.equal(await page.locator('[data-slot="message-scroller"]').getAttribute('data-scroll-mode'), 'anchored');
+        const fillSamples = await page.evaluate(async source => {
+          const samples = [];
+          for (const paragraph of source.split('\n\n')) {
+            window.streamingCheck.append(paragraph + '\n\n');
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            const viewport = document.querySelector('[data-message-scroller-viewport]');
+            const content = document.querySelector('[data-slot="message-scroller-content"]');
+            const anchor = content.querySelector('[data-scroll-anchor="true"]');
+            const last = content.querySelector('[data-message-scroller-spacer]').previousElementSibling;
+            const style = getComputedStyle(content);
+            const turnHeight = last.getBoundingClientRect().bottom - anchor.getBoundingClientRect().top
+              + (parseFloat(style.paddingBlockStart) || 0) + (parseFloat(style.paddingBlockEnd) || 0);
+            const mode = document.querySelector('[data-slot="message-scroller"]').dataset.scrollMode;
+            samples.push({ mode, turnHeight, height: viewport.clientHeight,
+              gap: viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop });
+            if (mode === 'following') break;
+          }
+          return samples;
+        }, document);
+        assert.ok(fillSamples.some(sample => sample.mode === 'anchored'), 'A partial answer must retain top alignment');
+        assert.equal(fillSamples.at(-1)?.mode, 'following', 'Filling the viewport must automatically start following');
+        assert.ok(fillSamples.every(sample => sample.mode === 'following'
+          ? sample.turnHeight >= sample.height - 1 && sample.gap <= 8
+          : sample.mode === 'anchored' && sample.turnHeight < sample.height - 1),
+        `Follow must begin at the fill boundary: ${JSON.stringify(fillSamples)}`);
+        const automaticallyFollowedGap = await page.evaluate(source => {
+          window.streamingCheck.append('\n\n' + source);
+          const viewport = document.querySelector('[data-message-scroller-viewport]');
+          return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
+        }, document);
+        assert.ok(automaticallyFollowedGap <= 8, 'An untouched full turn must follow subsequent output before paint');
+        const streamingTail = await page.evaluate(() => {
+          const viewport = document.querySelector('[data-message-scroller-viewport]');
+          const spacer = document.querySelector('[data-message-scroller-spacer]');
+          const last = spacer.previousElementSibling;
+          return { spacerDisplay: getComputedStyle(spacer).display,
+            trailingSpace: viewport.scrollHeight - viewport.scrollTop
+              - (last.getBoundingClientRect().bottom - viewport.getBoundingClientRect().top) };
+        });
+        assert.equal(streamingTail.spacerDisplay, 'none', 'Following must release the turn spacer during generation');
+        assert.ok(streamingTail.trailingSpace <= 17, 'Streaming must not expose empty scroll range below the actual answer');
+        const tailViewport = page.locator('[data-message-scroller-viewport]');
+        assert.equal(await tailViewport.evaluate(element => getComputedStyle(element).overscrollBehaviorY),
+          'none', 'The transcript must disable elastic overscroll beyond the real answer tail');
+        const tailTop = await tailViewport.evaluate(element => element.scrollTop);
+        await tailViewport.hover();
+        await page.mouse.wheel(0, 400);
+        await page.waitForTimeout(200);
+        assert.ok(Math.abs(await tailViewport.evaluate(element => element.scrollTop) - tailTop) <= 2,
+          'A downward wheel gesture at the live tail must not scroll into empty space');
+        assert.equal(await page.locator('[data-slot="message-scroller"]').getAttribute('data-scroll-mode'), 'following');
+        await page.evaluate(source => window.streamingCheck.reset(source), document);
+        await page.locator('[data-slot="message-scroller"]:not(.invisible)').waitFor();
+        assert.equal(await page.locator('[data-slot="message-scroller"]').getAttribute('data-scroll-mode'), 'anchored');
+        await page.evaluate(source => window.streamingCheck.finishAnswer(source), document);
+        await page.waitForFunction(() => {
+          const viewport = document.querySelector('[data-message-scroller-viewport]');
+          const spacer = document.querySelector('[data-message-scroller-spacer]');
+          return document.querySelector('[data-slot="message-scroller"]').dataset.scrollMode === 'following'
+            && viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 8
+            && getComputedStyle(spacer).display === 'none';
+        });
         // Read a growing answer from its turn anchor with small native wheel
         // gestures. Each gesture must move locally rather than resume tailing.
         await page.evaluate(source => {
@@ -74,6 +144,8 @@ try {
             'Continuing generation must preserve the manually chosen position');
         }
         await page.evaluate(() => window.clearInterval(window.concurrentScrollStream));
+        assert.equal(await page.locator('[data-message-scroller-spacer]').evaluate(element => getComputedStyle(element).display),
+          'none', 'Manual reading must not restore a released turn spacer');
         // A short anchored turn may currently share the physical bottom edge.
         // A downward reading gesture there must not opt into following when
         // the next streamed batch makes the answer taller than the viewport.
@@ -87,6 +159,8 @@ try {
         await page.waitForTimeout(150);
         assert.ok(Math.abs(await scrollport.evaluate(element => element.scrollTop) - shortTurnTop) < 2,
           'Streaming past a short turn must not turn downward reading into tail following');
+        assert.equal(await page.locator('[data-message-scroller-spacer]').evaluate(element => getComputedStyle(element).display),
+          'none', 'A turn that fills while reading must release its obsolete top-alignment space');
         await scrollport.focus();
         await page.keyboard.press('Home');
         await page.waitForFunction(() => document.querySelector('[data-message-scroller-viewport]').scrollTop === 0);
@@ -431,6 +505,9 @@ try {
         await page.locator('[data-slot="message-scroller"]:not(.invisible)').waitFor();
         await page.evaluate(source => window.streamingCheck.append(source), document);
         await scrollport.hover();
+        await scrollport.focus();
+        await page.keyboard.press('Home');
+        await page.waitForFunction(() => document.querySelector('[data-message-scroller-viewport]').scrollTop === 0);
         await page.locator('[data-slot="message-scroller-button"]').click();
         await page.waitForFunction(() => window.streamingCheck.anchor()?.atBottom === true);
         await page.evaluate(() => window.streamingCheck.reopen());

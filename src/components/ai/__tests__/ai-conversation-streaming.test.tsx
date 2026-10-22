@@ -12,7 +12,7 @@ import { inboxTimelineEvidence } from '@/test/fixtures/agent-inbox-timeline';
 
 afterEach(cleanup);
 
-it('keeps the turn anchor when recorded steering arrives and advances it for the next question', async () => {
+it('keeps questions out of top-anchor mode when steering or a new question arrives', async () => {
   await initI18n('en-US');
   const { events } = inboxTimelineEvidence;
   const correction = events.findIndex(event => event.type === 'user/message' && event.data.message.messageId === 'correction');
@@ -20,11 +20,11 @@ it('keeps the turn anchor when recorded steering arrives and advances it for the
     nodes={projectAgentChatNodes(events.slice(0, correction))} status="running" throughSeq={null} />);
   const anchors = () => [...container.querySelectorAll<HTMLElement>('[data-scroll-anchor="true"]')]
     .map(element => element.dataset.messageId);
-  expect(anchors()).toEqual(['user:initial']);
+  expect(anchors()).toEqual([]);
   rerender(<AiConversation nodes={projectAgentChatNodes(events.slice(0, correction + 1))} status="running" throughSeq={null} />);
-  expect(anchors()).toEqual(['user:initial']);
+  expect(anchors()).toEqual([]);
   rerender(<AiConversation nodes={projectAgentChatNodes(events)} status="running" throughSeq={null} />);
-  expect(anchors()).toEqual(['user:new-turn-step']);
+  expect(anchors()).toEqual([]);
 });
 
 it('completes the footer without a processing row from recorded turn events', async () => {
@@ -40,7 +40,7 @@ it('completes the footer without a processing row from recorded turn events', as
   expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
   expect(container.querySelector('.ai-assistant-actions')).toBeNull();
   expect(container.querySelector('[data-ai-node-kind="turnTail"]')).toBeNull();
-  expect(container.querySelector('[data-message-scroller-spacer]')).not.toHaveClass('hidden');
+  expect(container.querySelector('[data-message-scroller-spacer]')).toHaveClass('hidden');
 
   const nodes = at(end + 1);
   rerender(<AiConversation nodes={nodes} status="running" throughSeq={events[end].seq} />);
@@ -56,7 +56,7 @@ it('completes the footer without a processing row from recorded turn events', as
   rerender(<AiConversation nodes={nodes} status="running" pending throughSeq={events[end].seq} />);
   expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
   expect(container.querySelector('[data-slot="message-scroller-button"] .ai-scroll-loading')).toBeInTheDocument();
-  expect(container.querySelector('[data-message-scroller-spacer]')).not.toHaveClass('hidden');
+  expect(container.querySelector('[data-message-scroller-spacer]')).toHaveClass('hidden');
 });
 
 it('keeps standalone message actions when no complete turn boundary is available', async () => {

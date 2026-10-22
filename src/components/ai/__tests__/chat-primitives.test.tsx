@@ -485,7 +485,7 @@ describe('MessageScroller', () => {
     expect(userItem).toHaveAttribute('data-scroll-anchor', 'true');
   });
 
-  it('keeps an initially mounted short turn anchored as it grows and restores its reading position', async () => {
+  it('preserves a completed turn reading position when rows change and the conversation reopens', async () => {
     let itemCount = 2;
     let scrollTop = 0;
     let savedAnchor: AiScrollAnchor | undefined;

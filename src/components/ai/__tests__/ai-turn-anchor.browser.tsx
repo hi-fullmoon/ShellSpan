@@ -1,6 +1,8 @@
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
-import { useState } from 'react';
+import { useReducer, useState } from 'react';
+import { AiWorkspaceRoot } from '../workspace/ai-workspace-root';
+import { createAiComposerState, reduceAiComposer, type AiComposerEvent } from '@/lib/ai/composer-machine';
 import { AiConversation } from '../workspace/ai-conversation';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { taskTokenBudgetEvidence } from '@/test/fixtures/task-token-budget';
@@ -20,6 +22,21 @@ const recorded = withOptimisticConversationNodes(history, [{
   content: 'Explain the continuation result.', createdAtUnixMs: Date.now(),
 }], 'layout', null);
 const root = createRoot(document.getElementById('root')!);
+function ExistingComposer() {
+  const sessionId = history[0].sessionId;
+  const [state, dispatch] = useReducer((previous: ReturnType<typeof createAiComposerState>, event: AiComposerEvent) =>
+    reduceAiComposer(previous, event).state, undefined,
+  () => createAiComposerState({ sessionId, runtimeStatus: 'completed' }));
+  const submissions = state.pendingSubmissions.map(item => ({ ...item, scopeKey: 'layout',
+    expectedNextSeq: null, delivery: item.state === 'confirming' ? 'confirming' as const : 'pending' as const }));
+  const nodes = withOptimisticConversationNodes(history, submissions, 'layout', sessionId);
+  return <main className="flex h-dvh min-h-0 flex-col">
+    <AiWorkspaceRoot scope="workbench" mode="agent" view={null} pendingNodes={nodes} composerState={state}
+      onDraftChange={value => dispatch({ type: 'draft.changed', value })}
+      onSubmitGesture={(gesture, accelerated) => dispatch({ type: 'submit.requested', gesture, accelerated,
+        clientOperationId: crypto.randomUUID(), now: Date.now(), hasProvider: true, canCreateSession: true })} />
+  </main>;
+}
 function PagedHistory() {
   const [start, setStart] = useState(Math.max(1, Math.floor(history.length / 2)));
   return <main className="ai-workspace-root ai-panel-shell flex h-dvh min-h-0 w-full flex-col" data-ai-scope="workbench">
@@ -29,6 +46,7 @@ function PagedHistory() {
 }
 await initI18n('en-US');
 Object.assign(window, {
+  renderExistingComposer() { flushSync(() => root.render(<ExistingComposer />)); },
   recordedEventTypes: taskTokenBudgetEvidence.continuedEvents.map(event => event.type),
   renderRecordedEvents(length: number, status: 'running' | 'completed' = 'running', submitting = false) {
     const events = taskTokenBudgetEvidence.continuedEvents;

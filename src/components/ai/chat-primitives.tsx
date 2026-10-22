@@ -51,10 +51,12 @@ interface MessageScrollerProps {
   onFollowLatest?: () => void;
 }
 
+type ConversationScrollMode = 'anchored' | 'reading' | 'following';
+
 interface ConversationScrollerProps extends MessageScrollerProps {
   restoreToEnd?: boolean;
-  following: boolean;
-  onFollowIntentChange: (following: boolean) => void;
+  scrollMode: ConversationScrollMode;
+  onScrollModeChange: (mode: ConversationScrollMode) => void;
 }
 
 const SCROLL_EDGE_THRESHOLD = 8;
@@ -91,25 +93,26 @@ export const MessageScroller: React.FC<MessageScrollerProps> = (props) => {
   // Following the latest output is navigation state too. Restoring it through
   // scrollToMessage would leave the primitive in its detached jump mode.
   const readingAnchor = restoreToEnd ? undefined : openingAnchor.current;
-  const [navigation, setNavigation] = useState(() => ({
+  const [navigation, setNavigation] = useState<{ turnKey?: string; mode: ConversationScrollMode }>(() => ({
     turnKey: props.turnAnchorKey,
-    following: restoreToEnd || (readingAnchor?.atBottom !== false && !props.turnAnchorKey),
+    mode: restoreToEnd || (readingAnchor?.atBottom !== false && !props.turnAnchorKey)
+      ? 'following' : readingAnchor ? 'reading' : 'anchored',
   }));
   if (navigation.turnKey !== props.turnAnchorKey) {
-    setNavigation({ turnKey: props.turnAnchorKey, following: false });
+    setNavigation({ turnKey: props.turnAnchorKey, mode: 'anchored' });
   }
-  const updateFollowIntent = useCallback((following: boolean) => {
-    setNavigation(current => current.following === following ? current : { ...current, following });
+  const updateScrollMode = useCallback((mode: ConversationScrollMode) => {
+    setNavigation(current => current.mode === mode ? current : { ...current, mode });
   }, []);
   return (
     <MessageScrollerProvider
-      autoScroll={navigation.following}
+      autoScroll={navigation.mode === 'following'}
       defaultScrollPosition={readingAnchor ? 'start' : props.turnAnchorKey && !restoreToEnd ? 'last-anchor' : 'end'}
       scrollEdgeThreshold={SCROLL_EDGE_THRESHOLD}
       scrollPreviousItemPeek={0}
     >
       <ConversationScroller {...props} initialAnchor={readingAnchor} restoreToEnd={restoreToEnd}
-        following={navigation.following} onFollowIntentChange={updateFollowIntent} />
+        scrollMode={navigation.mode} onScrollModeChange={updateScrollMode} />
     </MessageScrollerProvider>
   );
 };
@@ -128,8 +131,8 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
   onAnchorChange,
   onFollowLatest,
   restoreToEnd = false,
-  following,
-  onFollowIntentChange,
+  scrollMode,
+  onScrollModeChange,
 }) => {
   const { t } = useI18n();
   const contentRef = useRef<HTMLDivElement>(null);
@@ -137,12 +140,35 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
   // A top-aligned turn can also sit at the scrollport's bottom. Its own scroll
   // event must not turn that reading position into live-tail follow mode.
   const suppressProgrammaticFollowRef = useRef(initialAnchor?.atBottom === false);
+  const following = scrollMode === 'following';
+  // Once the turn reaches its live edge, its top-alignment space is no longer
+  // scrollable content. Pausing to read must not introduce that space again.
+  const [releasedSpacer, setReleasedSpacer] = useState({ key: turnAnchorKey, released: following });
+  useLayoutEffect(() => {
+    if (following && (releasedSpacer.key !== turnAnchorKey || !releasedSpacer.released)) {
+      setReleasedSpacer({ key: turnAnchorKey, released: true });
+    }
+  }, [following, releasedSpacer, turnAnchorKey]);
+  const needsTurnSpacer = generating && !following
+    && !(releasedSpacer.key === turnAnchorKey && releasedSpacer.released);
+  const modeRef = useRef(scrollMode);
+  modeRef.current = scrollMode;
+  const activeTurnRef = useRef({ key: turnAnchorKey, generated: generating });
+  if (activeTurnRef.current.key !== turnAnchorKey) {
+    activeTurnRef.current = { key: turnAnchorKey, generated: generating };
+  } else if (generating) {
+    activeTurnRef.current.generated = true;
+  }
   const followIntentRef = useRef(following);
   followIntentRef.current = following;
+  const setScrollMode = useCallback((mode: ConversationScrollMode) => {
+    modeRef.current = mode;
+    followIntentRef.current = mode === 'following';
+    onScrollModeChange(mode);
+  }, [onScrollModeChange]);
   const setFollowIntent = useCallback((following: boolean) => {
-    followIntentRef.current = following;
-    onFollowIntentChange(following);
-  }, [onFollowIntentChange]);
+    setScrollMode(following ? 'following' : 'reading');
+  }, [setScrollMode]);
   const resumeFollowOnScrollRef = useRef(false);
   const pointerScrollStartRef = useRef<number | null>(null);
   const wheelScrollStartRef = useRef<number | null>(null);
@@ -152,6 +178,17 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
     resumeFollowOnScrollRef.current = false;
   }, [generating]);
   const selectionPausedRef = useRef(false);
+  const navigationTurnRef = useRef({ applied: turnAnchorKey, current: turnAnchorKey });
+  navigationTurnRef.current.current = turnAnchorKey;
+  if (navigationTurnRef.current.applied !== turnAnchorKey) {
+    // A new question is explicit navigation intent. Previous reading gestures
+    // and selections must not detach the new turn during its first layout.
+    suppressProgrammaticFollowRef.current = false;
+    pointerScrollStartRef.current = null;
+    wheelScrollStartRef.current = null;
+    resumeFollowOnScrollRef.current = false;
+    selectionPausedRef.current = false;
+  }
   const restoredAnchorRef = useRef(false);
   const restoreFrameRef = useRef<number | null>(null);
   const [positionReady, setPositionReady] = useState(false);
@@ -162,6 +199,22 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
   const turnAnchor = [...childItems].reverse().find(wantsScrollAnchor);
   useTurnScrollTransition(viewportRef, turnAnchor ? messageItemId(turnAnchor, childItems.indexOf(turnAnchor)) : undefined);
   const observedAnchorItemsRef = useRef(new Set(childItems.filter(wantsScrollAnchor).map(messageItemId)));
+  const followFilledTurn = useCallback(() => {
+    const viewport = viewportRef.current;
+    const content = contentRef.current;
+    if (modeRef.current !== 'anchored' || !activeTurnRef.current.generated || !positionReady || !viewport || !content) return;
+    const anchor = content.querySelector<HTMLElement>('[data-scroll-anchor="true"]');
+    const last = content.querySelector<HTMLElement>('[data-message-scroller-spacer]')?.previousElementSibling;
+    if (!anchor || !last) return;
+    const style = getComputedStyle(content);
+    const turnHeight = last.getBoundingClientRect().bottom - anchor.getBoundingClientRect().top
+      + (Number.parseFloat(style.paddingBlockStart) || 0) + (Number.parseFloat(style.paddingBlockEnd) || 0);
+    if (turnHeight < viewport.clientHeight - 1) return;
+    suppressProgrammaticFollowRef.current = false;
+    setScrollMode('following');
+    scrollToEnd({ behavior: 'instant' });
+    onFollowLatest?.();
+  }, [onFollowLatest, positionReady, scrollToEnd, setScrollMode]);
   const updateBottomVisibility = useCallback(() => {
     const viewport = viewportRef.current;
     if (viewport) setAtBottom(isNearBottom(viewport));
@@ -174,11 +227,19 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
     if (!viewport || !content) return;
     // The primitive also tracks virtual spacer/follow state. Button visibility
     // must reflect the actual scroll range, including composer/content resizes.
-    const observer = new ResizeObserver(updateBottomVisibility);
+    let fillFrame: number | null = null;
+    const observer = new ResizeObserver(() => {
+      updateBottomVisibility();
+      if (modeRef.current !== 'anchored' || fillFrame !== null) return;
+      fillFrame = requestAnimationFrame(() => { fillFrame = null; followFilledTurn(); });
+    });
     observer.observe(viewport);
     observer.observe(content);
-    return () => observer.disconnect();
-  }, [updateBottomVisibility]);
+    return () => {
+      observer.disconnect();
+      if (fillFrame !== null) cancelAnimationFrame(fillFrame);
+    };
+  }, [followFilledTurn, updateBottomVisibility]);
   const messageItems = childItems.map((child, index) => {
     const itemKey = React.isValidElement(child) && child.key !== null ? child.key : index;
     const messageId = messageItemId(child, index);
@@ -234,6 +295,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
   }, []);
 
   const pauseForSelection = useCallback(() => {
+    if (navigationTurnRef.current.applied !== navigationTurnRef.current.current) return false;
     if (!hasTranscriptSelection()) {
       selectionPausedRef.current = false;
       return false;
@@ -246,6 +308,12 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
     }
     return true;
   }, [hasTranscriptSelection, preserveHistoryPosition]);
+
+  useLayoutEffect(() => {
+    if (navigationTurnRef.current.applied === turnAnchorKey) return;
+    if (hasTranscriptSelection()) window.getSelection()?.removeAllRanges();
+    navigationTurnRef.current.applied = turnAnchorKey;
+  }, [hasTranscriptSelection, turnAnchorKey]);
 
   useEffect(() => {
     document.addEventListener('selectionchange', pauseForSelection);
@@ -292,10 +360,11 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
 
   const handlePointerDown = useCallback(() => {
     wheelScrollStartRef.current = null;
+    if (modeRef.current === 'anchored') setFollowIntent(false);
     interruptRestore();
     resumeFollowOnScrollRef.current = false;
     pointerScrollStartRef.current = viewportRef.current?.scrollTop ?? null;
-  }, [interruptRestore]);
+  }, [interruptRestore, setFollowIntent]);
 
   useEffect(() => {
     const clearPointerIntent = () => { pointerScrollStartRef.current = null; };
@@ -321,7 +390,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
       const spacer = contentRef.current?.querySelector<HTMLElement>('[data-message-scroller-spacer]');
       // Resume only after native downward movement arrives at the actual end.
       // A resize, near-bottom threshold or turn spacer cannot opt into tailing.
-      if (Math.abs(distanceToBottom(viewport)) <= 1 && (!generating || !spacer || spacer.hidden)) {
+      if (Math.abs(distanceToBottom(viewport)) <= 1 && (!generating || !spacer || spacer.hidden || getComputedStyle(spacer).display === 'none')) {
         wheelScrollStartRef.current = null;
         suppressProgrammaticFollowRef.current = false;
         setFollowIntent(true);
@@ -345,6 +414,8 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
       // Skip only while rubber-band overscroll sits past the bottom edge, where
       // re-clamping would cancel the native bounce-back.
       if (distanceToBottom(viewport) >= 0) scrollToEnd();
+    } else if (viewport.scrollTop > start) {
+      setFollowIntent(false);
     } else if (viewport.scrollTop < start) {
       setFollowIntent(false);
       // A scrollbar drag may overlap the primitive's programmatic-scroll grace
@@ -412,6 +483,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
 
   const commitMessageLayout = useCallback(() => {
     if (pauseForSelection()) return;
+    followFilledTurn();
     // A throttled child can commit without changing children/followKey here.
     // Use the recorded user intent, not geometry after the text has grown.
     const viewport = viewportRef.current;
@@ -422,19 +494,19 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
       // geometry also makes child and parent commits share one correction.
       scrollToEnd({ behavior: 'instant' });
     }
-  }, [pauseForSelection, positionReady, scrollToEnd]);
+  }, [followFilledTurn, pauseForSelection, positionReady, scrollToEnd]);
 
   useLayoutEffect(() => {
     for (const [index, child] of childItems.entries()) {
       if (!wantsScrollAnchor(child)) continue;
       const id = messageItemId(child, index);
-      if (!observedAnchorItemsRef.current.has(id)) setFollowIntent(false);
+      if (!observedAnchorItemsRef.current.has(id) && turnAnchorKey === undefined) setScrollMode('anchored');
       observedAnchorItemsRef.current.add(id);
     }
     // data-scrollable is published by the primitive on a later frame. It can
     // describe the previous layout during a burst of Markdown updates.
     commitMessageLayout();
-  }, [children, followKey, commitMessageLayout, setFollowIntent]);
+  }, [children, followKey, commitMessageLayout, setScrollMode, turnAnchorKey]);
 
   const readAnchor = useCallback(() => {
     const scrollport = viewportRef.current;
@@ -523,12 +595,13 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
       className={cn(className, !positionReady && 'invisible')}
       data-follow-key={followKey}
       data-following={following}
+      data-scroll-mode={scrollMode}
       role="log"
       aria-label={ariaLabel}
       onPointerDownCapture={handlePointerDown}
     >
       <MessageScrollerViewport
-        className="flex flex-col [overflow-anchor:none]"
+        className="flex flex-col overscroll-none [overflow-anchor:none]"
         ref={viewportRef}
         onScrollCapture={handleScrollCapture}
         onScroll={readAnchor}
@@ -541,6 +614,9 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
           interruptRestore();
         }}
         onKeyDown={(event) => {
+          if (modeRef.current === 'anchored' && ['ArrowDown', 'ArrowUp', 'End', 'Home', 'PageDown', 'PageUp', 'Enter', ' '].includes(event.key)) {
+            setFollowIntent(false);
+          }
           if (event.target === event.currentTarget) {
             const viewport = viewportRef.current;
             if (['ArrowDown', 'End', 'PageDown', ' '].includes(event.key)) {
@@ -551,8 +627,9 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
                 return;
               }
               suppressProgrammaticFollowRef.current = false;
-              resumeFollowOnScrollRef.current = true;
-              if (viewport && isNearBottom(viewport)) {
+              const spacer = contentRef.current?.querySelector<HTMLElement>('[data-message-scroller-spacer]');
+              resumeFollowOnScrollRef.current = !generating || !spacer || Boolean(spacer.hidden) || getComputedStyle(spacer).display === 'none';
+              if (event.key === 'End' || (viewport && isNearBottom(viewport) && resumeFollowOnScrollRef.current)) {
                 setFollowIntent(true);
                 resumeFollowOnScrollRef.current = false;
                 scrollToEnd();
@@ -568,7 +645,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
         {/* The primitive detects prepends from its first content child. Keep
             history controls in the viewport, outside the message sequence. */}
         {header && <div className="shrink-0 pt-5" onClickCapture={preserveHistoryPosition}>{header}</div>}
-        <MessageScrollerContent ref={contentRef} spacerClassName={generating ? undefined : 'hidden'}
+        <MessageScrollerContent ref={contentRef} spacerClassName={needsTurnSpacer ? undefined : 'hidden'}
           className={cn('min-h-0 grow shrink-0 gap-4 px-3 py-4', contentClassName)}>
           <MessageLayoutContext.Provider value={commitMessageLayout}>
             {messageItems}
