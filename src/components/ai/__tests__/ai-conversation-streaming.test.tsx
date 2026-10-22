@@ -9,8 +9,31 @@ import { useAppStore } from '@/stores/appStore';
 import skillsCapture from '@/test/fixtures/agent-skills-runtime.json';
 import type { AgentSessionEvent } from '@/types/agent-session';
 import { inboxTimelineEvidence } from '@/test/fixtures/agent-inbox-timeline';
+import { withOptimisticConversationNodes } from '@/lib/ai/optimistic-submission';
 
 afterEach(cleanup);
+
+it('preserves the outgoing bubble on receipt and leaves committed history unanimated', async () => {
+  await initI18n('en-US');
+  const committed = projectAgentChatNodes(skillsCapture as unknown as AgentSessionEvent[])
+    .find(node => node.kind === 'userMessage');
+  if (!committed || committed.kind !== 'userMessage') throw new Error('Recorded user input is required');
+  const pending = withOptimisticConversationNodes([], [{
+    clientOperationId: committed.clientSubmissionId ?? committed.messageId,
+    sessionId: committed.sessionId, scopeKey: 'send-animation', expectedNextSeq: null,
+    delivery: 'pending', mode: 'nextTurn', startsTurn: true,
+    content: committed.content, createdAtUnixMs: 0,
+  }], 'send-animation', committed.sessionId);
+  const view = render(<AiConversation nodes={pending} status="running" throughSeq={null} />);
+  const bubble = view.container.querySelector('.ai-message-bubble-user');
+  expect(bubble).toHaveClass('ai-user-bubble-enter');
+  view.rerender(<AiConversation nodes={[committed]} status="running" throughSeq={null} />);
+  expect(view.container.querySelector('.ai-message-bubble-user')).toBe(bubble);
+  expect(bubble).toHaveClass('ai-user-bubble-enter');
+  view.unmount();
+  const history = render(<AiConversation nodes={[committed]} status="completed" throughSeq={null} />);
+  expect(history.container.querySelector('.ai-message-bubble-user')).not.toHaveClass('ai-user-bubble-enter');
+});
 
 it('keeps questions out of top-anchor mode when steering or a new question arrives', async () => {
   await initI18n('en-US');

@@ -48,6 +48,8 @@ await initI18n('en-US');
 Object.assign(window, {
   renderExistingComposer() { flushSync(() => root.render(<ExistingComposer />)); },
   recordedEventTypes: taskTokenBudgetEvidence.continuedEvents.map(event => event.type),
+  recordedUserIndices: taskTokenBudgetEvidence.continuedEvents.flatMap((event, index) =>
+    event.type === 'user/message' && event.data.message.source.kind === 'user' ? [index] : []),
   renderRecordedEvents(length: number, status: 'running' | 'completed' = 'running', submitting = false) {
     const events = taskTokenBudgetEvidence.continuedEvents;
     const next = events[length];

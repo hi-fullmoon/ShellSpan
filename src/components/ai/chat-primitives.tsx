@@ -697,7 +697,8 @@ export const Message: React.FC<{
 export const Bubble: React.FC<{
   role: 'user' | 'assistant';
   children: React.ReactNode;
-}> = ({ role, children }) => (
+  className?: string;
+}> = ({ role, children, className }) => (
   <BubblePrimitive
     align={role === 'user' ? 'end' : 'start'}
     variant={role === 'user' ? 'secondary' : 'ghost'}
@@ -707,6 +708,7 @@ export const Bubble: React.FC<{
       role === 'user'
         ? 'max-w-[82%]'
         : 'w-full max-w-full',
+      className,
     )}
   >
     <BubbleContent
