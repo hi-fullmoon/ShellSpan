@@ -995,29 +995,43 @@ impl SubAgentManager {
         ) {
             return Err("subagentBudgetExhausted: cumulative child budget is exhausted; inspect its saved progress and report or take over the remaining work. Do not spawn a replacement to reset this budget.".into());
         }
-        self.ensure_resident(child_session_id)?;
-        self.sessions.enqueue(
-            child_session_id,
-            AgentInboxLane::NextTurn,
-            AgentInboxMessage {
-                images: Vec::new(),
-                message_id: client_submission_id
-                    .clone()
-                    .unwrap_or_else(|| format!("child-input-{}", Uuid::new_v4().simple())),
-                client_submission_id: client_submission_id.clone(),
-                content,
-                source: if client_submission_id.is_some() {
-                    AgentMessageSource::user()
-                } else {
-                    AgentMessageSource::session_reference(parent_session_id.into())
-                },
-                terminal_context: None,
-            },
-        )?;
+        // Serialize cold attachment, admission and wake with idle release and
+        // cancellation. Keep the handle reachable until suspension succeeds.
+        let mut handles = self
+            .handles
+            .lock()
+            .map_err(|_| "subagent handle registry is unavailable".to_string())?;
+        let entry = self.ensure_resident(child_session_id, &mut handles)?;
+        entry
+            .with_input_admission(|| {
+                self.sessions.enqueue(
+                    child_session_id,
+                    AgentInboxLane::NextTurn,
+                    AgentInboxMessage {
+                        images: Vec::new(),
+                        message_id: client_submission_id
+                            .clone()
+                            .unwrap_or_else(|| format!("child-input-{}", Uuid::new_v4().simple())),
+                        client_submission_id: client_submission_id.clone(),
+                        content,
+                        source: if client_submission_id.is_some() {
+                            AgentMessageSource::user()
+                        } else {
+                            AgentMessageSource::session_reference(parent_session_id.into())
+                        },
+                        terminal_context: None,
+                    },
+                )
+            })?
+            .ok_or("child Agent is stopping")?;
         self.wake(child_session_id)
     }
 
-    fn ensure_resident(&self, child_session_id: &str) -> Result<Arc<AgentEntry>, String> {
+    fn ensure_resident(
+        &self,
+        child_session_id: &str,
+        handles: &mut HashMap<String, Arc<AgentHandle>>,
+    ) -> Result<Arc<AgentEntry>, String> {
         if let Some(entry) = self.agents.get(child_session_id)? {
             return Ok(entry);
         }
@@ -1071,10 +1085,7 @@ impl SubAgentManager {
             .get(parent_id)?
             .ok_or("child owner is not live")?;
         self.agents.set_owner(&entry, &parent)?;
-        self.handles
-            .lock()
-            .map_err(|_| "subagent handle registry is unavailable".to_string())?
-            .insert(child_session_id.into(), handle);
+        handles.insert(child_session_id.into(), handle);
         Ok(entry)
     }
 
@@ -1130,18 +1141,24 @@ impl SubAgentManager {
             .map(|subagent| subagent.budget.timeout_ms)
             .unwrap_or(60_000);
         let wait = async {
+            // Subscribe before inspecting the durable state so a driver release
+            // between the check and the await cannot be missed.
+            let mut changes = entry.subscribe_changes();
             loop {
-                entry.await_idle().await;
                 let snapshot = self.sessions.snapshot(child_session_id)?;
-                if snapshot.ended
-                    || snapshot.status.is_terminal()
-                    || (snapshot.status == AgentSessionStatus::Idle
-                        && snapshot.inbox.next_turn.is_empty()
-                        && snapshot.inbox.next_step.is_empty())
+                if !entry.is_driver_active()
+                    && (snapshot.ended
+                        || snapshot.status.is_terminal()
+                        || (snapshot.status == AgentSessionStatus::Idle
+                            && snapshot.inbox.next_turn.is_empty()
+                            && snapshot.inbox.next_step.is_empty()))
                 {
                     return Ok::<_, String>(snapshot);
                 }
-                tokio::task::yield_now().await;
+                changes
+                    .changed()
+                    .await
+                    .map_err(|_| "child Agent state channel closed")?;
             }
         };
         let created = self
@@ -1259,20 +1276,31 @@ impl SubAgentManager {
         let mut order = self.descendants_postorder(child_session_id)?;
         order.push(child_session_id.into());
         for session_id in order {
-            let handle = self
-                .handles
-                .lock()
-                .map_err(|_| "subagent handle registry is unavailable".to_string())?
-                .remove(&session_id);
+            let handle = {
+                let handles = self
+                    .handles
+                    .lock()
+                    .map_err(|_| "subagent handle registry is unavailable".to_string())?;
+                let handle = handles.get(&session_id).cloned();
+                if let Some(handle) = &handle {
+                    handle.entry().stop_admission()?;
+                } else {
+                    // Fence cold attachment until cancellation is durable too.
+                    let snapshot = self.sessions.snapshot(&session_id)?;
+                    if !snapshot.ended {
+                        self.sessions.cancel(&session_id)?;
+                    }
+                }
+                handle
+            };
             if let Some(handle) = handle {
                 self.tools.cancel_session(&handle.entry())?;
                 self.tools.await_pending_executions(&handle.entry()).await?;
                 handle.dispose().await?;
-            } else {
-                let snapshot = self.sessions.snapshot(&session_id)?;
-                if !snapshot.ended {
-                    self.sessions.cancel(&session_id)?;
-                }
+                self.handles
+                    .lock()
+                    .map_err(|_| "subagent handle registry is unavailable".to_string())?
+                    .remove(&session_id);
             }
             if let Some(parent_session_id) = self
                 .sessions
@@ -1313,13 +1341,15 @@ impl SubAgentManager {
         {
             return Ok(());
         }
-        let handle = self
+        let mut handles = self
             .handles
             .lock()
-            .map_err(|_| "subagent handle registry is unavailable".to_string())?
-            .remove(child_session_id);
-        if let Some(handle) = handle {
-            handle.suspend().await?;
+            .map_err(|_| "subagent handle registry is unavailable".to_string())?;
+        if let Some(handle) = handles.get(child_session_id) {
+            if !handle.try_suspend()? {
+                return Ok(());
+            }
+            handles.remove(child_session_id);
             let child = self.sessions.snapshot(child_session_id)?;
             if let (Some(parent), Some(subagent)) =
                 (child.header.parent_session_id, child.header.subagent)
@@ -2107,6 +2137,11 @@ fn fleet_tool_result(
         evidence_refs: Vec::new(),
         result_committed: false,
     })
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    include!("tests/subagent_lifecycle.rs");
 }
 
 #[cfg(test)]

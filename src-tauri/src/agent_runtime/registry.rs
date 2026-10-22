@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
-use tokio::sync::Notify;
+use tokio::sync::{watch, Notify};
 use tokio_util::sync::CancellationToken;
 
 use crate::ai::AiProviderConfig;
@@ -52,6 +52,7 @@ pub(crate) struct AgentEntry {
     phase: Mutex<AgentLifecyclePhase>,
     scope: Mutex<Option<AgentActiveScope>>,
     idle: Notify,
+    changes: watch::Sender<()>,
     #[cfg(test)]
     lifecycle: Mutex<Vec<&'static str>>,
 }
@@ -81,6 +82,7 @@ impl AgentEntry {
             phase: Mutex::new(initial_phase),
             scope: Mutex::new(None),
             idle: Notify::new(),
+            changes: watch::channel(()).0,
             #[cfg(test)]
             lifecycle: Mutex::new(Vec::new()),
         }
@@ -134,7 +136,12 @@ impl AgentEntry {
             .phase
             .lock()
             .map_err(|_| "Agent lifecycle lock is unavailable".to_string())? = phase;
+        self.changes.send_replace(());
         Ok(())
+    }
+
+    pub(crate) fn subscribe_changes(&self) -> watch::Receiver<()> {
+        self.changes.subscribe()
     }
 
     pub(crate) fn set_scope(&self, scope: Option<AgentActiveScope>) -> Result<(), String> {
@@ -153,6 +160,10 @@ impl AgentEntry {
     }
 
     pub(crate) fn try_acquire_driver(&self) -> Result<bool, String> {
+        let _gate = self
+            .admission_gate
+            .lock()
+            .map_err(|_| "Agent admission lock is unavailable")?;
         if !self.admitting.load(Ordering::Acquire)
             || matches!(
                 self.phase()?,
@@ -172,6 +183,7 @@ impl AgentEntry {
     pub(crate) fn release_driver(&self) {
         self.driver_active.store(false, Ordering::Release);
         self.idle.notify_waiters();
+        self.changes.send_replace(());
     }
 
     /// Reserve the worker slot while archive validates and closes the durable
@@ -217,6 +229,7 @@ impl AgentEntry {
 
     pub(crate) fn cancel(&self) {
         self.cancellation.cancel();
+        self.changes.send_replace(());
         self.record_lifecycle("cancel");
     }
 
@@ -409,19 +422,33 @@ impl AgentHandle {
     /// Release a continuable child from memory without ending or cancelling
     /// its durable Session. A later input may attach a fresh Entry to the same
     /// log and Model Surface.
-    pub(crate) async fn suspend(&self) -> Result<AgentSessionSnapshot, String> {
-        if self.entry.is_driver_active() || self.entry.scope()?.is_some() {
-            return Err("an active Agent cannot be suspended".into());
+    pub(crate) fn try_suspend(&self) -> Result<bool, String> {
+        let _gate = self
+            .entry
+            .admission_gate
+            .lock()
+            .map_err(|_| "Agent admission lock is unavailable")?;
+        if !self.entry.is_admitting()
+            || self.entry.is_driver_active()
+            || self.entry.scope()?.is_some()
+            || self.entry.phase()? != AgentLifecyclePhase::Idle
+        {
+            return Ok(false);
         }
-        if self.entry.phase()? != AgentLifecyclePhase::Idle {
-            return Err("only an idle Agent can be suspended".into());
+        let snapshot = self.sessions.snapshot(&self.entry.session_id)?;
+        if snapshot.ended
+            || snapshot.status != super::AgentSessionStatus::Idle
+            || !snapshot.inbox.next_turn.is_empty()
+            || !snapshot.inbox.next_step.is_empty()
+        {
+            return Ok(false);
         }
         self.entry.admitting.store(false, Ordering::Release);
         self.entry.set_phase(AgentLifecyclePhase::Disposed)?;
         self.registry.detach(&self.entry.session_id)?;
         self.entry.record_lifecycle("detach-agent");
         self.entry.record_lifecycle("detach-session");
-        self.sessions.snapshot(&self.entry.session_id)
+        Ok(true)
     }
 }
 
