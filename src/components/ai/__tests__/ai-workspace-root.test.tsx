@@ -184,7 +184,17 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(tool).toHaveAttribute('aria-expanded', 'false');
   });
 
-  it.each(['stopping', 'waitingApproval', 'waitingQuestion'] as const)('places %s notices above the input inside the composer', (phase) => {
+  it('keeps the notice area hidden while stopping and preserves the draft', () => {
+    const { container } = render(<AiWorkspaceRoot scope="terminal" view={agentView('running')}
+      defaultDraft="Unsent draft"
+      composerState={createAiComposerState({ phase: 'stopping', runtimeStatus: 'running', draft: 'Unsent draft' })} />);
+    const notices = container.querySelector('[data-slot="ai-workspace-status-notices"]')!;
+    expect(notices).toBeEmptyDOMElement();
+    expect(notices).toHaveClass('empty:hidden');
+    expect(screen.getByTestId('ai-workspace-composer')).toHaveTextContent('Unsent draft');
+  });
+
+  it.each(['waitingApproval', 'waitingQuestion'] as const)('places %s notices above the input inside the composer', (phase) => {
     const { container, rerender } = render(<AiWorkspaceRoot scope="terminal" view={agentView('running')}
       composerState={createAiComposerState({ phase, runtimeStatus: 'running' })} />);
     const notices = container.querySelector<HTMLElement>('[data-slot="ai-workspace-status-notices"]')!;

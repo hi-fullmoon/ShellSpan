@@ -189,6 +189,7 @@ fn uses_legacy_minimax_builtin_catalog(route: &ProviderRoute) -> Result<bool, St
         return Ok(false);
     };
     let mut legacy = catalog::preset_models(&route.preset_id, route.kind()?)?;
+    legacy.remove("MiniMax-M3.1-Flash");
     let Some(minimax_m3) = legacy.get_mut("MiniMax-M3") else {
         return Ok(false);
     };

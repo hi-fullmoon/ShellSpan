@@ -104,17 +104,25 @@ try {
           await page.screenshot({ path: `/tmp/shellspan-provider-connection-${engine.name()}-${locale}-${viewport.width}.png` });
 
           // No IPC substitution: a plain browser really has no Tauri backend. The
-          // failed start must give one Toast and must never save the edited provider.
+          // failed start must persist inline and must never save the edited provider.
           const before = await page.evaluate(() => window.readConnectionReview().settings);
           await test.focus();
           await page.keyboard.press('Enter');
-          await page.waitForFunction(() => window.readConnectionReview().toasts.length === 1);
+          const testFeedback = page.getByRole('alert');
+          await testFeedback.waitFor();
           const after = await page.evaluate(() => window.readConnectionReview());
           assert.equal(after.settings, before);
-          assert.equal(after.toasts[0].variant, 'error');
-          assert.match(after.toasts[0].message, locale === 'zh-CN' ? /桌面应用/ : /desktop app/);
+          assert.equal(after.toasts.length, 0, 'inline results must not also create a Toast');
+          assert.equal(await testFeedback.innerText(), locale === 'zh-CN' ? '连接测试失败' : 'Connection test failed');
+          const details = testFeedback.getByRole('button');
+          assert.match(await details.getAttribute('aria-label'), locale === 'zh-CN' ? /桌面应用/ : /desktop app/);
+          await details.hover();
+          const tooltip = page.locator('[data-slot="tooltip-content"]');
+          await tooltip.waitFor();
+          assert.match(await tooltip.innerText(), locale === 'zh-CN' ? /桌面应用/ : /desktop app/);
+          await test.hover();
           assert.equal(await test.isEnabled(), true);
-          assert.equal(await page.locator('[role="alert"]').count(), 0, 'test errors must only appear in a Toast');
+          await page.screenshot({ path: `/tmp/shellspan-provider-test-result-${engine.name()}-${locale}-${viewport.width}.png` });
           await page.getByRole('button', { name: locale === 'zh-CN' ? '保存' : 'Save', exact: true }).click();
           await page.locator('[role="alert"]').waitFor();
           const overlaps = await page.locator('[data-slot="dialog-footer"]').evaluate(footer => {
@@ -126,10 +134,11 @@ try {
           assert.equal(overlaps, false, 'inline feedback must not overlap the action buttons');
           const feedbackFits = await page.locator('[role="alert"]').evaluate(element => {
             const bounds = element.getBoundingClientRect();
-            const actions = element.previousElementSibling.getBoundingClientRect();
-            return bounds.top >= actions.bottom && bounds.bottom <= innerHeight && bounds.width > 0;
+            const actions = element.closest('[data-slot="dialog-footer"]').lastElementChild.getBoundingClientRect();
+            return Math.abs((bounds.top + bounds.bottom - actions.top - actions.bottom) / 2) <= 1
+              && bounds.bottom <= innerHeight && bounds.width > 0;
           });
-          assert.equal(feedbackFits, true, 'feedback must remain visible below the action row');
+          assert.equal(feedbackFits, true, 'feedback must remain visible on the action row');
           await page.screenshot({ path: `/tmp/shellspan-provider-feedback-${engine.name()}-${locale}-${viewport.width}.png` });
           const cancel = page.getByRole('button', { name: locale === 'zh-CN' ? '取消' : 'Cancel', exact: true });
           await cancel.click();
@@ -172,7 +181,7 @@ try {
       await browser.close();
     }
   }
-  console.log('Provider connection controls passed in Chromium and WebKit at wide/narrow sizes in both locales; real missing-backend errors show one Toast without saving.');
+  console.log('Provider connection controls passed in Chromium and WebKit at wide/narrow sizes in both locales; real missing-backend errors persist inline without duplicate Toasts or saving.');
 } finally {
   await server.close();
 }

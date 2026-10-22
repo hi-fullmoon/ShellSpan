@@ -156,6 +156,48 @@ fn minimax_m3_uses_the_documented_agent_output_and_vision_budgets() {
 }
 
 #[test]
+fn minimax_flash_discovery_and_reasoning_match_the_official_contract() {
+    let mut p = provider("MiniMax-M3.1-Flash");
+    p.profile = "minimax".into();
+    let discovered = super::discovery::catalog_models(&p).unwrap().unwrap();
+    let candidates = serde_json::to_value(discovered).unwrap();
+    assert!(candidates
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|m| m["id"] == p.model));
+    let resolved = resolve(&p).unwrap();
+    assert_eq!(resolved.context_window, 1_000_000);
+    assert_eq!(resolved.max_output_tokens, 131_072);
+    assert_eq!(resolved.tool_calling, Support::Supported);
+    assert_eq!(resolved.image_input, Support::Supported);
+    assert!(!resolved.compat.cumulative_stream);
+    assert!(!resolved.compat.think_tag_fallback);
+    assert_eq!(
+        resolved.vision.as_ref().unwrap().max_request_image_bytes,
+        10 * 1024 * 1024
+    );
+    let efforts: Vec<_> = resolved
+        .reasoning
+        .iter()
+        .map(|option| option.id.as_str())
+        .collect();
+    assert_eq!(efforts, ["low", "medium", "high", "xhigh", "max"]);
+    for effort in efforts {
+        let mut body = json!({});
+        apply_reasoning(&mut body, &resolved, Some(effort.into()));
+        assert_eq!(body, json!({"reasoning_effort": effort}));
+    }
+    let mut body = json!({});
+    apply_reasoning(&mut body, &resolved, None);
+    assert_eq!(body, json!({}));
+    for unsupported in ["off", "none", "on"] {
+        p.reasoning_effort = Some(unsupported.into());
+        assert!(resolve(&p).is_err());
+    }
+}
+
+#[test]
 fn custom_capacity_is_not_inferred_or_clamped_to_obsolete_hint_bounds() {
     let mut p = provider("custom-small");
     p.model_definition = Some(fixture_definition(p.kind, 4096));

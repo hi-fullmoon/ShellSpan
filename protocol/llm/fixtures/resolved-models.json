@@ -2,6 +2,74 @@
   {
     "provider": {
       "id": "fixture",
+      "profile": "minimax",
+      "kind": "openAiCompatible",
+      "baseUrl": "https://proxy.example/v1",
+      "model": "MiniMax-M3.1-Flash",
+      "requiresApiKey": false
+    },
+    "resolved": {
+      "catalogVersion": 1,
+      "routeId": "fixture",
+      "providerId": "fixture",
+      "profile": "minimax",
+      "kind": "openAiCompatible",
+      "modelId": "MiniMax-M3.1-Flash",
+      "source": "builtinCatalog",
+      "capacityPolicy": "conservativeApplicationBudget",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 131072,
+      "toolCalling": "supported",
+      "textInput": "supported",
+      "imageInput": "supported",
+      "reasoning": [
+        {
+          "id": "low",
+          "displayName": "Low"
+        },
+        {
+          "id": "medium",
+          "displayName": "Medium"
+        },
+        {
+          "id": "high",
+          "displayName": "High"
+        },
+        {
+          "id": "xhigh",
+          "displayName": "XHigh"
+        },
+        {
+          "id": "max",
+          "displayName": "Max"
+        }
+      ],
+      "compat": {
+        "cumulativeStream": false,
+        "supportsStreamUsage": true,
+        "nativeReasoning": true,
+        "splitReasoning": true,
+        "replayReasoningContent": true,
+        "thinkTagFallback": false,
+        "parallelToolCalls": false,
+        "strictSchema": false,
+        "preservesReasoningAcrossTurns": true,
+        "protocol": "openAiCompatible",
+        "reasoningEncoding": "effort",
+        "clearThinking": false,
+        "defaultThinking": false
+      },
+      "vision": {
+        "maxRequestImages": 20,
+        "maxRequestImageBytes": 10485760,
+        "reservedTokensPerImage": 4096,
+        "imageTokenBudgetPolicy": "Application admission estimate of 4096 tokens per image after normalization, not a provider token ceiling; actual usage varies with image size and detail. MiniMax limits each image to 10 MiB; the 20-image limit is an application safety limit."
+      }
+    }
+  },
+  {
+    "provider": {
+      "id": "fixture",
       "profile": "anthropic",
       "kind": "anthropicMessages",
       "baseUrl": "https://proxy.example/v1",

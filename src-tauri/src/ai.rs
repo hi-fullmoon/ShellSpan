@@ -133,9 +133,6 @@ pub(crate) async fn ai_list_models(
     provider: AiProviderConfig,
 ) -> Result<Vec<crate::llm::discovery::DiscoveredModel>, String> {
     validate_provider_config(&provider, false)?;
-    if let Some(models) = crate::llm::discovery::catalog_models(&provider)? {
-        return Ok(models);
-    }
     let temporary = provider
         .api_key
         .as_deref()
@@ -148,7 +145,11 @@ pub(crate) async fn ai_list_models(
         let snapshot = runtime.routes.snapshot()?;
         match snapshot.routes.iter().find(|route| route.id == provider.id) {
             Some(route) => runtime.routes.credential(route)?,
-            None if provider.requires_api_key => return Err("MISSING_CREDENTIAL".into()),
+            None if provider.requires_api_key
+                && crate::llm::discovery::catalog_models(&provider)?.is_none() =>
+            {
+                return Err("MISSING_CREDENTIAL".into());
+            }
             None => None,
         }
     };

@@ -1029,6 +1029,31 @@
           "imageInput": "unsupported",
           "reasoning": []
         },
+        "MiniMax-M3.1-Flash": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 131072,
+          "toolCalling": "supported",
+          "textInput": "supported",
+          "imageInput": "supported",
+          "reasoning": [
+            { "id": "low", "displayName": "Low" },
+            { "id": "medium", "displayName": "Medium" },
+            { "id": "high", "displayName": "High" },
+            { "id": "xhigh", "displayName": "XHigh" },
+            { "id": "max", "displayName": "Max" }
+          ],
+          "compat": {
+            "reasoningEncoding": "effort",
+            "cumulativeStream": false,
+            "thinkTagFallback": false
+          },
+          "vision": {
+            "maxRequestImages": 20,
+            "maxRequestImageBytes": 10485760,
+            "reservedTokensPerImage": 4096,
+            "imageTokenBudgetPolicy": "Application admission estimate of 4096 tokens per image after normalization, not a provider token ceiling; actual usage varies with image size and detail. MiniMax limits each image to 10 MiB; the 20-image limit is an application safety limit."
+          }
+        },
         "MiniMax-M3": {
           "contextWindow": 1000000,
           "maxOutputTokens": 131072,

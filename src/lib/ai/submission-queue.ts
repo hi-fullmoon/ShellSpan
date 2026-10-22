@@ -15,6 +15,7 @@ export class AiSubmissionQueue {
     paused?: boolean;
     started?: () => void;
     observe?: ObserveAdmission;
+    reconciled?: (receipt: AiSubmitReceipt) => void;
     resolve: (receipt: AiSubmitReceipt) => void;
     reject: (error: unknown) => void;
   }[] = [];
@@ -30,7 +31,8 @@ export class AiSubmissionQueue {
     this.sessionId = sessionId;
   }
 
-  enqueue(id: string, prepare: () => Promise<AiSubmitInput<'agent'>>, started?: () => void, observe?: ObserveAdmission): Promise<AiSubmitReceipt> {
+  enqueue(id: string, prepare: () => Promise<AiSubmitInput<'agent'>>, started?: () => void, observe?: ObserveAdmission,
+    reconciled?: (receipt: AiSubmitReceipt) => void): Promise<AiSubmitReceipt> {
     return new Promise((resolve, reject) => {
       const previous = this.entries.find(entry => entry.id === id);
       if (previous) {
@@ -43,12 +45,13 @@ export class AiSubmissionQueue {
         previous.reject = reject;
         previous.started = started;
         previous.observe = observe;
+        previous.reconciled = reconciled;
         this.stopObserving?.();
         this.stopObserving = undefined;
         if (!previous.input) previous.prepare = prepare;
         this.blocked = false;
       } else {
-        this.entries.push({ id, prepare, resolve, reject, started, observe });
+        this.entries.push({ id, prepare, resolve, reject, started, observe, reconciled });
       }
       void this.drain();
     });
@@ -78,6 +81,7 @@ export class AiSubmissionQueue {
         this.acknowledging = false;
         head.resolve(receipt);
         queueMicrotask(() => { void this.drain(); });
+        head.reconciled?.(receipt);
       }
     })();
   }
@@ -103,10 +107,20 @@ export class AiSubmissionQueue {
           }
           const input = { ...entry.input, paused: entry.paused || entry.input.paused };
           let admissionTimer: ReturnType<typeof setTimeout> | undefined;
+          let timedOut = false;
+          const admission = this.submit(this.sessionId, input).then(receipt => {
+            // Promise.race does not cancel the native request. Its eventual
+            // durable receipt must release the queue even without a stream event.
+            if (timedOut) this.acknowledge(receipt);
+            return receipt;
+          });
           const receipt = await Promise.race([
-            this.submit(this.sessionId, input),
+            admission,
             new Promise<AiSubmitReceipt>((_, reject) => {
-              admissionTimer = setTimeout(() => reject(new AiAdmissionUnconfirmedError()), 15_000);
+              admissionTimer = setTimeout(() => {
+                timedOut = true;
+                reject(new AiAdmissionUnconfirmedError());
+              }, 15_000);
             }),
           ]).finally(() => clearTimeout(admissionTimer));
           this.sessionId = receipt.sessionId;

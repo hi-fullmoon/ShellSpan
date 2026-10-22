@@ -65,7 +65,6 @@ import {
   useAiSettingsStore,
 } from '@/stores/aiSettingsStore';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
-import { useToastStore } from '@/stores/toastStore';
 import type {
   AiConnectionTestResult,
   AiProviderConnectionConfig,
@@ -107,6 +106,7 @@ type Feedback = {
   kind: 'error' | 'success';
   message: string;
   labelKey?: LocaleKey;
+  label?: string;
 };
 
 const PRESET_OPTIONS = [...AI_PROVIDER_PRESETS];
@@ -503,6 +503,7 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
       if (modelRequestGeneration.current !== requestGeneration) return undefined;
       setFeedback({
         kind: 'success',
+        label: t('settings.ai.modelsLoaded', { count: found.length }),
         message: t('settings.ai.connectionSuccess', { count: found.length }),
       });
       return found;
@@ -735,17 +736,29 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
       const result = await invokeTestAiConnection(config, controller.signal);
       if (controller.signal.aborted || connectionTest.current !== controller) return;
       if (result.type === 'success') {
-        useToastStore.getState().addToast(t('settings.ai.testConnectionSuccess', { elapsed: result.elapsedMs }), 'success');
+        setFeedback({
+          kind: 'success',
+          labelKey: 'settings.ai.connectionTestPassed',
+          message: t('settings.ai.testConnectionSuccess', { elapsed: result.elapsedMs }),
+        });
       } else if (result.kind !== 'cancelled') {
         const key = connectionTestFailureKey(result, config.profile);
         const reason = t(key, { model: config.model });
-        useToastStore.getState().addToast(result.status
-          ? t('settings.ai.testConnectionHttpError', { status: result.status, reason })
-          : reason, 'error', 6000);
+        setFeedback({
+          kind: 'error',
+          labelKey: 'settings.ai.connectionTestFailed',
+          message: result.status
+            ? t('settings.ai.testConnectionHttpError', { status: result.status, reason })
+            : reason,
+        });
       }
     } catch {
       if (!controller.signal.aborted && connectionTest.current === controller) {
-        useToastStore.getState().addToast(t('settings.ai.testConnectionConfigError'), 'error', 6000);
+        setFeedback({
+          kind: 'error',
+          labelKey: 'settings.ai.connectionTestFailed',
+          message: t('settings.ai.testConnectionConfigError'),
+        });
       }
     } finally {
       if (connectionTest.current === controller) {
@@ -1059,10 +1072,44 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
           <CompactDialogFooter className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1 sm:gap-2">
             <div className="flex min-w-0 flex-1 items-center gap-1 sm:gap-2">
               {onDelete && (
-                <Button type="button" variant="destructiveOutline" size="xs" className="shrink-0" onClick={onDelete}>
-                  {t('settings.ai.deleteProvider')}
+                <Button type="button" variant="destructiveOutline" size="xs" className="min-w-0" onClick={onDelete}>
+                  <span className="truncate">{t('settings.ai.deleteProvider')}</span>
                 </Button>
               )}
+            {feedback && (
+              <div
+                role={feedback.kind === 'error' ? 'alert' : 'status'}
+                aria-atomic="true"
+                className={cn(
+                  'flex h-6 min-w-5 items-center gap-1 overflow-hidden text-xs font-medium leading-none',
+                  feedback.kind === 'error' ? 'text-destructive' : 'text-app-success',
+                )}
+              >
+                <span className="truncate">
+                  {feedback.label ?? t(feedback.labelKey ?? (feedback.kind === 'error' ? 'settings.ai.connectionFailed' : 'settings.ai.ready'))}
+                </span>
+                <TooltipProvider delay={250}>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          type="button"
+                          variant="plain"
+                          size="xs"
+                          className="size-4 shrink-0 p-0"
+                          aria-label={`${feedback.label ?? t(feedback.labelKey ?? (feedback.kind === 'error' ? 'settings.ai.connectionFailed' : 'settings.ai.ready'))}: ${feedback.message}`}
+                        />
+                      }
+                    >
+                      {feedback.kind === 'error' ? <CircleAlertIcon /> : <CheckCircle2Icon />}
+                    </TooltipTrigger>
+                    <TooltipContent align="start" className="max-w-sm break-words">
+                      {feedback.message}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+            )}
             </div>
             <div className="flex shrink-0 justify-end gap-1 sm:gap-2">
               <Button type="button" variant="outline" size="sm" onClick={() => handleOpenChange(false)}>
@@ -1084,40 +1131,6 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
                 {t('common.save')}
               </Button>
             </div>
-            {feedback && (
-              <div
-                role={feedback.kind === 'error' ? 'alert' : 'status'}
-                aria-atomic="true"
-                className={cn(
-                  'col-span-2 flex h-6 min-w-0 items-center gap-0.5 text-xs font-medium leading-none',
-                  feedback.kind === 'error' ? 'text-destructive' : 'text-app-success',
-                )}
-              >
-                <span className="truncate">
-                  {t(feedback.labelKey ?? (feedback.kind === 'error' ? 'settings.ai.connectionFailed' : 'settings.ai.ready'))}
-                </span>
-                <TooltipProvider delay={250}>
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <Button
-                          type="button"
-                          variant="plain"
-                          size="xs"
-                          className="size-4 shrink-0 p-0"
-                          aria-label={`${t(feedback.labelKey ?? (feedback.kind === 'error' ? 'settings.ai.connectionFailed' : 'settings.ai.ready'))}: ${feedback.message}`}
-                        />
-                      }
-                    >
-                      {feedback.kind === 'error' ? <CircleAlertIcon /> : <CheckCircle2Icon />}
-                    </TooltipTrigger>
-                    <TooltipContent align="start" className="max-w-sm break-words">
-                      {feedback.message}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
-            )}
           </CompactDialogFooter>
         </form>
       </CompactDialogContent>

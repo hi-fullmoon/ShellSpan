@@ -685,12 +685,6 @@ export function AiWorkspaceRoot({
                       : 'ai.workspace.tokenBudget.description')}</AlertDescription>
                   </Alert>
                 )}
-                {activeComposerState?.phase === 'stopping' && (
-                  <Alert variant="info" size="sm" role="status">
-                    <InfoIcon aria-hidden="true" />
-                    <AlertDescription>{t('ai.workspace.stopping')}</AlertDescription>
-                  </Alert>
-                )}
                 {surfaceMode === 'agent' && activeComposerState?.phase === 'waitingApproval' && !view?.pendingApproval && (
                   <Alert variant="info" size="sm">
                     <InfoIcon aria-hidden="true" />

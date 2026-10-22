@@ -1,8 +1,37 @@
 import { expect, it } from 'vitest';
 import { createAgentSessionAdapter } from '../agent-session-adapter';
 import { AiSubmissionQueue } from '../submission-queue';
-import type { AiSubmitInput } from '../session-adapter';
-import { AiPreparationTimeoutError } from '../session-error';
+import type { AiSubmitInput, AiSubmitReceipt } from '../session-adapter';
+import { AiAdmissionUnconfirmedError, AiPreparationTimeoutError } from '../session-error';
+import { createAiComposerState, reduceAiComposer } from '../composer-machine';
+
+it('reconciles a late admission receipt and releases queued preparation without resending', async () => {
+  let release!: (receipt: AiSubmitReceipt) => void;
+  const admission = new Promise<AiSubmitReceipt>(resolve => { release = resolve; });
+  let sends = 0;
+  let state = createAiComposerState({ sessionId: 'conversation', draft: 'original' });
+  state = reduceAiComposer(state, { type: 'submit.requested', gesture: 'keyboard', accelerated: false,
+    clientOperationId: 'original', now: 1, hasProvider: true, canCreateSession: true }).state;
+  const input: AiSubmitInput<'agent'> = { clientOperationId: 'original', content: 'original', mode: 'nextTurn',
+    provider: { id: 'local', kind: 'ollama', profile: 'ollama', baseUrl: 'http://127.0.0.1:11434', model: 'local', requiresApiKey: false } };
+  const queue = new AiSubmissionQueue('conversation', () => { sends += 1; return admission; });
+  const first = queue.enqueue('original', async () => input, undefined, undefined, receipt => {
+    state = reduceAiComposer(state, { type: 'submit.committed', clientOperationId: receipt.clientOperationId,
+      sessionId: receipt.sessionId }).state;
+  });
+  const later = queue.enqueue('later', async () => { throw new Error('Later preparation reached'); });
+  const laterFailure = expect(later).rejects.toThrow('Later preparation reached');
+  await expect(first).rejects.toBeInstanceOf(AiAdmissionUnconfirmedError);
+  state = reduceAiComposer(state, { type: 'submit.failed', clientOperationId: 'original',
+    error: { kind: 'unknown', message: 'unconfirmed', retryable: true, deliveryUnknown: true } }).state;
+  expect(state.failedDrafts).toHaveLength(1);
+  release({ sessionId: 'conversation', clientOperationId: 'original', mode: 'nextTurn' });
+  await laterFailure;
+  expect(sends).toBe(1);
+  expect(state.failedDrafts).toEqual([]);
+  expect(state.pendingSubmissions).toEqual([]);
+  expect(state.phase).toBe('idle');
+}, 20_000);
 
 it.concurrent.each(['resolve', 'reject'] as const)('times out preparation and ignores its late %s before retrying the same input', async lateResult => {
   const adapter = createAgentSessionAdapter();

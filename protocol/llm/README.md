@@ -54,6 +54,17 @@ Custom route `models` and `modelOverrides` remain full `ModelDefinition` values.
 
 The `openrouter` profile intentionally has no static models. Its catalog changes independently of ShellSpan releases, so the provider editor reads `GET /api/v1/models`, excludes entries carrying an `expiration_date`, retains each exact model slug, and adopts OpenRouter's capacities, tool parameters, reasoning-effort support, and input modalities into a complete persisted definition.
 
+## Model discovery
+
+Model discovery requests the configured endpoint (including curated providers)
+and merges its exact IDs with the built-in catalog. Built-in definitions win for
+duplicate IDs so an ID-only response cannot erase reviewed capabilities. New
+IDs retain reported capacities without inheriting another model's capabilities.
+An empty listing preserves built-ins. Network, HTTP, parsing and 15-second
+timeout failures fall back to built-ins when available; routes without a built-in
+catalog return the error. Discovery only produces candidates: manual addition,
+explicit adoption and saving remain unchanged.
+
 ## Chat Completions reasoning replay
 
 Returned `reasoning_details` are preserved even when the route does not request
@@ -80,3 +91,22 @@ the payload. Protocol failures remain non-retryable and never replay tools.
 
 References: [MiniMax streaming and tool-use contract](https://platform.minimax.io/docs/api-reference/text-openai-api)
 and [OpenRouter reasoning details](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens).
+
+### MiniMax M3.1 Flash catalog
+
+The exact API ID is `MiniMax-M3.1-Flash` (case-sensitive). It supports a
+1,000,000-token context, text/image input and tool calls. The catalog keeps the
+official recommended 131,072-token output budget; the provider hard ceiling is
+524,288 tokens, including reasoning. Video input is supported by the provider
+but is not advertised by ShellSpan's image-only attachment contract.
+
+Thinking cannot be disabled. The OpenAI-compatible route uses `reasoning_effort`
+with `low`, `medium`, `high`, `xhigh`, or `max`; omission uses the provider's `max`
+default. Reasoning is returned separately and text stream chunks are incremental.
+Image admission retains an application estimate of 4096 tokens per image, a
+20-image application limit and a 10 MiB total image budget; token usage varies.
+
+Verified on 2026-10-21 against the official
+[model guide](https://platform.minimax.cn/docs/guides/text-generation),
+[OpenAI SDK guide](https://platform.minimax.cn/docs/api-reference/text-openai-api)
+and [Chat Completions reference](https://platform.minimax.cn/docs/api-reference/text-chat-openai).

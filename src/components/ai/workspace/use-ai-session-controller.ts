@@ -903,7 +903,19 @@ export function useAiSessionController({
               }
             });
           })
-        ));
+        ), receipt => {
+          sessionSubmissionQueues.current.set(receipt.sessionId, queue);
+          settle({ type: 'submit.committed', clientOperationId: payload.clientOperationId, sessionId: receipt.sessionId });
+          if (submissionInputs.current.get(payload.clientOperationId)?.images?.length) {
+            void acknowledgeDetachedImageDraft(payload.clientOperationId).then(() => {
+              submissionInputs.current.delete(payload.clientOperationId);
+            }).catch(() => undefined);
+          }
+          if (!isCurrent()) return;
+          updateOptimistic(current => current.filter(item => item.clientOperationId !== payload.clientOperationId));
+          setOpenedSessionId(receipt.sessionId);
+          adoptDraft(receipt.sessionId);
+        });
         window.clearTimeout(confirming);
         sessionSubmissionQueues.current.set(receipt.sessionId, queue);
         settle({ type: 'submit.accepted', receipt });

@@ -457,14 +457,16 @@ describe('ProviderSetupDialog', () => {
     const dialog = screen.getByRole('dialog', { name: 'settings.ai.addProviderTitle' });
     const footer = dialog.querySelector<HTMLElement>('[data-slot="dialog-footer"]');
     const scrollArea = dialog.querySelector<HTMLElement>('[data-slot="provider-dialog-scroll-area"]');
-    expect(feedback).toHaveTextContent('settings.ai.ready');
+    expect(feedback).toHaveTextContent('settings.ai.modelsLoaded:2');
     expect(feedback).not.toHaveTextContent('settings.ai.connectionSuccess:2');
     expect(feedback).toHaveClass('h-6', 'items-center', 'leading-none');
     expect(footer).toContainElement(feedback);
+    expect(feedback.parentElement?.parentElement).toBe(footer);
+    expect(feedback).not.toHaveClass('col-span-2');
     expect(scrollArea).not.toContainElement(feedback);
 
     const detailsButton = within(feedback as HTMLElement).getByRole('button', {
-      name: /settings\.ai\.ready: settings\.ai\.connectionSuccess:2/,
+      name: /settings\.ai\.modelsLoaded:2: settings\.ai\.connectionSuccess:2/,
     });
     expect(detailsButton).toHaveClass('size-4', 'shrink-0', 'p-0');
     await user.hover(detailsButton);

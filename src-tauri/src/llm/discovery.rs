@@ -150,11 +150,8 @@ fn discovered(
 pub(crate) fn catalog_models(
     provider: &AiProviderConfig,
 ) -> Result<Option<Vec<DiscoveredModel>>, String> {
-    // Curated cloud profiles already have a complete capability catalog. Expose
-    // that catalog to configuration surfaces instead of replacing it with a
-    // /models response that normally carries IDs only.
-    // Ollama and generic gateways remain endpoint-discovered because their
-    // installed models are deployment-specific.
+    // Built-in declarations supply capabilities for known IDs and a fallback
+    // when the endpoint cannot provide a listing. They do not replace discovery.
     if provider.kind != AiProviderKind::Ollama && provider.profile != "generic" {
         let models = catalog::preset_models(&provider.profile, provider.kind)?;
         if !models.is_empty() {
@@ -179,10 +176,47 @@ pub(crate) async fn list_models(
     provider: &AiProviderConfig,
     api_key: Option<String>,
 ) -> Result<Vec<DiscoveredModel>, String> {
-    if let Some(models) = catalog_models(provider)? {
-        return Ok(models);
+    let builtin = catalog_models(provider)?.unwrap_or_default();
+    let remote = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        list_endpoint_models(provider, api_key),
+    )
+    .await
+    .unwrap_or_else(|_| Err("MODEL_DISCOVERY_TIMEOUT".into()));
+    match remote {
+        Ok(remote) => {
+            log::info!(
+                "Model discovery: received {} endpoint candidates; merging {} built-in candidates",
+                remote.len(),
+                builtin.len()
+            );
+            Ok(merge_models(builtin, remote))
+        }
+        Err(_) if !builtin.is_empty() => {
+            log::warn!(
+                "Model discovery endpoint failed; falling back to {} built-in candidates",
+                builtin.len()
+            );
+            Ok(builtin)
+        }
+        Err(error) => Err(error),
     }
-    list_endpoint_models(provider, api_key).await
+}
+
+fn merge_models(
+    builtin: Vec<DiscoveredModel>,
+    remote: Vec<DiscoveredModel>,
+) -> Vec<DiscoveredModel> {
+    let mut models: BTreeMap<_, _> = remote
+        .into_iter()
+        .map(|model| (model.id.clone(), model))
+        .collect();
+    // An ID-only listing cannot override reviewed capacities or capabilities.
+    // New IDs retain only the metadata actually supplied by the endpoint.
+    for model in builtin {
+        models.insert(model.id.clone(), model);
+    }
+    models.into_values().collect()
 }
 
 async fn list_endpoint_models(
@@ -219,24 +253,19 @@ async fn list_endpoint_models(
         }
     };
     let value = checked_json(response).await?;
-    let models = match provider.kind {
-        AiProviderKind::Ollama => value
-            .get("models")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|item| discovered(provider, item, "name"))
-            .collect::<Vec<_>>(),
+    let (field, id_field) = match provider.kind {
+        AiProviderKind::Ollama => ("models", "name"),
         AiProviderKind::OpenAi
         | AiProviderKind::OpenAiCompatible
-        | AiProviderKind::AnthropicMessages => value
-            .get("data")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|item| discovered(provider, item, "id"))
-            .collect::<Vec<_>>(),
+        | AiProviderKind::AnthropicMessages => ("data", "id"),
     };
+    let entries = value
+        .get(field)
+        .and_then(Value::as_array)
+        .ok_or_else(|| "MODEL_DISCOVERY_INVALID_RESPONSE: missing model array".to_string())?;
+    let models = entries
+        .iter()
+        .filter_map(|item| discovered(provider, item, id_field));
     let mut unique = BTreeMap::new();
     for model in models {
         unique.entry(model.id.clone()).or_insert(model);
@@ -252,6 +281,84 @@ mod tests {
         net::{Ipv4Addr, TcpListener},
         thread,
     };
+
+    fn minimax_provider() -> AiProviderConfig {
+        serde_json::from_value(serde_json::json!({
+            "id": "minimax", "profile": "minimax", "kind": "openAiCompatible",
+            "baseUrl": "https://api.minimaxi.com/v1", "model": "MiniMax-M3",
+            "requiresApiKey": false
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn merging_preserves_reviewed_capabilities_and_new_id_metadata() {
+        let provider = minimax_provider();
+        let mut builtin = catalog_models(&provider).unwrap().unwrap();
+        let flash = builtin.remove(
+            builtin
+                .iter()
+                .position(|m| m.id == "MiniMax-M3.1-Flash")
+                .unwrap(),
+        );
+        let m3 = builtin
+            .iter()
+            .find(|m| m.id == "MiniMax-M3")
+            .unwrap()
+            .clone();
+        let remote_m3 =
+            discovered(&provider, &serde_json::json!({"id": "MiniMax-M3"}), "id").unwrap();
+        let remote_flash = discovered(
+            &provider,
+            &serde_json::json!({
+                "id": flash.id, "context_window": flash.context_window,
+                "max_output_tokens": flash.max_output_tokens
+            }),
+            "id",
+        )
+        .unwrap();
+        let merged = merge_models(builtin.clone(), vec![remote_m3, remote_flash.clone()]);
+        assert_eq!(merged.len(), builtin.len() + 1);
+        assert_eq!(merged.iter().find(|m| m.id == m3.id), Some(&m3));
+        assert_eq!(
+            merged.iter().find(|m| m.id == flash.id),
+            Some(&remote_flash)
+        );
+        assert!(remote_flash.definition.is_none());
+        assert_eq!(merge_models(builtin.clone(), vec![]), builtin);
+    }
+
+    #[tokio::test]
+    async fn refused_endpoint_falls_back_only_when_a_builtin_catalog_exists() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        let mut provider = minimax_provider();
+        provider.base_url = format!("http://{address}/v1");
+        let builtin = catalog_models(&provider).unwrap().unwrap();
+        assert_eq!(list_models(&provider, None).await.unwrap(), builtin);
+        provider.profile = "generic".into();
+        assert!(list_models(&provider, None).await.is_err());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires external access to OpenRouter's public model listing"]
+    async fn live_public_gateway_merges_remote_models_with_curated_profile() {
+        let mut provider = minimax_provider();
+        provider.base_url = "https://openrouter.ai/api/v1".into();
+        let builtin = catalog_models(&provider).unwrap().unwrap();
+        let models = list_models(&provider, None).await.unwrap();
+        assert!(
+            models.len() > builtin.len(),
+            "endpoint models must extend the catalog"
+        );
+        for model in builtin {
+            assert_eq!(models.iter().find(|m| m.id == model.id), Some(&model));
+        }
+        assert!(models
+            .iter()
+            .any(|m| m.id.contains('/') && m.definition.is_none()));
+    }
 
     #[test]
     fn curated_cloud_discovery_uses_the_capability_catalog() {

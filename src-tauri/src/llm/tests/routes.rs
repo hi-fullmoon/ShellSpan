@@ -23,6 +23,7 @@
         let db = Database::open(&dir.path().join("db.sqlite")).unwrap();
         let mut models =
             catalog::preset_models("minimax", AiProviderKind::OpenAiCompatible).unwrap();
+        models.remove("MiniMax-M3.1-Flash");
         let old_m3 = models.get_mut("MiniMax-M3").unwrap();
         old_m3.context_window = 204_800;
         old_m3.max_output_tokens = 4_096;
