@@ -700,7 +700,7 @@ export function AiWorkspaceRoot({
                   </Alert>
                 )}
                 {(agentUnavailableReason || onContinueOnReconnectedTerminal) && (
-                  <Alert id={availabilityHintId} variant={terminalConflict ? 'warning' : 'info'} size="sm" role="status" aria-label={t('agent.availability.title')} className="[&:has(button)>svg]:translate-y-1">
+                  <Alert id={availabilityHintId} variant={terminalConflict ? 'warning' : 'info'} size="sm" role="status" aria-label={t('agent.availability.title')} className={terminalConflict ? undefined : '[&:not(:has(button))>svg]:-translate-y-px [&:has(button)>svg]:translate-y-1'}>
                     {terminalConflict ? <TriangleAlertIcon aria-hidden="true" /> : <InfoIcon aria-hidden="true" />}
                     <AlertDescription className="flex min-w-0 flex-wrap items-start gap-1 break-words [&:has(>button)>span]:py-1">
                       <span className="min-w-0 flex-1 basis-48">{agentUnavailableReason

@@ -99,6 +99,7 @@ it('warns and blocks pointer and keyboard submission during terminal contention,
   const warning = await screen.findByRole('status', { name: 'Agent is unavailable' });
   expect(warning).toHaveTextContent('Another Agent owns the terminal');
   expect(warning).toHaveClass('text-app-warning');
+  expect(warning).not.toHaveClass('[&:not(:has(button))>svg]:-translate-y-px');
   const send = container.querySelector<HTMLButtonElement>('.ai-composer-primary')!;
   expect(send).toBeDisabled();
   await user.click(send);

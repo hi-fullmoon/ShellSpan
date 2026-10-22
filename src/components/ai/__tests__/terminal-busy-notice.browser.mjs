@@ -4,7 +4,7 @@ import { chromium, webkit } from 'playwright';
 const browser = await (process.env.SHELLSPAN_TEST_ENGINE === 'webkit' ? webkit : chromium).launch();
 try {
   for (const { locale, action, longText } of ['zh-CN', 'en-US'].flatMap(locale =>
-    ['reconnect', 'continue', 'settings'].flatMap(action =>
+    ['reconnect', 'continue', 'settings', 'none'].flatMap(action =>
       [false, true].map(longText => ({ locale, action, longText }))))) {
   const page = await browser.newPage();
   const errors = [];
@@ -96,8 +96,20 @@ try {
         `All composer notices share a narrower width at ${width}px`);
       assert.ok(Math.abs(box.center - noticeWidths.inputCenter) < 1, 'Notices stay centered above the input');
     }
-    const availability = page.getByRole('status').filter({ has: page.getByRole('button', { name: labels.action, exact: true }) });
-    for (const target of [notice, availability]) {
+    const availability = statusNotices.getByRole('status', { name: locale === 'zh-CN' ? 'Agent 当前不可用' : 'Agent is unavailable' });
+    if (action === 'none') {
+      const geometry = await availability.evaluate(el => {
+        const icon = el.querySelector(':scope > svg').getBoundingClientRect();
+        const text = el.querySelector('[data-slot="alert-description"] > span');
+        const box = text.getBoundingClientRect();
+        return { offset: icon.y + icon.height / 2 - box.y - parseFloat(getComputedStyle(text).lineHeight) / 2,
+          gap: box.x - icon.right };
+      });
+      assert.equal(geometry.offset, -2, `Availability icon keeps its optical alignment at ${width}px`);
+      assert.equal(geometry.gap, 4);
+      await availability.screenshot({ path: `/tmp/shellspan-availability-${locale}-${width}${longText ? '-long' : ''}.png` });
+    }
+    for (const target of action === 'none' ? [notice] : [notice, availability]) {
       assert.equal(await target.locator('button svg').count(), 0, 'Notice actions must remain text-only');
       const geometry = await target.evaluate(el => {
         const box = el.getBoundingClientRect();
@@ -135,6 +147,10 @@ try {
       }
     }
     await page.screenshot({ path: `/tmp/shellspan-terminal-action-notices-${locale}-${action}-${width}${longText ? '-long' : ''}.png` });
+  }
+  if (action === 'none') {
+    await page.close();
+    continue;
   }
   await page.getByRole('button', { name: labels.action, exact: true }).focus();
   await page.keyboard.press('Enter');
