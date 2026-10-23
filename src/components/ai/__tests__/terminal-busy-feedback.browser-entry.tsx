@@ -25,6 +25,7 @@ export async function initialize(locale: Locale) {
     blocked: t('agent.executionSurface.v1.busyComposerHint'),
     direct: t('agent.executionSurface.v1.switchDirect'),
     unavailable: t('agent.executionSurface.v1.unavailableDescription'),
+    timeout: t('agent.executionSurface.v1.initializationTimeoutDescription'),
   };
 }
 

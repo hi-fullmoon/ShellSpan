@@ -86,6 +86,24 @@ try {
     assert.equal(await notice.count(), 0, 'Reconnecting keeps ordinary activity silent');
     await page.waitForTimeout(400);
     assert.equal(await notice.count(), 0, 'Reconnected terminal activity stays silent');
+    await show({ state: 'initializing' });
+    const initializingBox = await input.boundingBox();
+    assert.equal(await notice.count(), 0, 'Normal initialization must remain silent');
+    await page.waitForTimeout(1100);
+    assert.deepEqual(await input.boundingBox(), initializingBox, 'Initialization must not move the composer');
+    await notice.waitFor({ timeout: 16000 });
+    assert.ok((await notice.textContent()).includes(labels.timeout), 'Timed out initialization offers actionable feedback');
+    for (const width of [960, 320]) {
+      await page.setViewportSize({ width, height: 520 });
+      assert.equal(await notice.evaluate(el => el.scrollWidth <= el.clientWidth), true);
+      await page.screenshot({ path: `/tmp/shellspan-initialization-timeout-${locale}-${width}.png` });
+    }
+    await notice.getByRole('button', { name: labels.direct, exact: true }).click();
+    assert.equal(await page.evaluate(() => document.body.dataset.switched), 'true');
+    await show({ state: 'ready' });
+    assert.equal(await notice.count(), 0, 'Readiness clears initialization timeout feedback');
+    await show({ state: 'initializing', generation: 3 });
+    assert.equal(await notice.count(), 0, 'A new connection starts without timeout feedback');
     await show({ state: 'unavailable' });
     assert.ok((await notice.textContent()).includes(labels.unavailable), 'Unavailable state is distinct and immediate');
     const showContention = blocked => page.evaluate(async blocked => {

@@ -2078,6 +2078,7 @@ export default {
   'agent.executionSurface.v1.state.unavailable': '不可用',
   'agent.executionSurface.v1.state.directFallback': '直接执行后备',
   'agent.executionSurface.v1.initializingDescription': '真实终端命令能力正在初始化，请暂时使用直接执行。',
+  'agent.executionSurface.v1.initializationTimeoutDescription': '终端初始化超时，可稍后重试，或切换为直接执行。',
   'agent.executionSurface.v1.readyDescription': '在当前真实终端中可视运行，并使用协作式 Shell 生命周期；安全敏感或不受信代码请使用直接执行。',
   'agent.executionSurface.v1.busyDescription': '当前终端正在运行前台程序；请等待返回命令提示符，或改用直接执行。',
   'agent.executionSurface.v1.busyComposerHint': '终端正忙，AI 暂时无法执行命令。请等待返回命令提示符，或切换直接执行。',

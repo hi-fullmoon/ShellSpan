@@ -100,14 +100,38 @@ describe('terminal busy feedback', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
-  it('keeps unavailable and initializing feedback immediate and hides ordinary activity', async () => {
+  it('shows failure feedback immediately but keeps normal initialization silent', async () => {
     const { rerender } = render(<AgentTerminalBusyNotice disabled={false} />);
     await elapse(1100);
     rerender(<AgentTerminalBusyNotice disabled={false} state="unavailable" />);
     expect(screen.getByRole('status')).toHaveTextContent(t('agent.executionSurface.v1.unavailableDescription'));
     rerender(<AgentTerminalBusyNotice disabled={false} state="initializing" />);
-    expect(screen.getByRole('status')).toHaveTextContent(t('agent.executionSurface.v1.initializingDescription'));
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
     rerender(<AgentTerminalBusyNotice disabled={false} />);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('offers Direct after initialization times out and resets for a new connection', async () => {
+    let switches = 0;
+    const { rerender } = render(<StrictMode><AgentTerminalBusyNotice key="connection-1" disabled={false}
+      state="initializing" onSwitchDirect={() => { switches++; }} /></StrictMode>);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    await elapse(15_100);
+    expect(screen.getByRole('status')).toHaveTextContent(t('agent.executionSurface.v1.initializationTimeoutDescription'));
+    await userEvent.click(screen.getByRole('button', { name: t('agent.executionSurface.v1.switchDirect') }));
+    expect(switches).toBe(1);
+    rerender(<AgentTerminalBusyNotice key="connection-2" disabled={false} state="initializing" />);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    rerender(<AgentTerminalBusyNotice key="connection-2" disabled={false} state="unavailable" />);
+    expect(screen.getByRole('status')).toHaveTextContent(t('agent.executionSurface.v1.unavailableDescription'));
+    rerender(<AgentTerminalBusyNotice key="connection-2" disabled={false} state="initializing" />);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  }, 20_000);
+
+  it('clears the initialization timer when the terminal becomes ready', async () => {
+    const { rerender } = render(<AgentTerminalBusyNotice disabled={false} state="initializing" />);
+    await elapse(100);
+    rerender(<>{null}</>);
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 });
