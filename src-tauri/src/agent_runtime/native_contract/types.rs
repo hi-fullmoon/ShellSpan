@@ -206,6 +206,8 @@ pub struct TerminalExecuteArgumentsNative {
     pub command: String,
     pub explanation: String,
     #[serde(default)]
+    pub background: bool,
+    #[serde(default)]
     pub timeout_ms: Option<u64>,
 }
 

@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import TerminalWorkspace from '../index';
 import { terminalRegistry } from '../registry/terminal-registry';
 import { agentTerminalLeaseState } from '../agent-terminal-lease-state';
@@ -20,8 +21,11 @@ import {
   invokeCreateAgentRuntimeSession, invokeStartAgentRuntime, invokeAgentRuntimeFollowup,
   invokeGetAgentRuntimeSession, invokeCancelAgentRuntime, invokeArchiveAgentRuntimeSession,
   invokeDeleteAgentRuntimeSession, invokeGetAgentRuntimeArtifact, listenToAgentRuntimeSession, listenToAgentTerminalLease,
+  invokeGetCommittedAgentRuntimeEvents,
 } from '@/lib/ipc/tauri';
+import { createAgentSessionAdapter } from '@/lib/ai/agent-session-adapter';
 import '@/styles/base.css';
+import type { AgentSessionEvent } from '@/types/agent-session';
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
@@ -51,7 +55,7 @@ function draftEditor(focus: boolean): HTMLElement {
 function draftText(focus: boolean): string {
   return draftEditor(focus).innerText.trimEnd();
 }
-async function setDraft(focus: boolean, text: string) {
+async function setDraft(focus: boolean, text: string, nativeKeyboard = false) {
   const editor = draftEditor(focus);
   editor.focus();
   const range = document.createRange();
@@ -60,8 +64,29 @@ async function setDraft(focus: boolean, text: string) {
   assert(selection, 'No browser text selection');
   selection.removeAllRanges();
   selection.addRange(range);
-  assert(document.execCommand('insertText', false, text), 'Native editor insertion failed');
-  await eventually(() => draftText(focus) === text, 'The production editor did not retain its draft');
+  let nativeInput: unknown;
+  if (nativeKeyboard) {
+    const response = await fetch(`/__native-composer-input/${new URL(location.href).searchParams.get('token')}`, {
+      method: 'POST', body: JSON.stringify({ text }),
+    });
+    const result = await response.text();
+    assert(response.ok, `Native user keyboard input failed: ${result}`);
+    nativeInput = JSON.parse(result);
+  } else assert(document.execCommand('insertText', false, text), 'Native editor insertion failed');
+  try {
+    await eventually(() => draftText(focus) === text, 'The production editor did not retain its draft');
+    if (nativeKeyboard) await fetch(`/__agent-stream-result/${new URL(location.href).searchParams.get('token')}`, {
+      method: 'POST', body: JSON.stringify({ progress: 'Captured actual native keyboard input and complete production draft.',
+        evidence: { composerInput: { expected: text, actual: draftText(focus), nativeInput } } }),
+    });
+  } catch {
+    throw new Error(`The production editor did not retain its draft: ${JSON.stringify({
+      expected: text, actual: draftText(focus), originalEditorConnected: editor.isConnected,
+      currentEditorIsOriginal: draftEditor(focus) === editor,
+      currentEditorFocused: document.activeElement === draftEditor(focus),
+      sessionId: workspaceRoot(focus)?.dataset.sessionId,
+    })}`);
+  }
 }
 function submitDraft(focus: boolean) {
   const button = workspaceRoot(focus)?.querySelector<HTMLButtonElement>('.ai-composer-primary');
@@ -92,13 +117,57 @@ async function verify() {
     return;
   }
   await initI18n(useAppStore.getState().locale);
+  await getCurrentWindow().show();
+  await getCurrentWindow().setFocus();
   document.documentElement.dataset.theme = 'light';
   const noModel = new URL(location.href).searchParams.get('noModel') === 'true';
   const selection = noModel ? null : (await invokeListAiRoutes()).defaultSelection;
   const root = createRoot(document.getElementById('root')!);
   const ids = [`agent-contention-${crypto.randomUUID()}`, `focus-agent-contention-${crypto.randomUUID()}`];
   const created: string[] = [];
+  const lifecycle: AgentSessionEvent[] = [];
+  const assertClosedAfterMetadataRefresh = async () => {
+    const adapter = createAgentSessionAdapter();
+    const refreshes: { sessionId: string; operation: string; status: string; ended: boolean }[] = [];
+    try {
+      for (const id of ids) {
+        for (const operation of ['skills', 'files']) {
+          try {
+            if (operation === 'skills') await adapter.listSkills?.(id);
+            else await adapter.listFileReferences?.(id, '', new AbortController().signal);
+          } catch { /* A closed source may reject discovery; it must stay ended. */ }
+          const snapshot = await invokeGetAgentRuntimeSession({ sessionId: id });
+          refreshes.push({ sessionId: id, operation, status: snapshot.status, ended: snapshot.ended });
+        }
+      }
+      const journals = await Promise.all(ids.map(sessionId => invokeGetCommittedAgentRuntimeEvents({ sessionId, limit: 100 })));
+      await fetch(`/__agent-stream-result/${new URL(location.href).searchParams.get('token')}`, {
+        method: 'POST', body: JSON.stringify({ progress: 'Captured read-only metadata refresh after real terminal close.',
+          evidence: { refreshes, lifecycle, journals: journals.map(page => page.events.filter(event => ['session/resumed', 'session/ended', 'agent/status'].includes(event.type))) } }),
+      });
+      assert(refreshes.every(snapshot => snapshot.ended && snapshot.status === 'cancelled'),
+        'Read-only metadata refresh reopened a cancelled terminal conversation');
+    } finally { adapter.dispose(); }
+  };
   const completed = new Map<string, number>();
+  const toolEvidence: { kind: string; sessionId: string; status?: string; value: unknown; event: AgentSessionEvent }[] = [];
+  const leaseEvidence: unknown[] = [];
+  const artifactEvidence: unknown[] = [];
+  const readOwnedToolJournals = async () => {
+    const committedTools: AgentSessionEvent[] = [];
+    for (const sessionId of ids.filter(id => created.includes(id))) {
+      let afterSeq: number | undefined;
+      for (let pageIndex = 0; ; pageIndex++) {
+        assert(pageIndex < 100, 'Owned contention journal exceeded its evidence bound');
+        const page = await invokeGetCommittedAgentRuntimeEvents({ sessionId, afterSeq, limit: 100 });
+        committedTools.push(...page.events.filter(event => ['tool/call', 'tool/execution', 'tool/result'].includes(event.type)));
+        if (page.nextCursor === undefined) break;
+        assert(afterSeq === undefined || page.nextCursor > afterSeq, 'Owned contention journal cursor did not advance');
+        afterSeq = page.nextCursor;
+      }
+    }
+    return committedTools;
+  };
   let failure: string | undefined;
   let takingOver = false;
   let closingTerminal = false;
@@ -126,6 +195,21 @@ async function verify() {
     await eventually(() => useTerminalStore.getState().sessions.some(item => item.sessionId === terminalId && item.status === 'connected' && item.promptReady), 'Real local terminal never became ready');
     const controller = terminalRegistry.get(terminalId);
     assert(controller, 'No real terminal controller');
+    const shell=(await invokeGetTerminalBrokerSnapshot(terminalId)).session?.integrationShell;
+    const powershell=shell==='windowsPowerShell'||shell==='powerShell7';
+    if (new URL(location.href).searchParams.get('composerInputDiagnostic') === 'true') {
+      assert(noModel, 'Composer input diagnostic must not call a model');
+      await invokeCreateAgentRuntimeSession({ sessionId: ids[1], taskId: ids[1], goal: 'Check actual composer input.',
+        executionSurface: 'boundTerminal', target: { kind: 'local', targetId: `terminal-${terminalId}`, sessionId: terminalId },
+      });
+      created.push(ids[1]);
+      flushSync(() => { useFocusStore.getState().enter(); useFocusStore.getState().setTarget(session.sessionId); });
+      useTerminalTaskNavigation.getState().setRequest({ workspace: 'focus', agentSessionId: ids[1], terminalSessionId: terminalId });
+      await eventually(() => workspaceRoot(true)?.dataset.sessionId === ids[1], 'Diagnostic Focus composer did not open');
+      await setDraft(true, 'Call run_terminal_command exactly once on the bound visible terminal with this exact command. Do not use Direct, background execution, other tools, or alter the command. Reply done after it completes.\nStart-Sleep -Seconds 0; [Console]::WriteLine(\'原生输入字😀\')', powershell);
+      await reportProgress('Actual production Focus composer retained the complete two-line draft; no model calls.');
+      return;
+    }
     if (noModel) {
       await reportProgress('Checking real PTY close and durable Agent cancellation without model credentials.');
       cleanups.push(controller.subscribeOutput(chunk => { output += chunk; }));
@@ -145,7 +229,7 @@ async function verify() {
       });
       created.push(unrelated);
       const marker = `close-running-${crypto.randomUUID()}`;
-      assert(await controller.writeUserInput(`printf '%s%s\\n' '${marker.slice(0, 16)}' '${marker.slice(16)}'; sleep 30\r`), 'Real terminal input was rejected');
+      assert(await controller.writeUserInput(powershell ? `[Console]::WriteLine('${marker.slice(0,16)}'+'${marker.slice(16)}'); Start-Sleep -Seconds 30\r` : `printf '%s%s\\n' '${marker.slice(0, 16)}' '${marker.slice(16)}'; sleep 30\r`), 'Real terminal input was rejected');
       await eventually(() => output.includes(marker), 'Real command did not start');
       await confirmTabClose(terminalId);
       await eventually(() => !useTerminalStore.getState().sessions.some(item => item.sessionId === terminalId), 'Successful close must remove its tab');
@@ -154,6 +238,7 @@ async function verify() {
         const snapshot = await invokeGetAgentRuntimeSession({ sessionId: id });
         assert(snapshot.ended && snapshot.status === 'cancelled', 'Closing must cancel durable Agent tasks on both execution surfaces');
       }
+      await assertClosedAfterMetadataRefresh();
       assert(!(await invokeGetAgentRuntimeSession({ sessionId: unrelated })).ended, 'Another terminal task must remain unchanged');
       await invokeCloseSession(other.sessionId);
       otherTerminalClosed = true;
@@ -168,7 +253,7 @@ async function verify() {
       await eventually(() => Boolean(useTerminalStore.getState().sessions.find(item => item.sessionId === idle.sessionId)?.promptReady), 'Idle-timeout terminal did not reach its prompt');
       const idleController = terminalRegistry.get(idle.sessionId);
       assert(idleController, 'Missing idle-timeout terminal controller');
-      assert(await idleController.writeUserInput('unset HISTFILE; TMOUT=1\r'), 'Idle-timeout input was rejected');
+      assert(await idleController.writeUserInput(powershell?'exit\r':'unset HISTFILE; TMOUT=1\r'), 'Real shell disconnect input was rejected');
       await eventually(() => useTerminalStore.getState().sessions.find(item => item.sessionId === idle.sessionId)?.status === 'disconnected', 'Real shell did not disconnect after its idle timeout');
       const idleToastsBefore = useToastStore.getState().toasts.length;
       await confirmTabClose(idle.sessionId);
@@ -181,14 +266,17 @@ async function verify() {
     assert(identity, 'Missing broker identity for the real PTY');
     const operations = new Set<string>();
     cleanups.push(await listenToAgentTerminalLease(({ payload }) => {
-      if (payload.sessionId === terminalId && ids.includes(payload.agentSessionId) && payload.state === 'acquired') operations.add(payload.operationId);
+      if (payload.sessionId !== terminalId || !ids.includes(payload.agentSessionId)) return;
+      leaseEvidence.push(payload);
+      if (payload.state === 'acquired') operations.add(payload.operationId);
     }));
     cleanups.push(controller.subscribeOutput(chunk => { output += chunk; }));
     cleanups.push(await listenToAgentRuntimeSession(async ({ payload }) => {
       if (!ids.includes(payload.sessionId)) return;
+      if (['session/resumed', 'session/ended', 'agent/status', 'turn/start', 'turn/end'].includes(payload.type)) lifecycle.push(payload);
       if (payload.type === 'request/failure') failure = `Real model failure: ${payload.data.failure.kind}`;
+      if (payload.type === 'tool/call') toolEvidence.push({ kind: 'call', sessionId: payload.sessionId, value: payload.data.call, event: payload });
       if (payload.type === 'tool/result') {
-        if ((closingTerminal || takingOver && payload.sessionId === ids[0]) && payload.data.status !== 'completed') return;
         let result: unknown = payload.data.data;
         if (result && typeof result === 'object' && 'artifactRef' in result && typeof result.artifactRef === 'string') {
           try {
@@ -196,12 +284,17 @@ async function verify() {
             assert(!artifact.truncated && artifact.metadata.kind === 'tool-result', 'Terminal proof requires the complete persisted tool result');
             assert('sha256' in result && artifact.metadata.sha256 === result.sha256, 'Tool-result artifact identity changed');
             const bytes = Uint8Array.from(atob(artifact.bodyBase64), character => character.charCodeAt(0));
+            const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('');
+            assert(digest === artifact.metadata.sha256 && bytes.length === artifact.metadata.sizeBytes, 'Persisted tool-result bytes do not match their metadata');
+            artifactEvidence.push({ sessionId: payload.sessionId, metadata: artifact.metadata, computedSha256: digest, bytes: bytes.length });
             result = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
           } catch (error) {
             failure = `Cannot read complete terminal execution proof: ${error instanceof Error ? error.message : String(error)}`;
             return;
           }
         }
+        toolEvidence.push({ kind: 'result', sessionId: payload.sessionId, status: payload.data.status, value: result, event: payload });
+        if ((closingTerminal || takingOver && payload.sessionId === ids[0]) && payload.data.status !== 'completed') return;
         if (payload.data.status !== 'completed' || !result || typeof result !== 'object'
           || !('channel' in result) || result.channel !== 'terminal'
           || !('exitCode' in result) || result.exitCode !== 0
@@ -229,7 +322,7 @@ async function verify() {
     await eventually(() => workspaceRoot(true)?.dataset.sessionId === ids[1], 'Focus task did not open in the production UI');
     const markerA = `contention-a-${crypto.randomUUID()}`;
     const markerB = `contention-b-${crypto.randomUUID()}`;
-    const command = (marker: string, delay: number) => `sleep ${delay}; printf '%s%s\\n' '${marker.slice(0, 16)}' '${marker.slice(16)}'`;
+    const command = (marker: string, delay: number) => powershell ? `Start-Sleep -Seconds ${delay}; [Console]::WriteLine('${marker.slice(0,16)}'+'${marker.slice(16)}')` : `sleep ${delay}; printf '%s%s\\n' '${marker.slice(0, 16)}' '${marker.slice(16)}'`;
     const exactCommandPrompt = (command: string) => `Call run_terminal_command exactly once on the bound visible terminal with this exact command. Do not use Direct, background execution, other tools, or alter the command. Reply done after it completes.\n${command}`;
     const prompt = (marker: string, delay: number) => exactCommandPrompt(command(marker, delay));
     const send = (id: string, content: string, messageId = crypto.randomUUID()) => invokeAgentRuntimeFollowup({ sessionId: id, messageId, clientSubmissionId: messageId, content });
@@ -254,7 +347,7 @@ async function verify() {
       assert(notice.querySelectorAll('button').length === 2, 'Task navigation and confirmed takeover must both be visible');
     }
     const draftB = prompt(markerB, 0);
-    await setDraft(true, draftB);
+    await setDraft(true, draftB, powershell);
     await eventually(() => workspaceRoot(true)?.textContent?.includes(t('terminal.occupancy.submitBlocked')) === true, 'Focus must warn before a conflicting submission');
     const blockedSubmit = workspaceRoot(true)?.querySelector<HTMLButtonElement>('.ai-composer-primary');
     assert(blockedSubmit?.disabled, 'Focus must disable sending while another Agent owns the terminal');
@@ -343,20 +436,33 @@ async function verify() {
     const closeRunning = `close-running-${crypto.randomUUID()}`;
     const closeFinished = `close-finished-${crypto.randomUUID()}`;
     await send(ids[1], exactCommandPrompt(`${command(closeRunning, 0)}; ${command(closeFinished, 30)}`));
-    await eventually(() => output.includes(closeRunning)
-      && agentTerminalLeaseState.get(terminalId!)?.commandPhase === 'running', 'Close requires a real running command', 180_000);
+    await eventually(() => {
+      assert(!failure, failure ?? 'Real tool failed before running-terminal close');
+      return output.includes(closeRunning) && agentTerminalLeaseState.get(terminalId!)?.commandPhase === 'running';
+    }, 'Close requires a real running command', 180_000);
+    const beforeClose = await Promise.all(ids.map(sessionId => invokeGetAgentRuntimeSession({ sessionId })));
+    assert(!beforeClose[1].ended, 'Close acceptance requires the second Agent to remain live');
     closingTerminal = true;
     await confirmTabClose(terminalId);
     await eventually(() => !useTerminalStore.getState().sessions.some(item => item.sessionId === terminalId), 'Successful close must remove the tab');
     terminalClosed = true;
-    for (const id of ids) {
-      const snapshot = await invokeGetAgentRuntimeSession({ sessionId: id });
-      assert(snapshot.ended && snapshot.status === 'cancelled', 'Closing must stop every associated Agent');
+    const afterClose = await Promise.all(ids.map(sessionId => invokeGetAgentRuntimeSession({ sessionId })));
+    const summarizeClose = (snapshot: typeof beforeClose[number]) => ({ sessionId: snapshot.header.sessionId,
+      target: snapshot.header.target?.sessionId, status: snapshot.status, ended: snapshot.ended });
+    await fetch(`/__agent-stream-result/${new URL(location.href).searchParams.get('token')}`, {
+      method: 'POST', body: JSON.stringify({ progress: 'Captured actual terminal-close lifecycle before test resource cleanup.',
+        evidence: { beforeClose: beforeClose.map(summarizeClose), afterClose: afterClose.map(summarizeClose), lifecycle } }),
+    });
+    for (const [index, snapshot] of afterClose.entries()) {
+      const previous = beforeClose[index];
+      assert(snapshot.ended && snapshot.status === (previous.ended ? previous.status : 'cancelled'),
+        `Closing must cancel live associated Agents and preserve ended history: before=${previous.status}/${previous.ended}, after=${snapshot.status}/${snapshot.ended}`);
     }
     assert(await invokeGetAgentTerminalOwner(terminalId) === null, 'Closing must release Agent ownership');
     assert(!output.includes(closeFinished), 'Closing must interrupt the running command');
     const unrelatedSnapshot = await invokeGetAgentRuntimeSession({ sessionId: unrelated });
     assert(!unrelatedSnapshot.ended, 'Closing one terminal must preserve Agents on another terminal');
+    await assertClosedAfterMetadataRefresh();
 
     // A stale tab whose transport was already closed still completes normally
     // through real IPC and the production close hook.
@@ -367,6 +473,28 @@ async function verify() {
     await eventually(() => !useTerminalStore.getState().sessions.some(item => item.sessionId === other.sessionId), 'An already-closed backend must still remove its tab');
     assert(useToastStore.getState().toasts.length === toastsBefore, 'Idempotent close must not report an error');
     await invokeCloseSession(other.sessionId);
+    const committedTools = await readOwnedToolJournals();
+    assert(!failure, failure ?? 'Real contention proof failed');
+    await fetch(`/__agent-stream-result/${new URL(location.href).searchParams.get('token')}`, {
+      method: 'POST', body: JSON.stringify({ progress: 'Captured complete owned tool journals, terminal leases and verified artifact hashes.',
+        evidence: { toolChain: { identity, operations: [...operations], leases: leaseEvidence, tools: toolEvidence, artifacts: artifactEvidence, committedTools } } }),
+    });
+  } catch (error) {
+    try {
+      const snapshots = await Promise.all(created.map(async sessionId => {
+        const snapshot = await invokeGetAgentRuntimeSession({ sessionId });
+        return { sessionId, status: snapshot.status, ended: snapshot.ended,
+          nextStep: snapshot.inbox.nextStep.length, nextTurn: snapshot.inbox.nextTurn.length };
+      }));
+      await fetch(`/__agent-stream-result/${new URL(location.href).searchParams.get('token')}`, {
+        method: 'POST', body: JSON.stringify({ progress: 'Captured real contention failure before owned resource cleanup.',
+          evidence: { failureContext: { error: error instanceof Error ? error.message : String(error), failure, snapshots,
+            completed: Object.fromEntries(completed), tools: toolEvidence, committedTools: await readOwnedToolJournals(), leases: leaseEvidence, artifacts: artifactEvidence, outputTail: output.slice(-16000),
+            lease: terminalId ? agentTerminalLeaseState.get(terminalId) : null,
+            broker: terminalId ? await invokeGetTerminalBrokerSnapshot(terminalId) : null } } }),
+      });
+    } catch { /* Preserve the original failure if diagnostic collection fails. */ }
+    throw error;
   } finally {
     for (const cleanup of cleanups.reverse()) cleanup();
     root.unmount();

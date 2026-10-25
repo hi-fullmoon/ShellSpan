@@ -10,12 +10,25 @@ import {
   parseRustHost,
   supportedRustHosts,
   verifyBenchmarkRound,
+  windowsTestEnvironment,
+  windowsNativeEditorTests,
 } from '../verify-terminal-broker-windows.mjs';
 
 const throughputRows = [
   'local_pty_single\t10.000\t12.000\t200.00\t5',
   'local_pty_multi\t20.000\t24.000\t400.00\t5',
 ];
+
+it('requires both real editor interruption/reconnect cases as explicit native gates',()=>{
+  expect(windowsNativeEditorTests).toEqual({
+    windowsPowerShell:'terminal_integration::tests::windows_powershell_5_1_editor_data_interruptions',
+    powerShell7:'terminal_integration::tests::windows_powershell_7_editor_data_interruptions',
+  });
+  for(const test of Object.values(windowsNativeEditorTests)){
+    expect(()=>assertCargoTestsRan(`running 1 test\ntest ${test} ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored;`,test)).not.toThrow();
+    expect(()=>assertCargoTestsRan('running 0 tests\ntest result: ok. 0 passed; 0 failed;',test)).toThrow();
+  }
+});
 const latencyRows = [
   'local_worker_legacy_16ms_first_byte\t8.000\t16.000\t17.000\t41',
   'local_worker_event_first_byte\t0.100\t0.200\t0.300\t41',
@@ -31,6 +44,13 @@ function benchmarkOutput(profile, rows = [...throughputRows, ...latencyRows]) {
 }
 
 describe('Windows Phase 2 acceptance runner fail-closed contracts', () => {
+  it('scopes the native jobs candidate to its child test without changing inherited defaults', () => {
+    const inherited = Object.freeze({ PATH: process.env.PATH, SHELLSPAN_NATIVE_POWERSHELL_JOBS: '1' });
+    expect(windowsTestEnvironment(false, inherited).SHELLSPAN_NATIVE_POWERSHELL_JOBS).toBe('0');
+    expect(windowsTestEnvironment(true, inherited).SHELLSPAN_NATIVE_POWERSHELL_JOBS).toBe('1');
+    expect(windowsTestEnvironment(true, inherited).PATH).toBe(process.env.PATH);
+    expect(inherited.SHELLSPAN_NATIVE_POWERSHELL_JOBS).toBe('1');
+  });
   it('maps both accepted process architectures to an exact Rust host tuple', () => {
     expect(supportedRustHosts).toEqual({
       x64: 'x86_64-pc-windows-msvc',

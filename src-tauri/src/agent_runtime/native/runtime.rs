@@ -878,6 +878,7 @@ impl NativeToolEngine {
                 &effect,
                 sessions,
                 tool.descriptor.default_timeout_ms,
+                cancellation,
             ),
             "probe_http" => {
                 let remote_connection = match &call.target {
@@ -929,8 +930,8 @@ impl NativeToolEngine {
                 cancellation,
             ),
             "write_stdin" => self.write_process(context, &call, &effect),
-            "wait_process" => self.wait_process(context, &call, &effect),
-            "kill_process" => self.kill_process(context, &call, &effect),
+            "wait_process" => self.wait_process(context, &call, &effect, sessions, cancellation),
+            "kill_process" => self.kill_process(context, &call, &effect, sessions, cancellation),
             "read_file" | "list_directory" | "search_text" | "write_file" | "edit_file"
             | "apply_patch" | "transfer_file" | "trash_file" => self.execute_file_tool(
                 context,
@@ -962,6 +963,12 @@ impl NativeToolEngine {
         if let Err(error) = self.terminal_interactive.cancel_task(sessions, task_id) {
             errors.push(error);
         }
+        if let Err(error) = self
+            .terminal_execute
+            .cleanup_shell_jobs(sessions, Some(task_id))
+        {
+            errors.push(error);
+        }
         if errors.is_empty() {
             Ok(())
         } else {
@@ -991,6 +998,10 @@ impl NativeToolEngine {
             Err(error) => errors.push(error),
         }
         match self.terminal_interactive.shutdown_all() {
+            Ok(count) => cancelled += count,
+            Err(error) => errors.push(error),
+        }
+        match self.terminal_execute.cleanup_shell_jobs(sessions, None) {
             Ok(count) => cancelled += count,
             Err(error) => errors.push(error),
         }
@@ -1133,6 +1144,21 @@ impl NativeToolEngine {
                 owner_target_id,
                 process_handle,
             } => {
+                if process_handle.starts_with("job-") {
+                    let job = self.terminal_broker.shell_job(
+                        process_handle,
+                        owner_target_id,
+                        &context.request.user_session_id,
+                        &context.request.task_id,
+                    )?;
+                    if *target_id != format!("process-{process_handle}") {
+                        return Err("TERMINAL_JOB_OWNER_MISMATCH".into());
+                    }
+                    if !job.control_lost {
+                        self.revalidate_target(context, &job.frozen_target, sessions, database)?;
+                    }
+                    return Ok(());
+                }
                 let snapshot = self.processes.get(process_handle)?.snapshot()?;
                 if snapshot.target_id != *target_id
                     || snapshot.owner_target_id != *owner_target_id
@@ -1425,6 +1451,7 @@ impl NativeToolEngine {
         effect: &AgentObservedEffectNative,
         sessions: &SessionManager,
         default_timeout_ms: u64,
+        cancellation: &CancellationToken,
     ) -> Result<AgentToolResultNative, String> {
         let arguments: TerminalExecuteArgumentsNative =
             serde_json::from_value(call.arguments.clone())
@@ -1440,7 +1467,21 @@ impl NativeToolEngine {
             .ok_or_else(|| "TERMINAL_INTEGRATION_SHELL_UNKNOWN".to_string())?;
         let expected_terminal_session_id = broker_snapshot.terminal_session_id;
         let expected_terminal_generation = broker_snapshot.terminal_generation;
-        let operation = self.terminal_execute.start_with_revalidation(
+        let timeout = Duration::from_millis(arguments.timeout_ms.unwrap_or(default_timeout_ms));
+        let launch_deadline = arguments.background.then(|| Instant::now() + timeout);
+        let job = if arguments.background {
+            Some(self.terminal_broker.prepare_shell_job(
+                &session_id,
+                &call.target,
+                &context.request.user_session_id,
+                &context.request.task_id,
+                &call.call_id,
+                &arguments.command,
+            )?)
+        } else {
+            None
+        };
+        let started = self.terminal_execute.start_native_submission_until(
             sessions,
             &session_id,
             &context.request.user_session_id,
@@ -1448,7 +1489,15 @@ impl NativeToolEngine {
             &call.call_id,
             &arguments.command,
             shell.enter(),
+            job.as_ref().map(|job| job.submitted_command_line.as_str()),
+            launch_deadline,
             |stage| {
+                if cancellation.is_cancelled() {
+                    return Err("TERMINAL_JOB_LAUNCH_CANCELLED".into());
+                }
+                if launch_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                    return Err("TERMINAL_JOB_LAUNCH_DEADLINE: no automatic replay".into());
+                }
                 self.revalidate_terminal_execution(
                     &call.target,
                     sessions,
@@ -1460,17 +1509,75 @@ impl NativeToolEngine {
                     stage,
                 )
             },
-        )?;
-        let timeout = Duration::from_millis(arguments.timeout_ms.unwrap_or(default_timeout_ms));
-        let snapshot = self
-            .terminal_execute
-            .wait(sessions, &session_id, &operation, timeout)?;
+        );
+        let operation = match started {
+            Ok(operation) => operation,
+            Err(error) => {
+                self.terminal_broker
+                    .discard_shell_job_submission(&call.call_id)?;
+                if let Some(job) = &job {
+                    let current = self.terminal_broker.shell_job(
+                        &job.process_handle,
+                        &job.owner_target_id,
+                        &context.request.user_session_id,
+                        &context.request.task_id,
+                    )?;
+                    if !current.launch_confirmed {
+                        self.terminal_broker
+                            .mark_shell_job_uncertain(&job.process_handle)?;
+                    }
+                    let mut result = completed_result(&context.request, call, effect,
+                        "Native job launch was not confirmed; retain this handle and do not replay the source.",
+                        json!({"contractVersion":1,"channel":"terminal","processHandle":job.process_handle,"state":"uncertain","noAutoReplay":true,"error":crate::redaction::redact_sensitive_text(&error),"outputScope":"sharedTerminal","job":self.terminal_broker.shell_job(&job.process_handle,&job.owner_target_id,&context.request.user_session_id,&context.request.task_id)?}), false);
+                    result.status = AgentToolResultStatusNative::Uncertain;
+                    return Ok(result);
+                }
+                return Err(error);
+            }
+        };
+        let snapshot = if let Some(deadline) = launch_deadline {
+            self.terminal_execute.wait_management(
+                sessions,
+                &session_id,
+                &operation,
+                deadline.saturating_duration_since(Instant::now()),
+            )?
+        } else {
+            self.terminal_execute
+                .wait(sessions, &session_id, &operation, timeout)?
+        };
+        if let Some(job) = &job {
+            let current = self.terminal_broker.shell_job(
+                &job.process_handle,
+                &job.owner_target_id,
+                &context.request.user_session_id,
+                &context.request.task_id,
+            )?;
+            if !current.launch_confirmed && current.state != "rejected" {
+                self.terminal_broker
+                    .mark_shell_job_uncertain(&job.process_handle)?;
+            }
+        }
         let model_output =
             crate::redaction::redact_sensitive_text(&super::strip_ansi(&snapshot.combined_output));
         let state = terminal_command_wire_state(snapshot.state);
-        let summary = crate::redaction::redact_sensitive_text(&format!(
-            "Visible terminal command reached {state}."
-        ));
+        let job = job
+            .map(|job| {
+                self.terminal_broker.shell_job(
+                    &job.process_handle,
+                    &job.owner_target_id,
+                    &context.request.user_session_id,
+                    &context.request.task_id,
+                )
+            })
+            .transpose()?;
+        let summary = crate::redaction::redact_sensitive_text(&match &snapshot.input_rejection {
+            Some(reason) => format!("{reason}: native parser refused the approved source; no source statement was executed. Wait for the clean prompt before retrying."),
+            None => match &job {
+                Some(job) => format!("Native shell job launchConfirmed={}, jobState={}; output remains shared with the terminal.",job.launch_confirmed,job.state),
+                None => format!("Visible terminal command reached {state}."),
+            },
+        });
         Ok(AgentToolResultNative {
             request_id: context.request.request_id.clone(),
             call_id: call.call_id.clone(),
@@ -1478,7 +1585,11 @@ impl NativeToolEngine {
             target_id: call.target.target_id().to_string(),
             status: match snapshot.state {
                 crate::terminal_broker::TerminalCommandState::Completed => {
-                    AgentToolResultStatusNative::Completed
+                    match job.as_ref().map(|job| job.state.as_str()) {
+                        Some("rejected") => AgentToolResultStatusNative::Failed,
+                        Some("starting" | "uncertain") => AgentToolResultStatusNative::Uncertain,
+                        _ => AgentToolResultStatusNative::Completed,
+                    }
                 }
                 crate::terminal_broker::TerminalCommandState::Cancelled
                 | crate::terminal_broker::TerminalCommandState::TakenOver => {
@@ -1507,6 +1618,8 @@ impl NativeToolEngine {
                 "operationId": snapshot.operation_id,
                 "commandId": snapshot.command_id,
                 "commandLine": snapshot.command_line,
+                "submittedCommandLine": snapshot.submitted_command_line,
+                "inputRejection": snapshot.input_rejection,
                 "exitCode": snapshot.exit_code,
                 "cwd": snapshot.cwd,
                 "stdout": "",
@@ -1516,6 +1629,11 @@ impl NativeToolEngine {
                 "captureEndSequence": snapshot.capture_end_sequence,
                 "truncated": snapshot.capture_truncated,
                 "noAutoReplay": snapshot.no_auto_replay,
+                "processHandle": job.as_ref().map(|job| &job.process_handle),
+                "launchState": job.as_ref().map(|job| if job.state == "rejected" { "rejected" } else if job.launch_confirmed { "confirmed" } else { "uncertain" }),
+                "launchWaitTimedOut": launch_deadline.is_some_and(|deadline|Instant::now()>=deadline) && snapshot.state!=crate::terminal_broker::TerminalCommandState::Completed,
+                "job": job,
+                "outputScope": "sharedTerminal",
             })),
             artifacts: Vec::new(),
             effects: vec![effect.clone()],
@@ -1710,6 +1828,9 @@ impl NativeToolEngine {
         let arguments: WriteStdinArgumentsNative =
             serde_json::from_value(call.arguments.clone())
                 .map_err(|error| format!("Invalid write_stdin arguments: {error}"))?;
+        if process_handle(&call.target)?.starts_with("job-") {
+            return Err("TERMINAL_JOB_STDIN_UNSUPPORTED: native background jobs share the terminal; per-job stdin is unavailable".into());
+        }
         let accepted = self
             .processes
             .get(process_handle(&call.target)?)?
@@ -1729,10 +1850,23 @@ impl NativeToolEngine {
         context: &NativeExecutionContext,
         call: &AgentToolCallNative,
         effect: &AgentObservedEffectNative,
+        sessions: &SessionManager,
+        cancellation: &CancellationToken,
     ) -> Result<AgentToolResultNative, String> {
         let arguments: WaitProcessArgumentsNative = serde_json::from_value(call.arguments.clone())
             .map_err(|error| format!("Invalid wait_process arguments: {error}"))?;
         let handle = process_handle(&call.target)?;
+        if handle.starts_with("job-") {
+            return self.manage_shell_job(
+                context,
+                call,
+                effect,
+                sessions,
+                false,
+                arguments.timeout_ms.unwrap_or(30_000),
+                cancellation,
+            );
+        }
         let snapshot = self.processes.get(handle)?.wait(Duration::from_millis(
             arguments.timeout_ms.unwrap_or(30_000),
         ))?;
@@ -1767,10 +1901,28 @@ impl NativeToolEngine {
         context: &NativeExecutionContext,
         call: &AgentToolCallNative,
         effect: &AgentObservedEffectNative,
+        sessions: &SessionManager,
+        cancellation: &CancellationToken,
     ) -> Result<AgentToolResultNative, String> {
         let arguments: KillProcessArgumentsNative = serde_json::from_value(call.arguments.clone())
             .map_err(|error| format!("Invalid kill_process arguments: {error}"))?;
         let handle = process_handle(&call.target)?;
+        if handle.starts_with("job-") {
+            if arguments.signal != crate::agent_runtime::ProcessSignalNative::Terminate {
+                return Err(
+                    "TERMINAL_JOB_SIGNAL_UNSUPPORTED: native job stop supports TERM only".into(),
+                );
+            }
+            return self.manage_shell_job(
+                context,
+                call,
+                effect,
+                sessions,
+                true,
+                arguments.timeout_ms.unwrap_or(10_000),
+                cancellation,
+            );
+        }
         let snapshot = self.processes.get(handle)?.kill(
             arguments.signal,
             Duration::from_millis(arguments.timeout_ms.unwrap_or(10_000)),
@@ -1784,6 +1936,292 @@ impl NativeToolEngine {
             json!({ "state": format!("{:?}", snapshot.state) }),
             false,
         ))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn manage_registered_job_for_test(
+        broker: &TerminalSessionBroker,
+        leases: &TerminalLeaseManager,
+        registry: &TerminalExecuteRegistry,
+        sessions: &SessionManager,
+        job: &crate::terminal_jobs::NativeShellJob,
+        stop: bool,
+        timeout_ms: u64,
+    ) -> Result<AgentToolResultNative, String> {
+        // Wire the production manager to the real PTY acceptance registry.
+        // No replacement transport, fabricated events, provider or result.
+        let engine = Self {
+            terminal_execute: registry.clone(),
+            terminal_interactive: TerminalInteractiveRegistry::new(leases.clone(), broker.clone()),
+            terminal_leases: leases.clone(),
+            terminal_broker: broker.clone(),
+            ..Self::default()
+        };
+        let context = NativeExecutionContext {
+            request: AgentRequestNative {
+                contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
+                request_id: "native-job-wait-acceptance".into(),
+                user_session_id: job.agent_session_id.clone(),
+                task_id: job.task_id.clone(),
+                goal: "Observe the actual registered shell job".into(),
+                success_criteria: vec![],
+                targets: vec![job.frozen_target.clone()],
+                permission_mode: AgentPermissionModeNative::Operator,
+            },
+            turn_id: "native-job-wait-turn".into(),
+            step_id: "native-job-wait-step".into(),
+        };
+        let call = AgentToolCallNative {
+            request_id: context.request.request_id.clone(),
+            call_id: uuid::Uuid::new_v4().to_string(),
+            tool_name: if stop { "kill_process" } else { "wait_process" }.into(),
+            arguments: json!({"timeoutMs": timeout_ms}),
+            target: AgentToolTargetNative::Process {
+                target_id: format!("process-{}", job.process_handle),
+                owner_target_id: job.owner_target_id.clone(),
+                process_handle: job.process_handle.clone(),
+            },
+            capability_id: "real-pty-acceptance".into(),
+        };
+        let effect = AgentObservedEffectNative {
+            kind: if stop {
+                AgentEffectKindNative::StateChange
+            } else {
+                AgentEffectKindNative::ReadOnly
+            },
+            target_id: call.target.target_id().into(),
+            summary: "Observe the actual registered shell job".into(),
+            paths: vec![],
+            network_destinations: vec![],
+        };
+        engine.manage_shell_job(
+            &context,
+            &call,
+            &effect,
+            sessions,
+            stop,
+            timeout_ms,
+            &CancellationToken::new(),
+        )
+    }
+
+    fn manage_shell_job(
+        &self,
+        context: &NativeExecutionContext,
+        call: &AgentToolCallNative,
+        effect: &AgentObservedEffectNative,
+        sessions: &SessionManager,
+        stop: bool,
+        timeout_ms: u64,
+        cancellation: &CancellationToken,
+    ) -> Result<AgentToolResultNative, String> {
+        let AgentToolTargetNative::Process {
+            process_handle: handle,
+            owner_target_id,
+            ..
+        } = &call.target
+        else {
+            return Err("TERMINAL_JOB_INVALID_TARGET".into());
+        };
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+        let mut stop_sent = false;
+        let mut blocked: Option<String> = None;
+        let mut observation_budget = super::terminal_execute::TYPING_SUBMIT_PAUSE.saturating_mul(2);
+        let job = loop {
+            let job = self.terminal_broker.shell_job(
+                handle,
+                owner_target_id,
+                &context.request.user_session_id,
+                &context.request.task_id,
+            )?;
+            if matches!(job.state.as_str(), "exited" | "rejected")
+                || job.control_lost
+                || job.native_active == Some(false)
+                || timeout_ms == 0
+                || cancellation.is_cancelled()
+            {
+                break job;
+            }
+            if Instant::now() >= deadline {
+                break job;
+            }
+            if job.state == "starting" && job.accepted_command_line.is_none() {
+                self.terminal_broker.wait_shell_job_change(
+                    &job,
+                    Duration::from_millis(25)
+                        .min(deadline.saturating_duration_since(Instant::now())),
+                )?;
+                continue;
+            }
+            if self
+                .terminal_broker
+                .snapshot(Some(&job.transport_session_id))?
+                .session
+                .is_some_and(|terminal| {
+                    !terminal.prompt_ready || terminal.active_command_id.is_some()
+                })
+            {
+                blocked =
+                    Some("terminal prompt is unavailable; no management input was admitted".into());
+                self.terminal_broker.wait_shell_job_prompt(
+                    &job,
+                    Duration::from_millis(25)
+                        .min(deadline.saturating_duration_since(Instant::now())),
+                )?;
+                continue;
+            }
+            blocked = None;
+            if deadline.saturating_duration_since(Instant::now()) < observation_budget {
+                blocked = Some("remaining deadline cannot admit another native observation; last confirmed observation retained".into());
+                let mut observed = job;
+                while Instant::now() < deadline
+                    && !cancellation.is_cancelled()
+                    && !observed.control_lost
+                    && !matches!(observed.state.as_str(), "exited" | "uncertain" | "rejected")
+                {
+                    self.terminal_broker.wait_shell_job_change(
+                        &observed,
+                        Duration::from_millis(25)
+                            .min(deadline.saturating_duration_since(Instant::now())),
+                    )?;
+                    observed = self.terminal_broker.shell_job(
+                        handle,
+                        owner_target_id,
+                        &context.request.user_session_id,
+                        &context.request.task_id,
+                    )?;
+                }
+                break observed;
+            }
+            let observation_started = Instant::now();
+            let operation_id = format!("job-control-{}", uuid::Uuid::new_v4());
+            let source = self.terminal_broker.prepare_shell_job_control(
+                &job,
+                &operation_id,
+                stop && !stop_sent,
+            )?;
+            let start = self.terminal_execute.start_native_submission_until(
+                sessions,
+                &job.transport_session_id,
+                &context.request.user_session_id,
+                &context.request.task_id,
+                &operation_id,
+                &source,
+                "\n",
+                Some(&source),
+                Some(deadline),
+                |stage| {
+                    if cancellation.is_cancelled() {
+                        return Err("TERMINAL_JOB_WAIT_CANCELLED".into());
+                    }
+                    if Instant::now() >= deadline {
+                        return Err("TERMINAL_JOB_WAIT_DEADLINE".into());
+                    }
+                    self.revalidate_terminal_execution(
+                        &job.frozen_target,
+                        sessions,
+                        &job.terminal_session_id,
+                        job.terminal_generation,
+                        &context.request.user_session_id,
+                        &context.request.task_id,
+                        &operation_id,
+                        stage,
+                    )
+                },
+            );
+            match start {
+                Ok(operation) => {
+                    let snapshot = self.terminal_execute.wait_management(
+                        sessions,
+                        &job.transport_session_id,
+                        &operation,
+                        deadline.saturating_duration_since(Instant::now()),
+                    )?;
+                    let observed = self.terminal_broker.shell_job(
+                        handle,
+                        owner_target_id,
+                        &context.request.user_session_id,
+                        &context.request.task_id,
+                    )?;
+                    if snapshot.state != crate::terminal_broker::TerminalCommandState::Completed
+                        || snapshot.exit_code != Some(0)
+                        || observed.observation_revision <= job.observation_revision
+                    {
+                        self.terminal_broker.mark_shell_job_uncertain(handle)?;
+                        blocked = Some(
+                            "management submission was not confirmed; no automatic replay".into(),
+                        );
+                        break self.terminal_broker.shell_job(
+                            handle,
+                            owner_target_id,
+                            &context.request.user_session_id,
+                            &context.request.task_id,
+                        )?;
+                    }
+                    stop_sent |= stop && observed.stop_requested;
+                }
+                Err(error) => {
+                    self.terminal_broker
+                        .discard_shell_job_submission(&operation_id)?;
+                    blocked = Some(format!(
+                        "terminal management unconfirmed: {}; no automatic replay",
+                        crate::redaction::redact_sensitive_text(&error)
+                    ));
+                    break job;
+                }
+            }
+            let job = self.terminal_broker.shell_job(
+                handle,
+                owner_target_id,
+                &context.request.user_session_id,
+                &context.request.task_id,
+            )?;
+            if matches!(job.state.as_str(), "exited" | "uncertain" | "rejected")
+                || Instant::now() >= deadline
+            {
+                break job;
+            }
+            // Reserve twice the largest confirmed round-trip in this call,
+            // including native editing and its mandatory pre-submit pause.
+            // A new poll must not borrow its checkpoint budget from a nearly
+            // expired wait. Unexpected lost/mismatched A still quarantines.
+            observation_budget =
+                observation_budget.max(observation_started.elapsed().saturating_mul(2));
+            std::thread::sleep(
+                Duration::from_millis(100).min(deadline.saturating_duration_since(Instant::now())),
+            );
+        };
+        let uncertain = job.state == "uncertain";
+        let finished =
+            matches!(job.state.as_str(), "exited" | "rejected") || job.native_active == Some(false);
+        let wait_timed_out = !finished && Instant::now() >= deadline;
+        let mut result = completed_result(
+            &context.request,
+            call,
+            effect,
+            "Native shell job observation completed; output is shared with the terminal.",
+            json!({
+                "state": job.state, "exitCode": job.exit_code, "processHandle": job.process_handle,
+                "job": job, "waitTimedOut": wait_timed_out,
+                "stopRequested": stop_sent, "managementBlocked": blocked,
+                "waitCancelled": cancellation.is_cancelled(),
+                "outputScope": "sharedTerminal", "stdout": "", "stderr": "",
+                "noAutoReplay": true,
+            }),
+            false,
+        );
+        if uncertain {
+            result.status = AgentToolResultStatusNative::Uncertain;
+        } else if cancellation.is_cancelled() {
+            result.status = AgentToolResultStatusNative::Cancelled;
+        } else if stop && !finished {
+            result.status = if wait_timed_out {
+                AgentToolResultStatusNative::TimedOut
+            } else {
+                AgentToolResultStatusNative::Uncertain
+            };
+        }
+        Ok(result)
     }
 
     fn execute_file_tool(
@@ -2616,12 +3054,24 @@ mod tests {
         );
 
         let session_count_before = sessions.session_count().unwrap();
-        let first_result =
-            engine.execute_terminal_command(&context, &call, &effect, &sessions, 1_000);
+        let first_result = engine.execute_terminal_command(
+            &context,
+            &call,
+            &effect,
+            &sessions,
+            1_000,
+            &CancellationToken::new(),
+        );
         let mut second_call = call.clone();
         second_call.call_id = "operation-2".into();
-        let second_result =
-            engine.execute_terminal_command(&context, &second_call, &effect, &sessions, 1_000);
+        let second_result = engine.execute_terminal_command(
+            &context,
+            &second_call,
+            &effect,
+            &sessions,
+            1_000,
+            &CancellationToken::new(),
+        );
         let worker_result = worker.join();
         assert!(
             first_result.is_ok() && second_result.is_ok(),
@@ -2890,7 +3340,14 @@ mod tests {
         };
 
         let error = engine
-            .execute_terminal_command(&context, &call, &effect, &sessions, 1_000)
+            .execute_terminal_command(
+                &context,
+                &call,
+                &effect,
+                &sessions,
+                1_000,
+                &CancellationToken::new(),
+            )
             .unwrap_err();
         assert!(
             crate::agent_runtime::is_terminal_target_unavailable(&error),

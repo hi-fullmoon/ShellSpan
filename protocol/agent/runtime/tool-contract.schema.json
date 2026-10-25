@@ -183,9 +183,10 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 8192,
-          "pattern": "^[^\\u0000-\\u001F\\u007F]*$"
+          "pattern": "^[^\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F-\\u009F]*$"
         },
         "explanation": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "background": { "type": "boolean", "default": false },
         "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 3600000 }
       }
     },
@@ -717,6 +718,42 @@
         "networkScope": { "const": "targetLoopback" }
       }
     },
+    "nativeShellJobObservation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["processHandle", "ownerTargetId", "agentSessionId", "taskId", "transportSessionId", "terminalSessionId", "terminalGeneration", "shell", "operationId", "commandLine", "submittedCommandLine", "acceptedCommandLine", "controlLost", "nativeActive", "state", "exitCode", "observedOutputSequence", "observedAtUnixMs", "observationRevision", "captureStartSequence", "cleanupReason", "stopRequested", "launchConfirmed"],
+      "properties": {
+        "processHandle": { "type": "string", "pattern": "^job-[0-9a-f]{32}$" },
+        "ownerTargetId": { "$ref": "#/$defs/identifier" }, "agentSessionId": { "$ref": "#/$defs/identifier" },
+        "taskId": { "$ref": "#/$defs/identifier" }, "transportSessionId": { "$ref": "#/$defs/identifier" },
+        "terminalSessionId": { "$ref": "#/$defs/identifier" }, "operationId": { "$ref": "#/$defs/identifier" },
+        "terminalGeneration": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "shell": { "enum": ["bash", "zsh", "windowsPowerShell", "powerShell7"] },
+        "commandLine": { "type": "string", "minLength": 1, "maxLength": 8192 },
+        "submittedCommandLine": { "description": "Frozen native submission recipe; acceptedCommandLine is separately populated only by an exact matching native S record.", "type": "string", "minLength": 1, "maxLength": 32768 },
+        "acceptedCommandLine": { "type": ["string", "null"], "minLength": 1, "maxLength": 32768 },
+        "controlLost": { "type": "boolean" }, "nativeActive": { "type": ["boolean", "null"] },
+        "state": { "enum": ["starting", "queued", "running", "stopped", "stopRequested", "exited", "rejected", "uncertain"] },
+        "exitCode": { "type": ["integer", "null"], "minimum": -2147483648, "maximum": 2147483647 },
+        "observedOutputSequence": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "observedAtUnixMs": { "type": "integer", "minimum": 0 },
+        "observationRevision": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "captureStartSequence": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "cleanupReason": { "type": ["string", "null"] }, "stopRequested": { "type": "boolean" }, "launchConfirmed": { "type": "boolean" }
+      }
+    },
+    "nativeJobManagementResultData": {
+      "type": "object", "additionalProperties": false,
+      "required": ["state", "exitCode", "processHandle", "job", "waitTimedOut", "stopRequested", "managementBlocked", "waitCancelled", "outputScope", "stdout", "stderr", "noAutoReplay"],
+      "properties": {
+        "state": { "enum": ["starting", "queued", "running", "stopped", "stopRequested", "exited", "rejected", "uncertain"] },
+        "exitCode": { "type": ["integer", "null"], "minimum": -2147483648, "maximum": 2147483647 },
+        "processHandle": { "type": "string", "pattern": "^job-[0-9a-f]{32}$" },
+        "job": { "$ref": "#/$defs/nativeShellJobObservation" },
+        "waitTimedOut": { "type": "boolean" }, "stopRequested": { "type": "boolean" }, "waitCancelled": { "type": "boolean" },
+        "managementBlocked": { "type": ["string", "null"] }, "outputScope": { "const": "sharedTerminal" },
+        "stdout": { "const": "" }, "stderr": { "const": "" }, "noAutoReplay": { "const": true }
+      }
+    },
     "terminalExecuteResultData": {
       "type": "object",
       "additionalProperties": false,
@@ -740,6 +777,11 @@
         "noAutoReplay"
       ],
       "properties": {
+        "processHandle": { "type": ["string", "null"], "pattern": "^job-[0-9a-f]{32}$" },
+        "launchState": { "enum": ["confirmed", "rejected", "uncertain", null] },
+        "launchWaitTimedOut": { "type": "boolean" },
+        "job": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/nativeShellJobObservation" }] },
+        "outputScope": { "const": "sharedTerminal" },
         "contractVersion": { "const": 1 },
         "channel": { "const": "terminal" },
         "state": {
@@ -750,6 +792,8 @@
         "operationId": { "$ref": "#/$defs/identifier" },
         "commandId": { "$ref": "#/$defs/identifier" },
         "commandLine": { "type": "string", "minLength": 1, "maxLength": 8192 },
+        "submittedCommandLine": { "type": ["string", "null"], "minLength": 1, "maxLength": 32768 },
+        "inputRejection": { "enum": [null, "TERMINAL_INPUT_UNSUPPORTED", "TERMINAL_BACKGROUND_UNSUPPORTED"] },
         "exitCode": { "type": ["integer", "null"], "minimum": -2147483648, "maximum": 2147483647 },
         "cwd": { "type": ["string", "null"], "maxLength": 16384 },
         "stdout": { "const": "" },
@@ -1011,14 +1055,25 @@
       ]
     },
     "execCommandResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "exec_command" }, "data": { "$ref": "#/$defs/execCommandResultData" } } }], "unevaluatedProperties": false },
-    "terminalExecuteResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "terminal_execute" }, "data": { "$ref": "#/$defs/terminalExecuteResultData" } } }], "unevaluatedProperties": false },
+    "nativeJobLaunchUnconfirmed": {
+      "type": "object", "additionalProperties": false,
+      "required": ["contractVersion", "channel", "processHandle", "state", "noAutoReplay", "outputScope", "error", "job"],
+      "properties": {
+        "contractVersion": { "const": 1 }, "channel": { "const": "terminal" },
+        "processHandle": { "type": "string", "pattern": "^job-[0-9a-f]{32}$" },
+        "state": { "const": "uncertain" }, "noAutoReplay": { "const": true },
+        "outputScope": { "const": "sharedTerminal" }, "error": { "type": "string" },
+        "job": { "$ref": "#/$defs/nativeShellJobObservation" }
+      }
+    },
+    "terminalExecuteResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "terminal_execute" }, "data": { "oneOf": [{ "$ref": "#/$defs/terminalExecuteResultData" }, { "$ref": "#/$defs/nativeJobLaunchUnconfirmed" }] } } }], "unevaluatedProperties": false },
     "probeHttpResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "probe_http" }, "data": { "$ref": "#/$defs/probeHttpResultData" } } }], "unevaluatedProperties": false },
     "readTerminalResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "read_terminal" }, "data": { "$ref": "#/$defs/readTerminalResultData" } } }], "unevaluatedProperties": false },
     "writeTerminalInputResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "write_terminal_input" }, "data": { "$ref": "#/$defs/writeTerminalInputResultData" } } }], "unevaluatedProperties": false },
     "waitTerminalResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "wait_terminal" }, "data": { "$ref": "#/$defs/waitTerminalResultData" } } }], "unevaluatedProperties": false },
     "writeStdinResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "write_stdin" }, "data": { "$ref": "#/$defs/writeStdinResultData" } } }], "unevaluatedProperties": false },
-    "waitProcessResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "wait_process" }, "data": { "$ref": "#/$defs/waitProcessResultData" } } }], "unevaluatedProperties": false },
-    "killProcessResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "kill_process" }, "data": { "$ref": "#/$defs/killProcessResultData" } } }], "unevaluatedProperties": false },
+    "waitProcessResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "wait_process" }, "data": { "oneOf": [{ "$ref": "#/$defs/waitProcessResultData" }, { "$ref": "#/$defs/nativeJobManagementResultData" }] } } }], "unevaluatedProperties": false },
+    "killProcessResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "kill_process" }, "data": { "oneOf": [{ "$ref": "#/$defs/killProcessResultData" }, { "$ref": "#/$defs/nativeJobManagementResultData" }] } } }], "unevaluatedProperties": false },
     "readFileResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "read_file" }, "data": { "$ref": "#/$defs/readFileResultData" } } }], "unevaluatedProperties": false },
     "listDirectoryResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "list_directory" }, "data": { "$ref": "#/$defs/listDirectoryResultData" } } }], "unevaluatedProperties": false },
     "searchTextResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "search_text" }, "data": { "$ref": "#/$defs/searchTextResultData" } } }], "unevaluatedProperties": false },

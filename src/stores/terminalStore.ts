@@ -4,6 +4,7 @@ import type {
   ClosedEvent,
   SessionStatus,
   SessionSummary,
+  SessionPtyInfo,
   StatusEvent,
   TerminalBrokerIntegrationState,
   TerminalIntegrationStateEvent,
@@ -18,6 +19,8 @@ export interface TerminalSession {
   /** Ephemeral broker identity; deliberately excluded from TerminalWorkspaceSession. */
   terminalSessionId?: string;
   terminalGeneration?: number;
+  /** Live backend metadata; excluded from persisted workspaces. */
+  ptyInfo?: SessionPtyInfo;
   integrationState?: TerminalBrokerIntegrationState;
   integrationReason?: string;
   integrationStateRevision?: number;
@@ -257,6 +260,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
       sessions[pendingIndex] = {
         sessionId: summary.sessionId,
         ...brokerIdentity(summary),
+        ptyInfo: summary.ptyInfo,
         title: summary.title,
         baseTitle: summary.title,
         manualTitle: pending.manualTitle,
@@ -306,6 +310,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
       const newSession: TerminalSession = {
         sessionId: summary.sessionId,
         ...brokerIdentity(summary),
+        ptyInfo: summary.ptyInfo,
         title: summary.title,
         host: summary.host,
         port: summary.port,
@@ -392,6 +397,7 @@ export const useTerminalStore = create<TerminalState>()((set) => ({
       const newSession: TerminalSession = {
         sessionId: summary.sessionId,
         ...brokerIdentity(summary),
+        ptyInfo: summary.ptyInfo,
         title: old.title ?? summary.title,
         baseTitle: old.baseTitle ?? old.title,
         manualTitle: old.manualTitle,

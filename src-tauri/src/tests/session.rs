@@ -648,7 +648,39 @@
             operation_id: &str,
             command: &str,
         ) -> Arc<crate::terminal_broker::TerminalCommandOperation> {
+            self.begin_with_submit(operation_id, command, true)
+        }
+
+        fn begin_with_submit(
+            &mut self,
+            operation_id: &str,
+            command: &str,
+            submit: bool,
+        ) -> Arc<crate::terminal_broker::TerminalCommandOperation> {
+            self.begin_with_submission(operation_id, command, submit, None)
+        }
+
+        fn begin_with_submission(
+            &mut self,
+            operation_id: &str,
+            command: &str,
+            submit: bool,
+            job_submission: Option<&str>,
+        ) -> Arc<crate::terminal_broker::TerminalCommandOperation> {
             use crate::terminal_broker::{TerminalBrokerInputSource, TerminalInputKind};
+
+            let native_input = job_submission.is_some()
+                || command.len() > 512
+                || command.contains(['\n', '\r', '\t']);
+            let submission = if let Some(line) = job_submission {
+                Some(line.to_string())
+            } else if native_input
+                && self.broker.command_shell(&self.transport_id).unwrap() == TerminalShellKind::Bash
+            {
+                Some(crate::terminal_integration::bash_native_submission(command).unwrap())
+            } else {
+                None
+            };
 
             self.broker
                 .acquire_agent_lease(
@@ -661,30 +693,93 @@
                 .expect("broker enabled");
             let operation =
                 self.broker
-                    .begin_command(&self.transport_id, operation_id, command)
+                    .begin_command_with_submission(
+                        &self.transport_id,
+                        operation_id,
+                        command,
+                        submission.as_deref(),
+                    )
                     .unwrap_or_else(|error| {
                         panic!(
                         "register remote command {command:?} before input: {error}; snapshot={:?}",
                         self.broker.snapshot(Some(&self.transport_id)).unwrap().session
                     )
                     });
-            let input = format!("{command}\n");
+            let chunks = if native_input {
+                assert!(self
+                    .broker
+                    .native_input_enabled(&self.transport_id)
+                    .unwrap());
+                crate::agent_runtime::native_editor_chunks(
+                    submission.as_deref().unwrap_or(command),
+                    self.broker.command_shell(&self.transport_id).unwrap(),
+                )
+            } else {
+                vec![(command.to_string(), String::new())]
+            };
             let broker = self.broker.clone();
             let transport_id = self.transport_id.clone();
+            if native_input {
+                operation.expect_native_checkpoint("").unwrap();
+                let shell_channel = &mut self.shell_channel;
+                broker
+                    .admit_terminal_input(
+                        &transport_id,
+                        TerminalBrokerInputSource::Agent {
+                            agent_session_id: self.agent_session_id.clone(),
+                            task_id: "fixture-task".into(),
+                            operation_id: operation_id.into(),
+                        },
+                        TerminalInputKind::Text,
+                        b"\x18\x01",
+                        || write_all_nonblocking(&self.session, shell_channel, b"\x18\x01"),
+                    )
+                    .unwrap();
+                self.pump_until(Duration::from_secs(3), |_| {
+                    operation.wait_native_checkpoint(Duration::ZERO).unwrap()
+                });
+            }
+            for (input, prefix) in chunks {
+                if native_input {
+                    operation.expect_native_checkpoint(&prefix).unwrap();
+                }
+                let shell_channel = &mut self.shell_channel;
+                broker
+                    .admit_terminal_input(
+                        &transport_id,
+                        TerminalBrokerInputSource::Agent {
+                            agent_session_id: self.agent_session_id.clone(),
+                            task_id: "fixture-task".into(),
+                            operation_id: operation_id.into(),
+                        },
+                        TerminalInputKind::Text,
+                        input.as_bytes(),
+                        || write_all_nonblocking(&self.session, shell_channel, input.as_bytes()),
+                    )
+                    .expect("write exact remote command through broker input admission");
+                if native_input {
+                    self.pump_until(Duration::from_secs(3), |_| {
+                        operation.wait_native_checkpoint(Duration::ZERO).unwrap()
+                    });
+                }
+            }
             let shell_channel = &mut self.shell_channel;
-            broker
-                .admit_terminal_input(
-                    &transport_id,
-                    TerminalBrokerInputSource::Agent {
-                        agent_session_id: self.agent_session_id.clone(),
-                        task_id: "fixture-task".into(),
-                        operation_id: operation_id.into(),
-                    },
-                    TerminalInputKind::Text,
-                    input.as_bytes(),
-                    || write_all_nonblocking(&self.session, shell_channel, input.as_bytes()),
-                )
-                .expect("write exact remote command through broker input admission");
+            if submit {
+                let accept = if native_input { "\u{18}\u{5}" } else { "\n" };
+                broker
+                    .admit_terminal_input(
+                        &transport_id,
+                        TerminalBrokerInputSource::Agent {
+                            agent_session_id: self.agent_session_id.clone(),
+                            task_id: "fixture-task".into(),
+                            operation_id: operation_id.into(),
+                        },
+                        TerminalInputKind::Text,
+                        accept.as_bytes(),
+                        || write_all_nonblocking(&self.session, shell_channel, accept.as_bytes()),
+                    )
+                    .unwrap();
+            }
             operation
         }
 
@@ -693,7 +788,16 @@
             operation_id: &str,
             command: &str,
         ) -> crate::terminal_broker::TerminalCommandSnapshot {
-            let operation = self.begin(operation_id, command);
+            self.execute_submission(operation_id, command, None)
+        }
+
+        fn execute_submission(
+            &mut self,
+            operation_id: &str,
+            command: &str,
+            submitted: Option<&str>,
+        ) -> crate::terminal_broker::TerminalCommandSnapshot {
+            let operation = self.begin_with_submission(operation_id, command, true, submitted);
             self.pump_until(Duration::from_secs(8), |_| {
                 operation
                     .snapshot()
@@ -1136,6 +1240,491 @@
         );
         assert!(count.combined_output.contains('1'));
         assert!(count.no_auto_replay);
+    }
+
+    #[test]
+    #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
+    fn remote_native_shell_jobs_bash_and_zsh() {
+        use crate::agent_runtime::AgentToolTargetNative;
+        use crate::terminal_broker::TerminalCommandState;
+        for username in ["shellspan", "shellspan-zsh"] {
+            let broker =
+                crate::terminal_broker::TerminalSessionBroker::phase4_enabled_for_test(16_384);
+            let mut terminal = RemoteFixtureTerminal::connect(
+                username,
+                &format!("native-jobs-{username}"),
+                None,
+                broker.clone(),
+            );
+            terminal.execute_user_command("set -o monitor");
+            terminal.execute_user_command("export SS_JOB_STATE=kept; alias ss_job_alias='printf ssh-alias'; ss_job_fn(){ printf ssh-function; }; cd /tmp");
+            let target = AgentToolTargetNative::Remote {
+                target_id: "ssh-job-owner".into(),
+                session_id: terminal.transport_id.clone(),
+                profile_id: None,
+                host: "127.0.0.1".into(),
+                port: 22222,
+                username: username.into(),
+                root_path: None,
+                local_root: None,
+            };
+            let launch = |terminal: &mut RemoteFixtureTerminal, source: &str| {
+                let id = format!("ssh-job-{}", Uuid::new_v4());
+                let job = broker
+                    .prepare_shell_job(
+                        &terminal.transport_id,
+                        &target,
+                        &terminal.agent_session_id,
+                        "fixture-task",
+                        &id,
+                        source,
+                    )
+                    .unwrap();
+                let result =
+                    terminal.execute_submission(&id, source, Some(&job.submitted_command_line));
+                assert_eq!(result.state, TerminalCommandState::Completed, "{result:?}");
+                assert_eq!(result.exit_code, Some(0), "{result:?}");
+                job
+            };
+            let observe = |terminal: &mut RemoteFixtureTerminal,
+                           job: &crate::terminal_jobs::NativeShellJob,
+                           stop: bool| {
+                let fresh = broker
+                    .shell_job(
+                        &job.process_handle,
+                        "ssh-job-owner",
+                        &terminal.agent_session_id,
+                        "fixture-task",
+                    )
+                    .unwrap();
+                if matches!(fresh.state.as_str(), "exited" | "uncertain") {
+                    return fresh;
+                }
+                let id = format!("ssh-job-control-{}", Uuid::new_v4());
+                let line = broker.prepare_shell_job_control(&fresh, &id, stop).unwrap();
+                let result = terminal.execute_submission(&id, &line, Some(&line));
+                assert_eq!(result.state, TerminalCommandState::Completed, "{result:?}");
+                broker
+                    .shell_job(
+                        &job.process_handle,
+                        "ssh-job-owner",
+                        &terminal.agent_session_id,
+                        "fixture-task",
+                    )
+                    .unwrap()
+            };
+            let settle = |terminal: &mut RemoteFixtureTerminal,
+                          job: &crate::terminal_jobs::NativeShellJob| {
+                let deadline = Instant::now() + Duration::from_secs(8);
+                loop {
+                    let job = observe(terminal, job, false);
+                    if matches!(job.state.as_str(), "exited" | "uncertain") {
+                        break job;
+                    }
+                    assert!(Instant::now() < deadline, "{job:?}");
+                    thread::sleep(Duration::from_millis(20));
+                }
+            };
+            let path = format!("/tmp/shellspan-job-once-{}", Uuid::new_v4());
+            let inherited_path = format!("{path}.state");
+            let first = launch(&mut terminal,&format!("printf 'once\\n' >> {path}; {{ ss_job_alias; ss_job_fn; printf ':ssh-job-state:%s:%s:' \"$SS_JOB_STATE\" \"$PWD\"; cd /; printf ':child-cwd:%s:' \"$PWD\"; }} >| {inherited_path}; printf '\\033[32mssh-early\\033[0m'; sleep 2; printf ssh-one-end"));
+            let second = launch(&mut terminal, "sleep 0.2; printf ssh-two-end; exit 7");
+            assert_eq!(
+                terminal
+                    .execute("parallel-foreground", "printf ssh-foreground")
+                    .exit_code,
+                Some(0)
+            );
+            assert_eq!(observe(&mut terminal, &first, false).state, "running");
+            assert_eq!(settle(&mut terminal, &second).exit_code, Some(7));
+            assert_eq!(settle(&mut terminal, &first).exit_code, Some(0));
+            assert!(String::from_utf8_lossy(&terminal.display).contains("\x1b[32mssh-early\x1b[0m"));
+            assert_eq!(
+                broker
+                    .snapshot(Some(&terminal.transport_id))
+                    .unwrap()
+                    .session
+                    .unwrap()
+                    .current_directory
+                    .as_deref(),
+                Some("/tmp"),
+                "background cwd polluted the parent control stream"
+            );
+            let once = terminal.execute("verify-once", &format!("printf 'first-count:%s:end' \"$(wc -l < {path})\"; cat {inherited_path}; rm {path} {inherited_path}"));
+            assert!(regex::Regex::new(r"first-count:\s*1:end")
+                .unwrap()
+                .is_match(&once.combined_output));
+            assert!(
+                once.combined_output
+                    .contains("ssh-aliasssh-function:ssh-job-state:kept:/tmp::child-cwd:/:"),
+                "{once:?}"
+            );
+            terminal.execute("custom-ifs", "IFS=:");
+            let survivor = launch(&mut terminal, "sleep 60");
+            let stopped = launch(&mut terminal, "sleep 60");
+            terminal.execute(
+                "stop-native-job",
+                &format!("builtin kill -s STOP '%( : {};'", stopped.process_handle),
+            );
+            assert_eq!(observe(&mut terminal, &stopped, false).state, "stopped");
+            observe(&mut terminal, &stopped, true);
+            assert_eq!(settle(&mut terminal, &stopped).state, "exited");
+            assert_eq!(observe(&mut terminal, &survivor, false).state, "running");
+            observe(&mut terminal, &survivor, true);
+            assert_eq!(settle(&mut terminal, &survivor).state, "exited");
+            terminal.execute("restore-ifs", "unset IFS");
+            let quick: Vec<_> = (0..8)
+                .map(|index| launch(&mut terminal, &format!("sleep 0.5; exit {index}")))
+                .collect();
+            let long = format!(
+                ": {}\nprintf ssh-long-done",
+                shlex::try_quote(&"'\"".repeat(1400)).unwrap()
+            );
+            assert!(long.len() <= 8192);
+            for index in 0..6 {
+                assert_eq!(
+                    terminal
+                        .execute(&format!("long-native-concurrent-{index}"), &long)
+                        .exit_code,
+                    Some(0)
+                );
+            }
+            for (index, job) in quick.iter().enumerate() {
+                assert_eq!(settle(&mut terminal, job).exit_code, Some(index as i32));
+            }
+            let replay_path = format!("/tmp/shellspan-job-replay-{}", Uuid::new_v4());
+            let replay_display_start = terminal.display.len();
+            let disconnected=launch(&mut terminal,&format!("printf 'once\\n' >> {replay_path}; printf '\\033[32mreconnect-prefix\\033[0m'; sleep 60"));
+            let prefix_deadline = Instant::now() + Duration::from_secs(3);
+            while !String::from_utf8_lossy(&terminal.display[replay_display_start..])
+                .contains("\x1b[32mreconnect-prefix\x1b[0m")
+            {
+                assert!(
+                    Instant::now() < prefix_deadline,
+                    "background prefix never ran before disconnect"
+                );
+                terminal.pump_once();
+                thread::sleep(Duration::from_millis(2));
+            }
+            let previous = terminal.transport_id.clone();
+            terminal.close_transport();
+            assert_eq!(
+                broker
+                    .shell_job(
+                        &disconnected.process_handle,
+                        "ssh-job-owner",
+                        &terminal.agent_session_id,
+                        "fixture-task"
+                    )
+                    .unwrap()
+                    .state,
+                "uncertain"
+            );
+            let mut reconnected = RemoteFixtureTerminal::connect(
+                username,
+                &format!("native-jobs-reconnect-{username}"),
+                Some(&previous),
+                broker.clone(),
+            );
+            let stale = broker
+                .shell_job(
+                    &disconnected.process_handle,
+                    "ssh-job-owner",
+                    &terminal.agent_session_id,
+                    "fixture-task",
+                )
+                .unwrap();
+            assert!(broker
+                .prepare_shell_job_control(&stale, "stale-control", true)
+                .is_err());
+            assert!(stale.control_lost);
+            let replay = reconnected.execute(
+                "verify-no-background-replay",
+                &format!(
+                    "printf 'replay-count:%s:end' \"$(wc -l < {replay_path})\"; rm {replay_path}"
+                ),
+            );
+            assert!(
+                regex::Regex::new(r"replay-count:\s*1:end")
+                    .unwrap()
+                    .is_match(&replay.combined_output),
+                "background source replayed after reconnect: {replay:?}"
+            );
+            drop(reconnected);
+        }
+    }
+
+    #[test]
+    #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
+    fn remote_native_complete_scripts_bash_and_zsh() {
+        use crate::terminal_broker::{
+            TerminalBrokerInputSource, TerminalCommandRequestedSettlement, TerminalCommandState,
+            TerminalInputKind,
+        };
+        for username in ["shellspan", "shellspan-zsh"] {
+            let broker =
+                crate::terminal_broker::TerminalSessionBroker::phase4_enabled_for_test(16_384);
+            let mut terminal = RemoteFixtureTerminal::connect(
+                username,
+                &format!("native-script-{username}"),
+                None,
+                broker.clone(),
+            );
+            assert!(
+                broker.native_input_enabled(&terminal.transport_id).unwrap(),
+                "{username} failed to advertise native editor support"
+            );
+            let path = format!("/tmp/shellspan-native-script-{}", Uuid::new_v4());
+            for flow in ["ixon", "-ixon"] {
+                terminal.execute_user_command(&format!("stty {flow}"));
+                let command = format!("  export SHELLSPAN_NATIVE_STATE=kept\nalias ss_native_alias='printf alias-kept'\nss_native_fn() {{ printf function-kept; }}\ncd /tmp\nprintf '\\033[32mnative-early\\033[0m'; sleep 1\ncat <<'END_NATIVE'\nquoted '\"' with\tliteral Tab\nEND_NATIVE\nprintf '%s\\n' one >> {path}\nprintf '%s\\n' two >> {path}\nfalse\n");
+                let display_start = terminal.display.len();
+                let operation = terminal.begin("native-complete", &command);
+                let deadline = Instant::now() + Duration::from_secs(4);
+                while !String::from_utf8_lossy(&terminal.display[display_start..])
+                    .contains("\x1b[32mnative-early\x1b[0m")
+                {
+                    assert!(
+                        Instant::now() < deadline,
+                        "native script never streamed early output: {:?}",
+                        operation.snapshot().unwrap()
+                    );
+                    terminal.pump_once();
+                    thread::sleep(Duration::from_millis(2));
+                }
+                assert!(
+                    !operation.snapshot().unwrap().state.is_terminal(),
+                    "output was delayed until script completion"
+                );
+                terminal.pump_until(Duration::from_secs(5), |_| {
+                    operation.snapshot().unwrap().state.is_terminal()
+                });
+                let drain = Instant::now() + Duration::from_millis(75);
+                while Instant::now() < drain {
+                    terminal.pump_once();
+                    thread::sleep(Duration::from_millis(2));
+                }
+                let snapshot = operation.snapshot().unwrap();
+                assert_eq!(
+                    snapshot.state,
+                    TerminalCommandState::Completed,
+                    "{username}: {snapshot:?}"
+                );
+                assert_eq!(snapshot.command_line, command);
+                assert_eq!(snapshot.exit_code, Some(1));
+                assert!(
+                    snapshot
+                        .combined_output
+                        .contains("quoted '\"' with\tliteral Tab"),
+                    "{snapshot:?}"
+                );
+                broker
+                    .retire_command(&terminal.transport_id, &snapshot.command_id)
+                    .unwrap();
+                broker
+                    .release_agent_lease(
+                        &terminal.transport_id,
+                        &terminal.agent_session_id,
+                        "fixture-task",
+                        "native-complete",
+                    )
+                    .unwrap();
+                terminal.pump_until(Duration::from_secs(3), |snapshot| snapshot.prompt_ready);
+                let state = terminal.execute("native-state", &format!("ss_native_alias; ss_native_fn; printf ':%s:%s:' \"$SHELLSPAN_NATIVE_STATE\" \"$PWD\"; wc -l < {path}; rm {path}; stty -a"));
+                assert!(
+                    state
+                        .combined_output
+                        .contains("alias-keptfunction-kept:kept:/tmp:"),
+                    "{state:?}"
+                );
+                assert!(
+                    state.combined_output.contains("2\r\n"),
+                    "script side effects were not unique: {state:?}"
+                );
+                let pattern = if flow == "ixon" {
+                    r"(?:^|[\s;])ixon(?:[\s;]|$)"
+                } else {
+                    r"(?:^|[\s;])-ixon(?:[\s;]|$)"
+                };
+                assert!(
+                    regex::Regex::new(pattern)
+                        .unwrap()
+                        .is_match(&state.combined_output),
+                    "TTY flow control changed: {state:?}"
+                );
+            }
+            for requested in [
+                TerminalCommandRequestedSettlement::Cancelled,
+                TerminalCommandRequestedSettlement::TakenOver,
+            ] {
+                let script = format!("printf forbidden > {path}\nprintf residue >> {path}");
+                let operation = terminal.begin_with_submit("native-edit-cancel", &script, false);
+                thread::sleep(Duration::from_millis(100));
+                terminal.pump_once();
+                operation.request_settlement(requested).unwrap();
+                operation.settle_unsubmitted().unwrap();
+                broker
+                    .retire_command(&terminal.transport_id, &operation.command_id().unwrap())
+                    .unwrap();
+                let native_clear = broker.command_shell(&terminal.transport_id).unwrap()
+                    == TerminalShellKind::Bash;
+                if native_clear {
+                    broker
+                        .expect_native_clear(&terminal.transport_id, "native-edit-cancel")
+                        .unwrap();
+                }
+                let recovery = if native_clear {
+                    b"\x18\x04".as_slice()
+                } else {
+                    b"\x03".as_slice()
+                };
+                broker
+                    .admit_terminal_input(
+                        &terminal.transport_id,
+                        TerminalBrokerInputSource::System {
+                            operation_id: "native-edit-cancel".into(),
+                        },
+                        if native_clear {
+                            TerminalInputKind::SystemControl
+                        } else {
+                            TerminalInputKind::Interrupt
+                        },
+                        recovery,
+                        || {
+                            write_all_nonblocking(
+                                &terminal.session,
+                                &mut terminal.shell_channel,
+                                recovery,
+                            )
+                        },
+                    )
+                    .unwrap();
+                if native_clear {
+                    let clear_transport = terminal.transport_id.clone();
+                    terminal.pump_until(Duration::from_secs(3), |_| {
+                        broker
+                            .wait_native_clear(
+                                &clear_transport,
+                                "native-edit-cancel",
+                                Duration::ZERO,
+                            )
+                            .unwrap()
+                    });
+                }
+                broker
+                    .release_agent_lease(
+                        &terminal.transport_id,
+                        &terminal.agent_session_id,
+                        "fixture-task",
+                        "native-edit-cancel",
+                    )
+                    .unwrap();
+                terminal.pump_until(Duration::from_secs(5), |snapshot| snapshot.prompt_ready);
+                terminal.execute_user_command("");
+                let check = terminal.execute("native-no-residue", &format!("test ! -e {path}"));
+                assert_eq!(
+                    check.exit_code,
+                    Some(0),
+                    "cancelled edit buffer executed on user Enter: {check:?}"
+                );
+            }
+            for (requested, expected) in [
+                (
+                    TerminalCommandRequestedSettlement::Cancelled,
+                    TerminalCommandState::Cancelled,
+                ),
+                (
+                    TerminalCommandRequestedSettlement::TimedOut,
+                    TerminalCommandState::TimedOut,
+                ),
+                (
+                    TerminalCommandRequestedSettlement::TakenOver,
+                    TerminalCommandState::TakenOver,
+                ),
+            ] {
+                let script =
+                    format!("printf 'once\\n' >> {path}\nsleep 30\nprintf forbidden >> {path}");
+                let operation = terminal.begin("native-running-interrupt", &script);
+                thread::sleep(Duration::from_millis(150));
+                let result = terminal.interrupt(&operation, requested);
+                assert_eq!(result.state, expected, "{username}: {result:?}");
+                broker
+                    .retire_command(&terminal.transport_id, &result.command_id)
+                    .unwrap();
+                broker
+                    .release_agent_lease(
+                        &terminal.transport_id,
+                        &terminal.agent_session_id,
+                        "fixture-task",
+                        "native-running-interrupt",
+                    )
+                    .unwrap();
+                terminal.pump_until(Duration::from_secs(5), |snapshot| snapshot.prompt_ready);
+                let result =
+                    terminal.execute("native-running-no-tail", &format!("cat {path}; rm {path}"));
+                assert!(result.combined_output.contains("once\r\n"), "{result:?}");
+                assert!(
+                    !result.combined_output.contains("forbidden"),
+                    "interrupted script executed its remaining lines: {result:?}"
+                );
+            }
+            let old_transport = terminal.transport_id.clone();
+            let old_integration = terminal.integration_id.clone();
+            let generation = broker
+                .snapshot(Some(&old_transport))
+                .unwrap()
+                .session
+                .unwrap()
+                .terminal_generation;
+            let operation = terminal.begin(
+                "native-disconnect",
+                &format!("printf 'once\\n' >> {path}\nsleep 30"),
+            );
+            terminal.pump_until(Duration::from_secs(5), |_| {
+                operation.snapshot().unwrap().state == TerminalCommandState::Running
+            });
+            thread::sleep(Duration::from_millis(150));
+            terminal.close_transport();
+            assert_eq!(
+                operation.snapshot().unwrap().state,
+                TerminalCommandState::Uncertain
+            );
+            assert!(operation.snapshot().unwrap().no_auto_replay);
+            drop(terminal);
+            let replacement = format!("native-replacement-{username}");
+            let mut reconnected = RemoteFixtureTerminal::connect(
+                username,
+                &replacement,
+                Some(&old_transport),
+                broker.clone(),
+            );
+            assert!(
+                broker
+                    .snapshot(Some(&replacement))
+                    .unwrap()
+                    .session
+                    .unwrap()
+                    .terminal_generation
+                    > generation
+            );
+            assert!(broker
+                .accept_integration_event(
+                    &old_transport,
+                    &old_integration,
+                    crate::terminal_integration::TerminalIntegrationControlEvent::NativeInput {
+                        enabled: true
+                    }
+                )
+                .is_err());
+            let result = reconnected.execute(
+                "native-disconnect-no-replay",
+                &format!("wc -l < {path}; rm {path}"),
+            );
+            assert!(
+                result.combined_output.contains("1\r\n"),
+                "script was replayed after reconnect: {result:?}"
+            );
+        }
     }
 
     #[test]

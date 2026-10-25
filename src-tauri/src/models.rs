@@ -27,6 +27,43 @@ pub(crate) struct SessionSummary {
     pub(crate) terminal_session_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) terminal_generation: Option<u64>,
+    pub(crate) pty_info: SessionPtyInfo,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SessionPtyInfo {
+    pub(crate) transport_kind: crate::terminal_broker::TerminalTransportKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) windows_build_number: Option<u32>,
+}
+
+impl SessionPtyInfo {
+    pub(crate) fn local() -> Self {
+        Self {
+            transport_kind: if cfg!(windows) {
+                crate::terminal_broker::TerminalTransportKind::WindowsConPty
+            } else {
+                crate::terminal_broker::TerminalTransportKind::LocalPty
+            },
+            // sysinfo reads Windows' CurrentBuildNumber; never infer a modern
+            // ConPTY version from the frontend host or an SSH destination.
+            windows_build_number: if cfg!(windows) {
+                sysinfo::System::kernel_version()
+                    .and_then(|version| version.parse::<u32>().ok())
+                    .filter(|build| *build > 0)
+            } else {
+                None
+            },
+        }
+    }
+
+    pub(crate) fn ssh() -> Self {
+        Self {
+            transport_kind: crate::terminal_broker::TerminalTransportKind::SshPty,
+            windows_build_number: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]

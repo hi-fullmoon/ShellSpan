@@ -265,19 +265,6 @@ pub(crate) fn enforce_native_call_policy_native(
             super::shell_guard::reject_destructive(command, cwd)?;
         }
     }
-    if call.tool_name == "terminal_execute"
-        && matches!(
-            effect.kind,
-            AgentEffectKindNative::SensitiveRead
-                | AgentEffectKindNative::Destructive
-                | AgentEffectKindNative::ExternalSideEffect
-        )
-    {
-        return Err(
-            "native policy requires Direct execution for security-sensitive command lifecycle evidence"
-                .into(),
-        );
-    }
     let critical_write = if call.tool_name == "transfer_file" {
         // Both upload and download write their destination, even when overwrite
         // is false. A protected read source is not itself a protected mutation.
@@ -740,7 +727,7 @@ mod tests {
     }
 
     #[test]
-    fn terminal_execute_cannot_bypass_direct_lifecycle_policy() {
+    fn terminal_execute_effects_do_not_change_execution_surface() {
         let call = terminal_call();
         let scope = inspect_call_policy_scope_native(&call).unwrap();
         for kind in [
@@ -748,11 +735,27 @@ mod tests {
             AgentEffectKindNative::Destructive,
             AgentEffectKindNative::ExternalSideEffect,
         ] {
-            assert!(
-                enforce_native_call_policy_native(&call, &effect(kind), &scope,)
-                    .unwrap_err()
-                    .contains("requires Direct execution")
-            );
+            assert!(enforce_native_call_policy_native(&call, &effect(kind), &scope,).is_ok());
+            for tool in ["exec_command", "terminal_execute"] {
+                assert!(requires_call_confirmation_native(
+                    AgentPermissionModeNative::RequestApproval,
+                    tool,
+                    kind,
+                    0
+                ));
+                assert!(requires_call_confirmation_native(
+                    AgentPermissionModeNative::ScopedAutopilot,
+                    tool,
+                    kind,
+                    0
+                ));
+                assert!(!requires_call_confirmation_native(
+                    AgentPermissionModeNative::Operator,
+                    tool,
+                    kind,
+                    0
+                ));
+            }
         }
         assert!(enforce_native_call_policy_native(
             &call,

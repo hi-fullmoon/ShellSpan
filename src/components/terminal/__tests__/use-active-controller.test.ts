@@ -186,6 +186,48 @@ describe('useActiveController', () => {
     expect(host.firstChild).toBe(controller.container);
   });
 
+  it('preserves composer focus acquired before a pending terminal focus frame', async () => {
+    const host = setupPane();
+    const controller = createController('s1');
+    const focus = vi.spyOn(controller, 'focus');
+    renderControllerHook(host, 's1');
+    const editor = document.createElement('div');
+    editor.setAttribute('contenteditable', 'true');
+    editor.tabIndex = 0;
+    document.body.append(editor);
+    editor.focus();
+    await act(async () => { await new Promise<void>(resolve => requestAnimationFrame(() => resolve())); });
+    expect(document.activeElement).toBe(editor);
+    expect(focus).not.toHaveBeenCalled();
+  });
+
+  it('still focuses a newly selected terminal when another terminal input has focus', async () => {
+    const oldHost = setupPane();
+    const previous = createController('previous');
+    previous.attach(oldHost);
+    previous.focus();
+    const host = setupPane();
+    const selected = createController('selected');
+    const focus = vi.spyOn(selected, 'focus');
+    renderControllerHook(host, 'selected');
+    await act(async () => { await new Promise<void>(resolve => requestAnimationFrame(() => resolve())); });
+    expect(focus).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(selected.terminal.textarea);
+  });
+
+  it('honors a terminal selection when the external input was already focused at scheduling', async () => {
+    const input = document.createElement('input');
+    document.body.append(input);
+    input.focus();
+    const host = setupPane();
+    const selected = createController('selected');
+    const focus = vi.spyOn(selected, 'focus');
+    renderControllerHook(host, 'selected');
+    await act(async () => { await new Promise<void>(resolve => requestAnimationFrame(() => resolve())); });
+    expect(focus).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(selected.terminal.textarea);
+  });
+
   it('does not auto-focus a controller in an inactive terminal group', async () => {
     const host = setupPane();
     const controller = createController('s1');
@@ -195,5 +237,16 @@ describe('useActiveController', () => {
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
     expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('cancels a pending automatic focus when the terminal section becomes hidden', async () => {
+    const host = setupPane();
+    const controller = createController('s1');
+    const focus = vi.spyOn(controller, 'focus');
+    const { rerender } = renderControllerHook(host, 's1', true, true);
+    rerender({ sid: 's1', focus: true, attach: false });
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    expect(controller.host).toBeNull();
+    expect(focus).not.toHaveBeenCalled();
   });
 });

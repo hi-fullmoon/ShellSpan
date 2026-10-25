@@ -86,7 +86,12 @@ impl RemoteSshShellIntegration {
         sftp.mkdir(Path::new(&remote_root), 0o700)
             .map_err(|error| format!("failed to create remote integration root: {error}"))?;
         let setup = (|| {
-            let source = remote_posix_bootstrap(shell, &fifo_path, &identity.home_directory)?;
+            let source = remote_posix_bootstrap(
+                shell,
+                &fifo_path,
+                &identity.home_directory,
+                &identity.executable,
+            )?;
             let mut remote = sftp
                 .create(Path::new(&bootstrap_path))
                 .map_err(|error| format!("failed to create remote integration script: {error}"))?;
@@ -230,6 +235,32 @@ fn cleanup_remote_integration_files(
     bootstrap_path: &str,
     fifo_path: &str,
 ) {
+    if let Ok(entries) = sftp.readdir(Path::new(remote_root)) {
+        let prefix = Path::new(fifo_path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| format!("{name}.job."));
+        if let Some(prefix) = prefix {
+            for (path, _) in entries {
+                let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                    continue;
+                };
+                let Some(suffix) = name.strip_prefix(&prefix) else {
+                    continue;
+                };
+                let handle = suffix.split('.').next().unwrap_or("");
+                let tail = suffix.strip_prefix(handle).unwrap_or("");
+                if crate::terminal_jobs::validate_handle(handle).is_ok()
+                    && matches!(
+                        tail,
+                        "" | ".pending" | ".identity" | ".running" | ".stopped"
+                    )
+                {
+                    let _ = sftp.unlink(Path::new(&format!("{remote_root}/{name}")));
+                }
+            }
+        }
+    }
     let _ = sftp.unlink(Path::new(bootstrap_path));
     let _ = sftp.unlink(Path::new(fifo_path));
     for name in [".zshenv", ".zprofile", ".zlogin"] {

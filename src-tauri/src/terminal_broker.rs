@@ -444,6 +444,10 @@ pub(crate) struct TerminalCommandSnapshot {
     pub(crate) operation_id: String,
     pub(crate) command_id: String,
     pub(crate) command_line: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) submitted_command_line: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) input_rejection: Option<String>,
     pub(crate) state: TerminalCommandState,
     pub(crate) revision: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -460,15 +464,27 @@ pub(crate) struct TerminalCommandSnapshot {
 
 #[derive(Debug)]
 struct TerminalCommandData {
+    command_started: bool,
+    native_empty_confirmed: bool,
+    native_checkpoint: Option<(String, bool)>,
+    native_read_only_probe: bool,
+    native_probe_refresh: bool,
+    native_probe_waiting_prompt: bool,
+    native_probe_outstanding: bool,
+    source_may_be_enqueued: bool,
+    integration_id: Option<String>,
     terminal_session_id: String,
     terminal_generation: u64,
     operation_id: String,
     command_id: String,
     command_line: String,
+    submitted_command_line: Option<String>,
     state: TerminalCommandState,
     revision: u64,
     requested_settlement: Option<TerminalCommandRequestedSettlement>,
     interrupt_sent: bool,
+    input_rejection: Option<String>,
+    interrupt_uncertain: bool,
     exit_code: Option<i32>,
     cwd: Option<String>,
     capture: Vec<u8>,
@@ -492,21 +508,34 @@ impl TerminalCommandOperation {
         terminal_generation: u64,
         operation_id: String,
         command_line: String,
+        integration_id: Option<String>,
         capture_start_sequence: u64,
         capture_limit: usize,
         counters: Arc<TerminalRolloutCounters>,
     ) -> Self {
         Self {
             data: Mutex::new(TerminalCommandData {
+                command_started: false,
+                native_empty_confirmed: false,
+                native_checkpoint: None,
+                native_read_only_probe: false,
+                native_probe_refresh: false,
+                native_probe_waiting_prompt: false,
+                native_probe_outstanding: false,
+                source_may_be_enqueued: false,
+                integration_id,
                 terminal_session_id,
                 terminal_generation,
                 operation_id,
                 command_id: opaque_id("command"),
                 command_line,
+                submitted_command_line: None,
                 state: TerminalCommandState::Submitted,
                 revision: 1,
                 requested_settlement: None,
                 interrupt_sent: false,
+                input_rejection: None,
+                interrupt_uncertain: false,
                 exit_code: None,
                 cwd: None,
                 capture: Vec::new(),
@@ -635,6 +664,92 @@ impl TerminalCommandOperation {
         Ok(())
     }
 
+    pub(crate) fn expect_native_checkpoint(&self, prefix: &str) -> Result<(), String> {
+        let mut data = self.lock()?;
+        if data.state != TerminalCommandState::Submitted {
+            return Err("TERMINAL_NATIVE_EDIT_INTERRUPTED".into());
+        }
+        data.native_checkpoint = Some((prefix.into(), false));
+        Ok(())
+    }
+
+    pub(crate) fn begin_native_read_only_probe(&self) -> Result<(), String> {
+        let mut data = self.lock()?;
+        if data.state != TerminalCommandState::Submitted || data.source_may_be_enqueued {
+            return Err("TERMINAL_NATIVE_EDIT_INTERRUPTED".into());
+        }
+        data.native_read_only_probe = true;
+        data.native_probe_refresh = false;
+        data.native_probe_waiting_prompt = false;
+        data.native_probe_outstanding = true;
+        data.native_empty_confirmed = false;
+        data.native_checkpoint = Some((String::new(), false));
+        Ok(())
+    }
+
+    pub(crate) fn refresh_native_read_only_probe(&self) -> Result<bool, String> {
+        let mut data = self.lock()?;
+        if data.state != TerminalCommandState::Submitted
+            || !data.native_read_only_probe
+            || data.source_may_be_enqueued
+            || !data.native_probe_refresh
+            || data.native_probe_waiting_prompt
+            || data.native_probe_outstanding
+        {
+            return Ok(false);
+        }
+        data.native_probe_refresh = false;
+        data.native_probe_outstanding = true;
+        data.native_empty_confirmed = false;
+        data.native_checkpoint = Some((String::new(), false));
+        Ok(true)
+    }
+
+    pub(crate) fn finish_native_read_only_probe(&self) -> Result<bool, String> {
+        let mut data = self.lock()?;
+        if data.state != TerminalCommandState::Submitted
+            || !data.native_read_only_probe
+            || data.source_may_be_enqueued
+            || data.native_probe_refresh
+            || !data
+                .native_checkpoint
+                .as_ref()
+                .is_some_and(|(_, acknowledged)| *acknowledged)
+        {
+            return Ok(false);
+        }
+        data.native_read_only_probe = false;
+        Ok(true)
+    }
+
+    pub(crate) fn wait_native_checkpoint(&self, timeout: Duration) -> Result<bool, String> {
+        let data = self.lock()?;
+        let (data, _) = self
+            .changed
+            .wait_timeout_while(data, timeout, |data| {
+                data.state == TerminalCommandState::Submitted
+                    && data
+                        .native_checkpoint
+                        .as_ref()
+                        .is_some_and(|(_, acknowledged)| !acknowledged)
+                    && !(data.native_read_only_probe
+                        && data.native_probe_refresh
+                        && !data.native_probe_waiting_prompt
+                        && !data.native_probe_outstanding)
+            })
+            .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE")?;
+        Ok(data.state == TerminalCommandState::Submitted
+            && !data.native_probe_refresh
+            && data
+                .native_checkpoint
+                .as_ref()
+                .is_some_and(|(_, acknowledged)| *acknowledged))
+    }
+
+    pub(crate) fn native_empty_confirmed(&self) -> Result<bool, String> {
+        Ok(self.lock()?.native_empty_confirmed)
+    }
+
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, TerminalCommandData>, String> {
         self.data
             .lock()
@@ -662,6 +777,8 @@ fn command_snapshot(data: &TerminalCommandData) -> TerminalCommandSnapshot {
         operation_id: data.operation_id.clone(),
         command_id: data.command_id.clone(),
         command_line: data.command_line.clone(),
+        submitted_command_line: data.submitted_command_line.clone(),
+        input_rejection: data.input_rejection.clone(),
         state: data.state,
         revision: data.revision,
         exit_code: data.exit_code,
@@ -894,6 +1011,15 @@ struct SessionRecord {
     integration_state_revision: u64,
     prompt_started: bool,
     prompt_ready: bool,
+    native_input: bool,
+    native_checkpoints: bool,
+    native_recovery_required: bool,
+    native_clear_pending: Option<(String, Option<String>, u64, bool)>,
+    native_clear_sequence: u64,
+    native_clear_confirmed: Option<String>,
+    native_clear_scope: Option<(String, Option<String>)>,
+    native_jobs: bool,
+    native_comments: bool,
     current_directory: Option<String>,
     active_command: Option<Arc<TerminalCommandOperation>>,
     // Kept across lease release/retirement until a trusted shell event proves
@@ -940,6 +1066,15 @@ impl SessionRecord {
             integration_state_revision: 0,
             prompt_started: false,
             prompt_ready: false,
+            native_input: false,
+            native_checkpoints: false,
+            native_recovery_required: false,
+            native_clear_pending: None,
+            native_clear_sequence: 0,
+            native_clear_confirmed: None,
+            native_clear_scope: None,
+            native_jobs: false,
+            native_comments: false,
             current_directory: None,
             active_command: None,
             command_input_pending: false,
@@ -1001,13 +1136,20 @@ impl SessionRecord {
             integration_event_sequence: self.integration_event_sequence,
             integration_state_revision: self.integration_state_revision,
             integration_capabilities: if self.integration_state == TerminalIntegrationState::Ready {
-                vec![
+                let mut capabilities = vec![
                     "promptLifecycle",
                     "commandLifecycle",
                     "exactCommandLine",
                     "exitStatus",
                     "currentDirectory",
-                ]
+                ];
+                if self.native_input && self.native_checkpoints && !self.native_recovery_required {
+                    capabilities.push("nativeScriptInput");
+                }
+                if self.native_jobs && self.native_checkpoints && !self.native_recovery_required {
+                    capabilities.push("nativeJobControl");
+                }
+                capabilities
             } else {
                 Vec::new()
             },
@@ -1039,6 +1181,8 @@ impl SessionRecord {
 
 #[derive(Debug)]
 struct BrokerState {
+    jobs: HashMap<String, crate::terminal_jobs::NativeShellJob>,
+    prepared_job_commands: HashMap<String, crate::terminal_jobs::PreparedShellJob>,
     rollout: TerminalBrokerRolloutDecision,
     shell_integration_rollout: TerminalFeatureRolloutDecision,
     terminal_execute_rollout: TerminalFeatureRolloutDecision,
@@ -1054,6 +1198,8 @@ impl Default for BrokerState {
     fn default() -> Self {
         let rollout = TerminalBrokerRolloutDecision::default();
         Self {
+            jobs: HashMap::new(),
+            prepared_job_commands: HashMap::new(),
             shell_integration_rollout: TerminalFeatureRolloutDecision::new(
                 TERMINAL_SHELL_INTEGRATION_FLAG_NAME,
                 TERMINAL_SHELL_INTEGRATION_DEFAULT_ENABLED,
@@ -1651,6 +1797,44 @@ impl TerminalSessionBroker {
             .ok_or_else(|| "TERMINAL_SCREEN_UNAVAILABLE".to_string())
     }
 
+    pub(crate) fn native_input_enabled(&self, transport_session_id: &str) -> Result<bool, String> {
+        let state = self.lock()?;
+        let attachment = current_attachment(&state, transport_session_id)?;
+        let record = state
+            .sessions
+            .get(&attachment.terminal_session_id)
+            .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
+        Ok(record.integration_state == TerminalIntegrationState::Ready
+            && record.native_input
+            && record.native_checkpoints
+            && !record.native_recovery_required)
+    }
+
+    pub(crate) fn command_shell(
+        &self,
+        transport_session_id: &str,
+    ) -> Result<TerminalShellKind, String> {
+        let state = self.lock()?;
+        let attachment = current_attachment(&state, transport_session_id)?;
+        state
+            .sessions
+            .get(&attachment.terminal_session_id)
+            .and_then(|record| record.integration_shell)
+            .ok_or_else(|| "TERMINAL_INTEGRATION_NOT_READY".to_string())
+    }
+
+    pub(crate) fn native_comments_enabled(
+        &self,
+        transport_session_id: &str,
+    ) -> Result<bool, String> {
+        let state = self.lock()?;
+        let attachment = current_attachment(&state, transport_session_id)?;
+        Ok(state
+            .sessions
+            .get(&attachment.terminal_session_id)
+            .is_some_and(|record| record.native_comments))
+    }
+
     pub(crate) fn wait_terminal(
         &self,
         transport_session_id: &str,
@@ -1771,12 +1955,21 @@ impl TerminalSessionBroker {
             return Ok(());
         }
         record.integration_state = TerminalIntegrationState::Initializing;
+        if record.native_clear_pending.is_none() {
+            record.native_clear_sequence = 0;
+            record.native_clear_confirmed = None;
+            record.native_clear_scope = None;
+        }
         record.integration_id = Some(integration_id.to_string());
         record.integration_shell = Some(shell);
         record.integration_reason = None;
         record.integration_event_sequence = 0;
         record.prompt_started = false;
         record.prompt_ready = false;
+        record.native_input = false;
+        record.native_checkpoints = false;
+        record.native_jobs = false;
+        record.native_comments = false;
         advance_integration_state_revision(record)?;
         Ok(())
     }
@@ -1823,6 +2016,168 @@ impl TerminalSessionBroker {
             matches!(&event, TerminalIntegrationControlEvent::Ready { .. });
         let mut state = self.lock()?;
         let attachment = current_attachment(&state, transport_session_id)?.clone();
+        if let TerminalIntegrationControlEvent::Job {
+            handle,
+            state: observed,
+            exit_code,
+        } = &event
+        {
+            let record = current_record_mut(&mut state, transport_session_id, &attachment)?;
+            if record.integration_id.as_deref() != Some(integration_id) {
+                return Err("TERMINAL_INTEGRATION_IDENTITY_MISMATCH".into());
+            }
+            require_ready_integration(record)?;
+            let sequence = record.next_output_sequence.saturating_sub(1);
+            let active_command = record
+                .active_command
+                .as_ref()
+                .map(|operation| {
+                    let data = operation.lock()?;
+                    Ok::<_, String>((data.operation_id.clone(), data.command_started, data.state))
+                })
+                .transpose()?;
+            let active_operation = active_command
+                .as_ref()
+                .map(|(operation, _, _)| operation.as_str());
+            let command_accepted = active_command.as_ref().is_some_and(|(_, started, state)| {
+                *started
+                    && matches!(
+                        state,
+                        TerminalCommandState::Running | TerminalCommandState::CancelRequested
+                    )
+            });
+            let fresh_control = command_accepted
+                && active_operation
+                    .and_then(|operation| {
+                        state
+                            .prepared_job_commands
+                            .get(operation)
+                            .map(|prepared| (operation, prepared))
+                    })
+                    .is_some_and(|(operation, prepared)| {
+                        prepared.job.process_handle == *handle
+                            && prepared.job.operation_id != operation
+                            && prepared.source == prepared.line
+                    });
+            let job = state.jobs.get_mut(handle).ok_or("TERMINAL_JOB_UNKNOWN")?;
+            if job.transport_session_id != transport_session_id
+                || job.terminal_generation != attachment.terminal_generation
+                || job.terminal_session_id != attachment.terminal_session_id
+                || job.integration_id.as_deref() != Some(integration_id)
+            {
+                return Err("TERMINAL_JOB_IDENTITY_MISMATCH".into());
+            }
+            if matches!(job.state.as_str(), "exited" | "rejected")
+                || job.native_active == Some(false)
+                || job.control_lost
+                || !command_accepted
+                || (active_operation != Some(job.operation_id.as_str()) && !fresh_control)
+                || (job.state == "uncertain" && !fresh_control)
+            {
+                return Ok(());
+            }
+            job.observed_output_sequence = sequence;
+            job.observed_at_unix_ms = crate::terminal_jobs::observation_time();
+            job.observation_revision = job
+                .observation_revision
+                .checked_add(1)
+                .filter(|revision| *revision <= JAVASCRIPT_MAX_SAFE_INTEGER)
+                .ok_or_else(counter_exhausted)?;
+            match observed.as_str() {
+                "running" | "queued" => {
+                    if !job.launch_confirmed
+                        && active_operation != Some(job.operation_id.as_str())
+                        && !fresh_control
+                    {
+                        return Err("TERMINAL_JOB_START_UNCONFIRMED".into());
+                    }
+                    job.launch_confirmed = true;
+                    job.native_active = Some(true);
+                    job.state = observed.clone();
+                }
+                "finished" => {
+                    job.exit_code = *exit_code;
+                    job.launch_confirmed = true;
+                }
+                "stopRequested" => {
+                    job.launch_confirmed = true;
+                    job.native_active = Some(true);
+                    job.stop_requested = true;
+                    job.state = observed.clone();
+                }
+                "settled" => {
+                    job.native_active = Some(false);
+                    if job.exit_code.is_none() {
+                        job.exit_code = *exit_code;
+                    }
+                    job.state = if job.exit_code.is_some() {
+                        "exited"
+                    } else {
+                        "uncertain"
+                    }
+                    .into();
+                    if job.exit_code.is_none() {
+                        job.cleanup_reason = Some(
+                            "native job no longer active; original exit status unavailable".into(),
+                        );
+                    }
+                }
+                "terminated" => {
+                    job.native_active = Some(false);
+                    job.state = "exited".into();
+                }
+                other => {
+                    job.native_active = match other {
+                        "stopped" => Some(true),
+                        "rejected" => Some(false),
+                        _ => None,
+                    };
+                    if !matches!(job.state.as_str(), "exited" | "rejected") {
+                        job.state = other.into();
+                    }
+                    if other == "uncertain"
+                        && job.stop_requested
+                        && matches!(
+                            job.shell,
+                            TerminalShellKind::WindowsPowerShell | TerminalShellKind::PowerShell7
+                        )
+                    {
+                        job.cleanup_reason = Some("PowerShell stop remains uncertain; native descendant termination has not been established".into());
+                    }
+                }
+            }
+            self.changed.notify_all();
+            return Ok(());
+        }
+        let job_submission_event =
+            if let TerminalIntegrationControlEvent::CommandStart { command_line, .. }
+            | TerminalIntegrationControlEvent::InputRejected { command_line, .. } = &event
+            {
+                let operation = current_record_mut(&mut state, transport_session_id, &attachment)?
+                    .active_command
+                    .as_ref()
+                    .map(|operation| operation.snapshot())
+                    .transpose()?
+                    .map(|snapshot| snapshot.operation_id);
+                operation.as_ref().and_then(|operation| {
+                    state
+                        .prepared_job_commands
+                        .get(operation)
+                        .filter(|prepared| prepared.job.operation_id == *operation)
+                        .map(|prepared| {
+                            (
+                                prepared.job.process_handle.clone(),
+                                command_line.clone(),
+                                matches!(
+                                    &event,
+                                    TerminalIntegrationControlEvent::InputRejected { .. }
+                                ),
+                            )
+                        })
+                })
+            } else {
+                None
+            };
         let record = current_record_mut(&mut state, transport_session_id, &attachment)?;
         if record.integration_id.as_deref() != Some(integration_id) {
             return Err("TERMINAL_INTEGRATION_IDENTITY_MISMATCH".into());
@@ -1836,6 +2191,98 @@ impl TerminalSessionBroker {
         }
         let through_output_sequence = record.next_output_sequence.saturating_sub(1);
         match event {
+            TerminalIntegrationControlEvent::NativeCleared { sequence, buffer } => {
+                require_ready_integration(record)?;
+                if let Some((operation, integration, expected, queued)) =
+                    record.native_clear_pending.clone()
+                {
+                    if integration != record.integration_id {
+                        return Err("TERMINAL_INTEGRATION_IDENTITY_MISMATCH".into());
+                    }
+                    if queued && sequence == expected && sequence > record.native_clear_sequence {
+                        record.native_clear_sequence = sequence;
+                        record.native_clear_pending = None;
+                        record.native_clear_scope = None;
+                        if buffer.is_empty() {
+                            record.native_clear_confirmed = Some(operation);
+                            record.prompt_started = false;
+                            record.prompt_ready = true;
+                            record.command_input_pending = record.native_recovery_required;
+                        } else {
+                            record.native_recovery_required = true;
+                            record.command_input_pending = true;
+                            record.native_input = false;
+                        }
+                    }
+                } else if sequence > record.native_clear_sequence {
+                    record.native_clear_sequence = sequence;
+                }
+            }
+            TerminalIntegrationControlEvent::NativeCheckpointMode { enabled } => {
+                require_ready_integration(record)?;
+                if !record.prompt_started
+                    || record.prompt_ready
+                    || (enabled && !record.native_input)
+                {
+                    return Err("TERMINAL_NATIVE_CHECKPOINT_OUT_OF_ORDER".into());
+                }
+                record.native_checkpoints = enabled;
+            }
+            TerminalIntegrationControlEvent::NativeCheckpoint { buffer } => {
+                require_ready_integration(record)?;
+                if let Some(command) = &record.active_command {
+                    let mut data = command.lock()?;
+                    if data.integration_id != record.integration_id {
+                        return Err("TERMINAL_INTEGRATION_IDENTITY_MISMATCH".into());
+                    }
+                    if data.state == TerminalCommandState::Submitted {
+                        if data.native_read_only_probe && data.native_probe_refresh {
+                            // Drain the old read-only request before issuing a
+                            // new one after Q. Its late A cannot authorize data.
+                            data.native_probe_outstanding = false;
+                            drop(data);
+                            command.notify();
+                        } else if let Some((expected, _)) = data.native_checkpoint.take() {
+                            if data.native_read_only_probe {
+                                data.native_probe_outstanding = false;
+                            }
+                            let initial = expected.is_empty() && !data.native_empty_confirmed;
+                            let matched = expected == buffer;
+                            data.native_checkpoint = Some((expected, matched));
+                            if matched {
+                                if initial {
+                                    data.native_empty_confirmed = true;
+                                    record.native_clear_scope = Some((
+                                        data.operation_id.clone(),
+                                        record.integration_id.clone(),
+                                    ));
+                                }
+                            } else if initial {
+                                data.state = TerminalCommandState::Failed;
+                                data.revision = next_command_revision(data.revision)?;
+                                record.prompt_ready = true;
+                                record.command_input_pending = false;
+                            } else {
+                                data.state = TerminalCommandState::Uncertain;
+                                data.revision = next_command_revision(data.revision)?;
+                                record.native_input = false;
+                                record.native_recovery_required = true;
+                                record.command_input_pending = true;
+                            }
+                            drop(data);
+                            command.notify();
+                        }
+                    }
+                }
+            }
+            TerminalIntegrationControlEvent::NativeJobs { enabled } => {
+                require_ready_integration(record)?;
+                if !record.prompt_started {
+                    return Err("TERMINAL_JOB_CAPABILITY_OUTSIDE_PROMPT".into());
+                }
+                record.native_jobs = enabled;
+            }
+            TerminalIntegrationControlEvent::Job { .. } => unreachable!("job event handled above"),
             TerminalIntegrationControlEvent::Ready { shell } => {
                 if record.integration_state != TerminalIntegrationState::Initializing
                     || record.integration_shell != Some(shell)
@@ -1849,12 +2296,128 @@ impl TerminalSessionBroker {
             TerminalIntegrationControlEvent::PromptStart { cwd } => {
                 require_ready_integration(record)?;
                 validate_cwd(&cwd)?;
+                let (read_only_probe, source_may_be_enqueued) =
+                    if let Some(command) = &record.active_command {
+                        let mut data = command.lock()?;
+                        let safe = data.state == TerminalCommandState::Submitted
+                            && data.native_read_only_probe
+                            && !data.source_may_be_enqueued;
+                        if safe {
+                            data.native_probe_refresh = true;
+                            data.native_probe_waiting_prompt = true;
+                            data.native_empty_confirmed = false;
+                            data.native_checkpoint = Some((String::new(), false));
+                            record.native_clear_scope = None;
+                        }
+                        (safe, data.source_may_be_enqueued)
+                    } else {
+                        (false, false)
+                    };
+                if (record.command_input_pending || source_may_be_enqueued)
+                    && !read_only_probe
+                    && record.active_command.as_ref().is_some_and(|command| {
+                        command
+                            .snapshot()
+                            .is_ok_and(|snapshot| snapshot.state == TerminalCommandState::Submitted)
+                    })
+                {
+                    record.native_recovery_required = true;
+                    record.command_input_pending = true;
+                    record.native_input = false;
+                    degrade_record(
+                        record,
+                        if source_may_be_enqueued {
+                            "promptDuringUnsubmittedInput:sourceMayBeEnqueued"
+                        } else {
+                            "promptDuringUnsubmittedInput:sourceNotEnqueued"
+                        },
+                    )?;
+                    return Err("TERMINAL_INPUT_RECOVERY_REQUIRED: shell prompt changed while command input was pending; reconnect before retrying".into());
+                }
                 if record.prompt_started {
                     return Err("TERMINAL_PROMPT_START_OUT_OF_ORDER".into());
                 }
                 record.current_directory = Some(cwd);
                 record.prompt_started = true;
                 record.prompt_ready = false;
+                record.native_input = false;
+                record.native_checkpoints = false;
+                record.native_jobs = false;
+                record.native_comments = false;
+            }
+            TerminalIntegrationControlEvent::NativeInput { enabled } => {
+                require_ready_integration(record)?;
+                if !record.prompt_started || record.prompt_ready {
+                    return Err("TERMINAL_NATIVE_INPUT_OUT_OF_ORDER".into());
+                }
+                record.native_input = enabled;
+            }
+            TerminalIntegrationControlEvent::NativeComments { enabled } => {
+                require_ready_integration(record)?;
+                if !record.prompt_started
+                    || record.prompt_ready
+                    || record.integration_shell != Some(TerminalShellKind::Zsh)
+                {
+                    return Err("TERMINAL_NATIVE_INPUT_OUT_OF_ORDER".into());
+                }
+                record.native_comments = enabled;
+            }
+            TerminalIntegrationControlEvent::InputRejected {
+                command_line,
+                reason,
+            } => {
+                require_ready_integration(record)?;
+                if !matches!(
+                    reason.as_str(),
+                    "TERMINAL_INPUT_UNSUPPORTED" | "TERMINAL_BACKGROUND_UNSUPPORTED"
+                ) {
+                    return Err("TERMINAL_INTEGRATION_INVALID_INPUT_REJECTION".into());
+                }
+                if let Some(command) = &record.active_command {
+                    let mut data = command.lock()?;
+                    if data.command_line != command_line
+                        || !matches!(
+                            data.state,
+                            TerminalCommandState::Submitted
+                                | TerminalCommandState::Running
+                                | TerminalCommandState::CancelRequested
+                        )
+                    {
+                        drop(data);
+                        degrade_record(record, "invalidInputRejection")?;
+                        return Err("TERMINAL_COMMAND_LINE_MISMATCH".into());
+                    }
+                    data.state = match data.requested_settlement {
+                        Some(TerminalCommandRequestedSettlement::Cancelled) => {
+                            TerminalCommandState::Cancelled
+                        }
+                        Some(TerminalCommandRequestedSettlement::TakenOver) => {
+                            TerminalCommandState::TakenOver
+                        }
+                        Some(TerminalCommandRequestedSettlement::TimedOut) => {
+                            TerminalCommandState::TimedOut
+                        }
+                        None => {
+                            data.input_rejection = Some(reason);
+                            TerminalCommandState::Failed
+                        }
+                    };
+                    data.revision = next_command_revision(data.revision)?;
+                    data.capture_end_sequence = Some(through_output_sequence);
+                    drop(data);
+                    command.notify();
+                }
+                record.command_input_pending = true;
+            }
+            TerminalIntegrationControlEvent::InterruptUncertain => {
+                require_ready_integration(record)?;
+                if let Some(command) = &record.active_command {
+                    let mut data = command.lock()?;
+                    data.interrupt_uncertain = true;
+                    data.revision = next_command_revision(data.revision)?;
+                    drop(data);
+                    command.notify();
+                }
             }
             TerminalIntegrationControlEvent::PromptEnd => {
                 require_ready_integration(record)?;
@@ -1863,7 +2426,16 @@ impl TerminalSessionBroker {
                 }
                 record.prompt_started = false;
                 record.prompt_ready = true;
-                record.command_input_pending = false;
+                record.command_input_pending =
+                    record.native_recovery_required || record.native_clear_pending.is_some();
+                if let Some(command) = &record.active_command {
+                    let mut data = command.lock()?;
+                    if data.native_read_only_probe && data.native_probe_refresh {
+                        data.native_probe_waiting_prompt = false;
+                        drop(data);
+                        command.notify();
+                    }
+                }
             }
             TerminalIntegrationControlEvent::CommandStart { command_line, cwd } => {
                 require_ready_integration(record)?;
@@ -1881,7 +2453,13 @@ impl TerminalSessionBroker {
                         degrade_record(record, "unexpectedCommandStart")?;
                         return Err("TERMINAL_COMMAND_START_OUT_OF_ORDER".into());
                     }
-                    if command_line != data.command_line {
+                    if command_line
+                        != data
+                            .submitted_command_line
+                            .as_ref()
+                            .unwrap_or(&data.command_line)
+                            .as_str()
+                    {
                         data.state = TerminalCommandState::Uncertain;
                         data.revision = next_command_revision(data.revision)?;
                         data.capture_end_sequence = Some(through_output_sequence);
@@ -1894,6 +2472,8 @@ impl TerminalSessionBroker {
                     if data.state == TerminalCommandState::Submitted {
                         data.state = TerminalCommandState::Running;
                     }
+                    data.command_started = true;
+                    record.native_clear_scope = None;
                     record.command_input_pending = false;
                     data.revision = next_command_revision(data.revision)?;
                     data.cwd = Some(cwd);
@@ -1927,6 +2507,18 @@ impl TerminalSessionBroker {
         }
         record.integration_event_sequence = event_sequence;
         advance_integration_state_revision(record)?;
+        if let Some((handle, line, rejected)) = job_submission_event {
+            if let Some(job) = state.jobs.get_mut(&handle) {
+                if rejected {
+                    job.state = "rejected".into();
+                    job.native_active = Some(false);
+                    job.cleanup_reason =
+                        Some("native parser refused source before starting a job".into());
+                } else {
+                    job.accepted_command_line = Some(line);
+                }
+            }
+        }
         TerminalRolloutCounters::increment(&self.counters.lifecycle_matched);
         if integration_became_ready {
             TerminalRolloutCounters::increment(&self.counters.integration_ready);
@@ -1957,11 +2549,22 @@ impl TerminalSessionBroker {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn begin_command(
         &self,
         transport_session_id: &str,
         operation_id: &str,
         command_line: &str,
+    ) -> Result<Arc<TerminalCommandOperation>, String> {
+        self.begin_command_with_submission(transport_session_id, operation_id, command_line, None)
+    }
+
+    pub(crate) fn begin_command_with_submission(
+        &self,
+        transport_session_id: &str,
+        operation_id: &str,
+        command_line: &str,
+        submitted_command_line: Option<&str>,
     ) -> Result<Arc<TerminalCommandOperation>, String> {
         validate_identifier(operation_id, "operation id")?;
         let mut state = self.lock()?;
@@ -1969,6 +2572,10 @@ impl TerminalSessionBroker {
             return Err("TERMINAL_EXECUTE_DISABLED".into());
         }
         let remote_visible_command_enabled = state.remote_bound_terminal_rollout.enabled;
+        let prepared_job = state.prepared_job_commands.get(operation_id).cloned();
+        if prepared_job.is_some() && submitted_command_line.is_none() {
+            return Err("TERMINAL_NATIVE_SUBMISSION_MISMATCH".into());
+        }
         let attachment = current_attachment(&state, transport_session_id)?.clone();
         let record = current_record_mut(&mut state, transport_session_id, &attachment)?;
         if record.transport_kind == TerminalTransportKind::SshPty && !remote_visible_command_enabled
@@ -1977,6 +2584,25 @@ impl TerminalSessionBroker {
         }
         if record.integration_state != TerminalIntegrationState::Ready || !record.prompt_ready {
             return Err("TERMINAL_INTEGRATION_NOT_READY".into());
+        }
+        if record.native_recovery_required || record.native_clear_pending.is_some() {
+            return Err("TERMINAL_INPUT_RECOVERY_REQUIRED: native edit was not confirmed; reconnect before any further input".into());
+        }
+        if let Some(submitted) = submitted_command_line {
+            let job_matches = prepared_job.as_ref().is_some_and(|prepared| {
+                prepared.source == command_line && prepared.line == submitted
+            });
+            if let Some(prepared) = &prepared_job {
+                validate_prepared_shell_job(record, prepared, operation_id)?;
+            }
+            if !record.native_input
+                || (!job_matches
+                    && (record.integration_shell != Some(TerminalShellKind::Bash)
+                        || submitted
+                            != crate::terminal_integration::bash_native_submission(command_line)?))
+            {
+                return Err("TERMINAL_NATIVE_SUBMISSION_MISMATCH".into());
+            }
         }
         if record.active_command.is_some() {
             return Err("TERMINAL_COMMAND_BUSY".into());
@@ -1999,14 +2625,431 @@ impl TerminalSessionBroker {
             record.terminal_generation,
             operation_id.to_string(),
             command_line.to_string(),
+            record.integration_id.clone(),
             record.next_output_sequence,
             self.config.capture_max_bytes,
             Arc::clone(&self.counters),
         ));
+        operation.lock()?.submitted_command_line = submitted_command_line.map(str::to_string);
         record.active_command = Some(Arc::clone(&operation));
+        record.native_clear_scope = None;
         record.prompt_ready = false;
         advance_integration_state_revision(record)?;
         Ok(operation)
+    }
+
+    pub(crate) fn prepare_shell_job(
+        &self,
+        transport: &str,
+        target: &crate::agent_runtime::AgentToolTargetNative,
+        agent: &str,
+        task: &str,
+        operation: &str,
+        source: &str,
+    ) -> Result<crate::terminal_jobs::NativeShellJob, String> {
+        let mut state = self.lock()?;
+        if state.jobs.len() >= 4096 {
+            return Err("TERMINAL_JOB_CAPACITY_REACHED".into());
+        }
+        if state.jobs.values().any(|job| {
+            job.owner_target_id == target.target_id()
+                && job.agent_session_id == agent
+                && job.task_id == task
+                && job.operation_id == operation
+        }) {
+            return Err("TERMINAL_JOB_LAUNCH_ALREADY_REGISTERED: do not replay; retain the original opaque handle".into());
+        }
+        let attachment = current_attachment(&state, transport)?.clone();
+        let record = current_record_mut(&mut state, transport, &attachment)?;
+        require_ready_integration(record)?;
+        if !record.native_input
+            || !record.native_checkpoints
+            || record.native_recovery_required
+            || !record.native_jobs
+            || !matches!(
+                record.integration_shell,
+                Some(
+                    TerminalShellKind::Bash
+                        | TerminalShellKind::Zsh
+                        | TerminalShellKind::WindowsPowerShell
+                        | TerminalShellKind::PowerShell7
+                )
+            )
+        {
+            return Err("TERMINAL_BACKGROUND_UNSUPPORTED: the current shell has not advertised nativeJobControl; no input was sent".into());
+        }
+        let handle = format!("job-{}", Uuid::new_v4().simple());
+        let shell = record
+            .integration_shell
+            .ok_or("TERMINAL_INTEGRATION_SHELL_UNKNOWN")?;
+        let submitted = crate::terminal_jobs::shell_submission(source, &handle, shell)?;
+        let job = crate::terminal_jobs::NativeShellJob {
+            process_handle: handle.clone(),
+            owner_target_id: target.target_id().into(),
+            agent_session_id: agent.into(),
+            task_id: task.into(),
+            integration_id: record.integration_id.clone(),
+            frozen_target: target.clone(),
+            transport_session_id: transport.into(),
+            terminal_session_id: attachment.terminal_session_id,
+            terminal_generation: attachment.terminal_generation,
+            shell,
+            operation_id: operation.into(),
+            command_line: source.into(),
+            submitted_command_line: submitted.clone(),
+            accepted_command_line: None,
+            control_lost: false,
+            native_active: None,
+            state: "starting".into(),
+            exit_code: None,
+            observed_output_sequence: record.next_output_sequence.saturating_sub(1),
+            observed_at_unix_ms: crate::terminal_jobs::observation_time(),
+            observation_revision: 0,
+            capture_start_sequence: record.next_output_sequence,
+            cleanup_reason: None,
+            stop_requested: false,
+            launch_confirmed: false,
+        };
+        state.prepared_job_commands.insert(
+            operation.into(),
+            crate::terminal_jobs::PreparedShellJob {
+                job: job.clone(),
+                source: source.into(),
+                line: submitted,
+            },
+        );
+        state.jobs.insert(handle, job.clone());
+        Ok(job)
+    }
+
+    pub(crate) fn shell_job(
+        &self,
+        handle: &str,
+        owner: &str,
+        agent: &str,
+        task: &str,
+    ) -> Result<crate::terminal_jobs::NativeShellJob, String> {
+        let mut state = self.lock()?;
+        let job = state
+            .jobs
+            .get(handle)
+            .ok_or("TERMINAL_JOB_UNKNOWN")?
+            .clone();
+        if job.owner_target_id != owner || job.agent_session_id != agent || job.task_id != task {
+            return Err("TERMINAL_JOB_OWNER_MISMATCH".into());
+        }
+        let live = state
+            .sessions
+            .get(&job.terminal_session_id)
+            .is_some_and(|record| {
+                record.open
+                    && record.terminal_generation == job.terminal_generation
+                    && record.integration_state == TerminalIntegrationState::Ready
+                    && record.integration_id == job.integration_id
+            });
+        if !live {
+            let job = state.jobs.get_mut(handle).expect("job exists");
+            job.control_lost = true;
+            if job.native_active != Some(false) {
+                job.native_active = None;
+            }
+            if !matches!(job.state.as_str(), "exited" | "rejected") {
+                job.state = "uncertain".into();
+            }
+        }
+        Ok(state.jobs.get(handle).expect("job exists").clone())
+    }
+
+    pub(crate) fn prepare_shell_job_control(
+        &self,
+        job: &crate::terminal_jobs::NativeShellJob,
+        operation: &str,
+        stop: bool,
+    ) -> Result<String, String> {
+        let mut state = self.lock()?;
+        let current = state
+            .jobs
+            .get(&job.process_handle)
+            .ok_or("TERMINAL_JOB_UNKNOWN")?;
+        if current.owner_target_id != job.owner_target_id
+            || current.agent_session_id != job.agent_session_id
+            || current.task_id != job.task_id
+            || current.frozen_target != job.frozen_target
+            || current.terminal_generation != job.terminal_generation
+            || current.integration_id != job.integration_id
+        {
+            return Err("TERMINAL_JOB_OWNER_MISMATCH".into());
+        }
+        let job = current.clone();
+        if job.control_lost
+            || job.native_active == Some(false)
+            || matches!(job.state.as_str(), "rejected" | "exited")
+            || (job.state == "starting" && job.accepted_command_line.is_none())
+        {
+            return Err("TERMINAL_JOB_NOT_CONTROLLABLE".into());
+        }
+        let line = crate::terminal_jobs::control_submission(&job.process_handle, job.shell, stop)?;
+        state.prepared_job_commands.insert(
+            operation.into(),
+            crate::terminal_jobs::PreparedShellJob {
+                job: job.clone(),
+                source: line.clone(),
+                line: line.clone(),
+            },
+        );
+        Ok(line)
+    }
+
+    pub(crate) fn validate_shell_job_input(
+        &self,
+        transport: &str,
+        operation: &str,
+        source: &str,
+        line: &str,
+    ) -> Result<(), String> {
+        let mut state = self.lock()?;
+        let prepared = state
+            .prepared_job_commands
+            .get(operation)
+            .ok_or("TERMINAL_JOB_SUBMISSION_UNREGISTERED")?
+            .clone();
+        if source != prepared.source || line != prepared.line {
+            return Err("TERMINAL_NATIVE_SUBMISSION_MISMATCH".into());
+        }
+        let attachment = current_attachment(&state, transport)?.clone();
+        let record = current_record_mut(&mut state, transport, &attachment)?;
+        validate_prepared_shell_job(record, &prepared, operation)
+    }
+
+    pub(crate) fn discard_shell_job_submission(&self, operation: &str) -> Result<(), String> {
+        self.lock()?.prepared_job_commands.remove(operation);
+        Ok(())
+    }
+
+    pub(crate) fn require_native_input_recovery(
+        &self,
+        transport: &str,
+        operation: &str,
+    ) -> Result<(), String> {
+        let mut state = self.lock()?;
+        let attachment = current_attachment(&state, transport)?.clone();
+        let record = current_record_mut(&mut state, transport, &attachment)?;
+        if !record.lease.as_ref().is_some_and(|lease|matches!(&lease.owner,TerminalLeaseOwner::Agent{operation_id,..} if operation_id==operation)) {return Err("TERMINAL_BROKER_LEASE_IDENTITY_MISMATCH".into());}
+        record.native_recovery_required = true;
+        record.command_input_pending = true;
+        self.changed.notify_all();
+        Ok(())
+    }
+
+    pub(crate) fn expect_native_clear(
+        &self,
+        transport: &str,
+        operation: &str,
+    ) -> Result<(), String> {
+        let mut state = self.lock()?;
+        let attachment = current_attachment(&state, transport)?.clone();
+        let record = current_record_mut(&mut state, transport, &attachment)?;
+        require_ready_integration(record)?;
+        if !record.native_checkpoints||!matches!(record.integration_shell,Some(TerminalShellKind::Bash|TerminalShellKind::Zsh))||!record.native_clear_scope.as_ref().is_some_and(|(expected,integration)|expected==operation&&integration==&record.integration_id)||!record.lease.as_ref().is_some_and(|lease|matches!(&lease.owner,TerminalLeaseOwner::Agent{operation_id,..}if operation_id==operation)) {return Err("TERMINAL_INPUT_RECOVERY_REQUIRED: native clear is not bound to an unsubmitted, confirmed-empty editor/lease".into());}
+        if record.native_clear_pending.is_some() {
+            return Err(
+                "TERMINAL_INPUT_RECOVERY_REQUIRED: an earlier clear is still pending".into(),
+            );
+        }
+        let sequence = record
+            .native_clear_sequence
+            .checked_add(1)
+            .filter(|sequence| *sequence <= JAVASCRIPT_MAX_SAFE_INTEGER)
+            .ok_or_else(counter_exhausted)?;
+        record.native_clear_pending = Some((
+            operation.into(),
+            record.integration_id.clone(),
+            sequence,
+            false,
+        ));
+        record.native_clear_confirmed = None;
+        record.command_input_pending = true;
+        record.prompt_ready = false;
+        Ok(())
+    }
+
+    pub(crate) fn wait_native_clear(
+        &self,
+        transport: &str,
+        operation: &str,
+        timeout: Duration,
+    ) -> Result<bool, String> {
+        let mut state = self.lock()?;
+        let attachment = current_attachment(&state, transport)?.clone();
+        let integration = current_record_mut(&mut state, transport, &attachment)?
+            .integration_id
+            .clone();
+        let (state, _) = self
+            .changed
+            .wait_timeout_while(state, timeout, |state| {
+                state
+                    .sessions
+                    .get(&attachment.terminal_session_id)
+                    .is_some_and(|record| {
+                        record.terminal_generation == attachment.terminal_generation
+                            && record.integration_id == integration
+                            && record
+                                .native_clear_pending
+                                .as_ref()
+                                .is_some_and(|(expected, _, _, _)| expected == operation)
+                    })
+            })
+            .map_err(|_| "TERMINAL_INPUT_RECOVERY_REQUIRED")?;
+        Ok(state
+            .sessions
+            .get(&attachment.terminal_session_id)
+            .is_some_and(|record| {
+                record.open
+                    && record.terminal_generation == attachment.terminal_generation
+                    && record.integration_id == integration
+                    && record.native_clear_confirmed.as_deref() == Some(operation)
+            }))
+    }
+
+    pub(crate) fn reject_unsubmitted_shell_job(&self, operation: &str) -> Result<(), String> {
+        let mut state = self.lock()?;
+        if let Some(prepared) = state.prepared_job_commands.get(operation).cloned() {
+            if prepared.job.operation_id == operation
+                && prepared.source == prepared.job.command_line
+            {
+                if let Some(job) = state.jobs.get_mut(&prepared.job.process_handle) {
+                    job.state = "rejected".into();
+                    job.native_active = Some(false);
+                    job.cleanup_reason = Some(
+                        "launch cancelled before native accept-line; no source submitted".into(),
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn mark_shell_job_uncertain(&self, handle: &str) -> Result<(), String> {
+        let mut state = self.lock()?;
+        let job = state.jobs.get_mut(handle).ok_or("TERMINAL_JOB_UNKNOWN")?;
+        if !matches!(job.state.as_str(), "exited" | "rejected") {
+            job.state = "uncertain".into();
+        }
+        Ok(())
+    }
+
+    pub(crate) fn shell_jobs_for_cleanup(
+        &self,
+        task: Option<&str>,
+    ) -> Result<Vec<crate::terminal_jobs::NativeShellJob>, String> {
+        Ok(self
+            .lock()?
+            .jobs
+            .values()
+            .filter(|job| {
+                task.is_none_or(|task| task == job.task_id)
+                    && !matches!(job.state.as_str(), "exited" | "rejected")
+                    && !job.control_lost
+                    && job.native_active != Some(false)
+            })
+            .cloned()
+            .collect())
+    }
+
+    pub(crate) fn record_shell_job_cleanup(
+        &self,
+        handle: &str,
+        reason: &str,
+    ) -> Result<(), String> {
+        let mut state = self.lock()?;
+        let job = state.jobs.get_mut(handle).ok_or("TERMINAL_JOB_UNKNOWN")?;
+        if matches!(job.state.as_str(), "exited" | "rejected") || job.native_active == Some(false) {
+            return Ok(());
+        }
+        job.cleanup_reason = Some(reason.into());
+        if job.state != "exited" {
+            job.state = "uncertain".into();
+        }
+        Ok(())
+    }
+
+    pub(crate) fn wait_shell_job_prompt(
+        &self,
+        job: &crate::terminal_jobs::NativeShellJob,
+        timeout: Duration,
+    ) -> Result<bool, String> {
+        let state = self.lock()?;
+        let matches = |record: &SessionRecord| {
+            record.open
+                && record.terminal_generation == job.terminal_generation
+                && record.integration_id == job.integration_id
+        };
+        let (state, _) = self
+            .changed
+            .wait_timeout_while(state, timeout, |state| {
+                state
+                    .sessions
+                    .get(&job.terminal_session_id)
+                    .is_some_and(|record| {
+                        matches(record) && (!record.prompt_ready || record.active_command.is_some())
+                    })
+            })
+            .map_err(|_| "TERMINAL_JOB_PROMPT_WAIT_UNAVAILABLE")?;
+        Ok(state
+            .sessions
+            .get(&job.terminal_session_id)
+            .is_some_and(|record| {
+                matches(record) && record.prompt_ready && record.active_command.is_none()
+            }))
+    }
+
+    pub(crate) fn wait_shell_job_change(
+        &self,
+        job: &crate::terminal_jobs::NativeShellJob,
+        timeout: Duration,
+    ) -> Result<(), String> {
+        let state = self.lock()?;
+        let _ = self
+            .changed
+            .wait_timeout_while(state, timeout, |state| {
+                state.jobs.get(&job.process_handle).is_some_and(|current| {
+                    current.state == job.state
+                        && current.observation_revision == job.observation_revision
+                        && current.accepted_command_line == job.accepted_command_line
+                        && current.control_lost == job.control_lost
+                })
+            })
+            .map_err(|_| "TERMINAL_JOB_OBSERVATION_UNAVAILABLE")?;
+        Ok(())
+    }
+
+    pub(crate) fn wait_command_prompt(
+        &self,
+        operation: &TerminalCommandOperation,
+        timeout: Duration,
+    ) -> Result<bool, String> {
+        let data = operation.lock()?;
+        let terminal_id = data.terminal_session_id.clone();
+        let generation = data.terminal_generation;
+        let integration = data.integration_id.clone();
+        drop(data);
+        let matches = |record: &SessionRecord| {
+            record.open
+                && record.terminal_generation == generation
+                && record.integration_id == integration
+        };
+        let state = self.lock()?;
+        let (state, _) = self
+            .changed
+            .wait_timeout_while(state, timeout, |state| {
+                state.sessions.get(&terminal_id).is_some_and(|record| {
+                    matches(record) && (!record.prompt_ready || record.active_command.is_some())
+                })
+            })
+            .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE")?;
+        Ok(state.sessions.get(&terminal_id).is_some_and(|record| {
+            matches(record) && record.prompt_ready && record.active_command.is_none()
+        }))
     }
 
     pub(crate) fn mark_command_uncertain(
@@ -2044,7 +3087,14 @@ impl TerminalSessionBroker {
             return Err("TERMINAL_COMMAND_IDENTITY_MISMATCH".into());
         }
         command.finalize_capture(record.next_output_sequence.saturating_sub(1))?;
+        {
+            let data = command.lock()?;
+            if !data.command_started && !record.command_input_pending {
+                record.prompt_ready = record.integration_state == TerminalIntegrationState::Ready;
+            }
+        }
         record.active_command = None;
+        self.changed.notify_all();
         Ok(())
     }
 
@@ -2065,6 +3115,11 @@ impl TerminalSessionBroker {
         let remote_visible_command_enabled = state.remote_bound_terminal_rollout.enabled;
         let attachment = current_attachment(&state, transport_session_id)?.clone();
         let record = current_record_mut(&mut state, transport_session_id, &attachment)?;
+        if record.native_clear_pending.is_some() || record.native_recovery_required {
+            return Err(
+                "TERMINAL_INPUT_RECOVERY_REQUIRED: edit restoration is not confirmed".into(),
+            );
+        }
         if record.transport_kind == TerminalTransportKind::SshPty {
             if !remote_visible_command_enabled
                 || record.integration_state != TerminalIntegrationState::Ready
@@ -2163,7 +3218,18 @@ impl TerminalSessionBroker {
             .get(transport_session_id)
             .and_then(|attachment| state.sessions.get(&attachment.terminal_session_id))
         {
-            if record.command_input_pending && bytes != [3] {
+            let owned_clear = bytes == [0x18, 0x04]
+                && matches!(&source,TerminalBrokerInputSource::System{operation_id}if record.native_clear_pending.as_ref().is_some_and(|(expected,_,_,_)|expected==operation_id));
+            if bytes == [0x18, 0x04]
+                && matches!(&source, TerminalBrokerInputSource::System { .. })
+                && !owned_clear
+            {
+                return Err("TERMINAL_BROKER_SYSTEM_CONTROL_NOT_SCOPED".into());
+            }
+            if record.native_recovery_required && bytes != [3] && !owned_clear {
+                return Err("TERMINAL_INPUT_RECOVERY_REQUIRED: native editor acknowledgement was lost or mismatched; reconnect before further input".into());
+            }
+            if record.command_input_pending && bytes != [3] && !owned_clear {
                 let continuing_command = matches!(&source, TerminalBrokerInputSource::Agent { .. })
                     && record
                         .active_command
@@ -2186,8 +3252,19 @@ impl TerminalSessionBroker {
         }
         let remote_visible_command_enabled = state.remote_bound_terminal_rollout.enabled;
         let terminal_execute_enabled = state.terminal_execute_rollout.enabled;
+        let prepared_job = match &source {
+            TerminalBrokerInputSource::Agent { operation_id, .. }
+            | TerminalBrokerInputSource::System { operation_id } => state
+                .prepared_job_commands
+                .get(operation_id)
+                .map(|prepared| (operation_id.clone(), prepared.clone())),
+            TerminalBrokerInputSource::User => None,
+        };
         let attachment = current_attachment(&state, transport_session_id)?.clone();
         let record = current_record_mut(&mut state, transport_session_id, &attachment)?;
+        if let Some((operation, prepared)) = &prepared_job {
+            validate_prepared_shell_job(record, prepared, operation)?;
+        }
         if !matches!(&source, TerminalBrokerInputSource::User)
             && record.transport_kind == TerminalTransportKind::SshPty
             && !remote_visible_command_enabled
@@ -2224,6 +3301,23 @@ impl TerminalSessionBroker {
         if next_input_sequence > JAVASCRIPT_MAX_SAFE_INTEGER {
             return Err(counter_exhausted());
         }
+        let read_only_probe = bytes == [0x18, 0x01]
+            && record.active_command.as_ref().is_some_and(|command| {
+                command.lock().is_ok_and(|data| {
+                    data.native_read_only_probe
+                        && !data.source_may_be_enqueued
+                        && data
+                            .native_checkpoint
+                            .as_ref()
+                            .is_some_and(|(prefix, _)| prefix.is_empty())
+                })
+            });
+        let user_submission = matches!(&request.source, TerminalBrokerInputSource::User)
+            && record.prompt_ready
+            && (bytes == b"\n" || bytes == b"\r");
+        let submitted_agent_line =
+            matches!(&request.source, TerminalBrokerInputSource::Agent { .. })
+                && (bytes == [0x18, 0x05] || bytes == b"\n" || bytes == b"\r");
         let command_input_pending =
             matches!(&request.source, TerminalBrokerInputSource::Agent { .. })
                 && record
@@ -2239,9 +3333,35 @@ impl TerminalSessionBroker {
         // Authorization, transport admission, and input-sequence commit share
         // the broker lock. A rejected transport enqueue therefore consumes no
         // sequence and writes no partial input.
+        if matches!(&request.source, TerminalBrokerInputSource::Agent { .. })
+            && bytes != [0x18, 0x01]
+            && bytes != [0x18, 0x02]
+        {
+            if let Some(command) = &record.active_command {
+                // Called while the execution registration's submit/cancel/
+                // takeover gate is held. Mark before a queue callback can
+                // possibly deliver data, including an ambiguous enqueue error.
+                command.lock()?.source_may_be_enqueued = true;
+            }
+        }
         write()?;
-        if command_input_pending {
+        if bytes == [0x18, 0x04]
+            && matches!(&request.source, TerminalBrokerInputSource::System { .. })
+        {
+            if let Some((_, _, _, queued)) = &mut record.native_clear_pending {
+                *queued = true;
+            }
+        }
+        if command_input_pending && !read_only_probe {
             record.command_input_pending = true;
+        }
+        if submitted_agent_line {
+            record.native_clear_scope = None;
+        }
+        if user_submission {
+            record.prompt_ready = false;
+            advance_integration_state_revision(record)?;
+            self.changed.notify_all();
         }
         record.next_input_sequence = next_input_sequence;
         Ok(Some(receipt))
@@ -2272,7 +3392,7 @@ impl TerminalSessionBroker {
     }
 
     #[cfg(test)]
-    fn replay_output(
+    pub(crate) fn replay_output(
         &self,
         terminal_session_id: &str,
         terminal_generation: u64,
@@ -2983,6 +4103,48 @@ fn user_lease(revision: u64) -> TerminalLeaseSnapshot {
     }
 }
 
+fn validate_prepared_shell_job(
+    record: &SessionRecord,
+    prepared: &crate::terminal_jobs::PreparedShellJob,
+    operation: &str,
+) -> Result<(), String> {
+    let job = &prepared.job;
+    let expected = if operation == job.operation_id && prepared.source == job.command_line {
+        crate::terminal_jobs::shell_submission(&job.command_line, &job.process_handle, job.shell)?
+    } else if prepared.source
+        == crate::terminal_jobs::control_submission(&job.process_handle, job.shell, false)?
+    {
+        crate::terminal_jobs::control_submission(&job.process_handle, job.shell, false)?
+    } else if prepared.source
+        == crate::terminal_jobs::control_submission(&job.process_handle, job.shell, true)?
+    {
+        crate::terminal_jobs::control_submission(&job.process_handle, job.shell, true)?
+    } else {
+        return Err("TERMINAL_NATIVE_SUBMISSION_MISMATCH".into());
+    };
+    if prepared.line != expected {
+        return Err("TERMINAL_NATIVE_SUBMISSION_MISMATCH".into());
+    }
+    require_ready_integration(record)?;
+    if !record.native_jobs || !record.native_checkpoints {
+        return Err("TERMINAL_BACKGROUND_UNSUPPORTED".into());
+    }
+    if record.transport_session_id != job.transport_session_id
+        || record.terminal_session_id != job.terminal_session_id
+        || record.terminal_generation != job.terminal_generation
+        || record.integration_id != job.integration_id
+    {
+        return Err("TERMINAL_JOB_STALE_BINDING".into());
+    }
+    let owner_matches = record.lease.as_ref().is_some_and(|lease| matches!(&lease.owner,
+        TerminalLeaseOwner::Agent { agent_session_id, task_id, operation_id, .. }
+        if agent_session_id == &job.agent_session_id && task_id == &job.task_id && operation_id == operation));
+    if !owner_matches {
+        return Err("TERMINAL_JOB_OWNER_MISMATCH".into());
+    }
+    Ok(())
+}
+
 fn require_ready_integration(record: &SessionRecord) -> Result<(), String> {
     if record.integration_state == TerminalIntegrationState::Ready {
         Ok(())
@@ -3040,6 +4202,10 @@ fn settle_command_from_integration(
         return Err("TERMINAL_COMMAND_END_OUT_OF_ORDER".into());
     }
     data.state = match data.requested_settlement {
+        Some(_) if data.interrupt_uncertain => {
+            TerminalRolloutCounters::increment(&command.counters.uncertainty);
+            TerminalCommandState::Uncertain
+        }
         Some(TerminalCommandRequestedSettlement::Cancelled) => TerminalCommandState::Cancelled,
         Some(TerminalCommandRequestedSettlement::TimedOut) => TerminalCommandState::TimedOut,
         Some(TerminalCommandRequestedSettlement::TakenOver) => TerminalCommandState::TakenOver,

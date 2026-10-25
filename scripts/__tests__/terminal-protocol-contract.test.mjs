@@ -12,6 +12,83 @@ async function readJson(relativePath) {
 }
 
 describe('terminal execution Phase 0 protocol contract', () => {
+  it('keeps terminal display on the raw transport instead of replaying tool metadata', async () => {
+    const controller = await readFile(path.join(repositoryRoot, 'src/components/terminal/terminal-controller-layer.tsx'), 'utf8');
+    expect(controller).not.toContain('agent-command-echo');
+    expect(controller).not.toContain('appendTerminalOutput');
+    expect(controller).not.toContain('controller.write(');
+    expect(controller).toContain('controller.suppressUserInput(');
+    expect(controller).toContain('listenToAgentRuntimeSession(');
+    for (const locale of ['zh-CN', 'en-US']) {
+      const source = await readFile(path.join(repositoryRoot, `src/locales/${locale}.ts`), 'utf8');
+      expect(source).not.toContain("'terminal.notice.agentDirectCommand'");
+      expect(source).not.toContain("'terminal.notice.agentOutputTruncated'");
+    }
+  });
+  it('represents native job uncertainty and shared management output without PID authority', async () => {
+    const schema = await readJson('tool-contract.schema.json');
+    const ajv = new Ajv2020({ allErrors: true, strict: true });
+    ajv.addSchema(schema);
+    const validate = ajv.compile({ $ref: `${schema.$id}#/$defs/nativeJobManagementResultData` });
+    const handle = `job-${'a'.repeat(32)}`;
+    const job = { processHandle: handle, ownerTargetId: 'host', agentSessionId: 'agent', taskId: 'task', transportSessionId: 'transport', terminalSessionId: 'terminal', terminalGeneration: 1, shell: 'bash', operationId: 'operation', commandLine: 'approved source', submittedCommandLine: 'frozen submission', acceptedCommandLine: null, controlLost: false, nativeActive: null, state: 'uncertain', exitCode: null, observedOutputSequence: 0, observedAtUnixMs: 1000, observationRevision: 0, captureStartSequence: 1, cleanupReason: null, stopRequested: false, launchConfirmed: false };
+    const data = { state: 'uncertain', exitCode: null, processHandle: handle, job, waitTimedOut: false, stopRequested: false, managementBlocked: null, waitCancelled: false, outputScope: 'sharedTerminal', stdout: '', stderr: '', noAutoReplay: true };
+    expect(validate(data), ajv.errorsText(validate.errors)).toBe(true);
+    expect(validate({ ...data, stdout: 'fabricated isolated job log' })).toBe(false);
+    expect(validate({ ...data, job: { ...job, pid: 123 } })).toBe(false);
+    expect(validate({ ...data, processHandle: '123' })).toBe(false);
+    expect(validate({ ...data, outputScope: 'isolatedProcess' })).toBe(false);
+  });
+  it('keeps native edit checkpoints and shell job control private, bounded and typed', async () => {
+    const schema = await readJson('terminal-protocol-v1.schema.json');
+    const ajv = new Ajv2020({ allErrors: true, strict: true });
+    ajv.addSchema(schema);
+    const editor = ajv.compile({ $ref: `${schema.$id}#/$defs/nativeEditorControlRecord` });
+    const job = ajv.compile({ $ref: `${schema.$id}#/$defs/nativeJobControlRecord` });
+    for (const value of [['H', '0'], ['H', '1'], ['A', ''], ['L', '1', ''], ['A', "literal '\"\n\r\t"], ['A', 'x'.repeat(32768)]]) {
+      expect(editor(value), ajv.errorsText(editor.errors)).toBe(true);
+    }
+    for (const value of [['H', '2'], ['L', '0', ''], ['L', '1', 'not empty'], ['L', '1'], ['A'], ['A', 'a\0b'], ['A', 'x'.repeat(32769)], ['A', 'buffer', 'extra']]) expect(editor(value)).toBe(false);
+    const handle = `job-${'a'.repeat(32)}`;
+    for (const value of [['K', '1'], ['B', handle, 'running', '-'], ['B', handle, 'stopped', '-'], ['B', handle, 'settled', '7'], ['F', handle, '-1']]) expect(job(value), ajv.errorsText(job.errors)).toBe(true);
+    for (const value of [['B', '123', 'running', '-'], ['B', handle, 'running', '0'], ['B', handle, 'madeUp', '-'], ['F', handle, 'zero']]) expect(job(value)).toBe(false);
+    const publicFrames = new Ajv2020({ strict: true }).compile(schema);
+    expect(publicFrames([['A', 'buffer']])).toBe(false);
+    const engine = await readFile(path.join(repositoryRoot, 'src-tauri/src/agent_runtime/native/terminal_execute.rs'), 'utf8');
+    expect(engine).toContain('wait_native_checkpoint');
+    expect(engine).toContain('require_native_input_recovery');
+    const native = await readFile(path.join(repositoryRoot, 'src-tauri/src/terminal_jobs.ps1'), 'utf8');
+    const nativeHost = await readFile(
+      path.join(repositoryRoot, 'src-tauri/src/terminal_job_host.cs'),
+      'utf8',
+    );
+    expect(nativeHost).toContain('SourceSucceeded = $?');
+    expect(nativeHost).toContain('TryStatementAst');
+    expect(native).toContain('[ShellSpanJobHost]::InstrumentSource');
+    expect(native).toContain('} *>&1 | & $__shellspanStatusSink');
+    expect(native).toContain('| Microsoft.PowerShell.Core\\Out-Host');
+    expect(native).toContain('ActiveProcesses -eq 0');
+    expect(nativeHost).toContain('AssignProcessToJobObject');
+    expect(nativeHost).toContain('TerminateJobObject');
+    expect(native).not.toContain('Receive-Job');
+  });
+  it('accepts complete native scripts and advertises their capability without allowing terminal controls', async () => {
+    const validator = new Ajv2020({ allErrors: true, strict: true });
+    const validate = validator.compile(await readJson('tool-contract.schema.json'));
+    const call = { requestId: 'native-request', callId: 'native-call', capabilityId: 'native-capability', toolName: 'terminal_execute',
+      target: { kind: 'local', targetId: 'local', sessionId: 'terminal', cwd: '/workspace' },
+      arguments: { command: "cat <<'EOF'\nquoted '\"' and\tTab\r\nEOF", explanation: 'Run the approved complete script' } };
+    expect(validate(call), validator.errorsText(validate.errors)).toBe(true);
+    for (const control of ['\0', '\x03', '\x11', '\x13', '\x1b', '\x7f', '\x85']) {
+      expect(validate({ ...call, arguments: { ...call.arguments, command: `printf '${control}'` } })).toBe(false);
+    }
+    const terminalSchema = await readJson('terminal-protocol-v1.schema.json');
+    const fixture = await readJson('fixtures/terminal-protocol-v1.json');
+    const frame = fixture.find(({ type, state }) => type === 'integrationState' && state === 'ready');
+    const validateTerminal = new Ajv2020({ allErrors: true, strict: true }).compile(terminalSchema);
+    expect(validateTerminal([{ ...frame, capabilities: [...frame.capabilities, 'nativeScriptInput'] }]), JSON.stringify(validateTerminal.errors)).toBe(true);
+    expect(validateTerminal([{ ...frame, capabilities: [...frame.capabilities, 'unrecognizedInput'] }])).toBe(false);
+  });
   it('validates durable terminal reconnect events without accepting process targets or unknown fields', async () => {
     const validator = new Ajv2020({ allErrors: true, strict: true });
     const validate = validator.compile(await readJson('event-v5.schema.json'));
@@ -325,7 +402,7 @@ describe('terminal execution Phase 0 protocol contract', () => {
     }), validator.errorsText(validate.errors)).toBe(true);
   });
 
-  it('accepts complete scripts only on Direct execution and rejects terminal controls', async () => {
+  it('accepts complete scripts on both execution surfaces and rejects terminal controls', async () => {
     const schema = await readJson('tool-contract.schema.json');
     const validator = new Ajv2020({ allErrors: true, strict: true });
     const validate = validator.compile(schema);
@@ -337,7 +414,7 @@ describe('terminal execution Phase 0 protocol contract', () => {
     };
     for (const command of ['pwd\nls', "cat <<'EOF'\nhello\nEOF", 'printf\tvalue']) {
       expect(validate({ ...base, toolName: 'exec_command', arguments: { command, explanation: 'inspect', channel: 'direct' } }), validator.errorsText(validate.errors)).toBe(true);
-      expect(validate({ ...base, toolName: 'terminal_execute', arguments: { command, explanation: 'inspect' } })).toBe(false);
+      expect(validate({ ...base, toolName: 'terminal_execute', arguments: { command, explanation: 'inspect' } })).toBe(true);
     }
     for (const command of ['pwd\u0000', 'pwd\u001b', 'pwd\u0085']) {
       expect(validate({ ...base, toolName: 'exec_command', arguments: { command, explanation: 'inspect', channel: 'direct' } })).toBe(false);
@@ -497,9 +574,16 @@ describe('terminal execution Phase 0 protocol contract', () => {
     expect(adapter).toContain('TerminalVisibleCommandRoute::Unavailable');
     expect(adapter).not.toContain('LegacyFallback');
     expect(adapter).toContain('TerminalLifecycleTrust::DirectRequired');
-    expect(callPolicy).toContain('requires Direct execution for security-sensitive command lifecycle evidence');
+    expect(callPolicy).not.toContain('requires Direct execution for security-sensitive command lifecycle evidence');
+    expect(adapter).toContain('TERMINAL_DIRECT_REQUIRED');
+    expect(terminalExecute).toContain('TERMINAL_INPUT_UNSUPPORTED');
+    expect(integration).toContain('Invoke-ShellSpanNativeSubmit');
+    expect(integration).toContain('System.Management.Automation.Language.Parser');
+    expect(integration).toContain('__shellspan_accept_native');
+    expect(terminalExecute).toContain('job_submission');
+    expect(adapter).toContain('"background": background');
     expect(modelTools).toContain('"lifecycleTrust"');
-    expect(modelTools).toContain('visible-terminal lifecycle is never security evidence or a sandbox');
+    expect(modelTools).toContain('Cooperative terminal lifecycle is never security evidence or a sandbox');
     expect(runtime).not.toContain('AgentExecutionChannelNative::Pty');
     expect(broker).not.toContain('terminal_legacy_wrapper_fallback_v1');
     expect(broker).toMatch(/TERMINAL_BROKER_DEFAULT_ENABLED: bool =\s+cfg!\(any\(target_os = "macos", target_os = "windows"\)\)/);
@@ -595,7 +679,10 @@ describe('terminal execution Phase 0 protocol contract', () => {
     expect(rfc).toContain('### Amendment decision — 2026-09-15');
     expect(rfc).toContain('generation-bound isolated control plane');
     expect(rfc).toContain('**out-of-scope tampering**');
-    expect(rfc).toContain('MUST use Direct execution');
+    expect(rfc).toContain('MUST retain their native approval classification and deny rules without changing');
+    expect(rfc).toContain('Such requests MUST be rejected');
+    expect(rfc).toContain('explicitly switch to `direct`; the adapter MUST NOT switch automatically');
+    expect(rfc).not.toContain('command effects to\nDirect before dispatch');
     expect(roadmap).toMatch(/Native Windows PowerShell 5\.1 and PowerShell 7\.6 ConPTY acceptance also passed/i);
     expect(roadmap).toMatch(/Phase 6 is \*\*PASS for the Windows and macOS local\s+delivery scopes\*\*/i);
     expect(matrix).toMatch(/Linux bash and zsh \| \*\*PASS \(VM\/container\)\*\*/);

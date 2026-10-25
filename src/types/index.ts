@@ -205,6 +205,14 @@ export interface SessionSummary {
   terminalSessionId?: string;
   /** Generation of the currently attached PTY/ConPTY/SSH PTY transport. */
   terminalGeneration?: number;
+  /** Backend-reported transport metadata, available even with the broker off. */
+  ptyInfo?: SessionPtyInfo;
+}
+
+export interface SessionPtyInfo {
+  transportKind: TerminalBrokerTransportKind;
+  /** Actual local Windows kernel build, absent for SSH and non-Windows PTYs. */
+  windowsBuildNumber?: number;
 }
 
 export interface SessionCreateRequest {
@@ -244,6 +252,33 @@ export interface TerminalBrokerSubscriberSnapshot {
   observedBytes: number;
 }
 
+/** Cooperative observation; all output remains in the shared terminal stream. */
+export interface NativeShellJobObservation {
+  processHandle: `job-${string}`;
+  ownerTargetId: string;
+  agentSessionId: string;
+  taskId: string;
+  transportSessionId: string;
+  terminalSessionId: string;
+  terminalGeneration: number;
+  shell: 'bash' | 'zsh' | 'windowsPowerShell' | 'powerShell7';
+  operationId: string;
+  commandLine: string;
+  submittedCommandLine: string;
+  acceptedCommandLine: string | null;
+  controlLost: boolean;
+  nativeActive: boolean | null;
+  state: 'starting' | 'queued' | 'running' | 'stopped' | 'stopRequested' | 'exited' | 'rejected' | 'uncertain';
+  exitCode: number | null;
+  captureStartSequence: number;
+  observedOutputSequence: number;
+  observedAtUnixMs: number;
+  observationRevision: number;
+  stopRequested: boolean;
+  launchConfirmed: boolean;
+  cleanupReason: string | null;
+}
+
 export interface TerminalBrokerSessionSnapshot {
   terminalSessionId: string;
   terminalGeneration: number;
@@ -269,6 +304,8 @@ export interface TerminalBrokerSessionSnapshot {
     | 'exactCommandLine'
     | 'exitStatus'
     | 'currentDirectory'
+    | 'nativeScriptInput'
+    | 'nativeJobControl'
   )[];
   promptReady: boolean;
   currentDirectory?: string;

@@ -16,6 +16,19 @@ const latencyScenarios = [
   'local_worker_event_low_frequency_burst',
 ];
 
+export const windowsNativeEditorTests=Object.freeze({
+  windowsPowerShell:'terminal_integration::tests::windows_powershell_5_1_editor_data_interruptions',
+  powerShell7:'terminal_integration::tests::windows_powershell_7_editor_data_interruptions',
+});
+
+export function windowsTestEnvironment(nativeJobs = false, inherited = process.env) {
+  return {
+    ...inherited,
+    CARGO_TERM_COLOR: 'never',
+    SHELLSPAN_NATIVE_POWERSHELL_JOBS: nativeJobs ? '1' : '0',
+  };
+}
+
 export const supportedRustHosts = Object.freeze({
   x64: 'x86_64-pc-windows-msvc',
   arm64: 'aarch64-pc-windows-msvc',
@@ -24,7 +37,7 @@ export const supportedRustHosts = Object.freeze({
 function execute(command, args, options = {}) {
   return spawnSync(command, args, {
     cwd: repositoryRoot,
-    env: { ...process.env, CARGO_TERM_COLOR: 'never' },
+    env: windowsTestEnvironment(),
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
     ...options,
@@ -42,10 +55,10 @@ export function assertCommandSucceeded(result, rendered) {
   }
 }
 
-function run(command, args) {
+function run(command, args, nativeJobs = false) {
   const rendered = render(command, args);
-  console.log(`\n> ${rendered}`);
-  const result = execute(command, args);
+  console.log(`\n> ${nativeJobs ? '[native PowerShell jobs candidate=1] ' : ''}${rendered}`);
+  const result = execute(command, args, { env: windowsTestEnvironment(nativeJobs) });
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
   assertCommandSucceeded(result, rendered);
@@ -114,7 +127,7 @@ export function assertCargoTestsRan(output, filter, exactTest = null) {
   }
 }
 
-function cargoTest(filter, testArgs = [], exactTest = null) {
+function cargoTest(filter, testArgs = [], exactTest = null, nativeJobs = false) {
   const output = run(cargo, [
     'test',
     '--locked',
@@ -125,7 +138,7 @@ function cargoTest(filter, testArgs = [], exactTest = null) {
     '--',
     ...testArgs,
     '--nocapture',
-  ]);
+  ], nativeJobs);
   assertCargoTestsRan(output, filter, exactTest);
 }
 
@@ -389,6 +402,11 @@ export function main() {
     const integrationTest =
       'terminal_integration::tests::windows_powershell_5_1_visible_command_integration';
     cargoTest(integrationTest, ['--ignored', '--exact'], integrationTest);
+    run('powershell.exe', ['-NoLogo', '-NoProfile', '-File', 'scripts/verify-windows-native-job-startup.ps1']);
+    const nativeJobTest =
+      'terminal_integration::tests::windows_powershell_5_1_native_shell_jobs';
+    cargoTest(nativeJobTest, ['--ignored', '--exact', '--test-threads=1'], nativeJobTest, true);
+    cargoTest(windowsNativeEditorTests.windowsPowerShell,['--ignored','--exact','--test-threads=1'],windowsNativeEditorTests.windowsPowerShell);
     const interactiveTest =
       'agent_runtime::native::terminal_interactive::tests::windows_powershell_5_1_interactive_terminal_operation';
     cargoTest(interactiveTest, ['--ignored', '--exact'], interactiveTest);
@@ -413,6 +431,11 @@ export function main() {
     const integrationTest =
       'terminal_integration::tests::windows_powershell_7_visible_command_integration';
     cargoTest(integrationTest, ['--ignored', '--exact'], integrationTest);
+    run('pwsh.exe', ['-NoLogo', '-NoProfile', '-File', 'scripts/verify-windows-native-job-startup.ps1']);
+    const nativeJobTest =
+      'terminal_integration::tests::windows_powershell_7_native_shell_jobs';
+    cargoTest(nativeJobTest, ['--ignored', '--exact', '--test-threads=1'], nativeJobTest, true);
+    cargoTest(windowsNativeEditorTests.powerShell7,['--ignored','--exact','--test-threads=1'],windowsNativeEditorTests.powerShell7);
     const interactiveTest =
       'agent_runtime::native::terminal_interactive::tests::windows_powershell_7_interactive_terminal_operation';
     cargoTest(interactiveTest, ['--ignored', '--exact'], interactiveTest);

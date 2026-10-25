@@ -31,7 +31,11 @@ mod session;
 mod sftp_pool;
 pub mod terminal_broker;
 pub(crate) mod terminal_integration;
+pub(crate) mod terminal_jobs;
 pub(crate) mod terminal_screen;
+#[cfg(all(test, windows))]
+#[path = "tests/windows_shell_history.rs"]
+mod windows_shell_history;
 
 use log::LevelFilter;
 use tauri::{AppHandle, Emitter, Manager};
@@ -260,6 +264,9 @@ pub fn run() {
                 }
             }
             let home_dir = app.path().home_dir()?;
+            path_utils::configure_data_directory(
+                std::env::var_os("SHELLSPAN_DATA_DIR").map(std::path::PathBuf::from),
+            )?;
             let shellspan_dir = shellspan_data_dir(&home_dir);
             let database = db::Database::open(&shellspan_dir.join(db::DATABASE_FILE_NAME))?;
             let credentials = keychain::CredentialManager::new();

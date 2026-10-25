@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtemp, mkdir, readFile, writeFile, copyFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { parse } from 'yaml';
 import { parse as parseToml } from 'smol-toml';
 import { editTomlVersion, generateCandidates } from '../bump-version.mjs';
@@ -49,28 +50,42 @@ describe('release notes', () => {
   it('includes changes across failed and prerelease tags using real git-cliff and Git history', async () => {
     const directory = await temporaryDirectory();
     const git = args => command('git', args, directory);
-    git(['init', '--quiet']);
-    git(['config', 'user.name', 'Release tests']);
-    git(['config', 'user.email', 'release-tests@localhost']);
-    git(['config', 'commit.gpgsign', 'false']);
-    await copyFile(path.join(root, 'cliff.toml'), path.join(directory, 'cliff.toml'));
-    git(['add', '.']);
-    git(['commit', '--quiet', '-m', 'chore: initialize release configuration']);
-    git(['tag', 'v1.0.0']);
-    const base = git(['rev-parse', 'HEAD']);
+    git(['-c', 'init.defaultBranch=fixture-history', 'init', '--quiet']);
+    const configuration = await readFile(path.join(root, 'cliff.toml'));
     const changes = [
+      ['chore: initialize release configuration', 'v1.0.0'],
       ['feat: expose SSH reconnect action', 'v1.1.0'],
       ['fix: retain active connection after retry', 'v1.1.1-rc.1'],
       ['refactor!: remove obsolete connection settings', null],
       ['docs: update developer instructions', null],
       ['Improve connection accessibility', null],
     ];
-    for (const [message, tag] of changes) {
-      await writeFile(path.join(directory, 'changes.txt'), message + '\n', { flag: 'a' });
-      git(['add', '.']);
-      git(['commit', '--quiet', '-m', message]);
-      if (tag) git(['tag', tag]);
+    // Batch the same real Git history instead of launching a process for every
+    // add/commit/tag. Git parses exact byte-counted fast-import data, including
+    // the real UTF-8 cliff configuration; git-cliff remains unmodified.
+    const stream = [];
+    const data = value => {
+      const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value);
+      stream.push(Buffer.from(`data ${bytes.length}\n`), bytes, Buffer.from('\n'));
+    };
+    let contents = '';
+    for (const [index, [message, tag]] of changes.entries()) {
+      const mark = index + 1;
+      stream.push(Buffer.from(`commit refs/heads/fixture-history\nmark :${mark}\ncommitter Release tests <release-tests@localhost> ${1700000000 + index} +0000\n`));
+      data(message);
+      if (index) stream.push(Buffer.from(`from :${index}\n`));
+      stream.push(Buffer.from(`M 100644 inline ${index ? 'changes.txt' : 'cliff.toml'}\n`));
+      if (index) contents += message + '\n';
+      data(index ? contents : configuration);
+      stream.push(Buffer.from('\n'));
+      if (tag) stream.push(Buffer.from(`reset refs/tags/${tag}\nfrom :${mark}\n\n`));
     }
+    execFileSync('git', ['fast-import', '--quiet'], { cwd: directory, input: Buffer.concat(stream) });
+    // Only the freshly created temporary repository is materialized here.
+    git(['reset', '--hard', '--quiet', 'HEAD']);
+    expect(git(['rev-list', '--count', 'HEAD'])).toBe('6');
+    expect(git(['tag', '--list']).split(/\r?\n/)).toEqual(['v1.0.0', 'v1.1.0', 'v1.1.1-rc.1']);
+    const base = git(['rev-parse', 'v1.0.0']);
     const notes = generateCandidates(base, git(['rev-parse', 'HEAD']), directory);
     expect(notes).toContain('expose SSH reconnect action');
     expect(notes).toContain('retain active connection after retry');

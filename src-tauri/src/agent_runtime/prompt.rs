@@ -183,7 +183,10 @@ fn tool_available_on_target(name: &str, header: &AgentSessionHeader) -> bool {
         "run_terminal_command" => {
             target.is_some_and(|target| matches!(target.kind.as_str(), "local" | "remote"))
         }
-        "write_process_input" | "wait_process" | "kill_process" => target.is_some_and(|target| {
+        "wait_process" | "kill_process" => {
+            target.is_some_and(|target| matches!(target.kind.as_str(), "local" | "remote"))
+        }
+        "write_process_input" => target.is_some_and(|target| {
             target.kind == "local" || (target.kind == "remote" && target.profile_id.is_some())
         }),
         "probe_http" | "inspect_host" | "inspect_service" | "query_logs" | "diagnose_endpoint" => {
@@ -216,10 +219,11 @@ fn specialize_tools_for_target(tools: &mut [AgentRequestToolSchema], header: &Ag
         .target
         .as_ref()
         .is_some_and(|target| target.kind == "remote" && target.profile_id.is_none());
-    if !remote_without_profile {
+    if !remote_without_profile
+        || header.execution_surface == super::AgentExecutionSurface::BoundTerminal
+    {
         return;
     }
-    const BACKGROUND_GUIDANCE: &str = "Set background=true to receive a native processHandle, then use wait_process or kill_process and always clean up long-running services. ";
     if let Some(command) = tools
         .iter_mut()
         .find(|tool| tool.name == "run_terminal_command")
@@ -231,7 +235,7 @@ fn specialize_tools_for_target(tools: &mut [AgentRequestToolSchema], header: &Ag
         {
             properties.remove("background");
         }
-        command.description = command.description.replace(BACKGROUND_GUIDANCE, "");
+        command.description = "The selected execution surface is binding. This frozen remote target has no credential-backed profile, so independent Direct execution cannot start; explicitly select boundTerminal to use its current real SSH shell when native capability is available. No implicit fallback exists. Complete scripts are limited to 8192 UTF-8 bytes and explanations to 2048 UTF-8 bytes. Approval and native deny rules remain enforced; shell execution is not a sandbox.".into();
     }
 }
 
@@ -585,8 +589,9 @@ mod tests {
         assert!(!remote.contains(&"list_directory".into()));
         assert!(!remote.contains(&"probe_http".into()));
         assert!(!remote.contains(&"transfer_file".into()));
-        for name in ["write_process_input", "wait_process", "kill_process"] {
-            assert!(!remote.contains(&name.into()));
+        assert!(!remote.contains(&"write_process_input".into()));
+        for name in ["wait_process", "kill_process"] {
+            assert!(remote.contains(&name.into()));
         }
         let profileless =
             assemble_model_input(&header, crate::agent_runtime::default_model_tools());
@@ -653,6 +658,54 @@ mod tests {
         }
         assert!(without_target.contains(&"update_plan".into()));
         assert!(without_target.contains(&crate::agent_runtime::user_questions::TOOL_NAME.into()));
+    }
+
+    #[test]
+    fn profileless_source_ssh_jobs_keep_background_and_management_across_surface_switch() {
+        for profile in [None, Some("saved-profile".to_string())] {
+            for surface in [
+                super::super::AgentExecutionSurface::BoundTerminal,
+                super::super::AgentExecutionSurface::Direct,
+            ] {
+                let mut header = header();
+                header.execution_surface = surface;
+                let target = header.target.as_mut().unwrap();
+                target.kind = "remote".into();
+                target.profile_id = profile.clone();
+                target.host = Some("fixture".into());
+                target.port = Some(22);
+                target.username = Some("fixture".into());
+                let input =
+                    assemble_model_input(&header, crate::agent_runtime::default_model_tools());
+                let command = input
+                    .tools
+                    .iter()
+                    .find(|tool| tool.name == "run_terminal_command")
+                    .unwrap();
+                assert_eq!(
+                    command.input_schema["properties"]
+                        .get("background")
+                        .is_some(),
+                    profile.is_some()
+                        || surface == super::super::AgentExecutionSurface::BoundTerminal
+                );
+                for name in ["wait_process", "kill_process"] {
+                    let tool = input.tools.iter().find(|tool| tool.name == name).expect(
+                        "existing native jobs must remain manageable after a surface switch",
+                    );
+                    assert_eq!(
+                        tool.input_schema["properties"]["processHandle"]["pattern"],
+                        "^(proc|job)-[0-9a-f]{32}$"
+                    );
+                }
+                if profile.is_none() {
+                    assert!(!input
+                        .tools
+                        .iter()
+                        .any(|tool| tool.name == "write_process_input"));
+                }
+            }
+        }
     }
 
     #[test]

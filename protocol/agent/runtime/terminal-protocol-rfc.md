@@ -198,6 +198,14 @@ the enforced boundary. The raw PTY/ConPTY output data plane is outside it: an
 escape sequence, marker, prompt-shaped line, terminal title, OSC record, or any
 bytes printed by a command MUST NOT advance lifecycle.
 
+Rendering metadata is separate from lifecycle authority. The live backend
+`SessionSummary.ptyInfo` reports the actual transport kind and, for local Windows
+ConPTY, the OS build read through sysinfo. The frontend uses this metadata for
+xterm `windowsPty` resize compatibility and replaces it on reconnect. It MUST NOT
+infer ConPTY from the frontend host or an SSH destination, assume a modern build,
+or persist the metadata in workspace records. This does not modify the raw output
+stream, PSReadLine syntax colors, or prediction settings.
+
 For bash and zsh, an ordinary foreground external command or subshell MUST NOT
 inherit an open writable control descriptor. For PowerShell, ordinary external
 children MUST NOT inherit the managed named-pipe sender handle. Control paths,
@@ -216,15 +224,17 @@ actors without moving command execution outside the interactive shell. The
 product MUST describe this limitation and MUST NOT label the visible terminal a
 security sandbox or use its lifecycle metadata as authorization evidence.
 
-Secrets, authorization checks, security-sensitive side effects, explicitly
-adversarial code, and untrusted scripts requiring process-isolated lifecycle
-evidence MUST use Direct execution. ShellSpan classifies known
-`sensitiveRead`, `destructive`, and `externalSideEffect` command effects to
-Direct before dispatch; callers MUST request `lifecycleTrust = directRequired`
-when the adversarial or untrusted nature is contextual rather than classifiable
-from the command. Direct isolates lifecycle/control from interactive-shell
-hooks, but it is not by itself a general OS sandbox. Approval is always decided
-before dispatch and never depends on visible-terminal completion metadata.
+Secrets and authorization checks MUST NOT rely on cooperative shell lifecycle
+metadata. Known `sensitiveRead`, `destructive`, and `externalSideEffect` effects
+MUST retain their native approval classification and deny rules without changing
+the selected execution surface. Callers MUST request
+`lifecycleTrust = directRequired` when contextual adversarial or untrusted code
+requires process-isolated lifecycle evidence. Such requests MUST be rejected
+before input in `boundTerminal`, with an actionable requirement for the user to
+explicitly switch to `direct`; the adapter MUST NOT switch automatically.
+Direct isolates lifecycle/control from interactive-shell hooks, but it is not
+by itself a general OS sandbox. Approval is always decided before dispatch and
+never depends on visible-terminal completion metadata.
 
 ### Amendment decision — 2026-09-15
 
@@ -263,7 +273,7 @@ is the last raw-output frame known to precede or coincide with the event. The
 fence associates capture and screen state without delaying or changing display
 bytes.
 
-`commandStart.commandLine` MUST exactly match the submitted logical command
+`commandStart.commandLine` MUST exactly match the actual submitted editor line
 after only the shell's documented line-ending removal. A mismatch invalidates
 the operation. `commandEnd` from another command, integration, or generation is
 ignored and recorded as a protocol violation.
@@ -286,10 +296,131 @@ The broker command states and allowed transitions are:
 
 Submission requires a ready integration, the Agent lease, no active command,
 and a command identifier registered before any input bytes are written. The
-broker sends the exact command text through the common input path followed by
-the shell-appropriate Enter key sequence. It does not add `/bin/sh -c`, nested
-PowerShell, lifecycle wrappers, or a synthetic `[Agent]` echo. Normal terminal
-input echo, if enabled, remains part of raw output.
+broker sends the frozen source or its deterministic native submission envelope
+through the common input path. Ordinary commands remain wrapper-free. Bash
+complete scripts use the stage-two envelope below; it is evaluated at top level
+in the existing shell. No `/bin/sh -c`, child shell, temporary script, or
+synthetic `[Agent]` echo is added. Normal input echo remains raw output.
+
+### Complete native scripts (unification stage two)
+
+`commandLine` in the tool result is the approved original source (at most 8192
+UTF-8 bytes). Optional `submittedCommandLine` records the actual Bash editor
+line, including the fixed native envelope. Command-start lifecycle MUST match
+that exact envelope, not the original source. Without an envelope, lifecycle
+MUST match the source as before. The broker independently recomputes and checks
+the envelope before input; it never weakens exact-line matching.
+
+Bash 4+ Readline inserts a visible envelope of the following fixed form. `Q`
+is the complete source encoded as one argument by the mature `shlex` quoter;
+physical newlines remain physical newlines, and decoding that argument yields
+the approved source byte for byte:
+
+```bash
+__shellspan_validate_native Q && { __shellspan_return_status "$__shellspan_native_status"; builtin eval -- "$__shellspan_native_source"; }
+```
+
+The native validator uses the pinned current Bash executable in no-exec mode,
+carrying parsing options. It stores the unchanged source only after success
+without diagnostics. `eval` then runs at top level in the same shell, with the
+preceding exit status restored. It introduces no function scope or subprocess
+for source execution. This is one interruptible evaluation unit: accepting a
+raw multiline Readline buffer instead can continue later physical lines after
+SIGINT. Readline displays the complete actual envelope, not an opaque source
+reference alone. The real raw stream is the only display/capture source.
+
+ZLE accepts the original complete buffer. It validates syntax with a pinned
+executable matching the integrated Zsh, carrying parsing options and disabling
+startup/interactive execution; PATH changes cannot substitute another parser.
+PSReadLine inserts literal characters with native handlers and uses PowerShell's
+`Parser.ParseInput` AST before acceptance. Prefix call `&` is allowed there;
+background `PipelineAst.Background` is refused. Bash grammar is not used to
+classify PowerShell. Both Windows lanes require native verification separately.
+
+Rust rejects unsupported controls, oversized source/envelopes/editor input and
+unsupported capabilities before writing. Both POSIX native no-exec parsers can
+accept EOF within heredocs; each heredoc therefore additionally needs an
+explicit nonmissing `heredoc_end` node in the mature grammar. Other Zsh syntax
+is not rejected merely because the Bash grammar has errors. Background syntax
+inspection remains conservative and is not a sandbox.
+
+Zsh scripts containing grammar comment nodes require the current shell's
+`INTERACTIVE_COMMENTS` option. If it is off, they fail before any input rather
+than changing user options: noninteractive `-n` comment semantics do not prove
+the completeness of an interactive ZLE buffer. Hashes inside quoted literals
+or heredoc bodies are not comment nodes.
+
+Internal isolated-control records add `I\0{0|1}\0` (native editor capability
+between prompt-start/end), `C\0{0|1}\0` (Zsh native comment option),
+`J\0source\0reason\0` (source not executed; reason is
+`TERMINAL_INPUT_UNSUPPORTED` or `TERMINAL_BACKGROUND_UNSUPPORTED`), and `U\0`
+(custom Bash INT handling makes an interrupt settlement uncertain). They use
+the same registered integration/generation identity checks as lifecycle.
+`nativeScriptInput` is the corresponding optional public capability. Each
+control field is bounded to 32768 UTF-8 bytes and the control buffer to 131072;
+the generated envelope and encoded editor input (65536 bytes maximum) are
+checked before any lease/input. Nothing is truncated or resubmitted.
+
+Current native input additionally requires `H\0{0|1}\0` advertising the owned
+checkpoint binding. `I=1` alone from an older bootstrap is insufficient.
+Input uses bounded Unicode-safe editor chunks. `A\0buffer\0` must acknowledge
+the exact complete expected buffer before the next chunk. Readline/ZLE quote
+ordinary characters as well as LF/CR/Tab; each payload is at most 512 encoded
+bytes, followed by the native Ctrl-X Ctrl-A checkpoint widget. The Windows
+candidate uses at most 8192 decoded UTF-8 bytes per Base64 payload: Ctrl-X
+Ctrl-B first acknowledges the unchanged buffer, then an editor-owned receiver
+reads through the non-submitting Ctrl-X Ctrl-F data fence within two seconds.
+Public PSReadLine Replace preserves CR/LF/Tab, and GetBufferState supplies the
+exact complete-buffer A acknowledgement. Native syntax coloring and prediction
+remain enabled. The 65536-byte total includes encoded data, all readiness and
+checkpoint keys, and the final accept key. Windows acceptance remains separately
+versioned in windows-desktop-terminal-acceptance.md.
+Long single-line sources above 512 UTF-8 bytes require this native path too;
+an unavailable editor rejects before input rather than overflowing a PTY queue.
+No fixed delay is used as evidence that a chunk was consumed. The existing
+150ms pre-submit cancellation boundary follows the final acknowledgement.
+
+Before any native source is typed, a read-only A probe must confirm an empty
+editor. Existing user draft text causes rejection without writing or clearing
+it. Bash unsubmitted cancellation uses an owned Readline discard widget; Zsh
+uses a ZLE widget that clears BUFFER/CURSOR and redraws the existing prompt.
+Neither interrupts an in-flight editor callback or submits another line. They emit
+`L\0positiveSequence\0emptyBuffer\0`; the backend binds that monotonically
+increasing sequence to the original integration/generation/operation and a
+successfully enqueued discard key. Prepared, duplicated, delayed or foreign L
+cannot confirm a newer clear. The clear scope is removed as soon as an accept
+key is admitted, so it cannot inject a shortcut into a running program. A clear
+timeout retains quarantine and prevents replacement leases. Clearing an edit
+never sends Enter; a missing/mismatched checkpoint's sticky quarantine is not
+removed by L. User Enter also closes the backend prompt gate at admission,
+before the asynchronous S event, so management cannot enter a just-started user
+program during that transport window.
+
+Cancellation/takeover restores an unsubmitted editor once under the input gate.
+The input worker must not repeat that interrupt/clear while unwinding: a second
+interrupt can abort the replacement prompt's lifecycle hooks.
+
+A records are private and cannot authorize commands or clear recovery. They
+are bound to the active operation and current integration/generation. A
+mismatched or missing checkpoint quarantines input until a new generation;
+ordinary prompts, an unsolicited empty A or a same-generation integration
+replacement cannot clear it. Cancellation/takeover wakes a checkpoint waiter
+under the shared submission lock, sends no subsequent chunks or accept key,
+and retains the existing scoped-interrupt/prompt recovery contract. Missing
+confirmation never causes a chunk or source to be replayed.
+
+Parser rejection returns failed with `inputRejection`, retains the source and
+actual envelope in the result, and reports no source statement executed. A
+trusted prompt is still required to clear input recovery. Cancellation and
+takeover before submit interrupt the whole edit buffer; no accept key follows.
+Known custom Bash INT traps disable complex submission. Ordinary commands keep
+the user's trap; interrupted settlement is uncertain when that handler can
+continue execution. Deliberately changing traps/options inside source remains
+cooperative shell behavior, not process isolation. `LINENO`/`BASH_SOURCE` and
+history expose native eval/envelope context; they are not promised to equal
+separate interactive submissions. `return`, `exit`, `set` and alias expansion
+follow each native shell's script semantics. ZLE parses one complete buffer,
+so an alias newly defined there becomes available to subsequent buffers.
 
 For a remote `boundTerminal` operation, the frozen target `sessionId` MUST
 resolve directly to the current user SSH transport, terminal session, and
@@ -456,6 +587,99 @@ No raw frame, lifecycle event, snapshot, lease acknowledgement, or command
 completion from the old generation can affect the new one. Reconnect never
 replays a visible or interactive operation.
 
+## Native shell jobs
+
+Supported Bash 4+/Zsh `background=true` requests freeze the approved source,
+target, Agent/task, terminal session/generation, integration identity and launch
+operation. The broker independently builds and checks the visible native
+submission using `shlex`. Source/envelope/editor limits remain 8192/32768/65536
+bytes. The native asynchronous subshell inherits cwd, environment, aliases,
+functions and options; its state changes do not modify the parent shell.
+Monitor mode and native editor support are mandatory. PowerShell native jobs
+remain unsupported pending native acceptance, with no implicit Direct fallback.
+
+Opaque `job-*` handles are not PIDs or job slots. A fixed native command prefix
+binds the handle to its job; source/output mentioning another handle grants no
+control. Native jobspec resolution selects the group atomically for TERM/CONT.
+Bash observes machine-readable `jobs -p`; Zsh uses native `zsh/parameter`
+jobstates/jobtexts dictionaries. Human jobs/ps tables are never parsed.
+Suspended jobs remain live. Management acquires a fresh prompt/lease, preserves
+exact accepted-line checks and atomically revalidates frozen bindings at every
+input admission. It cannot inject into a foreground program or another lease.
+
+The frozen submitted recipe and exact observed `acceptedCommandLine` are
+separate. Launch submission completion does not prove native job start:
+`launchConfirmed`, `nativeActive`, the nullable exit code, observation revision,
+time and shared-output sequence range describe distinct facts. A missing start
+acknowledgement retains the opaque handle and uncertainty. A new owned query
+or stop can reconcile that same binding only after its own exact native S
+record; creating a prepared management record cannot make delayed B/F records
+fresh. A confirmed inactive job is retired even when its exit status is unknown.
+Integration loss/close/reconnect sets permanent `controlLost`; it cannot be
+reconciled in a replacement generation. Reconciliation never relaunches source.
+Background command timeout bounds launch, readiness, typing and confirmation;
+it is not the background job lifetime. Observation timeout does not stop a job.
+Task cancellation/shutdown attempts only owned jobs through the same gates and
+records unconfirmed cleanup instead of stealing a foreground program's input.
+
+`wait_process`/`kill_process` dispatch by handle class; `proc-*` retains all
+Direct semantics. `job-*` has no isolated stdin/stdout/stderr, and
+`write_process_input` explicitly rejects it. Output stays in the original shared
+terminal stream and may interleave. Results carry observation sequence ranges,
+never fabricated isolated job logs. Wait timeout leaves the job running. Native
+observations continue within one wait so natural completion is discoverable.
+Before another editor transaction, the runtime reserves twice the largest
+confirmed round-trip in that call, with a floor of twice the mandatory 150ms
+pre-submit boundary. When the remaining deadline cannot cover that budget it
+admits no more input and waits cancellably to the deadline. Returned observation
+time/revision remain the actual last observation; elapsed time never invents exit
+or refreshes state. Unexpected missing/mismatched A still quarantines the editor.
+TERM is the supported stop signal; a suspended group receives CONT to handle it.
+Stop requests and confirmed exit are distinct. Unknown exit status remains
+uncertain, never synthesized as zero.
+
+Direct `proc-*` keeps its existing consume-on-terminal contract: a terminal
+result from `wait_process` or `kill_process` retires that handle. Use the returned
+state/available output; do not query the retired handle again. A still-running
+result retains the handle. A kill result with no exit code must not imply zero.
+
+Only the interactive integration producer emits control frames. Native children
+publish a completion scalar by atomic rename in the private integration
+directory. The parent observes it, emits F(handle, exitCode), then
+B(handle, state, nativeWaitCode-or-minus). Child directory/subshell hooks cannot
+publish parent lifecycle/cwd events. Synchronous prompt-expansion Q is the sole
+subshell exception. Thus completion cannot interleave long S records beyond
+PIPE_BUF. User EXIT/TERM traps can replace the cooperative receipt; native wait
+may recover status, otherwise uncertainty is retained. Private artifacts are
+cleaned with the integration. Close, disconnect, integration loss and generation
+replacement invalidate control authority; incomplete launches retain handles
+and audit without replay. This is cooperative lifecycle, not strong isolation.
+
+Windows PowerShell 5.1/7 use owned console workers assigned to Windows Job
+Objects before source/state transfer. The trusted Rust process freezes the
+module rollout before preparing the shell. It defaults on for supported Windows
+hosts; `SHELLSPAN_NATIVE_POWERSHELL_JOBS=0` disables it for newly prepared shells,
+`1` explicitly enables it, and invalid values fail closed. Changing a child
+shell environment cannot enable the frozen flag. K=1 still requires native
+editor checkpoints, FullLanguage and the compiled output-only PSHost.
+
+Bounded, validated snapshots transfer supported variables, function/alias
+definitions, location, version/culture/style and strict-mode context. Unsupported
+state rejects before source execution. The private worker pipe verifies the
+actual child PID; workers receive no original integration control pipe and
+cannot prompt through Host/RawUI or consume the parent's stdin. Ordinary and
+native stdout/stderr use the same ConPTY console; tool results never replay
+them into the terminal. Source status is captured before formatting. Explicit
+host exit, native nonzero and unknown status remain distinct; initialization
+failure cannot claim execution and unknown exits are never filled with zero.
+
+Stop and cleanup target the owned Job Object, including ordinary descendants;
+control remains bound to the original opaque job/Agent/task/target/generation.
+This is cooperative lifecycle, not general same-account isolation. The former
+ThreadJob/Job2 design is historical and is not the current implementation.
+Exact real-machine versions, source/binary bindings, matrix results and remaining
+default/rollback gates are recorded in windows-desktop-terminal-acceptance.md.
+
 ## Direct execution boundary
 
 Direct execution remains the reliable structured path for local processes and
@@ -465,15 +689,26 @@ depend on TSP/1 feature flags. A terminal generation MUST NOT be added to direct
 process handles, and disabling terminal migration flags MUST NOT change direct
 execution behavior.
 
-The model facade MAY request `run_terminal_command.background = true`; the
-adapter MUST force Direct and return its opaque `proc-*` handle. Model-facing
+The selected execution surface is binding. `boundTerminal` MUST NOT silently
+route any command to Direct, including commands with sensitive effects. In
+visible-terminal unification stage two, complete scripts use the current
+shell's advertised native editor capability. Unsupported editors and incomplete
+heredocs MUST fail before terminal input; other syntax refusals MUST execute no
+source statement and leave no executable residue. Native background requests
+follow the shell-job contract above.
+An explicit `lifecycleTrust = directRequired` MUST reject `boundTerminal`;
+the user must explicitly switch the session to `direct`. Shell lifecycle is
+cooperative and cannot supply process-isolated security guarantees.
+
+In an explicitly selected Direct session, the model facade MAY request
+`run_terminal_command.background = true` and receive its opaque `proc-*` handle. Model-facing
 `write_process_input`, `wait_process`, and `kill_process` calls MUST bind that
 handle to the same frozen Session, task, request, and owner target. Background
 service workflows MUST terminate the handle explicitly after verification.
 
 Shell execution is not a network sandbox and MUST NOT claim an enforced
 destination scope. Known network-capable commands and general-purpose runtimes
-are conservatively classified as `externalSideEffect`, forced to Direct, and
+are conservatively classified as `externalSideEffect` and
 subject to the current permission mode. Permission controls confirmation; it
 does not create network isolation or an exact destination scope.
 `requestApproval` MUST require confirmation for every native tool call.

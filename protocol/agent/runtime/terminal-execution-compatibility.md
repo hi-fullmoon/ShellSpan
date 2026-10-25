@@ -1,15 +1,37 @@
 # Terminal Execution Compatibility and Rollout Plan
 
-Status: Phase 6 Windows and macOS local rollout accepted; remote bound-terminal reuse implemented through migration stage 6 on 2026-09-17, with final cross-platform/window validation pending.
+Status: historical Phase 6 local rollout and remote migration records are retained. Stage-four host-scoped Windows native/frontend/model evidence was accepted independently on 2026-10-25; untested platform and architecture lanes remain open.
 
 Protocol: [Terminal Session Protocol v1](./terminal-protocol-rfc.md)
+
+Current routing amendment (2026-10-23): the selected `direct`/`boundTerminal`
+surface is binding. The [visible-terminal unification plan](./visible-terminal-unification-plan.md)
+supersedes earlier forced-Direct routing statements in historical acceptance
+documents. Effects continue to control approval, not execution routing.
+
+Stage-two amendment: complete native scripts preserve their approved source in
+`commandLine`. Bash records its complete visible native evaluation envelope in
+`submittedCommandLine`; lifecycle matches that actual accepted line exactly.
+ZLE and PSReadLine accept the original buffer. See the plan for parser, heredoc,
+cancellation, byte limits and version evidence. Windows native-shell evidence
+is recorded in [the Windows acceptance report](./windows-native-terminal-acceptance.md);
+stage-four desktop/model cases and the complete normal native and full frontend
+gates are recorded independently in [the Windows desktop continuation](./windows-desktop-terminal-acceptance.md).
+Both gates passed on the named Windows x64 host on 2026-10-25, with matching
+production code across their frozen runs. The final frontend supplement also
+includes the route-schema test and offline diagnostic example missing from
+the earlier Windows inventory; those additions have explicit schema/build
+checks and a complete-tree frontend pass, rather than retrospective coverage.
+This does not change older
+failed-run verdicts or establish other hosts, architectures or Linux desktop.
 
 ## Compatibility table
 
 | Existing boundary | Current meaning | Migration decision | Compatibility proof / removal gate |
 | --- | --- | --- | --- |
 | `AgentExecutionSurface` | Persisted values are `direct` and `boundTerminal` in Rust event v5 and TypeScript. `boundTerminal` selects cooperative, wrapper-free terminal execution when it is available. | Preserve both serialized values. Do not add a third persisted surface for interactive operation; it is a runtime capability of the real-terminal surface. | Existing v5 session fixtures and restart tests continue to load both values. Runtime readiness remains ephemeral and platform-scoped. |
-| Model tool `run_terminal_command` | Stable model-facing facade normalized by the native adapter. `background = true` returns a native `proc-*` handle. | Keep the facade during migration. Routing is chosen and frozen before dispatch. Background execution and optional `lifecycleTrust = directRequired` force Direct. Background handles are managed through model-facing `write_process_input`, `wait_process`, and `kill_process`; known sensitive, destructive, and external effects are forced to Direct independently of the selected surface. Do not expose rollout flags to the model. | Adapter/effect/policy tests prove old calls remain accepted, background calls cannot reach `terminal_execute`, stateful shell commands remain eligible for the visible terminal, and strong-lifecycle requests cannot reach `terminal_execute`. |
+| Model tool `run_terminal_command` | Stable model-facing facade normalized by the native adapter. | The selected surface is binding. `boundTerminal` uses the current shell and its native editor. `background=true` requires advertised `nativeJobControl` and returns a generation/Agent/task-bound `job-*` handle. Unsupported capabilities and explicit `directRequired` fail before execution. Effects retain approval classification. Explicit `direct` preserves scripts and `proc-*` handles. | Real local/SSH Bash/Zsh jobs cover prompt reuse, shared output, native lifecycle and cleanup. Windows PowerShell uses owned console workers, validated state snapshots and the same ConPTY output; the supported-host implementation defaults on, with explicit `0` rollback for newly prepared shells. See the dated Windows report for actual versions, source bindings and remaining final gates. |
+| Native shell job handles | Opaque `job-*` binds frozen target, integration identity, terminal generation, Agent/task and one launch operation. | `wait_process` observes without killing on wait timeout; `kill_process(terminate)` uses native job identity. No isolated job stdin or logs. Prompt/lease gates apply to management; incomplete launches and lost control remain uncertain without replay. | Native Bash jobspec and Zsh jobstates/jobtexts use no human table parsing. Windows binds a held worker Process handle to a fresh Job Object before source delivery and confirms termination only after the owned group is empty. Unsupported caller state is refused; unknown observations remain uncertain. Supported Windows shells default on, with explicit `0` rollback; desktop/model acceptance and the full standard gate remain separately recorded. |
 | Native `exec_command.channel` | Contract v3 accepts only `direct`, which uses process/SSH exec. Visible commands use the separate `terminal_execute` contract. | Remove the former `pty` channel instead of reinterpreting it. Historical event payloads remain readable as opaque recorded JSON, but a new `pty` tool call is invalid. | Protocol tests require `channel = direct`; native routing exposes only `TerminalExecute` or `Unavailable`. |
 | Agent Session event v5 | Append-only JSONL source of truth. `session/created.executionSurface` and `session/execution_surface_changed.data.surface` persist surface choice; `tool/call`, `tool/execution`, and `tool/result` persist execution boundaries. | Keep version 5. Phase 0 repairs the schema enum to match the already-shipped surface-change event. Raw frames, integration secrets, and screen contents do not enter event v5. Phase 3 adds the `uncertain` tool-result status and versioned `terminal_execute` result data without changing the envelope; explicit uncertainty remains a reconciliation boundary. Oversized private Assistant replay uses a content-addressed, zstd-compressed artifact claim check; the replay inline threshold remains 256 KiB. File/script execution expands the durable event bound to 512 KiB for escaped 128 KiB writes and exact-diff approval prompts; older runtimes may reject these larger records (see file-and-script-execution.md). Existing inline records remain readable, but runtimes predating claim checks are not supported for downgrade reads. | Event-v5 compatibility fixtures validate `direct` and `boundTerminal`; Rust replay tests retain every older result status and prove `uncertain` is never auto-replayed. Replay storage tests keep every JSONL event bounded, hide the private artifact reference from public projection, verify its digest, restore same-domain provider metadata after restart, and keep archived history viewable when a replay artifact is unavailable. |
 | Persisted Agent Sessions | Stored under `sessions-v5`; historical events are replayed strictly. | Never rewrite old logs in place. Continue deriving `boundTerminal` exactly as stored. New runtime readiness is ephemeral/derived and must not make an old record unloadable. | Rust restart tests plus frontend adapter fixtures cover restoration. Migration tests in Phase 1 must include pre-feature sessions. |
@@ -39,8 +61,9 @@ Protocol: [Terminal Session Protocol v1](./terminal-protocol-rfc.md)
    persisted value or ordinary terminal connection state.
 8. Visible-terminal lifecycle metadata is cooperative operational evidence, not
    authorization evidence or a security sandbox. Approval completes before
-   dispatch. Secrets, security-sensitive effects, adversarial code, and
-   untrusted scripts requiring process-isolated lifecycle evidence use Direct.
+   dispatch. Effects retain their approval requirements. Requests requiring
+   process-isolated lifecycle evidence reject `boundTerminal` and require an
+   explicit switch to Direct.
 
 ## Named feature flags
 
@@ -51,7 +74,7 @@ phase listed below; Phase 0 only reserves their names and behavior.
 | --- | --- | --- | --- | --- | --- |
 | `terminal_broker_v1` | 2 | on for Windows and macOS local; off elsewhere | none | Creates broker session records and fans raw bytes to bounded consumers without rewriting display bytes. | Disable dependent flags before the broker for new local generations. Close active broker generations; unresolved operations become uncertain. Deferred platforms report visible commands unavailable. |
 | `terminal_shell_integration_v1` | 3 | on for Windows and macOS local; off elsewhere | `terminal_broker_v1` | Installs supported local cooperative shell integration with a generation-bound control plane. Unsupported or failed initialization degrades explicitly. | Stop new integration bootstrap and mark affected generations degraded. Invalidate active integration; any command lacking accepted completion becomes uncertain. |
-| `terminal_execute_v1` | 3 | on for Windows and macOS local; off elsewhere | broker + ready cooperative shell integration | Routes eligible non-security-sensitive visible commands to wrapper-free `terminal_execute`. Effect policy and `lifecycleTrust = directRequired` force Direct where cooperative evidence is insufficient. | Stop routing new calls. Existing calls finish on their chosen path or become uncertain; never replay. Rolled-out local platforms offer explicit Direct instead of reviving the wrapper. |
+| `terminal_execute_v1` | 3 | on for Windows and macOS local; off elsewhere | broker + ready cooperative shell integration | Routes supported visible commands regardless of effect. Ordinary commands remain wrapper-free; complete scripts use the advertised native mechanism. Explicit `directRequired` rejects bound-terminal execution. | Stop routing new calls. Existing calls finish on their chosen path or become uncertain; never replay. Rolled-out local platforms offer explicit Direct instead of reviving the wrapper. |
 | `terminal_remote_bound_terminal_v1` | remote reuse stage 6 | on for Windows and macOS desktop hosts; off on Linux | broker + shell integration + terminal execute | Prepares integration while opening an ordinary user SSH PTY and routes remote `boundTerminal` visible commands to that frozen source transport and generation. | Stop new remote visible-command routing; make active incomplete commands uncertain; revoke Agent leases and turn guards; keep the user SSH transport open. Later new/reconnected sessions use an ordinary shell. Never restore a dedicated Agent PTY. |
 | `terminal_interactive_tools_v1` | 5 | on for Windows and macOS local; off elsewhere | broker + shell integration; remote bound-terminal and remote-interactive flags for remote targets | Publishes terminal input/key/snapshot/wait tools and the headless screen model. | Remove tools from new model requests, revoke Agent leases, and reject later Agent input. Reconcile any operation without accepted completion; user ownership remains available. |
 | `terminal_remote_interactive_tools_v1` | 5 | off | interactive tools + remote bound-terminal | Separately admits screen observation and interactive input for the frozen user SSH PTY after the SSH Phase 5 gate passes. It does not gate visible commands. | Remove remote interactive tools from new model requests and reject later remote interactive input without disabling remote visible commands. |
@@ -195,10 +218,15 @@ Each input enqueue and the final submit share a per-operation gate with
 cancellation and takeover. Cancelling before submit discards the shell edit
 buffer with the existing scoped interrupt and settles as cancelled/taken over;
 the submit key is never sent. Execution timeout starts after submission.
-Every bracketed-paste envelope is closed within one enqueue. Visible commands
-retain the production single-line contract: newlines, tabs and other control
-characters are rejected before acquiring a lease or writing to the PTY.
-Multiline scripts use Direct execution. Typing does not expand shell support.
+Every bracketed-paste envelope is closed within one enqueue. Complete scripts
+use the advertised native Readline/ZLE/PSReadLine editor bindings: LF/CR/Tab
+insert literal buffer characters, then one dedicated accept-line submits the
+whole source or the visible Bash envelope containing that source. Bash validates
+and evaluates source at top level as one interruptible unit. This path does not
+rely on bracketed paste or animation and keeps
+a cancellation boundary before accept-line even in reduced motion. Other
+control characters stay rejected. Unsupported editors fail before input;
+see `visible-terminal-unification-plan.md` for shell/version and grammar limits.
 
 The broker tracks pending command input independently of the Agent lease.
 Releasing or retiring a command cannot unlock a potentially dirty edit buffer.

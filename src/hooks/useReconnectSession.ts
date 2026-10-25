@@ -101,7 +101,7 @@ export function useReconnectSession(): (sessionId: string, automatic?: boolean) 
             });
             return;
           }
-          terminalRegistry.rebindSession(sessionId, summary.sessionId);
+          terminalRegistry.rebindSession(sessionId, summary.sessionId, summary.ptyInfo);
           reconnectSession(sessionId, summary);
           logger.info(`Reconnected local session ${sessionId} as session ${summary.sessionId}`);
           invokeCloseSession(sessionId).catch((error) => {
@@ -153,7 +153,7 @@ export function useReconnectSession(): (sessionId: string, automatic?: boolean) 
           });
           return;
         }
-        terminalRegistry.rebindSession(sessionId, summary.sessionId);
+        terminalRegistry.rebindSession(sessionId, summary.sessionId, summary.ptyInfo);
         reconnectSession(sessionId, summary, profile.id);
         invokeCloseSession(sessionId).catch((error) => {
           logger.warn(`Failed to close replaced session ${sessionId}`, error);

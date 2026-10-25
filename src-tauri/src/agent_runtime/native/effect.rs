@@ -420,28 +420,8 @@ fn is_plain_windows_discovery_command(command: &str) -> bool {
     }
 }
 
-pub(crate) fn command_requires_direct_lifecycle_native(command: &str) -> bool {
-    if command.contains(['\n', '\r', '\t']) {
-        return true;
-    }
-    if let Some(commands) = super::shell_policy::literal_command_chain(command) {
-        if commands.into_iter().any(|part| {
-            matches!(
-                classify_single_command_effect(part),
-                AgentEffectKindNative::SensitiveRead
-                    | AgentEffectKindNative::Destructive
-                    | AgentEffectKindNative::ExternalSideEffect
-            )
-        }) {
-            return true;
-        }
-    }
-    matches!(
-        classify_command_effect(command),
-        AgentEffectKindNative::SensitiveRead
-            | AgentEffectKindNative::Destructive
-            | AgentEffectKindNative::ExternalSideEffect
-    )
+pub(crate) fn command_contains_background_operator_native(command: &str) -> bool {
+    super::shell_policy::contains_background_operator(command)
 }
 
 fn is_bounded_diagnostic_command(command: &str) -> bool {
@@ -630,11 +610,10 @@ mod tests {
     }
 
     #[test]
-    fn security_sensitive_command_effects_require_direct_lifecycle_evidence() {
+    fn security_sensitive_command_effects_remain_classified_for_approval() {
         for command in [
             "cat ~/.ssh/id_ed25519",
             "cat ./config; touch ./new",
-            "pwd\nls",
             "/bin/cat ~/.ssh/id_ed25519",
             "rm -rf /tmp/example",
             "/bin/rm -rf /tmp/example",
@@ -643,13 +622,13 @@ mod tests {
             r"C:\Windows\System32\format.com D:",
         ] {
             assert!(
-                command_requires_direct_lifecycle_native(command),
-                "{command} must not rely on cooperative terminal lifecycle evidence"
+                classify_command_effect(command) != AgentEffectKindNative::ReadOnly,
+                "{command} must retain its approval classification"
             );
         }
         for command in ["cd /tmp", "export DEMO=value", "alias ll='ls -l'"] {
             assert!(
-                !command_requires_direct_lifecycle_native(command),
+                !command_contains_background_operator_native(command),
                 "{command} must remain eligible for the stateful visible shell"
             );
         }
@@ -712,7 +691,7 @@ mod tests {
             "timeout 5 /bin/rm -rf /tmp/value",
         ] {
             assert!(
-                command_requires_direct_lifecycle_native(command),
+                classify_command_effect(command) != AgentEffectKindNative::ReadOnly,
                 "{command} must retain a security-sensitive executable boundary"
             );
         }

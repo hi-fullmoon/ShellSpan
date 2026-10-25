@@ -2,6 +2,7 @@ import { act } from '@testing-library/react';
 import { describe, expect, it, beforeEach, beforeAll, vi } from 'vitest';
 import { enableRealCanvas } from '@/test/real-canvas';
 import type { Event as TauriEvent } from '@tauri-apps/api/event';
+import type { SessionPtyInfo } from '@/types';
 import {
   appendTerminalOutput,
   getRecentTerminalOutput,
@@ -92,13 +93,14 @@ vi.mock('@/lib/ipc/tauri', () => ({
   listenToSshClosed: vi.fn().mockResolvedValue(() => {}),
 }));
 
-function createController(sessionId: string) {
+function createController(sessionId: string, ptyInfo?: SessionPtyInfo) {
   return terminalRegistry.create(
     sessionId,
     vi.fn(),
     vi.fn(),
     () => 'connected',
     vi.fn(),
+    ptyInfo,
   );
 }
 
@@ -127,6 +129,22 @@ describe('terminalRegistry', () => {
     });
     webglMocks.reset();
     vi.clearAllMocks();
+  });
+
+  it('uses only backend ConPTY metadata and resets it on reconnect', () => {
+    const controller = createController('local', {
+      transportKind: 'windowsConPty', windowsBuildNumber: 26300,
+    });
+    expect(controller.terminal.options.windowsPty).toEqual({ backend: 'conpty', buildNumber: 26300 });
+    terminalRegistry.rebindSession('local', 'remote', {
+      transportKind: 'sshPty', windowsBuildNumber: 26300,
+    });
+    expect(controller.terminal.options.windowsPty).toEqual({});
+    terminalRegistry.rebindSession('remote', 'unknown-build', { transportKind: 'windowsConPty' });
+    expect(controller.terminal.options.windowsPty).toEqual({ backend: 'conpty' });
+    terminalRegistry.rebindSession('unknown-build', 'legacy');
+    expect(controller.terminal.options.windowsPty).toEqual({});
+    expect(createController('posix', { transportKind: 'localPty' }).terminal.options.windowsPty).toEqual({});
   });
 
   it('create attaches container to a host and write appends to buffer', () => {

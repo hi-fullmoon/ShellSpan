@@ -3,6 +3,91 @@
 //! script, preserving pipelines, short-circuiting and the shell's own semantics.
 use tree_sitter::Parser;
 
+// Bash/Zsh policy inspection only. PowerShell uses its native Parser AST at
+// the editor's submit boundary; prefix call operators must not use this gate.
+pub(super) fn contains_background_operator(script: &str) -> bool {
+    let mut parser = Parser::new();
+    if parser
+        .set_language(&tree_sitter_bash::LANGUAGE.into())
+        .is_err()
+    {
+        return true;
+    }
+    let Some(tree) = parser.parse(script, None) else {
+        return true;
+    };
+    let mut stack = vec![tree.root_node()];
+    while let Some(node) = stack.pop() {
+        if !node.is_named() && matches!(node.kind(), "&" | "&!" | "coproc") {
+            return true;
+        }
+        if node.kind() == "command_name" && node.utf8_text(script.as_bytes()).ok() == Some("coproc")
+        {
+            return true;
+        }
+        let mut cursor = node.walk();
+        stack.extend(node.children(&mut cursor));
+    }
+    false
+}
+
+// Both `bash -n` and `zsh -n` can accept EOF in a heredoc even though an
+// interactive editor would wait for more input. Require the mature grammar's
+// explicit closing node for each heredoc, without treating unrelated Zsh
+// grammar errors as syntax failures.
+pub(super) fn has_incomplete_heredoc(script: &str) -> bool {
+    let mut parser = Parser::new();
+    if parser
+        .set_language(&tree_sitter_bash::LANGUAGE.into())
+        .is_err()
+    {
+        return true;
+    }
+    let Some(tree) = parser.parse(script, None) else {
+        return true;
+    };
+    let mut stack = vec![tree.root_node()];
+    while let Some(node) = stack.pop() {
+        if node.kind() == "heredoc_start" {
+            let complete = node.parent().is_some_and(|parent| {
+                let mut cursor = parent.walk();
+                parent.kind() == "heredoc_redirect"
+                    && parent
+                        .named_children(&mut cursor)
+                        .any(|child| child.kind() == "heredoc_end" && !child.is_missing())
+            });
+            if !complete {
+                return true;
+            }
+        }
+        let mut cursor = node.walk();
+        stack.extend(node.children(&mut cursor));
+    }
+    false
+}
+
+pub(super) fn contains_shell_comment(script: &str) -> bool {
+    let mut parser = Parser::new();
+    if parser
+        .set_language(&tree_sitter_bash::LANGUAGE.into())
+        .is_err()
+    {
+        return true;
+    }
+    let Some(tree) = parser.parse(script, None) else {
+        return true;
+    };
+    let mut stack = vec![tree.root_node()];
+    while let Some(node) = stack.pop() {
+        if node.kind() == "comment" {
+            return true;
+        }
+        let mut cursor = node.walk();
+        stack.extend(node.children(&mut cursor));
+    }
+    false
+}
+
 pub(super) fn literal_command_chain(script: &str) -> Option<Vec<&str>> {
     // Bound parser work even when a caller reaches classification before validation.
     if script.len() > 8192 {
@@ -68,6 +153,65 @@ pub(super) fn literal_command_chain(script: &str) -> Option<Vec<&str>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn heredocs_require_explicit_ast_end_nodes_without_restricting_other_zsh_syntax() {
+        for script in [
+            "printf forbidden\ncat <<EOF\nmissing end",
+            "cat <<'EOF'",
+            "cat <<EOF\nEOF\ncat <<BAR\nmissing",
+        ] {
+            assert!(has_incomplete_heredoc(script), "{script:?}");
+        }
+        for script in [
+            "cat <<'EOF'\ntext\nEOF",
+            "cat <<-EOF\n\ttext\n\tEOF",
+            "for item (one two) print $item",
+            "printf '<<EOF'\n",
+            "cat <<EOF\nEOF\ncat <<BAR\nBAR",
+        ] {
+            assert!(!has_incomplete_heredoc(script), "{script:?}");
+        }
+    }
+
+    #[test]
+    fn comment_gate_uses_grammar_nodes_not_hash_characters_in_literals_or_heredocs() {
+        assert!(contains_shell_comment(
+            "printf before\n#'unterminated as code"
+        ));
+        assert!(contains_shell_comment(
+            "for item (a b) print $item\n# comment"
+        ));
+        assert!(!contains_shell_comment(
+            "printf '%s' '#literal'\nprintf done"
+        ));
+        assert!(!contains_shell_comment("cat <<'EOF'\n# literal body\nEOF"));
+    }
+
+    #[test]
+    fn stage_one_ampersand_gate_distinguishes_literals_and_operators() {
+        for script in [
+            "sleep 1 &",
+            "sleep 1 &!",
+            "sleep 1 &|",
+            "(sleep 1 &)",
+            "echo $(sleep 1 &)",
+            "coproc sleep 1",
+            "for x (a b) print $x &!",
+            "& 'C:\\Program Files\\tool.exe'",
+        ] {
+            assert!(contains_background_operator(script), "{script}");
+        }
+        for script in [
+            "printf '&'",
+            "printf \"&\"",
+            "printf \\&",
+            "true && pwd",
+            "printf x 2>&1",
+        ] {
+            assert!(!contains_background_operator(script), "{script}");
+        }
+    }
 
     #[test]
     fn inspects_every_literal_command_without_changing_execution_order() {

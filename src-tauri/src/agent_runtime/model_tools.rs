@@ -71,7 +71,7 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
         },
         ModelToolDefinition {
             name: "run_terminal_command".into(),
-            description: "Run a frozen-host shell command or complete multiline script, including heredocs. Multiline scripts and tab-containing commands run through Direct execution, never by pasting lines into the visible terminal. Direct execution uses a separate process; visible-shell cd, aliases and environment changes do not carry over. Local Direct execution uses the frozen cwd when configured. Remote Direct execution requires a credential-backed profile and starts in the SSH account's default directory; use absolute paths or an explicit cd in the script. Never embed generated file content here when write_file is available. Use write_file for new files within the current output budget, and read_file plus apply_patch for focused changes. Set background=true to receive a native processHandle, then use wait_process or kill_process and always clean up long-running services. command/explanation limits are 8192/2048 UTF-8 bytes. Use probe_http for target-loopback HTTP instead of curl, wget, or an embedded network client. Child Agents share limits; delegation does not bypass them. Set lifecycleTrust=directRequired for untrusted or sensitive lifecycle evidence. visible-terminal lifecycle is never security evidence or a sandbox.".into(),
+            description: "Run a command on the frozen host using the selected execution surface. boundTerminal uses the current real shell, inheriting the supported cwd, environment, aliases, functions and shell state, with raw output from that same PTY/SSH stream. Complete multiline scripts, Tab and heredocs require nativeScriptInput. Bash 4+ validates a visible deterministic envelope and uses top-level builtin eval; Zsh ZLE accepts the complete buffer; PowerShell uses PSReadLine and its Parser AST. commandLine is approved source; submittedCommandLine is the exact accepted line. CR/CRLF remain literal. Unsupported editors, incomplete heredocs and invalid syntax execute no source prefix. background=true on supported Bash/Zsh starts a native shell job and returns an opaque job-* processHandle; wait_process observes it without stopping on wait timeout, kill_process(signal=terminate) stops its native process group, and per-job stdin is unsupported. Output is sharedTerminal and can interleave with other jobs and foreground output; never treat it as isolated stdout/stderr. Prompt/lease gates apply to management; uncertain jobs are never restarted automatically. On supported Windows hosts, PowerShell native job support is enabled by default; SHELLSPAN_NATIVE_POWERSHELL_JOBS=0 disables it for newly prepared shells. Request background=true only when this bound runtime advertises nativeJobControl. Each uses an owned console worker with a validated snapshot of supported state and a Windows Job Object; output remains live in the same terminal. Confirm termination only after the owned group has no active processes. Unsupported language/debugger state, StrictMode, private module context and non-transferable values are rejected before source execution; never change caller options to bypass refusal. No implicit direct fallback exists. lifecycleTrust=directRequired requires an explicit session switch to direct. Approval classification remains enforced on both surfaces. Cooperative terminal lifecycle is never security evidence or a sandbox. Explicit direct uses separate processes and proc-* handles with structured stdout/stderr, stdin, wait, kill and existing timeout semantics; visible-shell state does not carry over. Local direct uses frozen cwd; remote direct requires a credential-backed profile and starts in the account default directory. Use write_file for generated files, read_file plus apply_patch for focused edits. Clean up background services explicitly. command/explanation limits are 8192/2048 UTF-8 bytes. Use probe_http for target-loopback HTTP. Child Agents share these limits.".into(),
             input_schema: object_schema(
                 &["command", "explanation"],
                 json!({
@@ -94,7 +94,7 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
         },
         ModelToolDefinition {
             name: "write_process_input".into(),
-            description: "Write bounded stdin to a background process returned by run_terminal_command; set close=true to close stdin.".into(),
+            description: "Write bounded stdin to a direct proc-* process; set close=true to close stdin. Native shell job-* handles do not support isolated stdin.".into(),
             input_schema: object_schema(
                 &["processHandle", "input"],
                 json!({
@@ -106,7 +106,7 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
         },
         ModelToolDefinition {
             name: "wait_process".into(),
-            description: "Wait boundedly for a background process and return its current lifecycle and output.".into(),
+            description: "Wait boundedly for proc-* or native shell job-* lifecycle. Wait timeout leaves the job running. A Direct terminal-state result retires its proc-* handle: consume that result and do not query that handle again. A still-running Direct result retains it. Shell jobs report shared-terminal observations without isolated stdout/stderr; management requires the clean prompt and its lease.".into(),
             input_schema: object_schema(
                 &["processHandle"],
                 json!({
@@ -118,7 +118,7 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
         },
         ModelToolDefinition {
             name: "kill_process".into(),
-            description: "Terminate a background process returned by run_terminal_command and wait boundedly for its terminal state.".into(),
+            description: "Terminate a background process returned by run_terminal_command and wait boundedly for its terminal state. A Direct terminal result (Exited, Cancelled, TimedOut or Failed) retires its proc-* handle. Do not call wait_process after a terminal kill result; only a still-Running result retains that handle. Use the returned state and never invent an unavailable exit code.".into(),
             input_schema: object_schema(
                 &["processHandle", "signal"],
                 json!({
@@ -513,7 +513,7 @@ fn identifier_schema() -> Value {
 fn process_handle_schema() -> Value {
     json!({
         "type": "string",
-        "pattern": "^proc-[0-9a-f]{32}$"
+        "pattern": "^(proc|job)-[0-9a-f]{32}$"
     })
 }
 
@@ -651,12 +651,28 @@ mod tests {
         assert!(terminal.description.contains("8192"));
         assert!(terminal.description.contains("UTF-8 bytes"));
         assert!(terminal.description.contains("Use write_file"));
-        assert!(terminal.description.contains("delegation does not bypass"));
+        assert!(terminal
+            .description
+            .contains("Child Agents share these limits"));
         assert!(terminal.description.contains("multiline script"));
         assert!(terminal.description.contains("heredocs"));
         assert!(terminal.description.contains("Use probe_http"));
         assert!(terminal.description.contains("processHandle"));
-        assert!(terminal.description.contains("always clean up"));
+        assert!(terminal.description.contains("On supported Windows hosts"));
+        assert!(terminal
+            .description
+            .contains("native job support is enabled by default"));
+        assert!(terminal
+            .description
+            .contains("SHELLSPAN_NATIVE_POWERSHELL_JOBS=0"));
+        assert!(terminal.description.contains("newly prepared shells"));
+        assert!(terminal.description.contains("advertises nativeJobControl"));
+        assert!(!terminal
+            .description
+            .contains("default-off guarded candidate"));
+        assert!(terminal
+            .description
+            .contains("Clean up background services explicitly"));
         assert_eq!(
             terminal.input_schema["properties"]["command"]["pattern"],
             "^[^\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F-\\u009F]*$"
@@ -673,7 +689,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("missing {name}"));
             assert_eq!(
                 process_tool.input_schema["properties"]["processHandle"]["pattern"],
-                "^proc-[0-9a-f]{32}$"
+                "^(proc|job)-[0-9a-f]{32}$"
             );
         }
 

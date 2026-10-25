@@ -30,6 +30,7 @@ import {
 import type {
   ClosedEvent,
   SessionStatus,
+  SessionPtyInfo,
   StatusEvent,
   TerminalBellStyle,
   TerminalColorScheme,
@@ -40,6 +41,14 @@ import type { IBuffer, IBufferCellPosition, IDisposable, ILink } from '@xterm/xt
 import { useTerminalStore } from '@/stores/terminalStore';
 
 const logger = createLogger('terminal');
+
+function resolveWindowsPty(ptyInfo?: SessionPtyInfo): { backend: 'conpty'; buildNumber?: number } | undefined {
+  if (ptyInfo?.transportKind !== 'windowsConPty') return undefined;
+  const build = ptyInfo.windowsBuildNumber;
+  return Number.isSafeInteger(build) && (build ?? 0) > 0
+    ? { backend: 'conpty', buildNumber: build }
+    : { backend: 'conpty' };
+}
 
 export type StatusCallback = (sessionId: string, payload: StatusEvent) => void;
 export type ClosedCallback = (sessionId: string, payload: ClosedEvent) => void;
@@ -407,7 +416,7 @@ export interface TerminalController {
   writeDisconnectedHint(): void;
   writeConnectionFailure(message: string): void;
   clearConnectionFailure(): void;
-  rebindSession(sessionId: string): void;
+  rebindSession(sessionId: string, ptyInfo?: SessionPtyInfo): void;
   updateOptions(preferences: TerminalDisplayPreferences): void;
   refreshTheme(): void;
   dispose(): void;
@@ -475,6 +484,7 @@ class TerminalControllerImpl implements TerminalController {
     requestReconnect: RequestReconnectCallback,
     removeFromRegistry: (sessionId: string) => void,
     preferences: TerminalDisplayPreferences,
+    ptyInfo?: SessionPtyInfo,
   ) {
     this.sessionId = sessionId;
     this.setStatus = setStatus;
@@ -497,6 +507,7 @@ class TerminalControllerImpl implements TerminalController {
       overviewRuler: { width: 10 },
       lineHeight: preferences.lineHeight,
       letterSpacing: preferences.letterSpacing,
+      windowsPty: resolveWindowsPty(ptyInfo),
     });
     this.fitAddon = new FitAddon();
     this.searchAddon = new SearchAddon();
@@ -1326,7 +1337,7 @@ class TerminalControllerImpl implements TerminalController {
     this.inputBlockedNoticeRef = true;
   }
 
-  rebindSession(sessionId: string): void {
+  rebindSession(sessionId: string, ptyInfo?: SessionPtyInfo): void {
     if (this.disposed || sessionId === this.sessionId) return;
     this.failureMessage = undefined;
     this.terminal.write('\u001b[?25h');
@@ -1357,6 +1368,9 @@ class TerminalControllerImpl implements TerminalController {
     this.agentInputBlockedFeedbackRef = false;
     this.outputGeneration += 1;
     this.sessionId = sessionId;
+    // Reconnection may attach a different transport; never retain ConPTY
+    // behavior when the replacement is SSH or has no trusted metadata.
+    this.terminal.options.windowsPty = resolveWindowsPty(ptyInfo);
     rebindTerminalOutput(previousSessionId, sessionId);
     this.resetNoticeState();
     terminalInputReadiness.begin(sessionId);
@@ -1461,9 +1475,10 @@ interface TerminalRegistry {
     setClosed: ClosedCallback,
     getStatus: GetStatusCallback,
     requestReconnect: RequestReconnectCallback,
+    ptyInfo?: SessionPtyInfo,
   ): TerminalController;
   get(sessionId: string): TerminalController | undefined;
-  rebindSession(oldSessionId: string, newSessionId: string): void;
+  rebindSession(oldSessionId: string, newSessionId: string, ptyInfo?: SessionPtyInfo): void;
   updateOptions(preferences: TerminalDisplayPreferences): void;
   refreshTheme(): void;
   dispose(sessionId: string): void;
@@ -1500,7 +1515,7 @@ export const terminalRegistry: TerminalRegistry = retainedRegistry ?? (() => {
         letterSpacing: preferences.letterSpacing,
       });
     },
-    create(sessionId, setStatus, setClosed, getStatus, requestReconnect) {
+    create(sessionId, setStatus, setClosed, getStatus, requestReconnect, ptyInfo) {
       const existing = controllers.get(sessionId);
       if (existing) {
         existing.dispose();
@@ -1516,6 +1531,7 @@ export const terminalRegistry: TerminalRegistry = retainedRegistry ?? (() => {
           notify();
         },
         preferences,
+        ptyInfo,
       );
       controllers.set(sessionId, controller);
       notify();
@@ -1524,13 +1540,13 @@ export const terminalRegistry: TerminalRegistry = retainedRegistry ?? (() => {
     get(sessionId) {
       return controllers.get(sessionId);
     },
-    rebindSession(oldSessionId, newSessionId) {
+    rebindSession(oldSessionId, newSessionId, ptyInfo) {
       if (oldSessionId === newSessionId) return;
       const controller = controllers.get(oldSessionId);
       if (!controller) return;
       controllers.get(newSessionId)?.dispose();
       controllers.delete(oldSessionId);
-      controller.rebindSession(newSessionId);
+      controller.rebindSession(newSessionId, ptyInfo);
       controllers.set(newSessionId, controller);
       notify();
     },

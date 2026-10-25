@@ -4,6 +4,12 @@ Status: active; remote bound-terminal reuse automated and real-SSH Stage 7 gates
 Owner: ShellSpan Agent Runtime  
 Objective: replace the legacy wrapped visible-command path with three explicit capabilities: reliable direct execution, real visible command execution in a PTY, and interactive terminal operation.
 
+Current 2026-10-23 script submission, shell/version evidence, native Bash
+evaluation envelope and Windows deferral are recorded in
+[the sequential unification plan](./visible-terminal-unification-plan.md).
+Historical phase passes do not close the stage-two Windows or independent
+scoped HTTP/SSH verification gaps.
+
 ## Delivery rules
 
 - Each phase is implemented and verified in a separate Codex session.
@@ -35,7 +41,7 @@ These are three runtime capabilities but only two user-facing surface choices. I
 - Command completion and exit status must come from the isolated shell-integration control plane, never raw PTY output.
 - A terminal reconnect creates a new generation and invalidates old command ownership and integration state.
 - An interrupted or disconnected operation with no accepted cooperative completion is `uncertain` and is never replayed automatically.
-- Visible terminal integration is not a security sandbox. Secrets, authorization checks, security-sensitive effects, adversarial code, and untrusted scripts requiring process-isolated lifecycle evidence use Direct execution.
+- Visible terminal integration is not a security sandbox. Effects retain native approval and deny rules without changing the selected surface. Explicit requests for process-isolated lifecycle evidence reject boundTerminal before input and require the user to explicitly switch to direct; authorization never relies on cooperative completion metadata.
 - Credentials, secrets, integration nonces, and raw sensitive output are not written to logs or ordinary persisted configuration.
 - Unsupported or degraded integration is explicit to the UI and runtime. It must not masquerade as a real visible terminal.
 
@@ -133,8 +139,11 @@ control plane with cooperative lifecycle evidence: raw PTY bytes cannot advance
 lifecycle, ordinary foreground children inherit no writer, validation remains
 fail-closed, and active same-UID discovery or deliberate hook tampering is a
 documented out-of-scope threat. Visible terminal is never a security sandbox;
-known sensitive/destructive/external effects and explicit adversarial or
-untrusted-script requests are forced to Direct execution.
+the original gate forced sensitive effects and explicit untrusted lifecycle
+requests to Direct. The 2026-10-23
+[visible-terminal unification plan](./visible-terminal-unification-plan.md)
+supersedes that routing: effects control approval, and explicit directRequired
+rejects boundTerminal until the user explicitly switches to direct.
 
 POSIX production readiness is available only when the broker, integration, and
 execute flags and all identity/capability gates pass. Native macOS bash/zsh

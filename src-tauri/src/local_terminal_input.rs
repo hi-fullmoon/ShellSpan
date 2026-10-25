@@ -229,6 +229,8 @@ mod tests {
         let mut writer = take_writer(pair.master.as_ref(), TerminalShellKind::Bash).unwrap();
         let mut command = CommandBuilder::new("/bin/bash");
         command.args(["--noprofile", "--norc", "-i"]);
+        let history = tempfile::tempdir().unwrap();
+        command.env("HISTFILE", history.path().join("history.txt"));
         command.env("PS1", "input-probe$ ");
         command.env("BASH_SILENCE_DEPRECATION_WARNING", "1");
         let mut child = pair.slave.spawn_command(command).unwrap();

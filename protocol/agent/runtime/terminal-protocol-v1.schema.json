@@ -18,6 +18,23 @@
     ]
   },
   "$defs": {
+    "nativeEditorControlRecord": {
+      "description": "Private UTF-8 NUL-delimited control fields, never terminal output or event-v5. H advertises the installed checkpoint widget; A acknowledges the exact complete current edit buffer. Rust additionally enforces UTF-8 byte limits and generation/integration/operation/lease ordering.",
+      "oneOf": [
+        { "type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{ "const": "H" }, { "enum": ["0", "1"] }], "items": false },
+        { "type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{ "const": "A" }, { "type": "string", "maxLength": 32768, "pattern": "^[^\\u0000]*$" }], "items": false },
+        { "type": "array", "minItems": 3, "maxItems": 3, "prefixItems": [{ "const": "L" }, { "type": "string", "pattern": "^[1-9][0-9]{0,15}$" }, { "const": "" }], "items": false }
+      ]
+    },
+    "nativeJobControlRecord": {
+      "description": "Private parent-shell native job control fields. These records grant no authority without a registered opaque handle and matching frozen owner, integration and terminal generation.",
+      "oneOf": [
+        { "type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{ "const": "K" }, { "enum": ["0", "1"] }], "items": false },
+        { "type": "array", "minItems": 3, "maxItems": 3, "prefixItems": [{ "const": "F" }, { "type": "string", "pattern": "^job-[0-9a-f]{32}$" }, { "type": "string", "pattern": "^-?[0-9]{1,10}$" }], "items": false },
+        { "type": "array", "minItems": 4, "maxItems": 4, "prefixItems": [{ "const": "B" }, { "type": "string", "pattern": "^job-[0-9a-f]{32}$" }, { "enum": ["running", "queued", "stopped", "stopRequested", "terminated", "rejected", "uncertain"] }, { "const": "-" }], "items": false },
+        { "type": "array", "minItems": 4, "maxItems": 4, "prefixItems": [{ "const": "B" }, { "type": "string", "pattern": "^job-[0-9a-f]{32}$" }, { "const": "settled" }, { "type": "string", "pattern": "^(-|-?[0-9]{1,10})$" }], "items": false }
+      ]
+    },
     "identifier": {
       "type": "string",
       "minLength": 1,
@@ -120,7 +137,9 @@
         "commandLifecycle",
         "exactCommandLine",
         "exitStatus",
-        "currentDirectory"
+        "currentDirectory",
+        "nativeScriptInput",
+        "nativeJobControl"
       ]
     },
     "integrationStateFrame": {
@@ -137,7 +156,7 @@
             "shell": { "enum": ["bash", "zsh", "windowsPowerShell", "powerShell", "posixUnknown"] },
             "capabilities": {
               "type": "array",
-              "maxItems": 5,
+              "maxItems": 6,
               "uniqueItems": true,
               "items": { "$ref": "#/$defs/integrationCapability" }
             },
@@ -168,7 +187,7 @@
             "trust": { "const": "cooperativeIntegration" },
             "event": { "enum": ["promptStart", "promptEnd", "commandStart", "commandEnd", "directoryChanged"] },
             "commandId": { "$ref": "#/$defs/identifier" },
-            "commandLine": { "type": "string", "minLength": 1, "maxLength": 8192 },
+            "commandLine": { "type": "string", "minLength": 1, "maxLength": 32768 },
             "exitCode": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
             "cwd": { "type": "string", "minLength": 1, "maxLength": 4096 }
           }

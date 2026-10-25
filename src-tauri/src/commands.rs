@@ -325,6 +325,7 @@ async fn create_remote_terminal_session(
         username: request.username.clone(),
         terminal_session_id: None,
         terminal_generation: None,
+        pty_info: crate::models::SessionPtyInfo::ssh(),
     };
 
     let (tx, rx) = mpsc::channel::<SessionCommand>();
@@ -492,6 +493,7 @@ pub(crate) fn create_local_session(
         .unwrap_or_else(|_| "local".to_string()),
         terminal_session_id: None,
         terminal_generation: None,
+        pty_info: crate::models::SessionPtyInfo::local(),
     };
 
     let terminal_broker_enabled = app
@@ -601,11 +603,7 @@ pub(crate) fn create_local_session(
         });
     }
 
-    let transport_kind = if cfg!(target_os = "windows") {
-        crate::terminal_broker::TerminalTransportKind::WindowsConPty
-    } else {
-        crate::terminal_broker::TerminalTransportKind::LocalPty
-    };
+    let transport_kind = summary.pty_info.transport_kind;
     let broker_attachment = app
         .try_state::<crate::agent_runtime::AgentRuntime>()
         .ok_or_else(|| "terminal broker runtime is unavailable".to_string())

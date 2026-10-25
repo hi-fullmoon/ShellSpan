@@ -479,6 +479,8 @@
             .take_writer()
             .expect("take the real shell PTY writer");
         let mut command = CommandBuilder::new("/bin/zsh");
+        let history = tempfile::tempdir().unwrap();
+        command.env("HISTFILE", history.path().join("history.txt"));
         command.arg("-f");
         configure_local_terminal_environment(&mut command);
         let mut child = pair
@@ -534,7 +536,7 @@
             .take_writer()
             .expect("take the real ConPTY writer");
         let mut command = CommandBuilder::new("powershell.exe");
-        command.args(["-NoLogo", "-NoProfile"]);
+        let history = crate::windows_shell_history::WindowsShellHistory::configure(&mut command);
         configure_local_terminal_environment(&mut command);
         let mut child = pair
             .slave
@@ -571,6 +573,7 @@
         };
 
         assert_eq!(status.exit_code(), 7);
+        history.verify("WINDOWS_COMMANDS_SMOKE", false);
         // Keep the input writer alive until the explicit `exit 7`; dropping it earlier makes
         // ConPTY terminate interactive PowerShell with STATUS_CONTROL_C_EXIT (0xC000013A).
         drop(writer);

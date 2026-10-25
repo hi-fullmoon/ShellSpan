@@ -214,7 +214,7 @@
     }
 
     #[test]
-    fn complete_scripts_always_use_direct_execution_and_preserve_arguments() {
+    fn complete_scripts_preserve_the_selected_surface_and_original_arguments() {
         for command in [
             "pwd\nls",
             "cat <<'EOF'\nhello\nEOF",
@@ -232,8 +232,23 @@
                     );
                     call.execution_surface = surface;
                     call.target = session_target;
-                    assert!(terminal_command_requires_direct_lifecycle(&call).unwrap());
                     let target = target_native(&call.target).unwrap();
+                    if surface == AgentExecutionSurface::BoundTerminal {
+                        assert!(!terminal_command_requires_direct_lifecycle(&call).unwrap());
+                        let (name, arguments) = normalize_arguments(
+                            &call,
+                            &target,
+                            Some(TerminalVisibleCommandRoute::TerminalExecute),
+                            false,
+                        )
+                        .unwrap();
+                        assert_eq!(name, "terminal_execute");
+                        assert_eq!(arguments["command"], command);
+                        assert_eq!(arguments["timeoutMs"], 12000);
+                        crate::agent_runtime::validate_tool_arguments_native(&name, &arguments)
+                            .unwrap();
+                        continue;
+                    }
                     // Normalization itself must preserve this invariant even if
                     // its caller has not precomputed the lifecycle requirement.
                     let (name, arguments) = normalize_arguments(
@@ -267,7 +282,17 @@
             }),
         );
         background.execution_surface = AgentExecutionSurface::BoundTerminal;
-        assert!(terminal_command_requires_direct_lifecycle(&background).unwrap());
+        assert!(!terminal_command_requires_direct_lifecycle(&background).unwrap());
+        let (name, arguments) = normalize_arguments(
+            &background,
+            &owner,
+            Some(TerminalVisibleCommandRoute::TerminalExecute),
+            false,
+        )
+        .unwrap();
+        assert_eq!(name, "terminal_execute");
+        assert_eq!(arguments["background"], true);
+        background.execution_surface = AgentExecutionSurface::Direct;
         let (name, arguments) = normalize_arguments(&background, &owner, None, true).unwrap();
         assert_eq!(name, "exec_command");
         assert_eq!(arguments["background"], true);
@@ -314,7 +339,7 @@
     }
 
     #[test]
-    fn remote_visible_normalization_is_additive_and_direct_policy_still_wins() {
+    fn remote_visible_normalization_rejects_required_direct_without_fallback() {
         let target = target_native(&remote_target()).unwrap();
         let mut visible = request(
             "run_terminal_command",
@@ -333,15 +358,14 @@
         assert_eq!(arguments["command"], "export PHASE4=kept");
         assert!(arguments.get("channel").is_none());
 
-        let (name, arguments) = normalize_arguments(
+        let error = normalize_arguments(
             &visible,
             &target,
             Some(TerminalVisibleCommandRoute::TerminalExecute),
             true,
         )
-        .unwrap();
-        assert_eq!(name, "exec_command");
-        assert_eq!(arguments["channel"], "direct");
+        .unwrap_err();
+        assert!(error.contains("TERMINAL_DIRECT_REQUIRED"));
     }
 
     #[test]
@@ -505,7 +529,7 @@
     }
 
     #[test]
-    fn visible_sensitive_and_explicit_untrusted_commands_are_forced_to_direct() {
+    fn visible_sensitive_commands_keep_terminal_and_explicit_lifecycle_is_rejected() {
         let target = target_native(&local_target()).unwrap();
         for arguments in [
             json!({
@@ -520,11 +544,21 @@
         ] {
             let mut visible = request("run_terminal_command", arguments);
             visible.execution_surface = AgentExecutionSurface::BoundTerminal;
-            assert!(terminal_command_requires_direct_lifecycle(&visible).unwrap());
-            let (name, normalized) = normalize_arguments(&visible, &target, None, true).unwrap();
-            assert_eq!(name, "exec_command");
-            assert_eq!(normalized["channel"], "direct");
-            assert!(normalized.get("lifecycleTrust").is_none());
+            let required = terminal_command_requires_direct_lifecycle(&visible).unwrap();
+            if required {
+                assert!(normalize_arguments(&visible, &target, None, false)
+                    .unwrap_err()
+                    .contains("TERMINAL_DIRECT_REQUIRED"));
+            } else {
+                let (name, _) = normalize_arguments(
+                    &visible,
+                    &target,
+                    Some(TerminalVisibleCommandRoute::TerminalExecute),
+                    false,
+                )
+                .unwrap();
+                assert_eq!(name, "terminal_execute");
+            }
         }
 
         let mut stateful = request(
@@ -544,6 +578,79 @@
         )
         .unwrap();
         assert_eq!(name, "terminal_execute");
+    }
+
+    #[test]
+    fn local_and_remote_visible_routes_never_fall_back_to_direct() {
+        for session_target in [local_target(), remote_target()] {
+            let mut raw = request(
+                "exec_command",
+                json!({"command": "pwd", "explanation": "raw direct call", "channel": "direct"}),
+            );
+            raw.execution_surface = AgentExecutionSurface::BoundTerminal;
+            raw.target = session_target.clone();
+            assert!(
+                normalize_arguments(&raw, &target_native(&raw.target).unwrap(), None, false)
+                    .unwrap_err()
+                    .contains("TERMINAL_DIRECT_REQUIRED")
+            );
+            for command in [
+                "pwd",
+                "export DEMO=value",
+                "alias ll='ls -l'",
+                "curl https://example.test",
+                "rm ./example",
+                "cat ~/.ssh/id_ed25519",
+            ] {
+                let mut call = request(
+                    "run_terminal_command",
+                    json!({
+                        "command": command, "explanation": "verify frozen routing", "timeoutMs": 1234
+                    }),
+                );
+                call.target = session_target.clone();
+                call.execution_surface = AgentExecutionSurface::BoundTerminal;
+                let target = target_native(&call.target).unwrap();
+                assert!(!terminal_command_requires_direct_lifecycle(&call).unwrap());
+                let (name, args) = normalize_arguments(
+                    &call,
+                    &target,
+                    Some(TerminalVisibleCommandRoute::TerminalExecute),
+                    false,
+                )
+                .unwrap();
+                assert_eq!(name, "terminal_execute");
+                assert_eq!(args["timeoutMs"], 1234);
+                assert!(normalize_arguments(&call, &target, None, false).is_err());
+                call.execution_surface = AgentExecutionSurface::Direct;
+                assert_eq!(
+                    normalize_arguments(&call, &target, None, false).unwrap().0,
+                    "exec_command"
+                );
+            }
+            for command in ["sleep 1 &", "(sleep 1 &)"] {
+                let mut call = request(
+                    "run_terminal_command",
+                    json!({"command": command, "explanation": "reject unmanaged jobs"}),
+                );
+                call.target = session_target.clone();
+                call.execution_surface = AgentExecutionSurface::BoundTerminal;
+                // Shell-specific syntax is checked against the bound shell at
+                // the input endpoint, not with Bash grammar in this facade.
+                assert!(!terminal_command_requires_direct_lifecycle(&call).unwrap());
+                assert_eq!(
+                    normalize_arguments(
+                        &call,
+                        &target_native(&call.target).unwrap(),
+                        Some(TerminalVisibleCommandRoute::TerminalExecute),
+                        false
+                    )
+                    .unwrap()
+                    .0,
+                    "terminal_execute"
+                );
+            }
+        }
     }
 
     #[test]
@@ -571,4 +678,33 @@
         .unwrap();
         assert_eq!(name, "terminal_execute");
         assert_eq!(arguments["command"], "printf updated > result.txt");
+    }
+
+    #[test]
+    fn process_results_validate_native_identity_before_projecting_the_frozen_host() {
+        for prefix in ["job", "proc"] {
+            let handle = format!("{prefix}-{}", "a".repeat(32));
+            let host = target_native(&local_target()).unwrap();
+            let call = request("wait_process", json!({"processHandle": handle}));
+            let native = process_target_for_model_call(&call.model_call, &host)
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                project_native_result_target(&native, native.target_id(), host.target_id())
+                    .unwrap(),
+                host.target_id()
+            );
+            assert!(
+                project_native_result_target(&native, "forged-target", host.target_id()).is_err()
+            );
+            assert!(
+                project_native_result_target(&native, native.target_id(), "other-host").is_err()
+            );
+        }
+        let host = target_native(&local_target()).unwrap();
+        assert_eq!(
+            project_native_result_target(&host, host.target_id(), host.target_id()).unwrap(),
+            host.target_id()
+        );
+        assert!(project_native_result_target(&host, "forged-target", host.target_id()).is_err());
     }

@@ -465,7 +465,12 @@ pub(crate) fn decode_write_file_arguments_native(
 }
 
 pub(crate) fn validate_visible_command_input(command: &str) -> Result<(), String> {
-    if command.is_empty() || command.len() > 8192 || command.chars().any(char::is_control) {
+    if command.trim().is_empty()
+        || command.len() > 8192
+        || command
+            .chars()
+            .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
+    {
         return Err("invalid terminal_execute arguments".into());
     }
     Ok(())
@@ -1077,7 +1082,7 @@ mod tests {
     }
 
     #[test]
-    fn multiline_is_valid_only_for_direct_exec_and_other_controls_stay_rejected() {
+    fn multiline_and_tabs_are_valid_but_other_controls_stay_rejected() {
         for command in ["pwd\nls", "cat <<'EOF'\ntext\nEOF", "printf\tvalue"] {
             assert!(validate_tool_arguments_native(
                 "exec_command",
@@ -1088,7 +1093,7 @@ mod tests {
                 "terminal_execute",
                 &json!({"command":command,"explanation":"inspect"})
             )
-            .is_err());
+            .is_ok());
         }
         for command in [" \n\t", "pwd\u{0000}", "pwd\u{001b}", "pwd\u{0085}"] {
             assert!(validate_tool_arguments_native(

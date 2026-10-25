@@ -8,7 +8,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
 import { invokeCreateLocalSession, invokeCloseSession, invokeCreateAgentRuntimeSession,
   invokeGetAgentRuntimeSession, invokeReconnectAgentTerminal, invokeArchiveAgentRuntimeSession,
-  invokeDeleteAgentRuntimeSession, invokeGetCommittedAgentRuntimeEvents } from '@/lib/ipc/tauri';
+  invokeDeleteAgentRuntimeSession, invokeGetCommittedAgentRuntimeEvents, invokeGetTerminalBrokerSnapshot } from '@/lib/ipc/tauri';
 import { buildSessionCreateRequest, invokeCreateSession, invokeCheckHostKey, invokeTrustHost, invokeRemoveKnownHost } from '@/lib/ipc/tauri';
 import { useProfileStore } from '@/stores/profileStore';
 import type { ConnectionProfile } from '@/types';
@@ -92,13 +92,15 @@ async function verify() {
     await readProject();
     flushSync(() => agent!.setDraft('Keep this draft through terminal reconnect'));
     const before = await invokeGetAgentRuntimeSession({ sessionId: agentId });
+    const shell=(await invokeGetTerminalBrokerSnapshot(live()!.sessionId)).session?.integrationShell;
+    const powershell=shell==='windowsPowerShell'||shell==='powerShell7';
     const originalEvents = await invokeGetCommittedAgentRuntimeEvents({ sessionId: agentId, limit: 100 });
     for (let attempt = 0; attempt < 2; attempt++) {
       const previous = live()!.sessionId;
       if (attempt === 0) {
         const terminal = terminalRegistry.get(previous);
         assert(terminal, 'Missing production terminal for idle timeout');
-        terminal.terminal.input('unset HISTFILE; TMOUT=1\r', true);
+        terminal.terminal.input(powershell?'exit\r':'unset HISTFILE; TMOUT=1\r', true);
       } else {
         await invokeCloseSession(previous);
       }
@@ -153,7 +155,7 @@ async function verify() {
     await eventually(() => Boolean(live()?.promptReady), 'Reconnected shell did not reach its prompt');
     const closingController = terminalRegistry.get(closing.sessionId);
     assert(closingController && closeTerminal, 'Missing production close path');
-    assert(await closingController.writeUserInput('unset HISTFILE; TMOUT=1\r'), 'Final idle-timeout input was rejected');
+    assert(await closingController.writeUserInput(powershell?'exit\r':'unset HISTFILE; TMOUT=1\r'), 'Final native disconnect input was rejected');
     await eventually(() => live()?.status === 'disconnected', 'Reconnected shell did not disconnect after idle timeout');
     const toastsBeforeClose = useToastStore.getState().toasts.length;
     await closeTerminal(closing.sessionId);

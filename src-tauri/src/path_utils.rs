@@ -1,10 +1,44 @@
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 const SHELLSPAN_DATA_DIRECTORY: &str = ".shellspan";
 const SHELLSPAN_DEV_DATA_DIRECTORY: &str = ".shellspan-dev";
+static DATA_DIRECTORY: OnceLock<PathBuf> = OnceLock::new();
+
+pub(crate) fn configure_data_directory(path: Option<PathBuf>) -> std::io::Result<()> {
+    if let Some(path) = path {
+        validate_data_directory(&path)?;
+        std::fs::create_dir_all(&path)?;
+        DATA_DIRECTORY.set(path.canonicalize()?).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "data directory already configured",
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn validate_data_directory(path: &Path) -> std::io::Result<()> {
+    if !path.is_absolute() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "SHELLSPAN_DATA_DIR must be an absolute directory path",
+        ));
+    }
+    Ok(())
+}
 
 pub(crate) fn shellspan_data_dir(home_dir: &Path) -> PathBuf {
-    shellspan_data_dir_for_mode(home_dir, cfg!(debug_assertions))
+    DATA_DIRECTORY
+        .get()
+        .cloned()
+        .unwrap_or_else(|| shellspan_data_dir_for_mode(home_dir, cfg!(debug_assertions)))
+}
+
+#[cfg(windows)]
+pub(crate) fn configured_data_directory() -> Option<&'static Path> {
+    DATA_DIRECTORY.get().map(PathBuf::as_path)
 }
 
 fn shellspan_data_dir_for_mode(home_dir: &Path, development: bool) -> PathBuf {
@@ -49,6 +83,13 @@ pub(crate) fn posix_join(parent: &str, child: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_data_directory_requires_an_absolute_path() {
+        assert!(validate_data_directory(Path::new("relative-data")).is_err());
+        let absolute = std::env::temp_dir().join("shellspan-explicit-data");
+        assert!(validate_data_directory(&absolute).is_ok());
+    }
 
     #[test]
     fn uses_separate_data_directories_for_development_and_production() {

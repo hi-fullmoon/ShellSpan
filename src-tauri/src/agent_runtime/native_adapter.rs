@@ -344,7 +344,6 @@ impl NativeToolRuntime for NativeToolAdapter {
         };
         let (native_name, arguments) =
             normalize_arguments(&request, &target, visible_route, direct_lifecycle_required)?;
-        let native_target_id = target.target_id().to_string();
         let internal_call_id = stable_native_id(
             "call",
             &format!(
@@ -423,7 +422,7 @@ impl NativeToolRuntime for NativeToolAdapter {
                     public_call_id: request.model_call.call_id,
                     public_name: request.model_call.name,
                     native_name,
-                    target_id: native_target_id,
+                    target_id: request.target.target_id,
                     effect,
                     started_at_unix_ms: current_unix_ms(),
                 },
@@ -513,6 +512,11 @@ impl NativeToolRuntime for NativeToolAdapter {
                     &known_hosts_path,
                     &cancellation,
                 )?;
+                let public_target_id = project_native_result_target(
+                    &prepared.call.target,
+                    &result.target_id,
+                    &stored.target_id,
+                )?;
                 if matches!(
                     result.tool_name.as_str(),
                     "inspect_host" | "inspect_service" | "query_logs" | "diagnose_endpoint"
@@ -530,7 +534,7 @@ impl NativeToolRuntime for NativeToolAdapter {
                 Ok(NativeToolResult {
                     call_id: stored.public_call_id,
                     native_name: result.tool_name,
-                    target_id: result.target_id,
+                    target_id: public_target_id,
                     effect: result_effect,
                     status: status_from_native(result.status),
                     summary: result.summary,
@@ -678,27 +682,20 @@ fn normalize_arguments(
                 })),
             )),
             super::AgentExecutionSurface::BoundTerminal
-                if direct_lifecycle_required || background || arguments.command.contains(['\n', '\r', '\t']) => Ok((
-                "exec_command".into(),
-                omit_null_fields(json!({
-                    "command": arguments.command,
-                    "explanation": arguments.explanation,
-                    "channel": "direct",
-                    "cwd": cwd,
-                    "background": background,
-                    "elevated": false,
-                    "timeoutMs": timeout_ms
-                })),
-            )),
+                if direct_lifecycle_required || terminal_command_requires_direct_lifecycle(request)? => Err(
+                    "TERMINAL_DIRECT_REQUIRED: this request requires an independent process lifecycle; no command was executed; explicitly switch the session to direct before retrying".into(),
+                ),
             super::AgentExecutionSurface::BoundTerminal => match visible_route
                 .unwrap_or(TerminalVisibleCommandRoute::Unavailable)
             {
                 TerminalVisibleCommandRoute::TerminalExecute => Ok((
                     "terminal_execute".into(),
-                    json!({
+                    omit_null_fields(json!({
                         "command": arguments.command,
-                        "explanation": arguments.explanation
-                    }),
+                        "explanation": arguments.explanation,
+                        "background": background.then_some(true),
+                        "timeoutMs": timeout_ms
+                    })),
                 )),
                 TerminalVisibleCommandRoute::Unavailable => Err(
                     "TERMINAL_VISIBLE_COMMAND_UNAVAILABLE: cooperative terminal execution is not available"
@@ -708,6 +705,9 @@ fn normalize_arguments(
         };
     }
     match request.model_call.name.as_str() {
+        "exec_command" if request.execution_surface == super::AgentExecutionSurface::BoundTerminal => {
+            Err("TERMINAL_DIRECT_REQUIRED: exec_command requires an explicitly selected direct session; no command was executed; use run_terminal_command for the bound terminal".into())
+        }
         "write_process_input" => {
             let value = serde_json::from_value::<WriteProcessInputArguments>(
                 request.model_call.arguments.clone(),
@@ -804,10 +804,11 @@ fn terminal_command_requires_direct_lifecycle(request: &NativeToolRequest) -> Re
     let arguments: TerminalCommandArguments =
         serde_json::from_value(request.model_call.arguments.clone())
             .map_err(|error| format!("run_terminal_command schema rejected arguments: {error}"))?;
-    Ok(arguments.background
-        || arguments.command.contains(['\n', '\r', '\t'])
-        || arguments.lifecycle_trust == TerminalLifecycleTrust::DirectRequired
-        || super::native::command_requires_direct_lifecycle_native(&arguments.command))
+    if request.execution_surface == super::AgentExecutionSurface::BoundTerminal {
+        super::validate_visible_command_input(&arguments.command)?;
+        return Ok(arguments.lifecycle_trust == TerminalLifecycleTrust::DirectRequired);
+    }
+    Ok(arguments.background || arguments.lifecycle_trust == TerminalLifecycleTrust::DirectRequired)
 }
 
 fn is_model_process_tool(name: &str) -> bool {
@@ -815,6 +816,28 @@ fn is_model_process_tool(name: &str) -> bool {
         name,
         "write_process_input" | "wait_process" | "kill_process"
     )
+}
+
+fn project_native_result_target(
+    native_target: &AgentToolTargetNative,
+    result_target_id: &str,
+    frozen_host_target_id: &str,
+) -> Result<String, String> {
+    if native_target.target_id() != result_target_id {
+        return Err("Native result target did not match its authorized target".into());
+    }
+    let owner = match native_target {
+        AgentToolTargetNative::Process {
+            owner_target_id, ..
+        } => owner_target_id.as_str(),
+        _ => native_target.target_id(),
+    };
+    if owner != frozen_host_target_id {
+        return Err("Native result owner did not match the frozen host".into());
+    }
+    // Process handles are native authorization targets. The model facade keeps
+    // its frozen host identity, after validating both native target and owner.
+    Ok(frozen_host_target_id.to_string())
 }
 
 fn process_target_for_model_call(
@@ -837,6 +860,7 @@ fn process_target_for_model_call(
         .ok_or_else(|| format!("{} schema requires processHandle", call.name))?;
     let suffix = process_handle
         .strip_prefix("proc-")
+        .or_else(|| process_handle.strip_prefix("job-"))
         .filter(|value| value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
         .ok_or_else(|| format!("{} schema rejected processHandle", call.name))?;
     debug_assert_eq!(suffix.len(), 32);

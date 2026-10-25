@@ -302,7 +302,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
         if (active?.lease.operationId === lease.operationId) {
           // A command ending does not end the Agent turn. Keep the same input
           // suppression until TurnEnd (or an explicit confirmed takeover).
-          cleanup(active, true, true);
+          cleanup(active, false, true);
         }
         return;
       }
@@ -430,11 +430,12 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       ) return;
 
       // PTY writes target the leased transport, not the DOM keyboard focus.
-      // A Terminal Agent may keep running while the user works in Focus.
-      const backgroundInFocus = runsBehindFocus(lease.agentSessionId);
+      // An existing turn already owns its transport. Repeated job management
+      // leases must preserve the user's current workspace, focus and draft.
+      const preserveView = inheritedInput !== undefined || runsBehindFocus(lease.agentSessionId);
       let terminalFocused = false;
       if (controller && controller.sessionId === lease.sessionId
-        && terminalRegistry.get(lease.sessionId) === controller && !backgroundInFocus) {
+        && terminalRegistry.get(lease.sessionId) === controller && !preserveView) {
         // Commit the target pane's attachment before focusing xterm. The backend
         // cannot start writing the command until the readiness acknowledgement.
         flushSync(() => {
@@ -463,7 +464,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       const terminalConnected = useTerminalStore.getState().sessions.some(
         (session) => session.sessionId === lease.sessionId && session.status === 'connected',
       );
-      if (terminalConnected && outputListenerReady && !backgroundInFocus && !terminalFocused) {
+      if (terminalConnected && outputListenerReady && !preserveView && !terminalFocused) {
         // Leave readiness pending: the backend times out and releases the lease
         // without writing anything if the target cannot receive focus.
         logger.warn(`Target terminal focus failed before Agent input for ${lease.sessionId}`);
@@ -678,6 +679,7 @@ export const TerminalControllerLayer: React.FC = () => {
             useTerminalStore.getState().sessions.find((s) => s.sessionId === currentSessionId,
             )?.status ?? 'connecting',
           (currentSessionId, automatic) => reconnectSession(currentSessionId, automatic),
+          session.ptyInfo,
         );
         // Restored workspace sessions start disconnected and have no backend
         // process, so the closed-event hint never fires for them; show it up

@@ -4,6 +4,27 @@ Status: accepted Phase 0 matrix; Phase 3 cooperative-shell amendment: 2026-09-15
 
 Protocol: [Terminal Session Protocol v1](./terminal-protocol-rfc.md)
 
+2026-10-23 stage-two native-script evidence is tracked separately in
+[the current unification plan](./visible-terminal-unification-plan.md).
+macOS and isolated SSH Bash/Zsh evidence does not extend earlier Windows passes
+to the new script path. The native Windows continuation is tracked in
+[the Windows acceptance report](./windows-native-terminal-acceptance.md), including
+foreground cancellation, raw output, guarded state and complete descendant
+cleanup. The known independent scoped HTTP/SSH gate gap remains open.
+
+Stage-four desktop/model evidence and independent Windows native/frontend gates
+are recorded separately in [the Windows desktop continuation](./windows-desktop-terminal-acceptance.md).
+Supported Windows shells now default to native jobs; explicit `0` disables the
+capability for newly prepared shells. On 2026-10-25 the complete normal native
+gate and the full Windows frontend gate passed in separate frozen runs, with
+identical code/tests/configuration; prior combined failures remain failures.
+This does not close the Linux native-desktop or other-architecture lanes.
+The final complete-tree frontend supplement contains 1318 frozen inputs and
+292 discovered test files: 2611 passed / 6 existing skipped. It additionally
+checks the actual route-schema tests and builds the offline trace example
+that were absent from the earlier 1316-input Windows snapshot. Full-set
+comparison checks added and deleted files as well as matching hashes.
+
 ## Evidence policy
 
 Each cell is evidence from the named native host or fixture. Conditional
@@ -30,6 +51,7 @@ the first phase that must supply acceptance evidence.
 | --- | --- | --- | --- | --- | --- |
 | Direct foreground stdout/stderr/exit | native process | native process | native process | SSH exec | P0 and every phase |
 | Direct background handle, stdin, wait, kill | native process | native process | native process | SSH exec handle | P0 and every phase |
+| Current-shell native background jobs, shared stream, prompt reuse, exit/stop and cleanup | real Bash 5.3 / Zsh 5.9 PTY | native desktop pending | 5.1/7 on the named x64 host: supported shells default on, explicit `0` rollback; separate complete native and frontend gates passed; exact versions/snapshots in report | isolated Bash 5.2 / Zsh 5.9 | visible-terminal unification stages 3–4; see dated plan and separate native/desktop Windows reports |
 | Direct timeout/cancel terminal-state race | native process group | native process group | job object/process tree | SSH channel | P0 and every phase |
 | Real transport smoke and resize | `portable-pty` | `portable-pty` | ConPTY | `pty-req` | P0 baseline; P2 regression |
 | Startup listener gate and bounded transport backpressure | native worker + xterm contract | native worker + xterm contract | native worker + xterm contract | SSH worker + xterm contract | P0 baseline; P2 regression |
@@ -43,7 +65,7 @@ the first phase that must supply acceptance evidence.
 | Forged lifecycle-like output cannot start/complete a command | local PTY | local PTY | ConPTY | SSH PTY | P3/P4 |
 | Ordinary foreground child enumerates descriptors and cannot write a lifecycle endpoint | zsh/bash real PTY | bash/zsh real PTY | static handle non-inheritance plus native ConPTY | SSH PTY | P3/P4 |
 | Same-UID endpoint reopen / in-shell hook invocation is documented as cooperative-model tampering, not a sandbox claim | documented adversarial proof | documented adversarial proof | static module-access audit plus native debt | documented boundary | P3/P4 |
-| Sensitive/destructive/external or explicit untrusted/adversarial lifecycle request is forced to Direct | native route/effect/policy | native route/effect/policy | native route/effect/policy | native route/effect/policy | P3/P4 |
+| Sensitive/destructive/external effects retain approval and the selected surface; explicit directRequired rejects boundTerminal before input | native route/effect/policy | native route/effect/policy | native route/effect/policy | native route/effect/policy | visible unification 1 |
 | Cancel, timeout, completion race, takeover, and input rejection after release | local PTY | local PTY | ConPTY | SSH PTY | P3/P4 |
 | Disconnect with side effect is uncertain and never auto-replayed | local close | local close | ConPTY close | forced SSH disconnect | P3/P4 |
 | Remote `boundTerminal` resolves the frozen source session and creates no extra terminal | n/a | n/a | n/a | current user SSH PTY; stable tab count | Remote reuse |
@@ -118,7 +140,11 @@ POSIX FIFO is a generation-bound isolated control plane, not authentication
 against arbitrary same-UID code: raw PTY bytes cannot reach it, ordinary
 foreground children inherit no writer, and deliberate same-UID reopen or
 in-shell hook tampering is recorded as out-of-scope. Security-sensitive or
-explicit adversarial/untrusted lifecycle requests are forced to Direct.
+explicit adversarial/untrusted lifecycle requests were forced to Direct in that
+historical gate. Current routing is governed by
+[visible-terminal unification](./visible-terminal-unification-plan.md): effects
+retain approval, while explicit directRequired rejects boundTerminal without
+an automatic surface change.
 
 | Lane | Phase 3 result | Evidence boundary |
 | --- | --- | --- |
@@ -219,7 +245,7 @@ does not prove the revised transport topology.
 | User and Agent share cwd, environment, aliases/functions, prompt/history startup semantics, and one output stream | `pnpm test:terminal-visible:ssh` bash/zsh real-SSH fixture | **PASS** on the 2026-09-17 isolated Bash/Zsh gate |
 | Integration preparation failure still opens an ordinary usable SSH shell and does not create a replacement terminal | Session/commands tests plus no-SFTP/unsupported-shell/control-channel real-SSH fixture | **PASS** on the 2026-09-17 isolated fallback gate |
 | Whole-turn guard, per-command lease, takeover fencing, disconnect uncertainty, and no automatic replay | Terminal lease/runtime/Broker focused tests | **AUTOMATED PASS**; native-window takeover presentation remains blocked by unavailable computer-use app/window RPC |
-| No implicit Direct fallback; sensitive/effect/direct-required policy continues to select Direct explicitly | Native adapter/effect/policy focused tests and protocol contract | **PASS** in focused and full Rust gates |
+| No implicit Direct fallback; effects retain approval/native deny and explicit directRequired rejects boundTerminal before input | Native adapter/effect/policy focused tests and protocol contract | Current behavior supersedes historical effect-to-Direct routing; see visible-terminal unification stage one |
 | `terminal_remote_bound_terminal_v1`, `SHELLSPAN_TERMINAL_REMOTE_BOUND_TERMINAL_V1`, and `remoteBoundTerminalRollout` are authoritative and non-persisted | Environment precedence test, Broker JSON serialization test, TypeScript IPC/type test, residual search | **PASS** in focused and full gates |
 | Rollout disable makes incomplete work uncertain, revokes Agent lease/turn guard, preserves the SSH transport, and uses ordinary shell startup on later connection/reconnect | Broker rollback and Native runtime reconciliation regressions | **AUTOMATED PASS**; native-window reconnect presentation remains blocked by unavailable computer-use app/window RPC |
 

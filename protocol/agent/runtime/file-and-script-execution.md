@@ -39,9 +39,13 @@ and aggregate storage limits are unchanged.
 
 `run_terminal_command` accepts complete multiline scripts and heredocs within
 its existing 8192-byte command bound. LF, CR and tab are allowed; other control
-characters remain invalid. Scripts containing LF, CR or tab always route to
-`exec_command`, including bound-terminal sessions. `terminal_execute` still
-rejects all control characters: script lines are never pasted into a live PTY.
+characters remain invalid. These scripts use `exec_command` only in explicitly
+selected Direct sessions. Bound-terminal sessions use the same current-shell
+native editor for complete scripts, LF, CR and Tab when advertised by the shell
+integration; unsupported editors are rejected before input. They never silently
+route to Direct. See `visible-terminal-unification-plan.md` for the exact shell
+matrix and grammar limits. CR is preserved literally, including in CRLF; no
+newline normalization changes approved bytes or native shell semantics.
 
 Direct execution uses the frozen host, not mutable visible shell state. Local
 execution uses the frozen cwd when configured and the existing `/bin/sh -lc`

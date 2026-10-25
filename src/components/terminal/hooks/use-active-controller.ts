@@ -20,6 +20,9 @@ export function useActiveController(
   const attachedIdRef = useRef<string | null>(null);
   const focusEnabled = useFocusStore(state => state.enabled);
   const terminalOpen = useFocusStore(state => state.terminalOpen);
+  const autoFocus = shouldFocus && shouldAttach && (!focusEnabled || terminalOpen);
+  const focusTarget = useRef({ activeSessionId, autoFocus });
+  focusTarget.current = { activeSessionId, autoFocus };
   const controller = useSyncExternalStore(terminalRegistry.subscribe, () =>
     activeSessionId === null ? undefined : terminalRegistry.get(activeSessionId),
   );
@@ -64,12 +67,23 @@ export function useActiveController(
   }, [controller, shouldAttach, focusEnabled, terminalOpen]);
 
   useEffect(() => {
-    if (!shouldFocus || activeSessionId === null) return;
+    if (!autoFocus || activeSessionId === null) return;
+    const focusedWhenScheduled = document.activeElement;
     const focusFrame = requestAnimationFrame(() => {
-      terminalRegistry.get(activeSessionId)?.focus();
+      if (!focusTarget.current.autoFocus || focusTarget.current.activeSessionId !== activeSessionId) return;
+      // A user can enter a composer/search field after the selection commit
+      // but before this frame. Preserve that newer editing intent. Moving
+      // between actual terminal inputs still follows the selected session.
+      const focused = document.activeElement;
+      if (focused !== focusedWhenScheduled && focused instanceof HTMLElement
+        && focused.closest('input, textarea, select, [contenteditable="true"], [contenteditable="plaintext-only"]')
+        && !focused.closest('.xterm')
+        && !paneRef.current?.contains(focused)) return;
+      const active = terminalRegistry.get(activeSessionId);
+      if (active?.host && active.terminal.textarea?.isConnected) active.focus();
     });
     return () => cancelAnimationFrame(focusFrame);
-  }, [activeSessionId, shouldFocus]);
+  }, [activeSessionId, autoFocus, paneRef]);
 
   const focus = useCallback(() => {
     if (activeSessionId === null) return;

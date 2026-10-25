@@ -488,6 +488,7 @@ describe('terminalStore', () => {
       profileId: 'profile-1',
       terminalSessionId: 'must-not-survive-restart',
       terminalGeneration: 99,
+      ptyInfo: { transportKind: 'windowsConPty' as const, windowsBuildNumber: 26300 },
       brokerReplacedSessionIds: ['earlier-transport'],
     } as TerminalWorkspaceSession & {
       terminalSessionId: string;
@@ -499,6 +500,7 @@ describe('terminalStore', () => {
 
     expect(useTerminalStore.getState().sessions[0]?.terminalSessionId).toBeUndefined();
     expect(useTerminalStore.getState().sessions[0]?.terminalGeneration).toBeUndefined();
+    expect(useTerminalStore.getState().sessions[0]?.ptyInfo).toBeUndefined();
     expect(useTerminalStore.getState().sessions[0]?.brokerReplacedSessionIds).toBeUndefined();
   });
 

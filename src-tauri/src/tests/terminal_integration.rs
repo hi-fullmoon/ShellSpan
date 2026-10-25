@@ -150,7 +150,129 @@
     }
 
     #[test]
-    fn powershell_contract_has_no_nested_shell_or_terminal_markers() {
+    fn native_input_control_records_are_framed_bounded_and_strict() {
+        let bytes = b"I\x001\0J\0printf one\nprintf two\0TERMINAL_INPUT_UNSUPPORTED\0";
+        let mut decoder = TerminalIntegrationStreamDecoder::default();
+        let mut events = Vec::new();
+        for byte in bytes {
+            events.extend(decoder.push(&[*byte]).unwrap());
+        }
+        decoder.finish().unwrap();
+        assert_eq!(
+            events,
+            vec![
+                TerminalIntegrationControlEvent::NativeInput { enabled: true },
+                TerminalIntegrationControlEvent::InputRejected {
+                    command_line: "printf one\nprintf two".into(),
+                    reason: "TERMINAL_INPUT_UNSUPPORTED".into()
+                }
+            ]
+        );
+        let mut local_events = Vec::new();
+        read_control_events(&mut bytes.as_slice(), &mut |event| {
+            local_events.push(event);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(events, local_events);
+        assert!(TerminalIntegrationStreamDecoder::default()
+            .push(b"I\x002\0")
+            .is_err());
+        assert!(read_control_events(&mut b"I\0maybe\0".as_slice(), &mut |_| Ok(())).is_err());
+        assert!(read_control_events(&mut b"J\0incomplete\0".as_slice(), &mut |_| Ok(())).is_err());
+        for bytes in [
+            b"C\x001\0".as_slice(),
+            b"C\x000\0".as_slice(),
+            b"U\0".as_slice(),
+        ] {
+            let mut decoder = TerminalIntegrationStreamDecoder::default();
+            let decoded = decoder.push(bytes).unwrap();
+            let mut local = Vec::new();
+            let mut reader = bytes;
+            read_control_events(&mut reader, &mut |event| {
+                local.push(event);
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(decoded, local);
+        }
+        assert!(TerminalIntegrationStreamDecoder::default()
+            .push(b"C\0unexpected\0")
+            .is_err());
+    }
+
+    #[test]
+    fn native_checkpoints_and_job_records_are_exact_and_bounded_in_both_decoders() {
+        let handle = "job-0123456789abcdef0123456789abcdef";
+        for fields in [
+            vec!["H", "1"],
+            vec!["L", "1", ""],
+            vec!["A", "literal '\"\n\r\t"],
+            vec!["K", "1"],
+            vec!["B", handle, "running", "-"],
+            vec!["F", handle, "7"],
+            vec!["B", handle, "settled", "7"],
+        ] {
+            let bytes = fields.join("\0") + "\0";
+            let mut stream = TerminalIntegrationStreamDecoder::default();
+            let mut decoded = Vec::new();
+            for byte in bytes.as_bytes() {
+                decoded.extend(stream.push(&[*byte]).unwrap());
+            }
+            stream.finish().unwrap();
+            let mut local = Vec::new();
+            read_control_events(&mut bytes.as_bytes(), &mut |event| {
+                local.push(event);
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(decoded, local);
+        }
+        for mut bytes in [
+            b"H\x002\0".as_slice(),
+            b"L\x000\0\0".as_slice(),
+            b"L\x001\0missing".as_slice(),
+            b"A\0missing".as_slice(),
+            b"B\0123\0running\0-\0".as_slice(),
+        ] {
+            let mut decoder = TerminalIntegrationStreamDecoder::default();
+            let result = decoder.push(bytes);
+            assert!(result.is_err() || decoder.finish().is_err());
+            assert!(read_control_events(&mut bytes, &mut |_| Ok(())).is_err());
+        }
+        let oversized = format!("A\0{}\0", "界".repeat(10923));
+        assert!(TerminalIntegrationStreamDecoder::default()
+            .push(oversized.as_bytes())
+            .is_err());
+        assert!(read_control_events(&mut oversized.as_bytes(), &mut |_| Ok(())).is_err());
+    }
+
+    #[test]
+    fn bash_submission_quotes_one_unchanged_source_argument_and_keeps_physical_lines() {
+        for source in [
+            "printf 'a'\nprintf \"$HOME `literal`\"",
+            "cat <<'EOF'\na\tb\rc\nEOF",
+            "for x in a b; do printf '%s' \"$x\"; done\n",
+        ] {
+            let submitted = bash_native_submission(source).unwrap();
+            let words = shlex::split(&submitted).unwrap();
+            assert_eq!(words[0], "__shellspan_validate_native");
+            assert_eq!(words[1], source);
+            assert_eq!(
+                submitted.matches('\n').count(),
+                source.matches('\n').count()
+            );
+        }
+        assert!(
+            bash_native_submission(&"'\"$`\\\n".repeat(1_300))
+                .unwrap()
+                .len()
+                <= MAX_CONTROL_FIELD_BYTES
+        );
+    }
+
+    #[test]
+    fn powershell_foreground_contract_has_no_nested_shell_or_terminal_markers() {
         for shell in [
             TerminalShellKind::WindowsPowerShell,
             TerminalShellKind::PowerShell7,
@@ -179,7 +301,29 @@
             assert!(script.contains("$global:LASTEXITCODE -ne 0"));
             assert!(script.contains("(Get-Location).ProviderPath"));
             assert!(!script.contains("PipeOptions]::Inheritable"));
-            assert!(!script.contains("EncodedCommand"));
+            // The guarded background worker encodes only its trusted pipe
+            // bootstrap. Foreground source is still accepted by PSReadLine;
+            // neither it nor captured state is placed in process arguments.
+            let foreground = script.replace(include_str!("../terminal_job_host.cs"), "");
+            assert!(!foreground.contains("EncodedCommand"));
+            let worker = include_str!("../terminal_job_host.cs");
+            assert!(worker.contains("Unicode.GetBytes(bootstrap)"));
+            let arguments = worker
+                .split("var start = new System.Diagnostics.ProcessStartInfo")
+                .nth(1)
+                .unwrap()
+                .split("start.UseShellExecute")
+                .next()
+                .unwrap();
+            assert!(arguments.contains("GetBytes(bootstrap)"));
+            assert!(!arguments.contains("packet"));
+            assert!(!arguments.contains("Source"));
+            assert!(
+                worker
+                    .find("AssignProcessToJobObject(job, process.Handle)")
+                    .unwrap()
+                    < worker.find("writer.Write(bytes.Length)").unwrap()
+            );
             assert!(!script.contains("BEGIN:"));
             assert!(!script.contains("[Agent]"));
             assert!(!script.contains("powershell.exe -"));
@@ -187,11 +331,23 @@
         }
     }
 
+    #[test]
+    fn explicit_powershell_history_path_preserves_user_history_policy() {
+        let path = Path::new("C:/owned user's data/shell-history/windowsPowerShell.txt");
+        let script = powershell_history_redirect(path);
+        assert!(script.contains(
+            "-HistorySavePath 'C:/owned user''s data/shell-history/windowsPowerShell.txt'"
+        ));
+        assert!(!script.contains("HistorySaveStyle"));
+        assert!(!script.contains("AddToHistoryHandler"));
+        assert!(!script.contains("ClearHistory"));
+    }
+
     #[cfg(unix)]
     #[test]
     fn posix_bootstraps_use_shell_hooks_and_a_non_inherited_fifo() {
         let bash = bash_bootstrap(Path::new("/private/control"), true, true);
-        let zsh = zsh_bootstrap(Path::new("/private/control"), true, false);
+        let zsh = zsh_bootstrap(Path::new("/private/control"), true, false, Some("/bin/zsh"));
         assert!(bash.contains("trap '__shellspan_preexec' DEBUG"));
         assert!(bash.contains("READLINE_LINE"));
         assert!(zsh.contains("add-zsh-hook preexec"));
@@ -211,6 +367,7 @@
             TerminalShellKind::Bash,
             "/tmp/private/control",
             "/home/fixture user's",
+            "/bin/bash",
         )
         .unwrap();
 
@@ -230,10 +387,12 @@
             TerminalShellKind::Zsh,
             "/tmp/private/control",
             "/home/fixture",
+            "/bin/zsh",
         )
         .unwrap();
 
-        assert!(script.starts_with("[[ -r \"$HOME/.zshrc\" ]]"));
+        assert!(script.starts_with("typeset -gr __shellspan_parser_executable='/bin/zsh'"));
+        assert!(script.contains("[[ -r \"$HOME/.zshrc\" ]]"));
         assert!(script.contains("unset ZDOTDIR"));
         assert!(!script.contains(".zprofile"));
         assert!(!script.contains(".zlogin"));
@@ -329,6 +488,16 @@
         shell: TerminalShellKind,
         screen: bool,
     ) {
+        run_native_visible_command_acceptance_mode(shell_path, shell, screen, false);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn run_native_visible_command_acceptance_mode(
+        shell_path: &str,
+        shell: TerminalShellKind,
+        screen: bool,
+        checkpoint_failure: bool,
+    ) {
         use crate::terminal_broker::{
             TerminalGeometry, TerminalSessionBroker, TerminalTransportKind,
         };
@@ -336,6 +505,12 @@
         use std::sync::{Arc, Mutex};
         use std::time::Instant;
 
+        let expected_native_input = shell == TerminalShellKind::Zsh
+            || std::process::Command::new(shell_path)
+                .args(["-c", "(( BASH_VERSINFO[0] >= 4 ))"])
+                .status()
+                .unwrap()
+                .success();
         let broker = if screen {
             TerminalSessionBroker::phase5_enabled_for_test(4_096)
         } else {
@@ -371,6 +546,7 @@
         let home = tempfile::tempdir().unwrap();
         let mut command = CommandBuilder::new(shell_path);
         command.env("HOME", home.path());
+        command.env("HISTFILE", home.path().join("history.txt"));
         command.env("TERM", "xterm-256color");
         command.env("LANG", "C.UTF-8");
         command.env("LC_ALL", "C.UTF-8");
@@ -386,6 +562,15 @@
         let closed_integration = integration_id.clone();
         let mut integration_control = integration.start_reader(
             move |event| {
+                if let Ok(path)=std::env::var("SHELLSPAN_JOB_ACCEPT_TRACE") {
+                    let record=match &event {
+                        TerminalIntegrationControlEvent::NativeCheckpoint{buffer}=>Some(serde_json::json!({"kind":"A","bytes":buffer.len(),"tail":buffer.chars().rev().take(60).collect::<Vec<_>>().into_iter().rev().collect::<String>()})),
+                        TerminalIntegrationControlEvent::CommandStart{command_line,..}=>Some(serde_json::json!({"kind":"S","commandLine":command_line})),
+                        TerminalIntegrationControlEvent::InputRejected{command_line,reason}=>Some(serde_json::json!({"kind":"J","commandLine":command_line,"reason":reason})),
+                        _=>Some(serde_json::json!({"event":format!("{event:?}")})),
+                    };
+                    if let Some(record)=record { let mut trace=File::options().create(true).append(true).open(path).unwrap(); writeln!(trace,"{record}").unwrap(); }
+                }
                 control_broker.accept_integration_event(
                     &control_transport,
                     &control_integration,
@@ -428,17 +613,26 @@
             .unwrap()
             .session
             .unwrap();
-        assert_eq!(ready.integration_event_sequence, 3);
         assert_eq!(
-            ready.integration_capabilities,
-            [
-                "promptLifecycle",
-                "commandLifecycle",
-                "exactCommandLine",
-                "exitStatus",
-                "currentDirectory",
-            ]
+            ready.integration_event_sequence,
+            if shell == TerminalShellKind::Zsh {
+                7
+            } else {
+                6
+            }
         );
+        let mut expected_capabilities = vec![
+            "promptLifecycle",
+            "commandLifecycle",
+            "exactCommandLine",
+            "exitStatus",
+            "currentDirectory",
+        ];
+        if expected_native_input {
+            expected_capabilities.push("nativeScriptInput");
+            expected_capabilities.push("nativeJobControl");
+        }
+        assert_eq!(ready.integration_capabilities, expected_capabilities);
         let descendant_fds = execute_visible(
             &broker,
             &writer,
@@ -456,6 +650,7 @@
         for secret in [
             integration_root_text.as_str(),
             "__shellspan_control_path",
+            "SHELLSPAN_NATIVE_PARSER",
             "shellspan-terminal-integration-",
             integration_id.as_str(),
         ] {
@@ -568,6 +763,37 @@
         assert_eq!(rich.exit_code, Some(1));
         assert!(rich.combined_output.contains("\u{1b}[31m终端\u{1b}[0m"));
 
+        // Observe real PTY display before completion, then require the tool
+        // capture to contain the same unmodified bytes from that stream.
+        let streaming_start = display.lock().unwrap().len();
+        let streaming = thread::scope(|scope| {
+            let command = scope.spawn(|| {
+                execute_visible(
+                    &broker,
+                    &writer,
+                    &transport_id,
+                    shell,
+                    "printf '\\033[32mstage-one-stream\\033[0m'; sleep 2; printf stage-one-end",
+                )
+            });
+            wait_until(Duration::from_secs(2), || {
+                let bytes = display.lock().unwrap();
+                bytes[streaming_start..]
+                    .windows(b"\x1b[32mstage-one-stream\x1b[0m".len())
+                    .any(|part| part == b"\x1b[32mstage-one-stream\x1b[0m")
+            });
+            assert!(
+                !command.is_finished(),
+                "raw display arrived only after command completion"
+            );
+            command.join().unwrap()
+        });
+        assert_eq!(streaming.exit_code, Some(0));
+        assert!(streaming
+            .combined_output
+            .contains("\x1b[32mstage-one-stream\x1b[0m"));
+        assert!(streaming.combined_output.contains("stage-one-end"));
+
         for (requested, expected) in [
             (
                 crate::terminal_broker::TerminalCommandRequestedSettlement::Cancelled,
@@ -629,6 +855,8 @@
             &mut integration_control,
             &display,
             typing_display_start,
+            expected_native_input,
+            checkpoint_failure,
         );
         // The final case intentionally loses integration while input is pending.
         // Teardown must not bypass the recovery guard by injecting an exit line.
@@ -666,6 +894,8 @@
         integration_control: &mut TerminalIntegrationControlHandle,
         display: &std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
         typing_display_start: usize,
+        expected_native_input: bool,
+        checkpoint_failure: bool,
     ) {
         use crate::agent_runtime::{
             TerminalCommandPhase, TerminalExecuteRegistry, TerminalExecuteValidationStage,
@@ -757,14 +987,864 @@
             }
         });
         let output = tempfile::tempdir().unwrap();
-        for command in ["pwd\nls", "printf\tvalue", "echo\rnext", "echo \u{3}", ""] {
+        if checkpoint_failure {
+            assert!(expected_native_input);
+            let checkpoint_definition = if shell == TerminalShellKind::Bash {
+                "__shellspan_native_checkpoint() { if [[ -z $READLINE_LINE ]]; then __shellspan_emit A \"$READLINE_LINE\"; fi; }"
+            } else {
+                "__shellspan_native_checkpoint() { if [[ -z $BUFFER ]]; then __shellspan_emit A \"$BUFFER\"; fi; }"
+            };
+            let operation = registry
+                .start(
+                    &sessions,
+                    transport_id,
+                    "typing-agent",
+                    "typing-task",
+                    "disable-native-checkpoint",
+                    checkpoint_definition,
+                    shell.enter(),
+                )
+                .unwrap();
+            assert_eq!(
+                registry
+                    .wait(&sessions, transport_id, &operation, Duration::from_secs(5))
+                    .unwrap()
+                    .exit_code,
+                Some(0)
+            );
+            wait_for_prompt(broker, transport_id);
+            for takeover in [false, true] {
+                let id = format!("checkpoint-wait-cancel-{}", Uuid::new_v4());
+                let effect = output.path().join(&id);
+                let source = format!(
+                    "printf should-never-run >| {}",
+                    shell_single_quote(effect.to_str().unwrap())
+                );
+                let target = crate::agent_runtime::AgentToolTargetNative::Local {
+                    target_id: "checkpoint-fault-owner".into(),
+                    session_id: transport_id.into(),
+                    cwd: None,
+                };
+                let job = broker
+                    .prepare_shell_job(
+                        transport_id,
+                        &target,
+                        "typing-agent",
+                        "typing-task",
+                        &id,
+                        &source,
+                    )
+                    .unwrap();
+                let first =
+                    crate::agent_runtime::native_editor_chunks(&job.submitted_command_line, shell)
+                        .first()
+                        .unwrap()
+                        .0
+                        .clone();
+                let before = writes.lock().unwrap().len();
+                let operation = thread::scope(|scope| {
+                    let typing = scope.spawn(|| {
+                        registry.start_native_submission(
+                            &sessions,
+                            transport_id,
+                            "typing-agent",
+                            "typing-task",
+                            &id,
+                            &source,
+                            shell.enter(),
+                            Some(&job.submitted_command_line),
+                            |_| Ok(()),
+                        )
+                    });
+                    wait_until(Duration::from_secs(5), || {
+                        writes.lock().unwrap()[before..]
+                            .iter()
+                            .any(|(_, wire)| wire == &first)
+                    });
+                    let cancel_started = Instant::now();
+                    if takeover {
+                        registry
+                            .takeover(&sessions, transport_id, "typing-agent", &id)
+                            .unwrap();
+                    } else {
+                        registry.cancel_task(&sessions, "typing-task").unwrap();
+                    }
+                    let operation = typing.join().unwrap().unwrap();
+                    assert!(
+                        cancel_started.elapsed() < Duration::from_secs(1),
+                        "checkpoint cancellation did not wake its waiter"
+                    );
+                    operation
+                });
+                let result = registry
+                    .wait(&sessions, transport_id, &operation, Duration::from_secs(5))
+                    .unwrap();
+                assert_eq!(
+                    result.state,
+                    if takeover {
+                        TerminalCommandState::TakenOver
+                    } else {
+                        TerminalCommandState::Cancelled
+                    }
+                );
+                wait_for_prompt(broker, transport_id);
+                assert!(!effect.exists());
+                let after = writes.lock().unwrap();
+                assert_eq!(
+                    after[before..].len(),
+                    3,
+                    "a cancelled checkpoint sent more chunks or a final accept key"
+                );
+                assert_eq!(
+                    after[before + 2].1,
+                    if matches!(shell, TerminalShellKind::Bash | TerminalShellKind::Zsh) {
+                        "\u{18}\u{4}"
+                    } else {
+                        "\u{3}"
+                    }
+                );
+                drop(after);
+                assert_eq!(
+                    broker
+                        .shell_job(
+                            &job.process_handle,
+                            "checkpoint-fault-owner",
+                            "typing-agent",
+                            "typing-task"
+                        )
+                        .unwrap()
+                        .state,
+                    "rejected"
+                );
+                leases.release_turn("typing-agent").unwrap();
+            }
+            let effect = output.path().join("should-never-run");
+            let source = format!(
+                "printf should-never-run >| {}\nprintf tail",
+                shell_single_quote(effect.to_str().unwrap())
+            );
+            let error = registry
+                .start(
+                    &sessions,
+                    transport_id,
+                    "typing-agent",
+                    "typing-task",
+                    "lost-native-checkpoint",
+                    &source,
+                    shell.enter(),
+                )
+                .unwrap_err();
+            assert!(
+                error.contains("TERMINAL_INPUT_RECOVERY_REQUIRED"),
+                "{error}"
+            );
+            wait_for_prompt(broker, transport_id);
+            let admitted = broker.admit_terminal_input(
+                transport_id,
+                crate::terminal_broker::TerminalBrokerInputSource::User,
+                crate::terminal_broker::TerminalInputKind::Text,
+                b"\n",
+                || panic!("quarantined input was forwarded after an ordinary trusted prompt"),
+            );
+            assert!(admitted
+                .unwrap_err()
+                .contains("TERMINAL_INPUT_RECOVERY_REQUIRED"));
+            assert!(
+                !effect.exists(),
+                "source executed after an unacknowledged native edit"
+            );
+            assert!(!broker.native_input_enabled(transport_id).unwrap());
+            leases.release_turn("typing-agent").unwrap();
+            sessions.remove(transport_id).unwrap();
+            worker.join().unwrap();
+            return;
+        }
+        assert_eq!(
+            broker.native_input_enabled(transport_id).unwrap(),
+            expected_native_input
+        );
+        if expected_native_input {
+            reduced_motion.store(true, Ordering::SeqCst);
+            let draft_effect = output.path().join("preserved-user-draft");
+            let agent_effect = output.path().join("agent-must-not-run");
+            let draft = format!(
+                "printf '%s' draft-preserved >| {}",
+                shell_single_quote(draft_effect.to_str().unwrap())
+            );
+            leases
+                .write(
+                    &sessions,
+                    transport_id,
+                    draft,
+                    crate::agent_runtime::TerminalInputSource::User,
+                )
+                .unwrap();
+            let attempted = format!(
+                "printf forbidden >| {}\nprintf tail",
+                shell_single_quote(agent_effect.to_str().unwrap())
+            );
+            let error = registry
+                .start(
+                    &sessions,
+                    transport_id,
+                    "typing-agent",
+                    "typing-task",
+                    "existing-user-draft",
+                    &attempted,
+                    shell.enter(),
+                )
+                .unwrap_err();
+            assert!(error.contains("TERMINAL_FRONTEND_PENDING_INPUT"), "{error}");
+            leases.release_turn("typing-agent").unwrap();
+            leases
+                .write(
+                    &sessions,
+                    transport_id,
+                    shell.enter().into(),
+                    crate::agent_runtime::TerminalInputSource::User,
+                )
+                .unwrap();
+            wait_for_prompt(broker, transport_id);
+            assert_eq!(
+                fs::read_to_string(&draft_effect).unwrap(),
+                "draft-preserved",
+                "an agent probe or cancellation erased the existing user draft"
+            );
+            assert!(!agent_effect.exists());
+            verify_native_shell_jobs(
+                broker,
+                &registry,
+                &sessions,
+                transport_id,
+                shell,
+                display,
+                &writes,
+                writer,
+                &leases,
+            );
+            reduced_motion.store(false, Ordering::SeqCst);
+            let file = output.path().join("native-script");
+            fs::write(&file, "").unwrap();
+            let command = format!("export SHELLSPAN_NATIVE_SCRIPT=kept\nprintf '%s\\n' 'first' >> {}\ncat <<'SHELLSPAN_END'\nquoted '\"' and\tliteral Tab\nSHELLSPAN_END\nprintf '%s\\n' \"$SHELLSPAN_NATIVE_SCRIPT\" >> {}", shell_single_quote(file.to_str().unwrap()), shell_single_quote(file.to_str().unwrap()));
+            let native_display_start = display.lock().unwrap().len();
+            let operation = registry
+                .start(
+                    &sessions,
+                    transport_id,
+                    "typing-agent",
+                    "typing-task",
+                    "native-script",
+                    &command,
+                    shell.enter(),
+                )
+                .unwrap();
+            let result = registry
+                .wait(&sessions, transport_id, &operation, Duration::from_secs(5))
+                .unwrap();
+            assert_eq!(result.state, TerminalCommandState::Completed, "{result:?}");
+            assert_eq!(result.command_line, command);
+            assert_eq!(
+                result.submitted_command_line,
+                if shell == TerminalShellKind::Bash {
+                    Some(bash_native_submission(&command).unwrap())
+                } else {
+                    None
+                }
+            );
+            assert_eq!(result.exit_code, Some(0), "{result:?}");
+            assert!(
+                result
+                    .combined_output
+                    .contains("quoted '\"' and\tliteral Tab"),
+                "{result:?}"
+            );
+            assert_eq!(fs::read_to_string(&file).unwrap(), "first\nkept\n");
+            if let Ok(path) = std::env::var("SHELLSPAN_NATIVE_SCRIPT_TRACE_PATH") {
+                fs::write(&path, &display.lock().unwrap()[native_display_start..]).unwrap();
+                let geometry = broker
+                    .snapshot(Some(transport_id))
+                    .unwrap()
+                    .session
+                    .unwrap()
+                    .geometry;
+                fs::write(format!("{path}.json"), serde_json::to_vec(&serde_json::json!({ "commandLine": result.command_line, "submittedCommandLine": result.submitted_command_line, "columns": geometry.columns, "rows": geometry.rows })).unwrap()).unwrap();
+            }
+            wait_for_prompt(broker, transport_id);
+            leases.release_turn("typing-agent").unwrap();
+            let inherited = execute_visible(broker, writer, transport_id, shell, "[[ -o noclobber ]] && ss_phase3_alias; ss_phase3_function; printf ':%s:%s' \"$SHELLSPAN_NATIVE_SCRIPT\" \"$SHELLSPAN_PHASE3_VALUE\"");
+            assert!(
+                inherited
+                    .combined_output
+                    .contains("alias-okfunction-ok:kept:终端值"),
+                "native script lost current shell state: {inherited:?}"
+            );
+            execute_visible(broker, writer, transport_id, shell, "false");
+            let script = "printf 'previous-status:%s\\n' \"$?\"\nalias ss_native_same_buffer='printf new-alias-kept'\nss_native_same_buffer\n";
+            let operation = registry
+                .start(
+                    &sessions,
+                    transport_id,
+                    "typing-agent",
+                    "typing-task",
+                    "native-status-alias",
+                    script,
+                    shell.enter(),
+                )
+                .unwrap();
+            let result = registry
+                .wait(&sessions, transport_id, &operation, Duration::from_secs(5))
+                .unwrap();
+            assert_eq!(result.state, TerminalCommandState::Completed, "{result:?}");
+            assert_eq!(
+                result.exit_code,
+                Some(if shell == TerminalShellKind::Zsh {
+                    127
+                } else {
+                    0
+                }),
+                "{result:?}"
+            );
+            assert!(
+                result.combined_output.contains("previous-status:1\r\n"),
+                "native dispatch lost the preceding exit status: {result:?}"
+            );
+            if shell == TerminalShellKind::Bash {
+                assert!(
+                    result
+                        .combined_output
+                        .contains("previous-status:1\r\nnew-alias-kept"),
+                    "{result:?}"
+                );
+            }
+            wait_for_prompt(broker, transport_id);
+            leases.release_turn("typing-agent").unwrap();
+            // ZLE parses one accepted buffer before executing it, so an alias
+            // newly defined there becomes callable in the next buffer.
+            let alias =
+                execute_visible(broker, writer, transport_id, shell, "ss_native_same_buffer");
+            assert_eq!(alias.exit_code, Some(0), "{alias:?}");
+            assert!(
+                alias.combined_output.contains("new-alias-kept"),
+                "{alias:?}"
+            );
+            writes.lock().unwrap().clear();
+            phases.lock().unwrap().clear();
+            for incomplete in [
+                "echo 'unfinished",
+                "if true; then",
+                "cat <<EOF\nmissing end",
+            ] {
+                let effect = output.path().join("incomplete-prefix");
+                let script = format!(
+                    "printf forbidden >| {}\n{incomplete}",
+                    shell_single_quote(effect.to_str().unwrap())
+                );
+                let started = registry.start(
+                    &sessions,
+                    transport_id,
+                    "typing-agent",
+                    "typing-task",
+                    "incomplete-native",
+                    &script,
+                    shell.enter(),
+                );
+                let error = if incomplete.starts_with("cat") {
+                    started.unwrap_err()
+                } else {
+                    let result = registry
+                        .wait(
+                            &sessions,
+                            transport_id,
+                            &started.unwrap(),
+                            Duration::from_secs(5),
+                        )
+                        .unwrap();
+                    assert_eq!(result.state, TerminalCommandState::Failed, "{result:?}");
+                    result.input_rejection.unwrap()
+                };
+                assert!(error.starts_with("TERMINAL_INPUT_UNSUPPORTED"), "{error}");
+                wait_for_prompt(broker, transport_id);
+                leases.release_turn("typing-agent").unwrap();
+                assert!(!leases.has_lease(transport_id).unwrap());
+                leases
+                    .write(
+                        &sessions,
+                        transport_id,
+                        shell.enter().into(),
+                        crate::agent_runtime::TerminalInputSource::User,
+                    )
+                    .unwrap();
+                thread::sleep(Duration::from_millis(100));
+                wait_for_prompt(broker, transport_id);
+                assert!(
+                    !effect.exists(),
+                    "incomplete script executed its prefix or left an executable buffer"
+                );
+                writes.lock().unwrap().clear();
+                phases.lock().unwrap().clear();
+            }
+            if shell == TerminalShellKind::Zsh {
+                let script = "for item (one two) print -r -- \"native-zsh:$item\"\n";
+                let operation = registry
+                    .start(
+                        &sessions,
+                        transport_id,
+                        "typing-agent",
+                        "typing-task",
+                        "native-zsh-grammar",
+                        script,
+                        shell.enter(),
+                    )
+                    .unwrap();
+                let result = registry
+                    .wait(&sessions, transport_id, &operation, Duration::from_secs(5))
+                    .unwrap();
+                assert_eq!(result.state, TerminalCommandState::Completed, "{result:?}");
+                assert_eq!(result.command_line, script);
+                assert!(
+                    result
+                        .combined_output
+                        .contains("native-zsh:one\r\nnative-zsh:two\r\n"),
+                    "valid Zsh syntax was lost: {result:?}"
+                );
+                wait_for_prompt(broker, transport_id);
+                leases.release_turn("typing-agent").unwrap();
+                let rejected = output.path().join("native-parser-refusal");
+                execute_visible(
+                    broker,
+                    writer,
+                    transport_id,
+                    shell,
+                    "setopt cshjunkiequotes",
+                );
+                let script = format!(
+                    "printf forbidden >| {}\nprintf '%s' 'a\nb'",
+                    shell_single_quote(rejected.to_str().unwrap())
+                );
+                let operation = registry
+                    .start(
+                        &sessions,
+                        transport_id,
+                        "typing-agent",
+                        "typing-task",
+                        "native-parser-refusal",
+                        &script,
+                        shell.enter(),
+                    )
+                    .unwrap();
+                let result = registry
+                    .wait(&sessions, transport_id, &operation, Duration::from_secs(5))
+                    .unwrap();
+                assert_eq!(result.state, TerminalCommandState::Failed, "{result:?}");
+                let error = result.input_rejection.unwrap();
+                assert!(error.starts_with("TERMINAL_INPUT_UNSUPPORTED"), "{error}");
+                wait_for_prompt(broker, transport_id);
+                leases.release_turn("typing-agent").unwrap();
+                assert!(
+                    !rejected.exists(),
+                    "native parser refusal executed a script prefix"
+                );
+                execute_visible(
+                    broker,
+                    writer,
+                    transport_id,
+                    shell,
+                    "unsetopt cshjunkiequotes",
+                );
+                execute_visible(
+                    broker,
+                    writer,
+                    transport_id,
+                    shell,
+                    "SHELLSPAN_SAVED_PATH=$PATH; PATH=/shellspan-no-executable-search",
+                );
+                let script = "printf '%s' 'pinned\tparser'\nprintf path-safe";
+                let operation = registry
+                    .start(
+                        &sessions,
+                        transport_id,
+                        "typing-agent",
+                        "typing-task",
+                        "native-pinned-parser",
+                        script,
+                        shell.enter(),
+                    )
+                    .unwrap();
+                let result = registry
+                    .wait(&sessions, transport_id, &operation, Duration::from_secs(5))
+                    .unwrap();
+                assert_eq!(result.state, TerminalCommandState::Completed, "{result:?}");
+                assert_eq!(result.exit_code, Some(0), "{result:?}");
+                wait_for_prompt(broker, transport_id);
+                leases.release_turn("typing-agent").unwrap();
+                execute_visible(
+                    broker,
+                    writer,
+                    transport_id,
+                    shell,
+                    "PATH=$SHELLSPAN_SAVED_PATH; unset SHELLSPAN_SAVED_PATH",
+                );
+                writes.lock().unwrap().clear();
+                phases.lock().unwrap().clear();
+            }
+            for flow in ["ixon", "-ixon"] {
+                execute_visible(broker, writer, transport_id, shell, &format!("stty {flow}"));
+                let script = "  printf '%s' 'literal\rCR'\nprintf '%s' 'literal\tTab'\nprintf '%s' 'CRLF\r\ninside'\n";
+                let operation = registry
+                    .start(
+                        &sessions,
+                        transport_id,
+                        "typing-agent",
+                        "typing-task",
+                        "native-cr-tab",
+                        script,
+                        shell.enter(),
+                    )
+                    .unwrap();
+                let result = registry
+                    .wait(&sessions, transport_id, &operation, Duration::from_secs(5))
+                    .unwrap();
+                assert_eq!(result.state, TerminalCommandState::Completed, "{result:?}");
+                assert_eq!(result.command_line, script);
+                assert_eq!(result.exit_code, Some(0), "{result:?}");
+                assert!(
+                    result
+                        .combined_output
+                        .contains("literal\rCRliteral\tTabCRLF\r\r\ninside"),
+                    "literal controls were normalized: {result:?}"
+                );
+                wait_for_prompt(broker, transport_id);
+                leases.release_turn("typing-agent").unwrap();
+                let modes = execute_visible(broker, writer, transport_id, shell, "stty -a");
+                let pattern = if flow == "ixon" {
+                    r"(?:^|[\s;])ixon(?:[\s;]|$)"
+                } else {
+                    r"(?:^|[\s;])-ixon(?:[\s;]|$)"
+                };
+                assert!(
+                    regex::Regex::new(pattern)
+                        .unwrap()
+                        .is_match(&modes.combined_output),
+                    "native input changed TTY flow control: {modes:?}"
+                );
+                writes.lock().unwrap().clear();
+                phases.lock().unwrap().clear();
+            }
+            let original_comments = broker.native_comments_enabled(transport_id).unwrap();
+            if shell == TerminalShellKind::Zsh {
+                execute_visible(
+                    broker,
+                    writer,
+                    transport_id,
+                    shell,
+                    "unsetopt interactivecomments",
+                );
+                writes.lock().unwrap().clear();
+                phases.lock().unwrap().clear();
+                for tail in ["# plain comment", "#'unfinished", "#\"'\\$`"] {
+                    let effect = output.path().join("native-comment-refusal");
+                    let script = format!(
+                        "printf forbidden >| {}\n{tail}",
+                        shell_single_quote(effect.to_str().unwrap())
+                    );
+                    let error = registry
+                        .start(
+                            &sessions,
+                            transport_id,
+                            "typing-agent",
+                            "typing-task",
+                            "native-comment-refusal",
+                            &script,
+                            shell.enter(),
+                        )
+                        .unwrap_err();
+                    assert!(error.contains("INTERACTIVE_COMMENTS"), "{error}");
+                    assert!(writes.lock().unwrap().is_empty());
+                    assert!(!leases.has_lease(transport_id).unwrap());
+                    assert!(!effect.exists());
+                }
+                execute_visible(
+                    broker,
+                    writer,
+                    transport_id,
+                    shell,
+                    "setopt interactivecomments",
+                );
+            }
+            for suffix in ["'", "'\"$`\\", "终端"] {
+                let effect = output.path().join("native-byte-boundary");
+                let prefix = format!(
+                    "printf once >| {}\n#",
+                    shell_single_quote(effect.to_str().unwrap())
+                );
+                let mut script = prefix.clone();
+                script.push_str(&suffix.repeat((8192 - prefix.len()) / suffix.len()));
+                script.push_str(&"x".repeat(8192 - script.len()));
+                assert_eq!(script.len(), 8192);
+                let operation = registry
+                    .start(
+                        &sessions,
+                        transport_id,
+                        "typing-agent",
+                        "typing-task",
+                        "native-byte-boundary",
+                        &script,
+                        shell.enter(),
+                    )
+                    .unwrap();
+                let result = registry
+                    .wait(&sessions, transport_id, &operation, Duration::from_secs(8))
+                    .unwrap();
+                assert_eq!(result.state, TerminalCommandState::Completed, "{result:?}");
+                assert_eq!(result.command_line, script);
+                if shell == TerminalShellKind::Bash {
+                    assert_eq!(
+                        result.submitted_command_line,
+                        Some(bash_native_submission(&script).unwrap())
+                    );
+                }
+                assert_eq!(fs::read_to_string(&effect).unwrap(), "once");
+                wait_for_prompt(broker, transport_id);
+                leases.release_turn("typing-agent").unwrap();
+                writes.lock().unwrap().clear();
+                phases.lock().unwrap().clear();
+                script.push('x');
+                assert!(registry
+                    .start(
+                        &sessions,
+                        transport_id,
+                        "typing-agent",
+                        "typing-task",
+                        "native-byte-overflow",
+                        &script,
+                        shell.enter()
+                    )
+                    .is_err());
+                assert!(writes.lock().unwrap().is_empty());
+                assert!(!leases.has_lease(transport_id).unwrap());
+            }
+            if shell == TerminalShellKind::Zsh && !original_comments {
+                execute_visible(
+                    broker,
+                    writer,
+                    transport_id,
+                    shell,
+                    "unsetopt interactivecomments",
+                );
+                writes.lock().unwrap().clear();
+                phases.lock().unwrap().clear();
+            }
+            for mode in ["native-cancel", "native-takeover"] {
+                wait_for_prompt(broker, transport_id);
+                let effect = output.path().join(mode);
+                let script = format!(
+                    "printf first >| {}\nprintf second >> {}",
+                    shell_single_quote(effect.to_str().unwrap()),
+                    shell_single_quote(effect.to_str().unwrap())
+                );
+                let operation = thread::scope(|scope| {
+                    let typing = scope.spawn(|| {
+                        registry.start(
+                            &sessions,
+                            transport_id,
+                            "typing-agent",
+                            "typing-task",
+                            mode,
+                            &script,
+                            shell.enter(),
+                        )
+                    });
+                    let submitted = if shell == TerminalShellKind::Bash {
+                        bash_native_submission(&script).unwrap()
+                    } else {
+                        script.clone()
+                    };
+                    wait_until(Duration::from_secs(5), || {
+                        writes.lock().unwrap().iter().any(|(_, data)| {
+                            data == &crate::agent_runtime::native_editor_final_chunk(
+                                &submitted, shell,
+                            )
+                        })
+                    });
+                    assert!(!effect.exists());
+                    if mode == "native-takeover" {
+                        registry
+                            .takeover(&sessions, transport_id, "typing-agent", mode)
+                            .unwrap();
+                    } else {
+                        registry.cancel_task(&sessions, "typing-task").unwrap();
+                    }
+                    typing.join().unwrap().unwrap()
+                });
+                let result = registry
+                    .wait(&sessions, transport_id, &operation, Duration::from_secs(5))
+                    .unwrap();
+                assert_eq!(
+                    result.state,
+                    if mode == "native-takeover" {
+                        TerminalCommandState::TakenOver
+                    } else {
+                        TerminalCommandState::Cancelled
+                    }
+                );
+                assert!(!writes
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|(_, data)| data == "\u{18}\u{5}"));
+                wait_for_prompt(broker, transport_id);
+                leases.release_turn("typing-agent").unwrap();
+                leases
+                    .write(
+                        &sessions,
+                        transport_id,
+                        shell.enter().into(),
+                        crate::agent_runtime::TerminalInputSource::User,
+                    )
+                    .unwrap();
+                wait_for_prompt(broker, transport_id);
+                assert!(
+                    !effect.exists(),
+                    "user Enter executed a cancelled native buffer"
+                );
+                writes.lock().unwrap().clear();
+                phases.lock().unwrap().clear();
+            }
+            for mode in [
+                "native-running-cancel",
+                "native-running-timeout",
+                "native-running-takeover",
+                "single-running-cancel",
+                "single-running-timeout",
+            ] {
+                let effect = output.path().join(mode);
+                let separator = if mode.starts_with("single") {
+                    "; "
+                } else {
+                    "\n"
+                };
+                let script = format!("printf '\\033[31mnative-running\\033[0m'{separator}sleep 10{separator}printf forbidden >| {}", shell_single_quote(effect.to_str().unwrap()));
+                let display_start = display.lock().unwrap().len();
+                let operation = registry
+                    .start(
+                        &sessions,
+                        transport_id,
+                        "typing-agent",
+                        "typing-task",
+                        mode,
+                        &script,
+                        shell.enter(),
+                    )
+                    .unwrap();
+                wait_until(Duration::from_secs(3), || {
+                    display.lock().unwrap()[display_start..]
+                        .windows(b"\x1b[31mnative-running\x1b[0m".len())
+                        .any(|part| part == b"\x1b[31mnative-running\x1b[0m")
+                });
+                assert!(!operation.snapshot().unwrap().state.is_terminal());
+                thread::sleep(Duration::from_millis(100));
+                let expected = if mode.ends_with("takeover") {
+                    registry
+                        .takeover(&sessions, transport_id, "typing-agent", mode)
+                        .unwrap();
+                    TerminalCommandState::TakenOver
+                } else if mode.ends_with("cancel") {
+                    registry.cancel_task(&sessions, "typing-task").unwrap();
+                    TerminalCommandState::Cancelled
+                } else {
+                    TerminalCommandState::TimedOut
+                };
+                let result = registry
+                    .wait(
+                        &sessions,
+                        transport_id,
+                        &operation,
+                        Duration::from_millis(100),
+                    )
+                    .unwrap();
+                assert_eq!(result.state, expected, "{mode}: {result:?}");
+                assert!(result
+                    .combined_output
+                    .contains("\x1b[31mnative-running\x1b[0m"));
+                wait_for_prompt(broker, transport_id);
+                leases.release_turn("typing-agent").unwrap();
+                assert!(
+                    !effect.exists(),
+                    "interrupted script continued executing subsequent lines"
+                );
+                writes.lock().unwrap().clear();
+                phases.lock().unwrap().clear();
+            }
+            if shell == TerminalShellKind::Bash {
+                execute_visible(
+                    broker,
+                    writer,
+                    transport_id,
+                    shell,
+                    "trap 'printf user-int-handler' INT",
+                );
+                assert!(!broker.native_input_enabled(transport_id).unwrap());
+                let error = registry
+                    .start(
+                        &sessions,
+                        transport_id,
+                        "typing-agent",
+                        "typing-task",
+                        "native-user-trap",
+                        "printf one\nprintf two",
+                        shell.enter(),
+                    )
+                    .unwrap_err();
+                assert!(error.starts_with("TERMINAL_INPUT_UNSUPPORTED"));
+                writes.lock().unwrap().clear();
+                let operation = registry.start(&sessions, transport_id, "typing-agent", "typing-task", "single-user-trap", "printf '\\033[31muser-trap-running\\033[0m'; sleep 10; printf user-trap-tail", shell.enter()).unwrap();
+                wait_until(Duration::from_secs(3), || {
+                    operation.snapshot().unwrap().state == TerminalCommandState::Running
+                });
+                thread::sleep(Duration::from_millis(100));
+                registry.cancel_task(&sessions, "typing-task").unwrap();
+                let result = registry
+                    .wait(&sessions, transport_id, &operation, Duration::from_secs(5))
+                    .unwrap();
+                assert_eq!(
+                    result.state,
+                    TerminalCommandState::Uncertain,
+                    "a user SIGINT handler cannot certify cancellation: {result:?}"
+                );
+                assert!(result.no_auto_replay);
+                wait_for_prompt(broker, transport_id);
+                leases.release_turn("typing-agent").unwrap();
+                execute_visible(broker, writer, transport_id, shell, "trap - INT");
+                assert!(broker.native_input_enabled(transport_id).unwrap());
+                writes.lock().unwrap().clear();
+                phases.lock().unwrap().clear();
+            }
+        } else {
+            let error = registry
+                .start(
+                    &sessions,
+                    transport_id,
+                    "typing-agent",
+                    "typing-task",
+                    "bash3-unsupported",
+                    "printf first\nprintf second",
+                    shell.enter(),
+                )
+                .unwrap_err();
+            assert!(error.starts_with("TERMINAL_INPUT_UNSUPPORTED"));
+            assert!(writes.lock().unwrap().is_empty());
+            assert!(!leases.has_lease(transport_id).unwrap());
+        }
+        for command in ["echo \u{3}", "", "sleep 1 &", "sleep 1 &!", "sleep 1 &|"] {
             let arguments =
                 serde_json::json!({"command": command, "explanation": "verify input rejection"});
-            assert!(crate::agent_runtime::validate_tool_arguments_native(
-                "terminal_execute",
-                &arguments
-            )
-            .is_err());
+            if command.is_empty() || command.contains('\u{3}') {
+                assert!(crate::agent_runtime::validate_tool_arguments_native(
+                    "terminal_execute",
+                    &arguments
+                )
+                .is_err());
+            }
             assert!(registry
                 .start(
                     &sessions,
@@ -813,7 +1893,11 @@
             } else {
                 "终端e\u{301}👩‍💻"
             };
-            let command = format!("printf '%s' '{value}' > {quoted_file}");
+            let command = if mode == "integration-loss" && expected_native_input {
+                format!("printf '%s' '{value}' > {quoted_file}\nprintf forbidden >> {quoted_file}")
+            } else {
+                format!("printf '%s' '{value}' > {quoted_file}")
+            };
             crate::agent_runtime::validate_tool_arguments_native("terminal_execute", &serde_json::json!({"command": &command, "explanation": "verify real terminal input"})).unwrap();
             let operation_id = format!("typing-{}", Uuid::new_v4().simple());
             let operation = thread::scope(|scope| {
@@ -841,7 +1925,19 @@
                     let deadline = Instant::now() + Duration::from_secs(5);
                     while {
                         let inputs = writes.lock().unwrap();
-                        if mode == "pause-cancel"
+                        if mode == "integration-loss" && expected_native_input {
+                            let submitted = if shell == TerminalShellKind::Bash {
+                                bash_native_submission(&command).unwrap()
+                            } else {
+                                command.clone()
+                            };
+                            !inputs.iter().any(|(_, input)| {
+                                input
+                                    == &crate::agent_runtime::native_editor_final_chunk(
+                                        &submitted, shell,
+                                    )
+                            })
+                        } else if mode == "pause-cancel"
                             || (mode == "integration-loss"
                                 && broker
                                     .bracketed_paste_enabled(transport_id)
@@ -905,7 +2001,7 @@
                     .lock()
                     .unwrap()
                     .iter()
-                    .any(|(_, input)| input == shell.enter()));
+                    .any(|(_, input)| input == shell.enter() || input == "\u{18}\u{5}"));
                 continue;
             }
             let operation = operation.unwrap();
@@ -924,6 +2020,11 @@
                 );
                 assert!(!file.exists(), "cancelled typing executed a command");
                 assert_eq!(inputs.last().unwrap().1, "\u{3}");
+                assert_eq!(
+                    inputs.iter().filter(|(_, input)| input == "\u{3}").count(),
+                    1,
+                    "{mode}: cancellation must not interrupt the replacement prompt twice"
+                );
                 assert!(!inputs.iter().any(|(_, input)| input == shell.enter()));
                 assert_eq!(*phases.lock().unwrap(), [TerminalCommandPhase::Typing]);
             } else {
@@ -1001,6 +2102,25 @@
         shell: TerminalShellKind,
         command: &str,
     ) -> crate::terminal_broker::TerminalCommandSnapshot {
+        execute_visible_with_timeout(
+            broker,
+            writer,
+            transport_id,
+            shell,
+            command,
+            Duration::from_secs(8),
+        )
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+    fn execute_visible_with_timeout(
+        broker: &crate::terminal_broker::TerminalSessionBroker,
+        writer: &std::sync::Arc<std::sync::Mutex<Box<dyn std::io::Write + Send>>>,
+        transport_id: &str,
+        shell: TerminalShellKind,
+        command: &str,
+        timeout: Duration,
+    ) -> crate::terminal_broker::TerminalCommandSnapshot {
         use crate::terminal_broker::{TerminalBrokerInputSource, TerminalInputKind};
         let operation_id = format!("operation-{}", Uuid::new_v4().simple());
         broker
@@ -1029,9 +2149,7 @@
                 },
             )
             .unwrap();
-        let mut snapshot = operation
-            .wait_until_terminal(Duration::from_secs(8))
-            .unwrap();
+        let mut snapshot = operation.wait_until_terminal(timeout).unwrap();
         assert!(
             snapshot.state.is_terminal(),
             "command did not settle: {snapshot:?}"
@@ -1159,9 +2277,20 @@
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+    #[track_caller]
     fn wait_for_prompt(broker: &crate::terminal_broker::TerminalSessionBroker, transport_id: &str) {
+        wait_for_prompt_with_timeout(broker, transport_id, Duration::from_secs(5));
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+    #[track_caller]
+    fn wait_for_prompt_with_timeout(
+        broker: &crate::terminal_broker::TerminalSessionBroker,
+        transport_id: &str,
+        timeout: Duration,
+    ) {
         use std::time::Instant;
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + timeout;
         loop {
             let snapshot = broker.snapshot(Some(transport_id)).unwrap();
             if snapshot.session.as_ref().is_some_and(|session| {
@@ -1170,7 +2299,33 @@
             }) {
                 return;
             }
-            assert!(Instant::now() < deadline, "prompt not ready: {snapshot:?}");
+            if Instant::now() >= deadline {
+                let frames = snapshot.session.as_ref().and_then(|session| {
+                    broker
+                        .replay_output(
+                            &session.terminal_session_id,
+                            session.terminal_generation,
+                            session.replay_first_sequence.unwrap_or(1),
+                            512,
+                            4096,
+                        )
+                        .ok()
+                });
+                let raw = frames
+                    .map(|batch| {
+                        batch
+                            .frames
+                            .into_iter()
+                            .flat_map(|frame| frame.bytes)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                let tail = crate::redaction::redact_sensitive_text(&String::from_utf8_lossy(&raw));
+                panic!(
+                    "prompt not ready at {}: {snapshot:?}; shared PTY tail={tail:?}",
+                    std::panic::Location::caller()
+                );
+            }
             thread::sleep(Duration::from_millis(10));
         }
     }
@@ -1190,10 +2345,668 @@
         format!("'{}'", value.replace('\'', "'\"'\"'"))
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn verify_native_shell_jobs(
+        broker: &crate::terminal_broker::TerminalSessionBroker,
+        registry: &crate::agent_runtime::TerminalExecuteRegistry,
+        sessions: &crate::models::SessionManager,
+        transport: &str,
+        shell: TerminalShellKind,
+        display: &std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+        writes: &std::sync::Arc<std::sync::Mutex<Vec<(Instant, String)>>>,
+        writer: &std::sync::Arc<std::sync::Mutex<Box<dyn std::io::Write + Send>>>,
+        leases: &crate::agent_runtime::TerminalLeaseManager,
+    ) {
+        use crate::agent_runtime::AgentToolTargetNative;
+        use crate::terminal_broker::TerminalCommandState;
+        let target = AgentToolTargetNative::Local {
+            target_id: "native-job-owner".into(),
+            session_id: transport.into(),
+            cwd: None,
+        };
+        let run = |source: &str, submitted: Option<&str>| {
+            let id = format!("native-job-{}", Uuid::new_v4());
+            // Prepared submissions are bound to this operation before a lease.
+            let operation = registry.start_native_submission(
+                sessions,
+                transport,
+                "typing-agent",
+                "typing-task",
+                &id,
+                source,
+                shell.enter(),
+                submitted,
+                |_| Ok(()),
+            );
+            operation.map(|operation| {
+                registry
+                    .wait(sessions, transport, &operation, Duration::from_secs(5))
+                    .unwrap()
+            })
+        };
+        let launch = |source: &str| {
+            let id = format!("native-job-{}", Uuid::new_v4());
+            let job = broker
+                .prepare_shell_job(
+                    transport,
+                    &target,
+                    "typing-agent",
+                    "typing-task",
+                    &id,
+                    source,
+                )
+                .unwrap();
+            let operation = registry
+                .start_native_submission(
+                    sessions,
+                    transport,
+                    "typing-agent",
+                    "typing-task",
+                    &id,
+                    source,
+                    shell.enter(),
+                    Some(&job.submitted_command_line),
+                    |_| Ok(()),
+                )
+                .unwrap();
+            let result = registry
+                .wait(sessions, transport, &operation, Duration::from_secs(5))
+                .unwrap();
+            assert_eq!(result.state, TerminalCommandState::Completed, "{result:?}");
+            assert_eq!(result.command_line, source);
+            assert_eq!(result.exit_code, Some(0), "job launch failed: {result:?}");
+            assert_eq!(
+                result.submitted_command_line.as_ref(),
+                Some(&job.submitted_command_line)
+            );
+            wait_for_prompt(broker, transport);
+            job
+        };
+        let observe = |job: &crate::terminal_jobs::NativeShellJob, stop: bool| {
+            let id = format!("native-job-control-{}", Uuid::new_v4());
+            let fresh = broker
+                .shell_job(
+                    &job.process_handle,
+                    "native-job-owner",
+                    "typing-agent",
+                    "typing-task",
+                )
+                .unwrap();
+            if matches!(fresh.state.as_str(), "exited")
+                || fresh.control_lost
+                || fresh.native_active == Some(false)
+            {
+                return fresh;
+            }
+            let line = broker.prepare_shell_job_control(&fresh, &id, stop).unwrap();
+            let operation = registry
+                .start_native_submission(
+                    sessions,
+                    transport,
+                    "typing-agent",
+                    "typing-task",
+                    &id,
+                    &line,
+                    shell.enter(),
+                    Some(&line),
+                    |_| Ok(()),
+                )
+                .unwrap();
+            let result = registry
+                .wait(sessions, transport, &operation, Duration::from_secs(5))
+                .unwrap();
+            assert_eq!(result.state, TerminalCommandState::Completed, "{result:?}");
+            wait_for_prompt(broker, transport);
+            broker
+                .shell_job(
+                    &job.process_handle,
+                    "native-job-owner",
+                    "typing-agent",
+                    "typing-task",
+                )
+                .unwrap()
+        };
+        let until_exit = |job: &crate::terminal_jobs::NativeShellJob| {
+            let deadline = Instant::now() + Duration::from_secs(6);
+            loop {
+                let observed = observe(job, false);
+                if matches!(observed.state.as_str(), "exited" | "uncertain") {
+                    break observed;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "job did not settle: {observed:?}"
+                );
+                thread::sleep(Duration::from_millis(20));
+            }
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let completion_gate = directory.path().join("release-natural-exit");
+        let natural = launch(&format!(
+            "while [[ ! -f {} ]]; do sleep 0.01; done; sleep 0.1; exit 7",
+            shell_single_quote(completion_gate.to_str().unwrap())
+        ));
+        let revision = broker
+            .shell_job(
+                &natural.process_handle,
+                "native-job-owner",
+                "typing-agent",
+                "typing-task",
+            )
+            .unwrap()
+            .observation_revision;
+        let natural_result = thread::scope(|scope| {
+            scope.spawn(|| {
+                wait_until(Duration::from_secs(3), || {
+                    broker
+                        .shell_job(
+                            &natural.process_handle,
+                            "native-job-owner",
+                            "typing-agent",
+                            "typing-task",
+                        )
+                        .unwrap()
+                        .observation_revision
+                        > revision
+                });
+                fs::write(&completion_gate, "release").unwrap();
+            });
+            crate::agent_runtime::NativeToolEngine::manage_registered_job_for_test(
+                broker, leases, registry, sessions, &natural, false, 5000,
+            )
+            .unwrap()
+        });
+        let natural_data = natural_result.data.unwrap();
+        assert_eq!(
+            natural_data["state"], "exited",
+            "a single wait must discover natural completion after its first running observation"
+        );
+        assert_eq!(natural_data["exitCode"], 7);
+        assert_eq!(natural_data["waitTimedOut"], false);
+        let bounded = launch("sleep 60");
+        let bounded_result =
+            crate::agent_runtime::NativeToolEngine::manage_registered_job_for_test(
+                broker, leases, registry, sessions, &bounded, false, 1000,
+            )
+            .unwrap();
+        assert_eq!(bounded_result.data.as_ref().unwrap()["waitTimedOut"], true);
+        assert!(
+            broker.native_input_enabled(transport).unwrap(),
+            "a bounded observation must not quarantine a healthy editor at its deadline"
+        );
+        let stopped = crate::agent_runtime::NativeToolEngine::manage_registered_job_for_test(
+            broker, leases, registry, sessions, &bounded, true, 10000,
+        )
+        .unwrap();
+        let stopped_data = stopped.data.unwrap();
+        assert_eq!(stopped_data["job"]["nativeActive"], false);
+        assert_eq!(stopped_data["job"]["controlLost"], false);
+        wait_for_prompt(broker, transport);
+        let marker = directory.path().join("once");
+        fs::write(&marker, "").unwrap();
+        let inherited = directory.path().join("state");
+        fs::write(&inherited, "").unwrap();
+        let parent_cwd = broker
+            .snapshot(Some(transport))
+            .unwrap()
+            .session
+            .unwrap()
+            .current_directory;
+        let display_start = display.lock().unwrap().len();
+        let first = launch(&format!("printf 'once\\n' >> {}; {{ ss_phase3_alias; ss_phase3_function; printf ':job-state:%s:%s:' \"$SHELLSPAN_PHASE3_VALUE\" \"$PWD\"; cd /; printf ':child-cwd:%s:' \"$PWD\"; }} >> {}; sleep 3; printf 'job-%s-end' one", shell_single_quote(marker.to_str().unwrap()), shell_single_quote(inherited.to_str().unwrap())));
+        let second = launch("sleep 0.3; printf job-two-end; exit 7");
+        let marker_deadline = Instant::now() + Duration::from_secs(2);
+        while fs::read_to_string(&marker).unwrap().is_empty() && Instant::now() < marker_deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(fs::read_to_string(&marker).unwrap(), "once\n");
+        assert!(broker
+            .shell_job(
+                &first.process_handle,
+                "native-job-owner",
+                "another-agent",
+                "typing-task"
+            )
+            .is_err());
+        assert!(broker
+            .shell_job(
+                &first.process_handle,
+                "native-job-owner",
+                "typing-agent",
+                "another-task"
+            )
+            .is_err());
+        let foreground = run("printf foreground-while-jobs-run", None).unwrap();
+        assert_eq!(foreground.exit_code, Some(0));
+        assert!(foreground
+            .combined_output
+            .contains("foreground-while-jobs-run"));
+        assert_eq!(
+            observe(&first, false).state,
+            "running",
+            "bounded observation must not stop a running job"
+        );
+        assert_eq!(until_exit(&second).exit_code, Some(7));
+        assert_eq!(until_exit(&first).exit_code, Some(0));
+        let inherited_state = fs::read_to_string(&inherited).unwrap();
+        assert!(
+            inherited_state.contains("alias-okfunction-ok:job-state:终端值:"),
+            "background did not inherit current shell state: {inherited_state:?}"
+        );
+        assert!(fs::read_to_string(&inherited)
+            .unwrap()
+            .contains(":child-cwd:/:"));
+        assert_eq!(
+            broker
+                .snapshot(Some(transport))
+                .unwrap()
+                .session
+                .unwrap()
+                .current_directory,
+            parent_cwd,
+            "background chpwd must not change parent integration cwd"
+        );
+        assert_eq!(
+            run("printf '%s' \"$(cd /; pwd)\"", None).unwrap().cwd,
+            parent_cwd,
+            "command substitution must not change parent integration cwd"
+        );
+        assert!(
+            String::from_utf8_lossy(&display.lock().unwrap()[display_start..])
+                .contains("job-one-end")
+        );
+        assert_eq!(fs::read_to_string(&marker).unwrap(), "once\n");
+        // Native jobspecs avoid IFS parsing and numeric slot/PID credentials.
+        assert_eq!(run("IFS=:", None).unwrap().exit_code, Some(0));
+        let survivor = launch("sleep 60");
+        let stopped = launch("sleep 60");
+        assert_eq!(
+            run(
+                &format!("builtin kill -s STOP '%( : {};'", stopped.process_handle),
+                None
+            )
+            .unwrap()
+            .exit_code,
+            Some(0)
+        );
+        thread::sleep(Duration::from_millis(50));
+        assert_eq!(
+            observe(&stopped, false).state,
+            "stopped",
+            "stopped jobs remain live and controllable"
+        );
+        observe(&stopped, true);
+        assert_eq!(until_exit(&stopped).state, "exited");
+        assert_eq!(observe(&survivor, false).state, "running");
+        assert!(broker
+            .prepare_shell_job_control(&until_exit(&first), "retired-control", true)
+            .is_err());
+        assert_eq!(
+            observe(&survivor, false).state,
+            "running",
+            "old handle must not signal a new job slot"
+        );
+        observe(&survivor, true);
+        assert_eq!(until_exit(&survivor).state, "exited");
+        assert_eq!(run("unset IFS", None).unwrap().exit_code, Some(0));
+        let natural127 = launch("exit 127");
+        assert_eq!(until_exit(&natural127).exit_code, Some(127));
+        let previous = directory.path().join("previous-status");
+        assert_eq!(run("false", None).unwrap().exit_code, Some(1));
+        wait_for_prompt(broker, transport);
+        let inherited_status = launch(&format!(
+            "printf '%s' \"$?\" >| {}",
+            shell_single_quote(previous.to_str().unwrap())
+        ));
+        assert_eq!(until_exit(&inherited_status).exit_code, Some(0));
+        assert_eq!(
+            fs::read_to_string(&previous).unwrap(),
+            "1",
+            "background source did not inherit the shell's preceding status"
+        );
+        let changed_path = launch("export PATH=/shellspan-no-such-path; exit 11");
+        assert_eq!(
+            until_exit(&changed_path).exit_code,
+            Some(11),
+            "child PATH must not disable its completion receipt"
+        );
+        assert_eq!(
+            run(
+                "export SS_JOB_OLD_PATH=$PATH; export PATH=/shellspan-no-such-path",
+                None
+            )
+            .unwrap()
+            .exit_code,
+            Some(0)
+        );
+        let parent_path = launch("/bin/sleep 0.1; exit 12");
+        assert_eq!(
+            until_exit(&parent_path).exit_code,
+            Some(12),
+            "parent PATH must not disable job observation/cleanup"
+        );
+        assert_eq!(
+            run("export PATH=$SS_JOB_OLD_PATH; unset SS_JOB_OLD_PATH", None)
+                .unwrap()
+                .exit_code,
+            Some(0)
+        );
+        let own_trap = launch("trap 'printf user-job-cleanup' EXIT; sleep 0.1; exit 9");
+        let observed = until_exit(&own_trap);
+        assert!(
+            observed.exit_code == Some(9)
+                || (observed.state == "uncertain" && observed.exit_code.is_none()),
+            "lost notification must never invent success: {observed:?}"
+        );
+        let replacement = launch(&format!(
+            "printf '%s' '{}'; sleep 60",
+            own_trap.process_handle
+        ));
+        assert!(broker
+            .prepare_shell_job_control(&observed, "old-handle-stop", true)
+            .is_err());
+        assert_eq!(
+            observe(&replacement, false).state,
+            "running",
+            "source mentioning an old handle must not acquire its identity"
+        );
+        observe(&replacement, true);
+        assert_eq!(until_exit(&replacement).state, "exited");
+        assert_eq!(
+            run("__shellspan_job_register() { :; }", None)
+                .unwrap()
+                .exit_code,
+            Some(0)
+        );
+        wait_for_prompt(broker, transport);
+        let missing_ack = directory.path().join("missing-start-ack");
+        fs::write(&missing_ack, "").unwrap();
+        let unknown = launch(&format!(
+            "printf 'once\\n' >> {}; /bin/sleep 60",
+            shell_single_quote(missing_ack.to_str().unwrap())
+        ));
+        broker
+            .mark_shell_job_uncertain(&unknown.process_handle)
+            .unwrap();
+        let uncertain = broker
+            .shell_job(
+                &unknown.process_handle,
+                "native-job-owner",
+                "typing-agent",
+                "typing-task",
+            )
+            .unwrap();
+        assert!(!uncertain.launch_confirmed);
+        assert_eq!(
+            uncertain.accepted_command_line,
+            Some(unknown.submitted_command_line.clone())
+        );
+        let reconciled = observe(&unknown, false);
+        assert_eq!(reconciled.state, "running");
+        assert!(reconciled.launch_confirmed);
+        observe(&unknown, true);
+        assert_eq!(until_exit(&unknown).state, "exited");
+        assert_eq!(
+            fs::read_to_string(&missing_ack).unwrap(),
+            "once\n",
+            "unconfirmed native launch was replayed"
+        );
+        assert_eq!(
+            run(
+                "__shellspan_job_register() { __shellspan_emit B \"$1\" running -; }",
+                None
+            )
+            .unwrap()
+            .exit_code,
+            Some(0)
+        );
+        wait_for_prompt(broker, transport);
+        let quick: Vec<_> = (0..8)
+            .map(|index| launch(&format!("sleep 0.5; exit {index}")))
+            .collect();
+        let long = format!(
+            ": {}\nprintf native-long-while-jobs-finish",
+            shlex::try_quote(&"'\"".repeat(1400)).unwrap()
+        );
+        assert!(long.len() <= 8192);
+        if let Ok(path) = std::env::var("SHELLSPAN_JOB_ACCEPT_TRACE") {
+            fs::write(
+                format!("{path}.expected.json"),
+                serde_json::to_vec(&long).unwrap(),
+            )
+            .unwrap();
+        }
+        for _ in 0..6 {
+            let result = run(&long, None).unwrap();
+            assert_eq!(
+                result.exit_code,
+                Some(0),
+                "long foreground source failed: state={:?} rejection={:?}; broker={:?}",
+                result.state,
+                result.input_rejection,
+                broker.snapshot(Some(transport)).unwrap().session
+            );
+        }
+        for (index, job) in quick.iter().enumerate() {
+            assert_eq!(until_exit(job).exit_code, Some(index as i32));
+        }
+        assert!(
+            broker.native_input_enabled(transport).unwrap(),
+            "concurrent job completion corrupted the control stream"
+        );
+        for takeover in [false, true] {
+            let id = format!("job-edit-cancel-{}", Uuid::new_v4());
+            let clears_before = writes
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(_, input)| input == "\u{18}\u{4}")
+                .count();
+            let effect = directory.path().join(&id);
+            let source = format!(
+                "printf should-never-run >| {}",
+                shell_single_quote(effect.to_str().unwrap())
+            );
+            let job = broker
+                .prepare_shell_job(
+                    transport,
+                    &target,
+                    "typing-agent",
+                    "typing-task",
+                    &id,
+                    &source,
+                )
+                .unwrap();
+            let operation = thread::scope(|scope| {
+                let launch = scope.spawn(|| {
+                    registry.start_native_submission(
+                        sessions,
+                        transport,
+                        "typing-agent",
+                        "typing-task",
+                        &id,
+                        &source,
+                        shell.enter(),
+                        Some(&job.submitted_command_line),
+                        |_| Ok(()),
+                    )
+                });
+                let encoded = crate::agent_runtime::native_editor_final_chunk(
+                    &job.submitted_command_line,
+                    shell,
+                );
+                wait_until(Duration::from_secs(5), || {
+                    writes
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .any(|(_, data)| data == &encoded)
+                });
+                if takeover {
+                    registry
+                        .takeover(sessions, transport, "typing-agent", &id)
+                        .unwrap();
+                } else {
+                    registry.cancel_task(sessions, "typing-task").unwrap();
+                }
+                launch.join().unwrap().unwrap()
+            });
+            let result = registry
+                .wait(sessions, transport, &operation, Duration::from_secs(5))
+                .unwrap();
+            assert_eq!(
+                writes
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|(_, input)| input == "\u{18}\u{4}")
+                    .count(),
+                clears_before + 1,
+                "native editor cancellation must clear once without interrupting prompt hooks"
+            );
+            assert_eq!(
+                result.state,
+                if takeover {
+                    TerminalCommandState::TakenOver
+                } else {
+                    TerminalCommandState::Cancelled
+                }
+            );
+            wait_for_prompt(broker, transport);
+            let sequence = broker
+                .snapshot(Some(transport))
+                .unwrap()
+                .session
+                .unwrap()
+                .integration_event_sequence;
+            broker
+                .admit_terminal_input(
+                    transport,
+                    crate::terminal_broker::TerminalBrokerInputSource::User,
+                    crate::terminal_broker::TerminalInputKind::Text,
+                    b"\n",
+                    || {
+                        let mut writer = writer.lock().unwrap();
+                        writer.write_all(b"\n").map_err(|error| error.to_string())?;
+                        writer.flush().map_err(|error| error.to_string())
+                    },
+                )
+                .unwrap();
+            wait_until(Duration::from_secs(5), || {
+                broker
+                    .snapshot(Some(transport))
+                    .unwrap()
+                    .session
+                    .is_some_and(|session| {
+                        session.prompt_ready && session.integration_event_sequence > sequence
+                    })
+            });
+            assert!(
+                !effect.exists(),
+                "cancelled native job launch executed on subsequent user Enter"
+            );
+            assert_eq!(
+                broker
+                    .shell_job(
+                        &job.process_handle,
+                        "native-job-owner",
+                        "typing-agent",
+                        "typing-task"
+                    )
+                    .unwrap()
+                    .state,
+                "rejected"
+            );
+            leases.release_turn("typing-agent").unwrap();
+        }
+        let owned_a = launch("sleep 60");
+        let owned_b = launch("sleep 60");
+        assert_eq!(
+            registry
+                .cleanup_shell_jobs(sessions, Some("another-task"))
+                .unwrap(),
+            0
+        );
+        assert_eq!(observe(&owned_a, false).state, "running");
+        registry
+            .cleanup_shell_jobs(sessions, Some("typing-task"))
+            .unwrap();
+        for job in [&owned_a, &owned_b] {
+            let final_job = broker
+                .shell_job(
+                    &job.process_handle,
+                    "native-job-owner",
+                    "typing-agent",
+                    "typing-task",
+                )
+                .unwrap();
+            assert_eq!(
+                final_job.state, "exited",
+                "task cancellation did not confirm cleanup: {final_job:?}"
+            );
+            assert!(final_job.stop_requested);
+        }
+        assert_eq!(run("set +m", None).unwrap().exit_code, Some(0));
+        wait_for_prompt(broker, transport);
+        let before = writes.lock().unwrap().len();
+        assert!(broker
+            .prepare_shell_job(
+                transport,
+                &target,
+                "typing-agent",
+                "typing-task",
+                "monitor-off",
+                "printf never"
+            )
+            .unwrap_err()
+            .contains("TERMINAL_BACKGROUND_UNSUPPORTED"));
+        assert_eq!(writes.lock().unwrap().len(), before);
+        assert_eq!(
+            run("[[ ! -o monitor ]]", None).unwrap().exit_code,
+            Some(0),
+            "background gate changed the user's monitor option"
+        );
+        assert_eq!(run("set -m", None).unwrap().exit_code, Some(0));
+        wait_for_prompt(broker, transport);
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn macos_native_bash_visible_commands_preserve_shell_state_and_raw_display() {
         run_native_visible_command_acceptance("/bin/bash", TerminalShellKind::Bash);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    #[ignore = "requires SHELLSPAN_TEST_MODERN_BASH pointing to a native Bash 4+ executable"]
+    fn native_modern_bash_complete_script_acceptance() {
+        let path =
+            std::env::var("SHELLSPAN_TEST_MODERN_BASH").expect("native Bash executable required");
+        assert!(std::process::Command::new(&path)
+            .args(["-c", "(( BASH_VERSINFO[0] >= 4 ))"])
+            .status()
+            .unwrap()
+            .success());
+        run_native_visible_command_acceptance_with_screen(
+            &path,
+            TerminalShellKind::Bash,
+            std::env::var_os("SHELLSPAN_NATIVE_SCRIPT_NARROW").is_some(),
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_zsh_missing_editor_checkpoint_quarantines_until_reconnect() {
+        run_native_visible_command_acceptance_mode("/bin/zsh", TerminalShellKind::Zsh, false, true);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    #[ignore = "requires SHELLSPAN_TEST_MODERN_BASH pointing to native Bash 4+"]
+    fn native_modern_bash_missing_editor_checkpoint_quarantines_until_reconnect() {
+        let path =
+            std::env::var("SHELLSPAN_TEST_MODERN_BASH").expect("native Bash executable required");
+        run_native_visible_command_acceptance_mode(&path, TerminalShellKind::Bash, false, true);
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -1367,6 +3180,7 @@ trap - DEBUG
         } else {
             let mut command = CommandBuilder::new("/bin/bash");
             command.env("HOME", home.path());
+            command.env("HISTFILE", home.path().join("history.txt"));
             integration.configure_command(&mut command).unwrap();
             command
         };
@@ -1997,234 +3811,7 @@ trap - DEBUG
     }
 
     #[cfg(target_os = "windows")]
-    fn run_windows_visible_command_acceptance(executable: &str, shell: TerminalShellKind) {
-        use crate::terminal_broker::{
-            TerminalGeometry, TerminalSessionBroker, TerminalTransportKind,
-        };
-        use portable_pty::{native_pty_system, PtySize};
-        use std::io::Write;
-        use std::sync::{Arc, Mutex};
-        use std::time::Instant;
-
-        let broker = TerminalSessionBroker::phase3_enabled_for_test(4_096);
-        let transport_id = format!("native-{}", shell.protocol_name());
-        broker
-            .attach_transport(
-                &transport_id,
-                None,
-                TerminalTransportKind::WindowsConPty,
-                TerminalGeometry::new(180, 30),
-            )
-            .unwrap();
-        let pair = native_pty_system()
-            .openpty(PtySize {
-                rows: 30,
-                cols: 180,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .unwrap();
-        let mut reader = pair.master.try_clone_reader().unwrap();
-        let writer = Arc::new(Mutex::new(
-            crate::local_terminal_input::take_writer(pair.master.as_ref(), shell).unwrap(),
-        ));
-        let (_fixture, integration) = prepare_test_integration(shell);
-        let _history_fixture = if shell == TerminalShellKind::WindowsPowerShell {
-            let root = tempfile::tempdir().unwrap();
-            let history_path = root.path().join("history.txt");
-            fs::write(&history_path, "Write-Output 'saved-history-only'\n").unwrap();
-            let bootstrap = fs::read_to_string(&integration.bootstrap_path).unwrap();
-            let history_setting = format!(
-                "Import-Module PSReadLine\n    Set-PSReadLineOption -HistorySavePath '{}'",
-                history_path.to_string_lossy().replace('\'', "''")
-            );
-            let seeded = bootstrap.replacen("Import-Module PSReadLine", &history_setting, 1);
-            fs::write(&integration.bootstrap_path, seeded).unwrap();
-            Some(root)
-        } else {
-            None
-        };
-        let integration_id = integration.integration_id().to_string();
-        broker
-            .register_integration_channel(&transport_id, &integration_id, shell)
-            .unwrap();
-        let mut command = CommandBuilder::new(executable);
-        command.env("TERM", "xterm-256color");
-        integration.configure_command(&mut command).unwrap();
-        let mut child = pair.slave.spawn_command(command).unwrap();
-        drop(pair.slave);
-
-        let control_broker = broker.clone();
-        let control_transport = transport_id.clone();
-        let control_integration = integration_id.clone();
-        let closed_broker = broker.clone();
-        let closed_transport = transport_id.clone();
-        let _integration_control = integration.start_reader(
-            move |event| {
-                control_broker.accept_integration_event(
-                    &control_transport,
-                    &control_integration,
-                    event,
-                )
-            },
-            move |error| {
-                if error.is_some() {
-                    let _ = closed_broker.integration_channel_closed(
-                        &closed_transport,
-                        &integration_id,
-                        "controlChannelFailed",
-                    );
-                }
-            },
-        );
-        let display = Arc::new(Mutex::new(Vec::<u8>::new()));
-        let display_reader = Arc::clone(&display);
-        let output_broker = broker.clone();
-        let output_transport = transport_id.clone();
-        let output_thread = thread::spawn(move || {
-            let mut buffer = [0_u8; 4096];
-            loop {
-                match reader.read(&mut buffer) {
-                    Ok(0) | Err(_) => break,
-                    Ok(count) => {
-                        display_reader
-                            .lock()
-                            .unwrap()
-                            .extend_from_slice(&buffer[..count]);
-                        output_broker
-                            .observe_raw_output(&output_transport, &buffer[..count])
-                            .unwrap();
-                    }
-                }
-            }
-        });
-
-        wait_for_prompt(&broker, &transport_id);
-        let cwd = tempfile::tempdir().unwrap();
-        let path = cwd.path().to_string_lossy().replace('\'', "''");
-        let changed = execute_visible(
-            &broker,
-            &writer,
-            &transport_id,
-            shell,
-            &format!("Set-Location -LiteralPath '{path}'"),
-        );
-        let reported_cwd = std::path::Path::new(changed.cwd.as_deref().unwrap())
-            .canonicalize()
-            .unwrap();
-        assert_eq!(reported_cwd, cwd.path().canonicalize().unwrap());
-        execute_visible(
-            &broker,
-            &writer,
-            &transport_id,
-            shell,
-            "$env:SHELLSPAN_PHASE3_VALUE='终端值'",
-        );
-        let environment = execute_visible(
-            &broker,
-            &writer,
-            &transport_id,
-            shell,
-            "[Console]::Write($env:SHELLSPAN_PHASE3_VALUE)",
-        );
-        assert!(environment.combined_output.contains("终端值"));
-        execute_visible(
-            &broker,
-            &writer,
-            &transport_id,
-            shell,
-            "Set-Alias -Name ss_phase3_alias -Value Write-Output",
-        );
-        let alias = execute_visible(
-            &broker,
-            &writer,
-            &transport_id,
-            shell,
-            "ss_phase3_alias alias-ok",
-        );
-        assert!(alias.combined_output.contains("alias-ok"));
-        execute_visible(
-            &broker,
-            &writer,
-            &transport_id,
-            shell,
-            "function ss_phase3_function { [Console]::Write('function-ok') }",
-        );
-        let function =
-            execute_visible(&broker, &writer, &transport_id, shell, "ss_phase3_function");
-        assert!(function.combined_output.contains("function-ok"));
-        execute_visible(
-            &broker,
-            &writer,
-            &transport_id,
-            shell,
-            "$ErrorActionPreference='Continue'",
-        );
-        let rich = execute_visible(
-            &broker,
-            &writer,
-            &transport_id,
-            shell,
-            "[Console]::Write(\"`e[31m终端`e[0m\")",
-        );
-        assert_eq!(rich.exit_code, Some(0));
-        assert!(rich.combined_output.contains("终端"));
-        let native_failure = execute_visible(
-            &broker,
-            &writer,
-            &transport_id,
-            shell,
-            "cmd.exe /d /c exit 7",
-        );
-        assert_eq!(native_failure.exit_code, Some(7));
-        let cmdlet_failure = execute_visible(
-            &broker,
-            &writer,
-            &transport_id,
-            shell,
-            "$global:LASTEXITCODE=0; Write-Error expected",
-        );
-        assert_eq!(cmdlet_failure.exit_code, Some(1));
-        let before_large = display.lock().unwrap().len();
-        let large = execute_visible(
-            &broker,
-            &writer,
-            &transport_id,
-            shell,
-            "1..12000 | ForEach-Object { [Console]::Write('x') }",
-        );
-        assert!(large.capture_truncated);
-        wait_until(Duration::from_secs(3), || {
-            display.lock().unwrap().len() >= before_large + 12_000
-        });
-
-        writer.lock().unwrap().write_all(b"exit\r").unwrap();
-        writer.lock().unwrap().flush().unwrap();
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while child.try_wait().unwrap().is_none() && Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(10));
-        }
-        if child.try_wait().unwrap().is_none() {
-            child.kill().unwrap();
-        }
-        drop(writer);
-        drop(pair.master);
-        output_thread.join().unwrap();
-    }
+    include!("terminal_integration_windows.rs");
 
     #[cfg(target_os = "windows")]
-    #[test]
-    #[ignore = "requires native Windows PowerShell 5.1 and ConPTY"]
-    fn windows_powershell_5_1_visible_command_integration() {
-        run_windows_visible_command_acceptance(
-            "powershell.exe",
-            TerminalShellKind::WindowsPowerShell,
-        );
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    #[ignore = "requires native PowerShell 7 and ConPTY"]
-    fn windows_powershell_7_visible_command_integration() {
-        run_windows_visible_command_acceptance("pwsh.exe", TerminalShellKind::PowerShell7);
-    }
+    include!("terminal_editor_windows.rs");

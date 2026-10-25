@@ -740,12 +740,10 @@ export function createAgentSessionAdapter(
       }
     },
     async listFileReferences(sessionId, query, signal) {
-      await resumeEndedSession(sessionId);
       if (signal.aborted) throw new Error('Cancelled');
       return (dependencies.listFileReferences ?? invokeListAgentFileReferences)(sessionId, query, signal);
     },
     async listSkills(sessionId) {
-      await resumeEndedSession(sessionId);
       return (dependencies.listSkills ?? invokeListAgentRuntimeSkills)(sessionId);
     },
     create: createSession,
@@ -755,8 +753,11 @@ export function createAgentSessionAdapter(
     },
     async reconnectTerminal(sessionId, previousSessionId, terminalSessionId) {
       await (dependencies.reconnectTerminal ?? invokeReconnectAgentTerminal)({ sessionId, previousSessionId, terminalSessionId });
+      // Reopening belongs to the explicit reconnect action, never to background
+      // file/skill discovery that may finish after a terminal was closed.
       const entry = ensureEntry(sessionId);
-      entry.view = entry.project(await entry.client.reconnect());
+      const rebound = entry.project(await entry.client.reconnect());
+      entry.view = await resumeEndedSession(sessionId, rebound);
       for (const listener of entry.listeners) listener(entry.view);
       return entry.view;
     },

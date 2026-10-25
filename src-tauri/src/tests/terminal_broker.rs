@@ -121,6 +121,8 @@
         let mut writer = pair.master.take_writer().unwrap();
         let mut command = CommandBuilder::new(shell);
         command.args(args);
+        let history = tempfile::tempdir().unwrap();
+        command.env("HISTFILE", history.path().join("history.txt"));
         command.env("TERM", "xterm-256color");
         command.env("LC_ALL", "C");
         command.env("PS1", "");
@@ -294,7 +296,7 @@
         let mut reader = pair.master.try_clone_reader().unwrap();
         let mut writer = pair.master.take_writer().unwrap();
         let mut command = CommandBuilder::new(shell);
-        command.args(["-NoLogo", "-NoProfile"]);
+        let history = crate::windows_shell_history::WindowsShellHistory::configure(&mut command);
         command.env("TERM", "xterm-256color");
         let mut child = pair.slave.spawn_command(command).unwrap();
         drop(pair.slave);
@@ -411,6 +413,7 @@
         let (raw, frames) = reader_thread.join().unwrap().unwrap();
 
         assert!(status.success(), "{shell} exited unsuccessfully");
+        history.verify(label, true);
         let expected_shell_output = |reset: &[u8]| {
             let mut expected = output_marker.as_bytes().to_vec();
             expected.extend_from_slice(b"\x1b[31mred\x1b[");
@@ -914,6 +917,7 @@
             attachment.terminal_generation,
             "counter-timeout".into(),
             "safe".into(),
+            None,
             1,
             4,
             Arc::clone(&broker.counters),
@@ -926,6 +930,7 @@
             attachment.terminal_generation,
             "counter-takeover".into(),
             "safe".into(),
+            None,
             1,
             4,
             Arc::clone(&broker.counters),
@@ -938,6 +943,7 @@
             attachment.terminal_generation,
             "counter-uncertain".into(),
             "safe".into(),
+            None,
             1,
             4,
             Arc::clone(&broker.counters),

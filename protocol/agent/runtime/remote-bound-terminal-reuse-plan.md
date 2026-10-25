@@ -4,6 +4,8 @@
 更新时间：2026-09-17（Asia/Shanghai）
 范围：远程 SSH 终端、Agent `boundTerminal` 执行面、终端 Broker、前端终端租约与状态展示
 
+2026-10-23原生多行补充：当前Shell脚本提交、源码与实际accepted line的区分、Bash原生求值结构、取消恢复及真实SSH Bash/Zsh证据以[统一阶段计划](./visible-terminal-unification-plan.md)为准。本文历史完整门禁通过不代表本次独立HTTP/SSH转发缺口已关闭；Windows新增原生脚本验收延期。
+
 ## 1. 背景
 
 当前远程终端选择“可视命令”后，普通用户 SSH 会话只作为 Agent
@@ -29,7 +31,7 @@ Shell 已有的工作目录、环境变量、alias 和历史状态，而不是�
    - Agent 修改的环境变量、alias 和 cwd 对用户后续输入可见。
 5. 整个 Agent turn 内，当前终端由现有租约机制保护；用户可主动接管。
 6. 当前终端不满足执行条件时，明确返回不可用或忙碌，不新建备用终端。
-7. Direct 执行、敏感命令强制 Direct、审批、取消、审计、脱敏和不自动重放语义保持不变。
+7. Direct 执行、审批、原生拒绝规则、取消、审计、脱敏和不自动重放语义保持不变。effect 不改变所选执行面；显式独立生命周期请求在 boundTerminal 执行前拒绝，要求用户显式切换 direct。
 8. Shell 集成失败不能阻止普通 SSH 终端连接和使用。
 
 ## 3. 非目标
@@ -39,7 +41,7 @@ Shell 已有的工作目录、环境变量、alias 和历史状态，而不是�
 - 不支持 Bash、Zsh 之外的新远程 Shell。
 - 不在用户已经运行的前台程序或 TUI 中注入命令。
 - 不把任意终端滚动区、控制通道内容、凭据或集成临时路径写入 Agent 事件日志。
-- 不通过静默 Direct 回退掩盖可视命令不可用；策略明确要求 Direct 的命令除外。
+- 不通过静默 Direct 回退掩盖可视命令不可用，也不因策略要求独立生命周期自动切换执行面。
 
 ## 4. 术语
 
@@ -125,8 +127,9 @@ FIFO 不可用或第二个控制 channel 不可创建，都不能导致 SSH 主�
 - 不创建新终端；
 - 不自动切换 Direct。
 
-只有现有安全策略认定 `lifecycleTrust = directRequired`，或命令涉及敏感路径、凭据等必须隔离的
-场景时，才允许将该工具调用强制路由到 Direct。该决定必须继续反映在执行结果和 UI 状态中。
+`sensitiveRead`、`destructive` 和 `externalSideEffect` 继续控制审批及原生拒绝规则，不改变路由。
+`lifecycleTrust = directRequired` 等显式独立生命周期请求必须在 boundTerminal 写入前拒绝，
+提示用户显式切换 direct。不得自动切换，也不得将 Shell 合作式完成元数据用作授权证据。
 
 ### 5.6 删除专用 Agent SSH 终端生产路径
 
@@ -257,7 +260,8 @@ UI 复用现有执行面选择器、终端租约提示条、Button、Badge 和 T
   前缀和结构均匹配、超过安全期限且没有活动控制通道的目录。
 
 复用当前终端会主动放弃“独立 Agent PTY”的 Shell 状态隔离，这是本功能的产品语义，不得再在
-协议或 UI 中暗示二者隔离。命令审批、敏感命令 Direct 隔离和输入租约仍然构成安全边界。
+协议或 UI 中暗示二者隔离。命令审批、原生拒绝规则、目标绑定和输入租约继续强制执行；
+明确要求独立生命周期时，用户须显式选择 Direct，可视 Shell 不提供该保证。
 
 ## 10. 实现范围
 
@@ -290,7 +294,7 @@ UI 复用现有执行面选择器、终端租约提示条、Button、Badge 和 T
 - `terminal_execute` 和远程交互工具直接解析源终端。
 - 删除 Agent Remote Terminal 创建和等待逻辑。
 - 审批后、租约前和 PTY 写入前保留目标与 generation 重校验。
-- Direct 和 `directRequired` 路由保持不变。
+- 历史阶段要求 Direct 和 `directRequired` 路由保持不变；当前由可视终端统一阶段一更新为 effect 只控制审批/native deny，显式 directRequired 拒绝 boundTerminal 并要求用户显式切换。
 
 ### 10.3 Terminal Broker
 
@@ -353,7 +357,7 @@ UI 复用现有执行面选择器、终端租约提示条、Button、Badge 和 T
 - 用户接管后拒绝所有迟到 Agent 输入。
 - transport 断开使未完成命令进入 `uncertain`。
 - Remote native tool 始终解析冻结目标 `sessionId`，不查询 Agent Remote Terminal map。
-- 敏感命令和 `directRequired` 仍路由 Direct。
+- 历史验收覆盖敏感命令和 `directRequired` 路由 Direct；当前由可视终端统一阶段一的固定执行面及执行前拒绝回归取代。
 
 ### 11.2 SSH 集成测试
 

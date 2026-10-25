@@ -785,6 +785,8 @@ mod tests {
             TerminalShellKind::Zsh => command.args(["-f"]),
             _ => unreachable!("macOS Phase 5 accepts only bash and zsh"),
         }
+        let history = tempfile::tempdir().unwrap();
+        command.env("HISTFILE", history.path().join("history.txt"));
         command.env("TERM", "xterm-256color");
         command.env("PS1", "");
         let mut child = pair.slave.spawn_command(command).unwrap();
@@ -1182,7 +1184,7 @@ mod tests {
         let mut reader = pair.master.try_clone_reader().unwrap();
         let mut writer = pair.master.take_writer().unwrap();
         let mut command = CommandBuilder::new(shell);
-        command.args(["-NoLogo", "-NoProfile"]);
+        let history = crate::windows_shell_history::WindowsShellHistory::configure(&mut command);
         command.env("TERM", "xterm-256color");
         let mut child = pair.slave.spawn_command(command).unwrap();
         drop(pair.slave);
@@ -1408,6 +1410,7 @@ mod tests {
         let raw = reader_thread.join().unwrap().unwrap();
 
         assert!(status.success(), "{shell} exited unsuccessfully");
+        history.verify(label, false);
         assert!(raw
             .windows(repl_echo.len())
             .any(|window| window == repl_echo.as_bytes()));
