@@ -718,13 +718,14 @@ async fn apply_pre_step_hooks(
     );
     let snapshot = sessions.snapshot(&entry.session_id)?;
     let surface_generation = snapshot.surface.generation;
-    let assembly = assemble_model_input(
+    let mut assembly = assemble_model_input(
         &snapshot.header,
         model_tools_for(
             entry,
             tools.terminal_interactive_tools_enabled(snapshot.header.target.as_ref()),
         ),
     );
+    append_current_task_plan_context(sessions, &snapshot, turn_id, &mut assembly.system_prompt)?;
     let mut request = ModelRequest::from_surface(
         "pre-step-budget".into(),
         &snapshot.surface,
@@ -1009,13 +1010,19 @@ async fn run_step(
         } else {
             let mut snapshot = sessions.snapshot(&entry.session_id)?;
             snapshot.header.permission_mode = permission_mode;
-            let assembly = assemble_model_input(
+            let mut assembly = assemble_model_input(
                 &snapshot.header,
                 model_tools_for(
                     entry,
                     tools.terminal_interactive_tools_enabled(snapshot.header.target.as_ref()),
                 ),
             );
+            append_current_task_plan_context(
+                sessions,
+                &snapshot,
+                turn_id,
+                &mut assembly.system_prompt,
+            )?;
             ensure_model_context(
                 sessions,
                 entry,
@@ -2575,6 +2582,25 @@ async fn commit_response(
         ToolPipelineSettlement::Waiting => Ok(StepSettlement::Waiting),
         ToolPipelineSettlement::Cancelled => Ok(StepSettlement::Cancelled),
     }
+}
+
+fn append_current_task_plan_context(
+    sessions: &AgentSessionStore,
+    snapshot: &super::AgentSessionSnapshot,
+    turn_id: &str,
+    system_prompt: &mut String,
+) -> Result<(), String> {
+    if let Some(plan) = &snapshot.task.plan {
+        let current_turn_owns_plan =
+            sessions.read_turn_events(&snapshot.header.session_id, |events| {
+                events.iter().any(|event| {
+                    event.turn_id.as_deref() == Some(turn_id)
+                        && matches!(event.payload, AgentSessionEventPayload::TaskPlan { .. })
+                })
+            })?;
+        super::prompt::append_task_plan_context(system_prompt, plan, current_turn_owns_plan);
+    }
+    Ok(())
 }
 
 pub(super) fn incomplete_plan_for_turn(events: &[super::AgentSessionEvent], turn_id: &str) -> bool {
