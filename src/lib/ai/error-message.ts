@@ -1,8 +1,24 @@
 import type { LocaleKey } from '@/locales';
 import { imageErrorKey } from './image-error';
 
+/** Recognize current and persisted loopback probe diagnostics, leaving other failures intact. */
+export function httpProbeTimeoutKind(message: string): 'http' | 'ssh' | null {
+  const diagnostic = message.trim().replace(/^Error:\s*/, '');
+  const sshTimeouts = [
+    'target loopback SSH setup exceeded its total deadline',
+    'target loopback SSH transport exceeded its total deadline',
+  ];
+  if (sshTimeouts.some(timeout => diagnostic === timeout
+    || diagnostic === `Target loopback HTTP request exceeded its total deadline; ${timeout}`)) return 'ssh';
+  if (diagnostic === 'Target loopback HTTP request exceeded its total deadline'
+    || diagnostic === 'probe_http exceeded its total deadline'
+    || diagnostic === 'Loopback HTTP probe timed out') return 'http';
+  return null;
+}
+
 /** Translate known configuration/image errors without changing stored diagnostics. */
 export function aiErrorMessage(message: string, t: (key: LocaleKey, values?: Record<string, string | number>) => string): string {
+  if (httpProbeTimeoutKind(message)) return t('ai.workspace.tool.httpProbe.timeout');
   const diagnostic = message.trim().replace(/^Error:\s*/, '');
   const tokenBudget = /^subagentTokenBudgetExceeded: maximum (\d+) tokens$/.exec(diagnostic);
   if (tokenBudget) return t('ai.error.subagentTokenBudgetExceeded', { maximum: tokenBudget[1] });

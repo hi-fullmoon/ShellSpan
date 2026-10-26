@@ -894,6 +894,12 @@ redirects, exposes no arbitrary request headers, and enforces method, request
 body, one total deadline, and response-size bounds. Remote probes use an
 authenticated SSH direct-TCP channel connected to an internal preconnected
 socket pair; no discoverable local forwarding listener carries target data.
+The private SSH bridge uses nonblocking bidirectional I/O with bounded buffers,
+preserves half-close, and observes cancellation and the same total deadline.
+Finishing a framed or body-limited HTTP response stops and joins the private
+transport without waiting for the service to close its connection. A probe
+timeout leaves HTTP verification inconclusive; it MUST NOT be interpreted as
+proof that a preceding service operation failed or replay that operation.
 They do not broaden shell network scope. Known external effects, including
 inline general-purpose interpreter execution, MUST NOT use `terminal_execute`.
 

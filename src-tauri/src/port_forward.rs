@@ -10,6 +10,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use log::{info, warn};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
+use tokio_util::sync::CancellationToken;
 
 use crate::connection::{
     connect_tcp_stream, connect_through_jump_host, open_authenticated_session, validate_host,
@@ -445,6 +446,7 @@ pub(crate) struct ScopedLoopbackConnection {
     cancel: Arc<AtomicBool>,
     worker: Option<thread::JoinHandle<Result<(), String>>>,
     outcome: std::sync::mpsc::Receiver<Result<(), String>>,
+    cancellation: CancellationToken,
 }
 
 struct ScopedForwardCancelGuard {
@@ -482,6 +484,9 @@ impl ScopedLoopbackConnection {
 
     pub(crate) fn finish(mut self, deadline: std::time::Instant) -> Result<(), String> {
         drop(self.stream.take());
+        // HTTP framing already established the result. Stop the private bridge
+        // even when the peer keeps its connection open or the body was capped.
+        self.cancellation.cancel();
         let remaining = remaining_scoped_forward_time(deadline)?;
         let outcome = self
             .outcome
@@ -508,9 +513,10 @@ impl ScopedLoopbackConnection {
 impl Drop for ScopedLoopbackConnection {
     fn drop(&mut self) {
         self.cancel.store(true, Ordering::SeqCst);
+        self.cancellation.cancel();
         drop(self.stream.take());
-        // A blocking SSH handshake cannot be interrupted portably. Detach the
-        // bounded worker rather than allowing Drop to exceed the tool deadline.
+        // The scoped socket watcher interrupts setup and forwarding. Keep Drop
+        // from waiting beyond the caller's deadline while that owner cleans up.
         drop(self.worker.take());
     }
 }
@@ -520,31 +526,43 @@ pub(crate) fn open_scoped_loopback_connection(
     remote_port: u16,
     known_hosts_path: &Path,
     deadline: std::time::Instant,
+    cancellation: &CancellationToken,
 ) -> Result<ScopedLoopbackConnection, String> {
+    if cancellation.is_cancelled() {
+        return Err("probe_http was cancelled before SSH setup".into());
+    }
+    remaining_scoped_forward_time(deadline)?;
     let cancel = Arc::new(AtomicBool::new(false));
     let worker_cancel = Arc::clone(&cancel);
     let worker_connection = connection.clone();
     let worker_known_hosts_path = known_hosts_path.to_path_buf();
+    let cancellation = cancellation.child_token();
+    let worker_cancellation = cancellation.clone();
     let (stream_tx, stream_rx) = std::sync::mpsc::sync_channel(1);
     let (outcome_tx, outcome_rx) = std::sync::mpsc::sync_channel(1);
     let worker = thread::spawn(move || {
+        let runtime = tauri::async_runtime::handle();
+        let _runtime_context = runtime.inner().enter();
         let mut stream_tx = Some(stream_tx);
-        let result = (|| {
-            let session = open_forward_session(
-                &worker_connection.host,
-                worker_connection.port,
-                &worker_connection.username,
-                worker_connection.auth_method,
-                worker_connection.password.as_deref(),
-                worker_connection.private_key_data.as_deref(),
-                worker_connection.passphrase.as_deref(),
-                worker_connection.jump_host.as_ref(),
-                &worker_known_hosts_path,
-            )?;
-            if worker_cancel.load(Ordering::SeqCst) {
-                return Err("scoped loopback connection was cancelled before SSH setup".into());
-            }
-            let channel = session
+        let result = crate::connection::with_scoped_connection_io(
+            worker_cancellation.clone(),
+            deadline,
+            || {
+                let session = open_forward_session(
+                    &worker_connection.host,
+                    worker_connection.port,
+                    &worker_connection.username,
+                    worker_connection.auth_method,
+                    worker_connection.password.as_deref(),
+                    worker_connection.private_key_data.as_deref(),
+                    worker_connection.passphrase.as_deref(),
+                    worker_connection.jump_host.as_ref(),
+                    &worker_known_hosts_path,
+                )?;
+                if worker_cancel.load(Ordering::SeqCst) {
+                    return Err("scoped loopback connection was cancelled before SSH setup".into());
+                }
+                let channel = session
                 .target
                 .channel_direct_tcpip("127.0.0.1", remote_port, None)
                 .map_err(|error| {
@@ -552,32 +570,32 @@ pub(crate) fn open_scoped_loopback_connection(
                         "failed to open SSH channel to target loopback 127.0.0.1:{remote_port}: {error}"
                     )
                 })?;
-            if worker_cancel.load(Ordering::SeqCst) {
-                return Err("scoped loopback connection was cancelled before bridging".into());
-            }
-            let (client, bridge) = connected_loopback_pair(deadline)?;
-            let remaining = remaining_scoped_forward_time(deadline)?;
-            bridge
-                .set_read_timeout(Some(remaining))
-                .map_err(|error| format!("failed to bound scoped transport reads: {error}"))?;
-            bridge
-                .set_write_timeout(Some(remaining))
-                .map_err(|error| format!("failed to bound scoped transport writes: {error}"))?;
-            if stream_tx
-                .take()
-                .expect("scoped stream sender exists")
-                .send(Ok(client))
-                .is_err()
-            {
-                return Err("scoped HTTP client stopped before receiving its transport".into());
-            }
-            bridge_single_connection(
-                channel,
-                bridge,
-                Arc::new(AtomicU64::new(0)),
-                Arc::new(AtomicU64::new(0)),
-            )
-        })();
+                // ssh2 channels share the session mutex. A blocking read can hold
+                // it while the HTTP request is still waiting to be written.
+                session.target.set_blocking(false);
+                if worker_cancel.load(Ordering::SeqCst) {
+                    return Err("scoped loopback connection was cancelled before bridging".into());
+                }
+                let (client, bridge) = connected_loopback_pair(deadline)?;
+                if stream_tx
+                    .take()
+                    .expect("scoped stream sender exists")
+                    .send(Ok(client))
+                    .is_err()
+                {
+                    return Err("scoped HTTP client stopped before receiving its transport".into());
+                }
+                let result =
+                    bridge_scoped_connection(channel, bridge, deadline, &worker_cancellation);
+                if worker_cancellation.is_cancelled() {
+                    Ok(())
+                } else if std::time::Instant::now() >= deadline {
+                    Err("target loopback SSH transport exceeded its total deadline".into())
+                } else {
+                    result
+                }
+            },
+        );
         if let Err(error) = &result {
             if let Some(sender) = stream_tx.take() {
                 let _ = sender.send(Err(error.clone()));
@@ -587,20 +605,37 @@ pub(crate) fn open_scoped_loopback_connection(
         result
     });
     let mut cancel_guard = ScopedForwardCancelGuard::new(Arc::clone(&cancel));
-    let remaining = remaining_scoped_forward_time(deadline)?;
-    let stream = match stream_rx.recv_timeout(remaining) {
-        Ok(Ok(stream)) => stream,
-        Ok(Err(error)) => {
-            return Err(format!(
-                "failed to establish target loopback SSH transport: {error}"
-            ))
+    let stream = loop {
+        if cancellation.is_cancelled() {
+            return Err("probe_http was cancelled during SSH setup".into());
         }
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            drop(worker);
-            return Err("target loopback SSH setup exceeded its total deadline".into());
-        }
-        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-            return Err("target loopback SSH setup stopped before returning a transport".into());
+        let remaining = match remaining_scoped_forward_time(deadline) {
+            Ok(remaining) => remaining,
+            Err(_) => {
+                cancellation.cancel();
+                return Err("target loopback SSH setup exceeded its total deadline".into());
+            }
+        };
+        match stream_rx.recv_timeout(remaining.min(Duration::from_millis(10))) {
+            Ok(Ok(stream)) => break stream,
+            Ok(Err(error)) => {
+                if cancellation.is_cancelled() {
+                    return Err("probe_http was cancelled during SSH setup".into());
+                }
+                if std::time::Instant::now() >= deadline {
+                    return Err("target loopback SSH setup exceeded its total deadline".into());
+                }
+                return Err(format!(
+                    "failed to establish target loopback SSH transport: {error}"
+                ));
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                cancellation.cancel();
+                return Err(
+                    "target loopback SSH setup stopped before returning a transport".into(),
+                );
+            }
         }
     };
     let connection = ScopedLoopbackConnection {
@@ -608,9 +643,111 @@ pub(crate) fn open_scoped_loopback_connection(
         cancel,
         worker: Some(worker),
         outcome: outcome_rx,
+        cancellation,
     };
     cancel_guard.disarm();
     Ok(connection)
+}
+
+fn bridge_scoped_connection(
+    mut channel: ssh2::Channel,
+    mut tcp: TcpStream,
+    deadline: std::time::Instant,
+    cancellation: &CancellationToken,
+) -> Result<(), String> {
+    tcp.set_nonblocking(true)
+        .map_err(|error| format!("failed to configure scoped bridge: {error}"))?;
+    let mut upload = [0_u8; 16 * 1024];
+    let mut download = [0_u8; 16 * 1024];
+    let (mut upload_start, mut upload_end) = (0, 0);
+    let (mut download_start, mut download_end) = (0, 0);
+    let (mut tcp_eof, mut channel_eof) = (false, false);
+    let (mut sent_eof, mut sent_shutdown) = (false, false);
+
+    loop {
+        if cancellation.is_cancelled() {
+            return Ok(());
+        }
+        let remaining = remaining_scoped_forward_time(deadline)?;
+        let mut progressed = false;
+        if !tcp_eof && upload_start == upload_end {
+            upload_start = 0;
+            upload_end = 0;
+            match tcp.read(&mut upload) {
+                Ok(count) => {
+                    upload_end = count;
+                    tcp_eof = count == 0;
+                    progressed = true;
+                }
+                Err(error) if scoped_bridge_retryable(&error) => {}
+                Err(error) => return Err(format!("scoped bridge TCP read failed: {error}")),
+            }
+        }
+        if upload_start < upload_end {
+            match channel.write(&upload[upload_start..upload_end]) {
+                Ok(0) => return Err("scoped bridge SSH write returned zero bytes".into()),
+                Ok(count) => {
+                    upload_start += count;
+                    progressed = true;
+                }
+                Err(error) if scoped_bridge_retryable(&error) => {}
+                Err(error) => return Err(format!("scoped bridge SSH write failed: {error}")),
+            }
+        }
+        if tcp_eof && upload_start == upload_end && !sent_eof {
+            match channel.send_eof() {
+                Ok(()) => {
+                    sent_eof = true;
+                    progressed = true;
+                }
+                Err(error) if error.code() == ssh2::ErrorCode::Session(-37) => {}
+                Err(error) => return Err(format!("scoped bridge SSH EOF failed: {error}")),
+            }
+        }
+        if !channel_eof && download_start == download_end {
+            download_start = 0;
+            download_end = 0;
+            match channel.read(&mut download) {
+                Ok(count) => {
+                    download_end = count;
+                    channel_eof = count == 0;
+                    progressed = true;
+                }
+                Err(error) if scoped_bridge_retryable(&error) => {}
+                Err(error) => return Err(format!("scoped bridge SSH read failed: {error}")),
+            }
+        }
+        if download_start < download_end {
+            match tcp.write(&download[download_start..download_end]) {
+                Ok(0) => return Err("scoped bridge TCP write returned zero bytes".into()),
+                Ok(count) => {
+                    download_start += count;
+                    progressed = true;
+                }
+                Err(error) if scoped_bridge_retryable(&error) => {}
+                Err(error) => return Err(format!("scoped bridge TCP write failed: {error}")),
+            }
+        }
+        if channel_eof && download_start == download_end && !sent_shutdown {
+            tcp.shutdown(std::net::Shutdown::Write)
+                .map_err(|error| format!("scoped bridge TCP shutdown failed: {error}"))?;
+            sent_shutdown = true;
+            progressed = true;
+        }
+        if sent_eof && sent_shutdown {
+            return Ok(());
+        }
+        if !progressed {
+            thread::sleep(remaining.min(Duration::from_millis(2)));
+        }
+    }
+}
+
+fn scoped_bridge_retryable(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+    )
 }
 
 fn connected_loopback_pair(deadline: std::time::Instant) -> Result<(TcpStream, TcpStream), String> {

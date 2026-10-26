@@ -87,6 +87,10 @@ try {
     'agent_runtime::native::http_probe::tests::isolated_ssh_probe_reaches_only_the_remote_loopback_service',
     ['--ignored', '--exact'],
   );
+  cargoTest(
+    'port_forward::tests::isolated_scoped_http_bridge_preserves_half_close_and_stops_on_cancel_or_deadline',
+    ['--ignored', '--exact'],
+  );
   console.log(
     '\nIsolated SSH gate completed with shared ordinary bash/zsh PTYs, startup compatibility, cleanup, Direct SSH exec, and scoped remote-loopback HTTP.',
   );

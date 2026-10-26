@@ -82,6 +82,7 @@ pub(super) fn execute_http_probe_native(
             arguments.port,
             known_hosts_path,
             deadline,
+            cancellation,
         )?;
         let stream = transport.take_stream()?;
         let result = send_http_probe_over_stream(
@@ -97,6 +98,14 @@ pub(super) fn execute_http_probe_native(
             (Ok(output), Ok(())) => Ok(output),
             (Err(error), Ok(())) => Err(error),
             (Ok(_), Err(error)) => Err(error),
+            // Both layers share a deadline. Preserve the request failure rather
+            // than presenting cleanup's exhausted budget as a second failure.
+            (Err(probe_error), Err(transport_error))
+                if transport_error
+                    == "target loopback SSH transport exceeded its total deadline" =>
+            {
+                Err(probe_error)
+            }
             (Err(probe_error), Err(transport_error)) => {
                 Err(format!("{probe_error}; {transport_error}"))
             }
@@ -208,7 +217,10 @@ fn send_http_probe_over_stream(
         .map_err(|error| format!("Failed to create target loopback HTTP runtime: {error}"))?;
     let timeout = remaining_probe_time(deadline)?;
     let response = runtime.block_on(async {
-        tokio::time::timeout(timeout, async {
+        tokio::select! {
+        biased;
+        _ = cancellation.cancelled() => Err("probe_http was cancelled while awaiting the response".to_string()),
+        result = tokio::time::timeout(timeout, async {
             let stream = tokio::net::TcpStream::from_std(stream).map_err(|error| {
                 format!("Failed to adopt target loopback HTTP transport: {error}")
             })?;
@@ -251,9 +263,8 @@ fn send_http_probe_over_stream(
                 .await
                 .map_err(|error| format!("Target loopback HTTP request failed: {error}"))?;
             collect_hyper_response(response, arguments.method, max_bytes).await
-        })
-        .await
-        .map_err(|_| "Target loopback HTTP request exceeded its total deadline".to_string())?
+        }) => result.map_err(|_| "Target loopback HTTP request exceeded its total deadline".to_string())?,
+        }
     })?;
     if cancellation.is_cancelled() {
         return Err("probe_http was cancelled while awaiting the response".into());
@@ -675,5 +686,29 @@ mod tests {
         assert!(result.data["body"]
             .as_str()
             .is_some_and(|body| body.contains("Directory listing")));
+
+        // Repeated requests, HEAD and a capped body must all release the SSH
+        // bridge without waiting for remote EOF or exhausting the deadline.
+        for (method, max_bytes) in [("get", 16), ("head", 1_024), ("get", 16 * 1_024)] {
+            request.arguments["method"] = json!(method);
+            request.arguments["maxBytes"] = json!(max_bytes);
+            let started = Instant::now();
+            let result = execute_http_probe_native(
+                &request,
+                Some(&connection),
+                &known_hosts_path,
+                &CancellationToken::new(),
+            )
+            .unwrap();
+            assert_eq!(result.data["status"], 200);
+            assert_eq!(result.truncated, method == "get" && max_bytes == 16);
+            if method == "head" {
+                assert_eq!(result.data["bodyBytes"], 0);
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(3),
+                "probe should finish before its 10s deadline"
+            );
+        }
     }
 }

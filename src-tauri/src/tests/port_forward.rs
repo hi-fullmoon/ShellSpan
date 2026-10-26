@@ -107,6 +107,99 @@
     }
 
     #[test]
+    fn scoped_ssh_setup_cancellation_closes_a_stalled_handshake() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let token = CancellationToken::new();
+        let server_token = token.clone();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut bytes = [0_u8; 256];
+            assert!(stream.read(&mut bytes).unwrap() > 0);
+            server_token.cancel();
+            assert_eq!(stream.read(&mut bytes).unwrap_or(0), 0);
+        });
+        let mut connection = request("cancel-setup", "cancel-setup").connection;
+        connection.host = address.ip().to_string();
+        connection.port = address.port();
+        let started = std::time::Instant::now();
+        let result = open_scoped_loopback_connection(
+            &connection,
+            80,
+            Path::new("unused-before-authentication"),
+            started + Duration::from_secs(5),
+            &token,
+        );
+        assert!(result.err().unwrap().contains("cancelled"));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        server.join().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
+    fn isolated_scoped_http_bridge_preserves_half_close_and_stops_on_cancel_or_deadline() {
+        let connection = crate::execution::fixture::isolated_ssh_connection();
+        let (_known_hosts_temp, known_hosts_path) =
+            crate::connection::trusted_known_hosts_fixture(&connection.host, connection.port);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut transport = open_scoped_loopback_connection(
+            &connection,
+            18081,
+            &known_hosts_path,
+            deadline,
+            &CancellationToken::new(),
+        )
+        .unwrap();
+        let mut stream = transport.take_stream().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        stream
+            .write_all(b"GET / HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
+            .unwrap();
+        stream.shutdown(std::net::Shutdown::Write).unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.0 200"));
+        assert!(response.contains("Directory listing"));
+        transport.finish(deadline).unwrap();
+
+        for cancel in [true, false] {
+            let token = CancellationToken::new();
+            let deadline = std::time::Instant::now() + Duration::from_secs(1);
+            let mut transport = open_scoped_loopback_connection(
+                &connection,
+                18081,
+                &known_hosts_path,
+                deadline,
+                &token,
+            )
+            .unwrap();
+            let _stream = transport.take_stream().unwrap();
+            let started = std::time::Instant::now();
+            if cancel {
+                token.cancel();
+            }
+            let result = transport
+                .outcome
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap();
+            if cancel {
+                result.unwrap();
+                assert!(started.elapsed() < Duration::from_millis(500));
+            } else {
+                assert!(result.unwrap_err().contains("deadline"));
+                assert!(started.elapsed() < Duration::from_secs(2));
+            }
+            let worker_result = transport.worker.take().unwrap().join().unwrap();
+            assert_eq!(worker_result.is_ok(), cancel);
+        }
+    }
+
+    #[test]
     #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
     fn isolated_ssh_sftp_end_to_end_port_forward() {
         let host =

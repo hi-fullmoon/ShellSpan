@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aiErrorMessage } from '../error-message';
+import { aiErrorMessage, httpProbeTimeoutKind } from '../error-message';
 import zhCN from '@/locales/zh-CN';
 import enUS from '@/locales/en-US';
 import { initI18n, t } from '@/locales';
@@ -26,6 +26,10 @@ describe.each([['zh-CN', zhCN], ['en-US', enUS]] as const)('AI error messages in
     ['INVALID_MODEL_SELECTION: route-8e7d5ff7-25b5-4526-a8fa-df932c19228c/k3', 'ai.error.invalidModelSelection'],
     ['INVALID_MODEL_SELECTION: stale route revision 1', 'ai.error.invalidModelSelection'],
     ['Error: INVALID_MODEL_SELECTION: no default route', 'ai.error.invalidModelSelection'],
+    ['Target loopback HTTP request exceeded its total deadline; target loopback SSH transport exceeded its total deadline', 'ai.workspace.tool.httpProbe.timeout'],
+    ['Target loopback HTTP request exceeded its total deadline', 'ai.workspace.tool.httpProbe.timeout'],
+    ['target loopback SSH setup exceeded its total deadline', 'ai.workspace.tool.httpProbe.timeout'],
+    ['Loopback HTTP probe timed out', 'ai.workspace.tool.httpProbe.timeout'],
   ] as const)('translates %s', (message, key) => {
     expect(aiErrorMessage(message, key => messages[key])).toBe(messages[key]);
   });
@@ -33,4 +37,12 @@ describe.each([['zh-CN', zhCN], ['en-US', enUS]] as const)('AI error messages in
   it.each(['Unknown provider response', 'IMAGE_NEW_ERROR: diagnostics', 'INVALID_MODEL_SELECTION_OTHER: diagnostics', '请检查模型配置。'])('preserves unrecognized messages: %s', message => {
     expect(aiErrorMessage(message, key => messages[key])).toBe(message);
   });
+});
+
+it('distinguishes a probe transport timeout from HTTP and unrelated failures', () => {
+  expect(httpProbeTimeoutKind('Error: target loopback SSH setup exceeded its total deadline')).toBe('ssh');
+  expect(httpProbeTimeoutKind('Target loopback HTTP request exceeded its total deadline')).toBe('http');
+  expect(httpProbeTimeoutKind('probe_http exceeded its total deadline')).toBe('http');
+  expect(httpProbeTimeoutKind('SSH authentication failed')).toBeNull();
+  expect(httpProbeTimeoutKind('Target loopback HTTP request failed: connection reset')).toBeNull();
 });

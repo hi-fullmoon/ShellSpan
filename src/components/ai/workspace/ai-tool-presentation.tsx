@@ -30,7 +30,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
-import { aiErrorMessage } from '@/lib/ai/error-message';
+import { aiErrorMessage, httpProbeTimeoutKind } from '@/lib/ai/error-message';
 import { cn } from '@/lib/utils';
 import type { LocaleKey } from '@/locales';
 import {
@@ -205,6 +205,7 @@ function toolTitle(
 ): string {
   if (node.name === 'skill' || node.nativeName === 'skill') return t('ai.workspace.tool.title.skill');
   if (node.name === 'trash_file') return t('ai.workspace.approval.action.trashFile');
+  if (node.name === 'probe_http' || node.nativeName === 'probe_http') return t('ai.workspace.tool.title.httpProbe');
   if (node.title === 'Agent orchestration') return t('ai.workspace.tool.title.orchestration');
   if (variant !== 'generic' || !node.title || node.title === node.name || node.title === node.nativeName) {
     return t(titleKey(variant));
@@ -389,14 +390,20 @@ function webSources(value: unknown): readonly WebSource[] {
 }
 
 function WebSurface({ node }: { node: ToolNode }) {
+  const { t } = useI18n();
   const input = asRecord(node.input);
   const sources = webSources(node.output);
   const url = firstString(input, ['url']);
   const answer = firstString(asRecord(node.output), ['answer', 'summary']);
+  const diagnostic = node.error || node.summary || outputText(node);
+  const timeoutKind = node.state === 'failed' && (node.name === 'probe_http' || node.nativeName === 'probe_http')
+    ? httpProbeTimeoutKind(diagnostic) : null;
   return (
     <div className="ai-web-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="web">
-      <div className="ai-block-banner flex min-w-0 items-center gap-1 truncate px-3.5 py-[9px]"><GlobeIcon aria-hidden="true" />{url ?? node.summary ?? node.name}</div>
-      {answer && <p className="ai-web-answer m-0 px-3.5 pt-3 pb-1">{answer}</p>}
+      <div className="ai-block-banner flex min-w-0 items-center gap-1 truncate px-3.5 py-[9px]"><GlobeIcon aria-hidden="true" />{timeoutKind ? t('ai.workspace.tool.httpProbe.timeout') : url ?? node.summary ?? node.name}</div>
+      {(timeoutKind || answer) && <p className="ai-web-answer m-0 px-3.5 pt-3 pb-1">{timeoutKind
+        ? t(timeoutKind === 'ssh' ? 'ai.workspace.tool.httpProbe.sshTimeout' : 'ai.workspace.tool.httpProbe.httpTimeout')
+        : answer}</p>}
       {sources.length > 0 ? (
         <div className="ai-web-sources flex min-w-0 flex-col p-2">
           {sources.map((source, index) => (
@@ -407,7 +414,7 @@ function WebSurface({ node }: { node: ToolNode }) {
           ))}
         </div>
       ) : (
-        <pre className="ai-detail-code m-0 min-w-0 max-w-full overflow-x-auto p-4 whitespace-pre-wrap break-words">{bounded(outputText(node))}</pre>
+        <pre className="ai-detail-code m-0 min-w-0 max-w-full overflow-x-auto p-4 whitespace-pre-wrap break-words">{bounded(timeoutKind ? diagnostic : outputText(node))}</pre>
       )}
     </div>
   );

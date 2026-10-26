@@ -78,6 +78,37 @@ describe('AI tool presentation', () => {
     expect(screen.getByText(error)).toBeVisible();
   });
 
+  it.each(['zh-CN', 'en-US'] as const)('explains the captured HTTP/SSH timeout without claiming a service outage in %s', async locale => {
+    useAppStore.setState({ locale });
+    await initI18n(locale);
+    const diagnostic = 'Target loopback HTTP request exceeded its total deadline; target loopback SSH transport exceeded its total deadline';
+    const probe: AiConversationNodeOf<'tool'> = {
+      ...node, name: 'probe_http', state: 'failed', summary: diagnostic,
+      input: { method: 'get', port: 80, path: '/' }, output: diagnostic, error: null,
+    };
+    const { container } = render(<AiToolRow node={probe} />);
+    const row = screen.getByRole('button', { name: locale === 'zh-CN'
+      ? 'HTTP 检查: HTTP 健康检查超时' : 'HTTP check: HTTP health check timed out' });
+    expect(row).not.toHaveTextContent('total deadline');
+    expect(container.querySelector('[data-tool-state="failed"]')).toBeInTheDocument();
+    row.focus();
+    await userEvent.setup().keyboard('{Enter}');
+    expect(row).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText(locale === 'zh-CN'
+      ? 'SSH 探测通道超时，暂时无法确认 HTTP 服务响应。请结合服务状态和主机本地检查结果判断。'
+      : 'The SSH probe transport timed out; the HTTP response remains unverified. Check the service status and results from a check on the host.')).toBeVisible();
+    expect(screen.getByText(diagnostic)).toBeVisible();
+  });
+
+  it('keeps a non-timeout HTTP failure intact and preserves successful responses', () => {
+    const error = 'failed to open SSH channel: administratively prohibited';
+    const { rerender } = render(<AiToolExpandedContent node={{ ...node, name: 'probe_http', state: 'failed', summary: error, error, output: error }} />);
+    expect(screen.queryByText('HTTP health check timed out')).not.toBeInTheDocument();
+    rerender(<AiToolExpandedContent node={{ ...node, name: 'probe_http', output: { status: 503, body: 'Service Unavailable' } }} />);
+    expect(screen.getByText('Service Unavailable')).toBeVisible();
+    expect(screen.queryByText(/remains unverified/u)).not.toBeInTheDocument();
+  });
+
   it('explains a changed automatic review without implying a shell fallback', () => {
     const error = 'AUTO_REVIEW_CHANGED: reviewed root identity changed';
     render(<AiToolRow node={{ ...node, state: 'failed', error, output: error }} />);
