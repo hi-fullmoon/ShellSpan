@@ -1,6 +1,6 @@
 # Agent 可视终端执行模式设计
 
-> 状态：Draft  
+> 状态：历史首版设计，仅保留设计与验收背景；其中 wrapper、合成回显及首版能力限制不代表当前实现。当前契约见[终端协议](../../protocol/agent/runtime/terminal-protocol-rfc.md)，实现演进见[可视终端统一计划](../../protocol/agent/runtime/visible-terminal-unification-plan.md)。
 > 适用范围：ShellSpan Terminal Agent  
 > 最后更新：2026-09-09
 

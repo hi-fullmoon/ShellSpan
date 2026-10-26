@@ -4,7 +4,7 @@ English · [简体中文](./README.zh-CN.md)
 
 ShellSpan is a desktop SSH client for remote system administration, with an integrated terminal, file manager, monitoring tools, and AI assistant.
 
-[Download](https://github.com/hi-fullmoon/ShellSpan/releases/latest) · [Report an issue](https://github.com/hi-fullmoon/ShellSpan/issues) · [Contributing](./CONTRIBUTING.md)
+[Download](https://github.com/hi-fullmoon/ShellSpan/releases/latest) · [Report an issue](https://github.com/hi-fullmoon/ShellSpan/issues) · [Contributing](./CONTRIBUTING.md) · [Documentation](./docs/README.md)
 
 ## Features
 

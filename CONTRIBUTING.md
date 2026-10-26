@@ -4,8 +4,8 @@ Thank you for contributing! Please follow these guidelines to maintain code qual
 
 ## Development Environment
 
-- **Node.js**: >=24 <25 (nvm recommended)
-- **Package manager**: pnpm 10.33.0
+- **Node.js**: >=24 (see `package.json`; nvm recommended)
+- **Package manager**: pnpm 11.1.1 (see `packageManager` in `package.json`)
 - **Rust**: latest stable (for Tauri)
 
 ```bash

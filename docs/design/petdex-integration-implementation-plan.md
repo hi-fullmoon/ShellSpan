@@ -5,7 +5,7 @@
 
 ## 1. 目标与边界
 
-后续消息气泡接入已单独建立[设计](petdex-message-integration-design.md)与[阶段 6–9 计划](petdex-message-integration-plan.md)，目前待实施。以下阶段 0–5 的范围和完成结论仅针对已实现的动作联动，不表示已经发送气泡。
+后续消息气泡接入已完成阶段 6–11，见[设计](petdex-message-integration-design.md)、[实施计划](petdex-message-integration-plan.md)与[验收记录](petdex-message-integration-acceptance.md)。以下阶段 0–5 的范围和完成结论仅针对动作联动；消息能力与验证范围以其独立协议及验收为准。
 
 将 Petdex 联动完善为 ShellSpan 的任务状态提醒，本轮覆盖 SSH、文件传输和 AI 任务。优先解决状态准确性、等待用户操作提醒、连接诊断和恢复行为。根据用户最新要求，部署来源、部署分类和部署生命周期全部延期；保留规划，不属于本轮完成门槛。
 
