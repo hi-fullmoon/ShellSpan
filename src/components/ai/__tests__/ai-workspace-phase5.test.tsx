@@ -129,6 +129,7 @@ function agentView(approval: AiPendingApproval | null = null): AiSessionView {
     },
     nodes: [tool, artifact],
     activityNodes: [],
+    taskPlanActive: true,
     inbox: [],
     pendingApproval: approval,
     status: approval ? 'waiting' : 'running',
@@ -157,6 +158,48 @@ describe('AI workspace Phase 5 workflows', () => {
     await user.click(toggle);
     expect(screen.getByText('Inspect service')).toBeVisible();
     expect(screen.getByText('Restart safely')).toBeVisible();
+  });
+
+  it.each(['Explain the previous output', '继续'])('keeps retained work paused for "%s" until this turn updates the plan', async (content) => {
+    const user = userEvent.setup();
+    const plan = { version: 1, steps: [{ id: 'verify', title: 'Verify service', status: 'inProgress' as const }] };
+    const events: AgentSessionEvent[] = [
+      ...agentSessionEventFixture.slice(0, 3),
+      sessionEvent(3, { type: 'turn/start', turnId: 'turn-1' }),
+      sessionEvent(4, { type: 'task/plan', turnId: 'turn-1', data: plan }),
+    ];
+    const initialSnapshot = agentView().snapshot.value;
+    const view = () => agentSessionView({
+      snapshot: { ...initialSnapshot, header: { ...initialSnapshot.header, sessionId: 'session-fixture' } },
+      events: [...events], lastCommittedSeq: events.length - 1, hasTerminalEvent: false,
+    });
+    const { rerender } = render(<AiWorkspaceRoot view={view()} scope="terminal" />);
+    expect(screen.getByText('1 in progress')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Toggle 1 tasks' }));
+    expect(screen.getByText('Verify service').closest('li')).toHaveAttribute('data-status', 'inProgress');
+    events.push(sessionEvent(5, { type: 'turn/end', turnId: 'turn-1', data: { reason: 'incomplete' } }));
+    events.push(sessionEvent(6, { type: 'agent/status', data: { status: 'idle' } }));
+    rerender(<AiWorkspaceRoot view={view()} scope="terminal" />);
+    expect(screen.getByText('1 paused')).toBeVisible();
+
+    events.push(sessionEvent(7, { type: 'turn/start', turnId: 'turn-2' }));
+    events.push(sessionEvent(8, { type: 'user/message', turnId: 'turn-2', data: { message: {
+      messageId: 'followup', content, source: { kind: 'user', label: 'User', producerId: 'shellspan-user' },
+    } } }));
+    events.push(sessionEvent(9, { type: 'agent/status', data: { status: 'running' } }));
+    rerender(<AiWorkspaceRoot view={view()} scope="terminal" />);
+    expect(screen.getByRole('button', { name: 'Toggle 1 tasks' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('1 paused')).toBeVisible();
+    expect(screen.getByText('Verify service').closest('li')).toHaveAttribute('data-status', 'paused');
+    expect(screen.queryByText('1 in progress')).toBeNull();
+
+    events.push(sessionEvent(10, { type: 'task/plan', turnId: 'turn-2', data: { ...plan, version: 2 } }));
+    rerender(<AiWorkspaceRoot view={view()} scope="terminal" />);
+    expect(screen.getByText('1 in progress')).toBeVisible();
+    expect(screen.getByText('Verify service').closest('li')).toHaveAttribute('data-status', 'inProgress');
+    events.push(sessionEvent(11, { type: 'turn/end', turnId: 'turn-2', data: { reason: 'incomplete' } }));
+    rerender(<AiWorkspaceRoot view={view()} scope="terminal" />);
+    expect(screen.getByText('1 paused')).toBeVisible();
   });
 
   it('places approval above the input while preserving the Composer draft and recoverable decisions', async () => {
@@ -551,7 +594,7 @@ describe('AI workspace Phase 5 workflows', () => {
 it('updates the task strip from live committed plan events with an unchanged initial snapshot, including clearing', async () => {
   const user = userEvent.setup();
   const initialSnapshot = { ...agentView().snapshot.value, header: { ...agentView().snapshot.value.header, sessionId: 'session-fixture' }, task: { evidence: [], successCriteria: ['preserved'] } };
-  const events = [...agentSessionEventFixture.slice(0, 3)];
+  const events = [...agentSessionEventFixture.slice(0, 7)];
   let publish: ((event: AgentSessionEvent) => void) | undefined;
   const client = new AgentSessionCommittedClient('session-fixture', {
     snapshot: async () => initialSnapshot,
@@ -563,7 +606,7 @@ it('updates the task strip from live committed plan events with an unchanged ini
   const unsubscribe = client.onChange((next) => rerender(<AiWorkspaceRoot view={agentSessionView(next)} scope="terminal" />));
   expect(screen.queryByRole('button', { name: /Toggle .* tasks/ })).toBeNull();
   const emitPlan = async (steps: Extract<AgentSessionEvent, { type: 'task/plan' }>['data']['steps']): Promise<void> => {
-    const event = sessionEvent(events.length, { type: 'task/plan', data: { version: 1, steps } });
+    const event = sessionEvent(events.length, { type: 'task/plan', turnId: 'turn-1', data: { version: 1, steps } });
     events.push(event);
     await act(async () => { publish?.(event); await client.settled(); });
   };

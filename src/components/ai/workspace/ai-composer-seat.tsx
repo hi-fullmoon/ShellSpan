@@ -78,6 +78,7 @@ export interface AiComposerSeatProps extends ComposerHistoryProps {
   readonly composerState?: AiComposerState;
   readonly inbox?: readonly AiInboxItem[];
   readonly taskSteps?: readonly AgentSessionPlanStep[];
+  readonly taskPlanActive?: boolean;
   readonly queueMutable?: boolean;
   readonly queueMutation?: AiQueueMutationState | null;
   readonly announcement?: string | null;
@@ -133,6 +134,7 @@ export function AiComposerSeat({
   composerState,
   inbox = [],
   taskSteps = [],
+  taskPlanActive = false,
   queueMutation = null,
   queueMutable = true,
   announcement,
@@ -460,7 +462,7 @@ export function AiComposerSeat({
     >
       <div data-slot="ai-composer-notices" className="flex shrink-0 flex-col gap-[var(--ai-composer-stack-gap)] empty:hidden">
         {mode === 'agent' && (
-          <AiTaskStrip steps={taskSteps} active={status === 'running' || status === 'waiting'} />
+          <AiTaskStrip steps={taskSteps} active={taskPlanActive && (status === 'running' || status === 'waiting')} />
         )}
         {completion.dialog}
         {mode === 'agent' && <AiQueueDock

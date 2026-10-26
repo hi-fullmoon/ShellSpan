@@ -100,6 +100,8 @@ export interface AiSessionView {
   readonly snapshot: AiSessionSourceSnapshot;
   readonly nodes: readonly AiConversationNode[];
   readonly activityNodes: readonly AgentActivityNode[];
+  /** A retained plan stays paused until the current turn records a plan update. */
+  readonly taskPlanActive?: boolean;
   /** Direct children projected from the selected Session's durable subagent events. */
   readonly subagents?: readonly AgentActivityAgent[];
   readonly inbox: readonly AiInboxItem[];

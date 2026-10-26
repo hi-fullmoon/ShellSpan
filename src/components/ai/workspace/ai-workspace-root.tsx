@@ -748,6 +748,7 @@ export function AiWorkspaceRoot({
           composerState={activeComposerState}
           inbox={surfaceMode === 'agent' && !readOnlySession ? view?.inbox : undefined}
           taskSteps={surfaceMode === 'agent' && !readOnlySession ? taskSteps : undefined}
+          taskPlanActive={view?.taskPlanActive}
           queueMutation={surfaceMode === 'agent' && !readOnlySession ? queueMutation : undefined}
           queueMutable={Boolean(view && !readOnlySession && !view.summary.archived && (!view.snapshot.value.ended || view.status === 'failed'))}
           announcement={announcement}

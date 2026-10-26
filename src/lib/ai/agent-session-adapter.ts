@@ -378,6 +378,7 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
     },
     nodes,
     activityNodes: activity.nodes,
+    taskPlanActive: activity.planActive,
     subagents: activity.agents.filter((agent) => (
       agent.descriptorId !== undefined
       && agent.parentSessionId === state.snapshot?.header.sessionId

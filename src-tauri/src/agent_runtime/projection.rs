@@ -71,10 +71,16 @@ pub(crate) fn derive_task(events: &[AgentSessionEvent]) -> AgentTaskProjection {
                     projection.goal.clone_from(goal);
                 }
             }
-            // A plan belongs to the turn that created it. Keep its final rows
-            // visible after turn/end, but do not carry it into the next turn.
+            // Unfinished work survives interruption and explicit continuation.
+            // Only retire a completed plan when another turn starts.
             AgentSessionEventPayload::TurnStart => {
-                projection.plan = None;
+                if projection.plan.as_ref().is_some_and(|plan| {
+                    plan.steps
+                        .iter()
+                        .all(|step| step.status == super::AgentPlanStepStatus::Completed)
+                }) {
+                    projection.plan = None;
+                }
             }
             AgentSessionEventPayload::TaskPlan { version, steps } => {
                 projection.plan = Some(AgentTaskPlanProjection {
@@ -177,7 +183,7 @@ mod tests {
     }
 
     #[test]
-    fn task_plan_stays_visible_after_turn_end_and_clears_on_the_next_turn() {
+    fn completed_task_plan_stays_visible_after_turn_end_and_clears_on_the_next_turn() {
         let events = vec![
             turn_event(0, "turn-1", AgentSessionEventPayload::TurnStart),
             turn_event(
@@ -204,7 +210,7 @@ mod tests {
         ];
         assert_eq!(derive_task(&events).plan.unwrap().version, 1);
 
-        let unfinished = vec![
+        let mut unfinished = vec![
             turn_event(0, "turn-1", AgentSessionEventPayload::TurnStart),
             turn_event(
                 1,
@@ -228,6 +234,10 @@ mod tests {
                 },
             ),
         ];
+        assert!(derive_task(&unfinished).plan.is_some_and(|plan| {
+            plan.steps[0].status == super::super::AgentPlanStepStatus::InProgress
+        }));
+        unfinished.push(turn_event(3, "turn-2", AgentSessionEventPayload::TurnStart));
         assert!(derive_task(&unfinished).plan.is_some_and(|plan| {
             plan.steps[0].status == super::super::AgentPlanStepStatus::InProgress
         }));

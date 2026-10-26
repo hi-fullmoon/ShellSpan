@@ -50,6 +50,131 @@ fn terminal_reconnect_preserves_conversation_and_replays_the_new_target() {
 }
 
 #[test]
+fn terminal_reconnect_and_continue_preserve_unfinished_task_plan_on_disk() {
+    use crate::agent_runtime::{AgentPlanStep, AgentPlanStepStatus};
+
+    let (root, store) = configured();
+    store
+        .create(CreateAgentSessionRequest {
+            session_id: "reconnect-plan".into(),
+            task_id: "reconnect-plan-task".into(),
+            goal: "Inspect and verify the project".into(),
+            parent_session_id: None,
+            continued_from_session_id: None,
+            target: Some(target()),
+            permission_mode: Some(AgentSessionPermissionMode::Operator),
+            execution_surface: AgentExecutionSurface::Direct,
+            success_criteria: vec![],
+            capability_scope: None,
+            subagent: None,
+        })
+        .unwrap();
+    store
+        .enqueue(
+            "reconnect-plan",
+            AgentInboxLane::NextTurn,
+            message("inspect-input", "Inspect and verify the project"),
+        )
+        .unwrap();
+    store
+        .begin_turn_step("reconnect-plan", "turn-1".into(), "step-1".into())
+        .unwrap()
+        .unwrap();
+    let steps = vec![
+        AgentPlanStep {
+            id: "inspect".into(),
+            title: "Inspect the project".into(),
+            status: AgentPlanStepStatus::Completed,
+            detail: None,
+            evidence_refs: Vec::new(),
+        },
+        AgentPlanStep {
+            id: "verify".into(),
+            title: "Verify the result".into(),
+            status: AgentPlanStepStatus::InProgress,
+            detail: Some("Check current state after reconnect".into()),
+            evidence_refs: Vec::new(),
+        },
+    ];
+    store
+        .append(
+            "reconnect-plan",
+            Some("turn-1".into()),
+            Some("step-1".into()),
+            AgentSessionEventPayload::TaskPlan {
+                version: 3,
+                steps: steps.clone(),
+            },
+        )
+        .unwrap();
+    store
+        .pause_for_input("reconnect-plan", "terminalTargetUnavailable")
+        .unwrap();
+    let failed = store
+        .end(
+            "reconnect-plan",
+            AgentSessionStatus::Failed,
+            Some("terminalTargetUnavailable".into()),
+        )
+        .unwrap();
+    let plan = failed.task.plan.unwrap();
+    assert_eq!(plan.version, 3);
+    assert_eq!(plan.steps, steps);
+
+    let replacement = AgentSessionTarget {
+        session_id: "terminal-2".into(),
+        target_id: "target-2".into(),
+        ..target()
+    };
+    let rebound = store
+        .reconnect_terminal("reconnect-plan", "terminal-1", replacement.clone())
+        .unwrap();
+    assert_eq!(rebound.task.plan.as_ref(), Some(&plan));
+    store.resume("reconnect-plan").unwrap();
+    store
+        .enqueue(
+            "reconnect-plan",
+            AgentInboxLane::NextTurn,
+            message("continue-input", "继续"),
+        )
+        .unwrap();
+    store
+        .begin_turn_step("reconnect-plan", "turn-2".into(), "step-2".into())
+        .unwrap()
+        .unwrap();
+    let continued = store.snapshot("reconnect-plan").unwrap();
+    assert_eq!(continued.task.plan.as_ref(), Some(&plan));
+    assert_eq!(continued.header.target, Some(replacement));
+    assert_eq!(
+        continued.header.permission_mode,
+        Some(AgentSessionPermissionMode::RequestApproval)
+    );
+    let restored = AgentSessionStore::default();
+    restored.configure(root.path().into()).unwrap();
+    assert_eq!(
+        restored.snapshot("reconnect-plan").unwrap().task.plan,
+        Some(plan)
+    );
+    store
+        .append(
+            "reconnect-plan",
+            Some("turn-2".into()),
+            Some("step-2".into()),
+            AgentSessionEventPayload::TaskPlan {
+                version: 4,
+                steps: Vec::new(),
+            },
+        )
+        .unwrap();
+    assert!(store
+        .snapshot("reconnect-plan")
+        .unwrap()
+        .task
+        .plan
+        .is_some_and(|plan| plan.version == 4 && plan.steps.is_empty()));
+}
+
+#[test]
 fn terminal_reconnect_rejects_pending_work_and_changed_roots_without_mutation() {
     let (_root, store) = configured();
     store

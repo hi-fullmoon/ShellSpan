@@ -648,6 +648,8 @@ function createActivityProjection() {
   let status: AgentSessionRuntimeStatus = 'idle';
   let statusReason: string | undefined;
   let plan: AgentActivityProjection['plan'];
+  let planTurnId: string | undefined;
+  let activeTurnId: string | undefined;
   let recovery: AgentActivityProjection['recovery'] = { status: 'none' };
   let fleet: AgentActivityProjection['fleet'];
   let evidenceCount = 0;
@@ -758,21 +760,25 @@ function createActivityProjection() {
       case 'session/resumed':
         status = 'idle';
         statusReason = undefined;
+        activeTurnId = undefined;
         break;
       case 'session/ended':
         status = event.data.status;
         statusReason = event.data.reason;
+        activeTurnId = undefined;
         break;
       case 'turn/start': {
-        // Match the runtime projection: a task plan is scoped to the turn that
-        // wrote it and never leaks into the next user turn.
-        plan = null;
+        // Keep unfinished work visible when an interrupted conversation continues.
+        // Match the runtime: only retire a completed plan on a new turn.
+        if (!plan || plan.steps.every((step) => step.status === 'completed')) plan = null;
+        activeTurnId = event.turnId;
         const turn = ensureTurn(event);
         turn.startedAt = event.timeUnixMs;
         turn.status = 'running';
         break;
       }
       case 'turn/end': {
+        if (event.turnId === activeTurnId) activeTurnId = undefined;
         const turn = ensureTurn(event);
         turn.endedAt = event.timeUnixMs;
         turn.endReason = event.data.reason;
@@ -985,6 +991,7 @@ function createActivityProjection() {
       }
       case 'task/plan':
         plan = event.data;
+        planTurnId = event.turnId;
         break;
       case 'task/state':
         recovery = event.data.recovery ?? recovery;
@@ -1030,6 +1037,7 @@ function createActivityProjection() {
       statusReason,
       turns: projectedTurns,
       plan,
+      planActive: Boolean(plan?.steps.length && planTurnId && planTurnId === activeTurnId),
       context: {
         inputTokens,
         contextWindow,

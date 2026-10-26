@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  createAgentActivityProjector,
   projectAgentActivity,
   projectAgentActivityNodes,
 } from '@/lib/ai/agent-session-projection';
@@ -106,28 +107,87 @@ describe('Agent committed Activity projection', () => {
     expect(projectAgentActivity(events).plan).toBeNull();
   });
 
-  it('keeps an unfinished plan when its turn ends and treats a step budget as idle', () => {
-    const activity = projectAgentActivity([
+  it.each(['pending', 'inProgress', 'blocked', 'failed'] as const)('retains a %s plan across continuation, replacement and replay', (status) => {
+    const project = createAgentActivityProjector();
+    const plan = {
+      version: 1,
+      steps: [
+        { id: 'read', title: 'Inspect target', status: 'completed' as const },
+        { id: 'verify', title: 'Verify target', status, detail: 'Check after reconnect', evidenceRefs: ['read-1'] },
+      ],
+    };
+    const events: AgentSessionEvent[] = [
       sessionEvent(0, { type: 'turn/start', turnId: 'turn-1' }),
       sessionEvent(1, {
         type: 'task/plan',
         turnId: 'turn-1',
-        data: {
-          version: 1,
-          steps: [{ id: 'inspect', title: 'Inspect target', status: 'inProgress' }],
-        },
+        data: plan,
       }),
       sessionEvent(2, {
         type: 'turn/end',
         turnId: 'turn-1',
         data: { reason: 'stepBudgetReached: maximum 128 Steps per Turn' },
       }),
-    ]);
+    ];
 
-    expect(activity.plan?.steps).toEqual([
-      { id: 'inspect', title: 'Inspect target', status: 'inProgress' },
-    ]);
-    expect(activity.turns[0]).toMatchObject({ status: 'idle' });
+    expect(project(events).plan).toEqual(plan);
+    expect(project(events).planActive).toBe(false);
+    expect(project(events).turns[0]).toMatchObject({ status: 'idle' });
+    events.push(sessionEvent(3, { type: 'turn/start', turnId: 'turn-2' }));
+    expect(project(events).plan).toEqual(plan);
+    expect(project(events).planActive).toBe(false);
+    expect(projectAgentActivity(events).plan).toEqual(plan);
+
+    const replacement = { version: 2, steps: [{ id: 'verify', title: 'Verify target', status: 'completed' as const }] };
+    events.push(sessionEvent(4, { type: 'task/plan', turnId: 'turn-2', data: replacement }));
+    expect(project(events).plan).toEqual(replacement);
+    expect(project(events).planActive).toBe(true);
+    events.push(sessionEvent(5, { type: 'turn/end', turnId: 'turn-2', data: { reason: 'completed' } }));
+    events.push(sessionEvent(6, { type: 'turn/start', turnId: 'turn-3' }));
+    expect(project(events).plan).toBeNull();
+    expect(project(events).planActive).toBe(false);
+    expect(projectAgentActivity(events).plan).toBeNull();
+  });
+
+  it('allows an explicit empty plan to clear retained unfinished work', () => {
+    const events = [
+      sessionEvent(0, { type: 'turn/start', turnId: 'turn-1' }),
+      sessionEvent(1, { type: 'task/plan', turnId: 'turn-1', data: {
+        version: 1, steps: [{ id: 'verify', title: 'Verify target', status: 'pending' }],
+      } }),
+      sessionEvent(2, { type: 'turn/end', turnId: 'turn-1', data: { reason: 'incomplete' } }),
+      sessionEvent(3, { type: 'turn/start', turnId: 'turn-2' }),
+      sessionEvent(4, { type: 'task/plan', turnId: 'turn-2', data: { version: 2, steps: [] } }),
+    ];
+    expect(projectAgentActivity(events).plan).toEqual({ version: 2, steps: [] });
+  });
+
+  it('activates only plans owned by the open turn, including after replay', () => {
+    const project = createAgentActivityProjector();
+    const plan = { version: 1, steps: [{ id: 'verify', title: 'Verify result', status: 'inProgress' as const }] };
+    const events = [
+      sessionEvent(0, { type: 'turn/start', turnId: 'turn-1' }),
+      sessionEvent(1, { type: 'task/plan', turnId: 'turn-1', data: plan }),
+    ];
+    const expectActive = (active: boolean): void => {
+      expect(project(events).planActive).toBe(active);
+      expect(projectAgentActivity(events).planActive).toBe(active);
+    };
+    expectActive(true);
+    events.push(sessionEvent(2, { type: 'turn/end', turnId: 'turn-1', data: { reason: 'incomplete' } }));
+    expectActive(false);
+    events.push(sessionEvent(3, { type: 'turn/start', turnId: 'turn-2' }));
+    expectActive(false);
+    events.push(sessionEvent(4, { type: 'task/plan', turnId: 'turn-1', data: plan }));
+    expectActive(false);
+    events.push(sessionEvent(5, { type: 'task/plan', data: plan }));
+    expectActive(false);
+    events.push(sessionEvent(6, { type: 'task/plan', turnId: 'turn-2', data: { ...plan, version: 2 } }));
+    expectActive(true);
+    events.push(sessionEvent(7, { type: 'session/ended', data: { status: 'failed', reason: 'terminalTargetUnavailable' } }));
+    expectActive(false);
+    events.push(sessionEvent(8, { type: 'session/resumed' }));
+    expectActive(false);
   });
 
   it.each([

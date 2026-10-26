@@ -112,7 +112,7 @@ it('projects a reconnected target and resets permission without changing convers
   expect(createAgentSessionViewProjector()(state)).toEqual(view);
 });
 
-it('clears a stale snapshot plan when a newer turn starts', () => {
+it('clears a completed snapshot plan when a newer turn starts', () => {
   const persisted = snapshot();
   const view = agentSessionView({
     snapshot: {
@@ -121,7 +121,7 @@ it('clears a stale snapshot plan when a newer turn starts', () => {
         ...persisted.task,
         plan: {
           version: 1,
-          steps: [{ id: 'old', title: 'Old turn work', status: 'inProgress' }],
+          steps: [{ id: 'old', title: 'Old turn work', status: 'completed' }],
         },
       },
     },
@@ -164,6 +164,53 @@ it('keeps an unfinished current-turn plan available after the turn settles', () 
   expect(view.snapshot.value.task.plan?.steps).toEqual([
     { id: 'old', title: 'Old turn work', status: 'inProgress' },
   ]);
+});
+
+it('retains the task list through terminal failure, reconnect, resume and a continue turn', () => {
+  const project = createAgentSessionViewProjector();
+  const plan = {
+    version: 3,
+    steps: [
+      { id: 'inspect', title: 'Inspect target', status: 'completed' as const },
+      { id: 'verify', title: 'Verify after reconnect', status: 'inProgress' as const },
+    ],
+  };
+  const target = { kind: 'remote' as const, targetId: 'terminal-new', sessionId: 'new', host: 'example.com', port: 22, username: 'user' };
+  const events: AgentSessionEvent[] = [
+    agentSessionEventFixture[0]!,
+    sessionEvent(1, { type: 'turn/start', turnId: 'turn-1' }),
+    sessionEvent(2, { type: 'task/plan', turnId: 'turn-1', data: plan }),
+    sessionEvent(3, { type: 'turn/end', turnId: 'turn-1', data: { reason: 'terminalTargetUnavailable' } }),
+    sessionEvent(4, { type: 'session/ended', data: { status: 'failed', reason: 'terminalTargetUnavailable' } }),
+  ];
+  const state = () => ({ snapshot: snapshot(), events: [...events], lastCommittedSeq: events.length - 1, hasTerminalEvent: true });
+  expect(project(state()).snapshot.value.task.plan).toEqual(plan);
+  events.push(sessionEvent(5, { type: 'session/terminal_reconnected', data: { previousSessionId: 'old', target } }));
+  events.push(sessionEvent(6, { type: 'session/resumed' }));
+  expect(project(state()).snapshot.value.task.plan).toEqual(plan);
+  events.push(sessionEvent(7, { type: 'turn/start', turnId: 'turn-2' }));
+  const continued = project(state());
+  expect(continued.snapshot.value.task.plan).toEqual(plan);
+  expect(continued.taskPlanActive).toBe(false);
+  expect(continued.snapshot.value.header.target).toEqual(target);
+  expect(continued.snapshot.value.header.permissionMode).toBe('requestApproval');
+  expect(continued.snapshot.value.ended).toBe(false);
+  expect(agentSessionView(state())).toEqual(continued);
+  events.push(sessionEvent(8, { type: 'task/plan', turnId: 'turn-2', data: { ...plan, version: 4 } }));
+  expect(project(state()).taskPlanActive).toBe(true);
+  expect(agentSessionView(state())).toEqual(project(state()));
+});
+
+it('keeps a snapshot-only plan paused until committed ownership is available', () => {
+  const persisted = snapshot();
+  const view = agentSessionView({
+    snapshot: { ...persisted, task: { ...persisted.task, plan: {
+      version: 1, steps: [{ id: 'verify', title: 'Verify result', status: 'inProgress' }],
+    } } },
+    events: [], hasTerminalEvent: false,
+  });
+  expect(view.snapshot.value.task.plan?.steps).toHaveLength(1);
+  expect(view.taskPlanActive).toBe(false);
 });
 
 it.each(['direct', 'boundTerminal'] as const)(
