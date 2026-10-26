@@ -19,9 +19,12 @@
   },
   "$defs": {
     "nativeEditorControlRecord": {
-      "description": "Private UTF-8 NUL-delimited control fields, never terminal output or event-v5. H advertises the installed checkpoint widget; A acknowledges the exact complete current edit buffer. Rust additionally enforces UTF-8 byte limits and generation/integration/operation/lease ordering.",
+      "description": "Private UTF-8 NUL-delimited control fields, never terminal output or event-v5. H advertises checkpoints; A acknowledges the current buffer; V advertises bounded private editor frames; W confirms entry into an awaited private receiver, independently of buffer-only A; M acknowledges a descriptor and exact buffer, with an empty descriptor on native refusal. Descriptor actions e/b mean Zsh/Bash source; p/s mean poll/stop on supported native editors. Rust additionally enforces UTF-8 byte limits, fresh nonces, generation/integration/operation/lease ordering and exact expected buffers.",
       "oneOf": [
         { "type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{ "const": "H" }, { "enum": ["0", "1"] }], "items": false },
+        { "type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{ "const": "V" }, { "enum": ["0", "1"] }], "items": false },
+        { "type": "array", "minItems": 1, "maxItems": 1, "prefixItems": [{ "const": "W" }], "items": false },
+        { "type": "array", "minItems": 3, "maxItems": 3, "prefixItems": [{ "const": "M" }, { "type": "string", "pattern": "^(?:[beps][0-9a-f]{64})?$" }, { "type": "string", "maxLength": 32768, "pattern": "^[^\\u0000]*$" }], "items": false },
         { "type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{ "const": "A" }, { "type": "string", "maxLength": 32768, "pattern": "^[^\\u0000]*$" }], "items": false },
         { "type": "array", "minItems": 3, "maxItems": 3, "prefixItems": [{ "const": "L" }, { "type": "string", "pattern": "^[1-9][0-9]{0,15}$" }, { "const": "" }], "items": false }
       ]

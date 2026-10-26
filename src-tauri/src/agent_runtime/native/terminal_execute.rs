@@ -207,7 +207,9 @@ impl TerminalExecuteRegistry {
         let native_input = job_submission.is_some()
             || powershell
             || command.len() > 512
-            || command.contains(['\n', '\r', '\t']);
+            || command.contains(['\n', '\r', '\t'])
+            || (matches!(shell, TerminalShellKind::Zsh | TerminalShellKind::Bash)
+                && self.broker.has_active_shell_jobs(session_id)?);
         let submission = if let Some(line) = job_submission {
             Some(line.to_string())
         } else if native_input && shell == TerminalShellKind::Bash {
@@ -217,20 +219,30 @@ impl TerminalExecuteRegistry {
         } else {
             None
         };
-        let editor_input = submission.as_deref().unwrap_or(command);
+        let private_job_control = job_submission.is_some_and(|line| line == command);
+        let editor_input = if private_job_control {
+            ""
+        } else {
+            submission.as_deref().unwrap_or(command)
+        };
         let native_editor_data = native_input.then(|| native_editor_chunks(editor_input, shell));
+        let wire_limit = if shell == TerminalShellKind::Bash {
+            131_072
+        } else {
+            65_536
+        };
         if native_editor_data.as_ref().is_some_and(|data| {
             data.iter()
                 .map(|(wire, _)| wire.len())
                 .sum::<usize>()
                 .saturating_add(4)
-                > 65_536
+                > wire_limit
         }) {
-            return Err("TERMINAL_INPUT_UNSUPPORTED: native editor input exceeds 65536 UTF-8 bytes; no input was sent".into());
+            return Err(format!("TERMINAL_INPUT_UNSUPPORTED: native editor input exceeds {wire_limit} UTF-8 bytes; no input was sent"));
         }
         if native_input {
             if !self.broker.native_input_enabled(session_id)? {
-                return Err("TERMINAL_INPUT_UNSUPPORTED: complete script input requires the native Readline (Bash 4+), ZLE or PSReadLine integration; this shell/editor has not advertised that capability; no input was sent".into());
+                return Err("TERMINAL_INPUT_UNSUPPORTED: complete script input requires the native Readline (Bash 4.1+), ZLE or PSReadLine integration; this shell/editor has not advertised that capability; no input was sent".into());
             }
         }
         revalidate(TerminalExecuteValidationStage::LeaseAcquisition)?;
@@ -465,6 +477,174 @@ impl TerminalExecuteRegistry {
                     }
                     return Err("TERMINAL_FRONTEND_PENDING_INPUT: empty native editor was not confirmed; no source was typed and any existing user draft was preserved".into());
                 }
+                if private_job_control {
+                    let confirmation_deadline = deadline
+                        .map_or(Instant::now() + FRONTEND_READY_TIMEOUT, |deadline| {
+                            deadline.min(Instant::now() + FRONTEND_READY_TIMEOUT)
+                        });
+                    let private_line =
+                        job_submission.expect("private control is a prepared operation");
+                    let descriptor;
+                    {
+                        let _gate = submitted
+                            .lock()
+                            .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE")?;
+                        if operation.snapshot()?.state != TerminalCommandState::Submitted {
+                            return interrupted_typing_result(operation.snapshot()?.state);
+                        }
+                        descriptor = self
+                            .broker
+                            .private_shell_job_control_descriptor(
+                                session_id,
+                                operation_id,
+                                command,
+                                private_line,
+                            )?
+                            .ok_or("TERMINAL_PRIVATE_CONTROL_UNAVAILABLE")?;
+                        revalidate(TerminalExecuteValidationStage::InputWrite)?;
+                        if shell == TerminalShellKind::Zsh {
+                            operation.expect_native_checkpoint("")?;
+                        } else {
+                            operation.expect_native_private_ready()?;
+                        }
+                        if powershell {
+                            editor_batch_pending.store(true, Ordering::Release);
+                        }
+                        self.leases.write(
+                            sessions,
+                            session_id,
+                            if shell == TerminalShellKind::Zsh {
+                                "\u{18}\u{f}"
+                            } else {
+                                "\u{18}\u{12}"
+                            }
+                            .into(),
+                            TerminalInputSource::Agent {
+                                agent_session_id,
+                                task_id,
+                                operation_id,
+                            },
+                        )?;
+                    }
+                    let receiver_timeout =
+                        confirmation_deadline.saturating_duration_since(Instant::now());
+                    let receiver_ready = if shell == TerminalShellKind::Zsh {
+                        operation.wait_native_checkpoint(receiver_timeout)?
+                    } else {
+                        operation.wait_native_private_ready(receiver_timeout)?
+                    };
+                    if !receiver_ready {
+                        let _gate = submitted
+                            .lock()
+                            .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE")?;
+                        let state = operation.snapshot()?.state;
+                        if matches!(
+                            state,
+                            TerminalCommandState::Cancelled | TerminalCommandState::TakenOver
+                        ) {
+                            return interrupted_typing_result(state);
+                        }
+                        self.broker
+                            .require_native_input_recovery(session_id, operation_id)?;
+                        return Err("TERMINAL_INPUT_RECOVERY_REQUIRED: private receiver was not ready; no automatic replay".into());
+                    }
+                    {
+                        let _gate = submitted
+                            .lock()
+                            .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE")?;
+                        if operation.snapshot()?.state != TerminalCommandState::Submitted {
+                            return interrupted_typing_result(operation.snapshot()?.state);
+                        }
+                        revalidate(TerminalExecuteValidationStage::InputWrite)?;
+                        self.broker.validate_shell_job_input(
+                            session_id,
+                            operation_id,
+                            command,
+                            private_line,
+                        )?;
+                        operation.expect_native_private_checkpoint(&descriptor)?;
+                        let private_wire = if powershell {
+                            use base64::Engine;
+                            format!(
+                                "{}\u{18}\u{6}",
+                                base64::engine::general_purpose::STANDARD
+                                    .encode(descriptor.as_bytes())
+                            )
+                        } else {
+                            descriptor.clone()
+                        };
+                        self.leases.write(
+                            sessions,
+                            session_id,
+                            private_wire,
+                            TerminalInputSource::Agent {
+                                agent_session_id,
+                                task_id,
+                                operation_id,
+                            },
+                        )?;
+                    }
+                    if !operation.wait_native_private_checkpoint(
+                        confirmation_deadline.saturating_duration_since(Instant::now()),
+                    )? {
+                        let _gate = submitted
+                            .lock()
+                            .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE")?;
+                        let state = operation.snapshot()?.state;
+                        if matches!(
+                            state,
+                            TerminalCommandState::Cancelled | TerminalCommandState::TakenOver
+                        ) {
+                            return interrupted_typing_result(state);
+                        }
+                        self.broker
+                            .require_native_input_recovery(session_id, operation_id)?;
+                        return Err("TERMINAL_INPUT_RECOVERY_REQUIRED: private descriptor was not confirmed; no automatic replay".into());
+                    }
+                    let mut gate = submitted
+                        .lock()
+                        .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE")?;
+                    if operation.snapshot()?.state != TerminalCommandState::Submitted {
+                        return interrupted_typing_result(operation.snapshot()?.state);
+                    }
+                    revalidate(TerminalExecuteValidationStage::InputWrite)?;
+                    if Instant::now() >= confirmation_deadline {
+                        self.broker
+                            .require_native_input_recovery(session_id, operation_id)?;
+                        return Err("TERMINAL_INPUT_RECOVERY_REQUIRED: private control deadline elapsed before dispatch; no automatic replay".into());
+                    }
+                    self.broker.validate_shell_job_input(
+                        session_id,
+                        operation_id,
+                        command,
+                        private_line,
+                    )?;
+                    self.leases.write(
+                        sessions,
+                        session_id,
+                        "\u{18}\u{b}".into(),
+                        TerminalInputSource::Agent {
+                            agent_session_id,
+                            task_id,
+                            operation_id,
+                        },
+                    )?;
+                    editor_batch_pending.store(false, Ordering::Release);
+                    *gate = true;
+                    self.leases.publish_command_phase(
+                        session_id,
+                        agent_session_id,
+                        operation_id,
+                        TerminalCommandPhase::Running,
+                    )?;
+                    return Ok(());
+                }
+                let zsh_frame_deadline =
+                    matches!(shell, TerminalShellKind::Zsh | TerminalShellKind::Bash).then(|| {
+                        deadline.map_or(Instant::now() + FRONTEND_READY_TIMEOUT, |deadline| {
+                            deadline.min(Instant::now() + FRONTEND_READY_TIMEOUT)
+                        })
+                    });
                 let mut previous_prefix = String::new();
                 for (wire, prefix) in native_editor_data
                     .as_ref()
@@ -473,7 +653,9 @@ impl TerminalExecuteRegistry {
                     // PSReadLine consumes each bounded data batch in one native
                     // Replace call. Its unchanged-buffer A is a readiness fence:
                     // payload is never queued where ReadLine could accept it.
-                    let phases = if powershell {
+                    let phases = if powershell
+                        || matches!(shell, TerminalShellKind::Zsh | TerminalShellKind::Bash)
+                    {
                         vec![
                             ("\u{18}\u{2}".to_string(), previous_prefix.clone()),
                             (wire.clone(), prefix.clone()),
@@ -483,12 +665,21 @@ impl TerminalExecuteRegistry {
                     };
                     for (phase_index, (phase_wire, phase_prefix)) in phases.into_iter().enumerate()
                     {
+                        let zsh_data =
+                            matches!(shell, TerminalShellKind::Zsh | TerminalShellKind::Bash)
+                                && phase_index == 1;
                         {
                             let _gate = submitted
                                 .lock()
                                 .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE".to_string())?;
                             if operation.snapshot()?.state != TerminalCommandState::Submitted {
                                 return interrupted_typing_result(operation.snapshot()?.state);
+                            }
+                            if zsh_frame_deadline.is_some_and(|deadline| Instant::now() >= deadline)
+                            {
+                                self.broker
+                                    .require_native_input_recovery(session_id, operation_id)?;
+                                return Err("TERMINAL_INPUT_RECOVERY_REQUIRED: native source frame deadline elapsed before input; no automatic replay".into());
                             }
                             if !self.broker.native_input_enabled(session_id)? {
                                 return Err(
@@ -508,7 +699,67 @@ impl TerminalExecuteRegistry {
                             if powershell && phase_index == 0 {
                                 editor_batch_pending.store(true, Ordering::Release);
                             }
-                            operation.expect_native_checkpoint(&phase_prefix)?;
+                            if zsh_data {
+                                let descriptor = if shell == TerminalShellKind::Bash {
+                                    let source_length =
+                                        crate::terminal_integration::bash_native_eval_source(
+                                            &phase_prefix,
+                                        )
+                                        .map_or(0, |source| source.len() * 4);
+                                    let geometry = self
+                                        .broker
+                                        .snapshot(Some(session_id))?
+                                        .session
+                                        .ok_or("TERMINAL_BROKER_SESSION_NOT_FOUND")?
+                                        .geometry;
+                                    format!(
+                                        "b{:05x}{:04x}{:04x}{:04x}{}{}",
+                                        phase_wire.len(),
+                                        source_length,
+                                        geometry.rows,
+                                        geometry.columns,
+                                        &uuid::Uuid::new_v4().simple().to_string()[..15],
+                                        uuid::Uuid::new_v4().simple()
+                                    )
+                                } else {
+                                    format!(
+                                        "e{:04x}{}{}",
+                                        phase_wire.len(),
+                                        &uuid::Uuid::new_v4().simple().to_string()[..28],
+                                        uuid::Uuid::new_v4().simple()
+                                    )
+                                };
+                                operation
+                                    .expect_native_data_checkpoint(&descriptor, &phase_prefix)?;
+                                self.leases.write(
+                                    sessions,
+                                    session_id,
+                                    descriptor,
+                                    TerminalInputSource::Agent {
+                                        agent_session_id,
+                                        task_id,
+                                        operation_id,
+                                    },
+                                )?;
+                                revalidate(TerminalExecuteValidationStage::InputWrite)?;
+                                if zsh_frame_deadline
+                                    .is_some_and(|deadline| Instant::now() >= deadline)
+                                {
+                                    self.broker
+                                        .require_native_input_recovery(session_id, operation_id)?;
+                                    return Err("TERMINAL_INPUT_RECOVERY_REQUIRED: native source frame deadline elapsed before payload; no automatic replay".into());
+                                }
+                                if let Some(line) = job_submission {
+                                    self.broker.validate_shell_job_input(
+                                        session_id,
+                                        operation_id,
+                                        command,
+                                        line,
+                                    )?;
+                                }
+                            } else {
+                                operation.expect_native_checkpoint(&phase_prefix)?;
+                            }
                             self.leases.write(
                                 sessions,
                                 session_id,
@@ -520,16 +771,31 @@ impl TerminalExecuteRegistry {
                                 },
                             )?;
                         }
-                        let acknowledgement_timeout =
-                            deadline.map_or(FRONTEND_READY_TIMEOUT, |deadline| {
+                        let acknowledgement_timeout = zsh_frame_deadline.or(deadline).map_or(
+                            FRONTEND_READY_TIMEOUT,
+                            |deadline| {
                                 FRONTEND_READY_TIMEOUT
                                     .min(deadline.saturating_duration_since(Instant::now()))
-                            });
-                        if !operation.wait_native_checkpoint(acknowledgement_timeout)? {
+                            },
+                        );
+                        let confirmed = if zsh_data {
+                            operation.wait_native_private_checkpoint(acknowledgement_timeout)?
+                        } else {
+                            operation.wait_native_checkpoint(acknowledgement_timeout)?
+                        };
+                        if !confirmed {
                             let _gate = submitted
                                 .lock()
                                 .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE")?;
-                            let state = operation.snapshot()?.state;
+                            let snapshot = operation.snapshot()?;
+                            let state = snapshot.state;
+                            if shell == TerminalShellKind::Bash
+                                && state == TerminalCommandState::Failed
+                                && snapshot.input_rejection.is_some()
+                            {
+                                editor_batch_pending.store(false, Ordering::Release);
+                                return Ok(());
+                            }
                             if matches!(
                                 state,
                                 TerminalCommandState::Cancelled | TerminalCommandState::TakenOver
@@ -564,6 +830,11 @@ impl TerminalExecuteRegistry {
                     return interrupted_typing_result(operation.snapshot()?.state);
                 }
                 revalidate(TerminalExecuteValidationStage::InputWrite)?;
+                if zsh_frame_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                    self.broker
+                        .require_native_input_recovery(session_id, operation_id)?;
+                    return Err("TERMINAL_INPUT_RECOVERY_REQUIRED: native source frame deadline elapsed; no automatic replay".into());
+                }
                 if !self.broker.native_input_enabled(session_id)? {
                     return Err(
                         "TERMINAL_INPUT_RECOVERY_REQUIRED: native editor capability was lost"
@@ -739,6 +1010,7 @@ impl TerminalExecuteRegistry {
                 } else if native_input
                     && matches!(shell, TerminalShellKind::Bash | TerminalShellKind::Zsh)
                     && !*_gate
+                    && !editor_batch_pending.load(Ordering::Acquire)
                 {
                     let _ = self.discard_native_input(sessions, session_id, operation_id);
                 } else {
@@ -911,7 +1183,11 @@ impl TerminalExecuteRegistry {
         let send = registration
             .operation
             .request_settlement(TerminalCommandRequestedSettlement::TakenOver)?;
-        if !*submitted && registration.editor_batch_pending.load(Ordering::Acquire) {
+        let receiver_pending = registration.editor_batch_pending.load(Ordering::Acquire)
+            && !registration
+                .operation
+                .native_private_checkpoint_confirmed()?;
+        if !*submitted && receiver_pending {
             self.broker
                 .require_native_input_recovery(session_id, operation_id)?;
         }
@@ -927,7 +1203,7 @@ impl TerminalExecuteRegistry {
                 && !registration.operation.native_empty_confirmed()?
             {
                 Ok(())
-            } else if registration.native_clear && !*submitted {
+            } else if registration.native_clear && !*submitted && !receiver_pending {
                 self.discard_native_input(sessions, session_id, operation_id)
             } else {
                 self.leases
@@ -1162,7 +1438,11 @@ impl TerminalExecuteRegistry {
                 .lock()
                 .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE".to_string())?;
             let send = registration.operation.request_settlement(requested)?;
-            if !*submitted && registration.editor_batch_pending.load(Ordering::Acquire) {
+            let receiver_pending = registration.editor_batch_pending.load(Ordering::Acquire)
+                && !registration
+                    .operation
+                    .native_private_checkpoint_confirmed()?;
+            if !*submitted && receiver_pending {
                 self.broker
                     .require_native_input_recovery(&session_id, &registration.operation_id)?;
             }
@@ -1182,7 +1462,7 @@ impl TerminalExecuteRegistry {
                     && !registration.operation.native_empty_confirmed()?
                 {
                     Ok(())
-                } else if registration.native_clear && !*submitted {
+                } else if registration.native_clear && !*submitted && !receiver_pending {
                     self.discard_native_input(sessions, &session_id, &registration.operation_id)
                 } else {
                     self.leases
@@ -1210,6 +1490,17 @@ impl TerminalExecuteRegistry {
         } else {
             Err(errors.join("; "))
         }
+    }
+
+    #[cfg(all(test, unix))]
+    pub(crate) fn native_editor_confirmed_for_test(
+        &self,
+        session_id: &str,
+        operation_id: &str,
+    ) -> Result<bool, String> {
+        self.registration(session_id, operation_id)?
+            .operation
+            .native_private_checkpoint_confirmed()
     }
 
     fn registration(
@@ -1358,6 +1649,22 @@ pub(crate) fn native_editor_chunks(
     command: &str,
     shell: TerminalShellKind,
 ) -> Vec<(String, String)> {
+    if matches!(shell, TerminalShellKind::Zsh | TerminalShellKind::Bash) {
+        use std::fmt::Write;
+        let mut encoded = String::with_capacity(command.len() * 4);
+        if shell == TerminalShellKind::Bash {
+            if let Some(source) = crate::terminal_integration::bash_native_eval_source(command) {
+                for byte in source.as_bytes() {
+                    write!(encoded, "\\x{byte:02x}")
+                        .expect("writing original source into a String");
+                }
+            }
+        }
+        for byte in command.as_bytes() {
+            write!(encoded, "\\x{byte:02x}").expect("writing source bytes into a String");
+        }
+        return vec![(encoded, command.to_string())];
+    }
     if matches!(
         shell,
         TerminalShellKind::WindowsPowerShell | TerminalShellKind::PowerShell7

@@ -178,7 +178,8 @@ const attachResult = (vite) => {
       const shell = windowsShell ?? values['native-jobs-ssh'] ?? (process.env.SHELL?.endsWith('/bash') ? 'bash' : process.env.SHELL?.endsWith('/zsh') ? 'zsh' : undefined);
       assert(shell && input.shell === shell, 'Native editor must match the runner shell configuration');
       assert(typeof input.acceptedLine === 'string' && Buffer.byteLength(input.acceptedLine) <= 32768
-        && input.acceptedLine.startsWith(windowsShell ? '& $__shellspanModule ' : '__shellspan_job_validate '), 'Invalid actual native submission');
+        && (windowsShell ? /^job-[0-9a-f]{32} '/.test(input.acceptedLine)
+          : /^\( job-[0-9a-f]{32};\n[\s\S]*\n\) &$/.test(input.acceptedLine)), 'Invalid actual native submission');
       assert(Number.isInteger(input.columns) && input.columns >= 32 && input.columns <= 1000
         && Number.isInteger(input.rows) && input.rows >= 10 && input.rows <= 300
         && Number.isInteger(input.prefixColumns) && input.prefixColumns >= 0 && input.prefixColumns < input.columns, 'Invalid native layout geometry');

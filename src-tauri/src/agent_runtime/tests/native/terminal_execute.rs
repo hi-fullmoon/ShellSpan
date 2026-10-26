@@ -10,6 +10,67 @@
     use std::thread;
 
     #[test]
+    #[cfg(target_os = "macos")]
+    fn posix_source_frame_roundtrips_literal_utf8_and_control_bytes_with_native_printf() {
+        let source = "printf '%s\\n' '$value `literal` \\c \\x41'\r\n# 字😀\tend\n";
+        for (shell, executable) in [
+            (TerminalShellKind::Zsh, "/bin/zsh"),
+            (TerminalShellKind::Bash, "/bin/bash"),
+        ] {
+            let frames = native_editor_chunks(source, shell);
+            assert_eq!(frames.len(), 1);
+            let (wire, buffer) = &frames[0];
+            assert_eq!(buffer, source);
+            let wire = wire.as_str();
+            assert!(!wire.contains(['\n', '\r', '\t', '\u{1b}', '\u{18}']));
+            let output = std::process::Command::new(executable)
+                .args(["-f", "-c", "builtin printf '%b' \"$1\"", "frame", wire])
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            assert_eq!(output.stdout, source.as_bytes());
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn bash_background_frame_preserves_source_separately_from_its_eval_envelope() {
+        let source =
+            "alias ss_literal='printf \\\"中文🙂\\\"'\nss_literal\n# $value `literal` \\c\t\r\n";
+        let line = crate::terminal_jobs::shell_submission(
+            source,
+            "job-0123456789abcdef0123456789abcdef",
+            TerminalShellKind::Bash,
+        )
+        .unwrap();
+        assert_eq!(
+            crate::terminal_integration::bash_native_eval_source(&line).as_deref(),
+            Some(source)
+        );
+        let frames = native_editor_chunks(&line, TerminalShellKind::Bash);
+        assert_eq!(frames.len(), 1);
+        let (wire, buffer) = &frames[0];
+        assert_eq!(buffer, &line);
+        let output = std::process::Command::new("/bin/bash")
+            .args([
+                "--noprofile",
+                "--norc",
+                "-c",
+                "builtin printf '%b' \"$1\"",
+                "frame",
+                wire,
+            ])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout, [source.as_bytes(), line.as_bytes()].concat());
+        assert!(crate::terminal_integration::bash_native_eval_source(
+            &line.replace("job-0123456789abcdef0123456789abcdef", "job-invalid")
+        )
+        .is_none());
+    }
+
+    #[test]
     fn powershell_editor_batches_are_bounded_utf8_data_with_exact_buffer_prefixes() {
         use base64::Engine;
         let command = format!(
@@ -21,7 +82,8 @@
             TerminalShellKind::PowerShell7,
         ] {
             let batches = native_editor_chunks(&command, shell);
-            assert_eq!(batches.len(), 2);
+            assert!(batches.len() >= 2);
+            let limit = POWERSHELL_EDITOR_BATCH_BYTES;
             let mut actual = String::new();
             for (wire, prefix) in batches {
                 let encoded = wire
@@ -30,13 +92,13 @@
                 let bytes = base64::engine::general_purpose::STANDARD
                     .decode(encoded)
                     .unwrap();
-                assert!(!bytes.is_empty() && bytes.len() <= POWERSHELL_EDITOR_BATCH_BYTES);
+                assert!(!bytes.is_empty() && bytes.len() <= limit);
                 actual.push_str(std::str::from_utf8(&bytes).unwrap());
                 assert_eq!(prefix, actual);
                 assert!(!wire.contains(['\n', '\r']) && !encoded.contains('\u{18}'));
             }
             assert_eq!(actual, command);
-            assert_eq!(native_editor_chunks(&"x".repeat(8192), shell).len(), 1);
+            assert_eq!(native_editor_chunks(&"x".repeat(limit), shell).len(), 1);
         }
     }
 
@@ -47,6 +109,7 @@
             TerminalIntegrationControlEvent::PromptStart { cwd: "/tmp".into() },
             TerminalIntegrationControlEvent::NativeInput { enabled: true },
             TerminalIntegrationControlEvent::NativeCheckpointMode { enabled: true },
+            TerminalIntegrationControlEvent::NativePrivateControl { enabled: true },
             TerminalIntegrationControlEvent::PromptEnd,
         ] {
             broker
@@ -660,6 +723,78 @@
     }
 
     #[test]
+    fn private_control_checkpoint_rejects_mismatch_and_ignores_retired_nonce() {
+        for user_buffer in ["", "user draft"] {
+            let (broker, _, _, _) = harness();
+            let emit = |event| {
+                broker
+                    .accept_integration_event("transport-1", "integration-1", event)
+                    .unwrap()
+            };
+            for event in [
+                TerminalIntegrationControlEvent::PromptStart { cwd: "/tmp".into() },
+                TerminalIntegrationControlEvent::NativeInput { enabled: true },
+                TerminalIntegrationControlEvent::NativeCheckpointMode { enabled: true },
+                TerminalIntegrationControlEvent::NativePrivateControl { enabled: true },
+                TerminalIntegrationControlEvent::PromptEnd,
+            ] {
+                emit(event);
+            }
+            broker
+                .acquire_agent_lease("transport-1", "agent", "task", "operation")
+                .unwrap();
+            let operation = broker
+                .begin_command("transport-1", "operation", "approved")
+                .unwrap();
+            operation.expect_native_checkpoint("").unwrap();
+            emit(TerminalIntegrationControlEvent::NativeCheckpoint {
+                buffer: String::new(),
+            });
+            let descriptor = format!("p{}{}", "1".repeat(32), "2".repeat(32));
+            operation
+                .expect_native_private_checkpoint(&descriptor)
+                .unwrap();
+            emit(TerminalIntegrationControlEvent::NativePrivateCheckpoint {
+                descriptor: format!("p{}{}", "1".repeat(32), "3".repeat(32)),
+                buffer: String::new(),
+            });
+            assert!(!operation
+                .wait_native_private_checkpoint(Duration::ZERO)
+                .unwrap());
+            emit(TerminalIntegrationControlEvent::NativePrivateCheckpoint {
+                descriptor: descriptor.clone(),
+                buffer: String::new(),
+            });
+            assert!(operation
+                .wait_native_private_checkpoint(Duration::ZERO)
+                .unwrap());
+            emit(TerminalIntegrationControlEvent::NativePrivateCheckpoint {
+                descriptor: format!("p{}{}", "1".repeat(32), "3".repeat(32)),
+                buffer: String::new(),
+            });
+            assert!(operation
+                .wait_native_private_checkpoint(Duration::ZERO)
+                .unwrap());
+            emit(TerminalIntegrationControlEvent::NativePrivateCheckpoint {
+                descriptor: if user_buffer.is_empty() {
+                    format!("s{}{}", "1".repeat(32), "2".repeat(32))
+                } else {
+                    descriptor
+                },
+                buffer: user_buffer.into(),
+            });
+            assert!(!operation
+                .wait_native_private_checkpoint(Duration::ZERO)
+                .unwrap());
+            assert!(!broker.native_input_enabled("transport-1").unwrap());
+            assert_eq!(
+                operation.snapshot().unwrap().state,
+                TerminalCommandState::Uncertain
+            );
+        }
+    }
+
+    #[test]
     fn uncertain_job_observation_requires_the_new_control_command_exact_start() {
         let (broker, _, _, _) = harness();
         let prompt = || {
@@ -667,6 +802,7 @@
                 TerminalIntegrationControlEvent::PromptStart { cwd: "/tmp".into() },
                 TerminalIntegrationControlEvent::NativeInput { enabled: true },
                 TerminalIntegrationControlEvent::NativeCheckpointMode { enabled: true },
+                TerminalIntegrationControlEvent::NativePrivateControl { enabled: true },
                 TerminalIntegrationControlEvent::NativeJobs { enabled: true },
                 TerminalIntegrationControlEvent::PromptEnd,
             ] {
@@ -835,6 +971,13 @@
                     .accept_integration_event(
                         "transport-1",
                         "integration-1",
+                        TerminalIntegrationControlEvent::NativePrivateControl { enabled: true },
+                    )
+                    .unwrap();
+                broker
+                    .accept_integration_event(
+                        "transport-1",
+                        "integration-1",
                         TerminalIntegrationControlEvent::NativeJobs { enabled: true },
                     )
                     .unwrap();
@@ -915,6 +1058,9 @@
                                     },
                                     TerminalIntegrationControlEvent::NativeInput { enabled: true },
                                     TerminalIntegrationControlEvent::NativeCheckpointMode {
+                                        enabled: true,
+                                    },
+                                    TerminalIntegrationControlEvent::NativePrivateControl {
                                         enabled: true,
                                     },
                                     TerminalIntegrationControlEvent::NativeJobs { enabled: true },
@@ -1194,6 +1340,17 @@
             )
             .unwrap();
         assert!(broker.native_comments_enabled("transport-1").unwrap());
+        assert!(
+            !broker.native_input_enabled("transport-1").unwrap(),
+            "legacy Zsh I/H without a private source receiver must not authorize data"
+        );
+        broker
+            .accept_integration_event(
+                "transport-1",
+                "integration-1",
+                TerminalIntegrationControlEvent::NativePrivateControl { enabled: true },
+            )
+            .unwrap();
         broker
             .accept_integration_event(
                 "transport-1",

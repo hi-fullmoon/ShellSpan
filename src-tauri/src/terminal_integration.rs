@@ -19,19 +19,86 @@ use uuid::Uuid;
 const MAX_CONTROL_FIELD_BYTES: usize = 32_768;
 const MAX_CONTROL_BUFFER_BYTES: usize = MAX_CONTROL_FIELD_BYTES * 4;
 
+#[cfg(any(windows, test))]
+const BUNDLED_PSREADLINE_FILES: &[(&str, &[u8])] = &[
+    ("PSReadLine.psd1", include_bytes!("../resources/powershell/PSReadLine/2.4.5/PSReadLine.psd1")),
+    ("ShellSpan.PSReadLine.psm1", include_bytes!("../resources/powershell/PSReadLine/2.4.5/ShellSpan.PSReadLine.psm1")),
+    ("PSReadLine.psm1", include_bytes!("../resources/powershell/PSReadLine/2.4.5/PSReadLine.psm1")),
+    ("Upstream.PSReadLine.ps1", include_bytes!("../resources/powershell/PSReadLine/2.4.5/Upstream.PSReadLine.ps1")),
+    ("PSReadLine.format.ps1xml", include_bytes!("../resources/powershell/PSReadLine/2.4.5/PSReadLine.format.ps1xml")),
+    ("Microsoft.PowerShell.PSReadLine.dll", include_bytes!("../resources/powershell/PSReadLine/2.4.5/Microsoft.PowerShell.PSReadLine.dll")),
+    ("Microsoft.PowerShell.Pager.dll", include_bytes!("../resources/powershell/PSReadLine/2.4.5/Microsoft.PowerShell.Pager.dll")),
+    ("netstd/Microsoft.PowerShell.PSReadLine.Polyfiller.dll", include_bytes!("../resources/powershell/PSReadLine/2.4.5/netstd/Microsoft.PowerShell.PSReadLine.Polyfiller.dll")),
+    ("net6plus/Microsoft.PowerShell.PSReadLine.Polyfiller.dll", include_bytes!("../resources/powershell/PSReadLine/2.4.5/net6plus/Microsoft.PowerShell.PSReadLine.Polyfiller.dll")),
+    ("License.txt", include_bytes!("../resources/powershell/PSReadLine/2.4.5/License.txt")),
+    ("Upstream.PSReadLine.psd1", include_bytes!("../resources/powershell/PSReadLine/2.4.5/Upstream.PSReadLine.psd1")),
+];
+
+#[cfg(any(windows, test))]
+fn prepare_bundled_powershell_module(data_dir: &Path) -> Result<PathBuf, String> {
+    use sha2::{Digest, Sha256};
+    let mut digest = Sha256::new();
+    for (name, bytes) in BUNDLED_PSREADLINE_FILES {
+        digest.update(name.as_bytes());
+        digest.update([0]);
+        digest.update(bytes);
+    }
+    let identity = hex::encode(digest.finalize());
+    let parent = data_dir.join("native-editor-modules");
+    fs::create_dir_all(&parent)
+        .map_err(|error| format!("failed to prepare native editor cache: {error}"))?;
+    let root = parent.join(&identity[..32]);
+    if !root.exists() {
+        let staging = tempfile::Builder::new()
+            .prefix(".psreadline-")
+            .tempdir_in(&parent)
+            .map_err(|error| format!("failed to stage native editor: {error}"))?;
+        let version = staging.path().join("PSReadLine/2.4.5");
+        for (name, bytes) in BUNDLED_PSREADLINE_FILES {
+            let path = version.join(name);
+            fs::create_dir_all(path.parent().ok_or("invalid bundled editor path")?)
+                .map_err(|error| format!("failed to prepare native editor directory: {error}"))?;
+            fs::write(path, bytes)
+                .map_err(|error| format!("failed to stage native editor file: {error}"))?;
+        }
+        if let Err(error) = fs::rename(staging.path(), &root) {
+            if !root.exists() {
+                return Err(format!("failed to install native editor: {error}"));
+            }
+        }
+    }
+    for (name, bytes) in BUNDLED_PSREADLINE_FILES {
+        let actual = fs::read(root.join("PSReadLine/2.4.5").join(name))
+            .map_err(|error| format!("failed to verify native editor: {error}"))?;
+        if actual.as_slice() != *bytes {
+            return Err("bundled native editor integrity mismatch".into());
+        }
+    }
+    Ok(root)
+}
+
 pub(crate) fn bash_native_submission(source: &str) -> Result<String, String> {
     if source.len() > 8192 {
         return Err(
             "TERMINAL_INPUT_UNSUPPORTED: source exceeds 8192 UTF-8 bytes; no input was sent".into(),
         );
     }
-    let quoted = shlex::try_quote(source)
-        .map_err(|_| "TERMINAL_INPUT_UNSUPPORTED: script cannot be quoted".to_string())?;
-    let submission = format!("__shellspan_validate_native {quoted} && {{ __shellspan_return_status \"$__shellspan_native_status\"; builtin eval -- \"$__shellspan_native_source\"; }}");
-    if submission.len() > MAX_CONTROL_FIELD_BYTES {
-        return Err("TERMINAL_INPUT_UNSUPPORTED: quoted submission exceeds the native control-field byte limit; no input was sent".into());
-    }
-    Ok(submission)
+    let quoted = shlex::try_quote(source).map_err(|_| "TERMINAL_INPUT_UNSUPPORTED")?;
+    // A real status-only command before eval preserves Bash's foreground
+    // interrupt settlement. The approved script still runs at parent top level.
+    Ok(format!("(exit \"$?\"); builtin eval -- {quoted}"))
+}
+
+pub(crate) fn bash_native_eval_source(line: &str) -> Option<String> {
+    let quoted = if let Some(quoted) = line.strip_prefix("(exit \"$?\"); builtin eval -- ") {
+        quoted
+    } else {
+        let (handle, quoted) = line.strip_prefix("( ")?.split_once(";\nbuiltin eval -- ")?;
+        crate::terminal_jobs::validate_handle(handle).ok()?;
+        quoted.strip_suffix("\n) &")?
+    };
+    let words = shlex::split(quoted)?;
+    (words.len() == 1).then(|| words[0].clone())
 }
 #[cfg(any(windows, test))]
 const WINDOWS_PIPE_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -92,6 +159,14 @@ pub(crate) enum TerminalIntegrationControlEvent {
         buffer: String,
     },
     NativeCheckpoint {
+        buffer: String,
+    },
+    NativePrivateControl {
+        enabled: bool,
+    },
+    NativePrivateReady,
+    NativePrivateCheckpoint {
+        descriptor: String,
         buffer: String,
     },
     NativeCheckpointMode {
@@ -173,10 +248,10 @@ impl TerminalIntegrationStreamDecoder {
         let mut events = Vec::new();
         while let Some(kind) = self.pending_fields.first().map(String::as_str) {
             let field_count = match kind {
-                "R" | "P" | "X" | "I" | "C" | "K" | "A" | "H" => 2,
+                "R" | "P" | "X" | "I" | "C" | "K" | "A" | "H" | "V" => 2,
                 "L" => 3,
-                "Q" | "T" | "U" => 1,
-                "S" | "E" | "J" | "F" => 3,
+                "Q" | "T" | "U" | "W" => 1,
+                "S" | "E" | "J" | "F" | "M" => 3,
                 "B" => 4,
                 "D" => 2,
                 _ => return Err("TERMINAL_INTEGRATION_UNKNOWN_EVENT".into()),
@@ -232,6 +307,21 @@ fn event_from_fields(fields: &[String]) -> Result<Option<TerminalIntegrationCont
         "A" => Ok(Some(TerminalIntegrationControlEvent::NativeCheckpoint {
             buffer: fields[1].clone(),
         })),
+        "V" => Ok(Some(
+            TerminalIntegrationControlEvent::NativePrivateControl {
+                enabled: match fields[1].as_str() {
+                    "1" => true,
+                    "0" => false,
+                    _ => return Err("TERMINAL_PRIVATE_CONTROL_INVALID_MODE".into()),
+                },
+            },
+        )),
+        "M" => Ok(Some(
+            TerminalIntegrationControlEvent::NativePrivateCheckpoint {
+                descriptor: fields[1].clone(),
+                buffer: fields[2].clone(),
+            },
+        )),
         "K" => Ok(Some(TerminalIntegrationControlEvent::NativeJobs {
             enabled: match fields[1].as_str() {
                 "1" => true,
@@ -292,6 +382,7 @@ fn event_from_fields(fields: &[String]) -> Result<Option<TerminalIntegrationCont
             cwd: fields[1].clone(),
         })),
         "Q" => Ok(Some(TerminalIntegrationControlEvent::PromptEnd)),
+        "W" => Ok(Some(TerminalIntegrationControlEvent::NativePrivateReady)),
         "U" => Ok(Some(TerminalIntegrationControlEvent::InterruptUncertain)),
         "I" => Ok(Some(TerminalIntegrationControlEvent::NativeInput {
             enabled: match fields[1].as_str() {
@@ -380,6 +471,8 @@ pub(crate) struct PreparedLocalShellIntegration {
     bootstrap_root: TempDir,
     bootstrap_path: PathBuf,
     endpoint: ControlEndpoint,
+    #[cfg(windows)]
+    bundled_powershell_modules: Option<PathBuf>,
 }
 
 impl PreparedLocalShellIntegration {
@@ -404,6 +497,13 @@ impl PreparedLocalShellIntegration {
             )?;
         }
         let integration_id = format!("integration-{}", Uuid::new_v4());
+
+        #[cfg(windows)]
+        let bundled_powershell_modules = if shell == TerminalShellKind::WindowsPowerShell {
+            Some(prepare_bundled_powershell_module(data_dir)?)
+        } else {
+            None
+        };
 
         #[cfg(unix)]
         let (endpoint, bootstrap_path) = {
@@ -459,6 +559,8 @@ impl PreparedLocalShellIntegration {
             bootstrap_root,
             bootstrap_path,
             endpoint,
+            #[cfg(windows)]
+            bundled_powershell_modules,
         })
     }
 
@@ -471,6 +573,23 @@ impl PreparedLocalShellIntegration {
     }
 
     pub(crate) fn configure_command(&self, command: &mut CommandBuilder) -> Result<(), String> {
+        #[cfg(windows)]
+        if let Some(modules) = &self.bundled_powershell_modules {
+            let mut paths = vec![modules.clone()];
+            if let Some(previous) = command.get_env("PSModulePath") {
+                paths.extend(std::env::split_paths(previous));
+            }
+            if let Some(system_root) = std::env::var_os("SystemRoot") {
+                let system_modules =
+                    PathBuf::from(system_root).join("System32/WindowsPowerShell/v1.0/Modules");
+                if !paths.contains(&system_modules) {
+                    paths.push(system_modules);
+                }
+            }
+            let module_path = std::env::join_paths(paths)
+                .map_err(|error| format!("failed to bind native editor module path: {error}"))?;
+            command.env("PSModulePath", module_path);
+        }
         #[cfg(unix)]
         if self.shell == TerminalShellKind::Zsh {
             let executable = command
@@ -814,6 +933,23 @@ __shellspan_emit() {{
 }}
 __shellspan_prompt_cycle() {{
   local __shellspan_status=$?
+  __shellspan_private_descriptor=
+  if [[ -n ${{__shellspan_job_armed_handle-}} ]]; then
+    local __shellspan_identity="${{__shellspan_control_path}}.job.${{__shellspan_job_armed_handle}}.identity" __shellspan_pid
+    builtin jobs -p "%( $__shellspan_job_armed_handle;" >| "$__shellspan_identity" 2>/dev/null
+    IFS= builtin read -r __shellspan_pid < "$__shellspan_identity"
+    if [[ -n $__shellspan_pid ]]; then
+      __shellspan_job_register "$__shellspan_job_armed_handle"
+    elif [[ -f ${{__shellspan_control_path}}.job.${{__shellspan_job_armed_handle}} ]]; then
+      __shellspan_job_register "$__shellspan_job_armed_handle"
+      __shellspan_job_completion "$__shellspan_job_armed_handle"
+      __shellspan_emit B "$__shellspan_job_armed_handle" settled -
+    else
+      __shellspan_emit B "$__shellspan_job_armed_handle" rejected -
+    fi
+    unset -f "$__shellspan_job_armed_handle"
+    __shellspan_job_armed_handle=
+  fi
   __shellspan_native_status=$__shellspan_status
   __shellspan_native_source=
   if [[ $__shellspan_command_active -eq 0 && $__shellspan_prompt_ready -eq 1 ]]; then
@@ -840,14 +976,25 @@ __shellspan_prompt_cycle() {{
     __shellspan_command_active=0
   fi
   __shellspan_emit P "$PWD"
-  __shellspan_native_input=0
-  if (( BASH_VERSINFO[0] >= 4 )) && [[ -o emacs || -o vi ]] && [[ -z "$__shellspan_previous_int_trap" && $__shellspan_parser_executable == /* ]]; then
-    if bind '"\C-x\C-v":quoted-insert' && bind '"\C-xn":"\C-x\C-v\C-j"' && bind '"\C-xt":"\C-x\C-v\C-i"' && bind '"\C-xr":"\C-x\C-v\C-m"' && bind -x '"\C-x\C-a":__shellspan_native_checkpoint' && bind -x '"\C-x\C-d":__shellspan_discard_native' && bind -x '"\C-x\C-g":__shellspan_capture_line' && bind '"\C-x\C-e":"\C-x\C-g\C-m"'; then
-      __shellspan_native_input=1
+  # Bash 4.x executes bind-x's command string in place. Rebinding the active
+  # receiver from its syntax-rejection callback frees that executing string.
+  # Keep its existing bindings until the next real PROMPT_COMMAND cycle.
+  if [[ ${{1-}} != native-reject ]]; then
+    __shellspan_native_input=0
+    if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 1) )) && [[ -o emacs || -o vi ]] && [[ -z "$__shellspan_previous_int_trap" && $__shellspan_parser_executable == /* ]]; then
+      # Older Readline leaves the tty's VDISCARD active on macOS: it consumes
+      # Ctrl-O before bind-x sees it. Ctrl-R reaches the private receiver.
+      if bind '"\C-x\C-v":quoted-insert' && bind '"\C-xn":"\C-x\C-v\C-j"' && bind '"\C-xt":"\C-x\C-v\C-i"' && bind '"\C-xr":"\C-x\C-v\C-m"' && bind -x '"\C-x\C-a":__shellspan_native_checkpoint' && bind -x '"\C-x\C-d":__shellspan_discard_native' && bind -x '"\C-x\C-g":__shellspan_capture_line' && bind '"\C-x\C-e":accept-line' && bind -x '"\C-x\C-r":__shellspan_private_receive' && bind -x '"\C-x\C-k":__shellspan_private_commit'; then
+        __shellspan_native_input=1
+      fi
     fi
   fi
   __shellspan_emit I "$__shellspan_native_input"
   __shellspan_emit H "$__shellspan_native_input"
+  if [[ $__shellspan_native_input == 1 && ${{1-}} != native-reject ]]; then
+    bind -x '"\C-x\C-b":__shellspan_native_receive'
+  fi
+  __shellspan_emit V "$__shellspan_native_input"
   if [[ $__shellspan_native_input == 1 && -o monitor ]]; then __shellspan_emit K 1; else __shellspan_emit K 0; fi
   __shellspan_emit Q
   __shellspan_prompt_ready=1
@@ -855,10 +1002,155 @@ __shellspan_prompt_cycle() {{
 __shellspan_capture_line() {{
   __shellspan_pending_line=$READLINE_LINE
 }}
+__shellspan_accept_native() {{
+  local __shellspan_source=$READLINE_LINE __shellspan_marker= __shellspan_prefix __shellspan_original=${{1-}}
+  if [[ $READLINE_LINE == '( job-'* ]]; then
+    __shellspan_marker=${{READLINE_LINE:2:36}}
+    __shellspan_prefix="( $__shellspan_marker;"$'\nbuiltin eval -- '
+    if [[ ${{#__shellspan_marker}} != 36 || ${{__shellspan_marker#job-}} == *[!0-9a-f]* || $READLINE_LINE != "$__shellspan_prefix"*$'\n) &' || -z $__shellspan_original || -n $(type -t -- "$__shellspan_marker") ]] || ! __shellspan_validate_native "$__shellspan_original" quiet; then
+      __shellspan_emit J "$READLINE_LINE" TERMINAL_INPUT_UNSUPPORTED
+      READLINE_LINE=; READLINE_POINT=0; __shellspan_prompt_ready=0; return
+    fi
+  fi
+  if ! __shellspan_validate_native "$__shellspan_source"; then
+    READLINE_LINE=; READLINE_POINT=0; __shellspan_prompt_ready=0; return
+  fi
+  if [[ -n $__shellspan_marker ]]; then
+    if [[ -o errexit && $__shellspan_native_status != 0 ]]; then
+      __shellspan_emit J "$READLINE_LINE" TERMINAL_BACKGROUND_UNSUPPORTED
+      READLINE_LINE=; READLINE_POINT=0; __shellspan_prompt_ready=0; return
+    fi
+    __shellspan_job_aliases=0
+    if shopt -q expand_aliases; then __shellspan_job_aliases=1; fi
+    builtin eval -- "$__shellspan_marker() {{ __shellspan_job_initialize_bash $__shellspan_marker; }}"
+    __shellspan_job_armed_handle=$__shellspan_marker
+  fi
+  __shellspan_pending_line=$READLINE_LINE
+}}
+__shellspan_private_receive() {{
+  __shellspan_private_descriptor=
+  [[ -z "$READLINE_LINE" ]] || {{ __shellspan_emit M '' "$READLINE_LINE"; return; }}
+  __shellspan_emit W
+  local __shellspan_data
+  if __shellspan_read_private 65 2 __shellspan_data && [[ ${{#__shellspan_data}} == 65 && ${{__shellspan_data:0:1}} == [ps] && ${{__shellspan_data:1}} != *[!0-9a-f]* ]]; then
+    __shellspan_private_descriptor=$__shellspan_data
+  fi
+  __shellspan_emit M "$__shellspan_private_descriptor" "$READLINE_LINE"
+}}
+__shellspan_private_commit() {{
+  local __shellspan_descriptor=$__shellspan_private_descriptor __shellspan_status __shellspan_action=poll
+  __shellspan_private_descriptor=
+  [[ -z "$READLINE_LINE" && ${{#__shellspan_descriptor}} == 65 ]] || return
+  local __shellspan_handle="job-${{__shellspan_descriptor:1:32}}"
+  [[ ${{__shellspan_descriptor:0:1}} == s ]] && __shellspan_action=stop
+  __shellspan_emit S "__shellspan_job_control $__shellspan_handle $__shellspan_action" "$PWD"
+  if __shellspan_job_control "$__shellspan_handle" "$__shellspan_action"; then __shellspan_status=0; else __shellspan_status=$?; fi
+  __shellspan_emit E "$__shellspan_status" "$PWD"
+  __shellspan_emit P "$PWD"
+  __shellspan_emit I 1
+  __shellspan_emit H 1
+  __shellspan_emit V 1
+  if [[ -o monitor ]]; then __shellspan_emit K 1; else __shellspan_emit K 0; fi
+  __shellspan_emit Q
+}}
 __shellspan_native_checkpoint() {{
   __shellspan_emit A "$READLINE_LINE"
 }}
+__shellspan_native_receive() {{
+  local __shellspan_async_redraw=0
+  [[ -n $(builtin jobs -p -r) ]] && __shellspan_async_redraw=1
+  __shellspan_emit A "$READLINE_LINE"
+  [[ -z "$READLINE_LINE" ]] || return
+  local __shellspan_descriptor __shellspan_encoded __shellspan_decoded __shellspan_count __shellspan_source_count __shellspan_original=
+  local __shellspan_rows __shellspan_columns __shellspan_without_newlines __shellspan_line_count __shellspan_row
+  local __shellspan_deadline=$((SECONDS + 2)) __shellspan_remaining
+  if ! __shellspan_read_private 65 2 __shellspan_descriptor; then
+    __shellspan_emit M '' "$READLINE_LINE"; return
+  fi
+  if [[ ${{#__shellspan_descriptor}} != 65 || ${{__shellspan_descriptor:0:1}} != b || ${{__shellspan_descriptor:1}} == *[!0-9a-f]* ]]; then
+    __shellspan_emit M '' "$READLINE_LINE"; return
+  fi
+  __shellspan_count=$((16#${{__shellspan_descriptor:1:5}}))
+  __shellspan_source_count=$((16#${{__shellspan_descriptor:6:4}}))
+  __shellspan_rows=$((16#${{__shellspan_descriptor:10:4}}))
+  __shellspan_columns=$((16#${{__shellspan_descriptor:14:4}}))
+  __shellspan_remaining=$((__shellspan_deadline - SECONDS))
+  if (( __shellspan_count < 4 || __shellspan_count > 131072 || __shellspan_count % 4 || __shellspan_source_count > 32768 || __shellspan_source_count >= __shellspan_count || __shellspan_source_count % 4 || __shellspan_remaining <= 0 || __shellspan_rows < 1 || __shellspan_rows > 1000 || __shellspan_columns < 1 || __shellspan_columns > 1000 )) || ! __shellspan_read_private "$__shellspan_count" "$__shellspan_remaining" __shellspan_encoded; then
+    __shellspan_emit M "$__shellspan_descriptor" "$READLINE_LINE"; return
+  fi
+  builtin printf -v __shellspan_decoded '%b' "${{__shellspan_encoded:__shellspan_source_count}}"
+  if (( __shellspan_source_count )); then
+    builtin printf -v __shellspan_original '%b' "${{__shellspan_encoded:0:__shellspan_source_count}}"
+    if ! __shellspan_validate_native "$__shellspan_original" quiet; then
+      __shellspan_emit J "$__shellspan_original" TERMINAL_INPUT_UNSUPPORTED
+      __shellspan_prompt_ready=0
+      __shellspan_prompt_cycle native-reject
+      return
+    fi
+  fi
+  READLINE_LINE=$__shellspan_decoded
+  __shellspan_readline_end "$(( (__shellspan_count - __shellspan_source_count) / 4 ))"
+  __shellspan_accept_native "$__shellspan_original"
+  if [[ -z "$READLINE_LINE" ]]; then __shellspan_prompt_cycle native-reject; return; fi
+  if [[ -z "$__shellspan_previous_int_trap" && -n "$__shellspan_int_trap" ]]; then
+    trap - INT
+    __shellspan_int_trap=
+  fi
+  __shellspan_without_newlines=${{READLINE_LINE//$'\n'/}}
+  __shellspan_line_count=$(( ${{#READLINE_LINE}} - ${{#__shellspan_without_newlines}} + 1 ))
+  if (( (__shellspan_count - __shellspan_source_count) / 4 > __shellspan_rows * __shellspan_columns || __shellspan_line_count >= __shellspan_rows )); then
+    # Readline clears the viewport for oversized buffers. Scroll the existing
+    # native screen into terminal history first, without replaying its content.
+    builtin printf '\033[%d;1H' "$__shellspan_rows"
+    for ((__shellspan_row=0; __shellspan_row<__shellspan_rows; __shellspan_row++)); do builtin printf '\n'; done
+    builtin printf '\033[H'
+  elif [[ $__shellspan_async_redraw == 1 ]]; then
+    builtin printf '\r\n'
+  fi
+  __shellspan_native_frame_checkpoint "$__shellspan_descriptor"
+  return 124
+}}
+__shellspan_native_frame_checkpoint() {{
+  __shellspan_emit M "$1" "$READLINE_LINE"
+}}
+__shellspan_readline_end() {{
+  # bind-x offsets are bytes before Bash 5.0, characters starting with 5.0.
+  # The receiver supplies the validated displayed-line byte length, excluding
+  # the original-source field. Do not assign LC_ALL: it may be read-only.
+  if (( BASH_VERSINFO[0] < 5 )); then
+    READLINE_POINT=$1
+  else
+    READLINE_POINT=${{#READLINE_LINE}}
+  fi
+}}
+__shellspan_read_private() {{
+  local __shellspan_read_status=0 __shellspan_read_record
+  local __shellspan_read_deadline=$((SECONDS + $2))
+  # A synchronous command-substitution child stays in the foreground group,
+  # but has no children of its own. Parent job exits cannot interrupt its
+  # read builtin's legacy tcsetattr(TCSADRAIN). Keep fixed-byte boundaries;
+  # do not retry/replay input or leave a helper reading the tty after timeout.
+  __shellspan_read_record=$(
+    __shellspan_read_value=
+    __shellspan_read_remaining=$((__shellspan_read_deadline - SECONDS))
+    (( __shellspan_read_remaining > 0 )) || builtin exit 142
+    builtin exec {{__shellspan_read_fd}}</dev/tty || builtin exit
+    IFS= builtin read -r -s -u "$__shellspan_read_fd" -N "$1" -t "$__shellspan_read_remaining" __shellspan_read_value
+    __shellspan_read_status=$?
+    builtin exec {{__shellspan_read_fd}}<&-
+    builtin printf '%s' "$__shellspan_read_value"
+    builtin exit "$__shellspan_read_status"
+  ) || __shellspan_read_status=$?
+  (( __shellspan_read_status == 0 )) || return "$__shellspan_read_status"
+  [[ ${{#__shellspan_read_record}} == "$1" ]] || return 2
+  builtin printf -v "$3" '%s' "$__shellspan_read_record"
+}}
 __shellspan_discard_native() {{
+  __shellspan_private_descriptor=
+  if [[ -n ${{__shellspan_job_armed_handle-}} ]]; then
+    unset -f "$__shellspan_job_armed_handle"
+    __shellspan_job_armed_handle=
+  fi
   READLINE_LINE=
   READLINE_POINT=0
   __shellspan_pending_line=
@@ -884,7 +1176,7 @@ __shellspan_validate_native() {{
     return 0
   else
     [[ -z "$__shellspan_parse_diagnostic" ]] || builtin printf '%s\n' "$__shellspan_parse_diagnostic"
-    __shellspan_emit J "$__shellspan_source" TERMINAL_INPUT_UNSUPPORTED
+    [[ ${{2-}} == quiet ]] || __shellspan_emit J "$__shellspan_source" TERMINAL_INPUT_UNSUPPORTED
     __shellspan_native_source=
     return 2
   fi
@@ -898,7 +1190,7 @@ __shellspan_preexec() {{
     __shellspan_debug_prompt_echo_control=$__shellspan_prompt_echo_control
   fi
   case "$__shellspan_debug_command" in
-    __shellspan_prompt_cycle|__shellspan_capture_line|__shellspan_native_checkpoint|__shellspan_discard_native|__shellspan_preexec|__shellspan_on_exit|__shellspan_on_exit\ *|__shellspan_on_interrupt|__shellspan_on_interrupt\ *) return ;;
+    __shellspan_prompt_cycle|__shellspan_capture_line|__shellspan_accept_native|__shellspan_native_receive|__shellspan_read_private\ *|__shellspan_native_frame_checkpoint\ *|__shellspan_private_receive|__shellspan_private_commit|__shellspan_native_checkpoint|__shellspan_discard_native|__shellspan_preexec|__shellspan_on_exit|__shellspan_on_exit\ *|__shellspan_on_interrupt|__shellspan_on_interrupt\ *) return ;;
   esac
   if [[ $__shellspan_prompt_ready -eq 1 && ${{BASH_SUBSHELL:-0}} -eq 0 ]]; then
     local __shellspan_line
@@ -914,10 +1206,10 @@ __shellspan_preexec() {{
     # Our prompt-only INT feedback handler must not make Bash resume the
     # remaining lines of an accepted native buffer after a foreground SIGINT.
     # Native input is advertised only with the user's default INT disposition.
-    if [[ -z "$__shellspan_previous_int_trap" ]]; then
+    if [[ -z "$__shellspan_previous_int_trap" && -n "$__shellspan_int_trap" ]]; then
       trap - INT
       __shellspan_int_trap=
-    else
+    elif [[ -n "$__shellspan_previous_int_trap" ]]; then
       __shellspan_emit U
     fi
     __shellspan_emit S "$__shellspan_line" "$PWD"
@@ -988,6 +1280,17 @@ __shellspan_emit() {{
 }}
 __shellspan_precmd() {{
   local __shellspan_status=$?
+  __shellspan_private_descriptor=
+  __shellspan_native_redraw_before_accept=0
+  if [[ -n ${{__shellspan_blocked_marker-}} && ${{functions[$__shellspan_blocked_marker]-}} == "${{__shellspan_blocked_marker_definition-}}" ]]; then
+    unfunction "$__shellspan_blocked_marker"
+  fi
+  __shellspan_blocked_marker=
+  __shellspan_blocked_marker_definition=
+  if [[ -n ${{__shellspan_job_armed_handle-}} ]]; then
+    __shellspan_job_confirm_zsh "$__shellspan_job_armed_handle"
+    __shellspan_job_release_marker_zsh
+  fi
   __shellspan_native_status=$__shellspan_status
   __shellspan_prompt_end_pending=1
   if (( __shellspan_native_pending && ! __shellspan_command_active )); then
@@ -1002,19 +1305,39 @@ __shellspan_precmd() {{
   fi
   __shellspan_emit P "$PWD"
   __shellspan_native_pending=0
+  __shellspan_publish_native_capabilities
+}}
+__shellspan_publish_native_capabilities() {{
   if [[ -o interactivecomments ]]; then __shellspan_emit C 1; else __shellspan_emit C 0; fi
   if [[ -o zle && -n $__shellspan_parser_executable ]] && bindkey '^X^V' quoted-insert && bindkey -s '^Xn' '^X^V^J' && bindkey -s '^Xt' '^X^V^I' && bindkey -s '^Xr' '^X^V^M' && bindkey '^X^A' __shellspan_native_checkpoint && bindkey '^X^D' __shellspan_discard_native && bindkey '^X^E' __shellspan_accept_native; then
     __shellspan_emit I 1
     __shellspan_emit H 1
+    if zmodload zsh/datetime && bindkey '^X^O' __shellspan_private_receive && bindkey '^X^K' __shellspan_private_commit && bindkey '^X^B' __shellspan_native_receive; then
+      __shellspan_emit V 1
+    else
+      __shellspan_emit V 0
+    fi
     if [[ -o monitor ]] && zmodload zsh/parameter; then __shellspan_emit K 1; else __shellspan_emit K 0; fi
   else
     __shellspan_emit I 0
     __shellspan_emit H 0
+    __shellspan_emit V 0
     __shellspan_emit K 0
   fi
 }}
 __shellspan_preexec() {{
+  local REPLY
   __shellspan_command_active=1
+  # Only the native accept widget arms a one-use child marker. A normal Enter
+  # on a cancelled, previously typed group gets an inert marker instead.
+  if (( ! __shellspan_native_pending )) && __shellspan_job_marker_zsh "$1"; then
+    local __shellspan_marker=$REPLY
+    if (( ! ${{+functions[$__shellspan_marker]}} && ! ${{+aliases[$__shellspan_marker]}} )); then
+      functions[$__shellspan_marker]='if (( ZSH_SUBSHELL )); then exit 2; else return 2; fi'
+      __shellspan_blocked_marker=$__shellspan_marker
+      __shellspan_blocked_marker_definition=${{functions[$__shellspan_marker]}}
+    fi
+  fi
   if (( __shellspan_native_pending )); then
     __shellspan_emit S "$__shellspan_native_line" "$PWD"
     __shellspan_native_pending=0
@@ -1024,6 +1347,7 @@ __shellspan_preexec() {{
   fi
 }}
 __shellspan_accept_native() {{
+  local REPLY
   local -a __shellspan_parse_options
   local __shellspan_option __shellspan_parse_diagnostic
   for __shellspan_option in ${{(k)options}}; do
@@ -1043,15 +1367,139 @@ __shellspan_accept_native() {{
     zle send-break
     return
   fi
+  if __shellspan_job_marker_zsh "$BUFFER"; then
+    local __shellspan_marker=$REPLY
+    local __shellspan_prefix="( $__shellspan_marker;"$'\n'
+    local __shellspan_suffix=$'\n) &'
+    local __shellspan_original=${{BUFFER#"$__shellspan_prefix"}}
+    __shellspan_original=${{__shellspan_original%"$__shellspan_suffix"}}
+    # Removing the fixed, broker-built envelope is framing, not source parsing.
+    # The original source must also be valid on its own: an unmatched closing
+    # group could otherwise balance our envelope and escape the native child.
+    if [[ "$BUFFER" != "$__shellspan_prefix"*"$__shellspan_suffix" ]] || ! {{ __shellspan_parse_diagnostic=$("$__shellspan_parser_executable" -f "${{__shellspan_parse_options[@]}}" -n -c "$__shellspan_original" 2>&1) && [[ -z "$__shellspan_parse_diagnostic" ]]; }}; then
+      [[ -z "$__shellspan_parse_diagnostic" ]] || builtin printf '%s\n' "$__shellspan_parse_diagnostic"
+      __shellspan_emit J "$BUFFER" TERMINAL_INPUT_UNSUPPORTED
+      BUFFER=
+      zle send-break
+      return
+    fi
+    if ! __shellspan_job_context_zsh; then
+      __shellspan_emit J "$BUFFER" TERMINAL_BACKGROUND_UNSUPPORTED
+      BUFFER=
+      zle send-break
+      return
+    fi
+    if ! __shellspan_job_arm_zsh "$__shellspan_marker"; then
+      __shellspan_emit J "$BUFFER" TERMINAL_INPUT_UNSUPPORTED
+      zle send-break
+      return
+    fi
+  fi
   __shellspan_native_line=$BUFFER
   __shellspan_native_pending=1
+  local __shellspan_redraw=${{__shellspan_native_redraw_before_accept:-0}}
+  __shellspan_native_redraw_before_accept=0
+  # The receiver has already displayed the source. Only protect output from
+  # other controlled jobs that were live during this edit; invalidating every
+  # accepted buffer would leave a second complete source copy in scrollback.
+  if (( __shellspan_redraw )); then zle -I; fi
   zle accept-line
 }}
 __shellspan_native_checkpoint() {{
   __shellspan_emit A "$BUFFER"
 }}
 zle -N __shellspan_native_checkpoint
+__shellspan_native_frame_checkpoint() {{
+  __shellspan_emit M "$1" "$BUFFER"
+}}
+__shellspan_native_receive() {{
+  __shellspan_native_redraw_before_accept=0
+  local __shellspan_slot
+  if zmodload zsh/parameter; then
+    for __shellspan_slot in "${{(@k)jobstates}}"; do
+      if [[ ${{jobtexts[$__shellspan_slot]}} == "( job-"* ]]; then
+        case ${{jobstates[$__shellspan_slot]}} in
+          running:*|suspended:*) __shellspan_native_redraw_before_accept=1; break ;;
+        esac
+      fi
+    done
+  fi
+  __shellspan_emit A "$BUFFER"
+  [[ -z "$BUFFER" ]] || return
+  local __shellspan_descriptor __shellspan_encoded __shellspan_decoded __shellspan_count
+  local -F 6 __shellspan_deadline=$(( EPOCHREALTIME + 2.0 )) __shellspan_remaining
+  if ! read -r -s -k 65 -t 2 __shellspan_descriptor; then
+    __shellspan_native_frame_checkpoint ''
+    return
+  fi
+  if [[ ${{#__shellspan_descriptor}} != 65 || ${{__shellspan_descriptor[1]}} != e || ${{__shellspan_descriptor[2,-1]}} == *[!0-9a-f]* ]]; then
+    __shellspan_native_frame_checkpoint ''
+    return
+  fi
+  __shellspan_count=$((16#${{__shellspan_descriptor[2,5]}}))
+  __shellspan_remaining=$(( __shellspan_deadline - EPOCHREALTIME ))
+  if (( __shellspan_count < 4 || __shellspan_count > 36864 || __shellspan_count % 4 || __shellspan_remaining <= 0 )) || ! read -r -s -k "$__shellspan_count" -t "$__shellspan_remaining" __shellspan_encoded; then
+    __shellspan_native_frame_checkpoint "$__shellspan_descriptor"
+    return
+  fi
+  builtin printf -v __shellspan_decoded '%b' "$__shellspan_encoded"
+  # Native invalidation preserves asynchronous output before the one native
+  # buffer replacement. No source is accepted or evaluated by this widget.
+  zle -I
+  BUFFER=$__shellspan_decoded
+  CURSOR=${{#BUFFER}}
+  __shellspan_native_frame_checkpoint "$__shellspan_descriptor"
+}}
+zle -N __shellspan_native_receive
+__shellspan_private_receive() {{
+  __shellspan_private_descriptor=
+  [[ -z "$BUFFER" ]] || {{ __shellspan_emit M '' "$BUFFER"; return; }}
+  __shellspan_emit A "$BUFFER"
+  local __shellspan_byte __shellspan_data= __shellspan_index
+  local -F 6 __shellspan_deadline=$(( EPOCHREALTIME + 2.0 )) __shellspan_remaining
+  for __shellspan_index in {{1..65}}; do
+    __shellspan_remaining=$(( __shellspan_deadline - EPOCHREALTIME ))
+    if (( __shellspan_remaining <= 0 )) || ! read -r -s -k 1 -t "$__shellspan_remaining" __shellspan_byte || [[ $__shellspan_byte == $'\x03' ]]; then
+      __shellspan_emit M '' "$BUFFER"
+      return
+    fi
+    __shellspan_data+=$__shellspan_byte
+  done
+  if [[ -z "$BUFFER" && ${{__shellspan_data[1]}} == [ps] && ${{__shellspan_data[2,-1]}} != *[!0-9a-f]* ]]; then
+    __shellspan_private_descriptor=$__shellspan_data
+  fi
+  __shellspan_emit M "$__shellspan_private_descriptor" "$BUFFER"
+}}
+zle -N __shellspan_private_receive
+__shellspan_private_commit() {{
+  local __shellspan_descriptor=$__shellspan_private_descriptor
+  # Consume before any action: no later Enter/widget can repeat this request.
+  __shellspan_private_descriptor=
+  [[ -z "$BUFFER" && ${{#__shellspan_descriptor}} == 65 ]] || return
+  local __shellspan_handle="job-${{__shellspan_descriptor[2,33]}}"
+  local __shellspan_action=poll __shellspan_status
+  [[ ${{__shellspan_descriptor[1]}} == s ]] && __shellspan_action=stop
+  __shellspan_emit S "__shellspan_job_control $__shellspan_handle $__shellspan_action" "$PWD"
+  __shellspan_command_active=1
+  if __shellspan_job_control "$__shellspan_handle" "$__shellspan_action"; then
+    __shellspan_status=0
+  else
+    __shellspan_status=$?
+  fi
+  __shellspan_emit E "$__shellspan_status" "$PWD"
+  __shellspan_command_active=0
+  __shellspan_emit P "$PWD"
+  __shellspan_publish_native_capabilities
+  __shellspan_emit Q
+}}
+zle -N __shellspan_private_commit
+__shellspan_private_line_finish() {{ __shellspan_private_descriptor=; }}
+autoload -Uz add-zle-hook-widget
+add-zle-hook-widget line-finish __shellspan_private_line_finish
 __shellspan_discard_native() {{
+  __shellspan_private_descriptor=
+  __shellspan_native_redraw_before_accept=0
+  __shellspan_job_release_marker_zsh
   BUFFER=
   CURSOR=0
   __shellspan_native_line=
@@ -1213,6 +1661,8 @@ fn powershell_bootstrap(pipe_name: &str, shell: TerminalShellKind) -> String {
       }}
     }}
     $script:NativeEditorTransaction = $false
+    $script:PrivateDescriptor=$null
+    Remove-ShellSpanNativeMarker
     $ExitCode = if ($PreviousSuccess) {{ 0 }} else {{ if (($global:LASTEXITCODE -is [int]) -and ($global:LASTEXITCODE -ne 0)) {{ $global:LASTEXITCODE }} else {{ 1 }} }}
     if ($script:CommandActive) {{
       Send-ShellSpanControl @('E',[string]$ExitCode,(Get-Location).ProviderPath)
@@ -1230,9 +1680,17 @@ fn powershell_bootstrap(pipe_name: &str, shell: TerminalShellKind) -> String {
     $NativeReady = $script:ConsoleSignalReady -and (Install-ShellSpanNativeInput)
     Send-ShellSpanControl @('I',$(if ($NativeReady) {{ '1' }} else {{ '0' }}))
     Send-ShellSpanControl @('H',$(if ($NativeReady) {{ '1' }} else {{ '0' }}))
+    Send-ShellSpanControl @('V',$(if ($NativeReady) {{ '1' }} else {{ '0' }}))
     Send-ShellSpanControl @('K',$(if ($NativeReady -and (Test-ShellSpanNativeJobs)) {{ '1' }} else {{ '0' }}))
     Send-ShellSpanControl @('Q')
     return $Rendered
+  }}
+  function Add-ShellSpanNativeEditorData {{
+    param([int]$Position,[string]$Payload)
+    $PreviousRedraw=$script:NativePromptRedraw
+    $script:NativePromptRedraw=$true
+    try {{ [Microsoft.PowerShell.PSConsoleReadLine]::Replace($Position,0,$Payload) }}
+    finally {{ $script:NativePromptRedraw=$PreviousRedraw }}
   }}
   function Start-ShellSpanCommand {{
     param([string]$Line)
@@ -1276,7 +1734,7 @@ fn powershell_bootstrap(pipe_name: &str, shell: TerminalShellKind) -> String {
     $ParseErrors = $null
     $Ast = [System.Management.Automation.Language.Parser]::ParseInput($Line,[ref]$Tokens,[ref]$ParseErrors)
     $Background = $Ast.Find({{ param($Node) $Node -is [System.Management.Automation.Language.PipelineAst] -and $Node.PSObject.Properties['Background'] -and $Node.Background }},$true)
-    if ($ParseErrors.Count -gt 0 -or $null -ne $Background) {{
+    if ($ParseErrors.Count -gt 0 -or $null -ne $Background -or -not (Install-ShellSpanNativeMarker $Line $Ast)) {{
       $Reason = if ($null -ne $Background) {{ 'TERMINAL_BACKGROUND_UNSUPPORTED' }} else {{ 'TERMINAL_INPUT_UNSUPPORTED' }}
       $PreviousRedraw=$script:NativePromptRedraw
       $script:NativePromptRedraw=$true
@@ -1294,6 +1752,9 @@ fn powershell_bootstrap(pipe_name: &str, shell: TerminalShellKind) -> String {
   }}
   function Install-ShellSpanNativeInput {{
     try {{
+      $EditorOptions=PSReadLine\Get-PSReadLineOption
+      if ($EditorOptions.GetType().Assembly -ne [Microsoft.PowerShell.PSConsoleReadLine].Assembly) {{ return $false }}
+      if ($script:ShellKind -eq 'windowsPowerShell' -and (Microsoft.PowerShell.Core\Get-Module -Name PSReadLine).Version -lt [version]'2.4.5') {{ return $false }}
       if ($null -eq [ShellSpanConsoleSignals].GetMethod('ReadEditorData')) {{ throw 'Native editor data receiver unavailable' }}
       $null = Set-PSReadLineKeyHandler -ErrorAction Stop -Chord 'Ctrl+x,n' -ScriptBlock {{ [Microsoft.PowerShell.PSConsoleReadLine]::Insert("`n") }}
       $null = Set-PSReadLineKeyHandler -ErrorAction Stop -Chord 'Ctrl+x,t' -ScriptBlock {{ [Microsoft.PowerShell.PSConsoleReadLine]::Insert("`t") }}
@@ -1304,7 +1765,6 @@ fn powershell_bootstrap(pipe_name: &str, shell: TerminalShellKind) -> String {
         if ([string]::IsNullOrEmpty($Line)) {{
           & $__shellspanModule {{ $script:NativeEditorTransaction = $true }}
         }}
-        & $__shellspanModule {{ Sync-ShellSpanNativeEditor }}
         [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$Line,[ref]$Cursor)
         & $__shellspanModule {{ param($Buffer) Send-ShellSpanControl @('A',$Buffer) }} $Line
       }}
@@ -1333,19 +1793,15 @@ fn powershell_bootstrap(pipe_name: &str, shell: TerminalShellKind) -> String {
         & $__shellspanModule {{ Sync-ShellSpanNativeEditor }}
         # Insert(string) in PSReadLine 2.4 normalizes CRLF. Replace is the
         # public native insertion API that preserves the approved bytes.
-        & $__shellspanModule {{
-          param($Position,[string]$Payload)
-          $PreviousRedraw=$script:NativePromptRedraw
-          $script:NativePromptRedraw=$true
-          try {{ [Microsoft.PowerShell.PSConsoleReadLine]::Replace($Position,0,$Payload) }}
-          finally {{ $script:NativePromptRedraw=$PreviousRedraw }}
-        }} $Cursor $Data
+        & $__shellspanModule {{ param($Position,[string]$Payload) Add-ShellSpanNativeEditorData $Position $Payload }} $Cursor $Data
         [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$Line,[ref]$Cursor)
         & $__shellspanModule {{ param($Buffer) Send-ShellSpanControl @('A',$Buffer) }} $Line
       }}
       # A late data fence is inert even if its receiver has already aborted.
       # No encoded batch ever carries an Enter or an accept-line chord.
       $null = Set-PSReadLineKeyHandler -ErrorAction Stop -Chord 'Ctrl+x,Ctrl+f' -ScriptBlock {{ }}
+      $null = Set-PSReadLineKeyHandler -ErrorAction Stop -Chord 'Ctrl+x,Ctrl+r' -ScriptBlock {{ & $__shellspanModule {{ Receive-ShellSpanPrivateControl }} }}
+      $null = Set-PSReadLineKeyHandler -ErrorAction Stop -Chord 'Ctrl+x,Ctrl+k' -ScriptBlock {{ & $__shellspanModule {{ Complete-ShellSpanPrivateControl }} }}
       $null = Set-PSReadLineKeyHandler -ErrorAction Stop -Chord 'Ctrl+x,Ctrl+e' -ScriptBlock {{
         param($Key,$Arg)
         & $__shellspanModule {{ param($PressedKey,$Argument) Invoke-ShellSpanNativeSubmit $PressedKey $Argument }} $Key $Arg
@@ -1442,6 +1898,16 @@ fn read_control_events(
             .ok_or("TERMINAL_NATIVE_CHECKPOINT_INVALID_MODE")?,
             "A" => TerminalIntegrationControlEvent::NativeCheckpoint {
                 buffer: required_field(reader, "native checkpoint buffer")?,
+            },
+            "V" => event_from_fields(&[
+                kind.clone(),
+                required_field(reader, "private control mode")?,
+            ])?
+            .ok_or("TERMINAL_PRIVATE_CONTROL_EMPTY_EVENT")?,
+            "W" => TerminalIntegrationControlEvent::NativePrivateReady,
+            "M" => TerminalIntegrationControlEvent::NativePrivateCheckpoint {
+                descriptor: required_field(reader, "private descriptor")?,
+                buffer: required_field(reader, "private descriptor buffer")?,
             },
             "K" => event_from_fields(&[kind.clone(), required_field(reader, "native job mode")?])?
                 .ok_or("TERMINAL_JOB_EMPTY_EVENT")?,

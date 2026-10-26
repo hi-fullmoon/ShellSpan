@@ -1,0 +1,2 @@
+# Preserve the upstream binaries, signed scripts and content-addressed cache bytes.
+PSReadLine/2.4.5/** -text

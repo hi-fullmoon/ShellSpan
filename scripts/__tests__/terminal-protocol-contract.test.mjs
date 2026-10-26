@@ -49,11 +49,19 @@ describe('terminal execution Phase 0 protocol contract', () => {
       expect(editor(value), ajv.errorsText(editor.errors)).toBe(true);
     }
     for (const value of [['H', '2'], ['L', '0', ''], ['L', '1', 'not empty'], ['L', '1'], ['A'], ['A', 'a\0b'], ['A', 'x'.repeat(32769)], ['A', 'buffer', 'extra']]) expect(editor(value)).toBe(false);
+    for (const value of [['V', '0'], ['V', '1'], ['W'], ['M', '', 'user draft'], ...['b', 'e', 'p', 's'].map(action => ['M', `${action}${'a'.repeat(64)}`, "literal '\"\n\r\t"])]) {
+      expect(editor(value), ajv.errorsText(editor.errors)).toBe(true);
+    }
+    for (const value of [['V', '2'], ['V', 1], ['M', `x${'a'.repeat(64)}`, ''], ['M', `e${'a'.repeat(63)}`, ''], ['M', '', 'a\0b'], ['M', '', 'x'.repeat(32769)], ['M', '', '', 'extra']]) expect(editor(value)).toBe(false);
     const handle = `job-${'a'.repeat(32)}`;
     for (const value of [['K', '1'], ['B', handle, 'running', '-'], ['B', handle, 'stopped', '-'], ['B', handle, 'settled', '7'], ['F', handle, '-1']]) expect(job(value), ajv.errorsText(job.errors)).toBe(true);
     for (const value of [['B', '123', 'running', '-'], ['B', handle, 'running', '0'], ['B', handle, 'madeUp', '-'], ['F', handle, 'zero']]) expect(job(value)).toBe(false);
     const publicFrames = new Ajv2020({ strict: true }).compile(schema);
     expect(publicFrames([['A', 'buffer']])).toBe(false);
+    expect(publicFrames([['V', '1']])).toBe(false);
+    expect(editor(['W', 'extra'])).toBe(false);
+    expect(publicFrames([['W']])).toBe(false);
+    expect(publicFrames([['M', `e${'a'.repeat(64)}`, 'source']])).toBe(false);
     const engine = await readFile(path.join(repositoryRoot, 'src-tauri/src/agent_runtime/native/terminal_execute.rs'), 'utf8');
     expect(engine).toContain('wait_native_checkpoint');
     expect(engine).toContain('require_native_input_recovery');

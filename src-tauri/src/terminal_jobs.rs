@@ -41,26 +41,31 @@ pub(crate) struct NativeShellJob {
     pub launch_confirmed: bool,
 }
 
-pub(crate) fn submission(source: &str, handle: &str) -> Result<String, String> {
-    crate::agent_runtime::validate_visible_command_input(source)?;
-    validate_handle(handle)?;
-    let quoted = shlex::try_quote(source).map_err(|_| "TERMINAL_JOB_INVALID_SOURCE")?;
-    let trap = format!("__shellspan_job_status=$?; {{ builtin printf '%s\\n' \"$__shellspan_job_status\" >\"${{__shellspan_control_path}}.job.{handle}.pending\" && command /bin/mv -- \"${{__shellspan_control_path}}.job.{handle}.pending\" \"${{__shellspan_control_path}}.job.{handle}\"; }} 2>/dev/null");
-    let trap = shlex::try_quote(&trap).map_err(|_| "TERMINAL_JOB_INVALID_TRAP")?;
-    let line = format!("__shellspan_job_validate {handle} {quoted} && {{ ( : {handle}; trap {trap} EXIT; trap 'exit 143' TERM; __shellspan_job_restore; if __shellspan_job_return_status \"$__shellspan_native_status\"; then builtin eval -- \"$__shellspan_native_source\"; else builtin eval -- \"$__shellspan_native_source\"; fi ) & __shellspan_job_register {handle}; }}");
-    if line.len() > 32_768 {
-        return Err("TERMINAL_INPUT_UNSUPPORTED: job submission exceeds 32768 bytes".into());
-    }
-    Ok(line)
-}
-
 pub(crate) fn shell_submission(
     source: &str,
     handle: &str,
     shell: TerminalShellKind,
 ) -> Result<String, String> {
-    if matches!(shell, TerminalShellKind::Bash | TerminalShellKind::Zsh) {
-        return submission(source, handle);
+    if matches!(shell, TerminalShellKind::Zsh | TerminalShellKind::Bash) {
+        crate::agent_runtime::validate_visible_command_input(source)?;
+        validate_handle(handle)?;
+        // The marker installs private completion handling in the native child.
+        // Bash must parse the source through eval after the marker returns:
+        // parsing the entire asynchronous group first loses aliases defined
+        // and used on successive source lines. eval stays at child top level.
+        let body = if shell == TerminalShellKind::Bash {
+            format!(
+                "builtin eval -- {}",
+                shlex::try_quote(source).map_err(|_| "TERMINAL_INPUT_UNSUPPORTED")?
+            )
+        } else {
+            source.to_owned()
+        };
+        let line = format!("( {handle};\n{body}\n) &");
+        if line.len() > 32_768 {
+            return Err("TERMINAL_INPUT_UNSUPPORTED: job submission exceeds 32768 bytes".into());
+        }
+        return Ok(line);
     }
     crate::agent_runtime::validate_visible_command_input(source)?;
     validate_handle(handle)?;
@@ -70,13 +75,8 @@ pub(crate) fn shell_submission(
     ) {
         return Err("TERMINAL_BACKGROUND_UNSUPPORTED".into());
     }
-    // PowerShell's native single-quoted literal: only apostrophes are doubled;
-    // all LF/CR/Tab bytes and dollar/backtick characters remain literal.
-    let literal = format!("'{}'", source.replace('\'', "''"));
-    // Argument expressions run in the actual caller scope before entering the
-    // integration module. StrictMode is scope state, not a copyable PSVariable.
-    let probe = format!("$(& {{ $__shellspan_saved_errors_{id} = $Error.Clone(); try {{ $null = $__shellspan_strict_probe_{id}; $false }} catch {{ $Error.Clear(); $Error.AddRange($__shellspan_saved_errors_{id}); $true }} }})", id = &handle[4..]);
-    let line=format!("& $__shellspanModule {{ param($h,$s,$strict,$functions,$language) & ${{function:Invoke-ShellSpanNativeJobStart}} $h $s $strict $functions $language }} '{handle}' {literal} {probe} @(& {{ $d=$ExecutionContext.SessionState.PSVariable.Get('global:PSDefaultParameterValues'); if ($null -eq $d -or -not ($d.Options -band [System.Management.Automation.ScopedItemOptions]::AllScope)) {{ $local:PSDefaultParameterValues=@{{}}; Microsoft.PowerShell.Management\\Get-ChildItem Function: }} }}) $ExecutionContext.SessionState.LanguageMode");
+    let literal = source.replace('\'', "''");
+    let line = format!("{handle} '{literal}'");
     if line.len() > 32768 {
         return Err("TERMINAL_INPUT_UNSUPPORTED: native job submission exceeds 32768 bytes".into());
     }
@@ -125,6 +125,80 @@ pub(crate) fn observation_time() -> u64 {
 // cwd, environment, aliases, functions and options. The parent alone controls
 // its job table; a completed slot/PID is never used as a signal credential.
 pub(crate) const POSIX_HELPERS: &str = r#"
+__shellspan_job_initialize_bash() {
+  if (( ! BASH_SUBSHELL )); then return 2; fi
+  if [[ ${__shellspan_job_armed_handle-} != "$1" ]]; then exit 2; fi
+  if [[ -o errexit && $__shellspan_native_status != 0 ]]; then exit 2; fi
+  __shellspan_job_owned_handle=$1
+  __shellspan_job_restore
+  trap '__shellspan_job_status=$?; { builtin printf "%s\n" "$__shellspan_job_status" >"${__shellspan_control_path}.job.${__shellspan_job_owned_handle}.pending" && command /bin/mv -- "${__shellspan_control_path}.job.${__shellspan_job_owned_handle}.pending" "${__shellspan_control_path}.job.${__shellspan_job_owned_handle}"; } 2>/dev/null' EXIT
+  trap 'exit 143' TERM
+  return "$__shellspan_native_status"
+}
+__shellspan_job_context_zsh() {
+  # A nonzero marker return is an executable command under these options.
+  # Refuse this launch context instead of changing options or skipping source.
+  if (( __shellspan_native_status != 0 )) && [[ -o errexit || -o errreturn ]]; then return 2; fi
+  return 0
+}
+__shellspan_job_initialize_zsh() {
+  # A manually accepted or stale marker must never reach the following source.
+  if (( ! ZSH_SUBSHELL )); then return 2; fi
+  if [[ ${__shellspan_job_armed_handle-} != "$1" ]]; then exit 2; fi
+  if ! __shellspan_job_context_zsh; then
+    builtin printf '%s\n' 'TERMINAL_BACKGROUND_UNSUPPORTED: Zsh errexit/errreturn with a nonzero prior status; no source was executed' >&2
+    exit 2
+  fi
+  typeset -g __shellspan_job_owned_handle=$1
+  local __shellspan_old_posix_traps=$options[posixtraps]
+  # Zsh normally treats an EXIT trap installed in a function as a function-exit
+  # trap. Scope the installation to the child shell, then restore the option
+  # before any user source runs.
+  setopt posixtraps
+  trap '__shellspan_job_status=$?; { builtin printf "%s\n" "$__shellspan_job_status" >"${__shellspan_control_path}.job.${__shellspan_job_owned_handle}.pending" && command /bin/mv -- "${__shellspan_control_path}.job.${__shellspan_job_owned_handle}.pending" "${__shellspan_control_path}.job.${__shellspan_job_owned_handle}"; } 2>/dev/null' EXIT
+  [[ $__shellspan_old_posix_traps == off ]] && unsetopt posixtraps
+  trap 'exit 143' TERM
+  return "$__shellspan_native_status"
+}
+__shellspan_job_marker_zsh() {
+  local -a __shellspan_words
+  __shellspan_words=(${(z)1})
+  [[ ${__shellspan_words[1]-} == '(' && ${__shellspan_words[3]-} == ';' && ${__shellspan_words[-2]-} == ')' && ${__shellspan_words[-1]-} == '&' ]] || return 1
+  local __shellspan_marker=${__shellspan_words[2]-}
+  [[ $__shellspan_marker == job-* && ${#__shellspan_marker} == 36 && ${__shellspan_marker#job-} != *[!0-9a-fA-F]* ]] || return 1
+  REPLY=$__shellspan_marker
+}
+__shellspan_job_arm_zsh() {
+  local __shellspan_marker=$1
+  if (( ${+functions[$__shellspan_marker]} || ${+aliases[$__shellspan_marker]} )); then return 2; fi
+  functions[$__shellspan_marker]="__shellspan_job_initialize_zsh $__shellspan_marker"
+  __shellspan_job_marker_definition=${functions[$__shellspan_marker]}
+  __shellspan_job_armed_handle=$__shellspan_marker
+}
+__shellspan_job_release_marker_zsh() {
+  local __shellspan_marker=${__shellspan_job_armed_handle-}
+  if [[ -n $__shellspan_marker && ${functions[$__shellspan_marker]-} == "${__shellspan_job_marker_definition-}" ]]; then
+    unfunction -- "$__shellspan_marker"
+  fi
+  __shellspan_job_armed_handle=
+  __shellspan_job_marker_definition=
+}
+__shellspan_job_confirm_zsh() {
+  local __shellspan_handle=$1 __shellspan_slot
+  for __shellspan_slot in "${(@k)jobtexts}"; do
+    if [[ ${jobtexts[$__shellspan_slot]} == "( $__shellspan_handle;"* ]]; then
+      __shellspan_job_register "$__shellspan_handle"
+      return
+    fi
+  done
+  if [[ -f ${__shellspan_control_path}.job.$__shellspan_handle ]]; then
+    __shellspan_job_register "$__shellspan_handle"
+    __shellspan_job_completion "$__shellspan_handle"
+    __shellspan_emit B "$__shellspan_handle" settled -
+  else
+    __shellspan_emit B "$__shellspan_handle" rejected -
+  fi
+}
 __shellspan_job_validate() {
   local __shellspan_handle=$1
   __shellspan_job_aliases=0
@@ -160,7 +234,7 @@ __shellspan_job_observe_zsh() {
   zmodload zsh/parameter || return 2
   for __shellspan_slot in "${(@k)jobstates}"; do
     __shellspan_text=${jobtexts[$__shellspan_slot]}
-    if [[ $__shellspan_text == "( : $__shellspan_handle;"* ]]; then
+    if [[ $__shellspan_text == "( $__shellspan_handle;"* ]]; then
       __shellspan_native_state=${jobstates[$__shellspan_slot]}
       case $__shellspan_native_state in
         running:*) __shellspan_active=1 ;;
@@ -175,7 +249,8 @@ __shellspan_job_control() {
   local __shellspan_handle=$1 __shellspan_action=$2 __shellspan_active= __shellspan_stopped= __shellspan_status __shellspan_pid= __shellspan_candidate
   # The literal opaque handle occurs in the native asynchronous command text.
   # Shell jobspec resolution is atomic inside kill; no PID/slot reuse window.
-  local __shellspan_spec="%( : $__shellspan_handle;"
+  local __shellspan_spec="%( $__shellspan_handle;"
+  [[ -n ${ZSH_VERSION-} ]] && __shellspan_spec="%( $__shellspan_handle;"
   local __shellspan_status_path="${__shellspan_control_path}.job.$__shellspan_handle"
   __shellspan_job_completion "$__shellspan_handle"
   if [[ -n ${ZSH_VERSION-} ]]; then
@@ -225,14 +300,54 @@ __shellspan_job_control() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_zsh_errexit_rejects_nonzero_marker_status_before_source() {
+        let directory = tempfile::tempdir().unwrap();
+        let handle = "job-0123456789abcdef0123456789abcdef";
+        let control = directory.path().join("control");
+        let script = format!("{}\n__shellspan_control_path={}\n__shellspan_native_status=23\n__shellspan_job_arm_zsh {}\nsetopt errexit\n{}\nwait \"$!\"\n", POSIX_HELPERS, shlex::try_quote(control.to_str().unwrap()).unwrap(), handle, shell_submission("printf 'SOURCE-RAN:%s\\n' \"$?\"", handle, TerminalShellKind::Zsh).unwrap());
+        let output = std::process::Command::new("/bin/zsh")
+            .args(["-f", "-c", &script])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("TERMINAL_BACKGROUND_UNSUPPORTED"));
+        assert!(!directory
+            .path()
+            .join(format!("control.job.{handle}"))
+            .exists());
+    }
+    #[cfg(unix)]
+    #[test]
+    fn posix_job_source_is_accepted_by_the_native_parser() {
+        let source = "while [[ ! -f '/tmp/owned path' ]]; do sleep 0.01; done; exit 7";
+        for (shell, path) in [
+            (TerminalShellKind::Bash, "/bin/bash"),
+            (TerminalShellKind::Zsh, "/bin/zsh"),
+        ] {
+            let line =
+                shell_submission(source, "job-0123456789abcdef0123456789abcdef", shell).unwrap();
+            let output = std::process::Command::new(path)
+                .args(["-n", "-c", &line])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "native syntax error: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
     #[test]
     fn powershell_job_contract_preserves_literals_and_uses_native_objects() {
         let source = "Write-Output 'quoted $value `backtick'\nWrite-Output \"CR\rTab\t\"";
         let handle = "job-0123456789abcdef0123456789abcdef";
         let line = shell_submission(source, handle, TerminalShellKind::PowerShell7).unwrap();
-        assert!(line.contains("'quoted $value `backtick'".replace('\'', "''").as_str()));
+        assert_eq!(line, format!("{handle} '{}'", source.replace('\'', "''")));
         assert!(line.contains("\n") && line.contains("\r") && line.contains("\t"));
-        assert!(line.contains("Invoke-ShellSpanNativeJobStart"));
+        assert!(!line.contains("Invoke-ShellSpanNativeJobStart"));
         assert!(
             control_submission(handle, TerminalShellKind::WindowsPowerShell, true)
                 .unwrap()

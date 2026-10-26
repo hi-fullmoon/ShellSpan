@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import os
+import re
 from pathlib import Path
 import shlex
 import subprocess
@@ -23,9 +24,10 @@ signal.signal(signal.SIGTERM, terminate)
 
 request = json.loads(Path(sys.argv[1]).read_text())
 source = request['acceptedLine']
-assert len(source.encode()) <= 32768 and source.startswith('__shellspan_job_validate ')
+assert len(source.encode()) <= 32768
 assert all((ord(char) >= 32 and not 127 <= ord(char) <= 159) or char in '\n\t\r' for char in source)
 assert request['shell'] in ('bash', 'zsh')
+assert re.fullmatch(r'\( job-[0-9a-f]{32};\n[\s\S]*\n\) &', source)
 columns, rows, prefix = request['columns'], request['rows'], request['prefixColumns']
 assert 32 <= columns <= 1000 and 10 <= rows <= 300 and 0 <= prefix < columns
 remote = request.get('ssh', False)

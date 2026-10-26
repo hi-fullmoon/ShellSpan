@@ -216,6 +216,78 @@ function Test-ShellSpanNativeJobs {
     return $true
   } catch { return $false }
 }
+function Remove-ShellSpanNativeMarker {
+  if ($script:NativeMarkerName) {
+    $Current=Microsoft.PowerShell.Management\Get-Item -LiteralPath ('Function:\global:'+$script:NativeMarkerName) -ErrorAction Ignore
+    if ($null-ne $Current -and $Current.ScriptBlock-eq $script:NativeMarkerBody) {
+      Microsoft.PowerShell.Management\Remove-Item -LiteralPath ('Function:\global:'+$script:NativeMarkerName)
+    }
+  }
+  $script:NativeMarkerName=$null
+  $script:NativeMarkerBody=$null
+}
+function Install-ShellSpanNativeMarker {
+  param([string]$Line,[System.Management.Automation.Language.ScriptBlockAst]$Ast)
+  if ($Line -cnotmatch '^job-[0-9a-f]{32} ') { return $true }
+  if ($Ast.EndBlock.Statements.Count-ne 1 -or $Ast.EndBlock.Statements[0]-isnot [System.Management.Automation.Language.PipelineAst]) { return $false }
+  $Pipeline=$Ast.EndBlock.Statements[0]
+  if ($Pipeline.PipelineElements.Count-ne 1 -or $Pipeline.PipelineElements[0]-isnot [System.Management.Automation.Language.CommandAst]) { return $false }
+  $Command=$Pipeline.PipelineElements[0]
+  if ($Command.CommandElements.Count-ne 2 -or $Command.CommandElements[1]-isnot [System.Management.Automation.Language.StringConstantExpressionAst] -or $Command.CommandElements[1].StringConstantType-ne [System.Management.Automation.Language.StringConstantType]::SingleQuoted) { return $false }
+  $Handle=$Command.GetCommandName()
+  if ($Handle -cnotmatch '^job-[0-9a-f]{32}$') { return $false }
+  $Source=$Command.CommandElements[1].Value
+  $Tokens=$null; $Errors=$null
+  $null=[System.Management.Automation.Language.Parser]::ParseInput($Source,[ref]$Tokens,[ref]$Errors)
+  if ($Errors.Count-ne 0 -or (Microsoft.PowerShell.Core\Get-Command $Handle -ErrorAction Ignore)) { return $false }
+  # An unbound global function runs in the caller's native scope. Probe inherited
+  # StrictMode there, before entering the integration module, as in the original
+  # submission. The native parser decodes the literal; it is never invoked here.
+  $Body=@'
+param([string]$__shellspanSource)
+$__shellspan_saved_errors = $Error.Clone()
+try { $null=${__shellspan_strict_probe___HANDLE__}; $__shellspanStrict=$false }
+catch { $Error.Clear(); $Error.AddRange($__shellspan_saved_errors); $__shellspanStrict=$true }
+$__shellspanFunctions=@(& { $d=$ExecutionContext.SessionState.PSVariable.Get('global:PSDefaultParameterValues'); if($null-eq $d -or -not ($d.Options-band [System.Management.Automation.ScopedItemOptions]::AllScope)) { $local:PSDefaultParameterValues=@{}; Microsoft.PowerShell.Management\Get-ChildItem Function: } })
+& $__shellspanModule { param($s,$strict,$functions,$language) & ${function:Invoke-ShellSpanNativeJobStart} '__HANDLE__' $s $strict $functions $language } $__shellspanSource $__shellspanStrict $__shellspanFunctions $ExecutionContext.SessionState.LanguageMode
+'@
+  $script:NativeMarkerBody=[scriptblock]::Create($Body.Replace('__HANDLE__',$Handle))
+  Microsoft.PowerShell.Management\Set-Item -LiteralPath ('Function:\global:'+$Handle) -Value $script:NativeMarkerBody
+  $script:NativeMarkerName=$Handle
+  return $true
+}
+function Receive-ShellSpanPrivateControl {
+  $script:PrivateDescriptor=$null
+  $Line=$null; $Cursor=0
+  [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$Line,[ref]$Cursor)
+  if (-not [string]::IsNullOrEmpty($Line)) { Send-ShellSpanControl @('M','',$Line); return }
+  Send-ShellSpanControl @('W')
+  try {
+    $Data=[ShellSpanConsoleSignals]::ReadEditorData()
+    if ($Data-cmatch '^[ps][0-9a-f]{64}$') { $script:PrivateDescriptor=$Data }
+  } catch { $script:PrivateDescriptor=$null }
+  Send-ShellSpanControl @('M',[string]$script:PrivateDescriptor,$Line)
+}
+function Complete-ShellSpanPrivateControl {
+  $Descriptor=$script:PrivateDescriptor
+  $script:PrivateDescriptor=$null
+  $script:NativeEditorTransaction=$false
+  $Line=$null; $Cursor=0
+  [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$Line,[ref]$Cursor)
+  if (-not [string]::IsNullOrEmpty($Line) -or $Descriptor-cnotmatch '^[ps][0-9a-f]{64}$') { return }
+  $Handle='job-'+$Descriptor.Substring(1,32)
+  $Action=if($Descriptor[0]-ceq 's'){'stop'}else{'poll'}
+  $Submission="& `$__shellspanModule { param(`$h,`$a) & `${function:Invoke-ShellSpanNativeJobControl} `$h `$a } '$Handle' '$Action'"
+  Send-ShellSpanControl @('S',$Submission,(Get-Location).ProviderPath)
+  & ${function:Invoke-ShellSpanNativeJobControl} $Handle $Action
+  Send-ShellSpanControl @('E','0',(Get-Location).ProviderPath)
+  Send-ShellSpanControl @('P',(Get-Location).ProviderPath)
+  Send-ShellSpanControl @('I','1')
+  Send-ShellSpanControl @('H','1')
+  Send-ShellSpanControl @('V','1')
+  Send-ShellSpanControl @('K',$(if(Test-ShellSpanNativeJobs){'1'}else{'0'}))
+  Send-ShellSpanControl @('Q')
+}
 function Invoke-ShellSpanNativeJobStart {
   param([string]$Handle, [string]$Source, [object]$StrictModeActive=$null, [object[]]$CallerFunctions, [object]$CallerLanguageMode=$null)
   if($CallerLanguageMode-isnot [System.Management.Automation.PSLanguageMode] -or $CallerLanguageMode-ne [System.Management.Automation.PSLanguageMode]::FullLanguage){
@@ -296,7 +368,7 @@ function Invoke-ShellSpanNativeJobStart {
   }
   # Standard module commands resolve through native module loading in the new
   # runspace. Copy only plain user functions, never a module's Definition text.
-  $Functions = @($CallerFunctions | Microsoft.PowerShell.Core\Where-Object { -not $_.ModuleName -and $_.Name -notin @('prompt','PSConsoleHostReadLine') -and $_.Name -notlike '__shellspan*' } | Microsoft.PowerShell.Core\ForEach-Object {
+  $Functions = @($CallerFunctions | Microsoft.PowerShell.Core\Where-Object { -not $_.ModuleName -and $_.Name -ne $Handle -and $_.Name -notin @('prompt','PSConsoleHostReadLine') -and $_.Name -notlike '__shellspan*' } | Microsoft.PowerShell.Core\ForEach-Object {
     @{ Name=$_.Name; Definition=$_.Definition; Options=$_.Options }
   })
   $Aliases = @(Microsoft.PowerShell.Utility\Get-Alias | Microsoft.PowerShell.Core\ForEach-Object { @{ Name=$_.Name; Definition=$_.Definition; Options=$_.Options } })

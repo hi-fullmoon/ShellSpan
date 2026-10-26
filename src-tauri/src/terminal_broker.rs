@@ -467,6 +467,8 @@ struct TerminalCommandData {
     command_started: bool,
     native_empty_confirmed: bool,
     native_checkpoint: Option<(String, bool)>,
+    native_private_checkpoint: Option<(String, String, bool)>,
+    native_private_ready: Option<bool>,
     native_read_only_probe: bool,
     native_probe_refresh: bool,
     native_probe_waiting_prompt: bool,
@@ -518,6 +520,8 @@ impl TerminalCommandOperation {
                 command_started: false,
                 native_empty_confirmed: false,
                 native_checkpoint: None,
+                native_private_checkpoint: None,
+                native_private_ready: None,
                 native_read_only_probe: false,
                 native_probe_refresh: false,
                 native_probe_waiting_prompt: false,
@@ -744,6 +748,74 @@ impl TerminalCommandOperation {
                 .native_checkpoint
                 .as_ref()
                 .is_some_and(|(_, acknowledged)| *acknowledged))
+    }
+
+    pub(crate) fn expect_native_private_checkpoint(&self, descriptor: &str) -> Result<(), String> {
+        self.expect_native_data_checkpoint(descriptor, "")
+    }
+
+    pub(crate) fn native_private_checkpoint_confirmed(&self) -> Result<bool, String> {
+        Ok(self
+            .lock()?
+            .native_private_checkpoint
+            .as_ref()
+            .is_some_and(|(_, _, confirmed)| *confirmed))
+    }
+
+    pub(crate) fn expect_native_private_ready(&self) -> Result<(), String> {
+        let mut data = self.lock()?;
+        if data.state != TerminalCommandState::Submitted || !data.native_empty_confirmed {
+            return Err("TERMINAL_PRIVATE_CONTROL_NOT_READY".into());
+        }
+        data.native_private_ready = Some(false);
+        Ok(())
+    }
+
+    pub(crate) fn wait_native_private_ready(&self, timeout: Duration) -> Result<bool, String> {
+        let data = self.lock()?;
+        let (data, _) = self
+            .changed
+            .wait_timeout_while(data, timeout, |data| {
+                data.state == TerminalCommandState::Submitted
+                    && data.native_private_ready == Some(false)
+            })
+            .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE")?;
+        Ok(
+            data.state == TerminalCommandState::Submitted
+                && data.native_private_ready == Some(true),
+        )
+    }
+
+    pub(crate) fn expect_native_data_checkpoint(
+        &self,
+        descriptor: &str,
+        buffer: &str,
+    ) -> Result<(), String> {
+        let mut data = self.lock()?;
+        if data.state != TerminalCommandState::Submitted || !data.native_empty_confirmed {
+            return Err("TERMINAL_PRIVATE_CONTROL_NOT_READY".into());
+        }
+        data.native_private_checkpoint = Some((descriptor.to_string(), buffer.to_string(), false));
+        Ok(())
+    }
+
+    pub(crate) fn wait_native_private_checkpoint(&self, timeout: Duration) -> Result<bool, String> {
+        let data = self.lock()?;
+        let (data, _) = self
+            .changed
+            .wait_timeout_while(data, timeout, |data| {
+                data.state == TerminalCommandState::Submitted
+                    && data
+                        .native_private_checkpoint
+                        .as_ref()
+                        .is_some_and(|(_, _, ready)| !ready)
+            })
+            .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE")?;
+        Ok(data.state == TerminalCommandState::Submitted
+            && data
+                .native_private_checkpoint
+                .as_ref()
+                .is_some_and(|(_, _, ready)| *ready))
     }
 
     pub(crate) fn native_empty_confirmed(&self) -> Result<bool, String> {
@@ -1013,6 +1085,7 @@ struct SessionRecord {
     prompt_ready: bool,
     native_input: bool,
     native_checkpoints: bool,
+    native_private_control: bool,
     native_recovery_required: bool,
     native_clear_pending: Option<(String, Option<String>, u64, bool)>,
     native_clear_sequence: u64,
@@ -1068,6 +1141,7 @@ impl SessionRecord {
             prompt_ready: false,
             native_input: false,
             native_checkpoints: false,
+            native_private_control: false,
             native_recovery_required: false,
             native_clear_pending: None,
             native_clear_sequence: 0,
@@ -1143,7 +1217,14 @@ impl SessionRecord {
                     "exitStatus",
                     "currentDirectory",
                 ];
-                if self.native_input && self.native_checkpoints && !self.native_recovery_required {
+                if self.native_input
+                    && self.native_checkpoints
+                    && !self.native_recovery_required
+                    && (!matches!(
+                        self.integration_shell,
+                        Some(TerminalShellKind::Bash | TerminalShellKind::Zsh)
+                    ) || self.native_private_control)
+                {
                     capabilities.push("nativeScriptInput");
                 }
                 if self.native_jobs && self.native_checkpoints && !self.native_recovery_required {
@@ -1807,6 +1888,10 @@ impl TerminalSessionBroker {
         Ok(record.integration_state == TerminalIntegrationState::Ready
             && record.native_input
             && record.native_checkpoints
+            && (!matches!(
+                record.integration_shell,
+                Some(TerminalShellKind::Bash | TerminalShellKind::Zsh)
+            ) || record.native_private_control)
             && !record.native_recovery_required)
     }
 
@@ -1968,6 +2053,7 @@ impl TerminalSessionBroker {
         record.prompt_ready = false;
         record.native_input = false;
         record.native_checkpoints = false;
+        record.native_private_control = false;
         record.native_jobs = false;
         record.native_comments = false;
         advance_integration_state_revision(record)?;
@@ -2191,6 +2277,72 @@ impl TerminalSessionBroker {
         }
         let through_output_sequence = record.next_output_sequence.saturating_sub(1);
         match event {
+            TerminalIntegrationControlEvent::NativePrivateControl { enabled } => {
+                require_ready_integration(record)?;
+                if !record.prompt_started
+                    || record.prompt_ready
+                    || (enabled && !record.native_input)
+                {
+                    return Err("TERMINAL_PRIVATE_CONTROL_OUT_OF_ORDER".into());
+                }
+                record.native_private_control = enabled;
+            }
+            TerminalIntegrationControlEvent::NativePrivateReady => {
+                require_ready_integration(record)?;
+                if let Some(command) = &record.active_command {
+                    let mut data = command.lock()?;
+                    if data.integration_id == record.integration_id
+                        && data.state == TerminalCommandState::Submitted
+                        && data.native_empty_confirmed
+                        && record.native_private_control
+                        && data.native_private_ready == Some(false)
+                    {
+                        data.native_private_ready = Some(true);
+                        drop(data);
+                        command.notify();
+                    }
+                }
+            }
+            TerminalIntegrationControlEvent::NativePrivateCheckpoint { descriptor, buffer } => {
+                require_ready_integration(record)?;
+                if let Some(command) = &record.active_command {
+                    let mut data = command.lock()?;
+                    if data.integration_id != record.integration_id {
+                        return Err("TERMINAL_INTEGRATION_IDENTITY_MISMATCH".into());
+                    }
+                    if data.state == TerminalCommandState::Submitted {
+                        if let Some((expected, expected_buffer, acknowledged)) =
+                            data.native_private_checkpoint.take()
+                        {
+                            // A descriptor from a cancelled/retired operation
+                            // must not acknowledge or quarantine its successor.
+                            if descriptor.len() != 65 || descriptor.get(33..) != expected.get(33..)
+                            {
+                                data.native_private_checkpoint =
+                                    Some((expected, expected_buffer, acknowledged));
+                                return Ok(());
+                            }
+                            let matched = descriptor == expected
+                                && buffer == expected_buffer
+                                && data.native_empty_confirmed
+                                && record.native_private_control;
+                            data.native_private_checkpoint =
+                                Some((expected, expected_buffer, matched));
+                            if !matched {
+                                data.state = TerminalCommandState::Uncertain;
+                                data.revision = next_command_revision(data.revision)?;
+                                data.input_rejection =
+                                    Some("TERMINAL_PRIVATE_CONTROL_MISMATCH".into());
+                                record.native_recovery_required = true;
+                                record.command_input_pending = true;
+                                record.native_input = false;
+                            }
+                            drop(data);
+                            command.notify();
+                        }
+                    }
+                }
+            }
             TerminalIntegrationControlEvent::NativeCleared { sequence, buffer } => {
                 require_ready_integration(record)?;
                 if let Some((operation, integration, expected, queued)) =
@@ -2280,7 +2432,7 @@ impl TerminalSessionBroker {
                 if !record.prompt_started {
                     return Err("TERMINAL_JOB_CAPABILITY_OUTSIDE_PROMPT".into());
                 }
-                record.native_jobs = enabled;
+                record.native_jobs = enabled && record.native_private_control;
             }
             TerminalIntegrationControlEvent::Job { .. } => unreachable!("job event handled above"),
             TerminalIntegrationControlEvent::Ready { shell } => {
@@ -2342,6 +2494,7 @@ impl TerminalSessionBroker {
                 record.prompt_ready = false;
                 record.native_input = false;
                 record.native_checkpoints = false;
+                record.native_private_control = false;
                 record.native_jobs = false;
                 record.native_comments = false;
             }
@@ -2375,7 +2528,9 @@ impl TerminalSessionBroker {
                 }
                 if let Some(command) = &record.active_command {
                     let mut data = command.lock()?;
-                    if data.command_line != command_line
+                    let matches_prepared_submission = job_submission_event.is_some()
+                        && data.submitted_command_line.as_deref() == Some(command_line.as_str());
+                    if (data.command_line != command_line && !matches_prepared_submission)
                         || !matches!(
                             data.state,
                             TerminalCommandState::Submitted
@@ -2821,6 +2976,52 @@ impl TerminalSessionBroker {
         validate_prepared_shell_job(record, &prepared, operation)
     }
 
+    pub(crate) fn private_shell_job_control_descriptor(
+        &self,
+        transport: &str,
+        operation: &str,
+        source: &str,
+        line: &str,
+    ) -> Result<Option<String>, String> {
+        let mut state = self.lock()?;
+        let prepared = state
+            .prepared_job_commands
+            .get(operation)
+            .ok_or("TERMINAL_JOB_SUBMISSION_UNREGISTERED")?
+            .clone();
+        if prepared.source != source || prepared.line != line {
+            return Err("TERMINAL_NATIVE_SUBMISSION_MISMATCH".into());
+        }
+        let attachment = current_attachment(&state, transport)?.clone();
+        let record = current_record_mut(&mut state, transport, &attachment)?;
+        validate_prepared_shell_job(record, &prepared, operation)?;
+        if operation == prepared.job.operation_id {
+            return Ok(None);
+        }
+        if !record.native_private_control {
+            return Err(
+                "TERMINAL_BACKGROUND_UNSUPPORTED: native private job control unavailable".into(),
+            );
+        }
+        let stop = line
+            == crate::terminal_jobs::control_submission(
+                &prepared.job.process_handle,
+                prepared.job.shell,
+                true,
+            )?;
+        let suffix = prepared
+            .job
+            .process_handle
+            .strip_prefix("job-")
+            .ok_or("TERMINAL_JOB_INVALID_HANDLE")?;
+        Ok(Some(format!(
+            "{}{}{}",
+            if stop { 's' } else { 'p' },
+            suffix,
+            Uuid::new_v4().simple()
+        )))
+    }
+
     pub(crate) fn discard_shell_job_submission(&self, operation: &str) -> Result<(), String> {
         self.lock()?.prepared_job_commands.remove(operation);
         Ok(())
@@ -2954,6 +3155,23 @@ impl TerminalSessionBroker {
             })
             .cloned()
             .collect())
+    }
+
+    pub(crate) fn has_active_shell_jobs(&self, transport: &str) -> Result<bool, String> {
+        let state = self.lock()?;
+        let attachment = current_attachment(&state, transport)?;
+        let record = state
+            .sessions
+            .get(&attachment.terminal_session_id)
+            .ok_or("TERMINAL_BROKER_SESSION_NOT_FOUND")?;
+        Ok(state.jobs.values().any(|job| {
+            job.terminal_session_id == attachment.terminal_session_id
+                && job.terminal_generation == attachment.terminal_generation
+                && job.integration_id == record.integration_id
+                && !job.control_lost
+                && job.native_active != Some(false)
+                && !matches!(job.state.as_str(), "exited" | "rejected")
+        }))
     }
 
     pub(crate) fn record_shell_job_cleanup(

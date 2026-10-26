@@ -298,7 +298,7 @@ Submission requires a ready integration, the Agent lease, no active command,
 and a command identifier registered before any input bytes are written. The
 broker sends the frozen source or its deterministic native submission envelope
 through the common input path. Ordinary commands remain wrapper-free. Bash
-complete scripts use the stage-two envelope below; it is evaluated at top level
+complete scripts use the native eval line below; it is evaluated at top level
 in the existing shell. No `/bin/sh -c`, child shell, temporary script, or
 synthetic `[Agent]` echo is added. Normal input echo remains raw output.
 
@@ -306,28 +306,31 @@ synthetic `[Agent]` echo is added. Normal input echo remains raw output.
 
 `commandLine` in the tool result is the approved original source (at most 8192
 UTF-8 bytes). Optional `submittedCommandLine` records the actual Bash editor
-line, including the fixed native envelope. Command-start lifecycle MUST match
-that exact envelope, not the original source. Without an envelope, lifecycle
+line, including native quoting. Command-start lifecycle MUST match
+that exact line, not the original source. Without an envelope, lifecycle
 MUST match the source as before. The broker independently recomputes and checks
 the envelope before input; it never weakens exact-line matching.
 
-Bash 4+ Readline inserts a visible envelope of the following fixed form. `Q`
+Bash 4.1+ Readline inserts a visible native command of the following fixed form. `Q`
 is the complete source encoded as one argument by the mature `shlex` quoter;
 physical newlines remain physical newlines, and decoding that argument yields
 the approved source byte for byte:
 
 ```bash
-__shellspan_validate_native Q && { __shellspan_return_status "$__shellspan_native_status"; builtin eval -- "$__shellspan_native_source"; }
+(exit "$?"); builtin eval -- Q
 ```
 
 The native validator uses the pinned current Bash executable in no-exec mode,
-carrying parsing options. It stores the unchanged source only after success
-without diagnostics. `eval` then runs at top level in the same shell, with the
-preceding exit status restored. It introduces no function scope or subprocess
-for source execution. This is one interruptible evaluation unit: accepting a
+carrying parsing options. The private receiver validates the original source
+and the actual eval line before acknowledging its Readline buffer. `eval`
+then runs at top level in the same shell. A status-only native subshell restores
+the preceding status and foreground interrupt settlement; it contains no user
+source. Source execution introduces no function scope or child shell.
+This is one interruptible evaluation unit: accepting a
 raw multiline Readline buffer instead can continue later physical lines after
-SIGINT. Readline displays the complete actual envelope, not an opaque source
-reference alone. The real raw stream is the only display/capture source.
+SIGINT. Readline displays the actual native eval line and quoted script;
+private validation/status helper code is absent. The real raw stream is the
+only display/capture source.
 
 ZLE accepts the original complete buffer. It validates syntax with a pinned
 executable matching the integrated Zsh, carrying parsing options and disabling
@@ -358,7 +361,8 @@ between prompt-start/end), `C\0{0|1}\0` (Zsh native comment option),
 the same registered integration/generation identity checks as lifecycle.
 `nativeScriptInput` is the corresponding optional public capability. Each
 control field is bounded to 32768 UTF-8 bytes and the control buffer to 131072;
-the generated envelope and encoded editor input (65536 bytes maximum) are
+the generated envelope and encoded editor input (65536 bytes, or 131072 for
+the bounded Bash source-plus-display frame) are
 checked before any lease/input. Nothing is truncated or resubmitted.
 
 Current native input additionally requires `H\0{0|1}\0` advertising the owned
@@ -589,14 +593,152 @@ replays a visible or interactive operation.
 
 ## Native shell jobs
 
-Supported Bash 4+/Zsh `background=true` requests freeze the approved source,
+Zsh launches display a native asynchronous group containing a short opaque
+`job-*` marker followed by the unchanged approved source. The one-use marker
+returns before source execution; source runs at subshell top level. Completion
+notifications therefore use native source text without the private validation,
+trap or management implementation. Existing ZLE rendering and coloring remain
+in effect; the frontend does not filter terminal output.
+
+Zsh native script input and management require the private-widget capability
+`V` (`0` or `1`), advertised with I/H at each prompt. Long/multiline source and
+short foreground commands while current-generation controlled jobs may still
+produce output use one bounded ZLE data receiver. Its 65-byte descriptor is
+`e`, four hexadecimal digits for the encoded length, 28 random hexadecimal
+digits, and a fresh 32-digit nonce. The ASCII `\\xHH` payload is decoded with
+native `printf %b` into a variable, never eval/source/execute. After the bounded
+read, native `zle -I` preserves asynchronous output before one BUFFER replacement;
+M must match both the fresh descriptor and the entire approved buffer before
+one native accept. Syntax coloring and prediction configuration remain intact.
+Accept does not unconditionally invalidate the displayed buffer again. The
+receiver snapshots running/suspended controlled groups from native jobstates
+and jobtexts before this edit; only an edit with another such job retains the
+protective accept-time invalidation. Its flag is consumed once and cleared on
+prompt/discard. A first background launch and multiline foreground input with
+no other jobs therefore display their source once. With another live job,
+native invalidation can leave a source redraw fragment while preserving
+interleaved output; it does not execute the source again. Native notifications
+remain unchanged.
+Ordinary short input without potentially active controlled jobs retains its
+existing path. Old Zsh integrations without V advertise neither native script
+input nor usable native job control; data is refused before typing.
+
+Poll/stop require an empty native
+editor checkpoint, then transfer a fixed 65-byte descriptor (action, opaque
+handle suffix, fresh operation nonce) to a bounded native receiver. `M` returns
+that descriptor and the observed editor buffer over the integration channel.
+Only the matching current operation may dispatch the one-use commit widget;
+the normal Enter path discards pending descriptors. Management keeps canonical
+S/E/P/Q audit events without placing private commands into the editor/history.
+Lease, generation, integration and frozen job bindings are revalidated before
+each write under the existing submission/cancellation mutex. Missing or
+mismatched confirmation retains uncertainty and never permits automatic replay.
+The source receiver reads for at most two seconds; readiness and M share the
+original bounded confirmation deadline. A late M cannot release recovery or
+acknowledge another operation. Source-may-be-enqueued remains monotonic.
+
+Before accepting a Zsh job, the native parser checks both the complete envelope
+and the original source independently under the captured shell options. Only
+the fixed broker-built prefix/suffix are removed; source grammar is parsed by
+the native executable. This prevents invalid source from closing the outer
+group. With errexit/errreturn and a nonzero prior status, launch explicitly
+returns TERMINAL_BACKGROUND_UNSUPPORTED before source execution, without
+changing those options or disabling management of existing jobs.
+The Zsh evidence alone does not establish Bash or Windows display acceptance.
+Windows PSReadLine coloring remains unchanged and requires native validation.
+
+### Bash and PowerShell display extension (2026-10-26)
+
+Bash jobs use a short marker/native asynchronous group containing
+`builtin eval -- Q`, where shlex quotes the original source as one literal
+argument. The receiver independently validates the original source and the
+actual group before acknowledgement. The marker installs completion handling,
+restores the parent's `expand_aliases` setting in the asynchronous child and
+returns before eval runs at child top level. This preserves aliases defined
+and used on successive source lines, as well as the preceding exit status;
+source state changes remain confined to the child. Zsh keeps its native group.
+With errexit and a nonzero preceding status, Bash refuses the launch before
+source execution. Discard clears an armed marker; registration requires a real
+native jobspec or completion receipt.
+
+Bash long/multiline input uses a bounded private receiver, followed by native
+Readline accept-line after a non-accepting frame checkpoint. The source
+receiver reads each fixed-byte field in a synchronous command-substitution
+child. That child stays in the foreground process group, opens its own
+temporary /dev/tty descriptor and uses only builtins, creating no children.
+The parent's background job exits therefore do not deliver SIGCHLD to the
+reader while older Bash applies tcsetattr(TCSADRAIN). Child exit closes the
+descriptor on success, timeout or interruption; no detached reader remains.
+Each read consumes its original absolute timeout budget, without input
+replay, deadline extension, parent trap replacement or changed parent job control.
+The final accept does not perform bind-x cached line clearing, preserving
+interleaved background output. Bash 4.1's descriptor allocation is required.
+The receiver sets READLINE_POINT in bytes on Bash 4.x and in characters on
+Bash 5.x+, without changing the caller's locale or native multibyte editing.
+The Bash 4.x byte count comes from the validated frame lengths: subtract the
+original-source field from the total encoded field and divide by four for
+the ASCII `\\xHH` encoding. It does not assign LC_ALL, including when the
+caller has made LC_ALL read-only.
+Syntax refusal refreshes prompt readiness without rebinding the executing
+bind-x command; Bash 4.x keeps that command string in place during its callback.
+Binding refresh waits for the next real PROMPT_COMMAND cycle.
+Its 65-byte descriptor is `b`, five hexadecimal encoded-length digits, four
+hexadecimal original-source-length digits, four hexadecimal row digits, four
+hexadecimal column digits, 15 random hexadecimal digits and a fresh 32-digit
+nonce. Lengths count ASCII `\\xHH` bytes. The optional original
+source precedes the displayed foreground or background eval line; both are decoded by native printf,
+never evaluated by the receiver. Rust uses shlex to encode/decode the one eval
+argument. Original source remains capped at 8192 UTF-8 bytes, actual line at
+32768 bytes; only Bash's private wire budget becomes 131072 bytes to carry both
+bounded fields. M must match the descriptor and entire actual editor line.
+Before Readline's oversized-buffer viewport clear, the native receiver scrolls
+the existing screen into terminal history. It emits cursor/newline controls,
+never copies command text or output. This preserves earlier background lines
+in narrow terminals without filtering, replaying or dropping raw output.
+
+PowerShell jobs display `job-<opaque handle> Q`, where Q is the native
+single-quoted original source (apostrophes are doubled). Before
+acceptance, the native PowerShell parser validates source and complete line;
+a temporary global marker passes the native StringConstantExpressionAst value
+as data to the existing
+console worker implementation. It probes inherited StrictMode and captures
+caller functions/language before entering the module. Source is not invoked in
+the marker. The prompt removes only the installed function with matching
+identity. Its real worker/state/Job Object restrictions remain in force.
+
+Bash and PowerShell poll/stop reuse the one-use private descriptor protocol.
+PowerShell transports its descriptor through the existing bounded Base64
+console receiver and fence, keeping PSReadLine coloring and prediction intact.
+For Bash and PowerShell, receiver readiness is the separate `W\0` record,
+expected only during that operation's private-control handshake. Their private
+receiver chord is Ctrl-X/Ctrl-R, avoiding Ctrl-O being consumed by macOS
+VDISCARD with Bash 4.x's older Readline tty settings. An ordinary
+buffer-only A cannot confirm it. Matching M is still required before commit;
+W alone grants no execution or management authority. Zsh keeps its existing
+readiness path.
+S/E/P/Q remain canonical audit records; management source is not typed into the
+editor or history. Each platform's real-terminal evidence is recorded separately.
+
+Windows PowerShell sessions prepend an application-private PSReadLine 2.4.5
+module directory before normal startup/profile loading. The embedded upstream
+files and license are installed atomically in a content-addressed application
+cache and checked byte-for-byte before reuse. An application initializer keeps
+the older no-prediction default before profiles set explicit preferences.
+No system module or profile is edited. PowerShell 7's module selection is kept.
+Native input refuses a mismatched option-provider/editor assembly or an older
+Windows PowerShell editor, rather than silently using another execution surface.
+
+Supported Bash 4.1+/Zsh `background=true` requests freeze the approved source,
 target, Agent/task, terminal session/generation, integration identity and launch
-operation. The broker independently builds and checks the visible native
-submission using `shlex`. Source/envelope/editor limits remain 8192/32768/65536
+operation. The broker independently builds and checks the frozen submission;
+Bash literal quoting uses `shlex`, while Zsh additionally performs the native
+source/envelope checks above. Source/envelope/editor limits remain 8192/32768/65536
 bytes. The native asynchronous subshell inherits cwd, environment, aliases,
 functions and options; its state changes do not modify the parent shell.
-Monitor mode and native editor support are mandatory. PowerShell native jobs
-remain unsupported pending native acceptance, with no implicit Direct fallback.
+Monitor mode and native editor support are mandatory. PowerShell retains its
+existing platform rollout and independent native/desktop acceptance boundaries;
+this Zsh revision does not change or establish those gates. No implicit Direct
+fallback is permitted.
 
 Opaque `job-*` handles are not PIDs or job slots. A fixed native command prefix
 binds the handle to its job; source/output mentioning another handle grants no

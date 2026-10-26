@@ -134,7 +134,18 @@
                     Some(&job.submitted_command_line),
                     |_| Ok(()),
                 )
-                .unwrap();
+                .unwrap_or_else(|error| {
+                    let bytes = display.lock().unwrap().clone();
+                    if let Ok(prefix) = std::env::var("SHELLSPAN_JOB_DISPLAY_TRACE") {
+                        fs::write(format!("{prefix}.failed.raw.bin"), &bytes).unwrap();
+                        fs::write(format!("{prefix}.failed.cells.txt"), rendered_cells(&bytes))
+                            .unwrap();
+                    }
+                    panic!(
+                        "{error}; native display tail={:?}",
+                        String::from_utf8_lossy(&bytes[bytes.len().saturating_sub(2400)..])
+                    );
+                });
             let result = registry
                 .wait(sessions, transport, &operation, Duration::from_secs(10))
                 .unwrap();
@@ -199,6 +210,7 @@
             }
             let id = format!("windows-job-control-{}", Uuid::new_v4());
             let line = broker.prepare_shell_job_control(&fresh, &id, stop).unwrap();
+            let start = display.lock().unwrap().len();
             let operation = registry
                 .start_native_submission(
                     sessions,
@@ -227,6 +239,16 @@
                 .unwrap();
             assert_eq!(result.exit_code, Some(0), "{result:?}");
             wait_for_prompt(broker, transport);
+            let bytes = display.lock().unwrap().clone();
+            assert!(
+                !String::from_utf8_lossy(&bytes[start..])
+                    .contains("Invoke-ShellSpanNativeJobControl"),
+                "private control source leaked into native output"
+            );
+            assert!(
+                !rendered_cells(&bytes).contains("Invoke-ShellSpanNativeJobControl"),
+                "private control source reached native cells"
+            );
             broker
                 .shell_job(
                     &job.process_handle,
@@ -287,7 +309,28 @@
         assert_eq!(run(&format!("$tokens=[IO.File]::ReadAllText('{}') | ConvertFrom-Json; $env:SS_PS_OUTPUT=$tokens[0]; $env:SS_PS_ERROR=$tokens[1]; $env:SS_NATIVE_TOKEN=$tokens[2]; $env:SS_NATIVE_ERR=$tokens[3]; $env:SS_CONSOLE_TOKEN=$tokens[4]",quote(&tokens_path))).exit_code,Some(0));
         let source=format!("[IO.File]::WriteAllText('{}', ((ss_job_alias 'alias-kept')+(ss_job_fn)+$global:SS_JOB_VALUE+(Get-Location).ProviderPath)); Write-Output $env:SS_PS_OUTPUT; Write-Error $env:SS_PS_ERROR -ErrorAction Continue; cmd.exe /d /c 'echo %SS_NATIVE_TOKEN% & echo %SS_NATIVE_ERR% 1>&2'; [Console]::WriteLine($env:SS_CONSOLE_TOKEN); [Console]::Write($env:SS_CONSOLE_TOKEN+'-control'+[char]27+'[31m'+$env:SS_CONSOLE_TOKEN+'-ansi'+[char]27+\"[0m`n\"); [Console]::Write('INITIAL-LINE'+[char]13+$env:SS_CONSOLE_TOKEN+'-cr'+[char]9+$env:SS_CONSOLE_TOKEN+\"-tab`n\"); [IO.File]::WriteAllText('{}','ready'); while (-not [IO.File]::Exists('{}')) {{ Start-Sleep -Milliseconds 10 }}; [IO.File]::AppendAllText('{}',\"once`n\"); exit 7",quote(&inherited),quote(&body_ready),quote(&completion_gate),quote(&effect));
         let start = display.lock().unwrap().len();
+        let display_start = display.lock().unwrap().len();
         let first = launch(&source);
+        let accepted_display = display.lock().unwrap().clone();
+        let accepted_cells = rendered_cells(&accepted_display);
+        for private in [
+            "Invoke-ShellSpanNativeJobStart",
+            "__shellspan_saved_errors",
+            "__shellspan_strict_probe",
+        ] {
+            assert!(
+                !String::from_utf8_lossy(&accepted_display[display_start..]).contains(private),
+                "private launch code leaked: {private}"
+            );
+            assert!(
+                !accepted_cells.contains(private),
+                "private launch code reached native cells: {private}"
+            );
+        }
+        assert!(
+            accepted_cells.contains(&first.process_handle),
+            "native job marker is absent"
+        );
         let early_deadline = Instant::now() + Duration::from_secs(10);
         loop {
             let bytes = display.lock().unwrap();
@@ -394,20 +437,20 @@
         let maximum_cwd = fixture.path().join("maximum-cwd.txt");
         let maximum_gate = fixture.path().join("maximum-completion");
         let head = "$Dense = @'\n";
-        let tail = format!("\n'@\r\n$CR='left\rright'\r\n[IO.File]::WriteAllText('{}',$Dense+$CR)\r\n[IO.File]::WriteAllText('{}',(Get-Location).ProviderPath)\r\n[Console]::WriteLine($env:SS_CONSOLE_TOKEN+'-maximum-carrier')\r\nwhile (-not [IO.File]::Exists('{}')) {{ Start-Sleep -Milliseconds 15 }}", quote(&maximum_file), quote(&maximum_cwd), quote(&maximum_gate));
+        let tail = format!("\n'@\r\n$CR='left\rright'\r\n[IO.File]::WriteAllText('{}',$Dense+$CR)\r\n[IO.File]::WriteAllText('{}',(Get-Location).ProviderPath)\r\n[Console]::WriteLine($env:SS_CONSOLE_TOKEN+'-maximum-carrier')\r\nwhile (-not [IO.File]::Exists('{}')) {{ Start-Sleep -Milliseconds 15 }}\n#{}", quote(&maximum_file), quote(&maximum_cwd), quote(&maximum_gate), "字😀".repeat(12));
         let fragment = "'😀字\t";
         // Choose a real UTF-8 boundary with the production carrier encoder;
         // no candidate is submitted while constructing the input stimulus.
-        let (maximum_source, maximum_text) = (0..10)
+        let (maximum_source, maximum_text) = (0..32)
             .find_map(|padding| {
-                let available = 8192 - head.len() - tail.len() - padding;
+                let available = 8192 - head.len() - tail.len() - padding * 2;
                 let text = format!(
                     "{}{}{}",
                     "x".repeat(padding),
                     fragment.repeat(available / fragment.len()),
                     "'".repeat(available % fragment.len())
                 );
-                let source = format!("{head}{text}{tail}");
+                let source = format!("{head}{text}{tail}{}", "x".repeat(padding));
                 assert_eq!(source.len(), 8192);
                 let line = crate::terminal_jobs::shell_submission(
                     &source,
@@ -420,7 +463,8 @@
                         &line, shell,
                     );
                 let first = batches.first().unwrap().1.len();
-                (first < 8192 && line[first..].chars().next().unwrap().len_utf8() > 8192 - first)
+                let limit = 8192;
+                (first < limit && line[first..].chars().next().unwrap().len_utf8() > limit - first)
                     .then_some((source, text))
             })
             .expect("maximum carrier must exercise a multi-byte UTF-8 batch boundary");
@@ -1059,6 +1103,16 @@
             !tail.exists(),
             "native external child survived native job cancellation"
         );
+        if let Ok(prefix) = std::env::var("SHELLSPAN_JOB_DISPLAY_TRACE") {
+            let bytes = display.lock().unwrap().clone();
+            fs::write(format!("{prefix}.raw.bin"), &bytes).unwrap();
+            fs::write(format!("{prefix}.cells.txt"), rendered_cells(&bytes)).unwrap();
+            fs::write(
+                format!("{prefix}.json"),
+                format!("{{\"columns\":{columns},\"rows\":30}}"),
+            )
+            .unwrap();
+        }
     }
 
     #[cfg(target_os = "windows")]
@@ -1492,6 +1546,7 @@
                 .unwrap()
                 .success());
         }
+        let bundled_powershell_modules = integration.bundled_powershell_modules.clone();
         let integration_id = integration.integration_id().to_string();
         broker
             .register_integration_channel(&transport_id, &integration_id, shell)
@@ -1525,6 +1580,7 @@
             move |event| {
                 let label = match &event {
                     TerminalIntegrationControlEvent::Ready { .. } => "R".to_string(),
+                    TerminalIntegrationControlEvent::NativePrivateReady => "W".to_string(),
                     TerminalIntegrationControlEvent::NativeCheckpoint { buffer } => {
                         let digest = <sha2::Sha256 as sha2::Digest>::digest(buffer.as_bytes());
                         format!("A:{}:{}", buffer.len(), hex::encode(digest))
@@ -1623,6 +1679,26 @@
                         "lifecycleTimings":&*lifecycle_timings.lock().unwrap(),
                     }))
                     .unwrap(),
+                )
+                .unwrap();
+            }
+            let editor_metadata = _history_fixture.path().join("native-editor.json");
+            let editor_metadata_literal = editor_metadata.to_string_lossy().replace('\'', "''");
+            let editor_probe = format!("& {{ $m=Microsoft.PowerShell.Core\\Get-Module -Name PSReadLine; $o=PSReadLine\\Get-PSReadLineOption; [IO.File]::WriteAllText('{editor_metadata_literal}',(Microsoft.PowerShell.Utility\\ConvertTo-Json -Compress -InputObject @{{version=$m.Version.ToString();path=$m.Path;prediction=[string]$o.PredictionSource}}),[Text.UTF8Encoding]::new($false)) }}");
+            let observed_editor =
+                execute_visible(&broker, &writer, &transport_id, shell, &editor_probe);
+            assert_eq!(observed_editor.exit_code, Some(0));
+            let editor: serde_json::Value =
+                serde_json::from_slice(&fs::read(&editor_metadata).unwrap()).unwrap();
+            if shell == TerminalShellKind::WindowsPowerShell {
+                assert_eq!(editor["version"], "2.4.5");
+                assert!(Path::new(editor["path"].as_str().unwrap())
+                    .starts_with(bundled_powershell_modules.as_ref().unwrap()));
+            }
+            if let Ok(prefix) = std::env::var("SHELLSPAN_JOB_DISPLAY_TRACE") {
+                fs::write(
+                    format!("{prefix}.editor.json"),
+                    serde_json::to_vec_pretty(&editor).unwrap(),
                 )
                 .unwrap();
             }

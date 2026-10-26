@@ -10,6 +10,25 @@
     }
 
     #[test]
+    fn bundled_powershell_editor_is_content_addressed_and_refuses_modified_cache() {
+        let directory = tempfile::tempdir().unwrap();
+        let first = prepare_bundled_powershell_module(directory.path()).unwrap();
+        assert_eq!(
+            first,
+            prepare_bundled_powershell_module(directory.path()).unwrap()
+        );
+        assert!(first.starts_with(directory.path()));
+        let module = first.join("PSReadLine/2.4.5/Microsoft.PowerShell.PSReadLine.dll");
+        let original = fs::read(&module).unwrap();
+        let mut changed = original;
+        changed[0] ^= 1;
+        fs::write(&module, changed).unwrap();
+        assert!(prepare_bundled_powershell_module(directory.path())
+            .unwrap_err()
+            .contains("integrity mismatch"));
+    }
+
+    #[test]
     fn local_bootstraps_use_app_temporary_storage_and_clean_up_only_their_own_directory() {
         let shell = if cfg!(windows) {
             TerminalShellKind::WindowsPowerShell
@@ -151,7 +170,7 @@
 
     #[test]
     fn native_input_control_records_are_framed_bounded_and_strict() {
-        let bytes = b"I\x001\0J\0printf one\nprintf two\0TERMINAL_INPUT_UNSUPPORTED\0";
+        let bytes = b"I\x001\0J\0printf one\nprintf two\0TERMINAL_INPUT_UNSUPPORTED\0W\0";
         let mut decoder = TerminalIntegrationStreamDecoder::default();
         let mut events = Vec::new();
         for byte in bytes {
@@ -165,7 +184,8 @@
                 TerminalIntegrationControlEvent::InputRejected {
                     command_line: "printf one\nprintf two".into(),
                     reason: "TERMINAL_INPUT_UNSUPPORTED".into()
-                }
+                },
+                TerminalIntegrationControlEvent::NativePrivateReady,
             ]
         );
         let mut local_events = Vec::new();
@@ -209,6 +229,12 @@
             vec!["L", "1", ""],
             vec!["A", "literal '\"\n\r\t"],
             vec!["K", "1"],
+            vec!["V", "1"],
+            vec![
+                "M",
+                "p0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "",
+            ],
             vec!["B", handle, "running", "-"],
             vec!["F", handle, "7"],
             vec!["B", handle, "settled", "7"],
@@ -230,6 +256,8 @@
         }
         for mut bytes in [
             b"H\x002\0".as_slice(),
+            b"V\x002\0".as_slice(),
+            b"M\0descriptor\0missing".as_slice(),
             b"L\x000\0\0".as_slice(),
             b"L\x001\0missing".as_slice(),
             b"A\0missing".as_slice(),
@@ -248,7 +276,7 @@
     }
 
     #[test]
-    fn bash_submission_quotes_one_unchanged_source_argument_and_keeps_physical_lines() {
+    fn bash_submission_uses_only_native_eval_with_one_unchanged_source_argument() {
         for source in [
             "printf 'a'\nprintf \"$HOME `literal`\"",
             "cat <<'EOF'\na\tb\rc\nEOF",
@@ -256,8 +284,8 @@
         ] {
             let submitted = bash_native_submission(source).unwrap();
             let words = shlex::split(&submitted).unwrap();
-            assert_eq!(words[0], "__shellspan_validate_native");
-            assert_eq!(words[1], source);
+            assert_eq!(words[..5], ["(exit", "$?);", "builtin", "eval", "--"]);
+            assert_eq!(words[5], source);
             assert_eq!(
                 submitted.matches('\n').count(),
                 source.matches('\n').count()
@@ -505,9 +533,17 @@
         use std::sync::{Arc, Mutex};
         use std::time::Instant;
 
+        let user_profile = (shell == TerminalShellKind::Zsh)
+            .then(|| std::env::var_os("SHELLSPAN_TEST_NATIVE_ZSH_USER_HOME"))
+            .flatten();
+        let initial_columns = if user_profile.is_some() && screen {
+            32
+        } else {
+            180
+        };
         let expected_native_input = shell == TerminalShellKind::Zsh
             || std::process::Command::new(shell_path)
-                .args(["-c", "(( BASH_VERSINFO[0] >= 4 ))"])
+                .args(["-c", "(( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 1) ))"])
                 .status()
                 .unwrap()
                 .success();
@@ -522,13 +558,13 @@
                 &transport_id,
                 None,
                 TerminalTransportKind::LocalPty,
-                TerminalGeometry::new(180, 30),
+                TerminalGeometry::new(initial_columns, 30),
             )
             .unwrap();
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows: 30,
-                cols: 180,
+                cols: u16::try_from(initial_columns).unwrap(),
                 pixel_width: 0,
                 pixel_height: 0,
             })
@@ -545,12 +581,29 @@
             .unwrap();
         let home = tempfile::tempdir().unwrap();
         let mut command = CommandBuilder::new(shell_path);
-        command.env("HOME", home.path());
+        command.env(
+            "HOME",
+            user_profile.as_deref().unwrap_or(home.path().as_os_str()),
+        );
         command.env("HISTFILE", home.path().join("history.txt"));
         command.env("TERM", "xterm-256color");
         command.env("LANG", "C.UTF-8");
         command.env("LC_ALL", "C.UTF-8");
         integration.configure_command(&mut command).unwrap();
+        if user_profile.is_some() {
+            // configure_command regenerates this owned bootstrap. Redirect
+            // history afterwards and before the first editable prompt.
+            let mut bootstrap = File::options()
+                .append(true)
+                .open(integration_root.join(".zshrc"))
+                .unwrap();
+            writeln!(
+                bootstrap,
+                "HISTFILE={}",
+                shell_single_quote(home.path().join("history.txt").to_str().unwrap())
+            )
+            .unwrap();
+        }
         let mut child = pair.slave.spawn_command(command).unwrap();
         drop(pair.slave);
 
@@ -590,11 +643,17 @@
         let output_broker = broker.clone();
         let output_transport = transport_id.clone();
         let output_thread = thread::spawn(move || {
+            let mut raw_trace = std::env::var("SHELLSPAN_JOB_DISPLAY_TRACE")
+                .ok()
+                .map(|prefix| File::create(format!("{prefix}.full.raw.bin")).unwrap());
             let mut buffer = [0_u8; 4096];
             loop {
                 match reader.read(&mut buffer) {
                     Ok(0) | Err(_) => break,
                     Ok(count) => {
+                        if let Some(trace) = raw_trace.as_mut() {
+                            trace.write_all(&buffer[..count]).unwrap();
+                        }
                         display_reader
                             .lock()
                             .unwrap()
@@ -616,9 +675,9 @@
         assert_eq!(
             ready.integration_event_sequence,
             if shell == TerminalShellKind::Zsh {
-                7
+                8
             } else {
-                6
+                7
             }
         );
         let mut expected_capabilities = vec![
@@ -633,219 +692,252 @@
             expected_capabilities.push("nativeJobControl");
         }
         assert_eq!(ready.integration_capabilities, expected_capabilities);
-        let descendant_fds = execute_visible(
+        let integration_root_text = integration_root.to_string_lossy().into_owned();
+        let typing_display_start;
+        // Keep the native cwd alive through all later parser/job checks.
+        let test_cwd = tempfile::tempdir().unwrap();
+        if user_profile.is_none() {
+            let descendant_fds = execute_visible(
             &broker,
             &writer,
             &transport_id,
             shell,
             "/bin/sh -c 'for f in /dev/fd/*; do if [ -p \"$f\" ]; then printf \"S\\000forged\\000/tmp\\000\" >\"$f\" 2>/dev/null; exit 9; fi; done; exit 0'",
         );
-        assert_eq!(
-            descendant_fds.exit_code,
-            Some(0),
-            "foreground child inherited the integration FIFO"
-        );
-        let environment = execute_visible(&broker, &writer, &transport_id, shell, "/usr/bin/env");
-        let integration_root_text = integration_root.to_string_lossy().into_owned();
-        for secret in [
-            integration_root_text.as_str(),
-            "__shellspan_control_path",
-            "SHELLSPAN_NATIVE_PARSER",
-            "shellspan-terminal-integration-",
-            integration_id.as_str(),
-        ] {
-            assert!(
-                !environment.combined_output.contains(secret),
-                "integration control detail leaked through child environment: {secret}"
+            assert_eq!(
+                descendant_fds.exit_code,
+                Some(0),
+                "foreground child inherited the integration FIFO"
             );
-        }
-        let diagnostic =
-            serde_json::to_string(&broker.snapshot(Some(&transport_id)).unwrap()).unwrap();
-        assert!(!diagnostic.contains(&integration_root_text));
-        execute_visible(&broker, &writer, &transport_id, shell, "PS1=''");
-        let empty_prompt = execute_visible(
-            &broker,
-            &writer,
-            &transport_id,
-            shell,
-            "printf empty-prompt-independent",
-        );
-        assert!(empty_prompt
-            .combined_output
-            .contains("empty-prompt-independent"));
-        execute_visible(
-            &broker,
-            &writer,
-            &transport_id,
-            shell,
-            "PS1=$'\\n\\033[35mcustom>\\033[0m '",
-        );
-        let prompt_independent = execute_visible(
-            &broker,
-            &writer,
-            &transport_id,
-            shell,
-            "printf prompt-independent",
-        );
-        assert!(prompt_independent
-            .combined_output
-            .contains("prompt-independent"));
-        let test_cwd = tempfile::tempdir().unwrap();
-        let quoted_cwd = shell_single_quote(test_cwd.path().to_str().unwrap());
-        let cd = execute_visible(
-            &broker,
-            &writer,
-            &transport_id,
-            shell,
-            &format!("cd {quoted_cwd}"),
-        );
-        assert_eq!(cd.exit_code, Some(0));
-        assert_eq!(cd.cwd.as_deref(), test_cwd.path().to_str());
+            let environment =
+                execute_visible(&broker, &writer, &transport_id, shell, "/usr/bin/env");
+            for secret in [
+                integration_root_text.as_str(),
+                "__shellspan_control_path",
+                "SHELLSPAN_NATIVE_PARSER",
+                "shellspan-terminal-integration-",
+                integration_id.as_str(),
+            ] {
+                assert!(
+                    !environment.combined_output.contains(secret),
+                    "integration control detail leaked through child environment: {secret}"
+                );
+            }
+            let diagnostic =
+                serde_json::to_string(&broker.snapshot(Some(&transport_id)).unwrap()).unwrap();
+            assert!(!diagnostic.contains(&integration_root_text));
+            execute_visible(&broker, &writer, &transport_id, shell, "PS1=''");
+            let empty_prompt = execute_visible(
+                &broker,
+                &writer,
+                &transport_id,
+                shell,
+                "printf empty-prompt-independent",
+            );
+            assert!(empty_prompt
+                .combined_output
+                .contains("empty-prompt-independent"));
+            execute_visible(
+                &broker,
+                &writer,
+                &transport_id,
+                shell,
+                "PS1=$'\\n\\033[35mcustom>\\033[0m '",
+            );
+            let prompt_independent = execute_visible(
+                &broker,
+                &writer,
+                &transport_id,
+                shell,
+                "printf prompt-independent",
+            );
+            assert!(prompt_independent
+                .combined_output
+                .contains("prompt-independent"));
+            let quoted_cwd = shell_single_quote(test_cwd.path().to_str().unwrap());
+            let cd = execute_visible(
+                &broker,
+                &writer,
+                &transport_id,
+                shell,
+                &format!("cd {quoted_cwd}"),
+            );
+            assert_eq!(cd.exit_code, Some(0));
+            assert_eq!(cd.cwd.as_deref(), test_cwd.path().to_str());
 
-        execute_visible(
-            &broker,
-            &writer,
-            &transport_id,
-            shell,
-            "export SHELLSPAN_PHASE3_VALUE='终端值'",
-        );
-        let environment = execute_visible(
-            &broker,
-            &writer,
-            &transport_id,
-            shell,
-            "printf '%s' \"$SHELLSPAN_PHASE3_VALUE\"",
-        );
-        assert!(environment.combined_output.contains("终端值"));
+            execute_visible(
+                &broker,
+                &writer,
+                &transport_id,
+                shell,
+                "export SHELLSPAN_PHASE3_VALUE='终端值'",
+            );
+            let environment = execute_visible(
+                &broker,
+                &writer,
+                &transport_id,
+                shell,
+                "printf '%s' \"$SHELLSPAN_PHASE3_VALUE\"",
+            );
+            assert!(environment.combined_output.contains("终端值"));
 
-        execute_visible(
-            &broker,
-            &writer,
-            &transport_id,
-            shell,
-            "alias ss_phase3_alias='printf alias-ok'",
-        );
-        let alias = execute_visible(&broker, &writer, &transport_id, shell, "ss_phase3_alias");
-        assert!(alias.combined_output.contains("alias-ok"));
-        execute_visible(
-            &broker,
-            &writer,
-            &transport_id,
-            shell,
-            "ss_phase3_function(){ printf function-ok; }",
-        );
-        let function =
-            execute_visible(&broker, &writer, &transport_id, shell, "ss_phase3_function");
-        assert!(function.combined_output.contains("function-ok"));
+            execute_visible(
+                &broker,
+                &writer,
+                &transport_id,
+                shell,
+                "alias ss_phase3_alias='printf alias-ok'",
+            );
+            let alias = execute_visible(&broker, &writer, &transport_id, shell, "ss_phase3_alias");
+            assert!(alias.combined_output.contains("alias-ok"));
+            execute_visible(
+                &broker,
+                &writer,
+                &transport_id,
+                shell,
+                "ss_phase3_function(){ printf function-ok; }",
+            );
+            let function =
+                execute_visible(&broker, &writer, &transport_id, shell, "ss_phase3_function");
+            assert!(function.combined_output.contains("function-ok"));
 
-        let option_command = match shell {
-            TerminalShellKind::Bash => "set -o noclobber",
-            TerminalShellKind::Zsh => "setopt noclobber",
-            _ => unreachable!(),
-        };
-        execute_visible(&broker, &writer, &transport_id, shell, option_command);
-        let option_check = match shell {
-            TerminalShellKind::Bash => "[[ -o noclobber ]] && printf option-ok",
-            TerminalShellKind::Zsh => "[[ -o noclobber ]] && printf option-ok",
-            _ => unreachable!(),
-        };
-        let option = execute_visible(&broker, &writer, &transport_id, shell, option_check);
-        assert!(option.combined_output.contains("option-ok"));
+            let option_command = match shell {
+                TerminalShellKind::Bash => "set -o noclobber",
+                TerminalShellKind::Zsh => "setopt noclobber",
+                _ => unreachable!(),
+            };
+            execute_visible(&broker, &writer, &transport_id, shell, option_command);
+            let option_check = match shell {
+                TerminalShellKind::Bash => "[[ -o noclobber ]] && printf option-ok",
+                TerminalShellKind::Zsh => "[[ -o noclobber ]] && printf option-ok",
+                _ => unreachable!(),
+            };
+            let option = execute_visible(&broker, &writer, &transport_id, shell, option_check);
+            assert!(option.combined_output.contains("option-ok"));
 
-        let rich = execute_visible(
-            &broker,
-            &writer,
-            &transport_id,
-            shell,
-            "printf '\\033[31m终端\\033[0m'; false",
-        );
-        assert_eq!(rich.command_line, "printf '\\033[31m终端\\033[0m'; false");
-        assert_eq!(rich.exit_code, Some(1));
-        assert!(rich.combined_output.contains("\u{1b}[31m终端\u{1b}[0m"));
+            let rich = execute_visible(
+                &broker,
+                &writer,
+                &transport_id,
+                shell,
+                "printf '\\033[31m终端\\033[0m'; false",
+            );
+            assert_eq!(rich.command_line, "printf '\\033[31m终端\\033[0m'; false");
+            assert_eq!(rich.exit_code, Some(1));
+            assert!(rich.combined_output.contains("\u{1b}[31m终端\u{1b}[0m"));
 
-        // Observe real PTY display before completion, then require the tool
-        // capture to contain the same unmodified bytes from that stream.
-        let streaming_start = display.lock().unwrap().len();
-        let streaming = thread::scope(|scope| {
-            let command = scope.spawn(|| {
-                execute_visible(
-                    &broker,
-                    &writer,
-                    &transport_id,
-                    shell,
-                    "printf '\\033[32mstage-one-stream\\033[0m'; sleep 2; printf stage-one-end",
-                )
+            // Observe real PTY display before completion, then require the tool
+            // capture to contain the same unmodified bytes from that stream.
+            let streaming_start = display.lock().unwrap().len();
+            let streaming = thread::scope(|scope| {
+                let command = scope.spawn(|| {
+                    execute_visible(
+                        &broker,
+                        &writer,
+                        &transport_id,
+                        shell,
+                        "printf '\\033[32mstage-one-stream\\033[0m'; sleep 2; printf stage-one-end",
+                    )
+                });
+                wait_until(Duration::from_secs(2), || {
+                    let bytes = display.lock().unwrap();
+                    bytes[streaming_start..]
+                        .windows(b"\x1b[32mstage-one-stream\x1b[0m".len())
+                        .any(|part| part == b"\x1b[32mstage-one-stream\x1b[0m")
+                });
+                assert!(
+                    !command.is_finished(),
+                    "raw display arrived only after command completion"
+                );
+                command.join().unwrap()
             });
+            assert_eq!(streaming.exit_code, Some(0));
+            assert!(streaming
+                .combined_output
+                .contains("\x1b[32mstage-one-stream\x1b[0m"));
+            assert!(streaming.combined_output.contains("stage-one-end"));
+
+            for (requested, expected) in [
+                (
+                    crate::terminal_broker::TerminalCommandRequestedSettlement::Cancelled,
+                    crate::terminal_broker::TerminalCommandState::Cancelled,
+                ),
+                (
+                    crate::terminal_broker::TerminalCommandRequestedSettlement::TimedOut,
+                    crate::terminal_broker::TerminalCommandState::TimedOut,
+                ),
+                (
+                    crate::terminal_broker::TerminalCommandRequestedSettlement::TakenOver,
+                    crate::terminal_broker::TerminalCommandState::TakenOver,
+                ),
+            ] {
+                let interrupted =
+                    execute_interrupted_visible(&broker, &writer, &transport_id, shell, requested);
+                assert_eq!(interrupted.state, expected);
+                assert!(interrupted.exit_code.is_some());
+            }
+
+            let before_large = display.lock().unwrap().len();
+            let large = execute_visible(
+                &broker,
+                &writer,
+                &transport_id,
+                shell,
+                "i=0; while (( i < 12000 )); do printf x; (( i++ )); done",
+            );
+            assert!(large.capture_truncated);
+            assert_eq!(large.combined_output.len(), 4_096);
             wait_until(Duration::from_secs(2), || {
-                let bytes = display.lock().unwrap();
-                bytes[streaming_start..]
-                    .windows(b"\x1b[32mstage-one-stream\x1b[0m".len())
-                    .any(|part| part == b"\x1b[32mstage-one-stream\x1b[0m")
+                display.lock().unwrap().len() >= before_large + 12_000
             });
-            assert!(
-                !command.is_finished(),
-                "raw display arrived only after command completion"
+
+            typing_display_start = display.lock().unwrap().len();
+            if screen {
+                // Exercise animated input across several actual terminal rows.
+                pair.master
+                    .resize(PtySize {
+                        rows: 30,
+                        cols: 32,
+                        pixel_width: 0,
+                        pixel_height: 0,
+                    })
+                    .unwrap();
+                broker
+                    .resize(&transport_id, TerminalGeometry::new(32, 30))
+                    .unwrap();
+                // The earlier lifecycle test intentionally uses raw ANSI in PS1.
+                // Use a width-correct prompt for the wrapping/display regression.
+                execute_visible(&broker, &writer, &transport_id, shell, "PS1='typing> '");
+                execute_visible(&broker, &writer, &transport_id, shell, "clear");
+            }
+        } else {
+            typing_display_start = display.lock().unwrap().len();
+            let history = execute_visible(
+                &broker,
+                &writer,
+                &transport_id,
+                shell,
+                "printf '%s' \"$HISTFILE\"; (( ${+functions[prompt_powerlevel9k_setup]} ))",
             );
-            command.join().unwrap()
-        });
-        assert_eq!(streaming.exit_code, Some(0));
-        assert!(streaming
-            .combined_output
-            .contains("\x1b[32mstage-one-stream\x1b[0m"));
-        assert!(streaming.combined_output.contains("stage-one-end"));
-
-        for (requested, expected) in [
-            (
-                crate::terminal_broker::TerminalCommandRequestedSettlement::Cancelled,
-                crate::terminal_broker::TerminalCommandState::Cancelled,
-            ),
-            (
-                crate::terminal_broker::TerminalCommandRequestedSettlement::TimedOut,
-                crate::terminal_broker::TerminalCommandState::TimedOut,
-            ),
-            (
-                crate::terminal_broker::TerminalCommandRequestedSettlement::TakenOver,
-                crate::terminal_broker::TerminalCommandState::TakenOver,
-            ),
-        ] {
-            let interrupted =
-                execute_interrupted_visible(&broker, &writer, &transport_id, shell, requested);
-            assert_eq!(interrupted.state, expected);
-            assert!(interrupted.exit_code.is_some());
-        }
-
-        let before_large = display.lock().unwrap().len();
-        let large = execute_visible(
-            &broker,
-            &writer,
-            &transport_id,
-            shell,
-            "i=0; while (( i < 12000 )); do printf x; (( i++ )); done",
-        );
-        assert!(large.capture_truncated);
-        assert_eq!(large.combined_output.len(), 4_096);
-        wait_until(Duration::from_secs(2), || {
-            display.lock().unwrap().len() >= before_large + 12_000
-        });
-
-        let typing_display_start = display.lock().unwrap().len();
-        if screen {
-            // Exercise animated input across several actual terminal rows.
-            pair.master
-                .resize(PtySize {
-                    rows: 30,
-                    cols: 32,
-                    pixel_width: 0,
-                    pixel_height: 0,
-                })
-                .unwrap();
-            broker
-                .resize(&transport_id, TerminalGeometry::new(32, 30))
-                .unwrap();
-            // The earlier lifecycle test intentionally uses raw ANSI in PS1.
-            // Use a width-correct prompt for the wrapping/display regression.
-            execute_visible(&broker, &writer, &transport_id, shell, "PS1='typing> '");
-            execute_visible(&broker, &writer, &transport_id, shell, "clear");
+            assert_eq!(
+                history.exit_code,
+                Some(0),
+                "real Powerlevel prompt was not loaded"
+            );
+            assert!(history
+                .combined_output
+                .contains(home.path().join("history.txt").to_str().unwrap()));
+            for source in [
+                "export SHELLSPAN_PHASE3_VALUE='终端值'",
+                "alias ss_phase3_alias='printf alias-ok'",
+                "ss_phase3_function(){ printf function-ok; }",
+                "setopt noclobber",
+            ] {
+                assert_eq!(
+                    execute_visible(&broker, &writer, &transport_id, shell, source).exit_code,
+                    Some(0)
+                );
+            }
         }
         verify_native_command_typing(
             &broker,
@@ -883,6 +975,12 @@
                 .join("\n")
         );
         assert!(!display.contains(integration_id.as_str()));
+        if shell == TerminalShellKind::Bash && expected_native_input {
+            assert!(
+                !display.contains("error setting terminal attributes"),
+                "native receive reported a tty attribute failure: {display}"
+            );
+        }
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -987,12 +1085,213 @@
             }
         });
         let output = tempfile::tempdir().unwrap();
+        for readonly_locale in [false, true] {
+            if shell != TerminalShellKind::Bash || !expected_native_input || checkpoint_failure {
+                break;
+            }
+            // Exercise the production receiver and then let real Readline move
+            // left and insert a character before a separate bind-x snapshot.
+            // Reading the callback's assigned number alone would miss a
+            // character/byte offset mismatch when Readline applies the value.
+            let label = if readonly_locale {
+                "cursor-readonly"
+            } else {
+                "cursor"
+            };
+            let snapshot = output.path().join(format!("native-{label}-buffer"));
+            let locale_setup = if readonly_locale {
+                "readonly LC_ALL; "
+            } else {
+                ""
+            };
+            let setup = format!(
+                "{locale_setup}__shellspan_native_frame_checkpoint() {{ if [[ $1 == cursor ]]; then builtin printf '%s' \"$READLINE_LINE\" >| {}; else __shellspan_emit M \"$1\" \"$READLINE_LINE\"; fi; }}; bind -x '\"\\C-x\\C-y\":__shellspan_native_frame_checkpoint cursor'",
+                shell_single_quote(snapshot.to_str().unwrap())
+            );
+            assert_eq!(
+                execute_visible(broker, writer, transport_id, shell, &setup).exit_code,
+                Some(0)
+            );
+            let source = "printf '中文🙂'";
+            // The read-only case uses the actual foreground eval envelope.
+            // Its frame contains both original source and displayed line.
+            let submitted = if readonly_locale {
+                bash_native_submission(source).unwrap()
+            } else {
+                source.to_owned()
+            };
+            let original_length =
+                bash_native_eval_source(&submitted).map_or(0, |original| original.len() * 4);
+            let encoded = crate::agent_runtime::native_editor_chunks(&submitted, shell)[0]
+                .0
+                .clone();
+            let geometry = broker
+                .snapshot(Some(transport_id))
+                .unwrap()
+                .session
+                .unwrap()
+                .geometry;
+            let descriptor = format!(
+                "b{:05x}{:04x}{:04x}{:04x}{}{}",
+                encoded.len(),
+                original_length,
+                geometry.rows,
+                geometry.columns,
+                &Uuid::new_v4().simple().to_string()[..15],
+                Uuid::new_v4().simple()
+            );
+            let display_start = display.lock().unwrap().len();
+            {
+                let mut input = writer.lock().unwrap();
+                write!(input, "\u{18}\u{2}{descriptor}{encoded}\u{2}X\u{18}\u{19}").unwrap();
+                input.flush().unwrap();
+            }
+            wait_until(Duration::from_secs(3), || {
+                fs::metadata(&snapshot)
+                    .is_ok_and(|metadata| metadata.len() == (submitted.len() + 1) as u64)
+            });
+            let actual = fs::read_to_string(&snapshot).unwrap();
+            // Clear through the production discard widget before assertions,
+            // so a failing cursor test never accepts the staged source.
+            {
+                let mut input = writer.lock().unwrap();
+                input.write_all(b"\x18\x04").unwrap();
+                input.flush().unwrap();
+            }
+            assert_eq!(
+                execute_visible(
+                    broker,
+                    writer,
+                    transport_id,
+                    shell,
+                    "bind -r '\"\\C-x\\C-y\"'; __shellspan_native_frame_checkpoint() { __shellspan_emit M \"$1\" \"$READLINE_LINE\"; }; [[ $LC_ALL == C.UTF-8 ]]"
+                )
+                .exit_code,
+                Some(0)
+            );
+            if let Ok(prefix) = std::env::var("SHELLSPAN_JOB_DISPLAY_TRACE") {
+                fs::write(
+                    format!("{prefix}.{label}.raw.bin"),
+                    &display.lock().unwrap()[display_start..],
+                )
+                .unwrap();
+                fs::write(format!("{prefix}.{label}.buffer.txt"), &actual).unwrap();
+            }
+            let mut expected = submitted.clone();
+            let last = expected.pop().unwrap();
+            expected.push('X');
+            expected.push(last);
+            assert_eq!(
+                actual, expected,
+                "{label}: native Readline did not apply the multibyte end-of-line position"
+            );
+            assert!(
+                !String::from_utf8_lossy(&display.lock().unwrap()[display_start..])
+                    .contains("LC_ALL: readonly variable"),
+                "the native receiver attempted to change a read-only locale"
+            );
+            if readonly_locale {
+                assert_eq!(
+                    execute_visible(
+                        broker,
+                        writer,
+                        transport_id,
+                        shell,
+                        "[[ $LC_ALL == C.UTF-8 ]] && ! (LC_ALL=C) 2>/dev/null"
+                    )
+                    .exit_code,
+                    Some(0),
+                    "the receiver changed LC_ALL or removed its read-only attribute"
+                );
+            }
+        }
+        if shell == TerminalShellKind::Bash && expected_native_input && !checkpoint_failure {
+            // A genuinely truncated frame must time out and release the real
+            // tty reader before the next user command, with no extra Enter.
+            let sequence = broker
+                .snapshot(Some(transport_id))
+                .unwrap()
+                .session
+                .unwrap()
+                .integration_event_sequence;
+            let start = Instant::now();
+            {
+                let mut input = writer.lock().unwrap();
+                input.write_all(b"\x18\x02b0000a0000").unwrap();
+                input.flush().unwrap();
+            }
+            wait_until(Duration::from_secs(3), || {
+                broker
+                    .snapshot(Some(transport_id))
+                    .unwrap()
+                    .session
+                    .unwrap()
+                    .integration_event_sequence
+                    >= sequence + 2
+            });
+            assert!(start.elapsed() < Duration::from_secs(3));
+            let resumed = execute_visible(
+                broker,
+                writer,
+                transport_id,
+                shell,
+                "printf receiver-after-timeout",
+            );
+            assert_eq!(resumed.exit_code, Some(0));
+            assert!(resumed.combined_output.contains("receiver-after-timeout"));
+        }
+        if shell == TerminalShellKind::Zsh && !checkpoint_failure {
+            assert!(!broker.has_active_shell_jobs(transport_id).unwrap());
+            let label = format!("FOREGROUND-ONCE-{}", Uuid::new_v4().simple());
+            let effect = output.path().join("foreground-once");
+            fs::write(&effect, "").unwrap();
+            let source = format!(
+                "printf '{label}\\n'\nprintf once >> {}",
+                shell_single_quote(effect.to_str().unwrap())
+            );
+            let operation = registry
+                .start(
+                    &sessions,
+                    transport_id,
+                    "typing-agent",
+                    "typing-task",
+                    "foreground-source-once",
+                    &source,
+                    shell.enter(),
+                )
+                .unwrap();
+            let result = registry
+                .wait(&sessions, transport_id, &operation, Duration::from_secs(5))
+                .unwrap();
+            assert_eq!(result.state, TerminalCommandState::Completed, "{result:?}");
+            assert_eq!(result.exit_code, Some(0), "{result:?}");
+            wait_for_prompt(broker, transport_id);
+            assert_eq!(fs::read_to_string(&effect).unwrap(), "once");
+            let geometry = broker
+                .snapshot(Some(transport_id))
+                .unwrap()
+                .session
+                .unwrap()
+                .geometry;
+            let bytes = display.lock().unwrap().clone();
+            let (cells, _) = native_display_cells(&bytes, geometry);
+            if let Ok(prefix) = std::env::var("SHELLSPAN_JOB_DISPLAY_TRACE") {
+                fs::write(format!("{prefix}.foreground-once.cells.txt"), &cells).unwrap();
+            }
+            assert_eq!(
+                cells.matches(&format!("printf '{label}\\n'")).count(),
+                1,
+                "multiline foreground source without jobs must be shown exactly once"
+            );
+            leases.release_turn("typing-agent").unwrap();
+        }
         if checkpoint_failure {
             assert!(expected_native_input);
+            let delayed_frame = output.path().join("delayed-source-frame");
             let checkpoint_definition = if shell == TerminalShellKind::Bash {
-                "__shellspan_native_checkpoint() { if [[ -z $READLINE_LINE ]]; then __shellspan_emit A \"$READLINE_LINE\"; fi; }"
+                format!("__shellspan_native_frame_checkpoint() {{ if [[ -z $READLINE_LINE ]]; then __shellspan_emit M \"$1\" \"$READLINE_LINE\"; else builtin printf '%s\\0' M \"$1\" \"$READLINE_LINE\" >| {}; fi; }}", shell_single_quote(delayed_frame.to_str().unwrap()))
             } else {
-                "__shellspan_native_checkpoint() { if [[ -z $BUFFER ]]; then __shellspan_emit A \"$BUFFER\"; fi; }"
+                format!("__shellspan_native_frame_checkpoint() {{ if [[ -z $BUFFER ]]; then __shellspan_emit M \"$1\" \"$BUFFER\"; else builtin printf '%s\\0' M \"$1\" \"$BUFFER\" >| {}; fi; }}", shell_single_quote(delayed_frame.to_str().unwrap()))
             };
             let operation = registry
                 .start(
@@ -1001,7 +1300,7 @@
                     "typing-agent",
                     "typing-task",
                     "disable-native-checkpoint",
-                    checkpoint_definition,
+                    &checkpoint_definition,
                     shell.enter(),
                 )
                 .unwrap();
@@ -1013,6 +1312,7 @@
                 Some(0)
             );
             wait_for_prompt(broker, transport_id);
+            let mut previous_frame = None;
             for takeover in [false, true] {
                 let id = format!("checkpoint-wait-cancel-{}", Uuid::new_v4());
                 let effect = output.path().join(&id);
@@ -1061,6 +1361,30 @@
                             .iter()
                             .any(|(_, wire)| wire == &first)
                     });
+                    if let Some(event) = previous_frame.clone() {
+                        let integration = broker
+                            .snapshot(Some(transport_id))
+                            .unwrap()
+                            .session
+                            .unwrap()
+                            .integration_id
+                            .unwrap();
+                        broker
+                            .accept_integration_event(transport_id, &integration, event)
+                            .unwrap();
+                        assert!(
+                            broker.native_input_enabled(transport_id).unwrap(),
+                            "a retired nonce quarantined its successor"
+                        );
+                        thread::sleep(Duration::from_millis(200));
+                        assert!(
+                            !typing.is_finished(),
+                            "a retired nonce confirmed its successor's frame"
+                        );
+                        assert!(!writes.lock().unwrap()[before..]
+                            .iter()
+                            .any(|(_, wire)| wire == "\u{18}\u{5}"));
+                    }
                     let cancel_started = Instant::now();
                     if takeover {
                         registry
@@ -1092,11 +1416,11 @@
                 let after = writes.lock().unwrap();
                 assert_eq!(
                     after[before..].len(),
-                    3,
+                    5,
                     "a cancelled checkpoint sent more chunks or a final accept key"
                 );
                 assert_eq!(
-                    after[before + 2].1,
+                    after[before + 4].1,
                     if matches!(shell, TerminalShellKind::Bash | TerminalShellKind::Zsh) {
                         "\u{18}\u{4}"
                     } else {
@@ -1104,6 +1428,20 @@
                     }
                 );
                 drop(after);
+                if matches!(shell, TerminalShellKind::Bash | TerminalShellKind::Zsh) {
+                    let mut events = Vec::new();
+                    let bytes = fs::read(&delayed_frame).unwrap();
+                    read_control_events(&mut bytes.as_slice(), &mut |event| {
+                        events.push(event);
+                        Ok(())
+                    })
+                    .unwrap();
+                    assert_eq!(events.len(), 1);
+                    assert!(
+                        matches!(&events[0], TerminalIntegrationControlEvent::NativePrivateCheckpoint { descriptor, buffer } if descriptor.starts_with(if shell == TerminalShellKind::Bash { 'b' } else { 'e' }) && buffer == &job.submitted_command_line)
+                    );
+                    previous_frame = events.pop();
+                }
                 assert_eq!(
                     broker
                         .shell_job(
@@ -1138,6 +1476,24 @@
                 error.contains("TERMINAL_INPUT_RECOVERY_REQUIRED"),
                 "{error}"
             );
+            if matches!(shell, TerminalShellKind::Bash | TerminalShellKind::Zsh) {
+                let integration = broker
+                    .snapshot(Some(transport_id))
+                    .unwrap()
+                    .session
+                    .unwrap()
+                    .integration_id
+                    .unwrap();
+                let bytes = fs::read(&delayed_frame).unwrap();
+                read_control_events(&mut bytes.as_slice(), &mut |event| {
+                    broker.accept_integration_event(transport_id, &integration, event)
+                })
+                .unwrap();
+                assert!(
+                    !broker.native_input_enabled(transport_id).unwrap(),
+                    "a late real frame released recovery after its deadline"
+                );
+            }
             wait_for_prompt(broker, transport_id);
             let admitted = broker.admit_terminal_input(
                 transport_id,
@@ -1211,6 +1567,38 @@
                 "an agent probe or cancellation erased the existing user draft"
             );
             assert!(!agent_effect.exists());
+            if shell == TerminalShellKind::Bash {
+                let effect = output.path().join("fresh-native-interrupt");
+                let script = format!("printf '\\033[31mfresh-native-running\\033[0m'\nsleep 10\nprintf forbidden >| {}", shell_single_quote(effect.to_str().unwrap()));
+                let start = display.lock().unwrap().len();
+                let operation = registry
+                    .start(
+                        &sessions,
+                        transport_id,
+                        "typing-agent",
+                        "typing-task",
+                        "fresh-native-interrupt",
+                        &script,
+                        shell.enter(),
+                    )
+                    .unwrap();
+                wait_until(Duration::from_secs(3), || {
+                    display.lock().unwrap()[start..]
+                        .windows(b"\x1b[31mfresh-native-running\x1b[0m".len())
+                        .any(|bytes| bytes == b"\x1b[31mfresh-native-running\x1b[0m")
+                });
+                registry.cancel_task(&sessions, "typing-task").unwrap();
+                let result = registry
+                    .wait(&sessions, transport_id, &operation, Duration::from_secs(3))
+                    .unwrap();
+                assert_eq!(result.state, TerminalCommandState::Cancelled);
+                wait_for_prompt(broker, transport_id);
+                assert!(
+                    !effect.exists(),
+                    "native receive changed SIGINT semantics before any background job"
+                );
+                leases.release_turn("typing-agent").unwrap();
+            }
             verify_native_shell_jobs(
                 broker,
                 &registry,
@@ -1222,6 +1610,14 @@
                 writer,
                 &leases,
             );
+            if shell == TerminalShellKind::Zsh
+                && std::env::var_os("SHELLSPAN_TEST_NATIVE_ZSH_USER_HOME").is_some()
+            {
+                leases.release_turn("typing-agent").unwrap();
+                sessions.remove(transport_id).unwrap();
+                worker.join().unwrap();
+                return;
+            }
             reduced_motion.store(false, Ordering::SeqCst);
             let file = output.path().join("native-script");
             fs::write(&file, "").unwrap();
@@ -1723,7 +2119,18 @@
                 } else {
                     "\n"
                 };
-                let script = format!("printf '\\033[31mnative-running\\033[0m'{separator}sleep 10{separator}printf forbidden >| {}", shell_single_quote(effect.to_str().unwrap()));
+                let trap_state = output.path().join(format!("{mode}-int-trap"));
+                let tty_state = output.path().join(format!("{mode}-tty"));
+                let probe = if shell == TerminalShellKind::Bash {
+                    format!(
+                        "stty -a >| {}; trap -p INT >| {}; ",
+                        shell_single_quote(tty_state.to_str().unwrap()),
+                        shell_single_quote(trap_state.to_str().unwrap())
+                    )
+                } else {
+                    String::new()
+                };
+                let script = format!("{probe}printf '\\033[31mnative-running\\033[0m'{separator}sleep 10{separator}printf forbidden >| {}", shell_single_quote(effect.to_str().unwrap()));
                 let display_start = display.lock().unwrap().len();
                 let operation = registry
                     .start(
@@ -1742,7 +2149,31 @@
                         .any(|part| part == b"\x1b[31mnative-running\x1b[0m")
                 });
                 assert!(!operation.snapshot().unwrap().state.is_terminal());
+                if shell == TerminalShellKind::Bash {
+                    assert_eq!(
+                        fs::read_to_string(&trap_state).unwrap(),
+                        "",
+                        "{mode}: prompt-only INT trap reached foreground source"
+                    );
+                }
+                if shell == TerminalShellKind::Bash {
+                    let settings = fs::read_to_string(&tty_state).unwrap();
+                    assert!(
+                        settings.split_whitespace().any(|word| word == "isig"),
+                        "{mode}: native input disabled terminal signals: {settings}"
+                    );
+                }
                 thread::sleep(Duration::from_millis(100));
+                assert!(
+                    !effect.exists(),
+                    "{mode}: tail executed before the running command was interrupted"
+                );
+                assert_eq!(
+                    operation.snapshot().unwrap().state,
+                    TerminalCommandState::Running,
+                    "{mode}: foreground output arrived without a matched native start"
+                );
+                let interrupt_start = writes.lock().unwrap().len();
                 let expected = if mode.ends_with("takeover") {
                     registry
                         .takeover(&sessions, transport_id, "typing-agent", mode)
@@ -1763,6 +2194,12 @@
                     )
                     .unwrap();
                 assert_eq!(result.state, expected, "{mode}: {result:?}");
+                assert!(
+                    writes.lock().unwrap()[interrupt_start..]
+                        .iter()
+                        .any(|(_, wire)| wire == "\u{3}"),
+                    "{mode}: native cancellation did not send its interrupt"
+                );
                 assert!(result
                     .combined_output
                     .contains("\x1b[31mnative-running\x1b[0m"));
@@ -1770,7 +2207,9 @@
                 leases.release_turn("typing-agent").unwrap();
                 assert!(
                     !effect.exists(),
-                    "interrupted script continued executing subsequent lines"
+                    "{mode}: interrupted script continued executing subsequent lines; tty={:?}; raw tail={:?}",
+                    fs::read_to_string(&tty_state).ok(),
+                    String::from_utf8_lossy(&display.lock().unwrap()[display_start..]).chars().rev().take(1800).collect::<String>().chars().rev().collect::<String>()
                 );
                 writes.lock().unwrap().clear();
                 phases.lock().unwrap().clear();
@@ -2346,6 +2785,46 @@
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn native_display_cells(
+        bytes: &[u8],
+        geometry: crate::terminal_broker::TerminalGeometry,
+    ) -> (String, std::collections::HashSet<usize>) {
+        let rows = u16::try_from(geometry.rows).unwrap();
+        let columns = u16::try_from(geometry.columns).unwrap();
+        let mut parser = vt100::Parser::new(rows, columns, 20_000);
+        parser.process(bytes);
+        parser.screen_mut().set_scrollback(usize::MAX);
+        let history = parser.screen().scrollback();
+        let mut cells = String::new();
+        let mut colored_printf = std::collections::HashSet::new();
+        for offset in (0..=history).rev() {
+            parser.screen_mut().set_scrollback(offset);
+            for row in 0..if offset == 0 { rows } else { 1 } {
+                for column in 0..columns {
+                    if column + 6 <= columns {
+                        let word = (column..column + 6)
+                            .map(|col| parser.screen().cell(row, col).unwrap().contents())
+                            .collect::<String>();
+                        if word == "printf"
+                            && parser.screen().cell(row, column).unwrap().fgcolor()
+                                != vt100::Color::Default
+                        {
+                            colored_printf.insert(cells.len());
+                        }
+                    }
+                    let text = parser.screen().cell(row, column).unwrap().contents();
+                    if text.is_empty() {
+                        cells.push(' ');
+                    } else {
+                        cells.push_str(&text);
+                    }
+                }
+            }
+        }
+        (cells, colored_printf)
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn verify_native_shell_jobs(
         broker: &crate::terminal_broker::TerminalSessionBroker,
         registry: &crate::agent_runtime::TerminalExecuteRegistry,
@@ -2396,22 +2875,44 @@
                     source,
                 )
                 .unwrap();
-            let operation = registry
-                .start_native_submission(
-                    sessions,
-                    transport,
-                    "typing-agent",
-                    "typing-task",
-                    &id,
-                    source,
-                    shell.enter(),
-                    Some(&job.submitted_command_line),
-                    |_| Ok(()),
-                )
-                .unwrap();
+            let operation = registry.start_native_submission(
+                sessions,
+                transport,
+                "typing-agent",
+                "typing-task",
+                &id,
+                source,
+                shell.enter(),
+                Some(&job.submitted_command_line),
+                |_| Ok(()),
+            );
+            let operation = operation.unwrap_or_else(|error| {
+                if let Ok(prefix) = std::env::var("SHELLSPAN_JOB_DISPLAY_TRACE") {
+                    fs::write(
+                        format!("{prefix}.launch-failed.raw.bin"),
+                        &*display.lock().unwrap(),
+                    )
+                    .unwrap();
+                }
+                panic!("native job launch failed: {error}");
+            });
             let result = registry
                 .wait(sessions, transport, &operation, Duration::from_secs(5))
                 .unwrap();
+            if result.state != TerminalCommandState::Completed {
+                if let Ok(prefix) = std::env::var("SHELLSPAN_JOB_DISPLAY_TRACE") {
+                    fs::write(
+                        format!("{prefix}.failed.raw.bin"),
+                        &*display.lock().unwrap(),
+                    )
+                    .unwrap();
+                    fs::write(
+                        format!("{prefix}.failed.submission"),
+                        &job.submitted_command_line,
+                    )
+                    .unwrap();
+                }
+            }
             assert_eq!(result.state, TerminalCommandState::Completed, "{result:?}");
             assert_eq!(result.command_line, source);
             assert_eq!(result.exit_code, Some(0), "job launch failed: {result:?}");
@@ -2439,19 +2940,27 @@
                 return fresh;
             }
             let line = broker.prepare_shell_job_control(&fresh, &id, stop).unwrap();
-            let operation = registry
-                .start_native_submission(
-                    sessions,
-                    transport,
-                    "typing-agent",
-                    "typing-task",
-                    &id,
-                    &line,
-                    shell.enter(),
-                    Some(&line),
-                    |_| Ok(()),
-                )
-                .unwrap();
+            let operation = registry.start_native_submission(
+                sessions,
+                transport,
+                "typing-agent",
+                "typing-task",
+                &id,
+                &line,
+                shell.enter(),
+                Some(&line),
+                |_| Ok(()),
+            );
+            let operation = operation.unwrap_or_else(|error| {
+                if let Ok(prefix) = std::env::var("SHELLSPAN_JOB_DISPLAY_TRACE") {
+                    fs::write(
+                        format!("{prefix}.control-failed.raw.bin"),
+                        &*display.lock().unwrap(),
+                    )
+                    .unwrap();
+                }
+                panic!("native job control failed: {error}");
+            });
             let result = registry
                 .wait(sessions, transport, &operation, Duration::from_secs(5))
                 .unwrap();
@@ -2482,6 +2991,170 @@
         };
         let directory = tempfile::tempdir().unwrap();
         let completion_gate = directory.path().join("release-natural-exit");
+        if shell == TerminalShellKind::Bash {
+            let effect = directory.path().join("same-buffer-alias");
+            let alias = launch(&format!(
+                "alias ss_job_same_buffer='printf alias-ok'\nss_job_same_buffer >| {}\n",
+                shell_single_quote(effect.to_str().unwrap())
+            ));
+            assert_eq!(until_exit(&alias).exit_code, Some(0));
+            assert_eq!(fs::read_to_string(&effect).unwrap(), "alias-ok");
+            assert_eq!(
+                run("type ss_job_same_buffer >/dev/null 2>&1", None)
+                    .unwrap()
+                    .exit_code,
+                Some(1),
+                "a background alias definition changed the parent shell"
+            );
+            wait_for_prompt(broker, transport);
+            assert_eq!(
+                run("shopt -u expand_aliases", None).unwrap().exit_code,
+                Some(0)
+            );
+            let disabled = launch(&format!(
+                "alias ss_job_same_buffer='printf forbidden'\nss_job_same_buffer >| {}\n",
+                shell_single_quote(effect.to_str().unwrap())
+            ));
+            assert_eq!(until_exit(&disabled).exit_code, Some(127));
+            assert_eq!(fs::read_to_string(&effect).unwrap(), "");
+            assert_eq!(
+                run("shopt -q expand_aliases", None).unwrap().exit_code,
+                Some(1)
+            );
+            assert_eq!(
+                run("shopt -s expand_aliases", None).unwrap().exit_code,
+                Some(0)
+            );
+            wait_for_prompt(broker, transport);
+        }
+        if matches!(shell, TerminalShellKind::Zsh | TerminalShellKind::Bash) {
+            let effect = directory.path().join("group-escape");
+            let source = format!(
+                ")\nprintf forbidden >| {}\n(",
+                shell_single_quote(effect.to_str().unwrap())
+            );
+            let id = format!("source-group-escape-{}", Uuid::new_v4());
+            let job = broker
+                .prepare_shell_job(
+                    transport,
+                    &target,
+                    "typing-agent",
+                    "typing-task",
+                    &id,
+                    &source,
+                )
+                .unwrap();
+            let operation = registry
+                .start_native_submission(
+                    sessions,
+                    transport,
+                    "typing-agent",
+                    "typing-task",
+                    &id,
+                    &source,
+                    shell.enter(),
+                    Some(&job.submitted_command_line),
+                    |_| Ok(()),
+                )
+                .unwrap();
+            let result = registry
+                .wait(sessions, transport, &operation, Duration::from_secs(5))
+                .unwrap();
+            assert_eq!(result.state, TerminalCommandState::Failed, "{result:?}");
+            assert_eq!(
+                result.input_rejection.as_deref(),
+                Some("TERMINAL_INPUT_UNSUPPORTED")
+            );
+            assert!(
+                !effect.exists(),
+                "invalid source escaped the asynchronous native child"
+            );
+            wait_for_prompt(broker, transport);
+        }
+        if shell == TerminalShellKind::Zsh
+            && std::env::var_os("SHELLSPAN_TEST_NATIVE_ZSH_USER_HOME").is_none()
+        {
+            let survivor = launch("sleep 60");
+            for option in ["errexit", "errreturn"] {
+                assert_eq!(
+                    run(&format!("setopt {option}; false && true"), None)
+                        .unwrap()
+                        .exit_code,
+                    Some(1)
+                );
+                wait_for_prompt(broker, transport);
+                assert_eq!(observe(&survivor, false).state, "running");
+                let effect = directory.path().join(format!("unsupported-{option}"));
+                let source = format!(
+                    "printf forbidden >| {}",
+                    shell_single_quote(effect.to_str().unwrap())
+                );
+                let id = format!("unsupported-context-{}", Uuid::new_v4());
+                let job = broker
+                    .prepare_shell_job(
+                        transport,
+                        &target,
+                        "typing-agent",
+                        "typing-task",
+                        &id,
+                        &source,
+                    )
+                    .unwrap();
+                let operation = registry
+                    .start_native_submission(
+                        sessions,
+                        transport,
+                        "typing-agent",
+                        "typing-task",
+                        &id,
+                        &source,
+                        shell.enter(),
+                        Some(&job.submitted_command_line),
+                        |_| Ok(()),
+                    )
+                    .unwrap();
+                let result = registry
+                    .wait(sessions, transport, &operation, Duration::from_secs(5))
+                    .unwrap();
+                assert_eq!(result.state, TerminalCommandState::Failed, "{result:?}");
+                assert!(result
+                    .input_rejection
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("TERMINAL_BACKGROUND_UNSUPPORTED"));
+                assert!(
+                    !effect.exists(),
+                    "an explicitly unsupported context executed source"
+                );
+                wait_for_prompt(broker, transport);
+                let restored = run(
+                    &format!("[[ -o {option} ]] && printf option-preserved; unsetopt {option}"),
+                    None,
+                )
+                .unwrap();
+                assert!(restored.combined_output.contains("option-preserved"));
+                assert_eq!(restored.exit_code, Some(0));
+                wait_for_prompt(broker, transport);
+            }
+            observe(&survivor, true);
+            assert_eq!(until_exit(&survivor).state, "exited");
+            assert_eq!(run("setopt errexit", None).unwrap().exit_code, Some(0));
+            let effect = directory.path().join("errexit-source");
+            let supported = launch(&format!(
+                "printf '%s' \"$?\" >| {}; false; printf forbidden >> {}",
+                shell_single_quote(effect.to_str().unwrap()),
+                shell_single_quote(effect.to_str().unwrap())
+            ));
+            assert_eq!(until_exit(&supported).exit_code, Some(1));
+            assert_eq!(fs::read_to_string(&effect).unwrap(), "0");
+            let restored = run(
+                "[[ -o errexit ]] && printf option-preserved; unsetopt errexit",
+                None,
+            )
+            .unwrap();
+            assert!(restored.combined_output.contains("option-preserved"));
+            wait_for_prompt(broker, transport);
+        }
         let natural = launch(&format!(
             "while [[ ! -f {} ]]; do sleep 0.01; done; sleep 0.1; exit 7",
             shell_single_quote(completion_gate.to_str().unwrap())
@@ -2543,6 +3216,184 @@
         assert_eq!(stopped_data["job"]["controlLost"], false);
         wait_for_prompt(broker, transport);
         let marker = directory.path().join("once");
+        if matches!(shell, TerminalShellKind::Zsh | TerminalShellKind::Bash) {
+            let prefix = format!("BG-DISPLAY-{}-", Uuid::new_v4().simple());
+            let visible = format!("APPROVED-SOURCE-{}", Uuid::new_v4().simple());
+            let counter = directory.path().join("display-count");
+            let gate = directory.path().join("display-release");
+            let overlap_gate = directory.path().join("display-overlap");
+            let short_gate = directory.path().join("display-short-overlap");
+            assert_eq!(
+                run(
+                    &format!(
+                        "SS_DISPLAY_ROOT={}",
+                        shell_single_quote(directory.path().to_str().unwrap())
+                    ),
+                    None
+                )
+                .unwrap()
+                .exit_code,
+                Some(0)
+            );
+            let start = display.lock().unwrap().len();
+            let script = format!("printf '{visible}\\n'\nfor n in {{1..12}}; do if (( n == 4 )); then while [[ ! -f $SS_DISPLAY_ROOT/display-overlap ]]; do sleep 0.01; done; elif (( n == 7 )); then while [[ ! -f $SS_DISPLAY_ROOT/display-short-overlap ]]; do sleep 0.01; done; fi; printf '{prefix}%s-END\\n' \"$n\"; printf '%s' \"$n\" >| $SS_DISPLAY_ROOT/display-count; sleep 1; done\nwhile [[ ! -f $SS_DISPLAY_ROOT/display-release ]]; do sleep 0.01; done");
+            let producer = launch(&script);
+            for threshold in [3, 6, 9, 12] {
+                wait_until(Duration::from_secs(4), || {
+                    fs::read_to_string(&counter)
+                        .ok()
+                        .and_then(|s| s.parse::<usize>().ok())
+                        .is_some_and(|count| count >= threshold)
+                });
+                if matches!(threshold, 3 | 6) {
+                    let foreground = if threshold == 3 {
+                        format!(
+                            "printf 'LONG-{visible}\\n'\n: '{}'\nprintf 'LONG-END-{visible}\\n'",
+                            "approved-字-".repeat(400)
+                        )
+                    } else {
+                        format!("printf 'SHORT-{visible}\\n'")
+                    };
+                    assert!(threshold == 3 || foreground.len() < 512);
+                    let submitted_foreground = if shell == TerminalShellKind::Bash {
+                        bash_native_submission(&foreground).unwrap()
+                    } else {
+                        foreground.clone()
+                    };
+                    let first_wire =
+                        crate::agent_runtime::native_editor_chunks(&submitted_foreground, shell)[0]
+                            .0
+                            .clone();
+                    let mut overlapped = false;
+                    let id = format!("display-overlap-{}", Uuid::new_v4());
+                    let operation = registry.start_native_submission(sessions, transport, "typing-agent", "typing-task", &id, &foreground, shell.enter(), None, |stage| {
+                        if matches!(stage, crate::agent_runtime::TerminalExecuteValidationStage::InputWrite)
+                            && !overlapped
+                            && writes.lock().unwrap().iter().any(|(_, wire)| wire == &first_wire)
+                        {
+                            fs::write(if threshold == 3 { &overlap_gate } else { &short_gate }, "release").unwrap();
+                            wait_until(Duration::from_secs(3), || String::from_utf8_lossy(&display.lock().unwrap()[start..]).contains(&format!("{prefix}{}-END", threshold+1)));
+                            overlapped = true;
+                        }
+                        Ok(())
+                    }).unwrap();
+                    let result = registry
+                        .wait(sessions, transport, &operation, Duration::from_secs(5))
+                        .unwrap();
+                    assert_eq!(result.state, TerminalCommandState::Completed, "{result:?}");
+                    assert_eq!(result.exit_code, Some(0));
+                    assert_eq!(result.command_line, foreground);
+                    assert_eq!(
+                        result.submitted_command_line,
+                        if shell == TerminalShellKind::Bash {
+                            Some(bash_native_submission(&foreground).unwrap())
+                        } else {
+                            None
+                        }
+                    );
+                    assert!(
+                        overlapped,
+                        "the background line must arrive after a real source frame and before acceptance"
+                    );
+                    if let Ok(prefix) = std::env::var("SHELLSPAN_JOB_DISPLAY_TRACE") {
+                        fs::write(
+                            format!("{prefix}.foreground-{threshold}.source"),
+                            &foreground,
+                        )
+                        .unwrap();
+                    }
+                    wait_for_prompt(broker, transport);
+                }
+                assert_eq!(observe(&producer, false).state, "running");
+            }
+            wait_until(Duration::from_secs(3), || {
+                String::from_utf8_lossy(&display.lock().unwrap()[start..])
+                    .contains(&format!("{prefix}12-END"))
+            });
+            let bytes = display.lock().unwrap().clone();
+            let raw = String::from_utf8_lossy(&bytes[start..]);
+            if let Ok(prefix) = std::env::var("SHELLSPAN_JOB_DISPLAY_TRACE") {
+                fs::write(format!("{prefix}.raw.bin"), &bytes).unwrap();
+                fs::write(format!("{prefix}.source"), &script).unwrap();
+            }
+            assert!(
+                !raw.contains("__shellspan_"),
+                "private implementation leaked into actual raw VT: {raw:?}"
+            );
+            let geometry = broker
+                .snapshot(Some(transport))
+                .unwrap()
+                .session
+                .unwrap()
+                .geometry;
+            let (cells, colored_printf) = native_display_cells(&bytes, geometry);
+            if let Ok(prefix) = std::env::var("SHELLSPAN_JOB_DISPLAY_TRACE") {
+                fs::write(format!("{prefix}.cells.txt"), &cells).unwrap();
+            }
+            let visible_source = if shell == TerminalShellKind::Bash {
+                // Check the actual eval argument, including shlex's native
+                // quote spelling, rather than unquoted approved source text.
+                let quoted = shlex::try_quote(&script).unwrap().into_owned();
+                quoted.lines().next().unwrap().to_string()
+            } else {
+                format!("printf '{visible}\\n'")
+            };
+            assert_eq!(
+                cells.matches(&visible_source).count(),
+                1,
+                "the first background source must be shown exactly once"
+            );
+            assert!(
+                // Native ZLE clips the first row of input taller than the
+                // viewport even without ShellSpan (saved native baseline).
+                // Keep the 5KB source and BG4 overlap; require exact native
+                // acceptance above and real source text at the visible tail.
+                cells.contains(&format!("LONG-END-{visible}")),
+                "foreground source tail disappeared during real BG4 overlap"
+            );
+            assert!(
+                cells.contains(&format!("SHORT-{visible}")),
+                "short foreground source disappeared during real BG7 overlap"
+            );
+            if std::env::var_os("SHELLSPAN_TEST_NATIVE_ZSH_USER_HOME").is_some() {
+                let source_offset = cells.find(&format!("printf 'SHORT-{visible}\\n'")).unwrap();
+                assert!(
+                    colored_printf.contains(&source_offset),
+                    "the real profile's source command lost native syntax coloring"
+                );
+            }
+            let mut previous_raw = 0;
+            let mut previous_cells = 0;
+            for number in 1..=12 {
+                let line = format!("{prefix}{number}-END");
+                assert_eq!(
+                    raw.matches(&line).count(),
+                    1,
+                    "raw output was lost or duplicated: {line}"
+                );
+                assert_eq!(
+                    cells.matches(&line).count(),
+                    1,
+                    "logical native cells lost or duplicated: {line}"
+                );
+                let raw_position = raw.find(&line).unwrap();
+                let cell_position = cells.find(&line).unwrap();
+                assert!(
+                    raw_position >= previous_raw && cell_position >= previous_cells,
+                    "native output reordered: {line}"
+                );
+                previous_raw = raw_position;
+                previous_cells = cell_position;
+            }
+            fs::write(&gate, "release").unwrap();
+            assert_eq!(until_exit(&producer).state, "exited");
+            wait_for_prompt(broker, transport);
+            let completed = display.lock().unwrap().clone();
+            assert!(
+                !String::from_utf8_lossy(&completed[start..]).contains("__shellspan_"),
+                "private implementation leaked through native completion notification"
+            );
+        }
         fs::write(&marker, "").unwrap();
         let inherited = directory.path().join("state");
         fs::write(&inherited, "").unwrap();
@@ -2622,7 +3473,7 @@
         let stopped = launch("sleep 60");
         assert_eq!(
             run(
-                &format!("builtin kill -s STOP '%( : {};'", stopped.process_handle),
+                &format!("builtin kill -s STOP '%( {};'", stopped.process_handle),
                 None
             )
             .unwrap()
@@ -2836,11 +3687,15 @@
                     shell,
                 );
                 wait_until(Duration::from_secs(5), || {
-                    writes
+                    let queued = writes
                         .lock()
                         .unwrap()
                         .iter()
-                        .any(|(_, data)| data == &encoded)
+                        .any(|(_, data)| data == &encoded);
+                    queued
+                        && registry
+                            .native_editor_confirmed_for_test(transport, &id)
+                            .unwrap_or(false)
                 });
                 if takeover {
                     registry
@@ -2946,7 +3801,45 @@
             );
             assert!(final_job.stop_requested);
         }
+        if shell == TerminalShellKind::Bash {
+            // Repeated real child exits and TERM/CONT settlements overlap the
+            // next native descriptor/data receive. Bash 4.1's read -N/-s used
+            // an interruptible tcsetattr here even though Readline was raw.
+            let counter = directory.path().join("receive-exit-stress-count");
+            fs::write(&counter, "").unwrap();
+            let start = display.lock().unwrap().len();
+            for _ in 0..24 {
+                let quick = launch(&format!(
+                    "printf x >> {}; sleep 0.01; exit 19",
+                    shell_single_quote(counter.to_str().unwrap())
+                ));
+                let stopped = launch("sleep 60");
+                assert_eq!(until_exit(&quick).exit_code, Some(19));
+                observe(&stopped, true);
+                assert_eq!(until_exit(&stopped).state, "exited");
+            }
+            assert_eq!(fs::read_to_string(&counter).unwrap(), "x".repeat(24));
+            let bytes = display.lock().unwrap();
+            let raw = String::from_utf8_lossy(&bytes[start..]);
+            assert!(
+                !raw.contains("error setting terminal attributes"),
+                "native receive changed terminal attributes while children were exiting"
+            );
+            assert!(
+                !raw.contains("__shellspan_"),
+                "private receive/control implementation leaked during exit stress"
+            );
+        }
+        let ordinary_start = writes.lock().unwrap().len();
         assert_eq!(run("set +m", None).unwrap().exit_code, Some(0));
+        if shell == TerminalShellKind::Zsh {
+            assert!(
+                !writes.lock().unwrap()[ordinary_start..]
+                    .iter()
+                    .any(|(_, wire)| wire == "\u{18}\u{2}"),
+                "ordinary short input without active jobs changed to the frame path"
+            );
+        }
         wait_for_prompt(broker, transport);
         let before = writes.lock().unwrap().len();
         assert!(broker
@@ -2978,12 +3871,15 @@
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
-    #[ignore = "requires SHELLSPAN_TEST_MODERN_BASH pointing to a native Bash 4+ executable"]
+    #[ignore = "requires SHELLSPAN_TEST_MODERN_BASH pointing to a native Bash 4.1+ executable"]
     fn native_modern_bash_complete_script_acceptance() {
         let path =
             std::env::var("SHELLSPAN_TEST_MODERN_BASH").expect("native Bash executable required");
         assert!(std::process::Command::new(&path)
-            .args(["-c", "(( BASH_VERSINFO[0] >= 4 ))"])
+            .args([
+                "-c",
+                "(( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 1) ))"
+            ])
             .status()
             .unwrap()
             .success());
@@ -3795,6 +4691,22 @@ trap - DEBUG
     #[cfg(target_os = "macos")]
     #[test]
     fn macos_native_zsh_typing_with_negotiated_bracketed_paste() {
+        run_native_visible_command_acceptance_with_screen("/bin/zsh", TerminalShellKind::Zsh, true);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "requires explicit SHELLSPAN_TEST_NATIVE_ZSH_USER_HOME and the real Powerlevel profile"]
+    fn macos_native_zsh_user_powerlevel_profile_preserves_job_display() {
+        assert!(std::env::var_os("SHELLSPAN_TEST_NATIVE_ZSH_USER_HOME").is_some());
+        run_native_visible_command_acceptance("/bin/zsh", TerminalShellKind::Zsh);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "requires explicit SHELLSPAN_TEST_NATIVE_ZSH_USER_HOME and the real Powerlevel profile"]
+    fn macos_native_zsh_user_powerlevel_profile_preserves_job_display_narrow() {
+        assert!(std::env::var_os("SHELLSPAN_TEST_NATIVE_ZSH_USER_HOME").is_some());
         run_native_visible_command_acceptance_with_screen("/bin/zsh", TerminalShellKind::Zsh, true);
     }
 

@@ -37,20 +37,30 @@ try {
     terminal.open(document.getElementById('terminal'));
     await new Promise(resolve => terminal.write(new Uint8Array(bytes), resolve));
     const lines = [];
+    let firstContentRow = 0;
+    let foundContent = false;
     for (let index = 0; index < terminal.buffer.active.length; index += 1) {
       const line = terminal.buffer.active.getLine(index);
+      if (!foundContent && line.translateToString(true).trim()) {
+        firstContentRow = index;
+        foundContent = true;
+      }
       if (line.isWrapped && lines.length) lines[lines.length - 1] += line.translateToString(true);
       else lines.push(line.translateToString(true));
     }
-    terminal.scrollToTop();
+    // Oversized native input can preserve an initially blank viewport in
+    // scrollback. Show the first real recorded content and await its paint.
+    terminal.scrollToLine(firstContentRow);
+    await document.fonts.ready;
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     return lines.join('\n');
   }, { bytes, metadata });
   for (const text of ['export SHELLSPAN_NATIVE_SCRIPT=kept', 'cat <<', 'SHELLSPAN_END', 'literal Tab']) {
     assert(visible.includes(text), `Real source line is absent from xterm: ${text}`);
   }
   if (metadata.submittedCommandLine) {
-    assert(visible.includes('__shellspan_validate_native'), 'Actual Bash envelope is absent');
-    assert(visible.includes('builtin eval --'), 'Actual Bash native evaluation is absent');
+    assert(!visible.includes('__shellspan_validate_native'), 'Private Bash validation leaked');
+    assert(!visible.includes('$__shellspan_native_source'), 'Private Bash source reference leaked');
   }
   await writeFile(`${trace}.rendered.txt`, visible);
   await page.screenshot({ path: `${trace}.png`, fullPage: true });
