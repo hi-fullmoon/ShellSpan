@@ -219,7 +219,7 @@ describe('TerminalPane', () => {
     expect(bar).toHaveAttribute('data-operation-id', 'operation-1');
     expect(bar).toHaveTextContent('terminal.agentLease.visibleCommandLabel');
     expect(bar).toHaveTextContent('terminal.agentLease.commandRunning');
-    expect(bar).toHaveTextContent('terminal.agentLease.inputLockedLabel');
+    expect(bar).not.toHaveTextContent('terminal.agentLease.inputLockedLabel');
     expect(bar).not.toHaveTextContent('terminal.agentLease.runtime');
     expect(bar.querySelector('[aria-label="terminal.agentLease.runtime"]')).toBeNull();
     expect(bar).not.toHaveClass('absolute');
@@ -244,9 +244,9 @@ describe('TerminalPane', () => {
     );
     expect(bar.querySelector('.agent-terminal-lease-description')).toHaveClass('min-w-0', 'flex-1', 'truncate');
     expect(bar.querySelector('.agent-terminal-lease-status')).not.toHaveClass('flex-wrap');
-    expect(bar.querySelector('.agent-terminal-input-state')).not.toHaveClass('hidden');
+    expect(bar.querySelector('.agent-terminal-input-state')).toBeNull();
     expect(bar.querySelector('.agent-terminal-lease-status')).toContainElement(identity);
-    expect(bar.querySelector('.agent-terminal-lease-status')).toContainElement(bar.querySelector('.agent-terminal-input-state'));
+    expect(bar.querySelector('.agent-terminal-lease-status')?.children).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'terminal.agentLease.takeover' }))
       .toHaveAttribute('data-slot', 'button');
     expect(screen.getByRole('button', { name: 'terminal.agentLease.takeover' }))
@@ -318,7 +318,7 @@ describe('TerminalPane', () => {
 
     const bar = screen.getByTestId('agent-terminal-lease-bar');
     expect(bar).toHaveTextContent('terminal.agentLease.turnRunning');
-    expect(bar).toHaveTextContent('terminal.agentLease.inputLockedLabel');
+    expect(bar).not.toHaveTextContent('terminal.agentLease.inputLockedLabel');
     expect(bar).not.toHaveTextContent('terminal.agentLease.inputAvailableLabel');
     expect(screen.getByTestId('agent-visible-terminal-aura')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'terminal.agentLease.takeover' }));

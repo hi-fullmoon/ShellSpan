@@ -52,10 +52,6 @@
   color: var(--app-primary);
 }
 
-.agent-terminal-input-state {
-  color: var(--app-text-soft);
-}
-
 .agent-terminal-input-state-dot {
   width: 5px;
   height: 5px;

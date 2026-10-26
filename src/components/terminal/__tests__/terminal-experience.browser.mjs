@@ -581,6 +581,8 @@ try {
     await page.setViewportSize({ width, height: 800 });
     const bar = page.getByTestId('agent-terminal-lease-bar');
     await bar.locator('.agent-terminal-lease-description').filter({ hasText: '正在输入命令…' }).waitFor();
+    assert.equal(await bar.locator('.agent-terminal-lease-status > *').count(), 1);
+    assert.equal(await bar.getByText('键盘已锁定', { exact: true }).count(), 0);
     const typingBar = await bar.boundingBox();
     const takeover = bar.getByRole('button', { name: '停止并接管', exact: true });
     const typingButton = await takeover.boundingBox();
@@ -635,11 +637,13 @@ try {
         'Status and takeover must stay on one row');
       assert.ok(description.top >= status.top && description.bottom <= status.bottom,
         'Description must stay within the same row');
-      assert.equal(await bar.locator('.agent-terminal-input-state').isVisible(), true);
+      assert.equal(await bar.locator('.agent-terminal-input-state').count(), 0);
+      assert.equal(await bar.locator('.agent-terminal-lease-status > *').count(), 1);
+      assert.equal(await bar.getByText(locale === 'zh-CN' ? '键盘已锁定' : 'Keyboard locked', { exact: true }).count(), 0);
       await bar.evaluate(async element => {
         await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished));
       });
-      const iconAlignment = await bar.locator('.agent-terminal-lease-status [data-slot="badge"]').evaluateAll(badges => badges.map(badge => {
+      const iconAlignment = await bar.getByTestId('agent-terminal-lease-identity').evaluateAll(badges => badges.map(badge => {
         const bounds = badge.getBoundingClientRect();
         const icon = badge.querySelector('svg').getBoundingClientRect();
         const label = badge.querySelector('span');

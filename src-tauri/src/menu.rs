@@ -362,7 +362,7 @@ fn build_tray_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
     )
 }
 
-fn show_main_window(app: &AppHandle) -> Result<(), String> {
+pub(crate) fn show_main_window(app: &AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
         .ok_or_else(|| "main window not found".to_string())?;

@@ -4,6 +4,7 @@ Uses standard-library protocol parsers, never shell=True. stdout is one bounded 
 document; subprocess diagnostics are returned only as bounded evidence. Python 3.8+.
 """
 import base64
+import configparser
 import hashlib
 import http.client
 import ipaddress
@@ -147,15 +148,23 @@ def inspect_service(args):
                   "ExecMainCode", "ExecMainStatus", "NRestarts", "Type",
                   "ActiveEnterTimestampMonotonic", "InactiveEnterTimestampMonotonic"]
     values = {}
+    output, _ = command(["systemctl", "show", "--no-pager", "--no-ask-password", "--all",
+                         "--property=" + ",".join(properties), "--", args["service"]], 8192)
+    # Only selected scalar properties are requested. Use the standard INI parser
+    # for systemctl's key=value output; never depend on property output ordering.
+    parser = configparser.ConfigParser(interpolation=None, delimiters=("=",),
+                                       comment_prefixes=(), inline_comment_prefixes=None)
+    parser.optionxform = str
+    parser.read_string("[service]\n" + output)
+    if set(parser["service"]) != set(properties):
+        raise CollectionError("invalidOutput", "systemctl did not return the selected service properties")
     for prop in properties:
-        # --value avoids a custom parser for systemctl's property format.
-        value, _ = command(["systemctl", "show", "--no-pager", "--no-ask-password", "--value", "--property=" + prop, "--", args["service"]], 8192)
-        value = value.strip()
+        value = parser["service"][prop].strip()
         numeric = prop in {"MainPID", "ExecMainCode", "ExecMainStatus", "NRestarts",
                            "ActiveEnterTimestampMonotonic", "InactiveEnterTimestampMonotonic"}
         values[prop] = int(value) if numeric and value else value or None
     return {"manager": "systemd", "service": args["service"], "properties": values,
-            "consistency": "sequential property observations; state can change during collection",
+            "consistency": "single systemctl query; not an atomic application-health snapshot",
             "limitations": ["unit state does not establish application health; no logs or environment were read"]}
 
 
@@ -339,7 +348,7 @@ def main():
     except CollectionError as error:
         result.update(status="unavailable", code=error.code, detail=error.detail)
     except (TimeoutError, subprocess.TimeoutExpired):
-        result.update(status="timedOut", code="deadlineExceeded")
+        result.update(status="timedOut", code="deadlineExceeded", phase="collection")
     except Exception as error:
         result.update(status="unavailable", code=type(error).__name__, detail=str(error)[:512])
     finally:

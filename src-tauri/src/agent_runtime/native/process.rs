@@ -739,16 +739,19 @@ struct DiagnosticProcessIo {
     cancellation: tokio_util::sync::CancellationToken,
     deadline: Instant,
     runtime: tokio::runtime::Handle,
+    phase: Arc<Mutex<&'static str>>,
 }
 
 pub(super) fn spawn_remote_diagnostic_process_native(
     start: RemoteProcessStartNative,
     cancellation: &tokio_util::sync::CancellationToken,
     deadline: Instant,
+    phase: Arc<Mutex<&'static str>>,
 ) -> Result<Arc<ManagedProcessNative>, String> {
     let io = DiagnosticProcessIo {
         cancellation: cancellation.child_token(),
         deadline,
+        phase,
         runtime: tokio::runtime::Handle::try_current()
             .map_err(|_| "Remote diagnostics require the native async runtime")?,
     };
@@ -1136,6 +1139,7 @@ fn run_remote_worker(
     {
         return;
     }
+    set_diagnostic_phase(io, "channelSetup");
     let mut channel = match session.target.channel_session() {
         Ok(channel) => channel,
         Err(error) => {
@@ -1156,6 +1160,7 @@ fn run_remote_worker(
     {
         return;
     }
+    set_diagnostic_phase(io, "dispatch");
     if let Err(error) = crate::execution::start_ssh_exec_channel(&mut channel, &start.command) {
         if remote_diagnostic_interrupted(&process, io) {
             return;
@@ -1170,6 +1175,7 @@ fn run_remote_worker(
     }
     // Restore blocking mode before the channel is freed on every exit path.
     let _blocking_mode = RemoteBlockingModeGuard::nonblocking(&session.target);
+    set_diagnostic_phase(io, "collection");
     loop {
         if remote_diagnostic_interrupted(&process, io) {
             let _ = channel.close();
@@ -1213,6 +1219,7 @@ fn run_remote_worker(
             return;
         }
         if channel.eof() {
+            set_diagnostic_phase(io, "finalization");
             finish_remote_channel(&process, &mut channel, &controls, deadline, io);
             return;
         }
@@ -1222,6 +1229,14 @@ fn run_remote_worker(
             return;
         }
         thread::sleep(PROCESS_POLL_INTERVAL);
+    }
+}
+
+fn set_diagnostic_phase(io: Option<&DiagnosticProcessIo>, phase: &'static str) {
+    if let Some(io) = io {
+        if let Ok(mut current) = io.phase.lock() {
+            *current = phase;
+        }
     }
 }
 

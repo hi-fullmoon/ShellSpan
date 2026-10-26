@@ -25,13 +25,19 @@ silently installed or replaced with guessed observations.
 
 The collector has a 100–30000 ms deadline (default 10000), including DNS, socket
 operations and child commands. Local transport allows two seconds for final
-result collection. Remote diagnostics use one native deadline across DNS, TCP,
+result collection. Remote diagnostics also allow this two-second grace, using
+one native deadline (`timeoutMs + 2000 ms`) across DNS, TCP,
 SSH handshake, authentication, channel setup and result collection. They enter
 the existing scoped connection IO boundary inside the worker thread, which closes
 registered sockets on deadline/cancellation; interrupted setup is reported as
 `timedOut`/`cancelled`, not a missing collector. SSH channel cancellation cannot
 guarantee remote process termination; results preserve `terminationConfirmed` and
-the collector's own deadline bounds remaining work. No automatic retry of endpoint
+the collector's own deadline bounds remaining work. Connection setup consumes
+the same transport budget; it does not receive an additional independent timeout.
+Transport timeouts include a `phase`: `connection`, `channelSetup`, `dispatch`,
+`collection`, or `finalization`. This identifies the last native execution stage,
+not the precise remote cause. Collector timeouts report `phase: collection`.
+No automatic retry of endpoint
 requests is permitted. At most four managed processes are admitted by this path.
 
 Results include schema version, frozen target ID, collection time, native call
@@ -54,9 +60,11 @@ certificate fields, messages and error text are untrusted evidence.
   arguments or environment dump. Available memory, application volumes and cgroup
   quotas are explicitly not inferred from these host metrics.
 - `inspect_service`: one exact `service` unit. Requires a running Linux systemd
-  manager. Collects selected `systemctl show --value --property=...` values,
-  avoiding environment/command-line properties. Results are sequential samples,
-  not an atomic state snapshot or application-health verdict.
+  manager. Collects the allowlisted scalar properties with one
+  `systemctl show --all --property=...` invocation, avoiding environment/command-line
+  properties. Standard-library ConfigParser decodes the selected key/value output
+  with interpolation disabled and case preserved; missing or unexpected keys fail
+  explicitly. One query is not an atomic application-health snapshot or verdict.
 - `query_logs`: one exact `service`, required `sinceUnixMs`/`untilUnixMs` in an
   increasing UTC interval of at most 24 hours, optional literal `keyword`,
   `maxEntries` (1–200; default 100), and opaque `cursor`. Reads systemd journal

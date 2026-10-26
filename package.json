@@ -8,6 +8,7 @@
     "dev": "vite --host 0.0.0.0 --port 1420",
     "build": "tsc && vite build",
     "test": "vitest run",
+    "test:single-instance": "node scripts/verify-single-instance.mjs",
     "test:credential-refresh": "node scripts/verify-credential-refresh.mjs",
     "test:sftp-cancellation:ssh": "node scripts/verify-sftp-cancellation.mjs",
     "test:agent-diagnostics": "node scripts/verify-agent-diagnostics.mjs",

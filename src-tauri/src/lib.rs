@@ -255,7 +255,21 @@ pub fn run() {
         vec![backend_log_target, frontend_log_target]
     };
 
-    let builder = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // Register first so duplicate development processes exit before opening
+    // the database or initializing other plugins. The app identifier scopes
+    // the lock independently from release builds and isolated native checks.
+    #[cfg(all(
+        debug_assertions,
+        any(target_os = "macos", target_os = "windows", target_os = "linux")
+    ))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
+        if let Err(error) = menu::show_main_window(app) {
+            log::error!("failed to restore existing development window: {error}");
+        }
+    }));
+
+    let builder = builder
         .setup(|app| {
             #[cfg(target_os = "macos")]
             {

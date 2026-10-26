@@ -34,7 +34,19 @@ class SystemdDiagnosticTests(unittest.TestCase):
         self.assertEqual(properties["ActiveState"], "active")
         expected = subprocess.check_output(["systemctl", "show", "--value", "--property=MainPID", "ssh.service"], text=True).strip()
         self.assertEqual(str(properties["MainPID"]), expected)
-        self.assertNotIn("Environment", properties)
+        self.assertEqual(set(properties), {"Id", "LoadState", "ActiveState", "SubState", "Result",
+            "MainPID", "ExecMainCode", "ExecMainStatus", "NRestarts", "Type",
+            "ActiveEnterTimestampMonotonic", "InactiveEnterTimestampMonotonic"})
+        for name, value in properties.items():
+            expected = subprocess.check_output(["systemctl", "show", "--all", "--value",
+                "--property=" + name, "ssh.service"], text=True).strip()
+            self.assertEqual(str(value) if value is not None else "", expected, name)
+
+    def test_missing_service_returns_actual_not_found_state(self):
+        observed = collect("inspect_service", {"service": "shellspan-nonexistent-diagnostic.service"})
+        self.assertEqual(observed["status"], "ok", observed)
+        self.assertEqual(observed["data"]["properties"]["LoadState"], "not-found")
+        self.assertEqual(observed["data"]["properties"]["ActiveState"], "inactive")
 
     def test_journal_cursor_pages_real_records_without_skips(self):
         expected = subprocess.check_output(["journalctl", "--no-pager", "-o", "json", "--unit=ssh.service",

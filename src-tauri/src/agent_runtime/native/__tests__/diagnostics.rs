@@ -249,8 +249,8 @@ fn diagnostic_ssh_handshake_obeys_total_deadline_and_cancellation() {
         .unwrap();
         server.join().unwrap();
         assert!(
-            started.elapsed() < Duration::from_secs(2),
-            "SSH setup must obey the diagnostic deadline"
+            started.elapsed() < Duration::from_secs(4),
+            "SSH setup must obey the diagnostic deadline plus bounded finalization grace"
         );
         assert_eq!(
             result.status,
@@ -262,7 +262,11 @@ fn diagnostic_ssh_handshake_obeys_total_deadline_and_cancellation() {
         );
         assert_eq!(processes.running_count().unwrap(), 0);
         if !cancel {
-            assert_eq!(result.data.unwrap()["code"], "transportDeadlineExceeded");
+            assert!(started.elapsed() >= Duration::from_millis(2500));
+            let data = result.data.unwrap();
+            assert_eq!(data["code"], "transportDeadlineExceeded");
+            assert_eq!(data["phase"], "connection");
+            assert_eq!(data["terminationConfirmed"], false);
         }
     }
 }

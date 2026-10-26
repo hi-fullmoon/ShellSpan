@@ -748,7 +748,6 @@ export default {
   'terminal.agentLease.commandTypingHint': 'Typing a command; it has not been submitted. Keyboard input is locked. Press Escape or choose Stop & take over to cancel.',
   'terminal.agentLease.commandRunning': 'Agent is running a command in this terminal',
   'terminal.agentLease.inputLocked': 'Agent is running a command; keyboard input is locked. You can still scroll, select, copy, and search.',
-  'terminal.agentLease.inputLockedLabel': 'Keyboard locked',
   'terminal.agentLease.inputAvailableLabel': 'Input available',
   'terminal.agentLease.turnRunning': 'Agent is continuing this turn; terminal input remains locked.',
   'terminal.occupancy.terminal': 'Terminal workspace',

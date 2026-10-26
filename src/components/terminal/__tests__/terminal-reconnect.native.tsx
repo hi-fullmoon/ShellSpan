@@ -13,10 +13,14 @@ import { buildSessionCreateRequest, invokeCreateSession, invokeCheckHostKey, inv
 import { useProfileStore } from '@/stores/profileStore';
 import type { ConnectionProfile } from '@/types';
 import { useTerminalStore } from '@/stores/terminalStore';
+import { useFocusStore } from '@/stores/focusStore';
+import { FocusNoTarget } from '@/components/focus/focus-no-target';
+import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
 import { useAppStore } from '@/stores/appStore';
 import { initI18n } from '@/locales';
 import { readTerminalCurrentDirectory } from '@/lib/terminal/terminal-current-directory';
 import { useCloseTerminal } from '@/hooks/useCloseTerminal';
+import { useReconnectSession } from '@/hooks/useReconnectSession';
 import { useToastStore } from '@/stores/toastStore';
 import '@/styles/base.css';
 
@@ -30,12 +34,25 @@ async function eventually(check: () => boolean, message: string) {
 }
 let agent: AiSessionController | undefined;
 let closeTerminal: ReturnType<typeof useCloseTerminal> | undefined;
+let reconnectTerminal: ReturnType<typeof useReconnectSession> | undefined;
+const focusReconnect = new URL(location.href).searchParams.get('focusReconnect') === 'true';
 function NativeAgent() {
-  agent = useAiSessionController({ scope: 'terminal' });
+  agent = useAiSessionController({ scope: 'terminal', focusMode: focusReconnect });
+  const focusTarget = useFocusStore(state => state.targetSessionId);
+  const targetConnected = useTerminalStore(state => state.sessions.some(
+    session => session.sessionId === focusTarget && session.status === 'connected',
+  ));
+  if (focusReconnect) return <AiWorkspaceRoot scope="terminal" mode="agent" view={agent.view}
+    composerState={agent.composer} canStartAgent={agent.canStartAgent} readOnlySession={agent.readOnlySession}
+    agentUnavailableReason={agent.agentUnavailableReason}
+    onContinueOnReconnectedTerminal={agent.continueOnReconnectedTerminal ?? undefined}
+    historicalContinuationAvailable={agent.historicalContinuationAvailable}
+    executionSurfaceNotice={!targetConnected ? <FocusNoTarget /> : undefined} />;
   return <div data-agent-id={agent.view?.summary.id}>{agent.composer.draft}</div>;
 }
 function NativeWorkspace({ panel }: { panel: boolean }) {
   closeTerminal = useCloseTerminal();
+  reconnectTerminal = useReconnectSession();
   const session = useTerminalStore(state => state.sessions.find(item => item.sessionId === state.activeSessionId) ?? null);
   return <TooltipProvider><TerminalControllerLayer /><TerminalPane activeSession={session} />
     {panel && <NativeAgent />}<Toaster /></TooltipProvider>;
@@ -55,6 +72,7 @@ async function verify() {
   const live = () => useTerminalStore.getState().sessions.find(item => item.sessionId === useTerminalStore.getState().activeSessionId);
   try {
     useAppStore.getState().setActiveSection('terminal');
+    if (focusReconnect) useFocusStore.getState().enter();
     flushSync(() => root.render(<NativeWorkspace panel={false} />));
     if (sshFixture) {
       const host = await invokeCheckHostKey(profile.host, profile.port);
@@ -71,6 +89,7 @@ async function verify() {
     flushSync(() => useTerminalStore.getState().addSession(original, sshFixture ? profile.id : undefined));
     await eventually(() => live()?.status === 'connected', 'Original native PTY did not connect');
     await eventually(() => Boolean(live()?.promptReady), 'Original native shell did not reach its integrated prompt');
+    if (focusReconnect) assert(useFocusStore.getState().setTarget(original.sessionId), 'Cannot select the actual Focus target');
     const projectRoot = sshFixture ? null : await readTerminalCurrentDirectory(live()!);
     assert(sshFixture || projectRoot, 'Missing actual local project directory');
     await invokeCreateAgentRuntimeSession({ sessionId: agentId, taskId: `task-${crypto.randomUUID()}`,
@@ -78,6 +97,7 @@ async function verify() {
       permissionMode: 'operator', target: { kind: sshFixture ? 'remote' : 'local', targetId: `terminal-${original.sessionId}`, sessionId: original.sessionId,
         ...(sshFixture ? { host: profile.host, port: profile.port, username: profile.username, profileId: profile.id } : { cwd: projectRoot! }) } });
     created = true;
+    if (focusReconnect) useFocusStore.getState().setConversation(agentId);
     flushSync(() => root.render(<NativeWorkspace panel />));
     await eventually(() => agent?.view?.summary.id === agentId, 'Native Agent did not restore its original conversation');
     const readProject = async () => {
@@ -113,12 +133,16 @@ async function verify() {
       const replacement = live()!.sessionId;
       terminals.add(replacement);
       assert(replacement !== previous, 'Reconnect did not create a real replacement PTY');
+      if (focusReconnect) assert(useFocusStore.getState().targetSessionId === replacement,
+        'Focus kept the removed transport ID after the terminal reconnected');
       assert(live()!.brokerReplacedSessionIds?.includes(previous), 'Real broker rollover lost verified ancestry');
       await eventually(() => agent?.view?.snapshot.value.header.target?.sessionId === replacement,
         `Agent did not rebind to native replacement: ${agent?.composer.lastError?.message ?? 'no error'}`);
       assert(agent!.view!.summary.id === agentId, 'Reconnect replaced the Agent conversation ID');
       assert(agent!.composer.draft === 'Keep this draft through terminal reconnect', 'Reconnect lost the composer draft');
       assert(!agent!.readOnlySession, 'Reconnected Agent remained read-only');
+      if (focusReconnect) assert(!document.querySelector('[data-slot="focus-start-notice"]'),
+        'Focus still reported its reconnected target as closed');
       const persisted = await invokeGetAgentRuntimeSession({ sessionId: agentId });
       assert(persisted.header.taskId === before.header.taskId && persisted.header.goal === before.header.goal, 'Reconnect replaced task context');
       assert(persisted.header.permissionMode === 'requestApproval', 'Reconnect retained old execution authorization');
@@ -144,12 +168,45 @@ async function verify() {
       && agent.view.snapshot.value.header.target?.sessionId === live()?.sessionId, 'Closed panel did not restore and rebind its predecessor conversation');
     const unrelated = await invokeCreateLocalSession(80, 24);
     terminals.add(unrelated.sessionId);
+    let expectedReconnects = 3;
+    if (focusReconnect) {
+      flushSync(() => useTerminalStore.getState().addSession(unrelated));
+      await eventually(() => live()?.status === 'connected', 'Unrelated viewing terminal did not connect');
+      for (const hidden of [false, true]) {
+        const previous = useFocusStore.getState().targetSessionId!;
+        assert(previous !== unrelated.sessionId, 'Viewing a different tab changed the Focus target');
+        if (hidden) flushSync(() => useFocusStore.getState().leave());
+        flushSync(() => useTerminalStore.getState().setActiveSession(unrelated.sessionId));
+        await invokeCloseSession(previous);
+        await eventually(() => useTerminalStore.getState().sessions.find(item => item.sessionId === previous)?.status === 'disconnected',
+          'Focus target did not disconnect while a different terminal was selected');
+        assert(reconnectTerminal, 'Missing production reconnect action');
+        await reconnectTerminal(previous);
+        await eventually(() => {
+          const id = useFocusStore.getState().targetSessionId;
+          return id !== previous && useTerminalStore.getState().sessions.some(item => item.sessionId === id && item.status === 'connected');
+        }, 'Focus did not follow its replacement while another terminal was selected');
+        const replacement = useFocusStore.getState().targetSessionId!;
+        terminals.add(replacement);
+        assert(useTerminalStore.getState().activeSessionId === unrelated.sessionId, 'Focus reconnect stole the viewed terminal');
+        assert(useFocusStore.getState().enabled === !hidden, 'Reconnect changed whether Focus was enabled');
+        await eventually(() => agent?.view?.snapshot.value.header.target?.sessionId === replacement,
+          'Focus Agent did not bind to its replacement while hidden or viewing another tab');
+        assert(agent!.view!.summary.id === agentId && agent!.composer.draft === 'Keep this draft through terminal reconnect',
+          'Focus reconnect replaced the conversation or lost its draft');
+        if (hidden) flushSync(() => useFocusStore.getState().enter());
+        assert(useFocusStore.getState().targetSessionId === replacement, 'Returning to Focus lost its reconnected target');
+        expectedReconnects++;
+      }
+      flushSync(() => useTerminalStore.getState().setActiveSession(useFocusStore.getState().targetSessionId));
+      await readProject();
+    }
     let rejected = false;
     try { await invokeReconnectAgentTerminal({ sessionId: agentId, previousSessionId: live()!.sessionId, terminalSessionId: unrelated.sessionId }); }
     catch { rejected = true; }
     assert(rejected, 'Backend accepted an unrelated native PTY as a reconnect');
     const events = await invokeGetCommittedAgentRuntimeEvents({ sessionId: agentId, limit: 100 });
-    assert(events.events.filter(event => event.type === 'session/terminal_reconnected').length === 3, 'Native rebind events were not durably committed');
+    assert(events.events.filter(event => event.type === 'session/terminal_reconnected').length === expectedReconnects, 'Native rebind events were not durably committed');
     assert(!events.events.some(event => event.type === 'turn/start' || event.type === 'request/start'), 'Reconnect started execution without human input');
     const closing = live()!;
     await eventually(() => Boolean(live()?.promptReady), 'Reconnected shell did not reach its prompt');
@@ -160,9 +217,17 @@ async function verify() {
     const toastsBeforeClose = useToastStore.getState().toasts.length;
     await closeTerminal(closing.sessionId);
     assert(!useTerminalStore.getState().sessions.some(item => item.sessionId === closing.sessionId), 'Closing the disconnected terminal retained its tab');
+    if (focusReconnect) assert(useFocusStore.getState().targetSessionId === closing.sessionId,
+      'Closing the Focus target implicitly adopted another terminal');
     assert(useToastStore.getState().toasts.length === toastsBeforeClose, 'Closing a disconnected terminal reported a false error');
     assert((await invokeGetAgentRuntimeSession({ sessionId: agentId })).ended, 'Closing must settle the associated Agent');
     await invokeCloseSession(closing.sessionId);
+    if (focusReconnect) {
+      // Startup restoration runs only in an empty workspace. The extra live
+      // tab used above must be closed before exercising that separate path.
+      await invokeCloseSession(unrelated.sessionId);
+      flushSync(() => useTerminalStore.getState().removeSession(unrelated.sessionId));
+    }
 
     // Restore exactly the persisted workspace fields: broker identities do not
     // survive a process restart. Exercise the production Enter reconnect path.
@@ -181,7 +246,7 @@ async function verify() {
     assert(!agent!.continueOnReconnectedTerminal, 'Restored transport offered an impossible rebind');
     assert(!agent!.composer.lastError, 'Restored transport attempted an invalid automatic rebind');
     const restoredEvents = await invokeGetCommittedAgentRuntimeEvents({ sessionId: agentId, limit: 100 });
-    assert(restoredEvents.events.filter(event => event.type === 'session/terminal_reconnected').length === 3,
+    assert(restoredEvents.events.filter(event => event.type === 'session/terminal_reconnected').length === expectedReconnects,
       'Restoring workspace history rebound the old conversation');
   } finally {
     root.unmount();

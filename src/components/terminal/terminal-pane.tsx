@@ -34,7 +34,6 @@ import {
 } from '@/components/terminal/agent-terminal-lease-state';
 import {
   SquareTerminalIcon,
-  LockKeyholeIcon,
   SquareIcon,
 } from 'lucide-react';
 
@@ -76,7 +75,6 @@ const AgentTerminalLeaseBar: React.FC<{
       ? 'terminal.agentLease.commandTyping'
       : 'terminal.agentLease.commandRunning')
     : t('terminal.agentLease.turnRunning');
-  const inputLabel = t('terminal.agentLease.inputLockedLabel');
 
   return (
     <div
@@ -109,15 +107,6 @@ const AgentTerminalLeaseBar: React.FC<{
               <TooltipContent>{t('terminal.agentLease.agentIdentity', { id: lease.agentSessionId })}</TooltipContent>
             </Tooltip>
           </TooltipProvider>
-          <Badge
-            variant={lease.terminalOwned ? 'secondary' : 'outline'}
-            className="agent-terminal-input-state h-6 shrink-0 @max-[520px]/terminal-lease:size-6 @max-[520px]/terminal-lease:p-0 @max-[520px]/terminal-lease:has-data-[icon=inline-start]:pl-0"
-            aria-hidden="true"
-            title={inputLabel}
-          >
-            <LockKeyholeIcon data-icon="inline-start" />
-            <span className="hidden @min-[520px]/terminal-lease:inline">{inputLabel}</span>
-          </Badge>
         </div>
         <span
           className="agent-terminal-lease-description min-w-0 flex-1 truncate text-xs text-app-text-soft"

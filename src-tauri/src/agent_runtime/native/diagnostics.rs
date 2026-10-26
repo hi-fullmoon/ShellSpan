@@ -1,6 +1,6 @@
 //! Fixed collector dispatch through the existing bounded, cancellable process transport.
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -53,8 +53,6 @@ pub(super) fn execute_diagnostic(
     cancellation: &CancellationToken,
 ) -> Result<AgentToolResultNative, String> {
     let arguments = collector_arguments(call)?;
-    let deadline = Instant::now()
-        + Duration::from_millis(call.arguments["timeoutMs"].as_u64().unwrap_or(10_000));
     if cancellation.is_cancelled() {
         return Ok(result(
             request,
@@ -81,6 +79,8 @@ pub(super) fn execute_diagnostic(
     // short grace period to collect its final structured timeout result and reap it.
     let timeout = Duration::from_millis(call.arguments["timeoutMs"].as_u64().unwrap_or(10_000))
         + Duration::from_secs(2);
+    let deadline = Instant::now() + timeout;
+    let phase = Arc::new(Mutex::new("connection"));
     let process = match &call.target {
         AgentToolTargetNative::Local { target_id, .. } => {
             let mut command = std::process::Command::new(&arguments[0]);
@@ -107,6 +107,7 @@ pub(super) fn execute_diagnostic(
             },
             cancellation,
             deadline,
+            Arc::clone(&phase),
         )?,
         _ => return Err("diagnostics require a frozen host target".into()),
     };
@@ -136,7 +137,11 @@ pub(super) fn execute_diagnostic(
     } else if snapshot.state == ProcessLifecycleNative::TimedOut {
         (
             AgentToolResultStatusNative::TimedOut,
-            json!({"status":"timedOut","code":"transportDeadlineExceeded","terminationConfirmed":snapshot.termination_confirmed}),
+            json!({"status":"timedOut","code":"transportDeadlineExceeded",
+                "phase": if matches!(call.target, AgentToolTargetNative::Remote { .. }) {
+                    *phase.lock().map_err(|_| "diagnostic phase lock poisoned")?
+                } else { "collection" },
+                "terminationConfirmed":snapshot.termination_confirmed}),
         )
     } else if snapshot.exit_code != Some(0) || snapshot.stdout_truncated {
         // Do not include the transport's command or stderr: they can contain shell

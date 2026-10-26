@@ -67,3 +67,18 @@ export const useFocusStore = create<FocusState>()((set, get) => ({
     try { localStorage.setItem(SPLIT_KEY, String(split)); } catch { /* Layout remains usable without storage. */ }
   },
 }));
+
+// Follow the replacement of the selected connection, including while Focus
+// is hidden or its Agent is busy. This updates the UI target only; the Agent
+// controller/backend still enforce broker ancestry and settled execution.
+useTerminalStore.subscribe((state, previous) => {
+  const target = useFocusStore.getState().targetSessionId;
+  if (!target || state.sessions === previous.sessions
+    || state.sessions.some(session => session.sessionId === target)) return;
+  const original = previous.sessions.find(session => session.sessionId === target);
+  if (!original) return;
+  const replacement = state.sessions.find(session => session.replacesSessionId === target
+    && session.host === original.host && session.port === original.port
+    && session.username === original.username && session.profileId === original.profileId);
+  if (replacement) useFocusStore.setState({ targetSessionId: replacement.sessionId });
+});

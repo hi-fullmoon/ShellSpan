@@ -454,6 +454,13 @@ Rebinding neither resumes a turn nor submits input: the next explicit human
 message must inspect current execution state and must not replay earlier commands.
 Uncertain operations remain blocked for reconciliation.
 
+Focus follows the explicit replacement of its selected terminal transport
+when the profile, host, port and username remain unchanged. This includes
+reconnecting while viewing another tab or while Focus is hidden. Viewing or
+closing a terminal never adopts an unrelated target. Following the UI target
+does not transfer Agent authority: broker ancestry, settled execution,
+reconciled effects and fresh permission checks above still govern rebinding.
+
 `commandStart` moves `submitted` to `running`. A matching, accepted cooperative
 `commandEnd`
 moves the command to `completed` and supplies the exit code and final working
