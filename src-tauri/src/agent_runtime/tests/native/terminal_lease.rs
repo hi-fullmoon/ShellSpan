@@ -298,6 +298,39 @@
     }
 
     #[test]
+    fn command_presentation_is_explicit_without_publishing_source() {
+        let manager = disabled_broker_manager();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&events);
+        manager
+            .set_publisher(Arc::new(move |event| {
+                captured.lock().unwrap().push(event.clone());
+            }))
+            .unwrap();
+        manager
+            .acquire_command("terminal-1", "agent-1", "task-1", "command-1")
+            .unwrap();
+        let command = serde_json::to_value(&events.lock().unwrap()[0]).unwrap();
+        assert_eq!(command["commandExecution"], true);
+        assert!(command.get("commandDisplay").is_none());
+        manager
+            .release(
+                "terminal-1",
+                "agent-1",
+                "task-1",
+                "command-1",
+                TerminalLeaseReleaseReason::Completed,
+            )
+            .unwrap();
+        manager
+            .acquire("terminal-1", "agent-1", "task-1", "interaction-1", None)
+            .unwrap();
+        let interaction = serde_json::to_value(events.lock().unwrap().last().unwrap()).unwrap();
+        assert!(interaction.get("commandExecution").is_none());
+        assert!(interaction.get("commandDisplay").is_none());
+    }
+
+    #[test]
     fn events_preserve_operation_identity_and_first_release_reason() {
         let manager = disabled_broker_manager();
         let events = Arc::new(Mutex::new(Vec::new()));

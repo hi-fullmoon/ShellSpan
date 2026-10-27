@@ -81,6 +81,8 @@ export interface AgentTerminalLeaseEvent {
   acquiredAtUnixMs: number;
   state: 'acquired' | 'activity' | 'released';
   commandDisplay?: string;
+  /** Marks terminal_execute without publishing command text to the display event. */
+  commandExecution?: boolean;
   commandPhase?: 'typing' | 'running';
   reason?: AgentTerminalLeaseReleaseReason;
 }

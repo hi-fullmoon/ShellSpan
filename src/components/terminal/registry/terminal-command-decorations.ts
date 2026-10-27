@@ -79,7 +79,7 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
   };
   const syncLease = () => {
     const lease = agentTerminalLeaseState.get(sessionId);
-    const next = lease?.terminalOwned && lease.commandDisplay ? lease.operationId : undefined;
+    const next = lease?.terminalOwned && lease.commandExecution ? lease.operationId : undefined;
     schedule();
     if (next === operationId) return;
     operationId = next;

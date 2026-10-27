@@ -7,7 +7,11 @@ the command without guessing prompts, parsing source, or relying on timing
 between independent frontend events.
 
 The frontend shades only the command range belonging to an active Agent
-lease with a `commandDisplay`. It anchors the beginning before acknowledging
+lease with `commandExecution: true`. `terminal_execute` sets this acquired-event
+flag without publishing command text; private job-control requests, interactive
+observation and input leases omit it. `commandDisplay` is optional and is not a
+decoration prerequisite.
+The frontend anchors the beginning before acknowledging
 frontend readiness and closes the range when xterm parses `OSC 133;C`.
 The prompt marker reanchors the range if delayed PTY display follows lease
 acquisition. In-progress shading appears only during the typing phase;
@@ -32,3 +36,7 @@ integrated Bash/Zsh PTY executions and render them through xterm in WebKit.
 The browser checks wide/narrow layouts, app/terminal color schemes, delayed
 display after lease release, selection, reflow, alternate screens and cleanup.
 Windows PowerShell runtime acceptance requires a Windows host.
+`SHELLSPAN_NATIVE_SCRIPT_TRACE_PATH` can point the browser check at a complete
+native script capture and its metadata. That path replays the actual acquired
+lease event exported by the native acceptance test, without synthesizing
+`commandDisplay` or a command-execution flag.

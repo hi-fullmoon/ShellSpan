@@ -1014,9 +1014,16 @@
         let preference = Arc::clone(&reduced_motion);
         let phases = Arc::new(Mutex::new(Vec::new()));
         let observed_phases = Arc::clone(&phases);
+        let native_script_lease = Arc::new(Mutex::new(None));
+        let observed_script_lease = Arc::clone(&native_script_lease);
         leases
             .set_publisher(Arc::new(move |event| {
                 if event.state == TerminalLeaseEventState::Acquired {
+                    if event.operation_id == "native-script" {
+                        assert_eq!(event.command_execution, Some(true));
+                        assert!(event.command_display.is_none());
+                        *observed_script_lease.lock().unwrap() = Some(event.clone());
+                    }
                     acknowledger
                         .set_reduced_motion(
                             &event.session_id,
@@ -1628,7 +1635,7 @@
                     .session
                     .unwrap()
                     .geometry;
-                fs::write(format!("{path}.json"), serde_json::to_vec(&serde_json::json!({ "commandLine": result.command_line, "submittedCommandLine": result.submitted_command_line, "columns": geometry.columns, "rows": geometry.rows })).unwrap()).unwrap();
+                fs::write(format!("{path}.json"), serde_json::to_vec(&serde_json::json!({ "commandLine": result.command_line, "submittedCommandLine": result.submitted_command_line, "columns": geometry.columns, "rows": geometry.rows, "leaseEvent": native_script_lease.lock().unwrap().clone().expect("real native script acquisition") })).unwrap()).unwrap();
             }
             wait_for_prompt(broker, transport_id);
             leases.release_turn("typing-agent").unwrap();

@@ -78,7 +78,7 @@ try {
             const operationId = `presentation-${index}`;
             agentTerminalLeaseState.set({ sessionId: 'presentation', agentSessionId: 'agent',
               taskId: 'task', operationId, acquiredAtUnixMs: Date.now(), state: 'acquired',
-              commandDisplay: execution.command, commandPhase: 'typing', terminalOwned: true,
+              commandExecution: true, commandPhase: 'typing', terminalOwned: true,
               inputBlocked: false, takeoverRequested: false, takeoverFailed: false, requestTakeover() {} });
             await write('');
             let remainder = execution.trace;
@@ -171,7 +171,7 @@ try {
           const state = window.runtime.agentTerminalLeaseState;
           state.set({ sessionId: 'presentation', agentSessionId: 'agent', taskId: 'task',
             operationId: 'cancelled', acquiredAtUnixMs: Date.now(), state: 'acquired',
-            commandDisplay: 'git status', terminalOwned: true, inputBlocked: false,
+            commandExecution: true, terminalOwned: true, inputBlocked: false,
             takeoverRequested: false, takeoverFailed: false, requestTakeover() {} });
           await write('');
           state.clear('presentation', 'cancelled');
@@ -191,7 +191,7 @@ try {
             const write = value => new Promise(resolve => terminal.write(value, resolve));
             const acquire = index => state.set({ sessionId: 'delayed-commands', agentSessionId: 'agent',
               taskId: 'task', operationId: `delayed-${index}`, acquiredAtUnixMs: Date.now(), state: 'acquired',
-              commandDisplay: trace.executions[index].command, commandPhase: 'typing', terminalOwned: true,
+              commandExecution: true, commandPhase: 'typing', terminalOwned: true,
               inputBlocked: false, takeoverRequested: false, takeoverFailed: false, requestTakeover() {} });
             await write(trace.startup);
             acquire(0);
@@ -238,14 +238,15 @@ try {
       const terminal = new Terminal({ cols: metadata.columns, rows: metadata.rows,
         allowProposedApi: true, fontSize: 14, theme: resolveTerminalTheme('app') });
       terminal.open(document.getElementById('terminal'));
-      const decorations = installTerminalCommandDecorations(terminal, 'native-script');
-      agentTerminalLeaseState.set({ sessionId: 'native-script', agentSessionId: 'agent', taskId: 'task',
-        operationId: 'native', acquiredAtUnixMs: Date.now(), state: 'acquired',
-        commandDisplay: metadata.commandLine, commandPhase: 'typing', terminalOwned: true,
+      if (!metadata.leaseEvent?.commandExecution || metadata.leaseEvent.commandDisplay !== undefined) {
+        throw new Error('Native script must use its real command acquisition event without display text');
+      }
+      const decorations = installTerminalCommandDecorations(terminal, metadata.leaseEvent.sessionId);
+      agentTerminalLeaseState.set({ ...metadata.leaseEvent, terminalOwned: true,
         inputBlocked: false, takeoverRequested: false, takeoverFailed: false, requestTakeover() {} });
       await new Promise(resolve => terminal.write('', resolve));
       await new Promise(resolve => terminal.write(trace, resolve));
-      agentTerminalLeaseState.clear('native-script', 'native');
+      agentTerminalLeaseState.clear(metadata.leaseEvent.sessionId, metadata.leaseEvent.operationId);
       await new Promise(resolve => terminal.write('', resolve));
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const buffer = terminal.buffer.active;
