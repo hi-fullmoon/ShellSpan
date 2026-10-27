@@ -41,7 +41,8 @@ struct TerminalExecuteRegistration {
     task_id: String,
     operation_id: String,
     operation: Arc<TerminalCommandOperation>,
-    // Serializes each enqueue with cancellation, but is never held while sleeping.
+    // Serializes each enqueue with cancellation. Receiver/clear acknowledgements
+    // can be awaited under this gate to prevent a concurrent accept-line.
     submitted: Arc<Mutex<bool>>,
     editor_batch_pending: Arc<AtomicBool>,
 }
@@ -1192,6 +1193,7 @@ impl TerminalExecuteRegistry {
             .submitted
             .lock()
             .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE".to_string())?;
+        self.wait_native_frame_before_stop(&registration, *submitted)?;
         let send = registration
             .operation
             .request_settlement(TerminalCommandRequestedSettlement::TakenOver)?;
@@ -1449,6 +1451,7 @@ impl TerminalExecuteRegistry {
                 .submitted
                 .lock()
                 .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE".to_string())?;
+            self.wait_native_frame_before_stop(&registration, *submitted)?;
             let send = registration.operation.request_settlement(requested)?;
             let receiver_pending = registration.editor_batch_pending.load(Ordering::Acquire)
                 && !registration
@@ -1502,6 +1505,25 @@ impl TerminalExecuteRegistry {
         } else {
             Err(errors.join("; "))
         }
+    }
+
+    fn wait_native_frame_before_stop(
+        &self,
+        registration: &TerminalExecuteRegistration,
+        submitted: bool,
+    ) -> Result<(), String> {
+        if registration.native_clear && !submitted {
+            // Keep the operation attached and Submitted while its exact frame
+            // acknowledgement arrives. Retiring it first discards that receipt;
+            // sending a clear first can race the receiver's tty restoration.
+            // The caller holds the submit gate, so this cannot accept the line.
+            // If the receipt is lost, the existing scoped clear still requires
+            // its own exact empty-buffer acknowledgement before input unlocks.
+            registration
+                .operation
+                .wait_native_private_checkpoint(INTERRUPT_SETTLEMENT_TIMEOUT)?;
+        }
+        Ok(())
     }
 
     #[cfg(all(test, unix))]

@@ -1074,11 +1074,17 @@ __shellspan_native_checkpoint() {{
   __shellspan_emit A "$READLINE_LINE"
 }}
 __shellspan_native_receive() {{
+  local __shellspan_completed_descriptor=
   __shellspan_receiver_tty=$(__shellspan_stty -g 2>/dev/null) || return
   __shellspan_stty -echo 2>/dev/null || {{ __shellspan_restore_receiver_tty; return; }}
   __shellspan_native_receive_frame
   local __shellspan_receive_status=$?
   __shellspan_restore_receiver_tty
+  # The acknowledgement also fences terminal-mode restoration. A following
+  # discard key must reach Readline rather than the receiver's cooked tty.
+  if [[ -n $__shellspan_completed_descriptor ]]; then
+    __shellspan_native_frame_checkpoint "$__shellspan_completed_descriptor"
+  fi
   return "$__shellspan_receive_status"
 }}
 __shellspan_quarantine_native() {{
@@ -1144,7 +1150,7 @@ __shellspan_native_receive_frame() {{
   elif [[ $__shellspan_async_redraw == 1 ]]; then
     builtin printf '\r\n'
   fi
-  __shellspan_native_frame_checkpoint "$__shellspan_descriptor"
+  __shellspan_completed_descriptor=$__shellspan_descriptor
   return 124
 }}
 __shellspan_native_frame_checkpoint() {{
@@ -1456,7 +1462,7 @@ __shellspan_native_frame_checkpoint() {{
   __shellspan_emit M "$1" "$BUFFER"
 }}
 __shellspan_native_receive() {{
-  local __shellspan_receiver_tty __shellspan_receiver_fd
+  local __shellspan_receiver_tty __shellspan_receiver_fd __shellspan_completed_descriptor=
   __shellspan_receiver_tty=$("$__shellspan_stty_executable" -g </dev/tty 2>/dev/null) || return
   "$__shellspan_stty_executable" -echo </dev/tty 2>/dev/null || return
   {{
@@ -1466,6 +1472,11 @@ __shellspan_native_receive() {{
     if [[ -n ${{__shellspan_receiver_fd-}} ]]; then builtin exec {{__shellspan_receiver_fd}}<&-; fi
     "$__shellspan_stty_executable" "$__shellspan_receiver_tty" </dev/tty 2>/dev/null
   }}
+  # External stty temporarily leaves ZLE's input mode. Publish readiness only
+  # after it returns, so the next discard key cannot be consumed as tty EOF.
+  if [[ -n $__shellspan_completed_descriptor ]]; then
+    __shellspan_native_frame_checkpoint "$__shellspan_completed_descriptor"
+  fi
 }}
 __shellspan_read_native() {{
   local __shellspan_read_data= __shellspan_read_chunk
@@ -1531,7 +1542,7 @@ __shellspan_native_receive_frame() {{
   zle -I
   BUFFER=$__shellspan_decoded
   CURSOR=${{#BUFFER}}
-  __shellspan_native_frame_checkpoint "$__shellspan_descriptor"
+  __shellspan_completed_descriptor=$__shellspan_descriptor
 }}
 zle -N __shellspan_native_receive
 __shellspan_private_receive() {{

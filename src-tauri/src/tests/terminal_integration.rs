@@ -1439,8 +1439,10 @@
                     }
                     let operation = typing.join().unwrap().unwrap();
                     assert!(
-                        cancel_started.elapsed() < Duration::from_secs(1),
-                        "checkpoint cancellation did not wake its waiter"
+                        // Stop allows the two-second frame receipt wait before
+                        // falling back to its independently confirmed clear.
+                        cancel_started.elapsed() < Duration::from_secs(3),
+                        "checkpoint cancellation exceeded the bounded frame wait"
                     );
                     operation
                 });

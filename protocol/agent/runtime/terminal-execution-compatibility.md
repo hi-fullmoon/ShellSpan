@@ -247,7 +247,13 @@ never replayed.
 
 Bash/Zsh private script receivers keep terminal echo disabled across the entire
 descriptor and encoded payload, using the `stty` executable resolved at shell
-startup even if the user later changes `PATH`. A truncated, invalid or timed-out
+startup even if the user later changes `PATH`. Successful frame acknowledgements
+are emitted after terminal modes have been restored. Stop/takeover waits up to
+two seconds for an outstanding frame acknowledgement under the submit gate
+before settling and retiring the unsubmitted command, preventing the discard
+key from racing receiver cleanup. If the frame receipt is lost, the scoped
+clear still requires its own matching empty-buffer acknowledgement; otherwise
+the input recovery guard remains held. A truncated, invalid or timed-out
 frame enters a silent drain instead of returning its delayed tail to the shell
 editor. Ctrl-C does not release this isolation, because it cannot prove that
 all bytes in flight have arrived; reconnect to establish a fresh generation. No delayed

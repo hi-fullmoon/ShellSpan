@@ -4,6 +4,8 @@ PasswordAuthentication yes
 KbdInteractiveAuthentication no
 PermitEmptyPasswords no
 PermitRootLogin no
+# Host-key probes deliberately disconnect before authentication in this isolated fixture.
+PerSourcePenalties no
 UsePAM no
 AllowUsers shellspan shellspan-zsh shellspan-sh
 AllowTcpForwarding yes
