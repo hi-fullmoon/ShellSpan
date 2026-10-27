@@ -50,7 +50,8 @@ it('keeps questions out of top-anchor mode when steering or a new question arriv
   expect(anchors()).toEqual([]);
 });
 
-it('completes the footer without a processing row from recorded turn events', async () => {
+it('keeps processing through recorded output until the runtime settles, preserving the completed footer', async () => {
+  useAppStore.setState({ locale: 'en-US' });
   await initI18n('en-US');
   const events = skillsCapture as unknown as AgentSessionEvent[];
   const end = events.findIndex(event => event.type === 'turn/end');
@@ -60,7 +61,9 @@ it('completes the footer without a processing row from recorded turn events', as
   const { container, rerender } = render(
     <AiConversation nodes={at(message + 1)} status="running" throughSeq={events[message].seq} />,
   );
-  expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
+  expect(container.querySelectorAll('[data-ai-running-indicator]')).toHaveLength(1);
+  expect(container.querySelector('[data-ai-running-indicator]')).toHaveTextContent('Processing');
+  expect(container.querySelector('[data-ai-running-indicator] [data-slot="spinner"]')).toBeInTheDocument();
   expect(container.querySelector('.ai-assistant-actions')).toBeNull();
   expect(container.querySelector('[data-ai-node-kind="turnTail"]')).toBeNull();
   expect(container.querySelector('[data-message-scroller-spacer]')).toHaveClass('hidden');
@@ -69,7 +72,8 @@ it('completes the footer without a processing row from recorded turn events', as
   rerender(<AiConversation nodes={nodes} status="running" throughSeq={events[end].seq} />);
   const footer = container.querySelector('[data-ai-node-kind="turnTail"]');
   expect(footer).toBeInTheDocument();
-  expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
+  // A committed turn boundary can arrive before the session's running status settles.
+  expect(container.querySelectorAll('[data-ai-running-indicator]')).toHaveLength(1);
   expect(container.querySelector('[data-slot="message-scroller-button"] .ai-scroll-loading')).toBeNull();
   expect(container.querySelector('[data-message-scroller-spacer]')).toHaveClass('hidden');
   rerender(<AiConversation nodes={nodes} status="idle" throughSeq={events[end].seq} />);
@@ -77,9 +81,13 @@ it('completes the footer without a processing row from recorded turn events', as
   expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
 
   rerender(<AiConversation nodes={nodes} status="running" pending throughSeq={events[end].seq} />);
-  expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
+  expect(container.querySelectorAll('[data-ai-running-indicator]')).toHaveLength(1);
+  expect(container.querySelector('[data-ai-running-indicator]')).toHaveTextContent('Processing');
   expect(container.querySelector('[data-slot="message-scroller-button"] .ai-scroll-loading')).toBeInTheDocument();
   expect(container.querySelector('[data-message-scroller-spacer]')).toHaveClass('hidden');
+  rerender(<AiConversation nodes={nodes} status="completed" throughSeq={events[end].seq} />);
+  expect(container.querySelector('[data-ai-processing]')).toBeNull();
+  expect(container.querySelector('[data-ai-node-kind="turnTail"]')).toBe(footer);
 });
 
 it('keeps standalone message actions when no complete turn boundary is available', async () => {
@@ -151,13 +159,16 @@ it('lays out every row immediately after history has been paged', async () => {
 });
 
 it('shows processing before the first Agent output and preserves waiting and Ask feedback', async () => {
+  useAppStore.setState({ locale: 'zh-CN' });
   await initI18n('zh-CN');
   const user = projectAgentChatNodes(skillsCapture as unknown as AgentSessionEvent[]).find(node => node.kind === 'userMessage');
   if (!user) throw new Error('Recorded session must contain a committed user input');
   const { container, rerender } = render(
     <AiConversation nodes={[]} status="running" throughSeq={null} />,
   );
-  expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
+  expect(container.querySelectorAll('[data-ai-running-indicator]')).toHaveLength(1);
+  expect(container.querySelector('[data-ai-running-indicator]')).toHaveTextContent('处理中');
+  expect(container.querySelector('[data-ai-running-indicator] [data-slot="spinner"]')).toBeInTheDocument();
   expect(container.querySelector('[data-ai-thinking-indicator]')).toBeNull();
 
   rerender(<AiConversation nodes={[user]} status="running" pending throughSeq={null} />);
@@ -174,7 +185,12 @@ it('shows processing before the first Agent output and preserves waiting and Ask
 
   rerender(<AiConversation nodes={[]} status="waiting" throughSeq={null} />);
   expect(container.querySelector('[data-ai-thinking-indicator]')).toBeNull();
-  expect(container.querySelector('[data-ai-running-indicator]')?.closest('[data-slot="message-scroller-item"]'))
+  const waiting = container.querySelector('[data-ai-running-indicator]');
+  expect(waiting).toHaveAttribute('role', 'status');
+  expect(waiting).toHaveAttribute('aria-live', 'polite');
+  expect(waiting).toHaveTextContent('等待中（未提供原因）');
+  expect(waiting?.querySelector('[data-slot="spinner"]')).toBeNull();
+  expect(waiting?.closest('[data-slot="message-scroller-item"]'))
     .toHaveClass('[content-visibility:visible]', '[contain-intrinsic-size:none]');
   rerender(<AiConversation nodes={[]} status="running" runningIndicator="ask" throughSeq={null} />);
   expect(container.querySelector('[data-ai-thinking-indicator] .shimmer')).toHaveTextContent('思考中…');

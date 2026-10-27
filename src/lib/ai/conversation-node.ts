@@ -97,6 +97,8 @@ export interface AiToolNode extends AiConversationNodeBase {
   readonly input: unknown;
   readonly output: unknown | null;
   readonly error: string | null;
+  /** A later successful read of the same stored result range; the original state remains failed. */
+  readonly recoveredByToolKey?: string;
   readonly target: import('@/types/agent-session').AgentSessionTarget | null;
   readonly idempotency: 'yes' | 'no' | 'conditional' | null;
   readonly approval: Readonly<{

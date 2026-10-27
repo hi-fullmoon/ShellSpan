@@ -33,10 +33,10 @@ export async function mount(host: HTMLElement) {
           phase: stage === 'pending' || stage === 'receipt' ? 'submitting' : 'idle',
         })} />));
     },
-    prefix(length: number) {
+    prefix(length: number, status: 'running' | 'idle' = 'running') {
       flushSync(() => root.render(<AiConversation
         nodes={projectAgentChatNodes(events.slice(0, length)).filter(node => node.kind !== 'systemPrompt')}
-        status="running" throughSeq={events[length - 1]?.seq ?? null} />));
+        status={status} throughSeq={events[length - 1]?.seq ?? null} />));
     },
     firstVisibleProcess: events.findIndex((_, index) => projectAgentChatNodes(events.slice(0, index + 1))
       .some(node => node.kind === 'turnProcess' && node.children.some(child => child.kind === 'contextInjection'

@@ -132,14 +132,22 @@ it('explains blocked Ask submission once and preserves the draft until the reply
   expect(submissions).toEqual(['Explain the result']);
 });
 
-it('keeps Agent submission and runtime startup free of a processing row', () => {
+it.each([['en-US', 'Processing'], ['zh-CN', '处理中']] as const)('shows Agent processing only after runtime startup in %s', async (locale, label) => {
+  useAppStore.setState({ locale });
+  await initI18n(locale);
   const props = { nodes: [], status: 'idle' as const, throughSeq: null };
   const { container, rerender } = render(<AiConversation {...props} pending />);
   expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
   expect(container.querySelector('[data-ai-processing]')).toBeNull();
   rerender(<AiConversation {...props} status="running" />);
-  expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
-  expect(container.querySelector('[data-ai-processing]')).toBeNull();
-  rerender(<AiConversation {...props} />);
-  expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
+  expect(container.querySelectorAll('[data-ai-running-indicator]')).toHaveLength(1);
+  expect(container.querySelector('[data-ai-processing]')).toHaveTextContent(label);
+  expect(container.querySelector('[data-ai-processing] [data-slot="spinner"]')).toBeInTheDocument();
+  rerender(<AiConversation {...props} status="running" pending />);
+  expect(container.querySelectorAll('[data-ai-processing]')).toHaveLength(1);
+  for (const status of ['idle', 'completed', 'failed', 'cancelled'] as const) {
+    rerender(<AiConversation {...props} status={status} />);
+    expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
+    expect(container.querySelector('[data-ai-processing]')).toBeNull();
+  }
 });

@@ -681,7 +681,7 @@ describe('AiConversationNodeList', () => {
     await user.click(inspect);
     expect(openTool).toHaveBeenCalledWith(running);
 
-    await user.click(within(failedSeat).getByRole('button', { name: 'Tool call: Provider rejected the call' }));
+    await user.click(within(failedSeat).getByRole('button', { name: 'Tool call: Call failed; expand for details' }));
     expect(failedSeat.querySelector('[data-ai-tool-view="generic"]')).toHaveTextContent('Provider rejected the call');
   });
 

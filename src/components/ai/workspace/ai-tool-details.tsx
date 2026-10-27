@@ -11,6 +11,8 @@ import {
   ToolStateIcon,
   formatToolValue,
   toolOutputForCopy,
+  toolDisplaySummary,
+  toolErrorIsInOutput,
 } from './ai-tool-presentation';
 
 const DETAIL_PREVIEW_LIMIT = 64 * 1024;
@@ -82,15 +84,15 @@ export function AiToolDetails({
             <>
               <div className="ai-detail-summary mb-1 flex min-w-0 flex-col items-stretch gap-2.5" data-state={node.state}>
                 <div className="ai-detail-summary-meta flex min-w-0 items-center justify-between gap-3">
-                  <Badge variant={node.state === 'failed' || node.state === 'rejected' ? 'destructive' : 'secondary'}>
-                    <ToolStateIcon node={node} />
-                    {t(`ai.workspace.tool.${node.state}`)}
+                  <Badge variant={!node.recoveredByToolKey && (node.state === 'failed' || node.state === 'rejected') ? 'destructive' : 'secondary'}>
+                    {!node.recoveredByToolKey && <ToolStateIcon node={node} />}
+                    {t(node.recoveredByToolKey ? 'ai.workspace.tool.recovered' : `ai.workspace.tool.${node.state}`)}
                   </Badge>
                   {node.durationMs !== null && (
                     <small className="ai-detail-duration inline-flex shrink-0 items-center gap-1"><Clock3Icon aria-hidden="true" />{node.durationMs} ms</small>
                   )}
                 </div>
-                <p className="m-0 [overflow-wrap:anywhere]">{node.summary || node.name}</p>
+                <p className="m-0 [overflow-wrap:anywhere]">{node.state === 'failed' || node.state === 'rejected' ? toolDisplaySummary(node, t) : node.summary || node.name}</p>
               </div>
               <DetailCode value={node.input} label={t('ai.workspace.details.input')} />
               <DetailSection
@@ -102,10 +104,10 @@ export function AiToolDetails({
                   />
                 ) : undefined}
               >
-                {node.output === null && node.state !== 'running'
+                {node.output === null && !node.error && node.state !== 'failed' && node.state !== 'rejected' && node.state !== 'running'
                   ? <p className="ai-details-empty m-0 py-3 px-3.5 [overflow-wrap:anywhere]">{t('ai.workspace.details.noOutput')}</p>
                   : <AiToolExpandedContent node={node} showCopyActions={false} />}
-                {node.error && <p className="ai-detail-error m-0 py-3 px-3.5 [overflow-wrap:anywhere]">{node.error}</p>}
+                {node.error && !toolErrorIsInOutput(node) && <p className="ai-detail-error m-0 py-3 px-3.5 [overflow-wrap:anywhere]">{node.error}</p>}
               </DetailSection>
               <DetailCode
                 value={{

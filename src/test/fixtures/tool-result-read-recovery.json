@@ -1,0 +1,51 @@
+[
+  {
+    "version": 5, "sessionId": "agent-aa08aed5-c310-4086-98b2-2b274b70ddc5-mvoq8a7s-5dciefr",
+    "seq": 0, "sourceSeq": 537, "timeUnixMs": 1792987234973,
+    "turnId": "turn-aec2c238d1f6491da42d13b0a32f65d9", "stepId": "step-aeb5d1fcf9ab4fb7914bb133ccfab872",
+    "type": "tool/call",
+    "data": { "call": {
+      "callId": "call-d2ea0bb431705771ee60f6b8531ad018c1cc8d6922f2f2f66f7d8de0632bd9a8-1",
+      "name": "read_tool_result", "nativeName": "read_tool_result",
+      "arguments": { "artifactId": "artifact-39b73706a488ad966e3d1eb51ec3f7a5", "maxBytes": 4096, "offset": 0 },
+      "title": "Read stored tool result", "effect": "readOnly"
+    } }
+  },
+  {
+    "version": 5, "sessionId": "agent-aa08aed5-c310-4086-98b2-2b274b70ddc5-mvoq8a7s-5dciefr",
+    "seq": 1, "sourceSeq": 540, "timeUnixMs": 1792987234978,
+    "turnId": "turn-aec2c238d1f6491da42d13b0a32f65d9", "stepId": "step-aeb5d1fcf9ab4fb7914bb133ccfab872",
+    "type": "tool/result",
+    "data": {
+      "callId": "call-d2ea0bb431705771ee60f6b8531ad018c1cc8d6922f2f2f66f7d8de0632bd9a8-1",
+      "name": "read_tool_result", "status": "failed", "summary": "maxBytes must be between 1 and 2048"
+    }
+  },
+  {
+    "version": 5, "sessionId": "agent-aa08aed5-c310-4086-98b2-2b274b70ddc5-mvoq8a7s-5dciefr",
+    "seq": 2, "sourceSeq": 563, "timeUnixMs": 1792987244451,
+    "turnId": "turn-aec2c238d1f6491da42d13b0a32f65d9", "stepId": "step-9a3316375494479595ca015442a078ef",
+    "type": "tool/call",
+    "data": { "call": {
+      "callId": "call-974fbc46d5f9d59ff2a804ad89160b14976a36f89d7700f07c8b7992e5fbbe6d-1",
+      "name": "read_tool_result", "nativeName": "read_tool_result",
+      "arguments": { "artifactId": "artifact-39b73706a488ad966e3d1eb51ec3f7a5", "maxBytes": 2048, "offset": 0 },
+      "title": "Read stored tool result", "effect": "readOnly"
+    } }
+  },
+  {
+    "version": 5, "sessionId": "agent-aa08aed5-c310-4086-98b2-2b274b70ddc5-mvoq8a7s-5dciefr",
+    "seq": 3, "sourceSeq": 566, "timeUnixMs": 1792987244457,
+    "turnId": "turn-aec2c238d1f6491da42d13b0a32f65d9", "stepId": "step-9a3316375494479595ca015442a078ef",
+    "type": "tool/result",
+    "data": {
+      "callId": "call-974fbc46d5f9d59ff2a804ad89160b14976a36f89d7700f07c8b7992e5fbbe6d-1",
+      "name": "read_tool_result", "status": "completed", "summary": "Read stored tool result range",
+      "data": {
+        "artifactRef": "artifact-39b73706a488ad966e3d1eb51ec3f7a5", "hasMore": true,
+        "nextOffset": 2048, "offset": 0,
+        "sha256": "39b73706a488ad966e3d1eb51ec3f7a5bcca2e305e4d5e691ac37e3b08b9fa4d", "sizeBytes": 9295
+      }
+    }
+  }
+]

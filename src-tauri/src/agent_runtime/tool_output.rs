@@ -10,6 +10,7 @@ use super::{
 };
 
 pub(crate) const READ_TOOL_RESULT: &str = "read_tool_result";
+pub(crate) const READ_TOOL_RESULT_PAGE_BYTES: usize = 2048;
 
 static ARTIFACT_REFERENCES: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"(?-u:\b)artifact-[0-9a-f]{32}(?-u:\b)")
@@ -300,8 +301,14 @@ pub(crate) fn publish_artifact(
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ReadArguments {
     artifact_id: String,
+    #[serde(default)]
     offset: usize,
+    #[serde(default = "default_read_max_bytes")]
     max_bytes: usize,
+}
+
+fn default_read_max_bytes() -> usize {
+    READ_TOOL_RESULT_PAGE_BYTES
 }
 
 pub(crate) fn read_result(
@@ -313,9 +320,12 @@ pub(crate) fn read_result(
     let args: ReadArguments = serde_json::from_value(arguments)
         .map_err(|error| format!("Invalid read_tool_result arguments: {error}"))?;
     super::session::validate_identifier(&args.artifact_id, "artifactId")?;
-    if !(1..=2048).contains(&args.max_bytes) {
-        return Err("maxBytes must be between 1 and 2048".into());
+    if args.max_bytes == 0 {
+        return Err(
+            "maxBytes must be a positive integer; omit it to use the default page size".into(),
+        );
     }
+    let max_bytes = args.max_bytes.min(READ_TOOL_RESULT_PAGE_BYTES);
     let metadata = sessions
         .read_events(session_id, |events| {
             events
@@ -329,15 +339,15 @@ pub(crate) fn read_result(
     if args.offset > text.len() || !text.is_char_boundary(args.offset) {
         return Err("offset must be a UTF-8 boundary within the result".into());
     }
-    let mut end = args.offset.saturating_add(args.max_bytes).min(text.len());
+    let mut end = args.offset.saturating_add(max_bytes).min(text.len());
     while !text.is_char_boundary(end) {
         end -= 1;
     }
     if end == args.offset && end < text.len() {
-        return Err("maxBytes is too small for the next UTF-8 character".into());
+        return Err("maxBytes is too small for the next UTF-8 character; omit it to use the default page size".into());
     }
     Ok(
-        json!({"artifactRef": metadata.artifact_id, "sha256": metadata.sha256, "sizeBytes": text.len(), "offset": args.offset, "nextOffset": end, "hasMore": end < text.len(), "untrustedExcerpt": &text[args.offset..end]}),
+        json!({"artifactRef": metadata.artifact_id, "sha256": metadata.sha256, "sizeBytes": text.len(), "offset": args.offset, "maxBytes": max_bytes, "readBytes": end - args.offset, "nextOffset": end, "hasMore": end < text.len(), "untrustedExcerpt": &text[args.offset..end]}),
     )
 }
 

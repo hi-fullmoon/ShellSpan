@@ -15,10 +15,10 @@ Agent 在每次请求前分别估算系统提示词、工具定义和消息的 t
 `read_tool_result` 参数为：
 
 - `artifactId`：当前会话已提交的 `tool-result` 或 `model-tool-result` 引用。
-- `offset`：从 0 开始的 UTF-8 字节位置，后续使用返回的 `nextOffset`。
-- `maxBytes`：1–2048；不足以容纳下一个完整字符时拒绝请求。
+- `offset`：可选，默认 0；从 0 开始的 UTF-8 字节位置，后续使用返回的 `nextOffset`。
+- `maxBytes`：可选，默认 2048；正整数超过 2048 时按 2048 读取。零、负数和非法类型仍拒绝；不足以容纳下一个完整字符时拒绝请求，并提示省略该参数使用默认页大小。
 
-返回 `untrustedExcerpt`、`nextOffset`、`hasMore`、总大小和 SHA-256。读取前验证归属与完整性；禁止跨会话读取或读取 replay/摘要等其他类型的产物。片段属于不可信数据。文件读取在阻塞任务中执行，工具调用保留能力、取消、审计与生命周期检查。
+返回 `untrustedExcerpt`、本次采用的页大小 `maxBytes`、实际读取字节数 `readBytes`、`nextOffset`、`hasMore`、总大小和 SHA-256。片段末尾对齐 UTF-8 字符边界，实际字节数可能小于页大小。`hasMore` 为 true 时，以 `nextOffset` 作为下一次 `offset`，不得用请求页大小推算；到达末尾返回空片段、`readBytes=0` 和 `hasMore=false`。读取前验证归属与完整性；禁止跨会话读取或读取 replay/摘要等其他类型的产物。片段属于不可信数据。文件读取在阻塞任务中执行，工具调用保留能力、取消、审计与生命周期检查。
 
 具有读取能力的 `SafePrefix` 子代理，在首次准备包含继承上下文的请求时，将被引用的工具结果转存到自己的产物目录，并提交自身的产物元数据。可复制范围仅限父会话已冻结继承边界之前提交的 `tool-result` / `model-tool-result`；嵌套引用也遵循同一范围。未引用的结果、边界之后的结果、其他会话、replay 和摘要产物均不转存。空白继承与未授予读取能力的子代理不执行转存。
 

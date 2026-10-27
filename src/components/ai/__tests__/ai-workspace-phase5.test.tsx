@@ -440,7 +440,7 @@ describe('AI workspace Phase 5 workflows', () => {
       />;
     }
     const { container } = render(<Harness />);
-    await user.click(screen.getByRole('button', { name: `Command: ${error}` }));
+    await user.click(screen.getByRole('button', { name: 'Command: Call failed; expand for details' }));
     await user.click(screen.getByRole('button', { name: 'Open details for exec_command' }));
     const details = container.querySelector('[data-slot="ai-tool-details"]');
     expect(details).toHaveTextContent(command);

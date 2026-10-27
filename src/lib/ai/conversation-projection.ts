@@ -2,6 +2,7 @@ import { skillContexts } from './skill-projection';
 import { createCommittedEventProjection } from './committed-event-projection';
 import { createQuestionProjector } from './question-projection';
 import { conversationTurnTimeline } from './conversation-turn-timeline';
+import { markRecoveredToolReads } from './conversation-tool';
 import { questionKey } from '@/types/agent-question';
 import {
   agentEventTimestamp,
@@ -1326,9 +1327,9 @@ function createChatProjection() {
           child.kind === 'question' ? [child.question.identity.callId] : [],
         ),
       );
-      const children = [...turn.children.values(), ...assistants.filter((assistant) => assistant.key !== closing?.key)]
+      const children = markRecoveredToolReads([...turn.children.values(), ...assistants.filter((assistant) => assistant.key !== closing?.key)]
         .filter((child) => child.kind !== 'tool' || !questionCallIds.has(child.callId))
-        .sort(processChildSort);
+        .sort(processChildSort));
       const status: AiTurnProcessStatus = turn.startSeq === undefined
         ? 'partial'
         : turn.status ?? (turn.endSeq === undefined ? 'running' : 'completed');

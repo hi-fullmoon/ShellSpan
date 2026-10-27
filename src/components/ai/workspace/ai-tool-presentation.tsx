@@ -198,6 +198,48 @@ function toolSummary(node: ToolNode, variant: AiToolVariant): string {
     ?? node.name;
 }
 
+export function toolDisplaySummary(node: ToolNode, t: ReturnType<typeof useI18n>['t']): string {
+  if (node.recoveredByToolKey) return t('ai.workspace.tool.recoveredSummary');
+  const raw = toolSummary(node, classifyAiTool(node.name, node.nativeName));
+  if (node.state === 'failed' || node.state === 'rejected') {
+    const translated = aiErrorMessage(raw, t);
+    return translated !== raw ? translated : t(node.state === 'rejected'
+      ? 'ai.workspace.tool.rejected' : 'ai.workspace.tool.failureSummary');
+  }
+  return raw === 'Agent orchestration' ? t('ai.workspace.tool.title.orchestration') : raw;
+}
+
+function failureOnly(node: ToolNode): string | null {
+  if (node.state !== 'failed' && node.state !== 'rejected') return null;
+  const diagnostic = node.error || node.summary;
+  if (!diagnostic) return null;
+  return node.output === null || (typeof node.output === 'string' && node.output.trim() === diagnostic.trim())
+    ? diagnostic : null;
+}
+
+export function toolErrorIsInOutput(node: ToolNode): boolean {
+  return Boolean(node.error && (failureOnly(node) || bounded(outputText(node)).includes(node.error.trim())));
+}
+
+function FailureSurface({ node, diagnostic, showCopyActions }: {
+  readonly node: ToolNode;
+  readonly diagnostic: string;
+  readonly showCopyActions: boolean;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="ai-read-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="error">
+      <div className="ai-block-banner flex min-w-0 items-center gap-2 overflow-hidden py-[9px] pr-1 pl-3.5">
+        <span className="min-w-0 flex-1 truncate">{t('ai.error.details')}</span>
+        {showCopyActions && <AiToolCopyButton text={diagnostic} label={t('ai.workspace.tool.copyOutput')} />}
+      </div>
+      <pre className="ai-detail-code m-0 max-h-65 min-w-0 max-w-full overflow-auto px-3.5 py-3 whitespace-pre-wrap [overflow-wrap:anywhere]" data-error={!node.recoveredByToolKey || undefined}>
+        <code>{bounded(diagnostic)}</code>
+      </pre>
+    </div>
+  );
+}
+
 function toolTitle(
   node: ToolNode,
   variant: AiToolVariant,
@@ -326,7 +368,8 @@ function TerminalSurface({ node, compact, showCopyActions }: { node: ToolNode; c
 function ReadSurface({ node, compact, showCopyActions }: { node: ToolNode; compact: boolean; showCopyActions: boolean }) {
   const { t } = useI18n();
   const input = asRecord(node.input);
-  const label = firstString(input, ['path', 'file_path', 'filePath']) ?? node.summary ?? node.name;
+  const label = firstString(input, ['path', 'file_path', 'filePath'])
+    ?? (node.state === 'failed' || node.state === 'rejected' ? t('ai.workspace.tool.title.read') : node.summary || node.name);
   const output = outputText(node);
   const lines = bounded(output).split('\n');
   const shown = compact && lines.length > 8
@@ -353,7 +396,8 @@ function ReadSurface({ node, compact, showCopyActions }: { node: ToolNode; compa
 function SearchSurface({ node, compact }: { node: ToolNode; compact: boolean }) {
   const { t } = useI18n();
   const input = asRecord(node.input);
-  const query = firstString(input, ['query', 'pattern']) ?? node.summary ?? node.name;
+  const query = firstString(input, ['query', 'pattern'])
+    ?? (node.state === 'failed' || node.state === 'rejected' ? t('ai.workspace.tool.title.search') : node.summary || node.name);
   const lines = bounded(outputText(node)).split('\n').filter(Boolean);
   const shown = compact && lines.length > 8
     ? [...lines.slice(0, 4), t('ai.workspace.tool.omittedResults', { count: lines.length - 8 }), ...lines.slice(-4)]
@@ -398,9 +442,11 @@ function WebSurface({ node }: { node: ToolNode }) {
   const diagnostic = node.error || node.summary || outputText(node);
   const timeoutKind = node.state === 'failed' && (node.name === 'probe_http' || node.nativeName === 'probe_http')
     ? httpProbeTimeoutKind(diagnostic) : null;
+  const label = url ?? (node.state === 'failed' || node.state === 'rejected'
+    ? toolTitle(node, 'web', t) : node.summary || node.name);
   return (
     <div className="ai-web-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="web">
-      <div className="ai-block-banner flex min-w-0 items-center gap-1 truncate px-3.5 py-[9px]"><GlobeIcon aria-hidden="true" />{timeoutKind ? t('ai.workspace.tool.httpProbe.timeout') : url ?? node.summary ?? node.name}</div>
+      <div className="ai-block-banner flex min-w-0 items-center gap-1 truncate px-3.5 py-[9px]"><GlobeIcon aria-hidden="true" />{label}</div>
       {(timeoutKind || answer) && <p className="ai-web-answer m-0 px-3.5 pt-3 pb-1">{timeoutKind
         ? t(timeoutKind === 'ssh' ? 'ai.workspace.tool.httpProbe.sshTimeout' : 'ai.workspace.tool.httpProbe.httpTimeout')
         : answer}</p>}
@@ -722,6 +768,10 @@ export function AiToolExpandedContent({
   readonly diffModel?: DiffModel;
 }) {
   const variant = classifyAiTool(node.name, node.nativeName);
+  const diagnostic = failureOnly(node);
+  if (diagnostic && !httpProbeTimeoutKind(diagnostic)) {
+    return <FailureSurface node={node} diagnostic={diagnostic} showCopyActions={showCopyActions} />;
+  }
   if (node.name === 'trash_file') return <TrashSurface node={node} />;
   switch (variant) {
     case 'terminal': return <TerminalSurface node={node} compact={compact} showCopyActions={showCopyActions} />;
@@ -744,16 +794,14 @@ export function AiToolRow({
   readonly onInspect?: (node: ToolNode) => void;
 }) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
+  const [disclosure, setDisclosure] = useState<{ open: boolean; recoveryKey?: string }>({ open: false });
+  const open = disclosure.open && disclosure.recoveryKey === node.recoveredByToolKey;
+  const setOpen = (next: boolean) => setDisclosure({ open: next, recoveryKey: node.recoveredByToolKey });
   const variant = classifyAiTool(node.name, node.nativeName);
   const Icon = node.name === 'trash_file' ? Trash2Icon : iconFor(variant);
   const stateKey = `ai.workspace.tool.${node.state}` as LocaleKey;
-  const rawSummary = toolSummary(node, variant);
-  const summary = node.state === 'failed' || node.state === 'rejected'
-    ? aiErrorMessage(rawSummary, t)
-    : rawSummary === 'Agent orchestration'
-      ? t('ai.workspace.tool.title.orchestration')
-      : rawSummary;
+  const summary = toolDisplaySummary(node, t);
+  const hasError = !node.recoveredByToolKey && (node.state === 'failed' || node.state === 'rejected');
   const title = toolTitle(node, variant, t);
   const model = useMemo(() => variant === 'write' || variant === 'edit' ? diffModel(node) : null, [node, variant]);
   const changeStat = model ? diffStat(model) : null;
@@ -762,10 +810,11 @@ export function AiToolRow({
       <div
         className="ai-tool-row-root flex min-w-0 flex-col"
         data-tool-state={node.state}
+        data-tool-recovered={Boolean(node.recoveredByToolKey) || undefined}
         data-tool-variant={variant}
         data-tool-fallback={variant === 'generic' || undefined}
       >
-        <span className="sr-only" role="status">{t(stateKey)}</span>
+        <span className="sr-only" role="status">{t(node.recoveredByToolKey ? 'ai.workspace.tool.recovered' : stateKey)}</span>
         <CollapsibleTrigger
           render={(
             <button
@@ -777,7 +826,7 @@ export function AiToolRow({
           )}
         >
           <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
-            {node.state === 'failed' || node.state === 'rejected'
+            {hasError
               ? <span className={AI_STATE_DOT_CLASS} data-state="failed" />
               : node.state === 'approval'
                 ? <ShieldAlertIcon />
@@ -788,7 +837,7 @@ export function AiToolRow({
           <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
           <span
             className={AI_DISCLOSURE_SUMMARY_CLASS}
-            data-error={node.state === 'failed' || node.state === 'rejected' || undefined}
+            data-error={hasError || undefined}
           >
             {summary}
           </span>
@@ -841,5 +890,5 @@ export function ToolStateIcon({ node }: { readonly node: ToolNode }) {
 }
 
 export function toolOutputForCopy(node: ToolNode): string {
-  return outputText(node);
+  return failureOnly(node) ?? outputText(node);
 }

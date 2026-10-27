@@ -473,13 +473,22 @@ fn real_repository_output_is_bounded_and_fully_retrievable_without_duplicate_art
     )
     .unwrap_err()
     .contains("this session"));
-    assert!(read_result(
-        &sessions,
-        &artifacts,
-        "source",
-        json!({"artifactId":artifact_id,"offset":0,"maxBytes":2049})
-    )
-    .is_err());
+    assert_eq!(
+        read_result(
+            &sessions,
+            &artifacts,
+            "source",
+            json!({"artifactId":artifact_id,"offset":0,"maxBytes":2049})
+        )
+        .unwrap(),
+        read_result(
+            &sessions,
+            &artifacts,
+            "source",
+            json!({"artifactId":artifact_id,"offset":0,"maxBytes":2048})
+        )
+        .unwrap()
+    );
     let middle = recovered
         .char_indices()
         .find(|(_, ch)| !ch.is_ascii())
@@ -493,6 +502,176 @@ fn real_repository_output_is_bounded_and_fully_retrievable_without_duplicate_art
         json!({"artifactId":artifact_id,"offset":middle,"maxBytes":2048})
     )
     .is_err());
+}
+
+fn stored_repository_output(
+    sessions: &AgentSessionStore,
+    artifacts: &AgentArtifactStore,
+) -> (AgentArtifactMetadata, String) {
+    let original = json!({"source":include_str!("../../../../AGENTS.md")});
+    let metadata = artifacts
+        .store_json(
+            "source",
+            "tool-result",
+            "Repository instructions",
+            &original,
+        )
+        .unwrap();
+    publish_artifact(sessions, "source", "turn", "step", &metadata).unwrap();
+    (metadata, original.to_string())
+}
+
+#[test]
+fn tool_result_pages_default_and_cap_sizes_without_losing_bytes() {
+    let (_root, sessions, artifacts) = stores();
+    let (metadata, original) = stored_repository_output(&sessions, &artifacts);
+    assert!(original.len() > 2048);
+    for requested in [None, Some(17), Some(2048), Some(2049), Some(usize::MAX)] {
+        let applied = requested.unwrap_or(2048).min(2048);
+        let mut offset = 0;
+        let mut recovered = String::new();
+        loop {
+            let mut arguments = json!({"artifactId":metadata.artifact_id});
+            if offset > 0 {
+                arguments["offset"] = json!(offset);
+            }
+            if let Some(max_bytes) = requested {
+                arguments["maxBytes"] = json!(max_bytes);
+            }
+            let result = read_result(&sessions, &artifacts, "source", arguments).unwrap();
+            let excerpt = result["untrustedExcerpt"].as_str().unwrap();
+            let next = result["nextOffset"].as_u64().unwrap() as usize;
+            assert_eq!(result["artifactRef"], metadata.artifact_id);
+            assert_eq!(result["sha256"], metadata.sha256);
+            assert_eq!(result["sizeBytes"], original.len());
+            assert_eq!(result["offset"], offset);
+            assert_eq!(result["maxBytes"], applied);
+            assert_eq!(result["readBytes"], excerpt.len());
+            assert!(excerpt.len() <= applied);
+            assert_eq!(next, offset + excerpt.len());
+            assert!(next > offset, "non-final pages must make progress");
+            assert!(original.is_char_boundary(next));
+            assert_eq!(result["hasMore"], next < original.len());
+            recovered.push_str(excerpt);
+            offset = next;
+            if result["hasMore"] == false {
+                break;
+            }
+        }
+        assert_eq!(recovered, original);
+        let eof = read_result(
+            &sessions,
+            &artifacts,
+            "source",
+            json!({"artifactId":metadata.artifact_id,"offset":offset}),
+        )
+        .unwrap();
+        assert_eq!(eof["untrustedExcerpt"], "");
+        assert_eq!(eof["readBytes"], 0);
+        assert_eq!(eof["nextOffset"], original.len());
+        assert_eq!(eof["hasMore"], false);
+    }
+    assert!(read_result(
+        &sessions,
+        &artifacts,
+        "other",
+        json!({"artifactId":metadata.artifact_id,"maxBytes":usize::MAX})
+    )
+    .unwrap_err()
+    .contains("this session"));
+}
+
+#[test]
+fn tool_result_pages_preserve_utf8_boundaries_and_reject_invalid_arguments() {
+    let (_root, sessions, artifacts) = stores();
+    let (metadata, original) = stored_repository_output(&sessions, &artifacts);
+    let (position, character) = original
+        .char_indices()
+        .find(|(_, ch)| !ch.is_ascii())
+        .unwrap();
+    assert!(position > 0 && original.is_char_boundary(position - 1));
+    let page = read_result(
+        &sessions,
+        &artifacts,
+        "source",
+        json!({"artifactId":metadata.artifact_id,"offset":position-1,"maxBytes":character.len_utf8()}),
+    )
+    .unwrap();
+    assert_eq!(page["untrustedExcerpt"], &original[position - 1..position]);
+    assert_eq!(page["readBytes"], 1);
+    assert_eq!(page["nextOffset"], position);
+    assert_eq!(page["hasMore"], true);
+    let next = read_result(
+        &sessions,
+        &artifacts,
+        "source",
+        json!({"artifactId":metadata.artifact_id,"offset":page["nextOffset"]}),
+    )
+    .unwrap();
+    assert!(next["untrustedExcerpt"]
+        .as_str()
+        .unwrap()
+        .starts_with(character));
+    for max_bytes in [
+        json!(0),
+        json!(-1),
+        json!(1.5),
+        json!("2048"),
+        Value::Null,
+        json!(true),
+    ] {
+        assert!(
+            read_result(
+                &sessions,
+                &artifacts,
+                "source",
+                json!({"artifactId":metadata.artifact_id,"maxBytes":max_bytes})
+            )
+            .is_err(),
+            "invalid maxBytes must be rejected: {max_bytes}"
+        );
+    }
+    assert!(read_result(
+        &sessions,
+        &artifacts,
+        "source",
+        json!({"artifactId":metadata.artifact_id,"offset":position,"maxBytes":character.len_utf8()-1})
+    )
+    .unwrap_err()
+    .contains("omit it"));
+    for offset in [
+        json!(position + 1),
+        json!(original.len() + 1),
+        json!(-1),
+        json!(1.5),
+        json!("0"),
+        Value::Null,
+    ] {
+        assert!(
+            read_result(
+                &sessions,
+                &artifacts,
+                "source",
+                json!({"artifactId":metadata.artifact_id,"offset":offset})
+            )
+            .is_err(),
+            "invalid offset must be rejected: {offset}"
+        );
+    }
+}
+
+#[test]
+fn tool_result_schema_allows_default_paging_and_oversized_requests() {
+    let tool = crate::agent_runtime::model_tools::default_model_tools()
+        .into_iter()
+        .find(|tool| tool.name == READ_TOOL_RESULT)
+        .unwrap();
+    let schema = tool.input_schema;
+    assert_eq!(schema["required"], json!(["artifactId"]));
+    assert_eq!(schema["properties"]["offset"]["default"], 0);
+    assert_eq!(schema["properties"]["maxBytes"]["default"], 2048);
+    assert_eq!(schema["properties"]["maxBytes"]["minimum"], 1);
+    assert!(schema["properties"]["maxBytes"].get("maximum").is_none());
 }
 
 #[test]

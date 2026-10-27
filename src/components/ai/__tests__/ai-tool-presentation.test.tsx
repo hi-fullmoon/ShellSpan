@@ -3,12 +3,22 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiToolExpandedContent, AiToolRow, classifyAiTool } from '@/components/ai/workspace/ai-tool-presentation';
+import { AiToolDetails } from '@/components/ai/workspace/ai-tool-details';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import skillsCapture from '@/test/fixtures/agent-skills-runtime.json';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import type { AgentSessionEvent } from '@/types/agent-session';
+import readRecoveryCapture from '@/test/fixtures/tool-result-read-recovery.json';
+
+function capturedRead(recovered: boolean): AiConversationNodeOf<'tool'> {
+  const events = readRecoveryCapture as readonly AgentSessionEvent[];
+  const tools = projectAgentChatNodes(recovered ? events : events.slice(0, 2))
+    .flatMap(item => item.kind === 'turnProcess' ? item.children : [])
+    .filter((item): item is AiConversationNodeOf<'tool'> => item.kind === 'tool');
+  return tools[0];
+}
 
 const command = 'powershell $f="$env:USERPROFILE\\todo.html"; $c=Get-Content $f; Write-Output $c';
 const node: AiConversationNodeOf<'tool'> = {
@@ -30,6 +40,54 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('AI tool presentation', () => {
+  it.each(['zh-CN', 'en-US'] as const)('keeps recovered read errors compact and shows one diagnostic when expanded in %s', async locale => {
+    useAppStore.setState({ locale });
+    await initI18n(locale);
+    const user = userEvent.setup();
+    const failure = capturedRead(false);
+    const { container, rerender } = render(<AiToolRow node={failure} />);
+    const row = screen.getByRole('button');
+    expect(row).not.toHaveTextContent(failure.error!);
+    await user.click(row);
+    expect(screen.getAllByText(failure.error!)).toHaveLength(1);
+    expect(container.querySelector('.ai-read-line')).toBeNull();
+    expect(container.querySelector('[data-error]')).toBeInTheDocument();
+
+    rerender(<AiToolRow node={capturedRead(true)} />);
+    expect(row).toHaveAttribute('aria-expanded', 'false');
+    expect(row).toHaveTextContent(locale === 'zh-CN' ? '重试读取成功' : 'Read retry succeeded');
+    expect(container.querySelector('.ai-disclosure-summary')).not.toHaveAttribute('data-error');
+    expect(container.querySelector('.ai-state-dot[data-state="failed"]')).toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent(locale === 'zh-CN' ? '读取已恢复' : 'Read recovered');
+    row.focus();
+    await user.keyboard('{Enter}');
+    expect(row).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getAllByText(failure.error!)).toHaveLength(1);
+    await user.keyboard('{Enter}');
+    expect(row).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it.each(['zh-CN', 'en-US'] as const)('does not duplicate the captured error in the details page in %s', async locale => {
+    useAppStore.setState({ locale });
+    await initI18n(locale);
+    const failure = capturedRead(true);
+    const { container, rerender } = render(<AiToolDetails node={failure} onBack={() => undefined} />);
+    expect(screen.getAllByText(failure.error!)).toHaveLength(1);
+    expect(container.querySelector('.ai-detail-error')).toBeNull();
+    expect(container.querySelector('.ai-detail-summary')).not.toHaveTextContent(failure.error!);
+    expect(screen.getByRole('button', { name: locale === 'zh-CN' ? '复制输出' : 'Copy Output' })).toBeVisible();
+    rerender(<AiToolDetails node={{ ...failure, output: null }} onBack={() => undefined} />);
+    expect(screen.getAllByText(failure.error!)).toHaveLength(1);
+    // A separate diagnostic remains visible alongside distinct structured output.
+    const success = projectAgentChatNodes(readRecoveryCapture as readonly AgentSessionEvent[])
+      .flatMap(item => item.kind === 'turnProcess' ? item.children : [])
+      .find((item): item is AiConversationNodeOf<'tool'> => item.kind === 'tool' && item.state === 'succeeded')!;
+    rerender(<AiToolDetails node={{ ...failure, output: success.output }} onBack={() => undefined} />);
+    expect(screen.getAllByText(failure.error!)).toHaveLength(1);
+    expect(container.querySelector('.ai-detail-error')).toHaveTextContent(failure.error!);
+    expect(screen.getByText(/"nextOffset": 2048/u)).toBeVisible();
+  });
+
   it.each(['zh-CN', 'en-US'] as const)('localizes the captured skill tool title in %s', async (locale) => {
     useAppStore.setState({ locale });
     await initI18n(locale);

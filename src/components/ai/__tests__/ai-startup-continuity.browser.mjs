@@ -60,6 +60,10 @@ try {
           return document.querySelector('[data-slot="message-scroller"]') !== scroller;
         });
         assert.equal(adopted, true, 'Session adoption preserves the visible scroller; navigation resets it');
+        await page.evaluate(() => window.startup.prefix(0));
+        await page.locator('[data-ai-running-indicator] [data-slot="spinner"]').waitFor();
+        assert.equal(await page.locator('[data-ai-processing]').count(), 1,
+          'A running session must show processing even before the first event arrives');
         await page.evaluate(() => window.startup.prefix(window.startup.firstVisibleProcess));
         await page.locator('[data-ai-thinking-indicator]').waitFor({ state: 'visible' });
         assert.equal(await page.locator('.ai-turn-process').count(), 0);
@@ -93,6 +97,17 @@ try {
         assert.deepEqual(pendingGeometry, completedGeometry,
           'Processing and completed rows must retain the same height and label center');
         assert.equal(completedGeometry.height, 32);
+        assert.equal(await page.locator('[data-ai-running-indicator] [data-slot="spinner"]').count(), 1,
+          'A completed turn must retain processing while the session is still running');
+        await page.screenshot({ path: `/tmp/shellspan-processing-tail-${engine.name()}-${width}.png` });
+        const preservedFooter = await page.evaluate(() => {
+          const footer = document.querySelector('[data-ai-node-kind="turnTail"]');
+          window.startup.prefix(window.startup.completedProcess, 'idle');
+          return Boolean(footer) && document.querySelector('[data-ai-node-kind="turnTail"]') === footer;
+        });
+        assert.equal(preservedFooter, true, 'Settling the runtime must preserve the completed footer');
+        assert.equal(await page.locator('[data-ai-processing]').count(), 0,
+          'Processing must clear when the runtime becomes idle');
         await page.evaluate(() => window.startup.delivery('pending'));
         const bubble = page.locator('.ai-message-bubble-user');
         await bubble.waitFor();

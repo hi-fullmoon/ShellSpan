@@ -1,0 +1,124 @@
+import assert from 'node:assert/strict';
+import { mkdir, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { chromium, webkit } from 'playwright';
+import { createServer } from 'vite';
+import tailwindcss from '@tailwindcss/vite';
+
+const root = fileURLToPath(new URL('../../../../', import.meta.url));
+const capture = JSON.parse(await readFile(join(root, 'src/test/fixtures/tool-result-read-recovery.json'), 'utf8'));
+const diagnostic = capture.find(event => event.type === 'tool/result' && event.data.status === 'failed').data.summary;
+const screenshots = join(tmpdir(), 'shellspan-tool-error-recovery');
+await mkdir(screenshots, { recursive: true });
+const server = await createServer({
+  configFile: false, root, appType: 'custom', logLevel: 'error',
+  resolve: { alias: { '@': `${root}src` } }, esbuild: { jsx: 'automatic' },
+  optimizeDeps: { include: ['react', 'react-dom/client'] },
+  server: { host: '127.0.0.1', port: 0 },
+  plugins: [tailwindcss(), {
+    name: 'tool-error-recovery',
+    configureServer(vite) {
+      vite.middlewares.use((request, response, next) => {
+        if (request.url !== '/') return next();
+        response.setHeader('Content-Type', 'text/html');
+        response.end('<!doctype html><html><body style="margin:0"><main id="root" class="ai-panel-shell" style="height:100vh"></main></body></html>');
+      });
+    },
+  }],
+});
+try {
+  await server.listen();
+  for (const engine of [chromium, webkit]) {
+    const browser = await engine.launch();
+    try {
+      const page = await browser.newPage();
+      const errors = [];
+      page.on('pageerror', error => errors.push(error.message));
+      for (const locale of ['zh-CN', 'en-US']) {
+        for (const width of [380, 720]) {
+          await page.setViewportSize({ width, height: 640 });
+          await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`);
+          await page.evaluate(async ({ capture, locale }) => {
+            const { default: React } = await import('/node_modules/.vite/deps/react.js');
+            const { default: ReactDOM } = await import('/node_modules/.vite/deps/react-dom_client.js');
+            await import('/src/styles/base.css');
+            await import('/src/components/ai/styles/styles.css');
+            const { AiToolRow } = await import('/src/components/ai/workspace/ai-tool-presentation.tsx');
+            const { AiToolDetails } = await import('/src/components/ai/workspace/ai-tool-details.tsx');
+            const { projectAgentChatNodes } = await import('/src/lib/ai/conversation-projection.ts');
+            const { initI18n } = await import('/src/locales/index.ts');
+            const { useAppStore } = await import('/src/stores/appStore.ts');
+            await initI18n(locale);
+            useAppStore.setState({ locale });
+            const firstTool = events => projectAgentChatNodes(events)
+              .flatMap(node => node.kind === 'turnProcess' ? node.children : [])
+              .find(node => node.kind === 'tool');
+            const failure = firstTool(capture.slice(0, 2));
+            const recovered = firstTool(capture);
+            const view = ReactDOM.createRoot(document.getElementById('root'));
+            window.renderRecovery = stage => view.render(stage === 'details'
+              ? React.createElement(AiToolDetails, { node: recovered, onBack() {} })
+              : React.createElement(AiToolRow, { node: stage === 'failure' ? failure : recovered }));
+            window.renderRecovery('failure');
+          }, { capture, locale });
+          const row = page.locator('.ai-tool-row');
+          await row.waitFor();
+          assert.ok(!(await row.innerText()).includes(diagnostic));
+          await row.focus();
+          await page.keyboard.press('Enter');
+          await page.getByText(diagnostic, { exact: true }).waitFor();
+          assert.equal(await page.getByText(diagnostic, { exact: true }).count(), 1);
+          await page.evaluate(() => window.renderRecovery('recovered'));
+          await page.locator('[data-tool-recovered="true"]').waitFor();
+          assert.equal(await row.getAttribute('aria-expanded'), 'false');
+          await page.getByText(diagnostic, { exact: true }).waitFor({ state: 'hidden' });
+          assert.equal(await page.locator('.ai-disclosure-summary[data-error]').count(), 0);
+          await page.screenshot({ path: join(screenshots, `${engine.name()}-${locale}-${width}-collapsed.png`) });
+          await row.focus();
+          await page.keyboard.press('Enter');
+          await page.getByText(diagnostic, { exact: true }).waitFor();
+          assert.equal(await page.getByText(diagnostic, { exact: true }).count(), 1);
+          await page.waitForFunction(() => {
+            const panel = document.querySelector('.ai-tool-row-root > [data-slot="collapsible-content"]');
+            return panel && panel.getBoundingClientRect().height >= panel.scrollHeight - 1;
+          });
+          const geometry = await row.evaluate(element => {
+            const leading = element.querySelector('.ai-disclosure-leading').getBoundingClientRect();
+            const title = element.querySelector('.ai-disclosure-title').getBoundingClientRect();
+            return { gap: title.left - leading.right, right: element.getBoundingClientRect().right };
+          });
+          assert.ok(Math.abs(geometry.gap - 4) < 1, 'Tool icon and title must retain a 4px gap');
+          assert.ok(geometry.right <= width, 'Tool record must fit the narrow panel');
+          await page.screenshot({ path: join(screenshots, `${engine.name()}-${locale}-${width}-expanded.png`) });
+          const surface = await page.locator('[data-ai-tool-view="error"]').evaluate(element => ({
+            right: element.getBoundingClientRect().right, scrollWidth: element.scrollWidth, clientWidth: element.clientWidth,
+            children: [...element.querySelectorAll('*')].map(child => ({
+              tag: child.tagName, className: child.getAttribute('class'), right: child.getBoundingClientRect().right,
+              scrollWidth: child.scrollWidth, clientWidth: child.clientWidth,
+            })),
+          }));
+          assert.ok(surface.right <= width && surface.scrollWidth <= surface.clientWidth,
+            `${engine.name()}/${locale}/${width}: ${JSON.stringify(surface)}`);
+          await row.focus();
+          await page.keyboard.press('Enter');
+          assert.equal(await row.getAttribute('aria-expanded'), 'false');
+          await page.evaluate(() => window.renderRecovery('details'));
+          await page.locator('[data-slot="ai-tool-details"]').waitFor();
+          assert.equal(await page.getByText(diagnostic, { exact: true }).count(), 1);
+          assert.equal(await page.locator('.ai-detail-error').count(), 0);
+          assert.ok(await page.locator('[data-slot="ai-tool-details"]').evaluate(element =>
+            element.scrollWidth <= element.clientWidth));
+          await page.screenshot({ path: join(screenshots, `${engine.name()}-${locale}-${width}-details.png`) });
+        }
+      }
+      assert.deepEqual(errors, []);
+    } finally {
+      await browser.close();
+    }
+  }
+  console.log(`Tool error recovery rendering passed in Chromium/WebKit, both languages, at 380px/720px. Screenshots: ${screenshots}`);
+} finally {
+  await server.close();
+}
