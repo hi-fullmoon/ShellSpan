@@ -1728,7 +1728,7 @@ export default {
   'ai.workspace.tool.expand': 'Show {count} hidden lines',
   'ai.workspace.tool.collapse': 'Collapse output',
   'ai.workspace.artifact.produced': 'Produced',
-  'ai.workspace.artifact.runtimeDetails': 'Runtime details',
+  'ai.workspace.artifact.runtimeDetails': 'Run records',
   'ai.workspace.artifact.runtimeCount': '{count} records',
   'ai.error.modelInputBudgetInvalid': 'The maximum output and safety reserve leave no usable input space. Lower the maximum output tokens or increase the context window, then retry.',
   'ai.workspace.turnFooter.usage': 'Usage {count}',

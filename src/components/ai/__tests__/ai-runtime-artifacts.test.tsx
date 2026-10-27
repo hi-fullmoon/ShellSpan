@@ -9,6 +9,7 @@ import { taskTokenBudgetEvidence, taskTokenBudgetView } from '@/test/fixtures/ta
 import type { AiArtifactNode } from '@/lib/ai/conversation-node';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
+import '../styles/styles.css';
 
 afterEach(cleanup);
 
@@ -23,7 +24,7 @@ it.each(['zh-CN', 'en-US'] as const)('collapses recorded internal artifacts with
   const opened: AiArtifactNode[] = [];
   const user = userEvent.setup();
   const { container } = render(<AiConversationNodeList nodes={[group]} onOpenArtifact={artifact => opened.push(artifact)} />);
-  const trigger = screen.getByRole('button', { name: locale === 'zh-CN' ? '运行详情' : 'Runtime details' });
+  const trigger = screen.getByRole('button', { name: locale === 'zh-CN' ? '运行记录' : 'Run records' });
   expect(trigger).toHaveAttribute('aria-expanded', 'false');
   expect(screen.queryByText(locale === 'zh-CN' ? '已生成' : 'Produced')).toBeNull();
   expect(container.querySelector('[data-runtime-artifact-list]')).toBeNull();
@@ -31,6 +32,10 @@ it.each(['zh-CN', 'en-US'] as const)('collapses recorded internal artifacts with
   await user.keyboard('{Enter}');
   expect(trigger).toHaveAttribute('aria-expanded', 'true');
   const list = container.querySelector('[data-runtime-artifact-list]') as HTMLElement;
+  const panel = list.parentElement!;
+  expect(getComputedStyle(panel).height).toBe('var(--collapsible-panel-height)');
+  expect(getComputedStyle(panel).overflow).toBe('hidden');
+  expect(getComputedStyle(panel).transitionProperty).toBe('height, opacity');
   const entries = within(list).getAllByRole('button');
   expect(entries).toHaveLength(artifacts.length);
   expect(list).toHaveClass('max-h-65', 'overflow-auto');

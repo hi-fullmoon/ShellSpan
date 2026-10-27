@@ -1726,7 +1726,7 @@ export default {
   'ai.workspace.tool.expand': '显示隐藏的 {count} 行',
   'ai.workspace.tool.collapse': '收起输出',
   'ai.workspace.artifact.produced': '已生成',
-  'ai.workspace.artifact.runtimeDetails': '运行详情',
+  'ai.workspace.artifact.runtimeDetails': '运行记录',
   'ai.workspace.artifact.runtimeCount': '{count} 项记录',
   'ai.error.modelInputBudgetInvalid': '模型的最大输出与安全预留占满了上下文，无法容纳输入。请降低最大输出 token 数，或增大上下文窗口后重试。',
   'ai.workspace.turnFooter.usage': '用量 {count}',

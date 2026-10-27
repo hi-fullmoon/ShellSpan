@@ -54,7 +54,7 @@ try {
       await page.setViewportSize({ width, height: 800 });
       const result = await page.evaluate(async ({ entry, locale, width }) =>
         (await import(entry)).show(locale, width), { entry, locale, width });
-      const trigger = page.getByRole('button', { name: locale === 'zh-CN' ? '运行详情' : 'Runtime details', exact: true });
+      const trigger = page.getByRole('button', { name: locale === 'zh-CN' ? '运行记录' : 'Run records', exact: true });
       await trigger.waitFor();
       assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
       assert.equal(await page.locator('.ai-produced-files-label').count(), 0);
@@ -65,6 +65,17 @@ try {
       const list = page.locator('[data-runtime-artifact-list]');
       await list.waitFor();
       assert.equal(await list.getByRole('button').count(), result.count);
+      const panel = page.locator('[data-runtime-artifacts] > [data-slot="collapsible-content"]');
+      await page.waitForFunction(() => document.querySelector('[data-runtime-artifacts] > [data-slot="collapsible-content"]')
+        ?.getAnimations().some(animation => animation.transitionProperty === 'height'));
+      const expandedHeight = await panel.evaluate(element => {
+        const animation = element.getAnimations().find(item => item.transitionProperty === 'height');
+        if (!animation) throw new Error('Opening must animate panel height');
+        const frames = animation.effect.getKeyframes();
+        return { from: parseFloat(frames[0].height), to: parseFloat(frames.at(-1).height) };
+      });
+      assert.equal(expandedHeight.from, 0);
+      assert.ok(expandedHeight.to > 0);
       await page.evaluate(() => document.getAnimations().forEach(animation => animation.finish()));
       const bounds = await list.evaluate(element => {
         const box = element.getBoundingClientRect();
@@ -72,15 +83,29 @@ try {
           height: box.height, scrolls: element.scrollHeight > element.clientHeight };
       });
       assert.equal(bounds.fits, true, `${locale} list fits at ${width}px`);
-      assert.ok(bounds.height <= 260, 'Runtime details keep a bounded scrolling area');
+      assert.ok(bounds.height <= 260, 'Run records keep a bounded scrolling area');
       if (result.count >= 20) assert.equal(bounds.scrolls, true);
       await page.screenshot({ path: `/tmp/shellspan-runtime-artifacts-${locale}-${width}-expanded.png` });
       await list.getByRole('button').last().click();
       assert.equal(await page.locator('body').getAttribute('data-opened-artifact'), result.lastArtifactId);
+      await trigger.click();
+      assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
+      await page.waitForFunction(() => document.querySelector('[data-runtime-artifacts] > [data-slot="collapsible-content"][data-ending-style]')
+        ?.getAnimations().some(animation => animation.transitionProperty === 'height'));
+      const closingHeight = await panel.evaluate(element => {
+        const animation = element.getAnimations().find(item => item.transitionProperty === 'height');
+        if (!animation) throw new Error('Closing must animate panel height');
+        const frames = animation.effect.getKeyframes();
+        return { from: parseFloat(frames[0].height), to: parseFloat(frames.at(-1).height) };
+      });
+      assert.ok(closingHeight.from > 0);
+      assert.equal(closingHeight.to, 0);
+      await page.evaluate(() => document.getAnimations().forEach(animation => animation.finish()));
+      await list.waitFor({ state: 'detached' });
     }
   }
   assert.deepEqual(errors, []);
-  console.log(`Runtime details: ${evidence.length} recorded artifacts grouped, accessible and bounded in both languages and widths.`);
+  console.log(`Run records: ${evidence.length} recorded artifacts grouped, animated, accessible and bounded in both languages and widths.`);
 } finally {
   await browser?.close();
   await server.close();
