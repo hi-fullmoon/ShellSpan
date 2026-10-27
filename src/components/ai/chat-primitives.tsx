@@ -600,8 +600,10 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
       aria-label={ariaLabel}
       onPointerDownCapture={handlePointerDown}
     >
+      {/* Overflow already clips the viewport. A second paint-containment clip
+          can leave newly exposed WebKit scroll tiles unpainted after updates. */}
       <MessageScrollerViewport
-        className="flex flex-col overscroll-none [overflow-anchor:none]"
+        className="flex flex-col overscroll-none contain-none [overflow-anchor:none]"
         ref={viewportRef}
         onScrollCapture={handleScrollCapture}
         onScroll={readAnchor}

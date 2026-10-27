@@ -48,7 +48,7 @@ try {
           assert.equal(state.opacity, '1', 'Expanded, hovered and focused loading icons must stay visible');
           assert.notEqual(state.animation, 'none');
           assert.ok(Math.abs(state.gap - 4) <= 1, `Icon/text gap must remain 4px: ${JSON.stringify(state)}`);
-          assert.ok(Math.abs(state.offset) <= 1, 'Spinner must align with the process title');
+          assert.equal(state.offset, 0, 'Spinner must align with the process title');
         }
         await trigger.screenshot({ path: `/tmp/process-loading-${engine.name()}-${width}.png` });
         await page.emulateMedia({ reducedMotion: 'reduce' });

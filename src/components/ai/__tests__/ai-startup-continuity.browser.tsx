@@ -7,13 +7,16 @@ import { createAiComposerState } from '@/lib/ai/composer-machine';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { taskTokenBudgetView } from '@/test/fixtures/task-token-budget';
 import type { AgentSessionEvent } from '@/types/agent-session';
+import type { Locale } from '@/types';
 import capture from '@/test/fixtures/agent-skills-runtime.json';
 import { initI18n } from '@/locales';
+import { useAppStore } from '@/stores/appStore';
 import '@/styles/base.css';
 import '../styles/styles.css';
 
-export async function mount(host: HTMLElement) {
-  await initI18n('zh-CN');
+export async function mount(host: HTMLElement, locale: Locale = 'zh-CN') {
+  useAppStore.setState({ locale });
+  await initI18n(locale);
   const root = createRoot(host);
   const context = {};
   const view = taskTokenBudgetView();

@@ -1,6 +1,9 @@
 mod continuation_tests {
     include!("continuation.rs");
 }
+mod terminal_stop_tests {
+    include!("terminal_stop.rs");
+}
 mod terminal_close_tests {
     include!("terminal_close.rs");
 }

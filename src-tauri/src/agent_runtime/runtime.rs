@@ -30,6 +30,19 @@ struct TerminalAdmissionGuard {
     committed: bool,
 }
 
+struct AgentStopGuard {
+    sessions: Arc<Mutex<HashSet<String>>>,
+    session_id: String,
+}
+
+impl Drop for AgentStopGuard {
+    fn drop(&mut self) {
+        if let Ok(mut sessions) = self.sessions.lock() {
+            sessions.remove(&self.session_id);
+        }
+    }
+}
+
 pub(crate) struct TerminalCloseGuard {
     terminals: Arc<Mutex<HashSet<String>>>,
     terminal_id: String,
@@ -146,6 +159,7 @@ impl AgentRuntimeBuilder {
             handles: Arc::new(Mutex::new(HashMap::new())),
             restored_inputs_paused: Arc::new(Mutex::new(false)),
             terminal_submission_gate: Arc::new(Mutex::new(())),
+            stopping_sessions: Arc::new(Mutex::new(HashSet::new())),
             closing_terminals: Arc::new(Mutex::new(HashSet::new())),
             models: self.models,
             hooks: self.hooks,
@@ -168,6 +182,7 @@ pub(crate) struct AgentRuntime {
     handles: Arc<Mutex<HashMap<String, super::AgentHandle>>>,
     restored_inputs_paused: Arc<Mutex<bool>>,
     terminal_submission_gate: Arc<Mutex<()>>,
+    stopping_sessions: Arc<Mutex<HashSet<String>>>,
     closing_terminals: Arc<Mutex<HashSet<String>>>,
     models: ModelRegistry,
     hooks: AgentHookBus,
@@ -1267,6 +1282,11 @@ impl AgentRuntime {
         provider: AiProviderConfig,
         api_key: Option<String>,
     ) -> Result<AgentSessionSnapshot, String> {
+        let _terminal_gate = self
+            .terminal_submission_gate
+            .lock()
+            .map_err(|_| "TERMINAL_ADMISSION_UNAVAILABLE")?;
+        self.require_session_not_stopping(session_id)?;
         self.require_open_terminal_target(session_id)?;
         if self.agents.get(session_id)?.is_some() {
             self.wake(session_id)?;
@@ -1483,15 +1503,16 @@ impl AgentRuntime {
         paused: bool,
     ) -> Result<Option<TerminalAdmissionGuard>, String> {
         self.check_terminal_submission_owner(session_id, submission_id)?;
+        if self.sessions.has_submission(session_id, submission_id)? {
+            return Ok(None);
+        }
+        self.require_session_not_stopping(session_id)?;
         let snapshot = self.sessions.snapshot(session_id)?;
         if paused
             || snapshot.ended
             || self.agents.get(session_id)?.is_none()
             || snapshot.header.execution_surface != super::AgentExecutionSurface::BoundTerminal
         {
-            return Ok(None);
-        }
-        if self.sessions.has_submission(session_id, submission_id)? {
             return Ok(None);
         }
         let Some(target) = snapshot.header.target else {
@@ -1743,9 +1764,7 @@ impl AgentRuntime {
         session_id: &str,
         terminate: bool,
     ) -> Result<AgentSessionSnapshot, String> {
-        if let Some(entry) = self.agents.get(session_id)? {
-            entry.stop_admission()?;
-        }
+        let _stop = self.begin_session_stop(session_id)?;
         self.models.images.cancel_session(session_id)?;
         self.subagents.cancel_descendants(session_id).await?;
         let handle = self
@@ -1753,7 +1772,7 @@ impl AgentRuntime {
             .lock()
             .map_err(|_| "Agent handle registry is unavailable".to_string())?
             .remove(session_id);
-        if let Some(handle) = handle {
+        let snapshot = if let Some(handle) = handle {
             let result = async {
                 handle.entry().stop_admission()?;
                 self.tools.cancel_session(&handle.entry())?;
@@ -1766,7 +1785,7 @@ impl AgentRuntime {
             }
             .await;
             match result {
-                Ok(snapshot) => return Ok(snapshot),
+                Ok(snapshot) => snapshot,
                 Err(error) => {
                     if self.agents.get(session_id)?.is_some() {
                         self.handles
@@ -1777,23 +1796,68 @@ impl AgentRuntime {
                     return Err(error);
                 }
             }
-        }
-        if self.agents.get(session_id)?.is_some() {
+        } else {
+            if self.agents.get(session_id)?.is_some() {
+                return Err("Agent Session is already stopping".into());
+            }
+            let _gate = self
+                .tools
+                .question_gate
+                .lock()
+                .map_err(|_| "question gate unavailable")?;
+            self.tools.cancel_questions(session_id)?;
+            if self.sessions.snapshot(session_id)?.ended {
+                self.sessions.snapshot(session_id)?
+            } else if terminate {
+                self.sessions.cancel(session_id)?
+            } else {
+                self.sessions.interrupt(session_id)?
+            }
+        };
+        // Submission can reserve input before TurnStart. Stopping in that gap
+        // emits no TurnEnd, so event-driven cleanup alone leaves the guard held.
+        // The stop fence remains held until cleanup finishes, so a replacement
+        // Agent cannot acquire a new turn guard before this release.
+        // The broker's independent dirty-editor recovery guard stays intact.
+        self.native_engine.release_terminal_turn(session_id)?;
+        Ok(snapshot)
+    }
+
+    fn require_session_not_stopping(&self, session_id: &str) -> Result<(), String> {
+        if self
+            .stopping_sessions
+            .lock()
+            .map_err(|_| "Agent stop registry is unavailable")?
+            .contains(session_id)
+        {
             return Err("Agent Session is already stopping".into());
         }
-        let _gate = self
-            .tools
-            .question_gate
+        Ok(())
+    }
+
+    fn begin_session_stop(&self, session_id: &str) -> Result<AgentStopGuard, String> {
+        // Drain synchronous starts/submissions before closing admission. Never
+        // hold this mutex while joining asynchronous drivers or tool workers.
+        let _terminal_gate = self
+            .terminal_submission_gate
             .lock()
-            .map_err(|_| "question gate unavailable")?;
-        self.tools.cancel_questions(session_id)?;
-        if self.sessions.snapshot(session_id)?.ended {
-            self.sessions.snapshot(session_id)
-        } else if terminate {
-            self.sessions.cancel(session_id)
-        } else {
-            self.sessions.interrupt(session_id)
+            .map_err(|_| "TERMINAL_ADMISSION_UNAVAILABLE")?;
+        if !self
+            .stopping_sessions
+            .lock()
+            .map_err(|_| "Agent stop registry is unavailable")?
+            .insert(session_id.to_string())
+        {
+            return Err("Agent Session is already stopping".into());
         }
+        let stop = AgentStopGuard {
+            sessions: Arc::clone(&self.stopping_sessions),
+            session_id: session_id.to_string(),
+        };
+        if let Some(entry) = self.agents.get(session_id)? {
+            entry.stop_admission()?;
+        }
+        Ok(stop)
     }
 
     pub(crate) async fn spawn_subagent(

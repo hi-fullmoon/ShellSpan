@@ -1,5 +1,9 @@
     use super::*;
 
+    mod terminal_stop_tests {
+        include!("session_terminal_stop.rs");
+    }
+
     mod terminal_recovery_tests {
         include!("session_terminal_recovery.rs");
     }

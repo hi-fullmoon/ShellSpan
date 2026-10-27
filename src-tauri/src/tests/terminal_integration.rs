@@ -1257,6 +1257,78 @@
             );
             leases.release_turn("typing-agent").unwrap();
         }
+        if expected_native_input && !checkpoint_failure {
+            for attempt in 0..6 {
+                wait_for_prompt(broker, transport_id);
+                let effect = output.path().join(format!("stopped-native-{attempt}"));
+                let source = format!(
+                    "printf '%s' '{}' > {}",
+                    "cancel-before-submit".repeat(40),
+                    shell_single_quote(effect.to_str().unwrap())
+                );
+                let submitted_source = if shell == TerminalShellKind::Bash {
+                    bash_native_submission(&source).unwrap()
+                } else {
+                    source.clone()
+                };
+                let frame = crate::agent_runtime::native_editor_chunks(&submitted_source, shell)[0]
+                    .0
+                    .clone();
+                let id = format!("stop-native-{attempt}");
+                let before = writes.lock().unwrap().len();
+                let operation = thread::scope(|scope| {
+                    let typing = scope.spawn(|| {
+                        registry.start(
+                            &sessions,
+                            transport_id,
+                            "typing-agent",
+                            "typing-task",
+                            &id,
+                            &source,
+                            shell.enter(),
+                        )
+                    });
+                    wait_until(Duration::from_secs(5), || {
+                        writes.lock().unwrap()[before..]
+                            .iter()
+                            .any(|(_, input)| input == &frame)
+                    });
+                    registry.cancel_task(&sessions, "typing-task").unwrap();
+                    typing.join().unwrap().unwrap()
+                });
+                let result = registry
+                    .wait(&sessions, transport_id, &operation, Duration::from_secs(5))
+                    .unwrap();
+                assert_eq!(result.state, TerminalCommandState::Cancelled, "{result:?}");
+                leases.release_turn("typing-agent").unwrap();
+                wait_for_prompt(broker, transport_id);
+                assert!(!effect.exists(), "stopped native source executed");
+                let sequence = broker
+                    .snapshot(Some(transport_id))
+                    .unwrap()
+                    .session
+                    .unwrap()
+                    .integration_event_sequence;
+                leases
+                    .write(
+                        &sessions,
+                        transport_id,
+                        "printf 'user-input-after-stop\\n'\n".into(),
+                        crate::agent_runtime::TerminalInputSource::User,
+                    )
+                    .expect("stopping native input must restore manual terminal input");
+                wait_until(Duration::from_secs(5), || {
+                    broker
+                        .snapshot(Some(transport_id))
+                        .unwrap()
+                        .session
+                        .is_some_and(|session| {
+                            session.prompt_ready && session.integration_event_sequence > sequence
+                        })
+                });
+                assert!(!effect.exists(), "user input submitted cancelled source");
+            }
+        }
         if checkpoint_failure {
             assert!(expected_native_input);
             let delayed_frame = output.path().join("delayed-source-frame");

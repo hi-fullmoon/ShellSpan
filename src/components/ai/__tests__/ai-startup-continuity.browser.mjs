@@ -8,15 +8,18 @@ import { chromium, webkit } from 'playwright';
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 function statusGeometry(element) {
   const row = element.getBoundingClientRect();
+  const label = element.querySelector('[data-slot="marker-content"]').getBoundingClientRect();
   return ['[data-slot="marker-icon"]', '[data-slot="marker-content"]'].map(selector => {
     const target = element.querySelector(selector);
     const rect = target.getBoundingClientRect();
     const style = getComputedStyle(target);
     const svg = target.querySelector('svg');
+    const icon = svg?.getBoundingClientRect();
     const iconStyle = svg ? getComputedStyle(svg) : null;
     return { x: rect.x, y: rect.y, width: rect.width, height: rect.height,
       font: selector === '[data-slot="marker-content"]' ? style.font : undefined, rowHeight: row.height,
-      icon: iconStyle ? { width: iconStyle.width, height: iconStyle.height, translate: iconStyle.translate } : null };
+      icon: iconStyle ? { width: iconStyle.width, height: iconStyle.height, translate: iconStyle.translate,
+        offset: icon.top + icon.height / 2 - label.top - label.height / 2 } : null };
   });
 }
 const server = await createServer({ root, configFile: false, appType: 'custom', logLevel: 'error',
@@ -32,20 +35,21 @@ try {
   for (const engine of [chromium, webkit]) {
     const browser = await engine.launch();
     try {
-      for (const width of [360, 900]) {
+      for (const { width, locale } of [360, 900].flatMap(width =>
+        ['zh-CN', 'en-US'].map(locale => ({ width, locale })))) {
         const page = await browser.newPage({ viewport: { width, height: 720 } });
         const errors = [];
         page.on('pageerror', error => errors.push(error.message));
         await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__startup`);
-        await page.evaluate(async () => {
+        await page.evaluate(async locale => {
           const { mount } = await import('/src/components/ai/__tests__/ai-startup-continuity.browser.tsx');
           const host = document.createElement('main');
           host.className = 'ai-panel-shell ai-workspace-root @container/ai-workspace';
           host.style.cssText = 'position:fixed;inset:0;display:flex;flex-direction:column';
           document.body.append(host);
-          window.startup = await mount(host);
+          window.startup = await mount(host, locale);
           window.startup.session('pending');
-        });
+        }, locale);
         await page.locator('[data-slot="message-scroller"]:not(.invisible)').waitFor();
         const adopted = await page.evaluate(() => {
           const scroller = document.querySelector('[data-slot="message-scroller"]');
@@ -69,6 +73,11 @@ try {
         assert.equal(await page.locator('.ai-turn-process').count(), 0);
         const pendingLabel = await page.locator('[data-ai-thinking-indicator] .shimmer').textContent();
         const initialStatusGeometry = await page.locator('[data-ai-thinking-indicator]').evaluate(statusGeometry);
+        assert.equal(initialStatusGeometry[0].icon.offset, 0,
+          `Loading icon and processing label must be vertically centered in ${locale} at ${width}px`);
+        await page.locator('[data-ai-thinking-indicator]').screenshot({
+          path: `/tmp/shellspan-pending-loading-${engine.name()}-${locale}-${width}.png`,
+        });
         const pendingGeometry = await page.locator('[data-ai-thinking-indicator]').evaluate(element => {
           const row = element.getBoundingClientRect();
           const label = element.querySelector('[data-slot="marker-content"]').getBoundingClientRect();

@@ -127,6 +127,14 @@ Readiness requires `integrationState = ready`, `promptReady = true`, no active
 command, the current generation, and user lease ownership before Agent
 acquisition. The frontend turn guard protects the same source terminal from
 `turn/start` through `turn/end`; per-command leases do not shorten that guard.
+Submission also reserves backend input ownership before `turn/start`. Explicit
+stop releases that reservation after the driver and pending tool executions
+settle, including when no turn started and no `turn/end` event is emitted.
+Stop admission is serialized with starts and text/image submissions. A per-session
+stop fence rejects replacement starts and new submissions until cleanup finishes,
+while duplicate submission receipts remain readable. The fence is released on
+success or failure, without holding the admission mutex across asynchronous waits.
+This does not clear the broker's independent pending-input recovery guard.
 Takeover restores user ownership and fences every later Agent input for the
 turn. Disabling the flag makes active incomplete commands uncertain, revokes
 remote Agent leases and turn guards, and keeps the user's SSH transport open.
