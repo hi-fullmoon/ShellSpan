@@ -1235,9 +1235,13 @@ export function useAiSessionController({
     }
   }, [providers, visibleView]);
   const oneShotSubagent = visibleView?.snapshot.value.header.subagent?.continuable === false;
+  const isSubagent = Boolean(visibleView?.snapshot.value.header.subagent);
+  const endedSubagent = isSubagent && Boolean(visibleView?.snapshot.value.ended
+    || visibleView?.summary.archived || visibleView?.snapshot.value.archived
+    || ['completed', 'cancelled', 'failed'].includes(visibleView?.status ?? 'idle'));
   const historicalTargetUnavailable = scope === 'terminal' && Boolean(visibleView
     && visibleView.snapshot.value.header.target?.sessionId !== activeTerminal?.sessionId);
-  const readOnlySession = oneShotSubagent || historicalTargetUnavailable;
+  const readOnlySession = oneShotSubagent || endedSubagent || historicalTargetUnavailable;
   const canContinueReconnectedView = scope === 'terminal' && visibleView?.snapshot.kind === 'agent'
     && canContinueOnReconnectedTerminal(visibleView.snapshot.value, activeTerminal)
     && Boolean(adapter.reconnectTerminal);
@@ -1312,7 +1316,7 @@ export function useAiSessionController({
   useEffect(() => () => { if (focusMode) useFocusStore.getState().setBusy(false); }, [focusMode]);
   const selectedExecutionSurface = focusMode ? 'boundTerminal' : canContinueHistoricalView ? newExecutionSurface
     : visibleView?.snapshot.value.header.executionSurface ?? newExecutionSurface;
-  const terminalConflict = !terminalSessionRestoring && scope === 'terminal' && selectedExecutionSurface === 'boundTerminal'
+  const terminalConflict = !terminalSessionRestoring && !isSubagent && scope === 'terminal' && selectedExecutionSurface === 'boundTerminal'
     && Boolean(terminalOccupancy && terminalOccupancy.agentSessionId !== (visibleView?.summary.id ?? composer.sessionId));
   const agentUnavailableReason = terminalSessionRestoring ? null
     : terminalConflict ? t('terminal.occupancy.submitBlocked') : visibleExecutionRequired ? t('focus.visibleRequired') : oneShotSubagent
@@ -1800,10 +1804,10 @@ export function useAiSessionController({
   const terminalInsertions = useAiDraftStore(state => state.terminalInsertions);
   useEffect(() => {
     if (composer.lastError?.message === 'TERMINAL_AGENT_CONFLICT'
-      && (terminalConflict || !terminalOccupancy || terminalOccupancy.agentSessionId === (visibleView?.summary.id ?? composer.sessionId))) {
+      && (isSubagent || terminalConflict || !terminalOccupancy || terminalOccupancy.agentSessionId === (visibleView?.summary.id ?? composer.sessionId))) {
       dispatch({ type: 'error.dismissed' });
     }
-  }, [composer.lastError, composer.sessionId, dispatch, terminalConflict, terminalOccupancy, visibleView?.summary.id]);
+  }, [composer.lastError, composer.sessionId, dispatch, isSubagent, terminalConflict, terminalOccupancy, visibleView?.summary.id]);
   const taskRequest = useTerminalTaskNavigation(state => state.request);
   useEffect(() => {
     if (!taskRequest || scope !== 'terminal' || workspaceChanging
@@ -1964,9 +1968,12 @@ export function useAiSessionController({
     setBusyPreference: (value) => dispatch({ type: 'preference.changed', value }),
     submit: (gesture, accelerated = false) => {
       if (terminalSessionRestoring) return;
+      const child = viewRef.current?.snapshot.value.header.subagent;
+      if (child && readOnlySession) return;
       const owner = agentTerminalLeaseState.get(activeTerminal?.sessionId ?? null);
       const ownSession = viewRef.current?.summary.id ?? composerRef.current.sessionId;
-      if (scope === 'terminal' && selectedExecutionSurface === 'boundTerminal' && owner && owner.agentSessionId !== ownSession) {
+      // Child follow-ups use sendChildInput; they do not acquire a terminal lease.
+      if (!child && scope === 'terminal' && selectedExecutionSurface === 'boundTerminal' && owner && owner.agentSessionId !== ownSession) {
         dispatch({ type: 'error.reported', error: { kind: 'conflict', message: 'TERMINAL_AGENT_CONFLICT', retryable: true } });
         return;
       }

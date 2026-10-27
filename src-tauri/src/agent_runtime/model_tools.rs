@@ -154,7 +154,7 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
         },
         ModelToolDefinition {
             name: "read_file".into(),
-            description: "Read a bounded file from the frozen target through ShellSpan's native filesystem runtime.".into(),
+            description: "Read a bounded file from the frozen target through ShellSpan's native filesystem runtime. offset and maxBytes are byte counts. UTF-8 pages end at a complete character, so readBytes may be smaller than maxBytes. While truncated is true, use the returned nextOffset for the next page; never calculate it from the requested size. An offset inside a UTF-8 character is rejected with a valid restart offset.".into(),
             input_schema: object_schema(
                 &["path", "encoding"],
                 json!({

@@ -28,8 +28,7 @@ export function AiContextMeter({ usage }: { readonly usage?: AiContextUsage }): 
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const available = usage !== undefined
-    && Number.isFinite(usage.usedTokens)
-    && usage.usedTokens >= 0
+    && (usage.source === 'pending' || (Number.isFinite(usage.usedTokens) && usage.usedTokens >= 0))
     && Number.isFinite(usage.contextWindow)
     && usage.contextWindow > 0;
 
@@ -38,23 +37,26 @@ export function AiContextMeter({ usage }: { readonly usage?: AiContextUsage }): 
   }, [available, open]);
 
   if (!available || !usage) return null;
-  const percent = Math.min(100, Math.round(usage.usedTokens / usage.contextWindow * 100));
+  const percent = usage.usedTokens === null ? null
+    : Math.min(100, Math.round(usage.usedTokens / usage.contextWindow * 100));
   const ariaLabel = t(
-    usage.source === 'reported'
+    usage.source === 'pending' ? 'ai.workspace.contextUsage.pendingAria'
+      : usage.source === 'reported'
       ? 'ai.workspace.contextUsage.reportedAria'
+      : usage.afterCompaction ? 'ai.workspace.contextUsage.compactedEstimatedAria'
       : 'ai.workspace.contextUsage.estimatedAria',
-    { percent },
+    { percent: percent ?? 0 },
   );
   const breakdownTotal = usage.breakdown
     ? usage.breakdown.systemTokens + usage.breakdown.toolsTokens + usage.breakdown.messageTokens
     : 0;
-  const segments = usage.breakdown && breakdownTotal > 0
+  const segments = usage.source === 'estimated' && usage.breakdown && breakdownTotal > 0 && percent !== null
     ? BREAKDOWN_ROWS.map((row) => ({
         key: row.key,
         color: row.color,
         width: percent * usage.breakdown![row.key] / breakdownTotal,
       })).filter((segment) => segment.width > 0)
-    : percent > 0
+    : percent !== null && percent > 0
       ? [{ key: 'total', color: 'total', width: percent }]
       : [];
 
@@ -77,7 +79,7 @@ export function AiContextMeter({ usage }: { readonly usage?: AiContextUsage }): 
               cx="7"
               cy="7"
               r={RADIUS}
-              strokeDasharray={`${CIRCUMFERENCE * percent / 100} ${CIRCUMFERENCE}`}
+              strokeDasharray={`${CIRCUMFERENCE * (percent ?? 0) / 100} ${CIRCUMFERENCE}`}
               transform="rotate(-90 7 7)"
             />
           </svg>
@@ -92,10 +94,14 @@ export function AiContextMeter({ usage }: { readonly usage?: AiContextUsage }): 
         >
           <PopoverTitle className="sr-only">{t('ai.workspace.contextUsage.title')}</PopoverTitle>
           <div className="ai-context-meter-header flex min-w-0 items-center gap-1.5 whitespace-nowrap">
-            <span>{t('ai.workspace.contextUsage.used')}</span>
-            <strong>{percent}%</strong>
+            <span>{t(usage.source === 'reported' ? 'ai.workspace.contextUsage.confirmed'
+              : usage.source === 'estimated' ? (usage.afterCompaction
+                ? 'ai.workspace.contextUsage.compactedEstimate' : 'ai.workspace.contextUsage.estimated')
+                : 'ai.workspace.contextUsage.used')}</span>
+            <strong>{percent === null ? t('ai.workspace.contextUsage.pending') : `${percent}%`}</strong>
             <span className="ai-context-meter-figures ml-auto min-w-0 truncate">
-              ~{formatTokens(usage.usedTokens)} / {formatTokens(usage.contextWindow)}
+              {usage.usedTokens === null ? '—'
+                : `${usage.source === 'estimated' ? '~' : ''}${formatTokens(usage.usedTokens)}`} / {formatTokens(usage.contextWindow)}
             </span>
           </div>
           <div className="ai-context-meter-bar mt-2 mb-2.5 flex h-1 gap-px overflow-hidden" aria-hidden="true">
@@ -108,6 +114,12 @@ export function AiContextMeter({ usage }: { readonly usage?: AiContextUsage }): 
               />
             ))}
           </div>
+          {usage.estimatedTokens !== undefined && (
+            <div className="mt-1 flex items-center justify-between gap-3" data-slot="ai-context-estimate">
+              <span>{t('ai.workspace.contextUsage.currentEstimate')}</span>
+              <span>~{formatTokens(usage.estimatedTokens)}</span>
+            </div>
+          )}
           {usage.breakdown && (
             <dl className="ai-context-meter-rows mt-1 mb-0">
               {BREAKDOWN_ROWS.map((row) => (
@@ -122,7 +134,10 @@ export function AiContextMeter({ usage }: { readonly usage?: AiContextUsage }): 
             </dl>
           )}
           <p className="ai-context-meter-note mt-1.5 mb-0 pt-1.5">
-            {t(usage.source === 'reported'
+            {t(usage.afterCompaction ? (usage.source === 'pending'
+              ? 'ai.workspace.contextUsage.compactedPendingNote' : 'ai.workspace.contextUsage.compactedNote')
+              : usage.source === 'pending' ? 'ai.workspace.contextUsage.pendingNote'
+              : usage.source === 'reported'
               ? 'ai.workspace.contextUsage.reportedNote'
               : 'ai.workspace.contextUsage.estimatedNote')}
             {usage.capacitySource === 'selectedModel' && <> {t('ai.workspace.contextUsage.currentCapacityNote')}</>}

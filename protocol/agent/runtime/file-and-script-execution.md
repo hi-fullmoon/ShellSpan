@@ -80,6 +80,14 @@ path is involved. Remote structured reads also require a credential-backed
 profile. Existing scoped readers retain their path, symlink and size checks;
 recursive search omits known sensitive paths. No model explanation grants access.
 
+`read_file` uses byte offsets and byte limits. UTF-8 pages end at a complete
+character, so `readBytes` may be smaller than the requested `maxBytes`. When
+`truncated` is true, continue with the returned `nextOffset`; do not add the
+requested page size to the previous offset. An offset inside a UTF-8 character
+is rejected with a valid restart offset. A page too small for the next character
+is rejected with guidance to increase or omit `maxBytes`. Invalid UTF-8 files
+remain errors; binary reads through `base64` retain exact byte ranges.
+
 On macOS/Linux, a single literal local Direct `pwd`, `uname`, `ls`, `cat`, `head`
 or `tail` can be auto-approved with the supported argument subset. `ls` permits
 non-recursive `a/l/h/A/1/n` flags and at most one directory. `uname` permits

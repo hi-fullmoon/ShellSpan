@@ -1,5 +1,6 @@
 import { AgentSessionCommittedClient, type AgentSessionStreamState } from '@/lib/ai/agent-session-client';
 import { createCommittedEventProjection } from './committed-event-projection';
+import { projectContextUsage } from './context-usage';
 import { fallbackSessionTitle } from './session-title';
 import { AiAdmissionUnconfirmedError, normalizeAiSessionError } from './session-error';
 import { invokeAnswerAgentRuntimeQuestion, invokeListAgentRuntimeSkills, invokeListAgentFileReferences } from '@/lib/ipc/tauri';
@@ -46,7 +47,6 @@ import { findConversationTool } from './conversation-tool';
 import type { AiConversationNode } from './conversation-node';
 import type {
   AiApprovalDecisionInput,
-  AiContextUsage,
   AiCreateSessionInput,
   AiInboxMutationInput,
   AiInboxItem,
@@ -63,33 +63,6 @@ import type {
   AiSubmitReceipt,
   ListSessionsInput,
 } from './session-adapter';
-
-function contextUsage(events: readonly AgentSessionEvent[]): AiContextUsage | undefined {
-  const latestContext = [...events].reverse().find((event) => event.type === 'request/context');
-  if (latestContext?.type !== 'request/context') return undefined;
-  const estimated = latestContext.data.inputTokens;
-  const contextWindow = latestContext.data.contextWindow;
-  if (estimated === undefined || contextWindow === undefined || contextWindow <= 0) return undefined;
-  const reported = [...events].reverse().find((event) => (
-    event.type === 'request/usage'
-    && event.data.requestId === latestContext.data.requestId
-    && event.data.usage.uncachedInputTokens !== undefined
-    && event.data.usage.cacheReadTokens !== undefined
-  ));
-  const systemTokens = latestContext.data.systemTokens;
-  const toolsTokens = latestContext.data.toolSchemaTokens;
-  const messageTokens = latestContext.data.messageTokens;
-  return {
-    usedTokens: reported?.type === 'request/usage'
-      ? reported.data.usage.uncachedInputTokens! + reported.data.usage.cacheReadTokens!
-      : estimated,
-    contextWindow,
-    source: reported ? 'reported' : 'estimated',
-    ...(systemTokens !== undefined && toolsTokens !== undefined && messageTokens !== undefined
-      ? { breakdown: { systemTokens, toolsTokens, messageTokens } }
-      : {}),
-  };
-}
 
 interface AgentCommittedClientLike {
   state(): AgentSessionStreamState;
@@ -416,7 +389,7 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
       }
     }),
     canLoadOlder: false,
-    contextUsage: contextUsage(events),
+    contextUsage: projectContextUsage(events),
   };
 }
 

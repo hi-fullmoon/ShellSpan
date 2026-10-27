@@ -756,6 +756,7 @@ describe('AgentSessionAdapter', () => {
     });
     expect(view.contextUsage).toEqual({
       usedTokens: 31_500,
+      estimatedTokens: 32_000,
       contextWindow: 64_000,
       source: 'reported',
       breakdown: { systemTokens: 1_200, toolsTokens: 6_800, messageTokens: 24_000 },
@@ -927,6 +928,7 @@ describe('AgentSessionAdapter', () => {
     expect(view.activityNodes.some((node) => node.kind === 'request')).toBe(true);
     expect(view.contextUsage).toEqual({
       usedTokens: 32_000,
+      estimatedTokens: 32_000,
       contextWindow: 64_000,
       source: 'estimated',
       breakdown: { systemTokens: 1_200, toolsTokens: 6_800, messageTokens: 24_000 },

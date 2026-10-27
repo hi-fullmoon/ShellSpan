@@ -918,6 +918,8 @@
         "sha256": { "$ref": "#/$defs/sha256" },
         "content": { "type": "string", "maxLength": 1398104 },
         "offset": { "type": "integer", "minimum": 0 },
+        "readBytes": { "type": "integer", "minimum": 0 },
+        "nextOffset": { "type": "integer", "minimum": 0 },
         "truncated": { "type": "boolean" },
         "isBinary": { "type": "boolean" },
         "sensitive": { "type": "boolean" },

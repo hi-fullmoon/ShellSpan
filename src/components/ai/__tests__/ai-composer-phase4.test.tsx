@@ -346,11 +346,11 @@ describe('AiComposerSeat Phase 4 behavior', () => {
 
     await user.click(meter);
     const panel = screen.getByRole('dialog', { name: 'Context usage' });
-    expect(panel).toHaveTextContent('Context used6%~61.8K / 1M');
+    expect(panel).toHaveTextContent('Estimated usage6%~61.8K / 1M');
     expect(panel).toHaveTextContent('System prompt~1.7K');
     expect(panel).toHaveTextContent('Tools~6.6K');
     expect(panel).toHaveTextContent('Conversation messages~45.8K');
-    expect(panel).toHaveTextContent('Total usage and categories are stable Runtime estimates.');
+    expect(panel).toHaveTextContent('No provider-confirmed count yet; showing the latest request estimate.');
     expect(document.querySelectorAll('.ai-context-meter-bar > span')).toHaveLength(3);
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog', { name: 'Context usage' })).toBeNull();

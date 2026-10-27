@@ -385,24 +385,34 @@ fn execute_read_file(
     if offset > bytes.len() as u64 {
         return Err("read_file offset is beyond the file".into());
     }
-    let end = offset.saturating_add(limit).min(bytes.len() as u64);
-    let slice = &bytes[offset as usize..end as usize];
-    let truncated = end < bytes.len() as u64;
+    if limit == 0 {
+        return Err("read_file maxBytes must be a positive integer".into());
+    }
+    let mut end = offset.saturating_add(limit).min(bytes.len() as u64) as usize;
     let is_binary = detect_binary(&bytes);
     let content = match arguments.encoding {
         FileEncodingNative::Utf8 => {
             if is_binary {
                 return Err("read_file refuses to decode binary content as UTF-8".into());
             }
-            Some(
-                std::str::from_utf8(slice)
-                    .map_err(|_| "read_file content is not valid UTF-8".to_string())?
-                    .to_string(),
-            )
+            let text = std::str::from_utf8(&bytes)
+                .map_err(|_| "read_file content is not valid UTF-8".to_string())?;
+            if !text.is_char_boundary(offset as usize) {
+                return Err(format!(
+                    "read_file offset must be a UTF-8 character boundary; use nextOffset from the previous page, or restart at {}",
+                    text.floor_char_boundary(offset as usize)
+                ));
+            }
+            end = text.floor_char_boundary(end);
+            if end == offset as usize && end < text.len() {
+                return Err("read_file maxBytes is too small for the next UTF-8 character; increase maxBytes or omit it to use the default page size".into());
+            }
+            Some(text[offset as usize..end].to_string())
         }
-        FileEncodingNative::Base64 => Some(STANDARD.encode(slice)),
+        FileEncodingNative::Base64 => Some(STANDARD.encode(&bytes[offset as usize..end])),
         FileEncodingNative::MetadataOnly => None,
     };
+    let truncated = end < bytes.len();
     let sensitive = path_is_sensitive(&path);
     Ok(FileToolOutputNative {
         summary: "Read a bounded file through the native filesystem driver.".into(),
@@ -413,6 +423,8 @@ fn execute_read_file(
             "sha256": digest,
             "content": content,
             "offset": offset,
+            "readBytes": end - offset as usize,
+            "nextOffset": end,
             "truncated": truncated,
             "isBinary": is_binary,
             "sensitive": sensitive,
@@ -2284,6 +2296,108 @@ fn truncate_utf8(value: &str, limit: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_file_pages_real_utf8_source_without_losing_characters() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(workspace.path()).unwrap();
+        let runtime = tempfile::tempdir().unwrap();
+        let database = Database::open(&runtime.path().join("read.db")).unwrap();
+        let credentials = CredentialManager::in_memory_for_tests();
+        let checkpoints = CheckpointStoreNative::default();
+        let operations = FileOperationRegistryNative::default();
+        let known_hosts = runtime.path().join("known_hosts");
+        let source = include_str!("../../../../AGENTS.md");
+        fs::write(root.join("AGENTS.md"), source).unwrap();
+        let run = |encoding: &str, offset: usize, max_bytes: usize| {
+            let call = AgentToolCallNative {
+                request_id: "read-request".into(),
+                call_id: Uuid::new_v4().to_string(),
+                tool_name: "read_file".into(),
+                arguments: json!({
+                    "path": "AGENTS.md", "encoding": encoding,
+                    "offset": offset, "maxBytes": max_bytes
+                }),
+                target: AgentToolTargetNative::Local {
+                    target_id: "local".into(),
+                    session_id: "terminal".into(),
+                    cwd: Some(root.to_string_lossy().into()),
+                },
+                capability_id: "read".into(),
+            };
+            execute_file_tool_native(FileExecutionContextNative {
+                task_id: "read-task",
+                call: &call,
+                database: &database,
+                credentials: &credentials,
+                known_hosts_path: &known_hosts,
+                checkpoint_root: runtime.path(),
+                checkpoints: &checkpoints,
+                operations: &operations,
+            })
+        };
+        let (multibyte_offset, character) = source
+            .char_indices()
+            .find(|(_, character)| character.len_utf8() > 1)
+            .unwrap();
+        let page = run("utf8", 0, multibyte_offset + 1).unwrap();
+        assert_eq!(page.data["content"], &source[..multibyte_offset]);
+        assert_eq!(page.data["readBytes"], multibyte_offset);
+        assert_eq!(page.data["nextOffset"], multibyte_offset);
+        assert!(page.truncated);
+        assert!(run("utf8", multibyte_offset, 1)
+            .err()
+            .unwrap()
+            .contains("too small for the next UTF-8 character"));
+        let error = run("utf8", multibyte_offset + 1, 100).err().unwrap();
+        assert!(error.contains("use nextOffset"));
+        assert!(error.ends_with(&format!("restart at {multibyte_offset}")));
+        assert!(run("utf8", 0, 0)
+            .err()
+            .unwrap()
+            .contains("positive integer"));
+        assert!(run("utf8", source.len() + 1, 100)
+            .err()
+            .unwrap()
+            .contains("beyond the file"));
+        for max_bytes in [7, 1400] {
+            let mut offset = 0;
+            let mut reconstructed = String::new();
+            loop {
+                let page = run("utf8", offset, max_bytes).unwrap();
+                let content = page.data["content"].as_str().unwrap();
+                let next = page.data["nextOffset"].as_u64().unwrap() as usize;
+                assert_eq!(page.data["offset"], offset);
+                assert_eq!(page.data["readBytes"], content.len());
+                assert_eq!(next, offset + content.len());
+                assert!(content.len() <= max_bytes);
+                assert!(next > offset);
+                reconstructed.push_str(content);
+                offset = next;
+                if !page.truncated {
+                    break;
+                }
+            }
+            assert_eq!(reconstructed, source);
+            let eof = run("utf8", offset, max_bytes).unwrap();
+            assert_eq!(eof.data["content"], "");
+            assert_eq!(eof.data["readBytes"], 0);
+            assert_eq!(eof.data["nextOffset"], source.len());
+            assert!(!eof.truncated);
+        }
+        let raw = run("base64", multibyte_offset + 1, character.len_utf8() - 1).unwrap();
+        assert_eq!(
+            STANDARD
+                .decode(raw.data["content"].as_str().unwrap())
+                .unwrap(),
+            source.as_bytes()[multibyte_offset + 1..multibyte_offset + character.len_utf8()]
+        );
+        assert_eq!(
+            raw.data["nextOffset"],
+            multibyte_offset + character.len_utf8()
+        );
+        assert_eq!(fs::read_to_string(root.join("AGENTS.md")).unwrap(), source);
+    }
 
     #[cfg(unix)]
     #[test]

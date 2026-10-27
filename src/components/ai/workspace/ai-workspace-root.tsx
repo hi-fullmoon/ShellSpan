@@ -439,6 +439,12 @@ export function AiWorkspaceRoot({
     ? t('agent.emptyDescription')
     : t('ai.workbench.empty');
   const surfaceMode = mode ?? 'agent';
+  const subagent = view?.snapshot.value.header.subagent ?? view?.summary.subagent;
+  const subagentReadOnly = Boolean(subagent && (readOnlySession || view?.snapshot.value.ended
+    || view?.snapshot.value.archived || view?.summary.archived
+    || ['completed', 'cancelled', 'failed'].includes(status)));
+  const subagentInputMode = !subagent ? 'default'
+    : subagent.continuable && !subagentReadOnly ? 'supplement' : 'hidden';
   const terminalRecovery = surfaceMode === 'agent' && !readOnlySession && !historicalTargetUnavailable
     ? terminalExecutionRecovery(view) : null;
   const sessionTarget = view?.snapshot.value.header.target;
@@ -664,9 +670,11 @@ export function AiWorkspaceRoot({
         </div>
 
         <AiComposerSeat
+          inputMode={subagentInputMode}
           statusNotices={(
             <>
               <AiWorkspaceErrorNotices
+                key={subagent ? selectedSessionId : undefined}
                 composerState={activeComposerState}
                 syncError={view?.syncError}
                 syncRecovery={view?.syncRecovery}
@@ -718,8 +726,8 @@ export function AiWorkspaceRoot({
                     <AlertDescription>{t('ai.workspace.announce.waitingQuestion')}</AlertDescription>
                   </Alert>
                 )}
-                <AiNoticeTransition>
-                  {!terminalRecovery && (agentUnavailableReason || onContinueOnReconnectedTerminal) ? (
+                <AiNoticeTransition key={subagent ? selectedSessionId : undefined}>
+                  {!subagent && !terminalRecovery && (agentUnavailableReason || onContinueOnReconnectedTerminal) ? (
                     <Alert id={availabilityHintId} variant={terminalConflict ? 'warning' : 'info'} size="sm" role="status" aria-label={t('agent.availability.title')} className={terminalConflict ? undefined
                       : '[--alert-icon-offset:0px] [&:has(button)>svg]:translate-y-1'}>
                       {terminalConflict ? <TriangleAlertIcon aria-hidden="true" /> : <InfoIcon aria-hidden="true" />}
@@ -767,10 +775,10 @@ export function AiWorkspaceRoot({
             ? contextUsageForModel(view?.contextUsage, contextWindow) : undefined}
           permissionControl={surfaceMode === 'agent' ? permissionControl : undefined}
           executionSurfaceControl={surfaceMode === 'agent' ? executionSurfaceControl : undefined}
-          executionSurfaceNotice={surfaceMode === 'agent' ? executionSurfaceNotice : undefined}
+          executionSurfaceNotice={surfaceMode === 'agent' && !subagent ? executionSurfaceNotice : undefined}
           composerState={activeComposerState}
           inbox={surfaceMode === 'agent' && !readOnlySession ? view?.inbox : undefined}
-          taskSteps={surfaceMode === 'agent' && !readOnlySession ? taskSteps : undefined}
+          taskSteps={surfaceMode === 'agent' && (!readOnlySession || subagent) ? taskSteps : undefined}
           taskPlanActive={terminalRecovery ? false : view?.taskPlanActive}
           queueMutation={surfaceMode === 'agent' && !readOnlySession ? queueMutation : undefined}
           queueMutable={Boolean(view && !terminalRecovery && !readOnlySession && !view.summary.archived && (!view.snapshot.value.ended || view.status === 'failed'))}
@@ -790,7 +798,8 @@ export function AiWorkspaceRoot({
           approvalArguments={approvalArguments}
           approvalArgumentsLoading={approvalArgumentsLoading}
           approvalArgumentsError={approvalArgumentsError}
-          unavailableReason={terminalRecovery ? t('ai.workspace.terminalRecovery.title') : agentUnavailableReason}
+          unavailableReason={terminalRecovery ? t('ai.workspace.terminalRecovery.title')
+            : subagent && terminalConflict ? null : agentUnavailableReason}
           availabilityHintId={availabilityHintId}
           onDraftChange={onDraftChange}
           onSubmit={onSubmit ? (content) => {

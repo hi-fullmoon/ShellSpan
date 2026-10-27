@@ -4,6 +4,8 @@ import { contextUsageForModel } from '@/lib/ai/session-settings';
 import type { AiContextUsage } from '@/lib/ai/session-adapter';
 import type { AgentSessionEvent } from '@/types/agent-session';
 import capture from '@/test/fixtures/agent-skills-runtime.json';
+import accountingCapture from '@/test/fixtures/context-usage-runtime.json';
+import { projectContextUsage } from '@/lib/ai/context-usage';
 import catalog from '../../../../protocol/llm/catalog.json';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
@@ -26,4 +28,15 @@ export async function show(locale: Locale, capacity: number) {
   root.render(<main className="ai-panel-shell flex h-screen items-end justify-end p-4">
     <AiContextMeter usage={contextUsageForModel(usage, capacity)} />
   </main>);
+}
+
+export async function showAccounting(locale: Locale, stream: keyof typeof accountingCapture, seq: number) {
+  useAppStore.setState({ locale });
+  await initI18n(locale);
+  const events = accountingCapture[stream] as readonly AgentSessionEvent[];
+  const projected = projectContextUsage(events.filter(event => event.seq <= seq));
+  root.render(<main className="ai-panel-shell flex h-screen items-end justify-end p-4">
+    <AiContextMeter usage={projected} />
+  </main>);
+  return projected;
 }

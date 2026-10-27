@@ -147,10 +147,12 @@ export interface AiSessionSummaryPage {
   readonly nextCursor?: string;
 }
 
-export interface AiContextUsage {
-  readonly usedTokens: number;
+export type AiContextUsage = Readonly<{
   readonly contextWindow: number;
-  readonly source: 'reported' | 'estimated';
+  /** Current prepared request estimate, separate from the last confirmed input. */
+  readonly estimatedTokens?: number;
+  /** A new compacted surface has no provider-confirmed usage yet. */
+  readonly afterCompaction?: boolean;
   /** The selected model's capacity differs from the last recorded request. */
   readonly capacitySource?: 'selectedModel';
   readonly breakdown?: Readonly<{
@@ -158,7 +160,8 @@ export interface AiContextUsage {
     readonly toolsTokens: number;
     readonly messageTokens: number;
   }>;
-}
+}> & (Readonly<{ source: 'reported' | 'estimated'; usedTokens: number }>
+  | Readonly<{ source: 'pending'; usedTokens: null }>);
 
 export type AiCreateSessionInput = Readonly<{
   kind: 'agent';

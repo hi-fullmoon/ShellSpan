@@ -4,18 +4,21 @@ import { AiControlTooltip } from '../ai-control-tooltip';
 import { AiCompletionPopover } from './ai-completion-popover';
 import { useFileCompletion } from './use-file-completion';
 import { useSkillCompletion } from './use-skill-completion';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   ArrowUpIcon,
   ChevronDownIcon,
   CornerUpLeftIcon,
+  InfoIcon,
   ListPlusIcon,
+  MessageSquarePlusIcon,
   ShieldCheckIcon,
   SquareIcon,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Spinner } from '@/components/ui/spinner';
 import {
   DropdownMenu,
@@ -57,6 +60,7 @@ import { AiComposerAddMenu, type ComposerHistoryProps } from './ai-composer-add-
 import type { AiQueueMutationState } from './use-ai-session-controller';
 
 export interface AiComposerSeatProps extends ComposerHistoryProps {
+  readonly inputMode?: 'default' | 'supplement' | 'hidden';
   readonly mode?: 'ask' | 'agent';
   readonly imageControls?: React.ReactNode;
   readonly onPasteImages?: (files: File[]) => void | Promise<void>;
@@ -117,6 +121,7 @@ export interface AiComposerSeatProps extends ComposerHistoryProps {
 
 /** ShellSpan composer surface backed by the existing workspace state machine. */
 export function AiComposerSeat({
+  inputMode = 'default',
   mode = 'agent',
   sessions, sessionsLoading, sessionsError, currentSessionId, onRefreshSessions, onReadSession,
   imageControls, onPasteImages, hasImages = false, imageBusy = false, imageLocked = false,
@@ -172,11 +177,16 @@ export function AiComposerSeat({
 }: AiComposerSeatProps): React.ReactNode {
   const { t } = useI18n();
   const toast = useToast();
+  const inputRegionId = useId();
+  const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
+  const inputExpanded = inputMode === 'default'
+    || (inputMode === 'supplement' && currentSessionId != null && expandedSessionId === currentSessionId);
+  useEffect(() => { setExpandedSessionId(null); }, [currentSessionId, inputMode]);
   const cardRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const toolbar = cardRef.current?.querySelector<HTMLElement>('.ai-composer-toolbar');
     if (toolbar) return observeComposerToolbar(toolbar);
-  }, []);
+  }, [inputExpanded]);
   const documentInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
   const [localDraft, setLocalDraft] = useState(defaultDraft);
@@ -281,7 +291,7 @@ export function AiComposerSeat({
     return items;
   }, [composerState?.pendingSubmissions, inbox]);
 
-  const attachmentsEnabled = !terminal && !unavailable && !submitting && !imageLocked && !documents.busy;
+  const attachmentsEnabled = inputExpanded && !terminal && !unavailable && !submitting && !imageLocked && !documents.busy;
   const addPaths = async (paths: readonly string[], kind?: 'file' | 'directory'): Promise<void> => {
     if (!attachmentsEnabled || !paths.length || attachmentOwnerRef.current !== attachmentOwner) return;
     try {
@@ -381,6 +391,9 @@ export function AiComposerSeat({
       sessions, sessionsLoading, sessionsError, currentSessionId: currentSessionId ?? composerState?.sessionId, onRefreshSessions },
   });
   const skillCompletion = useSkillCompletion({ text: draft, update: updateDraft, query: mode === 'agent' ? onListSkills : undefined, scopeKey: skillsScopeKey, editor: completion.editor, disabled: Boolean(terminal || waitingApproval || waitingQuestion || unavailable || imageLocked || submitting) });
+  useEffect(() => {
+    if (inputMode === 'supplement' && inputExpanded) completion.editor.current?.focus();
+  }, [completion.editor, inputExpanded, inputMode]);
   const wasStopping = useRef(false);
   useEffect(() => {
     if (!running || stopping || terminal || !onStop) return;
@@ -501,8 +514,23 @@ export function AiComposerSeat({
           </div>
         )}
       </div>
-      {
-        <div ref={completionAnchor} className="ai-composer-input-anchor relative flex min-h-24 min-w-0 shrink flex-col">
+      {inputMode === 'supplement' && (
+        <Button type="button" variant="ghost" size="sm" className="self-start"
+          aria-expanded={inputExpanded} aria-controls={inputRegionId}
+          onClick={() => setExpandedSessionId(inputExpanded ? null : currentSessionId ?? null)}>
+          <MessageSquarePlusIcon data-icon="inline-start" />
+          {t('ai.workspace.subagents.supplementInstructions')}
+          <ChevronDownIcon data-icon="inline-end" className={cn(inputExpanded && 'rotate-180')} />
+        </Button>
+      )}
+      {inputExpanded && inputMode === 'supplement' && unavailableReason && (
+        <Alert id={availabilityHintId} variant="info" size="sm" role="status">
+          <InfoIcon aria-hidden="true" />
+          <AlertDescription>{unavailableReason}</AlertDescription>
+        </Alert>
+      )}
+      {inputExpanded && (
+        <div id={inputRegionId} ref={completionAnchor} className="ai-composer-input-anchor relative flex min-h-24 min-w-0 shrink flex-col">
           <InputGroup ref={cardRef} className={cn(
             'h-auto min-h-0 flex-col items-stretch gap-0 overflow-hidden [&>.ai-composer-editor-wrap]:min-h-0 [&>.ai-composer-editor-wrap]:grid-rows-[minmax(0,1fr)]',
             dragActive && 'ring-2 ring-primary',
@@ -581,7 +609,9 @@ export function AiComposerSeat({
                 if (event.repeat) return;
                 submit('keyboard', event.metaKey || event.ctrlKey);
               }}
-              placeholder={mode === 'ask'
+              placeholder={inputMode === 'supplement'
+                ? t('ai.workspace.subagents.instructionsPlaceholder')
+                : mode === 'ask'
                 ? t('ai.workbench.composerPlaceholder')
                 : t('ai.workspace.composerPlaceholder')}
             />
@@ -740,10 +770,10 @@ export function AiComposerSeat({
             {skillCompletion.panel ?? completion.panel}
           </AiCompletionPopover>
         </div>
-      }
-      <p className="m-0 shrink-0 text-center text-[11px] leading-4 text-muted-foreground" data-slot="ai-composer-disclaimer">
+      )}
+      {inputExpanded && <p className="m-0 shrink-0 text-center text-[11px] leading-4 text-muted-foreground" data-slot="ai-composer-disclaimer">
         {t('ai.workspace.composerDisclaimer')}
-      </p>
+      </p>}
       <span className="sr-only" aria-live="polite">
         {announcement ? t(`ai.workspace.announce.${announcement}` as LocaleKey) : null}
       </span>
