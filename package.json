@@ -21,6 +21,7 @@
     "test:terminal-geometry": "node src/components/terminal/__tests__/terminal-geometry.browser.mjs",
     "test:terminal-clear-screen": "node scripts/verify-ai-session-stream.mjs --terminal-clear-screen --no-model",
     "test:terminal-experience": "node src/components/terminal/__tests__/terminal-experience.browser.mjs",
+    "test:terminal-command-presentation": "node src/components/terminal/__tests__/terminal-command-decorations.browser.mjs",
     "test:agent-visible-terminal": "node scripts/verify-agent-visible-terminal.mjs",
     "test:terminal-broker:linux-container": "node scripts/verify-terminal-broker-linux-container.mjs",
     "test:terminal-visible:linux-container": "node scripts/verify-terminal-broker-linux-container.mjs",

@@ -5,6 +5,7 @@ import { SearchAddon } from '@xterm/addon-search';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { createTerminalResizeHandler, installTerminalScrollbarVisibility, measureTerminalGeometry, TERMINAL_CONTAINER_CLASS } from './terminal-geometry';
 import { installTerminalEdgeBackground } from './terminal-edge-background';
+import { installTerminalCommandDecorations } from './terminal-command-decorations';
 import { terminalInputReadiness } from '../terminal-input-readiness';
 import { getTerminalScrollState } from '@/components/terminal/terminal-scroll-state';
 import {
@@ -462,6 +463,7 @@ class TerminalControllerImpl implements TerminalController {
   private resizeRetryAttempts = 0;
   private rendererInitialized = false;
   private edgeBackground?: IDisposable;
+  private commandDecorations: IDisposable;
   private scrollbarVisibility?: IDisposable;
   private webglAddon?: WebglAddon;
   private webglContextLossDisposable?: IDisposable;
@@ -514,6 +516,7 @@ class TerminalControllerImpl implements TerminalController {
     this.terminal.loadAddon(this.fitAddon);
     this.terminal.loadAddon(this.searchAddon);
     getTerminalScrollState(this.terminal);
+    this.commandDecorations = installTerminalCommandDecorations(this.terminal, sessionId);
 
     this.container = document.createElement('div');
     this.container.className = TERMINAL_CONTAINER_CLASS;
@@ -1367,7 +1370,9 @@ class TerminalControllerImpl implements TerminalController {
     this.userInputBlockedListeners.clear();
     this.agentInputBlockedFeedbackRef = false;
     this.outputGeneration += 1;
+    this.commandDecorations.dispose();
     this.sessionId = sessionId;
+    this.commandDecorations = installTerminalCommandDecorations(this.terminal, sessionId);
     // Reconnection may attach a different transport; never retain ConPTY
     // behavior when the replacement is SSH or has no trusted metadata.
     this.terminal.options.windowsPty = resolveWindowsPty(ptyInfo);
@@ -1454,6 +1459,7 @@ class TerminalControllerImpl implements TerminalController {
     this.linkProviderDisposable?.dispose();
     this.disposeWebglRenderer();
     this.edgeBackground?.dispose();
+    this.commandDecorations.dispose();
     this.scrollbarVisibility?.dispose();
     this.terminal.dispose();
     clearTerminalOutput(this.sessionId);

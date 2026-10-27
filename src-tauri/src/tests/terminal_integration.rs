@@ -4218,10 +4218,12 @@ trap - DEBUG
                 .unwrap();
             writer.flush().unwrap();
             receive_prompts(&mut bytes, 144);
+            terminal = vt100::Parser::new(300, 120, 0);
+            terminal.process(&bytes);
             assert!(
-                regex::Regex::new(r"(?:^|\r\n)INT-status:\d+\r\n")
+                regex::Regex::new(r"(?m)^INT-status:\d+$")
                     .unwrap()
-                    .is_match(&String::from_utf8_lossy(&bytes)),
+                    .is_match(&terminal.screen().contents()),
                 "default SIGINT did not cancel the input: {:?}",
                 String::from_utf8_lossy(&bytes)
             );

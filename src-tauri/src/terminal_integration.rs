@@ -941,6 +941,11 @@ __shellspan_emit() {{
     __shellspan_integration_active=0
     return 0
   }}
+  # Display-only boundary, ordered with PTY text. Lifecycle stays on the FIFO.
+  case "$1" in
+    P) builtin printf '\033]133;A\007' ;;
+    S) builtin printf '\033]133;C\007' ;;
+  esac
 }}
 __shellspan_prompt_cycle() {{
   local __shellspan_status=$?
@@ -1311,6 +1316,10 @@ __shellspan_emit() {{
     __shellspan_integration_active=0
     return 0
   }}
+  case "$1" in
+    P) builtin printf '\033]133;A\007' ;;
+    S) builtin printf '\033]133;C\007' ;;
+  esac
 }}
 __shellspan_precmd() {{
   local __shellspan_status=$?
@@ -1680,6 +1689,8 @@ fn powershell_bootstrap(pipe_name: &str, shell: TerminalShellKind) -> String {
       $script:Pipe.WriteByte(0)
     }}
     $script:Pipe.Flush()
+    if ($Fields[0] -ceq 'S') {{ [Console]::Write("$([char]27)]133;C$([char]7)") }}
+    if ($Fields[0] -ceq 'P') {{ [Console]::Write("$([char]27)]133;A$([char]7)") }}
   }}
   $script:OriginalPrompt = (Get-Command prompt -CommandType Function).ScriptBlock
   $script:NativePromptRedraw = $false
@@ -2071,6 +2082,11 @@ fn parse_shell(value: &str) -> Result<TerminalShellKind, String> {
 #[cfg(test)]
 mod tests {
     include!("tests/terminal_integration.rs");
+
+    #[cfg(unix)]
+    mod command_presentation {
+        include!("tests/terminal_command_presentation.rs");
+    }
 
     #[cfg(unix)]
     mod late_native_frame {
