@@ -30,7 +30,7 @@ const makeProfile = (overrides?: Partial<ConnectionProfile>): ConnectionProfile 
 
 describe('ConnectionList', () => {
   beforeEach(() => {
-    localStorage.clear();
+    saveConnectionSort('default');
     useRecentProfilesStore.setState({ recentIds: [], initialized: true });
   });
 

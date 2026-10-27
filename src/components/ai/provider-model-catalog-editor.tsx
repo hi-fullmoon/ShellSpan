@@ -60,6 +60,7 @@ export type ModelCatalogFailure =
   | { kind: 'empty' }
   | { kind: 'missingId'; index: number }
   | { kind: 'duplicateId'; index: number }
+  | { kind: 'invalidBudget'; index: number }
   | { kind: 'invalidDefinition'; index: number };
 
 export function validateProviderModels(models: readonly ProviderModelDraft[]): ModelCatalogFailure | undefined {
@@ -93,6 +94,10 @@ export function validateProviderModels(models: readonly ProviderModelDraft[]): M
       || (definition !== undefined
         && (definition.imageInput === 'supported') !== Boolean(definition.vision))
     ) return { kind: 'invalidDefinition', index };
+    if (contextWindow !== undefined && maxOutputTokens !== undefined
+      && contextWindow - maxOutputTokens - Math.max(Math.floor(contextWindow / 20), 1_024) < 2) {
+      return { kind: 'invalidBudget', index };
+    }
   }
   return undefined;
 }
@@ -121,6 +126,7 @@ function failureMessage(
   const number = failure.index + 1;
   if (failure.kind === 'missingId') return t('settings.ai.modelIdRequired', { number });
   if (failure.kind === 'duplicateId') return t('settings.ai.modelIdDuplicate', { number });
+  if (failure.kind === 'invalidBudget') return t('ai.error.modelInputBudgetInvalid');
   return t('settings.ai.modelDefinitionInvalid', { number });
 }
 
@@ -287,7 +293,7 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
           const open = expanded.has(index);
           const idInvalid = failure?.kind !== 'empty' && failure?.index === index
             && (failure.kind === 'missingId' || failure.kind === 'duplicateId');
-          const definitionInvalid = failure?.kind === 'invalidDefinition' && failure.index === index;
+          const definitionInvalid = (failure?.kind === 'invalidDefinition' || failure?.kind === 'invalidBudget') && failure.index === index;
           return (
             <Collapsible
               key={index}

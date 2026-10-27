@@ -19,8 +19,10 @@ describe('persisted task token budget recovery', () => {
   it('only claims a saved summary when the failed turn contains its artifact', () => {
     const view = taskTokenBudgetView();
     expect(hasTokenBudgetCheckpoint(view)).toBe(true);
-    expect(hasTokenBudgetCheckpoint({ ...view, nodes: view.nodes.filter((node) => node.kind !== 'artifact') })).toBe(false);
-    expect(hasTokenBudgetCheckpoint({ ...view, nodes: view.nodes.map((node) => node.kind === 'artifact'
+    expect(hasTokenBudgetCheckpoint({ ...view, nodes: view.nodes.filter((node) => node.kind !== 'runtimeArtifacts') })).toBe(false);
+    expect(hasTokenBudgetCheckpoint({ ...view, nodes: view.nodes.map((node) => node.kind === 'runtimeArtifacts'
+      ? { ...node, artifacts: node.artifacts.map(artifact => ({ ...artifact, turnId: 'earlier-turn' })) }
+      : node.kind === 'artifact'
       ? { ...node, turnId: 'earlier-turn' } : node) })).toBe(false);
   });
 });

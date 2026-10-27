@@ -18,6 +18,7 @@ export function httpProbeTimeoutKind(message: string): 'http' | 'ssh' | null {
 
 /** Translate known configuration/image errors without changing stored diagnostics. */
 export function aiErrorMessage(message: string, t: (key: LocaleKey, values?: Record<string, string | number>) => string): string {
+  if (message.includes('INVALID_MODEL_TOKEN_BUDGET:')) return t('ai.error.modelInputBudgetInvalid');
   if (httpProbeTimeoutKind(message)) return t('ai.workspace.tool.httpProbe.timeout');
   const diagnostic = message.trim().replace(/^Error:\s*/, '');
   const tokenBudget = /^subagentTokenBudgetExceeded: maximum (\d+) tokens$/.exec(diagnostic);

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { conversationArtifacts } from '@/lib/ai/conversation-artifact';
 
 import {
   aggregateDurableSessionStats,
@@ -132,7 +133,7 @@ describe('AI Phase 3 chat projection', () => {
       sessionEvent(1, { type: 'turn/start', turnId: 'preparation' }),
       sessionEvent(2, { type: 'turn/end', turnId: 'preparation', data: { reason: 'runtimeFailure: summary unavailable' } }),
     ]);
-    expect(admitted.some(node => node.kind === 'artifact' && node.artifactId === 'attempt')).toBe(true);
+    expect(conversationArtifacts(admitted).some(node => node.artifactId === 'attempt')).toBe(true);
     expect(turnProcess(admitted, 'preparation').status).toBe('failed');
     const continued = project([
       attempt, abandoned,

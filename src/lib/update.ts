@@ -1,5 +1,6 @@
 import type { DownloadEvent, Update } from '@tauri-apps/plugin-updater';
 import type { UpdateStatus, UpdateVersionInfo } from '@/types';
+import { readLocalState, saveLocalState } from '@/lib/preferences/local-state';
 
 export interface UpdateState {
   phase: UpdateStatus;
@@ -129,7 +130,7 @@ const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
 export function shouldRunStartupUpdateCheck(now: number): boolean {
   if (import.meta.env.DEV) return false;
 
-  const raw = window.localStorage.getItem(STARTUP_UPDATE_CHECK_KEY);
+  const raw = readLocalState(STARTUP_UPDATE_CHECK_KEY);
   if (raw == null) {
     return true;
   }
@@ -143,5 +144,5 @@ export function shouldRunStartupUpdateCheck(now: number): boolean {
 }
 
 export function markStartupUpdateCheck(now: number): void {
-  window.localStorage.setItem(STARTUP_UPDATE_CHECK_KEY, String(now));
+  saveLocalState(STARTUP_UPDATE_CHECK_KEY, String(now));
 }

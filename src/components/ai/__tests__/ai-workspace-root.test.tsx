@@ -304,6 +304,10 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(error).not.toBeNull();
     expect(within(error).getByText(title)).toBeVisible();
     expect(error).not.toHaveTextContent('taskTokenBudgetExceeded:');
+    expect(screen.queryByText(artifact)).toBeNull();
+    const runtimeDetails = screen.getByRole('button', { name: locale === 'zh-CN' ? '运行详情' : 'Runtime details' });
+    expect(runtimeDetails).toHaveAttribute('aria-expanded', 'false');
+    await userEvent.setup().click(runtimeDetails);
     expect(screen.getByText(artifact)).toBeVisible();
     expect(container.querySelector('[data-token-budget-notice]')).not.toBeNull();
     const notice = container.querySelector('[data-token-budget-notice]') as HTMLElement;

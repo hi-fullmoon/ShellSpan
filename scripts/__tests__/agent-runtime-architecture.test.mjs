@@ -1,4 +1,5 @@
 import { readFile, readdir } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { describe, expect, it } from 'vitest';
@@ -25,6 +26,17 @@ async function combinedSource(root) {
 }
 
 describe('single Agent Runtime architecture', () => {
+  it('requires an explicit storage directory for an isolated native validation app', () => {
+    const environment = { ...process.env };
+    delete environment.SHELLSPAN_DATA_DIR;
+    const result = spawnSync(process.execPath, [
+      path.join(repositoryRoot, 'scripts/verify-ai-session-stream.mjs'),
+      '--data-scope', 'com.shellspan.validation.storage-check', '--no-model',
+    ], { cwd: repositoryRoot, env: environment, encoding: 'utf8', timeout: 10_000 });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('the app identifier does not isolate stored data');
+  });
+
   it('contains no dead-code suppression or legacy runtime control plane', async () => {
     const runtime = await combinedSource(runtimeRoot);
     expect(runtime).not.toMatch(/allow\s*\(\s*dead_code\s*\)/);

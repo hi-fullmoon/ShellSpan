@@ -4,7 +4,6 @@ use crate::ai::AiProviderConfig;
 
 use super::{ModelMessage, ModelRequest};
 
-const FIXED_SAFETY_TOKENS: u64 = 1_024;
 const COMPACTION_THRESHOLD_PERCENT: u64 = 85;
 const COMPACTION_TARGET_PERCENT: u64 = 60;
 
@@ -88,11 +87,8 @@ pub(crate) fn estimate_model_surface_budget(
         .vision
         .as_ref()
         .map_or(0, |v| v.reserved_tokens_per_image);
-    let safety_reserve_tokens = (context_window / 20).max(FIXED_SAFETY_TOKENS);
-    let usable_input_tokens = context_window
-        .saturating_sub(output_reserve_tokens)
-        .saturating_sub(safety_reserve_tokens)
-        .max(1);
+    let (safety_reserve_tokens, usable_input_tokens) =
+        crate::llm::catalog::model_input_token_budget(context_window, output_reserve_tokens)?;
     let compaction_threshold_tokens =
         usable_input_tokens.saturating_mul(COMPACTION_THRESHOLD_PERCENT) / 100;
     let compaction_target_tokens =
@@ -108,6 +104,9 @@ pub(crate) fn estimate_model_surface_budget(
         .sum::<u64>();
     let system_tokens = estimate_tokens(system_bytes);
     let tool_schema_tokens = estimate_tokens(tool_schema_bytes);
+    if system_tokens.saturating_add(tool_schema_tokens) >= usable_input_tokens {
+        return Err(format!("INVALID_MODEL_TOKEN_BUDGET: input budget {usable_input_tokens} cannot hold fixed system and tool instructions ({} tokens); reduce maximum output tokens or increase the context window", system_tokens.saturating_add(tool_schema_tokens)));
+    }
     let message_tokens = request
         .messages
         .iter()
@@ -304,6 +303,28 @@ mod tests {
             budget.estimated_input_tokens,
             budget.system_tokens + budget.tool_schema_tokens + budget.message_tokens
         );
+    }
+
+    #[test]
+    fn fixed_instructions_that_cannot_fit_fail_before_compaction() {
+        let source = include_str!("driver.rs");
+        let mut request = ModelRequest {
+            request_id: "fixed-input-capacity".into(),
+            surface_generation: 0,
+            system_prompt: source.into(),
+            messages: vec![],
+            tools: vec![],
+        };
+        assert!(estimate_model_surface_budget(&provider(8192), &request)
+            .unwrap_err()
+            .starts_with("INVALID_MODEL_TOKEN_BUDGET:"));
+        request.system_prompt.clear();
+        request.messages.push(ModelMessage::User {
+            content: source.into(),
+        });
+        let budget = estimate_model_surface_budget(&provider(8192), &request).unwrap();
+        assert!(budget.requires_compaction());
+        assert!(!budget.fits_hard_limit());
     }
 
     #[test]

@@ -1073,7 +1073,7 @@ impl NativeToolEngine {
             if paths.iter().any(|path| {
                 let path = PathBuf::from(path);
                 // A new file does not canonicalize yet. Resolve its nearest
-                // existing ancestor so aliases of app_data_dir remain protected.
+                // existing ancestor so aliases of ShellSpan's data root remain protected.
                 let path = path
                     .ancestors()
                     .find_map(|ancestor| {

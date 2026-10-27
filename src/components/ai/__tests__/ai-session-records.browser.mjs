@@ -12,7 +12,7 @@ import tailwindcss from '@tailwindcss/vite';
 const root = path.resolve(import.meta.dirname, '../../../..');
 const deleteAllOnly = process.argv.includes('--delete-all-only');
 const archives = process.env.SHELLSPAN_SESSION_DIRECTORY ?? process.env.SHELLSPAN_SESSION_ARCHIVES
-  ?? path.join(os.homedir(), 'Library/Application Support/com.shellspan/agent-runtime/archives-v5');
+  ?? path.join(process.env.SHELLSPAN_DATA_DIR ?? path.join(os.homedir(), '.shellspan'), 'agent-runtime', 'archives-v5');
 const records = [];
 for (const name of await readdir(archives)) {
   if (!name.endsWith('.jsonl')) continue;

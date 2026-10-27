@@ -207,6 +207,39 @@ fn custom_capacity_is_not_inferred_or_clamped_to_obsolete_hint_bounds() {
 }
 
 #[test]
+fn minimax_capacity_override_must_leave_a_usable_input_budget() {
+    let mut config = provider("MiniMax-M3");
+    config.profile = "minimax".into();
+    let mut definition = resolve(&config).unwrap().definition;
+    definition.context_window = 128_000;
+    let request = super::types::ModelRequest {
+        request_id: "minimax-input-budget".into(),
+        surface_generation: 0,
+        system_prompt: include_str!("../../../AGENTS.md").into(),
+        messages: vec![],
+        tools: vec![],
+    };
+    for output in [128_000, 121_600, 121_599] {
+        definition.max_output_tokens = output;
+        config.model_definition = Some(definition.clone());
+        // Capability resolution stays available so saved settings remain editable.
+        assert_eq!(resolve(&config).unwrap().max_output_tokens, output);
+        assert!(
+            crate::agent_runtime::estimate_model_surface_budget(&config, &request)
+                .unwrap_err()
+                .starts_with("INVALID_MODEL_TOKEN_BUDGET:")
+        );
+    }
+    definition.max_output_tokens = 8_192;
+    config.model_definition = Some(definition);
+    let model = resolve(&config).unwrap();
+    assert_eq!(
+        model_input_token_budget(model.context_window, model.max_output_tokens).unwrap(),
+        (6_400, 113_408)
+    );
+}
+
+#[test]
 fn unknown_model_template_is_conservative_and_immediately_resolvable() {
     let mut p = provider("deepseek-preview");
     let definition = declaration_template(&p).unwrap();

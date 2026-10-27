@@ -20,6 +20,7 @@ import { useTerminalStore } from './stores/terminalStore';
 import { useAiSettingsStore } from './stores/aiSettingsStore';
 import { useSftpStore } from './stores/sftpStore';
 import { hydrateTransferResumeCandidates } from './lib/sftp/transfer-resume';
+import { hydrateLocalState } from './lib/preferences/local-state';
 
 initGlobalErrorLogging();
 
@@ -63,6 +64,7 @@ async function bootstrap(): Promise<void> {
     return;
   }
   await Promise.all([
+    hydrateLocalState().catch(() => { /* Optional layout preferences do not block startup. */ }),
     useAppStore.getState().hydrateFromDb(),
     useProfileStore.getState().hydrateFromDb(),
     useRecentProfilesStore.getState().hydrateFromDb(),

@@ -66,19 +66,6 @@ struct OpenTempFileGuard {
     preserve: bool,
 }
 
-fn fallback_open_root() -> PathBuf {
-    #[cfg(unix)]
-    {
-        // SAFETY: geteuid has no preconditions and does not dereference memory.
-        let effective_user_id = unsafe { libc::geteuid() };
-        std::env::temp_dir().join(format!("shellspan-open-{effective_user_id}"))
-    }
-    #[cfg(not(unix))]
-    {
-        std::env::temp_dir().join("shellspan-open")
-    }
-}
-
 fn prepare_private_open_root(path: &Path) -> Result<(), RemoteFsError> {
     fs::create_dir_all(path).map_err(|error| RemoteFsError::Other {
         message: format!("failed to create temp directory: {error}"),
@@ -2599,7 +2586,7 @@ pub(crate) fn open_remote_file_blocking(
     request: OpenRemoteFileRequest,
     _pool: Option<&SftpPool>,
     known_hosts: Option<&Path>,
-    open_root: Option<&Path>,
+    open_root: &Path,
     cancel_flag: Arc<AtomicBool>,
 ) -> Result<(), RemoteFsError> {
     open_remote_file_inner(request, known_hosts, open_root, &cancel_flag)
@@ -2608,7 +2595,7 @@ pub(crate) fn open_remote_file_blocking(
 fn open_remote_file_inner(
     request: OpenRemoteFileRequest,
     known_hosts: Option<&Path>,
-    open_root: Option<&Path>,
+    open_root: &Path,
     cancel_flag: &AtomicBool,
 ) -> Result<(), RemoteFsError> {
     ensure_remote_file_read_not_cancelled(cancel_flag)?;
@@ -2674,13 +2661,9 @@ fn open_remote_file_inner(
 
         // Local copies of remotely-opened files live under ShellSpan's
         // build-specific data directory so they survive reboots (retention
-        // cleanup bounds their lifetime); fall back to the system temp dir if
-        // the home dir is unavailable.
-        let open_root = open_root
-            .map(Path::to_path_buf)
-            .unwrap_or_else(fallback_open_root);
-        prepare_private_open_root(&open_root)?;
-        cleanup_stale_open_temp_files(&open_root);
+        // cleanup bounds their lifetime).
+        prepare_private_open_root(open_root)?;
+        cleanup_stale_open_temp_files(open_root);
 
         let local_path = open_root.join(open_temp_file_name(&file_name));
         ensure_remote_file_read_not_cancelled(cancel_flag)?;

@@ -135,11 +135,11 @@ pub(crate) async fn agent_runtime_image_preview(
 }
 
 pub(crate) fn configure_runtime(app: &AppHandle, runtime: &AgentRuntime) -> Result<(), String> {
-    let root = app
+    let home = app
         .path()
-        .app_data_dir()
-        .map_err(|error| format!("failed to resolve Agent runtime root: {error}"))?;
-    runtime.configure(root)?;
+        .home_dir()
+        .map_err(|error| format!("failed to resolve ShellSpan home directory: {error}"))?;
+    runtime.configure(crate::shellspan_data_dir(&home))?;
     runtime.attach_petdex(app.state::<crate::petdex::PetdexAdapter>().inner().clone())?;
     runtime.configure_llm(
         app.state::<crate::llm::runtime::LlmRuntime>()

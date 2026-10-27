@@ -3,6 +3,7 @@ import { createCommittedEventProjection } from './committed-event-projection';
 import { createQuestionProjector } from './question-projection';
 import { conversationTurnTimeline } from './conversation-turn-timeline';
 import { markRecoveredToolReads } from './conversation-tool';
+import { groupConversationArtifacts } from './conversation-artifact';
 import { questionKey } from '@/types/agent-question';
 import {
   agentEventTimestamp,
@@ -1296,7 +1297,11 @@ function createChatProjection() {
       } else projectedUnscoped.set(question.key, question);
     }
 
-    const nodes: AiConversationNode[] = [...projectedUnscoped.values()].sort(topLevelSort);
+    const unscoped = [...projectedUnscoped.values()].sort(topLevelSort);
+    const nodes: AiConversationNode[] = [
+      ...unscoped.filter(node => node.kind !== 'artifact'),
+      ...groupConversationArtifacts(unscoped.filter((node): node is AiArtifactNode => node.kind === 'artifact')),
+    ].sort(topLevelSort);
     const orderedTurns = [...turns.values()].sort((left, right) => (
       left.firstSeq - right.firstSeq || left.id.localeCompare(right.id)
     ));
@@ -1309,7 +1314,7 @@ function createChatProjection() {
       const cached = turnSnapshots.get(turn.id);
       if (cached && !dirtyTurns.has(turn.id) && cached.previousStats === sessionStats) {
         nodes.push(...conversationTurnTimeline(users, cached.process, cached.closing));
-        nodes.push(...(scopedArtifacts.get(turn.id) ?? []).sort(topLevelSort));
+        nodes.push(...groupConversationArtifacts((scopedArtifacts.get(turn.id) ?? []).sort(topLevelSort)));
         if (cached.tail) {
           nodes.push(cached.tail);
           sessionStats = cached.tail.sessionStats;
@@ -1355,7 +1360,7 @@ function createChatProjection() {
         && Boolean(turn.endReason && turn.endTimestamp);
       const closingNode = closing && (hasTurnTail ? { ...closing, hasTurnTail: true } : closing);
       nodes.push(...conversationTurnTimeline(users, process, closingNode));
-      nodes.push(...(scopedArtifacts.get(turn.id) ?? []).sort(topLevelSort));
+      nodes.push(...groupConversationArtifacts((scopedArtifacts.get(turn.id) ?? []).sort(topLevelSort)));
 
       let tail: AiTurnTailNode | undefined;
       if (turn.startSeq !== undefined && turn.endSeq !== undefined && turn.endReason && turn.endTimestamp) {

@@ -48,7 +48,6 @@ export function useImageDraft(owner: string, text: string, restoreText: (text: s
     const generation = ++epoch.current;
     setSubmittedOperationId(undefined);
     current.current = null; setDraft(null); setPendingFiles([]); setError(null); setBusy(false); running.current = false; ready.current = false;
-    if (typeof indexedDB === 'undefined') { ready.current = true; return; }
     void readImageDraft(owner).then(async value => {
       // A restored queue already exposes this operation and its retry action.
       // Do not also put its old text/images over the user's newer editor draft.

@@ -1,4 +1,5 @@
 import type { ConnectionProfile } from '@/types';
+import { readLocalState, saveLocalState } from '@/lib/preferences/local-state';
 
 export const CONNECTION_SORT_MODES = ['default', 'name', 'recent', 'created'] as const;
 export type ConnectionSortMode = typeof CONNECTION_SORT_MODES[number];
@@ -10,7 +11,7 @@ export function isConnectionSortMode(value: unknown): value is ConnectionSortMod
 
 export function readConnectionSort(): ConnectionSortMode {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = readLocalState(STORAGE_KEY);
     return isConnectionSortMode(saved) ? saved : 'default';
   } catch {
     return 'default';
@@ -19,7 +20,7 @@ export function readConnectionSort(): ConnectionSortMode {
 
 export function saveConnectionSort(mode: ConnectionSortMode): void {
   try {
-    localStorage.setItem(STORAGE_KEY, mode);
+    saveLocalState(STORAGE_KEY, mode);
   } catch {
     // Sorting remains usable when local preference storage is unavailable.
   }

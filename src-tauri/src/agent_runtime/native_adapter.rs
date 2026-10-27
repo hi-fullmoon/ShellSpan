@@ -57,12 +57,12 @@ impl NativeToolAdapter {
     }
 
     fn configure(&self, runtime: &NativeToolEngine) -> Result<(), String> {
-        let root = self
+        let home = self
             .app
             .path()
-            .app_data_dir()
-            .map_err(|error| format!("failed to resolve Agent native runtime root: {error}"))?;
-        runtime.configure_checkpoint_root(root)?;
+            .home_dir()
+            .map_err(|error| format!("failed to resolve ShellSpan home directory: {error}"))?;
+        runtime.configure_checkpoint_root(crate::shellspan_data_dir(&home))?;
         runtime.reconcile_remote_visible_rollout()?;
         Ok(())
     }

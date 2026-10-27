@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiPanel } from '@/components/ai/ai-panel';
+import { saveLocalState } from '@/lib/preferences/local-state';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useAiPanelStore } from '@/stores/aiPanelStore';
 import { useAppStore } from '@/stores/appStore';
@@ -44,7 +45,8 @@ function flushAnimationFrames(): void {
 
 beforeEach(() => {
   cleanup();
-  window.localStorage.clear();
+  saveLocalState('shellspan.aiPanelWidth.workbench', '400');
+  saveLocalState('shellspan.aiPanelWidth.terminal', '400');
   setViewport(1_200);
   nextAnimationFrameId = 1;
   animationFrames = new Map();
@@ -102,7 +104,7 @@ describe('AI panel production path and immutable shell', () => {
   });
 
   it.each([320, 400, 560, 720])('restores a persisted %d px desktop width', (width) => {
-    window.localStorage.setItem('shellspan.aiPanelWidth', String(width));
+    saveLocalState('shellspan.aiPanelWidth.workbench', String(width));
     render(<div><AiPanel /></div>);
 
     const panel = screen.getByRole('complementary', { name: 'ai.workbench.title' });
@@ -111,7 +113,7 @@ describe('AI panel production path and immutable shell', () => {
   });
 
   it('resizes through pointer capture and requestAnimationFrame', () => {
-    window.localStorage.setItem('shellspan.aiPanelWidth', '400');
+    saveLocalState('shellspan.aiPanelWidth.workbench', '400');
     render(<div><AiPanel /></div>);
     const handle = screen.getByRole('separator', { name: 'ai.resize' });
     expect(handle).toHaveClass('ai-panel-resize-handle');
@@ -132,7 +134,7 @@ describe('AI panel production path and immutable shell', () => {
   });
 
   it('resizes by the 24 px keyboard contract', () => {
-    window.localStorage.setItem('shellspan.aiPanelWidth', '400');
+    saveLocalState('shellspan.aiPanelWidth.workbench', '400');
     render(<div><AiPanel /></div>);
     const handle = screen.getByRole('separator', { name: 'ai.resize' });
     fireEvent.keyDown(handle, { key: 'ArrowLeft' });

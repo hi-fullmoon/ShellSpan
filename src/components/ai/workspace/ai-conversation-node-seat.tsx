@@ -26,6 +26,7 @@ import type { LocaleKey } from '@/locales';
 import { cn } from '@/lib/utils';
 import { createStreamingMarkdownSplitter } from '@/lib/streaming-markdown';
 import { taskBudgetArtifactTitleKey } from '@/lib/ai/task-token-budget';
+import { isRuntimeArtifact } from '@/lib/ai/conversation-artifact';
 import { requestErrorMessageKey } from '@/lib/ai/request-error';
 import { AiToolRow } from './ai-tool-presentation';
 import { AiTurnFooter } from './ai-turn-footer';
@@ -383,14 +384,16 @@ function ArtifactNodeView({
   const { t } = useI18n();
   const titleKey = taskBudgetArtifactTitleKey(node.artifactKind);
   const title = titleKey ? t(titleKey) : node.title;
+  const internal = isRuntimeArtifact(node);
   return (
-    <div className="ai-produced-files grid min-h-6 min-w-0 grid-cols-[max-content_minmax(0,1fr)] items-center gap-2">
-      <span className="ai-produced-files-label inline-flex items-center gap-1 whitespace-nowrap">
+    <div className={cn('ai-produced-files min-h-6 min-w-0 items-center', internal
+      ? 'flex' : 'grid grid-cols-[max-content_minmax(0,1fr)] gap-2')}>
+      {!internal && <span className="ai-produced-files-label inline-flex items-center gap-1 whitespace-nowrap">
         <span className="inline-flex size-4 shrink-0 items-center justify-center">
           <FileOutputIcon aria-hidden="true" />
         </span>
         {t('ai.workspace.artifact.produced')}
-      </span>
+      </span>}
       <button
         type="button"
         className="ai-produced-file m-0 flex min-w-0 max-w-full cursor-pointer items-center justify-self-start gap-2 overflow-hidden px-2 py-0"
@@ -403,6 +406,29 @@ function ArtifactNodeView({
       </button>
     </div>
   );
+}
+
+function RuntimeArtifactsNodeView({ node, onOpenArtifact }: AiConversationNodeRendererProps<'runtimeArtifacts'>) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  return <Collapsible open={open} onOpenChange={setOpen} className="min-w-0" data-runtime-artifacts="">
+    <CollapsibleTrigger render={<Button type="button" variant="plain" size="sm"
+      className={AI_DISCLOSURE_ROW_CLASS} />} aria-label={t('ai.workspace.artifact.runtimeDetails')}>
+      <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
+        <FileInputIcon /><ChevronDownIcon className="ai-disclosure-chevron" />
+      </span>
+      <span className={AI_DISCLOSURE_TITLE_CLASS}>{t('ai.workspace.artifact.runtimeDetails')}</span>
+      <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
+      <span className={AI_DISCLOSURE_SUMMARY_CLASS}>{t('ai.workspace.artifact.runtimeCount', { count: node.artifacts.length })}</span>
+    </CollapsibleTrigger>
+    <CollapsibleContent>
+      <div className="mt-1 flex max-h-65 min-w-0 flex-col gap-1 overflow-auto" data-runtime-artifact-list="">
+        {node.artifacts.map(artifact => <div key={artifact.key} data-ai-node-key={artifact.key} className="min-w-0">
+          <ArtifactNodeView node={artifact} onOpenArtifact={onOpenArtifact} />
+        </div>)}
+      </div>
+    </CollapsibleContent>
+  </Collapsible>;
 }
 
 function ApprovalMarkerNodeView({ node }: { readonly node: AiConversationNodeOf<'approvalMarker'> }) {
@@ -644,6 +670,7 @@ export const aiConversationNodeRenderers = {
   tool: ToolNodeView,
   question: ({ node }) => <AiQuestionHistory question={node.question} />,
   artifact: ArtifactNodeView,
+  runtimeArtifacts: RuntimeArtifactsNodeView,
   approvalMarker: ApprovalMarkerNodeView,
   retry: RetryNodeView,
   error: ErrorNodeView,
@@ -685,6 +712,8 @@ function renderNode(
       return React.createElement(renderers.question, { node });
     case 'artifact':
       return React.createElement(renderers.artifact, { node, onOpenArtifact });
+    case 'runtimeArtifacts':
+      return React.createElement(renderers.runtimeArtifacts, { node, onOpenArtifact });
     case 'approvalMarker':
       return React.createElement(renderers.approvalMarker, { node });
     case 'retry':
@@ -731,6 +760,7 @@ export function aiConversationNodeRevision(node: AiConversationNode): string {
     case 'systemPrompt':
     case 'contextInjection':
     case 'artifact':
+    case 'runtimeArtifacts':
     case 'retry':
       return base;
     default:

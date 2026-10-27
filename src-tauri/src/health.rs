@@ -137,7 +137,8 @@ pub(crate) fn get_system_health(
         cpu_percent: sys.global_cpu_usage() as f64,
     };
 
-    let app_data_dir = app.path().app_data_dir().unwrap_or_default();
+    let home = app.path().home_dir().map_err(|error| error.to_string())?;
+    let app_data_dir = crate::shellspan_data_dir(&home);
     let disk = disk_info(&app_data_dir);
 
     let app_info = AppInfo {

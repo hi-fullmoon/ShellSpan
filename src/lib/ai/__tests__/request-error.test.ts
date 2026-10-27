@@ -3,6 +3,7 @@ import { requestErrorMessageKey } from '@/lib/ai/request-error';
 
 describe('requestErrorMessageKey', () => {
   it.each([
+    ['runtimeFailure: INVALID_MODEL_TOKEN_BUDGET: output consumes input space', 'ai.error.modelInputBudgetInvalid'],
     ['providerFailure: status=404 code=HTTP_404 message={"code":"model_not_found"}', 'ai.error.modelUnavailable'],
     ['runtimeFailure: semantic summary unavailable (inputBudget); preserved current Surface', 'ai.error.summaryUnavailable'],
     ['contextBudgetExceeded: semantic summary unavailable (inputBudget)', 'ai.error.contextBudgetExceeded'],

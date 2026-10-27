@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { saveLocalState } from '@/lib/preferences/local-state';
 import {
   checkForUpdate,
   markStartupUpdateCheck,
@@ -68,7 +69,7 @@ describe('startup update check throttle', () => {
   afterEach(() => vi.unstubAllEnvs());
 
   it('runs when no previous check is recorded', () => {
-    window.localStorage.removeItem('shellspan.update.lastStartupCheckAt');
+    saveLocalState('shellspan.update.lastStartupCheckAt', 'invalid');
     expect(shouldRunStartupUpdateCheck(Date.now())).toBe(true);
   });
 
@@ -90,7 +91,7 @@ describe('development updates', () => {
 
   it('skips startup checks even when no previous check is recorded', () => {
     vi.stubEnv('DEV', true);
-    window.localStorage.removeItem('shellspan.update.lastStartupCheckAt');
+    saveLocalState('shellspan.update.lastStartupCheckAt', 'invalid');
     expect(shouldRunStartupUpdateCheck(Date.now())).toBe(false);
   });
 

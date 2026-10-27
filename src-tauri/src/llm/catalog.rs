@@ -271,6 +271,21 @@ pub(crate) fn validate_profile(provider: &AiProviderConfig) -> Result<(), String
     Ok(())
 }
 
+/// Runtime admission policy, separate from capability resolution so existing
+/// invalid budget settings can still be loaded and corrected in the editor.
+pub(crate) fn model_input_token_budget(
+    context_window: u64,
+    output_tokens: u64,
+) -> Result<(u64, u64), String> {
+    let safety_tokens = (context_window / 20).max(1_024);
+    let input_tokens = context_window
+        .checked_sub(output_tokens)
+        .and_then(|remaining| remaining.checked_sub(safety_tokens))
+        .filter(|remaining| *remaining >= 2)
+        .ok_or_else(|| format!("INVALID_MODEL_TOKEN_BUDGET: context window {context_window}, maximum output {output_tokens}, and safety reserve {safety_tokens} leave no usable input budget; reduce maximum output tokens or increase the context window"))?;
+    Ok((safety_tokens, input_tokens))
+}
+
 pub(crate) fn validate_definition(
     id: &str,
     d: &ModelDefinition,
@@ -285,8 +300,8 @@ pub(crate) fn validate_definition(
     {
         return Err("UNSUPPORTED_OPTION: model display name must be nonempty".into());
     }
-    // IPC token counts must remain exact JavaScript integers; this is an encoding limit,
-    // not a provider capacity heuristic. Small/custom windows are otherwise valid.
+    // IPC token counts must remain exact JavaScript integers; runtime input
+    // admission checks the independent output and safety reservations.
     if d.context_window == 0
         || d.context_window > 9_007_199_254_740_991
         || d.max_output_tokens == 0

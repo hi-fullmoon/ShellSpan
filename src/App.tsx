@@ -34,6 +34,7 @@ import { FocusLayout } from '@/components/focus/focus-layout';
 import { flushTerminalWorkspace } from '@/lib/terminal/terminal-workspace-persistence';
 import { flushSftpWorkspace } from '@/lib/sftp/sftp-workspace-persistence';
 import { flushAiSettingsPreferences } from '@/stores/aiSettingsStore';
+import { flushLocalState } from '@/lib/preferences/local-state';
 import { CommandPalette } from '@/components/command-palette';
 import { isTransferActive, useTransferStore } from '@/stores/transferStore';
 import {
@@ -122,6 +123,7 @@ export const App: React.FC = () => {
     if (exitInFlightRef.current) return;
     exitInFlightRef.current = true;
     void Promise.all([
+      flushLocalState().catch(() => { /* IPC already records the failed preference write. */ }),
       flushAiSettingsPreferences().catch((error) => {
         logger.warn('Failed to flush AI settings before exit', error);
       }),

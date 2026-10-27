@@ -1,12 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { applyTheme, resolveTheme, THEME_CACHE_KEY } from '../theme';
+import { applyTheme, resolveTheme } from '../theme';
 
 afterEach(() => {
   vi.unstubAllGlobals();
   document.documentElement.removeAttribute('data-theme');
   document.documentElement.style.removeProperty('background-color');
   document.documentElement.style.removeProperty('color-scheme');
-  window.localStorage.removeItem(THEME_CACHE_KEY);
 });
 
 describe('theme', () => {
@@ -15,7 +14,7 @@ describe('theme', () => {
     expect(document.documentElement).toHaveAttribute('data-theme', 'dark');
     expect(document.documentElement.style.backgroundColor).toBe('var(--app-bg)');
     expect(document.documentElement.style.colorScheme).toBe('dark');
-    expect(window.localStorage.getItem(THEME_CACHE_KEY)).toBe('dark');
+    expect(window.localStorage.getItem('shellspan.theme')).toBeNull();
   });
 
   it('resolves the system theme from the current media query', () => {

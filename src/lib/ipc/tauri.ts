@@ -1115,6 +1115,23 @@ export async function invokeLoadPreferences(): Promise<[string, string][]> {
   return invokeLogged<[string, string][]>('load_preferences');
 }
 
+export function invokeLoadUiPreferences(): Promise<[string, string][]> {
+  return invokeLogged('load_ui_preferences', undefined, { logLifecycle: false });
+}
+export function invokeSaveUiPreferences(entries: [string, string][]): Promise<void> {
+  return invokeLogged('save_ui_preferences', { entries }, { logLifecycle: false });
+}
+export function invokeReadImageDrafts(input: { keys: readonly string[]; recoveryOwner?: string }): Promise<import('@/lib/ai/image-drafts').ImageDraft[]> {
+  return invokeLogged('read_image_drafts', { input }, { logLifecycle: false });
+}
+export function invokeCommitImageDrafts(input: {
+  checks: readonly { owner: string; revision: number }[];
+  writes: readonly import('@/lib/ai/image-drafts').ImageDraft[];
+  deletes: readonly string[];
+}): Promise<void> {
+  return invokeLogged('commit_image_drafts', { input }, { logLifecycle: false });
+}
+
 export async function invokeSavePreferences(
   entries: [string, string][],
 ): Promise<void> {

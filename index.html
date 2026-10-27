@@ -8,16 +8,7 @@
   <title>ShellSpan</title>
   <script>
     (function () {
-      var mode = 'system';
-      try {
-        var cached = localStorage.getItem('shellspan.theme');
-        if (cached === 'light' || cached === 'dark' || cached === 'system') {
-          mode = cached;
-        }
-      } catch (e) { }
-      var theme = mode === 'system'
-        ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-        : mode;
+      var theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
       document.documentElement.setAttribute('data-theme', theme);
       document.documentElement.style.backgroundColor = theme === 'light' ? '#edf4fb' : '#020617';
       document.documentElement.style.colorScheme = theme;

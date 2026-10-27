@@ -135,6 +135,11 @@ export interface AiApprovalMarkerNode extends AiConversationNodeBase {
   readonly expiresAtUnixMs: number | null;
 }
 
+export interface AiRuntimeArtifactsNode extends AiConversationNodeBase {
+  readonly kind: 'runtimeArtifacts';
+  readonly artifacts: readonly AiArtifactNode[];
+}
+
 export interface AiRetryNode extends AiConversationNodeBase {
   readonly kind: 'retry';
   readonly requestId: string;
@@ -255,6 +260,7 @@ export type AiConversationNode =
   | AiReasoningNode
   | AiToolNode
   | AiArtifactNode
+  | AiRuntimeArtifactsNode
   | AiApprovalMarkerNode
   | AiRetryNode
   | AiErrorNode

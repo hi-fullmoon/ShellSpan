@@ -1,11 +1,12 @@
 import { create } from 'zustand';
 import { useTerminalStore } from './terminalStore';
 import { useAppStore } from './appStore';
+import { onLocalStateHydrated, readLocalState, saveLocalState } from '@/lib/preferences/local-state';
 
 const SPLIT_KEY = 'shellspan.focus.split';
 function savedSplit(): number {
   try {
-    const value = Number(localStorage.getItem(SPLIT_KEY));
+    const value = Number(readLocalState(SPLIT_KEY));
     return Number.isFinite(value) && value >= 0.3 && value <= 0.75 ? value : 0.6;
   } catch { return 0.6; }
 }
@@ -64,9 +65,11 @@ export const useFocusStore = create<FocusState>()((set, get) => ({
     if (!Number.isFinite(value)) return;
     const split = Math.max(0.3, Math.min(0.75, value));
     set({ split });
-    try { localStorage.setItem(SPLIT_KEY, String(split)); } catch { /* Layout remains usable without storage. */ }
+    saveLocalState(SPLIT_KEY, String(split));
   },
 }));
+
+onLocalStateHydrated(() => useFocusStore.setState({ split: savedSplit() }));
 
 // Follow the replacement of the selected connection, including while Focus
 // is hidden or its Agent is busy. This updates the UI target only; the Agent

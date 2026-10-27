@@ -9,6 +9,7 @@ import { useAppStore } from '@/stores/appStore';
 import { aiErrorMessage } from '@/lib/ai/error-message';
 import { terminalLoginLabel } from '@/lib/ai/terminal-login-scope';
 import { contextUsageForModel } from '@/lib/ai/session-settings';
+import { conversationArtifacts } from '@/lib/ai/conversation-artifact';
 import type { AiConversationNode } from '@/lib/ai/conversation-node';
 import { canResumeTokenBudgetedTask, hasTokenBudgetCheckpoint, taskBudgetArtifactTitleKey } from '@/lib/ai/task-token-budget';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -59,6 +60,7 @@ function askConversationNodes(nodes: readonly AiConversationNode[]): readonly Ai
       || node.kind === 'reasoning'
       || node.kind === 'turnTail'
       || (node.kind === 'artifact' && taskBudgetArtifactTitleKey(node.artifactKind) !== null)
+      || node.kind === 'runtimeArtifacts'
     ) return [node];
     if (node.kind !== 'turnProcess') return [];
     const questionsAndErrors = node.children.filter((child) => child.kind === 'question' || child.kind === 'error');
@@ -508,7 +510,7 @@ export function AiWorkspaceRoot({
     ? findConversationTool(view.nodes, route)
     : undefined;
   const artifactDetailsNode = route.kind === 'artifactDetails'
-    ? view?.nodes.find((node) => node.kind === 'artifact' && node.artifactId === route.artifactId)
+    ? conversationArtifacts(view?.nodes ?? []).find((node) => node.artifactId === route.artifactId)
     : undefined;
   const lineage = useMemo(
     () => subagentLineage(view, sessions),

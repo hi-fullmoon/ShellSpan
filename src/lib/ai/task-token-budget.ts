@@ -1,5 +1,6 @@
 import { latestTurnReachedTokenBudget } from './conversation-node';
 import type { AiSessionView } from './session-adapter';
+import { conversationArtifacts } from './conversation-artifact';
 
 /** Only explicit human input can reopen an ended, unarchived root session. */
 export function canResumeTokenBudgetedTask(view: AiSessionView | null | undefined): boolean {
@@ -13,8 +14,8 @@ export function canResumeTokenBudgetedTask(view: AiSessionView | null | undefine
 
 export function hasTokenBudgetCheckpoint(view: AiSessionView): boolean {
   const latestTurn = [...view.nodes].reverse().find((node) => node.kind === 'turnTail');
-  return latestTurn !== undefined && view.nodes.some((node) => node.kind === 'artifact'
-    && node.artifactKind === 'task-budget-checkpoint' && node.turnId === latestTurn.turnId);
+  return latestTurn !== undefined && conversationArtifacts(view.nodes).some((node) =>
+    node.artifactKind === 'task-budget-checkpoint' && node.turnId === latestTurn.turnId);
 }
 
 export function taskBudgetArtifactTitleKey(kind: string) {

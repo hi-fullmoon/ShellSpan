@@ -11,6 +11,7 @@ import {
 } from './workspace/ai-workspace-controller';
 import './styles/styles.css';
 import { useFocusStore } from '@/stores/focusStore';
+import { readLocalState, saveLocalState } from '@/lib/preferences/local-state';
 
 const AI_PANEL_DEFAULT_WIDTH = 400;
 const AI_PANEL_MIN_WIDTH = 320;
@@ -40,8 +41,7 @@ export function clampAiPanelWidth(width: number, containerWidth: number): number
 function initialAiPanelWidth(scope: AppSection): number {
   if (typeof window === 'undefined') return AI_PANEL_DEFAULT_WIDTH;
   const storedWidth = Number(
-    window.localStorage.getItem(aiPanelWidthStorageKey(scope))
-      ?? window.localStorage.getItem(AI_PANEL_WIDTH_STORAGE_KEY),
+    readLocalState(aiPanelWidthStorageKey(scope)),
   );
   return Number.isFinite(storedWidth) && storedWidth > 0
     ? storedWidth
@@ -149,7 +149,7 @@ export const AiPanelShell: React.FC<AiPanelShellProps> = ({
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      window.localStorage.setItem(aiPanelWidthStorageKey(scope), String(panelWidth));
+      saveLocalState(aiPanelWidthStorageKey(scope), String(panelWidth));
     }, 150);
     return () => window.clearTimeout(timer);
   }, [panelWidth, scope]);

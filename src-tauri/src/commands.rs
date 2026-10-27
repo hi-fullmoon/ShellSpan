@@ -2079,11 +2079,13 @@ pub(crate) async fn open_remote_file(
     );
     let pool = pool.inner().clone();
     let known_hosts = remote_known_hosts_path(&app)?;
-    let open_root = app
+    let home = app
         .path()
         .home_dir()
-        .ok()
-        .map(|home| crate::shellspan_data_dir(&home).join("open-cache"));
+        .map_err(|error| RemoteFsError::Other {
+            message: format!("failed to resolve ShellSpan home directory: {error}"),
+        })?;
+    let open_root = crate::shellspan_data_dir(&home).join("open-cache");
     let cancel_flag = remote_file_reads
         .register(operation_id.clone())
         .map_err(|message| RemoteFsError::Other { message })?;
@@ -2093,7 +2095,7 @@ pub(crate) async fn open_remote_file(
             request,
             Some(&pool),
             Some(&known_hosts),
-            open_root.as_deref(),
+            &open_root,
             task_cancel_flag,
         )
     })
@@ -3014,10 +3016,11 @@ pub(crate) fn remove_known_host(app: AppHandle, host: String, port: u16) -> Resu
 pub(crate) fn list_log_files(app: AppHandle) -> Result<Vec<LogFileInfo>, String> {
     use std::fs;
 
-    let log_dir = app
+    let home = app
         .path()
-        .app_log_dir()
+        .home_dir()
         .map_err(|error| format!("failed to resolve log dir: {error}"))?;
+    let log_dir = crate::path_utils::shellspan_log_dir(&home);
 
     if !log_dir.exists() {
         return Ok(Vec::new());
@@ -3061,10 +3064,8 @@ pub(crate) async fn read_log_chunk(
     name: String,
     cursor: Option<crate::log_reader::LogCursor>,
 ) -> Result<crate::log_reader::LogChunk, String> {
-    let dir = app
-        .path()
-        .app_log_dir()
-        .map_err(|error| error.to_string())?;
+    let home = app.path().home_dir().map_err(|error| error.to_string())?;
+    let dir = crate::path_utils::shellspan_log_dir(&home);
     tauri::async_runtime::spawn_blocking(move || crate::log_reader::read_chunk(&dir, &name, cursor))
         .await
         .map_err(|error| error.to_string())?
@@ -3074,10 +3075,11 @@ pub(crate) async fn read_log_chunk(
 pub(crate) fn read_log_file(app: AppHandle, name: String) -> Result<String, String> {
     use std::fs;
 
-    let log_dir = app
+    let home = app
         .path()
-        .app_log_dir()
+        .home_dir()
         .map_err(|error| format!("failed to resolve log dir: {error}"))?;
+    let log_dir = crate::path_utils::shellspan_log_dir(&home);
     let path = log_dir.join(&name);
 
     if !path.exists() {

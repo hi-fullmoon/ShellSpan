@@ -1,10 +1,24 @@
 # 请求预算、工具结果与上下文恢复
 
+## 本地存储目录
+
+Agent 与数据库共用 ShellSpan 数据根目录：正式版为 `~/.shellspan`，开发版为 `~/.shellspan-dev`；显式 `SHELLSPAN_DATA_DIR` 配置优先。会话和归档位于 `agent-runtime/sessions-v5`、`agent-runtime/archives-v5`，产物位于 `agent-runtime/artifacts-v2`，图片位于 `agent-runtime/images-v1`，原生命令恢复记录位于 `agent-native-call-checkpoints`。这些路径均相对于同一个数据根目录，原生工具的数据保护也使用该根目录。
+
+不读取或迁移 Tauri 应用数据目录中的旧 Agent 数据。Tauri identifier 不再隔离 Agent 存储，独立验证必须显式指定 `SHELLSPAN_DATA_DIR`。
+
+应用日志的写入和读取统一使用数据根目录下的 `logs/`。远程文件打开缓存必须使用 `open-cache/`，无法解析数据目录时直接报错，不回退系统临时目录。UI 偏好与图片草稿保存在同一根目录的 `frontend-state.db`；主题继续使用主数据库中的偏好。应用不再使用 localStorage 或 IndexedDB 持久化这些数据，也不迁移或读取旧 WebView 记录。
+
+图片草稿的正文、图片与待发送身份以 SQLite 事务保存。写入、从编辑器移交至待发送记录、取消恢复和确认删除均检查相关记录的版本；任一版本冲突时整批回滚，保留较新的编辑内容。SQLite 操作在阻塞工作线程执行，IPC 不记录草稿正文、图片或参数内容。
+
 ## 请求预算
 
 Agent 在每次请求前分别估算系统提示词、工具定义和消息的 tokens 与字节数，预留模型最大输出及安全空间。压缩触发阈值为可用输入的 85%，常规目标为 60%。这些值属于应用的容量策略，不是服务端实际 tokenizer 的计数。
 
+安全预留为上下文的 5%（最低 1024 tokens）。模型配置必须在最大输出与安全预留之外留下可用输入；运行时还会检查输入预算能否容纳不可压缩的系统提示词和工具定义。无有效输入空间时，以 `INVALID_MODEL_TOKEN_BUDGET` 提示降低最大输出或增大上下文，不将输入容量兜底为 1 token，也不执行无效的工具结果外置或压缩。
+
 预算压力出现时，`context-budget` 产物记录总预算、消息类别的数量/tokens/字节数和各工具结果的大小。记录不包含消息正文、工具参数、主机信息或凭据。工具输出缩减前后均可形成记录，相同内容与类型不重复发布。
+
+界面将内部工具结果、预算诊断、压缩证据和恢复检查点按轮次合并为默认收起的“运行详情”，保留逐项查看与原始审计事件。交付给用户的报告、导出文件等其他产物继续单独展示。
 
 请求准备完成后再次估算预算，包括准备阶段生成的 provider native replay。只有满足可用输入 tokens 和字节上限的请求才会发送；服务端仍可能因 tokenizer 或容量声明差异返回 `ContextTooLarge`。
 

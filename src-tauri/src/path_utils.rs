@@ -36,6 +36,10 @@ pub(crate) fn shellspan_data_dir(home_dir: &Path) -> PathBuf {
         .unwrap_or_else(|| shellspan_data_dir_for_mode(home_dir, cfg!(debug_assertions)))
 }
 
+pub(crate) fn shellspan_log_dir(home_dir: &Path) -> PathBuf {
+    shellspan_data_dir(home_dir).join("logs")
+}
+
 #[cfg(windows)]
 pub(crate) fn configured_data_directory() -> Option<&'static Path> {
     DATA_DIRECTORY.get().map(PathBuf::as_path)
@@ -89,6 +93,65 @@ mod tests {
         assert!(validate_data_directory(Path::new("relative-data")).is_err());
         let absolute = std::env::temp_dir().join("shellspan-explicit-data");
         assert!(validate_data_directory(&absolute).is_ok());
+    }
+
+    #[test]
+    fn database_sessions_and_artifacts_share_the_mode_specific_data_root() {
+        use crate::agent_runtime::{
+            AgentArtifactStore, AgentExecutionSurface, AgentSessionStore, CreateAgentSessionRequest,
+        };
+        let home = tempfile::tempdir().unwrap();
+        for development in [false, true] {
+            let root = shellspan_data_dir_for_mode(home.path(), development);
+            let database_path = root.join(crate::db::DATABASE_FILE_NAME);
+            let _database = crate::db::Database::open(&database_path).unwrap();
+            let sessions = AgentSessionStore::default();
+            sessions.configure(root.clone()).unwrap();
+            let id = "storage-root-check";
+            sessions
+                .create(CreateAgentSessionRequest {
+                    session_id: id.into(),
+                    task_id: id.into(),
+                    goal: "Verify shared application storage".into(),
+                    parent_session_id: None,
+                    continued_from_session_id: None,
+                    target: None,
+                    permission_mode: None,
+                    execution_surface: AgentExecutionSurface::Direct,
+                    success_criteria: vec![],
+                    capability_scope: None,
+                    subagent: None,
+                })
+                .unwrap();
+            let artifacts = AgentArtifactStore::default();
+            artifacts.configure(&root).unwrap();
+            let metadata = artifacts
+                .store_json(
+                    id,
+                    "tool-result",
+                    "Repository storage guide",
+                    &serde_json::json!({"text": include_str!("../../AGENTS.md")}),
+                )
+                .unwrap();
+            assert!(database_path.is_file());
+            assert!(root
+                .join("agent-runtime/sessions-v5")
+                .join(format!("{id}.jsonl"))
+                .is_file());
+            assert!(root.join("agent-runtime/archives-v5").is_dir());
+            assert!(root
+                .join("agent-runtime/artifacts-v2")
+                .join(id)
+                .join(format!("{}.bin", metadata.artifact_id))
+                .is_file());
+            let reopened = AgentSessionStore::default();
+            reopened.configure(root).unwrap();
+            assert_eq!(reopened.snapshot(id).unwrap().header.session_id, id);
+            assert_eq!(
+                artifacts.verify(id, &metadata).unwrap(),
+                crate::agent_runtime::AgentArtifactIntegrity::Verified
+            );
+        }
     }
 
     #[test]

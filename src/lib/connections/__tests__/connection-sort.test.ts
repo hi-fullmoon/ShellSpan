@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { ConnectionProfile } from '@/types';
 import { readConnectionSort, saveConnectionSort, sortConnections } from '../connection-sort';
+import { saveLocalState } from '@/lib/preferences/local-state';
 
 const profile = (id: string, name: string, createdAt: number): ConnectionProfile => ({
   id, name, createdAt, updatedAt: createdAt, host: `${id}.example.org`,
@@ -8,7 +9,7 @@ const profile = (id: string, name: string, createdAt: number): ConnectionProfile
 });
 
 describe('connection sorting', () => {
-  beforeEach(() => localStorage.clear());
+  beforeEach(() => saveConnectionSort('default'));
   const profiles = [profile('a', 'Server 10', 10), profile('b', 'server 2', 30), profile('c', 'Alpha', 20)];
 
   it('keeps current order by default and never mutates source profiles', () => {
@@ -38,7 +39,7 @@ describe('connection sorting', () => {
   it('remembers the selected mode and safely falls back for invalid saved values', () => {
     saveConnectionSort('created');
     expect(readConnectionSort()).toBe('created');
-    localStorage.setItem('shellspan.connections.sort', 'invalid');
+    saveLocalState('shellspan.connections.sort', 'invalid');
     expect(readConnectionSort()).toBe('default');
   });
 });

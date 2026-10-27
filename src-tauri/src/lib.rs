@@ -8,6 +8,7 @@ mod connection;
 mod db;
 mod directory_request_registry;
 mod execution;
+mod frontend_storage;
 mod health;
 mod identity_cache;
 mod keychain;
@@ -237,24 +238,6 @@ pub fn run() {
         LevelFilter::Info
     };
 
-    let backend_log_target = Target::new(TargetKind::LogDir {
-        file_name: Some("backend".into()),
-    })
-    .filter(|metadata| !metadata.target().starts_with(WEBVIEW_TARGET));
-    let frontend_log_target = Target::new(TargetKind::LogDir {
-        file_name: Some("frontend".into()),
-    })
-    .filter(|metadata| metadata.target().starts_with(WEBVIEW_TARGET));
-    let log_targets = if cfg!(debug_assertions) {
-        vec![
-            Target::new(TargetKind::Stdout),
-            backend_log_target,
-            frontend_log_target,
-        ]
-    } else {
-        vec![backend_log_target, frontend_log_target]
-    };
-
     let builder = tauri::Builder::default();
     // Register first so duplicate development processes exit before opening
     // the database or initializing other plugins. The app identifier scopes
@@ -270,7 +253,7 @@ pub fn run() {
     }));
 
     let builder = builder
-        .setup(|app| {
+        .setup(move |app| {
             #[cfg(target_os = "macos")]
             {
                 if let Some(window) = app.get_webview_window("main") {
@@ -283,6 +266,31 @@ pub fn run() {
             )?;
             let shellspan_dir = shellspan_data_dir(&home_dir);
             let database = db::Database::open(&shellspan_dir.join(db::DATABASE_FILE_NAME))?;
+            app.manage(frontend_storage::FrontendStorage::open(&shellspan_dir)?);
+            let log_directory = path_utils::shellspan_log_dir(&home_dir);
+            let backend = Target::new(TargetKind::Folder {
+                path: log_directory.clone(),
+                file_name: Some("backend".into()),
+            })
+            .filter(|metadata| !metadata.target().starts_with(WEBVIEW_TARGET));
+            let frontend = Target::new(TargetKind::Folder {
+                path: log_directory,
+                file_name: Some("frontend".into()),
+            })
+            .filter(|metadata| metadata.target().starts_with(WEBVIEW_TARGET));
+            let mut targets = vec![backend, frontend];
+            if cfg!(debug_assertions) {
+                targets.push(Target::new(TargetKind::Stdout));
+            }
+            app.handle().plugin(
+                tauri_plugin_log::Builder::new()
+                    .level(log_level)
+                    .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+                    .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(10))
+                    .max_file_size(2 * 1024 * 1024)
+                    .targets(targets)
+                    .build(),
+            )?;
             let credentials = keychain::CredentialManager::new();
             let petdex = petdex::PetdexAdapter::new(home_dir);
             let message_adapter = petdex.clone();
@@ -307,15 +315,6 @@ pub fn run() {
             menu::initialize_tray(app)?;
             Ok(())
         })
-        .plugin(
-            tauri_plugin_log::Builder::new()
-                .level(log_level)
-                .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
-                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(10))
-                .max_file_size(2 * 1024 * 1024)
-                .targets(log_targets)
-                .build(),
-        )
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -483,6 +482,10 @@ pub fn run() {
             commands::remove_profile,
             commands::load_preferences,
             commands::save_preferences,
+            frontend_storage::load_ui_preferences,
+            frontend_storage::save_ui_preferences,
+            frontend_storage::read_image_drafts,
+            frontend_storage::commit_image_drafts,
             commands::list_recent_profiles,
             commands::touch_recent_profile,
             commands::remove_recent_profile,

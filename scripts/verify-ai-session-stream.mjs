@@ -77,6 +77,7 @@ assert(!values['native-jobs-direct'] || values['native-jobs'] && !values['native
 assert(!values['native-jobs-focus'] || values['native-jobs'], '--native-jobs-focus requires --native-jobs');
 assert(!values['native-jobs-narrow'] || values['native-jobs'], '--native-jobs-narrow requires --native-jobs');
 assert(!values['data-scope'] || /^com\.shellspan\.validation\.[a-z0-9-]+$/.test(values['data-scope']), '--data-scope must be a dedicated com.shellspan.validation.* identifier');
+assert(!values['data-scope'] || process.env.SHELLSPAN_DATA_DIR && isAbsolute(process.env.SHELLSPAN_DATA_DIR), '--data-scope requires an explicit absolute SHELLSPAN_DATA_DIR; the app identifier does not isolate stored data');
 assert(!values['data-scope'] || !values['native-binary'], '--data-scope requires a native build with that Tauri identifier');
 assert(!values['native-jobs'] || (!noModel && !focusRun && !focusBackgroundRun && !performanceRun && !terminalContentionRun && !terminalReadinessRun && !terminalClearScreenRun && !terminalReconnectRun), '--native-jobs is a separate real-model regression');
 assert(!focusBackgroundRun || !noModel, '--focus-background requires real model calls');
