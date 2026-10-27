@@ -242,7 +242,7 @@ impl TerminalLeaseManager {
             task_id,
             operation_id,
             command_display,
-            false,
+            None,
         )
     }
 
@@ -252,6 +252,7 @@ impl TerminalLeaseManager {
         agent_session_id: &str,
         task_id: &str,
         operation_id: &str,
+        visible: bool,
     ) -> Result<AgentTerminalLease, String> {
         self.acquire_with_presentation(
             session_id,
@@ -259,7 +260,7 @@ impl TerminalLeaseManager {
             task_id,
             operation_id,
             None,
-            true,
+            Some(visible),
         )
     }
 
@@ -270,7 +271,7 @@ impl TerminalLeaseManager {
         task_id: &str,
         operation_id: &str,
         command_display: Option<String>,
-        command_execution: bool,
+        command_execution: Option<bool>,
     ) -> Result<AgentTerminalLease, String> {
         let lease = AgentTerminalLease {
             session_id: session_id.to_string(),
@@ -336,7 +337,7 @@ impl TerminalLeaseManager {
             acquired_at_unix_ms: lease.acquired_at_unix_ms,
             state: TerminalLeaseEventState::Acquired,
             command_display,
-            command_execution: command_execution.then_some(true),
+            command_execution,
             command_phase: None,
             reason: None,
         });

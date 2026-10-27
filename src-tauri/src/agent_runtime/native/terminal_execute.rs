@@ -253,13 +253,13 @@ impl TerminalExecuteRegistry {
             }
         }
         revalidate(TerminalExecuteValidationStage::LeaseAcquisition)?;
-        if private_job_control {
-            self.leases
-                .acquire(session_id, agent_session_id, task_id, operation_id, None)?;
-        } else {
-            self.leases
-                .acquire_command(session_id, agent_session_id, task_id, operation_id)?;
-        }
+        self.leases.acquire_command(
+            session_id,
+            agent_session_id,
+            task_id,
+            operation_id,
+            !private_job_control,
+        )?;
         let ready_deadline = deadline
             .unwrap_or_else(|| Instant::now() + FRONTEND_READY_TIMEOUT)
             .min(Instant::now() + FRONTEND_READY_TIMEOUT);

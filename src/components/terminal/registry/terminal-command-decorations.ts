@@ -10,6 +10,8 @@ interface CommandRange {
 
 interface PendingCommand {
   operationId: string;
+  visible: boolean;
+  anchored: boolean;
   range?: CommandRange;
 }
 
@@ -19,6 +21,7 @@ const MAX_PENDING_COMMANDS = 256;
 export function installTerminalCommandDecorations(terminal: Terminal, sessionId: string): IDisposable {
   const ranges = new Set<CommandRange>();
   const pendingCommands: PendingCommand[] = [];
+  const submittedOperations = new Set<string>();
   let operationId: string | undefined;
   let prompt: IMarker | undefined;
   let promptReady = true;
@@ -33,7 +36,9 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
   };
   const startPendingCommand = () => {
     const pending = pendingCommands[0];
-    if (!pending || pending.range || !promptReady || terminal.buffer.active.type !== 'normal') return;
+    if (!pending || pending.anchored || !promptReady || terminal.buffer.active.type !== 'normal') return;
+    pending.anchored = true;
+    if (!pending.visible) return;
     const cursor = terminal.buffer.active.baseY + terminal.buffer.active.cursorY;
     const start = terminal.registerMarker(prompt && !prompt.isDisposed ? prompt.line - cursor : 0);
     if (start) {
@@ -79,24 +84,42 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
   };
   const syncLease = () => {
     const lease = agentTerminalLeaseState.get(sessionId);
-    const next = lease?.terminalOwned && lease.commandExecution ? lease.operationId : undefined;
+    const next = lease?.terminalOwned && typeof lease.commandExecution === 'boolean' ? lease.operationId : undefined;
+    const visible = lease?.commandExecution === true;
+    if (next && lease?.commandPhase === 'running') submittedOperations.add(next);
     schedule();
     if (next === operationId) return;
+    const released = operationId;
     operationId = next;
     // Queue behind already received PTY writes, before the readiness handshake
     // allows the backend to type. Never inspect prompts or command text.
     terminal.write('', () => {
       if (disposed) return;
-      // Keep a released candidate until its ordered PTY boundary arrives. The
-      // private lifecycle can finish before the final display batch is delivered.
-      if (!next) return;
+      if (released) {
+        // Running is published under the submission fence before release. A
+        // request aborted before submission has no C (or new prompt) to consume.
+        if (!submittedOperations.has(released)) {
+          const index = pendingCommands.findIndex(pending => pending.operationId === released);
+          if (index >= 0) {
+            const [aborted] = pendingCommands.splice(index, 1);
+            if (aborted.range) remove(aborted.range);
+          }
+        }
+        submittedOperations.delete(released);
+      }
+      // Submitted scopes survive release until their ordered PTY boundary.
+      if (!next) {
+        startPendingCommand();
+        schedule();
+        return;
+      }
       // Lease events can outrun several PTY display batches. Consume command
       // scopes in stream order; only the next prompt may start a later scope.
       if (pendingCommands.length >= MAX_PENDING_COMMANDS) {
         const expired = pendingCommands.shift();
         if (expired?.range) remove(expired.range);
       }
-      pendingCommands.push({ operationId: next });
+      pendingCommands.push({ operationId: next, visible, anchored: false });
       startPendingCommand();
       schedule();
     });
@@ -105,12 +128,13 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
     terminal.parser.registerOscHandler(133, (data) => {
       if (data === 'A' && terminal.buffer.active.type === 'normal') {
         const pending = pendingCommands[0];
-        if (pending?.range) {
-          remove(pending.range);
+        if (pending?.anchored) {
+          if (pending.range) remove(pending.range);
           pending.range = undefined;
+          pending.anchored = false;
           // A fresh prompt without C discards cancelled input. The first
           // delayed prompt can still reanchor a scope acquired before display.
-          if (prompt && !prompt.isDisposed && pending.operationId !== operationId) {
+          if (prompt && pending.operationId !== operationId) {
             pendingCommands.shift();
           }
         }
@@ -152,6 +176,7 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
       subscriptions.forEach(subscription => subscription.dispose());
       for (const range of ranges) remove(range);
       pendingCommands.length = 0;
+      submittedOperations.clear();
       prompt?.dispose();
     },
   };

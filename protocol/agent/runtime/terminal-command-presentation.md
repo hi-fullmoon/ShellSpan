@@ -8,9 +8,10 @@ between independent frontend events.
 
 The frontend shades only the command range belonging to an active Agent
 lease with `commandExecution: true`. `terminal_execute` sets this acquired-event
-flag without publishing command text; private job-control requests, interactive
-observation and input leases omit it. `commandDisplay` is optional and is not a
-decoration prerequisite.
+flag without publishing command text. Private job-control requests send
+`commandExecution: false`: they consume an ordered boundary slot but create no
+background range. Interactive observation and input leases omit the field.
+`commandDisplay` is optional and is not a decoration prerequisite.
 The frontend anchors the beginning before acknowledging
 frontend readiness and closes the range when xterm parses `OSC 133;C`.
 The prompt marker reanchors the range if delayed PTY display follows lease
@@ -19,11 +20,14 @@ output is never shaded while waiting for an optional boundary.
 Acquired command scopes queue in lease order and consume the ordered PTY
 boundaries one at a time. A later acquisition never replaces an earlier
 unconsumed scope; its range starts at the next prompt. Pending scopes are
-bounded to 256 entries for old connections without display markers.
+bounded to 256 entries for old connections without display markers. The
+`running` phase is published under the submission fence before lease release.
+Requests released before that phase are discarded because no C is expected;
+submitted requests retain their slot until the ordered display boundary.
 Output retains its ANSI attributes. Markers follow normal-buffer scrollback
 and reflow; alternate-screen applications hide these decorations. Lease
-release hides an unfinished decoration; the next prompt discards it if no
-command boundary arrived. Rebinding or disposing the terminal removes all
+release hides an unfinished decoration; a fresh prompt also discards a released
+scope when no command boundary arrived. Rebinding or disposing removes all
 decorations.
 
 These markers are untrusted, optional presentation hints. They do not change
@@ -33,10 +37,14 @@ continue displaying their original terminal stream.
 
 Run `pnpm test:terminal-command-presentation` on macOS or Linux to capture real
 integrated Bash/Zsh PTY executions and render them through xterm in WebKit.
+The focused native case launches a real shell job, polls it three times and
+executes a complete foreground script through the production terminal registry.
 The browser checks wide/narrow layouts, app/terminal color schemes, delayed
-display after lease release, selection, reflow, alternate screens and cleanup.
+display after lease release, internal control boundaries before and after a new
+acquisition, consecutive polls, cancelled controls (including screen clear),
+selection, reflow, alternate screens and cleanup.
 Windows PowerShell runtime acceptance requires a Windows host.
 `SHELLSPAN_NATIVE_SCRIPT_TRACE_PATH` can point the browser check at a complete
 native script capture and its metadata. That path replays the actual acquired
-lease event exported by the native acceptance test, without synthesizing
-`commandDisplay` or a command-execution flag.
+lease events exported by the focused native case, without synthesizing
+`commandDisplay`, command-execution flags or running-phase events.

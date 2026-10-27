@@ -308,7 +308,7 @@
             }))
             .unwrap();
         manager
-            .acquire_command("terminal-1", "agent-1", "task-1", "command-1")
+            .acquire_command("terminal-1", "agent-1", "task-1", "command-1", true)
             .unwrap();
         let command = serde_json::to_value(&events.lock().unwrap()[0]).unwrap();
         assert_eq!(command["commandExecution"], true);
@@ -319,6 +319,21 @@
                 "agent-1",
                 "task-1",
                 "command-1",
+                TerminalLeaseReleaseReason::Completed,
+            )
+            .unwrap();
+        manager
+            .acquire_command("terminal-1", "agent-1", "task-1", "control-1", false)
+            .unwrap();
+        let control = serde_json::to_value(events.lock().unwrap().last().unwrap()).unwrap();
+        assert_eq!(control["commandExecution"], false);
+        assert!(control.get("commandDisplay").is_none());
+        manager
+            .release(
+                "terminal-1",
+                "agent-1",
+                "task-1",
+                "control-1",
                 TerminalLeaseReleaseReason::Completed,
             )
             .unwrap();
