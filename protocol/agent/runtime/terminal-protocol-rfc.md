@@ -639,6 +639,17 @@ no other jobs therefore display their source once. With another live job,
 native invalidation can leave a source redraw fragment while preserving
 interleaved output; it does not execute the source again. Native notifications
 remain unchanged.
+The Zsh source receiver requires `zsh/system`'s `sysread` builtin in addition
+to `zsh/datetime`. It reads opaque transport bytes from its own `/dev/tty` file
+descriptor, rather than `read -k` through ZLE's key/typeahead machinery. Each
+bounded read uses the remaining time from the same absolute two-second frame
+deadline; partial arrivals do not restart it, and data returned after it cannot
+be acknowledged. The descriptor closes in the receiver's `always` cleanup and
+the prior terminal settings are restored. Only a complete payload replaces
+BUFFER. Missing modules disable the advertised native input/checkpoint/private
+capabilities before dispatch; no parent traps, job notifications or input replay
+are changed. See [Zsh's read implementation](https://github.com/zsh-users/zsh/blob/zsh-5.9/Src/builtin.c#L6026-L6077)
+and [sysread implementation](https://github.com/zsh-users/zsh/blob/zsh-5.9/Src/Modules/system.c#L68-L190).
 Ordinary short input without potentially active controlled jobs retains its
 existing path. Old Zsh integrations without V advertise neither native script
 input nor usable native job control; data is refused before typing.

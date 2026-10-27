@@ -3584,9 +3584,6 @@
             Some(0)
         );
         wait_for_prompt(broker, transport);
-        let quick: Vec<_> = (0..8)
-            .map(|index| launch(&format!("sleep 0.5; exit {index}")))
-            .collect();
         let long = format!(
             ": {}\nprintf native-long-while-jobs-finish",
             shlex::try_quote(&"'\"".repeat(1400)).unwrap()
@@ -3599,19 +3596,25 @@
             )
             .unwrap();
         }
-        for _ in 0..6 {
-            let result = run(&long, None).unwrap();
-            assert_eq!(
-                result.exit_code,
-                Some(0),
-                "long foreground source failed: state={:?} rejection={:?}; broker={:?}",
-                result.state,
-                result.input_rejection,
-                broker.snapshot(Some(transport)).unwrap().session
-            );
-        }
-        for (index, job) in quick.iter().enumerate() {
-            assert_eq!(until_exit(job).exit_code, Some(index as i32));
+        for wave in 0..3 {
+            let quick: Vec<_> = (0..8)
+                .map(|index| launch(&format!("sleep 0.5; exit {index}")))
+                .collect();
+            for iteration in 0..6 {
+                let result = run(&long, None).unwrap();
+                assert_eq!(
+                    result.exit_code,
+                    Some(0),
+                    "long source failed in wave {wave}, iteration {iteration}: state={:?} rejection={:?}; broker={:?}",
+                    result.state,
+                    result.input_rejection,
+                    broker.snapshot(Some(transport)).unwrap().session
+                );
+                assert_eq!(result.command_line, long);
+            }
+            for (index, job) in quick.iter().enumerate() {
+                assert_eq!(until_exit(job).exit_code, Some(index as i32));
+            }
         }
         assert!(
             broker.native_input_enabled(transport).unwrap(),

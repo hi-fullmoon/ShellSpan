@@ -1352,7 +1352,7 @@ __shellspan_precmd() {{
 }}
 __shellspan_publish_native_capabilities() {{
   if [[ -o interactivecomments ]]; then __shellspan_emit C 1; else __shellspan_emit C 0; fi
-  if [[ $__shellspan_native_quarantined == 0 && -o zle && -n $__shellspan_parser_executable && $__shellspan_stty_executable == /* ]] && bindkey '^X^V' quoted-insert && bindkey -s '^Xn' '^X^V^J' && bindkey -s '^Xt' '^X^V^I' && bindkey -s '^Xr' '^X^V^M' && bindkey '^X^A' __shellspan_native_checkpoint && bindkey '^X^D' __shellspan_discard_native && bindkey '^X^E' __shellspan_accept_native; then
+  if [[ $__shellspan_native_quarantined == 0 && -o zle && -n $__shellspan_parser_executable && $__shellspan_stty_executable == /* ]] && zmodload zsh/datetime && zmodload -F zsh/system b:sysread && bindkey '^X^V' quoted-insert && bindkey -s '^Xn' '^X^V^J' && bindkey -s '^Xt' '^X^V^I' && bindkey -s '^Xr' '^X^V^M' && bindkey '^X^A' __shellspan_native_checkpoint && bindkey '^X^D' __shellspan_discard_native && bindkey '^X^E' __shellspan_accept_native; then
     __shellspan_emit I 1
     __shellspan_emit H 1
     if zmodload zsh/datetime && bindkey '^X^O' __shellspan_private_receive && bindkey '^X^K' __shellspan_private_commit && bindkey '^X^B' __shellspan_native_receive; then
@@ -1456,14 +1456,34 @@ __shellspan_native_frame_checkpoint() {{
   __shellspan_emit M "$1" "$BUFFER"
 }}
 __shellspan_native_receive() {{
-  local __shellspan_receiver_tty
+  local __shellspan_receiver_tty __shellspan_receiver_fd
   __shellspan_receiver_tty=$("$__shellspan_stty_executable" -g </dev/tty 2>/dev/null) || return
   "$__shellspan_stty_executable" -echo </dev/tty 2>/dev/null || return
   {{
+    builtin exec {{__shellspan_receiver_fd}}</dev/tty || return
     __shellspan_native_receive_frame
   }} always {{
+    if [[ -n ${{__shellspan_receiver_fd-}} ]]; then builtin exec {{__shellspan_receiver_fd}}<&-; fi
     "$__shellspan_stty_executable" "$__shellspan_receiver_tty" </dev/tty 2>/dev/null
   }}
+}}
+__shellspan_read_native() {{
+  local __shellspan_read_data= __shellspan_read_chunk
+  local -i __shellspan_read_total=0 __shellspan_read_count=0
+  local -F 6 __shellspan_read_remaining
+  while (( __shellspan_read_total < $1 )); do
+    __shellspan_read_remaining=$(( $2 - EPOCHREALTIME ))
+    (( __shellspan_read_remaining > 0 )) || return 142
+    # Transport bytes must bypass ZLE's get-key/typeahead/last-key machinery.
+    # sysread is bounded per chunk; the original absolute frame deadline is
+    # checked both before and after each read, without replaying any input.
+    builtin sysread -i "$__shellspan_receiver_fd" -s "$(( $1 - __shellspan_read_total ))" -t "$__shellspan_read_remaining" -c __shellspan_read_count __shellspan_read_chunk 2>/dev/null || return $?
+    (( EPOCHREALTIME < $2 && __shellspan_read_count > 0 )) || return 142
+    [[ $__shellspan_read_chunk != *$'\x03'* ]] || return 130
+    __shellspan_read_data+=$__shellspan_read_chunk
+    (( __shellspan_read_total += __shellspan_read_count ))
+  done
+  builtin printf -v "$3" '%s' "$__shellspan_read_data"
 }}
 __shellspan_quarantine_native() {{
   __shellspan_native_quarantined=1
@@ -1488,7 +1508,7 @@ __shellspan_native_receive_frame() {{
   [[ -z "$BUFFER" ]] || return
   local __shellspan_descriptor __shellspan_encoded __shellspan_decoded __shellspan_count
   local -F 6 __shellspan_deadline=$(( EPOCHREALTIME + 2.0 )) __shellspan_remaining
-  if ! read -r -s -k 65 -t 2 __shellspan_descriptor; then
+  if ! __shellspan_read_native 65 "$__shellspan_deadline" __shellspan_descriptor; then
     __shellspan_native_frame_checkpoint ''
     __shellspan_quarantine_native
     return
@@ -1500,7 +1520,7 @@ __shellspan_native_receive_frame() {{
   fi
   __shellspan_count=$((16#${{__shellspan_descriptor[2,5]}}))
   __shellspan_remaining=$(( __shellspan_deadline - EPOCHREALTIME ))
-  if (( __shellspan_count < 4 || __shellspan_count > 36864 || __shellspan_count % 4 || __shellspan_remaining <= 0 )) || ! read -r -s -k "$__shellspan_count" -t "$__shellspan_remaining" __shellspan_encoded; then
+  if (( __shellspan_count < 4 || __shellspan_count > 36864 || __shellspan_count % 4 || __shellspan_remaining <= 0 )) || ! __shellspan_read_native "$__shellspan_count" "$__shellspan_deadline" __shellspan_encoded; then
     __shellspan_native_frame_checkpoint "$__shellspan_descriptor"
     __shellspan_quarantine_native
     return
@@ -2091,5 +2111,10 @@ mod tests {
     #[cfg(unix)]
     mod late_native_frame {
         include!("tests/terminal_late_native_frame.rs");
+    }
+
+    #[cfg(target_os = "macos")]
+    mod zsh_receive_pressure {
+        include!("tests/terminal_zsh_receive_pressure.rs");
     }
 }
