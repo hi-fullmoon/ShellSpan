@@ -121,6 +121,65 @@ fn record_budget_admission(sessions: &AgentSessionStore, index: usize, input_tok
 }
 
 #[test]
+fn default_task_token_budget_tracks_usage_past_two_million_without_stopping() {
+    use super::super::driver_metrics::TaskTokenBudgetDecision;
+
+    let (root, sessions, _artifacts) = task_budget_session();
+    let id = "token-budget-review";
+    let config = AgentDriverConfig::default();
+    assert_eq!(config.max_model_tokens_per_session, 0);
+    let surface = sessions.model_surface(id).unwrap();
+    let request = ModelRequest::from_surface("measure".into(), &surface, String::new(), vec![]);
+    // Record production input estimates measured from repository source, not
+    // fabricated provider usage or model responses.
+    let tokens = super::super::measure_model_messages(&request.messages, 0).0;
+    assert!(tokens > 0);
+    let admissions = 2_000_000 / tokens + 2;
+    for index in 0..admissions {
+        let metrics = sessions.driver_metrics(id).unwrap();
+        assert_eq!(task_budget_failure(&metrics, config).unwrap(), None);
+        assert_eq!(
+            metrics.token_budget_decision(tokens, config.max_model_tokens_per_session),
+            TaskTokenBudgetDecision::Continue
+        );
+        record_budget_admission(&sessions, index as usize, tokens);
+    }
+
+    let reopened = AgentSessionStore::default();
+    reopened.configure(root.path().to_path_buf()).unwrap();
+    let metrics = reopened.driver_metrics(id).unwrap();
+    assert!(metrics.model_tokens > 2_000_000);
+    assert_eq!(metrics.model_tokens, admissions * tokens);
+    assert_eq!(task_budget_failure(&metrics, config).unwrap(), None);
+    assert_eq!(
+        metrics.token_budget_decision(u64::MAX, config.max_model_tokens_per_session),
+        TaskTokenBudgetDecision::Continue
+    );
+
+    // Explicit limits and the independent active-time guard still apply.
+    assert!(task_budget_failure(
+        &metrics,
+        AgentDriverConfig {
+            max_model_tokens_per_session: metrics.model_tokens,
+            ..config
+        }
+    )
+    .unwrap()
+    .unwrap()
+    .starts_with("taskTokenBudgetExceeded:"));
+    assert!(task_budget_failure(
+        &metrics,
+        AgentDriverConfig {
+            max_active_duration_ms: 0,
+            ..config
+        }
+    )
+    .unwrap()
+    .unwrap()
+    .starts_with("taskActiveTimeExceeded:"));
+}
+
+#[test]
 fn task_token_budget_checkpoint_survives_restart_and_explicit_resume() {
     use super::super::driver_metrics::TaskTokenBudgetDecision;
     use super::super::{measure_model_messages, AgentSurfaceMessage, TaskBudgetCheckpointStage};

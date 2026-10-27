@@ -25,6 +25,7 @@ pub(crate) struct AgentDriverConfig {
     pub(crate) max_steps_per_turn: Option<usize>,
     pub(crate) max_turns_per_session: usize,
     pub(crate) max_identical_tool_steps: usize,
+    /// Zero disables cumulative token admission limits without disabling usage tracking.
     pub(crate) max_model_tokens_per_session: u64,
     pub(crate) max_active_duration_ms: u64,
     pub(crate) max_model_stream_duration_ms: u64,
@@ -43,7 +44,7 @@ impl Default for AgentDriverConfig {
             max_steps_per_turn: Some(DEFAULT_MAX_STEPS_PER_TURN),
             max_turns_per_session: 64,
             max_identical_tool_steps: 5,
-            max_model_tokens_per_session: 2_000_000,
+            max_model_tokens_per_session: 0,
             max_active_duration_ms: 60 * 60 * 1_000,
             max_model_stream_duration_ms: 15 * 60 * 1_000,
             network_recovery_window_ms: 2 * 60 * 1_000,
@@ -1888,7 +1889,9 @@ fn task_budget_failure(
     metrics: &super::driver_metrics::DriverMetrics,
     config: AgentDriverConfig,
 ) -> Result<Option<String>, String> {
-    if metrics.model_tokens >= config.max_model_tokens_per_session {
+    if config.max_model_tokens_per_session > 0
+        && metrics.model_tokens >= config.max_model_tokens_per_session
+    {
         return Ok(Some(format!(
             "taskTokenBudgetExceeded: maximum {} estimated model tokens",
             config.max_model_tokens_per_session

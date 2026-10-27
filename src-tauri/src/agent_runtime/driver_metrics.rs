@@ -72,6 +72,9 @@ impl DriverMetrics {
         next_request_tokens: u64,
         maximum: u64,
     ) -> TaskTokenBudgetDecision {
+        if maximum == 0 {
+            return TaskTokenBudgetDecision::Continue;
+        }
         let projected = self.model_tokens.saturating_add(next_request_tokens);
         if self.model_tokens >= maximum || projected > maximum {
             TaskTokenBudgetDecision::Stop

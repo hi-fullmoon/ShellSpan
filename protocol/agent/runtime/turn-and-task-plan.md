@@ -34,7 +34,9 @@ This adapts the tool-cycle threshold and single recovery opportunity from [Gemin
 
 ## Cumulative task token budget
 
-The default cumulative admission budget is 2,000,000 estimated model tokens. Before each model request, the driver adds the estimated next input and output reserve to the current task's recorded input estimates and output usage. Context compaction does not reset this counter.
+The driver has no cumulative token admission limit by default (`max_model_tokens_per_session = 0`). Recorded input estimates and output usage continue to accumulate and rebuild from committed events after restart; crossing 2,000,000 tokens does not trigger a progress checkpoint or stop a request. Automatic context compaction, per-request context limits, no-progress detection, active-time and step limits remain independent and unchanged. Explicit child-agent budgets remain enforced.
+
+An internal positive `max_model_tokens_per_session` enables the optional cumulative admission budget described below. Before each model request, the driver adds the estimated next input and output reserve to the current task's recorded input estimates and output usage. Context compaction does not reset this counter.
 
 When that projection first reaches 90% of the task budget, the runtime saves a `task-budget-progress` artifact extracted from committed events. This contains the latest user constraints, completed work, unfinished plan steps, evidence references and suggested next steps. It makes no model call, does not replace history, and does not consume a tool approval. The attempt is tracked by committed events, so reopening the runtime does not repeat it on every step. A failed early save is recorded as `taskBudgetCheckpointUnavailable`; existing durable history remains available.
 
