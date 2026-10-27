@@ -201,6 +201,7 @@ export function AiWorkspaceController({
       onSubmitGesture={controller.submit}
       onStop={controller.stop}
       onContinueOnReconnectedTerminal={controller.continueOnReconnectedTerminal ?? undefined}
+      terminalReconnectBusy={controller.terminalReconnectBusy}
       onReconnectTerminal={scope === 'terminal' && activeTerminalId
         && (terminalRecovery || activeTerminalStatus === 'disconnected' || activeTerminalStatus === 'error')
         ? () => {

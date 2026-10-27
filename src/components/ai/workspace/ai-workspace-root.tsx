@@ -281,6 +281,7 @@ export interface AiWorkspaceRootProps {
   readonly onSubmitGesture?: (gesture: 'keyboard' | 'primary', accelerated: boolean) => void;
   readonly onStop?: () => void;
   readonly onContinueOnReconnectedTerminal?: () => void;
+  readonly terminalReconnectBusy?: boolean;
   readonly onReconnectTerminal?: () => void;
   readonly historicalContinuationAvailable?: boolean;
   readonly historicalContinuationBusy?: boolean;
@@ -373,6 +374,7 @@ export function AiWorkspaceRoot({
   onSubmitGesture,
   onStop,
   onContinueOnReconnectedTerminal,
+  terminalReconnectBusy = false,
   onReconnectTerminal,
   historicalContinuationAvailable = false,
   historicalContinuationBusy = false,
@@ -728,7 +730,9 @@ export function AiWorkspaceRoot({
                         {!terminalConflict && (onReconnectTerminal ? <Button type="button" variant="ghost" size="xs" className="text-[11px]"
                           onClick={onReconnectTerminal}>{t('ai.workspace.status.reconnect')}</Button>
                           : onContinueOnReconnectedTerminal ? <Button type="button" variant="ghost" size="xs" className="text-[11px]"
-                          onClick={onContinueOnReconnectedTerminal}>{t('ai.workspace.continueOnReconnectedTerminal')}</Button>
+                          disabled={terminalReconnectBusy}
+                          onClick={onContinueOnReconnectedTerminal}>{t(terminalReconnectBusy
+                            ? 'ai.workspace.reconnectChecking' : 'ai.workspace.continueOnReconnectedTerminal')}</Button>
                           : !readOnlySession && canStartAgent && onOpenModel && <Button type="button" variant="ghost" size="xs" className="text-[11px]"
                             onClick={onOpenModel}>{t('ai.workspace.status.openSettings')}</Button>)}
                       </AlertDescription>

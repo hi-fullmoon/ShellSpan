@@ -996,47 +996,70 @@ impl AgentRuntime {
         } else {
             None
         };
-        if !self
-            .native_engine
-            .is_replacement_transport(previous_session_id, terminal_session_id)?
-        {
-            return Err("terminal reconnect requires a verified replacement transport".into());
-        }
         let snapshot = self.sessions.snapshot(session_id)?;
         let mut target = snapshot
             .header
             .target
             .clone()
             .ok_or("Agent target is missing")?;
-        let state = terminals.target_state(terminal_session_id)?;
-        let local = target.kind == "local";
-        if state.status != crate::models::SessionStatus::Connected
-            || (local
-                && (state.terminal_kind != crate::models::SessionTerminalKind::Local
-                    || state.identity.host != "local"))
-            || (!local
-                && (target.kind != "remote"
-                    || state.terminal_kind != crate::models::SessionTerminalKind::Remote
-                    || target.host.as_deref() != Some(state.identity.host.as_str())
-                    || target.port != Some(state.identity.port)
-                    || target.username.as_deref() != Some(state.identity.username.as_str())))
-            || self.native_engine.has_terminal_lease(previous_session_id)?
-            || self.native_engine.has_terminal_lease(terminal_session_id)?
-        {
-            return Err(
-                "terminal reconnect requires the same connected identity and no execution lease"
-                    .into(),
-            );
-        }
         if let Some(entry) = &entry {
             if entry.scope()?.is_some() {
                 return Err("terminal reconnect requires a settled turn".into());
             }
         }
-        target.session_id = terminal_session_id.into();
-        target.target_id = format!("terminal-{terminal_session_id}");
-        self.sessions
-            .reconnect_terminal(session_id, previous_session_id, target)
+        terminals.with_reconnect_targets(
+            previous_session_id,
+            terminal_session_id,
+            |previous, state| {
+                let local = target.kind == "local";
+                if state.status != crate::models::SessionStatus::Connected
+                    || (local
+                        && (state.terminal_kind != crate::models::SessionTerminalKind::Local
+                            || state.identity.host != "local"))
+                    || (!local
+                        && (target.kind != "remote"
+                            || state.terminal_kind != crate::models::SessionTerminalKind::Remote
+                            || target.host.as_deref() != Some(state.identity.host.as_str())
+                            || target.port != Some(state.identity.port)
+                            || target.username.as_deref()
+                                != Some(state.identity.username.as_str())))
+                {
+                    return Err(
+                        "TERMINAL_RECONNECT_UNVERIFIED: requires the same connected identity"
+                            .into(),
+                    );
+                }
+                if self.native_engine.has_terminal_lease(previous_session_id)?
+                    || self.native_engine.has_terminal_lease(terminal_session_id)?
+                {
+                    return Err("terminal reconnect requires no execution lease".into());
+                }
+                let replacement = self.native_engine.verify_reconnect_transport(
+                    previous_session_id,
+                    terminal_session_id,
+                    snapshot.header.execution_surface
+                        == super::AgentExecutionSurface::BoundTerminal,
+                )?;
+                if !replacement
+                    && previous.is_some_and(|state| {
+                        matches!(
+                            state.status,
+                            crate::models::SessionStatus::Connected
+                                | crate::models::SessionStatus::Connecting
+                        )
+                    })
+                {
+                    return Err(
+                        "TERMINAL_RECONNECT_SOURCE_ACTIVE: previous terminal is still available"
+                            .into(),
+                    );
+                }
+                target.session_id = terminal_session_id.into();
+                target.target_id = format!("terminal-{terminal_session_id}");
+                self.sessions
+                    .reconnect_terminal(session_id, previous_session_id, target)
+            },
+        )
     }
 
     pub(crate) fn continue_on_target(

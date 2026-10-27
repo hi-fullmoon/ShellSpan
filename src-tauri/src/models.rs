@@ -1802,6 +1802,30 @@ impl SessionManager {
         })
     }
 
+    /// Keep close/status changes from racing the durable conversation rebind.
+    /// Missing predecessors are expected after restart; registry failures are not.
+    pub(crate) fn with_reconnect_targets<T>(
+        &self,
+        previous: &str,
+        current: &str,
+        commit: impl FnOnce(Option<SessionTargetState>, SessionTargetState) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let guard = self
+            .registry
+            .lock()
+            .map_err(|_| "session registry poisoned".to_string())?;
+        let state = |managed: &ManagedSession| SessionTargetState {
+            terminal_kind: managed.terminal_kind,
+            identity: managed.identity.clone(),
+            status: managed.status.status,
+        };
+        let current = guard
+            .sessions
+            .get(current)
+            .ok_or("TERMINAL_RECONNECT_UNVERIFIED: current terminal was not found")?;
+        commit(guard.sessions.get(previous).map(state), state(current))
+    }
+
     pub(crate) fn set_status(&self, session_id: &str, status: StatusEvent) -> Result<(), String> {
         let mut guard = self
             .registry

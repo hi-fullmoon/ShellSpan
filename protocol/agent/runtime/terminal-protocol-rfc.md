@@ -439,9 +439,18 @@ The rejected call remains durable evidence, later calls from the same model
 step are recorded as not started, and the Agent Session fails immediately so a
 model cannot accumulate repeated failed probes against the stale target. A
 reconnect creates a new execution trust boundary while preserving the Agent
-conversation. `agent_runtime_reconnect_terminal` verifies the backend Broker's
-bounded transport ancestry and the live local/SSH identity before recording
-`session/terminal_reconnected` in the same Agent Session. Only settled root
+conversation. `agent_runtime_reconnect_terminal` verifies the live local/SSH
+identity and current execution state before recording
+`session/terminal_reconnected` in the same Agent Session. Broker-verified
+transport ancestry permits automatic rebinding. When ancestry is absent (for
+example after an application restart), an explicit restore action may bind a
+fresh connection with the same login only if the original transport is missing
+or disconnected. A still-connected or connecting original transport cannot be
+adopted this way. The terminal registry remains locked through the journal
+commit so a concurrent close or status change cannot invalidate that check.
+The current transport must be open, have no Agent lease, active command or
+pending native-input recovery, and for visible execution must have a trusted
+ready prompt. Only settled root
 Sessions with empty inboxes, settled children and reconciled native effects may
 rebind. The target's explicit project root and all conversation events remain;
 the target/transport IDs change and permission resets to `requestApproval`.
@@ -453,6 +462,10 @@ waits for an overlapping terminal close before retrying the binding.
 Rebinding neither resumes a turn nor submits input: the next explicit human
 message must inspect current execution state and must not replay earlier commands.
 Uncertain operations remain blocked for reconciliation.
+The UI preserves the original conversation and unsent draft while verifying;
+verification errors remain retryable in place and do not require a new Session.
+Same-login restoration must not fall back to creating a linked Session to
+bypass pending input, child work, approvals or uncertain execution outcomes.
 
 Focus follows the explicit replacement of its selected terminal transport
 when the profile, host, port and username remain unchanged. This includes

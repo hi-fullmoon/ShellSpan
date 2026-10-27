@@ -35,7 +35,7 @@ import {
   type AiOptimisticSubmission,
 } from '@/lib/ai/optimistic-submission';
 import { AiPreparationTimeoutError, normalizeAiSessionError, sessionArchiveErrorMessage } from '@/lib/ai/session-error';
-import { canContinueOnReconnectedTerminal, isDirectReconnectedTerminal, terminalReconnectErrorKey } from '@/lib/ai/reconnected-terminal';
+import { canContinueOnReconnectedTerminal, canVerifyTerminalContinuation, isDirectReconnectedTerminal, terminalReconnectErrorKey } from '@/lib/ai/reconnected-terminal';
 import {
   type AiConversationNode,
   type AiConversationNodeOf,
@@ -150,6 +150,7 @@ export interface AiSessionController {
   readonly submit: (gesture: 'keyboard' | 'primary', accelerated?: boolean) => void;
   readonly stop: () => void;
   readonly continueOnReconnectedTerminal: (() => void) | null;
+  readonly terminalReconnectBusy: boolean;
   readonly historicalContinuationAvailable: boolean;
   readonly historicalContinuationBusy: boolean;
   readonly historicalContinuationError: string | null;
@@ -1233,17 +1234,20 @@ export function useAiSessionController({
   const canContinueReconnectedView = scope === 'terminal' && visibleView?.snapshot.kind === 'agent'
     && canContinueOnReconnectedTerminal(visibleView.snapshot.value, activeTerminal)
     && Boolean(adapter.reconnectTerminal);
+  const canVerifyCurrentTerminal = scope === 'terminal' && visibleView?.snapshot.kind === 'agent'
+    && canVerifyTerminalContinuation(visibleView.snapshot.value, activeTerminal)
+    && Boolean(adapter.reconnectTerminal);
   const directTerminalReconnect = scope === 'terminal'
     && isDirectReconnectedTerminal(visibleView?.snapshot.value, activeTerminal);
   const canContinueHistoricalView = scope === 'terminal' && historicalTargetUnavailable
-    && !directTerminalReconnect
+    && !directTerminalReconnect && !canVerifyCurrentTerminal
     && visibleView?.snapshot.kind === 'agent'
     && Boolean(provider)
     && (focusMode ? canSwitchFocusTarget(visibleView, activeTerminal) : canContinueHistoricalConversation(visibleView.snapshot.value, activeTerminal));
   const reconnectAgentTerminal = useCallback((): void => {
     const current = viewRef.current;
     if (!adapter.reconnectTerminal || !current || !activeTerminal || terminalReconnectPending.current
-      || !canContinueOnReconnectedTerminal(current.snapshot.value, activeTerminal)) return;
+      || !canVerifyTerminalContinuation(current.snapshot.value, activeTerminal)) return;
     const terminalId = activeTerminal.sessionId;
     const previousId = current.snapshot.value.header.target!.sessionId;
     terminalReconnectPending.current = true;
@@ -1306,6 +1310,7 @@ export function useAiSessionController({
     && Boolean(terminalOccupancy && terminalOccupancy.agentSessionId !== (visibleView?.summary.id ?? composer.sessionId));
   const agentUnavailableReason = terminalConflict ? t('terminal.occupancy.submitBlocked') : visibleExecutionRequired ? t('focus.visibleRequired') : oneShotSubagent
     ? t('ai.workspace.subagents.oneShotReadOnly')
+    : canVerifyCurrentTerminal ? t(terminalReconnectBusy ? 'ai.workspace.reconnectChecking' : 'ai.workspace.reconnectAvailable')
     : canContinueHistoricalView ? terminalUnavailableReason
       : sessionProviderResolution.error
       ?? (historicalTargetUnavailable && !canContinueReconnectedView
@@ -1963,6 +1968,7 @@ export function useAiSessionController({
         && !viewRef.current?.snapshot.value.header.subagent;
       if (scope === 'terminal' && viewRef.current?.snapshot.value.header.target?.sessionId !== activeTerminal?.sessionId
         && viewRef.current?.snapshot.kind === 'agent'
+        && !canVerifyCurrentTerminal
         && (focusMode ? canSwitchFocusTarget(viewRef.current, activeTerminal) : canContinueHistoricalConversation(viewRef.current.snapshot.value, activeTerminal))) {
         startHistoricalContinuation(composerRef.current.draft);
         return;
@@ -2047,7 +2053,8 @@ export function useAiSessionController({
       });
     },
     stop: () => dispatch({ type: 'stop.requested' }),
-    continueOnReconnectedTerminal: canContinueReconnectedView ? reconnectAgentTerminal : null,
+    continueOnReconnectedTerminal: canVerifyCurrentTerminal ? reconnectAgentTerminal : null,
+    terminalReconnectBusy,
     historicalContinuationAvailable: canContinueHistoricalView,
     historicalContinuationBusy,
     historicalContinuationError,

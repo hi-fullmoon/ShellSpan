@@ -138,7 +138,7 @@ describe('AiComposerSeat Phase 4 behavior', () => {
 
   it('does not show a new-terminal continuation button after failure', () => {
     render(<AiComposerSeat phase="active" status="failed" />);
-    expect(screen.queryByRole('button', { name: 'Continue in reconnected terminal' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Verify connection and continue' })).toBeNull();
   });
 
   it('adds pasted images once without submitting the message', () => {

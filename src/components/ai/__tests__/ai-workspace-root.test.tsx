@@ -236,7 +236,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     }
     const availability = within(notices).getByRole('status', { name: 'Agent is unavailable' });
     expect(screen.getByRole('textbox')).toHaveAttribute('aria-describedby', availability.id);
-    const continuation = within(notices).getByRole('button', { name: 'Continue in reconnected terminal' });
+    const continuation = within(notices).getByRole('button', { name: 'Verify connection and continue' });
     expect(continuation).toBeVisible();
     expect(continuation.querySelector('svg')).toBeNull();
     expect(continuation).toHaveClass('h-6', 'text-[11px]');
@@ -255,8 +255,8 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     }
     const { container } = render(<ContinuedWorkspace />);
     const notices = container.querySelector<HTMLElement>('[data-slot="ai-workspace-status-notices"]')!;
-    expect(within(notices).getByText('The terminal has reconnected. Restore the binding to continue this conversation. Earlier commands will not run automatically.')).toBeVisible();
-    await user.click(within(notices).getByRole('button', { name: 'Continue in reconnected terminal' }));
+    expect(within(notices).getByText('Your history and draft are preserved. Verify the current connection and execution state to continue this conversation. Earlier commands will not run automatically.')).toBeVisible();
+    await user.click(within(notices).getByRole('button', { name: 'Verify connection and continue' }));
     expect(container.querySelector('output')).toHaveTextContent('continued');
   });
 

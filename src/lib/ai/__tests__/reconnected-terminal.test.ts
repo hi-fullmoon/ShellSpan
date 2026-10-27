@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canContinueOnReconnectedTerminal, isDirectReconnectedTerminal, terminalReconnectErrorKey } from '../reconnected-terminal';
+import { canContinueOnReconnectedTerminal, canVerifyTerminalContinuation, isDirectReconnectedTerminal, terminalReconnectErrorKey } from '../reconnected-terminal';
 import type { AgentSessionSnapshot } from '@/types/agent-session';
 import type { TerminalSession } from '@/stores/terminalStore';
 
@@ -26,6 +26,35 @@ const terminal: TerminalSession = {
 };
 
 describe('reconnected terminal Agent continuation', () => {
+  it('offers explicit verification when a fresh same-login connection has no ancestry', () => {
+    const fresh = { ...terminal, profileId: 'recreated-profile', replacesSessionId: undefined, brokerReplacedSessionIds: undefined };
+    expect(canVerifyTerminalContinuation(snapshot, fresh)).toBe(true);
+    expect(canContinueOnReconnectedTerminal(snapshot, fresh)).toBe(false);
+    expect(canVerifyTerminalContinuation(snapshot, { ...fresh, host: 'other.example.com' })).toBe(false);
+    expect(canVerifyTerminalContinuation(snapshot, { ...fresh, username: 'other-user' })).toBe(false);
+    expect(canVerifyTerminalContinuation(snapshot, { ...fresh, port: 2222 })).toBe(false);
+    expect(canVerifyTerminalContinuation(snapshot, { ...fresh, status: 'disconnected' })).toBe(false);
+    expect(canVerifyTerminalContinuation(snapshot, { ...fresh, sessionId: 'old' })).toBe(false);
+    expect(canVerifyTerminalContinuation({ ...snapshot, archived: true }, fresh)).toBe(false);
+  });
+
+  it('does not mistake verification eligibility for authorization to resume uncertain execution', () => {
+    const unsettled = { ...snapshot, uncertainNativeEffects: true };
+    expect(canVerifyTerminalContinuation(unsettled, terminal)).toBe(true);
+    expect(canContinueOnReconnectedTerminal(unsettled, terminal)).toBe(false);
+    expect(terminalReconnectErrorKey('TERMINAL_RECONNECT_UNVERIFIED: requires the same connected identity'))
+      .toBe('ai.workspace.reconnectUnverified');
+    expect(terminalReconnectErrorKey('TERMINAL_RECONNECT_SOURCE_ACTIVE: previous terminal is still available'))
+      .toBe('ai.workspace.reconnectSourceActive');
+  });
+
+  it('waits for the trusted shell prompt before automatically restoring visible execution', () => {
+    const visible = { ...snapshot, header: { ...snapshot.header, executionSurface: 'boundTerminal' as const } };
+    expect(canContinueOnReconnectedTerminal(visible, terminal)).toBe(false);
+    expect(canContinueOnReconnectedTerminal(visible, { ...terminal, integrationState: 'ready', promptReady: false })).toBe(false);
+    expect(canContinueOnReconnectedTerminal(visible, { ...terminal, integrationState: 'ready', promptReady: true })).toBe(true);
+  });
+
   it('keeps restored history visible without offering an unverified rebind', () => {
     const restored = { ...terminal, brokerReplacedSessionIds: [] };
     expect(isDirectReconnectedTerminal(snapshot, restored)).toBe(true);

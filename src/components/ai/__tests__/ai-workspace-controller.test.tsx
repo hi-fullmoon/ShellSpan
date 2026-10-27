@@ -1092,7 +1092,7 @@ describe('AiWorkspaceController', () => {
       snapshot: { kind: 'agent', value: { ...base.snapshot.value, status: 'failed', ended: true } },
     };
     render(<AiWorkspaceRoot scope="terminal" view={failed} readOnlySession />);
-    expect(screen.queryByRole('button', { name: 'Continue in reconnected terminal' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Verify connection and continue' })).toBeNull();
   });
 
   it('renews the subscription when history selects the current session again', async () => {

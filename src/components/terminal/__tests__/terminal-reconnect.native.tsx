@@ -8,6 +8,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
 import { invokeCreateLocalSession, invokeCloseSession, invokeCreateAgentRuntimeSession,
   invokeGetAgentRuntimeSession, invokeReconnectAgentTerminal, invokeArchiveAgentRuntimeSession,
+  invokeResumeAgentRuntime, invokeAgentRuntimeFollowup, invokeMutateAgentRuntimeInbox,
   invokeDeleteAgentRuntimeSession, invokeGetCommittedAgentRuntimeEvents, invokeGetTerminalBrokerSnapshot } from '@/lib/ipc/tauri';
 import { buildSessionCreateRequest, invokeCreateSession, invokeCheckHostKey, invokeTrustHost, invokeRemoveKnownHost } from '@/lib/ipc/tauri';
 import { useProfileStore } from '@/stores/profileStore';
@@ -22,13 +23,14 @@ import { readTerminalCurrentDirectory } from '@/lib/terminal/terminal-current-di
 import { useCloseTerminal } from '@/hooks/useCloseTerminal';
 import { useReconnectSession } from '@/hooks/useReconnectSession';
 import { useToastStore } from '@/stores/toastStore';
+import { canContinueOnReconnectedTerminal, canVerifyTerminalContinuation } from '@/lib/ai/reconnected-terminal';
 import '@/styles/base.css';
 
 function assert(value: unknown, message: string): asserts value { if (!value) throw new Error(message); }
-async function eventually(check: () => boolean, message: string) {
+async function eventually(check: () => boolean, message: string | (() => string)) {
   const deadline = Date.now() + 30_000;
   while (!check()) {
-    assert(Date.now() < deadline, message);
+    assert(Date.now() < deadline, typeof message === 'function' ? message() : message);
     await new Promise(resolve => setTimeout(resolve, 25));
   }
 }
@@ -42,20 +44,22 @@ function NativeAgent() {
   const targetConnected = useTerminalStore(state => state.sessions.some(
     session => session.sessionId === focusTarget && session.status === 'connected',
   ));
-  if (focusReconnect) return <AiWorkspaceRoot scope="terminal" mode="agent" view={agent.view}
+  return <section data-agent-panel className="flex h-full min-h-0 min-w-0 flex-col"><AiWorkspaceRoot scope="terminal" mode="agent" view={agent.view}
     composerState={agent.composer} canStartAgent={agent.canStartAgent} readOnlySession={agent.readOnlySession}
+    draft={agent.composer.draft} onDraftChange={agent.setDraft}
+    historicalTargetUnavailable={agent.historicalTargetUnavailable}
     agentUnavailableReason={agent.agentUnavailableReason}
     onContinueOnReconnectedTerminal={agent.continueOnReconnectedTerminal ?? undefined}
+    terminalReconnectBusy={agent.terminalReconnectBusy}
     historicalContinuationAvailable={agent.historicalContinuationAvailable}
-    executionSurfaceNotice={!targetConnected ? <FocusNoTarget /> : undefined} />;
-  return <div data-agent-id={agent.view?.summary.id}>{agent.composer.draft}</div>;
+    executionSurfaceNotice={focusReconnect && !targetConnected ? <FocusNoTarget /> : undefined} /></section>;
 }
 function NativeWorkspace({ panel }: { panel: boolean }) {
   closeTerminal = useCloseTerminal();
   reconnectTerminal = useReconnectSession();
   const session = useTerminalStore(state => state.sessions.find(item => item.sessionId === state.activeSessionId) ?? null);
-  return <TooltipProvider><TerminalControllerLayer /><TerminalPane activeSession={session} />
-    {panel && <NativeAgent />}<Toaster /></TooltipProvider>;
+  return <TooltipProvider><TerminalControllerLayer /><div className="grid h-full min-h-0 grid-cols-2">
+    <TerminalPane activeSession={session} />{panel && <NativeAgent />}</div><Toaster /></TooltipProvider>;
 }
 
 async function verify() {
@@ -137,7 +141,13 @@ async function verify() {
         'Focus kept the removed transport ID after the terminal reconnected');
       assert(live()!.brokerReplacedSessionIds?.includes(previous), 'Real broker rollover lost verified ancestry');
       await eventually(() => agent?.view?.snapshot.value.header.target?.sessionId === replacement,
-        `Agent did not rebind to native replacement: ${agent?.composer.lastError?.message ?? 'no error'}`);
+        () => `Agent did not rebind to native replacement: ${JSON.stringify({
+          error: agent?.composer.lastError?.message, busy: agent?.terminalReconnectBusy,
+          target: agent?.view?.snapshot.value.header.target?.sessionId, replacement,
+          status: agent?.view?.status, recovery: agent?.view?.snapshot.value.recovery,
+          autoEligible: canContinueOnReconnectedTerminal(agent?.view?.snapshot.value, live()),
+          verifyEligible: canVerifyTerminalContinuation(agent?.view?.snapshot.value, live()),
+        })}`);
       assert(agent!.view!.summary.id === agentId, 'Reconnect replaced the Agent conversation ID');
       assert(agent!.composer.draft === 'Keep this draft through terminal reconnect', 'Reconnect lost the composer draft');
       assert(!agent!.readOnlySession, 'Reconnected Agent remained read-only');
@@ -168,6 +178,13 @@ async function verify() {
       && agent.view.snapshot.value.header.target?.sessionId === live()?.sessionId, 'Closed panel did not restore and rebind its predecessor conversation');
     const unrelated = await invokeCreateLocalSession(80, 24);
     terminals.add(unrelated.sessionId);
+    const selectedBeforeUnrelated = live()!.sessionId;
+    if (!focusReconnect) {
+      flushSync(() => {
+        useTerminalStore.getState().addSession(unrelated);
+        useTerminalStore.getState().setActiveSession(selectedBeforeUnrelated);
+      });
+    }
     let expectedReconnects = 3;
     if (focusReconnect) {
       flushSync(() => useTerminalStore.getState().addSession(unrelated));
@@ -201,10 +218,13 @@ async function verify() {
       flushSync(() => useTerminalStore.getState().setActiveSession(useFocusStore.getState().targetSessionId));
       await readProject();
     }
-    let rejected = false;
+    await eventually(() => Boolean(useTerminalStore.getState().sessions.find(item => item.sessionId === unrelated.sessionId)?.promptReady),
+      'Unrelated native PTY did not reach a trusted prompt');
+    let rejected = '';
     try { await invokeReconnectAgentTerminal({ sessionId: agentId, previousSessionId: live()!.sessionId, terminalSessionId: unrelated.sessionId }); }
-    catch { rejected = true; }
-    assert(rejected, 'Backend accepted an unrelated native PTY as a reconnect');
+    catch (error) { rejected = String(error); }
+    assert(rejected.includes(sshFixture ? 'TERMINAL_RECONNECT_UNVERIFIED' : 'TERMINAL_RECONNECT_SOURCE_ACTIVE'),
+      `Backend did not enforce the original login and live-source gate: ${rejected}`);
     const events = await invokeGetCommittedAgentRuntimeEvents({ sessionId: agentId, limit: 100 });
     assert(events.events.filter(event => event.type === 'session/terminal_reconnected').length === expectedReconnects, 'Native rebind events were not durably committed');
     assert(!events.events.some(event => event.type === 'turn/start' || event.type === 'request/start'), 'Reconnect started execution without human input');
@@ -222,12 +242,10 @@ async function verify() {
     assert(useToastStore.getState().toasts.length === toastsBeforeClose, 'Closing a disconnected terminal reported a false error');
     assert((await invokeGetAgentRuntimeSession({ sessionId: agentId })).ended, 'Closing must settle the associated Agent');
     await invokeCloseSession(closing.sessionId);
-    if (focusReconnect) {
-      // Startup restoration runs only in an empty workspace. The extra live
-      // tab used above must be closed before exercising that separate path.
-      await invokeCloseSession(unrelated.sessionId);
-      flushSync(() => useTerminalStore.getState().removeSession(unrelated.sessionId));
-    }
+    // Startup restoration runs only in an empty workspace. Close the extra
+    // live tab before exercising that separate path.
+    await invokeCloseSession(unrelated.sessionId);
+    flushSync(() => useTerminalStore.getState().removeSession(unrelated.sessionId));
 
     // Restore exactly the persisted workspace fields: broker identities do not
     // survive a process restart. Exercise the production Enter reconnect path.
@@ -243,11 +261,87 @@ async function verify() {
     await eventually(() => agent?.view?.summary.id === agentId && agent.readOnlySession,
       'Restored terminal did not retain the earlier conversation as read-only history');
     assert(live()!.brokerReplacedSessionIds?.length === 0, 'Restored transport was treated as a verified replacement');
-    assert(!agent!.continueOnReconnectedTerminal, 'Restored transport offered an impossible rebind');
+    assert(agent!.continueOnReconnectedTerminal, 'Restored transport did not offer explicit verification');
+    assert(canVerifyTerminalContinuation(agent!.view!.snapshot.value, live()), 'Same-login restore was not eligible for verification');
+    assert(!canContinueOnReconnectedTerminal(agent!.view!.snapshot.value, live()), 'Lost ancestry enabled automatic rebinding');
     assert(!agent!.composer.lastError, 'Restored transport attempted an invalid automatic rebind');
     const restoredEvents = await invokeGetCommittedAgentRuntimeEvents({ sessionId: agentId, limit: 100 });
     assert(restoredEvents.events.filter(event => event.type === 'session/terminal_reconnected').length === expectedReconnects,
       'Restoring workspace history rebound the old conversation');
+    await eventually(() => Boolean(live()?.promptReady), 'Restored shell did not reach its integrated prompt');
+    assert(!agent!.historicalContinuationAvailable, 'Restore could bypass verification by creating a linked Session');
+    const panel = document.querySelector<HTMLElement>('[data-agent-panel]')!;
+    for (const locale of ['zh-CN', 'en-US'] as const) {
+      await initI18n(locale);
+      flushSync(() => useAppStore.setState({ locale }));
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      const label = locale === 'zh-CN' ? '验证当前连接并继续' : 'Verify connection and continue';
+      const button = [...panel.querySelectorAll('button')].find(item => item.textContent === label);
+      assert(button, `Missing readable restore action in ${locale}`);
+      button.focus();
+      assert(document.activeElement === button, 'Restore action was not keyboard focusable');
+      for (const width of [640, 340]) {
+        panel.style.width = `${width}px`;
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const notice = button.closest<HTMLElement>('[data-slot="alert"]')!;
+        assert(notice.getAttribute('data-size') === 'sm', 'Restore replaced the shared compact Alert');
+        assert(button.getBoundingClientRect().right <= notice.getBoundingClientRect().right + 1,
+          `Restore action overflowed its notice in ${locale} at ${width}px`);
+        assert(button.getBoundingClientRect().height === 24, 'Restore changed the shared compact Button height');
+        assert(!panel.textContent?.includes(locale === 'zh-CN' ? '右上角新建会话' : 'Use New conversation'),
+          'Restore still required a new conversation');
+      }
+      panel.style.removeProperty('width');
+    }
+    const current = live()!.sessionId;
+    await invokeResumeAgentRuntime({ sessionId: agentId });
+    const queuedId = `paused-${crypto.randomUUID()}`;
+    const queued = await invokeAgentRuntimeFollowup({ sessionId: agentId, messageId: queuedId,
+      clientSubmissionId: queuedId, content: 'Verify the connection only after this paused input is reviewed.', paused: true });
+    assert(queued.inbox.nextTurn.some(item => item.messageId === queuedId), 'Paused input was not durably admitted');
+    let queueError = '';
+    try { await invokeReconnectAgentTerminal({ sessionId: agentId, previousSessionId: closing.sessionId, terminalSessionId: current }); }
+    catch (error) { queueError = String(error); }
+    assert(queueError.includes('settled root Session'), `Verification bypassed pending input: ${queueError}`);
+    assert(JSON.stringify(await invokeGetAgentRuntimeSession({ sessionId: agentId })) === JSON.stringify(queued),
+      'Rejected pending-input verification changed the journal');
+    await invokeMutateAgentRuntimeInbox({ sessionId: agentId, expectedRevision: queued.eventCount,
+      clientOperationId: `remove-${queuedId}`, mutation: { type: 'remove', itemId: queuedId } });
+    const beforeVerification = await invokeGetAgentRuntimeSession({ sessionId: agentId });
+    const controller = terminalRegistry.get(current)!;
+    assert(await controller.writeUserInput(powershell ? 'Start-Sleep -Seconds 5\r' : 'sleep 5\r'),
+      'Could not start a real command to verify the current terminal busy gate');
+    await eventually(() => !live()?.promptReady, 'Real command did not make the shell busy');
+    flushSync(() => agent!.continueOnReconnectedTerminal!());
+    assert(agent!.terminalReconnectBusy, 'Restore did not expose its pending state');
+    const checking = [...panel.querySelectorAll('button')].find(item => item.textContent === 'Verifying connection and execution state…');
+    assert(checking?.disabled, 'Restore action remained enabled during verification');
+    await eventually(() => !agent!.terminalReconnectBusy && Boolean(agent!.composer.lastError),
+      'Busy execution did not produce an actionable verification error');
+    assert(agent!.composer.lastError!.message.includes('execution outcomes to resolve'), 'Busy execution error did not explain how to recover');
+    assert(agent!.readOnlySession && agent!.view!.snapshot.value.header.target?.sessionId === closing.sessionId,
+      'Failed verification changed the original binding');
+    assert(agent!.composer.draft === 'Keep this draft through terminal reconnect', 'Failed verification discarded the draft');
+    assert(JSON.stringify(await invokeGetAgentRuntimeSession({ sessionId: agentId })) === JSON.stringify(beforeVerification),
+      'Failed verification mutated the persisted conversation');
+    await eventually(() => Boolean(live()?.promptReady), 'Real verification command did not finish');
+    const verifyButton = [...panel.querySelectorAll('button')].find(item => item.textContent === 'Verify connection and continue');
+    assert(verifyButton, 'Failed verification did not retain a retry action');
+    verifyButton.click();
+    await eventually(() => agent?.view?.snapshot.value.header.target?.sessionId === current && !agent.terminalReconnectBusy,
+      'Explicit verification did not restore the original conversation');
+    assert(agent!.view!.summary.id === agentId && !agent!.readOnlySession, 'Verified restore replaced the conversation or left it read-only');
+    assert(!agent!.composer.lastError, 'Successful retry retained the old verification error');
+    assert(agent!.composer.draft === 'Keep this draft through terminal reconnect', 'Verified restore discarded the draft');
+    const rebound = await invokeGetAgentRuntimeSession({ sessionId: agentId });
+    assert(rebound.header.taskId === before.header.taskId && rebound.header.goal === before.header.goal, 'Explicit restore replaced the task');
+    assert(rebound.header.permissionMode === 'requestApproval', 'Explicit restore retained prior authorization');
+    const verifiedEvents = await invokeGetCommittedAgentRuntimeEvents({ sessionId: agentId, limit: 100 });
+    assert(verifiedEvents.events.filter(event => event.type === 'session/terminal_reconnected').length === expectedReconnects + 1,
+      'Explicit verification did not record exactly one durable rebind');
+    assert(!verifiedEvents.events.some(event => event.type === 'turn/start' || event.type === 'request/start' || event.type === 'tool/execution'),
+      'Verification replayed old work or started a model turn');
+    await readProject();
   } finally {
     root.unmount();
     if (created) {

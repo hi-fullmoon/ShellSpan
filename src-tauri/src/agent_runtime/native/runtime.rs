@@ -195,6 +195,33 @@ impl NativeToolEngine {
             .is_replacement_transport(previous, current)
     }
 
+    pub(crate) fn verify_reconnect_transport(
+        &self,
+        previous: &str,
+        current: &str,
+        bound_terminal: bool,
+    ) -> Result<bool, String> {
+        let snapshot = self.terminal_broker.snapshot(Some(current))?;
+        let Some(session) = snapshot.session else {
+            return if bound_terminal || snapshot.rollout.enabled {
+                Err("TERMINAL_RECONNECT_UNVERIFIED: current transport is unavailable".into())
+            } else {
+                Ok(false)
+            };
+        };
+        if !session.open || session.transport_session_id != current {
+            return Err("TERMINAL_RECONNECT_UNVERIFIED: current transport is closed".into());
+        }
+        let capabilities = self.terminal_execution_capabilities(current)?;
+        if session.active_command_id.is_some()
+            || capabilities.input_recovery_required
+            || (bound_terminal && !capabilities.prompt_ready)
+        {
+            return Err("TERMINAL_RECONNECT_BUSY: current terminal execution must settle".into());
+        }
+        self.is_replacement_transport(previous, current)
+    }
+
     pub(crate) fn terminal_broker_attachment(
         &self,
         transport_session_id: &str,
