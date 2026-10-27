@@ -315,11 +315,17 @@ async function verify() {
       await reportProgress(`Starting real ${id.startsWith('focus-') ? 'Focus' : 'Terminal'} Agent through the configured model route.`);
       await invokeStartAgentRuntime({ sessionId: id, selection });
     }
-    useTerminalTaskNavigation.getState().setRequest({ workspace: 'terminal', agentSessionId: ids[0], terminalSessionId: terminalId });
-    await eventually(() => workspaceRoot(false)?.dataset.sessionId === ids[0], 'Terminal task did not open in the production UI');
-    flushSync(() => { useFocusStore.getState().enter(); useFocusStore.getState().setTarget(session.sessionId); });
-    useTerminalTaskNavigation.getState().setRequest({ workspace: 'focus', agentSessionId: ids[1], terminalSessionId: terminalId });
-    await eventually(() => workspaceRoot(true)?.dataset.sessionId === ids[1], 'Focus task did not open in the production UI');
+    const idle = await invokeCreateLocalSession(100, 25);
+    idleTerminalId = idle.sessionId;
+    flushSync(() => useTerminalStore.getState().addSession(idle));
+    const idleAgentId = `agent-contention-${crypto.randomUUID()}`;
+    await invokeCreateAgentRuntimeSession({ sessionId: idleAgentId, taskId: idleAgentId,
+      goal: 'Keep an idle conversation while switching terminal tabs.', executionSurface: 'boundTerminal',
+      target: { kind: 'local', targetId: `terminal-${idle.sessionId}`, sessionId: idle.sessionId },
+    });
+    created.push(idleAgentId);
+    useTerminalTaskNavigation.getState().setRequest({ workspace: 'terminal', agentSessionId: idleAgentId, terminalSessionId: idle.sessionId });
+    await eventually(() => workspaceRoot(false)?.dataset.sessionId === idleAgentId, 'Idle Agent conversation did not open');
     const markerA = `contention-a-${crypto.randomUUID()}`;
     const markerB = `contention-b-${crypto.randomUUID()}`;
     const command = (marker: string, delay: number) => powershell ? `Start-Sleep -Seconds ${delay}; [Console]::WriteLine('${marker.slice(0,16)}'+'${marker.slice(16)}')` : `sleep ${delay}; printf '%s%s\\n' '${marker.slice(0, 16)}' '${marker.slice(16)}'`;
@@ -330,6 +336,40 @@ async function verify() {
     await eventually(() => agentTerminalLeaseState.get(terminalId!)?.agentSessionId === ids[0]
       && agentTerminalLeaseState.get(terminalId!)?.terminalOwned === true, 'First Agent never acquired the real PTY', 180_000);
     assert(await invokeGetAgentTerminalOwner(terminalId) === ids[0], 'Backend owner differs from first Agent');
+    const transientWarnings: string[] = [];
+    const observer = new MutationObserver(records => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (node.textContent?.includes(t('terminal.occupancy.submitBlocked'))) {
+            transientWarnings.push(node.textContent);
+          }
+        }
+      }
+    });
+    observer.observe(document.getElementById('root')!, { subtree: true, childList: true });
+    const activateTab = (id: string): void => {
+      const tab = document.querySelector<HTMLElement>(`[data-session-tab="${id}"]`);
+      assert(tab, 'Production terminal tab is missing');
+      flushSync(() => tab.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 })));
+    };
+    try {
+      // First visit waits for native history; subsequent visits restore cached state.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        activateTab(terminalId);
+        await eventually(() => workspaceRoot(false)?.dataset.sessionId === ids[0], 'The running Agent was not restored after switching tabs');
+        await new Promise(requestAnimationFrame);
+        assert(agentTerminalLeaseState.get(terminalId)?.agentSessionId === ids[0], 'Tab regression requires an active real terminal owner');
+        assert(!workspaceRoot(false)?.textContent?.includes(t('terminal.occupancy.submitBlocked')), 'The owning Agent must not show a terminal conflict');
+        if (attempt < 2) {
+          activateTab(idle.sessionId);
+          await eventually(() => workspaceRoot(false)?.dataset.sessionId === idleAgentId, 'The idle Agent was not restored');
+        }
+      }
+      assert(transientWarnings.length === 0, 'Switching from an idle Agent to its running terminal owner flashed a conflict warning');
+    } finally { observer.disconnect(); }
+    flushSync(() => { useFocusStore.getState().enter(); useFocusStore.getState().setTarget(session.sessionId); });
+    useTerminalTaskNavigation.getState().setRequest({ workspace: 'focus', agentSessionId: ids[1], terminalSessionId: terminalId });
+    await eventually(() => workspaceRoot(true)?.dataset.sessionId === ids[1], 'Focus task did not open in the production UI');
     await reportProgress('First real Agent owns the PTY; checking competing submission and task navigation.');
     await eventually(() => !!document.querySelector('[data-slot="focus-terminal"] [data-testid="agent-terminal-lease-bar"]'), 'Terminal header must display terminal ownership');
     for (const split of [0.3, 0.6]) {
