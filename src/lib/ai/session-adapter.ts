@@ -107,6 +107,9 @@ export interface AiSessionView {
   readonly inbox: readonly AiInboxItem[];
   readonly pendingApproval: AiPendingApproval | null;
   readonly status: AiSessionStatus;
+  readonly statusReason?: string;
+  /** Latest committed task recovery state, including updates after the initial snapshot. */
+  readonly recovery?: import('@/types/agent-session').AgentSessionRecoveryState;
   readonly error: AiSessionError | null;
   /** Client synchronization failure; does not change the backend task status. */
   readonly syncError?: AiSessionError;

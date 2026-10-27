@@ -1,5 +1,6 @@
 import type { AppSection } from '@/types';
 import { latestTerminalBusyAttempt } from '@/lib/ai/terminal-busy-feedback';
+import { terminalExecutionRecovery } from '@/lib/ai/terminal-execution-recovery';
 import { useFocusStore } from '@/stores/focusStore';
 import { FocusNoTarget } from '@/components/focus/focus-no-target';
 import { FocusControls } from '@/components/focus/focus-controls';
@@ -41,6 +42,10 @@ export function AiWorkspaceController({
   const activeTerminalStatus = useTerminalStore((state) => state.sessions.find(
     (candidate) => candidate.sessionId === activeTerminalId,
   )?.status);
+  const terminalReconnecting = useTerminalStore((state) => state.sessions.find(
+    candidate => candidate.sessionId === activeTerminalId,
+  )?.reconnecting ?? false);
+  const terminalRecovery = !controller.readOnlySession && terminalExecutionRecovery(controller.view);
   const activeTerminalIntegrationState = useTerminalStore((state) => state.sessions.find(
     (candidate) => candidate.sessionId === activeTerminalId,
   )?.integrationState);
@@ -136,6 +141,7 @@ export function AiWorkspaceController({
       terminalConflict={controller.terminalConflict}
       historyScopeLabel={controller.historyScopeLabel}
       terminalConnected={activeTerminalStatus === 'connected'}
+      terminalReconnecting={terminalReconnecting}
       readOnlySession={controller.readOnlySession}
       historicalTargetUnavailable={controller.historicalTargetUnavailable}
       providerLabel={controller.providerLabel}
@@ -185,8 +191,12 @@ export function AiWorkspaceController({
       onStop={controller.stop}
       onContinueOnReconnectedTerminal={controller.continueOnReconnectedTerminal ?? undefined}
       onReconnectTerminal={scope === 'terminal' && activeTerminalId
-        && (activeTerminalStatus === 'disconnected' || activeTerminalStatus === 'error')
-        ? () => { void reconnectSession(activeTerminalId); } : undefined}
+        && (terminalRecovery || activeTerminalStatus === 'disconnected' || activeTerminalStatus === 'error')
+        ? () => {
+          // Stopping must settle first; reconnect must never bypass an active recovery gate.
+          if (terminalReconnecting || (terminalRecovery && (terminalRecovery.needsStop || controller.composer.phase === 'stopping'))) return;
+          void reconnectSession(activeTerminalId);
+        } : undefined}
       historicalContinuationAvailable={controller.historicalContinuationAvailable}
       historicalContinuationBusy={controller.historicalContinuationBusy}
       historicalContinuationError={controller.historicalContinuationError}

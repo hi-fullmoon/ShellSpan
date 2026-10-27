@@ -1,0 +1,36 @@
+{
+  "statusReason": "terminalExecutionRecoveryRequired",
+  "recovery": {
+    "status": "required",
+    "summary": "TERMINAL_INPUT_RECOVERY_REQUIRED: terminal input is quarantined; reconnect and verify execution state before continuing; no automatic replay"
+  },
+  "toolResult": {
+    "version": 5,
+    "sessionId": "agent-064530d4-e210-4c7f-88ee-764e1ce7ba4b-mvq5kzsm-t18gg2q",
+    "seq": 2207,
+    "timeUnixMs": 1793073936761,
+    "turnId": "turn-43a872c2e4464be1a72336bf900ac17d",
+    "stepId": "step-a089ca2168584c16aa7ff81cc88bd477",
+    "type": "tool/result",
+    "data": {
+      "callId": "call-08cfd0ca9509927ad36fa5385cce76218e985bd5235c3864facec02e3f656514-1",
+      "name": "wait_process",
+      "status": "completed",
+      "summary": "Native shell job observation completed; output is shared with the terminal.",
+      "durationMs": 19517,
+      "data": {
+        "exitCode": null,
+        "managementBlocked": "terminal management unconfirmed: TERMINAL_INPUT_RECOVERY_REQUIRED: private descriptor was not confirmed; no automatic replay; no automatic replay",
+        "noAutoReplay": true,
+        "outputScope": "sharedTerminal",
+        "processHandle": "job-1bc99e73fa4145cab59c63486bbc0490",
+        "state": "running",
+        "stderr": "",
+        "stdout": "",
+        "stopRequested": false,
+        "waitCancelled": false,
+        "waitTimedOut": false
+      }
+    }
+  }
+}

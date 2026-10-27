@@ -22,6 +22,7 @@ import type {
 } from '@/types/agent-session';
 import { AGENT_SESSION_EVENT_VERSION } from '@/types/agent-session';
 import { terminalLoginScopeKey } from '@/lib/ai/terminal-login-scope';
+import terminalRecoveryCapture from '@/test/fixtures/terminal-execution-recovery.json';
 
 const provider = {
   id: 'provider-test',
@@ -95,6 +96,39 @@ it('projects model, permission, and execution surface changes over an older snap
   const view = agentSessionView({ snapshot: snapshot(), events, lastCommittedSeq: 3, hasTerminalEvent: false });
   expect(view.snapshot.value.header).toMatchObject({ modelSelection: selected, permissionMode: 'operator', executionSurface: 'boundTerminal' });
   expect(view.activityNodes.some(node => node.kind === 'unknown')).toBe(false);
+});
+
+it('preserves the committed status reason through full and incremental view projection', () => {
+  const project = createAgentSessionViewProjector();
+  const source = [...agentSessionWaitingApprovalEventFixture];
+  for (const data of [
+    { status: 'waiting', reason: 'toolApprovalPending' },
+    { status: 'running', reason: 'toolBoundaryResolved' },
+    { status: 'waiting', reason: 'waitingForNetwork' },
+    { status: 'running', reason: undefined },
+  ] as const) {
+    source.push(sessionEvent(source.length, { type: 'agent/status', data }));
+    const state = { snapshot: snapshot(), events: [...source], lastCommittedSeq: source.length - 1, hasTerminalEvent: false };
+    expect(agentSessionView(state)).toMatchObject({ status: data.status, statusReason: data.reason });
+    expect(project(state)).toEqual(agentSessionView(state));
+  }
+});
+
+it('projects recovery updates over a stale snapshot and preserves the gate after stopping', () => {
+  const project = createAgentSessionViewProjector();
+  const events: AgentSessionEvent[] = [sessionEvent(0, { type: 'task/state', data: {
+    status: 'waiting', phase: 'reconciliation',
+    recovery: { status: 'required', summary: terminalRecoveryCapture.recovery.summary },
+  } }), sessionEvent(1, { type: 'agent/status', data: {
+    status: 'waiting', reason: terminalRecoveryCapture.statusReason,
+  } })];
+  const state = () => ({ snapshot: snapshot(), events: [...events], lastCommittedSeq: events.length - 1, hasTerminalEvent: false });
+  expect(project(state()).recovery).toEqual(terminalRecoveryCapture.recovery);
+  events.push(sessionEvent(2, { type: 'agent/status', data: { status: 'idle', reason: 'stoppedByUser' } }));
+  expect(project(state()).recovery).toEqual(terminalRecoveryCapture.recovery);
+  events.push(sessionEvent(3, { type: 'task/state', data: { status: 'idle', recovery: { status: 'none' } } }));
+  expect(project(state()).recovery).toEqual({ status: 'none' });
+  expect(project(state())).toEqual(agentSessionView(state()));
 });
 
 it('projects a reconnected target and resets permission without changing conversation identity', () => {

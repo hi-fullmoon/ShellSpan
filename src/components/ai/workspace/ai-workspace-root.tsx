@@ -29,6 +29,8 @@ import { AiEmptyHero } from './ai-empty-hero';
 import { AiConversation } from './ai-conversation';
 import { AiFailureRecoveryContext } from './ai-failure-recovery';
 import { latestFailureRecovery } from '@/lib/ai/failure-recovery';
+import { terminalExecutionRecovery } from '@/lib/ai/terminal-execution-recovery';
+import { AiTerminalRecoveryNotice } from './ai-terminal-recovery-notice';
 import { aiAskConversationNodeRenderers } from './ai-conversation-node-seat';
 import { AiSessionHeader } from './ai-session-header';
 import { AiSessionBrowser } from './ai-session-browser';
@@ -267,6 +269,7 @@ export interface AiWorkspaceRootProps {
   readonly terminalConflict?: boolean;
   readonly historyScopeLabel?: string | null;
   readonly terminalConnected?: boolean;
+  readonly terminalReconnecting?: boolean;
   readonly readOnlySession?: boolean;
   readonly historicalTargetUnavailable?: boolean;
   readonly onDraftChange?: (value: string) => void;
@@ -357,6 +360,7 @@ export function AiWorkspaceRoot({
   terminalConflict = false,
   historyScopeLabel = null,
   terminalConnected = canStartAgent,
+  terminalReconnecting = false,
   readOnlySession = false,
   historicalTargetUnavailable = false,
   onDraftChange,
@@ -428,6 +432,8 @@ export function AiWorkspaceRoot({
     ? t('agent.emptyDescription')
     : t('ai.workbench.empty');
   const surfaceMode = mode ?? 'agent';
+  const terminalRecovery = surfaceMode === 'agent' && !readOnlySession && !historicalTargetUnavailable
+    ? terminalExecutionRecovery(view) : null;
   const sessionTarget = view?.snapshot.value.header.target;
   const historicalTargetLabel = sessionTarget?.kind === 'local'
     ? t('ai.workspace.localTarget')
@@ -635,6 +641,8 @@ export function AiWorkspaceRoot({
               submittedOperationId={submittedOperationId}
               imageSubmissionId={imageSubmissionId}
               status={status}
+              statusReason={view?.statusReason ?? (view?.pendingQuestion ? 'waitingForUserQuestion'
+                : view?.pendingApproval ? 'toolApprovalPending' : undefined)}
               throughSeq={view?.throughSeq ?? null}
               initialAnchor={scrollAnchor}
               onAnchorChange={onScrollAnchorChange}
@@ -664,6 +672,9 @@ export function AiWorkspaceRoot({
                 data-slot="ai-workspace-status-notices"
                 className="flex w-full min-w-0 shrink-0 flex-col gap-1.5 empty:hidden"
               >
+                {terminalRecovery && <AiTerminalRecoveryNotice id={availabilityHintId} recovery={terminalRecovery}
+                  stopping={activeComposerState?.phase === 'stopping'} reconnecting={terminalReconnecting}
+                  onStop={onStop} onReconnect={onReconnectTerminal} />}
                 {historicalContinuationAvailable && (
                   <Alert variant="info" size="sm" role="status">
                     <InfoIcon aria-hidden="true" />
@@ -701,7 +712,7 @@ export function AiWorkspaceRoot({
                   </Alert>
                 )}
                 <AiNoticeTransition>
-                  {(agentUnavailableReason || onContinueOnReconnectedTerminal) ? (
+                  {!terminalRecovery && (agentUnavailableReason || onContinueOnReconnectedTerminal) ? (
                     <Alert id={availabilityHintId} variant={terminalConflict ? 'warning' : 'info'} size="sm" role="status" aria-label={t('agent.availability.title')} className={terminalConflict ? undefined
                       : '[--alert-icon-offset:0px] [&:has(button)>svg]:translate-y-1'}>
                       {terminalConflict ? <TriangleAlertIcon aria-hidden="true" /> : <InfoIcon aria-hidden="true" />}
@@ -750,9 +761,9 @@ export function AiWorkspaceRoot({
           composerState={activeComposerState}
           inbox={surfaceMode === 'agent' && !readOnlySession ? view?.inbox : undefined}
           taskSteps={surfaceMode === 'agent' && !readOnlySession ? taskSteps : undefined}
-          taskPlanActive={view?.taskPlanActive}
+          taskPlanActive={terminalRecovery ? false : view?.taskPlanActive}
           queueMutation={surfaceMode === 'agent' && !readOnlySession ? queueMutation : undefined}
-          queueMutable={Boolean(view && !readOnlySession && !view.summary.archived && (!view.snapshot.value.ended || view.status === 'failed'))}
+          queueMutable={Boolean(view && !terminalRecovery && !readOnlySession && !view.summary.archived && (!view.snapshot.value.ended || view.status === 'failed'))}
           announcement={announcement}
           pendingApproval={surfaceMode === 'agent' && !readOnlySession ? view?.pendingApproval : undefined}
           pendingQuestion={readOnlySession ? undefined : view?.pendingQuestion}
@@ -769,7 +780,7 @@ export function AiWorkspaceRoot({
           approvalArguments={approvalArguments}
           approvalArgumentsLoading={approvalArgumentsLoading}
           approvalArgumentsError={approvalArgumentsError}
-          unavailableReason={agentUnavailableReason}
+          unavailableReason={terminalRecovery ? t('ai.workspace.terminalRecovery.title') : agentUnavailableReason}
           availabilityHintId={availabilityHintId}
           onDraftChange={onDraftChange}
           onSubmit={onSubmit ? (content) => {

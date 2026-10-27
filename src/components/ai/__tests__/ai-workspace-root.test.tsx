@@ -328,12 +328,12 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
   });
 
   it('does not show a live waiting indicator for a read-only historical session', () => {
-    const view = agentView('waiting');
+    const view = { ...agentView('waiting'), statusReason: 'waitingForNetwork' };
     const { container, rerender } = render(
       <AiWorkspaceRoot view={view} scope="terminal" />,
     );
 
-    expect(container.querySelector('[data-ai-running-indicator]')).toHaveTextContent('Waiting');
+    expect(container.querySelector('[data-ai-running-indicator]')).toHaveTextContent('Waiting for network recovery');
     rerender(<AiWorkspaceRoot view={view} scope="terminal" readOnlySession historicalTargetUnavailable />);
     expect(container.querySelector('[data-ai-running-indicator]')).toBeNull();
     expect(screen.getByText('Check nginx now.')).toBeVisible();
@@ -744,13 +744,14 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
       .toHaveAttribute('data-phase', 'active');
   });
 
-  it('keeps the process hierarchy without a separate processing row', () => {
+  it('keeps the process hierarchy and a trailing processing indicator while the session continues', () => {
     const view = runningHierarchyView();
     const { container, rerender } = render(
       <AiWorkspaceRoot view={view} scope="workbench" />,
     );
 
-    expect(container.querySelectorAll('[data-ai-running-indicator]')).toHaveLength(0);
+    expect(container.querySelectorAll('[data-ai-running-indicator]')).toHaveLength(1);
+    expect(container.querySelector('[data-ai-running-indicator]')).toHaveTextContent('Processing');
     expect(container.querySelectorAll('[data-ai-node-kind="turnProcess"]')).toHaveLength(1);
     expect(container.querySelectorAll('[data-ai-node-kind="reasoning"]')).toHaveLength(0);
     expect(container.querySelectorAll('[data-tool-state="running"]')).toHaveLength(0);
@@ -768,7 +769,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
       />,
     );
 
-    expect(container.querySelectorAll('[data-ai-running-indicator]')).toHaveLength(0);
+    expect(container.querySelectorAll('[data-ai-running-indicator]')).toHaveLength(1);
     expect(container.querySelector('[data-ai-node-key="test:additional-flow-node"]')).toBeInTheDocument();
   });
 
@@ -1036,7 +1037,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
 
     expect(screen.queryByRole('tab')).toBeNull();
     expect(screen.getByRole('log', { name: 'AI conversation' })).toBeVisible();
-    expect(screen.queryByText('Processing')).toBeNull();
+    expect(screen.getByText('Processing')).toBeVisible();
   });
 
   it('gives every icon-only workspace action an accessible name and tooltip', () => {

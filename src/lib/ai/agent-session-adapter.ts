@@ -350,13 +350,16 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
   const activity = projected?.activity ?? projectAgentActivity(state.events);
   const nodes = projected?.nodes ?? projectAgentChatNodes(state.events);
   const header = { ...state.snapshot.header };
+  let recovery: import('@/types/agent-session').AgentSessionRecoveryState = state.snapshot.recovery;
   for (const event of events) {
+    if (event.type === 'task/state' && event.data.recovery) recovery = event.data.recovery;
     if (event.type === 'session/model_selected') header.modelSelection = event.data.provider;
     if (event.type === 'session/permission_changed') header.permissionMode = event.data.mode;
     if (event.type === 'session/execution_surface_changed') header.executionSurface = event.data.surface;
     if (event.type === 'session/terminal_reconnected') {
       header.target = event.data.target;
       header.permissionMode = 'requestApproval';
+      recovery = { status: 'none' };
     }
   }
   const task = activity.plan === undefined
@@ -387,6 +390,8 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
     pendingApproval: pendingApproval(nodes),
     pendingQuestion: projectQuestions(events).find((q) => q.status === 'pending') ?? null,
     status: activity.status,
+    statusReason: activity.statusReason,
+    recovery,
     error: activity.status === 'failed' || activity.status === 'cancelled' ? terminalError(nodes) : null,
     syncError: state.syncError ? normalizeAiSessionError(state.syncError) : undefined,
     syncRecovery: state.syncRecovery,

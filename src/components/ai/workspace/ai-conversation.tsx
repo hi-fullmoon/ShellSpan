@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Marker, MarkerContent, MarkerIcon } from '@/components/ui/marker';
 import { BrainIcon } from 'lucide-react';
 import { useI18n } from '@/hooks/useI18n';
+import type { LocaleKey } from '@/locales';
 import { cn } from '@/lib/utils';
 import type { AiConversationNode, AiConversationNodeOf, AiSessionStatus } from '@/lib/ai/conversation-node';
 import type { AiScrollAnchor } from '@/lib/ai/panel-route';
@@ -14,14 +15,17 @@ import { AiConversationNodeSeat, isUserVisibleContextInjection, type AiConversat
 const statusItemClassName = '[content-visibility:visible] [contain-intrinsic-size:none]';
 const HISTORY_PAGE_SIZE = 80;
 
-const PendingResponseIndicator = memo(function PendingResponseIndicator({ processing }: { scrollItemClassName: string; processing: boolean }) {
+const PendingResponseIndicator = memo(function PendingResponseIndicator({ processing, continuing = false }: {
+  scrollItemClassName: string; processing: boolean; continuing?: boolean;
+}) {
   const { t } = useI18n();
   return (
     <Marker
       className={cn('ai-turn-status inline-flex min-h-8 w-fit self-start items-center whitespace-nowrap', processing ? 'gap-0' : 'gap-1')}
       role="status"
       aria-live="polite"
-      data-ai-thinking-indicator=""
+      data-ai-thinking-indicator={continuing ? undefined : ''}
+      data-ai-running-indicator={continuing ? '' : undefined}
       data-ai-processing={processing || undefined}
     >
       {processing ? <AiProcessingStatus /> : <>
@@ -32,16 +36,30 @@ const PendingResponseIndicator = memo(function PendingResponseIndicator({ proces
   );
 });
 
-const AgentWaitingIndicator = memo(function AgentWaitingIndicator(_: { readonly scrollItemClassName: string }) {
+function waitingLabelKey(reason: string | undefined): LocaleKey {
+  switch (reason) {
+    case 'waitingForNetwork': return 'agent.session.waiting.network';
+    case 'toolApprovalPending': return 'agent.session.waiting.approval';
+    case 'waitingForUserQuestion': return 'agent.session.waiting.answer';
+    case 'waitingForTool': return 'agent.session.waiting.tool';
+    case 'toolSchedulerRecoveryRequired': return 'agent.session.waiting.toolRecovery';
+    case 'terminalExecutionRecoveryRequired': return 'agent.session.waiting.terminalRecovery';
+    case 'ephemeralInputRecoveryRequired': return 'agent.session.waiting.inputRecovery';
+    case 'authorizedCallRecoveryAvailable': return 'agent.session.waiting.resume';
+    default: return 'agent.session.waiting.unknown';
+  }
+}
+
+const AgentWaitingIndicator = memo(function AgentWaitingIndicator({ reason }: { readonly reason?: string }) {
   const { t } = useI18n();
   return (
     <Marker
-      className="ai-turn-status inline-flex min-h-6.5 w-fit self-start items-center gap-1 whitespace-nowrap"
+      className="ai-turn-status inline-flex min-h-6.5 max-w-full w-fit self-start items-center gap-1"
       role="status"
       aria-live="polite"
       data-ai-running-indicator=""
     >
-      <MarkerContent className="shimmer">{t('agent.session.status.waiting')}</MarkerContent>
+      <MarkerContent className={reason === 'terminalExecutionRecoveryRequired' ? undefined : 'shimmer'}>{t(waitingLabelKey(reason))}</MarkerContent>
     </Marker>
   );
 });
@@ -81,6 +99,7 @@ export interface AiConversationProps {
   readonly submittedOperationId?: string;
   readonly imageSubmissionId?: string;
   readonly status: AiSessionStatus;
+  readonly statusReason?: string;
   readonly throughSeq: number | null;
   readonly initialAnchor?: AiScrollAnchor;
   readonly onAnchorChange?: (anchor: AiScrollAnchor) => void;
@@ -97,6 +116,7 @@ export const AiConversation = memo(function AiConversation({
   runningIndicator = 'agent',
   pending = false,
   status,
+  statusReason,
   throughSeq,
   initialAnchor,
   onAnchorChange,
@@ -171,13 +191,18 @@ export const AiConversation = memo(function AiConversation({
     !visibleResponseStarted &&
     !processResponseStarted &&
     !latestProcess?.hasEndBoundary;
+  const lastNode = allNodes[allNodes.length - 1];
+  const processingAtTail = lastNode?.kind === 'turnProcess' && lastNode.status === 'running'
+    && lastNode.children.some(node => node.kind !== 'contextInjection' || isUserVisibleContextInjection(node));
+  const showAgentProcessing = status === 'running' && runningIndicator === 'agent' && !processingAtTail;
   // Keep the trailing status in the last message row. A separate status item
   // would hide an inserted user row from the primitive's append detection.
   const indicator =
-    showAskThinking || showAgentThinking ? (
-      <PendingResponseIndicator processing={showAgentThinking} scrollItemClassName={statusItemClassName} />
+    showAskThinking || showAgentProcessing ? (
+      <PendingResponseIndicator processing={showAgentProcessing} continuing={showAgentProcessing && !showAgentThinking}
+        scrollItemClassName={statusItemClassName} />
     ) : status === 'waiting' && runningIndicator === 'agent' ? (
-      <AgentWaitingIndicator scrollItemClassName={statusItemClassName} />
+      <AgentWaitingIndicator reason={statusReason} />
     ) : null;
   return (
     <MessageScroller
