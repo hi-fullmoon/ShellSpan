@@ -40,6 +40,7 @@ import { AiToolDetails } from './ai-tool-details';
 import { AiArtifactDetails } from './ai-artifact-details';
 import type { AiQueueMutationState } from './use-ai-session-controller';
 import { AiWorkspaceErrorNotices } from './ai-workspace-error-notices';
+import { AiNoticeTransition } from './ai-notice-transition';
 
 export interface AiWorkspaceSubmitInput {
   readonly content: string;
@@ -699,23 +700,25 @@ export function AiWorkspaceRoot({
                     <AlertDescription>{t('ai.workspace.announce.waitingQuestion')}</AlertDescription>
                   </Alert>
                 )}
-                {(agentUnavailableReason || onContinueOnReconnectedTerminal) && (
-                  <Alert id={availabilityHintId} variant={terminalConflict ? 'warning' : 'info'} size="sm" role="status" aria-label={t('agent.availability.title')} className={terminalConflict ? undefined
-                    : '[--alert-icon-offset:0px] [&:has(button)>svg]:translate-y-1'}>
-                    {terminalConflict ? <TriangleAlertIcon aria-hidden="true" /> : <InfoIcon aria-hidden="true" />}
-                    <AlertDescription className="flex min-w-0 flex-wrap items-start gap-1 break-words [&:has(>button)>span]:py-1">
-                      <span className="min-w-0 flex-1 basis-48">{agentUnavailableReason
-                        ?? t(onContinueOnReconnectedTerminal
-                          ? 'ai.workspace.reconnectAvailable' : 'ai.workspace.sessions.previousTerminalReadOnly')}</span>
-                      {!terminalConflict && (onReconnectTerminal ? <Button type="button" variant="ghost" size="xs" className="text-[11px]"
-                        onClick={onReconnectTerminal}>{t('ai.workspace.status.reconnect')}</Button>
-                        : onContinueOnReconnectedTerminal ? <Button type="button" variant="ghost" size="xs" className="text-[11px]"
-                        onClick={onContinueOnReconnectedTerminal}>{t('ai.workspace.continueOnReconnectedTerminal')}</Button>
-                        : !readOnlySession && canStartAgent && onOpenModel && <Button type="button" variant="ghost" size="xs" className="text-[11px]"
-                          onClick={onOpenModel}>{t('ai.workspace.status.openSettings')}</Button>)}
-                    </AlertDescription>
-                  </Alert>
-                )}
+                <AiNoticeTransition>
+                  {(agentUnavailableReason || onContinueOnReconnectedTerminal) ? (
+                    <Alert id={availabilityHintId} variant={terminalConflict ? 'warning' : 'info'} size="sm" role="status" aria-label={t('agent.availability.title')} className={terminalConflict ? undefined
+                      : '[--alert-icon-offset:0px] [&:has(button)>svg]:translate-y-1'}>
+                      {terminalConflict ? <TriangleAlertIcon aria-hidden="true" /> : <InfoIcon aria-hidden="true" />}
+                      <AlertDescription className="flex min-w-0 flex-wrap items-start gap-1 break-words [&:has(>button)>span]:py-1">
+                        <span className="min-w-0 flex-1 basis-48">{agentUnavailableReason
+                          ?? t(onContinueOnReconnectedTerminal
+                            ? 'ai.workspace.reconnectAvailable' : 'ai.workspace.sessions.previousTerminalReadOnly')}</span>
+                        {!terminalConflict && (onReconnectTerminal ? <Button type="button" variant="ghost" size="xs" className="text-[11px]"
+                          onClick={onReconnectTerminal}>{t('ai.workspace.status.reconnect')}</Button>
+                          : onContinueOnReconnectedTerminal ? <Button type="button" variant="ghost" size="xs" className="text-[11px]"
+                          onClick={onContinueOnReconnectedTerminal}>{t('ai.workspace.continueOnReconnectedTerminal')}</Button>
+                          : !readOnlySession && canStartAgent && onOpenModel && <Button type="button" variant="ghost" size="xs" className="text-[11px]"
+                            onClick={onOpenModel}>{t('ai.workspace.status.openSettings')}</Button>)}
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+                </AiNoticeTransition>
               </div>
 
             </>

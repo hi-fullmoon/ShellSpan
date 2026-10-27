@@ -7,6 +7,31 @@
   margin-inline: auto;
 }
 
+.ai-workspace-error-notices:not(:has([data-slot='alert'])),
+[data-slot='ai-workspace-status-notices']:not(:has([data-slot='alert'])) {
+  display: none;
+}
+
+.ai-notice-transition {
+  height: var(--collapsible-panel-height);
+  opacity: 1;
+  overflow: clip;
+  transition: height 180ms ease-out, opacity 180ms ease-out;
+}
+
+.ai-notice-transition[data-ending-style] {
+  height: 0;
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-notice-transition {
+    transition: none;
+    animation-duration: 0s !important;
+    transition-duration: 0s !important;
+  }
+}
+
 .ai-composer-seat [data-slot='ai-composer-notices'] [data-slot='alert-description'] {
   text-wrap: wrap;
 }

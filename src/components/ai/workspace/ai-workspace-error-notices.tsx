@@ -4,6 +4,7 @@ import { aiErrorMessage } from '@/lib/ai/error-message';
 import type { AiComposerState } from '@/lib/ai/composer-machine';
 import type { AiSessionError, AiSessionSyncRecovery } from '@/lib/ai/session-adapter';
 import { AiErrorNotice } from './ai-error-notice';
+import { AiNoticeTransition } from './ai-notice-transition';
 
 export interface AiWorkspaceErrorNoticesProps {
   readonly composerState?: AiComposerState;
@@ -24,7 +25,6 @@ export function AiWorkspaceErrorNotices({
   onRetryFailedDraft,
 }: AiWorkspaceErrorNoticesProps): React.ReactNode {
   const { t, locale } = useI18n();
-  if (!syncError && !composerState?.lastError && !composerState?.failedDrafts.length) return null;
 
   return (
     <div
@@ -50,24 +50,26 @@ export function AiWorkspaceErrorNotices({
           </span>
         </AiErrorNotice>
       )}
-      {composerState?.lastError && !composerState.failedDrafts.some(failed => failed.error.deliveryUnknown && failed.error === composerState.lastError) && (
-        <AiErrorNotice
-          title={t('ai.workspace.recovery.title')}
-          action={onDismissError && (
-            <Button
-              variant="ghost"
-              size="xs"
-              className="text-[11px]"
-              aria-label={t('ai.workspace.recovery.dismiss')}
-              onClick={onDismissError}
-            >
-              {t('ai.workspace.recovery.dismiss')}
-            </Button>
-          )}
-        >
-          {aiErrorMessage(composerState.lastError.message, t)}
-        </AiErrorNotice>
-      )}
+      <AiNoticeTransition>
+        {composerState?.lastError && !composerState.failedDrafts.some(failed => failed.error.deliveryUnknown && failed.error === composerState.lastError) ? (
+          <AiErrorNotice
+            title={t('ai.workspace.recovery.title')}
+            action={onDismissError && (
+              <Button
+                variant="ghost"
+                size="xs"
+                className="text-[11px]"
+                aria-label={t('ai.workspace.recovery.dismiss')}
+                onClick={onDismissError}
+              >
+                {t('ai.workspace.recovery.dismiss')}
+              </Button>
+            )}
+          >
+            {aiErrorMessage(composerState.lastError.message, t)}
+          </AiErrorNotice>
+        ) : null}
+      </AiNoticeTransition>
       {composerState?.failedDrafts.map((failed) => (
         <AiErrorNotice
           key={failed.id}
