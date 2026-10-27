@@ -654,7 +654,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
       </MessageScrollerViewport>
       <Tooltip>
         <TooltipTrigger render={<MessageScrollerButton
-          className={cn('group/latest-message', atBottom && 'hidden')}
+          className={cn('group/latest-message data-[active=false]:hidden', atBottom && 'hidden')}
           aria-label={t('ai.scrollToLatest')}
           onClick={(event) => {
             event.preventDefault();

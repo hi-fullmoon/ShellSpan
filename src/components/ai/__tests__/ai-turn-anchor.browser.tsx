@@ -4,6 +4,7 @@ import { useReducer, useState } from 'react';
 import { AiWorkspaceRoot } from '../workspace/ai-workspace-root';
 import { createAiComposerState, reduceAiComposer, type AiComposerEvent } from '@/lib/ai/composer-machine';
 import { AiConversation } from '../workspace/ai-conversation';
+import { Message, MessageScroller } from '../chat-primitives';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { taskTokenBudgetEvidence } from '@/test/fixtures/task-token-budget';
 import { initI18n } from '@/locales';
@@ -46,6 +47,15 @@ function PagedHistory() {
 }
 await initI18n('en-US');
 Object.assign(window, {
+  renderScrollingDocument(text: string, generating: boolean) {
+    flushSync(() => root.render(
+      <main className="ai-workspace-root ai-panel-shell flex h-dvh min-h-0 w-full flex-col" data-ai-scope="workbench">
+        <MessageScroller followKey={text} generating={generating}>
+          <Message role="assistant"><div className="whitespace-pre-wrap">{text}</div></Message>
+        </MessageScroller>
+      </main>,
+    ));
+  },
   renderExistingComposer() { flushSync(() => root.render(<ExistingComposer />)); },
   recordedEventTypes: taskTokenBudgetEvidence.continuedEvents.map(event => event.type),
   recordedUserIndices: taskTokenBudgetEvidence.continuedEvents.flatMap((event, index) =>

@@ -33,8 +33,6 @@
 .ai-turn-stats time {
   font-size: 12px;
   line-height: 20px;
-  /* Match the optical correction on the adjacent usage and duration labels. */
-  translate: 0 1px;
 }
 
 .ai-turn-stat-panel {
