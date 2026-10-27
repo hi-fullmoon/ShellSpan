@@ -6,7 +6,7 @@ try {
   for (const { locale, action, longText } of ['zh-CN', 'en-US'].flatMap(locale =>
     ['reconnect', 'continue', 'settings', 'none', 'history'].flatMap(action =>
       [false, true].map(longText => ({ locale, action, longText }))))) {
-  const page = await browser.newPage();
+  const page = await browser.newPage({ deviceScaleFactor: 2, colorScheme: 'light' });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(process.env.SHELLSPAN_TEST_URL ?? 'http://localhost:1420');
@@ -100,6 +100,7 @@ try {
     }
     const availability = statusNotices.getByRole('status', { name: locale === 'zh-CN' ? 'Agent 当前不可用' : 'Agent is unavailable' });
     if (action === 'none' || action === 'history') {
+      await page.evaluate(() => document.fonts.ready);
       const geometry = await availability.evaluate(el => {
         const icon = el.querySelector(':scope > svg').getBoundingClientRect();
         const text = el.querySelector('[data-slot="alert-description"] > span');
@@ -107,7 +108,7 @@ try {
         return { offset: icon.y + icon.height / 2 - box.y - parseFloat(getComputedStyle(text).lineHeight) / 2,
           gap: box.x - icon.right };
       });
-      assert.equal(geometry.offset, action === 'history' ? 0 : -2, `Availability icon keeps its first-line alignment for ${action} at ${width}px`);
+      assert.equal(geometry.offset, 0, `Availability icon is centered on the first text line for ${action} at ${width}px`);
       assert.equal(geometry.gap, 4);
       await availability.screenshot({ path: `/tmp/shellspan-availability-${action}-${locale}-${width}${longText ? '-long' : ''}.png` });
     }
