@@ -785,6 +785,7 @@ fi
     let job_helpers = crate::terminal_jobs::POSIX_HELPERS;
     format!(
         r#"readonly __shellspan_parser_executable=$BASH
+readonly __shellspan_stty_executable=$(builtin type -P stty)
 {system_profile}{login_profile}__shellspan_control_path={fifo_path}
 __shellspan_integration_active=1
 __shellspan_command_active=0
@@ -796,6 +797,8 @@ __shellspan_clear_sequence=0
 __shellspan_previous_prompt_command=${{PROMPT_COMMAND-}}
 __shellspan_prompt_tty_state=()
 __shellspan_prompt_echo_control=0
+__shellspan_receiver_tty=
+__shellspan_native_quarantined=0
 __shellspan_debug_prompt_echo_control=0
 __shellspan_prompt_interrupt_label='^C'
 __shellspan_previous_exit_trap=$(trap -p EXIT)
@@ -808,7 +811,7 @@ __shellspan_stty() {{
   # with the child's redundant call on macOS. Command substitution keeps this
   # private helper in the shell's group; exec avoids another Bash child job.
   # User commands, prompt hooks and their monitor setting remain untouched.
-  __shellspan_stty_output=$(exec stty "$@" </dev/tty) || __shellspan_stty_status=$?
+  __shellspan_stty_output=$(exec "$__shellspan_stty_executable" "$@" </dev/tty) || __shellspan_stty_status=$?
   builtin printf '%s' "$__shellspan_stty_output"
   return "$__shellspan_stty_status"
 }}
@@ -817,6 +820,12 @@ __shellspan_restore_prompt_tty() {{
     if __shellspan_stty "${{__shellspan_prompt_tty_state[@]}}" 2>/dev/null; then
       __shellspan_prompt_tty_state=()
     fi
+  fi
+}}
+__shellspan_restore_receiver_tty() {{
+  if [[ -n $__shellspan_receiver_tty ]]; then
+    __shellspan_stty "$__shellspan_receiver_tty" 2>/dev/null
+    __shellspan_receiver_tty=
   fi
 }}
 __shellspan_return_status() {{
@@ -840,12 +849,14 @@ __shellspan_run_previous_trap() {{
 __shellspan_on_exit() {{
   local __shellspan_exit_status=$?
   __shellspan_prompt_ready=0
+  __shellspan_restore_receiver_tty
   __shellspan_restore_prompt_tty
   __shellspan_run_previous_trap "$__shellspan_previous_exit_trap" "$__shellspan_exit_status" "$@"
   return "$__shellspan_exit_status"
 }}
 __shellspan_on_interrupt() {{
   local __shellspan_int_status=$?
+  __shellspan_restore_receiver_tty
   if [[ $__shellspan_command_active -eq 1 && -n "$__shellspan_previous_int_trap" ]]; then
     __shellspan_emit U
   fi
@@ -933,6 +944,7 @@ __shellspan_emit() {{
 }}
 __shellspan_prompt_cycle() {{
   local __shellspan_status=$?
+  __shellspan_restore_receiver_tty
   __shellspan_private_descriptor=
   if [[ -n ${{__shellspan_job_armed_handle-}} ]]; then
     local __shellspan_identity="${{__shellspan_control_path}}.job.${{__shellspan_job_armed_handle}}.identity" __shellspan_pid
@@ -981,7 +993,7 @@ __shellspan_prompt_cycle() {{
   # Keep its existing bindings until the next real PROMPT_COMMAND cycle.
   if [[ ${{1-}} != native-reject ]]; then
     __shellspan_native_input=0
-    if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 1) )) && [[ -o emacs || -o vi ]] && [[ -z "$__shellspan_previous_int_trap" && $__shellspan_parser_executable == /* ]]; then
+    if (( ! __shellspan_native_quarantined && (BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 1)) )) && [[ -o emacs || -o vi ]] && [[ -z "$__shellspan_previous_int_trap" && $__shellspan_parser_executable == /* && $__shellspan_stty_executable == /* ]]; then
       # Older Readline leaves the tty's VDISCARD active on macOS: it consumes
       # Ctrl-O before bind-x sees it. Ctrl-R reaches the private receiver.
       if bind '"\C-x\C-v":quoted-insert' && bind '"\C-xn":"\C-x\C-v\C-j"' && bind '"\C-xt":"\C-x\C-v\C-i"' && bind '"\C-xr":"\C-x\C-v\C-m"' && bind -x '"\C-x\C-a":__shellspan_native_checkpoint' && bind -x '"\C-x\C-d":__shellspan_discard_native' && bind -x '"\C-x\C-g":__shellspan_capture_line' && bind '"\C-x\C-e":accept-line' && bind -x '"\C-x\C-r":__shellspan_private_receive' && bind -x '"\C-x\C-k":__shellspan_private_commit'; then
@@ -1057,6 +1069,26 @@ __shellspan_native_checkpoint() {{
   __shellspan_emit A "$READLINE_LINE"
 }}
 __shellspan_native_receive() {{
+  __shellspan_receiver_tty=$(__shellspan_stty -g 2>/dev/null) || return
+  __shellspan_stty -echo 2>/dev/null || {{ __shellspan_restore_receiver_tty; return; }}
+  __shellspan_native_receive_frame
+  local __shellspan_receive_status=$?
+  __shellspan_restore_receiver_tty
+  return "$__shellspan_receive_status"
+}}
+__shellspan_quarantine_native() {{
+  # A timed-out frame may still be arriving over SSH. Never hand its tail to
+  # Readline. Keep consuming silently until transport closure;
+  # the broker requires a fresh terminal generation before further input.
+  __shellspan_native_quarantined=1
+  # Ctrl-C cannot establish that all bytes in flight have arrived. Keep this
+  # failed frame isolated even across interrupts; recovery requires reconnect.
+  trap '' INT
+  local __shellspan_discard
+  while IFS= builtin read -r -s -n 1 __shellspan_discard </dev/tty; do :; done
+  return 130
+}}
+__shellspan_native_receive_frame() {{
   local __shellspan_async_redraw=0
   [[ -n $(builtin jobs -p -r) ]] && __shellspan_async_redraw=1
   __shellspan_emit A "$READLINE_LINE"
@@ -1065,10 +1097,10 @@ __shellspan_native_receive() {{
   local __shellspan_rows __shellspan_columns __shellspan_without_newlines __shellspan_line_count __shellspan_row
   local __shellspan_deadline=$((SECONDS + 2)) __shellspan_remaining
   if ! __shellspan_read_private 65 2 __shellspan_descriptor; then
-    __shellspan_emit M '' "$READLINE_LINE"; return
+    __shellspan_emit M '' "$READLINE_LINE"; __shellspan_quarantine_native; return
   fi
   if [[ ${{#__shellspan_descriptor}} != 65 || ${{__shellspan_descriptor:0:1}} != b || ${{__shellspan_descriptor:1}} == *[!0-9a-f]* ]]; then
-    __shellspan_emit M '' "$READLINE_LINE"; return
+    __shellspan_emit M '' "$READLINE_LINE"; __shellspan_quarantine_native; return
   fi
   __shellspan_count=$((16#${{__shellspan_descriptor:1:5}}))
   __shellspan_source_count=$((16#${{__shellspan_descriptor:6:4}}))
@@ -1076,7 +1108,7 @@ __shellspan_native_receive() {{
   __shellspan_columns=$((16#${{__shellspan_descriptor:14:4}}))
   __shellspan_remaining=$((__shellspan_deadline - SECONDS))
   if (( __shellspan_count < 4 || __shellspan_count > 131072 || __shellspan_count % 4 || __shellspan_source_count > 32768 || __shellspan_source_count >= __shellspan_count || __shellspan_source_count % 4 || __shellspan_remaining <= 0 || __shellspan_rows < 1 || __shellspan_rows > 1000 || __shellspan_columns < 1 || __shellspan_columns > 1000 )) || ! __shellspan_read_private "$__shellspan_count" "$__shellspan_remaining" __shellspan_encoded; then
-    __shellspan_emit M "$__shellspan_descriptor" "$READLINE_LINE"; return
+    __shellspan_emit M "$__shellspan_descriptor" "$READLINE_LINE"; __shellspan_quarantine_native; return
   fi
   builtin printf -v __shellspan_decoded '%b' "${{__shellspan_encoded:__shellspan_source_count}}"
   if (( __shellspan_source_count )); then
@@ -1190,7 +1222,7 @@ __shellspan_preexec() {{
     __shellspan_debug_prompt_echo_control=$__shellspan_prompt_echo_control
   fi
   case "$__shellspan_debug_command" in
-    __shellspan_prompt_cycle|__shellspan_capture_line|__shellspan_accept_native|__shellspan_native_receive|__shellspan_read_private\ *|__shellspan_native_frame_checkpoint\ *|__shellspan_private_receive|__shellspan_private_commit|__shellspan_native_checkpoint|__shellspan_discard_native|__shellspan_preexec|__shellspan_on_exit|__shellspan_on_exit\ *|__shellspan_on_interrupt|__shellspan_on_interrupt\ *) return ;;
+    __shellspan_prompt_cycle|__shellspan_restore_receiver_tty|__shellspan_capture_line|__shellspan_accept_native|__shellspan_native_receive|__shellspan_native_receive_frame|__shellspan_quarantine_native|__shellspan_read_private\ *|__shellspan_native_frame_checkpoint\ *|__shellspan_private_receive|__shellspan_private_commit|__shellspan_native_checkpoint|__shellspan_discard_native|__shellspan_preexec|__shellspan_on_exit|__shellspan_on_exit\ *|__shellspan_on_interrupt|__shellspan_on_interrupt\ *) return ;;
   esac
   if [[ $__shellspan_prompt_ready -eq 1 && ${{BASH_SUBSHELL:-0}} -eq 0 ]]; then
     local __shellspan_line
@@ -1262,10 +1294,12 @@ add-zle-hook-widget line-init __shellspan_line_init
     let job_helpers = crate::terminal_jobs::POSIX_HELPERS;
     format!(
         r#"typeset -gr __shellspan_parser_executable={parser_executable}
+typeset -gr __shellspan_stty_executable=$(builtin whence -p stty)
 {user_rc}typeset -gr __shellspan_control_path={fifo_path}
 typeset -gi __shellspan_integration_active=1
 typeset -gi __shellspan_command_active=0
 typeset -gi __shellspan_native_pending=0
+typeset -gi __shellspan_native_quarantined=0
 typeset -gi __shellspan_clear_sequence=0
 typeset -g __shellspan_native_line=
 __shellspan_emit() {{
@@ -1309,7 +1343,7 @@ __shellspan_precmd() {{
 }}
 __shellspan_publish_native_capabilities() {{
   if [[ -o interactivecomments ]]; then __shellspan_emit C 1; else __shellspan_emit C 0; fi
-  if [[ -o zle && -n $__shellspan_parser_executable ]] && bindkey '^X^V' quoted-insert && bindkey -s '^Xn' '^X^V^J' && bindkey -s '^Xt' '^X^V^I' && bindkey -s '^Xr' '^X^V^M' && bindkey '^X^A' __shellspan_native_checkpoint && bindkey '^X^D' __shellspan_discard_native && bindkey '^X^E' __shellspan_accept_native; then
+  if [[ $__shellspan_native_quarantined == 0 && -o zle && -n $__shellspan_parser_executable && $__shellspan_stty_executable == /* ]] && bindkey '^X^V' quoted-insert && bindkey -s '^Xn' '^X^V^J' && bindkey -s '^Xt' '^X^V^I' && bindkey -s '^Xr' '^X^V^M' && bindkey '^X^A' __shellspan_native_checkpoint && bindkey '^X^D' __shellspan_discard_native && bindkey '^X^E' __shellspan_accept_native; then
     __shellspan_emit I 1
     __shellspan_emit H 1
     if zmodload zsh/datetime && bindkey '^X^O' __shellspan_private_receive && bindkey '^X^K' __shellspan_private_commit && bindkey '^X^B' __shellspan_native_receive; then
@@ -1413,6 +1447,23 @@ __shellspan_native_frame_checkpoint() {{
   __shellspan_emit M "$1" "$BUFFER"
 }}
 __shellspan_native_receive() {{
+  local __shellspan_receiver_tty
+  __shellspan_receiver_tty=$("$__shellspan_stty_executable" -g </dev/tty 2>/dev/null) || return
+  "$__shellspan_stty_executable" -echo </dev/tty 2>/dev/null || return
+  {{
+    __shellspan_native_receive_frame
+  }} always {{
+    "$__shellspan_stty_executable" "$__shellspan_receiver_tty" </dev/tty 2>/dev/null
+  }}
+}}
+__shellspan_quarantine_native() {{
+  __shellspan_native_quarantined=1
+  trap '' INT
+  local __shellspan_discard
+  while read -r -s -k 1 __shellspan_discard; do :; done
+  return 130
+}}
+__shellspan_native_receive_frame() {{
   __shellspan_native_redraw_before_accept=0
   local __shellspan_slot
   if zmodload zsh/parameter; then
@@ -1430,16 +1481,19 @@ __shellspan_native_receive() {{
   local -F 6 __shellspan_deadline=$(( EPOCHREALTIME + 2.0 )) __shellspan_remaining
   if ! read -r -s -k 65 -t 2 __shellspan_descriptor; then
     __shellspan_native_frame_checkpoint ''
+    __shellspan_quarantine_native
     return
   fi
   if [[ ${{#__shellspan_descriptor}} != 65 || ${{__shellspan_descriptor[1]}} != e || ${{__shellspan_descriptor[2,-1]}} == *[!0-9a-f]* ]]; then
     __shellspan_native_frame_checkpoint ''
+    __shellspan_quarantine_native
     return
   fi
   __shellspan_count=$((16#${{__shellspan_descriptor[2,5]}}))
   __shellspan_remaining=$(( __shellspan_deadline - EPOCHREALTIME ))
   if (( __shellspan_count < 4 || __shellspan_count > 36864 || __shellspan_count % 4 || __shellspan_remaining <= 0 )) || ! read -r -s -k "$__shellspan_count" -t "$__shellspan_remaining" __shellspan_encoded; then
     __shellspan_native_frame_checkpoint "$__shellspan_descriptor"
+    __shellspan_quarantine_native
     return
   fi
   builtin printf -v __shellspan_decoded '%b' "$__shellspan_encoded"
@@ -2017,4 +2071,9 @@ fn parse_shell(value: &str) -> Result<TerminalShellKind, String> {
 #[cfg(test)]
 mod tests {
     include!("tests/terminal_integration.rs");
+
+    #[cfg(unix)]
+    mod late_native_frame {
+        include!("tests/terminal_late_native_frame.rs");
+    }
 }

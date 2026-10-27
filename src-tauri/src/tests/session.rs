@@ -1,5 +1,9 @@
     use super::*;
 
+    mod terminal_recovery_tests {
+        include!("session_terminal_recovery.rs");
+    }
+
     #[test]
     fn initial_directory_input_quotes_paths_and_restores_echo() {
         assert_eq!(
@@ -477,7 +481,9 @@
     }
 
     struct RemoteFixtureTerminal {
-        _known_hosts: tempfile::TempDir,
+        _known_hosts: Option<tempfile::TempDir>,
+        socket: std::net::TcpStream,
+        username: String,
         session: Session,
         shell_channel: Channel,
         integration: Option<RemoteSshShellIntegration>,
@@ -495,15 +501,15 @@
             predecessor: Option<&str>,
             broker: crate::terminal_broker::TerminalSessionBroker,
         ) -> Self {
-            use crate::terminal_broker::TerminalGeometry;
-
             let mut connection = crate::execution::fixture::isolated_ssh_connection();
             connection.username = username.to_string();
             let (known_hosts, known_hosts_path) =
                 crate::connection::trusted_known_hosts_fixture(&connection.host, connection.port);
+            let stream = crate::connection::connect_tcp_stream(&connection.host, connection.port)
+                .expect("connect to isolated SSH fixture");
+            let socket = stream.try_clone().unwrap();
             let session = crate::connection::open_authenticated_session(
-                crate::connection::connect_tcp_stream(&connection.host, connection.port)
-                    .expect("connect to isolated SSH fixture"),
+                stream,
                 &connection.username,
                 connection.auth_method,
                 connection.password.as_deref(),
@@ -514,6 +520,27 @@
                 Some(&known_hosts_path),
             )
             .expect("authenticate to isolated SSH fixture");
+            Self::from_session(
+                Some(known_hosts),
+                socket,
+                session,
+                username,
+                transport_id,
+                predecessor,
+                broker,
+            )
+        }
+
+        fn from_session(
+            known_hosts: Option<tempfile::TempDir>,
+            socket: std::net::TcpStream,
+            session: Session,
+            username: &str,
+            transport_id: &str,
+            predecessor: Option<&str>,
+            broker: crate::terminal_broker::TerminalSessionBroker,
+        ) -> Self {
+            use crate::terminal_broker::TerminalGeometry;
             let integration = RemoteSshShellIntegration::prepare(&session, username)
                 .expect("prepare remote integration before interactive-shell startup");
             let integration_id = integration.integration_id.clone();
@@ -544,6 +571,8 @@
             session.set_blocking(false);
             let mut fixture = Self {
                 _known_hosts: known_hosts,
+                socket,
+                username: username.into(),
                 session,
                 shell_channel,
                 integration: Some(integration),

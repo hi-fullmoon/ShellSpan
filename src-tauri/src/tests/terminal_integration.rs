@@ -1205,41 +1205,6 @@
                 );
             }
         }
-        if shell == TerminalShellKind::Bash && expected_native_input && !checkpoint_failure {
-            // A genuinely truncated frame must time out and release the real
-            // tty reader before the next user command, with no extra Enter.
-            let sequence = broker
-                .snapshot(Some(transport_id))
-                .unwrap()
-                .session
-                .unwrap()
-                .integration_event_sequence;
-            let start = Instant::now();
-            {
-                let mut input = writer.lock().unwrap();
-                input.write_all(b"\x18\x02b0000a0000").unwrap();
-                input.flush().unwrap();
-            }
-            wait_until(Duration::from_secs(3), || {
-                broker
-                    .snapshot(Some(transport_id))
-                    .unwrap()
-                    .session
-                    .unwrap()
-                    .integration_event_sequence
-                    >= sequence + 2
-            });
-            assert!(start.elapsed() < Duration::from_secs(3));
-            let resumed = execute_visible(
-                broker,
-                writer,
-                transport_id,
-                shell,
-                "printf receiver-after-timeout",
-            );
-            assert_eq!(resumed.exit_code, Some(0));
-            assert!(resumed.combined_output.contains("receiver-after-timeout"));
-        }
         if shell == TerminalShellKind::Zsh && !checkpoint_failure {
             assert!(!broker.has_active_shell_jobs(transport_id).unwrap());
             let label = format!("FOREGROUND-ONCE-{}", Uuid::new_v4().simple());

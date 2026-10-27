@@ -237,6 +237,49 @@ attempts a scoped interrupt, and subsequent user input is rejected with
 is reconnected. Raw terminal output does not clear the guard. Commands are
 never replayed.
 
+Bash/Zsh private script receivers keep terminal echo disabled across the entire
+descriptor and encoded payload, using the `stty` executable resolved at shell
+startup even if the user later changes `PATH`. A truncated, invalid or timed-out
+frame enters a silent drain instead of returning its delayed tail to the shell
+editor. Ctrl-C does not release this isolation, because it cannot prove that
+all bytes in flight have arrived; reconnect to establish a fresh generation. No delayed
+source is submitted, decoded for execution, or replayed during this drain.
+
+Before every model step, the runtime reads the bound terminal's current
+generation, open/prompt state, script/job capabilities and input recovery state.
+The current capability context and command tool description supersede earlier
+snapshots. Unknown capabilities do not authorize scripts or background jobs.
+`TERMINAL_INPUT_RECOVERY_REQUIRED` and `TERMINAL_DIRECT_REQUIRED` stop the tool
+batch and automatic model continuation after committing the failed/rejected
+result. Undispatched calls remain explicitly not started; queued user input is
+paused. The task waits for explicit recovery/reconnect or a user-selected Direct
+surface, retaining uncertainty and the no-replay rule.
+
+### SSH recovery acceptance
+
+The 2026-10-27 acceptance ran five faults over an external saved-profile SSH
+connection and the same five faults on real isolated Bash and Zsh SSH servers:
+partial descriptor timeout, absent payload, partial payload timeout, transport
+closure during input, and transport closure after command start. All 15 cases
+passed through the production SSH2 transport, shell integration, broker and
+command registry. Delayed bytes after Ctrl-C remained invisible; retry probes
+enqueued no new input; reconnect increased the terminal generation, submitted
+no automatic input and executed only the explicitly requested fresh command.
+The already-started command stayed uncertain and its first side effect occurred
+once. Evidence uses actual remote file reads, generation/input counters and
+redacted terminal transcripts, with no model-provider requests.
+
+`pnpm test:terminal-visible:ssh` now includes the isolated recovery cases.
+`saved_profile_ssh_input_timeout_disconnect_and_reconnect_do_not_replay` is an
+explicitly ignored release-mode acceptance test: select an existing profile
+with `SHELLSPAN_SSH_ACCEPTANCE_PROFILE_ID`. It reads profile metadata without
+database writes, resolves the password through the production OS keychain and
+uses the existing trusted host key. Secrets are never passed in command-line
+arguments or evidence. `SHELLSPAN_SSH_RECOVERY_EVIDENCE_DIR` selects an absolute
+evidence directory. Saved-profile tests never run as part of the default suite.
+This lane supplies its own readiness acknowledgements; desktop UI interaction
+and real-model automatic continuation require their separate acceptance lanes.
+
 ## Phase 6 counters
 
 `get_terminal_broker_snapshot` exposes read-only, process-lifetime unsigned

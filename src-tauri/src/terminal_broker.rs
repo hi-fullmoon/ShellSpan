@@ -244,6 +244,17 @@ pub(crate) struct TerminalSubscriberSetSnapshot {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct TerminalExecutionCapabilities {
+    pub(crate) terminal_generation: u64,
+    pub(crate) open: bool,
+    pub(crate) shell: Option<TerminalShellKind>,
+    pub(crate) prompt_ready: bool,
+    pub(crate) integration_capabilities: Vec<&'static str>,
+    pub(crate) input_recovery_required: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct TerminalBrokerSessionSnapshot {
     pub(crate) terminal_session_id: String,
     pub(crate) terminal_generation: u64,
@@ -1876,6 +1887,28 @@ impl TerminalSessionBroker {
             .as_ref()
             .map(TerminalScreenModel::bracketed_paste)
             .ok_or_else(|| "TERMINAL_SCREEN_UNAVAILABLE".to_string())
+    }
+
+    pub(crate) fn execution_capabilities(
+        &self,
+        transport_session_id: &str,
+    ) -> Result<TerminalExecutionCapabilities, String> {
+        let state = self.lock()?;
+        let attachment = current_attachment(&state, transport_session_id)?;
+        let record = state
+            .sessions
+            .get(&attachment.terminal_session_id)
+            .ok_or("TERMINAL_BROKER_SESSION_NOT_FOUND")?;
+        let snapshot = record.snapshot();
+        Ok(TerminalExecutionCapabilities {
+            terminal_generation: snapshot.terminal_generation,
+            open: snapshot.open,
+            shell: snapshot.integration_shell,
+            prompt_ready: snapshot.prompt_ready,
+            integration_capabilities: snapshot.integration_capabilities,
+            input_recovery_required: record.native_recovery_required
+                || record.native_clear_pending.is_some(),
+        })
     }
 
     pub(crate) fn native_input_enabled(&self, transport_session_id: &str) -> Result<bool, String> {

@@ -10,13 +10,14 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::{
-    is_terminal_target_unavailable, AgentActiveScope, AgentAfterToolContext,
-    AgentAfterToolDecision, AgentArtifactStore, AgentBeforeToolContext, AgentBeforeToolDecision,
-    AgentEntry, AgentHookBus, AgentInboxLane, AgentInboxMessage, AgentLifecyclePhase,
-    AgentMessageSource, AgentPlanStep, AgentRecoveryState, AgentRecoveryStatus, AgentScopedPayload,
-    AgentSessionEffect, AgentSessionEventPayload, AgentSessionStatus, AgentSessionStore,
-    AgentSessionTarget, AgentToolApprovalStatus, AgentToolExecutionStatus, AgentToolResultStatus,
-    ModelMessage, ModelRequest, ModelToolCall, RecordedToolCall,
+    is_terminal_call_blocked, is_terminal_target_unavailable, AgentActiveScope,
+    AgentAfterToolContext, AgentAfterToolDecision, AgentArtifactStore, AgentBeforeToolContext,
+    AgentBeforeToolDecision, AgentEntry, AgentHookBus, AgentInboxLane, AgentInboxMessage,
+    AgentLifecyclePhase, AgentMessageSource, AgentPlanStep, AgentRecoveryState,
+    AgentRecoveryStatus, AgentScopedPayload, AgentSessionEffect, AgentSessionEventPayload,
+    AgentSessionStatus, AgentSessionStore, AgentSessionTarget, AgentToolApprovalStatus,
+    AgentToolExecutionStatus, AgentToolResultStatus, ModelMessage, ModelRequest, ModelToolCall,
+    RecordedToolCall,
 };
 
 pub(crate) const DEFAULT_NATIVE_APPROVAL_TTL_MS: u64 = 60_000;
@@ -262,6 +263,13 @@ impl EphemeralTerminalResultStore {
 }
 
 pub(crate) trait NativeToolRuntime: Send + Sync {
+    fn terminal_execution_capabilities(
+        &self,
+        _transport_session_id: &str,
+    ) -> Result<Option<crate::terminal_broker::TerminalExecutionCapabilities>, String> {
+        Ok(None)
+    }
+
     fn terminal_interactive_tools_enabled(&self, _remote_target: bool) -> bool {
         false
     }
@@ -411,6 +419,14 @@ impl NativeToolRuntimeSlot {
 }
 
 impl NativeToolRuntime for NativeToolRuntimeSlot {
+    fn terminal_execution_capabilities(
+        &self,
+        transport_session_id: &str,
+    ) -> Result<Option<crate::terminal_broker::TerminalExecutionCapabilities>, String> {
+        self.runtime()?
+            .terminal_execution_capabilities(transport_session_id)
+    }
+
     fn terminal_interactive_tools_enabled(&self, remote_target: bool) -> bool {
         self.runtime()
             .is_ok_and(|runtime| runtime.terminal_interactive_tools_enabled(remote_target))
@@ -615,6 +631,30 @@ impl AgentToolPipeline {
         )
     }
 
+    pub(crate) fn sync_terminal_execution_context(
+        &self,
+        header: &super::AgentSessionHeader,
+        assembly: &mut super::prompt::ModelInputAssembly,
+    ) -> Result<(), String> {
+        if header.execution_surface != super::AgentExecutionSurface::BoundTerminal {
+            return Ok(());
+        }
+        let state = header.target.as_ref().and_then(|target| {
+            self.native
+                .terminal_execution_capabilities(&target.session_id)
+                .ok()
+                .flatten()
+        });
+        if state
+            .as_ref()
+            .is_some_and(|state| state.input_recovery_required)
+        {
+            return Err("TERMINAL_INPUT_RECOVERY_REQUIRED: terminal input is quarantined; reconnect and verify execution state before continuing; no automatic replay".into());
+        }
+        super::prompt::apply_terminal_execution_context(header, state.as_ref(), assembly);
+        Ok(())
+    }
+
     pub(crate) fn apply_ephemeral_terminal_results(
         &self,
         session_id: &str,
@@ -706,12 +746,29 @@ impl AgentToolPipeline {
         entry: &Arc<AgentEntry>,
         message: &str,
     ) -> Result<(), String> {
+        self.pause_for_execution_input(entry, message, "ephemeralInputRecoveryRequired")
+    }
+
+    pub(crate) fn mark_terminal_execution_blocked(
+        &self,
+        entry: &Arc<AgentEntry>,
+        message: &str,
+    ) -> Result<(), String> {
+        self.pause_for_execution_input(entry, message, "terminalExecutionRecoveryRequired")
+    }
+
+    fn pause_for_execution_input(
+        &self,
+        entry: &Arc<AgentEntry>,
+        message: &str,
+        reason: &str,
+    ) -> Result<(), String> {
         if self
             .sessions
             .snapshot(&entry.session_id)?
             .uncertain_native_effects
         {
-            return self.mark_tool_recovery(entry, message, "ephemeralInputRecoveryRequired");
+            return self.mark_tool_recovery(entry, message, reason);
         }
         entry.set_phase(AgentLifecyclePhase::Waiting)?;
         self.sessions.pause_for_input(&entry.session_id, message)?;
@@ -932,9 +989,6 @@ impl AgentToolPipeline {
                                 committed += 1;
                             }
                             self.commit_prepare_failure(&request, &error)?;
-                            if is_terminal_target_unavailable(&error) {
-                                return Err(error);
-                            }
                             next += 1;
                             committed += 1;
                             continue;
@@ -1063,10 +1117,10 @@ impl AgentToolPipeline {
                                 if accepted.call_id == call.call_id))
                             && self.commit_not_started(
                                 &request_for(call.clone()),
-                                if outcome.as_ref().is_err_and(|error| {
-                                    is_terminal_target_unavailable(error)
-                                }) {
+                                if outcome.as_ref().is_err_and(|error| is_terminal_target_unavailable(error)) {
                                     "terminalTargetUnavailable"
+                                } else if outcome.as_ref().is_err_and(|error| is_terminal_call_blocked(error)) {
+                                    "terminalExecutionBlocked"
                                 } else if outcome.as_ref().is_err_and(|error| error.starts_with("ephemeralInputRecoveryRequired:")) {
                                     "ephemeralInputRecoveryRequired"
                                 } else {
@@ -1086,7 +1140,7 @@ impl AgentToolPipeline {
             Err(error) if error.starts_with("ephemeralInputRecoveryRequired:") => {
                 return Err(error)
             }
-            Err(error) if is_terminal_target_unavailable(&error) => return Err(error),
+            Err(error) if is_terminal_call_blocked(&error) => return Err(error),
             Err(error) => return Err(format!("toolSchedulerFailure: {error}")),
         };
         if settlement == ToolPipelineSettlement::Completed {
@@ -1978,12 +2032,18 @@ impl AgentToolPipeline {
                         name: request.model_call.name.clone(),
                         status: AgentToolResultStatus::Rejected,
                         summary: if repeated { EPHEMERAL_INPUT_RECOVERY_REQUIRED } else { reason }.to_string(),
-                        data: ephemeral.then(|| serde_json::json!({
+                        data: if super::terminal_execution_needs_user_action(reason) {
+                            Some(serde_json::json!({
+                                "executed": false,
+                                "retryable": false,
+                                "recoveryAction": if reason.starts_with("TERMINAL_DIRECT_REQUIRED") { "selectDirect" } else { "reconnectTerminal" },
+                            }))
+                        } else { ephemeral.then(|| serde_json::json!({
                             "code": "ephemeralInputUnavailable",
                             "executed": false,
                             "retryable": false,
                             "recoveryAction": if repeated { "requestUserInput" } else { "readCurrentStateAndReconstructInput" },
-                        })),
+                        })) },
                         duration_ms: None,
                         evidence_refs: Vec::new(),
                     },
@@ -1992,6 +2052,9 @@ impl AgentToolPipeline {
         )?;
         if repeated {
             return Err(EPHEMERAL_INPUT_RECOVERY_REQUIRED.into());
+        }
+        if is_terminal_call_blocked(reason) {
+            return Err(reason.into());
         }
         Ok(ToolPipelineSettlement::Completed)
     }
@@ -2108,8 +2171,8 @@ impl AgentToolPipeline {
                 artifacts: Vec::new(),
             };
         }
-        let terminal_target_failure = (result.status == AgentToolResultStatus::Failed
-            && is_terminal_target_unavailable(&result.summary))
+        let terminal_call_failure = (result.status == AgentToolResultStatus::Failed
+            && is_terminal_call_blocked(&result.summary))
         .then(|| result.summary.clone());
         let ephemeral_terminal_content = split_terminal_observation_for_persistence(
             &request.model_call.name,
@@ -2254,7 +2317,7 @@ impl AgentToolPipeline {
                     input: ephemeral_input,
                 })?;
         }
-        if let Some(error) = terminal_target_failure {
+        if let Some(error) = terminal_call_failure {
             return Err(error);
         }
         Ok(())
@@ -2324,15 +2387,15 @@ impl AgentToolPipeline {
         self.native.abandon(&pending.preparation.token);
         let refreshed = match self.prepare_native(&pending.request) {
             Ok(refreshed) => refreshed,
-            Err(error) if is_terminal_target_unavailable(&error) => {
+            Err(error) if is_terminal_call_blocked(&error) => {
                 self.append_terminal_approval(
                     &pending,
                     AgentToolApprovalStatus::Cancelled,
                     AgentToolResultStatus::Cancelled,
                     &error,
                 )?;
-                self.commit_pending_not_started(&pending, "terminalTargetUnavailable")?;
-                self.terminate_terminal_target(entry, &error)?;
+                self.commit_pending_not_started(&pending, "terminalExecutionBlocked")?;
+                self.settle_blocked_terminal_call(entry, &error)?;
                 return Err(error);
             }
             Err(error) => return Err(error),
@@ -2381,9 +2444,9 @@ impl AgentToolPipeline {
             .is_some_and(|record| record.status == PendingStatus::Executing);
         if still_executing {
             if let Err(error) = self.finish_native(&pending.request, &pending.preparation, result) {
-                if is_terminal_target_unavailable(&error) {
-                    self.commit_pending_not_started(&pending, "terminalTargetUnavailable")?;
-                    self.terminate_terminal_target(entry, &error)?;
+                if is_terminal_call_blocked(&error) {
+                    self.commit_pending_not_started(&pending, "terminalExecutionBlocked")?;
+                    self.settle_blocked_terminal_call(entry, &error)?;
                 }
                 return Err(error);
             }
@@ -2446,8 +2509,8 @@ impl AgentToolPipeline {
                     error.clone(),
                 )?;
                 entry.set_phase(AgentLifecyclePhase::Stopping)?;
-            } else if is_terminal_target_unavailable(error) {
-                self.terminate_terminal_target(entry, error)?;
+            } else if is_terminal_call_blocked(error) {
+                self.settle_blocked_terminal_call(entry, error)?;
             } else {
                 self.mark_scheduler_failure(entry, error)?;
             }
@@ -2509,6 +2572,17 @@ impl AgentToolPipeline {
             self.commit_not_started(&request, reason)?;
         }
         Ok(())
+    }
+
+    fn settle_blocked_terminal_call(
+        &self,
+        entry: &Arc<AgentEntry>,
+        reason: &str,
+    ) -> Result<(), String> {
+        if super::terminal_execution_needs_user_action(reason) {
+            return self.mark_terminal_execution_blocked(entry, reason);
+        }
+        self.terminate_terminal_target(entry, reason)
     }
 
     fn terminate_terminal_target(
@@ -3015,15 +3089,15 @@ impl AgentToolPipeline {
         self.native.abandon(&pending.preparation.token);
         let refreshed = match self.prepare_native(&pending.request) {
             Ok(refreshed) => refreshed,
-            Err(error) if is_terminal_target_unavailable(&error) => {
+            Err(error) if is_terminal_call_blocked(&error) => {
                 self.append_terminal_approval(
                     &pending,
                     AgentToolApprovalStatus::Cancelled,
                     AgentToolResultStatus::Cancelled,
                     &error,
                 )?;
-                self.commit_pending_not_started(&pending, "terminalTargetUnavailable")?;
-                self.terminate_terminal_target(entry, &error)?;
+                self.commit_pending_not_started(&pending, "terminalExecutionBlocked")?;
+                self.settle_blocked_terminal_call(entry, &error)?;
                 return Err(error);
             }
             Err(error) => return Err(error),
@@ -3049,9 +3123,9 @@ impl AgentToolPipeline {
             .execute_native(&pending.preparation, true, entry.cancellation())
             .await;
         if let Err(error) = self.finish_native(&pending.request, &pending.preparation, result) {
-            if is_terminal_target_unavailable(&error) {
-                self.commit_pending_not_started(&pending, "terminalTargetUnavailable")?;
-                self.terminate_terminal_target(entry, &error)?;
+            if is_terminal_call_blocked(&error) {
+                self.commit_pending_not_started(&pending, "terminalExecutionBlocked")?;
+                self.settle_blocked_terminal_call(entry, &error)?;
             }
             return Err(error);
         }
@@ -3541,4 +3615,9 @@ mod ephemeral_terminal_result_tests {
         assert_eq!(store.total_bytes, 0);
         assert!(store.entries.is_empty());
     }
+}
+
+#[cfg(test)]
+mod terminal_execution_recovery_tests {
+    include!("tests/terminal_execution_recovery.rs");
 }

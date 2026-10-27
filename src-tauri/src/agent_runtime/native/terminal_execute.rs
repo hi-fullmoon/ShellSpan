@@ -185,6 +185,13 @@ impl TerminalExecuteRegistry {
         // Reject unsupported input before acquiring a lease or touching the PTY.
         validate_visible_command_input(command)?;
         let shell = self.broker.command_shell(session_id)?;
+        if self
+            .broker
+            .execution_capabilities(session_id)?
+            .input_recovery_required
+        {
+            return Err("TERMINAL_INPUT_RECOVERY_REQUIRED: terminal input is quarantined; reconnect before further input; no automatic replay".into());
+        }
         let powershell = matches!(
             shell,
             TerminalShellKind::WindowsPowerShell | TerminalShellKind::PowerShell7

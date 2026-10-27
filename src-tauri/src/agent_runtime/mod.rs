@@ -56,6 +56,24 @@ pub(crate) fn is_terminal_target_unavailable(error: &str) -> bool {
     error.starts_with(TERMINAL_TARGET_UNAVAILABLE_PREFIX)
 }
 
+pub(crate) fn terminal_execution_needs_user_action(error: &str) -> bool {
+    [
+        "TERMINAL_INPUT_RECOVERY_REQUIRED",
+        "TERMINAL_DIRECT_REQUIRED",
+    ]
+    .iter()
+    .any(|code| {
+        error == *code
+            || error
+                .strip_prefix(code)
+                .is_some_and(|tail| tail.starts_with(':'))
+    })
+}
+
+pub(crate) fn is_terminal_call_blocked(error: &str) -> bool {
+    is_terminal_target_unavailable(error) || terminal_execution_needs_user_action(error)
+}
+
 pub(crate) use artifact::*;
 pub(crate) use budget::*;
 pub(crate) use commands::*;

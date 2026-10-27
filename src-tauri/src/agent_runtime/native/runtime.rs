@@ -252,6 +252,14 @@ impl NativeToolEngine {
         self.terminal_broker.snapshot(transport_session_id)
     }
 
+    pub(crate) fn terminal_execution_capabilities(
+        &self,
+        transport_session_id: &str,
+    ) -> Result<crate::terminal_broker::TerminalExecutionCapabilities, String> {
+        self.terminal_broker
+            .execution_capabilities(transport_session_id)
+    }
+
     pub(crate) fn terminal_shell_integration_enabled(&self) -> Result<bool, String> {
         self.terminal_broker.shell_integration_enabled()
     }

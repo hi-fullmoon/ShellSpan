@@ -104,8 +104,16 @@ pub(crate) async fn drive_agent(
     let settlement =
         match drive_agent_inner(&sessions, &entry, &hooks, &tools, &compactions, config).await {
             Ok(settlement) => settlement,
-            Err(message) if message.starts_with("ephemeralInputRecoveryRequired:") => {
-                match tools.mark_ephemeral_input_failure(&entry, &message) {
+            Err(message)
+                if message.starts_with("ephemeralInputRecoveryRequired:")
+                    || super::terminal_execution_needs_user_action(&message) =>
+            {
+                let paused = if super::terminal_execution_needs_user_action(&message) {
+                    tools.mark_terminal_execution_blocked(&entry, &message)
+                } else {
+                    tools.mark_ephemeral_input_failure(&entry, &message)
+                };
+                match paused {
                     Ok(()) if entry.phase().ok() == Some(AgentLifecyclePhase::Idle) => {
                         AgentDriverSettlement::Idle
                     }
@@ -725,6 +733,7 @@ async fn apply_pre_step_hooks(
             tools.terminal_interactive_tools_enabled(snapshot.header.target.as_ref()),
         ),
     );
+    tools.sync_terminal_execution_context(&snapshot.header, &mut assembly)?;
     append_current_task_plan_context(sessions, &snapshot, turn_id, &mut assembly.system_prompt)?;
     let mut request = ModelRequest::from_surface(
         "pre-step-budget".into(),
@@ -1017,6 +1026,7 @@ async fn run_step(
                     tools.terminal_interactive_tools_enabled(snapshot.header.target.as_ref()),
                 ),
             );
+            tools.sync_terminal_execution_context(&snapshot.header, &mut assembly)?;
             append_current_task_plan_context(
                 sessions,
                 &snapshot,

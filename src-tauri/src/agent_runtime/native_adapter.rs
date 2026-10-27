@@ -126,6 +126,15 @@ struct McpCallArguments {
 }
 
 impl NativeToolRuntime for NativeToolAdapter {
+    fn terminal_execution_capabilities(
+        &self,
+        transport_session_id: &str,
+    ) -> Result<Option<crate::terminal_broker::TerminalExecutionCapabilities>, String> {
+        self.engine
+            .terminal_execution_capabilities(transport_session_id)
+            .map(Some)
+    }
+
     fn terminal_interactive_tools_enabled(&self, remote_target: bool) -> bool {
         self.engine
             .terminal_broker_snapshot(None)

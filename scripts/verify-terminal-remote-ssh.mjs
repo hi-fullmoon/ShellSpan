@@ -73,6 +73,7 @@ try {
   );
   cargoTest('session::tests::remote_bound_terminal_bash_reuses_source_shell_acceptance', ['--ignored', '--exact']);
   cargoTest('session::tests::remote_bound_terminal_zsh_reuses_source_shell_smoke', ['--ignored', '--exact']);
+  cargoTest('session::tests::terminal_recovery_tests::isolated_ssh_input_timeout_disconnect_and_reconnect_do_not_replay', ['--ignored', '--exact']);
   cargoTest('session::tests::ordinary_ssh_unsupported_shell_is_unavailable_without_a_second_transport', ['--ignored', '--exact']);
   cargoTest('session::tests::ordinary_ssh_without_sftp_falls_back_to_a_usable_shell', ['--ignored', '--exact']);
   cargoTest(
