@@ -151,6 +151,8 @@ export interface AiContextUsage {
   readonly usedTokens: number;
   readonly contextWindow: number;
   readonly source: 'reported' | 'estimated';
+  /** The selected model's capacity differs from the last recorded request. */
+  readonly capacitySource?: 'selectedModel';
   readonly breakdown?: Readonly<{
     readonly systemTokens: number;
     readonly toolsTokens: number;

@@ -1,5 +1,16 @@
 import type { AgentSubagentModel } from '@/types/agent-session';
 import type { AiProviderConfig } from '@/types/ai';
+import type { AiContextUsage } from './session-adapter';
+
+/** Keep recorded usage intact while reflecting the current model's capacity. */
+export function contextUsageForModel(
+  usage: AiContextUsage | undefined,
+  contextWindow: number | undefined,
+): AiContextUsage | undefined {
+  if (!usage || contextWindow === undefined || !Number.isSafeInteger(contextWindow)
+    || contextWindow <= 0 || contextWindow === usage.contextWindow) return usage;
+  return { ...usage, contextWindow, capacitySource: 'selectedModel' };
+}
 
 /** Restore the credential-free provider selection recorded by the runtime. */
 export function sessionProviderConfig(selection: AgentSubagentModel, providers: readonly AiProviderConfig[] = []): AiProviderConfig {

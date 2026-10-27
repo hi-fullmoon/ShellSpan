@@ -8,6 +8,7 @@ import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
 import { aiErrorMessage } from '@/lib/ai/error-message';
 import { terminalLoginLabel } from '@/lib/ai/terminal-login-scope';
+import { contextUsageForModel } from '@/lib/ai/session-settings';
 import type { AiConversationNode } from '@/lib/ai/conversation-node';
 import { canResumeTokenBudgetedTask, hasTokenBudgetCheckpoint, taskBudgetArtifactTitleKey } from '@/lib/ai/task-token-budget';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -228,6 +229,7 @@ export interface AiWorkspaceRootProps {
   readonly imageLocked?: boolean;
   readonly submissionContext?: object;
   readonly view: AiSessionView | null;
+  readonly contextWindow?: number;
   readonly restoringSession?: boolean;
   readonly scope: Extract<AppSection, 'terminal' | 'workbench'>;
   readonly title?: string;
@@ -319,6 +321,7 @@ export function AiWorkspaceRoot({
   imageControls, onPasteImages, hasImages, imageBusy, imageSubmissionId, imageLocked,
   submissionContext,
   view,
+  contextWindow,
   restoringSession = false,
   scope,
   title,
@@ -754,7 +757,8 @@ export function AiWorkspaceRoot({
           providerLabel={providerLabel}
           modelLabel={modelLabel}
           modelControl={modelControl}
-          contextUsage={surfaceMode === 'agent' && !readOnlySession ? view?.contextUsage : undefined}
+          contextUsage={surfaceMode === 'agent' && !readOnlySession
+            ? contextUsageForModel(view?.contextUsage, contextWindow) : undefined}
           permissionControl={surfaceMode === 'agent' ? permissionControl : undefined}
           executionSurfaceControl={surfaceMode === 'agent' ? executionSurfaceControl : undefined}
           executionSurfaceNotice={surfaceMode === 'agent' ? executionSurfaceNotice : undefined}

@@ -1,6 +1,7 @@
 import type { AppSection } from '@/types';
 import { latestTerminalBusyAttempt } from '@/lib/ai/terminal-busy-feedback';
 import { terminalExecutionRecovery } from '@/lib/ai/terminal-execution-recovery';
+import { useResolvedModel } from '@/lib/ai/provider-contract';
 import { useFocusStore } from '@/stores/focusStore';
 import { FocusNoTarget } from '@/components/focus/focus-no-target';
 import { FocusControls } from '@/components/focus/focus-controls';
@@ -8,6 +9,7 @@ import {
   terminalConnectionPresentationState,
 } from '@/lib/terminal/terminal-surface-semantics';
 import { useAppStore } from '@/stores/appStore';
+import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useReconnectSession } from '@/hooks/useReconnectSession';
 import { AgentPermissionSelector } from '../agent-permission-selector';
@@ -35,6 +37,13 @@ export function AiWorkspaceController({
   onClose,
 }: AiWorkspaceControllerProps): React.ReactNode {
   const controller = useAiSessionController({ scope, adapter, focusMode });
+  const modelResolution = useResolvedModel(controller.selectedProvider);
+  const sessionModel = controller.view?.snapshot.value.header.modelSelection;
+  // Display the current route capacity even when its revision has changed and
+  // the session must explicitly reselect the model before another request.
+  const routeContextWindow = useLlmRoutesStore(state => sessionModel
+    ? state.modelsByRoute[sessionModel.routeId]?.find(model => model.modelId === sessionModel.modelId)?.contextWindow
+    : undefined);
   const reconnectSession = useReconnectSession();
   const focusTargetId = useFocusStore(state => state.targetSessionId);
   const terminalOpen = useFocusStore(state => state.terminalOpen);
@@ -100,6 +109,8 @@ export function AiWorkspaceController({
       headerActions={focusMode && !terminalOpen ? <FocusControls /> : undefined}
       mode={scope === 'workbench' ? 'ask' : 'agent'}
       view={controller.view}
+      contextWindow={routeContextWindow
+        ?? (modelResolution.status === 'ready' ? modelResolution.model.contextWindow : undefined)}
       restoringSession={controller.restoringSession}
       imageControls={imageDraftVisible
         ? <AiImageDraftControls state={controller.imageDraft} selection={controller.selectedProvider} />

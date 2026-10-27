@@ -1585,6 +1585,7 @@ export default {
   'ai.workspace.contextUsage.messages': 'Conversation messages',
   'ai.workspace.contextUsage.reportedNote': 'Total usage is provider-reported; categories are stable Runtime estimates.',
   'ai.workspace.contextUsage.estimatedNote': 'Total usage and categories are stable Runtime estimates.',
+  'ai.workspace.contextUsage.currentCapacityNote': 'Capacity reflects the current model configuration; usage is from the previous request and has not been recalculated for it.',
   'ai.workspace.model.trigger': 'Model selection: {selection}',
   'ai.workspace.model.menu': 'Model and reasoning selection',
   'ai.workspace.model.model': 'Model',

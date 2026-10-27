@@ -1583,6 +1583,7 @@ export default {
   'ai.workspace.contextUsage.messages': '对话消息',
   'ai.workspace.contextUsage.reportedNote': '总占用来自服务商回传；分项为 Runtime 稳定估算。',
   'ai.workspace.contextUsage.estimatedNote': '总占用与分项均为 Runtime 稳定估算。',
+  'ai.workspace.contextUsage.currentCapacityNote': '容量按当前模型配置显示；占用数据来自上次请求，尚未按新配置重新计算。',
   'ai.workspace.model.trigger': '模型选择：{selection}',
   'ai.workspace.model.menu': '模型与推理等级选择',
   'ai.workspace.model.model': '模型',

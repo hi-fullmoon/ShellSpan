@@ -125,6 +125,7 @@ export function AiContextMeter({ usage }: { readonly usage?: AiContextUsage }): 
             {t(usage.source === 'reported'
               ? 'ai.workspace.contextUsage.reportedNote'
               : 'ai.workspace.contextUsage.estimatedNote')}
+            {usage.capacitySource === 'selectedModel' && <> {t('ai.workspace.contextUsage.currentCapacityNote')}</>}
           </p>
         </PopoverContent>
     </Popover>
