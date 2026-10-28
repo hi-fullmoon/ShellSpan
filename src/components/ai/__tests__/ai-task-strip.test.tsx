@@ -92,6 +92,9 @@ describe('AI task strip', () => {
     expect(screen.getByText(longTitle)).not.toHaveClass('truncate');
     expect(screen.getByText(longTitle)).toHaveClass('whitespace-pre-wrap', '[overflow-wrap:anywhere]');
     expect(screen.getByRole('list')).toHaveClass('max-h-[180px]', 'overflow-y-auto');
+    for (const row of screen.getAllByRole('listitem')) {
+      expect(row).toHaveClass('relative');
+    }
     expect(container.querySelector('[title]')).toBeNull();
 
     rerender(<AiTaskStrip steps={referenceSteps.map((step) => ({ ...step, status: 'completed' }))} />);
