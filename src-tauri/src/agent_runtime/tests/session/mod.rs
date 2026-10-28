@@ -1292,7 +1292,7 @@ fn child_request() -> (CreateAgentSessionRequest, AgentSessionEventPayload) {
         target_ids: vec!["target-1".into()],
     };
     let budget = super::super::AgentSubagentBudget {
-        max_steps_per_turn: 4,
+        max_steps_per_turn: Some(4),
         max_turns: 1,
         max_tool_calls: Some(8),
         max_tokens: Some(8_192),

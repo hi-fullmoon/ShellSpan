@@ -37,7 +37,7 @@ pub(crate) struct AgentDriverConfig {
 impl Default for AgentDriverConfig {
     fn default() -> Self {
         Self {
-            // Root turns are unlimited; children retain their explicit step budgets.
+            // Root and continuable child turns are unlimited unless explicitly bounded.
             max_steps_per_turn: None,
             max_turns_per_session: 64,
             max_identical_tool_steps: 5,
@@ -56,11 +56,15 @@ impl Default for AgentDriverConfig {
 impl AgentDriverConfig {
     fn step_limit_for(self, subagent: Option<&super::AgentSubagentSession>) -> Option<usize> {
         subagent.map_or(self.max_steps_per_turn, |child| {
-            let child_limit = child.budget.max_steps_per_turn as usize;
-            Some(
-                self.max_steps_per_turn
-                    .map_or(child_limit, |limit| limit.min(child_limit)),
-            )
+            let child_limit = child
+                .budget
+                .max_steps_per_turn
+                .or_else(|| {
+                    (!child.continuable)
+                        .then_some(super::subagent::DEFAULT_ONE_SHOT_MAX_STEPS_PER_TURN)
+                })
+                .map(usize::from);
+            self.max_steps_per_turn.into_iter().chain(child_limit).min()
         })
     }
 }

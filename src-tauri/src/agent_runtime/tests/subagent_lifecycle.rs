@@ -1,5 +1,6 @@
 use super::*;
 include!("subagent_failure_recovery.rs");
+include!("subagent_step_budget.rs");
 use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};

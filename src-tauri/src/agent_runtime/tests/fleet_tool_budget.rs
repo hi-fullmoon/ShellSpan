@@ -1,7 +1,7 @@
 #[tokio::test]
 async fn all_fleet_roles_receive_and_enforce_the_persisted_call_budget() {
     let explicit = AgentSubagentBudget {
-        max_steps_per_turn: 9,
+        max_steps_per_turn: Some(9),
         max_turns: 1,
         max_tool_calls: Some(3),
         max_tokens: Some(524_288),

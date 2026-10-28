@@ -163,7 +163,7 @@ export type AgentSubagentInheritance =
   | Readonly<{ mode: 'safePrefix'; parentThroughSeq?: number }>;
 
 export interface AgentSubagentBudget {
-  readonly maxStepsPerTurn: number;
+  readonly maxStepsPerTurn?: number;
   readonly maxTurns: number;
   readonly maxToolCalls?: number;
   readonly maxTokens?: number;

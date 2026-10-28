@@ -1088,7 +1088,7 @@ async fn one_shot_child_budget_is_forced_to_one_turn() {
             inheritance_mode: "safePrefix".into(),
             target_ids: vec!["target-local".into()],
             budget: Some(super::super::AgentSubagentBudget {
-                max_steps_per_turn: 4,
+                max_steps_per_turn: Some(4),
                 max_turns: 9,
                 max_tool_calls: Some(8),
                 max_tokens: Some(8_192),

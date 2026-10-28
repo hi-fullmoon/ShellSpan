@@ -406,7 +406,7 @@ mod scheduler_tests {
                     inheritance_mode: "safePrefix".into(),
                     target_ids: vec!["target-local".into()],
                     budget: Some(super::super::super::AgentSubagentBudget {
-                        max_steps_per_turn: 4,
+                        max_steps_per_turn: Some(4),
                         max_turns: 1,
                         max_tool_calls: Some(1),
                         max_tokens: Some(8192),
@@ -694,7 +694,7 @@ mod scheduler_tests {
                     inheritance_mode: "safePrefix".into(),
                     target_ids: vec!["target-local".into()],
                     budget: Some(super::super::super::AgentSubagentBudget {
-                        max_steps_per_turn: 4,
+                        max_steps_per_turn: Some(4),
                         max_turns: 1,
                         max_tool_calls: Some(budget),
                         max_tokens: Some(8192),

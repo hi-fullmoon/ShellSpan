@@ -5320,8 +5320,9 @@ fn validate_subagent_inheritance(
 }
 
 pub(super) fn validate_subagent_budget(budget: &super::AgentSubagentBudget) -> Result<(), String> {
-    if budget.max_steps_per_turn == 0
-        || budget.max_steps_per_turn > 64
+    if budget
+        .max_steps_per_turn
+        .is_some_and(|limit| !(1..=64).contains(&limit))
         || budget.max_turns == 0
         || budget.max_turns > 256
         || budget

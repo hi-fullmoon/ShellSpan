@@ -307,7 +307,7 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
         },
         ModelToolDefinition {
             name: "spawn_continuable_agent".into(),
-            description: "Create a least-privilege continuable child Agent in a durable child Session and return its first settlement. Prefer this for implementation and debugging. A step-budget boundary returns partial progress; inspect it and use send_child_input with the same childSessionId while continuable is true. Token, tool, turn, and time budgets are cumulative and never reset by continuation.".into(),
+            description: "Create a least-privilege continuable child Agent in a durable child Session and return its first settlement. Prefer this for implementation and debugging. Steps are unlimited by default; omit budget.maxStepsPerTurn unless an explicit step limit is needed. An explicit step-budget boundary returns partial progress; inspect it and use send_child_input with the same childSessionId while continuable is true. Token, tool, turn, and time budgets are cumulative and never reset by continuation.".into(),
             input_schema: subagent_spawn_schema(),
         },
         ModelToolDefinition {
@@ -505,9 +505,9 @@ fn subagent_spawn_schema() -> Value {
 
 fn subagent_budget_schema() -> Value {
     object_schema(
-        &["maxStepsPerTurn", "maxTurns", "timeoutMs"],
+        &["maxTurns", "timeoutMs"],
         json!({
-            "maxStepsPerTurn": { "type": "integer", "minimum": 1, "maximum": 64 },
+            "maxStepsPerTurn": { "type": "integer", "minimum": 1, "maximum": 64, "description": "Optional per-turn model-step limit. Omitted means unlimited for continuable children; one-shot and Fleet children retain a default limit of 6. Existing explicit limits remain enforced across continuation and reload." },
             "maxTurns": { "type": "integer", "minimum": 1, "maximum": 256 },
             "maxToolCalls": { "type": "integer", "minimum": 1, "maximum": 4096, "description": "Optional cumulative tool-call limit per child, including Fleet children. Omit unless the parent explicitly intends to limit tool calls; omitted means unlimited." },
             "maxTokens": { "type": "integer", "minimum": 1024, "maximum": 16000000, "description": "Optional cumulative provider-reported total-token limit. Omit unless an explicit token budget is requested; omitted means unlimited." },
@@ -564,7 +564,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn child_and_fleet_schemas_allow_omitting_cumulative_token_and_tool_budgets() {
+    fn child_and_fleet_schemas_allow_omitting_step_token_and_tool_budgets() {
         for name in [
             "spawn_continuable_agent",
             "spawn_one_shot_agent",
@@ -575,10 +575,11 @@ mod tests {
                 .find(|tool| tool.name == name)
                 .unwrap();
             let budget = &tool.input_schema["properties"]["budget"];
-            assert_eq!(
-                budget["required"],
-                json!(["maxStepsPerTurn", "maxTurns", "timeoutMs"])
-            );
+            assert_eq!(budget["required"], json!(["maxTurns", "timeoutMs"]));
+            assert!(budget["properties"]["maxStepsPerTurn"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("Omitted means unlimited for continuable children"));
             assert!(budget["properties"]["maxTokens"]["description"]
                 .as_str()
                 .unwrap()

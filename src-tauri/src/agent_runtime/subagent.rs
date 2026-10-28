@@ -24,6 +24,8 @@ use super::{
     OrchestrationToolRuntime,
 };
 
+pub(super) const DEFAULT_ONE_SHOT_MAX_STEPS_PER_TURN: u16 = 6;
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AgentSubagentSpawnRequest {
@@ -941,6 +943,9 @@ impl SubAgentManager {
         }
         if !continuable {
             budget.max_turns = 1;
+            budget
+                .max_steps_per_turn
+                .get_or_insert(DEFAULT_ONE_SHOT_MAX_STEPS_PER_TURN);
         }
         let parent_entry = self
             .agents
@@ -1986,7 +1991,7 @@ pub(super) fn validate_required_tools(
 
 fn default_subagent_budget() -> AgentSubagentBudget {
     AgentSubagentBudget {
-        max_steps_per_turn: 6,
+        max_steps_per_turn: None,
         max_turns: 8,
         max_tool_calls: None,
         max_tokens: None,
@@ -2294,6 +2299,7 @@ fn fleet_role_goal(role: AgentSubagentRole, goal: &str) -> String {
 
 fn fleet_role_budget() -> AgentSubagentBudget {
     let mut budget = default_subagent_budget();
+    budget.max_steps_per_turn = Some(DEFAULT_ONE_SHOT_MAX_STEPS_PER_TURN);
     budget.max_turns = 1;
     budget
 }
@@ -2428,7 +2434,7 @@ mod retry_policy_tests {
             ),
         ];
         let budget = AgentSubagentBudget {
-            max_steps_per_turn: 8,
+            max_steps_per_turn: Some(8),
             max_turns: 2,
             max_tool_calls: Some(2),
             max_tokens: Some(200),

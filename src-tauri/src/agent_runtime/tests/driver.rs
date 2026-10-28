@@ -150,7 +150,7 @@
             },
             target_scope: Vec::new(),
             budget: super::super::AgentSubagentBudget {
-                max_steps_per_turn: 8,
+                max_steps_per_turn: Some(8),
                 max_turns: 3,
                 max_tool_calls: Some(12),
                 max_tokens: Some(16_000),
@@ -172,6 +172,14 @@
             assert_eq!(bounded.step_limit_for(None), Some(configured));
             assert_eq!(bounded.step_limit_for(Some(&child)), Some(expected));
         }
+        child.budget.max_steps_per_turn = None;
+        assert_eq!(config.step_limit_for(Some(&child)), None);
+        let bounded = AgentDriverConfig {
+            max_steps_per_turn: Some(16),
+            ..config
+        };
+        assert_eq!(bounded.step_limit_for(Some(&child)), Some(16));
+        assert!(no_progress_from_counts((0, config.max_identical_tool_steps), config).is_some());
         assert!(step_budget_recoverable(None));
         assert!(step_budget_recoverable(Some(&child)));
         let usage_events = vec![event(
@@ -195,6 +203,8 @@
             None
         );
         child.continuable = false;
+        assert_eq!(config.step_limit_for(Some(&child)), Some(6));
+        child.budget.max_steps_per_turn = Some(8);
         assert_eq!(config.step_limit_for(Some(&child)), Some(8));
         assert!(!step_budget_recoverable(Some(&child)));
         let events = vec![event(1_000, AgentSessionEventPayload::TurnStart)];
@@ -258,7 +268,7 @@
     #[test]
     fn child_cumulative_budget_warns_before_each_hard_boundary() {
         let budget = super::super::AgentSubagentBudget {
-            max_steps_per_turn: 8,
+            max_steps_per_turn: Some(8),
             max_turns: 1,
             max_tool_calls: Some(10),
             max_tokens: Some(32_000),

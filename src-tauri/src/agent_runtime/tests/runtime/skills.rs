@@ -1152,7 +1152,7 @@ async fn skill_child_safe_prefix_filters_parent_instructions_and_counts_real_too
             inheritance_mode: "safePrefix".into(),
             target_ids: vec!["local-target".into()],
             budget: Some(crate::agent_runtime::AgentSubagentBudget {
-                max_steps_per_turn: 4,
+                max_steps_per_turn: Some(4),
                 max_turns: 1,
                 max_tool_calls: Some(1),
                 max_tokens: Some(32768),
