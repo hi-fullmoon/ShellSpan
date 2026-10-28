@@ -4730,9 +4730,15 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
                 return Err("artifact sha256 is invalid".into());
             }
         }
-        Payload::CompactionStart { reason } => {
+        Payload::CompactionStart {
+            reason,
+            compaction_id,
+        } => {
             require_scope(event, true, true)?;
             validate_text(reason, "compaction reason", false, MAX_LABEL_BYTES)?;
+            if let Some(id) = compaction_id {
+                validate_identifier(id, "compaction ID")?;
+            }
         }
         Payload::CompactionSummary { summary, .. } => {
             require_scope(event, true, true)?;
@@ -4743,7 +4749,19 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
                 MAX_AGENT_MESSAGE_BYTES,
             )?;
         }
-        Payload::CompactionEnd { .. } => require_scope(event, true, true)?,
+        Payload::CompactionEnd {
+            compaction_id,
+            reason,
+            ..
+        } => {
+            require_scope(event, true, true)?;
+            if let Some(id) = compaction_id {
+                validate_identifier(id, "compaction ID")?;
+            }
+            if let Some(reason) = reason {
+                validate_text(reason, "compaction result reason", false, MAX_LABEL_BYTES)?;
+            }
+        }
         Payload::SubagentDescriptor {
             descriptor_id,
             child_session_id,

@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::redaction::{redact_json_value, redact_sensitive_text};
 use serde::Serialize;
@@ -497,6 +498,99 @@ pub(crate) struct AgentCompactionOutcome {
     pub(crate) artifact: AgentArtifactMetadata,
 }
 
+struct CompactionOperation {
+    sessions: AgentSessionStore,
+    session_id: String,
+    turn_id: String,
+    step_id: String,
+    id: String,
+    generation: u64,
+    boundary: u64,
+    started: Instant,
+    closed: bool,
+}
+
+impl CompactionOperation {
+    fn start(
+        sessions: &AgentSessionStore,
+        session_id: &str,
+        turn_id: &str,
+        step_id: &str,
+        generation: u64,
+        boundary: u64,
+        reason: &str,
+    ) -> Result<Self, String> {
+        let mut operation = Self {
+            sessions: sessions.clone(),
+            session_id: session_id.into(),
+            turn_id: turn_id.into(),
+            step_id: step_id.into(),
+            id: uuid::Uuid::new_v4().to_string(),
+            generation,
+            boundary,
+            started: Instant::now(),
+            closed: true,
+        };
+        sessions.append(
+            session_id,
+            Some(turn_id.into()),
+            Some(step_id.into()),
+            AgentSessionEventPayload::CompactionStart {
+                reason: bounded_with_marker(redact_sensitive_text(reason), 4 * 1024),
+                compaction_id: Some(operation.id.clone()),
+            },
+        )?;
+        operation.closed = false;
+        Ok(operation)
+    }
+
+    fn duration_ms(&self) -> u64 {
+        self.started.elapsed().as_millis().min(u64::MAX as u128) as u64
+    }
+
+    fn finish(
+        &mut self,
+        status: AgentCompactionStatus,
+        reason: Option<&str>,
+    ) -> Result<(), String> {
+        if self.closed {
+            return Ok(());
+        }
+        self.closed = true;
+        self.sessions.append(
+            &self.session_id,
+            Some(self.turn_id.clone()),
+            Some(self.step_id.clone()),
+            AgentSessionEventPayload::CompactionEnd {
+                surface_generation: self.generation,
+                replaced_through_seq: self.boundary,
+                status,
+                compaction_id: Some(self.id.clone()),
+                duration_ms: Some(self.duration_ms()),
+                reason: reason
+                    .map(|text| bounded_with_marker(redact_sensitive_text(text), 4 * 1024)),
+            },
+        )?;
+        Ok(())
+    }
+}
+
+impl Drop for CompactionOperation {
+    fn drop(&mut self) {
+        // Dropping an in-flight task must release its durable progress state too.
+        // A failed event write remains an error; never advertise a saved outcome.
+        if let Err(error) = self.finish(
+            AgentCompactionStatus::Cancelled,
+            Some("compaction task interrupted before settlement"),
+        ) {
+            log::error!(
+                "Failed to close interrupted Agent compaction: {}",
+                redact_sensitive_text(&error)
+            );
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct AgentCompactionManager {
     sessions: AgentSessionStore,
@@ -712,6 +806,16 @@ impl AgentCompactionManager {
             snapshot.surface.replaced_through_seq,
             active_turn_id,
         )?;
+        let mut operation = CompactionOperation::start(
+            &self.sessions,
+            session_id,
+            turn_id,
+            step_id,
+            snapshot.surface.generation.saturating_add(1),
+            preferred_boundary,
+            reason,
+        )?;
+        let result = async {
         let mut attempts = vec![preferred_boundary];
         if let Some(last) = boundaries.last().copied() {
             if last != preferred_boundary {
@@ -807,45 +911,13 @@ impl AgentCompactionManager {
                             sensitivity: Some(artifact.sensitivity),
                         },
                     )?;
-                    if !cancellation.is_cancelled() {
-                        record_failed_compaction(
-                            &self.sessions,
-                            session_id,
-                            turn_id,
-                            step_id,
-                            generation,
-                            boundary,
-                            reason,
-                            reason_detail,
-                        )?;
-                    }
                     return Err(reason_detail.into());
                 }
                 Ok(summary) if !summary.text.trim().is_empty() => summary,
                 Ok(_) => {
-                    record_failed_compaction(
-                        &self.sessions,
-                        session_id,
-                        turn_id,
-                        step_id,
-                        generation,
-                        boundary,
-                        reason,
-                        "summarization produced an empty checkpoint",
-                    )?;
                     return Err("compaction summarization failed: checkpoint was empty".into());
                 }
                 Err(error) => {
-                    record_failed_compaction(
-                        &self.sessions,
-                        session_id,
-                        turn_id,
-                        step_id,
-                        generation,
-                        boundary,
-                        reason,
-                        &format!("summarization failed: {error}"),
-                    )?;
                     return Err(format!("compaction summarization failed: {error}"));
                 }
             };
@@ -853,16 +925,6 @@ impl AgentCompactionManager {
             let proposed = proposal.text;
             let checkpoint = proposal.checkpoint.unwrap_or(checkpoint);
             if !summary_has_required_sections(&proposed) {
-                record_failed_compaction(
-                    &self.sessions,
-                    session_id,
-                    turn_id,
-                    step_id,
-                    generation,
-                    boundary,
-                    reason,
-                    "summarization omitted required checkpoint sections",
-                )?;
                 return Err(
                     "compaction summarization failed: checkpoint structure is incomplete".into(),
                 );
@@ -910,19 +972,6 @@ impl AgentCompactionManager {
                     )
                 },
             );
-            let boundary = *boundaries.last().ok_or_else(|| {
-                "no completed safe Step or Turn prefix is available for compaction".to_string()
-            })?;
-            record_failed_compaction(
-                &self.sessions,
-                session_id,
-                turn_id,
-                step_id,
-                generation,
-                boundary,
-                reason,
-                &format!("checkpoint remained above target: {detail}"),
-            )?;
             return Err(format!(
                 "compaction remained above its target after bounded degradation: {detail}; {}",
                 budget.diagnostic()
@@ -944,25 +993,8 @@ impl AgentCompactionManager {
         let final_projection =
             projected_budget(&snapshot.surface, &events, boundary, &summary, budget);
         if !final_projection.fits_target(budget) {
-            record_failed_compaction(
-                &self.sessions,
-                session_id,
-                turn_id,
-                step_id,
-                generation,
-                boundary,
-                reason,
-                "artifact reference pushed the checkpoint above target",
-            )?;
             return Err("compaction artifact reference exceeded the projected target".into());
         }
-        let reason = format!(
-            "{reason}; artifactRef={}; previousGeneration={}; estimatedInputTokens={}; estimatedInputBytes={}",
-            artifact.artifact_id,
-            snapshot.surface.generation,
-            final_projection.input_tokens,
-            final_projection.input_bytes,
-        );
         #[cfg(test)]
         if let Some(hook) = &self.before_commit {
             hook();
@@ -971,11 +1003,6 @@ impl AgentCompactionManager {
         self.sessions.append_batch(
             session_id,
             vec![
-                AgentScopedPayload {
-                    turn_id: Some(turn_id.to_string()),
-                    step_id: Some(step_id.to_string()),
-                    payload: AgentSessionEventPayload::CompactionStart { reason },
-                },
                 AgentScopedPayload {
                     turn_id: Some(turn_id.to_string()),
                     step_id: Some(step_id.to_string()),
@@ -1005,10 +1032,14 @@ impl AgentCompactionManager {
                         surface_generation: generation,
                         replaced_through_seq: boundary,
                         status: AgentCompactionStatus::Completed,
+                        compaction_id: Some(operation.id.clone()),
+                        duration_ms: Some(operation.duration_ms()),
+                        reason: None,
                     },
                 },
             ],
         )?;
+        operation.closed = true;
         let updated = self.sessions.snapshot(session_id)?.surface;
         if updated.generation != generation || updated.generation <= snapshot.surface.generation {
             return Err(
@@ -1028,6 +1059,18 @@ impl AgentCompactionManager {
             replaced_through_seq: boundary,
             artifact,
         })
+        }.await;
+        if let Err(error) = &result {
+            operation.finish(
+                if cancellation.is_cancelled() {
+                    AgentCompactionStatus::Cancelled
+                } else {
+                    AgentCompactionStatus::Failed
+                },
+                Some(error),
+            )?;
+        }
+        result
     }
 }
 
@@ -1203,26 +1246,40 @@ fn is_completed_step_boundary(events: &[AgentSessionEvent], boundary: u64) -> bo
     })
 }
 
-fn has_compaction_in_flight(events: &[AgentSessionEvent]) -> bool {
-    let starts = events
-        .iter()
-        .filter(|event| {
-            matches!(
-                event.payload,
-                AgentSessionEventPayload::CompactionStart { .. }
-            )
-        })
-        .count();
-    let ends = events
-        .iter()
-        .filter(|event| {
-            matches!(
-                event.payload,
-                AgentSessionEventPayload::CompactionEnd { .. }
-            )
-        })
-        .count();
-    starts > ends
+pub(super) fn has_compaction_in_flight(events: &[AgentSessionEvent]) -> bool {
+    let mut open = HashSet::new();
+    let mut legacy = 0usize;
+    for event in events {
+        match &event.payload {
+            AgentSessionEventPayload::CompactionStart {
+                compaction_id: Some(id),
+                ..
+            } => {
+                open.insert(id);
+            }
+            AgentSessionEventPayload::CompactionEnd {
+                compaction_id: Some(id),
+                ..
+            } => {
+                open.remove(id);
+            }
+            AgentSessionEventPayload::CompactionStart {
+                compaction_id: None,
+                ..
+            } => legacy += 1,
+            AgentSessionEventPayload::CompactionEnd {
+                compaction_id: None,
+                ..
+            } => legacy = legacy.saturating_sub(1),
+            AgentSessionEventPayload::SessionResumed {}
+            | AgentSessionEventPayload::SubagentRecoveryStarted { .. } => {
+                open.clear();
+                legacy = 0;
+            }
+            _ => {}
+        }
+    }
+    !open.is_empty() || legacy > 0
 }
 
 fn first_unresolved_recovery_seq(events: &[AgentSessionEvent]) -> Option<u64> {
@@ -2283,43 +2340,6 @@ fn summary_has_required_sections(summary: &str) -> bool {
         .all(|section| summary.contains(section))
 }
 
-fn record_failed_compaction(
-    sessions: &AgentSessionStore,
-    session_id: &str,
-    turn_id: &str,
-    step_id: &str,
-    generation: u64,
-    boundary: u64,
-    reason: &str,
-    failure: &str,
-) -> Result<(), String> {
-    sessions.append_batch(
-        session_id,
-        vec![
-            AgentScopedPayload {
-                turn_id: Some(turn_id.to_string()),
-                step_id: Some(step_id.to_string()),
-                payload: AgentSessionEventPayload::CompactionStart {
-                    reason: bounded_with_marker(
-                        format!("{reason}; failed={}", redact_sensitive_text(failure)),
-                        4 * 1024,
-                    ),
-                },
-            },
-            AgentScopedPayload {
-                turn_id: Some(turn_id.to_string()),
-                step_id: Some(step_id.to_string()),
-                payload: AgentSessionEventPayload::CompactionEnd {
-                    surface_generation: generation,
-                    replaced_through_seq: boundary,
-                    status: AgentCompactionStatus::Failed,
-                },
-            },
-        ],
-    )?;
-    Ok(())
-}
-
 fn ensure_not_cancelled(cancellation: &CancellationToken) -> Result<(), String> {
     if cancellation.is_cancelled() {
         Err("compaction cancelled before committing a checkpoint".into())
@@ -2345,4 +2365,5 @@ fn sha256_hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     include!("tests/compaction.rs");
+    include!("tests/compaction_progress.rs");
 }

@@ -647,7 +647,7 @@
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect();
-        let failed = all.iter().position(|event| matches!(&event.payload, AgentSessionEventPayload::CompactionStart { reason } if reason.contains("smallest checkpoint projected"))).expect("log must contain the original budget failure");
+        let failed = all.iter().position(|event| matches!(&event.payload, AgentSessionEventPayload::CompactionStart { reason, .. } if reason.contains("smallest checkpoint projected"))).expect("log must contain the original budget failure");
         let old_boundary = all[failed..]
             .iter()
             .find_map(|event| match event.payload {
@@ -2069,7 +2069,16 @@
             .await
             .is_err());
         assert_eq!(sessions.snapshot("session").unwrap().surface.generation, 0);
-        assert_eq!(sessions.all_events("session").unwrap().len(), before);
+        let events = sessions.all_events("session").unwrap();
+        assert_eq!(events.len(), before + 2);
+        assert!(matches!(
+            events.last().map(|event| &event.payload),
+            Some(AgentSessionEventPayload::CompactionEnd {
+                status: AgentCompactionStatus::Cancelled,
+                duration_ms: Some(_),
+                ..
+            })
+        ));
         assert!(root
             .path()
             .join("agent-runtime/artifacts-v2/session")

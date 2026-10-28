@@ -107,7 +107,7 @@ async fn real_model_long_conversation_automatically_compacts_and_continues() {
     let events = runtime.sessions.all_events(session).unwrap();
     assert!(
         events.iter().any(|event| matches!(&event.payload,
-            AgentSessionEventPayload::CompactionStart { reason } if reason.starts_with("budgetPressure;")
+            AgentSessionEventPayload::CompactionStart { reason, .. } if reason.starts_with("budgetPressure")
         )),
         "must trigger the normal automatic budget hook"
     );

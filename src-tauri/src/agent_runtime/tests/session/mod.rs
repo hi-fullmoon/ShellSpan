@@ -1853,6 +1853,7 @@ fn preparation_failure_claim_rejects_changed_input_and_survives_restart() {
                 Some("failed-step".into()),
                 AgentSessionEventPayload::CompactionStart {
                     reason: "budgetThreshold".into(),
+                    compaction_id: None,
                 },
             )
             .unwrap();
@@ -1865,6 +1866,9 @@ fn preparation_failure_claim_rejects_changed_input_and_survives_restart() {
                     surface_generation: 1,
                     replaced_through_seq: boundary,
                     status: super::super::AgentCompactionStatus::Failed,
+                    compaction_id: None,
+                    duration_ms: None,
+                    reason: None,
                 },
             )
             .unwrap();
@@ -2706,6 +2710,9 @@ fn compaction_advances_one_generation_and_keeps_raw_events() {
                 surface_generation: 1,
                 replaced_through_seq: turn_end.seq,
                 status: crate::agent_runtime::AgentCompactionStatus::Completed,
+                compaction_id: None,
+                duration_ms: None,
+                reason: None,
             },
         )
         .unwrap();

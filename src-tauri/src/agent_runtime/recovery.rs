@@ -89,7 +89,6 @@ pub(crate) fn derive_recovery_checkpoint(events: &[AgentSessionEvent]) -> AgentR
     let mut step_id = None;
     let mut open_request = None;
     let mut request_finished = false;
-    let mut compaction_open = false;
     let mut tools = HashMap::<String, ToolBoundary>::new();
     let mut task_recovery = None;
 
@@ -103,7 +102,6 @@ pub(crate) fn derive_recovery_checkpoint(events: &[AgentSessionEvent]) -> AgentR
                 step_id = None;
                 open_request = None;
                 request_finished = false;
-                compaction_open = false;
                 tools.clear();
                 task_recovery = None;
             }
@@ -172,8 +170,6 @@ pub(crate) fn derive_recovery_checkpoint(events: &[AgentSessionEvent]) -> AgentR
                 boundary.uncertain_result = *status == super::AgentToolResultStatus::Uncertain;
                 boundary.last_seq = event.seq;
             }
-            AgentSessionEventPayload::CompactionStart { .. } => compaction_open = true,
-            AgentSessionEventPayload::CompactionEnd { .. } => compaction_open = false,
             AgentSessionEventPayload::TaskState { recovery, .. } => {
                 task_recovery.clone_from(recovery);
             }
@@ -218,7 +214,7 @@ pub(crate) fn derive_recovery_checkpoint(events: &[AgentSessionEvent]) -> AgentR
             None,
         );
     }
-    if compaction_open {
+    if super::compaction::has_compaction_in_flight(events) {
         return make(
             AgentRecoveryCheckpointKind::CompactionInFlight,
             AgentRecoveryStatus::Required,

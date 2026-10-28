@@ -217,7 +217,16 @@ export type AiTurnProcessStatus =
   | 'cancelled'
   | 'partial';
 
+export interface AiCompactionNode extends AiConversationNodeBase {
+  readonly kind: 'compaction';
+  readonly compactionId: string;
+  readonly state: 'running' | 'completed' | 'failed' | 'cancelled';
+  readonly startedAtUnixMs: number | null;
+  readonly durationMs: number | null;
+}
+
 export type AiTurnProcessChildNode =
+  | AiCompactionNode
   | AiAssistantMessageNode
   | AiContextInjectionNode
   | AiReasoningNode
@@ -252,6 +261,7 @@ export interface AiTurnTailNode extends AiConversationNodeBase {
 }
 
 export type AiConversationNode =
+  | AiCompactionNode
   | AiQuestionNode
   | AiSystemPromptNode
   | AiContextInjectionNode

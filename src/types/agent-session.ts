@@ -545,7 +545,7 @@ export type AgentSessionEvent =
       sha256?: string;
       sensitivity?: 'internal' | 'sensitiveRedacted';
     }>
-  | AgentSessionEventWithData<'compaction/start', { reason: string }>
+  | AgentSessionEventWithData<'compaction/start', { reason: string; compactionId?: string }>
   | AgentSessionEventWithData<'step/preparation_abandoned', {
       reason: string;
       inputMessageIds: readonly string[];
@@ -558,7 +558,10 @@ export type AgentSessionEvent =
   | AgentSessionEventWithData<'compaction/end', {
       surfaceGeneration: number;
       replacedThroughSeq: number;
-      status: 'completed' | 'failed';
+      status: 'completed' | 'failed' | 'cancelled';
+      compactionId?: string;
+      durationMs?: number;
+      reason?: string;
     }>
   | AgentSessionEventWithData<'subagent/descriptor', {
       descriptorId: string;

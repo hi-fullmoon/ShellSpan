@@ -107,6 +107,9 @@ function omitSystemPrompts(nodes: readonly AiConversationNode[]): readonly AiCon
 }
 
 function historicalOutput<Node extends AiConversationNode>(node: Node): Node {
+  if (node.kind === 'compaction' && node.state === 'running') {
+    return { ...node, state: 'cancelled', durationMs: null };
+  }
   if (node.kind === 'turnProcess') {
     return {
       ...node,

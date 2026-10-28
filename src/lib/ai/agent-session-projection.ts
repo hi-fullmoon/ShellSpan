@@ -658,6 +658,7 @@ function createActivityProjection() {
   let contextWindow: number | undefined;
   let surfaceGeneration = 0;
   let compactionCount = 0;
+  const liveCompactions = new Map<string, string | undefined>();
   let primaryAgentId: string | undefined;
 
   const ensureTurn = (event: AgentSessionEvent): MutableActivityTurn => {
@@ -745,6 +746,7 @@ function createActivityProjection() {
       }
       case 'agent/status': {
         status = event.data.status;
+        if (status !== 'running' && status !== 'waiting') liveCompactions.clear();
         statusReason = event.data.reason;
         const current = agents.get(event.sessionId);
         agents.set(event.sessionId, {
@@ -760,11 +762,13 @@ function createActivityProjection() {
       }
       case 'session/resumed':
       case 'subagent/recovery_started':
+        liveCompactions.clear();
         status = 'idle';
         statusReason = undefined;
         activeTurnId = undefined;
         break;
       case 'session/ended':
+        liveCompactions.clear();
         status = event.data.status;
         statusReason = event.data.reason;
         activeTurnId = undefined;
@@ -780,6 +784,9 @@ function createActivityProjection() {
         break;
       }
       case 'turn/end': {
+        for (const [id, turnId] of liveCompactions) {
+          if (turnId === event.turnId) liveCompactions.delete(id);
+        }
         if (event.turnId === activeTurnId) activeTurnId = undefined;
         const turn = ensureTurn(event);
         turn.endedAt = event.timeUnixMs;
@@ -938,11 +945,15 @@ function createActivityProjection() {
       case 'context/artifact':
         artifacts.push(event.data);
         break;
+      case 'compaction/start':
+        if (event.data.compactionId) liveCompactions.set(event.data.compactionId, event.turnId);
+        break;
       case 'compaction/summary':
         compactionCount += 1;
         surfaceGeneration = Math.max(surfaceGeneration, event.data.surfaceGeneration);
         break;
       case 'compaction/end':
+        if (event.data.compactionId) liveCompactions.delete(event.data.compactionId);
         if (event.data.status === 'completed') {
           surfaceGeneration = Math.max(surfaceGeneration, event.data.surfaceGeneration);
         }
@@ -1035,7 +1046,7 @@ function createActivityProjection() {
 
     return {
       sessionId: events[0]?.sessionId,
-      status,
+      status: liveCompactions.size > 0 ? 'running' : status,
       statusReason,
       turns: projectedTurns,
       plan,

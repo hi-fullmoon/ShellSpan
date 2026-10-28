@@ -133,15 +133,19 @@ export const AiConversation = memo(function AiConversation({
   const allNodes = useMemo(
     () =>
       projectedNodes.flatMap((node): AiConversationNode[] => {
+        if (node.kind === 'compaction' && node.state === 'running' && status !== 'running') {
+          return [{ ...node, state: 'cancelled', durationMs: null }];
+        }
         if (node.kind !== 'turnProcess') return [node];
-        const children = node.children.filter((child) => child.kind !== 'assistantMessage');
+        const children = node.children.filter((child) => child.kind !== 'assistantMessage' && child.kind !== 'compaction');
         const messages = node.children.filter(
-          (child) => child.kind === 'assistantMessage' && child.blocks.some((block) => block.type === 'text' && block.text.trim().length > 0),
-        );
+          (child) => child.kind === 'compaction' || (child.kind === 'assistantMessage' && child.blocks.some((block) => block.type === 'text' && block.text.trim().length > 0)),
+        ).map(child => child.kind === 'compaction' && child.state === 'running' && status !== 'running'
+          ? { ...child, state: 'cancelled' as const, durationMs: null } : child);
         if (children.length === node.children.length) return [node];
         return [{ ...node, children, childKeys: children.map((child) => child.key) }, ...messages];
       }),
-    [projectedNodes],
+    [projectedNodes, status],
   );
   const { nodes, startIndex, saveAnchor, revealOlder, resumeFollowing } = useConversationHistory(
     allNodes,
@@ -194,7 +198,8 @@ export const AiConversation = memo(function AiConversation({
   const lastNode = allNodes[allNodes.length - 1];
   const processingAtTail = lastNode?.kind === 'turnProcess' && lastNode.status === 'running'
     && lastNode.children.some(node => node.kind !== 'contextInjection' || isUserVisibleContextInjection(node));
-  const showAgentProcessing = status === 'running' && runningIndicator === 'agent' && !processingAtTail;
+  const compacting = allNodes.some(node => node.kind === 'compaction' && node.state === 'running');
+  const showAgentProcessing = status === 'running' && runningIndicator === 'agent' && !processingAtTail && !compacting;
   // Keep the trailing status in the last message row. A separate status item
   // would hide an inserted user row from the primitive's append detection.
   const indicator =

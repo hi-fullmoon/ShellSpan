@@ -22,6 +22,7 @@ import type {
   AiArtifactNode,
   AiAssistantMessageNode,
   AiContextInjectionNode,
+  AiCompactionNode,
   AiConversationNode,
   AiDurableSessionStats,
   AiDurableTurnStats,
@@ -87,6 +88,7 @@ const PROCESS_CHILD_ORDER = {
   question: 5,
   approvalMarker: 6,
   error: 7,
+  compaction: 8,
 } satisfies Record<AiTurnProcessChildNode['kind'], number>;
 
 function eventTurnId(event: RuntimeEventLike): string | null {
@@ -271,7 +273,8 @@ function topLevelSort(left: AiConversationNode, right: AiConversationNode): numb
 
 /**
  * Project one committed Event v5 window into chat-readable nodes only.
- * Lifecycle and request diagnostics are projected independently by Activity.
+ * Live compaction progress joins the transcript; other lifecycle and request
+ * diagnostics are projected independently by Activity.
  */
 export function projectAgentChatNodes(
   events: readonly AgentSessionEvent[],
@@ -306,6 +309,7 @@ function createChatProjection() {
   const activeRequestByStep = new Map<string, string>();
   const tools = new Map<string, AiToolNode>();
   const unscopedNodes = new Map<string, AiConversationNode>();
+  const compactions = new Map<string, AiCompactionNode>();
   let latestTurnId: string | null = null;
 
   const ensureTurn = (event: RuntimeEventLike, explicitTurnId = event.turnId): TurnState | null => {
@@ -356,6 +360,15 @@ function createChatProjection() {
       return;
     }
     turns.get(turnId)?.assistants.set(node.key, node);
+  };
+
+  const stopCompactions = (event: RuntimeEventLike): void => {
+    for (const [id, node] of compactions) {
+      if (node.state !== 'running' || (event.turnId && event.turnId !== node.turnId)) continue;
+      const stopped = { ...node, lastSeq: event.seq, state: 'cancelled' as const, durationMs: null };
+      compactions.set(id, stopped);
+      putProcessChild(node.turnId, stopped);
+    }
   };
 
   const updateRequestUsage = (
@@ -581,9 +594,7 @@ function createChatProjection() {
       case 'session/project_root_bound':
       case 'session/renamed':
       case 'request/context':
-      case 'compaction/start':
       case 'compaction/summary':
-      case 'compaction/end':
       case 'subagent/descriptor':
       case 'subagent/message':
       case 'subagent/settled':
@@ -593,7 +604,42 @@ function createChatProjection() {
       case 'task/state':
       case 'task/evidence':
         break;
+      case 'compaction/start': {
+        const id = event.data.compactionId;
+        // Legacy start/end events were committed together after generation and
+        // cannot establish a real live state or elapsed duration.
+        if (!id) break;
+        ensureTurn({ ...event, stepId: undefined });
+        const node: AiCompactionNode = {
+          kind: 'compaction', key: `compaction:${id}`, compactionId: id,
+          sourceKind: 'agent', sessionId: event.sessionId, turnId: eventTurnId(event),
+          stepId: eventStepId(event), firstSeq: event.seq, lastSeq: event.seq,
+          timestamp: agentEventTimestamp(event.timeUnixMs), startedAtUnixMs: event.timeUnixMs,
+          durationMs: null, state: 'running',
+        };
+        compactions.set(id, node);
+        putProcessChild(node.turnId, node);
+        break;
+      }
+      case 'compaction/end': {
+        const id = event.data.compactionId;
+        if (!id) break;
+        ensureTurn({ ...event, stepId: undefined });
+        const previous = compactions.get(id);
+        const node: AiCompactionNode = {
+          kind: 'compaction', key: `compaction:${id}`, compactionId: id,
+          sourceKind: 'agent', sessionId: event.sessionId, turnId: eventTurnId(event),
+          stepId: eventStepId(event), firstSeq: previous?.firstSeq ?? event.seq, lastSeq: event.seq,
+          timestamp: previous?.timestamp ?? agentEventTimestamp(event.timeUnixMs),
+          startedAtUnixMs: previous?.startedAtUnixMs ?? null,
+          durationMs: event.data.durationMs ?? null, state: event.data.status,
+        };
+        compactions.set(id, node);
+        putProcessChild(node.turnId, node);
+        break;
+      }
       case 'agent/status':
+        if (event.data.status !== 'running' && event.data.status !== 'waiting') stopCompactions(event);
         if (event.data.status === 'idle' && event.data.reason === 'stoppedByUser') {
           upsertTurnError(event, 'cancelled', event.data.reason, 'session');
         }
@@ -606,6 +652,7 @@ function createChatProjection() {
         }
         break;
       case 'session/ended':
+        stopCompactions(event);
         settleStreamingOutput(event, event.data.status, 'session');
         if (event.data.status !== 'completed') {
           upsertTurnError(event, event.data.status, event.data.reason ?? event.data.status, 'session');
@@ -647,6 +694,7 @@ function createChatProjection() {
         break;
       case 'session/resumed':
       case 'subagent/recovery_started':
+        stopCompactions(event);
         activeTurnId = null;
         break;
       case 'agent/inbox/paused':
@@ -689,6 +737,7 @@ function createChatProjection() {
         break;
       }
       case 'turn/end': {
+        stopCompactions(event);
         if (event.turnId === activeTurnId) activeTurnId = null;
         const turn = ensureTurn(event);
         if (!turn) break;

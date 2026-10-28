@@ -95,6 +95,7 @@ pub(crate) fn derive_surface(events: &[AgentSessionEvent]) -> Result<AgentSurfac
                 surface_generation,
                 replaced_through_seq: through,
                 status,
+                ..
             } => match (*status, pending_summary) {
                 (_, Some(summary)) if summary == (*surface_generation, *through) => {
                     pending_summary = None;
@@ -102,7 +103,7 @@ pub(crate) fn derive_surface(events: &[AgentSessionEvent]) -> Result<AgentSurfac
                 (AgentCompactionStatus::Completed, _) => {
                     return Err("Agent compaction/end did not match its summary".into());
                 }
-                (AgentCompactionStatus::Failed, None) => {
+                (AgentCompactionStatus::Failed | AgentCompactionStatus::Cancelled, None) => {
                     if *surface_generation != generation.saturating_add(1)
                         || *through >= event.seq
                         || replaced_through_seq.is_some_and(|previous| *through <= previous)
@@ -121,7 +122,7 @@ pub(crate) fn derive_surface(events: &[AgentSessionEvent]) -> Result<AgentSurfac
                         );
                     }
                 }
-                (AgentCompactionStatus::Failed, Some(_)) => {
+                (AgentCompactionStatus::Failed | AgentCompactionStatus::Cancelled, Some(_)) => {
                     return Err("Agent compaction/end did not match its summary".into());
                 }
             },

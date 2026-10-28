@@ -112,6 +112,9 @@ fn task_plan_context_survives_interruption_and_replay_until_committed_adoption()
                 replaced_through_seq,
                 surface_generation: 1,
                 status: super::super::AgentCompactionStatus::Completed,
+                compaction_id: None,
+                duration_ms: None,
+                reason: None,
             },
         )
         .unwrap();

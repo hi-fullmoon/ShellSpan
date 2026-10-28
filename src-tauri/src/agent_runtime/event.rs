@@ -583,6 +583,7 @@ pub(crate) struct AgentFleetState {
 pub(crate) enum AgentCompactionStatus {
     Completed,
     Failed,
+    Cancelled,
 }
 
 #[allow(clippy::large_enum_variant)] // Wire vocabulary intentionally keeps session/created self-contained.
@@ -908,7 +909,11 @@ pub(crate) enum AgentSessionEventPayload {
         sensitivity: Option<super::AgentArtifactSensitivity>,
     },
     #[serde(rename = "compaction/start")]
-    CompactionStart { reason: String },
+    CompactionStart {
+        reason: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        compaction_id: Option<String>,
+    },
     #[serde(rename = "step/preparation_abandoned")]
     StepPreparationAbandoned {
         reason: String,
@@ -925,6 +930,12 @@ pub(crate) enum AgentSessionEventPayload {
         surface_generation: u64,
         replaced_through_seq: u64,
         status: AgentCompactionStatus,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        compaction_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
     },
     #[serde(rename = "subagent/descriptor")]
     SubagentDescriptor {

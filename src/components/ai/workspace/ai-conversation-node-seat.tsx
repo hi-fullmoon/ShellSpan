@@ -31,6 +31,7 @@ import { requestErrorMessageKey, requestRetryMessageKey } from '@/lib/ai/request
 import { AiToolRow } from './ai-tool-presentation';
 import { AiTurnFooter } from './ai-turn-footer';
 import { AiProcessingStatus } from './ai-processing-status';
+import { AiCompactionStatus } from './ai-compaction-status';
 import { AiQuestionHistory } from './ai-question-panel';
 import { AiFailureRecoveryAction } from './ai-failure-recovery';
 import {
@@ -662,6 +663,7 @@ function TurnProcessRow({
 }
 
 export const aiConversationNodeRenderers = {
+  compaction: AiCompactionStatus,
   systemPrompt: SystemPromptRow,
   contextInjection: ContextInjectionRow,
   userMessage: UserMessageNodeView,
@@ -696,6 +698,8 @@ function renderNode(
   deferMessageActions = false,
 ): React.ReactNode {
   switch (node.kind) {
+    case 'compaction':
+      return React.createElement(renderers.compaction, { node });
     case 'systemPrompt':
       return React.createElement(renderers.systemPrompt, { node, renderers });
     case 'contextInjection':
@@ -753,6 +757,8 @@ export function aiConversationNodeRevision(node: AiConversationNode): string {
       return `${base}:${node.status}`;
     case 'error':
       return `${base}:${node.state}`;
+    case 'compaction':
+      return `${base}:${node.state}:${node.durationMs ?? 'unknown'}`;
     case 'turnProcess':
       return `${base}:${node.status}:${node.answerGeneration}:${node.hasStartBoundary}:${node.hasEndBoundary}:${node.children.length}`;
     case 'turnTail':
