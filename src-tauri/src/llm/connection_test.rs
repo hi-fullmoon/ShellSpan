@@ -89,7 +89,7 @@ fn test_provider(mut provider: AiProviderConfig) -> Result<AiProviderConfig, Str
     }
     validate_provider_config(&provider, true)?;
     if let Some(definition) = &mut provider.model_definition {
-        definition.max_output_tokens = definition.max_output_tokens.min(OUTPUT_LIMIT);
+        definition.request_output_tokens = Some(definition.output_token_budget().min(OUTPUT_LIMIT));
     }
     Ok(provider)
 }
@@ -278,7 +278,7 @@ mod tests {
             let checked = test_provider(original.clone()).unwrap();
             assert_eq!(checked.kind, original.kind);
             assert_eq!(checked.model, original.model);
-            assert!(checked.model_definition.unwrap().max_output_tokens <= OUTPUT_LIMIT);
+            assert!(checked.model_definition.unwrap().output_token_budget() <= OUTPUT_LIMIT);
             assert!(original.model_definition.is_none());
         }
     }

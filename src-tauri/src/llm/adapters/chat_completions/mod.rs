@@ -133,7 +133,7 @@ impl ModelAdapter for ChatCompletionsAdapter {
         apply_output_token_limit(
             &mut body,
             self.http.provider.kind,
-            resolved.max_output_tokens,
+            resolved.output_token_budget(),
         );
         if capabilities.supports_stream_usage {
             body["stream_options"] = json!({ "include_usage": true });

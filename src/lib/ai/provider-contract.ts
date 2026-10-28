@@ -21,6 +21,8 @@ export interface VisionBudget {
 export interface ModelDefinition {
   displayName?: string;
   contextWindow: number; maxOutputTokens: number;
+  /** Missing in saved legacy declarations: retain maxOutputTokens as the request limit. */
+  requestOutputTokens?: number;
   toolCalling: Support; textInput: Support; imageInput: Support;
   reasoning: { id: string; displayName: string; wireValue?: unknown }[];
   compat: ModelCompat; vision?: VisionBudget;
@@ -36,6 +38,23 @@ export interface ResolvedModel extends ModelDefinition {
   catalogVersion: number; routeId: string; providerId: string; profile: ProviderProfileId;
   kind: AiProviderKind; modelId: string; source: 'builtinCatalog' | 'userDeclaration'; capacityPolicy: string;
 }
+
+/** Copy configurable fields without persisting resolution metadata. */
+export function modelDefinitionOf(model: ModelDefinition): ModelDefinition {
+  return {
+    ...(model.displayName ? { displayName: model.displayName } : {}),
+    contextWindow: model.contextWindow,
+    maxOutputTokens: model.maxOutputTokens,
+    ...(model.requestOutputTokens === undefined ? {} : { requestOutputTokens: model.requestOutputTokens }),
+    toolCalling: model.toolCalling,
+    textInput: model.textInput,
+    imageInput: model.imageInput,
+    reasoning: model.reasoning,
+    compat: model.compat,
+    ...(model.vision ? { vision: model.vision } : {}),
+  };
+}
+
 type Provider = Pick<AiProviderConfig, 'kind' | 'model' | 'baseUrl' | 'profile' | 'modelDefinition'> & { preset?: AiProviderPreset; id?: string };
 export function isProviderProfile(value: unknown): value is ProviderProfileId {
   return typeof value === 'string' && PROVIDER_PROFILE_IDS.includes(value as ProviderProfileId);

@@ -53,6 +53,7 @@ export interface ProviderModelDraft {
   displayName?: string;
   contextWindow?: number;
   maxOutputTokens?: number;
+  requestOutputTokens?: number;
   definition?: ModelDefinition;
 }
 
@@ -74,10 +75,12 @@ export function validateProviderModels(models: readonly ProviderModelDraft[]): M
     const definition = model.definition;
     const contextWindow = model.contextWindow ?? definition?.contextWindow;
     const maxOutputTokens = model.maxOutputTokens ?? definition?.maxOutputTokens;
+    const requestOutputTokens = model.requestOutputTokens ?? definition?.requestOutputTokens ?? maxOutputTokens;
     if (
       (contextWindow !== undefined && (!Number.isSafeInteger(contextWindow) || contextWindow <= 0))
       || (maxOutputTokens !== undefined && (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens <= 0))
-      || (contextWindow !== undefined && maxOutputTokens !== undefined && maxOutputTokens > contextWindow)
+      || (requestOutputTokens !== undefined && (!Number.isSafeInteger(requestOutputTokens) || requestOutputTokens <= 0
+        || (maxOutputTokens !== undefined && requestOutputTokens > maxOutputTokens)))
       || (definition?.vision !== undefined && (
         definition.imageInput !== 'supported'
         || !Number.isSafeInteger(definition.vision.maxRequestImages)
@@ -94,8 +97,8 @@ export function validateProviderModels(models: readonly ProviderModelDraft[]): M
       || (definition !== undefined
         && (definition.imageInput === 'supported') !== Boolean(definition.vision))
     ) return { kind: 'invalidDefinition', index };
-    if (contextWindow !== undefined && maxOutputTokens !== undefined
-      && contextWindow - maxOutputTokens - Math.max(Math.floor(contextWindow / 20), 1_024) < 2) {
+    if (contextWindow !== undefined && requestOutputTokens !== undefined
+      && contextWindow - requestOutputTokens - Math.max(Math.floor(contextWindow / 20), 1_024) < 2) {
       return { kind: 'invalidBudget', index };
     }
   }
@@ -394,6 +397,24 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
                         maxOutputTokens: event.target.value ? Number(event.target.value) : undefined,
                       })}
                     />
+                  </Field>
+                  <Field data-invalid={definitionInvalid || undefined}>
+                    <FieldLabel htmlFor={`ai-model-request-output-${index}`}>{t('settings.ai.requestOutput')}</FieldLabel>
+                    <Input
+                      id={`ai-model-request-output-${index}`}
+                      type="number"
+                      min={1}
+                      max={model.maxOutputTokens ?? model.definition?.maxOutputTokens}
+                      step={1}
+                      value={model.requestOutputTokens ?? model.definition?.requestOutputTokens
+                        ?? model.maxOutputTokens ?? model.definition?.maxOutputTokens ?? ''}
+                      aria-invalid={definitionInvalid || undefined}
+                      disabled={disabled}
+                      onChange={(event) => patchModel(index, {
+                        requestOutputTokens: event.target.value ? Number(event.target.value) : undefined,
+                      })}
+                    />
+                    <FieldDescription>{t('settings.ai.requestOutputDescription')}</FieldDescription>
                   </Field>
                   {!model.definition && (
                     <Field className="@min-[28rem]/model-row:col-span-2">

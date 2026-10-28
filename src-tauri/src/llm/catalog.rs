@@ -133,6 +133,9 @@ pub(crate) struct ModelDefinition {
     pub display_name: Option<String>,
     pub context_window: u64,
     pub max_output_tokens: u64,
+    /// Per-request output allowance. Missing values preserve saved legacy limits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_output_tokens: Option<u64>,
     pub tool_calling: Support,
     pub text_input: Support,
     pub image_input: Support,
@@ -140,6 +143,12 @@ pub(crate) struct ModelDefinition {
     pub compat: Compat,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vision: Option<VisionBudget>,
+}
+
+impl ModelDefinition {
+    pub(crate) fn output_token_budget(&self) -> u64 {
+        self.request_output_tokens.unwrap_or(self.max_output_tokens)
+    }
 }
 
 /// Built-in catalog entry. Model facts stay explicit while provider protocol
@@ -167,6 +176,7 @@ impl CatalogModelDefinition {
             display_name: self.display_name.clone(),
             context_window: self.context_window,
             max_output_tokens: self.max_output_tokens,
+            request_output_tokens: None,
             tool_calling: self.tool_calling,
             text_input: self.text_input,
             image_input: self.image_input,
@@ -282,7 +292,7 @@ pub(crate) fn model_input_token_budget(
         .checked_sub(output_tokens)
         .and_then(|remaining| remaining.checked_sub(safety_tokens))
         .filter(|remaining| *remaining >= 2)
-        .ok_or_else(|| format!("INVALID_MODEL_TOKEN_BUDGET: context window {context_window}, maximum output {output_tokens}, and safety reserve {safety_tokens} leave no usable input budget; reduce maximum output tokens or increase the context window"))?;
+        .ok_or_else(|| format!("INVALID_MODEL_TOKEN_BUDGET: context window {context_window}, request output budget {output_tokens}, and safety reserve {safety_tokens} leave no usable input budget; reduce the request output budget or increase the context window"))?;
     Ok((safety_tokens, input_tokens))
 }
 
@@ -305,9 +315,14 @@ pub(crate) fn validate_definition(
     if d.context_window == 0
         || d.context_window > 9_007_199_254_740_991
         || d.max_output_tokens == 0
-        || d.max_output_tokens > d.context_window
+        || d.max_output_tokens > 9_007_199_254_740_991
     {
-        return Err("UNSUPPORTED_OPTION: token counts must be positive exact JSON integers; output must not exceed context".into());
+        return Err("UNSUPPORTED_OPTION: token counts must be positive exact JSON integers".into());
+    }
+    if d.request_output_tokens
+        .is_some_and(|tokens| tokens == 0 || tokens > d.max_output_tokens)
+    {
+        return Err("UNSUPPORTED_OPTION: request output budget must be positive and no greater than model output capacity".into());
     }
     let c = &d.compat;
     if c.protocol != kind {
@@ -470,7 +485,7 @@ pub(crate) fn compaction_provider(provider: &AiProviderConfig) -> Result<AiProvi
         .map(|option| option.id.clone())
         .or_else(|| provider.reasoning_effort.clone());
     let mut definition = model.definition.clone();
-    definition.max_output_tokens = definition.max_output_tokens.min(2048);
+    definition.request_output_tokens = Some(model.output_token_budget().min(2048));
     summary.model_definition = Some(definition);
     resolve(&summary)?;
     Ok(summary)
@@ -540,6 +555,7 @@ pub(crate) fn declaration_template(provider: &AiProviderConfig) -> Result<ModelD
         display_name: None,
         context_window: DEFAULT_CONTEXT_WINDOW,
         max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
+        request_output_tokens: None,
         tool_calling: Support::Unknown,
         text_input: Support::Supported,
         image_input: Support::Unsupported,
@@ -568,6 +584,7 @@ pub(crate) fn fixture_definition(kind: AiProviderKind, context: u64) -> ModelDef
         display_name: None,
         context_window: context,
         max_output_tokens: 4096.min(context / 4),
+        request_output_tokens: None,
         tool_calling: Support::Supported,
         text_input: Support::Supported,
         image_input: Support::Unsupported,

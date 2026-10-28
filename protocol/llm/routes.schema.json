@@ -145,6 +145,10 @@
                   "type": "integer",
                   "minimum": 1
                 },
+                "requestOutputTokens": {
+                  "type": "integer",
+                  "minimum": 1
+                },
                 "toolCalling": {
                   "enum": [
                     "supported",
@@ -315,6 +319,10 @@
                   "minimum": 1
                 },
                 "maxOutputTokens": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "requestOutputTokens": {
                   "type": "integer",
                   "minimum": 1
                 },
@@ -741,6 +749,10 @@
           "minimum": 1
         },
         "maxOutputTokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "requestOutputTokens": {
           "type": "integer",
           "minimum": 1
         },

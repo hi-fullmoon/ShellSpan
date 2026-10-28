@@ -8,6 +8,16 @@ pub(crate) const MAX_AGENT_MESSAGE_BYTES: usize = 128 * 1024;
 pub(crate) const MAX_AGENT_STREAM_DELTA_BYTES: usize = 4 * 1024;
 pub(crate) const MAX_TERMINAL_CONTEXT_BYTES: usize = 32 * 1024;
 
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentRequestBudget {
+    pub(crate) output_tokens: u64,
+    pub(crate) safety_tokens: u64,
+    pub(crate) usable_input_tokens: u64,
+    pub(crate) compaction_threshold_tokens: u64,
+    pub(crate) compaction_target_tokens: u64,
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum AgentSessionStatus {
@@ -795,6 +805,8 @@ pub(crate) enum AgentSessionEventPayload {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         context_window: Option<u64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        request_budget: Option<AgentRequestBudget>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         system_tokens: Option<u64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tool_schema_tokens: Option<u64>,
@@ -1074,6 +1086,7 @@ mod tests {
                 request_id: "request-1".into(),
                 input_tokens: Some(42),
                 context_window: Some(128),
+                request_budget: None,
                 system_tokens: Some(8),
                 tool_schema_tokens: Some(12),
                 message_tokens: Some(22),

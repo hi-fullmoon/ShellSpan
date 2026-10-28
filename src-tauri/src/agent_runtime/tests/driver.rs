@@ -378,6 +378,7 @@
                     request_id: "request-1".into(),
                     input_tokens: Some(40),
                     context_window: None,
+                    request_budget: None,
                     system_tokens: None,
                     tool_schema_tokens: None,
                     message_tokens: None,

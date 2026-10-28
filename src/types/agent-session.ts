@@ -1,5 +1,13 @@
 export const AGENT_SESSION_EVENT_VERSION = 5 as const;
 
+export interface AgentRequestBudget {
+  readonly outputTokens: number;
+  readonly safetyTokens: number;
+  readonly usableInputTokens: number;
+  readonly compactionThresholdTokens: number;
+  readonly compactionTargetTokens: number;
+}
+
 export type AgentRequestSnapshot = {
   status: 'prepared'; routeId: string; routeRevision: number; adapterId: string;
   modelId: string; catalogVersion: number; capabilities: import('@/lib/ai/provider-contract').ModelDefinition;
@@ -464,6 +472,7 @@ export type AgentSessionEvent =
       requestId: string;
       inputTokens?: number;
       contextWindow?: number;
+      requestBudget?: AgentRequestBudget;
       systemTokens?: number;
       toolSchemaTokens?: number;
       messageTokens?: number;

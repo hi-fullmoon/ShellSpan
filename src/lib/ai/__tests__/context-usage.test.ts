@@ -3,6 +3,7 @@ import { projectContextUsage } from '../context-usage';
 import type { AgentSessionEvent } from '@/types/agent-session';
 import capture from '@/test/fixtures/context-usage-runtime.json';
 import skillsCapture from '@/test/fixtures/agent-skills-runtime.json';
+import budgetEvidence from '@/test/fixtures/context-budget-review.json';
 
 // Accounting-only excerpts from the actual 2026-10-27 session. No message
 // bodies, tool arguments, credentials, or fabricated usage are retained.
@@ -12,6 +13,25 @@ const through = (events: readonly AgentSessionEvent[], seq: number) =>
   projectContextUsage(events.filter(event => event.seq <= seq));
 
 describe('context usage from committed runtime accounting', () => {
+  it('projects observed request budgets separately from confirmed usage and clears them on compaction', () => {
+    const requestBudget = {
+      outputTokens: budgetEvidence.budget.outputReserveTokens,
+      safetyTokens: budgetEvidence.budget.safetyReserveTokens,
+      usableInputTokens: budgetEvidence.budget.usableInputTokens,
+      compactionThresholdTokens: budgetEvidence.budget.compactionThresholdTokens,
+      compactionTargetTokens: budgetEvidence.budget.compactionTargetTokens,
+    };
+    // Supply the new event field from the same session's recorded budget artifact.
+    const observed = (budgetEvidence.events as readonly AgentSessionEvent[]).map(event => event.type === 'request/context'
+      ? { ...event, data: { ...event.data, requestBudget } } : event);
+    expect(projectContextUsage(observed)).toMatchObject({
+      usedTokens: 46_517, estimatedTokens: 51_925, contextWindow: 200_000, requestBudget,
+    });
+    expect(projectContextUsage(budgetEvidence.events as readonly AgentSessionEvent[])).not.toHaveProperty('requestBudget');
+    const actualReset = budgetEvidence.compaction as AgentSessionEvent;
+    const resetEvents = [...observed, actualReset];
+    expect(projectContextUsage(resetEvents)?.requestBudget).toBeUndefined();
+  });
   it('keeps confirmed input when the next request starts', () => {
     expect(through(transitions, 6507)).toMatchObject({
       usedTokens: 80_998, source: 'reported', estimatedTokens: 116_893,

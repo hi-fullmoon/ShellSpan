@@ -248,7 +248,7 @@ impl SemanticCompactionSummarizer {
         let output_bytes = maximum_bytes.clamp(1024, 4096);
         let chunk_bytes = summary_chunk_bytes(
             resolved.context_window,
-            resolved.max_output_tokens,
+            resolved.output_token_budget(),
             output_bytes,
         );
         if chunk_bytes < 4096 {
@@ -349,7 +349,7 @@ impl SemanticCompactionSummarizer {
                             || response
                                 .usage
                                 .output_tokens
-                                .is_some_and(|tokens| tokens > resolved.max_output_tokens)
+                                .is_some_and(|tokens| tokens > resolved.output_token_budget())
                         {
                             return Err("outputBudget".into());
                         }
@@ -414,7 +414,7 @@ impl AgentCompactionSummarizer for SemanticCompactionSummarizer {
             .map(|model| {
                 summary_chunk_bytes(
                     model.context_window,
-                    model.max_output_tokens,
+                    model.output_token_budget(),
                     maximum_bytes.clamp(1024, 4096),
                 )
             })

@@ -100,7 +100,7 @@ impl PreparedModel {
             endpoint_identity: model.endpoint.to_string(),
             replay_domain_id: self.route.replay_domain_id.clone(),
             reasoning_effort: self.provider.reasoning_effort.clone(),
-            output_tokens: model.max_output_tokens,
+            output_tokens: model.output_token_budget(),
             retry_policy: self.provider.retry_policy.unwrap_or_default(),
             timeouts: self.route.timeouts.clone(),
             purpose: purpose.into(),

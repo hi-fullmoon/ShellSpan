@@ -82,7 +82,7 @@ pub(crate) fn estimate_model_surface_budget(
 ) -> Result<ModelSurfaceBudget, String> {
     let model = crate::llm::catalog::resolve(provider)?;
     let context_window = model.context_window;
-    let output_reserve_tokens = model.max_output_tokens;
+    let output_reserve_tokens = model.output_token_budget();
     let image_reserve = model
         .vision
         .as_ref()
@@ -105,7 +105,7 @@ pub(crate) fn estimate_model_surface_budget(
     let system_tokens = estimate_tokens(system_bytes);
     let tool_schema_tokens = estimate_tokens(tool_schema_bytes);
     if system_tokens.saturating_add(tool_schema_tokens) >= usable_input_tokens {
-        return Err(format!("INVALID_MODEL_TOKEN_BUDGET: input budget {usable_input_tokens} cannot hold fixed system and tool instructions ({} tokens); reduce maximum output tokens or increase the context window", system_tokens.saturating_add(tool_schema_tokens)));
+        return Err(format!("INVALID_MODEL_TOKEN_BUDGET: input budget {usable_input_tokens} cannot hold fixed system and tool instructions ({} tokens); reduce the request output budget or increase the context window", system_tokens.saturating_add(tool_schema_tokens)));
     }
     let message_tokens = request
         .messages

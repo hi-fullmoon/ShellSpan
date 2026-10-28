@@ -400,7 +400,8 @@ export function useAiSessionController({
     // Spend at most roughly a quarter of the model's input budget on terminal
     // text, leaving room for the task, tools, and existing conversation.
     const modelInputTokens = model.modelDefinition
-      ? model.modelDefinition.contextWindow - model.modelDefinition.maxOutputTokens
+      ? model.modelDefinition.contextWindow
+        - (model.modelDefinition.requestOutputTokens ?? model.modelDefinition.maxOutputTokens)
       : 8_192;
     const maxBytes = Math.min(
       MAX_AGENT_TERMINAL_SNAPSHOT_BYTES,

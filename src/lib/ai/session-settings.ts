@@ -9,7 +9,7 @@ export function contextUsageForModel(
 ): AiContextUsage | undefined {
   if (!usage || contextWindow === undefined || !Number.isSafeInteger(contextWindow)
     || contextWindow <= 0 || contextWindow === usage.contextWindow) return usage;
-  return { ...usage, contextWindow, capacitySource: 'selectedModel' };
+  return { ...usage, contextWindow, requestBudget: undefined, capacitySource: 'selectedModel' };
 }
 
 /** Restore the credential-free provider selection recorded by the runtime. */

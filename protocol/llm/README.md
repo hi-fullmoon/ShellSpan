@@ -21,7 +21,8 @@ Add the exact wire model ID as a key under `presets.<provider>.models`. Every en
 
 - `displayName` is optional presentation text; selectors fall back to the exact wire model ID when it is absent.
 - `contextWindow`: combined input and output capacity.
-- `maxOutputTokens`: maximum output capacity; it must not exceed `contextWindow`.
+- `maxOutputTokens`: declared model output capacity. It remains independent of a user-configured `contextWindow` and is never clamped when that window is reduced. Built-in catalog entries still describe capacities within the model's published context window.
+- Custom definitions may also set `requestOutputTokens`: the actual per-request output limit, a positive integer no larger than `maxOutputTokens`. Admission reserves this value and every adapter sends it. Omission preserves the legacy `maxOutputTokens` limit. The provider editor exposes these as separate fields without changing the user's context capacity.
 - `toolCalling`, `textInput`, and `imageInput`: explicit `supported`, `unsupported`, or `unknown` states. Unknown tool support allows tools to be sent to the provider; only explicit `unsupported` blocks tool calling locally. Text and image input still require explicit support.
 - `reasoning`: selectable reasoning levels in display order. Each item has a stable `id`, a `displayName`, and an optional provider-specific string `wireValue`. A missing `wireValue` sends the `id`; explicit `null` offers the selector value without sending a reasoning parameter. Use an empty list for a non-reasoning model.
 

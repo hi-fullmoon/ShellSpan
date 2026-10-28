@@ -197,7 +197,7 @@ impl ModelAdapter for AnthropicMessagesAdapter {
         let messages = encode_messages(&request.messages)?;
         let mut body = json!({
             "model": self.http.provider.model,
-            "max_tokens": resolved.max_output_tokens,
+            "max_tokens": resolved.output_token_budget(),
             "stream": true,
             "system": request.system_prompt,
             "messages": messages,

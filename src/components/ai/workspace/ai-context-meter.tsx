@@ -133,6 +133,25 @@ export function AiContextMeter({ usage }: { readonly usage?: AiContextUsage }): 
               ))}
             </dl>
           )}
+          {usage.requestBudget && (
+            <dl className="ai-context-meter-rows mt-2 mb-0" data-slot="ai-context-budget">
+              {([
+                ['outputTokens', 'ai.workspace.contextUsage.outputReserve'],
+                ['safetyTokens', 'ai.workspace.contextUsage.safetyReserve'],
+                ['usableInputTokens', 'ai.workspace.contextUsage.inputCapacity'],
+                ['compactionThresholdTokens', 'ai.workspace.contextUsage.compactionThreshold'],
+                ['compactionTargetTokens', 'ai.workspace.contextUsage.compactionTarget'],
+              ] as const).map(([key, label]) => (
+                <div className="flex items-center justify-between gap-3 py-0.5" key={key}>
+                  <dt>{t(label)}</dt>
+                  <dd className="m-0 whitespace-nowrap">
+                    {usage.requestBudget![key].toLocaleString('en-US')}
+                    {key === 'compactionThresholdTokens' && ` (${Math.round(usage.requestBudget!.compactionThresholdTokens / usage.contextWindow * 100)}%)`}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
           <p className="ai-context-meter-note mt-1.5 mb-0 pt-1.5">
             {t(usage.afterCompaction ? (usage.source === 'pending'
               ? 'ai.workspace.contextUsage.compactedPendingNote' : 'ai.workspace.contextUsage.compactedNote')
@@ -141,6 +160,7 @@ export function AiContextMeter({ usage }: { readonly usage?: AiContextUsage }): 
               ? 'ai.workspace.contextUsage.reportedNote'
               : 'ai.workspace.contextUsage.estimatedNote')}
             {usage.capacitySource === 'selectedModel' && <> {t('ai.workspace.contextUsage.currentCapacityNote')}</>}
+            {usage.requestBudget && <> {t('ai.workspace.contextUsage.budgetNote')}</>}
           </p>
         </PopoverContent>
     </Popover>

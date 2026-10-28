@@ -1,6 +1,7 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import type { PetdexCategories, PetdexDiagnostic, PetdexTestResult, PetdexCheckResult } from '@/types';
 import { createLogger } from '@/lib/logger';
+import { modelDefinitionOf } from '@/lib/ai/provider-contract';
 import { createOperationId, findOperationId } from '@/lib/operation-id';
 import { listen, type EventCallback, type UnlistenFn } from '@tauri-apps/api/event';
 
@@ -284,17 +285,7 @@ export async function invokeAiSetupModelDefinition(
   const { apiKey: _apiKey, ...provider } = config;
   try {
     const model = await invoke<import('@/lib/ai/provider-contract').ResolvedModel>('ai_resolve_model', { provider });
-    return {
-      displayName: model.displayName,
-      contextWindow: model.contextWindow,
-      maxOutputTokens: model.maxOutputTokens,
-      toolCalling: model.toolCalling,
-      textInput: model.textInput,
-      imageInput: model.imageInput,
-      reasoning: model.reasoning,
-      compat: model.compat,
-      vision: model.vision,
-    };
+    return modelDefinitionOf(model);
   } catch (reason) {
     if (!(reason instanceof Error ? reason.message : String(reason)).includes('UNKNOWN_MODEL')) throw reason;
     return invoke<import('@/lib/ai/provider-contract').ModelDefinition>('ai_model_declaration_template', { provider });

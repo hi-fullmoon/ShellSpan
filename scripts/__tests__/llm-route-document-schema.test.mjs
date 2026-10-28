@@ -17,7 +17,7 @@ describe('persisted native route document schema',()=>{
     const presets=JSON.parse(readFileSync('protocol/llm/catalog.json','utf8')).presets;
     const preset=presets.anthropic;
     const [id, definition]=Object.entries(preset.models)[0];
-    const concrete={ [id]:{ ...definition, compat:{...preset.compat,...definition.compat} } };
+    const concrete={ [id]:{ ...definition, requestOutputTokens: Math.min(definition.maxOutputTokens, 16_384), compat:{...preset.compat,...definition.compat} } };
     expect(catalog({models:concrete,modelOverrides:null}),validator.errorsText(catalog.errors)).toBe(true);
     expect(catalog({models:null,modelOverrides:concrete}),validator.errorsText(catalog.errors)).toBe(true);
     expect(catalog({models:concrete,modelOverrides:concrete})).toBe(false);

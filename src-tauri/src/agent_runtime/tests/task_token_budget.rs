@@ -109,6 +109,7 @@ fn record_budget_admission(sessions: &AgentSessionStore, index: usize, input_tok
                 request_id: format!("admission-{index}"),
                 input_tokens: Some(input_tokens),
                 context_window: None,
+                request_budget: None,
                 system_tokens: None,
                 tool_schema_tokens: None,
                 message_tokens: Some(input_tokens),

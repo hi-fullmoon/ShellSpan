@@ -84,7 +84,7 @@ import {
   QwenBrandIcon,
 } from './provider-brand-icons';
 
-import { PROVIDER_PROFILE_IDS, resolveProviderProfile, useResolvedModel, profileProtocol, type DiscoveredModel, type ModelDefinition, type ProviderProfileId } from '@/lib/ai/provider-contract';
+import { PROVIDER_PROFILE_IDS, modelDefinitionOf, resolveProviderProfile, useResolvedModel, profileProtocol, type DiscoveredModel, type ModelDefinition, type ProviderProfileId } from '@/lib/ai/provider-contract';
 import {
   ProviderModelCatalogEditor,
   type ProviderModelDraft,
@@ -226,21 +226,7 @@ function draftConfig(
   };
 }
 
-function modelDefinitionOf(model: ModelDefinition): ModelDefinition {
-  return {
-    ...(model.displayName ? { displayName: model.displayName } : {}),
-    contextWindow: model.contextWindow,
-    maxOutputTokens: model.maxOutputTokens,
-    toolCalling: model.toolCalling,
-    textInput: model.textInput,
-    imageInput: model.imageInput,
-    reasoning: model.reasoning,
-    compat: model.compat,
-    ...(model.vision ? { vision: model.vision } : {}),
-  };
-}
-
-function modelDefinitionForSave(
+export function modelDefinitionForSave(
   model: ProviderModelDraft,
   definition: ModelDefinition,
 ): ModelDefinition {
@@ -248,13 +234,15 @@ function modelDefinitionForSave(
     ? definition.displayName
     : model.displayName.trim() || undefined;
   const contextWindow = model.contextWindow ?? definition.contextWindow;
-  const maxOutputTokens = model.maxOutputTokens
-    ?? Math.min(definition.maxOutputTokens, contextWindow);
+  const maxOutputTokens = model.maxOutputTokens ?? definition.maxOutputTokens;
   return {
     ...definition,
     ...(displayName ? { displayName } : { displayName: undefined }),
     contextWindow,
     maxOutputTokens,
+    ...((model.requestOutputTokens ?? definition.requestOutputTokens) === undefined ? {} : {
+      requestOutputTokens: model.requestOutputTokens ?? definition.requestOutputTokens,
+    }),
   };
 }
 
@@ -559,11 +547,13 @@ export const ProviderSetupDialog: React.FC<ProviderSetupDialogProps> = ({
       setProviderModels((models) => models.map((model) => {
         const contextWindow = model.contextWindow ?? model.definition?.contextWindow;
         const maxOutputTokens = model.maxOutputTokens ?? model.definition?.maxOutputTokens;
+        const requestOutputTokens = model.requestOutputTokens ?? model.definition?.requestOutputTokens;
         return {
           id: model.id,
           ...(model.displayName ? { displayName: model.displayName } : {}),
           ...(contextWindow === undefined ? {} : { contextWindow }),
           ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
+          ...(requestOutputTokens === undefined ? {} : { requestOutputTokens }),
         };
       }));
       setDraft((current) => current ? {

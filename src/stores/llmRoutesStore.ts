@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { invokeListAiRoutes, invokeListAiRouteModels, invokeSaveAiRoutes } from '@/lib/ipc/tauri';
-import type { ResolvedModel } from '@/lib/ai/provider-contract';
+import { modelDefinitionOf, type ResolvedModel } from '@/lib/ai/provider-contract';
 import type { ModelSelection, ProviderRoute, RouteSnapshot } from '@/types/ai';
 import type { AiProviderPreset, AiProviderProfile } from '@/types/ai';
 
@@ -13,7 +13,7 @@ export function routeProviderConfigs(snapshot: RouteSnapshot, modelsByRoute: Rec
         : route.adapterId === 'anthropic-messages' ? 'anthropicMessages' as const
           : 'openAiCompatible' as const,
     profile: resolved.profile, baseUrl: route.baseUrl, model: resolved.modelId,
-    modelDefinition: { displayName:resolved.displayName,contextWindow:resolved.contextWindow,maxOutputTokens:resolved.maxOutputTokens,toolCalling:resolved.toolCalling,textInput:resolved.textInput,imageInput:resolved.imageInput,reasoning:resolved.reasoning,compat:resolved.compat,vision:resolved.vision },
+    modelDefinition: modelDefinitionOf(resolved),
     reasoningEffort: route.defaults?.modelId === resolved.modelId ? route.defaults.reasoningEffort : undefined,
     requiresApiKey: route.auth.kind === 'keychain',
   })));

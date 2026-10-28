@@ -147,7 +147,7 @@ describe('ProviderModelCatalogEditor', () => {
     expect(validateProviderModels([{
       id: 'bad-capacity',
       definition: { ...definition, maxOutputTokens: definition.contextWindow + 1 },
-    }])).toEqual({ kind: 'invalidDefinition', index: 0 });
+    }])).toEqual({ kind: 'invalidBudget', index: 0 });
     expect(validateProviderModels([{
       id: 'bad-vision-budget',
       contextWindow: 2_000,

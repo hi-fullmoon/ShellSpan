@@ -18,7 +18,7 @@ server.middlewares.use(async (request, response, next) => {
 let browser;
 try {
   await server.listen();
-  browser = await chromium.launch();
+  browser = await chromium.launch({ channel: process.env.SHELLSPAN_TEST_BROWSER_CHANNEL });
   const page = await browser.newPage({ viewport: { width: 1000, height: 700 }, deviceScaleFactor: 2 });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -95,6 +95,50 @@ try {
       }
       await page.keyboard.press('Escape');
       await page.locator('.ai-context-meter-panel').waitFor({ state: 'detached' });
+    }
+  }
+  for (const locale of ['zh-CN', 'en-US']) {
+    for (const width of [1000, 320]) {
+      await page.setViewportSize({ width, height: 600 });
+      await page.evaluate(async ({ entry, locale }) => (await import(entry)).showBudget(locale), { entry, locale });
+      await page.locator('.ai-context-meter-trigger').focus();
+      await page.keyboard.press('Enter');
+      const panel = page.locator('.ai-context-meter-panel');
+      await panel.waitFor();
+      assert.ok((await panel.innerText()).includes('50,088 (25%)'));
+      assert.ok((await panel.innerText()).includes('131,072'));
+      assert.ok((await panel.locator('.ai-context-meter-header').innerText()).includes('23%'));
+      await page.evaluate(() => document.getAnimations().forEach(animation => animation.finish()));
+      assert.ok(await panel.evaluate(element => {
+        const box = element.getBoundingClientRect();
+        return box.left >= 0 && box.right <= innerWidth && box.bottom <= innerHeight
+          && element.scrollWidth <= element.clientWidth;
+      }), `${locale} actual budget fits at ${width}px`);
+      await page.screenshot({ path: `/tmp/shellspan-request-budget-${locale}-${width}.png` });
+      await page.keyboard.press('Escape');
+      await panel.waitFor({ state: 'detached' });
+
+      await page.evaluate(async ({ entry, locale }) => (await import(entry)).showSettings(locale), { entry, locale });
+      await page.getByRole('button', { name: locale === 'zh-CN' ? '模型容量 1' : 'Model limits 1' }).click();
+      const output = page.locator('#ai-model-request-output-0');
+      await output.fill('16384');
+      await page.locator('#ai-model-context-0').focus();
+      const definition = await page.evaluate(async entry => (await import(entry)).settingsDefinition(), entry);
+      assert.equal(definition.contextWindow, 200_000);
+      assert.equal(definition.maxOutputTokens, 131_072);
+      assert.equal(definition.requestOutputTokens, 16_384);
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${locale} settings fit at ${width}px`);
+      await page.screenshot({ path: `/tmp/shellspan-output-settings-${locale}-${width}.png` });
+      await page.locator('#ai-model-context-0').fill('64000');
+      await output.fill('8192');
+      await page.locator('#ai-model-context-0').focus();
+      const smaller = await page.evaluate(async entry => (await import(entry)).settingsDefinition(), entry);
+      assert.equal(smaller.contextWindow, 64_000);
+      assert.equal(smaller.maxOutputTokens, 131_072);
+      assert.equal(smaller.requestOutputTokens, 8_192);
+      assert.equal(await output.getAttribute('aria-invalid'), null);
+      assert.equal(await page.locator('#ai-model-output-0').inputValue(), '131072');
+      await page.screenshot({ path: `/tmp/shellspan-output-settings-small-${locale}-${width}.png` });
     }
   }
   assert.deepEqual(errors, []);

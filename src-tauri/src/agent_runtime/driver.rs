@@ -1111,7 +1111,7 @@ async fn run_step(
             tools.apply_ephemeral_terminal_results(&entry.session_id, turn_id, &mut request)?;
             super::model_tools::apply_file_edit_budget(
                 &mut request,
-                crate::llm::catalog::resolve(&model.provider)?.max_output_tokens,
+                crate::llm::catalog::resolve(&model.provider)?.output_token_budget(),
                 sessions.read_turn_events(&entry.session_id, |events| {
                     output_limit_continuation_count(events, turn_id)
                 })?,
@@ -1316,6 +1316,13 @@ async fn run_step(
                 request_id: request_id.clone(),
                 input_tokens: estimated_input_tokens,
                 context_window: Some(budget.context_window),
+                request_budget: Some(super::AgentRequestBudget {
+                    output_tokens: budget.output_reserve_tokens,
+                    safety_tokens: budget.safety_reserve_tokens,
+                    usable_input_tokens: budget.usable_input_tokens,
+                    compaction_threshold_tokens: budget.compaction_threshold_tokens,
+                    compaction_target_tokens: budget.compaction_target_tokens,
+                }),
                 system_tokens: Some(budget.system_tokens),
                 tool_schema_tokens: Some(budget.tool_schema_tokens),
                 message_tokens: Some(budget.message_tokens),

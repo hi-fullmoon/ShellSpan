@@ -6,7 +6,7 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/in
 import { Separator } from '@/components/ui/separator';
 import { AiControlTooltip } from '../ai-control-tooltip';
 import { invokeResolveAiSelection, isTauriRuntime } from '@/lib/ipc/tauri';
-import { useResolvedModel } from '@/lib/ai/provider-contract';
+import { modelDefinitionOf, useResolvedModel } from '@/lib/ai/provider-contract';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -95,7 +95,7 @@ export function AiComposerModelSelector({
   const nativeRouteMode = isTauriRuntime();
   const routeProviders = useMemo(() => (routeSnapshot?.routes.flatMap(route =>
     (modelsByRoute[route.id] ?? []).map(resolved => ({
-      model: resolved.modelId, modelDefinition: { displayName:resolved.displayName,contextWindow:resolved.contextWindow,maxOutputTokens:resolved.maxOutputTokens,toolCalling:resolved.toolCalling,textInput:resolved.textInput,imageInput:resolved.imageInput,reasoning:resolved.reasoning,compat:resolved.compat,vision:resolved.vision },
+      model: resolved.modelId, modelDefinition: modelDefinitionOf(resolved),
       id: route.id, routeRevision: route.revision, name: route.displayName, preset: (route.presetId === 'generic' ? 'custom' : route.presetId) as AiProviderPreset,
       kind: route.adapterId === 'responses' ? 'openAi' as const : route.adapterId === 'ollama' ? 'ollama' as const : 'openAiCompatible' as const,
       profile: resolved.profile, baseUrl: route.baseUrl,

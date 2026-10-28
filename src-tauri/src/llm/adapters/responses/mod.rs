@@ -217,7 +217,7 @@ impl ModelAdapter for ResponsesAdapter {
         apply_output_token_limit(
             &mut body,
             self.http.provider.kind,
-            resolved.max_output_tokens,
+            resolved.output_token_budget(),
         );
         if !request.tools.is_empty() {
             body["tools"] = Value::Array(

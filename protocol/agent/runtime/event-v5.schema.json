@@ -100,6 +100,30 @@
   },
   "allOf": [
     {
+      "if": { "properties": { "type": { "const": "request/context" } }, "required": ["type"] },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "requestBudget": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["outputTokens", "safetyTokens", "usableInputTokens", "compactionThresholdTokens", "compactionTargetTokens"],
+                "properties": {
+                  "outputTokens": { "type": "integer", "minimum": 1 },
+                  "safetyTokens": { "type": "integer", "minimum": 1 },
+                  "usableInputTokens": { "type": "integer", "minimum": 1 },
+                  "compactionThresholdTokens": { "type": "integer", "minimum": 1 },
+                  "compactionTargetTokens": { "type": "integer", "minimum": 1 }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "if": {
         "properties": {
           "type": {
@@ -1225,6 +1249,10 @@
                   "type": "integer",
                   "minimum": 1
                 },
+                "requestOutputTokens": {
+                  "type": "integer",
+                  "minimum": 1
+                },
                 "toolCalling": {
                   "enum": [
                     "supported",
@@ -1730,6 +1758,10 @@
           "minimum": 1
         },
         "maxOutputTokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "requestOutputTokens": {
           "type": "integer",
           "minimum": 1
         },

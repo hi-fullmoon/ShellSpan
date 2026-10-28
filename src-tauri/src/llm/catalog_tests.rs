@@ -156,6 +156,106 @@ fn minimax_m3_uses_the_documented_agent_output_and_vision_budgets() {
 }
 
 #[test]
+fn request_output_budget_preserves_user_context_and_model_capacity() {
+    use super::adapter::ModelAdapterFactory;
+
+    let mut config = provider("MiniMax-M3");
+    config.profile = "minimax".into();
+    let mut definition = resolve(&config).unwrap().definition;
+    definition.context_window = 200_000;
+    config.model_definition = Some(definition.clone());
+    let request = super::types::ModelRequest {
+        request_id: "output-budget-review".into(),
+        surface_generation: 0,
+        system_prompt: include_str!("../../../AGENTS.md").into(),
+        messages: vec![super::types::ModelMessage::User {
+            content: include_str!("../../../protocol/agent/runtime/context-budget.md").into(),
+        }],
+        tools: vec![],
+    };
+    let legacy = crate::agent_runtime::estimate_model_surface_budget(&config, &request).unwrap();
+    assert_eq!(legacy.output_reserve_tokens, 131_072);
+    assert_eq!(legacy.compaction_threshold_tokens, 50_088);
+    definition.request_output_tokens = Some(16_384);
+    config.model_definition = Some(definition.clone());
+    let model = resolve(&config).unwrap();
+    assert_eq!(model.context_window, 200_000);
+    assert_eq!(model.max_output_tokens, 131_072);
+    assert_eq!(model.output_token_budget(), 16_384);
+    let budget = crate::agent_runtime::estimate_model_surface_budget(&config, &request).unwrap();
+    assert_eq!(budget.output_reserve_tokens, 16_384);
+    assert_eq!(budget.usable_input_tokens, 173_616);
+    assert_eq!(budget.compaction_threshold_tokens, 147_573);
+    assert_eq!(budget.compaction_target_tokens, 104_169);
+    for (kind, pointer) in [
+        (AiProviderKind::OpenAi, "/max_output_tokens"),
+        (AiProviderKind::OpenAiCompatible, "/max_tokens"),
+        (AiProviderKind::AnthropicMessages, "/max_tokens"),
+        (AiProviderKind::Ollama, "/options/num_predict"),
+    ] {
+        let mut body = json!({});
+        apply_output_token_limit(&mut body, kind, model.output_token_budget());
+        assert_eq!(body.pointer(pointer).unwrap(), budget.output_reserve_tokens);
+    }
+    let prepared = super::runtime::PreparedModel {
+        adapter: super::registry::HttpModelAdapterFactory
+            .create(config.clone(), None)
+            .unwrap(),
+        route: super::routes::ProviderRoute {
+            id: config.id.clone(),
+            revision: 1,
+            display_name: "MiniMax".into(),
+            adapter_id: "chat-completions".into(),
+            base_url: config.base_url.clone(),
+            auth: super::routes::RouteAuth::None,
+            replay_domain_id: "request-budget".into(),
+            preset_id: config.profile.clone(),
+            models: Some(std::collections::BTreeMap::from([(
+                config.model.clone(),
+                definition.clone(),
+            )])),
+            model_overrides: None,
+            defaults: None,
+            retry_policy: Default::default(),
+            timeouts: Default::default(),
+        },
+        provider: config.clone(),
+        images: None,
+    }
+    .prepare_request(request, "step", &tokio_util::sync::CancellationToken::new())
+    .unwrap();
+    let super::runtime::RequestSnapshot::Prepared {
+        output_tokens,
+        capabilities,
+        ..
+    } = prepared.snapshot;
+    assert_eq!(output_tokens, budget.output_reserve_tokens);
+    assert_eq!(capabilities.context_window, 200_000);
+    assert_eq!(capabilities.max_output_tokens, 131_072);
+    let encoded = serde_json::to_value(&definition).unwrap();
+    assert_eq!(encoded["requestOutputTokens"], 16_384);
+    assert_eq!(
+        serde_json::from_value::<ModelDefinition>(encoded).unwrap(),
+        definition
+    );
+    let summary = resolve(&compaction_provider(&config).unwrap()).unwrap();
+    assert_eq!(summary.output_token_budget(), 2048);
+    assert_eq!(
+        config
+            .model_definition
+            .as_ref()
+            .unwrap()
+            .request_output_tokens,
+        Some(16_384)
+    );
+    for invalid in [0, 131_073, u64::MAX] {
+        definition.request_output_tokens = Some(invalid);
+        config.model_definition = Some(definition.clone());
+        assert!(resolve(&config).is_err());
+    }
+}
+
+#[test]
 fn minimax_flash_discovery_and_reasoning_match_the_official_contract() {
     let mut p = provider("MiniMax-M3.1-Flash");
     p.profile = "minimax".into();
@@ -207,6 +307,41 @@ fn custom_capacity_is_not_inferred_or_clamped_to_obsolete_hint_bounds() {
 }
 
 #[test]
+fn request_budgets_follow_each_user_capacity_and_output_allowance() {
+    let mut config = provider("MiniMax-M3");
+    config.profile = "minimax".into();
+    let definition = resolve(&config).unwrap().definition;
+    let request = super::types::ModelRequest {
+        request_id: "configured-capacity-review".into(),
+        surface_generation: 0,
+        system_prompt: include_str!("../../../AGENTS.md").into(),
+        messages: vec![],
+        tools: vec![],
+    };
+    for (context, output, safety, usable, threshold, target) in [
+        (16_000, 8_192, 1_024, 6_784, 5_766, 4_070),
+        (64_000, 8_192, 3_200, 52_608, 44_716, 31_564),
+        (180_000, 8_192, 9_000, 162_808, 138_386, 97_684),
+        (312_000, 32_768, 15_600, 263_632, 224_087, 158_179),
+        (1_000_000, 65_536, 50_000, 884_464, 751_794, 530_678),
+    ] {
+        let mut configured = definition.clone();
+        configured.context_window = context;
+        configured.request_output_tokens = Some(output);
+        config.model_definition = Some(configured);
+        let budget =
+            crate::agent_runtime::estimate_model_surface_budget(&config, &request).unwrap();
+        assert_eq!(budget.context_window, context);
+        assert_eq!(budget.output_reserve_tokens, output);
+        assert_eq!(budget.safety_reserve_tokens, safety);
+        assert_eq!(budget.usable_input_tokens, usable);
+        assert_eq!(budget.compaction_threshold_tokens, threshold);
+        assert_eq!(budget.compaction_target_tokens, target);
+        assert_eq!(resolve(&config).unwrap().max_output_tokens, 131_072);
+    }
+}
+
+#[test]
 fn minimax_capacity_override_must_leave_a_usable_input_budget() {
     let mut config = provider("MiniMax-M3");
     config.profile = "minimax".into();
@@ -237,6 +372,41 @@ fn minimax_capacity_override_must_leave_a_usable_input_budget() {
         model_input_token_budget(model.context_window, model.max_output_tokens).unwrap(),
         (6_400, 113_408)
     );
+}
+
+#[test]
+fn smaller_context_requires_a_fitting_request_budget_without_changing_model_capacity() {
+    let mut config = provider("MiniMax-M3");
+    config.profile = "minimax".into();
+    let mut definition = resolve(&config).unwrap().definition;
+    definition.context_window = 64_000;
+    let request = super::types::ModelRequest {
+        request_id: "smaller-context-review".into(),
+        surface_generation: 0,
+        system_prompt: include_str!("../../../AGENTS.md").into(),
+        messages: vec![],
+        tools: vec![],
+    };
+    for output in [None, Some(60_800)] {
+        definition.request_output_tokens = output;
+        config.model_definition = Some(definition.clone());
+        assert_eq!(resolve(&config).unwrap().max_output_tokens, 131_072);
+        assert!(
+            crate::agent_runtime::estimate_model_surface_budget(&config, &request)
+                .unwrap_err()
+                .starts_with("INVALID_MODEL_TOKEN_BUDGET:")
+        );
+    }
+    definition.request_output_tokens = Some(8_192);
+    config.model_definition = Some(definition.clone());
+    let budget = crate::agent_runtime::estimate_model_surface_budget(&config, &request).unwrap();
+    assert!(budget.fits_hard_limit());
+    assert_eq!(budget.usable_input_tokens, 52_608);
+    let saved = serde_json::to_vec(&definition).unwrap();
+    let restored: ModelDefinition = serde_json::from_slice(&saved).unwrap();
+    assert_eq!(restored.context_window, 64_000);
+    assert_eq!(restored.max_output_tokens, 131_072);
+    assert_eq!(restored.output_token_budget(), 8_192);
 }
 
 #[test]
@@ -280,7 +450,7 @@ fn deepseek_retired_names_remain_routable_but_are_not_discoverable() {
 fn invalid_capacity_and_protocol_fail_while_string_reasoning_is_allowed() {
     let mut p = provider("custom");
     p.model_definition = Some(fixture_definition(p.kind, 32768));
-    p.model_definition.as_mut().unwrap().max_output_tokens = 32769;
+    p.model_definition.as_mut().unwrap().max_output_tokens = 9_007_199_254_740_992;
     assert!(resolve(&p).is_err());
     p.model_definition.as_mut().unwrap().max_output_tokens = 16384;
     p.model_definition.as_mut().unwrap().compat.protocol = AiProviderKind::Ollama;

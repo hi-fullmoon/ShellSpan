@@ -149,6 +149,7 @@ export interface AiSessionSummaryPage {
 
 export type AiContextUsage = Readonly<{
   readonly contextWindow: number;
+  readonly requestBudget?: import('@/types/agent-session').AgentRequestBudget;
   /** Current prepared request estimate, separate from the last confirmed input. */
   readonly estimatedTokens?: number;
   /** A new compacted surface has no provider-confirmed usage yet. */

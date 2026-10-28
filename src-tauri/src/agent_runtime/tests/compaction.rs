@@ -229,7 +229,11 @@
         let main_model = crate::llm::catalog::resolve(&provider).unwrap();
         let summary_model = crate::llm::catalog::resolve(&summary).unwrap();
         assert_eq!(main_model.context_window, summary_model.context_window);
-        assert_eq!(summary_model.max_output_tokens, 2048);
+        assert_eq!(
+            summary_model.max_output_tokens,
+            main_model.max_output_tokens
+        );
+        assert_eq!(summary_model.output_token_budget(), 2048);
         let mut body = serde_json::json!({});
         crate::llm::catalog::apply_reasoning(
             &mut body,
@@ -239,7 +243,7 @@
         assert_eq!(body["thinking"]["type"], "disabled");
         let chunk = summary_chunk_bytes(
             summary_model.context_window,
-            summary_model.max_output_tokens,
+            summary_model.output_token_budget(),
             4096,
         );
         assert_eq!(summary_deadline_seconds(chunk, chunk), 45);

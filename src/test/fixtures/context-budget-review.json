@@ -1,0 +1,73 @@
+{
+  "source": "Accounting-only values from COMPACT-4719 session, request/context seq 4704, request/usage seq 4846 and context-budget artifact 7ce36798ad229ca58f9ae7c7d27f429f. No message bodies or credentials.",
+  "contextWindow": 200000,
+  "inputTokens": 51925,
+  "uncachedInputTokens": 2058,
+  "cacheReadTokens": 44459,
+  "systemTokens": 3303,
+  "toolSchemaTokens": 8946,
+  "messageTokens": 39676,
+  "events": [
+    {
+      "version": 5,
+      "sessionId": "agent-6085f6bc-3db3-4cc7-9d4e-766f78ac9866-mvrzl5lx-j3c548m",
+      "seq": 4704,
+      "timeUnixMs": 1793184596944,
+      "turnId": "turn-db8dbf6b49524b83b68552c51b3996dc",
+      "stepId": "step-5eaee2bd3dc445fd84a743891faa8ff9",
+      "type": "request/context",
+      "data": {
+        "requestId": "request-921d198836fe4de187c200cac7be50e8",
+        "inputTokens": 51925,
+        "contextWindow": 200000,
+        "systemTokens": 3303,
+        "toolSchemaTokens": 8946,
+        "messageTokens": 39676,
+        "surfaceGeneration": 5
+      }
+    },
+    {
+      "version": 5,
+      "sessionId": "agent-6085f6bc-3db3-4cc7-9d4e-766f78ac9866-mvrzl5lx-j3c548m",
+      "seq": 4846,
+      "timeUnixMs": 1793184605034,
+      "turnId": "turn-db8dbf6b49524b83b68552c51b3996dc",
+      "stepId": "step-5eaee2bd3dc445fd84a743891faa8ff9",
+      "type": "request/usage",
+      "data": {
+        "requestId": "request-921d198836fe4de187c200cac7be50e8",
+        "usage": {
+          "uncachedInputTokens": 2058,
+          "cacheReadTokens": 44459,
+          "outputTokens": 1134,
+          "reasoningTokens": 838,
+          "totalTokens": 47651
+        },
+        "finishReason": "toolCalls"
+      }
+    }
+  ],
+  "compaction": {
+    "version": 5,
+    "sessionId": "agent-6085f6bc-3db3-4cc7-9d4e-766f78ac9866-mvrzl5lx-j3c548m",
+    "seq": 4873,
+    "timeUnixMs": 1793184628780,
+    "turnId": "turn-db8dbf6b49524b83b68552c51b3996dc",
+    "stepId": "step-f019a295774b49909b810960150e0cdd",
+    "type": "compaction/end",
+    "data": {
+      "surfaceGeneration": 6,
+      "replacedThroughSeq": 4292,
+      "status": "completed",
+      "compactionId": "7ad6f4e6-79a8-4534-a3dd-98c5530c50eb",
+      "durationMs": 23481
+    }
+  },
+  "budget": {
+    "outputReserveTokens": 131072,
+    "safetyReserveTokens": 10000,
+    "usableInputTokens": 58928,
+    "compactionThresholdTokens": 50088,
+    "compactionTargetTokens": 35356
+  }
+}

@@ -10,6 +10,7 @@ export function projectContextUsage(events: readonly AgentSessionEvent[]): AiCon
   let contextWindow: number | undefined;
   let estimatedTokens: number | undefined;
   let breakdown: AiContextUsage['breakdown'];
+  let requestBudget: AiContextUsage['requestBudget'];
   let afterCompaction = false;
   let reported: { requestSeq: number; tokens: number } | undefined;
   const requests = new Map<string, number>();
@@ -19,6 +20,7 @@ export function projectContextUsage(events: readonly AgentSessionEvent[]): AiCon
     generation = next;
     estimatedTokens = undefined;
     breakdown = undefined;
+    requestBudget = undefined;
     reported = undefined;
     requests.clear();
   };
@@ -35,6 +37,11 @@ export function projectContextUsage(events: readonly AgentSessionEvent[]): AiCon
         contextWindow = event.data.contextWindow;
       }
       estimatedTokens = validCount(event.data.inputTokens) ? event.data.inputTokens : undefined;
+      const nextBudget = event.data.requestBudget;
+      requestBudget = nextBudget && [nextBudget.outputTokens, nextBudget.safetyTokens,
+        nextBudget.usableInputTokens, nextBudget.compactionThresholdTokens,
+        nextBudget.compactionTargetTokens].every(value => validCount(value) && Number.isSafeInteger(value) && value > 0)
+        ? nextBudget : undefined;
       const { systemTokens, toolSchemaTokens: toolsTokens, messageTokens } = event.data;
       breakdown = validCount(systemTokens) && validCount(toolsTokens) && validCount(messageTokens)
         ? { systemTokens, toolsTokens, messageTokens } : undefined;
@@ -52,6 +59,7 @@ export function projectContextUsage(events: readonly AgentSessionEvent[]): AiCon
   if (contextWindow === undefined) return undefined;
   const details = {
     contextWindow,
+    ...(requestBudget === undefined ? {} : { requestBudget }),
     ...(estimatedTokens === undefined ? {} : { estimatedTokens }),
     ...(breakdown === undefined ? {} : { breakdown }),
     ...(afterCompaction && !reported ? { afterCompaction: true } : {}),

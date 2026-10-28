@@ -21,6 +21,7 @@ import {
   isTauriRuntime,
 } from '@/lib/ipc/tauri';
 import { listAllAgentSessionRecords } from '@/lib/ai/session-records';
+import { modelDefinitionOf } from '@/lib/ai/provider-contract';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useLlmRoutesStore } from '@/stores/llmRoutesStore';
@@ -104,7 +105,7 @@ export const AiSettingsSection: React.FC<AiSettingsSectionProps> = ({ embedded =
     return { id:route.id,name:route.displayName,preset:normalizeProviderPreset(route.presetId),
       kind:(route.adapterId==='responses'?'openAi':route.adapterId==='ollama'?'ollama':route.adapterId==='anthropic-messages'?'anthropicMessages':'openAiCompatible') as 'openAi'|'ollama'|'anthropicMessages'|'openAiCompatible',
       profile:resolved?.profile,baseUrl:route.baseUrl,model:resolved?.modelId ?? route.defaults?.modelId ?? '',reasoningEffort:route.defaults?.reasoningEffort,
-      modelDefinition:resolved ? {displayName:resolved.displayName,contextWindow:resolved.contextWindow,maxOutputTokens:resolved.maxOutputTokens,toolCalling:resolved.toolCalling,textInput:resolved.textInput,imageInput:resolved.imageInput,reasoning:resolved.reasoning,compat:resolved.compat,vision:resolved.vision}:undefined,
+      modelDefinition:resolved ? modelDefinitionOf(resolved):undefined,
       requiresApiKey:route.auth.kind==='keychain' };
   }) : nativeRouteMode ? [] : browserProviders, [routeSnapshot,modelsByRoute,browserProviders,nativeRouteMode]);
 

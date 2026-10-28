@@ -1,10 +1,16 @@
 import { createRoot } from 'react-dom/client';
+import { useState } from 'react';
 import { AiContextMeter } from '../workspace/ai-context-meter';
+import { ProviderModelCatalogEditor, type ProviderModelDraft } from '../provider-model-catalog-editor';
+import { modelDefinitionForSave } from '../provider-setup-dialog';
+import type { ModelDefinition } from '@/lib/ai/provider-contract';
 import { contextUsageForModel } from '@/lib/ai/session-settings';
 import type { AiContextUsage } from '@/lib/ai/session-adapter';
 import type { AgentSessionEvent } from '@/types/agent-session';
 import capture from '@/test/fixtures/agent-skills-runtime.json';
 import accountingCapture from '@/test/fixtures/context-usage-runtime.json';
+import budgetEvidence from '@/test/fixtures/context-budget-review.json';
+import modelFixtures from '../../../../protocol/llm/fixtures/resolved-models.json';
 import { projectContextUsage } from '@/lib/ai/context-usage';
 import catalog from '../../../../protocol/llm/catalog.json';
 import { initI18n } from '@/locales';
@@ -39,4 +45,57 @@ export async function showAccounting(locale: Locale, stream: keyof typeof accoun
     <AiContextMeter usage={projected} />
   </main>);
   return projected;
+}
+
+export async function showBudget(locale: Locale) {
+  useAppStore.setState({ locale });
+  await initI18n(locale);
+  const usage: AiContextUsage = {
+    contextWindow: budgetEvidence.contextWindow, source: 'reported',
+    usedTokens: budgetEvidence.uncachedInputTokens + budgetEvidence.cacheReadTokens,
+    estimatedTokens: budgetEvidence.inputTokens,
+    requestBudget: {
+      outputTokens: budgetEvidence.budget.outputReserveTokens,
+      safetyTokens: budgetEvidence.budget.safetyReserveTokens,
+      usableInputTokens: budgetEvidence.budget.usableInputTokens,
+      compactionThresholdTokens: budgetEvidence.budget.compactionThresholdTokens,
+      compactionTargetTokens: budgetEvidence.budget.compactionTargetTokens,
+    },
+  };
+  root.render(<main className="ai-panel-shell flex h-screen items-end justify-end p-4">
+    <AiContextMeter usage={usage} />
+  </main>);
+}
+
+const minimax = modelFixtures.find(item => item.provider.model === 'MiniMax-M3')!;
+const initialDefinition: ModelDefinition = {
+  contextWindow: budgetEvidence.contextWindow,
+  maxOutputTokens: minimax.resolved.maxOutputTokens,
+  toolCalling: 'supported', textInput: 'supported', imageInput: 'supported',
+  reasoning: minimax.resolved.reasoning,
+  compat: minimax.resolved.compat as ModelDefinition['compat'],
+  vision: minimax.resolved.vision,
+};
+let savedDefinition: ModelDefinition = initialDefinition;
+export const settingsDefinition = () => JSON.parse(JSON.stringify(savedDefinition)) as ModelDefinition;
+
+function BudgetSettings() {
+  const [models, setModels] = useState<ProviderModelDraft[]>([{ id: minimax.provider.model, definition: initialDefinition }]);
+  return <main className="ai-panel-shell p-4">
+    <ProviderModelCatalogEditor models={models} defaultModelId={minimax.provider.model}
+      inherited={false} canReset={false} disabled={false} discovering={false}
+      onChange={next => {
+        setModels(next);
+        if (next[0]) savedDefinition = modelDefinitionForSave(next[0], initialDefinition);
+      }}
+      onDefaultChange={() => undefined} onDiscover={async () => []}
+      onDeclare={async () => undefined} onReset={() => undefined} />
+  </main>;
+}
+
+export async function showSettings(locale: Locale) {
+  useAppStore.setState({ locale });
+  await initI18n(locale);
+  savedDefinition = initialDefinition;
+  root.render(<BudgetSettings key={locale} />);
 }
