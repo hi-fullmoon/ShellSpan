@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { requestErrorMessageKey } from '@/lib/ai/request-error';
+import { requestErrorMessageKey, requestRetryMessageKey } from '@/lib/ai/request-error';
 
 describe('requestErrorMessageKey', () => {
   it.each([
@@ -17,4 +17,13 @@ describe('requestErrorMessageKey', () => {
   ] as const)('provides a readable summary for %s', (message, key) => {
     expect(requestErrorMessageKey(message)).toBe(key);
   });
+});
+
+it.each([
+  ['retryable model failure: kind=RateLimited code=HTTP_429', 'ai.error.rateLimited'],
+  ['retryable model failure: kind=Timeout code=REQUEST_TIMEOUT', 'ai.error.timeout'],
+  ['network recovery after model transport failure', 'ai.error.connection'],
+  ['retryable model failure: kind=Terminal code=unspecified', 'ai.workspace.retryReason.generic'],
+] as const)('provides a localized automatic-retry reason for %s', (reason, key) => {
+  expect(requestRetryMessageKey(reason)).toBe(key);
 });

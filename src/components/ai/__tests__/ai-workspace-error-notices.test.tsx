@@ -4,10 +4,26 @@ import { AiWorkspaceErrorNotices } from '../workspace/ai-workspace-error-notices
 import { createAiComposerState } from '@/lib/ai/composer-machine';
 import { initI18n, t } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
+import { taskTokenBudgetView } from '@/test/fixtures/task-token-budget';
 
 afterEach(cleanup);
 
 describe('localized workspace errors', () => {
+  it.each(['zh-CN', 'en-US'] as const)('localizes recorded system failures while preserving the original draft in %s', async locale => {
+    useAppStore.setState({ locale });
+    await initI18n(locale);
+    const view = taskTokenBudgetView();
+    const error = view.error!;
+    const content = view.snapshot.value.header.goal;
+    const state = createAiComposerState({ phase: 'error', lastError: error,
+      failedDrafts: [{ id: view.summary.id, content, mode: 'nextTurn', error }] });
+    render(<AiWorkspaceErrorNotices composerState={state} />);
+    expect(screen.getByText(t('ai.error.taskTokenBudgetExceeded', { maximum: 8510 }))).toBeVisible();
+    expect(screen.getByText(content)).toBeVisible();
+    expect(screen.queryByText(error.message)).not.toBeInTheDocument();
+    expect(state.lastError).toBe(error);
+    expect(state.failedDrafts[0].content).toBe(content);
+  });
   it.each(['zh-CN', 'en-US'] as const)('renders image errors in %s without changing diagnostics or drafts', async locale => {
     useAppStore.setState({ locale });
     await initI18n(locale);

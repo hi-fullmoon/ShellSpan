@@ -701,7 +701,7 @@ export function AiWorkspaceRoot({
                 {historicalContinuationError && (
                   <Alert variant="destructiveSubtle" size="sm" className="items-center">
                     <CircleAlertIcon aria-hidden="true" />
-                    <AlertDescription>{historicalContinuationError}</AlertDescription>
+                    <AlertDescription>{aiErrorMessage(historicalContinuationError, t)}</AlertDescription>
                   </Alert>
                 )}
                 {!readOnlySession && canResumeTokenBudgetedTask(view) && (
@@ -728,8 +728,7 @@ export function AiWorkspaceRoot({
                 )}
                 <AiNoticeTransition key={subagent ? selectedSessionId : undefined}>
                   {!subagent && !terminalRecovery && (agentUnavailableReason || onContinueOnReconnectedTerminal) ? (
-                    <Alert id={availabilityHintId} variant={terminalConflict ? 'warning' : 'info'} size="sm" role="status" aria-label={t('agent.availability.title')} className={terminalConflict ? undefined
-                      : '[--alert-icon-offset:0px] [&:has(button)>svg]:translate-y-1'}>
+                    <Alert id={availabilityHintId} variant={terminalConflict ? 'warning' : 'info'} size="sm" role="status" aria-label={t('agent.availability.title')} className="[&:has(button)]:[--alert-icon-inset:--spacing(1)]">
                       {terminalConflict ? <TriangleAlertIcon aria-hidden="true" /> : <InfoIcon aria-hidden="true" />}
                       <AlertDescription className="flex min-w-0 flex-wrap items-start gap-1 break-words [&:has(>button)>span]:py-1">
                         <span className="min-w-0 flex-1 basis-48">{agentUnavailableReason

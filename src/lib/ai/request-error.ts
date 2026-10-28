@@ -14,3 +14,9 @@ export function requestErrorMessageKey(message: string): LocaleKey {
   if (/\b404\b|http_404/.test(text)) return 'ai.error.notFound';
   return 'ai.error.generic';
 }
+
+/** Retry reasons are runtime diagnostics, never user-authored conversation text. */
+export function requestRetryMessageKey(reason: string): LocaleKey {
+  const key = requestErrorMessageKey(reason);
+  return key === 'ai.error.generic' ? 'ai.workspace.retryReason.generic' : key;
+}

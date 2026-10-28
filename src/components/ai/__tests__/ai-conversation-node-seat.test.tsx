@@ -737,7 +737,7 @@ describe('AiConversationNodeList', () => {
     expect(approvalRow.querySelector('.ai-disclosure-leading')).toHaveClass('mr-1', 'size-4');
     expect(approvalRow.querySelector('.ai-disclosure-title')).toHaveClass('shrink-0');
     expect(getComputedStyle(approvalRow).lineHeight).toBe(getComputedStyle(toolRow.querySelector('.ai-disclosure-title')!).lineHeight);
-    expect(getComputedStyle(approvalRow.querySelector('svg')!).translate).toBe('0 -1px');
+    expect(getComputedStyle(approvalRow.querySelector('svg')!).translate).toBe('0 0');
   });
 
   it('renders only real tail metrics and keeps long generic payloads bounded at narrow widths', async () => {

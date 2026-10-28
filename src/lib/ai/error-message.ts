@@ -1,5 +1,6 @@
 import type { LocaleKey } from '@/locales';
 import { imageErrorKey } from './image-error';
+import { requestErrorMessageKey } from './request-error';
 
 /** Recognize current and persisted loopback probe diagnostics, leaving other failures intact. */
 export function httpProbeTimeoutKind(message: string): 'http' | 'ssh' | null {
@@ -16,11 +17,18 @@ export function httpProbeTimeoutKind(message: string): 'http' | 'ssh' | null {
   return null;
 }
 
-/** Translate known configuration/image errors without changing stored diagnostics. */
+/** Translate recognized runtime errors without changing stored diagnostics or user content. */
 export function aiErrorMessage(message: string, t: (key: LocaleKey, values?: Record<string, string | number>) => string): string {
   if (message.includes('INVALID_MODEL_TOKEN_BUDGET:')) return t('ai.error.modelInputBudgetInvalid');
   if (httpProbeTimeoutKind(message)) return t('ai.workspace.tool.httpProbe.timeout');
   const diagnostic = message.trim().replace(/^Error:\s*/, '');
+  const taskBudget = /^taskTokenBudgetExceeded: maximum (\d+) estimated model tokens(; checkpointUnavailable)?$/.exec(diagnostic);
+  if (taskBudget) {
+    const summary = t('ai.error.taskTokenBudgetExceeded', { maximum: taskBudget[1] });
+    return taskBudget[2] ? `${summary} ${t('ai.error.taskBudgetCheckpointUnavailable')}` : summary;
+  }
+  const activeTime = /^taskActiveTimeExceeded: maximum (\d+) active ms$/.exec(diagnostic);
+  if (activeTime) return t('ai.error.taskActiveTimeExceeded', { seconds: Math.ceil(Number(activeTime[1]) / 1000) });
   const tokenBudget = /^subagentTokenBudgetExceeded: maximum (\d+) tokens$/.exec(diagnostic);
   if (tokenBudget) return t('ai.error.subagentTokenBudgetExceeded', { maximum: tokenBudget[1] });
   if (diagnostic.startsWith('ephemeralInputUnavailable:')) return t('ai.error.ephemeralInputUnavailable');
@@ -36,5 +44,7 @@ export function aiErrorMessage(message: string, t: (key: LocaleKey, values?: Rec
     const key = imageErrorKey(code);
     if (key !== 'ai.workspace.images.error.retry') return t(key);
   }
+  if (/^(?:retryable model failure|providerFailure|runtimeFailure|contextBudgetExceeded):/.test(diagnostic)
+    || diagnostic === 'network recovery after model transport failure') return t(requestErrorMessageKey(diagnostic));
   return message;
 }

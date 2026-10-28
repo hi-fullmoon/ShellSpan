@@ -13,7 +13,7 @@ export function FocusNoTarget(): React.ReactNode {
   const targetSessionId = useFocusStore(state => state.targetSessionId);
   const target = useTerminalStore(state => state.sessions.find(s => s.sessionId === targetSessionId));
   const targetUnavailable = Boolean(targetSessionId && target?.status !== 'connected');
-  return <Alert variant="info" size="sm" role="status" data-slot="focus-start-notice" className="[&>svg]:translate-y-1.25">
+  return <Alert variant="info" size="sm" role="status" data-slot="focus-start-notice" className="[--alert-icon-inset:--spacing(1)]">
     <InfoIcon aria-hidden="true" />
     <AlertDescription className="flex min-w-0 flex-wrap items-start gap-1 break-words">
     <span className="min-w-0 flex-1 basis-48 py-1">{targetUnavailable

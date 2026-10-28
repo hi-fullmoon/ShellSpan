@@ -25,7 +25,7 @@ export function AiErrorNotice({
       data-ai-error-notice=""
       variant="destructiveSubtle"
       size="sm"
-      className={cn('items-center [--alert-icon-offset:1px]', className)}
+      className={cn('items-center', className)}
       {...props}
     >
       <CircleAlertIcon aria-hidden="true" />

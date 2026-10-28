@@ -76,11 +76,10 @@ async function verify() {
       const noticeBox = notice.getBoundingClientRect();
       const actionBox = action.getBoundingClientRect();
       const centerY = (box: DOMRect) => box.top + box.height / 2;
-      const actionIcon = action.querySelector<SVGElement>(':scope > svg')!;
-      assert(Math.abs(centerY(actionIcon.getBoundingClientRect()) - centerY(actionBox) + 0.5) <= 0.1, 'Focus notice action icon lost its optical alignment');
+      assert(action.querySelector('svg') === null, 'Focus notice action must remain text-only');
       const textBox = text.getBoundingClientRect();
       const firstLineCenter = textBox.top + parseFloat(getComputedStyle(text).paddingTop) + parseFloat(getComputedStyle(text).lineHeight) / 2;
-      assert(Math.abs(centerY(icon.getBoundingClientRect()) - firstLineCenter + 1.5) <= 0.1, 'Focus notice icon lost its first-line optical alignment');
+      assert(Math.abs(centerY(icon.getBoundingClientRect()) - firstLineCenter) <= 0.1, 'Focus notice icon must align to the first text line');
       if (actionBox.left >= textBox.right) assert(Math.abs(firstLineCenter - centerY(actionBox)) <= 1, 'Focus notice inline text and button are not centered');
       assert(actionBox.left >= noticeBox.left && actionBox.right <= noticeBox.right, 'Focus notice action overflows a narrow panel');
     };

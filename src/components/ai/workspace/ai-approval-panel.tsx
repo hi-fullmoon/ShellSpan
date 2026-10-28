@@ -16,6 +16,7 @@ import {
 import { Spinner } from '@/components/ui/empty-state';
 import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
 import { useI18n } from '@/hooks/useI18n';
+import { aiErrorMessage } from '@/lib/ai/error-message';
 import type { AiPendingApproval } from '@/lib/ai/session-adapter';
 import type { LocaleKey } from '@/locales';
 import type { AgentSessionEffect } from '@/types/agent-session';
@@ -255,7 +256,7 @@ export function AiApprovalPanel({
 
             {volatileArgumentsError && (
               <AiErrorNotice title={t('ai.workspace.approval.previewUnavailableTitle')}>
-                {volatileArgumentsError}
+                {aiErrorMessage(volatileArgumentsError, t)}
               </AiErrorNotice>
             )}
 
@@ -286,7 +287,7 @@ export function AiApprovalPanel({
 
             {error && (
               <AiErrorNotice title={t('ai.workspace.recovery.title')}>
-                {error}
+                {aiErrorMessage(error, t)}
               </AiErrorNotice>
             )}
           </CardContent>

@@ -3,10 +3,10 @@ import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
 
-// Align to the first line; compact info notices need a small optical correction
-// because the visible glyphs sit above the line-box center in the desktop UI.
+// Align to the first text line. Notices with padded text can add the same inset
+// without replacing the line-height calculation (including when text wraps).
 const alertVariants = cva(
-  "group/alert relative grid w-full rounded-lg border text-left [--alert-icon-offset:0px] has-data-[slot=alert-action]:relative has-data-[slot=alert-action]:pr-18 has-[>svg]:grid-cols-[auto_1fr] *:[svg]:self-start *:[svg]:translate-y-[calc((1lh-100%)/2-var(--alert-icon-offset))] *:[svg]:text-current",
+  "group/alert relative grid w-full rounded-lg border text-left [--alert-icon-inset:0px] has-data-[slot=alert-action]:relative has-data-[slot=alert-action]:pr-18 has-[>svg]:grid-cols-[auto_1fr] *:[svg]:self-start *:[svg]:translate-y-[calc((1lh-100%)/2+var(--alert-icon-inset))] *:[svg]:text-current",
   {
     variants: {
       variant: {
@@ -28,9 +28,6 @@ const alertVariants = cva(
         xs: "gap-0 px-1.5 py-1 text-xs has-[>svg]:gap-x-1 *:[svg:not([class*='size-'])]:size-3.5",
       },
     },
-    compoundVariants: [
-      { variant: "info", size: ["sm", "xs"], className: "[--alert-icon-offset:1px]" },
-    ],
     defaultVariants: {
       variant: "default",
       size: "default",

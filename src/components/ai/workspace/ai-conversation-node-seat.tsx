@@ -27,7 +27,7 @@ import { cn } from '@/lib/utils';
 import { createStreamingMarkdownSplitter } from '@/lib/streaming-markdown';
 import { taskBudgetArtifactTitleKey } from '@/lib/ai/task-token-budget';
 import { isRuntimeArtifact } from '@/lib/ai/conversation-artifact';
-import { requestErrorMessageKey } from '@/lib/ai/request-error';
+import { requestErrorMessageKey, requestRetryMessageKey } from '@/lib/ai/request-error';
 import { AiToolRow } from './ai-tool-presentation';
 import { AiTurnFooter } from './ai-turn-footer';
 import { AiProcessingStatus } from './ai-processing-status';
@@ -456,7 +456,7 @@ function RetryNodeView({ node }: { readonly node: AiConversationNodeOf<'retry'> 
         {t(outputRecovery ? 'ai.workspace.outputLimitContinuation' : 'ai.workspace.retry', { attempt: node.attempt })}
       </span>
       <span className="ai-transcript-notice-detail ml-1 min-w-0 flex-1 truncate">
-        {outputRecovery ? t('ai.workspace.outputLimitContinuationDetail') : node.reason}
+        {outputRecovery ? t('ai.workspace.outputLimitContinuationDetail') : t(requestRetryMessageKey(node.reason))}
       </span>
     </div>
   );

@@ -203,7 +203,7 @@
   color: var(--ai-warning);
 }
 
-.ai-transcript-notice[data-variant='cancelled'] .ai-disclosure-leading > svg {
+.ai-transcript-notice .ai-disclosure-leading > svg:not(.ai-disclosure-chevron):not([data-slot='spinner']) {
   translate: 0 0;
 }
 
@@ -217,7 +217,8 @@
 }
 
 .ai-turn-error > svg {
-  margin-top: 3px;
+  /* The adjacent copy is shifted down by 1px. */
+  margin-top: 4px;
   justify-self: center;
   color: var(--ai-error);
 }

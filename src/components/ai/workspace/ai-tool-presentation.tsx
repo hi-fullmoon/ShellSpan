@@ -746,8 +746,12 @@ function IoSurface({ node, compact }: { node: ToolNode; compact: boolean }) {
 }
 
 function TrashSurface({ node }: { readonly node: ToolNode }) {
-  const { t } = useI18n();
   if (node.state !== 'succeeded') return <IoSurface node={node} compact={false} />;
+  return <AiTrashRecoveryNotice />;
+}
+
+export function AiTrashRecoveryNotice() {
+  const { t } = useI18n();
   return (
     <Alert variant="subtle" size="sm">
       <Trash2Icon />
