@@ -134,7 +134,7 @@
             budget: super::super::AgentSubagentBudget {
                 max_steps_per_turn: 8,
                 max_turns: 3,
-                max_tool_calls: 12,
+                max_tool_calls: Some(12),
                 max_tokens: Some(16_000),
                 timeout_ms: 60_000,
             },
@@ -232,7 +232,7 @@
         let budget = super::super::AgentSubagentBudget {
             max_steps_per_turn: 8,
             max_turns: 1,
-            max_tool_calls: 10,
+            max_tool_calls: Some(10),
             max_tokens: Some(32_000),
             timeout_ms: 300_000,
         };
@@ -275,6 +275,17 @@
         usage.tool_calls = 0;
         usage.elapsed_ms = 240_000;
         assert!(child_budget_near_limit(&unlimited, &usage));
+        let unlimited_tools = super::super::AgentSubagentBudget {
+            max_tool_calls: None,
+            ..unlimited
+        };
+        usage.tool_calls = u32::MAX;
+        usage.elapsed_ms = 0;
+        let notice = child_cumulative_budget_notice(&unlimited_tools, &usage);
+        assert!(notice.contains("/ unlimited admitted tool calls"));
+        assert!(!notice.contains("A cumulative limit is near"));
+        usage.elapsed_ms = 240_000;
+        assert!(child_budget_near_limit(&unlimited_tools, &usage));
     }
 
     fn event(

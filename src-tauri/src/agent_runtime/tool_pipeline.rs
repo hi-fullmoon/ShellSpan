@@ -888,7 +888,9 @@ impl AgentToolPipeline {
                         let events = self.sessions.all_events(&entry.session_id)?;
                         let used = admitted_tool_calls(&events);
                         let reserved = events.iter().any(|event| event.step_id.as_deref() == Some(step_id) && matches!(&event.payload, AgentSessionEventPayload::ToolCall { call: previous } if previous.call_id == call.call_id));
-                        if used >= subagent.budget.max_tool_calls && !reserved {
+                        if subagent.budget.max_tool_calls.is_some_and(|limit| used >= limit)
+                            && !reserved
+                        {
                             budget_exhausted = true;
                             continue;
                         }

@@ -253,7 +253,8 @@ pub(crate) enum AgentSubagentInheritance {
 pub(crate) struct AgentSubagentBudget {
     pub(crate) max_steps_per_turn: u16,
     pub(crate) max_turns: u16,
-    pub(crate) max_tool_calls: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) max_tool_calls: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) max_tokens: Option<u64>,
     pub(crate) timeout_ms: u64,
@@ -571,6 +572,8 @@ pub(crate) struct AgentFleetState {
     pub(crate) failure_threshold: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) failures: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) budget: Option<AgentSubagentBudget>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) targets: Vec<AgentFleetTargetState>,
 }

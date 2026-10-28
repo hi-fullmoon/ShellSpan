@@ -1154,7 +1154,7 @@ async fn skill_child_safe_prefix_filters_parent_instructions_and_counts_real_too
             budget: Some(crate::agent_runtime::AgentSubagentBudget {
                 max_steps_per_turn: 4,
                 max_turns: 1,
-                max_tool_calls: 1,
+                max_tool_calls: Some(1),
                 max_tokens: Some(32768),
                 timeout_ms: 10000,
             }),

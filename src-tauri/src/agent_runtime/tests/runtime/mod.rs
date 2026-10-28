@@ -1090,7 +1090,7 @@ async fn one_shot_child_budget_is_forced_to_one_turn() {
             budget: Some(super::super::AgentSubagentBudget {
                 max_steps_per_turn: 4,
                 max_turns: 9,
-                max_tool_calls: 8,
+                max_tool_calls: Some(8),
                 max_tokens: Some(8_192),
                 timeout_ms: 60_000,
             }),
@@ -1185,6 +1185,7 @@ async fn fleet_uses_distinct_role_children_and_persists_target_evidence() {
             canary_size: 1,
             wave_size: 1,
             failure_threshold: 0,
+            budget: None,
         })
         .unwrap();
     let fleet_id = plan.fleet.fleet_id.unwrap();

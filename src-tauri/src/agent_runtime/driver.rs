@@ -625,9 +625,12 @@ fn child_cumulative_budget_notice(
     let token_limit = budget
         .max_tokens
         .map_or_else(|| "unlimited".into(), |limit| limit.to_string());
+    let tool_limit = budget
+        .max_tool_calls
+        .map_or_else(|| "unlimited".into(), |limit| limit.to_string());
     let mut notice = format!(
         "\nCumulative child budget: {} / {} provider-reported total tokens, {} / {} admitted tool calls, {} / {} turns, {} / {} ms elapsed. Tokens include repeated model inputs, not just the final answer; missing provider usage is unknown, not free. These counters never reset on continuation. Keep tool output bounded and reserve budget for a concise handoff.",
-        usage.reported_tokens, token_limit, usage.tool_calls, budget.max_tool_calls,
+        usage.reported_tokens, token_limit, usage.tool_calls, tool_limit,
         usage.turns, budget.max_turns, usage.elapsed_ms, budget.timeout_ms,
     );
     if child_budget_near_limit(budget, usage) {
@@ -644,10 +647,9 @@ fn child_budget_near_limit(
     budget
         .max_tokens
         .is_some_and(|limit| near_limit(usage.reported_tokens, limit))
-        || near_limit(
-            u64::from(usage.tool_calls),
-            u64::from(budget.max_tool_calls),
-        )
+        || budget
+            .max_tool_calls
+            .is_some_and(|limit| near_limit(u64::from(usage.tool_calls), u64::from(limit)))
         || near_limit(usage.elapsed_ms, budget.timeout_ms)
 }
 
@@ -2249,10 +2251,14 @@ fn subagent_budget_failure(
         return Ok(None);
     };
     let tool_calls = super::tool_pipeline::admitted_tool_calls(events);
-    if tool_calls > subagent.budget.max_tool_calls {
+    if let Some(limit) = subagent
+        .budget
+        .max_tool_calls
+        .filter(|limit| tool_calls > *limit)
+    {
         return Ok(Some(format!(
             "subagentToolBudgetExceeded: maximum {} calls",
-            subagent.budget.max_tool_calls
+            limit
         )));
     }
     let tokens = events

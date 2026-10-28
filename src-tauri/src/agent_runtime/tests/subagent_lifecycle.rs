@@ -13,6 +13,12 @@ use super::super::{
 // These lifecycle tests reserve the driver slot themselves and never send a
 // model request or replace the model/native runtime with a test implementation.
 fn setup() -> (tempfile::TempDir, SubAgentManager, Arc<AgentEntry>) {
+    setup_with_budget(default_subagent_budget())
+}
+
+fn setup_with_budget(
+    budget: AgentSubagentBudget,
+) -> (tempfile::TempDir, SubAgentManager, Arc<AgentEntry>) {
     let root = tempfile::tempdir().unwrap();
     let sessions = AgentSessionStore::default();
     sessions.configure(root.path().to_path_buf()).unwrap();
@@ -54,7 +60,7 @@ fn setup() -> (tempfile::TempDir, SubAgentManager, Arc<AgentEntry>) {
         parent_session_id: None,
         continued_from_session_id: None,
         target: Some(target.clone()),
-        permission_mode: None,
+        permission_mode: Some(super::super::AgentSessionPermissionMode::RequestApproval),
         execution_surface: AgentExecutionSurface::Direct,
         success_criteria: Vec::new(),
         capability_scope: None,
@@ -70,8 +76,8 @@ fn setup() -> (tempfile::TempDir, SubAgentManager, Arc<AgentEntry>) {
         )
         .unwrap();
     let scope = AgentCapabilityScope {
-        tool_names: vec!["list_directory".into()],
-        effects: vec![AgentSessionEffect::ReadOnly],
+        tool_names: vec!["list_directory".into(), "update_plan".into()],
+        effects: vec![AgentSessionEffect::ReadOnly, AgentSessionEffect::None],
         target_ids: vec![target.target_id.clone()],
     };
     sessions
@@ -89,7 +95,7 @@ fn setup() -> (tempfile::TempDir, SubAgentManager, Arc<AgentEntry>) {
                 inheritance: AgentSubagentInheritance::Blank,
                 capability_scope: scope,
                 target_scope: vec![target],
-                budget: default_subagent_budget(),
+                budget,
                 provider: provider_descriptor(&provider),
             }),
             ..parent_request
@@ -463,4 +469,173 @@ async fn waiting_child_parent_cancellation_wakes_without_a_state_change() {
     let error = wait.await.err().unwrap();
     assert!(error.contains("native tool adapter is not configured"));
     assert!(entry.cancellation().is_cancelled());
+}
+
+#[tokio::test]
+async fn tool_admission_and_continuation_only_enforce_explicit_call_limits() {
+    for limit in [None, Some(21)] {
+        let (_root, manager, entry) = setup_with_budget(AgentSubagentBudget {
+            max_tool_calls: limit,
+            ..default_subagent_budget()
+        });
+        // Reserve the real driver slot so input admission cannot issue a model request.
+        assert!(entry.try_acquire_driver().unwrap());
+        manager
+            .send_input(
+                "lifecycle-parent",
+                &entry.session_id,
+                "Record task progress".into(),
+                None,
+            )
+            .await
+            .unwrap();
+        manager
+            .sessions
+            .begin_turn_step(
+                &entry.session_id,
+                "budget-turn".into(),
+                "budget-step".into(),
+            )
+            .unwrap();
+        let calls = (0..40).map(|index| super::super::ModelToolCall {
+            call_id: format!("plan-{index}"),
+            provider_call_id: None,
+            name: "update_plan".into(),
+            arguments: json!({"steps": [{"id": "progress", "title": format!("Progress {index}"), "status": "inProgress"}]}),
+        }).collect();
+        let result = manager
+            .tools
+            .process_model_calls(
+                &entry,
+                "budget-turn",
+                "budget-step",
+                "budget-request",
+                calls,
+            )
+            .await;
+        if limit.is_some() {
+            assert!(result
+                .unwrap_err()
+                .starts_with("subagentToolBudgetExceeded:"));
+        } else {
+            assert_eq!(
+                result.unwrap(),
+                super::super::ToolPipelineSettlement::Completed
+            );
+        }
+        let events = manager.sessions.all_events(&entry.session_id).unwrap();
+        let accepted = limit.unwrap_or(40);
+        assert_eq!(
+            super::super::tool_pipeline::admitted_tool_calls(&events),
+            accepted
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(
+                    event.payload,
+                    AgentSessionEventPayload::ToolResult {
+                        status: AgentToolResultStatus::Completed,
+                        ..
+                    }
+                ))
+                .count(),
+            accepted as usize
+        );
+        let snapshot = manager.sessions.snapshot(&entry.session_id).unwrap();
+        assert_eq!(snapshot.task.plan.unwrap().version, u64::from(accepted));
+        let continuation = manager
+            .send_input(
+                "lifecycle-parent",
+                &entry.session_id,
+                "Continue from saved progress".into(),
+                None,
+            )
+            .await;
+        if limit.is_some() {
+            assert!(continuation
+                .unwrap_err()
+                .starts_with("subagentBudgetExhausted:"));
+        } else {
+            continuation.unwrap();
+        }
+        entry.release_driver();
+    }
+}
+
+#[test]
+fn fleet_tool_budget_is_optional_validated_and_restored_from_the_log() {
+    for limit in [None, Some(1), Some(4096)] {
+        let (root, manager, _entry) = setup();
+        // An omitted plan budget and a supplied budget with no call limit are both unlimited.
+        for budget in [
+            None,
+            Some(AgentSubagentBudget {
+                max_tool_calls: limit,
+                ..fleet_role_budget()
+            }),
+        ] {
+            let plan = manager
+                .plan_fleet(AgentFleetPlanRequest {
+                    parent_session_id: "lifecycle-parent".into(),
+                    targets: vec![AgentFleetTargetRequest {
+                        target_id: "lifecycle-target".into(),
+                        goal: "Inspect the local directory".into(),
+                    }],
+                    canary_size: 1,
+                    wave_size: 1,
+                    failure_threshold: 0,
+                    budget: budget.clone(),
+                })
+                .unwrap();
+            let id = plan.fleet.fleet_id.as_deref().unwrap();
+            assert_eq!(plan.fleet.budget, budget);
+            // Reopen the real store and discard the coordinator's in-memory state.
+            let reloaded = AgentSessionStore::default();
+            reloaded.configure(root.path().to_path_buf()).unwrap();
+            let mut restored = manager.clone();
+            restored.sessions = reloaded;
+            restored.fleets.lock().unwrap().clear();
+            restored
+                .ensure_fleet_loaded("lifecycle-parent", id)
+                .unwrap();
+            let fleets = restored.fleets.lock().unwrap();
+            let fleet = fleets.get(id).unwrap();
+            assert_eq!(fleet.budget, budget);
+            assert_eq!(
+                fleet
+                    .budget
+                    .clone()
+                    .unwrap_or_else(fleet_role_budget)
+                    .max_tool_calls,
+                budget.as_ref().and_then(|budget| budget.max_tool_calls)
+            );
+        }
+    }
+    for limit in [0, 4097] {
+        let (_root, manager, _entry) = setup();
+        assert!(manager
+            .plan_fleet(AgentFleetPlanRequest {
+                parent_session_id: "lifecycle-parent".into(),
+                targets: vec![AgentFleetTargetRequest {
+                    target_id: "lifecycle-target".into(),
+                    goal: "Inspect the local directory".into(),
+                }],
+                canary_size: 1,
+                wave_size: 1,
+                failure_threshold: 0,
+                budget: Some(AgentSubagentBudget {
+                    max_tool_calls: Some(limit),
+                    ..fleet_role_budget()
+                }),
+            })
+            .unwrap_err()
+            .contains("subagent execution budget is outside native bounds"));
+        assert!(manager.fleets.lock().unwrap().is_empty());
+    }
+}
+
+mod fleet_tool_budget_tests {
+    use super::*;
+    include!("fleet_tool_budget.rs");
 }

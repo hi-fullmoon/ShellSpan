@@ -408,7 +408,7 @@ mod scheduler_tests {
                     budget: Some(super::super::super::AgentSubagentBudget {
                         max_steps_per_turn: 4,
                         max_turns: 1,
-                        max_tool_calls: 1,
+                        max_tool_calls: Some(1),
                         max_tokens: Some(8192),
                         timeout_ms: 60000,
                     }),
@@ -696,7 +696,7 @@ mod scheduler_tests {
                     budget: Some(super::super::super::AgentSubagentBudget {
                         max_steps_per_turn: 4,
                         max_turns: 1,
-                        max_tool_calls: budget,
+                        max_tool_calls: Some(budget),
                         max_tokens: Some(8192),
                         timeout_ms: 60000,
                     }),

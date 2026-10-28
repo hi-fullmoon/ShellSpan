@@ -81,6 +81,8 @@ pub(crate) struct AgentFleetPlanRequest {
     pub(crate) canary_size: u32,
     pub(crate) wave_size: u32,
     pub(crate) failure_threshold: u32,
+    #[serde(default)]
+    pub(crate) budget: Option<AgentSubagentBudget>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -140,6 +142,8 @@ struct FleetPlanArguments {
     canary_size: u32,
     wave_size: u32,
     failure_threshold: u32,
+    #[serde(default)]
+    budget: Option<AgentSubagentBudget>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -178,6 +182,7 @@ struct FleetRuntime {
     failures: u32,
     current_wave: u32,
     total_waves: u32,
+    budget: Option<AgentSubagentBudget>,
     targets: Vec<FleetTargetRuntime>,
 }
 
@@ -331,6 +336,7 @@ impl SubAgentManager {
             request.canary_size,
             request.wave_size,
             request.failure_threshold,
+            request.budget,
         )
     }
 
@@ -432,10 +438,14 @@ impl SubAgentManager {
         canary_size: u32,
         wave_size: u32,
         failure_threshold: u32,
+        budget: Option<AgentSubagentBudget>,
     ) -> Result<AgentFleetInspection, String> {
         let parent = self.sessions.snapshot(parent_session_id)?;
         if parent.ended || parent.status.is_terminal() {
             return Err("terminal parent Agent Session cannot plan a Fleet".into());
+        }
+        if let Some(budget) = &budget {
+            super::session::validate_subagent_budget(budget)?;
         }
         if targets.is_empty()
             || targets.len() > 128
@@ -493,6 +503,7 @@ impl SubAgentManager {
             failures: 0,
             current_wave: 0,
             total_waves,
+            budget,
             targets,
         };
         let inspection = fleet_inspection(&fleet);
@@ -621,18 +632,9 @@ impl SubAgentManager {
                 AgentSubagentRole::Verifier,
                 AgentSubagentRole::Reviewer,
             ] {
-                let goal = fleet_role_goal(role, &target.request.goal);
-                let child = self
-                    .spawn_child(
-                        parent_session_id,
-                        goal,
-                        role,
-                        "safePrefix",
-                        vec![target.request.target_id.clone()],
-                        fleet_role_budget(role),
-                        false,
-                    )
-                    .await?;
+                let child =
+                    self.create_fleet_child(parent_session_id, fleet_id, &target.request, role)?;
+                self.wake(&child)?;
                 {
                     let mut fleets = self
                         .fleets
@@ -831,6 +833,7 @@ impl SubAgentManager {
             failures: fleet.failures.unwrap_or(0),
             current_wave: fleet.wave,
             total_waves: fleet.total_waves,
+            budget: fleet.budget,
             targets,
         };
         self.fleets
@@ -840,7 +843,60 @@ impl SubAgentManager {
         Ok(())
     }
 
+    fn create_fleet_child(
+        &self,
+        parent_session_id: &str,
+        fleet_id: &str,
+        target: &AgentFleetTargetRequest,
+        role: AgentSubagentRole,
+    ) -> Result<String, String> {
+        self.ensure_fleet_loaded(parent_session_id, fleet_id)?;
+        let budget = {
+            let fleets = self
+                .fleets
+                .lock()
+                .map_err(|_| "Fleet coordinator is unavailable".to_string())?;
+            let fleet = fleets
+                .get(fleet_id)
+                .ok_or_else(|| "Fleet was not found".to_string())?;
+            ensure_fleet_owner(fleet, parent_session_id)?;
+            fleet.budget.clone().unwrap_or_else(fleet_role_budget)
+        };
+        self.create_child(
+            parent_session_id,
+            fleet_role_goal(role, &target.goal),
+            role,
+            "safePrefix",
+            vec![target.target_id.clone()],
+            budget,
+            false,
+        )
+    }
+
     async fn spawn_child(
+        &self,
+        parent_session_id: &str,
+        goal: String,
+        role: AgentSubagentRole,
+        inheritance_mode: &str,
+        target_ids: Vec<String>,
+        budget: AgentSubagentBudget,
+        continuable: bool,
+    ) -> Result<String, String> {
+        let child = self.create_child(
+            parent_session_id,
+            goal,
+            role,
+            inheritance_mode,
+            target_ids,
+            budget,
+            continuable,
+        )?;
+        self.wake(&child)?;
+        Ok(child)
+    }
+
+    fn create_child(
         &self,
         parent_session_id: &str,
         goal: String,
@@ -963,7 +1019,6 @@ impl SubAgentManager {
                 terminal_context: None,
             },
         )?;
-        self.wake(&child_session_id)?;
         Ok(child_session_id)
     }
 
@@ -1611,6 +1666,7 @@ impl OrchestrationToolRuntime for SubAgentManager {
                     arguments.canary_size,
                     arguments.wave_size,
                     arguments.failure_threshold,
+                    arguments.budget,
                 )?;
                 Ok(fleet_tool_result("Fleet plan committed", inspection)?)
             }
@@ -1805,7 +1861,7 @@ fn default_subagent_budget() -> AgentSubagentBudget {
     AgentSubagentBudget {
         max_steps_per_turn: 6,
         max_turns: 8,
-        max_tool_calls: 32,
+        max_tool_calls: None,
         max_tokens: None,
         timeout_ms: 10 * 60 * 1_000,
     }
@@ -1987,7 +2043,9 @@ fn child_has_remaining_budget(
         })
         .fold(0_u64, u64::saturating_add);
     turns < max_turns.min(budget.max_turns as usize)
-        && super::tool_pipeline::admitted_tool_calls(events) < budget.max_tool_calls
+        && budget
+            .max_tool_calls
+            .is_none_or(|limit| super::tool_pipeline::admitted_tool_calls(events) < limit)
         && budget.max_tokens.is_none_or(|limit| tokens < limit)
         && events
             .first()
@@ -2044,6 +2102,7 @@ fn fleet_inspection(fleet: &FleetRuntime) -> AgentFleetInspection {
             wave_size: Some(fleet.wave_size),
             failure_threshold: Some(fleet.failure_threshold),
             failures: Some(fleet.failures),
+            budget: fleet.budget.clone(),
             targets: fleet
                 .targets
                 .iter()
@@ -2103,15 +2162,9 @@ fn fleet_role_goal(role: AgentSubagentRole, goal: &str) -> String {
     }
 }
 
-fn fleet_role_budget(role: AgentSubagentRole) -> AgentSubagentBudget {
+fn fleet_role_budget() -> AgentSubagentBudget {
     let mut budget = default_subagent_budget();
     budget.max_turns = 1;
-    if matches!(
-        role,
-        AgentSubagentRole::Verifier | AgentSubagentRole::Reviewer
-    ) {
-        budget.max_tool_calls = 16;
-    }
     budget
 }
 
@@ -2247,7 +2300,7 @@ mod retry_policy_tests {
         let budget = AgentSubagentBudget {
             max_steps_per_turn: 8,
             max_turns: 2,
-            max_tool_calls: 2,
+            max_tool_calls: Some(2),
             max_tokens: Some(200),
             timeout_ms: 1_000,
         };
@@ -2281,7 +2334,16 @@ mod retry_policy_tests {
         events.push(budget_event(3, AgentSessionEventPayload::ToolCall { call }));
         assert!(!child_has_remaining_budget(
             &AgentSubagentBudget {
-                max_tool_calls: 1,
+                max_tool_calls: Some(1),
+                ..budget.clone()
+            },
+            &events,
+            64,
+            1_500
+        ));
+        assert!(child_has_remaining_budget(
+            &AgentSubagentBudget {
+                max_tool_calls: None,
                 ..budget.clone()
             },
             &events,
@@ -2293,18 +2355,12 @@ mod retry_policy_tests {
     }
 
     #[test]
-    fn default_and_fleet_budgets_leave_cumulative_tokens_unlimited() {
+    fn default_and_fleet_budgets_leave_cumulative_tokens_and_tool_calls_unlimited() {
         assert_eq!(default_subagent_budget().max_tokens, None);
-        for role in [
-            AgentSubagentRole::General,
-            AgentSubagentRole::Explorer,
-            AgentSubagentRole::Diagnostician,
-            AgentSubagentRole::Operator,
-            AgentSubagentRole::Verifier,
-            AgentSubagentRole::Reviewer,
-        ] {
-            assert_eq!(fleet_role_budget(role).max_tokens, None);
-        }
+        assert_eq!(default_subagent_budget().max_tool_calls, None);
+        assert_eq!(fleet_role_budget().max_tokens, None);
+        assert_eq!(fleet_role_budget().max_tool_calls, None);
+        assert_eq!(fleet_role_budget().max_turns, 1);
     }
 
     #[test]

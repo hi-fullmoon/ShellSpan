@@ -165,7 +165,7 @@ export type AgentSubagentInheritance =
 export interface AgentSubagentBudget {
   readonly maxStepsPerTurn: number;
   readonly maxTurns: number;
-  readonly maxToolCalls: number;
+  readonly maxToolCalls?: number;
   readonly maxTokens?: number;
   readonly timeoutMs: number;
 }
@@ -315,6 +315,7 @@ export interface AgentSessionFleetState {
   readonly waveSize?: number;
   readonly failureThreshold?: number;
   readonly failures?: number;
+  readonly budget?: AgentSubagentBudget;
   readonly targets?: readonly AgentSessionFleetTargetState[];
 }
 
@@ -891,6 +892,7 @@ export interface AgentFleetPlanRequest {
   readonly canarySize: number;
   readonly waveSize: number;
   readonly failureThreshold: number;
+  readonly budget?: AgentSubagentBudget;
 }
 
 export interface AgentFleetControlRequest {

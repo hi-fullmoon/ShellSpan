@@ -4613,6 +4613,9 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
                 return Err("task Fleet counters are invalid".into());
             }
             if let Some(fleet) = fleet {
+                if let Some(budget) = &fleet.budget {
+                    validate_subagent_budget(budget)?;
+                }
                 validate_optional_text(fleet.fleet_id.as_deref(), "Fleet id")?;
                 validate_optional_text(fleet.status.as_deref(), "Fleet status")?;
                 validate_collection_allow_empty(&fleet.targets, "Fleet targets")?;
@@ -5066,13 +5069,14 @@ fn validate_subagent_inheritance(
     Ok(())
 }
 
-fn validate_subagent_budget(budget: &super::AgentSubagentBudget) -> Result<(), String> {
+pub(super) fn validate_subagent_budget(budget: &super::AgentSubagentBudget) -> Result<(), String> {
     if budget.max_steps_per_turn == 0
         || budget.max_steps_per_turn > 64
         || budget.max_turns == 0
         || budget.max_turns > 256
-        || budget.max_tool_calls == 0
-        || budget.max_tool_calls > 4_096
+        || budget
+            .max_tool_calls
+            .is_some_and(|limit| !(1..=4_096).contains(&limit))
         || budget
             .max_tokens
             .is_some_and(|limit| !(1_024..=16_000_000).contains(&limit))
