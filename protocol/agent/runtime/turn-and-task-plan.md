@@ -77,6 +77,7 @@ Plan submissions do not reset the no-progress detector, even when their text or 
 `update_plan` is a whole-list replacement for the current turn's task plan:
 
 - `steps` is required and replaces the preceding list.
+- Every step requires `id` and `status`. A new step also requires `title`. If `title` is absent for an ID in the current committed plan, the runtime preserves that step's title by ID, independent of list order. Explicit titles still undergo normal validation; empty, null or invalid values are rejected. No other fields are inherited, and steps absent from the replacement list are removed. Cleared plans and completed plans retired at the next turn cannot supply titles. The recorded tool call retains the original arguments; the committed `task/plan` contains complete validated steps. Rejection leaves the previous plan and version unchanged.
 - `planVersion` is optional for model callers. The runtime assigns the next monotonic version; if the caller supplies `planVersion`, it acts as a concurrency guard and must equal that next version.
 - Models should keep an `inProgress` step while work remains and update completed, blocked, or failed steps as soon as their state changes.
 - A successful tool result reports the assigned version and counts for every plan status.

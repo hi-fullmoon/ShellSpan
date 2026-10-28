@@ -278,7 +278,7 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
         },
         ModelToolDefinition {
             name: "update_plan".into(),
-            description: "Replace the complete task plan. Use for multi-step work; send all steps, keep one inProgress, and mark a step completed as soon as it is done. ShellSpan assigns the next version automatically. evidenceRefs must name committed evidence. Records a Session event; never enters the native kernel.".into(),
+            description: "Replace the complete task plan. Use for multi-step work; send all steps, keep one inProgress, and mark a step completed as soon as it is done. Every step needs id and status. New steps also require title; omitting title for an id in the current committed plan preserves its title. Other omitted fields are not inherited. ShellSpan assigns the next version automatically. evidenceRefs must name committed evidence. Records a Session event; never enters the native kernel.".into(),
             input_schema: object_schema(
                 &["steps"],
                 json!({
@@ -287,10 +287,10 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
                         "type": "array",
                         "maxItems": 100,
                         "items": object_schema(
-                            &["id", "title", "status"],
+                            &["id", "status"],
                             json!({
                                 "id": identifier_schema(),
-                                "title": bounded_string(256),
+                                "title": { "type": "string", "minLength": 1, "maxLength": 256, "description": "Required for a new step. Omit only to preserve the title of the same id in the current committed plan." },
                                 "status": { "type": "string", "enum": ["pending", "inProgress", "completed", "blocked", "failed"] },
                                 "detail": bounded_string(131072),
                                 "evidenceRefs": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": evidence_reference_schema() }
@@ -686,7 +686,15 @@ mod tests {
         assert!(tool
             .description
             .contains("mark a step completed as soon as it is done"));
-        let step = &tool.input_schema["properties"]["steps"]["items"]["properties"];
+        let items = &tool.input_schema["properties"]["steps"]["items"];
+        assert_eq!(items["required"], json!(["id", "status"]));
+        let step = &items["properties"];
+        assert!(step["title"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("Required for a new step"));
+        assert_eq!(step["title"]["minLength"], 1);
+        assert_eq!(step["title"]["maxLength"], 256);
         assert_eq!(step["id"]["pattern"], "^[A-Za-z0-9_-]+$");
         assert_eq!(step["evidenceRefs"]["items"]["pattern"], "^[A-Za-z0-9_-]+$");
     }

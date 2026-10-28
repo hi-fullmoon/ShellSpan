@@ -337,6 +337,63 @@ struct UpdatePlanArguments {
     steps: Vec<AgentPlanStep>,
 }
 
+fn parse_update_plan_arguments(
+    mut value: Value,
+    events: &[super::AgentSessionEvent],
+) -> Result<(u64, UpdatePlanArguments), String> {
+    let current_plan = super::projection::derive_task(events).plan;
+    if let Some(steps) = value.get_mut("steps").and_then(Value::as_array_mut) {
+        for (index, step) in steps.iter_mut().enumerate() {
+            let Some(step) = step.as_object_mut() else {
+                continue;
+            };
+            if step.contains_key("title") {
+                continue;
+            }
+            let previous = step.get("id").and_then(Value::as_str).and_then(|id| {
+                current_plan
+                    .as_ref()?
+                    .steps
+                    .iter()
+                    .find(|step| step.id == id)
+            });
+            let Some(previous) = previous else {
+                return Err(format!(
+                    "Invalid update_plan arguments: steps[{index}].title is required for a new step. Send the complete steps list with id, title and status; title may be omitted only for an id in the current committed plan."
+                ));
+            };
+            step.insert("title".into(), Value::String(previous.title.clone()));
+        }
+    }
+    let arguments: UpdatePlanArguments = serde_json::from_value(value)
+        .map_err(|error| format!("Invalid update_plan arguments: {error}"))?;
+    let next_version = events
+        .iter()
+        .rev()
+        .find_map(|event| match &event.payload {
+            AgentSessionEventPayload::TaskPlan { version, .. } => Some(*version),
+            _ => None,
+        })
+        .unwrap_or(0)
+        .saturating_add(1);
+    if arguments
+        .plan_version
+        .is_some_and(|version| version != next_version)
+    {
+        return Err(format!("update_plan version must be {}", next_version));
+    }
+    if arguments
+        .explanation
+        .as_deref()
+        .is_some_and(|value| value.trim().is_empty() || value.len() > 4_096)
+    {
+        return Err("update_plan explanation is outside bounds".into());
+    }
+    super::session::validate_task_plan(next_version, &arguments.steps)
+        .map_err(|error| format!("Invalid update_plan arguments: {error}"))?;
+    Ok((next_version, arguments))
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct OrchestrationToolRequest {
     pub(crate) parent_session_id: String,
@@ -1576,37 +1633,12 @@ impl AgentToolPipeline {
             effect: Some(AgentSessionEffect::None),
             target: Some(target),
         };
-        let parsed = serde_json::from_value::<UpdatePlanArguments>(call.arguments.clone())
-            .map_err(|error| format!("Invalid update_plan arguments: {error}"))
-            .and_then(|arguments| {
-                let previous_version = self
-                    .sessions
-                    .all_events(&entry.session_id)?
-                    .into_iter()
-                    .rev()
-                    .find_map(|event| match event.payload {
-                        AgentSessionEventPayload::TaskPlan { version, .. } => Some(version),
-                        _ => None,
-                    })
-                    .unwrap_or(0);
-                let next_version = previous_version.saturating_add(1);
-                if arguments
-                    .plan_version
-                    .is_some_and(|version| version != next_version)
-                {
-                    return Err(format!("update_plan version must be {}", next_version));
-                }
-                if arguments
-                    .explanation
-                    .as_deref()
-                    .is_some_and(|value| value.trim().is_empty() || value.len() > 4_096)
-                {
-                    return Err("update_plan explanation is outside bounds".into());
-                }
-                super::session::validate_task_plan(next_version, &arguments.steps)
-                    .map_err(|error| format!("Invalid update_plan arguments: {error}"))?;
-                Ok((next_version, arguments))
-            });
+        let parsed = self
+            .sessions
+            .read_events(&entry.session_id, |events| {
+                parse_update_plan_arguments(call.arguments.clone(), events)
+            })
+            .and_then(|parsed| parsed);
         let mut payloads = vec![
             AgentScopedPayload {
                 turn_id: Some(turn_id.into()),
@@ -3704,4 +3736,9 @@ mod ephemeral_terminal_result_tests {
 #[cfg(test)]
 mod terminal_execution_recovery_tests {
     include!("tests/terminal_execution_recovery.rs");
+}
+
+#[cfg(test)]
+mod update_plan_tests {
+    include!("tests/update_plan.rs");
 }
