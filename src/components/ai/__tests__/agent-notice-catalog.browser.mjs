@@ -88,6 +88,13 @@ try {
             if (sample.id === 'file-reference') await page.locator('[data-composer-editor]').fill('@');
             const element = page.locator(sample.selector).first();
             await element.waitFor({ state: 'visible', timeout: 10_000 });
+            // Measure the spinner at the same starting frame used for still screenshots.
+            if (sample.id === 'approval-loading') await element.evaluate(element => {
+              for (const animation of element.getAnimations({ subtree: true })) {
+                animation.pause();
+                animation.currentTime = 0;
+              }
+            });
             if (sample.id !== 'draft-error') assert.doesNotMatch(await element.innerText(),
               /taskTokenBudgetExceeded:|retryable model failure:|network recovery after model transport failure/,
               `${sample.id}/${locale}: system summaries must not expose raw runtime diagnostics`);
@@ -108,6 +115,25 @@ try {
                 overflow: element.scrollWidth > element.clientWidth + 1 };
             });
             const name = `${sample.id}-${theme}-${locale}-${width}.png`;
+            const style = await element.evaluate(element => {
+              if (!element.classList.contains('group/alert')) return null;
+              const icon = element.querySelector(':scope > svg');
+              const description = element.querySelector('[data-slot="alert-description"]');
+              const tone = element.classList.contains('bg-primary/10') ? 'info'
+                : element.classList.contains('bg-app-warning/10') ? 'warning'
+                  : element.classList.contains('bg-destructive/5') ? 'error' : null;
+              return { size: element.dataset.size, tone,
+                iconSize: icon.getBoundingClientRect().width, fontSize: getComputedStyle(description).fontSize };
+            });
+            if (style) {
+              assert.equal(measurements.gap, 4, `${sample.id}: notice must retain the shared 4px icon gap`);
+              assert.ok(style.tone, `${sample.id}: callout must use a semantic tinted background`);
+              assert.deepEqual(style, { size: 'sm', tone: style.tone, iconSize: 14, fontSize: '12px' },
+                `${sample.id}: callout must use the shared compact typography and icon size`);
+              if (['file-reference', 'approval-loading', 'trash-success'].includes(sample.id)) assert.equal(style.tone, 'info');
+              if (['permission', 'skills-stale', 'terminal-unavailable'].includes(sample.id)) assert.equal(style.tone, 'warning');
+              if (sample.id === 'approval-destructive') assert.equal(style.tone, 'error');
+            }
             await element.screenshot({ path: join(output, 'samples', name), animations: 'disabled' });
             report.push({ ...sample, theme, locale, width, ...measurements, image: `samples/${name}` });
           }

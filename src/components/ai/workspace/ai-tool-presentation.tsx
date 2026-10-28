@@ -753,8 +753,8 @@ function TrashSurface({ node }: { readonly node: ToolNode }) {
 export function AiTrashRecoveryNotice() {
   const { t } = useI18n();
   return (
-    <Alert variant="subtle" size="sm">
-      <Trash2Icon />
+    <Alert variant="info" size="sm" role="note">
+      <Trash2Icon aria-hidden="true" />
       <AlertDescription>{t('ai.workspace.tool.trashRecovery')}</AlertDescription>
     </Alert>
   );

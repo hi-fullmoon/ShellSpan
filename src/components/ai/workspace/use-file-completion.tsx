@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { AtSignIcon, ChevronRightIcon, CornerDownLeftIcon, FileIcon, FolderIcon, FolderOpenIcon, InfoIcon, MessageCircleIcon, RefreshCwIcon, ServerIcon, XIcon } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Field, FieldLabel } from '@/components/ui/field';
@@ -249,7 +250,10 @@ export function useFileCompletion({ text, update, query, listDirectories, scopeK
       </div>
       <Separator />
       <div className="flex shrink-0 flex-col gap-2 px-3 py-2 text-[11px] leading-4 text-muted-foreground">
-        <p className="flex items-start gap-1"><InfoIcon aria-hidden="true" className="mt-0.5 size-3 shrink-0" />{t('ai.workspace.files.hint')}</p>
+        <Alert variant="info" size="sm" role="note">
+          <InfoIcon aria-hidden="true" />
+          <AlertDescription>{t('ai.workspace.files.hint')}</AlertDescription>
+        </Alert>
         {hasEntries && <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
           <span className="flex items-center gap-1.5"><KbdGroup><Kbd>↑</Kbd><Kbd>↓</Kbd></KbdGroup>{t('ai.workspace.files.navigate')}</span>
           <span className="flex items-center gap-1.5"><Kbd>↵</Kbd>{t('ai.workspace.files.select')}</span>

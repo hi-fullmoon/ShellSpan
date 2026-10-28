@@ -58,6 +58,8 @@ describe('terminal busy feedback', () => {
     rerender(<AgentTerminalBusyNotice disabled={false} blockedAttempt="attempt-1" onSwitchDirect={switchDirect} />);
     expect(screen.getByRole('status')).toHaveTextContent(t('agent.executionSurface.v1.busyComposerHint'));
     expect(screen.getByRole('status')).toHaveClass('text-app-warning');
+    expect(screen.getByRole('status')).toHaveAttribute('data-size', 'sm');
+    expect(screen.getByRole('status').querySelector(':scope > svg')).toHaveAttribute('aria-hidden', 'true');
     const button = screen.getByRole('button', { name: t('agent.executionSurface.v1.switchDirect') });
     expect(button).toHaveClass('h-6');
     button.focus();

@@ -290,8 +290,8 @@ export function AgentPermissionSelector({
       </DropdownMenu>
 
       {!composer && mode === 'fullAccess' && (
-        <Alert variant="warning">
-          <TriangleAlertIcon />
+        <Alert variant="warning" size="sm">
+          <TriangleAlertIcon aria-hidden="true" />
           <AlertTitle>{t('agent.permission.fullAccess')}</AlertTitle>
           <AlertDescription>{t('agent.permission.fullAccessActive')}</AlertDescription>
         </Alert>

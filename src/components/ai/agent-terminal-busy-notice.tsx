@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { TriangleAlertIcon } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/hooks/useI18n';
@@ -35,7 +36,8 @@ function TerminalBusyFeedback({ disabled, onSwitchDirect, state = 'busy', blocke
   if (state === 'busy' && !blocked) return null;
 
   return (
-    <Alert variant="warning" size="sm" role="status" data-slot="terminal-busy-notice">
+    <Alert variant="warning" size="sm" role="status" data-slot="terminal-busy-notice" className="[--alert-icon-inset:--spacing(1)]">
+      <TriangleAlertIcon aria-hidden="true" />
       <AlertDescription className="flex min-w-0 flex-wrap items-start gap-1">
         <span className="min-w-0 flex-1 basis-48 py-1">{t(state === 'busy'
           ? 'agent.executionSurface.v1.busyComposerHint'

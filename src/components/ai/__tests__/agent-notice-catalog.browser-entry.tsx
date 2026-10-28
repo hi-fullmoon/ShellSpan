@@ -12,6 +12,8 @@ import { AiTrashRecoveryNotice } from '../workspace/ai-tool-presentation';
 import { AiComposerSeat } from '../workspace/ai-composer-seat';
 import { AiComposerEditor } from '../workspace/ai-composer-editor';
 import { useFileCompletion } from '../workspace/use-file-completion';
+import { AiSkillStaleNotice } from '../workspace/use-skill-completion';
+import { AgentTerminalBusyNotice } from '../agent-terminal-busy-notice';
 import { AiCompletionPopover } from '../workspace/ai-completion-popover';
 import { AgentPermissionSelector } from '../agent-permission-selector';
 import { FocusNoTarget } from '@/components/focus/focus-no-target';
@@ -95,6 +97,8 @@ export const cases: NoticeCase[] = [
   ].map(([id, label]) => ({ id, label, group: 'availability' as const, source: workspaceSource, selector: workspaceSelector })),
   { id: 'focus', label: 'Focus · 未选择终端', group: 'availability', source: 'src/components/focus/focus-no-target.tsx', selector: '[data-slot="focus-start-notice"]' },
   { id: 'supplement', label: '子 Agent · 补充输入不可用', group: 'availability', source: 'src/components/ai/workspace/ai-composer-seat.tsx', selector: '[role="status"][data-slot="alert"]' },
+  { id: 'skills-stale', label: '技能列表 · 使用缓存', group: 'availability', source: 'src/components/ai/workspace/use-skill-completion.tsx', selector: '[role="note"]' },
+  { id: 'terminal-unavailable', label: '终端执行通道不可用', group: 'availability', source: 'src/components/ai/agent-terminal-busy-notice.tsx', selector: '[data-slot="terminal-busy-notice"]' },
   ...['waiting', 'stopping', 'stopped', 'reconnecting'].map((stage, index) => ({
     id: `recovery-${stage}`, label: ['终端恢复 · 先停止任务', '终端恢复 · 正在停止', '终端恢复 · 可重新连接', '终端恢复 · 正在连接'][index],
     group: 'recovery' as const, source: 'src/components/ai/workspace/ai-terminal-recovery-notice.tsx', selector: '[data-terminal-recovery-notice]',
@@ -111,7 +115,7 @@ export const cases: NoticeCase[] = [
   { id: 'approval-panel', label: '审批面板 · 图标与标题', group: 'approval', source: 'src/components/ai/workspace/ai-approval-panel.tsx', selector: '[data-slot="ai-approval-panel"]', kind: 'panel' },
   { id: 'approval-error', label: '审批操作失败', group: 'approval', source: 'src/components/ai/workspace/ai-approval-panel.tsx', selector: '[data-ai-error-notice]' },
   { id: 'trash-success', label: '文件已移入系统回收站', group: 'approval', source: 'src/components/ai/workspace/ai-tool-presentation.tsx', selector: '[data-slot="alert"]' },
-  { id: 'file-reference', label: '引用文件 · 操作说明', group: 'availability', source: 'src/components/ai/workspace/use-file-completion.tsx', selector: '[data-file-completion] p:has(>svg)' },
+  { id: 'file-reference', label: '引用文件 · 操作说明', group: 'availability', source: 'src/components/ai/workspace/use-file-completion.tsx', selector: '[data-file-completion] [role="note"]' },
   { id: 'transcript-approval', label: '对话记录 · 审批结果', group: 'transcript', source: 'src/components/ai/workspace/ai-conversation-node-seat.tsx', selector: '.ai-transcript-notice' },
   { id: 'transcript-error', label: '对话记录 · 请求失败', group: 'transcript', source: 'src/components/ai/workspace/ai-conversation-node-seat.tsx', selector: '.ai-turn-error' },
   { id: 'processing', label: '对话状态 · 处理中', group: 'transcript', source: 'src/components/ai/workspace/ai-conversation.tsx', selector: '[data-ai-running-indicator]' },
@@ -158,6 +162,8 @@ function renderCase(id: string): ReactNode {
   const record = () => { document.body.dataset.catalogAction = id; };
   const workspace = (props: Partial<ComponentProps<typeof AiWorkspaceRoot>>) => <AiWorkspaceRoot scope="terminal" mode="agent" view={null} {...props} />;
   if (id === 'focus') return <FocusNoTarget />;
+  if (id === 'skills-stale') return <AiSkillStaleNotice />;
+  if (id === 'terminal-unavailable') return <AgentTerminalBusyNotice disabled={false} state="unavailable" onSwitchDirect={record} />;
   if (id === 'supplement') return <AiComposerSeat phase="active" status="idle" inputMode="supplement" currentSessionId={budget.summary.id}
     unavailableReason={t('agent.availability.needsTerminal')} />;
   if (id === 'file-reference') return <FileReferencePanelPreview />;

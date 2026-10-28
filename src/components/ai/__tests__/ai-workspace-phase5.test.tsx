@@ -321,7 +321,13 @@ describe('AI workspace Phase 5 workflows', () => {
       />,
     );
 
-    expect(screen.getByText('Loading the exact private arguments for review…')).toBeVisible();
+    const loading = screen.getByText('Loading the exact private arguments for review…');
+    expect(loading).toBeVisible();
+    const notice = loading.closest('[data-slot="alert"]');
+    expect(notice).toHaveAttribute('role', 'status');
+    expect(notice).toHaveAttribute('data-size', 'sm');
+    expect(notice).toHaveClass('bg-primary/10', 'border-primary/30');
+    expect(notice?.querySelector(':scope > svg')).toHaveAttribute('aria-hidden', 'true');
     expect(screen.getByRole('button', { name: 'Allow once' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled();
 

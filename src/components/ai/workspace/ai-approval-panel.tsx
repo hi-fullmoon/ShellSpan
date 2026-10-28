@@ -248,8 +248,8 @@ export function AiApprovalPanel({
             )}
 
             {volatileArgumentsMissing && argumentsLoading && !volatileArgumentsError && (
-              <Alert variant="subtle" size="sm" role="status">
-                <Spinner data-icon="inline-start" />
+              <Alert variant="info" size="sm" role="status">
+                <Spinner aria-hidden="true" data-icon="inline-start" />
                 <AlertDescription>{t('ai.workspace.approval.previewLoading')}</AlertDescription>
               </Alert>
             )}
@@ -268,12 +268,11 @@ export function AiApprovalPanel({
             )}
 
             <Alert
-              className="items-center [&>svg]:translate-y-px"
-              variant={destructive ? 'destructive' : 'warning'}
+              variant={destructive ? 'destructiveSubtle' : 'warning'}
               size="sm"
               role="note"
             >
-              <ShieldAlertIcon />
+              <ShieldAlertIcon aria-hidden="true" />
               <AlertDescription className="flex flex-wrap items-center gap-x-1">
                 <span className="font-medium">{t('ai.workspace.approval.impact')}</span>
                 <span>{t(approval.toolName === 'trash_file' ? 'ai.workspace.approval.trashImpact' : riskKeys.description)}</span>

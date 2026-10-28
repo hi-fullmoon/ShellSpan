@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useReducer, useRef, useState } from 'react';
-import { BookOpenIcon } from 'lucide-react';
+import { BookOpenIcon, TriangleAlertIcon } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AiMentionPanel } from './ai-mention-panel';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -10,6 +10,14 @@ import { builtinSkills } from '@/lib/ai/builtin-skills';
 import { activeSkillToken, insertSkill } from '@/lib/ai/skill-completion';
 import type { SkillEntry, SkillUserList } from '@/types/agent-skill';
 import { AiErrorNotice } from './ai-error-notice';
+
+export function AiSkillStaleNotice() {
+  const { t } = useI18n();
+  return <Alert variant="warning" size="sm" role="note">
+    <TriangleAlertIcon aria-hidden="true" />
+    <AlertDescription>{t('ai.workspace.skills.stale')}</AlertDescription>
+  </Alert>;
+}
 
 export function useSkillCompletion({ text, update, query, scopeKey, disabled, editor }: {
   text: string; update: (value: string, selectedSkill?: string) => void; query?: () => Promise<SkillUserList>;
@@ -85,7 +93,7 @@ export function useSkillCompletion({ text, update, query, scopeKey, disabled, ed
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div role="status" aria-live="polite" className="shrink-0 px-2 pt-2 empty:hidden">
         {(error || result?.status === 'unavailable') && <AiErrorNotice title={t('ai.workspace.recovery.title')}>{t('ai.workspace.skills.unavailable')}</AiErrorNotice>}
-        {result?.status === 'stale' && <Alert><AlertDescription>{t('ai.workspace.skills.stale')}</AlertDescription></Alert>}
+        {result?.status === 'stale' && <AiSkillStaleNotice />}
         {result && !loading && result.status !== 'unavailable' && entries.length === 0 && <EmptyState title={t('ai.workspace.skills.noMatch')} />}
       </div>
       <AiMentionPanel id={id} label={t('ai.workspace.skills.title')} index={index} onIndexChange={setIndex} empty={false}
