@@ -66,7 +66,26 @@ try {
       const reconnect = page.locator('[data-case="availability-true"] [role="status"] button');
       await reconnect.focus();
       await page.keyboard.press('Enter');
-      assert.equal(await page.evaluate(() => document.body.dataset.noticeAction), 'reconnect');
+      await reconnect.waitFor({ state: 'detached' });
+      const availability = page.locator('[data-case="availability-true"] [role="status"][aria-label]');
+      const immediateDelta = await availability.evaluate(alert => {
+        const icon = alert.querySelector(':scope > svg').getBoundingClientRect();
+        const text = alert.querySelector('[data-slot="alert-description"] > span');
+        return icon.y + icon.height / 2 - text.getBoundingClientRect().y
+          - parseFloat(getComputedStyle(text).lineHeight) / 2;
+      });
+      assert.ok(Math.abs(immediateDelta) < 0.1, `${engine}/${theme}/${locale}: immediately after reconnect offset ${immediateDelta}`);
+      for (const width of [1280, 640, 320, 240]) {
+        await page.setViewportSize({ width, height: 900 });
+        const delta = await availability.evaluate(alert => {
+          const icon = alert.querySelector(':scope > svg').getBoundingClientRect();
+          const text = alert.querySelector('[data-slot="alert-description"] > span');
+          return icon.y + icon.height / 2 - text.getBoundingClientRect().y
+            - parseFloat(getComputedStyle(text).lineHeight) / 2;
+        });
+        assert.ok(Math.abs(delta) < 0.1, `${engine}/${theme}/${locale}/${width}: after reconnect first-line offset ${delta}`);
+        await availability.screenshot({ path: `/tmp/shellspan-availability-after-reconnect-${engine}-${theme}-${locale}-${width}.png` });
+      }
       for (const variant of ['success', 'error']) {
         const id = await page.evaluate(async variant => {
           const entry = await import('/src/components/ui/__tests__/alert-alignment.browser-entry.tsx');

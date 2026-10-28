@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
 import { aiErrorMessage } from '@/lib/ai/error-message';
+import { cn } from '@/lib/utils';
 import { terminalLoginLabel } from '@/lib/ai/terminal-login-scope';
 import { contextUsageForModel } from '@/lib/ai/session-settings';
 import { conversationArtifacts } from '@/lib/ai/conversation-artifact';
@@ -540,6 +541,17 @@ export function AiWorkspaceRoot({
     return () => cancelAnimationFrame(frame);
   }, [navigation.returnFocus, onRouteReturnComplete, route.kind]);
 
+  // Update the icon inset and text padding in the same render as the action.
+  const availabilityAction = terminalConflict ? null
+    : onReconnectTerminal ? <Button type="button" variant="ghost" size="xs" className="text-[11px]"
+      onClick={onReconnectTerminal}>{t('ai.workspace.status.reconnect')}</Button>
+      : onContinueOnReconnectedTerminal ? <Button type="button" variant="ghost" size="xs" className="text-[11px]"
+        disabled={terminalReconnectBusy}
+        onClick={onContinueOnReconnectedTerminal}>{t(terminalReconnectBusy
+          ? 'ai.workspace.reconnectChecking' : 'ai.workspace.continueOnReconnectedTerminal')}</Button>
+        : !readOnlySession && canStartAgent && onOpenModel ? <Button type="button" variant="ghost" size="xs" className="text-[11px]"
+          onClick={onOpenModel}>{t('ai.workspace.status.openSettings')}</Button> : null;
+
   return (
     <section
       ref={rootRef}
@@ -731,20 +743,14 @@ export function AiWorkspaceRoot({
                 )}
                 <AiNoticeTransition key={subagent ? selectedSessionId : undefined}>
                   {!subagent && !terminalRecovery && (agentUnavailableReason || onContinueOnReconnectedTerminal) ? (
-                    <Alert id={availabilityHintId} variant={terminalConflict ? 'warning' : 'info'} size="sm" role="status" aria-label={t('agent.availability.title')} className="[&:has(button)]:[--alert-icon-inset:--spacing(1)]">
+                    <Alert id={availabilityHintId} variant={terminalConflict ? 'warning' : 'info'} size="sm" role="status" aria-label={t('agent.availability.title')}
+                      className={availabilityAction ? '[--alert-icon-inset:--spacing(1)]' : undefined}>
                       {terminalConflict ? <TriangleAlertIcon aria-hidden="true" /> : <InfoIcon aria-hidden="true" />}
-                      <AlertDescription className="flex min-w-0 flex-wrap items-start gap-1 break-words [&:has(>button)>span]:py-1">
-                        <span className="min-w-0 flex-1 basis-48">{agentUnavailableReason
+                      <AlertDescription className="flex min-w-0 flex-wrap items-start gap-1 break-words">
+                        <span className={cn('min-w-0 flex-1 basis-48', availabilityAction && 'py-1')}>{agentUnavailableReason
                           ?? t(onContinueOnReconnectedTerminal
                             ? 'ai.workspace.reconnectAvailable' : 'ai.workspace.sessions.previousTerminalReadOnly')}</span>
-                        {!terminalConflict && (onReconnectTerminal ? <Button type="button" variant="ghost" size="xs" className="text-[11px]"
-                          onClick={onReconnectTerminal}>{t('ai.workspace.status.reconnect')}</Button>
-                          : onContinueOnReconnectedTerminal ? <Button type="button" variant="ghost" size="xs" className="text-[11px]"
-                          disabled={terminalReconnectBusy}
-                          onClick={onContinueOnReconnectedTerminal}>{t(terminalReconnectBusy
-                            ? 'ai.workspace.reconnectChecking' : 'ai.workspace.continueOnReconnectedTerminal')}</Button>
-                          : !readOnlySession && canStartAgent && onOpenModel && <Button type="button" variant="ghost" size="xs" className="text-[11px]"
-                            onClick={onOpenModel}>{t('ai.workspace.status.openSettings')}</Button>)}
+                        {availabilityAction}
                       </AlertDescription>
                     </Alert>
                   ) : null}

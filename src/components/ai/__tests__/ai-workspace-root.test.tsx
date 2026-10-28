@@ -284,6 +284,32 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(screen.getByRole('textbox')).toHaveTextContent('Unsent message');
   });
 
+  it('removes and restores icon inset with the reconnect action while preserving the notice and draft', async () => {
+    const user = userEvent.setup();
+    const props = { scope: 'terminal' as const, view: null, agentUnavailableReason: 'Connect a terminal',
+      defaultDraft: 'Unsent message' };
+    const reconnect = () => rerender(<AiWorkspaceRoot {...props} />);
+    const { rerender } = render(<AiWorkspaceRoot {...props} onReconnectTerminal={reconnect} />);
+    const notice = screen.getByRole('status', { name: 'Agent is unavailable' });
+    const text = within(notice).getByText('Connect a terminal');
+    expect(notice).toHaveClass('[--alert-icon-inset:--spacing(1)]');
+    expect(text).toHaveClass('py-1');
+
+    await user.click(within(notice).getByRole('button', { name: 'Reconnect terminal' }));
+    expect(screen.getByRole('status', { name: 'Agent is unavailable' })).toBe(notice);
+    expect(within(notice).queryByRole('button')).toBeNull();
+    expect(notice).not.toHaveClass('[--alert-icon-inset:--spacing(1)]');
+    expect(notice).toHaveClass('[--alert-icon-inset:0px]');
+    expect(text).not.toHaveClass('py-1');
+
+    rerender(<AiWorkspaceRoot {...props} onReconnectTerminal={reconnect} />);
+    expect(screen.getByRole('status', { name: 'Agent is unavailable' })).toBe(notice);
+    expect(within(notice).getByRole('button', { name: 'Reconnect terminal' })).toBeVisible();
+    expect(notice).toHaveClass('[--alert-icon-inset:--spacing(1)]');
+    expect(text).toHaveClass('py-1');
+    expect(screen.getByRole('textbox')).toHaveTextContent('Unsent message');
+  });
+
   it('does not offer a continue task button after a step budget pause', () => {
     const view = agentView('idle');
     const nodes = view.nodes.map(node => node.kind === 'turnTail'

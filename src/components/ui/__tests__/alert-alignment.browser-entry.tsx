@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client';
+import { useState } from 'react';
 import { flushSync } from 'react-dom';
 import { InfoIcon } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '../alert';
@@ -26,6 +27,13 @@ const transcriptNotices = [...projectAgentChatNodes(capture as AgentSessionEvent
   .flatMap<AiConversationNode>(node => node.kind === 'turnProcess' ? node.children : [node])
   .filter(node => node.kind === 'approvalMarker' || node.kind === 'retry' || node.kind === 'error');
 
+function AvailabilityWorkspace({ action, message }: { action: boolean; message: string }) {
+  const [reconnectRequested, setReconnectRequested] = useState(false);
+  return <AiWorkspaceRoot scope="terminal" mode="agent" view={null}
+    agentUnavailableReason={message} onReconnectTerminal={action && !reconnectRequested
+      ? () => { setReconnectRequested(true); } : undefined} />;
+}
+
 export async function show(locale: Locale, theme: 'light' | 'dark') {
   useAppStore.setState({ locale });
   await initI18n(locale);
@@ -40,9 +48,7 @@ export async function show(locale: Locale, theme: 'light' | 'dark') {
       </AiErrorNotice>
       {[false, true].map(action => <section key={String(action)} data-case={`availability-${action}`}
         className="flex h-[400px] min-w-0 flex-col">
-        <AiWorkspaceRoot scope="terminal" mode="agent" view={null}
-          agentUnavailableReason={message} onReconnectTerminal={action
-            ? () => { document.body.dataset.noticeAction = 'reconnect'; } : undefined} />
+        <AvailabilityWorkspace key={`${locale}-${theme}`} action={action} message={message} />
       </section>)}
     </section>
     <section data-cases="variants" className="flex min-w-0 flex-col gap-3">
