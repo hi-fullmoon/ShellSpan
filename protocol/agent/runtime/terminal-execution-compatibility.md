@@ -151,6 +151,29 @@ from later model requests, revokes active Agent terminal leases, and rejects
 later input for the released operation. Raw text and paste payloads remain
 ephemeral: durable call records retain only input kind, key when applicable,
 byte length, and `contentPersisted = false`.
+Interactive input may acquire an exclusive lease while a foreground pager or
+REPL is waiting, without requiring a shell prompt, once the command observation
+has retired. An active command observation still blocks acquisition. Generation,
+rollout, takeover, credential-prompt and pending-input recovery checks remain in
+force. `boundCommandReady` gates new shell commands, not observation or deliberate
+input to a foreground program. For example, less accepts
+`{"inputKind":"text","text":"q"}` without Enter. After the trusted shell prompt
+returns, the same Agent/task's next command releases its interactive lease before
+acquiring the command lease. The uncertain command result remains uncertain and
+is never replayed or retrospectively reported as completed.
+Vim/Neovim recovery requests a safe exit with Escape, text `:qa`, and Enter.
+If the editor refuses because a buffer is modified, leave it open and preserve
+the buffer. Saving requires task authorization; forced exit or discarding changes
+requires explicit user authorization. Do not replace a refused exit with `:qa!`,
+`:q!`, `ZQ`, or process termination. Tool guidance carries this policy.
+The optional native macOS gate `pnpm test:terminal-editors:macos` requires real
+`vim` and `nvim` executables on PATH and fails if either is missing. It explicitly
+runs four otherwise ignored PTY regressions (Bash/zsh × Vim/Neovim), each with
+clean and modified-buffer exits, using a temporary copy of `src/lib/README.md`.
+They verify that `:qa` refuses unsaved changes, the original file is unchanged,
+the in-memory edit survives and is persisted by a separate explicit `:w`, and
+the shell accepts a new command after exit. The tests use production terminal
+registries and real editors; they do not make a model request.
 When later model requests project those durable receipts back into tool-call
 history, they use a non-executable `historicalInput` receipt with
 `available = false` and `replayable = false`, preserving the call/result pair.

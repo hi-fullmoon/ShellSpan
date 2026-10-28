@@ -199,6 +199,45 @@ impl TerminalInteractiveRegistry {
         self.broker.wait_terminal(session_id, request)
     }
 
+    pub(crate) fn release_at_prompt(
+        &self,
+        session_id: &str,
+        agent_session_id: &str,
+        task_id: &str,
+    ) -> Result<(), String> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "TERMINAL_INTERACTIVE_REGISTRY_UNAVAILABLE".to_string())?;
+        let Some(registration) = state.active.get(session_id) else {
+            return Ok(());
+        };
+        if registration.agent_session_id != agent_session_id || registration.task_id != task_id {
+            return Err("TERMINAL_INTERACTIVE_BUSY".into());
+        }
+        let terminal = self
+            .broker
+            .snapshot(Some(session_id))?
+            .session
+            .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
+        if !terminal.open
+            || terminal.integration_state != TerminalIntegrationState::Ready
+            || !terminal.prompt_ready
+            || terminal.active_command_id.is_some()
+        {
+            return Err("TERMINAL_INTERACTIVE_NOT_AT_SHELL_BOUNDARY".into());
+        }
+        self.leases.release(
+            session_id,
+            agent_session_id,
+            task_id,
+            &registration.operation_id,
+            TerminalLeaseReleaseReason::Completed,
+        )?;
+        state.active.remove(session_id);
+        Ok(())
+    }
+
     pub(crate) fn takeover(
         &self,
         sessions: &SessionManager,
@@ -354,7 +393,6 @@ impl TerminalInteractiveRegistry {
             .ok_or_else(|| "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string())?;
         if !broker_snapshot.open
             || broker_snapshot.integration_state != TerminalIntegrationState::Ready
-            || !broker_snapshot.prompt_ready
             || broker_snapshot.active_command_id.is_some()
         {
             return Err("TERMINAL_INTERACTIVE_NOT_AT_SHELL_BOUNDARY".into());
@@ -367,12 +405,13 @@ impl TerminalInteractiveRegistry {
             task_id: task_id.to_string(),
             operation_id: format!("interactive-{}", Uuid::new_v4().simple()),
         };
-        self.leases.acquire(
+        // A retired command can still leave less, a REPL, or another foreground
+        // program waiting for input. Only command submission requires a prompt.
+        self.leases.acquire_interactive(
             session_id,
             agent_session_id,
             task_id,
             &registration.operation_id,
-            None,
         )?;
         if let Err(error) = self.leases.wait_frontend_ready(
             session_id,

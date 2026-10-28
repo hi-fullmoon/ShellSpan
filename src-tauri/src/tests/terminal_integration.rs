@@ -1091,6 +1091,18 @@
                     .push((Instant::now(), input));
             }
         });
+        if broker.interactive_tools_enabled().unwrap() {
+            verify_native_pager_recovery(
+                broker,
+                &registry,
+                &sessions,
+                &leases,
+                transport_id,
+                shell,
+            );
+            writes.lock().unwrap().clear();
+            phases.lock().unwrap().clear();
+        }
         let output = tempfile::tempdir().unwrap();
         for readonly_locale in [false, true] {
             if shell != TerminalShellKind::Bash || !expected_native_input || checkpoint_failure {

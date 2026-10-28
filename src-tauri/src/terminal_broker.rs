@@ -3356,6 +3356,39 @@ impl TerminalSessionBroker {
         task_id: &str,
         operation_id: &str,
     ) -> Result<Option<TerminalLeaseSnapshot>, String> {
+        self.acquire_agent_lease_for_input(
+            transport_session_id,
+            agent_session_id,
+            task_id,
+            operation_id,
+            false,
+        )
+    }
+
+    pub(crate) fn acquire_agent_interactive_lease(
+        &self,
+        transport_session_id: &str,
+        agent_session_id: &str,
+        task_id: &str,
+        operation_id: &str,
+    ) -> Result<Option<TerminalLeaseSnapshot>, String> {
+        self.acquire_agent_lease_for_input(
+            transport_session_id,
+            agent_session_id,
+            task_id,
+            operation_id,
+            true,
+        )
+    }
+
+    fn acquire_agent_lease_for_input(
+        &self,
+        transport_session_id: &str,
+        agent_session_id: &str,
+        task_id: &str,
+        operation_id: &str,
+        interactive: bool,
+    ) -> Result<Option<TerminalLeaseSnapshot>, String> {
         validate_identifier(agent_session_id, "Agent Session id")?;
         validate_identifier(task_id, "task id")?;
         validate_identifier(operation_id, "operation id")?;
@@ -3364,8 +3397,24 @@ impl TerminalSessionBroker {
             return Ok(None);
         }
         let remote_visible_command_enabled = state.remote_bound_terminal_rollout.enabled;
+        let interactive_enabled = state.interactive_tools_rollout.enabled;
+        let remote_interactive_enabled = state.remote_interactive_tools_rollout.enabled;
         let attachment = current_attachment(&state, transport_session_id)?.clone();
         let record = current_record_mut(&mut state, transport_session_id, &attachment)?;
+        if interactive {
+            if !interactive_enabled
+                || (record.transport_kind == TerminalTransportKind::SshPty
+                    && !remote_interactive_enabled)
+            {
+                return Err("TERMINAL_INTERACTIVE_TOOLS_DISABLED".into());
+            }
+            if !record.open
+                || record.integration_state != TerminalIntegrationState::Ready
+                || record.active_command.is_some()
+            {
+                return Err("TERMINAL_INTERACTIVE_NOT_AT_SHELL_BOUNDARY".into());
+            }
+        }
         if record.native_clear_pending.is_some() || record.native_recovery_required {
             return Err(
                 "TERMINAL_INPUT_RECOVERY_REQUIRED: edit restoration is not confirmed".into(),
@@ -3377,7 +3426,7 @@ impl TerminalSessionBroker {
             {
                 return Err("TERMINAL_VISIBLE_COMMAND_UNAVAILABLE".into());
             }
-            if !record.prompt_ready || record.active_command.is_some() {
+            if !interactive && (!record.prompt_ready || record.active_command.is_some()) {
                 return Err("TERMINAL_VISIBLE_COMMAND_BUSY".into());
             }
         }

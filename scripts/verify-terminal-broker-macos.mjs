@@ -23,6 +23,13 @@ export const supportedRustHosts = Object.freeze({
   arm64: 'aarch64-apple-darwin',
 });
 
+export const editorRecoveryTests = Object.freeze([
+  'terminal_integration::tests::editor_recovery::native_editor_recovery_vim_bash',
+  'terminal_integration::tests::editor_recovery::native_editor_recovery_vim_zsh',
+  'terminal_integration::tests::editor_recovery::native_editor_recovery_nvim_bash',
+  'terminal_integration::tests::editor_recovery::native_editor_recovery_nvim_zsh',
+]);
+
 function execute(command, args, options = {}) {
   return spawnSync(command, args, {
     cwd: repositoryRoot,
@@ -128,6 +135,18 @@ export function main() {
   if (missingShells.length > 0) {
     console.error(`MISSING: required native macOS shells: ${missingShells.join(', ')}.`);
     process.exit(2);
+  }
+
+  if (process.argv.includes('--editors-only')) {
+    for (const editor of ['vim', 'nvim']) {
+      const version = execute(editor, ['--version']);
+      assertCommandSucceeded(version, `${editor} --version (install the real editor before running)`);
+    }
+    for (const testName of editorRecoveryTests) {
+      cargoTest(testName, ['--ignored', '--exact'], testName);
+    }
+    console.log('macOS Vim/Neovim safe exit and unsaved-buffer preservation: PASS.');
+    return;
   }
 
   run(cargo, ['fmt', '--manifest-path', 'src-tauri/Cargo.toml', '--all', '--', '--check']);

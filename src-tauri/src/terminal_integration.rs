@@ -2114,6 +2114,9 @@ fn parse_shell(value: &str) -> Result<TerminalShellKind, String> {
 mod tests {
     include!("tests/terminal_integration.rs");
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    include!("tests/terminal_pager_recovery.rs");
+
     #[cfg(unix)]
     mod command_presentation {
         include!("tests/terminal_command_presentation.rs");
@@ -2127,5 +2130,10 @@ mod tests {
     #[cfg(target_os = "macos")]
     mod zsh_receive_pressure {
         include!("tests/terminal_zsh_receive_pressure.rs");
+    }
+
+    #[cfg(target_os = "macos")]
+    mod editor_recovery {
+        include!("tests/terminal_editor_recovery.rs");
     }
 }

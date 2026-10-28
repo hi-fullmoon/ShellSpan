@@ -1492,6 +1492,11 @@ impl NativeToolEngine {
             serde_json::from_value(call.arguments.clone())
                 .map_err(|error| format!("Invalid terminal_execute arguments: {error}"))?;
         let session_id = self.terminal_target_session_id(&call.target, sessions)?;
+        self.terminal_interactive.release_at_prompt(
+            &session_id,
+            &context.request.user_session_id,
+            &context.request.task_id,
+        )?;
         let broker_snapshot = self
             .terminal_broker
             .snapshot(Some(&session_id))?

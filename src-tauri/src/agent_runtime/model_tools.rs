@@ -408,7 +408,7 @@ pub(crate) fn model_tools_with_terminal_interaction(
         },
         ModelToolDefinition {
             name: "write_terminal_input".into(),
-            description: "Send one explicit text, key, paste, or interrupt input to the bound terminal under ShellSpan's exclusive Agent lease. For a shell command at a prompt (including cd ~), prefer run_terminal_command, which submits and observes the command. Text and paste only insert content: they do not press Enter. To submit typed input, make a separate call with inputKind=key and key=enter, then observe with read_terminal or wait_terminal. An accepted input receipt is not command completion; never retype accepted text merely because its historical arguments are omitted. Never use it to enter passwords, tokens, one-time codes, or other credentials.".into(),
+            description: "Send one explicit text, key, paste, or interrupt input to the bound terminal under ShellSpan's exclusive Agent lease. Can interact with a foreground pager or REPL after a command observation ends, even when boundCommandReady=false; inspect read_terminal first and never replay uncertain commands. To quit less, send exactly {\"inputKind\":\"text\",\"text\":\"q\"}; printable characters are text, not named keys. Omit fields for other variants. To interrupt, send exactly {\"inputKind\":\"interrupt\"}. For a shell command at a prompt (including cd ~), prefer run_terminal_command, which submits and observes the command. Text and paste only insert content: they do not press Enter. To submit typed input, make a separate call with inputKind=key and key=enter, then observe with read_terminal or wait_terminal. An accepted input receipt is not command completion; never retype accepted text merely because its historical arguments are omitted. Never use it to enter passwords, tokens, one-time codes, or other credentials.".into(),
             input_schema: interactive_terminal_input_schema(),
         },
         ModelToolDefinition {
@@ -417,6 +417,12 @@ pub(crate) fn model_tools_with_terminal_interaction(
             input_schema: wait_terminal_schema(),
         },
     ]);
+    if let Some(write) = tools
+        .iter_mut()
+        .find(|tool| tool.name == "write_terminal_input")
+    {
+        write.description.push_str(" For Vim/Neovim, inspect the screen, send key=escape, text=:qa, then key=enter to request a safe exit. If unsaved changes prevent exit, keep the editor open. Save only when authorized by the task; otherwise ask the user. Do not force quit or discard unsaved changes without explicit user authorization (including :q!, :qa!, ZQ, or killing the editor). Confirm the shell prompt has returned before submitting another shell command.");
+    }
     tools
 }
 
@@ -805,5 +811,10 @@ mod tests {
             write.input_schema["oneOf"].as_array().map(Vec::len),
             Some(4)
         );
+        assert!(write.description.contains("text=:qa"));
+        assert!(write.description.contains("keep the editor open"));
+        assert!(write.description.contains(
+            "Do not force quit or discard unsaved changes without explicit user authorization"
+        ));
     }
 }

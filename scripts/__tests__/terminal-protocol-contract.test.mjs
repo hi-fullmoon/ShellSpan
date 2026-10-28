@@ -365,12 +365,18 @@ describe('terminal execution Phase 0 protocol contract', () => {
     };
     for (const call of [
       { ...base, toolName: 'read_terminal', arguments: {} },
+      { ...base, toolName: 'write_terminal_input', arguments: { inputKind: 'text', text: 'q' } },
       { ...base, toolName: 'write_terminal_input', arguments: { inputKind: 'key', key: 'arrowDown' } },
       { ...base, toolName: 'write_terminal_input', arguments: { inputKind: 'interrupt' } },
       { ...base, toolName: 'wait_terminal', arguments: { afterScreenVersion: 4, timeoutMs: 1000 } },
     ]) {
       expect(validate(call), validator.errorsText(validate.errors)).toBe(true);
     }
+    expect(validate({
+      ...base,
+      toolName: 'write_terminal_input',
+      arguments: { inputKind: 'key', key: 'q' },
+    })).toBe(false);
     expect(validate({
       ...base,
       toolName: 'write_terminal_input',

@@ -243,6 +243,25 @@ impl TerminalLeaseManager {
             operation_id,
             command_display,
             None,
+            false,
+        )
+    }
+
+    pub(crate) fn acquire_interactive(
+        &self,
+        session_id: &str,
+        agent_session_id: &str,
+        task_id: &str,
+        operation_id: &str,
+    ) -> Result<AgentTerminalLease, String> {
+        self.acquire_with_presentation(
+            session_id,
+            agent_session_id,
+            task_id,
+            operation_id,
+            None,
+            None,
+            true,
         )
     }
 
@@ -261,9 +280,11 @@ impl TerminalLeaseManager {
             operation_id,
             None,
             Some(visible),
+            false,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn acquire_with_presentation(
         &self,
         session_id: &str,
@@ -272,6 +293,7 @@ impl TerminalLeaseManager {
         operation_id: &str,
         command_display: Option<String>,
         command_execution: Option<bool>,
+        interactive: bool,
     ) -> Result<AgentTerminalLease, String> {
         let lease = AgentTerminalLease {
             session_id: session_id.to_string(),
@@ -310,8 +332,21 @@ impl TerminalLeaseManager {
                 );
                 return Err(TerminalLeaseError::Busy.to_string());
             }
-            self.broker
-                .acquire_agent_lease(session_id, agent_session_id, task_id, operation_id)?;
+            if interactive {
+                self.broker.acquire_agent_interactive_lease(
+                    session_id,
+                    agent_session_id,
+                    task_id,
+                    operation_id,
+                )?;
+            } else {
+                self.broker.acquire_agent_lease(
+                    session_id,
+                    agent_session_id,
+                    task_id,
+                    operation_id,
+                )?;
+            }
             turn_guards.insert(session_id.to_string(), agent_session_id.to_string());
             leases.insert(
                 session_id.to_string(),

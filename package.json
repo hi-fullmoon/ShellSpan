@@ -35,6 +35,7 @@
     "test:terminal-broker:macos": "node scripts/verify-terminal-broker-macos.mjs",
     "test:terminal-visible:macos": "node scripts/verify-terminal-broker-macos.mjs",
     "test:terminal-interactive:macos": "node scripts/verify-terminal-broker-macos.mjs",
+    "test:terminal-editors:macos": "node scripts/verify-terminal-broker-macos.mjs --editors-only",
     "test:terminal-rollout:macos": "node scripts/verify-terminal-broker-macos.mjs",
     "review:frontend": "pnpm test && pnpm build",
     "preview": "vite preview",
