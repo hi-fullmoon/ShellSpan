@@ -29,7 +29,7 @@ export const recordedBudgetUsage: AiContextUsage = {
 
 afterEach(cleanup);
 
-it.each(['zh-CN', 'en-US'] as const)('explains the actual trigger despite 23% confirmed usage in %s', async locale => {
+it.each(['zh-CN', 'en-US'] as const)('keeps the compaction trigger while hiding budget details in %s', async locale => {
   useAppStore.setState({ locale });
   await initI18n(locale);
   const user = userEvent.setup();
@@ -39,9 +39,12 @@ it.each(['zh-CN', 'en-US'] as const)('explains the actual trigger despite 23% co
   expect(panel.querySelector('.ai-context-meter-header')).toHaveTextContent('23%');
   expect(panel).toHaveTextContent('46.5K / 200K');
   const budget = within(panel.querySelector('[data-slot="ai-context-budget"]') as HTMLElement);
-  expect(budget.getByText('50,088 (25%)')).toBeVisible();
-  expect(budget.getByText('131,072')).toBeVisible();
-  expect(budget.getByText('58,928')).toBeVisible();
+  expect(budget.getByText(locale === 'zh-CN' ? '压缩触发线' : 'Compaction trigger')).toBeVisible();
+  expect(budget.getByText('50.1K (25%)')).toBeVisible();
+  expect(panel.querySelectorAll('dt')).toHaveLength(1);
+  expect(panel).not.toHaveTextContent('131,072');
+  expect(panel).not.toHaveTextContent('58,928');
+  expect(panel.querySelector('.ai-context-meter-note')).toBeNull();
   await user.keyboard('{Escape}');
   expect(screen.queryByRole('dialog')).toBeNull();
 });

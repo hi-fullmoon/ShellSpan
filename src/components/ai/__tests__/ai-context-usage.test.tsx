@@ -24,6 +24,7 @@ it.each(['zh-CN', 'en-US'] as const)('keeps confirmation stable and estimates se
   expect(header).toHaveTextContent('81K / 312K');
   expect(header).not.toHaveTextContent('~');
   expect(screen.getByRole('dialog')).toHaveTextContent('~117K');
+  expect(screen.getByRole('dialog').querySelector('.ai-context-meter-note')).toBeNull();
   expect(container.ownerDocument.querySelectorAll('.ai-context-meter-bar > span')).toHaveLength(1);
   rerender(<AiContextMeter usage={usageAt(events, 6684)} />);
   expect(header).toHaveTextContent('85.3K / 312K');
@@ -55,8 +56,10 @@ it.each(['zh-CN', 'en-US'] as const)('clears pre-compaction usage without displa
   rerender(<AiContextMeter usage={usageAt(events, 5672)} />);
   expect(panel).toHaveTextContent('~62.5K / 312K');
   expect(panel).toHaveTextContent(locale === 'zh-CN' ? '压缩后估算' : 'After compaction');
+  expect(panel.querySelector('.ai-context-meter-note')).toBeVisible();
   rerender(<AiContextMeter usage={usageAt(events, 5977)} />);
   expect(panel).toHaveTextContent('49.3K / 312K');
   expect(panel).toHaveTextContent(locale === 'zh-CN' ? '已确认占用' : 'Confirmed usage');
+  expect(panel.querySelector('.ai-context-meter-note')).toBeNull();
   expect(panel).not.toHaveTextContent(locale === 'zh-CN' ? '旧用量已清除' : 'previous usage was cleared');
 });

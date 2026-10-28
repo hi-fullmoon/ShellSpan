@@ -105,8 +105,9 @@ try {
       await page.keyboard.press('Enter');
       const panel = page.locator('.ai-context-meter-panel');
       await panel.waitFor();
-      assert.ok((await panel.innerText()).includes('50,088 (25%)'));
-      assert.ok((await panel.innerText()).includes('131,072'));
+      assert.ok((await panel.innerText()).includes('50.1K (25%)'));
+      assert.equal(await panel.locator('dt').count(), 1);
+      assert.equal(await panel.locator('.ai-context-meter-note').count(), 0);
       assert.ok((await panel.locator('.ai-context-meter-header').innerText()).includes('23%'));
       await page.evaluate(() => document.getAnimations().forEach(animation => animation.finish()));
       assert.ok(await panel.evaluate(element => {
