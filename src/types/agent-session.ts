@@ -166,7 +166,7 @@ export interface AgentSubagentBudget {
   readonly maxStepsPerTurn: number;
   readonly maxTurns: number;
   readonly maxToolCalls: number;
-  readonly maxTokens: number;
+  readonly maxTokens?: number;
   readonly timeoutMs: number;
 }
 

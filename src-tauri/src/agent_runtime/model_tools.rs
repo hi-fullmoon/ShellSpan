@@ -482,11 +482,11 @@ fn subagent_spawn_schema() -> Value {
             "requiredTools": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": bounded_string(128), "description": "Tools needed to complete this task, checked before child creation. Include run_terminal_command for system metric collection. Missing capabilities return an error so the parent can collect evidence or choose a capable role." },
             "inheritanceMode": { "type": "string", "enum": ["blank", "safePrefix"] },
             "targetIds": { "type": "array", "minItems": 1, "maxItems": 128, "uniqueItems": true, "items": bounded_string(128) },
-            "budget": object_schema(&["maxStepsPerTurn", "maxTurns", "maxToolCalls", "maxTokens", "timeoutMs"], json!({
+            "budget": object_schema(&["maxStepsPerTurn", "maxTurns", "maxToolCalls", "timeoutMs"], json!({
                 "maxStepsPerTurn": { "type": "integer", "minimum": 1, "maximum": 64 },
                 "maxTurns": { "type": "integer", "minimum": 1, "maximum": 256 },
                 "maxToolCalls": { "type": "integer", "minimum": 1, "maximum": 4096 },
-                "maxTokens": { "type": "integer", "minimum": 1024, "maximum": 16000000 },
+                "maxTokens": { "type": "integer", "minimum": 1024, "maximum": 16000000, "description": "Optional cumulative provider-reported total-token limit. Omit unless an explicit token budget is requested; omitted means unlimited." },
                 "timeoutMs": { "type": "integer", "minimum": 1000, "maximum": 86400000 }
             }))
         }),
@@ -539,6 +539,25 @@ fn object_schema(required: &[&str], properties: Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn child_spawn_schemas_allow_omitting_the_cumulative_token_budget() {
+        for name in ["spawn_continuable_agent", "spawn_one_shot_agent"] {
+            let tool = default_model_tools()
+                .into_iter()
+                .find(|tool| tool.name == name)
+                .unwrap();
+            let budget = &tool.input_schema["properties"]["budget"];
+            assert_eq!(
+                budget["required"],
+                json!(["maxStepsPerTurn", "maxTurns", "maxToolCalls", "timeoutMs"])
+            );
+            assert!(budget["properties"]["maxTokens"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("omitted means unlimited"));
+        }
+    }
 
     #[test]
     fn file_edit_budget_is_advisory_and_keeps_native_schemas_intact() {

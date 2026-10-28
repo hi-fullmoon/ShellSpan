@@ -1295,7 +1295,7 @@ fn child_request() -> (CreateAgentSessionRequest, AgentSessionEventPayload) {
         max_steps_per_turn: 4,
         max_turns: 1,
         max_tool_calls: 8,
-        max_tokens: 8_192,
+        max_tokens: Some(8_192),
         timeout_ms: 60_000,
     };
     let metadata = AgentSubagentSession {
@@ -1343,6 +1343,46 @@ fn child_request() -> (CreateAgentSessionRequest, AgentSessionEventPayload) {
             budget,
         },
     )
+}
+
+#[test]
+fn child_token_budget_survives_reload_when_omitted_or_explicit() {
+    for limit in [None, Some(1024), Some(4_000_000), Some(16_000_000)] {
+        let (root, store) = configured();
+        let (mut request, _) = child_request();
+        request.subagent.as_mut().unwrap().budget.max_tokens = limit;
+        let encoded = serde_json::to_value(&request).unwrap();
+        assert_eq!(
+            encoded["subagent"]["budget"].get("maxTokens").is_some(),
+            limit.is_some()
+        );
+        let request: CreateAgentSessionRequest = serde_json::from_value(encoded).unwrap();
+        store.create(request).unwrap();
+        drop(store);
+        let reloaded = AgentSessionStore::default();
+        reloaded.configure(root.path().to_path_buf()).unwrap();
+        assert_eq!(
+            reloaded
+                .snapshot("child-1")
+                .unwrap()
+                .header
+                .subagent
+                .unwrap()
+                .budget
+                .max_tokens,
+            limit
+        );
+    }
+    for limit in [0, 1023, 16_000_001] {
+        let (_root, store) = configured();
+        let (mut request, _) = child_request();
+        request.subagent.as_mut().unwrap().budget.max_tokens = Some(limit);
+        assert!(store
+            .create(request)
+            .unwrap_err()
+            .contains("subagent execution budget is outside native bounds"));
+        assert!(store.snapshot("child-1").is_err());
+    }
 }
 
 #[test]

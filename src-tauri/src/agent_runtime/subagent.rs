@@ -1806,7 +1806,7 @@ fn default_subagent_budget() -> AgentSubagentBudget {
         max_steps_per_turn: 6,
         max_turns: 8,
         max_tool_calls: 32,
-        max_tokens: 128_000,
+        max_tokens: None,
         timeout_ms: 10 * 60 * 1_000,
     }
 }
@@ -1988,7 +1988,7 @@ fn child_has_remaining_budget(
         .fold(0_u64, u64::saturating_add);
     turns < max_turns.min(budget.max_turns as usize)
         && super::tool_pipeline::admitted_tool_calls(events) < budget.max_tool_calls
-        && tokens < budget.max_tokens
+        && budget.max_tokens.is_none_or(|limit| tokens < limit)
         && events
             .first()
             .is_some_and(|event| now.saturating_sub(event.time_unix_ms) < budget.timeout_ms)
@@ -2111,7 +2111,6 @@ fn fleet_role_budget(role: AgentSubagentRole) -> AgentSubagentBudget {
         AgentSubagentRole::Verifier | AgentSubagentRole::Reviewer
     ) {
         budget.max_tool_calls = 16;
-        budget.max_tokens = 64_000;
     }
     budget
 }
@@ -2249,7 +2248,7 @@ mod retry_policy_tests {
             max_steps_per_turn: 8,
             max_turns: 2,
             max_tool_calls: 2,
-            max_tokens: 200,
+            max_tokens: Some(200),
             timeout_ms: 1_000,
         };
         assert!(child_has_remaining_budget(&budget, &events, 64, 1_500));
@@ -2257,7 +2256,16 @@ mod retry_policy_tests {
         assert!(!child_has_remaining_budget(&budget, &events, 64, 2_000));
         assert!(!child_has_remaining_budget(
             &AgentSubagentBudget {
-                max_tokens: 100,
+                max_tokens: Some(100),
+                ..budget.clone()
+            },
+            &events,
+            64,
+            1_500
+        ));
+        assert!(child_has_remaining_budget(
+            &AgentSubagentBudget {
+                max_tokens: None,
                 ..budget.clone()
             },
             &events,
@@ -2282,6 +2290,21 @@ mod retry_policy_tests {
         ));
         events.push(budget_event(4, AgentSessionEventPayload::TurnStart));
         assert!(!child_has_remaining_budget(&budget, &events, 64, 1_500));
+    }
+
+    #[test]
+    fn default_and_fleet_budgets_leave_cumulative_tokens_unlimited() {
+        assert_eq!(default_subagent_budget().max_tokens, None);
+        for role in [
+            AgentSubagentRole::General,
+            AgentSubagentRole::Explorer,
+            AgentSubagentRole::Diagnostician,
+            AgentSubagentRole::Operator,
+            AgentSubagentRole::Verifier,
+            AgentSubagentRole::Reviewer,
+        ] {
+            assert_eq!(fleet_role_budget(role).max_tokens, None);
+        }
     }
 
     #[test]
@@ -2407,10 +2430,7 @@ mod retry_policy_tests {
             assert_eq!(data["continuable"], false);
             assert_eq!(data["hasPartialResults"], false);
             assert_eq!(data["usage"]["reportedTokens"], 0);
-            assert_eq!(
-                data["budget"]["maxTokens"],
-                default_subagent_budget().max_tokens
-            );
+            assert!(data["budget"].get("maxTokens").is_none());
             if status == AgentSessionStatus::Completed {
                 assert!(data["stopReason"].is_null());
             } else {

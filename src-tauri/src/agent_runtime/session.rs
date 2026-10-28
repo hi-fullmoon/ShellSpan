@@ -5073,8 +5073,9 @@ fn validate_subagent_budget(budget: &super::AgentSubagentBudget) -> Result<(), S
         || budget.max_turns > 256
         || budget.max_tool_calls == 0
         || budget.max_tool_calls > 4_096
-        || budget.max_tokens < 1_024
-        || budget.max_tokens > 16_000_000
+        || budget
+            .max_tokens
+            .is_some_and(|limit| !(1_024..=16_000_000).contains(&limit))
         || budget.timeout_ms < 1_000
         || budget.timeout_ms > 24 * 60 * 60 * 1_000
     {

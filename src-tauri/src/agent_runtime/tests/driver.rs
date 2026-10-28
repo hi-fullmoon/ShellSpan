@@ -135,7 +135,7 @@
                 max_steps_per_turn: 8,
                 max_turns: 3,
                 max_tool_calls: 12,
-                max_tokens: 16_000,
+                max_tokens: Some(16_000),
                 timeout_ms: 60_000,
             },
             provider: super::super::AgentSubagentModel {
@@ -147,6 +147,26 @@
         };
         assert!(step_budget_recoverable(None));
         assert!(step_budget_recoverable(Some(&child)));
+        let usage_events = vec![event(
+            current_unix_ms().unwrap(),
+            AgentSessionEventPayload::RequestUsage {
+                request_id: "budget-request".into(),
+                usage: super::super::AgentTokenUsage {
+                    total_tokens: Some(16_000_001),
+                    ..Default::default()
+                },
+                finish_reason: super::super::AgentStopReason::Stop,
+            },
+        )];
+        assert_eq!(
+            subagent_budget_failure(Some(&child), &usage_events).unwrap(),
+            Some("subagentTokenBudgetExceeded: maximum 16000 tokens".into())
+        );
+        child.budget.max_tokens = None;
+        assert_eq!(
+            subagent_budget_failure(Some(&child), &usage_events).unwrap(),
+            None
+        );
         child.continuable = false;
         assert!(!step_budget_recoverable(Some(&child)));
         let events = vec![event(1_000, AgentSessionEventPayload::TurnStart)];
@@ -213,7 +233,7 @@
             max_steps_per_turn: 8,
             max_turns: 1,
             max_tool_calls: 10,
-            max_tokens: 32_000,
+            max_tokens: Some(32_000),
             timeout_ms: 300_000,
         };
         for (tokens, calls, elapsed, warning) in [
@@ -237,6 +257,24 @@
             assert!(notice.contains("missing provider usage is unknown"));
             assert!(notice.contains("never reset on continuation"));
         }
+        let unlimited = super::super::AgentSubagentBudget {
+            max_tokens: None,
+            ..budget
+        };
+        let mut usage = super::super::subagent::ChildBudgetUsage {
+            reported_tokens: u64::MAX,
+            tool_calls: 0,
+            turns: 1,
+            elapsed_ms: 0,
+        };
+        let notice = child_cumulative_budget_notice(&unlimited, &usage);
+        assert!(notice.contains("/ unlimited provider-reported total tokens"));
+        assert!(!notice.contains("A cumulative limit is near"));
+        usage.tool_calls = 8;
+        assert!(child_budget_near_limit(&unlimited, &usage));
+        usage.tool_calls = 0;
+        usage.elapsed_ms = 240_000;
+        assert!(child_budget_near_limit(&unlimited, &usage));
     }
 
     fn event(

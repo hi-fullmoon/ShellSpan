@@ -1091,7 +1091,7 @@ async fn one_shot_child_budget_is_forced_to_one_turn() {
                 max_steps_per_turn: 4,
                 max_turns: 9,
                 max_tool_calls: 8,
-                max_tokens: 8_192,
+                max_tokens: Some(8_192),
                 timeout_ms: 60_000,
             }),
             continuable: false,

@@ -209,7 +209,7 @@ async fn drive_agent_inner(
             }
         }
         if let Some(reason) = sessions.read_events(&entry.session_id, |events| {
-            subagent_budget_failure(entry, events)
+            subagent_budget_failure(entry.subagent.as_ref(), events)
         })?? {
             close_open_scope(sessions, entry, &reason)?;
             sessions.terminate(&entry.session_id, AgentSessionStatus::Failed, reason)?;
@@ -622,9 +622,12 @@ fn child_cumulative_budget_notice(
     budget: &super::AgentSubagentBudget,
     usage: &super::subagent::ChildBudgetUsage,
 ) -> String {
+    let token_limit = budget
+        .max_tokens
+        .map_or_else(|| "unlimited".into(), |limit| limit.to_string());
     let mut notice = format!(
         "\nCumulative child budget: {} / {} provider-reported total tokens, {} / {} admitted tool calls, {} / {} turns, {} / {} ms elapsed. Tokens include repeated model inputs, not just the final answer; missing provider usage is unknown, not free. These counters never reset on continuation. Keep tool output bounded and reserve budget for a concise handoff.",
-        usage.reported_tokens, budget.max_tokens, usage.tool_calls, budget.max_tool_calls,
+        usage.reported_tokens, token_limit, usage.tool_calls, budget.max_tool_calls,
         usage.turns, budget.max_turns, usage.elapsed_ms, budget.timeout_ms,
     );
     if child_budget_near_limit(budget, usage) {
@@ -638,7 +641,9 @@ fn child_budget_near_limit(
     usage: &super::subagent::ChildBudgetUsage,
 ) -> bool {
     let near_limit = |used: u64, limit: u64| used >= limit.saturating_sub(limit / 5);
-    near_limit(usage.reported_tokens, budget.max_tokens)
+    budget
+        .max_tokens
+        .is_some_and(|limit| near_limit(usage.reported_tokens, limit))
         || near_limit(
             u64::from(usage.tool_calls),
             u64::from(budget.max_tool_calls),
@@ -949,7 +954,7 @@ async fn run_step(
             return Ok(StepSettlement::Cancelled);
         }
         if let Some(reason) = sessions.read_events(&entry.session_id, |events| {
-            subagent_budget_failure(entry, events)
+            subagent_budget_failure(entry.subagent.as_ref(), events)
         })?? {
             return Ok(StepSettlement::Failed(reason));
         }
@@ -2237,10 +2242,10 @@ fn normalize_tool_data(value: &serde_json::Value) -> serde_json::Value {
 }
 
 fn subagent_budget_failure(
-    entry: &AgentEntry,
+    subagent: Option<&super::AgentSubagentSession>,
     events: &[super::AgentSessionEvent],
 ) -> Result<Option<String>, String> {
-    let Some(subagent) = &entry.subagent else {
+    let Some(subagent) = subagent else {
         return Ok(None);
     };
     let tool_calls = super::tool_pipeline::admitted_tool_calls(events);
@@ -2257,10 +2262,10 @@ fn subagent_budget_failure(
             _ => None,
         })
         .fold(0_u64, u64::saturating_add);
-    if tokens > subagent.budget.max_tokens {
+    if let Some(limit) = subagent.budget.max_tokens.filter(|limit| tokens > *limit) {
         return Ok(Some(format!(
             "subagentTokenBudgetExceeded: maximum {} tokens",
-            subagent.budget.max_tokens
+            limit
         )));
     }
     let created = events
