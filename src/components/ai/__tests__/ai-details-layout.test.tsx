@@ -63,9 +63,18 @@ describe('AI details content sizing', () => {
     expect(container.querySelector('.ai-detail-code')).toHaveTextContent(longValue);
     const sections = [...container.querySelectorAll('.ai-detail-section')];
     expect(sections).toHaveLength(3);
+    expect(container.querySelector('.ai-detail-sections')).toHaveClass('grid-rows-3', 'min-h-0', 'flex-1');
+    expect(container.querySelector('.ai-details-body')).toHaveClass('min-h-0', 'overflow-hidden');
+    expect(container.querySelectorAll('[data-slot="scroll-area"]')).toHaveLength(4);
+    expect(container.querySelector('.ai-detail-summary')).toHaveClass('max-h-[30%]', 'min-h-0');
+    expect(container.querySelector('.ai-detail-summary-meta')).toHaveClass('shrink-0');
+    expect(container.querySelector('.ai-detail-summary [data-slot="scroll-area"]')).toHaveAttribute('aria-label', 'Summary');
     for (const section of sections) {
+      expect(section).toHaveClass('flex-col', 'min-h-0', 'overflow-hidden');
       const header = section.querySelector('.ai-detail-section-header');
-      expect(header).toHaveClass('items-center', 'justify-between', 'px-3');
+      expect(header).toHaveClass('items-center', 'justify-between', 'px-3', 'shrink-0');
+      expect(section.querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'flex-1');
+      expect(section.querySelector('[data-slot="scroll-area-content"]')).toHaveStyle({ minWidth: '0' });
       expect(header?.querySelectorAll('.ai-tool-copy-button')).toHaveLength(1);
       expect(section.querySelectorAll('.ai-tool-copy-button')).toHaveLength(1);
     }

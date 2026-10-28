@@ -34,12 +34,17 @@ function DetailSection({
   readonly children: React.ReactNode;
 }) {
   return (
-    <section className="ai-detail-section min-w-0 overflow-hidden">
-      <div className="ai-detail-section-header flex min-h-10 items-center justify-between gap-3 px-3 py-2">
+    <section className="ai-detail-section flex min-h-0 min-w-0 flex-col overflow-hidden">
+      <div className="ai-detail-section-header flex min-h-10 shrink-0 items-center justify-between gap-3 px-3 py-2">
         <h3>{title}</h3>
         {actions}
       </div>
-      {children}
+      <ScrollArea className="min-h-0 min-w-0 flex-1" horizontal aria-label={title}>
+        {/* Base UI's fit-content minimum must not widen long tool payloads. */}
+        <ScrollAreaContent className="min-w-0" style={{ minWidth: 0 }}>
+          {children}
+        </ScrollAreaContent>
+      </ScrollArea>
     </section>
   );
 }
@@ -52,7 +57,7 @@ function DetailCode({ value, label }: { readonly value: unknown; readonly label:
       title={label}
       actions={<AiToolCopyButton text={text} label={t('ai.workspace.details.copy', { section: label })} />}
     >
-      <pre className="ai-detail-code m-0 max-h-[360px] min-w-0 max-w-full overflow-auto px-3.5 py-3 whitespace-pre-wrap break-words"><code>{text}</code></pre>
+      <pre className="ai-detail-code m-0 min-w-0 max-w-full px-3.5 py-3 whitespace-pre-wrap break-words"><code>{text}</code></pre>
     </DetailSection>
   );
 }
@@ -75,25 +80,28 @@ export function AiToolDetails({
         onBack={onBack}
         onClose={onClose}
       />
-      <ScrollArea className="min-h-0 min-w-0 flex-1" aria-label={t('ai.workspace.details.toolTitle')}>
-        {/* Override Base UI's inline fit-content minimum so long payloads stay inside the viewport. */}
-        <ScrollAreaContent className="ai-details-body flex min-w-0 flex-col gap-2 p-3" style={{ minWidth: 0 }}>
-          {!node ? (
-            <p className="ai-details-empty m-0 py-2 [overflow-wrap:anywhere]">{t('ai.workspace.details.notInWindow')}</p>
-          ) : (
-            <>
-              <div className="ai-detail-summary mb-1 flex min-w-0 flex-col items-stretch gap-2.5" data-state={node.state}>
-                <div className="ai-detail-summary-meta flex min-w-0 items-center justify-between gap-3">
-                  <Badge variant={!node.recoveredByToolKey && (node.state === 'failed' || node.state === 'rejected') ? 'destructive' : 'secondary'}>
-                    {!node.recoveredByToolKey && <ToolStateIcon node={node} />}
-                    {t(node.recoveredByToolKey ? 'ai.workspace.tool.recovered' : `ai.workspace.tool.${node.state}`)}
-                  </Badge>
-                  {node.durationMs !== null && (
-                    <small className="ai-detail-duration inline-flex shrink-0 items-center gap-1"><Clock3Icon aria-hidden="true" />{node.durationMs} ms</small>
-                  )}
-                </div>
-                <p className="m-0 [overflow-wrap:anywhere]">{node.state === 'failed' || node.state === 'rejected' ? toolDisplaySummary(node, t) : node.summary || node.name}</p>
+      <div className="ai-details-body flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden p-3">
+        {!node ? (
+          <p className="ai-details-empty m-0 py-2 [overflow-wrap:anywhere]">{t('ai.workspace.details.notInWindow')}</p>
+        ) : (
+          <>
+            <div className="ai-detail-summary mb-1 flex max-h-[30%] min-h-0 min-w-0 shrink-0 flex-col items-stretch gap-2.5" data-state={node.state}>
+              <div className="ai-detail-summary-meta flex min-w-0 shrink-0 items-center justify-between gap-3">
+                <Badge variant={!node.recoveredByToolKey && (node.state === 'failed' || node.state === 'rejected') ? 'destructive' : 'secondary'}>
+                  {!node.recoveredByToolKey && <ToolStateIcon node={node} />}
+                  {t(node.recoveredByToolKey ? 'ai.workspace.tool.recovered' : `ai.workspace.tool.${node.state}`)}
+                </Badge>
+                {node.durationMs !== null && (
+                  <small className="ai-detail-duration inline-flex shrink-0 items-center gap-1"><Clock3Icon aria-hidden="true" />{node.durationMs} ms</small>
+                )}
               </div>
+              <ScrollArea className="min-h-0 min-w-0" aria-label={t('ai.workspace.details.summary')}>
+                <ScrollAreaContent className="min-w-0" style={{ minWidth: 0 }}>
+                  <p className="m-0 [overflow-wrap:anywhere]">{node.state === 'failed' || node.state === 'rejected' ? toolDisplaySummary(node, t) : node.summary || node.name}</p>
+                </ScrollAreaContent>
+              </ScrollArea>
+            </div>
+            <div className="ai-detail-sections grid min-h-0 min-w-0 flex-1 grid-rows-3 gap-2">
               <DetailCode value={node.input} label={t('ai.workspace.details.input')} />
               <DetailSection
                 title={t('ai.workspace.details.output')}
@@ -119,10 +127,10 @@ export function AiToolDetails({
                 }}
                 label={t('ai.workspace.details.approval')}
               />
-            </>
-          )}
-        </ScrollAreaContent>
-      </ScrollArea>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

@@ -70,6 +70,17 @@
   background: var(--ai-code-block);
 }
 
+/* Keep keyboard focus around the whole section instead of clipping it at the header. */
+[data-slot='ai-tool-details'] .ai-detail-section:has([data-slot='scroll-area-viewport']:focus-visible) {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+[data-slot='ai-tool-details'] .ai-detail-section [data-slot='scroll-area-viewport']:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
 .ai-detail-section-header {
   border-bottom: 1px solid var(--ai-border-subtle);
   background: var(--ai-canvas);
@@ -97,6 +108,7 @@
   border-radius: 0;
   font-size: 12px;
   line-height: 20px;
+  overflow: visible;
 }
 
 [data-slot='ai-tool-details'] .ai-terminal-header {
@@ -118,9 +130,10 @@
   overflow-wrap: anywhere;
 }
 
-[data-slot='ai-tool-details'] :is(.ai-terminal-output, .ai-read-lines, .ai-search-results, .ai-diff-body) {
-  max-height: 400px;
-  overscroll-behavior: contain;
+/* Each detail section owns scrolling, including expanded output renderers. */
+[data-slot='ai-tool-details'] :is(.ai-detail-code, .ai-terminal-output > div, .ai-read-lines, .ai-search-results, .ai-diff-body, .ai-code-block-pre, .ai-io-section) {
+  max-height: none;
+  overflow: visible;
 }
 
 .ai-artifact-image-surface {
