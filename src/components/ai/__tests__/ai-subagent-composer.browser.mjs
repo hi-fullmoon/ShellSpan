@@ -117,43 +117,31 @@ try {
     for (const width of [1000, 480, 360]) {
       await page.setViewportSize({ width, height: 800 });
       await page.evaluate(() => globalThis.subagentComposerCheck.show('running'));
-      const toggle = host.getByRole('button', { name: label, exact: true });
-      await toggle.waitFor();
-      assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
-      assert.equal(await editor.count(), 0, 'Child input is collapsed by default');
+      await editor.waitFor();
+      assert.equal(await host.getByRole('button', { name: label, exact: true }).count(), 0,
+        'Child instructions must not require a separate toggle');
+      assert.equal(await editor.getAttribute('contenteditable'), 'true');
       assert.equal(await host.locator('[data-slot="ai-workspace-status-notices"]').innerText(), '',
         'Switching from the parent must not retain its terminal warning during an exit animation');
-      if (locale === 'zh-CN' && width === 360) {
-        await page.screenshot({ path: '/tmp/shellspan-subagent-composer-collapsed.png' });
-      }
-      assert.equal(await host.locator('[data-slot="ai-composer-disclaimer"]').count(), 0);
+      assert.equal(await host.locator('[data-slot="ai-composer-disclaimer"]').count(), 1);
       assert.equal(await host.locator('[data-slot="ai-task-strip"]').count(), 1, 'Task plan stays visible');
       // Keep the recorded parent's terminal ownership while inspecting its
       // child. Neither passive reading nor child text delivery needs takeover.
       await page.evaluate(() => globalThis.subagentComposerCheck.retainParentNotice());
       assert.equal(await host.locator('[data-slot="ai-workspace-status-notices"]').innerText(), '');
-      await toggle.focus();
-      await page.keyboard.press('Enter');
-      await editor.waitFor();
-      assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
       assert.equal(await editor.getAttribute('aria-disabled'), null, 'Parent ownership must not block child instructions');
-      assert.ok(await editor.evaluate(el => el === document.activeElement), 'Opening instructions focuses the editor');
       assert.equal(await host.getByRole('status', { name: locale === 'zh-CN' ? 'Agent 暂不可用' : 'Agent is unavailable' }).count(), 0);
-      assert.equal(await toggle.evaluate(el => getComputedStyle(el).columnGap), '4px');
       const bounds = await editor.boundingBox();
       assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width && bounds.y + bounds.height <= 800);
       const draft = await page.evaluate(() => globalThis.subagentComposerCheck.draft);
       await editor.fill(draft);
-      await toggle.click();
-      assert.equal(await editor.count(), 0);
-      await toggle.click();
-      assert.equal(await editor.textContent(), draft, 'Collapsing preserves the draft');
       await editor.press('Enter');
       assert.equal(await page.evaluate(() => globalThis.subagentComposerCheck.sent.at(-1)), draft);
       await page.screenshot({ path: `/tmp/shellspan-subagent-composer-${locale}-${width}.png` });
       await page.evaluate(() => globalThis.subagentComposerCheck.show('ended'));
-      await toggle.waitFor({ state: 'detached' });
+      await editor.waitFor({ state: 'detached' });
       assert.equal(await editor.count(), 0, 'Ended children stay read-only');
+      assert.equal(await host.locator('[data-slot="ai-composer-disclaimer"]').count(), 0);
       if (locale === 'zh-CN' && width === 360) {
         await page.screenshot({ path: '/tmp/shellspan-subagent-composer-ended.png' });
       }
@@ -164,21 +152,22 @@ try {
       await page.evaluate(() => globalThis.subagentComposerCheck.show('running'));
     }
     const failureMessage = await page.evaluate(() => globalThis.subagentComposerCheck.missingModel());
-    const toggle = host.getByRole('button', { name: label, exact: true });
-    assert.equal(await host.getByText(failureMessage, { exact: true }).count(), 0,
-      'Configuration problems do not interrupt passive child observation');
-    await toggle.click();
     const failure = host.getByText(failureMessage, { exact: true });
     await failure.waitFor();
-    assert.equal(await failure.count(), 1, 'A real configuration blocker is explained once near the expanded input');
+    assert.equal(await failure.count(), 1, 'A real configuration blocker is explained once near the input');
+    assert.equal(await editor.getAttribute('aria-disabled'), 'true');
+    assert.equal(await editor.getAttribute('contenteditable'), 'false');
+    assert.equal(await host.getByRole('button', { name: locale === 'zh-CN' ? '添加文件或文件夹' : 'Add file or folder' }).isDisabled(), true);
     const submitted = await page.evaluate(() => globalThis.subagentComposerCheck.sent.length);
     const draft = await editor.textContent();
     await editor.press('Enter');
     assert.equal(await page.evaluate(() => globalThis.subagentComposerCheck.sent.length), submitted);
     assert.equal(await editor.textContent(), draft, 'A blocked follow-up preserves the draft');
     await page.screenshot({ path: `/tmp/shellspan-subagent-composer-blocked-${locale}.png` });
-    await toggle.click();
+    await page.evaluate(() => globalThis.subagentComposerCheck.show('running'));
     await failure.waitFor({ state: 'detached' });
+    assert.equal(await editor.getAttribute('contenteditable'), 'true', 'Input resumes when configuration is available');
+    assert.equal(await editor.textContent(), draft, 'Restoring input preserves the draft');
   }
   assert.deepEqual(errors, []);
 } finally {

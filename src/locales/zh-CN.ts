@@ -1860,7 +1860,6 @@ export default {
   'ai.workspace.subagents.root': '根会话',
   'ai.workspace.subagents.current': '当前',
   'ai.workspace.subagents.oneShotReadOnly': '这是一次性子代理的执行记录，不支持发送后续消息。',
-  'ai.workspace.subagents.supplementInstructions': '补充指令',
   'ai.workspace.subagents.instructionsPlaceholder': '补充给子代理的指令…',
   'ai.workspace.subagents.count.one': '{count} 个子代理',
   'ai.workspace.subagents.count.other': '{count} 个子代理',

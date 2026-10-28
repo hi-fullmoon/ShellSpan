@@ -12,7 +12,6 @@ import {
   CornerUpLeftIcon,
   InfoIcon,
   ListPlusIcon,
-  MessageSquarePlusIcon,
   ShieldCheckIcon,
   SquareIcon,
 } from 'lucide-react';
@@ -178,10 +177,7 @@ export function AiComposerSeat({
   const { t } = useI18n();
   const toast = useToast();
   const inputRegionId = useId();
-  const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
-  const inputExpanded = inputMode === 'default'
-    || (inputMode === 'supplement' && currentSessionId != null && expandedSessionId === currentSessionId);
-  useEffect(() => { setExpandedSessionId(null); }, [currentSessionId, inputMode]);
+  const inputExpanded = inputMode !== 'hidden';
   const cardRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const toolbar = cardRef.current?.querySelector<HTMLElement>('.ai-composer-toolbar');
@@ -391,9 +387,6 @@ export function AiComposerSeat({
       sessions, sessionsLoading, sessionsError, currentSessionId: currentSessionId ?? composerState?.sessionId, onRefreshSessions },
   });
   const skillCompletion = useSkillCompletion({ text: draft, update: updateDraft, query: mode === 'agent' ? onListSkills : undefined, scopeKey: skillsScopeKey, editor: completion.editor, disabled: Boolean(terminal || waitingApproval || waitingQuestion || unavailable || imageLocked || submitting) });
-  useEffect(() => {
-    if (inputMode === 'supplement' && inputExpanded) completion.editor.current?.focus();
-  }, [completion.editor, inputExpanded, inputMode]);
   const wasStopping = useRef(false);
   useEffect(() => {
     if (!running || stopping || terminal || !onStop) return;
@@ -514,15 +507,6 @@ export function AiComposerSeat({
           </div>
         )}
       </div>
-      {inputMode === 'supplement' && (
-        <Button type="button" variant="ghost" size="sm" className="self-start"
-          aria-expanded={inputExpanded} aria-controls={inputRegionId}
-          onClick={() => setExpandedSessionId(inputExpanded ? null : currentSessionId ?? null)}>
-          <MessageSquarePlusIcon data-icon="inline-start" />
-          {t('ai.workspace.subagents.supplementInstructions')}
-          <ChevronDownIcon data-icon="inline-end" className={cn(inputExpanded && 'rotate-180')} />
-        </Button>
-      )}
       {inputExpanded && inputMode === 'supplement' && unavailableReason && (
         <Alert id={availabilityHintId} variant="info" size="sm" role="status">
           <InfoIcon aria-hidden="true" />
@@ -568,6 +552,7 @@ export function AiComposerSeat({
               )}
               aria-describedby={unavailableReason ? availabilityHintId : undefined}
               value={draft}
+              disabled={inputMode === 'supplement' && unavailable}
               chatTitles={[...chatReferences.current.documents.values()].map(document => document.chatTitle!)}
               historyKey={JSON.stringify([composerState?.sessionId, skillsScopeKey])}
               onChange={updateDraft}

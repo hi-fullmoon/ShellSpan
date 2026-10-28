@@ -1862,7 +1862,6 @@ export default {
   'ai.workspace.subagents.root': 'Root',
   'ai.workspace.subagents.current': 'Current',
   'ai.workspace.subagents.oneShotReadOnly': 'This is a one-shot subagent execution record and cannot accept follow-up messages.',
-  'ai.workspace.subagents.supplementInstructions': 'Add instructions',
   'ai.workspace.subagents.instructionsPlaceholder': 'Add instructions for this subagent…',
   'ai.workspace.subagents.count.one': '{count} subagent',
   'ai.workspace.subagents.count.other': '{count} subagents',

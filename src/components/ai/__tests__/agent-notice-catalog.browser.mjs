@@ -85,7 +85,6 @@ try {
           for (const width of [760, 360]) {
             await page.setViewportSize({ width, height: 1000 });
             await page.evaluate(async ({ entry, id, locale, theme }) => (await import(entry)).show(id, locale, theme), { entry, id: sample.id, locale, theme });
-            if (sample.id === 'supplement') await page.locator('button[aria-controls]').first().click();
             if (sample.id === 'file-reference') await page.locator('[data-composer-editor]').fill('@');
             const element = page.locator(sample.selector).first();
             await element.waitFor({ state: 'visible', timeout: 10_000 });
