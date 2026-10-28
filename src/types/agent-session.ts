@@ -345,6 +345,7 @@ type AgentSessionEventWithoutData<Type extends string> = AgentSessionEventBase &
  */
 export type AgentSessionEvent =
   | AgentSessionEventWithData<'session/resumed', Record<string, never>>
+  | AgentSessionEventWithData<'subagent/recovery_started', { failedTurnId: string; recoveryId: string; message: AgentSessionInboxMessage }>
   | AgentSessionEventWithData<'agent/inbox/paused', { itemIds: readonly string[] }>
   | AgentSessionEventWithData<'agent/inbox/item_resumed', { itemId: string; previousRevision: number; clientOperationId: string }>
   | AgentSessionEventWithData<'session/created', {
@@ -687,6 +688,7 @@ export interface AgentSessionSnapshot {
   readonly archived: boolean;
   /** A dispatched tool call lacks a durable result; a new terminal must not imply it was safe to replay. */
   readonly uncertainNativeEffects?: boolean;
+  readonly childFailureRecovery?: Readonly<{ turnId: string; retryable: boolean; retryAt: number | null }>;
   readonly eventCount: number;
   readonly surface: AgentModelSurfaceSnapshot;
   readonly inbox: Readonly<{

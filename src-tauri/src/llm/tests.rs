@@ -185,6 +185,7 @@ fn model_exposes_only_strict_runtime_pipeline_tools() {
             "spawn_one_shot_agent",
             "spawn_continuable_agent",
             "send_child_input",
+            "retry_child_agent",
             "inspect_child_agent",
             "cancel_child_agent",
             "fleet_plan",

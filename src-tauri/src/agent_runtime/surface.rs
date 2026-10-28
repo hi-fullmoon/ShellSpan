@@ -197,6 +197,7 @@ fn append_surface_events<'a>(
     for event in events {
         match &event.payload {
             AgentSessionEventPayload::SessionResumed {}
+            | AgentSessionEventPayload::SubagentRecoveryStarted { .. }
             | AgentSessionEventPayload::TurnEnd { .. } => {
                 // An interrupted session may contain tool calls without outcomes.
                 // Close their model protocol pairs without executing or asserting an outcome.

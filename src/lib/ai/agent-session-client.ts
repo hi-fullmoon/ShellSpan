@@ -232,6 +232,16 @@ export class AgentSessionCommittedClient {
     }
     signal.throwIfAborted();
     this.merge(event);
+    if (this.snapshotValue?.header.subagent
+      && (event.type === 'session/ended' || event.type === 'subagent/recovery_started')) {
+      const snapshot = await this.transport.snapshot(this.sessionId);
+      signal.throwIfAborted();
+      this.snapshotValue = snapshot;
+      this.requiredSeq = Math.max(this.requiredSeq, snapshot.eventCount - 1);
+      if ((this.events.last?.seq ?? -1) < this.requiredSeq) {
+        await this.fetchAfter(this.events.last?.seq, signal);
+      }
+    }
     this.scheduleEmit();
   }
 
@@ -338,7 +348,7 @@ export class AgentSessionCommittedClient {
 
   private updateTerminalState(event: AgentSessionEvent): void {
     if (event.type === 'session/ended') this.hasTerminalEventValue = true;
-    if (event.type === 'session/resumed') this.hasTerminalEventValue = false;
+    if (event.type === 'session/resumed' || event.type === 'subagent/recovery_started') this.hasTerminalEventValue = false;
   }
 
   private validateEnvelope(event: AgentSessionEvent): void {

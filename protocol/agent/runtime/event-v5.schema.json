@@ -89,6 +89,7 @@
         "task/state",
         "task/evidence",
         "session/resumed",
+        "subagent/recovery_started",
         "agent/inbox/paused",
         "agent/inbox/item_resumed"
       ]
@@ -995,6 +996,39 @@
             "additionalProperties": false,
             "required": ["root"],
             "properties": { "root": { "type": "string", "minLength": 1, "maxLength": 4096 } }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "subagent/recovery_started"
+          }
+        }
+      },
+      "then": {
+        "required": ["data"],
+        "properties": {
+          "data": {
+            "type": "object", "additionalProperties": false,
+            "required": ["failedTurnId", "recoveryId", "message"],
+            "properties": {
+              "failedTurnId": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "recoveryId": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "message": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["messageId", "clientSubmissionId", "content", "source"],
+                "properties": {
+                  "messageId": { "type": "string", "minLength": 1, "maxLength": 128 },
+                  "clientSubmissionId": { "type": "string", "minLength": 1, "maxLength": 128 },
+                  "content": { "type": "string", "minLength": 1, "maxLength": 131072 },
+                  "source": { "type": "object" }
+                }
+              }
+            }
           }
         }
       }

@@ -638,7 +638,7 @@ export function AiWorkspaceRoot({
             />
           ) : (
             <AiFailureRecoveryContext.Provider value={{
-              recovery: view && !readOnlySession && !historicalTargetUnavailable
+              recovery: view && (!readOnlySession || Boolean(subagent)) && !historicalTargetUnavailable
                 ? latestFailureRecovery(view) : null,
               busy: retryingModel || activeComposerState?.phase === 'submitting' || activeComposerState?.phase === 'stopping',
               onRetry: onRetryModel,

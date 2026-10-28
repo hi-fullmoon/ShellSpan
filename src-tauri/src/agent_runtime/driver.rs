@@ -3168,6 +3168,7 @@ pub(crate) fn recover_open_scope(
         match event.payload {
             AgentSessionEventPayload::TurnStart => turn_id = event.turn_id,
             AgentSessionEventPayload::TurnEnd { .. }
+            | AgentSessionEventPayload::SubagentRecoveryStarted { .. }
             | AgentSessionEventPayload::SessionResumed {} => {
                 turn_id = None;
                 step_id = None;

@@ -308,6 +308,7 @@ pub(crate) const ORCHESTRATION_TOOL_NAMES: &[&str] = &[
     "spawn_one_shot_agent",
     "spawn_continuable_agent",
     "send_child_input",
+    "retry_child_agent",
     "inspect_child_agent",
     "cancel_child_agent",
     "fleet_plan",
@@ -1008,6 +1009,24 @@ impl AgentToolPipeline {
                     )?;
                     if entry.cancellation().is_cancelled() {
                         continue;
+                    }
+                    if entry.subagent.is_some() {
+                        let events = self.sessions.all_events(&entry.session_id)?;
+                        if let Some(reason) = super::child_recovery::completed_recovery_operation(
+                            &events, turn_id, &preparation.call,
+                        ) {
+                            while let Some((index, request, preparation, result)) = running.next().await {
+                                ready.insert(index, (request, preparation, result));
+                            }
+                            while let Some((request, preparation, result)) = ready.remove(&committed) {
+                                self.finish_native(&request, &preparation, result)?;
+                                committed += 1;
+                            }
+                            self.commit_prepare_failure(&request, &reason)?;
+                            next += 1;
+                            committed += 1;
+                            continue;
+                        }
                     }
                     let parallel = preparation.parallel
                         && !preparation.requires_approval

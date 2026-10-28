@@ -194,6 +194,20 @@ pub(crate) async fn agent_runtime_retry_model(
 ) -> Result<AgentSessionSnapshot, String> {
     configure_runtime(&app, &runtime)?;
     runtime.configure_credentials(credentials.inner().clone())?;
+    let snapshot = runtime.session(&input.session_id)?;
+    if snapshot.header.subagent.is_some() {
+        return runtime
+            .retry_child_failure(super::AgentChildRetryRequest {
+                parent_session_id: snapshot
+                    .header
+                    .parent_session_id
+                    .ok_or("CHILD_RETRY_UNAVAILABLE: child has no parent")?,
+                child_session_id: input.session_id,
+                turn_id: input.turn_id,
+                content: None,
+            })
+            .await;
+    }
     let selection = runtime
         .session(&input.session_id)?
         .header

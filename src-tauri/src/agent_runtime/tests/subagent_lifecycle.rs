@@ -1,4 +1,5 @@
 use super::*;
+include!("subagent_failure_recovery.rs");
 use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
@@ -10,8 +11,9 @@ use super::super::{
 };
 
 // Exercise the real session store, registry, admission gate and HTTP adapter.
-// These lifecycle tests reserve the driver slot themselves and never send a
-// model request or replace the model/native runtime with a test implementation.
+// Admission tests reserve the driver slot without sending model requests;
+// recovery tests also exercise a real refused HTTP connection. Neither replaces
+// the model/native runtime with a test implementation.
 fn setup() -> (tempfile::TempDir, SubAgentManager, Arc<AgentEntry>) {
     setup_with_budget(default_subagent_budget())
 }

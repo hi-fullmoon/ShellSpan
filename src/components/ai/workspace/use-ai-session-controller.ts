@@ -2095,7 +2095,8 @@ export function useAiSessionController({
       const recovery = current && latestFailureRecovery(current);
       const context = submissionContextRef.current;
       if (!current || recovery?.kind !== 'retry' || recovery.turnId !== turnId
-        || (recovery.retryAt ?? 0) > now() || readOnlySession || !canStartAgent
+        || (recovery.retryAt ?? 0) > now() || (readOnlySession && !current.snapshot.value.childFailureRecovery)
+        || historicalTargetUnavailable || !canStartAgent
         || modelRetryPending.current || settingsPending.current
         || ['submitting', 'stopping'].includes(composerRef.current.phase) || !adapter.retryModel) return;
       modelRetryPending.current = true;

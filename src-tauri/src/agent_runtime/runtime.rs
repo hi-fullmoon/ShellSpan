@@ -1867,6 +1867,43 @@ impl AgentRuntime {
         self.subagents.spawn_from_command(request).await
     }
 
+    pub(crate) async fn retry_child_failure(
+        &self,
+        request: super::AgentChildRetryRequest,
+    ) -> Result<AgentSessionSnapshot, String> {
+        if self
+            .sessions
+            .validate_child_retry(&request, self.driver_config.max_turns_per_session)?
+        {
+            return self.sessions.snapshot(&request.child_session_id);
+        }
+        self.require_open_terminal_target(&request.child_session_id)?;
+        self.require_session_not_stopping(&request.child_session_id)?;
+        // A UI retry after restart restores the owner chain without resuming
+        // ended parents or changing the frozen child model/permissions.
+        let mut owner_id = request.parent_session_id.clone();
+        loop {
+            self.require_session_not_stopping(&owner_id)?;
+            let owner = self.sessions.snapshot(&owner_id)?;
+            if owner.ended || owner.archived {
+                return Err("CHILD_RETRY_UNAVAILABLE: parent conversation is closed".into());
+            }
+            if let Some(parent) = owner.header.parent_session_id {
+                owner_id = parent;
+            } else {
+                if self.agents.get(&owner_id)?.is_none() {
+                    let selected = owner
+                        .header
+                        .model_selection
+                        .ok_or("CHILD_RETRY_UNAVAILABLE: parent has no saved model")?;
+                    self.start(&owner_id, self.models.restore_selection(&selected)?, None)?;
+                }
+                break;
+            }
+        }
+        self.subagents.retry_child(request).await
+    }
+
     pub(crate) async fn send_child_input(
         &self,
         request: super::AgentChildInputRequest,

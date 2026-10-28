@@ -312,13 +312,22 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
         },
         ModelToolDefinition {
             name: "send_child_input".into(),
-            description: "Send a new bounded input to a continuable child Session, cold-resuming the same Session when needed.".into(),
+            description: "Send a new bounded input to an idle continuable child Session, cold-resuming the same Session when needed. For a failed child use inspect_child_agent, then retry_child_agent if failureRecovery permits it.".into(),
             input_schema: object_schema(
                 &["childSessionId", "content"],
                 json!({
                     "childSessionId": bounded_string(128),
                     "content": bounded_string(131072)
                 }),
+            ),
+        },
+        ModelToolDefinition {
+            name: "retry_child_agent".into(),
+            description: "Recover a failed continuable child in its original Session after inspecting failureRecovery and saved progress. Pass failureRecovery.turnId as turnId. Transient model errors can be retried directly; after fixing request/configuration errors provide content describing the correction. Each failed turn admits one durable recovery attempt. Retains the original task, permissions, completed operations and cumulative budgets; rejects uncertain effects, cancellation, one-shot children and exhausted budgets.".into(),
+            input_schema: object_schema(
+                &["childSessionId", "turnId"],
+                json!({ "childSessionId": bounded_string(128), "turnId": bounded_string(128),
+                    "content": bounded_string(65536) }),
             ),
         },
         ModelToolDefinition {

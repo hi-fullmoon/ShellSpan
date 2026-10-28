@@ -190,7 +190,16 @@ export function projectAgentInbox(events: readonly AgentSessionEvent[]): readonl
     if (event.turnId && !closedTurns.has(event.turnId) && event.type !== 'turn/end') {
       activeTurnId = event.turnId;
     }
-    if (event.type === 'session/resumed') {
+    if (event.type === 'subagent/recovery_started') {
+      failed = false;
+      activeTurnId = undefined;
+      const message = event.data.message;
+      items.set(message.messageId, {
+        id: message.messageId, clientSubmissionId: message.clientSubmissionId,
+        lane: 'nextTurn', content: message.content, state: 'queued', paused: false,
+        startsTurn: false, source: inboxSource(message.source), provenance: message.source,
+      });
+    } else if (event.type === 'session/resumed') {
       failed = false;
       activeTurnId = undefined;
     } else if (event.type === 'session/ended') {
@@ -347,7 +356,8 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
       value: {
         ...state.snapshot,
         status: activity.status,
-        ended: [...events].reverse().find(event => event.type === 'session/ended' || event.type === 'session/resumed')?.type === 'session/ended',
+        ended: [...events].reverse().find(event => event.type === 'session/ended' || event.type === 'session/resumed'
+          || event.type === 'subagent/recovery_started')?.type === 'session/ended',
         header,
         task,
       },
@@ -372,6 +382,8 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
     revision: state.lastCommittedSeq === undefined ? state.snapshot.eventCount : state.lastCommittedSeq + 1,
     committedOperationIds: events.flatMap((event) => {
       switch (event.type) {
+        case 'subagent/recovery_started':
+          return [event.data.recoveryId];
         case 'agent/inbox/spliced':
           return event.data.operation === 'enqueued'
             ? event.data.messages.flatMap(message => message.clientSubmissionId ? [message.clientSubmissionId] : []) : [];
@@ -973,7 +985,7 @@ export function createAgentSessionAdapter(
       // An old admission receipt does not prove a paused recovery was resumed.
       // Always dispatch the explicit action; native receipt handling is idempotent.
       const before = await openEntry(sessionId);
-      const id = `model-retry-${turnId}`;
+      const id = `${before.snapshot.value.header.subagent ? 'child' : 'model'}-retry-${turnId}`;
       await waitForCommittedOperation(sessionId, id, () => invokeRetryAgentModel({ sessionId, turnId }), {
         confirmed: modelRetryConfirmation(before, turnId),
       });

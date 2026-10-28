@@ -23,7 +23,7 @@ export function modelFailureRecovery(error: AiErrorNode): AiFailureRecovery['kin
 
 /** Admission and explicit resume have different durable acknowledgement rules. */
 export function modelRetryConfirmation(before: AiSessionView, turnId: string): (view: AiSessionView) => boolean {
-  const id = `model-retry-${turnId}`;
+  const id = `${before.snapshot.value.header.subagent ? 'child' : 'model'}-retry-${turnId}`;
   const original = before.inbox.find(item => item.clientSubmissionId === id && !item.consumed);
   return view => {
     if (!view.committedOperationIds?.includes(id)) return false;
@@ -34,9 +34,9 @@ export function modelRetryConfirmation(before: AiSessionView, turnId: string): (
 }
 
 /** Only a complete, settled latest turn can offer a recovery operation. */
-export function latestFailureRecovery(view: AiSessionView): AiFailureRecovery | null {
+export function latestFailureRecovery(view: AiSessionView, now = Date.now()): AiFailureRecovery | null {
   const snapshot = view.snapshot.value;
-  if (snapshot.archived || snapshot.header.subagent || view.syncError
+  if (snapshot.archived || view.summary.archived || view.syncError
     || view.pendingApproval || view.pendingQuestion
     || !['failed', 'idle'].includes(view.status)) return null;
   let latest: AiConversationNode | undefined;
@@ -48,6 +48,17 @@ export function latestFailureRecovery(view: AiSessionView): AiFailureRecovery | 
     || !latest.hasStartBoundary || !latest.hasEndBoundary || !latest.turnId) return null;
   const error = [...latest.children].reverse().find((node): node is AiErrorNode => node.kind === 'error' && node.state === 'failed');
   if (!error) return null;
+  if (snapshot.header.subagent) {
+    const child = snapshot.header.subagent;
+    const recovery = snapshot.childFailureRecovery;
+    if (!child.continuable || !recovery?.retryable || recovery.turnId !== latest.turnId
+      || snapshot.uncertainNativeEffects
+      || now >= snapshot.header.createdAtUnixMs + child.budget.timeoutMs
+      || view.inbox.some(item => !item.consumed && (!item.paused
+        || item.clientSubmissionId !== `child-retry-${latest.turnId}`
+        || item.provenance?.label !== 'child-failure-retry'))) return null;
+    return { turnId: recovery.turnId, kind: 'retry', ...(recovery.retryAt ? { retryAt: recovery.retryAt } : {}) };
+  }
   const kind = modelFailureRecovery(error);
   if (kind !== 'retry') return { turnId: latest.turnId, kind };
   if (snapshot.uncertainNativeEffects || latest.children.some(node => node.kind === 'tool' || node.kind === 'question')) {

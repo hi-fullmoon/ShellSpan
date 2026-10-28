@@ -1,6 +1,7 @@
 mod artifact;
 mod budget;
 mod builtin_skills;
+mod child_recovery;
 mod commands;
 mod compaction;
 mod driver;
@@ -76,6 +77,7 @@ pub(crate) fn is_terminal_call_blocked(error: &str) -> bool {
 
 pub(crate) use artifact::*;
 pub(crate) use budget::*;
+pub(crate) use child_recovery::AgentChildFailureRecovery;
 pub(crate) use commands::*;
 pub(crate) use compaction::*;
 pub(crate) use driver::*;

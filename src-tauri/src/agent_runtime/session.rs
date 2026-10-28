@@ -150,6 +150,8 @@ pub(crate) struct AgentSessionSnapshot {
     pub(crate) recovery: AgentRecoveryCheckpoint,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(crate) uncertain_native_effects: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) child_failure_recovery: Option<super::AgentChildFailureRecovery>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -348,7 +350,16 @@ impl AgentSessionRecord {
             task: derive_task(&self.events),
             recovery: super::derive_recovery_checkpoint(&self.events),
             uncertain_native_effects: has_uncertain_tool_executions(&self.events),
+            child_failure_recovery: None,
         };
+        let mut snapshot = snapshot;
+        snapshot.child_failure_recovery = super::child_recovery::child_failure_recovery(
+            &self.header,
+            self.status,
+            self.archived,
+            &self.events,
+            &snapshot.inbox,
+        );
         let _ = self.snapshot_cache.set(snapshot.clone());
         Ok(snapshot)
     }
@@ -366,7 +377,7 @@ impl AgentSessionRecord {
     }
 }
 
-fn has_uncertain_tool_executions(events: &[AgentSessionEvent]) -> bool {
+pub(super) fn has_uncertain_tool_executions(events: &[AgentSessionEvent]) -> bool {
     let mut dispatched = HashSet::new();
     for event in events {
         match &event.payload {
@@ -551,9 +562,7 @@ impl AgentSessionStore {
         let pending = inner
             .sessions
             .iter()
-            .filter(|(_, record)| {
-                !record.ended && !record.archived && record.header.subagent.is_none()
-            })
+            .filter(|(_, record)| !record.ended && !record.archived)
             .filter_map(|(id, record)| {
                 let paused = record.inbox.paused_ids();
                 let item_ids: Vec<_> = record
@@ -1510,6 +1519,98 @@ impl AgentSessionStore {
             .get(session_id)
             .ok_or("Agent session was not found")?;
         validate_model_retry_record(record, turn_id)
+    }
+
+    pub(crate) fn validate_child_retry(
+        &self,
+        request: &super::AgentChildRetryRequest,
+        max_turns: usize,
+    ) -> Result<bool, String> {
+        let inner = self.lock_configured()?;
+        let record = inner
+            .sessions
+            .get(&request.child_session_id)
+            .ok_or("Agent session was not found")?;
+        validate_child_retry_record(record, request, max_turns)
+    }
+
+    /// Commit recovery and its input together. A repeated request is identified
+    /// by the failed turn, including after a lost reply or a process restart.
+    pub(crate) fn retry_child_failure(
+        &self,
+        request: &super::AgentChildRetryRequest,
+        max_turns: usize,
+    ) -> Result<AgentSessionSnapshot, String> {
+        let mut inner = self.lock_configured()?;
+        let record = inner
+            .sessions
+            .get(&request.child_session_id)
+            .ok_or("Agent session was not found")?;
+        if validate_child_retry_record(record, request, max_turns)? {
+            return record.snapshot();
+        }
+        let id = super::child_recovery::recovery_id(&request.turn_id);
+        let payloads = if find_submission(record, &id).is_some() {
+            if record.inbox.paused_ids().contains(&id) {
+                vec![(
+                    None,
+                    None,
+                    AgentSessionEventPayload::InboxItemResumed {
+                        item_id: id,
+                        previous_revision: record.events.len() as u64,
+                        client_operation_id: format!(
+                            "child-retry-resume-{}",
+                            Uuid::new_v4().simple()
+                        ),
+                    },
+                )]
+            } else {
+                return record.snapshot();
+            }
+        } else {
+            let mut source = AgentMessageSource::runtime("child-failure-retry".into());
+            source
+                .metadata
+                .insert("retryTurnId".into(), request.turn_id.clone().into());
+            source.metadata.insert(
+                "parentSessionId".into(),
+                request.parent_session_id.clone().into(),
+            );
+            source.metadata.insert(
+                "recoveryInputHash".into(),
+                crate::llm::runtime::digest(
+                    &serde_json::to_vec(&request.content).map_err(|error| error.to_string())?,
+                )
+                .into(),
+            );
+            let mut content = "An explicit recovery attempt was requested for this child task. Continue only the unfinished work from the saved conversation, task plan and committed tool results. Completed operations remain completed: do not repeat them. Never assume that a timeout means an operation did not execute. Inspect current state before any uncertain side effect. The original permissions and cumulative budgets still apply.".to_string();
+            if let Some(correction) = &request.content {
+                content.push_str("\nRecovery instructions:\n");
+                content.push_str(correction);
+            }
+            vec![(
+                None,
+                None,
+                AgentSessionEventPayload::SubagentRecoveryStarted {
+                    failed_turn_id: request.turn_id.clone(),
+                    recovery_id: id.clone(),
+                    message: AgentInboxMessage {
+                        message_id: id.clone(),
+                        client_submission_id: Some(id),
+                        content,
+                        source,
+                        images: Vec::new(),
+                        terminal_context: None,
+                    },
+                },
+            )]
+        };
+        let (events, publisher) =
+            append_payloads_locked(&mut inner, &request.child_session_id, payloads)?;
+        let snapshot = inner.sessions[&request.child_session_id].snapshot()?;
+        drop(inner);
+        publish_events(publisher, &events);
+        Ok(snapshot)
     }
 
     /// Record a human recovery action without duplicating the original user input.
@@ -2951,6 +3052,81 @@ fn target_switch_settled(record: &AgentSessionRecord) -> Result<bool, String> {
         && snapshot.inbox.next_turn.is_empty())
 }
 
+fn validate_child_retry_record(
+    record: &AgentSessionRecord,
+    request: &super::AgentChildRetryRequest,
+    max_turns: usize,
+) -> Result<bool, String> {
+    validate_identifier(&request.turn_id, "turnId")?;
+    if record.header.parent_session_id.as_deref() != Some(&request.parent_session_id) {
+        return Err("CHILD_RETRY_UNAVAILABLE: parent does not own this child".into());
+    }
+    if let Some(content) = &request.content {
+        validate_text(
+            content,
+            "recovery instructions",
+            false,
+            MAX_AGENT_MESSAGE_BYTES / 2,
+        )?;
+    }
+    let id = super::child_recovery::recovery_id(&request.turn_id);
+    let mut has_receipt = false;
+    if let Some((_, message)) = find_submission(record, &id) {
+        has_receipt = true;
+        if message.source.label != "child-failure-retry"
+            || message
+                .source
+                .metadata
+                .get("retryTurnId")
+                .and_then(serde_json::Value::as_str)
+                != Some(request.turn_id.as_str())
+        {
+            return Err("CHILD_RETRY_UNAVAILABLE: recovery identity conflicts".into());
+        }
+        if request.content.is_some()
+            && message
+                .source
+                .metadata
+                .get("recoveryInputHash")
+                .and_then(serde_json::Value::as_str)
+                != Some(
+                    crate::llm::runtime::digest(
+                        &serde_json::to_vec(&request.content).map_err(|error| error.to_string())?,
+                    )
+                    .as_str(),
+                )
+        {
+            return Err("CHILD_RETRY_UNAVAILABLE: recovery input is immutable; send further instructions after recovery".into());
+        }
+        if record.inbox.locate(&id).is_none() {
+            return Ok(true);
+        }
+    }
+    let snapshot = record.snapshot()?;
+    let recovery = snapshot.child_failure_recovery.ok_or(
+        "CHILD_RETRY_UNAVAILABLE: inspect saved progress; this child cannot safely recover",
+    )?;
+    if recovery.turn_id != request.turn_id {
+        return Err("CHILD_RETRY_UNAVAILABLE: only the latest failed turn can recover".into());
+    }
+    if !recovery.retryable && request.content.is_none() && !has_receipt {
+        return Err("CHILD_RETRY_UNAVAILABLE: resolve the request or configuration error and provide recovery instructions".into());
+    }
+    let now = current_unix_ms();
+    if recovery.retry_at.is_some_and(|retry_at| now < retry_at) {
+        return Err("MODEL_RETRY_COOLDOWN: wait for the provider retry window".into());
+    }
+    let child = record
+        .header
+        .subagent
+        .as_ref()
+        .ok_or("Session is not a subagent")?;
+    if !super::subagent::child_has_remaining_budget(&child.budget, &record.events, max_turns, now) {
+        return Err("subagentBudgetExhausted: cumulative child budget is exhausted; inspect saved progress and take over remaining work".into());
+    }
+    Ok(false)
+}
+
 fn validate_model_retry_record(record: &AgentSessionRecord, turn_id: &str) -> Result<(), String> {
     let operation_id = format!("model-retry-{turn_id}");
     validate_identifier(&operation_id, "clientSubmissionId")?;
@@ -3075,6 +3251,11 @@ fn find_submission<'a>(
     client_submission_id: &str,
 ) -> Option<(AgentInboxLane, &'a AgentInboxMessage)> {
     record.events.iter().find_map(|event| match &event.payload {
+        AgentSessionEventPayload::SubagentRecoveryStarted { message, .. }
+            if message.client_submission_id.as_deref() == Some(client_submission_id) =>
+        {
+            Some((AgentInboxLane::NextTurn, message))
+        }
         AgentSessionEventPayload::InboxSpliced {
             operation: AgentInboxOperation::Enqueued,
             lane,
@@ -3281,6 +3462,38 @@ fn validate_event_transition(
             return Err("terminal reconnect requires reconciled effects".into());
         }
         return Ok(());
+    }
+    if let AgentSessionEventPayload::SubagentRecoveryStarted {
+        failed_turn_id,
+        recovery_id,
+        message,
+    } = &event.payload
+    {
+        let snapshot = record.snapshot()?;
+        return if record.ended
+            && record.status == AgentSessionStatus::Failed
+            && snapshot
+                .child_failure_recovery
+                .is_some_and(|recovery| recovery.turn_id == *failed_turn_id)
+            && *recovery_id == super::child_recovery::recovery_id(failed_turn_id)
+            && message.message_id == *recovery_id
+            && message.client_submission_id.as_deref() == Some(recovery_id.as_str())
+            && message.source.kind == super::AgentMessageSourceKind::Runtime
+            && message.source.label == "child-failure-retry"
+            && message.images.is_empty()
+            && message.terminal_context.is_none()
+            && message
+                .source
+                .metadata
+                .get("retryTurnId")
+                .and_then(serde_json::Value::as_str)
+                == Some(failed_turn_id.as_str())
+            && find_submission(record, recovery_id).is_none()
+        {
+            Ok(())
+        } else {
+            Err("subagent/recovery_started requires a safely settled failed child".into())
+        };
     }
     if matches!(event.payload, AgentSessionEventPayload::SessionResumed {}) {
         return if record.ended && !record.archived && record.header.subagent.is_none() {
@@ -3902,6 +4115,15 @@ fn apply_event(record: &mut AgentSessionRecord, event: &AgentSessionEvent) -> Re
             record.status = AgentSessionStatus::Idle;
             record.ended = false;
         }
+        AgentSessionEventPayload::SubagentRecoveryStarted { message, .. } => {
+            record.status = AgentSessionStatus::Idle;
+            record.ended = false;
+            record.inbox.apply(
+                AgentInboxOperation::Enqueued,
+                AgentInboxLane::NextTurn,
+                std::slice::from_ref(message),
+            )?;
+        }
         AgentSessionEventPayload::InboxPaused { item_ids } => record.inbox.pause(item_ids)?,
         AgentSessionEventPayload::InboxItemResumed { item_id, .. } => {
             record.inbox.resume(item_id)?
@@ -4041,6 +4263,16 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
             }
         }
         Payload::SessionResumed {} => require_scope(event, false, false)?,
+        Payload::SubagentRecoveryStarted {
+            failed_turn_id,
+            recovery_id,
+            message,
+        } => {
+            require_scope(event, false, false)?;
+            validate_identifier(failed_turn_id, "failedTurnId")?;
+            validate_identifier(recovery_id, "recoveryId")?;
+            validate_inbox_message(message)?;
+        }
         Payload::InboxPaused { item_ids } => {
             require_scope(event, false, false)?;
             validate_collection(item_ids, "paused Inbox items")?;

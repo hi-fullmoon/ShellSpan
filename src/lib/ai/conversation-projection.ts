@@ -646,6 +646,7 @@ function createChatProjection() {
         }
         break;
       case 'session/resumed':
+      case 'subagent/recovery_started':
         activeTurnId = null;
         break;
       case 'agent/inbox/paused':

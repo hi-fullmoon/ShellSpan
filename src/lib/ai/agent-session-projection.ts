@@ -237,6 +237,7 @@ function createActivityNodesProjection() {
         );
         break;
       case 'session/resumed':
+      case 'subagent/recovery_started':
         upsert(`activity:session:${event.sessionId}`, 'session', event, 'idle', 'session', null, event.data);
         break;
       case 'session/ended':
@@ -758,6 +759,7 @@ function createActivityProjection() {
         break;
       }
       case 'session/resumed':
+      case 'subagent/recovery_started':
         status = 'idle';
         statusReason = undefined;
         activeTurnId = undefined;

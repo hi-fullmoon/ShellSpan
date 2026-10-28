@@ -95,7 +95,8 @@ pub(crate) fn derive_recovery_checkpoint(events: &[AgentSessionEvent]) -> AgentR
 
     for event in events {
         match &event.payload {
-            AgentSessionEventPayload::SessionResumed {} => {
+            AgentSessionEventPayload::SessionResumed {}
+            | AgentSessionEventPayload::SubagentRecoveryStarted { .. } => {
                 status = AgentSessionStatus::Idle;
                 ended = false;
                 turn_id = None;

@@ -18,6 +18,7 @@ export default defineConfig({
     exclude: [
       'node_modules',
       'dist',
+      '**/.worktrees/**',
     ],
     maxWorkers: 4,
     testTimeout: 15_000,

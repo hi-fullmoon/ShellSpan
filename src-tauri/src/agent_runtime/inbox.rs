@@ -23,6 +23,14 @@ impl AgentInbox {
                     failed = *status == super::AgentSessionStatus::Failed;
                 }
                 AgentSessionEventPayload::SessionResumed {} => failed = false,
+                AgentSessionEventPayload::SubagentRecoveryStarted { message, .. } => {
+                    failed = false;
+                    inbox.apply(
+                        super::AgentInboxOperation::Enqueued,
+                        AgentInboxLane::NextTurn,
+                        std::slice::from_ref(message),
+                    )?;
+                }
                 AgentSessionEventPayload::InboxPaused { item_ids } => inbox.pause(item_ids)?,
                 AgentSessionEventPayload::InboxItemResumed { item_id, .. } => {
                     inbox.resume(item_id)?

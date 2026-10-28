@@ -56,7 +56,8 @@ pub(crate) fn derive_task(events: &[AgentSessionEvent]) -> AgentTaskProjection {
     };
     for event in events {
         match &event.payload {
-            AgentSessionEventPayload::SessionResumed {} => {
+            AgentSessionEventPayload::SessionResumed {}
+            | AgentSessionEventPayload::SubagentRecoveryStarted { .. } => {
                 projection.status = Some("idle".into());
                 projection.phase = None;
                 projection.recovery = None;

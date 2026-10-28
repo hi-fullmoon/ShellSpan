@@ -635,6 +635,13 @@ pub(crate) enum AgentSessionEventPayload {
     /// Explicit human continuation. The previous terminal events remain in history.
     #[serde(rename = "session/resumed")]
     SessionResumed {},
+    /// An explicit child recovery attempt; unlike root resume, budgets are retained.
+    #[serde(rename = "subagent/recovery_started")]
+    SubagentRecoveryStarted {
+        failed_turn_id: String,
+        recovery_id: String,
+        message: AgentInboxMessage,
+    },
     #[serde(rename = "agent/inbox/paused")]
     InboxPaused { item_ids: Vec<String> },
     #[serde(rename = "agent/inbox/item_resumed")]

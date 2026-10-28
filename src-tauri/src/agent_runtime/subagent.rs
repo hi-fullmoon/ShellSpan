@@ -55,6 +55,25 @@ pub(crate) struct AgentChildRequest {
     pub(crate) child_session_id: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AgentChildRetryRequest {
+    pub(crate) parent_session_id: String,
+    pub(crate) child_session_id: String,
+    pub(crate) turn_id: String,
+    #[serde(default)]
+    pub(crate) content: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ChildRetryArguments {
+    child_session_id: String,
+    turn_id: String,
+    #[serde(default)]
+    content: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AgentChildInspection {
@@ -206,6 +225,8 @@ pub(crate) struct SubAgentManager {
     driver_config: AgentDriverConfig,
     credentials: Arc<Mutex<Option<CredentialManager>>>,
     fleets: Arc<Mutex<HashMap<String, FleetRuntime>>>,
+    recovery_gate: Arc<tokio::sync::Mutex<()>>,
+    cancelled_children: Arc<Mutex<HashSet<String>>>,
 }
 
 struct ChildSettlement {
@@ -258,6 +279,8 @@ impl SubAgentManager {
             driver_config,
             credentials: Arc::new(Mutex::new(None)),
             fleets: Arc::new(Mutex::new(HashMap::new())),
+            recovery_gate: Arc::new(tokio::sync::Mutex::new(())),
+            cancelled_children: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -1022,6 +1045,84 @@ impl SubAgentManager {
         Ok(child_session_id)
     }
 
+    pub(crate) async fn retry_child(
+        &self,
+        request: AgentChildRetryRequest,
+    ) -> Result<AgentSessionSnapshot, String> {
+        let _gate = self.recovery_gate.lock().await;
+        self.ensure_owned_child(&request.parent_session_id, &request.child_session_id)?;
+        if self
+            .sessions
+            .validate_child_retry(&request, self.driver_config.max_turns_per_session)?
+        {
+            return self.sessions.snapshot(&request.child_session_id);
+        }
+        let cancelled = self.cancelled_children.lock().map_err(|_| "child cancellation registry is unavailable")?
+            .contains(&request.child_session_id)
+            || self.sessions.read_events(&request.parent_session_id, |events| events.iter().any(|event| {
+                matches!(&event.payload, AgentSessionEventPayload::SubagentDetached { child_session_id, reason, .. }
+                    if child_session_id == &request.child_session_id && reason == "cancelCascade")
+            }))?;
+        if cancelled {
+            return Err("CHILD_RETRY_UNAVAILABLE: respect the cancellation of this child".into());
+        }
+        let parent = self.sessions.snapshot(&request.parent_session_id)?;
+        if parent.ended || parent.archived {
+            return Err("CHILD_RETRY_UNAVAILABLE: the parent must be live and unarchived".into());
+        }
+        {
+            let mut handles = self
+                .handles
+                .lock()
+                .map_err(|_| "subagent handle registry is unavailable")?;
+            let owner = self.ensure_resident(&request.parent_session_id, &mut handles)?;
+            if !owner.is_admitting() || owner.cancellation().is_cancelled() {
+                return Err("CHILD_RETRY_UNAVAILABLE: parent is stopping".into());
+            }
+        }
+        // Resolve before committing so a missing credential/route leaves recovery available.
+        let child = self.sessions.snapshot(&request.child_session_id)?;
+        let model = &child
+            .header
+            .subagent
+            .as_ref()
+            .ok_or("Session is not a subagent")?
+            .provider;
+        let provider = self.models.restore_selection(model)?;
+        self.models.resolve(provider, None)?;
+        if child.ended {
+            let handle = self
+                .handles
+                .lock()
+                .map_err(|_| "subagent handle registry is unavailable")?
+                .get(&request.child_session_id)
+                .cloned();
+            if let Some(handle) = handle {
+                handle.entry().stop_admission()?;
+                handle.entry().await_idle().await;
+                self.tools.await_pending_executions(&handle.entry()).await?;
+                handle.dispose().await?;
+                self.handles
+                    .lock()
+                    .map_err(|_| "subagent handle registry is unavailable")?
+                    .remove(&request.child_session_id);
+            } else if self.agents.get(&request.child_session_id)?.is_some() {
+                return Err("CHILD_RETRY_UNAVAILABLE: child is already stopping".into());
+            }
+        }
+        self.sessions
+            .retry_child_failure(&request, self.driver_config.max_turns_per_session)?;
+        {
+            let mut handles = self
+                .handles
+                .lock()
+                .map_err(|_| "subagent handle registry is unavailable")?;
+            self.ensure_resident(&request.child_session_id, &mut handles)?;
+        }
+        self.wake(&request.child_session_id)?;
+        self.sessions.snapshot(&request.child_session_id)
+    }
+
     async fn send_input(
         &self,
         parent_session_id: &str,
@@ -1029,6 +1130,7 @@ impl SubAgentManager {
         content: String,
         client_submission_id: Option<String>,
     ) -> Result<(), String> {
+        let _gate = self.recovery_gate.lock().await;
         let child = self.ensure_owned_child(parent_session_id, child_session_id)?;
         let subagent = child
             .header
@@ -1119,6 +1221,18 @@ impl SubAgentManager {
             }
         };
         let adapter = self.models.resolve(provider.clone(), api_key)?;
+        let parent_id = snapshot
+            .header
+            .parent_session_id
+            .as_deref()
+            .ok_or("child owner missing")?;
+        let parent = match self.agents.get(parent_id)? {
+            Some(parent) => parent,
+            None => self.ensure_resident(parent_id, handles)?,
+        };
+        if !parent.is_admitting() || parent.cancellation().is_cancelled() {
+            return Err("child owner is stopping".into());
+        }
         let handle = Arc::new(self.agents.attach(
             self.sessions.clone(),
             child_session_id.into(),
@@ -1130,15 +1244,6 @@ impl SubAgentManager {
             .model_registry
             .lock()
             .map_err(|_| "MODEL_REGISTRY_UNAVAILABLE")? = Some(self.models.clone());
-        let parent_id = snapshot
-            .header
-            .parent_session_id
-            .as_deref()
-            .ok_or("child owner missing")?;
-        let parent = self
-            .agents
-            .get(parent_id)?
-            .ok_or("child owner is not live")?;
         self.agents.set_owner(&entry, &parent)?;
         handles.insert(child_session_id.into(), handle);
         Ok(entry)
@@ -1330,8 +1435,16 @@ impl SubAgentManager {
     async fn cancel_tree(&self, child_session_id: &str) -> Result<(), String> {
         let mut order = self.descendants_postorder(child_session_id)?;
         order.push(child_session_id.into());
+        {
+            let _gate = self.recovery_gate.lock().await;
+            self.cancelled_children
+                .lock()
+                .map_err(|_| "child cancellation registry is unavailable")?
+                .extend(order.iter().cloned());
+        }
         for session_id in order {
             let handle = {
+                let _gate = self.recovery_gate.lock().await;
                 let handles = self
                     .handles
                     .lock()
@@ -1603,6 +1716,20 @@ impl OrchestrationToolRuntime for SubAgentManager {
                     )
                     .await?;
                 self.settle_spawn(&request, &child_session_id, continuable, cancellation)
+                    .await
+            }
+            "retry_child_agent" => {
+                let arguments: ChildRetryArguments =
+                    serde_json::from_value(request.call.arguments.clone())
+                        .map_err(|error| format!("invalid child recovery arguments: {error}"))?;
+                self.retry_child(AgentChildRetryRequest {
+                    parent_session_id: request.parent_session_id.clone(),
+                    child_session_id: arguments.child_session_id.clone(),
+                    turn_id: arguments.turn_id,
+                    content: arguments.content,
+                })
+                .await?;
+                self.settle_spawn(&request, &arguments.child_session_id, true, cancellation)
                     .await
             }
             "send_child_input" => {
@@ -2013,7 +2140,10 @@ fn child_handoff_data(
         "usage": child_budget_usage(events, now),
         "plan": plan,
         "recentToolResults": if partial { partial_tool_results(events) } else { Vec::new() },
-        "nextAction": if snapshot.status == AgentSessionStatus::Cancelled && timeout_reason.is_none() {
+        "failureRecovery": snapshot.child_failure_recovery,
+        "nextAction": if snapshot.child_failure_recovery.is_some() {
+            "Inspect saved progress and failureRecovery. For a transient failure, use retry_child_agent with this childSessionId and failureRecovery.turnId. For request/configuration errors, fix the cause first and provide content explaining the correction. Recovery retains completed operations and cumulative budgets."
+        } else if snapshot.status == AgentSessionStatus::Cancelled && timeout_reason.is_none() {
             "Preserve saved evidence and respect cancellation. Do not automatically restart cancelled work."
         } else if !partial {
             "Inspect the child outcome and evidence."
@@ -2025,7 +2155,7 @@ fn child_handoff_data(
     }))
 }
 
-fn child_has_remaining_budget(
+pub(super) fn child_has_remaining_budget(
     budget: &AgentSubagentBudget,
     events: &[super::AgentSessionEvent],
     max_turns: usize,
