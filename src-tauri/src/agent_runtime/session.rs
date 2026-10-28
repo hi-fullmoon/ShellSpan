@@ -20,6 +20,8 @@ use super::{
     AGENT_SESSION_EVENT_VERSION, MAX_AGENT_MESSAGE_BYTES, MAX_AGENT_STREAM_DELTA_BYTES,
 };
 
+mod stream_chunks;
+
 const MAX_IDENTIFIER_BYTES: usize = 128;
 const MAX_LABEL_BYTES: usize = 4 * 1024;
 // Leave room for JSON escaping of 128 KiB writes and 240 KiB exact-diff
@@ -2973,7 +2975,8 @@ fn append_payloads_locked(
     let first_seq = record.events.len() as u64;
     let mut previous_time = record.events.last().map_or(1, |event| event.time_unix_ms);
     let mut appended = Vec::with_capacity(payloads.len());
-    for (seq, (turn_id, step_id, payload)) in (first_seq..).zip(payloads) {
+    for (turn_id, step_id, payload) in payloads {
+        let seq = first_seq + appended.len() as u64;
         let validation_record = candidate.as_ref().unwrap_or(record);
         let raw_event = AgentSessionEvent::new(
             session_id.to_string(),
@@ -2987,16 +2990,22 @@ fn append_payloads_locked(
         validate_event_transition(validation_record, &raw_event)?;
         validate_event_payload(&raw_event)?;
         encoded_events(std::slice::from_ref(&raw_event))?;
-        let event = sanitize_event(raw_event)?;
-        validate_event_envelope_at(validation_record, &event, seq, previous_time)?;
-        validate_event_transition(validation_record, &event)?;
-        validate_event_payload(&event)?;
-        if let Some(candidate) = &mut candidate {
-            apply_event(candidate, &event)?;
-            candidate.events.push(event.clone());
+        // Redaction can expand an otherwise valid 4 KiB delta. Normalize the
+        // durable copy before final validation without changing live tool input.
+        for mut event in stream_chunks::split_sanitized_event(sanitize_event(raw_event)?) {
+            let seq = first_seq + appended.len() as u64;
+            event.seq = seq;
+            let validation_record = candidate.as_ref().unwrap_or(record);
+            validate_event_envelope_at(validation_record, &event, seq, previous_time)?;
+            validate_event_transition(validation_record, &event)?;
+            validate_event_payload(&event)?;
+            if let Some(candidate) = &mut candidate {
+                apply_event(candidate, &event)?;
+                candidate.events.push(event.clone());
+            }
+            previous_time = event.time_unix_ms;
+            appended.push(event);
         }
-        previous_time = event.time_unix_ms;
-        appended.push(event);
     }
     if let Some(candidate) = &candidate {
         derive_surface(&candidate.events)?;

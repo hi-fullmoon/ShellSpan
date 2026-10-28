@@ -23,6 +23,134 @@ fn assert_cached_log_usage(store: &AgentSessionStore) {
 }
 
 #[test]
+fn expanded_stream_chunks_keep_metadata_once_and_mixed_batches_atomic() {
+    let (root, store) = configured();
+    create(&store);
+    store
+        .append(
+            "session-1",
+            Some("turn-1".into()),
+            None,
+            AgentSessionEventPayload::TurnStart,
+        )
+        .unwrap();
+    store
+        .append(
+            "session-1",
+            Some("turn-1".into()),
+            Some("step-1".into()),
+            AgentSessionEventPayload::StepStart,
+        )
+        .unwrap();
+    let published = Arc::new(Mutex::new(Vec::new()));
+    let observer = Arc::clone(&published);
+    store
+        .set_publisher(Arc::new(move |event| {
+            observer.lock().unwrap().push(event.clone());
+        }))
+        .unwrap();
+    let source = " token=a".repeat(MAX_AGENT_STREAM_DELTA_BYTES / 8);
+    let expected = redact_sensitive_text(&source);
+    assert!(source.len() <= MAX_AGENT_STREAM_DELTA_BYTES);
+    assert!(expected.len() > MAX_AGENT_STREAM_DELTA_BYTES * 2);
+    let usage = super::super::AgentTokenUsage {
+        output_tokens: Some(32),
+        ..Default::default()
+    };
+    let chunk = AgentScopedPayload {
+        turn_id: Some("turn-1".into()),
+        step_id: Some("step-1".into()),
+        payload: AgentSessionEventPayload::AssistantChunk {
+            request_id: "request-1".into(),
+            text_delta: Some(source.clone()),
+            reasoning_delta: Some(String::new()),
+            tool_call_delta: Some(super::super::AgentToolCallDelta {
+                index: 3,
+                call_id: Some("call-1".into()),
+                name_delta: Some("run_command".into()),
+                arguments_delta: Some(source),
+            }),
+            usage: Some(usage.clone()),
+        },
+    };
+    let end = |reason: &str| AgentScopedPayload {
+        turn_id: Some("turn-1".into()),
+        step_id: Some("step-1".into()),
+        payload: AgentSessionEventPayload::StepEnd {
+            reason: reason.into(),
+        },
+    };
+    let before = store.all_events("session-1").unwrap();
+    let disk_before = fs::read(log_path(&root)).unwrap();
+    assert!(store
+        .append_batch(
+            "session-1",
+            vec![
+                AgentScopedPayload {
+                    turn_id: chunk.turn_id.clone(),
+                    step_id: chunk.step_id.clone(),
+                    payload: chunk.payload.clone(),
+                },
+                end("")
+            ]
+        )
+        .is_err());
+    assert_eq!(store.all_events("session-1").unwrap(), before);
+    assert_eq!(fs::read(log_path(&root)).unwrap(), disk_before);
+    assert!(published.lock().unwrap().is_empty());
+    assert_cached_log_usage(&store);
+
+    let events = store
+        .append_batch("session-1", vec![chunk, end("complete")])
+        .unwrap();
+    assert_eq!(*published.lock().unwrap(), events);
+    assert!(events.len() > 3);
+    let mut text = String::new();
+    let mut arguments = String::new();
+    for (index, event) in events.iter().enumerate() {
+        assert_eq!(event.seq, (before.len() + index) as u64);
+        if let AgentSessionEventPayload::AssistantChunk {
+            text_delta,
+            reasoning_delta,
+            tool_call_delta,
+            usage: actual_usage,
+            ..
+        } = &event.payload
+        {
+            let delta = tool_call_delta.as_ref().unwrap();
+            assert_eq!(delta.index, 3);
+            assert_eq!(delta.call_id.as_deref(), (index == 0).then_some("call-1"));
+            assert_eq!(
+                delta.name_delta.as_deref(),
+                (index == 0).then_some("run_command")
+            );
+            assert_eq!(*actual_usage, (index == 0).then(|| usage.clone()));
+            assert_eq!(reasoning_delta.as_deref(), (index == 0).then_some(""));
+            let piece = text_delta.as_deref().unwrap();
+            let argument_piece = delta.arguments_delta.as_deref().unwrap();
+            assert!(piece.len() <= MAX_AGENT_STREAM_DELTA_BYTES);
+            assert!(argument_piece.len() <= MAX_AGENT_STREAM_DELTA_BYTES);
+            text.push_str(piece);
+            arguments.push_str(argument_piece);
+        }
+    }
+    assert_eq!(text, expected);
+    assert_eq!(arguments, expected);
+    assert!(matches!(
+        events.last().unwrap().payload,
+        AgentSessionEventPayload::StepEnd { .. }
+    ));
+    assert_cached_log_usage(&store);
+    let reopened = AgentSessionStore::default();
+    reopened.configure(root.path().to_path_buf()).unwrap();
+    assert_eq!(
+        reopened.all_events("session-1").unwrap(),
+        store.all_events("session-1").unwrap()
+    );
+    assert_cached_log_usage(&reopened);
+}
+
+#[test]
 fn stream_batches_commit_atomically_and_replay_after_disk_failure() {
     let (root, store) = configured();
     create(&store);

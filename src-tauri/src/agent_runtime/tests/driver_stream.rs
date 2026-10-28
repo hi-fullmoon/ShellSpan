@@ -328,6 +328,163 @@ fn persisted_text(sessions: &AgentSessionStore) -> String {
 }
 
 #[tokio::test]
+async fn stream_redaction_expansion_preserves_bounded_deltas_and_reopens() {
+    let (root, sink) = persisted_stream();
+    let command = format!("{} token=a", "中".repeat(1_300));
+    let initial = serde_json::to_string(&serde_json::json!({"command": command})).unwrap();
+    let command = format!(
+        "{}{} token=a",
+        "中".repeat(1_300),
+        "x".repeat(MAX_AGENT_STREAM_DELTA_BYTES - initial.len())
+    );
+    let source = serde_json::to_string(&serde_json::json!({"command": command})).unwrap();
+    assert_eq!(source.len(), MAX_AGENT_STREAM_DELTA_BYTES);
+    let expected = crate::redaction::redact_sensitive_text(&source);
+    assert!(expected.len() > MAX_AGENT_STREAM_DELTA_BYTES);
+    sink.emit(StreamDelta::Text {
+        index: 0,
+        text: source.clone(),
+    })
+    .unwrap();
+    sink.emit(StreamDelta::Reasoning {
+        index: 1,
+        text: source.clone(),
+    })
+    .unwrap();
+    sink.emit(StreamDelta::ToolCall {
+        index: 2,
+        call_id: Some("call-1".into()),
+        name_delta: Some("run_command".into()),
+        arguments_delta: Some(source.clone()),
+    })
+    .unwrap();
+    sink.flush_async(true).await.unwrap();
+
+    let events = sink.sessions.all_events("stream-test").unwrap();
+    let mut text = String::new();
+    let mut reasoning = String::new();
+    let mut arguments = String::new();
+    let mut call_ids = Vec::new();
+    let mut names = Vec::new();
+    for (seq, event) in events.iter().enumerate() {
+        assert_eq!(event.seq, seq as u64);
+        if let AgentSessionEventPayload::AssistantChunk {
+            text_delta,
+            reasoning_delta,
+            tool_call_delta,
+            ..
+        } = &event.payload
+        {
+            let argument_delta = tool_call_delta
+                .as_ref()
+                .and_then(|delta| delta.arguments_delta.as_deref());
+            for delta in [
+                text_delta.as_deref(),
+                reasoning_delta.as_deref(),
+                argument_delta,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                assert!(delta.len() <= MAX_AGENT_STREAM_DELTA_BYTES);
+                assert_eq!(crate::redaction::redact_sensitive_text(delta), delta);
+            }
+            text.push_str(text_delta.as_deref().unwrap_or_default());
+            reasoning.push_str(reasoning_delta.as_deref().unwrap_or_default());
+            arguments.push_str(argument_delta.unwrap_or_default());
+            if let Some(delta) = tool_call_delta {
+                assert_eq!(delta.index, 2);
+                call_ids.extend(delta.call_id.iter().cloned());
+                names.extend(delta.name_delta.iter().cloned());
+            }
+        }
+    }
+    assert_eq!(text, expected);
+    assert_eq!(reasoning, expected);
+    assert_eq!(arguments, expected);
+    assert_eq!(call_ids, ["call-1"]);
+    assert_eq!(names, ["run_command"]);
+    // Redaction applies only to the durable copy, not the model's in-memory output.
+    assert_eq!(
+        sink.collected.lock().unwrap().content(),
+        [
+            AgentAssistantContentBlock::Text {
+                text: source.clone()
+            },
+            AgentAssistantContentBlock::Reasoning {
+                text: source,
+                provider_item: None
+            },
+        ]
+    );
+    let reopened = AgentSessionStore::default();
+    reopened.configure(root.path().to_path_buf()).unwrap();
+    assert_eq!(reopened.all_events("stream-test").unwrap(), events);
+    let log = std::fs::read_to_string(
+        root.path()
+            .join("agent-runtime/sessions-v5/stream-test.jsonl"),
+    )
+    .unwrap();
+    assert!(!log.contains("token=a"));
+}
+
+#[tokio::test]
+async fn stream_large_tool_arguments_reassemble_as_json_with_metadata_once() {
+    let (root, sink) = persisted_stream();
+    let input = serde_json::json!({"command": include_str!("../driver_metrics.rs").repeat(8)});
+    let arguments = serde_json::to_string(&input).unwrap();
+    assert!(arguments.len() > MAX_AGENT_STREAM_DELTA_BYTES * 4);
+    sink.emit(StreamDelta::ToolCall {
+        index: 0,
+        call_id: Some("call-large".into()),
+        name_delta: Some("run_command".into()),
+        arguments_delta: None,
+    })
+    .unwrap();
+    for part in [" \n", arguments.as_str(), "\n "] {
+        sink.emit(StreamDelta::ToolCall {
+            index: 0,
+            call_id: None,
+            name_delta: None,
+            arguments_delta: Some(part.into()),
+        })
+        .unwrap();
+    }
+    sink.flush_async(true).await.unwrap();
+    let reopened = AgentSessionStore::default();
+    reopened.configure(root.path().to_path_buf()).unwrap();
+    let events = reopened.all_events("stream-test").unwrap();
+    assert_eq!(events, sink.sessions.all_events("stream-test").unwrap());
+    let mut assembled = String::new();
+    let mut metadata = Vec::new();
+    for event in events {
+        if let AgentSessionEventPayload::AssistantChunk {
+            tool_call_delta: Some(delta),
+            ..
+        } = event.payload
+        {
+            assert_eq!(delta.index, 0);
+            if delta.call_id.is_some() || delta.name_delta.is_some() {
+                metadata.push((delta.call_id, delta.name_delta));
+            }
+            if let Some(piece) = delta.arguments_delta {
+                assert!(piece.len() <= MAX_AGENT_STREAM_DELTA_BYTES);
+                assembled.push_str(&piece);
+            }
+        }
+    }
+    assert_eq!(
+        metadata,
+        [(Some("call-large".into()), Some("run_command".into()))]
+    );
+    assert_eq!(assembled, format!(" \n{arguments}\n "));
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&assembled).unwrap(),
+        input
+    );
+}
+
+#[tokio::test]
 async fn stream_batches_preserve_real_source_text_and_reopen_from_disk() {
     let (root, sink) = persisted_stream();
     let source = include_str!("../driver_metrics.rs");
