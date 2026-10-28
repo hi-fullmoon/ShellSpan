@@ -259,6 +259,7 @@ fn diagnostics_prompt(tools: &[AgentRequestToolSchema]) -> String {
         )
     }) {
         prompt.push_str(" Before delegation, declare requiredTools and check role capabilities. Explorer, diagnostician, verifier and reviewer roles cannot execute terminal commands. For system metric collection, execute on the authorized target yourself or delegate collection to an operator with run_terminal_command, then pass the evidence to the diagnostician. If a child reports missing capability, take over collection within your supplied tools or use a capable child; do not repeat the same incapable delegation or ask for permissions already granted. Never infer completion or server failure from a child's inability to collect evidence.");
+        prompt.push_str(" For code reading or review, prefer explorer with read_file/list_directory/search_text. Read-only shell commands such as rg, wc and git log still require run_terminal_command and a general or operator role; full access does not add this tool to explorer. Declare only essential child tools. Check one role/requiredTools combination before reusing it across a batch; after a preflight rejection, correct all remaining incompatible calls before submitting them.");
         prompt.push_str(" After any failed or partial child settlement, inspect stopReason, usage, plan and saved tool evidence, then collect the other child outcomes. Continue the same child only when continuable is true and useful work remains. Otherwise take over only missing work within your authorized tools and remaining task budget, or report concrete gaps. Never replay completed side effects, restart cancelled work, or spawn replacements to bypass exhausted budgets. A child error alone does not complete the parent task; update its plan and explain verified results and remaining work to the user.");
     }
     prompt
@@ -577,6 +578,12 @@ mod tests {
             .system_prompt
             .contains("Terminal command execution is unavailable"));
         assert!(capable.system_prompt.contains("declare requiredTools"));
+        assert!(capable
+            .system_prompt
+            .contains("Read-only shell commands such as rg, wc and git log"));
+        assert!(capable
+            .system_prompt
+            .contains("correct all remaining incompatible calls"));
         assert!(capable.system_prompt.contains("take over collection"));
         assert!(capable
             .system_prompt

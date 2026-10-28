@@ -161,6 +161,56 @@ fn set_waiting(manager: &SubAgentManager, entry: &AgentEntry) {
 }
 
 #[tokio::test]
+async fn incompatible_spawn_batch_creates_no_children_and_preserves_parent() {
+    let (_root, manager, _entry) = setup();
+    let before = manager.sessions.snapshot("lifecycle-parent").unwrap();
+    let children = manager
+        .sessions
+        .child_session_ids("lifecycle-parent")
+        .unwrap();
+    for name in ["spawn_one_shot_agent", "spawn_continuable_agent"] {
+        for batch in 0..6 {
+            let request = OrchestrationToolRequest {
+                parent_session_id: "lifecycle-parent".into(),
+                turn_id: "review-turn".into(),
+                step_id: "review-step".into(),
+                call: super::super::ModelToolCall {
+                    call_id: format!("review-{name}-{batch}"),
+                    provider_call_id: None,
+                    name: name.into(),
+                    arguments: json!({
+                        "goal": "Read source files and inspect git history",
+                        "role": "explorer",
+                        "inheritanceMode": "blank",
+                        "targetIds": ["lifecycle-target"],
+                        "requiredTools": ["read_file", "list_directory", "search_text", "run_terminal_command"]
+                    }),
+                },
+            };
+            let error = manager
+                .execute(request, CancellationToken::new())
+                .await
+                .unwrap_err();
+            assert!(error.contains("subagent capability unavailable: run_terminal_command"));
+            assert!(error.contains("No child was created"));
+            assert!(error.contains("For file-only review, keep the role"));
+            assert!(
+                error.contains("Do not repeat this incompatible role/requiredTools combination")
+            );
+        }
+    }
+    assert_eq!(
+        manager
+            .sessions
+            .child_session_ids("lifecycle-parent")
+            .unwrap(),
+        children
+    );
+    let after = manager.sessions.snapshot("lifecycle-parent").unwrap();
+    assert_eq!(after, before);
+}
+
+#[tokio::test]
 async fn continuation_winning_idle_release_keeps_its_handle_and_cancellation() {
     let (_root, manager, entry) = setup();
     assert!(entry.try_acquire_driver().unwrap());

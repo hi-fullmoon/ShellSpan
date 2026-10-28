@@ -1894,60 +1894,25 @@ fn delegated_scope(
     {
         return Err("subagent requested targets exceed the parent capability".into());
     }
-    let (allowed_tools, allowed_effects): (&[&str], &[AgentSessionEffect]) = match role {
+    let allowed_tools = role_tool_names(role);
+    let allowed_effects: &[AgentSessionEffect] = match role {
         AgentSubagentRole::Explorer
         | AgentSubagentRole::Diagnostician
         | AgentSubagentRole::Verifier
-        | AgentSubagentRole::Reviewer => (
-            &[
-                "read_file",
-                "list_directory",
-                "search_text",
-                "inspect_host",
-                "inspect_service",
-                "query_logs",
-                "inspect_child_agent",
-                "update_plan",
-                "read_tool_result",
-            ],
-            &[
-                AgentSessionEffect::None,
-                AgentSessionEffect::ReadOnly,
-                AgentSessionEffect::SensitiveRead,
-            ],
-        ),
-        AgentSubagentRole::Operator => (
-            &[
-                "run_terminal_command",
-                "write_process_input",
-                "wait_process",
-                "kill_process",
-                "probe_http",
-                "inspect_host",
-                "inspect_service",
-                "query_logs",
-                "diagnose_endpoint",
-                "read_file",
-                "list_directory",
-                "search_text",
-                "write_file",
-                "trash_file",
-                "apply_patch",
-                "transfer_file",
-                "inspect_child_agent",
-                "update_plan",
-                "read_tool_result",
-            ],
-            &[
-                AgentSessionEffect::None,
-                AgentSessionEffect::ReadOnly,
-                AgentSessionEffect::SensitiveRead,
-                AgentSessionEffect::StateChange,
-                AgentSessionEffect::Destructive,
-                AgentSessionEffect::ExternalSideEffect,
-            ],
-        ),
-        AgentSubagentRole::General => (&[], &[]),
+        | AgentSubagentRole::Reviewer => &[
+            AgentSessionEffect::None,
+            AgentSessionEffect::ReadOnly,
+            AgentSessionEffect::SensitiveRead,
+        ],
+        AgentSubagentRole::Operator => &[
+            AgentSessionEffect::None,
+            AgentSessionEffect::ReadOnly,
+            AgentSessionEffect::SensitiveRead,
+            AgentSessionEffect::StateChange,
+            AgentSessionEffect::Destructive,
+            AgentSessionEffect::ExternalSideEffect,
+        ],
+        AgentSubagentRole::General => &[],
     };
     let tool_names = parent_scope
         .tool_names
@@ -1969,6 +1934,49 @@ fn delegated_scope(
     })
 }
 
+// Shared by native delegation and model-facing role/tool guidance.
+// An empty list means the role adds no restriction to the parent scope.
+pub(super) fn role_tool_names(role: AgentSubagentRole) -> &'static [&'static str] {
+    match role {
+        AgentSubagentRole::Explorer
+        | AgentSubagentRole::Diagnostician
+        | AgentSubagentRole::Verifier
+        | AgentSubagentRole::Reviewer => &[
+            "read_file",
+            "list_directory",
+            "search_text",
+            "inspect_host",
+            "inspect_service",
+            "query_logs",
+            "inspect_child_agent",
+            "update_plan",
+            "read_tool_result",
+        ],
+        AgentSubagentRole::Operator => &[
+            "run_terminal_command",
+            "write_process_input",
+            "wait_process",
+            "kill_process",
+            "probe_http",
+            "inspect_host",
+            "inspect_service",
+            "query_logs",
+            "diagnose_endpoint",
+            "read_file",
+            "list_directory",
+            "search_text",
+            "write_file",
+            "trash_file",
+            "apply_patch",
+            "transfer_file",
+            "inspect_child_agent",
+            "update_plan",
+            "read_tool_result",
+        ],
+        AgentSubagentRole::General => &[],
+    }
+}
+
 pub(super) fn validate_required_tools(
     header: &super::AgentSessionHeader,
     scope: &AgentCapabilityScope,
@@ -1985,7 +1993,12 @@ pub(super) fn validate_required_tools(
     if missing.is_empty() {
         Ok(())
     } else {
-        Err(format!("subagent capability unavailable: {}. No child was created. Collect evidence with the parent's authorized tools or select a capable role; diagnostician/explorer/verifier/reviewer cannot execute terminal commands. Collection is incomplete; host health is unknown.", missing.join(", ")))
+        let recovery = if missing.iter().any(|tool| tool == "run_terminal_command") {
+            "Explorer/diagnostician/verifier/reviewer support structured read-only tools, never run_terminal_command, including read-only shell commands such as rg, wc or git log. For file-only review, keep the role and use read_file/list_directory/search_text without requesting shell execution. If shell execution is essential and authorized, select general or operator only when the parent and target supply every required tool; otherwise collect the missing evidence in the parent."
+        } else {
+            "These tools are unavailable within the selected role, parent scope or target. Use supplied tools or have the parent collect missing evidence. Changing roles cannot grant a capability absent from the parent or target."
+        };
+        Err(format!("subagent capability unavailable: {}. No child was created. {recovery} Do not repeat this incompatible role/requiredTools combination for other tasks in the batch. Missing collection is not evidence of target failure.", missing.join(", ")))
     }
 }
 
@@ -2379,9 +2392,17 @@ mod retry_policy_tests {
             let scope = delegated_scope(&parent, role, &targets).unwrap();
             assert!(validate_required_tools(&parent.header, &scope, &required).is_err());
             assert!(validate_required_tools(&parent.header, &scope, &["read_file".into()]).is_ok());
+            let error = validate_required_tools(&parent.header, &scope, &["write_file".into()])
+                .unwrap_err();
+            assert!(error.contains(
+                "Changing roles cannot grant a capability absent from the parent or target"
+            ));
+            assert!(!error.contains("For file-only review"));
         }
         let operator = delegated_scope(&parent, AgentSubagentRole::Operator, &targets).unwrap();
         assert!(validate_required_tools(&parent.header, &operator, &required).is_ok());
+        let general = delegated_scope(&parent, AgentSubagentRole::General, &targets).unwrap();
+        assert!(validate_required_tools(&parent.header, &general, &required).is_ok());
         let mut restricted = operator;
         restricted
             .tool_names
@@ -2389,6 +2410,8 @@ mod retry_policy_tests {
         parent.header.capability_scope = Some(restricted);
         let operator = delegated_scope(&parent, AgentSubagentRole::Operator, &targets).unwrap();
         assert!(validate_required_tools(&parent.header, &operator, &required).is_err());
+        let general = delegated_scope(&parent, AgentSubagentRole::General, &targets).unwrap();
+        assert!(validate_required_tools(&parent.header, &general, &required).is_err());
         assert!(delegated_scope(
             &parent,
             AgentSubagentRole::Operator,

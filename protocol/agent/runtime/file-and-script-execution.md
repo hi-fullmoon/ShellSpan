@@ -8,6 +8,14 @@ the selected target's available tools. Missing tools fail without creating a chi
 Existing callers omitting this field remain compatible. Explorer, diagnostician,
 verifier and reviewer roles do not receive terminal execution; system collection
 should run in the parent or an authorized operator child before diagnostic analysis.
+Spawn parameter descriptions list role tools from the same allowlists used by
+native delegation, preserving the existing flat schema for provider compatibility.
+File-only review should use structured reads; even read-only shell commands such
+as `rg`, `wc` and `git log` require `run_terminal_command` and
+a `general` or `operator` child. Parent/target checks remain authoritative for
+all providers. A rejected combination creates no child and must be corrected
+before reusing it across a batch; roles are never upgraded
+automatically and required tools are never silently dropped.
 Full access changes approval policy, not role tool availability or structured file
 root/symlink restrictions. The model context reports the host OS only for local
 targets; remote OS remains unknown until observed on that target. Agents must report

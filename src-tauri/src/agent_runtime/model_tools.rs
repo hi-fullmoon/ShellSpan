@@ -490,12 +490,16 @@ fn wait_terminal_schema() -> Value {
 }
 
 fn subagent_spawn_schema() -> Value {
+    let read_only_tools =
+        super::subagent::role_tool_names(super::AgentSubagentRole::Explorer).join(", ");
+    let operator_tools =
+        super::subagent::role_tool_names(super::AgentSubagentRole::Operator).join(", ");
     object_schema(
         &["goal", "role", "inheritanceMode", "targetIds"],
         json!({
             "goal": bounded_string(131072),
-            "role": { "type": "string", "enum": ["general", "explorer", "diagnostician", "operator", "verifier", "reviewer"], "description": "Explorer, diagnostician, verifier and reviewer have scoped file-reading tools but no terminal execution. Use operator for command-based metric collection, then pass evidence to diagnostician. All roles remain limited by parent capabilities." },
-            "requiredTools": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": bounded_string(128), "description": "Tools needed to complete this task, checked before child creation. Include run_terminal_command for system metric collection. Missing capabilities return an error so the parent can collect evidence or choose a capable role." },
+            "role": { "type": "string", "enum": ["general", "explorer", "diagnostician", "operator", "verifier", "reviewer"], "description": format!("Choose from requiredTools before spawning. Explorer, diagnostician, verifier and reviewer allow only: {read_only_tools}. Operator allows only: {operator_tools}. General inherits the parent's tools. Even read-only rg/wc/git log shell commands require general or operator with run_terminal_command. For file-only review, prefer explorer with read_file/list_directory/search_text. Every role remains limited by parent and target capabilities.") },
+            "requiredTools": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": bounded_string(128), "description": "Only tools essential to this child task, compatible with the selected role. Never copy the parent's full tool list into every child. Include run_terminal_command only when shell execution is essential, selecting general or operator. Missing capabilities fail before child creation; fix the combination before submitting other tasks in the batch." },
             "inheritanceMode": { "type": "string", "enum": ["blank", "safePrefix"] },
             "targetIds": { "type": "array", "minItems": 1, "maxItems": 128, "uniqueItems": true, "items": bounded_string(128) },
             "budget": subagent_budget_schema()
@@ -562,6 +566,44 @@ fn object_schema(required: &[&str], properties: Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spawn_schemas_describe_native_role_tools_without_root_composition() {
+        for name in ["spawn_one_shot_agent", "spawn_continuable_agent"] {
+            let tool = default_model_tools()
+                .into_iter()
+                .find(|tool| tool.name == name)
+                .unwrap();
+            let schema = &tool.input_schema;
+            assert_eq!(schema["type"], "object");
+            assert_eq!(schema["additionalProperties"], false);
+            assert_eq!(
+                schema["required"],
+                json!(["goal", "role", "inheritanceMode", "targetIds"])
+            );
+            for keyword in ["anyOf", "oneOf", "allOf", "if", "then", "else"] {
+                assert!(schema.get(keyword).is_none(), "{name}: {keyword}");
+            }
+            let description = schema["properties"]["role"]["description"]
+                .as_str()
+                .unwrap();
+            for role in [
+                super::super::AgentSubagentRole::Explorer,
+                super::super::AgentSubagentRole::Operator,
+            ] {
+                assert!(
+                    description.contains(&super::super::subagent::role_tool_names(role).join(", "))
+                );
+            }
+            assert!(description.contains(
+                "Even read-only rg/wc/git log shell commands require general or operator"
+            ));
+            assert_eq!(
+                schema["properties"]["requiredTools"]["items"],
+                bounded_string(128)
+            );
+        }
+    }
 
     #[test]
     fn child_and_fleet_schemas_allow_omitting_step_token_and_tool_budgets() {
