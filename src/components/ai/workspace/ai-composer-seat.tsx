@@ -101,6 +101,7 @@ export interface AiComposerSeatProps extends ComposerHistoryProps {
   readonly approvalArgumentsLoading?: boolean;
   readonly approvalArgumentsError?: string | null;
   readonly unavailableReason?: string | null;
+  readonly submissionDisabled?: boolean;
   readonly availabilityHintId?: string;
   readonly onDraftChange?: (value: string) => void;
   readonly onSubmit?: (value: string) => void | Promise<void>;
@@ -158,6 +159,7 @@ export function AiComposerSeat({
   approvalArgumentsLoading = false,
   approvalArgumentsError = null,
   unavailableReason = null,
+  submissionDisabled = false,
   availabilityHintId,
   onDraftChange,
   onSubmit,
@@ -217,7 +219,7 @@ export function AiComposerSeat({
   const submitting = imageBusy;
   const terminal = composerState?.terminal ?? false;
   const stopping = composerState?.phase === 'stopping';
-  const unavailable = unavailableReason !== null;
+  const unavailable = unavailableReason !== null || submissionDisabled;
   const updateRawDraft = (value: string): void => {
     rawDraftRef.current = value;
     if (composerState === undefined && controlledDraft === undefined) setLocalDraft(value);

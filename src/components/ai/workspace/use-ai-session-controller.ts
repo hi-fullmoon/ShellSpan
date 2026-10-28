@@ -486,6 +486,7 @@ export function useAiSessionController({
   const canStartAgent = !terminalSessionRestoring && !visibleExecutionRequired && (scope === 'workbench'
     || activeTerminal?.status === 'connected');
   const terminalUnavailableReason = scope === 'terminal' && !canStartAgent && !focusMode
+    && activeTerminal?.status !== 'connecting'
     ? t('agent.availability.needsTerminal')
     : null;
   const hasProvider = Boolean(

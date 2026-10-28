@@ -273,6 +273,7 @@ export interface AiWorkspaceRootProps {
   readonly renamingSessionId?: string | null;
   readonly renameError?: string | null;
   readonly canStartAgent?: boolean;
+  readonly submissionDisabled?: boolean;
   readonly agentUnavailableReason?: string | null;
   readonly terminalConflict?: boolean;
   readonly historyScopeLabel?: string | null;
@@ -366,6 +367,7 @@ export function AiWorkspaceRoot({
   renamingSessionId = null,
   renameError = null,
   canStartAgent = false,
+  submissionDisabled = false,
   agentUnavailableReason: rawAgentUnavailableReason = null,
   terminalConflict = false,
   historyScopeLabel = null,
@@ -785,6 +787,7 @@ export function AiWorkspaceRoot({
           executionSurfaceControl={surfaceMode === 'agent' ? executionSurfaceControl : undefined}
           executionSurfaceNotice={surfaceMode === 'agent' && !subagent ? executionSurfaceNotice : undefined}
           composerState={activeComposerState}
+          submissionDisabled={submissionDisabled}
           inbox={surfaceMode === 'agent' && !readOnlySession ? view?.inbox : undefined}
           taskSteps={surfaceMode === 'agent' && (!readOnlySession || subagent) ? taskSteps : undefined}
           taskPlanActive={terminalRecovery ? false : view?.taskPlanActive}
