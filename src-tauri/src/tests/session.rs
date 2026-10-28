@@ -1115,32 +1115,6 @@
             .combined_output
             .contains("env=user-shell-preserved cwd=/tmp user-alias-preserved"));
 
-        terminal.execute_user_command("set -H");
-        let source = "printf '%s\\n' \"!shellspan_missing_history_857bc4\"";
-        let submitted = crate::terminal_integration::bash_native_submission(source).unwrap();
-        let literal =
-            terminal.execute_submission("bound-history-literal", source, Some(&submitted));
-        assert_eq!(
-            literal.state,
-            TerminalCommandState::Completed,
-            "{literal:?}"
-        );
-        assert_eq!(literal.exit_code, Some(0), "{literal:?}");
-        assert_eq!(literal.command_line, source);
-        assert_eq!(
-            literal.submitted_command_line.as_deref(),
-            Some(submitted.as_str())
-        );
-        assert!(literal
-            .combined_output
-            .contains("\r\n!shellspan_missing_history_857bc4\r\n"));
-        assert_eq!(
-            terminal
-                .execute("bound-history-option", "[[ -o histexpand ]]")
-                .exit_code,
-            Some(0)
-        );
-
         let interactive = terminal.execute(
             "bound-interactive-shell",
             "case $- in *i*) printf interactive-bash;; *) false;; esac",

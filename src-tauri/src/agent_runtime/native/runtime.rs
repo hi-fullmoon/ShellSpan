@@ -3031,13 +3031,15 @@ mod tests {
                 else {
                     return Err("expected command input on the frozen source SSH session".into());
                 };
-                assert!(input.starts_with(COMMAND));
+                let submitted =
+                    crate::terminal_integration::bash_native_submission(COMMAND).unwrap();
+                assert!(input.starts_with(&submitted));
                 worker_broker
                     .accept_integration_event(
                         SOURCE_SESSION_ID,
                         INTEGRATION_ID,
                         TerminalIntegrationControlEvent::CommandStart {
-                            command_line: COMMAND.into(),
+                            command_line: submitted,
                             cwd: "/home/tester".into(),
                         },
                     )

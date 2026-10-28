@@ -95,6 +95,50 @@ fn remote_native_stop_restores_manual_input_on_fresh_connections() {
                     },
                 )
                 .unwrap();
+            if username == "shellspan" && attempt == 0 {
+                terminal.execute_user_command("set -H");
+                let source = "printf '%s\\n' \"!shellspan_missing_history_857bc4\"";
+                let operation = registry
+                    .start(
+                        &sessions,
+                        &transport,
+                        "history-agent",
+                        "history-task",
+                        "history-operation",
+                        source,
+                        "\n",
+                    )
+                    .unwrap();
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while !operation.snapshot().unwrap().state.is_terminal() {
+                    pump_registry_input(&mut terminal, &receiver, &registry, "");
+                    assert!(
+                        Instant::now() < deadline,
+                        "literal Bash command did not settle"
+                    );
+                    thread::sleep(Duration::from_millis(5));
+                }
+                let result = registry
+                    .wait(&sessions, &transport, &operation, Duration::from_secs(1))
+                    .unwrap();
+                assert_eq!(result.state, TerminalCommandState::Completed, "{result:?}");
+                assert_eq!(result.exit_code, Some(0), "{result:?}");
+                assert_eq!(result.command_line, source);
+                assert_eq!(
+                    result.submitted_command_line,
+                    Some(crate::terminal_integration::bash_native_submission(source).unwrap())
+                );
+                assert!(result
+                    .combined_output
+                    .contains("!shellspan_missing_history_857bc4\r\n"));
+                leases.release_turn("history-agent").unwrap();
+                assert_eq!(
+                    terminal
+                        .execute("history-option", "[[ -o histexpand ]]")
+                        .exit_code,
+                    Some(0)
+                );
+            }
             let effect = format!("/tmp/shellspan-stopped-{}", Uuid::new_v4());
             let source = format!(
                 "printf '%s' '{}' > {effect}",
