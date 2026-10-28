@@ -18,8 +18,6 @@ use super::{
 #[cfg(test)]
 use super::{AgentInboxLane, AgentInboxMessage, AgentMessageSource};
 
-const DEFAULT_MAX_STEPS_PER_TURN: usize = 128;
-
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AgentDriverConfig {
     pub(crate) max_steps_per_turn: Option<usize>,
@@ -39,9 +37,8 @@ pub(crate) struct AgentDriverConfig {
 impl Default for AgentDriverConfig {
     fn default() -> Self {
         Self {
-            // Root and continuable child sessions preserve state at this boundary.
-            // One-shot children retain their explicit single-turn contract.
-            max_steps_per_turn: Some(DEFAULT_MAX_STEPS_PER_TURN),
+            // Root turns are unlimited; children retain their explicit step budgets.
+            max_steps_per_turn: None,
             max_turns_per_session: 64,
             max_identical_tool_steps: 5,
             max_model_tokens_per_session: 0,
@@ -53,6 +50,18 @@ impl Default for AgentDriverConfig {
             network_recovery_max_delay_ms: 30_000,
             retry_policy: RetryPolicy::default(),
         }
+    }
+}
+
+impl AgentDriverConfig {
+    fn step_limit_for(self, subagent: Option<&super::AgentSubagentSession>) -> Option<usize> {
+        subagent.map_or(self.max_steps_per_turn, |child| {
+            let child_limit = child.budget.max_steps_per_turn as usize;
+            Some(
+                self.max_steps_per_turn
+                    .map_or(child_limit, |limit| limit.min(child_limit)),
+            )
+        })
     }
 }
 
@@ -163,13 +172,7 @@ async fn drive_agent_inner(
 ) -> Result<AgentDriverSettlement, String> {
     let config = if let Some(subagent) = &entry.subagent {
         AgentDriverConfig {
-            max_steps_per_turn: Some(
-                config
-                    .max_steps_per_turn
-                    .map_or(subagent.budget.max_steps_per_turn as usize, |limit| {
-                        limit.min(subagent.budget.max_steps_per_turn as usize)
-                    }),
-            ),
+            max_steps_per_turn: config.step_limit_for(Some(subagent)),
             max_turns_per_session: config
                 .max_turns_per_session
                 .min(subagent.budget.max_turns as usize),

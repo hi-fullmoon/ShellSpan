@@ -110,14 +110,31 @@
     }
 
     #[test]
-    fn root_and_delegated_step_budgets_have_distinct_settlements() {
+    fn unlimited_root_steps_keep_execution_protections() {
+        let config = AgentDriverConfig::default();
+        assert_eq!(config.step_limit_for(None), None);
+        assert!(config.max_identical_tool_steps > 0);
         assert_eq!(
-            AgentDriverConfig::default().max_steps_per_turn,
-            Some(DEFAULT_MAX_STEPS_PER_TURN)
+            no_progress_from_counts((0, config.max_identical_tool_steps - 1), config),
+            None
         );
         assert!(
-            step_budget_reason(DEFAULT_MAX_STEPS_PER_TURN, true).starts_with("stepBudgetReached:")
+            no_progress_from_counts((0, config.max_identical_tool_steps), config)
+                .unwrap()
+                .starts_with("noProgress:")
         );
+        assert!(config.max_turns_per_session > 0);
+        assert!(config.max_active_duration_ms > 0);
+        assert!(config.max_model_stream_duration_ms > 0);
+        assert!(config.network_recovery_window_ms > 0);
+        assert!(config.network_recovery_max_attempts > 0);
+    }
+
+    #[test]
+    fn root_and_delegated_step_budgets_have_distinct_settlements() {
+        let config = AgentDriverConfig::default();
+        assert_eq!(config.max_steps_per_turn, None);
+        assert!(step_budget_reason(8, true).starts_with("stepBudgetReached:"));
         assert!(step_budget_reason(4, false).starts_with("stepLimitExceeded:"));
         let mut child = super::super::AgentSubagentSession {
             descriptor_id: "budget-child".into(),
@@ -146,6 +163,15 @@
                 route_revision: None,
             },
         };
+        assert_eq!(config.step_limit_for(Some(&child)), Some(8));
+        for (configured, expected) in [(4, 4), (16, 8)] {
+            let bounded = AgentDriverConfig {
+                max_steps_per_turn: Some(configured),
+                ..config
+            };
+            assert_eq!(bounded.step_limit_for(None), Some(configured));
+            assert_eq!(bounded.step_limit_for(Some(&child)), Some(expected));
+        }
         assert!(step_budget_recoverable(None));
         assert!(step_budget_recoverable(Some(&child)));
         let usage_events = vec![event(
@@ -169,6 +195,7 @@
             None
         );
         child.continuable = false;
+        assert_eq!(config.step_limit_for(Some(&child)), Some(8));
         assert!(!step_budget_recoverable(Some(&child)));
         let events = vec![event(1_000, AgentSessionEventPayload::TurnStart)];
         assert!(!child_budget_requires_handoff(
