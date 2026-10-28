@@ -63,20 +63,18 @@ try {
       await trigger.focus();
       await page.keyboard.press('Enter');
       const list = page.locator('[data-runtime-artifact-list]');
-      await list.waitFor();
-      assert.equal(await list.getByRole('button').count(), result.count);
-      const panel = page.locator('[data-runtime-artifacts] > [data-slot="collapsible-content"]');
-      await page.waitForFunction(() => document.querySelector('[data-runtime-artifacts] > [data-slot="collapsible-content"]')
-        ?.getAnimations().some(animation => animation.transitionProperty === 'height'));
-      const expandedHeight = await panel.evaluate(element => {
-        const animation = element.getAnimations().find(item => item.transitionProperty === 'height');
-        if (!animation) throw new Error('Opening must animate panel height');
+      const expandedHeight = await (await page.waitForFunction(() => {
+        const animation = document.querySelector('[data-runtime-artifacts] > [data-slot="collapsible-content"]')
+          ?.getAnimations().find(item => item.transitionProperty === 'height');
+        if (!animation) return false;
         const frames = animation.effect.getKeyframes();
         return { from: parseFloat(frames[0].height), to: parseFloat(frames.at(-1).height) };
-      });
+      })).jsonValue();
       assert.equal(expandedHeight.from, 0);
       assert.ok(expandedHeight.to > 0);
       await page.evaluate(() => document.getAnimations().forEach(animation => animation.finish()));
+      await list.waitFor();
+      assert.equal(await list.getByRole('button').count(), result.count);
       const bounds = await list.evaluate(element => {
         const box = element.getBoundingClientRect();
         return { fits: box.left >= 0 && box.right <= innerWidth && element.scrollWidth <= element.clientWidth,
@@ -86,18 +84,30 @@ try {
       assert.ok(bounds.height <= 260, 'Run records keep a bounded scrolling area');
       if (result.count >= 20) assert.equal(bounds.scrolls, true);
       await page.screenshot({ path: `/tmp/shellspan-runtime-artifacts-${locale}-${width}-expanded.png` });
-      await list.getByRole('button').last().click();
+      const entryButton = list.getByRole('button').last();
+      await entryButton.click();
       assert.equal(await page.locator('body').getAttribute('data-opened-artifact'), result.lastArtifactId);
+      await page.keyboard.press('Tab');
+      await entryButton.focus();
+      assert.equal(await entryButton.evaluate(element => element.matches(':focus-visible')), true);
+      const focusStyle = await entryButton.evaluate(element => {
+        const style = getComputedStyle(element);
+        return { outline: style.outlineStyle, shadow: style.boxShadow };
+      });
+      assert.deepEqual(focusStyle, { outline: 'none', shadow: 'none' }, 'Run record focus must not draw an outer ring');
+      await page.locator('body').evaluate(element => element.removeAttribute('data-opened-artifact'));
+      await page.keyboard.press('Enter');
+      assert.equal(await page.locator('body').getAttribute('data-opened-artifact'), result.lastArtifactId);
+      await page.screenshot({ path: `/tmp/shellspan-runtime-artifacts-${locale}-${width}-focused.png` });
       await trigger.click();
-      assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
-      await page.waitForFunction(() => document.querySelector('[data-runtime-artifacts] > [data-slot="collapsible-content"][data-ending-style]')
-        ?.getAnimations().some(animation => animation.transitionProperty === 'height'));
-      const closingHeight = await panel.evaluate(element => {
-        const animation = element.getAnimations().find(item => item.transitionProperty === 'height');
-        if (!animation) throw new Error('Closing must animate panel height');
+      const closingHeight = await (await page.waitForFunction(() => {
+        const animation = document.querySelector('[data-runtime-artifacts] > [data-slot="collapsible-content"][data-ending-style]')
+          ?.getAnimations().find(item => item.transitionProperty === 'height');
+        if (!animation) return false;
         const frames = animation.effect.getKeyframes();
         return { from: parseFloat(frames[0].height), to: parseFloat(frames.at(-1).height) };
-      });
+      })).jsonValue();
+      assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
       assert.ok(closingHeight.from > 0);
       assert.equal(closingHeight.to, 0);
       await page.evaluate(() => document.getAnimations().forEach(animation => animation.finish()));
