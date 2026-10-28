@@ -65,6 +65,15 @@ pub(crate) fn assemble_model_input(
         ("Diagnostics and delegation", diagnostics_prompt(&tools)),
         ("Runtime capabilities", runtime_capabilities_prompt(header)),
     ];
+    if tools
+        .iter()
+        .any(|tool| tool.name == super::user_questions::TOOL_NAME)
+    {
+        sections.push((
+            "User questions",
+            super::user_questions::MODEL_INSTRUCTIONS.into(),
+        ));
+    }
     if tools.iter().any(|t| t.name == "read_file") {
         sections.push(("File references", "An @path or @\"path with spaces\" in the user's prompt refers only to a path relative to the frozen target root. A trailing slash denotes a directory. Completion does not read or attach content. Use read_file (or list_directory for a directory) explicitly when contents are needed; do not claim to have inspected a path before reading it.".into()));
     }
@@ -530,6 +539,62 @@ mod tests {
             normalize_line_endings(include_str!("testdata/prompt-scoped-autopilot.golden.txt"));
         assert_eq!(first, second);
         assert_eq!(first.system_prompt, golden.trim_end_matches('\n'));
+    }
+
+    #[test]
+    fn available_user_questions_require_cards_and_waiting_across_surfaces_and_permissions() {
+        for surface in [
+            super::super::AgentExecutionSurface::Direct,
+            super::super::AgentExecutionSurface::BoundTerminal,
+        ] {
+            for mode in [
+                AgentSessionPermissionMode::RequestApproval,
+                AgentSessionPermissionMode::ScopedAutopilot,
+                AgentSessionPermissionMode::Operator,
+            ] {
+                let mut header = header();
+                header.execution_surface = surface;
+                header.permission_mode = Some(mode);
+                let assembly = assemble_model_input(
+                    &header,
+                    super::super::model_tools_with_terminal_interaction(true),
+                );
+                let question = assembly
+                    .tools
+                    .iter()
+                    .find(|tool| tool.name == super::super::user_questions::TOOL_NAME)
+                    .expect("root Agent retains its question tool");
+                for instructions in [&assembly.system_prompt, &question.description] {
+                    assert!(instructions
+                        .contains("must call ask_user_question and wait for its answer"));
+                    assert!(instructions.contains("displays a question card and pauses the task"));
+                    assert!(instructions.contains("Do not substitute a question in ordinary chat"));
+                    assert!(instructions.contains("Do not continue dependent actions"));
+                    assert!(instructions.contains("do not ask again"));
+                    assert!(instructions.contains("Answers never grant native tool permissions"));
+                }
+                assert_eq!(
+                    assembly
+                        .tools
+                        .iter()
+                        .any(|tool| tool.name == "write_terminal_input"),
+                    surface == super::super::AgentExecutionSurface::BoundTerminal
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn unavailable_question_tool_is_not_advertised_as_a_required_call() {
+        let assembly = assemble_model_input(&header(), tools());
+        assert!(!assembly.system_prompt.contains("## User questions"));
+        assert!(!assembly
+            .system_prompt
+            .contains("must call ask_user_question"));
+        assert!(!assembly
+            .tools
+            .iter()
+            .any(|tool| tool.name == super::super::user_questions::TOOL_NAME));
     }
 
     #[test]

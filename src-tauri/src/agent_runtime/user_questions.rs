@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 use super::{AgentSessionEvent, AgentSessionEventPayload};
 
 pub(crate) const TOOL_NAME: &str = "ask_user_question";
+pub(crate) const MODEL_INSTRUCTIONS: &str = "Whenever you need clarification, missing information, or a user decision, you must call ask_user_question and wait for its answer. This tool displays a question card and pauses the task until the user submits an answer. Do not substitute a question in ordinary chat, a final response, or a simulated card. Do not continue dependent actions, guess an answer, or treat silence as consent. Ask only when a user decision is necessary; do not ask again when the current task already supplies the answer or authorization. Only the live root Agent may call this tool; child Agents must report the unresolved decision to their parent. Answers never grant native tool permissions or bypass approval or recovery checks.";
 const MAX_BYTES: usize = 32 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -166,6 +166,14 @@ If the editor refuses because a buffer is modified, leave it open and preserve
 the buffer. Saving requires task authorization; forced exit or discarding changes
 requires explicit user authorization. Do not replace a refused exit with `:qa!`,
 `:q!`, `ZQ`, or process termination. Tool guidance carries this policy.
+When a user decision is needed, the root Agent must call `ask_user_question`
+and wait for the submitted answer before dependent actions. The system prompt
+and question-tool description both require the existing question card and
+waiting flow; ordinary chat questions or simulated cards cannot substitute.
+An unresolved editor decision leaves the editor open. A child without the
+question tool reports the decision to its parent. Existing answers and task
+authorization do not require another question, and answers do not bypass native
+approval or recovery checks.
 The optional native macOS gate `pnpm test:terminal-editors:macos` requires real
 `vim` and `nvim` executables on PATH and fails if either is missing. It explicitly
 runs four otherwise ignored PTY regressions (Bash/zsh × Vim/Neovim), each with
