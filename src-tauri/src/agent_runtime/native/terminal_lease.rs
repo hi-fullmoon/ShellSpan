@@ -143,10 +143,28 @@ enum FrontendReadyState {
 
 type LeasePublisher = Arc<dyn Fn(&AgentTerminalLeaseEvent) + Send + Sync>;
 
+struct TerminalTurnGuard {
+    owner: String,
+    delegates: HashSet<String>,
+}
+
+impl TerminalTurnGuard {
+    fn new(owner: &str) -> Self {
+        Self {
+            owner: owner.into(),
+            delegates: HashSet::new(),
+        }
+    }
+
+    fn admits(&self, agent: &str) -> bool {
+        self.owner == agent || self.delegates.contains(agent)
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct TerminalLeaseManager {
     leases: Arc<Mutex<HashMap<String, LeaseRecord>>>,
-    turn_guards: Arc<Mutex<HashMap<String, String>>>,
+    turn_guards: Arc<Mutex<HashMap<String, TerminalTurnGuard>>>,
     taken_over: Arc<Mutex<HashSet<(String, String)>>>,
     changed: Arc<Condvar>,
     publisher: Arc<Mutex<Option<LeasePublisher>>>,
@@ -180,7 +198,19 @@ impl TerminalLeaseManager {
             .lock()
             .map_err(|_| TerminalLeaseError::Unavailable.to_string())?
             .get(session_id)
-            .cloned())
+            .map(|guard| guard.owner.clone()))
+    }
+
+    pub(crate) fn was_taken_over(
+        &self,
+        session_id: &str,
+        agent_session_id: &str,
+    ) -> Result<bool, String> {
+        Ok(self
+            .taken_over
+            .lock()
+            .map_err(|_| TerminalLeaseError::Unavailable.to_string())?
+            .contains(&(session_id.to_string(), agent_session_id.to_string())))
     }
 
     pub(crate) fn begin_turn(
@@ -188,11 +218,25 @@ impl TerminalLeaseManager {
         session_id: &str,
         agent_session_id: &str,
     ) -> Result<(), String> {
-        if self
+        self.begin_delegated_turn(session_id, agent_session_id, &[])
+    }
+
+    /// Ancestors come only from the committed Rust Session lineage. Sharing
+    /// turn admission does not share command leases: every operation still has
+    /// exactly one Agent, task and operation owner, including frontend takeover.
+    pub(crate) fn begin_delegated_turn(
+        &self,
+        session_id: &str,
+        agent_session_id: &str,
+        ancestors: &[String],
+    ) -> Result<(), String> {
+        let taken_over = self
             .taken_over
             .lock()
-            .map_err(|_| TerminalLeaseError::Unavailable.to_string())?
-            .contains(&(session_id.to_string(), agent_session_id.to_string()))
+            .map_err(|_| TerminalLeaseError::Unavailable.to_string())?;
+        if std::iter::once(agent_session_id)
+            .chain(ancestors.iter().map(String::as_str))
+            .any(|agent| taken_over.contains(&(session_id.to_string(), agent.to_string())))
         {
             return Err(TerminalLeaseError::TakenOver.to_string());
         }
@@ -200,10 +244,14 @@ impl TerminalLeaseManager {
             .turn_guards
             .lock()
             .map_err(|_| TerminalLeaseError::Unavailable.to_string())?;
-        if turn_guards
-            .get(session_id)
-            .is_some_and(|owner| owner != agent_session_id)
-        {
+        if let Some(guard) = turn_guards.get_mut(session_id) {
+            if guard.admits(agent_session_id) {
+                return Ok(());
+            }
+            if ancestors.contains(&guard.owner) {
+                guard.delegates.insert(agent_session_id.into());
+                return Ok(());
+            }
             return Err(TerminalLeaseError::Busy.to_string());
         }
         let leases = self
@@ -216,7 +264,10 @@ impl TerminalLeaseManager {
         {
             return Err(TerminalLeaseError::Busy.to_string());
         }
-        turn_guards.insert(session_id.to_string(), agent_session_id.to_string());
+        turn_guards.insert(
+            session_id.to_string(),
+            TerminalTurnGuard::new(agent_session_id),
+        );
         Ok(())
     }
 
@@ -318,7 +369,7 @@ impl TerminalLeaseManager {
                 .map_err(|_| TerminalLeaseError::Unavailable.to_string())?;
             if turn_guards
                 .get(session_id)
-                .is_some_and(|owner| owner != agent_session_id)
+                .is_some_and(|guard| !guard.admits(agent_session_id))
             {
                 return Err(TerminalLeaseError::Busy.to_string());
             }
@@ -347,7 +398,9 @@ impl TerminalLeaseManager {
                     operation_id,
                 )?;
             }
-            turn_guards.insert(session_id.to_string(), agent_session_id.to_string());
+            turn_guards
+                .entry(session_id.to_string())
+                .or_insert_with(|| TerminalTurnGuard::new(agent_session_id));
             leases.insert(
                 session_id.to_string(),
                 LeaseRecord {
@@ -481,9 +534,14 @@ impl TerminalLeaseManager {
             let lease = leases.remove(session_id).map(|record| record.lease);
             if turn_guards
                 .get(session_id)
-                .is_some_and(|owner| owner == agent_session_id)
+                .is_some_and(|guard| guard.admits(agent_session_id))
             {
-                turn_guards.remove(session_id);
+                if let Some(guard) = turn_guards.remove(session_id) {
+                    taken_over.insert((session_id.to_string(), guard.owner));
+                    for delegate in guard.delegates {
+                        taken_over.insert((session_id.to_string(), delegate));
+                    }
+                }
             }
             taken_over.insert((session_id.to_string(), agent_session_id.to_string()));
             lease
@@ -816,7 +874,10 @@ impl TerminalLeaseManager {
         self.turn_guards
             .lock()
             .map_err(|_| TerminalLeaseError::Unavailable.to_string())?
-            .retain(|_, owner| owner != agent_session_id);
+            .retain(|_, guard| {
+                guard.delegates.remove(agent_session_id);
+                guard.owner != agent_session_id
+            });
         Ok(())
     }
 

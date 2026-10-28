@@ -197,6 +197,48 @@ pub(crate) struct AgentRuntime {
 
 struct ActiveDriverLease(Arc<super::AgentEntry>);
 
+fn terminal_turn_ancestors(
+    sessions: &AgentSessionStore,
+    snapshot: &AgentSessionSnapshot,
+) -> Result<Vec<String>, String> {
+    let mut ancestors = Vec::new();
+    if snapshot.header.subagent.is_none() {
+        return Ok(ancestors);
+    }
+    let terminal = snapshot
+        .header
+        .target
+        .as_ref()
+        .ok_or("missing child terminal target")?;
+    let mut parent_id = snapshot.header.parent_session_id.clone();
+    while let Some(id) = parent_id {
+        if ancestors.len() >= 16 || ancestors.contains(&id) {
+            return Err("invalid terminal delegation lineage".into());
+        }
+        let parent = sessions.snapshot(&id)?;
+        if parent.ended
+            || parent.archived
+            || parent.header.execution_surface != super::AgentExecutionSurface::BoundTerminal
+            || parent
+                .header
+                .target
+                .as_ref()
+                .is_none_or(|target| target != terminal)
+        {
+            return Err(
+                "terminal delegation requires live ancestors on the same frozen target".into(),
+            );
+        }
+        ancestors.push(id);
+        parent_id = if parent.header.subagent.is_some() {
+            parent.header.parent_session_id
+        } else {
+            None
+        };
+    }
+    Ok(ancestors)
+}
+
 impl Drop for ActiveDriverLease {
     fn drop(&mut self) {
         self.0.release_driver();
@@ -624,7 +666,7 @@ impl AgentRuntime {
             slot.install(Arc::new(NativeToolAdapter::new(
                 app,
                 Arc::clone(&self.native_engine),
-            )))?;
+            )?))?;
         }
         Ok(())
     }
@@ -944,9 +986,14 @@ impl AgentRuntime {
                                     log::warn!("Failed to clear previous Agent terminal turn guard: {error}");
                                 }
                             }
-                            if let Err(error) = native_engine
-                                .begin_terminal_turn(&target.session_id, &event.session_id)
-                            {
+                            let admitted = terminal_turn_ancestors(&sessions, &snapshot).and_then(|ancestors| {
+                                if ancestors.is_empty() {
+                                    native_engine.begin_terminal_turn(&target.session_id, &event.session_id)
+                                } else {
+                                    native_engine.begin_delegated_terminal_turn(&target.session_id, &event.session_id, &ancestors)
+                                }
+                            });
+                            if let Err(error) = admitted {
                                 log::warn!("Failed to lock Agent terminal for the turn: {error}");
                             }
                         }
@@ -1668,14 +1715,32 @@ impl AgentRuntime {
     }
 
     pub(crate) async fn interrupt(&self, session_id: &str) -> Result<AgentSessionSnapshot, String> {
-        if self
-            .sessions
-            .snapshot(session_id)?
-            .header
-            .subagent
-            .is_some()
-        {
-            return Err("human interruption requires a root Session".into());
+        let snapshot = self.sessions.snapshot(session_id)?;
+        if snapshot.header.subagent.is_some() {
+            // The terminal UI identifies the exact operation owner. After a
+            // verified child takeover, stop the owning root and its complete
+            // delegation, rather than rejecting that UI request as child input.
+            let ancestors = terminal_turn_ancestors(&self.sessions, &snapshot)?;
+            let root = ancestors
+                .last()
+                .ok_or("human interruption requires a root Session")?;
+            let terminal = snapshot
+                .header
+                .target
+                .as_ref()
+                .ok_or("missing child terminal target")?;
+            let mut taken_over = self
+                .native_engine
+                .terminal_turn_was_taken_over(&terminal.session_id, session_id)?;
+            for ancestor in &ancestors {
+                taken_over |= self
+                    .native_engine
+                    .terminal_turn_was_taken_over(&terminal.session_id, ancestor)?;
+            }
+            if !taken_over {
+                return Err("human interruption requires a root Session".into());
+            }
+            return self.stop_session(root, false).await;
         }
         self.stop_session(session_id, false).await
     }
@@ -2622,3 +2687,7 @@ impl AgentRuntime {
 mod tests {
     include!("tests/runtime/mod.rs");
 }
+
+#[cfg(all(test, unix))]
+#[path = "tests/runtime/native_regressions.rs"]
+mod native_regression_tests;

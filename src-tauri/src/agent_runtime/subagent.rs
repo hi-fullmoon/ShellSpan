@@ -919,7 +919,7 @@ impl SubAgentManager {
         Ok(child)
     }
 
-    fn create_child(
+    pub(super) fn create_child(
         &self,
         parent_session_id: &str,
         goal: String,

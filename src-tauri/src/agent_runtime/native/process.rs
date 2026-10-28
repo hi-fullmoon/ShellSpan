@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -22,6 +22,25 @@ const STDOUT_CAPTURE_BYTES: usize = 768 * 1024;
 const STDERR_CAPTURE_BYTES: usize = 256 * 1024;
 const MAX_TRACKED_PROCESSES: usize = 256;
 const REMOTE_READS_PER_POLL: usize = 8;
+const STDIN_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+
+#[cfg(unix)]
+type LocalChildStdin = tokio::net::unix::pipe::Sender;
+#[cfg(windows)]
+type LocalChildStdin = tokio::process::ChildStdin;
+
+fn asynchronous_stdin(stdin: std::process::ChildStdin) -> std::io::Result<LocalChildStdin> {
+    #[cfg(unix)]
+    {
+        // Only pipe readiness is needed; do not introduce a process reaper or
+        // change global process-signal handling for the native shell runtime.
+        LocalChildStdin::from_owned_fd(stdin.into())
+    }
+    #[cfg(windows)]
+    {
+        LocalChildStdin::from_std(stdin)
+    }
+}
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -152,6 +171,7 @@ enum ProcessControlNative {
         input: String,
         close: bool,
         response: mpsc::SyncSender<Result<usize, String>>,
+        deadline: Instant,
     },
     Kill {
         signal: ProcessSignalNative,
@@ -329,10 +349,11 @@ impl ManagedProcessNative {
                 input,
                 close,
                 response: sender,
+                deadline: Instant::now() + STDIN_WRITE_TIMEOUT,
             })
             .map_err(|_| "Process input channel is unavailable".to_string())?;
         receiver
-            .recv_timeout(Duration::from_secs(5))
+            .recv_timeout(STDIN_WRITE_TIMEOUT + Duration::from_secs(3))
             .map_err(|_| "Process input acknowledgement timed out".to_string())?
     }
 
@@ -434,15 +455,21 @@ impl ProcessRegistryNative {
             .filter(|process| process.task_id == task_id)
             .cloned()
             .collect::<Vec<_>>();
-        for process in &processes {
-            let _ = process.kill(ProcessSignalNative::Kill, Duration::from_secs(2));
-        }
-        let mut registry = self
-            .processes
-            .lock()
-            .map_err(|_| "Process registry is unavailable".to_string())?;
+        let mut errors = Vec::new();
         for process in processes {
-            registry.remove(&process.process_handle);
+            match process.kill(ProcessSignalNative::Kill, Duration::from_secs(3)) {
+                Ok(snapshot) if snapshot.state.is_terminal() => {
+                    self.remove_terminal(&process.process_handle, snapshot.state)?;
+                }
+                Ok(_) => errors.push(format!(
+                    "Process {} is still running after cancellation; its handle was retained",
+                    process.process_handle
+                )),
+                Err(error) => errors.push(error),
+            }
+        }
+        if !errors.is_empty() {
+            return Err(errors.join("; "));
         }
         Ok(())
     }
@@ -604,10 +631,44 @@ fn spawn_local_child_native(
         control_tx,
     );
     let worker = Arc::clone(&process);
+    let (ready, readiness) = mpsc::sync_channel(1);
     thread::spawn(move || {
         // Keep the per-process writable temporary root alive until the complete
         // subprocess tree has reached a terminal state.
         let _sandbox_temp = sandbox_temp;
+        // Construct and drop this runtime on its own worker, including failures.
+        // A caller may itself run inside an async runtime.
+        let input_runtime = (|| {
+            let io = tokio::runtime::Builder::new_current_thread()
+                .enable_io()
+                .enable_time()
+                .build()
+                .map_err(|error| format!("Failed to initialize process input runtime: {error}"))?;
+            let stdin = {
+                let _entered = io.enter();
+                stdin
+                    .map(asynchronous_stdin)
+                    .transpose()
+                    .map_err(|error| format!("Failed to initialize process input pipe: {error}"))?
+            };
+            Ok::<_, String>((io, stdin))
+        })();
+        let (io, stdin) = match input_runtime {
+            Ok(input) => input,
+            Err(error) => {
+                let requested = containment.terminate(&mut child, ProcessSignalNative::Kill);
+                let observed = child.wait().is_ok();
+                worker.finish(
+                    ProcessLifecycleNative::Failed,
+                    None,
+                    requested && observed,
+                    Some(error.clone()),
+                );
+                let _ = ready.send(Err(error));
+                return;
+            }
+        };
+        let _ = ready.send(Ok(()));
         run_local_worker(
             worker,
             child,
@@ -617,8 +678,12 @@ fn spawn_local_child_native(
             control_rx,
             timeout,
             containment,
+            io,
         )
     });
+    readiness
+        .recv()
+        .map_err(|_| "Process input worker exited before initialization".to_string())??;
     Ok(process)
 }
 
@@ -954,20 +1019,77 @@ impl Drop for LocalProcessContainmentNative {
     }
 }
 
+struct PendingLocalInput {
+    input: String,
+    written: usize,
+    close: bool,
+    response: mpsc::SyncSender<Result<usize, String>>,
+    deadline: Instant,
+}
+
+impl PendingLocalInput {
+    fn poll(
+        &mut self,
+        stdin: &mut Option<LocalChildStdin>,
+        runtime: &tokio::runtime::Runtime,
+    ) -> Result<Option<usize>, String> {
+        use tokio::io::AsyncWriteExt;
+        let remaining = self.deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(format!(
+                "Process stdin write timed out after accepting {} of {} bytes; inspect process state before retrying",
+                self.written, self.input.len()
+            ));
+        }
+        let writer = stdin.as_mut().ok_or("Process stdin is closed")?;
+        runtime.block_on(async {
+            // AsyncWriteExt::write is cancellation safe. Track every completed
+            // partial write explicitly; never restart write_all after a poll.
+            let poll = async {
+                if self.written < self.input.len() {
+                    let count = writer.write(&self.input.as_bytes()[self.written..]).await?;
+                    if count == 0 {
+                        return Err(std::io::Error::new(
+                            ErrorKind::WriteZero,
+                            "process stdin closed",
+                        ));
+                    }
+                    self.written += count;
+                }
+                if self.written == self.input.len() {
+                    writer.flush().await?;
+                    Ok(Some(self.written))
+                } else {
+                    Ok(None)
+                }
+            };
+            match tokio::time::timeout(remaining.min(PROCESS_POLL_INTERVAL), poll).await {
+                Ok(result) => result.map_err(|error: std::io::Error| {
+                    format!("Failed to write process stdin: {error}")
+                }),
+                Err(_) => Ok(None),
+            }
+        })
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn run_local_worker(
     process: Arc<ManagedProcessNative>,
     mut child: Child,
-    mut stdin: Option<ChildStdin>,
+    mut stdin: Option<LocalChildStdin>,
     stdout: impl Read + Send + 'static,
     stderr: impl Read + Send + 'static,
     controls: mpsc::Receiver<ProcessControlNative>,
     timeout: Duration,
     containment: LocalProcessContainmentNative,
+    io: tokio::runtime::Runtime,
 ) {
     let (output_tx, output_rx) = mpsc::sync_channel(32);
     spawn_reader(stdout, output_tx.clone(), true);
     spawn_reader(stderr, output_tx, false);
     let deadline = Instant::now() + timeout;
+    let mut pending_input: Option<PendingLocalInput> = None;
     loop {
         while let Ok(control) = controls.try_recv() {
             match control {
@@ -975,19 +1097,19 @@ fn run_local_worker(
                     input,
                     close,
                     response,
+                    deadline,
                 } => {
-                    let result = match stdin.as_mut() {
-                        Some(writer) => writer
-                            .write_all(input.as_bytes())
-                            .and_then(|_| writer.flush())
-                            .map(|_| input.len())
-                            .map_err(|error| format!("Failed to write process stdin: {error}")),
-                        None => Err("Process stdin is closed".into()),
-                    };
-                    if close {
-                        stdin.take();
+                    if pending_input.is_some() {
+                        let _ = response.send(Err("Another process stdin write is pending".into()));
+                    } else {
+                        pending_input = Some(PendingLocalInput {
+                            input,
+                            written: 0,
+                            close,
+                            response,
+                            deadline,
+                        });
                     }
-                    let _ = response.send(result);
                 }
                 ProcessControlNative::Kill { signal } => {
                     let requested = containment.terminate(&mut child, signal);
@@ -1044,6 +1166,39 @@ fn run_local_worker(
             drain_process_output(&process, &output_rx);
             process.finish(ProcessLifecycleNative::TimedOut, None, confirmed, None);
             return;
+        }
+        if let Some(input) = pending_input.as_mut() {
+            let polled = input.poll(&mut stdin, &io);
+            let expired = polled.is_err() && Instant::now() >= input.deadline;
+            let completion = match polled {
+                Ok(None) => None,
+                Ok(Some(count)) => Some(Ok(count)),
+                Err(error) => Some(Err(error)),
+            };
+            if let Some(result) = completion {
+                let input = pending_input.take().expect("pending input was just polled");
+                if expired {
+                    // Windows child pipes use Tokio's blocking I/O pool. Stop
+                    // the process tree before dropping that I/O so an expired
+                    // request can never continue writing when the reader wakes.
+                    let requested = containment.terminate(&mut child, ProcessSignalNative::Kill);
+                    let observed = child.wait().is_ok();
+                    stdin.take();
+                    drain_process_output(&process, &output_rx);
+                    process.finish(
+                        ProcessLifecycleNative::Failed,
+                        None,
+                        requested && observed,
+                        result.as_ref().err().cloned(),
+                    );
+                    let _ = input.response.send(result);
+                    return;
+                }
+                if input.close {
+                    stdin.take();
+                }
+                let _ = input.response.send(result);
+            }
         }
         thread::sleep(PROCESS_POLL_INTERVAL);
     }
@@ -1187,8 +1342,13 @@ fn run_remote_worker(
                     input,
                     close,
                     response,
+                    deadline: write_deadline,
                 } => {
-                    let result = write_remote_input(&mut channel, input.as_bytes(), close);
+                    let result = if Instant::now() >= write_deadline {
+                        Err("Process stdin write expired before execution".into())
+                    } else {
+                        write_remote_input(&mut channel, input.as_bytes(), close)
+                    };
                     let _ = response.send(result);
                 }
                 ProcessControlNative::Kill { signal } => {
@@ -1417,6 +1577,10 @@ fn current_unix_ms() -> u64 {
 #[cfg(test)]
 #[path = "__tests__/diagnostic_transport.rs"]
 mod diagnostic_transport_tests;
+
+#[cfg(test)]
+#[path = "__tests__/process_stdin.rs"]
+mod stdin_tests;
 
 #[cfg(test)]
 mod tests {

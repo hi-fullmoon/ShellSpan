@@ -530,7 +530,41 @@ impl Drop for PendingExecutionGuard<'_> {
     fn drop(&mut self) {
         self.pipeline.native.abandon(&self.token);
         if let Ok(mut pending) = self.pipeline.pending.lock() {
-            pending.remove(&self.key);
+            // A failed durable write must leave a pre-dispatch decision
+            // retryable. Never retain an approval after dispatch or a result.
+            let retryable = pending.get(&self.key).is_some_and(|record| {
+                self.pipeline
+                    .sessions
+                    .read_events(&record.request.session_id, |events| {
+                        let scoped = || {
+                            events.iter().filter(|event| {
+                                event.turn_id.as_deref() == Some(&record.request.turn_id)
+                                    && event.step_id.as_deref() == Some(&record.request.step_id)
+                            })
+                        };
+                        let terminal = scoped().any(|event| {
+                            matches!(&event.payload,
+                        AgentSessionEventPayload::ToolExecution { call_id, .. }
+                        | AgentSessionEventPayload::ToolResult { call_id, .. }
+                        if call_id == &record.request.model_call.call_id)
+                        });
+                        !terminal
+                            && scoped().rev().find_map(|event| match &event.payload {
+                                AgentSessionEventPayload::ToolApproval {
+                                    call_id, status, ..
+                                } if call_id == &record.request.model_call.call_id => Some(*status),
+                                _ => None,
+                            }) == Some(AgentToolApprovalStatus::Requested)
+                    })
+                    .unwrap_or(false)
+            });
+            if retryable {
+                if let Some(record) = pending.get_mut(&self.key) {
+                    record.status = PendingStatus::Requested;
+                }
+            } else {
+                pending.remove(&self.key);
+            }
         }
         self.pipeline.changed.notify_waiters();
     }
@@ -2419,21 +2453,34 @@ impl AgentToolPipeline {
                 self.settle_blocked_terminal_call(entry, &error)?;
                 return Err(error);
             }
-            Err(error) => return Err(error),
+            Err(error) => {
+                self.fail_pending_revalidation(entry, &pending, &error)
+                    .await?;
+                return Ok(());
+            }
         };
         let refreshed_lease = PreparedLease::new(self.native.clone(), &refreshed.token);
-        self.ensure_capability(
+        if let Err(error) = self.ensure_capability(
             entry,
             &pending.request.model_call.name,
             refreshed.call.effect.unwrap_or(AgentSessionEffect::Unknown),
             &pending.request.target.target_id,
-        )?;
+        ) {
+            self.fail_pending_revalidation(entry, &pending, &error)
+                .await?;
+            return Ok(());
+        }
         if refreshed.call != pending.preparation.call
             || refreshed.idempotency != pending.preparation.idempotency
             || refreshed.parallel != pending.preparation.parallel
             || refreshed.exclusive != pending.preparation.exclusive
         {
-            return Err("Approval policy changed; explicit reconciliation is required".into());
+            self.fail_pending_revalidation(
+                entry,
+                &pending,
+                "Approval policy changed; no operation was dispatched. Inspect current state and request a fresh call.",
+            ).await?;
+            return Ok(());
         }
         pending.preparation = refreshed;
 
@@ -2474,6 +2521,22 @@ impl AgentToolPipeline {
             self.changed.notify_waiters();
             self.continue_after_pending(entry, &pending).await?;
         }
+        Ok(())
+    }
+
+    async fn fail_pending_revalidation(
+        &self,
+        entry: &Arc<AgentEntry>,
+        pending: &PendingTool,
+        error: &str,
+    ) -> Result<(), String> {
+        self.append_terminal_approval(
+            pending,
+            AgentToolApprovalStatus::Cancelled,
+            AgentToolResultStatus::Cancelled,
+            error,
+        )?;
+        self.continue_after_pending(entry, pending).await?;
         Ok(())
     }
 

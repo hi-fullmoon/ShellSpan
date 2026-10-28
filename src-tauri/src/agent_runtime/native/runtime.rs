@@ -139,7 +139,12 @@ pub(crate) struct NativeToolEngine {
 
 impl Default for NativeToolEngine {
     fn default() -> Self {
-        let terminal_broker = TerminalSessionBroker::default();
+        Self::with_terminal_broker(TerminalSessionBroker::default())
+    }
+}
+
+impl NativeToolEngine {
+    pub(crate) fn with_terminal_broker(terminal_broker: TerminalSessionBroker) -> Self {
         let terminal_leases = TerminalLeaseManager::new(terminal_broker.clone());
         let terminal_execute =
             TerminalExecuteRegistry::new(terminal_leases.clone(), terminal_broker.clone());
@@ -376,10 +381,28 @@ impl NativeToolEngine {
         self.terminal_leases.turn_owner(session_id)
     }
 
+    pub(crate) fn terminal_turn_was_taken_over(
+        &self,
+        session_id: &str,
+        agent_session_id: &str,
+    ) -> Result<bool, String> {
+        self.terminal_leases
+            .was_taken_over(session_id, agent_session_id)
+    }
+
     pub(crate) fn begin_terminal_turn(
         &self,
         terminal_session_id: &str,
         agent_session_id: &str,
+    ) -> Result<(), String> {
+        self.begin_delegated_terminal_turn(terminal_session_id, agent_session_id, &[])
+    }
+
+    pub(crate) fn begin_delegated_terminal_turn(
+        &self,
+        terminal_session_id: &str,
+        agent_session_id: &str,
+        ancestors: &[String],
     ) -> Result<(), String> {
         let snapshot = self.terminal_broker.snapshot(Some(terminal_session_id))?;
         if snapshot.session.as_ref().is_some_and(|session| {
@@ -388,8 +411,16 @@ impl NativeToolEngine {
         }) {
             return Err("TERMINAL_VISIBLE_COMMAND_UNAVAILABLE".into());
         }
-        self.terminal_leases
-            .begin_turn(terminal_session_id, agent_session_id)
+        if ancestors.is_empty() {
+            self.terminal_leases
+                .begin_turn(terminal_session_id, agent_session_id)
+        } else {
+            self.terminal_leases.begin_delegated_turn(
+                terminal_session_id,
+                agent_session_id,
+                ancestors,
+            )
+        }
     }
 
     pub(crate) fn set_terminal_lease_publisher(

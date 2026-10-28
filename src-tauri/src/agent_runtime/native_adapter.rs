@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use serde::Deserialize;
@@ -42,27 +43,50 @@ struct PreparedNativeCall {
 }
 
 pub(crate) struct NativeToolAdapter {
-    app: AppHandle,
+    services: NativeToolServices,
     engine: Arc<NativeToolEngine>,
     prepared: Mutex<HashMap<String, PreparedNativeCall>>,
 }
 
-impl NativeToolAdapter {
-    pub(crate) fn new(app: AppHandle, engine: Arc<NativeToolEngine>) -> Self {
-        Self {
-            app,
-            engine,
-            prepared: Mutex::new(HashMap::new()),
-        }
-    }
+pub(crate) struct NativeToolServices {
+    pub(crate) sessions: SessionManager,
+    pub(crate) database: Database,
+    pub(crate) credentials: CredentialManager,
+    pub(crate) known_hosts_path: PathBuf,
+    pub(crate) data_root: PathBuf,
+}
 
-    fn configure(&self, runtime: &NativeToolEngine) -> Result<(), String> {
-        let home = self
-            .app
+impl NativeToolAdapter {
+    pub(crate) fn new(app: AppHandle, engine: Arc<NativeToolEngine>) -> Result<Self, String> {
+        let home = app
             .path()
             .home_dir()
             .map_err(|error| format!("failed to resolve ShellSpan home directory: {error}"))?;
-        runtime.configure_checkpoint_root(crate::shellspan_data_dir(&home))?;
+        Self::from_services(
+            NativeToolServices {
+                sessions: app.state::<SessionManager>().inner().clone(),
+                database: app.state::<Database>().inner().clone(),
+                credentials: app.state::<CredentialManager>().inner().clone(),
+                known_hosts_path: crate::known_hosts::known_hosts_path(&app)?,
+                data_root: crate::shellspan_data_dir(&home),
+            },
+            engine,
+        )
+    }
+
+    pub(crate) fn from_services(
+        services: NativeToolServices,
+        engine: Arc<NativeToolEngine>,
+    ) -> Result<Self, String> {
+        engine.configure_checkpoint_root(services.data_root.clone())?;
+        Ok(Self {
+            services,
+            engine,
+            prepared: Mutex::new(HashMap::new()),
+        })
+    }
+
+    fn configure(&self, runtime: &NativeToolEngine) -> Result<(), String> {
         runtime.reconcile_remote_visible_rollout()?;
         Ok(())
     }
@@ -153,15 +177,11 @@ impl NativeToolRuntime for NativeToolAdapter {
         if request.target.kind == "local" {
             return super::file_references::read_local(request);
         }
-        let known_hosts = match crate::known_hosts::known_hosts_path(&self.app) {
-            Ok(p) => p,
-            Err(_) => return super::file_references::FileReferenceList::failed("Unavailable"),
-        };
         list_remote_file_references(
             request,
-            &self.app.state::<Database>(),
-            &self.app.state::<CredentialManager>(),
-            &known_hosts,
+            &self.services.database,
+            &self.services.credentials,
+            &self.services.known_hosts_path,
         )
     }
 
@@ -172,29 +192,21 @@ impl NativeToolRuntime for NativeToolAdapter {
         if request.target.kind == "local" {
             return super::skill_runtime::read_local(request);
         }
-        let known_hosts = match crate::known_hosts::known_hosts_path(&self.app) {
-            Ok(p) => p,
-            Err(_) => {
-                return super::skill_runtime::SkillReadResult::unavailable(
-                    "known hosts unavailable",
-                )
-            }
-        };
         read_remote_skills(
             request,
-            &self.app.state::<Database>(),
-            &self.app.state::<CredentialManager>(),
-            &known_hosts,
+            &self.services.database,
+            &self.services.credentials,
+            &self.services.known_hosts_path,
         )
     }
 
     fn prepare(&self, request: NativeToolRequest) -> Result<NativeToolPreparation, String> {
         let runtime = &self.engine;
-        let sessions = self.app.state::<SessionManager>();
-        let database = self.app.state::<Database>();
-        let credentials = self.app.state::<CredentialManager>();
+        let sessions = &self.services.sessions;
+        let database = &self.services.database;
+        let credentials = &self.services.credentials;
         self.configure(runtime)?;
-        let known_hosts_path = crate::known_hosts::known_hosts_path(&self.app)?;
+        let known_hosts_path = &self.services.known_hosts_path;
         let owner_target = target_native(&request.target)?;
         let target = process_target_for_model_call(&request.model_call, &owner_target)?
             .unwrap_or_else(|| owner_target.clone());
@@ -458,11 +470,11 @@ impl NativeToolRuntime for NativeToolAdapter {
             return Ok(cancelled_result(&stored));
         }
         let runtime = &self.engine;
-        let sessions = self.app.state::<SessionManager>();
-        let database = self.app.state::<Database>();
-        let credentials = self.app.state::<CredentialManager>();
+        let sessions = &self.services.sessions;
+        let database = &self.services.database;
+        let credentials = &self.services.credentials;
         self.configure(runtime)?;
-        let known_hosts_path = crate::known_hosts::known_hosts_path(&self.app)?;
+        let known_hosts_path = &self.services.known_hosts_path;
         match stored.authorization {
             PreparedAuthorization::Tool(prepared) => {
                 let native_request_id = prepared.call.request_id.clone();
@@ -617,8 +629,7 @@ impl NativeToolRuntime for NativeToolAdapter {
 
     fn cancel_task(&self, task_id: &str) -> Result<(), String> {
         let runtime = &self.engine;
-        let sessions = self.app.state::<SessionManager>();
-        runtime.cancel_task(task_id, &sessions)
+        runtime.cancel_task(task_id, &self.services.sessions)
     }
 }
 

@@ -56,6 +56,35 @@ Shell syntax must match the target executor. No fallback to live-terminal input
 occurs if Direct execution is unavailable. Native process handles, timeout,
 cancellation, output capture, secret redaction and exit status apply as before.
 
+Local Direct stdin uses Tokio's asynchronous child-pipe interface. Partial writes retain
+their exact byte offset, and a full pipe never prevents the process worker from
+observing cancellation or its execution deadline. Each stdin request has a
+five-second write deadline; an incomplete write reports the accepted byte count
+and terminates the local process tree before settling as failed. This also
+unblocks any Windows pipe write already accepted by Tokio's I/O pool. The write
+is never silently retried. A task cancellation retains any process handle still
+reported as running and returns an error instead of
+discarding that handle.
+
+Approval dispatch revalidates file preconditions and native policy. A failed
+pre-dispatch check durably cancels the approval and its tool result, without a
+dispatch marker or file change, then continues the remaining ordered queue.
+If recording that outcome fails, the original pending decision remains
+retryable. A dispatched call is never restored as an unexecuted approval.
+
+In bound-terminal sessions, a child inherits the same execution surface and
+permission mode. Turn admission accepts descendants verified against the
+committed Session lineage and the identical frozen terminal target. The original
+turn owner remains reserved while a descendant uses the terminal; unrelated
+Agents and user input remain excluded. Each command lease still belongs to one
+specific Agent, task and operation. Finishing a child turn only removes its
+delegation. User takeover of a descendant's command revokes the entire active
+turn's admission, including its parent and other delegated descendants, until
+their turns end. No delegation silently switches to Direct execution.
+The terminal UI's interruption request for a taken-over child is routed to its
+verified owning root, stopping the entire delegation. Without a takeover marker,
+human interruption continues to require a root Session.
+
 For effect inspection, tree-sitter-bash recognizes literal linear command chains
 joined by newline, `;`, `&&`, `||` or `|`. Each command is classified and the
 strongest effect wins. Inspection never rewrites or separately executes commands.
