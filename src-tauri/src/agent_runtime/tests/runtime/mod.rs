@@ -1618,11 +1618,7 @@ async fn tool_calls_commit_a_typed_waiting_boundary_without_execution() {
         ModelMessage::User { content }
             if content.contains("Current ShellSpan runtime context")
     )));
-    assert!(request.messages.iter().any(|message| matches!(
-        message,
-        ModelMessage::User { content }
-            if content.contains("command result is recorded")
-    )));
+    assert!(request.system_prompt.contains("command result is recorded"));
     assert!(events.iter().all(|event| !matches!(
         &event.payload,
         AgentSessionEventPayload::ToolCall { call }

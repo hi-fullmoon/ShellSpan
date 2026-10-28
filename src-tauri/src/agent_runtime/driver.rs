@@ -741,6 +741,7 @@ async fn apply_pre_step_hooks(
             tools.terminal_interactive_tools_enabled(snapshot.header.target.as_ref()),
         ),
     );
+    scope_current_task_context(sessions, &snapshot, &mut assembly)?;
     tools.sync_terminal_execution_context(&snapshot.header, &mut assembly)?;
     append_current_task_plan_context(sessions, &snapshot, turn_id, &mut assembly.system_prompt)?;
     let mut request = ModelRequest::from_surface(
@@ -1034,6 +1035,7 @@ async fn run_step(
                     tools.terminal_interactive_tools_enabled(snapshot.header.target.as_ref()),
                 ),
             );
+            scope_current_task_context(sessions, &snapshot, &mut assembly)?;
             tools.sync_terminal_execution_context(&snapshot.header, &mut assembly)?;
             append_current_task_plan_context(
                 sessions,
@@ -1776,6 +1778,18 @@ async fn run_step(
             }
         }
     }
+}
+
+fn scope_current_task_context(
+    sessions: &AgentSessionStore,
+    snapshot: &super::AgentSessionSnapshot,
+    assembly: &mut super::ModelInputAssembly,
+) -> Result<(), String> {
+    let task = sessions.read_events(&snapshot.header.session_id, |events| {
+        super::prompt::current_task_context(&snapshot.header, events)
+    })?;
+    super::prompt::set_current_task_context(assembly, &task);
+    Ok(())
 }
 
 fn is_assembled_context_source(source: &super::AgentMessageSource) -> bool {

@@ -25,7 +25,21 @@ impl ModelRequest {
     ) -> Self {
         system_prompt.push_str("\nHistorical tool arguments with historicalInput are non-executable privacy receipts: the original input was not saved. Only historical content was omitted; new tool input is passed unchanged. Never copy these receipts or legacy omission markers into tool calls. An ephemeralInputUnavailable rejection happens before execution, not in the shell. Read current terminal/process state and reconstruct the intended command from the task; if the original input is required and unavailable, report that limitation instead of guessing. Do not repeat rejected input; a second rejection in the same turn pauses the task for user input.");
         let mut messages = Vec::with_capacity(surface.messages.len());
-        for message in &surface.messages {
+        let latest_task_context = surface.messages.iter().rposition(|message| {
+            matches!(
+                message, AgentSurfaceMessage::User { source, .. }
+                    if source.producer_id == "shellspan.agent-instructions.v1"
+            )
+        });
+        for (index, message) in surface.messages.iter().enumerate() {
+            if Some(index) != latest_task_context
+                && matches!(
+                    message, AgentSurfaceMessage::User { source, .. }
+                        if source.producer_id == "shellspan.agent-instructions.v1"
+                )
+            {
+                continue;
+            }
             match message {
                 AgentSurfaceMessage::UserImages {
                     content, images, ..

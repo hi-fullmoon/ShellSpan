@@ -43,6 +43,147 @@
     }
 
     #[test]
+    fn semantic_claims_cannot_restore_an_old_one_time_goal() {
+        let (_root, sessions, _) = configured_session();
+        let mut header = sessions.snapshot("session").unwrap().header;
+        header.goal = "现在只回复“收到”。".into();
+        header.success_criteria = vec![header.goal.clone()];
+        let input = |seq, turn: &str, content: &str| {
+            event(
+                seq,
+                Some(turn),
+                Some("step"),
+                AgentSessionEventPayload::UserMessage {
+                    message: AgentInboxMessage {
+                        message_id: format!("message-{seq}"),
+                        client_submission_id: None,
+                        content: content.into(),
+                        source: AgentMessageSource::user(),
+                        images: Vec::new(),
+                        terminal_context: None,
+                    },
+                },
+            )
+        };
+        let events = vec![
+            input(0, "ack", &header.goal),
+            input(1, "review", "完成跨模块只读审查并输出带文件行号的结论。"),
+        ];
+        // The current request can be outside the compressed prefix.
+        let checkpoint = structured_checkpoint(&header, &events, 0, 0);
+        let summary = serde_json::json!({
+            "latestUserConstraints": [header.goal],
+            "completedWork": ["None recorded"],
+            "unfinishedWork": ["None recorded"],
+            "keyDecisionsAndReasons": ["None recorded"],
+            "relatedFilesSymbolsCommands": ["None recorded"],
+            "todosAndBlockers": ["None recorded"],
+            "nextSteps": ["None recorded"],
+        });
+        let merged = SemanticSummary::parse(&summary.to_string())
+            .unwrap()
+            .merge(&checkpoint);
+        assert_eq!(merged.goal, "完成跨模块只读审查并输出带文件行号的结论。");
+        assert!(merged.success_criteria.is_empty());
+        assert_eq!(
+            merged.latest_user_constraints,
+            checkpoint.latest_user_constraints
+        );
+        assert!(!merged
+            .latest_user_constraints
+            .iter()
+            .any(|line| line.contains("现在只回复")));
+        assert_eq!(merged.historical_user_constraints, vec![header.goal]);
+    }
+
+    #[test]
+    #[ignore = "requires a real read-only session ledger in SHELLSPAN_CURRENT_TASK_AUDIT_LOG"]
+    fn historical_current_task_audit() {
+        let path = std::env::var("SHELLSPAN_CURRENT_TASK_AUDIT_LOG").unwrap();
+        let events = std::fs::read_to_string(path)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<AgentSessionEvent>(line).unwrap())
+            .collect::<Vec<_>>();
+        let (_root, sessions, _) = configured_session();
+        let mut header = sessions.snapshot("session").unwrap().header;
+        if let AgentSessionEventPayload::SessionCreated {
+            goal,
+            success_criteria,
+            parent_session_id,
+            ..
+        } = &events[0].payload
+        {
+            header.goal = goal.clone();
+            header.success_criteria = success_criteria.clone();
+            header.parent_session_id = parent_session_id.clone();
+        } else {
+            panic!("ledger must start with session/created");
+        }
+        // Audit the screenshot's review turn even if the live session has since
+        // received a continuation or another user request.
+        let review = events.iter().find(|event| matches!(&event.payload,
+            AgentSessionEventPayload::UserMessage { message }
+                if message.source.kind == AgentMessageSourceKind::User && message.content.contains("完成一次跨模块"))).unwrap();
+        let end = events.iter().position(|event| event.seq > review.seq && matches!(&event.payload,
+            AgentSessionEventPayload::UserMessage { message }
+                if message.source.kind == AgentMessageSourceKind::User && event.turn_id != review.turn_id)).unwrap_or(events.len());
+        let events = &events[..end];
+        let task = super::super::prompt::current_task_context(&header, events);
+        assert!(header.goal.contains("现在只回复"));
+        assert!(task.goal.contains("完成一次跨模块"));
+        assert!(task.success_criteria.is_empty());
+        assert!(!task
+            .requests
+            .iter()
+            .any(|request| request.contains("现在只回复")));
+        let mut audited = 0;
+        for event in events {
+            if let AgentSessionEventPayload::CompactionSummary {
+                replaced_through_seq,
+                surface_generation,
+                ..
+            } = event.payload
+            {
+                let checkpoint = structured_checkpoint(
+                    &header,
+                    &events[..event.seq as usize],
+                    replaced_through_seq,
+                    surface_generation - 1,
+                );
+                assert_eq!(checkpoint.goal, task.goal);
+                assert!(checkpoint.success_criteria.is_empty());
+                assert!(!checkpoint
+                    .latest_user_constraints
+                    .iter()
+                    .any(|request| request.contains("现在只回复")));
+                // A syntactically valid semantic result carrying the old observed
+                // instruction cannot overwrite canonical current user input.
+                let semantic = SemanticSummary {
+                    latest_user_constraints: vec![header.goal.clone()],
+                    completed_work: checkpoint.completed_work.clone(),
+                    unfinished_work: checkpoint.unfinished_work.clone(),
+                    key_decisions_and_reasons: checkpoint.key_decisions_and_reasons.clone(),
+                    related_files_symbols_commands: Vec::new(),
+                    todos_and_blockers: Vec::new(),
+                    next_steps: Vec::new(),
+                }
+                .merge(&checkpoint);
+                assert_eq!(
+                    semantic.latest_user_constraints,
+                    checkpoint.latest_user_constraints
+                );
+                assert_eq!(semantic.goal, checkpoint.goal);
+                audited += 1;
+            }
+        }
+        assert!(
+            audited > 1,
+            "the real ledger must exercise repeated compaction"
+        );
+    }
+
+    #[test]
     fn summary_reasoning_does_not_consume_json_budget_and_both_remain_bounded() {
         use super::super::{ModelStreamSink, StreamDelta};
         let source = include_str!("../compaction.rs");
@@ -1709,7 +1850,7 @@
         assert_eq!(snapshot.surface.generation, 2);
         assert!(serde_json::to_string(&snapshot.surface)
             .unwrap()
-            .contains("Read-only revoked; edits authorized"));
+            .contains("USER REVOKES read-only; please edit now"));
     }
     #[tokio::test]
     async fn semantic_invalid_empty_failed_and_over_budget_outputs_use_explicit_bounded_fallback() {
@@ -1977,7 +2118,7 @@
         assert_eq!(snapshot.surface.generation, 1);
         assert!(serde_json::to_string(&snapshot.surface)
             .unwrap()
-            .contains("Read-only revoked; edits authorized"));
+            .contains("USER REVOKES read-only; edit now"));
     }
     #[tokio::test]
     async fn semantic_true_budget_exhaustion_preserves_surface_and_records_failed_provenance() {

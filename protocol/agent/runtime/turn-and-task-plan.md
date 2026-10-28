@@ -2,6 +2,14 @@
 
 Status: implemented runtime contract.
 
+## Current task and historical instructions
+
+Every newly assembled request derives its current task from committed user input in the latest turn containing such input. Steering messages in that turn remain ordered with the original request. A recovery turn without fresh user task input retains the preceding task. Child Sessions also accept delegated input identified by their recorded parent; sibling reports, runtime messages, skill/plugin output and summaries cannot define a new task.
+
+Session creation `goal` and `successCriteria` describe the initial task. Creation criteria are not injected as standing instructions for subsequent user turns, nor are inherited parent criteria treated as a child's delegated task criteria. Earlier one-time response instructions remain historical; applicable preferences and explicit continuations can still use the conversation and retained evidence. This scope follows committed input provenance and turn identities, without guessing task boundaries from keywords.
+
+The current task snapshot is independently included in the system context before budget estimation and request freezing. A scope receipt using `shellspan.agent-instructions.v1` supersedes previous task injections without duplicating the full input in model history. Model history includes only the latest injection from that producer; original human messages and all audit events remain intact. Transport retries reuse their frozen input. Restart and compaction rebuild the snapshot from the durable log, rather than trusting a previous summary's claim about the current request.
+
 ## Turn limits
 
 Primary Agent turns have a 128-step default soft boundary in addition to cancellation, session token and active-time budgets, model-stream deadlines, request retry policy, and the no-progress detector. Reaching the boundary records `stepBudgetReached`, closes the open step and turn, and returns the Session to idle without a terminal failure. The conversation renders the reason explicitly and offers a continuation action; queued user input may also start a fresh turn against the same durable Session.

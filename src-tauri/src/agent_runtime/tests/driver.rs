@@ -2,6 +2,7 @@
     include!("driver_stream.rs");
     include!("task_token_budget.rs");
     include!("task_plan_context.rs");
+    include!("task_context.rs");
 
     #[test]
     fn diagnostic_transport_metadata_does_not_reset_progress_but_evidence_does() {
