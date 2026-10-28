@@ -1445,7 +1445,7 @@ export default {
   'settings.ai.contextWindow': '上下文容量（tokens）',
   'settings.ai.maxOutput': '模型最大输出能力（tokens）',
   'settings.ai.requestOutput': '请求输出预算（tokens）',
-  'settings.ai.requestOutputDescription': '决定单次请求的输出上限及上下文预留，包含服务商计入输出的推理用量。旧配置保留原限制；可按任务需要调低，例如 16384。',
+  'settings.ai.requestOutputDescription': '决定单次请求的输出上限及上下文预留，包含服务商计入输出的推理用量。未单独设置时，取 16384、模型输出能力和上下文容量的八分之一中的最小值；明确设置的预算保持不变。',
   'settings.ai.toolSupport': '工具调用',
   'settings.ai.imageSupport': '图片输入',
   'settings.ai.imageCount': '请求图片数上限',

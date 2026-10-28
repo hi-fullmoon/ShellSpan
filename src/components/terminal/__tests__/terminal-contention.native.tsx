@@ -220,6 +220,17 @@ async function verify() {
         });
         created.push(id);
       }
+      useTerminalTaskNavigation.getState().setRequest({ workspace: 'terminal', agentSessionId: ids[0], terminalSessionId: terminalId });
+      await eventually(() => useTerminalTaskNavigation.getState().displayedSessionByWorkspace.terminal === ids[0],
+        'The production Terminal controller must publish its loaded conversation');
+      flushSync(() => useAiPanelStore.getState().setOpen(false, 'terminal'));
+      assert(useTerminalTaskNavigation.getState().displayedSessionByWorkspace.terminal === null,
+        'Closing the panel must clear the displayed conversation');
+      flushSync(() => { useFocusStore.getState().enter(); useFocusStore.getState().setTarget(terminalId!); });
+      useTerminalTaskNavigation.getState().setRequest({ workspace: 'focus', agentSessionId: ids[1], terminalSessionId: terminalId });
+      await eventually(() => useTerminalTaskNavigation.getState().displayedSessionByWorkspace.focus === ids[1],
+        'The production Focus controller must publish its own loaded conversation');
+      flushSync(() => { useFocusStore.getState().leave(); useAiPanelStore.getState().setOpen(true, 'terminal'); });
       const other = await invokeCreateLocalSession(100, 25);
       otherTerminalId = other.sessionId;
       flushSync(() => useTerminalStore.getState().addSession(other));
@@ -405,6 +416,9 @@ async function verify() {
     taskButton.click();
     await eventually(() => workspaceRoot(false)?.dataset.sessionId === ids[0], 'View task did not open the actual owning conversation');
     assert(!useFocusStore.getState().enabled, 'Terminal task entry must open the Terminal workspace');
+    await eventually(() => !Array.from(document.querySelectorAll('[data-testid="agent-terminal-lease-bar"] button'))
+      .some(button => button.textContent === t('terminal.occupancy.viewTask')),
+    'The task entry must disappear once its owning conversation is displayed');
     await eventually(async () => {
       assert(!failure, failure ?? 'Model failed');
       return completed.get(ids[0]) === 1 && output.includes(markerA) && await invokeGetAgentTerminalOwner(terminalId!) === null;

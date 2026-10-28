@@ -21,7 +21,7 @@ export interface VisionBudget {
 export interface ModelDefinition {
   displayName?: string;
   contextWindow: number; maxOutputTokens: number;
-  /** Missing in saved legacy declarations: retain maxOutputTokens as the request limit. */
+  /** Omission uses the independent request allowance; explicit values are preserved. */
   requestOutputTokens?: number;
   toolCalling: Support; textInput: Support; imageInput: Support;
   reasoning: { id: string; displayName: string; wireValue?: unknown }[];
@@ -33,6 +33,11 @@ export interface DiscoveredModel {
   contextWindow?: number;
   maxOutputTokens?: number;
   definition?: ModelDefinition;
+}
+
+/** Mirrors the backend capacity policy without changing the model declaration. */
+export function requestOutputTokenBudget(model: Pick<ModelDefinition, 'contextWindow' | 'maxOutputTokens' | 'requestOutputTokens'>): number {
+  return model.requestOutputTokens ?? Math.min(model.maxOutputTokens, 16_384, Math.max(1, Math.floor(model.contextWindow / 8)));
 }
 export interface ResolvedModel extends ModelDefinition {
   catalogVersion: number; routeId: string; providerId: string; profile: ProviderProfileId;

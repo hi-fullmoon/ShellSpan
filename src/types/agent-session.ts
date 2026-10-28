@@ -6,6 +6,12 @@ export interface AgentRequestBudget {
   readonly usableInputTokens: number;
   readonly compactionThresholdTokens: number;
   readonly compactionTargetTokens: number;
+  readonly inputMeasurement?: {
+    readonly identity: string;
+    readonly heuristicTokens: number;
+    readonly usageAdjustmentTokens: number;
+    readonly anchorRequestId?: string;
+  };
 }
 
 export type AgentRequestSnapshot = {
@@ -1083,7 +1089,7 @@ export interface AgentActivityProjection {
   readonly status: AgentSessionRuntimeStatus;
   readonly statusReason?: string;
   readonly turns: readonly AgentActivityTurn[];
-  /** `null` means a new turn started without an unfinished plan to retain. */
+  /** `null` means the previous plan was retired by a new submission or turn. */
   readonly plan?: Readonly<{
     version: number;
     steps: readonly AgentSessionPlanStep[];

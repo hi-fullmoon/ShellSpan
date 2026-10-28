@@ -23,6 +23,7 @@ mod prompt;
 pub(crate) mod provider;
 mod recovery;
 mod registry;
+mod request_budget;
 mod request_log;
 mod retry;
 mod runtime;

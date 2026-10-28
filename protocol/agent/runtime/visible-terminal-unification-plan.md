@@ -157,12 +157,14 @@ HTTP 调查未盲目重跑完整门禁，而是在同一个隔离 Docker fixture
 `commandLine` 是审批冻结的完整原始源码，8192 UTF-8字节上限不变。Bash 的 `submittedCommandLine` 另行记录实际 accepted line，使用固定结构：
 
 ```bash
-__shellspan_validate_native Q && { __shellspan_return_status "$__shellspan_native_status"; builtin eval -- "$__shellspan_native_source"; }
+(exit "$?"); builtin eval -- Q
 ```
 
 `Q` 由现有成熟 `shlex::try_quote` 将原始源码编码成一个 Shell 参数，解码后逐字节一致；物理换行保留，没有将脚本拼成单行，也不按行分别提交。该结构完整包含源码，真实Readline回显会显示它；没有把源码换成不可查看的内部变量 stub。原始源码的审批、参数记录与 effect 判断继续生效，固定结构只提供校验和当前Shell顶层求值，不增加模型控制的其他语句。后端在任何输入前独立重算并核对该结构，注册原始源码和实际 accepted line；Shell的S事件必须逐字匹配实际 accepted line，不以原始源码冒充实际提交值。工具结果保留两者。Zsh/PowerShell没有该结构，S事件仍匹配原始完整缓冲区。
 
 原生 eval 在当前交互Shell顶层运行，保持 cwd、env、已有 alias/function 和选项；不在验证函数作用域内执行源码，不使用子Shell或临时脚本。Bash交互多行缓冲在Ctrl-C后可能继续后面的物理行；这里的原生 eval 提供单一可中断求值单元。`$?` 在求值前恢复，后续命令可继续使用脚本产生的状态。`LINENO`、`BASH_SOURCE`、诊断和Shell历史反映原生eval/可见提交结构，不承诺与逐条交互提交的行号/调用上下文相同。`return`、`exit`、`set`遵循实际Shell顶层脚本语义；会退出Shell或自行改变中断处理的脚本仍受合作式生命周期边界约束。
+
+Bash Agent 的普通短命令也使用同一引用封装，使 `!important` 等字面量不经过 Readline 的历史展开，避免在命令开始前报错并跳过生命周期回调。短命令继续使用普通输入路径，包括 Bash 3.2；完整脚本接收器、后台作业和已有能力门禁保持各自约束。封装由后端独立重算并逐字核对；原始源码、实际提交行与退出状态分别记录，不修改用户的 `histexpand` 选项或手动输入行为。
 
 ZLE按原生完整缓冲区解析后执行，所以在同一缓冲区新定义再调用的alias会按Zsh自身语义返回127；alias状态仍保留，并在下一缓冲区调用成功。Bash源码按当前Shell原生eval语义处理；本阶段没有把这些Shell语言差异改写成统一的虚构行为。
 

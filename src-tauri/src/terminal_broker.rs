@@ -2783,12 +2783,14 @@ impl TerminalSessionBroker {
             if let Some(prepared) = &prepared_job {
                 validate_prepared_shell_job(record, prepared, operation_id)?;
             }
-            if !record.native_input
-                || (!job_matches
-                    && (record.integration_shell != Some(TerminalShellKind::Bash)
-                        || submitted
-                            != crate::terminal_integration::bash_native_submission(command_line)?))
-            {
+            let bash_source_matches = record.integration_shell == Some(TerminalShellKind::Bash)
+                && submitted == crate::terminal_integration::bash_native_submission(command_line)?
+                && (record.native_input
+                    || (command_line.len() <= 512 && !command_line.contains(['\n', '\r', '\t'])));
+            // A short Bash eval submission uses ordinary Readline typing and
+            // does not require the complete-script receiver (notably Bash 3).
+            // Prepared background jobs still require their native capability.
+            if (job_matches && !record.native_input) || (!job_matches && !bash_source_matches) {
                 return Err("TERMINAL_NATIVE_SUBMISSION_MISMATCH".into());
             }
         }

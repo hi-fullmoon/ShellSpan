@@ -7,6 +7,17 @@ use super::{ModelMessage, ModelRequest};
 const COMPACTION_THRESHOLD_PERCENT: u64 = 85;
 const COMPACTION_TARGET_PERCENT: u64 = 60;
 
+/// Size-only evidence tying an estimate to a request's routed model configuration.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct InputTokenMeasurement {
+    pub(crate) identity: String,
+    pub(crate) heuristic_tokens: u64,
+    pub(crate) usage_adjustment_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) anchor_request_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ModelSurfaceBudget {
@@ -23,6 +34,8 @@ pub(crate) struct ModelSurfaceBudget {
     pub(crate) estimated_input_tokens: u64,
     pub(crate) estimated_input_bytes: u64,
     pub(crate) maximum_input_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) input_measurement: Option<InputTokenMeasurement>,
     #[serde(skip)]
     pub(crate) tool_message_sizes: std::collections::BTreeMap<String, Vec<(u64, u64)>>,
     #[serde(skip)]
@@ -133,6 +146,7 @@ pub(crate) fn estimate_model_surface_budget(
         estimated_input_tokens,
         estimated_input_bytes,
         maximum_input_bytes: usable_input_tokens.saturating_mul(4),
+        input_measurement: None,
         tool_message_sizes: request.messages.iter().fold(
             std::collections::BTreeMap::<String, Vec<(u64, u64)>>::new(),
             |mut sizes, message| {

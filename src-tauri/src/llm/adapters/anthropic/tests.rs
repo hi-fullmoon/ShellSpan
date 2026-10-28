@@ -239,7 +239,7 @@
         assert!(!headers.to_ascii_lowercase().contains("authorization:"));
         let body: Value = serde_json::from_str(body).unwrap();
         assert_eq!(body["system"], "system");
-        assert_eq!(body["max_tokens"], 128000);
+        assert_eq!(body["max_tokens"], 16384);
         assert_eq!(body["thinking"]["type"], "adaptive");
         assert_eq!(body["output_config"]["effort"], "high");
         assert_eq!(

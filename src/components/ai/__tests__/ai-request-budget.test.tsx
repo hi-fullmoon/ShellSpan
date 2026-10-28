@@ -80,5 +80,5 @@ it('saves a smaller context without reducing model output capacity', () => {
   expect(validateProviderModels([{ ...draft, requestOutputTokens: 60_800 }]))
     .toEqual({ kind: 'invalidBudget', index: 0 });
   expect(validateProviderModels([{ ...draft, requestOutputTokens: undefined }]))
-    .toEqual({ kind: 'invalidBudget', index: 0 });
+    .toBeUndefined();
 });

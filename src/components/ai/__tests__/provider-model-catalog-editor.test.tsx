@@ -136,17 +136,17 @@ describe('ProviderModelCatalogEditor', () => {
     expect(validateProviderModels([{ id: 'same' }, { id: 'same' }]))
       .toEqual({ kind: 'duplicateId', index: 1 });
     expect(validateProviderModels([{
-      id: 'MiniMax-M3', contextWindow: 128_000, maxOutputTokens: 128_000,
+      id: 'MiniMax-M3', contextWindow: 128_000, maxOutputTokens: 128_000, requestOutputTokens: 128_000,
     }])).toEqual({ kind: 'invalidBudget', index: 0 });
     expect(validateProviderModels([{
-      id: 'MiniMax-M3', contextWindow: 128_000, maxOutputTokens: 121_600,
+      id: 'MiniMax-M3', contextWindow: 128_000, maxOutputTokens: 121_600, requestOutputTokens: 121_600,
     }])).toEqual({ kind: 'invalidBudget', index: 0 });
     expect(validateProviderModels([{
       id: 'MiniMax-M3', contextWindow: 128_000, maxOutputTokens: 8_192,
     }])).toBeUndefined();
     expect(validateProviderModels([{
       id: 'bad-capacity',
-      definition: { ...definition, maxOutputTokens: definition.contextWindow + 1 },
+      definition: { ...definition, maxOutputTokens: definition.contextWindow + 1, requestOutputTokens: definition.contextWindow + 1 },
     }])).toEqual({ kind: 'invalidBudget', index: 0 });
     expect(validateProviderModels([{
       id: 'bad-vision-budget',

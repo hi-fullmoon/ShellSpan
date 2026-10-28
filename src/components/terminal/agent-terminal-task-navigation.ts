@@ -14,7 +14,18 @@ export interface TerminalTaskRequest {
 export const useTerminalTaskNavigation = create<{
   request: TerminalTaskRequest | null;
   setRequest: (request: TerminalTaskRequest | null) => void;
-}>(set => ({ request: null, setRequest: request => set({ request }) }));
+  displayedSessionByWorkspace: Record<TerminalTaskRequest['workspace'], string | null>;
+  setDisplayedSession: (workspace: TerminalTaskRequest['workspace'], sessionId: string | null) => void;
+}>(set => ({
+  request: null,
+  setRequest: request => set({ request }),
+  displayedSessionByWorkspace: { terminal: null, focus: null },
+  setDisplayedSession: (workspace, sessionId) => set(state => (
+    state.displayedSessionByWorkspace[workspace] === sessionId ? state : {
+      displayedSessionByWorkspace: { ...state.displayedSessionByWorkspace, [workspace]: sessionId },
+    }
+  )),
+}));
 
 export function terminalTaskWorkspace(lease: AgentTerminalLeaseView): 'terminal' | 'focus' {
   return lease.workspace ?? (lease.agentSessionId.startsWith('focus-agent-') ? 'focus' : 'terminal');

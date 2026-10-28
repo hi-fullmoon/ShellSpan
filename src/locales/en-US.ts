@@ -1447,7 +1447,7 @@ export default {
   'settings.ai.contextWindow': 'Context window (tokens)',
   'settings.ai.maxOutput': 'Model output capacity (tokens)',
   'settings.ai.requestOutput': 'Request output budget (tokens)',
-  'settings.ai.requestOutputDescription': 'Sets the per-request output limit and context reserve, including reasoning counted as output by the provider. Existing configurations retain their limit; reduce it for your task, for example to 16384.',
+  'settings.ai.requestOutputDescription': 'Sets the per-request output limit and context reserve, including reasoning counted as output by the provider. When unset, uses the minimum of 16384, model output capacity and one eighth of the context window. Explicit budgets are preserved.',
   'settings.ai.toolSupport': 'Tool calling',
   'settings.ai.imageSupport': 'Image input',
   'settings.ai.imageCount': 'Maximum request images',

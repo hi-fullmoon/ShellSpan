@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { modelDefinitionOf, type ResolvedModel } from '../provider-contract';
+import { modelDefinitionOf, requestOutputTokenBudget, type ResolvedModel } from '../provider-contract';
 import models from '../../../../protocol/llm/fixtures/resolved-models.json';
 
 const minimax = models.find(entry => entry.provider.model === 'MiniMax-M3')!.resolved as ResolvedModel;
@@ -26,4 +26,16 @@ it('preserves the absence of a request override in legacy definitions', () => {
   const definition = modelDefinitionOf(minimax);
   expect(definition).not.toHaveProperty('requestOutputTokens');
   expect(definition.maxOutputTokens).toBe(minimax.maxOutputTokens);
+  expect(requestOutputTokenBudget(definition)).toBe(16_384);
+});
+
+it.each([
+  [16_000, 131_072, 2_000],
+  [64_000, 131_072, 8_000],
+  [200_000, 131_072, 16_384],
+  [1_000_000, 131_072, 16_384],
+  [200_000, 4_096, 4_096],
+])('reserves an independent default for a %i context and %i output capacity', (contextWindow, maxOutputTokens, expected) => {
+  expect(requestOutputTokenBudget({ contextWindow, maxOutputTokens })).toBe(expected);
+  expect(requestOutputTokenBudget({ contextWindow, maxOutputTokens, requestOutputTokens: maxOutputTokens })).toBe(maxOutputTokens);
 });

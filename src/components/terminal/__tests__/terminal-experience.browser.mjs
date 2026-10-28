@@ -5,7 +5,7 @@ import { userInfo, hostname } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
-import { webkit } from 'playwright';
+import { chromium, webkit } from 'playwright';
 
 // Exercise real xterm parsing, searching, scrolling, browser clipboard failures
 // and the production React components. Terminal text comes from the repository.
@@ -40,6 +40,8 @@ const server = await createServer({
         export { TerminalCarousel } from '/src/components/terminal/terminal-carousel.tsx';
         export { default as TerminalWorkspace } from '/src/components/terminal/index.tsx';
         export { agentTerminalLeaseState } from '/src/components/terminal/agent-terminal-lease-state.ts';
+        export { useTerminalTaskNavigation } from '/src/components/terminal/agent-terminal-task-navigation.ts';
+        export { useAiPanelStore } from '/src/stores/aiPanelStore.ts';
         export { createAgentTerminalLeaseCoordinator } from '/src/components/terminal/terminal-controller-layer.tsx';
         export { FitAddon } from '@xterm/addon-fit';
         export { resolveTerminalTheme, terminalRegistry } from '/src/components/terminal/registry/terminal-registry.ts';
@@ -70,7 +72,9 @@ const server = await createServer({
 let browser;
 try {
   await server.listen();
-  browser = await webkit.launch();
+  browser = process.env.SHELLSPAN_BROWSER_CHANNEL
+    ? await chromium.launch({ channel: process.env.SHELLSPAN_BROWSER_CHANNEL })
+    : await webkit.launch();
   const page = await browser.newPage();
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -659,6 +663,47 @@ try {
           `Icon-only badge must be horizontally centered at ${locale} ${width}px: ${JSON.stringify(alignment)}`);
       }
       await bar.screenshot({ path: `/tmp/shellspan-terminal-lease-${locale}-${width}.png` });
+      const taskButton = bar.getByRole('button', { name: locale === 'zh-CN' ? '查看任务' : 'View task', exact: true });
+      assert.equal(await taskButton.count(), 1, 'A hidden task must retain its navigation entry');
+      await page.evaluate(() => {
+        const { useTerminalTaskNavigation, useAiPanelStore, useFocusStore, useAppStore, agentTerminalLeaseState } = window.runtime;
+        useAppStore.setState({ activeSection: 'terminal' });
+        useFocusStore.setState({ enabled: false });
+        useAiPanelStore.getState().setOpen(true, 'terminal');
+        useTerminalTaskNavigation.getState().setDisplayedSession('terminal', agentTerminalLeaseState.get(window.identity.sessionId).agentSessionId);
+      });
+      await taskButton.waitFor({ state: 'detached' });
+      assert.equal(await bar.getByRole('button').count(), 1, 'The displayed task must only retain takeover');
+      await bar.screenshot({ path: `/tmp/shellspan-terminal-task-visible-${locale}-${width}.png` });
+      await page.evaluate(() => window.runtime.useAiPanelStore.getState().setOpen(false, 'terminal'));
+      await taskButton.waitFor();
+      await page.evaluate(() => {
+        window.runtime.useAiPanelStore.getState().setOpen(true, 'terminal');
+        window.runtime.useTerminalTaskNavigation.getState().setDisplayedSession('terminal', null);
+      });
+      await taskButton.waitFor();
+      await page.evaluate(() => {
+        window.runtime.useFocusStore.setState({ enabled: true });
+        window.runtime.useTerminalTaskNavigation.getState().setDisplayedSession('focus',
+          window.runtime.agentTerminalLeaseState.get(window.identity.sessionId).agentSessionId);
+      });
+      await page.evaluate(() => new Promise(requestAnimationFrame));
+      assert.equal(await taskButton.count(), 1, 'A task in another workspace must retain its navigation entry');
+      await page.evaluate(() => {
+        const { agentTerminalLeaseState, useAiPanelStore } = window.runtime;
+        const lease = agentTerminalLeaseState.get(window.identity.sessionId);
+        agentTerminalLeaseState.update(lease.sessionId, lease.operationId, current => ({ ...current, workspace: 'focus' }));
+        useAiPanelStore.getState().setOpen(false, 'terminal');
+      });
+      await taskButton.waitFor({ state: 'detached' });
+      await page.evaluate(() => {
+        const { agentTerminalLeaseState, useFocusStore, useTerminalTaskNavigation } = window.runtime;
+        const lease = agentTerminalLeaseState.get(window.identity.sessionId);
+        agentTerminalLeaseState.update(lease.sessionId, lease.operationId, current => ({ ...current, workspace: 'terminal' }));
+        useFocusStore.setState({ enabled: false });
+        useTerminalTaskNavigation.getState().setDisplayedSession('focus', null);
+      });
+      await taskButton.waitFor();
     }
   }
   await page.getByTestId('agent-terminal-lease-bar').getByRole('button', { name: '停止并接管', exact: true }).click();

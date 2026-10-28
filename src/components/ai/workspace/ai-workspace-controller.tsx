@@ -1,4 +1,6 @@
+import { useLayoutEffect } from 'react';
 import type { AppSection } from '@/types';
+import { useTerminalTaskNavigation } from '@/components/terminal/agent-terminal-task-navigation';
 import { latestTerminalBusyAttempt } from '@/lib/ai/terminal-busy-feedback';
 import { terminalExecutionRecovery } from '@/lib/ai/terminal-execution-recovery';
 import { useResolvedModel } from '@/lib/ai/provider-contract';
@@ -37,6 +39,14 @@ export function AiWorkspaceController({
   onClose,
 }: AiWorkspaceControllerProps): React.ReactNode {
   const controller = useAiSessionController({ scope, adapter, focusMode });
+  const displayedSessionId = controller.view?.summary.id ?? null;
+  useLayoutEffect(() => {
+    if (scope !== 'terminal') return;
+    const workspace = focusMode ? 'focus' : 'terminal';
+    const { setDisplayedSession } = useTerminalTaskNavigation.getState();
+    setDisplayedSession(workspace, displayedSessionId);
+    return () => setDisplayedSession(workspace, null);
+  }, [scope, focusMode, displayedSessionId]);
   const modelResolution = useResolvedModel(controller.selectedProvider);
   const sessionModel = controller.view?.snapshot.value.header.modelSelection;
   // Display the current route capacity even when its revision has changed and

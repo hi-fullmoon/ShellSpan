@@ -16,6 +16,8 @@ pub(crate) struct AgentRequestBudget {
     pub(crate) usable_input_tokens: u64,
     pub(crate) compaction_threshold_tokens: u64,
     pub(crate) compaction_target_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) input_measurement: Option<super::InputTokenMeasurement>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]

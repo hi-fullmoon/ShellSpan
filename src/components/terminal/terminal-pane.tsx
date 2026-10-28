@@ -16,7 +16,9 @@ import { TerminalSearch } from './terminal-search';
 import { TerminalResizeIndicator } from './terminal-resize-indicator';
 import { TerminalPastePreview } from './terminal-paste-preview';
 import { TerminalContentMenu } from './terminal-content-menu';
-import { openTerminalTask, terminalTaskWorkspace } from './agent-terminal-task-navigation';
+import { openTerminalTask, terminalTaskWorkspace, useTerminalTaskNavigation } from './agent-terminal-task-navigation';
+import { useAiPanelStore } from '@/stores/aiPanelStore';
+import { useFocusStore } from '@/stores/focusStore';
 import { eventMatchesShortcut } from '@/lib/shortcuts';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import type { ShortcutBindings } from '@/types';
@@ -51,6 +53,15 @@ const AgentTerminalLeaseBar: React.FC<{
 }> = ({ lease }) => {
   const { t } = useI18n();
   const { error: showError } = useToast();
+  const focusEnabled = useFocusStore(state => state.enabled);
+  const panelOpen = useAiPanelStore(state => state.panelOpenBySection.terminal);
+  const activeSection = useAppStore(state => state.activeSection);
+  const workspace = focusEnabled ? 'focus' : 'terminal';
+  const displayedSessionId = useTerminalTaskNavigation(state => state.displayedSessionByWorkspace[workspace]);
+  const taskVisible = activeSection === 'terminal'
+    && (focusEnabled || panelOpen)
+    && terminalTaskWorkspace(lease) === workspace
+    && displayedSessionId === lease.agentSessionId;
   const shownFailureOperationRef = useRef<string | null>(null);
   useEffect(() => {
     if (!lease.takeoverFailed) {
@@ -115,9 +126,9 @@ const AgentTerminalLeaseBar: React.FC<{
         >
           {t(terminalTaskWorkspace(lease) === 'focus' ? 'terminal.occupancy.focus' : 'terminal.occupancy.terminal')} · {activityLabel}
         </span>
-        <Button variant="ghost" size="xs" className="shrink-0" onClick={() => {
+        {!taskVisible && <Button variant="ghost" size="xs" className="shrink-0" onClick={() => {
           if (!openTerminalTask(lease)) showError(t('terminal.occupancy.navigationBlocked'));
-        }}>{t('terminal.occupancy.viewTask')}</Button>
+        }}>{t('terminal.occupancy.viewTask')}</Button>}
         <Button
           type="button"
           variant="outline"

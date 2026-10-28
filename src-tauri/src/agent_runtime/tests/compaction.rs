@@ -37,6 +37,7 @@
             estimated_input_tokens: 13_200,
             estimated_input_bytes: 52_800,
             maximum_input_bytes: 57_344,
+            input_measurement: None,
             tool_message_sizes: Default::default(),
             assistant_message_sizes: Default::default(),
         }

@@ -90,6 +90,8 @@ The latest plan remains visible after `turn/end`. The UI derives an `inProgress`
 
 Each newly assembled model request also includes the latest committed nonempty plan as JSON in its system context, before token-budget estimation and request freezing. This snapshot survives history compaction and does not itself change plan ownership. For a retained plan, the model is instructed to adopt the complete list through `update_plan` before using further task tools when the latest user request continues that work; unrelated questions leave it paused. Current-turn guidance requires immediate evidence-based updates and a `blocked` status with details before asking for a user decision. This is model guidance, not automatic status inference or a guarantee of model compliance. Retry attempts retain the frozen request, and the existing current-turn-only completion check is unchanged.
 
+When no nonempty plan exists, including after explicit clearing or retirement of a completed plan at the next turn, the same system context explicitly reports that absence. A new submission must include `id`, `title` and `status` for every step; historical plans and compaction summaries cannot supply omitted titles. This notice does not recreate a plan or authorize repeating completed work.
+
 ## Runtime projections and stream persistence
 
 Session token usage, active duration, turn count and current-turn step count advance with committed events and rebuild from the durable log on startup. Snapshot projections are cached for an unchanged record; event commits and archive changes invalidate the cache. Driver queries borrow events under the store lock rather than cloning the full history; current-turn checks start at the recorded turn offset.

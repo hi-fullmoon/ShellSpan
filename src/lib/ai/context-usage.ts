@@ -47,11 +47,12 @@ export function projectContextUsage(events: readonly AgentSessionEvent[]): AiCon
         ? { systemTokens, toolsTokens, messageTokens } : undefined;
     } else if (event.type === 'request/usage') {
       const requestSeq = requests.get(event.data.requestId);
-      const { uncachedInputTokens, cacheReadTokens } = event.data.usage;
+      const { uncachedInputTokens, cacheReadTokens, cacheWriteTokens } = event.data.usage;
       if (requestSeq === undefined || requestSeq > event.seq
         || requestSeq < (reported?.requestSeq ?? -1)
-        || !validCount(uncachedInputTokens) || !validCount(cacheReadTokens)) continue;
-      const tokens = uncachedInputTokens + cacheReadTokens;
+        || !validCount(uncachedInputTokens) || !validCount(cacheReadTokens)
+        || (cacheWriteTokens !== undefined && !validCount(cacheWriteTokens))) continue;
+      const tokens = uncachedInputTokens + cacheReadTokens + (cacheWriteTokens ?? 0);
       if (!Number.isFinite(tokens)) continue;
       reported = { requestSeq, tokens };
     }

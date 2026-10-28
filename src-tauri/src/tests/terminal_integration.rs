@@ -1091,6 +1091,19 @@
                     .push((Instant::now(), input));
             }
         });
+        if shell == TerminalShellKind::Bash && !checkpoint_failure {
+            verify_bash_agent_literal_source(
+                broker,
+                &registry,
+                &sessions,
+                &leases,
+                transport_id,
+                writer,
+                &reduced_motion,
+            );
+            writes.lock().unwrap().clear();
+            phases.lock().unwrap().clear();
+        }
         if broker.interactive_tools_enabled().unwrap() {
             verify_native_pager_recovery(
                 broker,
@@ -2449,7 +2462,11 @@
                                         .unwrap_or(input.as_str())
                                 })
                                 .collect::<String>()
-                                != command
+                                != if shell == TerminalShellKind::Bash {
+                                    bash_native_submission(&command).unwrap()
+                                } else {
+                                    command.clone()
+                                }
                         } else {
                             inputs.len() < 3
                         }
@@ -2541,7 +2558,10 @@
                             .iter()
                             .map(|(_, input)| input.as_str())
                             .collect::<String>(),
-                        command
+                        snapshot
+                            .submitted_command_line
+                            .as_deref()
+                            .unwrap_or(&command)
                     );
                     assert!(
                         inputs.iter().all(|(_, input)| !input.contains('\u{1b}')),
@@ -2589,6 +2609,100 @@
         }
         sessions.remove(transport_id).unwrap();
         worker.join().unwrap();
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn verify_bash_agent_literal_source(
+        broker: &crate::terminal_broker::TerminalSessionBroker,
+        registry: &crate::agent_runtime::TerminalExecuteRegistry,
+        sessions: &crate::models::SessionManager,
+        leases: &crate::agent_runtime::TerminalLeaseManager,
+        transport_id: &str,
+        writer: &std::sync::Arc<std::sync::Mutex<Box<dyn std::io::Write + Send>>>,
+        reduced_motion: &std::sync::atomic::AtomicBool,
+    ) {
+        use crate::terminal_broker::TerminalCommandState;
+
+        let shell = TerminalShellKind::Bash;
+        assert_eq!(
+            execute_visible(broker, writer, transport_id, shell, "set -H").exit_code,
+            Some(0)
+        );
+        let output = tempfile::tempdir().unwrap();
+        let file = output.path().join("history-literal");
+        let source = format!(
+            "printf '%s\\n' \"!shellspan_missing_history_857bc4\" >> {}",
+            shell_single_quote(file.to_str().unwrap())
+        );
+        assert!(source.len() < 512);
+        for (index, motion) in [false, true].into_iter().enumerate() {
+            reduced_motion.store(motion, Ordering::SeqCst);
+            let id = format!("bash-history-literal-{index}");
+            let operation = registry
+                .start(
+                    sessions,
+                    transport_id,
+                    "literal-agent",
+                    "literal-task",
+                    &id,
+                    &source,
+                    shell.enter(),
+                )
+                .unwrap();
+            let result = registry
+                .wait(sessions, transport_id, &operation, Duration::from_secs(3))
+                .unwrap();
+            assert_eq!(result.state, TerminalCommandState::Completed, "{result:?}");
+            assert_eq!(result.exit_code, Some(0), "{result:?}");
+            assert_eq!(result.command_line, source);
+            assert_eq!(
+                result.submitted_command_line,
+                Some(bash_native_submission(&source).unwrap())
+            );
+            wait_for_prompt(broker, transport_id);
+            leases.release_turn("literal-agent").unwrap();
+            assert_eq!(
+                fs::read_to_string(&file).unwrap(),
+                "!shellspan_missing_history_857bc4\n".repeat(index + 1),
+                "the approved source must execute once without history expansion"
+            );
+        }
+        for (index, (command, expected_status)) in
+            [("false", 1), ("printf 'previous-status:%s\\n' \"$?\"", 0)]
+                .into_iter()
+                .enumerate()
+        {
+            let operation = registry
+                .start(
+                    sessions,
+                    transport_id,
+                    "literal-agent",
+                    "literal-task",
+                    &format!("bash-command-error-{index}"),
+                    command,
+                    shell.enter(),
+                )
+                .unwrap();
+            let result = registry
+                .wait(sessions, transport_id, &operation, Duration::from_secs(3))
+                .unwrap();
+            assert_eq!(result.state, TerminalCommandState::Completed, "{result:?}");
+            assert_eq!(result.exit_code, Some(expected_status), "{result:?}");
+            if index == 1 {
+                assert!(
+                    result.combined_output.contains("previous-status:1"),
+                    "{result:?}"
+                );
+            }
+            wait_for_prompt(broker, transport_id);
+            leases.release_turn("literal-agent").unwrap();
+        }
+        assert_eq!(
+            execute_visible(broker, writer, transport_id, shell, "[[ -o histexpand ]]").exit_code,
+            Some(0),
+            "Agent submission must preserve the user's history expansion option"
+        );
+        reduced_motion.store(false, Ordering::SeqCst);
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]

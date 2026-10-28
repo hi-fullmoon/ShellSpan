@@ -173,9 +173,14 @@ fn request_output_budget_preserves_user_context_and_model_capacity() {
         }],
         tools: vec![],
     };
-    let legacy = crate::agent_runtime::estimate_model_surface_budget(&config, &request).unwrap();
-    assert_eq!(legacy.output_reserve_tokens, 131_072);
-    assert_eq!(legacy.compaction_threshold_tokens, 50_088);
+    let automatic = crate::agent_runtime::estimate_model_surface_budget(&config, &request).unwrap();
+    assert_eq!(automatic.output_reserve_tokens, 16_384);
+    assert_eq!(automatic.compaction_threshold_tokens, 147_573);
+    definition.request_output_tokens = Some(131_072);
+    config.model_definition = Some(definition.clone());
+    let explicit = crate::agent_runtime::estimate_model_surface_budget(&config, &request).unwrap();
+    assert_eq!(explicit.output_reserve_tokens, 131_072);
+    assert_eq!(explicit.compaction_threshold_tokens, 50_088);
     definition.request_output_tokens = Some(16_384);
     config.model_definition = Some(definition.clone());
     let model = resolve(&config).unwrap();
@@ -342,6 +347,39 @@ fn request_budgets_follow_each_user_capacity_and_output_allowance() {
 }
 
 #[test]
+fn automatic_request_output_budgets_scale_without_changing_model_capacity() {
+    let mut config = provider("MiniMax-M3");
+    config.profile = "minimax".into();
+    let original = resolve(&config).unwrap().definition;
+    for (context, capacity, expected) in [
+        (16_000, 131_072, 2_000),
+        (64_000, 131_072, 8_000),
+        (200_000, 131_072, 16_384),
+        (1_000_000, 131_072, 16_384),
+        (200_000, 4_096, 4_096),
+    ] {
+        let mut definition = original.clone();
+        definition.context_window = context;
+        definition.max_output_tokens = capacity;
+        config.model_definition = Some(definition);
+        let resolved = resolve(&config).unwrap();
+        assert_eq!(resolved.output_token_budget(), expected);
+        assert_eq!(resolved.max_output_tokens, capacity);
+        assert_eq!(resolved.context_window, context);
+        for (kind, pointer) in [
+            (AiProviderKind::OpenAi, "/max_output_tokens"),
+            (AiProviderKind::OpenAiCompatible, "/max_tokens"),
+            (AiProviderKind::AnthropicMessages, "/max_tokens"),
+            (AiProviderKind::Ollama, "/options/num_predict"),
+        ] {
+            let mut body = json!({});
+            apply_output_token_limit(&mut body, kind, resolved.output_token_budget());
+            assert_eq!(body.pointer(pointer).unwrap(), expected);
+        }
+    }
+}
+
+#[test]
 fn minimax_capacity_override_must_leave_a_usable_input_budget() {
     let mut config = provider("MiniMax-M3");
     config.profile = "minimax".into();
@@ -356,6 +394,7 @@ fn minimax_capacity_override_must_leave_a_usable_input_budget() {
     };
     for output in [128_000, 121_600, 121_599] {
         definition.max_output_tokens = output;
+        definition.request_output_tokens = Some(output);
         config.model_definition = Some(definition.clone());
         // Capability resolution stays available so saved settings remain editable.
         assert_eq!(resolve(&config).unwrap().max_output_tokens, output);
@@ -366,6 +405,7 @@ fn minimax_capacity_override_must_leave_a_usable_input_budget() {
         );
     }
     definition.max_output_tokens = 8_192;
+    definition.request_output_tokens = None;
     config.model_definition = Some(definition);
     let model = resolve(&config).unwrap();
     assert_eq!(
@@ -387,7 +427,7 @@ fn smaller_context_requires_a_fitting_request_budget_without_changing_model_capa
         messages: vec![],
         tools: vec![],
     };
-    for output in [None, Some(60_800)] {
+    for output in [Some(131_072), Some(60_800)] {
         definition.request_output_tokens = output;
         config.model_definition = Some(definition.clone());
         assert_eq!(resolve(&config).unwrap().max_output_tokens, 131_072);
@@ -469,6 +509,7 @@ fn budgets_use_exact_same_output_context_and_per_model_image_estimate() {
     let mut p = provider("qwen3-vl-plus");
     let mut definition = resolve(&p).unwrap().definition;
     definition.max_output_tokens = 64000;
+    definition.request_output_tokens = Some(64000);
     definition
         .vision
         .as_mut()

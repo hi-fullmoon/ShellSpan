@@ -22,7 +22,7 @@ Add the exact wire model ID as a key under `presets.<provider>.models`. Every en
 - `displayName` is optional presentation text; selectors fall back to the exact wire model ID when it is absent.
 - `contextWindow`: combined input and output capacity.
 - `maxOutputTokens`: declared model output capacity. It remains independent of a user-configured `contextWindow` and is never clamped when that window is reduced. Built-in catalog entries still describe capacities within the model's published context window.
-- Custom definitions may also set `requestOutputTokens`: the actual per-request output limit, a positive integer no larger than `maxOutputTokens`. Admission reserves this value and every adapter sends it. Omission preserves the legacy `maxOutputTokens` limit. The provider editor exposes these as separate fields without changing the user's context capacity.
+- Custom definitions may also set `requestOutputTokens`: the actual per-request output limit, a positive integer no larger than `maxOutputTokens`. Admission reserves this value and every adapter sends it. Omission, including in older definitions, uses `min(maxOutputTokens, 16384, max(1, floor(contextWindow / 8)))`. Explicit request limits remain unchanged. The provider editor displays the effective allowance separately without changing the user's context or model output capacity.
 - `toolCalling`, `textInput`, and `imageInput`: explicit `supported`, `unsupported`, or `unknown` states. Unknown tool support allows tools to be sent to the provider; only explicit `unsupported` blocks tool calling locally. Text and image input still require explicit support.
 - `reasoning`: selectable reasoning levels in display order. Each item has a stable `id`, a `displayName`, and an optional provider-specific string `wireValue`. A missing `wireValue` sends the `id`; explicit `null` offers the selector value without sending a reasoning parameter. Use an empty list for a non-reasoning model.
 
@@ -97,7 +97,7 @@ and [OpenRouter reasoning details](https://openrouter.ai/docs/guides/best-practi
 
 The exact API ID is `MiniMax-M3.1-Flash` (case-sensitive). It supports a
 1,000,000-token context, text/image input and tool calls. The catalog keeps the
-official recommended 131,072-token output budget; the provider hard ceiling is
+131,072-token model output capacity declaration; the provider hard ceiling is
 524,288 tokens, including reasoning. Video input is supported by the provider
 but is not advertised by ShellSpan's image-only attachment contract.
 

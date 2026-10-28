@@ -133,7 +133,7 @@ pub(crate) struct ModelDefinition {
     pub display_name: Option<String>,
     pub context_window: u64,
     pub max_output_tokens: u64,
-    /// Per-request output allowance. Missing values preserve saved legacy limits.
+    /// Explicit per-request output allowance; omission uses the capacity policy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_output_tokens: Option<u64>,
     pub tool_calling: Support,
@@ -147,7 +147,11 @@ pub(crate) struct ModelDefinition {
 
 impl ModelDefinition {
     pub(crate) fn output_token_budget(&self) -> u64 {
-        self.request_output_tokens.unwrap_or(self.max_output_tokens)
+        self.request_output_tokens.unwrap_or_else(|| {
+            self.max_output_tokens
+                .min(16_384)
+                .min((self.context_window / 8).max(1))
+        })
     }
 }
 

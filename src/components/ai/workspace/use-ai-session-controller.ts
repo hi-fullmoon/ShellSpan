@@ -20,7 +20,7 @@ import { initialSessionIntent } from '@/lib/ai/session-intent';
 import { belongsToAiWorkspace, isTopLevelAiSession, listAllAiSessions } from '@/lib/ai/session-list';
 import type { AiProviderConfig } from '@/types/ai';
 import { requireVision } from '@/lib/ai/vision-contract';
-import { loadResolvedModel } from '@/lib/ai/provider-contract';
+import { loadResolvedModel, requestOutputTokenBudget } from '@/lib/ai/provider-contract';
 import { resolveAiSubmission } from '@/lib/ai/submission-policy';
 import {
   createAiComposerState,
@@ -401,7 +401,7 @@ export function useAiSessionController({
     // text, leaving room for the task, tools, and existing conversation.
     const modelInputTokens = model.modelDefinition
       ? model.modelDefinition.contextWindow
-        - (model.modelDefinition.requestOutputTokens ?? model.modelDefinition.maxOutputTokens)
+        - requestOutputTokenBudget(model.modelDefinition)
       : 8_192;
     const maxBytes = Math.min(
       MAX_AGENT_TERMINAL_SNAPSHOT_BYTES,

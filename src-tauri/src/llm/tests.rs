@@ -1825,7 +1825,7 @@ async fn every_profile_proxy_request_stream_usage_and_history_fixture() {
             AiProviderKind::Ollama => &body["options"]["num_predict"],
             AiProviderKind::AnthropicMessages => unreachable!("chat profile fixture"),
         };
-        assert_eq!(wire_output, &json!(16384), "{profile}");
+        assert_eq!(wire_output, &json!(4096), "{profile}");
         server.join().unwrap();
         for (key, expected) in fixture["reasoningBody"].as_object().unwrap() {
             assert_eq!(&body[key], expected, "{profile} {key}");

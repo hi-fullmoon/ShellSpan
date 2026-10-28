@@ -177,9 +177,11 @@ fn task_plan_context_survives_interruption_and_replay_until_committed_adoption()
 }
 
 #[test]
-fn task_plan_context_is_absent_without_steps_and_after_explicit_clear() {
+fn task_plan_context_reports_no_plan_without_steps_and_after_explicit_clear() {
     let (_root, sessions) = task_plan_context_store();
-    assert!(!task_plan_request_prompt(&sessions, "turn-1").contains("## Current task plan"));
+    let initial = task_plan_request_prompt(&sessions, "turn-1");
+    assert!(initial.contains("There is no current task plan"));
+    assert!(initial.contains("including id, title and status for every step"));
     sessions
         .append(
             "plan-context",
@@ -199,5 +201,52 @@ fn task_plan_context_is_absent_without_steps_and_after_explicit_clear() {
             },
         )
         .unwrap();
-    assert!(!task_plan_request_prompt(&sessions, "turn-1").contains("## Current task plan"));
+    let cleared = task_plan_request_prompt(&sessions, "turn-1");
+    assert!(cleared.contains("There is no current task plan"));
+    assert!(cleared.contains("Historical IDs cannot supply omitted titles"));
+}
+
+#[test]
+fn task_plan_context_reports_retired_completed_plan_after_next_turn_and_replay() {
+    let (root, sessions) = task_plan_context_store();
+    for payload in [
+        AgentSessionEventPayload::TurnStart,
+        AgentSessionEventPayload::TaskPlan {
+            version: 1,
+            steps: vec![super::super::AgentPlanStep {
+                id: "inspect".into(),
+                title: "Inspect the workspace".into(),
+                status: super::super::AgentPlanStepStatus::Completed,
+                detail: None,
+                evidence_refs: vec![],
+            }],
+        },
+        AgentSessionEventPayload::TurnEnd {
+            reason: "completed".into(),
+        },
+    ] {
+        sessions
+            .append("plan-context", Some("turn-1".into()), None, payload)
+            .unwrap();
+    }
+    assert!(task_plan_request_prompt(&sessions, "turn-1").contains("This turn owns the plan"));
+    sessions
+        .append(
+            "plan-context",
+            Some("turn-2".into()),
+            None,
+            AgentSessionEventPayload::TurnStart,
+        )
+        .unwrap();
+    let reopened = AgentSessionStore::default();
+    reopened.configure(root.path().to_path_buf()).unwrap();
+    let before = reopened.snapshot("plan-context").unwrap();
+    assert!(before.task.plan.is_none());
+    let prompt = task_plan_request_prompt(&reopened, "turn-2");
+    assert!(prompt.contains("There is no current task plan"));
+    assert!(prompt.contains("completed plan is retired when the next turn starts"));
+    assert!(prompt.contains("including id, title and status for every step"));
+    assert!(!prompt.contains("This turn owns the plan"));
+    assert!(!prompt.contains("\"id\":\"inspect\""));
+    assert_eq!(reopened.snapshot("plan-context").unwrap(), before);
 }

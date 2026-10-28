@@ -4,19 +4,21 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use uuid::Uuid;
 
+use super::request_budget::estimate_request_budget;
+
 use super::{
-    assemble_model_input, estimate_model_surface_budget, model_tools_with_terminal_interaction,
-    recorded_tool_call, AgentActiveScope, AgentAssistantContentBlock, AgentCompactionManager,
-    AgentEntry, AgentHookBus, AgentLifecyclePhase, AgentPreStepContext, AgentPreStepDecision,
-    AgentRequestReason, AgentScopedPayload, AgentSessionEventPayload, AgentSessionStatus,
-    AgentSessionStore, AgentStopReason, AgentTokenUsage, AgentToolCallDelta, AgentToolPipeline,
-    ModelContentBlock, ModelFinishReason, ModelMessage, ModelRequest, ModelResponse,
-    ModelStreamSink, NormalizedModelError, NormalizedModelErrorKind, RetryPlan, RetryPolicy,
-    StreamDelta, ToolPipelineSettlement, MAX_AGENT_STREAM_DELTA_BYTES,
+    assemble_model_input, model_tools_with_terminal_interaction, recorded_tool_call,
+    AgentActiveScope, AgentAssistantContentBlock, AgentCompactionManager, AgentEntry, AgentHookBus,
+    AgentLifecyclePhase, AgentPreStepContext, AgentPreStepDecision, AgentRequestReason,
+    AgentScopedPayload, AgentSessionEventPayload, AgentSessionStatus, AgentSessionStore,
+    AgentStopReason, AgentTokenUsage, AgentToolCallDelta, AgentToolPipeline, ModelContentBlock,
+    ModelFinishReason, ModelMessage, ModelRequest, ModelResponse, ModelStreamSink,
+    NormalizedModelError, NormalizedModelErrorKind, RetryPlan, RetryPolicy, StreamDelta,
+    ToolPipelineSettlement, MAX_AGENT_STREAM_DELTA_BYTES,
 };
 
 #[cfg(test)]
-use super::{AgentInboxLane, AgentInboxMessage, AgentMessageSource};
+use super::{estimate_model_surface_budget, AgentInboxLane, AgentInboxMessage, AgentMessageSource};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AgentDriverConfig {
@@ -791,14 +793,14 @@ async fn apply_pre_step_hooks(
             });
             messages
         }));
-    let raw_budget = estimate_model_surface_budget(&model.provider, &request)?;
+    let raw_budget = estimate_request_budget(sessions, &entry.session_id, &model, &request)?;
     if raw_budget.requires_compaction() {
         compactions.record_budget(&entry.session_id, turn_id, step_id, &request, &raw_budget)?;
     }
     let request = tools
         .bound_request_results(&entry.session_id, turn_id, step_id, request, raw_budget)
         .await?;
-    let budget = estimate_model_surface_budget(&model.provider, &request)?;
+    let budget = estimate_request_budget(sessions, &entry.session_id, &model, &request)?;
     if budget.requires_compaction() {
         compactions.record_budget(&entry.session_id, turn_id, step_id, &request, &budget)?;
     }
@@ -1134,7 +1136,8 @@ async fn run_step(
         };
         let request_surface_generation = request.surface_generation;
         if prepared_call.is_none() {
-            let raw_budget = estimate_model_surface_budget(&model.provider, &request)?;
+            let raw_budget =
+                estimate_request_budget(sessions, &entry.session_id, &model, &request)?;
             if raw_budget.requires_compaction() {
                 compactions.record_budget(
                     &entry.session_id,
@@ -1148,7 +1151,7 @@ async fn run_step(
                 .bound_request_results(&entry.session_id, turn_id, step_id, request, raw_budget)
                 .await?;
         }
-        let budget = estimate_model_surface_budget(&model.provider, &request)?;
+        let budget = estimate_request_budget(sessions, &entry.session_id, &model, &request)?;
         // Retries retain the same prepared request. Its input was already
         // admitted; compaction is only appropriate when assembling a new call.
         if budget.requires_compaction() && prepared_call.is_none() {
@@ -1210,7 +1213,7 @@ async fn run_step(
             .as_ref()
             .expect("prepared call")
             .request(request_id.clone());
-        let budget = estimate_model_surface_budget(&model.provider, &request)?;
+        let budget = estimate_request_budget(sessions, &entry.session_id, &model, &request)?;
         if !budget.fits_hard_limit() {
             compactions.record_budget(&entry.session_id, turn_id, step_id, &request, &budget)?;
             let recovery = compact_prepared_budget(
@@ -1322,6 +1325,7 @@ async fn run_step(
                     usable_input_tokens: budget.usable_input_tokens,
                     compaction_threshold_tokens: budget.compaction_threshold_tokens,
                     compaction_target_tokens: budget.compaction_target_tokens,
+                    input_measurement: budget.input_measurement.clone(),
                 }),
                 system_tokens: Some(budget.system_tokens),
                 tool_schema_tokens: Some(budget.tool_schema_tokens),
@@ -2650,7 +2654,9 @@ fn append_current_task_plan_context(
                         && matches!(event.payload, AgentSessionEventPayload::TaskPlan { .. })
                 })
             })?;
-        super::prompt::append_task_plan_context(system_prompt, plan, current_turn_owns_plan);
+        super::prompt::append_task_plan_context(system_prompt, Some(plan), current_turn_owns_plan);
+    } else {
+        super::prompt::append_task_plan_context(system_prompt, None, false);
     }
     Ok(())
 }

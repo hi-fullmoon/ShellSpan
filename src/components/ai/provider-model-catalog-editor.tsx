@@ -44,7 +44,7 @@ import {
 import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/hooks/useI18n';
 import { cn } from '@/lib/utils';
-import type { DiscoveredModel, ModelDefinition } from '@/lib/ai/provider-contract';
+import { requestOutputTokenBudget, type DiscoveredModel, type ModelDefinition } from '@/lib/ai/provider-contract';
 
 const MAX_DISCOVERY_SELECTION = 50;
 
@@ -55,6 +55,14 @@ export interface ProviderModelDraft {
   maxOutputTokens?: number;
   requestOutputTokens?: number;
   definition?: ModelDefinition;
+}
+
+function draftRequestOutputBudget(model: ProviderModelDraft): number | undefined {
+  const contextWindow = model.contextWindow ?? model.definition?.contextWindow;
+  const maxOutputTokens = model.maxOutputTokens ?? model.definition?.maxOutputTokens;
+  const requestOutputTokens = model.requestOutputTokens ?? model.definition?.requestOutputTokens;
+  return requestOutputTokens ?? (contextWindow !== undefined && maxOutputTokens !== undefined
+    ? requestOutputTokenBudget({ contextWindow, maxOutputTokens }) : undefined);
 }
 
 export type ModelCatalogFailure =
@@ -75,7 +83,7 @@ export function validateProviderModels(models: readonly ProviderModelDraft[]): M
     const definition = model.definition;
     const contextWindow = model.contextWindow ?? definition?.contextWindow;
     const maxOutputTokens = model.maxOutputTokens ?? definition?.maxOutputTokens;
-    const requestOutputTokens = model.requestOutputTokens ?? definition?.requestOutputTokens ?? maxOutputTokens;
+    const requestOutputTokens = draftRequestOutputBudget(model);
     if (
       (contextWindow !== undefined && (!Number.isSafeInteger(contextWindow) || contextWindow <= 0))
       || (maxOutputTokens !== undefined && (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens <= 0))
@@ -406,8 +414,7 @@ export const ProviderModelCatalogEditor: React.FC<ProviderModelCatalogEditorProp
                       min={1}
                       max={model.maxOutputTokens ?? model.definition?.maxOutputTokens}
                       step={1}
-                      value={model.requestOutputTokens ?? model.definition?.requestOutputTokens
-                        ?? model.maxOutputTokens ?? model.definition?.maxOutputTokens ?? ''}
+                      value={draftRequestOutputBudget(model) ?? ''}
                       aria-invalid={definitionInvalid || undefined}
                       disabled={disabled}
                       onChange={(event) => patchModel(index, {

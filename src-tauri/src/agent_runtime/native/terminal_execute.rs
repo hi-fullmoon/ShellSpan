@@ -220,7 +220,10 @@ impl TerminalExecuteRegistry {
                 && self.broker.has_active_shell_jobs(session_id)?);
         let submission = if let Some(line) = job_submission {
             Some(line.to_string())
-        } else if native_input && shell == TerminalShellKind::Bash {
+        } else if shell == TerminalShellKind::Bash {
+            // Programmatic commands are literal shell source, including short
+            // lines. Readline history expansion can reject an unquoted `!`
+            // before Bash runs any command or prompt lifecycle hooks.
             Some(crate::terminal_integration::bash_native_submission(
                 command,
             )?)
@@ -412,11 +415,11 @@ impl TerminalExecuteRegistry {
                 .broker
                 .bracketed_paste_enabled(session_id)
                 .unwrap_or(false);
-            let input = command;
+            let input = editor_input;
             let chunks = if native_input {
                 vec![command]
             } else {
-                typing_chunks(command, reduced_motion)
+                typing_chunks(input, reduced_motion)
             };
             let animated = !reduced_motion && chunks.len() > 1;
             if native_input {

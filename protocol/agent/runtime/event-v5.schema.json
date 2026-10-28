@@ -115,7 +115,18 @@
                   "safetyTokens": { "type": "integer", "minimum": 1 },
                   "usableInputTokens": { "type": "integer", "minimum": 1 },
                   "compactionThresholdTokens": { "type": "integer", "minimum": 1 },
-                  "compactionTargetTokens": { "type": "integer", "minimum": 1 }
+                  "compactionTargetTokens": { "type": "integer", "minimum": 1 },
+                  "inputMeasurement": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["identity", "heuristicTokens", "usageAdjustmentTokens"],
+                    "properties": {
+                      "identity": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                      "heuristicTokens": { "type": "integer", "minimum": 0 },
+                      "usageAdjustmentTokens": { "type": "integer", "minimum": 0 },
+                      "anchorRequestId": { "type": "string", "minLength": 1 }
+                    }
+                  }
                 }
               }
             }

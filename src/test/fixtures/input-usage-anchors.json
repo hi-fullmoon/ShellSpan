@@ -1,0 +1,19 @@
+{
+  "source": "Size-only accounting from two local production session ledgers, captured 2026-10-28. Context/usage seq pairs 17/74 and 17/29. No request bodies, identifiers or credentials.",
+  "samples": [
+    {
+      "contextSeq": 17,
+      "usageSeq": 74,
+      "context": { "inputTokens": 10621, "contextWindow": 512000, "systemTokens": 2162, "toolSchemaTokens": 6848, "messageTokens": 1611, "surfaceGeneration": 0 },
+      "usage": { "uncachedInputTokens": 10800, "cacheReadTokens": 183, "outputTokens": 603, "totalTokens": 11586 },
+      "finishReason": "toolCalls"
+    },
+    {
+      "contextSeq": 17,
+      "usageSeq": 29,
+      "context": { "inputTokens": 12280, "contextWindow": 200000, "systemTokens": 2180, "toolSchemaTokens": 7934, "messageTokens": 2166, "surfaceGeneration": 0 },
+      "usage": { "uncachedInputTokens": 12481, "cacheReadTokens": 183, "outputTokens": 617, "reasoningTokens": 0, "totalTokens": 13281 },
+      "finishReason": "toolCalls"
+    }
+  ]
+}

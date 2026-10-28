@@ -4601,9 +4601,37 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
                 return Err("request series boundary does not match its index".into());
             }
         }
-        Payload::RequestContext { request_id, .. } => {
+        Payload::RequestContext {
+            request_id,
+            request_budget,
+            input_tokens,
+            ..
+        } => {
             require_scope(event, true, true)?;
             validate_identifier(request_id, "requestId")?;
+            if let Some(measurement) = request_budget
+                .as_ref()
+                .and_then(|budget| budget.input_measurement.as_ref())
+            {
+                let total = measurement
+                    .heuristic_tokens
+                    .checked_add(measurement.usage_adjustment_tokens);
+                if measurement.identity.len() != 64
+                    || !measurement
+                        .identity
+                        .bytes()
+                        .all(|byte| byte.is_ascii_hexdigit())
+                    || total.is_none_or(|tokens| tokens > 9_007_199_254_740_991)
+                    || *input_tokens != total
+                    || (measurement.usage_adjustment_tokens > 0
+                        && measurement.anchor_request_id.is_none())
+                {
+                    return Err("request input measurement is invalid".into());
+                }
+                if let Some(anchor) = &measurement.anchor_request_id {
+                    validate_identifier(anchor, "anchorRequestId")?;
+                }
+            }
         }
         Payload::RequestRetry {
             request_id,

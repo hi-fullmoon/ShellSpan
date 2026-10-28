@@ -773,6 +773,17 @@ function createActivityProjection() {
         statusReason = event.data.reason;
         activeTurnId = undefined;
         break;
+      case 'agent/inbox/spliced':
+        // Retire settled, completed work as soon as a new user message is committed.
+        // Draft edits and rejected submissions do not produce this event.
+        if (!activeTurnId && event.data.operation === 'enqueued'
+          && event.data.lane === 'nextTurn'
+          && event.data.messages.some((message) => message.source.kind === 'user')
+          && plan?.steps.every((step) => step.status === 'completed')) {
+          plan = null;
+          planTurnId = undefined;
+        }
+        break;
       case 'turn/start': {
         // Keep unfinished work visible when an interrupted conversation continues.
         // Match the runtime: only retire a completed plan on a new turn.
