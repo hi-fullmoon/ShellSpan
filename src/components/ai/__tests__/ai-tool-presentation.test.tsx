@@ -417,13 +417,20 @@ describe('AI tool presentation', () => {
   });
 
   it.each(['read_file'])('separates the %s path and output copy actions', (name) => {
-    const { container, rerender } = render(<AiToolExpandedContent node={{ ...node, name }} compact />);
+    const input = { path: 'package.json' };
+    const output = readFileSync(input.path, 'utf8');
+    const { container, rerender } = render(<AiToolExpandedContent node={{ ...node, name, input, output }} compact />);
     const copy = screen.getByRole('button', { name: 'Copy output' });
     const inputCopy = screen.getByRole('button', { name: 'Copy input' });
     expect(container.querySelectorAll('.ai-tool-copy-button')).toHaveLength(2);
     expect(inputCopy).toHaveClass('static', 'shrink-0');
     expect(inputCopy.closest('.ai-tool-surface-header')).toHaveClass('px-3.5', 'py-2');
-    expect(copy.closest('.ai-tool-surface-header')).toBeInTheDocument();
+    expect(copy.closest('.ai-tool-surface-header')).not.toBeInTheDocument();
+    expect(copy.parentElement).toHaveAttribute('data-ai-copy-region');
+    expect(copy.parentElement).toHaveClass('relative');
+    expect(container.querySelectorAll('.ai-tool-surface-header')).toHaveLength(1);
+    expect(screen.queryByText('OUT', { exact: true })).not.toBeInTheDocument();
+    expect([...container.querySelectorAll('.ai-read-line > span:last-child')].map(line => line.textContent)).toEqual(output.split('\n').map(line => line || '\u00a0'));
     expect(copy.closest('[data-ai-copy-region]')).not.toBe(inputCopy.closest('[data-ai-copy-region]'));
     expect(screen.queryByRole('button', { name: 'Copy command' })).not.toBeInTheDocument();
 

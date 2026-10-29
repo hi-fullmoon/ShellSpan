@@ -45,7 +45,10 @@
     pointer-events: none;
   }
 
-  :is([data-ai-tool-view], .ai-markdown-code-block, .ai-approval-command, .ai-semantic-note-body, .ai-queue-notice-preview, .ai-detail-code-wrap, .ai-detail-section):hover :is(.ai-tool-copy-button, .ai-markdown-code-copy, .ai-detail-copy),
+  :is([data-ai-tool-view="search"], [data-ai-tool-view="web"], [data-ai-tool-view="diff"], [data-ai-tool-view="error"], .ai-markdown-code-block, .ai-approval-command, .ai-semantic-note-body, .ai-queue-notice-preview, .ai-detail-code-wrap, .ai-detail-section):hover :is(.ai-tool-copy-button, .ai-markdown-code-copy, .ai-detail-copy),
+  :is(.ai-io-section, [data-ai-terminal-output]):hover > .ai-tool-surface-header > .ai-tool-copy-button,
+  .ai-terminal-block:has(.ai-terminal-command-row:hover) > .ai-terminal-header > .ai-tool-copy-button,
+  .ai-tool-code-block:has(.ai-code-block-pre:hover) > .ai-tool-surface-header > .ai-tool-copy-button,
   [data-ai-copy-region]:hover > .ai-tool-copy-button,
   :is(.ai-tool-copy-button, .ai-markdown-code-copy, .ai-detail-copy):focus-visible {
     opacity: 1;

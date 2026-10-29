@@ -376,9 +376,9 @@ function ReadSurface({ node, showCopyActions }: { node: ToolNode; showCopyAction
   return (
     <div className="ai-read-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="read">
       <ToolSurfaceHeader title={label} copyText={showCopyActions ? inputText : undefined} copyLabel={t('ai.workspace.tool.copyInput')} />
-      <div className="min-w-0">
-        {showCopyActions && output && <ToolSurfaceHeader title={t('ai.workspace.tool.outputLabel')} copyText={output} copyLabel={t('ai.workspace.tool.copyOutput')} />}
-        <pre className="ai-read-lines m-0 max-h-65 max-w-full overflow-auto px-3.5 pt-1 pb-3 whitespace-pre" tabIndex={0}>
+      <div className="relative min-w-0" data-ai-copy-region>
+        {showCopyActions && output && <AiToolCopyButton text={output} label={t('ai.workspace.tool.copyOutput')} className="top-1 right-3.5" />}
+        <pre className="ai-read-lines m-0 max-h-65 max-w-full overflow-auto px-3.5 pt-1 pb-3 pr-12 whitespace-pre" tabIndex={0}>
           {lines.map((line, index) => (
             <span key={index} className="ai-read-line grid min-h-[18px] grid-cols-[34px_minmax(max-content,1fr)]">
               <span className="ai-read-line-number" aria-hidden="true">{index + 1}</span>

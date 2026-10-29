@@ -134,7 +134,7 @@ try {
         const details = surface.locator('..').locator('.ai-tool-inspect');
         assert.equal((await details.boundingBox()).x, (await surface.boundingBox()).x,
           `${theme}/${width}: details action must align with the card's left edge`);
-        const copy = surface.getByRole('button', { name: selector === '.ai-terminal-block' ? '复制命令' : '复制输出', exact: true });
+        const copy = surface.getByRole('button', { name: selector === '.ai-terminal-block' ? '复制命令' : '复制输入', exact: true });
         assert.equal(await copy.count(), 1);
         const command = surface.locator('.ai-terminal-command');
         if (await command.count() && await command.getAttribute('aria-expanded') !== 'true') {
@@ -160,7 +160,7 @@ try {
         const idleTitle = await titleGeometry();
         const idleHeader = await headerRow.boundingBox();
         await surface.screenshot({ path: join(screenshots, `${theme}-${width}-${selector.slice(1)}-idle.png`) });
-        await surface.hover();
+        await headerRow.hover();
         assert.equal(await copy.evaluate(element => getComputedStyle(element).opacity), '1');
         const header = await headerRow.boundingBox();
         const button = await copy.boundingBox();
@@ -184,7 +184,7 @@ try {
         }
         await copy.press('Enter');
         await page.waitForFunction(() => document.querySelector('button[aria-label="已复制"]'));
-        assert.equal(await page.evaluate(() => navigator.clipboard.readText()), selector === '.ai-terminal-block' ? commandText : fileOutput);
+        assert.equal(await page.evaluate(() => navigator.clipboard.readText()), selector === '.ai-terminal-block' ? commandText : path);
         await page.waitForFunction(() => !document.querySelector('button[aria-label="已复制"]'));
         if (selector === '.ai-terminal-block') {
           await command.click();
@@ -193,7 +193,7 @@ try {
           const collapsedTitle = await titleGeometry();
           const collapsedSurface = await surface.boundingBox();
           assert.ok((await command.boundingBox()).width > width / 2, 'Collapsed command must retain the transcript width');
-          await surface.hover();
+          await headerRow.hover();
           assert.deepEqual(await titleGeometry(), collapsedTitle);
           assert.equal((await surface.boundingBox()).height, collapsedSurface.height);
           const collapsedHeader = await headerRow.boundingBox();
@@ -220,7 +220,7 @@ try {
           font: style.font, color: style.color, labelRight: label.right, copyLeft: copy.left,
           right: box.right };
       }));
-      assert.ok(geometry.length >= 7, 'Shell, file, error and input/output headings must all be measured');
+      assert.ok(geometry.length >= 6, 'Shell, file, error and input/output headings must all be measured');
       for (const heading of geometry) {
         assert.equal(heading.height, geometry[0].height, 'All tool headings must have equal heights');
         assert.equal(heading.rightInset, geometry[0].rightInset, 'Copy actions must share the same right inset');
