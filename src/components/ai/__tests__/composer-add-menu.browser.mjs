@@ -18,11 +18,12 @@ server.middlewares.use('/__menu', async (_request, response) => {
 });
 try {
   await server.listen();
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ channel: 'chromium' });
   try {
-    for (const width of [380, 1000]) {
+    for (const { width, theme } of [380, 1000].flatMap(width => ['light', 'dark'].map(theme => ({ width, theme })))) {
       const page = await browser.newPage({ viewport: { width, height: 720 } });
       await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__menu`);
+      await page.evaluate(async theme => (await import('/src/lib/theme.ts')).applyTheme(theme), theme);
       await page.getByRole('button', { name: 'Switch mode' }).click();
       await page.getByRole('button', { name: 'Add file or folder' }).click();
       const menu = page.getByRole('menu');
@@ -31,40 +32,45 @@ try {
       const bounds = await menu.boundingBox();
       assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width + 1);
       assert.equal(await menu.locator('input').count(), 0);
-      assert.equal(await menu.evaluate(element => getComputedStyle(element).borderRadius), width <= 420 ? '14px' : '22px');
+      assert.equal(await menu.evaluate(element => getComputedStyle(element).borderRadius), '10px');
       const menuShadow = await menu.evaluate(element => getComputedStyle(element).boxShadow);
-      assert.match(menuShadow, /0px 0px 0px 0\.5px/);
       assert.ok(await menu.evaluate(element => element.classList.contains('text-muted-foreground')));
       const groupColor = await menu.locator('[data-slot="dropdown-menu-label"]').first().evaluate(element => getComputedStyle(element).color);
       assert.match(groupColor, /\/ 0\.7\)/);
-      await page.screenshot({ path: `/tmp/shellspan-muted-menu-${width}.png` });
+      await page.screenshot({ path: `/tmp/shellspan-muted-menu-${theme}-${width}.png` });
       await page.keyboard.press('Escape');
+      await menu.waitFor({ state: 'hidden' });
+      // Finish the menu's focus restoration before moving into the editor.
+      await page.waitForFunction(() => document.activeElement?.matches('.ai-composer-add'));
       const editor = page.getByRole('textbox');
       await editor.fill('@');
       const list = page.getByRole('listbox');
       await list.waitFor();
       const popup = page.locator('.ai-completion-popup');
       assert.equal(await list.locator('[role="group"] > p').first().evaluate(element => getComputedStyle(element).color), groupColor);
-      assert.equal(await popup.evaluate(element => getComputedStyle(element).borderRadius), width <= 420 ? '14px' : '22px');
+      assert.equal(await popup.evaluate(element => getComputedStyle(element).borderRadius), '10px');
       assert.equal(await popup.evaluate(element => getComputedStyle(element).borderTopWidth), '0px');
-      const questionSurface = await popup.evaluate(element => {
+      const menuSurface = await popup.evaluate(element => {
         const reference = document.createElement('div');
-        reference.className = 'ai-question-panel';
+        reference.className = 'ai-permission-menu';
         element.append(reference);
         const expected = getComputedStyle(reference).boxShadow;
+        const expectedBackground = getComputedStyle(reference).backgroundColor;
         const actual = getComputedStyle(element).boxShadow;
         reference.remove();
-        return { expected, actual };
+        return { expected, actual, background: getComputedStyle(element).backgroundColor,
+          expectedBackground };
       });
-      assert.notEqual(questionSurface.actual, 'none');
-      assert.equal(questionSurface.actual, questionSurface.expected);
-      assert.equal(menuShadow, questionSurface.expected);
+      assert.notEqual(menuSurface.actual, 'none');
+      assert.equal(menuSurface.actual, menuSurface.expected, 'Completion uses the shared menu shadow');
+      assert.equal(menuShadow, menuSurface.expected, 'Attachments use the shared menu shadow');
+      assert.equal(menuSurface.background, menuSurface.expectedBackground, 'Completion uses the shared menu background');
       assert.equal(await page.getByRole('option').first().evaluate(element => getComputedStyle(element).borderRadius), '8px');
       assert.equal(await popup.getByText('Keep typing to search · ↑↓ to choose · Enter to insert · Esc to close').count(), 0);
       const popupBounds = await popup.boundingBox();
       const listBounds = await list.boundingBox();
       assert.ok(Math.abs(listBounds.y + listBounds.height - popupBounds.y - popupBounds.height) <= 2);
-      await page.screenshot({ path: `/tmp/shellspan-mention-style-${width}.png` });
+      await page.screenshot({ path: `/tmp/shellspan-mention-style-${theme}-${width}.png` });
       await editor.fill('hello @network');
       await page.getByRole('option', { name: 'Diagnose DNS, ports, routing and connectivity' }).waitFor();
       assert.equal(await list.getByRole('group', { name: 'Add', exact: true }).count(), 0);
@@ -94,10 +100,10 @@ try {
       await viewport.evaluate(element => { element.scrollTop = element.scrollHeight; });
       assert.ok(await viewport.evaluate(element => element.scrollTop > 0));
       assert.deepEqual(await header.boundingBox(), headerBounds);
-      await page.screenshot({ path: `/tmp/shellspan-document-scroll-${width}.png` });
+      await page.screenshot({ path: `/tmp/shellspan-document-scroll-${theme}-${width}.png` });
       await page.keyboard.press('Escape');
-      console.log(`${width}px: muted menu, no search input, editor mention and keyboard selection passed`);
       await page.close();
     }
   } finally { await browser.close(); }
+  console.log('Composer menu surfaces, keyboard selection and preview scrolling passed in both themes at 380px/1000px.');
 } finally { await server.close(); }
