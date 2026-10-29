@@ -395,6 +395,7 @@ export type AgentSessionEvent =
       itemId: string;
       lane: AgentSessionInboxLane;
       content: string;
+      contentFingerprint?: string;
       previousRevision: number;
       clientOperationId: string;
     }>

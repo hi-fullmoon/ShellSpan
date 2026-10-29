@@ -120,12 +120,28 @@ function activityEventData(event: AgentSessionEvent): unknown {
   return 'data' in event ? event.data ?? null : null;
 }
 
+type MutableActivityNode = {
+  -readonly [Field in keyof AgentActivityNode]: AgentActivityNode[Field];
+} & {
+  eventTypes: string[];
+  eventSeqs: number[];
+  records: AgentActivityNode['records'][number][];
+};
+
+interface ActivityNodeState {
+  current: MutableActivityNode;
+  published?: AgentActivityNode;
+}
+
 function createActivityNodesProjection() {
-  const nodes: AgentActivityNode[] = [];
-  const indexByKey = new Map<string, number>();
+  const nodes: ActivityNodeState[] = [];
+  const nodesByKey = new Map<string, ActivityNodeState>();
   const currentRequestByStep = new Map<string, string>();
   const requestTurn = new Map<string, { readonly turnId: string | null; readonly stepId: string | null }>();
   const subagentKeys = new Map<string, string>();
+  let published: readonly AgentActivityNode[] = [];
+  let dirty = false;
+  let orderDirty = false;
   let taskKey: string | undefined;
   let activeCompactionKey: string | null = null;
   let latestTurnId: string | null = null;
@@ -142,10 +158,10 @@ function createActivityNodesProjection() {
     coordinates?: Readonly<{ turnId?: string | null; stepId?: string | null }>,
     preserveData = false,
   ): void => {
-    const index = indexByKey.get(key);
-    const previous = index === undefined ? undefined : nodes[index];
-    const node: AgentActivityNode = previous === undefined
-      ? {
+    let state = nodesByKey.get(key);
+    if (state === undefined) {
+      state = {
+        current: {
           key,
           kind,
           sessionId: event.sessionId,
@@ -158,38 +174,27 @@ function createActivityNodesProjection() {
           status,
           label,
           detail,
-          eventTypes: [event.type],
-          eventSeqs: [event.seq],
-          records: [{
-            type: event.type,
-            seq: event.seq,
-            timeUnixMs: event.timeUnixMs,
-            data,
-          }],
+          eventTypes: [],
+          eventSeqs: [],
+          records: [],
           data,
-        }
-      : {
-          ...previous,
-          lastSeq: event.seq,
-          status,
-          label,
-          detail,
-          eventTypes: [...previous.eventTypes, event.type],
-          eventSeqs: [...previous.eventSeqs, event.seq],
-          records: [...previous.records, {
-            type: event.type,
-            seq: event.seq,
-            timeUnixMs: event.timeUnixMs,
-            data,
-          }],
-          data: preserveData ? previous.data : data,
-        };
-    if (index === undefined) {
-      indexByKey.set(key, nodes.length);
-      nodes.push(node);
-    } else {
-      nodes[index] = node;
+        },
+      };
+      nodesByKey.set(key, state);
+      nodes.push(state);
+      orderDirty = true;
     }
+    const node = state.current;
+    node.lastSeq = event.seq;
+    node.status = status;
+    node.label = label;
+    node.detail = detail;
+    node.eventTypes.push(event.type);
+    node.eventSeqs.push(event.seq);
+    node.records.push({ type: event.type, seq: event.seq, timeUnixMs: event.timeUnixMs, data });
+    if (!preserveData) node.data = data;
+    state.published = undefined;
+    dirty = true;
   };
 
   const diagnostic = (
@@ -413,7 +418,7 @@ function createActivityNodesProjection() {
       case 'request/failure': {
         const coordinates = requestCoordinates(event.data.requestId, event);
         const streamKey = `activity:assistant-stream:${event.data.requestId}`;
-        if (indexByKey.has(streamKey)) {
+        if (nodesByKey.has(streamKey)) {
           upsert(streamKey, 'assistantStream', event, 'interrupted', 'assistant/stream',
             event.data.failure.message, event.data, event.data.requestId, coordinates, true);
         }
@@ -599,11 +604,28 @@ function createActivityNodesProjection() {
     }
   };
 
-  const snapshot = (): readonly AgentActivityNode[] => [...nodes].sort((left, right) => (
-    left.firstSeq - right.firstSeq
-    || ACTIVITY_KIND_ORDER[left.kind] - ACTIVITY_KIND_ORDER[right.kind]
-    || left.key.localeCompare(right.key)
-  ));
+  const snapshot = (): readonly AgentActivityNode[] => {
+    if (!dirty) return published;
+    if (orderDirty) {
+      nodes.sort(({ current: left }, { current: right }) => (
+        left.firstSeq - right.firstSeq
+        || ACTIVITY_KIND_ORDER[left.kind] - ACTIVITY_KIND_ORDER[right.kind]
+        || left.key.localeCompare(right.key)
+      ));
+      orderDirty = false;
+    }
+    published = nodes.map((state) => {
+      state.published ??= {
+        ...state.current,
+        eventTypes: state.current.eventTypes.slice(),
+        eventSeqs: state.current.eventSeqs.slice(),
+        records: state.current.records.slice(),
+      };
+      return state.published;
+    });
+    dirty = false;
+    return published;
+  };
   return { apply, snapshot };
 }
 

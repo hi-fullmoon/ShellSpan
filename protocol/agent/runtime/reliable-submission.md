@@ -13,6 +13,25 @@ payloads conflict. Creation uses a stable Session ID and compares the original
 creation payload before acknowledging a repeated create request. Several inputs
 submitted before creation completes share that same Session.
 
+When content is redacted, text admission retains a store-owned SHA-256 digest of
+the original UTF-8 content in `source.metadata.submissionContentFingerprint`.
+Inbox edits retain the corresponding optional `contentFingerprint` on
+`agent/inbox/item_updated`. Receipt matching checks that digest before mutable
+state, so identical original content can be retried after consumption, termination
+or restart. Different original content conflicts even if it produces identical
+redacted text. The original secret is never retained. Legacy receipts without a
+digest continue to require exact equality with their persisted content.
+
+Model-surface reconciliation replaces an uncertain or synthetic tool result by
+its complete Turn/Step/call/name identity, including after later steps, turns or
+assistant messages. Audit events remain append-only. A new assistant call only
+invalidates the replacement slot for that exact identity.
+
+The committed client reconciles periodically and on foreground return. Child
+snapshot synchronization has its own cursor: committing a boundary event does
+not acknowledge its snapshot read. Failed snapshot reads remain pending across
+automatic or explicit retries even when no further event arrives.
+
 An IPC reply timeout is **confirming**, not failed. The adapter backfills committed
 events independently of the pending command and can acknowledge a lost reply.
 Failure to read the receipt is not evidence that admission failed. A definitive

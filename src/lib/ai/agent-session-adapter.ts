@@ -846,25 +846,12 @@ export function createAgentSessionAdapter(
           throw new Error('This one-shot subagent cannot accept human follow-up messages');
         }
         if (hasImages) throw new Error('Subagent continuation accepts text only');
-        await dependencies.sendChildInput({
+        await admit(resolvedSessionId, input, () => dependencies.sendChildInput({
           parentSessionId,
           childSessionId: resolvedSessionId,
           content,
           clientSubmissionId: input.clientOperationId,
-        });
-        const entry = ensureEntry(resolvedSessionId);
-        const state = await entry.client.reconnect();
-        if (!state.events.some((event) => (
-          event.type === 'agent/inbox/spliced'
-          && event.data.operation === 'enqueued'
-          && event.data.messages.some((message) => (
-            message.clientSubmissionId === input.clientOperationId
-          ))
-        ))) {
-          throw new Error('Subagent continuation is not confirmed; retry the same draft');
-        }
-        entry.view = entry.project(state);
-        for (const listener of entry.listeners) listener(entry.view);
+        }));
         return {
           sessionId: resolvedSessionId,
           clientOperationId: input.clientOperationId,

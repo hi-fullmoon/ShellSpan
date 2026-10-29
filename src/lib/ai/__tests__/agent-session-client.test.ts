@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   AgentSessionCommittedClient,
@@ -10,6 +10,20 @@ import type {
   AgentSessionEvent,
   AgentSessionSnapshot,
 } from '@/types/agent-session';
+
+const clients: AgentSessionCommittedClient[] = [];
+
+function createClient(...args: ConstructorParameters<typeof AgentSessionCommittedClient>) {
+  const client = new AgentSessionCommittedClient(...args);
+  clients.push(client);
+  return client;
+}
+
+afterEach(() => {
+  for (const client of clients.splice(0)) client.disconnect();
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 
 function snapshot(ended = false): AgentSessionSnapshot {
   return {
@@ -45,10 +59,11 @@ function transport(initial: AgentSessionEvent[], ended = false): AgentSessionStr
   return {
     snapshot: async () => snapshot(ended),
     committedEvents: async ({ afterSeq, limit }) => {
-      const page = events.filter((event) => afterSeq === undefined || event.seq > afterSeq).slice(0, limit);
+      const remaining = events.filter((event) => afterSeq === undefined || event.seq > afterSeq);
+      const page = remaining.slice(0, limit);
       return {
         events: page,
-        nextCursor: page.length < events.length
+        nextCursor: page.length < remaining.length
           ? (page[page.length - 1]?.seq ?? 0) + 1
           : undefined,
       };
@@ -73,7 +88,7 @@ describe('AgentSessionCommittedClient', () => {
     let exists = false;
     let subscriptions = 0;
     let releases = 0;
-    const client = new AgentSessionCommittedClient('session-fixture', {
+    const client = createClient('session-fixture', {
       ...source,
       snapshot: async () => { if (!exists) throw new Error('Agent session was not found'); return snapshot(); },
       subscribe: async listener => {
@@ -94,7 +109,7 @@ describe('AgentSessionCommittedClient', () => {
 
   it('subscribes before backfill and deduplicates an event observed on both paths', async () => {
     const source = transport([created]);
-    const client = new AgentSessionCommittedClient('session-fixture', source);
+    const client = createClient('session-fixture', source);
     const connected = await client.connect();
     source.publish(created);
     const state = await client.settled();
@@ -109,7 +124,7 @@ describe('AgentSessionCommittedClient', () => {
     });
     const turn = sessionEvent(2, { type: 'turn/start', turnId: 'turn-1' });
     const source = transport([created]);
-    const client = new AgentSessionCommittedClient('session-fixture', source);
+    const client = createClient('session-fixture', source);
     await client.connect();
     source.replace([created, running, turn]);
     source.publish(turn);
@@ -118,7 +133,7 @@ describe('AgentSessionCommittedClient', () => {
 
   it('coalesces a burst of live stream chunks into one published state', async () => {
     const source = transport([created]);
-    const client = new AgentSessionCommittedClient('session-fixture', source);
+    const client = createClient('session-fixture', source);
     const published: AgentSessionStreamState[] = [];
     client.onChange((state) => published.push(state));
     await client.connect();
@@ -143,7 +158,7 @@ describe('AgentSessionCommittedClient', () => {
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
     const source = transport([created]);
-    const client = new AgentSessionCommittedClient('session-fixture', source);
+    const client = createClient('session-fixture', source);
     const published: AgentSessionStreamState[] = [];
     client.onChange((state) => published.push(state));
     try {
@@ -187,7 +202,7 @@ describe('AgentSessionCommittedClient', () => {
         return () => { listener = undefined; };
       },
     };
-    const client = new AgentSessionCommittedClient('session-fixture', source);
+    const client = createClient('session-fixture', source);
     await client.connect();
     listener?.(turn);
     const state = await client.settled();
@@ -201,7 +216,7 @@ describe('AgentSessionCommittedClient', () => {
       data: { status: 'completed' },
     });
     const source = transport([created]);
-    const client = new AgentSessionCommittedClient('session-fixture', source);
+    const client = createClient('session-fixture', source);
     await client.connect();
     source.replace([created, ended]);
     await client.reconnect();
@@ -212,15 +227,124 @@ describe('AgentSessionCommittedClient', () => {
 
   it('does not invent a terminal event from an ended snapshot', async () => {
     const source = transport([created], true);
-    const client = new AgentSessionCommittedClient('session-fixture', source);
+    const client = createClient('session-fixture', source);
     const state = await client.connect();
     expect(state.snapshot?.ended).toBe(true);
     expect(state.hasTerminalEvent).toBe(false);
   });
 
+  it('recovers a missing final event and a later resume without another live event', async () => {
+    vi.useFakeTimers();
+    const source = transport([created]);
+    const client = createClient('session-fixture', source);
+    await client.connect();
+    const ended = sessionEvent(1, { type: 'session/ended', data: { status: 'completed' } });
+    source.replace([created, ended]);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await client.settled()).toMatchObject({ lastCommittedSeq: 1, hasTerminalEvent: true });
+    expect(client.state().syncError).toBeUndefined();
+    expect(client.state().syncRecovery).toBeUndefined();
+
+    const resumed = sessionEvent(2, { type: 'session/resumed' });
+    source.replace([created, ended, resumed]);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await client.settled()).toMatchObject({ lastCommittedSeq: 2, hasTerminalEvent: false });
+  });
+
+  it('recovers a missing approval and leaves unchanged publications alone', async () => {
+    vi.useFakeTimers();
+    const source = transport([created]);
+    const reads = vi.spyOn(source, 'committedEvents');
+    const client = createClient('session-fixture', source);
+    const publish = vi.fn();
+    client.onChange(publish);
+    await client.connect();
+    publish.mockClear();
+    const before = client.state().events;
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(reads).toHaveBeenCalledTimes(2);
+    expect(client.state().events).toBe(before);
+    expect(publish).not.toHaveBeenCalled();
+
+    const approval = sessionEvent(1, { type: 'tool/approval', turnId: 'turn', stepId: 'step',
+      data: { requestId: 'request', callId: 'call', approvalId: 'approval', status: 'requested' } });
+    source.replace([created, approval]);
+    await vi.advanceTimersByTimeAsync(5_050);
+    expect(publish).toHaveBeenCalledOnce();
+    expect(client.state().events).toEqual([created, approval]);
+  });
+
+  it('reconciles on foreground return and unregisters timers and listeners on disconnect', async () => {
+    vi.useFakeTimers();
+    const source = transport([created]);
+    const reads = vi.spyOn(source, 'committedEvents');
+    const client = createClient('session-fixture', source);
+    await client.connect();
+    const ended = sessionEvent(1, { type: 'session/ended', data: { status: 'completed' } });
+    source.replace([created, ended]);
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+    await client.settled();
+    expect(reads).toHaveBeenCalledTimes(1);
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new Event('focus'));
+    expect((await client.settled()).hasTerminalEvent).toBe(true);
+    expect(reads).toHaveBeenCalledTimes(2);
+
+    client.disconnect();
+    window.dispatchEvent(new Event('focus'));
+    document.dispatchEvent(new Event('visibilitychange'));
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(reads).toHaveBeenCalledTimes(2);
+  });
+
+  it('coalesces pending reconciliation and ignores its result after disconnection', async () => {
+    vi.useFakeTimers();
+    const source = transport([created]);
+    const client = createClient('session-fixture', source);
+    await client.connect();
+    let resolvePage!: (page: Awaited<ReturnType<AgentSessionStreamTransport['committedEvents']>>) => void;
+    const reads = vi.spyOn(source, 'committedEvents').mockImplementationOnce(() => new Promise(resolve => { resolvePage = resolve; }));
+    await vi.advanceTimersByTimeAsync(5_000);
+    window.dispatchEvent(new Event('focus'));
+    const retry = client.retrySync();
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(reads).toHaveBeenCalledOnce();
+    client.disconnect();
+    await client.connect();
+    const before = client.state().events;
+    resolvePage({ events: [sessionEvent(1, { type: 'session/ended', data: { status: 'completed' } })] });
+    await retry;
+    expect(client.state().events).toBe(before);
+    expect(client.state().hasTerminalEvent).toBe(false);
+  });
+
+  it('uses recovery backoff after reconciliation fails and preserves visible events', async () => {
+    vi.useFakeTimers();
+    const source = transport([created]);
+    const client = createClient('session-fixture', source);
+    await client.connect();
+    const before = client.state().events;
+    const reads = vi.spyOn(source, 'committedEvents').mockRejectedValue(new Error('storage unavailable'));
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(client.state().syncError?.message).toBe('storage unavailable');
+    expect(client.state().events).toBe(before);
+    expect(reads).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(reads).toHaveBeenCalledTimes(6);
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(reads).toHaveBeenCalledTimes(6);
+    const ended = sessionEvent(1, { type: 'session/ended', data: { status: 'completed' } });
+    reads.mockResolvedValue({ events: [ended] });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await client.settled()).toMatchObject({ lastCommittedSeq: 1, hasTerminalEvent: true });
+    expect(client.state().syncError).toBeUndefined();
+  });
+
   it('rejects a live pre-v4 envelope without appending it', async () => {
     const source = transport([created]);
-    const client = new AgentSessionCommittedClient('session-fixture', source);
+    const client = createClient('session-fixture', source);
     await client.connect();
     source.publish({ ...created, seq: 1, version: 3 } as unknown as AgentSessionEvent);
     await expect(client.settled()).rejects.toThrow(
@@ -233,13 +357,13 @@ describe('AgentSessionCommittedClient', () => {
 
 it('parses a live steer mutation after filling a sequence gap, and reproduces it on cold replay', async () => {
   const source = transport([...agentSessionSteerFixture.slice(0, 5)]);
-  const client = new AgentSessionCommittedClient('session-fixture', source);
+  const client = createClient('session-fixture', source);
   await client.connect();
   source.replace([...agentSessionSteerFixture]);
   source.publish(agentSessionSteerFixture[10]);
   expect((await client.settled()).events).toEqual(agentSessionSteerFixture);
   client.disconnect();
-  const cold = new AgentSessionCommittedClient('session-fixture', source);
+  const cold = createClient('session-fixture', source);
   expect((await cold.connect()).events).toEqual(agentSessionSteerFixture);
   cold.disconnect();
 });
@@ -250,7 +374,7 @@ it.each([
   { itemId: 'item', previousRevision: 1, clientOperationId: '' },
 ])('rejects malformed steer event data without appending it: %j', async (data) => {
   const source = transport([created]);
-  const client = new AgentSessionCommittedClient('session-fixture', source);
+  const client = createClient('session-fixture', source);
   await client.connect();
   source.publish(sessionEvent(1, { type: 'agent/inbox/item_steered', data }));
   await expect(client.settled()).rejects.toThrow('invalid mutation identity');

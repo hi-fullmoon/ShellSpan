@@ -39,6 +39,7 @@ const MAX_COLLECTION_ITEMS: usize = 1_024;
 const MAX_JS_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const MAX_SESSION_TITLE_CHARS: usize = 120;
 const MAX_SESSION_TITLE_BYTES: usize = 512;
+const SUBMISSION_CONTENT_FINGERPRINT: &str = "submissionContentFingerprint";
 
 type EventPublisher = Arc<dyn Fn(&AgentSessionEvent) + Send + Sync>;
 
@@ -1732,6 +1733,11 @@ impl AgentSessionStore {
                 serde_json::to_value(lane).map_err(|error| error.to_string())?,
             );
         }
+        // This receipt field is assigned only by the store, never by the caller.
+        message
+            .source
+            .metadata
+            .remove(SUBMISSION_CONTENT_FINGERPRINT);
         validate_inbox_message(&message)?;
         let mut inner = self.lock_configured()?;
         let record = inner
@@ -1749,9 +1755,21 @@ impl AgentSessionStore {
                 // caller's immutable payload. It survives an identical retry.
                 previous_source.metadata.remove("admissionPaused");
                 incoming_source.metadata.remove("admissionPaused");
+                let content_fingerprint = previous_source
+                    .metadata
+                    .remove(SUBMISSION_CONTENT_FINGERPRINT);
+                let same_content = content_fingerprint.as_ref().map_or_else(
+                    || previous.content == message.content,
+                    |fingerprint| {
+                        fingerprint.as_str()
+                            == Some(
+                                crate::llm::runtime::digest(message.content.as_bytes()).as_str(),
+                            )
+                    },
+                );
                 if (previous_lane != lane && target_turn_id.is_none())
                     || previous.message_id != message.message_id
-                    || previous.content != message.content
+                    || !same_content
                     || previous.images != message.images
                     || previous_source != incoming_source
                 {
@@ -1762,6 +1780,12 @@ impl AgentSessionStore {
                 }
                 return record.snapshot();
             }
+        }
+        if let Some(fingerprint) = inbox_content_fingerprint(&message.content) {
+            message
+                .source
+                .metadata
+                .insert(SUBMISSION_CONTENT_FINGERPRINT.into(), fingerprint.into());
         }
         let active_turn = record
             .events
@@ -1839,23 +1863,57 @@ impl AgentSessionStore {
         if let Some(previous) = record.events.iter().find(|event| {
             inbox_operation_id(&event.payload) == Some(input.client_operation_id.as_str())
         }) {
-            if let AgentSessionEventPayload::InboxItemResumed { item_id, .. } = &previous.payload {
-                if input.mutation
-                    == (AgentInboxMutation::Resume {
+            let previous_mutation = match &previous.payload {
+                AgentSessionEventPayload::InboxItemResumed { item_id, .. } => {
+                    Some(AgentInboxMutation::Resume {
                         item_id: item_id.clone(),
                     })
-                {
-                    return record.snapshot();
                 }
-            }
-            if let AgentSessionEventPayload::InboxItemSteered { item_id, .. } = &previous.payload {
-                if input.mutation
-                    == (AgentInboxMutation::Steer {
+                AgentSessionEventPayload::InboxItemSteered { item_id, .. } => {
+                    Some(AgentInboxMutation::Steer {
                         item_id: item_id.clone(),
                     })
-                {
-                    return record.snapshot();
                 }
+                AgentSessionEventPayload::InboxItemUpdated {
+                    item_id, content, ..
+                } => Some(AgentInboxMutation::Update {
+                    item_id: item_id.clone(),
+                    content: content.clone(),
+                }),
+                AgentSessionEventPayload::InboxItemRemoved { item_id, .. } => {
+                    Some(AgentInboxMutation::Remove {
+                        item_id: item_id.clone(),
+                    })
+                }
+                AgentSessionEventPayload::InboxReordered {
+                    lane,
+                    ordered_item_ids,
+                    ..
+                } => Some(AgentInboxMutation::Reorder {
+                    lane: *lane,
+                    ordered_item_ids: ordered_item_ids.clone(),
+                }),
+                _ => None,
+            };
+            let same_payload = match (&previous.payload, &input.mutation) {
+                (
+                    AgentSessionEventPayload::InboxItemUpdated {
+                        item_id,
+                        content_fingerprint: Some(fingerprint),
+                        ..
+                    },
+                    AgentInboxMutation::Update {
+                        item_id: incoming_item,
+                        content,
+                    },
+                ) => {
+                    item_id == incoming_item
+                        && *fingerprint == crate::llm::runtime::digest(content.as_bytes())
+                }
+                _ => previous_mutation.as_ref() == Some(&input.mutation),
+            };
+            if same_payload {
+                return record.snapshot();
             }
             return Err(
                 "client operation id was already committed with a different payload".into(),
@@ -1898,6 +1956,7 @@ impl AgentSessionStore {
                 AgentSessionEventPayload::InboxItemUpdated {
                     item_id,
                     lane,
+                    content_fingerprint: inbox_content_fingerprint(&content),
                     content,
                     previous_revision: input.expected_revision,
                     client_operation_id: input.client_operation_id,
@@ -4314,6 +4373,7 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
         Payload::InboxItemUpdated {
             item_id,
             content,
+            content_fingerprint,
             previous_revision,
             client_operation_id,
             ..
@@ -4322,6 +4382,9 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
             validate_mutation_event_identity(event, *previous_revision, client_operation_id)?;
             validate_identifier(item_id, "itemId")?;
             validate_text(content, "inbox content", false, MAX_AGENT_MESSAGE_BYTES)?;
+            if let Some(fingerprint) = content_fingerprint {
+                validate_content_fingerprint(fingerprint)?;
+            }
         }
         Payload::InboxItemSteered {
             item_id,
@@ -4981,7 +5044,26 @@ fn validate_session_title(title: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn inbox_content_fingerprint(content: &str) -> Option<String> {
+    (redact_sensitive_text(content) != content)
+        .then(|| crate::llm::runtime::digest(content.as_bytes()))
+}
+
+fn validate_content_fingerprint(fingerprint: &str) -> Result<(), String> {
+    if fingerprint.len() != 64 || !fingerprint.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("invalid Inbox content fingerprint".into());
+    }
+    Ok(())
+}
+
 fn validate_inbox_message(message: &AgentInboxMessage) -> Result<(), String> {
+    if let Some(fingerprint) = message.source.metadata.get(SUBMISSION_CONTENT_FINGERPRINT) {
+        validate_content_fingerprint(
+            fingerprint
+                .as_str()
+                .ok_or("invalid Inbox content fingerprint")?,
+        )?;
+    }
     if message.images.len() > super::images::VISION.max_images {
         return Err("IMAGE_COUNT_LIMIT".into());
     }

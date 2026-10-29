@@ -465,7 +465,7 @@ describe('AgentSessionAdapter', () => {
     adapter.dispose();
   });
 
-  it('submits and cancels a continuable child through its parent-owned commands', async () => {
+  it.each(['received', 'lost', 'conflict'] as const)('submits and cancels a continuable child with a %s IPC reply', async reply => {
     const childSnapshot: AgentSessionSnapshot = {
       ...snapshot(),
       header: {
@@ -522,6 +522,11 @@ describe('AgentSessionAdapter', () => {
           }],
         },
       })];
+      if (reply === 'lost') {
+        events.push(sessionEvent(2, { type: 'session/ended', data: { status: 'failed' } }));
+        throw new Error('IPC response lost after child input was committed');
+      }
+      if (reply === 'conflict') throw new Error('client submission id was already committed with a different payload');
       return childSnapshot;
     });
     const base = agentDependencies(events);
@@ -537,13 +542,19 @@ describe('AgentSessionAdapter', () => {
       }),
     };
     const adapter = createAgentSessionAdapter(dependencies);
-
-    await expect(adapter.submit(childSnapshot.header.sessionId, {
+    const submission = adapter.submit(childSnapshot.header.sessionId, {
       content: 'Continue the inspection.',
       mode: 'nextTurn',
       clientOperationId: 'child-followup',
       provider,
-    })).resolves.toEqual({
+    });
+    if (reply === 'conflict') {
+      await expect(submission).rejects.toThrow('different payload');
+      adapter.dispose();
+      return;
+    }
+
+    await expect(submission).resolves.toEqual({
       sessionId: childSnapshot.header.sessionId,
       clientOperationId: 'child-followup',
       mode: 'nextTurn',

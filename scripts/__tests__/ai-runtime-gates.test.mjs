@@ -5,6 +5,7 @@ import { parse } from 'yaml';
 import {
   includedRustFiles,
   rustIncludeSourceIsFormatted,
+  unformattedIncludedRustFiles,
 } from '../check-rust-includes.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
@@ -62,7 +63,7 @@ describe('quality gate wiring', () => {
       'src-tauri/src/agent_runtime/tests/native_adapter/file_references_sftp.rs',
     ]));
   });
-  it('accepts include context indentation but still rejects real Rust formatting defects', () => {
+  it('accepts include context indentation but still rejects real Rust formatting defects', async () => {
     const formatted = 'fn ready() {\n    let value = 1;\n}\n';
     const moduleIndented = formatted
       .split('\n')
@@ -70,9 +71,36 @@ describe('quality gate wiring', () => {
       .join('\n');
     const unformatted = '    fn  broken( ){let value=1;}\n';
 
-    expect(rustIncludeSourceIsFormatted(formatted)).toBe(true);
-    expect(rustIncludeSourceIsFormatted(formatted.replaceAll('\n', '\r\n'))).toBe(true);
-    expect(rustIncludeSourceIsFormatted(moduleIndented)).toBe(true);
-    expect(rustIncludeSourceIsFormatted(unformatted)).toBe(false);
+    await expect(rustIncludeSourceIsFormatted(formatted)).resolves.toBe(true);
+    await expect(rustIncludeSourceIsFormatted(formatted.replaceAll('\n', '\r\n'))).resolves.toBe(true);
+    await expect(rustIncludeSourceIsFormatted(moduleIndented)).resolves.toBe(true);
+    await expect(rustIncludeSourceIsFormatted(unformatted)).resolves.toBe(false);
+  });
+
+  it('formats large real include files repeatedly without stalling the stdin pipe', async () => {
+    const file = path.join(root, 'src-tauri/src/tests/session.rs');
+    const source = await readFile(file, 'utf8');
+    expect(Buffer.byteLength(source)).toBeGreaterThan(64 * 1024);
+    let eventLoopAdvanced = false;
+    const timer = setTimeout(() => { eventLoopAdvanced = true; }, 0);
+    try {
+      await expect(rustIncludeSourceIsFormatted(source)).resolves.toBe(true);
+      expect(eventLoopAdvanced).toBe(true);
+    } finally {
+      clearTimeout(timer);
+    }
+    await expect(unformattedIncludedRustFiles(Array(24).fill(file)))
+      .resolves.toEqual([]);
+  });
+
+  it('kills a real formatter on timeout and reports its file and include context', async () => {
+    const file = path.join(root, 'src-tauri/src/tests/session.rs');
+    await expect(unformattedIncludedRustFiles([file], 'rustfmt', { timeoutMs: 1 }))
+      .rejects.toThrow(`Cannot check ${file}: include context depth 0: rustfmt timed out after 1 ms`);
+  });
+
+  it.each([0, -1, Infinity, NaN, 0.5])('rejects an unbounded or invalid formatter timeout: %s', async timeoutMs => {
+    await expect(rustIncludeSourceIsFormatted('', 'rustfmt', { timeoutMs }))
+      .rejects.toThrow('rustfmt timeout must be a positive safe integer');
   });
 });

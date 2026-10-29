@@ -1074,6 +1074,114 @@ async fn continuable_child_reuses_the_same_session_and_driver() {
 }
 
 #[tokio::test]
+async fn child_input_receipts_survive_budget_exhaustion_termination_and_restart() {
+    for max_turns in [2, 3] {
+        for terminal in [false, true] {
+            let adapter =
+                FakeAdapter::new(vec![reply("first report", &[]), reply("final report", &[])]);
+            let (root, runtime) = configured(adapter.clone());
+            create(&runtime, "receipt-parent");
+            runtime.start("receipt-parent", provider(), None).unwrap();
+            runtime.await_idle("receipt-parent").await.unwrap();
+            let child = runtime
+                .spawn_subagent(AgentSubagentSpawnRequest {
+                    parent_session_id: "receipt-parent".into(),
+                    goal: "inspect the target".into(),
+                    role: AgentSubagentRole::Explorer,
+                    inheritance_mode: "blank".into(),
+                    target_ids: vec!["target-local".into()],
+                    budget: Some(super::super::AgentSubagentBudget {
+                        max_steps_per_turn: None,
+                        max_turns,
+                        max_tool_calls: None,
+                        max_tokens: None,
+                        timeout_ms: 60_000,
+                    }),
+                    continuable: true,
+                })
+                .await
+                .unwrap();
+            let child_id = &child.header.session_id;
+            runtime.await_idle(child_id).await.unwrap();
+            let input = super::super::AgentChildInputRequest {
+                parent_session_id: "receipt-parent".into(),
+                child_session_id: child_id.clone(),
+                content: "continue the inspection".into(),
+                client_submission_id: Some("child-receipt".into()),
+            };
+            runtime.send_child_input(input.clone()).await.unwrap();
+            runtime.await_idle(child_id).await.unwrap();
+            if terminal {
+                runtime
+                    .cancel_child_agent(super::super::AgentChildRequest {
+                        parent_session_id: "receipt-parent".into(),
+                        child_session_id: child_id.clone(),
+                    })
+                    .await
+                    .unwrap();
+            }
+            let saved = runtime.session(child_id).unwrap();
+            let events = all_events(&runtime, child_id);
+            assert_eq!(saved.ended, terminal);
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(event.payload, AgentSessionEventPayload::TurnStart))
+                    .count(),
+                2
+            );
+            assert_eq!(
+                runtime.send_child_input(input.clone()).await.unwrap(),
+                saved
+            );
+            assert_eq!(all_events(&runtime, child_id), events);
+            drop(runtime);
+            let restored = AgentRuntimeBuilder::new()
+                .model_factory(Arc::new(FakeFactory(adapter.clone())))
+                .native_tool_runtime(Arc::new(FakeNativeRuntime))
+                .build();
+            restored.configure(root.path().to_path_buf()).unwrap();
+            assert!(restored.agents.get(child_id).unwrap().is_none());
+            let cold = restored.session(child_id).unwrap();
+            let cold_events = all_events(&restored, child_id);
+            assert_eq!(
+                restored.send_child_input(input.clone()).await.unwrap(),
+                cold
+            );
+            let mut conflict = input.clone();
+            conflict.content = "different inspection".into();
+            assert!(restored
+                .send_child_input(conflict)
+                .await
+                .unwrap_err()
+                .contains("different payload"));
+            let mut wrong_owner = input.clone();
+            wrong_owner.parent_session_id = "another-parent".into();
+            assert!(restored
+                .send_child_input(wrong_owner)
+                .await
+                .unwrap_err()
+                .contains("does not own"));
+            if terminal || max_turns == 2 {
+                for submission_id in [None, Some("new-submission".into())] {
+                    let mut fresh = input.clone();
+                    fresh.client_submission_id = submission_id;
+                    let error = restored.send_child_input(fresh).await.unwrap_err();
+                    assert!(error.contains(if terminal {
+                        "terminal child"
+                    } else {
+                        "subagentBudgetExhausted"
+                    }));
+                }
+            }
+            assert!(restored.agents.get(child_id).unwrap().is_none());
+            assert_eq!(all_events(&restored, child_id), cold_events);
+            assert_eq!(adapter.requests.lock().unwrap().len(), 2);
+        }
+    }
+}
+
+#[tokio::test]
 async fn one_shot_child_budget_is_forced_to_one_turn() {
     let adapter = FakeAdapter::new(vec![reply("child answer", &[])]);
     let (_root, runtime) = configured(adapter.clone());
@@ -1099,6 +1207,77 @@ async fn one_shot_child_budget_is_forced_to_one_turn() {
         .await
         .unwrap();
     assert_eq!(child.header.subagent.unwrap().budget.max_turns, 1);
+    assert!(runtime
+        .send_child_input(super::super::AgentChildInputRequest {
+            parent_session_id: "parent-oneshot".into(),
+            child_session_id: child.header.session_id,
+            content: "continue".into(),
+            client_submission_id: Some("one-shot-input".into()),
+        })
+        .await
+        .unwrap_err()
+        .contains("one-shot child Agent cannot accept continuation input"));
+}
+
+#[tokio::test]
+async fn one_shot_child_returns_its_report_to_the_parent_after_termination() {
+    let report = "The target is verified; all checks passed.";
+    let adapter = FakeAdapter::new(vec![
+        tool_response(vec![ModelToolCall {
+            call_id: "spawn-child".into(),
+            provider_call_id: Some("provider-spawn-child".into()),
+            name: "spawn_one_shot_agent".into(),
+            arguments: json!({
+                "goal": "verify the target",
+                "role": "general",
+                "inheritanceMode": "blank",
+                "targetIds": ["target-local"]
+            }),
+        }]),
+        reply(report, &[]),
+        reply("The child verified the target.", &[]),
+    ]);
+    let (_root, runtime) = configured(adapter);
+    create(&runtime, "parent-completed-child");
+    runtime
+        .followup("parent-completed-child", "initial".into(), "verify".into())
+        .unwrap();
+    runtime
+        .start("parent-completed-child", provider(), None)
+        .unwrap();
+    runtime.await_idle("parent-completed-child").await.unwrap();
+    let events = all_events(&runtime, "parent-completed-child");
+    let child_id = events
+        .iter()
+        .find_map(|event| match &event.payload {
+            AgentSessionEventPayload::SubagentSettled {
+                child_session_id,
+                status: AgentSessionStatus::Completed,
+                summary,
+                ..
+            } => {
+                assert_eq!(summary, report);
+                Some(child_session_id.clone())
+            }
+            _ => None,
+        })
+        .expect("completed child settlement");
+    assert!(all_events(&runtime, &child_id).iter().any(|event| matches!(
+        &event.payload,
+        AgentSessionEventPayload::SessionEnded { reason: Some(reason), .. }
+            if reason == "oneShotTurnCompleted"
+    )));
+    assert!(events.iter().any(|event| matches!(
+        &event.payload,
+        AgentSessionEventPayload::ToolResult {
+            call_id, status: AgentToolResultStatus::Completed, summary, ..
+        } if call_id == "spawn-child" && summary == report
+    )));
+    assert!(events.iter().any(|event| matches!(
+        &event.payload,
+        AgentSessionEventPayload::SubagentMessage { summary, route, .. }
+            if summary == report && route == "toolResult"
+    )));
 }
 
 #[tokio::test]
@@ -1158,8 +1337,10 @@ async fn one_shot_child_with_unfinished_plan_is_not_reported_as_completed() {
     )));
     assert!(events.iter().any(|event| matches!(
         &event.payload,
-        AgentSessionEventPayload::ToolResult { call_id, status: AgentToolResultStatus::Failed, .. }
+        AgentSessionEventPayload::ToolResult { call_id, status: AgentToolResultStatus::Failed, summary, .. }
             if call_id == "spawn-child"
+                && summary.starts_with("Partial child result: oneShotPlanIncomplete.")
+                && summary.contains("Latest report: Verification is still pending.")
     )));
 }
 
@@ -1201,9 +1382,85 @@ async fn fleet_uses_distinct_role_children_and_persists_target_evidence() {
     assert_eq!(target.state, "completed");
     assert_eq!(target.child_session_ids.len(), 4);
     assert_eq!(target.evidence_refs.len(), 1);
-    assert!(all_events(&runtime, "fleet-parent").iter().any(|event| {
-            matches!(event.payload, AgentSessionEventPayload::TaskEvidence { ref kind, .. } if kind == "independent-fleet-verification")
-        }));
+    let events = all_events(&runtime, "fleet-parent");
+    for (child_id, report) in target.child_session_ids.iter().zip([
+        "explorer evidence",
+        "operator evidence",
+        "verifier evidence",
+        "reviewer evidence",
+    ]) {
+        assert!(events.iter().any(|event| matches!(
+            &event.payload,
+            AgentSessionEventPayload::SubagentSettled {
+                child_session_id, status: AgentSessionStatus::Completed, summary, ..
+            } if child_session_id == child_id && summary == report
+        )));
+        assert!(events.iter().any(|event| matches!(
+            &event.payload,
+            AgentSessionEventPayload::InboxSpliced { messages, .. }
+                if messages.iter().any(|message| message.content == report)
+        )));
+        assert!(all_events(&runtime, child_id).iter().any(|event| matches!(
+            &event.payload,
+            AgentSessionEventPayload::SessionEnded { reason: Some(reason), .. }
+                if reason == "fleetRoleTurnCompleted"
+        )));
+    }
+    assert!(events.iter().any(|event| {
+        matches!(event.payload, AgentSessionEventPayload::TaskEvidence { ref kind, .. } if kind == "independent-fleet-verification")
+    }));
+}
+
+#[tokio::test]
+async fn fleet_incomplete_child_keeps_its_failure_reason_in_the_parent_report() {
+    let adapter = FakeAdapter::new(vec![
+        tool_response(vec![ModelToolCall {
+            call_id: "child-plan".into(),
+            provider_call_id: Some("provider-child-plan".into()),
+            name: "update_plan".into(),
+            arguments: json!({
+                "planVersion": 1,
+                "steps": [{ "id": "verify", "title": "Verify the target", "status": "inProgress" }]
+            }),
+        }]),
+        reply("The target is verified.", &[]),
+        reply("Verification is still pending.", &[]),
+    ]);
+    let (_root, runtime) = configured(adapter);
+    create(&runtime, "fleet-incomplete-parent");
+    runtime
+        .start("fleet-incomplete-parent", provider(), None)
+        .unwrap();
+    runtime.await_idle("fleet-incomplete-parent").await.unwrap();
+    let plan = runtime
+        .plan_fleet(AgentFleetPlanRequest {
+            parent_session_id: "fleet-incomplete-parent".into(),
+            targets: vec![AgentFleetTargetRequest {
+                target_id: "target-local".into(),
+                goal: "verify the target".into(),
+            }],
+            canary_size: 1,
+            wave_size: 1,
+            failure_threshold: 0,
+            budget: None,
+        })
+        .unwrap();
+    let finished = runtime
+        .start_fleet(AgentFleetControlRequest {
+            parent_session_id: "fleet-incomplete-parent".into(),
+            fleet_id: plan.fleet.fleet_id.unwrap(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(finished.fleet.status.as_deref(), Some("failed"));
+    assert!(all_events(&runtime, "fleet-incomplete-parent")
+        .iter()
+        .any(|event| matches!(
+            &event.payload,
+            AgentSessionEventPayload::SubagentSettled {
+                status: AgentSessionStatus::Failed, summary, ..
+            } if summary == "fleetRolePlanIncomplete"
+        )));
 }
 
 fn event_types(runtime: &AgentRuntime, session_id: &str) -> Vec<String> {

@@ -189,23 +189,38 @@ pub(crate) fn surface_messages_after(
     messages
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct SurfaceToolCall<'a> {
+    turn_id: Option<&'a str>,
+    step_id: Option<&'a str>,
+    call_id: &'a str,
+    name: &'a str,
+}
+
 fn append_surface_events<'a>(
     events: impl Iterator<Item = &'a AgentSessionEvent>,
     messages: &mut Vec<AgentSurfaceMessage>,
 ) {
-    let mut synthetic_results = std::collections::HashMap::<String, usize>::new();
-    let mut pending_calls: Vec<(String, String)> = Vec::new();
+    let mut synthetic_results = std::collections::HashMap::<SurfaceToolCall<'a>, usize>::new();
+    let mut uncertain_results = std::collections::HashMap::<SurfaceToolCall<'a>, usize>::new();
+    let mut pending_calls: Vec<SurfaceToolCall<'a>> = Vec::new();
     for event in events {
+        let scoped_call = |call_id, name| SurfaceToolCall {
+            turn_id: event.turn_id.as_deref(),
+            step_id: event.step_id.as_deref(),
+            call_id,
+            name,
+        };
         match &event.payload {
             AgentSessionEventPayload::SessionResumed {}
             | AgentSessionEventPayload::SubagentRecoveryStarted { .. }
             | AgentSessionEventPayload::TurnEnd { .. } => {
                 // An interrupted session may contain tool calls without outcomes.
                 // Close their model protocol pairs without executing or asserting an outcome.
-                for (call_id, name) in pending_calls.drain(..) {
-                    synthetic_results.insert(call_id.clone(), messages.len());
+                for call in pending_calls.drain(..) {
+                    synthetic_results.insert(call, messages.len());
                     messages.push(AgentSurfaceMessage::Tool {
-                        call_id, name, status: AgentToolResultStatus::Cancelled,
+                        call_id: call.call_id.into(), name: call.name.into(), status: AgentToolResultStatus::Cancelled,
                         content: "The previous turn ended without a recorded outcome for this call. Do not automatically repeat it; inspect the current state before deciding whether further work is needed.".into(),
                     });
                 }
@@ -306,7 +321,12 @@ fn append_surface_events<'a>(
             } => {
                 pending_calls.extend(content.iter().filter_map(|block| {
                     if let AgentAssistantContentBlock::ToolCall { call } = block {
-                        Some((call.call_id.clone(), call.name.clone()))
+                        let identity = scoped_call(&call.call_id, &call.name);
+                        // Only a new occurrence of this exact call supersedes its
+                        // replacement slot. Later steps can reconcile older calls.
+                        synthetic_results.remove(&identity);
+                        uncertain_results.remove(&identity);
+                        Some(identity)
                     } else {
                         None
                     }
@@ -338,7 +358,22 @@ fn append_surface_events<'a>(
                 data,
                 ..
             } => {
-                pending_calls.retain(|(id, _)| id != call_id);
+                let call = scoped_call(call_id, name);
+                let pending = pending_calls.contains(&call);
+                pending_calls.retain(|candidate| *candidate != call);
+                let synthetic_index = synthetic_results.remove(&call);
+                let uncertain_index = uncertain_results.remove(&call).filter(|_| {
+                    matches!(
+                        status,
+                        AgentToolResultStatus::Completed | AgentToolResultStatus::Cancelled
+                    )
+                });
+                let index = synthetic_index.or(uncertain_index);
+                if *status == AgentToolResultStatus::Uncertain
+                    && (pending || synthetic_index.is_some())
+                {
+                    uncertain_results.insert(call, index.unwrap_or(messages.len()));
+                }
                 let result = AgentSurfaceMessage::Tool {
                     call_id: call_id.clone(),
                     name: name.clone(),
@@ -361,9 +396,7 @@ fn append_surface_events<'a>(
                         tool_result_content(*status, summary, data.as_ref())
                     },
                 };
-                if let Some(index) = synthetic_results.remove(call_id) {
-                    // A later committed outcome supersedes the placeholder without
-                    // creating a second result for the same model tool call.
+                if let Some(index) = index {
                     messages[index] = result;
                 } else {
                     messages.push(result);

@@ -1,9 +1,11 @@
 import { readFile, readdir } from 'node:fs/promises';
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const MAX_INCLUDE_CONTEXT_DEPTH = 8;
+const RUSTFMT_TIMEOUT_MS = 30_000;
+const RUSTFMT_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 
 export async function includedRustFiles(root) {
   const included = new Set();
@@ -36,29 +38,58 @@ function wrapRustIncludeSource(source, depth) {
   return `${opening}${source}${source.endsWith('\n') ? '' : '\n'}${closing}`;
 }
 
-function formatRustSource(source, rustfmt = 'rustfmt') {
-  const result = spawnSync(rustfmt, ['--edition', '2021', '--emit', 'stdout'], {
-    input: source,
-    encoding: 'utf8',
+function formatRustSource(source, rustfmt, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    let inputError;
+    // Drain stdout while writing stdin. A synchronous pipe exchange can stall
+    // on large include files; always bound the formatter's lifetime as well.
+    const child = execFile(rustfmt, ['--edition', '2021', '--emit', 'stdout'], {
+      encoding: 'utf8',
+      timeout: timeoutMs,
+      killSignal: 'SIGKILL',
+      maxBuffer: RUSTFMT_MAX_OUTPUT_BYTES,
+    }, (error, stdout) => {
+      if (error?.killed && error.signal === 'SIGKILL' && error.code === null) {
+        reject(new Error(`rustfmt timed out after ${timeoutMs} ms`, { cause: error }));
+      } else if (error && typeof error.code === 'number') {
+        // A source may parse only when wrapped in its include context.
+        resolve(null);
+      } else if (error || inputError) {
+        reject(error ?? inputError);
+      } else {
+        resolve(stdout);
+      }
+    });
+    child.stdin.on('error', error => { inputError = error; });
+    child.stdin.end(source);
   });
-  if (result.error) throw result.error;
-  return result.status === 0 ? result.stdout : null;
 }
 
-export function rustIncludeSourceIsFormatted(source, rustfmt = 'rustfmt') {
+export async function rustIncludeSourceIsFormatted(source, rustfmt = 'rustfmt', { timeoutMs = RUSTFMT_TIMEOUT_MS } = {}) {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new Error('rustfmt timeout must be a positive safe integer');
+  }
   const normalizedSource = source.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
   for (let depth = 0; depth <= MAX_INCLUDE_CONTEXT_DEPTH; depth += 1) {
     const contextualSource = wrapRustIncludeSource(normalizedSource, depth);
-    if (formatRustSource(contextualSource, rustfmt) === contextualSource) return true;
+    try {
+      if (await formatRustSource(contextualSource, rustfmt, timeoutMs) === contextualSource) return true;
+    } catch (cause) {
+      throw new Error(`include context depth ${depth}: ${cause.message}`, { cause });
+    }
   }
   return false;
 }
 
-export async function unformattedIncludedRustFiles(files, rustfmt = 'rustfmt') {
+export async function unformattedIncludedRustFiles(files, rustfmt = 'rustfmt', options = {}) {
   const failures = [];
   for (const file of files) {
     const source = await readFile(file, 'utf8');
-    if (!rustIncludeSourceIsFormatted(source, rustfmt)) failures.push(file);
+    try {
+      if (!await rustIncludeSourceIsFormatted(source, rustfmt, options)) failures.push(file);
+    } catch (cause) {
+      throw new Error(`Cannot check ${file}: ${cause.message}`, { cause });
+    }
   }
   return failures;
 }

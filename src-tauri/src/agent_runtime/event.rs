@@ -675,6 +675,8 @@ pub(crate) enum AgentSessionEventPayload {
         item_id: String,
         lane: AgentInboxLane,
         content: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        content_fingerprint: Option<String>,
         previous_revision: u64,
         client_operation_id: String,
     },

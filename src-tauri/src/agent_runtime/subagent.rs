@@ -778,6 +778,7 @@ impl SubAgentManager {
         let events = self.sessions.all_events(child_session_id)?;
         let summary = settlement
             .timeout_reason
+            .or_else(|| child_stop_reason(&events).map(str::to_string))
             .or_else(|| assistant_summary(&events))
             .unwrap_or_else(|| format!("Fleet child settled as {:?}", snapshot.status));
         self.sessions.commit_subagent_settlement(
@@ -1145,6 +1146,31 @@ impl SubAgentManager {
         if !subagent.continuable {
             return Err("one-shot child Agent cannot accept continuation input".into());
         }
+        let message = AgentInboxMessage {
+            images: Vec::new(),
+            message_id: client_submission_id
+                .clone()
+                .unwrap_or_else(|| format!("child-input-{}", Uuid::new_v4().simple())),
+            client_submission_id: client_submission_id.clone(),
+            content,
+            source: if client_submission_id.is_some() {
+                AgentMessageSource::user()
+            } else {
+                AgentMessageSource::session_reference(parent_session_id.into())
+            },
+            terminal_context: None,
+        };
+        if let Some(submission_id) = client_submission_id.as_deref() {
+            if self
+                .sessions
+                .has_submission(child_session_id, submission_id)?
+            {
+                return self
+                    .sessions
+                    .enqueue(child_session_id, AgentInboxLane::NextTurn, message)
+                    .map(|_| ());
+            }
+        }
         if child.ended || child.status.is_terminal() {
             return Err("terminal child Agent cannot be continued".into());
         }
@@ -1166,24 +1192,8 @@ impl SubAgentManager {
         let entry = self.ensure_resident(child_session_id, &mut handles)?;
         entry
             .with_input_admission(|| {
-                self.sessions.enqueue(
-                    child_session_id,
-                    AgentInboxLane::NextTurn,
-                    AgentInboxMessage {
-                        images: Vec::new(),
-                        message_id: client_submission_id
-                            .clone()
-                            .unwrap_or_else(|| format!("child-input-{}", Uuid::new_v4().simple())),
-                        client_submission_id: client_submission_id.clone(),
-                        content,
-                        source: if client_submission_id.is_some() {
-                            AgentMessageSource::user()
-                        } else {
-                            AgentMessageSource::session_reference(parent_session_id.into())
-                        },
-                        terminal_context: None,
-                    },
-                )
+                self.sessions
+                    .enqueue(child_session_id, AgentInboxLane::NextTurn, message)
             })?
             .ok_or("child Agent is stopping")?;
         self.wake(child_session_id)
@@ -2029,18 +2039,22 @@ fn role_prompt(role: AgentSubagentRole, goal: &str) -> String {
 }
 
 fn assistant_summary(events: &[super::AgentSessionEvent]) -> Option<String> {
-    events.iter().rev().find_map(|event| match &event.payload {
-        AgentSessionEventPayload::AssistantMessage { content, .. }
-            if !super::assistant_content_text(content).trim().is_empty() =>
-        {
-            Some(super::assistant_content_text(content))
-        }
-        AgentSessionEventPayload::SessionEnded {
-            reason: Some(reason),
-            ..
-        } => Some(reason.clone()),
-        _ => None,
-    })
+    events
+        .iter()
+        .rev()
+        .find_map(|event| match &event.payload {
+            AgentSessionEventPayload::AssistantMessage { content, .. } => {
+                let text = super::assistant_content_text(content);
+                (!text.trim().is_empty()).then_some(text)
+            }
+            _ => None,
+        })
+        .or_else(|| {
+            events.iter().rev().find_map(|event| match &event.payload {
+                AgentSessionEventPayload::SessionEnded { reason, .. } => reason.clone(),
+                _ => None,
+            })
+        })
 }
 
 fn last_turn_incomplete(events: &[super::AgentSessionEvent]) -> bool {

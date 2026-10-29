@@ -2016,6 +2016,254 @@ fn inbox_update_remove_and_reorder_commit_with_expected_revision() {
 }
 
 #[test]
+fn inbox_mutation_receipts_match_all_payloads_after_restart_and_termination() {
+    let mutations = [
+        AgentInboxMutation::Resume {
+            item_id: "paused".into(),
+        },
+        AgentInboxMutation::Steer {
+            item_id: "queued".into(),
+        },
+        AgentInboxMutation::Update {
+            item_id: "queued".into(),
+            content: "updated text".into(),
+        },
+        AgentInboxMutation::Remove {
+            item_id: "queued".into(),
+        },
+        AgentInboxMutation::Reorder {
+            lane: AgentInboxLane::NextTurn,
+            ordered_item_ids: vec!["paused".into(), "queued".into()],
+        },
+    ];
+    for mutation in &mutations {
+        let (root, store) = running_steer_store();
+        store
+            .enqueue_submission(
+                "session-1",
+                AgentInboxLane::NextTurn,
+                message("paused", "paused input"),
+                true,
+                None,
+            )
+            .unwrap();
+        let input = AgentInboxMutationInput {
+            session_id: "session-1".into(),
+            expected_revision: store.snapshot("session-1").unwrap().event_count,
+            client_operation_id: "durable-operation".into(),
+            mutation: mutation.clone(),
+        };
+        let accepted = store.mutate_inbox(input.clone()).unwrap();
+        assert_eq!(accepted.event_count, input.expected_revision + 1);
+        assert_eq!(store.mutate_inbox(input.clone()).unwrap(), accepted);
+        store.claim_step("session-1").unwrap();
+        store.claim_turn("session-1").unwrap();
+        store.cancel("session-1").unwrap();
+        store.archive("session-1").unwrap();
+        let saved = store.snapshot("session-1").unwrap();
+        let restored = AgentSessionStore::default();
+        restored.configure(root.path().to_path_buf()).unwrap();
+        let published = Arc::new(Mutex::new(Vec::new()));
+        let observed = Arc::clone(&published);
+        restored
+            .set_publisher(Arc::new(move |event| {
+                observed.lock().unwrap().push(event.clone());
+            }))
+            .unwrap();
+        assert_eq!(
+            restored
+                .mutate_inbox_with_driver(input.clone(), false)
+                .unwrap(),
+            saved
+        );
+        let conflicts = mutations.iter().cloned().chain([
+            AgentInboxMutation::Resume {
+                item_id: "other".into(),
+            },
+            AgentInboxMutation::Steer {
+                item_id: "other".into(),
+            },
+            AgentInboxMutation::Update {
+                item_id: "other".into(),
+                content: "updated text".into(),
+            },
+            AgentInboxMutation::Update {
+                item_id: "queued".into(),
+                content: "different text".into(),
+            },
+            AgentInboxMutation::Remove {
+                item_id: "other".into(),
+            },
+            AgentInboxMutation::Reorder {
+                lane: AgentInboxLane::NextStep,
+                ordered_item_ids: vec!["paused".into(), "queued".into()],
+            },
+            AgentInboxMutation::Reorder {
+                lane: AgentInboxLane::NextTurn,
+                ordered_item_ids: vec!["queued".into(), "paused".into()],
+            },
+            AgentInboxMutation::Reorder {
+                lane: AgentInboxLane::NextTurn,
+                ordered_item_ids: vec!["queued".into()],
+            },
+        ]);
+        for conflict in conflicts.filter(|candidate| candidate != mutation) {
+            let mut retry = input.clone();
+            retry.mutation = conflict;
+            assert!(restored
+                .mutate_inbox_with_driver(retry, false)
+                .unwrap_err()
+                .contains("client operation id was already committed with a different payload"));
+        }
+        let mut fresh = input;
+        fresh.client_operation_id = "new-operation".into();
+        assert!(restored
+            .mutate_inbox(fresh)
+            .unwrap_err()
+            .contains("archived"));
+        assert_eq!(restored.snapshot("session-1").unwrap(), saved);
+        assert!(published.lock().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn inbox_sensitive_content_receipts_match_raw_input_across_restart_and_consumption() {
+    let (root, store) = configured();
+    create(&store);
+    let secret = "Authorization: Bearer plaintext-secret";
+    store
+        .enqueue(
+            "session-1",
+            AgentInboxLane::NextTurn,
+            message("queued", secret),
+        )
+        .unwrap();
+    let input = AgentInboxMutationInput {
+        session_id: "session-1".into(),
+        expected_revision: store.snapshot("session-1").unwrap().event_count,
+        client_operation_id: "update-secret".into(),
+        mutation: AgentInboxMutation::Update {
+            item_id: "queued".into(),
+            content: secret.into(),
+        },
+    };
+    let accepted = store.mutate_inbox(input.clone()).unwrap();
+    let persisted = accepted.inbox.next_turn[0].content.clone();
+    assert_eq!(persisted, "Authorization: [REDACTED]");
+    assert_eq!(store.mutate_inbox(input.clone()).unwrap(), accepted);
+    assert_eq!(
+        store
+            .enqueue(
+                "session-1",
+                AgentInboxLane::NextTurn,
+                message("queued", secret)
+            )
+            .unwrap(),
+        accepted
+    );
+    store.claim("session-1", AgentInboxLane::NextTurn).unwrap();
+    store.cancel("session-1").unwrap();
+    let saved = store.snapshot("session-1").unwrap();
+    drop(store);
+    let restored = AgentSessionStore::default();
+    restored.configure(root.path().to_path_buf()).unwrap();
+    assert_eq!(restored.mutate_inbox(input.clone()).unwrap(), saved);
+    assert_eq!(
+        restored
+            .enqueue(
+                "session-1",
+                AgentInboxLane::NextTurn,
+                message("queued", secret)
+            )
+            .unwrap(),
+        saved
+    );
+    for content in ["Authorization: Bearer different-secret", persisted.as_str()] {
+        let mut retry = input.clone();
+        retry.mutation = AgentInboxMutation::Update {
+            item_id: "queued".into(),
+            content: content.into(),
+        };
+        assert!(restored
+            .mutate_inbox(retry)
+            .unwrap_err()
+            .contains("different payload"));
+        assert!(restored
+            .enqueue(
+                "session-1",
+                AgentInboxLane::NextTurn,
+                message("queued", content),
+            )
+            .unwrap_err()
+            .contains("different payload"));
+    }
+    let mut other_item = input.clone();
+    other_item.mutation = AgentInboxMutation::Update {
+        item_id: "another-item".into(),
+        content: secret.into(),
+    };
+    assert!(restored
+        .mutate_inbox(other_item)
+        .unwrap_err()
+        .contains("different payload"));
+    assert_eq!(restored.snapshot("session-1").unwrap(), saved);
+    assert!(!fs::read_to_string(log_path(&root))
+        .unwrap()
+        .contains("plaintext-secret"));
+}
+
+#[test]
+fn inbox_legacy_update_receipts_keep_exact_content_matching_without_a_fingerprint() {
+    let (root, store) = configured();
+    create(&store);
+    store
+        .enqueue(
+            "session-1",
+            AgentInboxLane::NextTurn,
+            message("queued", "original"),
+        )
+        .unwrap();
+    let revision = store.snapshot("session-1").unwrap().event_count;
+    store
+        .append(
+            "session-1",
+            None,
+            None,
+            AgentSessionEventPayload::InboxItemUpdated {
+                item_id: "queued".into(),
+                lane: AgentInboxLane::NextTurn,
+                content: "legacy update".into(),
+                content_fingerprint: None,
+                previous_revision: revision,
+                client_operation_id: "legacy-update".into(),
+            },
+        )
+        .unwrap();
+    let saved = store.snapshot("session-1").unwrap();
+    drop(store);
+    let restored = AgentSessionStore::default();
+    restored.configure(root.path().to_path_buf()).unwrap();
+    let mut input = AgentInboxMutationInput {
+        session_id: "session-1".into(),
+        expected_revision: revision,
+        client_operation_id: "legacy-update".into(),
+        mutation: AgentInboxMutation::Update {
+            item_id: "queued".into(),
+            content: "legacy update".into(),
+        },
+    };
+    assert_eq!(restored.mutate_inbox(input.clone()).unwrap(), saved);
+    input.mutation = AgentInboxMutation::Update {
+        item_id: "queued".into(),
+        content: "different update".into(),
+    };
+    assert!(restored
+        .mutate_inbox(input)
+        .unwrap_err()
+        .contains("different payload"));
+}
+
+#[test]
 fn inbox_mutations_reject_conflicts_claimed_missing_and_terminal_items() {
     let (_root, store) = configured();
     create(&store);

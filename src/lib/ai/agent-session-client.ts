@@ -16,6 +16,7 @@ import {
 const PAGE_SIZE = 1_024;
 const RECOVERY_DELAY_MS = 1_000;
 const MAX_RECOVERY_DELAY_MS = 30_000;
+const RECONCILIATION_DELAY_MS = 5_000;
 
 export interface AgentSessionStreamTransport {
   readonly snapshot: (sessionId: string) => Promise<AgentSessionSnapshot>;
@@ -67,6 +68,9 @@ export class AgentSessionCommittedClient {
   private lastSyncedAt?: number;
   private syncRecovery?: AiSessionSyncRecovery;
   private recoveryWork?: Promise<void>;
+  private reconciliationTimer?: ReturnType<typeof setTimeout>;
+  private stopForegroundSync?: () => void;
+  private childSnapshotSeq = -1;
 
   constructor(
     private readonly sessionId: string,
@@ -119,6 +123,7 @@ export class AgentSessionCommittedClient {
       const snapshot = await this.transport.snapshot(this.sessionId);
       signal.throwIfAborted();
       this.snapshotValue = snapshot;
+      this.childSnapshotSeq = snapshot.eventCount - 1;
       await this.fetchAfter(this.events.last?.seq, signal);
       // Keep buffering until replay is fully drained. Live work must not race
       // a buffered event's asynchronous gap repair.
@@ -133,6 +138,7 @@ export class AgentSessionCommittedClient {
       this.assertCaughtUp();
       this.lastSyncedAt = Date.now();
       this.clearSyncError();
+      this.startReconciliation(signal);
       this.publishNow(true);
       return this.state();
     } catch (error) {
@@ -167,6 +173,10 @@ export class AgentSessionCommittedClient {
     this.emitPending = false;
     if (this.recoveryTimer !== undefined) clearTimeout(this.recoveryTimer);
     this.recoveryTimer = undefined;
+    if (this.reconciliationTimer !== undefined) clearTimeout(this.reconciliationTimer);
+    this.reconciliationTimer = undefined;
+    this.stopForegroundSync?.();
+    this.stopForegroundSync = undefined;
   }
 
   async settled(): Promise<AgentSessionStreamState> {
@@ -232,17 +242,30 @@ export class AgentSessionCommittedClient {
     }
     signal.throwIfAborted();
     this.merge(event);
-    if (this.snapshotValue?.header.subagent
-      && (event.type === 'session/ended' || event.type === 'subagent/recovery_started')) {
+    await this.refreshChildSnapshot(signal);
+    this.scheduleEmit();
+  }
+
+  private async refreshChildSnapshot(signal: AbortSignal): Promise<void> {
+    if (!this.snapshotValue?.header.subagent) return;
+    for (let index = this.childSnapshotSeq + 1; index < this.events.length; index++) {
+      const event = this.events.get(index)!;
+      if (event.type !== 'session/ended' && event.type !== 'subagent/recovery_started') {
+        this.childSnapshotSeq = event.seq;
+        continue;
+      }
+      // The event cursor can advance before this read succeeds. Keep a separate
+      // cursor so a failed snapshot is retried even when no more events arrive.
       const snapshot = await this.transport.snapshot(this.sessionId);
       signal.throwIfAborted();
       this.snapshotValue = snapshot;
+      this.childSnapshotSeq = Math.max(event.seq, snapshot.eventCount - 1);
       this.requiredSeq = Math.max(this.requiredSeq, snapshot.eventCount - 1);
       if ((this.events.last?.seq ?? -1) < this.requiredSeq) {
         await this.fetchAfter(this.events.last?.seq, signal);
       }
+      break;
     }
-    this.scheduleEmit();
   }
 
   private async fetchAfter(
@@ -278,6 +301,7 @@ export class AgentSessionCommittedClient {
       throw new Error('Committed Agent replay is shorter than the published event window');
     }
     this.snapshotValue = snapshot;
+    this.childSnapshotSeq = snapshot.eventCount - 1;
     this.events = events;
     this.hasTerminalEventValue = false;
     for (const event of events.snapshot()) this.updateTerminalState(event);
@@ -306,27 +330,58 @@ export class AgentSessionCommittedClient {
     this.recoveryDelay = Math.min(this.recoveryDelay * 2, MAX_RECOVERY_DELAY_MS);
   }
 
-  private recover(signal: AbortSignal): Promise<void> {
+  private startReconciliation(signal: AbortSignal): void {
+    this.scheduleReconciliation(signal);
+    if (typeof document === 'undefined') return;
+    const foreground = () => {
+      if (document.visibilityState === 'visible') void this.recover(signal, !this.syncError);
+    };
+    document.addEventListener('visibilitychange', foreground);
+    window.addEventListener('focus', foreground);
+    this.stopForegroundSync = () => {
+      document.removeEventListener('visibilitychange', foreground);
+      window.removeEventListener('focus', foreground);
+    };
+  }
+
+  private scheduleReconciliation(signal: AbortSignal): void {
+    if (signal.aborted || this.reconciliationTimer !== undefined) return;
+    this.reconciliationTimer = setTimeout(() => {
+      this.reconciliationTimer = undefined;
+      // A missing final event has no later sequence to expose its gap.
+      if (!this.syncError) void this.recover(signal, true);
+      else this.scheduleReconciliation(signal);
+    }, RECONCILIATION_DELAY_MS);
+  }
+
+  private recover(signal: AbortSignal, quiet = false): Promise<void> {
     if (signal.aborted) return Promise.resolve();
     if (this.recoveryWork) return this.recoveryWork;
     if (this.recoveryTimer !== undefined) clearTimeout(this.recoveryTimer);
     this.recoveryTimer = undefined;
-    this.syncRecovery = { attempts: (this.syncRecovery?.attempts ?? 0) + 1,
+    if (this.reconciliationTimer !== undefined) clearTimeout(this.reconciliationTimer);
+    this.reconciliationTimer = undefined;
+    if (!quiet) this.syncRecovery = { attempts: (this.syncRecovery?.attempts ?? 0) + 1,
       retrying: true, lastSyncedAt: this.lastSyncedAt };
     const work = this.enqueue(signal, async () => {
+      const previousSeq = this.events.last?.seq ?? -1;
+      const previousSnapshot = this.snapshotValue;
       try {
         await this.fetchAfter(this.events.last?.seq, signal);
       } catch {
         signal.throwIfAborted();
         await this.fullResync(signal);
       }
+      await this.refreshChildSnapshot(signal);
       signal.throwIfAborted();
-      this.scheduleEmit();
+      if (!quiet || previousSeq !== (this.events.last?.seq ?? -1)
+        || previousSnapshot !== this.snapshotValue) this.scheduleEmit();
     }).finally(() => {
       if (this.recoveryWork === work) this.recoveryWork = undefined;
+      this.scheduleReconciliation(signal);
     });
     this.recoveryWork = work;
-    this.publishNow(true);
+    if (!quiet) this.publishNow(true);
     return work;
   }
 

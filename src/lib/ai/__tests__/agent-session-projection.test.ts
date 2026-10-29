@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   createAgentActivityProjector,
@@ -13,7 +13,152 @@ import {
 import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
 import type { AgentSessionEvent } from '@/types/agent-session';
 
+function streamingActivityEvents(chunkCount: number): AgentSessionEvent[] {
+  const headerIndex = agentSessionEventFixture.findIndex((event) => event.type === 'request/header');
+  const header = agentSessionEventFixture[headerIndex];
+  if (header?.type !== 'request/header') throw new Error('request fixture missing');
+  const events = agentSessionEventFixture.slice(0, headerIndex + 1);
+  return events.concat(Array.from({ length: chunkCount }, (_, index) => sessionEvent(events.length + index, {
+    type: 'assistant/chunk',
+    turnId: header.turnId,
+    stepId: header.stepId,
+    data: { requestId: header.data.requestId, textDelta: `chunk-${index}` },
+  })));
+}
+
+function countHistoryCopies(firstChunkSeq: number, project: () => unknown) {
+  const copied = { eventTypes: 0, eventSeqs: 0, records: 0 };
+  const count = (values: readonly unknown[]): void => {
+    const first = values[0];
+    if (first === 'assistant/chunk') copied.eventTypes += values.length;
+    else if (first === firstChunkSeq) copied.eventSeqs += values.length;
+    else if (first && typeof first === 'object' && 'type' in first
+      && first.type === 'assistant/chunk' && !('version' in first)) copied.records += values.length;
+  };
+  const iterator = Array.prototype[Symbol.iterator];
+  const slice = Array.prototype.slice;
+  Array.prototype[Symbol.iterator] = function (this: unknown[]) {
+    count(this);
+    return iterator.call(this);
+  };
+  Array.prototype.slice = function (this: unknown[], start?: number, end?: number) {
+    const values: unknown[] = slice.call(this, start, end);
+    count(values);
+    return values;
+  };
+  try {
+    project();
+    return copied;
+  } finally {
+    Array.prototype[Symbol.iterator] = iterator;
+    Array.prototype.slice = slice;
+  }
+}
+
 describe('Agent committed Activity projection', () => {
+  it.each(['nodes', 'activity'] as const)('copies each audit history once for a large %s publication', (projection) => {
+    const chunkCount = 4096;
+    const events = streamingActivityEvents(chunkCount);
+    const copied = countHistoryCopies(events.length - chunkCount, () => (
+      projection === 'nodes' ? projectAgentActivityNodes(events) : createAgentActivityProjector()(events)
+    ));
+    expect(copied).toEqual({ eventTypes: chunkCount, eventSeqs: chunkCount, records: chunkCount });
+    const stream = projectAgentActivityNodes(events).find((node) => node.kind === 'assistantStream');
+    const chunks = events.slice(-chunkCount);
+    expect(stream?.eventTypes).toEqual(chunks.map((event) => event.type));
+    expect(stream?.eventSeqs).toEqual(chunks.map((event) => event.seq));
+    expect(stream?.records).toEqual(chunks.map((event) => ({
+      type: event.type, seq: event.seq, timeUnixMs: event.timeUnixMs, data: 'data' in event ? event.data : null,
+    })));
+  });
+
+  it('copies growing history only at publication boundaries, including single-event appends', () => {
+    const events = streamingActivityEvents(4096);
+    const firstChunkSeq = events.length - 4096;
+    const project = createAgentActivityProjector();
+    project(events.slice(0, firstChunkSeq + 512));
+    for (const count of [513, 2048, 4096]) {
+      const window = events.slice(0, firstChunkSeq + count);
+      expect(countHistoryCopies(firstChunkSeq, () => project(window)))
+        .toEqual({ eventTypes: count, eventSeqs: count, records: count });
+      expect(countHistoryCopies(firstChunkSeq, () => project(window)))
+        .toEqual({ eventTypes: 0, eventSeqs: 0, records: 0 });
+    }
+  });
+
+  it('matches full replay across large batches while retaining all old snapshots and clean nodes', () => {
+    const events = streamingActivityEvents(4096);
+    const firstChunkSeq = events.length - 4096;
+    events.push(...agentSessionEventFixture.slice(firstChunkSeq).map((event, index) => ({
+      ...event, seq: events.length + index, timeUnixMs: 1000 + (events.length + index) * 10,
+    })));
+    const project = createAgentActivityProjector();
+    const retained: { nodes: ReturnType<typeof project>['nodes']; before: ReturnType<typeof project>['nodes'] }[] = [];
+    for (const length of [firstChunkSeq, firstChunkSeq + 1, firstChunkSeq + 512,
+      firstChunkSeq + 513, firstChunkSeq + 2048, firstChunkSeq + 4096, events.length]) {
+      const window = Object.freeze(events.slice(0, length));
+      const next = project(window);
+      expect(next).toEqual(projectAgentActivity(window));
+      const previous = retained[retained.length - 1]?.nodes;
+      for (const node of next.nodes) {
+        const old = previous?.find((candidate) => candidate.key === node.key);
+        if (old?.lastSeq === node.lastSeq) expect(node).toBe(old);
+        else if (old) {
+          expect(node).not.toBe(old);
+          expect(node.records[0]).toBe(old.records[0]);
+        }
+        Object.freeze(node.eventTypes);
+        Object.freeze(node.eventSeqs);
+        for (const record of node.records) Object.freeze(record);
+        Object.freeze(node.records);
+        Object.freeze(node);
+      }
+      Object.freeze(next.nodes);
+      retained.push({ nodes: next.nodes, before: structuredClone(next.nodes) });
+      for (const snapshot of retained) expect(snapshot.nodes).toEqual(snapshot.before);
+    }
+  });
+
+  it('sorts new equal-sequence nodes but does not sort again for existing entity updates', () => {
+    const events = [sessionEvent(0, {
+      type: 'agent/inbox/spliced',
+      data: { operation: 'enqueued', lane: 'nextTurn', messages: ['z', 'a'].map((messageId) => ({
+        messageId, content: messageId, source: { kind: 'user', label: 'User', producerId: 'user' },
+      })) },
+    })];
+    const project = createAgentActivityProjector();
+    const first = project(events);
+    expect(first.nodes.map((node) => node.key)).toEqual(['activity:inbox:a', 'activity:inbox:z']);
+    const updated = [...events, sessionEvent(1, {
+      type: 'agent/inbox/item_updated',
+      data: { itemId: 'z', lane: 'nextTurn', content: 'updated', previousRevision: 0, clientOperationId: 'update-z' },
+    })];
+    const sort = vi.spyOn(Array.prototype, 'sort');
+    let sortCalls: number;
+    let next: ReturnType<typeof project>;
+    try {
+      next = project(updated);
+      sortCalls = sort.mock.calls.length;
+    } finally {
+      sort.mockRestore();
+    }
+    expect(sortCalls).toBe(0);
+    expect(next.nodes.map((node) => node.key)).toEqual(first.nodes.map((node) => node.key));
+    expect(next.nodes[0]).toBe(first.nodes[0]);
+    expect(next.nodes[1]).toMatchObject({ detail: 'updated', eventSeqs: [0, 1] });
+    const ignored = [...updated, sessionEvent(2, {
+      type: 'session/permission_changed', data: { mode: 'requestApproval' },
+    })];
+    expect(project(ignored).nodes).toBe(next.nodes);
+    const appended = project([...ignored, sessionEvent(3, {
+      type: 'agent/inbox/item_updated',
+      data: { itemId: '0', lane: 'nextTurn', content: 'new', previousRevision: 0, clientOperationId: 'update-0' },
+    })]);
+    expect(appended.nodes.map((node) => node.key)).toEqual(['activity:inbox:a', 'activity:inbox:z', 'activity:inbox:0']);
+    expect(appended.nodes.slice(0, 2)).toEqual(next.nodes);
+    expect(appended.nodes[1]).toBe(next.nodes[1]);
+  });
+
   it('keeps a recovery step nonterminal without generating a failure diagnostic', () => {
     const events = [
       sessionEvent(0, { type: 'turn/start', turnId: 'turn-recovery' }),
