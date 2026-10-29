@@ -675,9 +675,9 @@
         assert_eq!(
             ready.integration_event_sequence,
             if shell == TerminalShellKind::Zsh {
-                8
+                9
             } else {
-                7
+                8
             }
         );
         let mut expected_capabilities = vec![
@@ -1314,9 +1314,13 @@
                         )
                     });
                     wait_until(Duration::from_secs(5), || {
-                        writes.lock().unwrap()[before..]
-                            .iter()
-                            .any(|(_, input)| input == &frame)
+                        writes.lock().unwrap()[before..].iter().any(|(_, input)| {
+                            if attempt % 2 == 0 {
+                                input.len() == 65 && input.starts_with(['c', 'f'])
+                            } else {
+                                input == &frame
+                            }
+                        })
                     });
                     registry.cancel_task(&sessions, "typing-task").unwrap();
                     typing.join().unwrap().unwrap()
@@ -1325,6 +1329,12 @@
                     .wait(&sessions, transport_id, &operation, Duration::from_secs(5))
                     .unwrap();
                 assert_eq!(result.state, TerminalCommandState::Cancelled, "{result:?}");
+                assert!(
+                    writes.lock().unwrap()[before..]
+                        .iter()
+                        .all(|(_, input)| input != "\u{18}\u{5}"),
+                    "cancelled native typing must not enqueue accept-line"
+                );
                 leases.release_turn("typing-agent").unwrap();
                 wait_for_prompt(broker, transport_id);
                 assert!(!effect.exists(), "stopped native source executed");
@@ -1356,6 +1366,9 @@
         }
         if checkpoint_failure {
             assert!(expected_native_input);
+            // This fault case withholds a complete source-frame receipt. Keep
+            // animation separate from the single-frame timeout/nonce contract.
+            reduced_motion.store(true, Ordering::SeqCst);
             let delayed_frame = output.path().join("delayed-source-frame");
             let checkpoint_definition = if shell == TerminalShellKind::Bash {
                 format!("__shellspan_native_frame_checkpoint() {{ if [[ -z $READLINE_LINE ]]; then __shellspan_emit M \"$1\" \"$READLINE_LINE\"; else builtin printf '%s\\0' M \"$1\" \"$READLINE_LINE\" >| {}; fi; }}", shell_single_quote(delayed_frame.to_str().unwrap()))

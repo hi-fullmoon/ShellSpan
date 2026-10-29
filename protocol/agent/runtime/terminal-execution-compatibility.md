@@ -241,12 +241,12 @@ rebind attempt. The user can start a new conversation on that terminal.
 The frontend lease-ready acknowledgement accepts optional `reducedMotion`.
 Missing preferences default to reduced motion for older clients. The desktop
 passes the current `prefers-reduced-motion` preference for each operation.
-Without reduced motion, command input advances in Unicode grapheme clusters
-at 35 ms intervals, batching long commands into at most 48 writes (a 1.7 s
+Without reduced motion, ordinary short commands advance in Unicode grapheme
+clusters at 35 ms intervals, batching long commands into at most 48 writes (a 1.7 s
 input budget). A 150 ms pause precedes the submit key. Output remains live.
 Animated chunks use normal text input rather than repeated bracketed pastes,
 avoiding paste-highlight redraws when the command wraps across terminal rows.
-Reduced motion submits the complete input without animation or pause.
+Reduced motion submits those short commands without animation or pause.
 
 Lease events additionally accept `state: activity` and
 `commandPhase: typing | running`. They carry no command text and only update
@@ -262,9 +262,26 @@ use the advertised native Readline/ZLE/PSReadLine editor bindings: LF/CR/Tab
 insert literal buffer characters, then one dedicated accept-line submits the
 whole source or the visible Bash envelope containing that source. Bash validates
 and evaluates source at top level as one interruptible unit. This path does not
-rely on bracketed paste or animation and keeps
-a cancellation boundary before accept-line even in reduced motion. Other
-control characters stay rejected. Unsupported editors fail before input;
+rely on bracketed paste. Bash/Zsh receivers that advertise `Y=1` also support
+animation: at most 48 grapheme-safe buffer prefixes, separated by 35 ms and an
+exact native buffer acknowledgement. Each Bash/Zsh frame keeps the
+submit/cancel/takeover gate from receiver readiness through the complete data
+enqueue, resetting the previous frame receipt before the next receiver starts.
+A stop request then waits for that frame's matching acknowledgement with the
+existing bounded receipt timeout before attempting the independently confirmed
+editor clear; editor control keys cannot enter the readiness/descriptor gap.
+Intermediate `c` (Bash) / `f` (Zsh) frames only edit the buffer; the final
+`b` / `e` frame retains complete-source validation and the single accept-line.
+Immediately before that accept, the command result capture budget restarts so
+repeated typing redisplays cannot
+truncate execution output; terminal display and replay retain all original bytes.
+A receiver only replaces an empty buffer or its own last confirmed edit,
+preserving unrelated user drafts. Each frame keeps its existing bounded receive
+deadline; reduced motion and older receivers
+retain the complete-frame path. The capability resets at every prompt and
+integration generation. A cancellation boundary remains before accept-line even
+in reduced motion. Other control characters stay rejected. Unsupported editors
+fail before input;
 see `visible-terminal-unification-plan.md` for shell/version and grammar limits.
 
 The broker tracks pending command input independently of the Agent lease.

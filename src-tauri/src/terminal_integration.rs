@@ -172,6 +172,9 @@ pub(crate) enum TerminalIntegrationControlEvent {
     NativeCheckpointMode {
         enabled: bool,
     },
+    NativeTyping {
+        enabled: bool,
+    },
     Job {
         handle: String,
         state: String,
@@ -248,7 +251,7 @@ impl TerminalIntegrationStreamDecoder {
         let mut events = Vec::new();
         while let Some(kind) = self.pending_fields.first().map(String::as_str) {
             let field_count = match kind {
-                "R" | "P" | "X" | "I" | "C" | "K" | "A" | "H" | "V" => 2,
+                "R" | "P" | "X" | "I" | "C" | "K" | "A" | "H" | "V" | "Y" => 2,
                 "L" => 3,
                 "Q" | "T" | "U" | "W" => 1,
                 "S" | "E" | "J" | "F" | "M" => 3,
@@ -304,6 +307,13 @@ fn event_from_fields(fields: &[String]) -> Result<Option<TerminalIntegrationCont
                 },
             },
         )),
+        "Y" => Ok(Some(TerminalIntegrationControlEvent::NativeTyping {
+            enabled: match fields[1].as_str() {
+                "1" => true,
+                "0" => false,
+                _ => return Err("TERMINAL_NATIVE_TYPING_INVALID_MODE".into()),
+            },
+        })),
         "A" => Ok(Some(TerminalIntegrationControlEvent::NativeCheckpoint {
             buffer: fields[1].clone(),
         })),
@@ -951,6 +961,7 @@ __shellspan_prompt_cycle() {{
   local __shellspan_status=$?
   __shellspan_restore_receiver_tty
   __shellspan_private_descriptor=
+  __shellspan_native_edit_line=
   if [[ -n ${{__shellspan_job_armed_handle-}} ]]; then
     local __shellspan_identity="${{__shellspan_control_path}}.job.${{__shellspan_job_armed_handle}}.identity" __shellspan_pid
     builtin jobs -p "%( $__shellspan_job_armed_handle;" >| "$__shellspan_identity" 2>/dev/null
@@ -1008,6 +1019,7 @@ __shellspan_prompt_cycle() {{
   fi
   __shellspan_emit I "$__shellspan_native_input"
   __shellspan_emit H "$__shellspan_native_input"
+  __shellspan_emit Y "$__shellspan_native_input"
   if [[ $__shellspan_native_input == 1 && ${{1-}} != native-reject ]]; then
     bind -x '"\C-x\C-b":__shellspan_native_receive'
   fi
@@ -1066,6 +1078,7 @@ __shellspan_private_commit() {{
   __shellspan_emit P "$PWD"
   __shellspan_emit I 1
   __shellspan_emit H 1
+  __shellspan_emit Y 1
   __shellspan_emit V 1
   if [[ -o monitor ]]; then __shellspan_emit K 1; else __shellspan_emit K 0; fi
   __shellspan_emit Q
@@ -1103,14 +1116,14 @@ __shellspan_native_receive_frame() {{
   local __shellspan_async_redraw=0
   [[ -n $(builtin jobs -p -r) ]] && __shellspan_async_redraw=1
   __shellspan_emit A "$READLINE_LINE"
-  [[ -z "$READLINE_LINE" ]] || return
+  [[ -z "$READLINE_LINE" || "$READLINE_LINE" == "${{__shellspan_native_edit_line-}}" ]] || return
   local __shellspan_descriptor __shellspan_encoded __shellspan_decoded __shellspan_count __shellspan_source_count __shellspan_original=
   local __shellspan_rows __shellspan_columns __shellspan_without_newlines __shellspan_line_count __shellspan_row
   local __shellspan_deadline=$((SECONDS + 2)) __shellspan_remaining
   if ! __shellspan_read_private 65 2 __shellspan_descriptor; then
     __shellspan_emit M '' "$READLINE_LINE"; __shellspan_quarantine_native; return
   fi
-  if [[ ${{#__shellspan_descriptor}} != 65 || ${{__shellspan_descriptor:0:1}} != b || ${{__shellspan_descriptor:1}} == *[!0-9a-f]* ]]; then
+  if [[ ${{#__shellspan_descriptor}} != 65 || ${{__shellspan_descriptor:0:1}} != [bc] || ${{__shellspan_descriptor:1}} == *[!0-9a-f]* ]]; then
     __shellspan_emit M '' "$READLINE_LINE"; __shellspan_quarantine_native; return
   fi
   __shellspan_count=$((16#${{__shellspan_descriptor:1:5}}))
@@ -1126,6 +1139,7 @@ __shellspan_native_receive_frame() {{
     builtin printf -v __shellspan_original '%b' "${{__shellspan_encoded:0:__shellspan_source_count}}"
     if ! __shellspan_validate_native "$__shellspan_original" quiet; then
       __shellspan_emit J "$__shellspan_original" TERMINAL_INPUT_UNSUPPORTED
+      READLINE_LINE=; READLINE_POINT=0; __shellspan_native_edit_line=; __shellspan_pending_line=
       __shellspan_prompt_ready=0
       __shellspan_prompt_cycle native-reject
       return
@@ -1133,6 +1147,11 @@ __shellspan_native_receive_frame() {{
   fi
   READLINE_LINE=$__shellspan_decoded
   __shellspan_readline_end "$(( (__shellspan_count - __shellspan_source_count) / 4 ))"
+  __shellspan_native_edit_line=$READLINE_LINE
+  if [[ ${{__shellspan_descriptor:0:1}} == c ]]; then
+    __shellspan_completed_descriptor=$__shellspan_descriptor
+    return 124
+  fi
   __shellspan_accept_native "$__shellspan_original"
   if [[ -z "$READLINE_LINE" ]]; then __shellspan_prompt_cycle native-reject; return; fi
   if [[ -z "$__shellspan_previous_int_trap" && -n "$__shellspan_int_trap" ]]; then
@@ -1190,6 +1209,7 @@ __shellspan_read_private() {{
 }}
 __shellspan_discard_native() {{
   __shellspan_private_descriptor=
+  __shellspan_native_edit_line=
   if [[ -n ${{__shellspan_job_armed_handle-}} ]]; then
     unset -f "$__shellspan_job_armed_handle"
     __shellspan_job_armed_handle=
@@ -1330,6 +1350,7 @@ __shellspan_emit() {{
 __shellspan_precmd() {{
   local __shellspan_status=$?
   __shellspan_private_descriptor=
+  __shellspan_native_edit_line=
   __shellspan_native_redraw_before_accept=0
   if [[ -n ${{__shellspan_blocked_marker-}} && ${{functions[$__shellspan_blocked_marker]-}} == "${{__shellspan_blocked_marker_definition-}}" ]]; then
     unfunction "$__shellspan_blocked_marker"
@@ -1361,6 +1382,7 @@ __shellspan_publish_native_capabilities() {{
   if [[ $__shellspan_native_quarantined == 0 && -o zle && -n $__shellspan_parser_executable && $__shellspan_stty_executable == /* ]] && zmodload zsh/datetime && zmodload -F zsh/system b:sysread && bindkey '^X^V' quoted-insert && bindkey -s '^Xn' '^X^V^J' && bindkey -s '^Xt' '^X^V^I' && bindkey -s '^Xr' '^X^V^M' && bindkey '^X^A' __shellspan_native_checkpoint && bindkey '^X^D' __shellspan_discard_native && bindkey '^X^E' __shellspan_accept_native; then
     __shellspan_emit I 1
     __shellspan_emit H 1
+    __shellspan_emit Y 1
     if zmodload zsh/datetime && bindkey '^X^O' __shellspan_private_receive && bindkey '^X^K' __shellspan_private_commit && bindkey '^X^B' __shellspan_native_receive; then
       __shellspan_emit V 1
     else
@@ -1370,6 +1392,7 @@ __shellspan_publish_native_capabilities() {{
   else
     __shellspan_emit I 0
     __shellspan_emit H 0
+    __shellspan_emit Y 0
     __shellspan_emit V 0
     __shellspan_emit K 0
   fi
@@ -1516,7 +1539,7 @@ __shellspan_native_receive_frame() {{
     done
   fi
   __shellspan_emit A "$BUFFER"
-  [[ -z "$BUFFER" ]] || return
+  [[ -z "$BUFFER" || "$BUFFER" == "${{__shellspan_native_edit_line-}}" ]] || return
   local __shellspan_descriptor __shellspan_encoded __shellspan_decoded __shellspan_count
   local -F 6 __shellspan_deadline=$(( EPOCHREALTIME + 2.0 )) __shellspan_remaining
   if ! __shellspan_read_native 65 "$__shellspan_deadline" __shellspan_descriptor; then
@@ -1524,7 +1547,7 @@ __shellspan_native_receive_frame() {{
     __shellspan_quarantine_native
     return
   fi
-  if [[ ${{#__shellspan_descriptor}} != 65 || ${{__shellspan_descriptor[1]}} != e || ${{__shellspan_descriptor[2,-1]}} == *[!0-9a-f]* ]]; then
+  if [[ ${{#__shellspan_descriptor}} != 65 || ${{__shellspan_descriptor[1]}} != [ef] || ${{__shellspan_descriptor[2,-1]}} == *[!0-9a-f]* ]]; then
     __shellspan_native_frame_checkpoint ''
     __shellspan_quarantine_native
     return
@@ -1539,9 +1562,10 @@ __shellspan_native_receive_frame() {{
   builtin printf -v __shellspan_decoded '%b' "$__shellspan_encoded"
   # Native invalidation preserves asynchronous output before the one native
   # buffer replacement. No source is accepted or evaluated by this widget.
-  zle -I
+  [[ -n "$BUFFER" ]] || zle -I
   BUFFER=$__shellspan_decoded
   CURSOR=${{#BUFFER}}
+  __shellspan_native_edit_line=$BUFFER
   __shellspan_completed_descriptor=$__shellspan_descriptor
 }}
 zle -N __shellspan_native_receive
@@ -1592,6 +1616,7 @@ autoload -Uz add-zle-hook-widget
 add-zle-hook-widget line-finish __shellspan_private_line_finish
 __shellspan_discard_native() {{
   __shellspan_private_descriptor=
+  __shellspan_native_edit_line=
   __shellspan_native_redraw_before_accept=0
   __shellspan_job_release_marker_zsh
   BUFFER=
@@ -1995,6 +2020,10 @@ fn read_control_events(
             "A" => TerminalIntegrationControlEvent::NativeCheckpoint {
                 buffer: required_field(reader, "native checkpoint buffer")?,
             },
+            "Y" => {
+                event_from_fields(&[kind.clone(), required_field(reader, "native typing mode")?])?
+                    .ok_or("TERMINAL_NATIVE_TYPING_EMPTY_EVENT")?
+            }
             "V" => event_from_fields(&[
                 kind.clone(),
                 required_field(reader, "private control mode")?,

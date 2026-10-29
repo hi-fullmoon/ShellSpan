@@ -316,6 +316,33 @@
     }
 
     #[test]
+    fn native_typing_preserves_prefixes_and_the_final_validated_source_frame() {
+        let source = format!("cat <<'END'\n{}\nEND\npwd", "中文e\u{301}👩‍💻\t".repeat(100));
+        for shell in [TerminalShellKind::Bash, TerminalShellKind::Zsh] {
+            let command = if shell == TerminalShellKind::Bash {
+                crate::terminal_integration::bash_native_submission(&source).unwrap()
+            } else {
+                source.clone()
+            };
+            let frames = native_editor_typing_chunks(&command, shell);
+            assert!(frames.len() > 1 && frames.len() <= TYPING_MAX_STEPS);
+            let mut previous = "";
+            for (_, prefix) in &frames {
+                assert!(prefix.starts_with(previous) && prefix.len() > previous.len());
+                assert!(command.starts_with(prefix));
+                assert!(
+                    command
+                        .grapheme_indices(true)
+                        .any(|(index, _)| index == prefix.len())
+                        || prefix.len() == command.len()
+                );
+                previous = prefix;
+            }
+            assert_eq!(frames.last(), native_editor_chunks(&command, shell).last());
+        }
+    }
+
+    #[test]
     fn native_editor_encoding_preserves_original_bytes_without_flow_control_keys() {
         assert_eq!(
             native_editor_input("a\nb\tc\rd"),

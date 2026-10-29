@@ -367,6 +367,13 @@ checked before any lease/input. Nothing is truncated or resubmitted.
 
 Current native input additionally requires `H\0{0|1}\0` advertising the owned
 checkpoint binding. `I=1` alone from an older bootstrap is insufficient.
+Optional `Y\0{0|1}\0` advertises animated Bash/Zsh editor frames. It requires
+I/H and resets at every prompt or integration replacement. Without Y, the
+runtime retains the single complete source frame. With Y and animations enabled,
+the runtime sends at most 48 grapheme-safe prefixes; `c` (Bash) and `f` (Zsh)
+descriptors edit without syntax acceptance, while the final `b` / `e` frame
+preserves full-source validation. Every frame retains the exact-buffer
+acknowledgement, receive timeout, silent quarantine and scoped cancellation.
 Input uses bounded Unicode-safe editor chunks. `A\0buffer\0` must acknowledge
 the exact complete expected buffer before the next chunk. Readline/ZLE quote
 ordinary characters as well as LF/CR/Tab; each payload is at most 512 encoded

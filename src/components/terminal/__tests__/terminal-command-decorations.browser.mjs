@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -341,6 +341,57 @@ try {
       assert.equal(result.blocks.length, 1, `${result.mode}: internal control must preserve exactly one visible command range`);
       assert.equal(result.blocks[0].bottom, script.bottom, `${result.mode}: delayed control boundaries must preserve the whole script`);
       assert.ok(result.blocks[0].bottom <= script.outputRow, `${result.mode}: shading must end before script output`);
+    }
+  }
+  for (const shell of process.platform === 'darwin' ? ['zsh', 'bash'] : ['bash']) {
+    for (const [width, columns] of [[1280, 100], [420, 40]]) {
+      const path = join(directory, `native-typing-${shell}-${columns}.bin.json`);
+      if (!existsSync(path)) {
+        assert.notEqual(shell, 'zsh', 'Native Zsh typing capture is required on macOS');
+        continue;
+      }
+      const metadata = JSON.parse(readFileSync(path, 'utf8'));
+      await page.setViewportSize({ width, height: 700 });
+      await page.evaluate(async metadata => {
+        const { Terminal, resolveTerminalTheme } = window.runtime;
+        const terminal = new Terminal({ cols: metadata.columns, rows: metadata.rows,
+          fontSize: 14, theme: resolveTerminalTheme('app'), allowProposedApi: true });
+        terminal.open(document.getElementById('terminal'));
+        window.nativeTyping = { terminal, snapshots: [], boundary: false, raw: '', decoder: new TextDecoder() };
+      }, metadata);
+      const middle = Math.floor(metadata.frames.length / 2);
+      for (const [from, to] of [[0, middle], [middle, metadata.frames.length]]) {
+        await page.evaluate(async frames => {
+          const state = window.nativeTyping;
+          for (const frame of frames) {
+            const data = state.decoder.decode(new Uint8Array(frame.bytes), { stream: true });
+            state.raw += data;
+            state.boundary ||= state.raw.includes('\x1b]133;C\x07');
+            await new Promise(resolve => state.terminal.write(data, resolve));
+            await new Promise(resolve => requestAnimationFrame(resolve));
+            if (!state.boundary) {
+              const buffer = state.terminal.buffer.active;
+              state.snapshots.push({ atMs: frame.atMs, text: Array.from({ length: buffer.length },
+                (_, index) => buffer.getLine(index).translateToString(true)).join('\n') });
+            }
+          }
+        }, metadata.frames.slice(from, to));
+        if (from === 0) await page.screenshot({ path: `/tmp/shellspan-typing-${shell}-${columns}-middle.png` });
+      }
+      const progress = await page.evaluate(() => {
+        const state = window.nativeTyping;
+        const screen = state.terminal.element.querySelector('.xterm-screen');
+        return { snapshots: state.snapshots, boundary: state.boundary,
+          screenWidth: screen.clientWidth, hostWidth: document.getElementById('terminal').clientWidth };
+      });
+      assert.ok(progress.boundary, 'The real source must eventually execute');
+      assert.ok(new Set(progress.snapshots.map(snapshot => snapshot.text)).size > 3,
+        'The real xterm buffer must visibly advance before submission');
+      assert.ok(progress.snapshots.at(-1).atMs - progress.snapshots[0].atMs > 500,
+        'Native typing must remain visible over time');
+      assert.ok(progress.screenWidth <= progress.hostWidth, 'Animated native input must fit the container');
+      await page.screenshot({ path: `/tmp/shellspan-typing-${shell}-${columns}-complete.png` });
+      await page.evaluate(() => window.nativeTyping.terminal.dispose());
     }
   }
   assert.deepEqual(errors, []);

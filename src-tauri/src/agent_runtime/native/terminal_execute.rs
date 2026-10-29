@@ -655,17 +655,50 @@ impl TerminalExecuteRegistry {
                     )?;
                     return Ok(());
                 }
-                let zsh_frame_deadline =
-                    matches!(shell, TerminalShellKind::Zsh | TerminalShellKind::Bash).then(|| {
+                let native_animation = !reduced_motion
+                    && matches!(shell, TerminalShellKind::Zsh | TerminalShellKind::Bash)
+                    && self.broker.native_typing_enabled(session_id)?;
+                let animated_data;
+                let editor_data = if native_animation {
+                    animated_data = native_editor_typing_chunks(input, shell);
+                    &animated_data
+                } else {
+                    native_editor_data
+                        .as_ref()
+                        .expect("native input prepared before lease")
+                };
+                let mut zsh_frame_deadline = None;
+                let mut previous_prefix = String::new();
+                for (index, (wire, prefix)) in editor_data.iter().enumerate() {
+                    if native_animation && index > 0 {
+                        std::thread::sleep(deadline.map_or(TYPING_INTERVAL, |deadline| {
+                            TYPING_INTERVAL.min(deadline.saturating_duration_since(Instant::now()))
+                        }));
+                    }
+                    zsh_frame_deadline = matches!(
+                        shell,
+                        TerminalShellKind::Zsh | TerminalShellKind::Bash
+                    )
+                    .then(|| {
                         deadline.map_or(Instant::now() + FRONTEND_READY_TIMEOUT, |deadline| {
                             deadline.min(Instant::now() + FRONTEND_READY_TIMEOUT)
                         })
                     });
-                let mut previous_prefix = String::new();
-                for (wire, prefix) in native_editor_data
-                    .as_ref()
-                    .expect("native input prepared before lease")
-                {
+                    let partial = native_animation && index + 1 < editor_data.len();
+                    let posix_frame =
+                        matches!(shell, TerminalShellKind::Zsh | TerminalShellKind::Bash);
+                    // Keep readiness and the complete data enqueue atomic with
+                    // stop/takeover. Once queued, stop may await this frame's
+                    // exact acknowledgement with its bounded receipt timeout.
+                    let mut frame_gate = if posix_frame {
+                        Some(
+                            submitted
+                                .lock()
+                                .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE")?,
+                        )
+                    } else {
+                        None
+                    };
                     // PSReadLine consumes each bounded data batch in one native
                     // Replace call. Its unchanged-buffer A is a readiness fence:
                     // payload is never queued where ReadLine could accept it.
@@ -685,9 +718,15 @@ impl TerminalExecuteRegistry {
                             matches!(shell, TerminalShellKind::Zsh | TerminalShellKind::Bash)
                                 && phase_index == 1;
                         {
-                            let _gate = submitted
-                                .lock()
-                                .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE".to_string())?;
+                            let _gate = if frame_gate.is_none() {
+                                Some(
+                                    submitted
+                                        .lock()
+                                        .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE")?,
+                                )
+                            } else {
+                                None
+                            };
                             if operation.snapshot()?.state != TerminalCommandState::Submitted {
                                 return interrupted_typing_result(operation.snapshot()?.state);
                             }
@@ -712,16 +751,22 @@ impl TerminalExecuteRegistry {
                                 )?;
                             }
                             revalidate(TerminalExecuteValidationStage::InputWrite)?;
+                            if posix_frame && phase_index == 0 {
+                                operation.begin_native_frame()?;
+                            }
                             if powershell && phase_index == 0 {
                                 editor_batch_pending.store(true, Ordering::Release);
                             }
                             if zsh_data {
                                 let descriptor = if shell == TerminalShellKind::Bash {
-                                    let source_length =
+                                    let source_length = if partial {
+                                        0
+                                    } else {
                                         crate::terminal_integration::bash_native_eval_source(
                                             &phase_prefix,
                                         )
-                                        .map_or(0, |source| source.len() * 4);
+                                        .map_or(0, |source| source.len() * 4)
+                                    };
                                     let geometry = self
                                         .broker
                                         .snapshot(Some(session_id))?
@@ -729,7 +774,8 @@ impl TerminalExecuteRegistry {
                                         .ok_or("TERMINAL_BROKER_SESSION_NOT_FOUND")?
                                         .geometry;
                                     format!(
-                                        "b{:05x}{:04x}{:04x}{:04x}{}{}",
+                                        "{}{:05x}{:04x}{:04x}{:04x}{}{}",
+                                        if partial { 'c' } else { 'b' },
                                         phase_wire.len(),
                                         source_length,
                                         geometry.rows,
@@ -739,7 +785,8 @@ impl TerminalExecuteRegistry {
                                     )
                                 } else {
                                     format!(
-                                        "e{:04x}{}{}",
+                                        "{}{:04x}{}{}",
+                                        if partial { 'f' } else { 'e' },
                                         phase_wire.len(),
                                         &uuid::Uuid::new_v4().simple().to_string()[..28],
                                         uuid::Uuid::new_v4().simple()
@@ -787,6 +834,9 @@ impl TerminalExecuteRegistry {
                                 },
                             )?;
                         }
+                        if zsh_data {
+                            drop(frame_gate.take());
+                        }
                         let acknowledgement_timeout = zsh_frame_deadline.or(deadline).map_or(
                             FRONTEND_READY_TIMEOUT,
                             |deadline| {
@@ -800,9 +850,15 @@ impl TerminalExecuteRegistry {
                             operation.wait_native_checkpoint(acknowledgement_timeout)?
                         };
                         if !confirmed {
-                            let _gate = submitted
-                                .lock()
-                                .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE")?;
+                            let _gate = if frame_gate.is_none() {
+                                Some(
+                                    submitted
+                                        .lock()
+                                        .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE")?,
+                                )
+                            } else {
+                                None
+                            };
                             let snapshot = operation.snapshot()?;
                             let state = snapshot.state;
                             if shell == TerminalShellKind::Bash
@@ -826,6 +882,7 @@ impl TerminalExecuteRegistry {
                             return Err("TERMINAL_INPUT_RECOVERY_REQUIRED: native editor checkpoint was not confirmed; no automatic replay".into());
                         }
                     }
+                    drop(frame_gate);
                     {
                         let _gate = submitted
                             .lock()
@@ -864,6 +921,9 @@ impl TerminalExecuteRegistry {
                         command,
                         line,
                     )?;
+                }
+                if native_animation {
+                    operation.finish_typing_capture()?;
                 }
                 self.leases.write(
                     sessions,
@@ -1753,6 +1813,26 @@ pub(crate) fn native_editor_chunks(
         chunks.push((wire, prefix));
     }
     chunks
+}
+
+// Each intermediate frame replaces the real editor buffer with a grapheme-safe
+// prefix. Only the final frame carries the complete source validation envelope.
+// Receivers acknowledge every prefix before another frame or accept is sent.
+fn native_editor_typing_chunks(command: &str, shell: TerminalShellKind) -> Vec<(String, String)> {
+    let chunks = typing_chunks(command, false);
+    let mut end = 0;
+    chunks
+        .iter()
+        .enumerate()
+        .map(|(index, chunk)| {
+            end += chunk.len();
+            if index + 1 == chunks.len() {
+                native_editor_chunks(command, shell).remove(0)
+            } else {
+                native_editor_chunks(&command[..end], TerminalShellKind::Zsh).remove(0)
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

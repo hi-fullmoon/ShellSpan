@@ -165,6 +165,51 @@ fn zsh_command_presentation_boundary_precedes_real_output() {
 
 #[test]
 fn native_private_controls_preserve_command_presentation() {
+    let (path, shell) = if cfg!(target_os = "macos") {
+        ("/bin/zsh", TerminalShellKind::Zsh)
+    } else {
+        ("/bin/bash", TerminalShellKind::Bash)
+    };
+    capture_native_presentation(path, shell, true, 100, false);
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn native_multiline_typing_renders_progress_before_single_submission() {
+    for columns in [40, 100] {
+        capture_native_presentation("/bin/zsh", TerminalShellKind::Zsh, false, columns, false);
+    }
+}
+
+#[test]
+#[ignore = "requires SHELLSPAN_TEST_MODERN_BASH pointing to Bash 4.1+"]
+fn native_bash_multiline_typing_renders_progress_before_single_submission() {
+    let path = std::env::var("SHELLSPAN_TEST_MODERN_BASH").unwrap();
+    for columns in [40, 100] {
+        capture_native_presentation(&path, TerminalShellKind::Bash, false, columns, false);
+    }
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn native_zsh_stop_and_takeover_at_receiver_ready_preserve_terminal_input() {
+    capture_native_presentation("/bin/zsh", TerminalShellKind::Zsh, false, 100, true);
+}
+
+#[test]
+#[ignore = "requires SHELLSPAN_TEST_MODERN_BASH pointing to Bash 4.1+"]
+fn native_bash_stop_and_takeover_at_receiver_ready_preserve_terminal_input() {
+    let path = std::env::var("SHELLSPAN_TEST_MODERN_BASH").unwrap();
+    capture_native_presentation(&path, TerminalShellKind::Bash, false, 100, true);
+}
+
+fn capture_native_presentation(
+    shell_path: &str,
+    shell: TerminalShellKind,
+    reduced_motion: bool,
+    columns: u16,
+    receiver_ready_stop: bool,
+) {
     use crate::agent_runtime::{
         AgentToolTargetNative, TerminalExecuteRegistry, TerminalLeaseEventState,
         TerminalLeaseManager,
@@ -178,11 +223,6 @@ fn native_private_controls_preserve_command_presentation() {
     };
     use std::collections::HashMap;
 
-    let (shell_path, shell) = if cfg!(target_os = "macos") {
-        ("/bin/zsh", TerminalShellKind::Zsh)
-    } else {
-        ("/bin/bash", TerminalShellKind::Bash)
-    };
     let transport = "presentation-private";
     let broker = TerminalSessionBroker::phase3_enabled_for_test(4096);
     broker
@@ -190,7 +230,7 @@ fn native_private_controls_preserve_command_presentation() {
             transport,
             None,
             TerminalTransportKind::LocalPty,
-            TerminalGeometry::new(100, 30),
+            TerminalGeometry::new(columns as u32, 30),
         )
         .unwrap();
     let (_fixture, integration) = prepare_test_integration(shell);
@@ -200,7 +240,7 @@ fn native_private_controls_preserve_command_presentation() {
     let pair = native_pty_system()
         .openpty(PtySize {
             rows: 30,
-            cols: 100,
+            cols: columns,
             pixel_width: 0,
             pixel_height: 0,
         })
@@ -215,12 +255,34 @@ fn native_private_controls_preserve_command_presentation() {
     integration.configure_command(&mut command).unwrap();
     let control_broker = broker.clone();
     let integration_id = integration.integration_id().to_string();
+    let checkpoints = Arc::new(Mutex::new(Vec::new()));
+    let received = Arc::clone(&checkpoints);
+    let ready_pause = Arc::new(Mutex::new(None::<(mpsc::Sender<()>, mpsc::Receiver<()>)>));
+    let pause = Arc::clone(&ready_pause);
     let mut control = integration.start_reader(
-        move |event| control_broker.accept_integration_event(transport, &integration_id, event),
+        move |event| {
+            if matches!(&event, TerminalIntegrationControlEvent::NativeCheckpoint { buffer } if !buffer.is_empty()) {
+                let gate = pause.lock().unwrap().take();
+                if let Some((ready, resume)) = gate {
+                    ready.send(()).unwrap();
+                    resume.recv_timeout(Duration::from_secs(1)).unwrap();
+                }
+            }
+            if let TerminalIntegrationControlEvent::NativePrivateCheckpoint { buffer, .. } = &event
+            {
+                received
+                    .lock()
+                    .unwrap()
+                    .push((Instant::now(), buffer.clone()));
+            }
+            control_broker.accept_integration_event(transport, &integration_id, event)
+        },
         |_| {},
     );
     let display = Arc::new(Mutex::new(Vec::new()));
     let captured = Arc::clone(&display);
+    let display_frames = Arc::new(Mutex::new(Vec::new()));
+    let frames = Arc::clone(&display_frames);
     let output_broker = broker.clone();
     let output_thread = thread::spawn(move || {
         let mut bytes = [0; 4096];
@@ -232,6 +294,10 @@ fn native_private_controls_preserve_command_presentation() {
                 .observe_raw_output(transport, &bytes[..count])
                 .unwrap();
             captured.lock().unwrap().extend_from_slice(&bytes[..count]);
+            frames
+                .lock()
+                .unwrap()
+                .push((Instant::now(), bytes[..count].to_vec()));
         }
     });
     let mut child = pair.slave.spawn_command(command).unwrap();
@@ -299,7 +365,7 @@ fn native_private_controls_preserve_command_presentation() {
                     &event.session_id,
                     &event.agent_session_id,
                     &event.operation_id,
-                    true,
+                    reduced_motion,
                 )
                 .unwrap();
             acknowledger
@@ -400,10 +466,41 @@ fn native_private_controls_preserve_command_presentation() {
             private_display =
                 Some(String::from_utf8_lossy(&bytes[offset..offset + cycle.len()]).into_owned());
         }
-        let source = "cat <<'SHELLSPAN_END'\nquoted '\"' and\tliteral Tab\nSHELLSPAN_END\npwd";
+        let source = "cat <<'SHELLSPAN_END'\nquoted '\"' and\tliteral Tab 中文e\u{301}👩‍💻\nSHELLSPAN_END\npwd";
         let start = display.lock().unwrap().len();
+        let frame_start = display_frames.lock().unwrap().len();
+        let checkpoint_start = checkpoints.lock().unwrap().len();
+        let started = Instant::now();
         let completed = run("presentation-script", source, None);
         assert!(completed.combined_output.contains("literal Tab"));
+        assert!(
+            !completed.capture_truncated,
+            "typing redraws consumed the execution output budget"
+        );
+        let script_checkpoints = checkpoints.lock().unwrap()[checkpoint_start..].to_vec();
+        let expected = if shell == TerminalShellKind::Bash {
+            bash_native_submission(source).unwrap()
+        } else {
+            source.to_owned()
+        };
+        assert_eq!(script_checkpoints.last().unwrap().1, expected);
+        if reduced_motion {
+            assert_eq!(script_checkpoints.len(), 1);
+        } else {
+            assert!(script_checkpoints.len() > 2 && script_checkpoints.len() <= 48);
+            for pair in script_checkpoints.windows(2) {
+                assert!(pair[1].1.starts_with(&pair[0].1));
+                assert!(pair[1].0.duration_since(pair[0].0) >= Duration::from_millis(30));
+            }
+            let bytes = display.lock().unwrap()[start..].to_vec();
+            assert_eq!(
+                bytes
+                    .windows(b"\x1b]133;C\x07".len())
+                    .filter(|part| *part == b"\x1b]133;C\x07")
+                    .count(),
+                1
+            );
+        }
         let event = acquisitions
             .lock()
             .unwrap()
@@ -411,13 +508,20 @@ fn native_private_controls_preserve_command_presentation() {
             .unwrap();
         assert_eq!(event.command_execution, Some(true));
         assert!(event.command_display.is_none());
-        if let Some(path) = std::env::var_os("SHELLSPAN_NATIVE_SCRIPT_TRACE_PATH")
+        if let Some(mut path) = std::env::var_os("SHELLSPAN_NATIVE_SCRIPT_TRACE_PATH")
             .map(PathBuf::from)
             .or_else(|| {
                 std::env::var_os("SHELLSPAN_COMMAND_PRESENTATION_DIR")
                     .map(|directory| PathBuf::from(directory).join("native-script.bin"))
             })
+            .filter(|_| !receiver_ready_stop)
         {
+            if !reduced_motion {
+                path.set_file_name(format!(
+                    "native-typing-{}-{columns}.bin",
+                    shell.protocol_name()
+                ));
+            }
             if let Some(parent) = path
                 .parent()
                 .filter(|parent| !parent.as_os_str().is_empty())
@@ -428,13 +532,147 @@ fn native_private_controls_preserve_command_presentation() {
             fs::write(
                 format!("{}.json", path.display()),
                 serde_json::to_vec(&serde_json::json!({
-                    "columns": 100, "rows": 30, "leaseEvent": event,
+                    "columns": columns, "rows": 30, "leaseEvent": event,
                     "privateLeaseEvents": private_events, "privateRunningEvents": private_running,
                     "privateDisplay": private_display.unwrap(),
+                    "source": expected,
+                    "frames": display_frames.lock().unwrap()[frame_start..].iter().map(|(at, bytes)| {
+                        serde_json::json!({ "atMs": at.duration_since(started).as_millis(), "bytes": bytes })
+                    }).collect::<Vec<_>>(),
                 }))
                 .unwrap(),
             )
             .unwrap();
+        }
+        if !reduced_motion {
+            for takeover in [false, true] {
+                let effect = home.path().join(format!("cancelled-{takeover}"));
+                let source = format!("printf unintended >| '{}'\npwd", effect.display());
+                let id = format!("typing-stop-{takeover}");
+                let before = checkpoints.lock().unwrap().len();
+                let operation = thread::scope(|scope| {
+                    let (ready, ready_rx) = mpsc::channel();
+                    let (resume, resume_rx) = mpsc::channel();
+                    if receiver_ready_stop {
+                        *ready_pause.lock().unwrap() = Some((ready, resume_rx));
+                    }
+                    let typing = scope.spawn(|| {
+                        registry.start(
+                            &sessions,
+                            transport,
+                            "presentation-agent",
+                            "presentation-task",
+                            &id,
+                            &source,
+                            shell.enter(),
+                        )
+                    });
+                    if receiver_ready_stop {
+                        ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                        let (entered, entered_rx) = mpsc::channel();
+                        let (finished, finished_rx) = mpsc::channel();
+                        let stop_registry = &registry;
+                        let stop_sessions = &sessions;
+                        let stop_id = &id;
+                        let stopping = scope.spawn(move || {
+                            entered.send(()).unwrap();
+                            let result = if takeover {
+                                stop_registry
+                                    .takeover(
+                                        stop_sessions,
+                                        transport,
+                                        "presentation-agent",
+                                        stop_id,
+                                    )
+                                    .map(usize::from)
+                            } else {
+                                stop_registry.cancel_task(stop_sessions, "presentation-task")
+                            };
+                            finished.send(()).unwrap();
+                            result
+                        });
+                        entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+                        let stopped_before_frame =
+                            finished_rx.recv_timeout(Duration::from_millis(50)).is_ok();
+                        resume.send(()).unwrap();
+                        assert!(
+                            !stopped_before_frame,
+                            "stop/takeover bypassed the unfinished frame"
+                        );
+                        assert_eq!(stopping.join().unwrap().unwrap(), 1);
+                    } else {
+                        wait_until(Duration::from_secs(5), || {
+                            checkpoints.lock().unwrap().len() > before
+                        });
+                        if takeover {
+                            assert!(registry
+                                .takeover(&sessions, transport, "presentation-agent", &id)
+                                .unwrap());
+                        } else {
+                            registry
+                                .cancel_task(&sessions, "presentation-task")
+                                .unwrap();
+                        }
+                    }
+                    typing.join().unwrap().unwrap()
+                });
+                let stopped = registry
+                    .wait(&sessions, transport, &operation, Duration::from_secs(5))
+                    .unwrap();
+                assert_eq!(
+                    stopped.state,
+                    if takeover {
+                        TerminalCommandState::TakenOver
+                    } else {
+                        TerminalCommandState::Cancelled
+                    }
+                );
+                assert!(
+                    !effect.exists(),
+                    "interrupted animated source must not execute"
+                );
+                wait_for_prompt(&broker, transport);
+                assert!(
+                    !broker
+                        .execution_capabilities(transport)
+                        .unwrap()
+                        .input_recovery_required
+                );
+                leases.release_turn("presentation-agent").unwrap();
+                if receiver_ready_stop {
+                    let manual_effect = home.path().join(format!("manual-after-stop-{takeover}"));
+                    leases
+                        .write(
+                            &sessions,
+                            transport,
+                            format!(
+                                "printf manual >| '{}'{}",
+                                manual_effect.display(),
+                                shell.enter()
+                            ),
+                            crate::agent_runtime::TerminalInputSource::User,
+                        )
+                        .unwrap();
+                    wait_until(Duration::from_secs(5), || {
+                        manual_effect.exists()
+                            && broker
+                                .snapshot(Some(transport))
+                                .unwrap()
+                                .session
+                                .is_some_and(|session| session.prompt_ready)
+                    });
+                    assert_eq!(fs::read_to_string(manual_effect).unwrap(), "manual");
+                }
+                run(
+                    &format!("after-stop-{takeover}"),
+                    "printf 'input-ready\\n'",
+                    None,
+                );
+                assert!(
+                    !effect.exists(),
+                    "later input must not submit the cancelled source"
+                );
+            }
         }
         registry
             .cleanup_shell_jobs(&sessions, Some("presentation-task"))

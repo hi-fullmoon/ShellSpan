@@ -661,6 +661,25 @@ impl TerminalCommandOperation {
         Ok(())
     }
 
+    pub(crate) fn finish_typing_capture(&self) -> Result<(), String> {
+        let mut data = self.lock()?;
+        if data.state != TerminalCommandState::Submitted || data.command_started {
+            return Err("TERMINAL_COMMAND_NOT_SUBMITTED".into());
+        }
+        // Native redisplays can repeat a long source many times. They remain
+        // in the display/replay stream, but must not consume the result budget
+        // before the single accept-line can produce any execution output.
+        data.capture.clear();
+        data.capture_truncated = false;
+        data.capture_start_sequence = data
+            .capture_end_sequence
+            .map_or(data.capture_start_sequence, |sequence| {
+                sequence.saturating_add(1)
+            });
+        data.capture_end_sequence = None;
+        Ok(())
+    }
+
     fn capture(&self, frame: &TerminalRawOutputFrame) -> Result<(), String> {
         let mut data = self.lock()?;
         if !data.capture_open || frame.sequence < data.capture_start_sequence {
@@ -759,6 +778,15 @@ impl TerminalCommandOperation {
                 .native_checkpoint
                 .as_ref()
                 .is_some_and(|(_, acknowledged)| *acknowledged))
+    }
+
+    pub(crate) fn begin_native_frame(&self) -> Result<(), String> {
+        let mut data = self.lock()?;
+        if data.state != TerminalCommandState::Submitted || !data.native_empty_confirmed {
+            return Err("TERMINAL_PRIVATE_CONTROL_NOT_READY".into());
+        }
+        data.native_private_checkpoint = None;
+        Ok(())
     }
 
     pub(crate) fn expect_native_private_checkpoint(&self, descriptor: &str) -> Result<(), String> {
@@ -1096,6 +1124,7 @@ struct SessionRecord {
     prompt_ready: bool,
     native_input: bool,
     native_checkpoints: bool,
+    native_typing: bool,
     native_private_control: bool,
     native_recovery_required: bool,
     native_clear_pending: Option<(String, Option<String>, u64, bool)>,
@@ -1152,6 +1181,7 @@ impl SessionRecord {
             prompt_ready: false,
             native_input: false,
             native_checkpoints: false,
+            native_typing: false,
             native_private_control: false,
             native_recovery_required: false,
             native_clear_pending: None,
@@ -1928,6 +1958,19 @@ impl TerminalSessionBroker {
             && !record.native_recovery_required)
     }
 
+    pub(crate) fn native_typing_enabled(&self, session_id: &str) -> Result<bool, String> {
+        let state = self.lock()?;
+        let attachment = current_attachment(&state, session_id)?;
+        let record = state
+            .sessions
+            .get(&attachment.terminal_session_id)
+            .ok_or("TERMINAL_BROKER_SESSION_NOT_FOUND")?;
+        Ok(record.native_typing
+            && record.native_input
+            && record.native_checkpoints
+            && !record.native_recovery_required)
+    }
+
     pub(crate) fn command_shell(
         &self,
         transport_session_id: &str,
@@ -2086,6 +2129,7 @@ impl TerminalSessionBroker {
         record.prompt_ready = false;
         record.native_input = false;
         record.native_checkpoints = false;
+        record.native_typing = false;
         record.native_private_control = false;
         record.native_jobs = false;
         record.native_comments = false;
@@ -2310,6 +2354,16 @@ impl TerminalSessionBroker {
         }
         let through_output_sequence = record.next_output_sequence.saturating_sub(1);
         match event {
+            TerminalIntegrationControlEvent::NativeTyping { enabled } => {
+                require_ready_integration(record)?;
+                if !record.prompt_started
+                    || record.prompt_ready
+                    || (enabled && (!record.native_input || !record.native_checkpoints))
+                {
+                    return Err("TERMINAL_NATIVE_TYPING_OUT_OF_ORDER".into());
+                }
+                record.native_typing = enabled;
+            }
             TerminalIntegrationControlEvent::NativePrivateControl { enabled } => {
                 require_ready_integration(record)?;
                 if !record.prompt_started
@@ -2527,6 +2581,7 @@ impl TerminalSessionBroker {
                 record.prompt_ready = false;
                 record.native_input = false;
                 record.native_checkpoints = false;
+                record.native_typing = false;
                 record.native_private_control = false;
                 record.native_jobs = false;
                 record.native_comments = false;
