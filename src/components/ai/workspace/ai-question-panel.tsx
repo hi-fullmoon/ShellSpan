@@ -6,7 +6,6 @@ import {
   ChevronRightIcon,
   MessageCircleQuestionIcon,
   PenLineIcon,
-  XIcon,
 } from 'lucide-react';
 import {
   Card,
@@ -182,15 +181,6 @@ export function AiQuestionPanel({
             onClick={() => setCollapsed((value) => !value)}
           >
             <ChevronDownIcon aria-hidden="true" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label={t('common.close')}
-            onClick={() => setCollapsed(true)}
-          >
-            <XIcon aria-hidden="true" />
           </Button>
         </CardAction>
       </CardHeader>

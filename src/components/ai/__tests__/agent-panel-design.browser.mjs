@@ -150,7 +150,7 @@ try {
           const footerButtons = footer.getByRole('button');
           for (const button of await footerButtons.all()) assert.ok(await fits(button), 'Every question action must fit');
           await page.locator('main').screenshot({ path: `${screenshots}/${engine.name()}-${locale}-${width}-question.png` });
-          const decline = locale === 'zh-CN' ? '拒绝回答' : 'Decline to answer';
+          const decline = locale === 'zh-CN' ? '跳过此题' : 'Skip question';
           for (let index = 0; index < question.questionCount; index++) {
             await footer.getByRole('button', { name: decline, exact: true }).click();
           }

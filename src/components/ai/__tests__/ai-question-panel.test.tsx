@@ -53,7 +53,7 @@ afterEach(cleanup);
 describe('Stage 6A question form', () => {
   it('keeps question decisions text-only, including disabled submission', () => {
     render(<AiQuestionPanel question={question} onAnswer={async () => {}} />);
-    for (const name of ['Decline to answer', 'Submit']) {
+    for (const name of ['Skip question', 'Submit']) {
       expect(screen.getByRole('button', { name }).querySelector('svg')).toBeNull();
     }
     expect(screen.getByRole('button', { name: 'Submit' })).toBeDisabled();
@@ -65,10 +65,10 @@ describe('Stage 6A question form', () => {
       ...question,
       questions: [...question.questions, { id: 'second', question: 'Anything else?', multi_select: false }],
     }} onAnswer={async (input) => { submissions.push(input); }} />);
-    await user.click(screen.getByRole('button', { name: 'Decline to answer' }));
+    await user.click(screen.getByRole('button', { name: 'Skip question' }));
     expect(submissions).toHaveLength(0);
     expect(screen.getAllByText('Anything else?')[0]).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Decline to answer' }));
+    await user.click(screen.getByRole('button', { name: 'Skip question' }));
     await waitFor(() => expect(submissions).toHaveLength(1));
     expect(submissions[0].answers.map((answer) => answer.id)).toEqual(['choice', 'second']);
     for (const answer of submissions[0].answers) {
@@ -91,7 +91,7 @@ describe('Stage 6A question form', () => {
     }, onAnswer };
     const first = render(<AiQuestionPanel {...props} />);
     await user.click(screen.getByRole('button', { name: 'B' }));
-    await user.click(screen.getByRole('button', { name: 'Decline to answer' }));
+    await user.click(screen.getByRole('button', { name: 'Skip question' }));
     await screen.findByRole('alert');
     expect(submissions[0].answers[0]).toEqual({ id: 'choice', selected: ['B'] });
     first.unmount();
@@ -160,7 +160,7 @@ describe('Stage 6A question form', () => {
           expect(screen.getByRole('button', { name: 'B' })).toHaveAttribute('aria-pressed', 'true');
         }
         expect(text).toBeDisabled();
-        expect(screen.getByRole('button', { name: 'Decline to answer' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Skip question' })).toBeDisabled();
         await user.type(text, 'Changed answer');
         // A queued change handler must not discard the saved operation either.
         fireEvent.change(text, { target: { value: 'Changed answer' } });
@@ -277,12 +277,23 @@ describe('Stage 6A question form', () => {
 
   it('collapses and restores the active question without losing its draft', async () => {
     const user = userEvent.setup();
-    render(<AiQuestionPanel question={question} onAnswer={vi.fn()} />);
+    const submissions: AnswerQuestionInput[] = [];
+    render(<AiQuestionPanel question={question} onAnswer={async (input) => { submissions.push(input); }} />);
+    const headerActions = document.querySelector('.ai-question-panel-actions');
+    expect(headerActions?.querySelectorAll('button')).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: 'Close' })).not.toBeInTheDocument();
     await user.type(screen.getByRole('textbox'), 'Keep this');
-    await user.click(screen.getByRole('button', { name: 'Collapse question' }));
+    const toggle = screen.getByRole('button', { name: 'Collapse question' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    toggle.focus();
+    await user.keyboard('{Enter}');
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Expand question' }));
+    expect(screen.getByRole('button', { name: 'Expand question' })).toHaveAttribute('aria-expanded', 'false');
+    expect(headerActions?.querySelectorAll('button')).toHaveLength(1);
+    await user.keyboard(' ');
+    expect(screen.getByRole('button', { name: 'Collapse question' })).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('textbox')).toHaveValue('Keep this');
+    expect(submissions).toHaveLength(0);
   });
 
   it('keeps header actions compact while giving pagination arrows a readable size', () => {
@@ -304,7 +315,7 @@ describe('Stage 6A question form', () => {
       />,
     );
 
-    for (const name of ['Collapse question', 'Close']) {
+    for (const name of ['Collapse question']) {
       const button = screen.getByRole('button', { name });
       expect(button).toHaveClass('size-8', '[&_svg]:size-3.5');
       expect(button).not.toHaveClass('h-9', 'w-9');
@@ -463,6 +474,8 @@ describe('Stage 6A question form', () => {
       />,
     );
     expect(screen.getByRole('textbox')).toBeVisible();
+    expect(screen.getByRole('button', { name: '跳过此题' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: '关闭' })).not.toBeInTheDocument();
     expect(screen.queryByText('Submit')).not.toBeInTheDocument();
     expect(screen.getAllByText('What next?')[0]).toBeVisible();
     const footer = document.querySelector('.ai-question-panel-footer');

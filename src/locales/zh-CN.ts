@@ -187,7 +187,7 @@ export default {
   'ai.workspace.question.historyTitle': '提问',
   'ai.workspace.question.previous': '上一题',
   'ai.workspace.question.next': '下一题',
-  'ai.workspace.question.decline': '拒绝回答',
+  'ai.workspace.question.decline': '跳过此题',
   'ai.workspace.question.declinedAnswer': '用户拒绝回答本题。请根据已有信息继续；如缺少必要信息，请说明限制。',
   'ai.workspace.question.collapse': '收起问题',
   'ai.workspace.question.expand': '展开问题',

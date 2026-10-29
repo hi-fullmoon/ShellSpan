@@ -187,7 +187,7 @@ export default {
   'ai.workspace.question.historyTitle': 'Question',
   'ai.workspace.question.previous': 'Previous question',
   'ai.workspace.question.next': 'Next question',
-  'ai.workspace.question.decline': 'Decline to answer',
+  'ai.workspace.question.decline': 'Skip question',
   'ai.workspace.question.declinedAnswer': 'The user declined to answer this question. Continue with the available information; explain any limitations if required information is missing.',
   'ai.workspace.question.collapse': 'Collapse question',
   'ai.workspace.question.expand': 'Expand question',

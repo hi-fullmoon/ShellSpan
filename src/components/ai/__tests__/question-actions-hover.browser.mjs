@@ -30,7 +30,7 @@ const server = await createServer({
 let browser;
 try {
   await server.listen();
-  browser = await chromium.launch();
+  browser = await chromium.launch({ channel: 'chromium' });
   const page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`);
   await page.evaluate(async () => {
@@ -51,10 +51,13 @@ try {
   });
   const buttons = page.locator('.ai-question-panel-actions button');
   await buttons.first().waitFor();
+  assert.equal(await buttons.count(), 1, 'Only the expand/collapse action belongs in the header');
+  assert.equal(await page.getByRole('button', { name: '关闭', exact: true }).count(), 0);
   for (const width of [320, 720]) {
     await page.setViewportSize({ width, height: 600 });
     const decisions = page.locator('.ai-question-footer-actions button');
     assert.equal(await decisions.count(), 2);
+    assert.equal(await decisions.filter({ hasText: '跳过此题' }).count(), 1);
     assert.equal(await decisions.locator('svg').count(), 0, 'Question decisions remain text-only');
     for (const button of await decisions.all()) {
       assert.ok((await button.innerText()).trim());
@@ -65,8 +68,7 @@ try {
   await buttons.first().click();
   for (const width of [380, 720]) {
     await page.setViewportSize({ width, height: 400 });
-    for (let index = 0; index < 2; index += 1) {
-      const button = buttons.nth(index);
+    for (const button of await buttons.all()) {
       const before = await button.boundingBox();
       await button.hover();
       await page.waitForFunction(element => getComputedStyle(element).backgroundColor !== 'rgba(0, 0, 0, 0)', await button.elementHandle());
@@ -88,14 +90,15 @@ try {
         clip: 'content-box', iconWidth: 14, iconHeight: 14, centered: true,
       });
       assert.deepEqual(await button.boundingBox(), before, 'Hover must preserve action placement');
-      await page.screenshot({ path: join(screenshots, `${width}-${index}.png`) });
+      await page.screenshot({ path: join(screenshots, `${width}-toggle.png`) });
     }
   }
   await buttons.first().focus();
   await page.keyboard.press('Enter');
   assert.equal(await buttons.first().getAttribute('aria-expanded'), 'true');
-  await buttons.nth(1).click();
+  await page.keyboard.press('Space');
   assert.equal(await buttons.first().getAttribute('aria-expanded'), 'false');
+  assert.equal(await buttons.count(), 1);
   console.log(`Question action hover checks passed at 380px and 720px. Screenshots: ${screenshots}`);
 } finally {
   await browser?.close();

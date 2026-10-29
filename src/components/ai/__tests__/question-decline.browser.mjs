@@ -27,7 +27,7 @@ const server = await createServer({
 let browser;
 try {
   await server.listen();
-  browser = await chromium.launch();
+  browser = await chromium.launch({ channel: 'chromium' });
   for (const width of [380, 720]) {
     const page = await browser.newPage({ viewport: { width, height: 600 } });
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`);
@@ -56,7 +56,7 @@ try {
         },
       }));
     });
-    const decline = page.getByRole('button', { name: '拒绝回答', exact: true });
+    const decline = page.getByRole('button', { name: '跳过此题', exact: true });
     await decline.waitFor();
     const bounds = await decline.boundingBox();
     const submitBounds = await page.getByRole('button', { name: '提交', exact: true }).boundingBox();
