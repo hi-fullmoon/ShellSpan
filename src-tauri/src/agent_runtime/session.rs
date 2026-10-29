@@ -1116,6 +1116,15 @@ impl AgentSessionStore {
         Ok(events)
     }
 
+    pub(crate) fn execution_observation_only(&self, session_id: &str) -> Result<bool, String> {
+        let inner = self.lock_configured()?;
+        let record = inner
+            .sessions
+            .get(session_id)
+            .ok_or("Agent session was not found")?;
+        execution_observation_only_locked(&inner, record)
+    }
+
     pub(crate) fn claimed_step(
         &self,
         session_id: &str,
@@ -3000,6 +3009,60 @@ fn create_session_events(
     Ok(events)
 }
 
+fn execution_observation_only_locked<'a>(
+    inner: &'a AgentSessionStoreInner,
+    mut record: &'a AgentSessionRecord,
+) -> Result<bool, String> {
+    let mut visited = HashSet::new();
+    loop {
+        if !visited.insert(record.header.session_id.as_str()) {
+            return Err("invalid Agent recovery lineage".into());
+        }
+        if super::recovery::execution_writes_restricted(&record.events) {
+            return Ok(true);
+        }
+        let Some(parent) = record.header.parent_session_id.as_ref() else {
+            return Ok(false);
+        };
+        record = inner
+            .sessions
+            .get(parent)
+            .ok_or("Agent recovery parent was not found")?;
+    }
+}
+
+fn validate_execution_admission(
+    inner: &AgentSessionStoreInner,
+    record: &AgentSessionRecord,
+    event: &AgentSessionEvent,
+) -> Result<(), String> {
+    let AgentSessionEventPayload::ToolExecution { call_id, .. } = &event.payload else {
+        return Ok(());
+    };
+    let effect = record
+        .events
+        .iter()
+        .rev()
+        .find_map(|previous| {
+            if previous.turn_id != event.turn_id || previous.step_id != event.step_id {
+                return None;
+            }
+            match &previous.payload {
+                AgentSessionEventPayload::ToolCall { call } if call.call_id == *call_id => {
+                    call.effect
+                }
+                _ => None,
+            }
+        })
+        .unwrap_or(super::AgentSessionEffect::Unknown);
+    if !super::recovery::observation_effect_allowed(effect)
+        && execution_observation_only_locked(inner, record)?
+    {
+        return Err(super::recovery::UNKNOWN_EXECUTION_WRITE_BLOCKED.into());
+    }
+    Ok(())
+}
+
 fn append_payloads_locked(
     inner: &mut AgentSessionStoreInner,
     session_id: &str,
@@ -3046,6 +3109,7 @@ fn append_payloads_locked(
             payload,
         );
         validate_event_envelope_at(validation_record, &raw_event, seq, previous_time)?;
+        validate_execution_admission(inner, validation_record, &raw_event)?;
         validate_event_transition(validation_record, &raw_event)?;
         validate_event_payload(&raw_event)?;
         encoded_events(std::slice::from_ref(&raw_event))?;
@@ -3098,6 +3162,10 @@ fn append_payloads_locked(
 }
 
 fn target_switch_settled(record: &AgentSessionRecord) -> Result<bool, String> {
+    Ok(terminal_reconnect_settled(record)? && !record.snapshot()?.uncertain_native_effects)
+}
+
+fn terminal_reconnect_settled(record: &AgentSessionRecord) -> Result<bool, String> {
     let snapshot = record.snapshot()?;
     let open_turn = record
         .events
@@ -3115,7 +3183,6 @@ fn target_switch_settled(record: &AgentSessionRecord) -> Result<bool, String> {
             snapshot.status,
             AgentSessionStatus::Running | AgentSessionStatus::Waiting
         )
-        && !snapshot.uncertain_native_effects
         && snapshot.inbox.next_step.is_empty()
         && snapshot.inbox.next_turn.is_empty())
 }
@@ -3513,7 +3580,7 @@ fn validate_event_transition(
             || old.session_id == target.session_id
             || old.target_id == target.target_id
             || expected != *target
-            || !target_switch_settled(record)?
+            || !terminal_reconnect_settled(record)?
         {
             return Err(
                 "terminal reconnect requires a settled root Session and the same target identity"
@@ -3521,12 +3588,14 @@ fn validate_event_transition(
             );
         }
         let recovery = record.snapshot()?.recovery;
-        if matches!(
-            recovery.status,
-            super::AgentRecoveryStatus::Available
-                | super::AgentRecoveryStatus::Required
-                | super::AgentRecoveryStatus::Reconciling
-        ) {
+        if recovery.kind != super::AgentRecoveryCheckpointKind::ExecutionInFlight
+            && matches!(
+                recovery.status,
+                super::AgentRecoveryStatus::Available
+                    | super::AgentRecoveryStatus::Required
+                    | super::AgentRecoveryStatus::Reconciling
+            )
+        {
             return Err("terminal reconnect requires reconciled effects".into());
         }
         return Ok(());
@@ -3569,6 +3638,36 @@ fn validate_event_transition(
         } else {
             Err("session/resumed requires an ended unarchived root Session".into())
         };
+    }
+    // A stopped root may append only scoped reconciliation evidence/results.
+    // It stays ended; neither this audit trail nor cancellation authorizes replay.
+    if record.ended
+        && !record.archived
+        && record.header.subagent.is_none()
+        && record.header.capability_scope.is_none()
+        && matches!(
+            record.status,
+            AgentSessionStatus::Cancelled | AgentSessionStatus::Failed
+        )
+    {
+        if let Some(checkpoint) = super::recovery::unresolved_execution(&record.events) {
+            if event.turn_id == checkpoint.turn_id && event.step_id == checkpoint.step_id {
+                match &event.payload {
+                    AgentSessionEventPayload::TaskEvidence { kind, .. } if kind == "recovery-reconciliation" => return Ok(()),
+                    AgentSessionEventPayload::ToolResult { call_id, name, status, evidence_refs, .. }
+                        if checkpoint.call_id.as_ref() == Some(call_id)
+                            && checkpoint.tool_name.as_ref() == Some(name)
+                            && matches!(status, super::AgentToolResultStatus::Completed | super::AgentToolResultStatus::Cancelled)
+                            && !evidence_refs.is_empty()
+                            && evidence_refs.iter().all(|id| record.events.iter().any(|previous| {
+                                previous.turn_id == event.turn_id && previous.step_id == event.step_id
+                                    && matches!(&previous.payload, AgentSessionEventPayload::TaskEvidence { evidence_id, kind, .. }
+                                        if evidence_id == id && kind == "recovery-reconciliation")
+                            })) => return validate_tool_result_transition(record, event, call_id, *status),
+                    _ => {}
+                }
+            }
+        }
     }
     let failed_admission = record.ended
         && record.status == AgentSessionStatus::Failed

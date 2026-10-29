@@ -728,6 +728,15 @@ impl AgentToolPipeline {
         header: &super::AgentSessionHeader,
         assembly: &mut super::prompt::ModelInputAssembly,
     ) -> Result<(), String> {
+        let observation_only = self
+            .sessions
+            .execution_observation_only(&header.session_id)?;
+        if observation_only {
+            assembly.context.push(super::prompt::ModelContextInjection {
+                content: "An earlier execution has an unknown outcome. This conversation may continue for discussion and non-mutating inspection. Use read_file, inspect_service, query_logs or other authorized observation tools to gather evidence. Writes, delegated writes and replay of the uncertain operation are blocked by the runtime regardless of permission mode. Do not claim the earlier command failed, succeeded or did not run without authoritative evidence. A new user message or a reconnected terminal does not settle that outcome.".into(),
+                source: super::AgentMessageSource::runtime("execution-observation-only".into()),
+            });
+        }
         if header.execution_surface != super::AgentExecutionSurface::BoundTerminal {
             return Ok(());
         }
@@ -737,9 +746,10 @@ impl AgentToolPipeline {
                 .ok()
                 .flatten()
         });
-        if state
-            .as_ref()
-            .is_some_and(|state| state.input_recovery_required)
+        if !observation_only
+            && state
+                .as_ref()
+                .is_some_and(|state| state.input_recovery_required)
         {
             return Err("TERMINAL_INPUT_RECOVERY_REQUIRED: terminal input is quarantined; reconnect and verify execution state before continuing; no automatic replay".into());
         }
@@ -1021,6 +1031,14 @@ impl AgentToolPipeline {
                         if !running.is_empty() {
                             draining_barrier = true;
                             continue;
+                        }
+                        if is_orchestration_tool(&call.name) {
+                            if let Err(reason) = self.ensure_execution_effect(&entry.session_id, orchestration_effect(&call.name)) {
+                                self.commit_prepare_failure(&request_for(call.clone()), &reason)?;
+                                next += 1;
+                                committed += 1;
+                                continue;
+                            }
                         }
                         if is_session_tool(&call.name) {
                             self.process_session_call(
@@ -1842,6 +1860,7 @@ impl AgentToolPipeline {
         effect: AgentSessionEffect,
         target_id: &str,
     ) -> Result<(), String> {
+        self.ensure_execution_effect(&entry.session_id, effect)?;
         let Some(scope) = &entry.capability_scope else {
             return Ok(());
         };
@@ -1863,6 +1882,18 @@ impl AgentToolPipeline {
         &self,
         request: &NativeToolRequest,
     ) -> Result<NativeToolPreparation, String> {
+        // Under recovery restrictions, reject unsafe tools before running hooks.
+        let prepared = if self
+            .sessions
+            .execution_observation_only(&request.session_id)?
+        {
+            Some(self.prepare_native(request)?)
+        } else {
+            None
+        };
+        let lease = prepared
+            .as_ref()
+            .map(|preparation| PreparedLease::new(self.native.clone(), &preparation.token));
         let before = AgentBeforeToolContext {
             session_id: request.session_id.clone(),
             task_id: request.task_id.clone(),
@@ -1883,7 +1914,27 @@ impl AgentToolPipeline {
                 return Err(format!("beforeToolRejected: {reason}"));
             }
         }
-        self.prepare_native(request)
+        if let Some(prepared) = prepared {
+            if let Some(lease) = lease {
+                lease.transfer();
+            }
+            Ok(prepared)
+        } else {
+            self.prepare_native(request)
+        }
+    }
+
+    fn ensure_execution_effect(
+        &self,
+        session_id: &str,
+        effect: AgentSessionEffect,
+    ) -> Result<(), String> {
+        if !super::recovery::observation_effect_allowed(effect)
+            && self.sessions.execution_observation_only(session_id)?
+        {
+            return Err(super::recovery::UNKNOWN_EXECUTION_WRITE_BLOCKED.into());
+        }
+        Ok(())
     }
 
     fn prepare_native(&self, request: &NativeToolRequest) -> Result<NativeToolPreparation, String> {
@@ -1893,6 +1944,16 @@ impl AgentToolPipeline {
         )?;
         let preparation = self.native.prepare(request.clone())?;
         if let Err(error) = self.validate_preparation(request, &preparation) {
+            self.native.abandon(&preparation.token);
+            return Err(error);
+        }
+        if let Err(error) = self.ensure_execution_effect(
+            &request.session_id,
+            preparation
+                .call
+                .effect
+                .unwrap_or(AgentSessionEffect::Unknown),
+        ) {
             self.native.abandon(&preparation.token);
             return Err(error);
         }
@@ -2064,6 +2125,13 @@ impl AgentToolPipeline {
         request: &NativeToolRequest,
         preparation: &NativeToolPreparation,
     ) -> Result<(), String> {
+        self.ensure_execution_effect(
+            &request.session_id,
+            preparation
+                .call
+                .effect
+                .unwrap_or(AgentSessionEffect::Unknown),
+        )?;
         self.sessions.append(
             &request.session_id,
             Some(request.turn_id.clone()),
@@ -2871,6 +2939,9 @@ impl AgentToolPipeline {
     pub(crate) fn recover_waiting(&self, entry: &Arc<AgentEntry>) -> Result<bool, String> {
         let events = self.sessions.all_events(&entry.session_id)?;
         let snapshot = self.sessions.snapshot(&entry.session_id)?;
+        if snapshot.header.subagent.is_none() && super::recovery::open_turn_id(&events).is_none() {
+            return Ok(false);
+        }
         let mut calls = HashMap::<(String, String), RecordedToolCall>::new();
         let mut approvals = HashMap::<
             (String, String),

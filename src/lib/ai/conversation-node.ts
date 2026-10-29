@@ -89,7 +89,7 @@ export interface AiToolNode extends AiConversationNodeBase {
   readonly nativeName: string | null;
   readonly title: string | null;
   readonly summary: string;
-  readonly state: 'preparing' | 'approval' | 'running' | 'succeeded' | 'failed' | 'rejected';
+  readonly state: 'preparing' | 'approval' | 'running' | 'succeeded' | 'failed' | 'rejected' | 'uncertain';
   readonly effect: AgentSessionEffect;
   readonly durationMs: number | null;
   readonly detailRef: AiToolDetailRef;

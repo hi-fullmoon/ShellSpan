@@ -226,15 +226,31 @@ or terminal workspace field to restore. Existing persisted
 `executionSurface = boundTerminal` values now select the frozen user terminal;
 they do not by themselves authorize rebinding an old Agent Session. The dedicated
 reconnect command additionally verifies backend transport ancestry and live
-identity, requires settled work and reconciled effects, and records the rebind
+identity, requires stopped work and released terminal ownership, and records the rebind
 with reset approval policy in the original conversation. It never replays work.
 
-The frontend offers this rebind only when consecutive broker generations confirm
-the replacement in the current process. Layout replacement IDs alone preserve
-history selection but do not establish reconnect eligibility. Restored workspace
-rows have no broker identity after a restart: their next connection starts a new
-broker lineage, and earlier conversations remain read-only without an automatic
-rebind attempt. The user can start a new conversation on that terminal.
+Restoring a stopped conversation does not require an execution-result form.
+Unknown outcomes remain attached to their original tool rows after interruption,
+cancellation, reconnect and restart. Rebinding preserves that evidence, resets
+approval policy and never submits terminal input or resumes the old tool queue.
+Only a new user message starts another turn. Discussion and authorized
+non-mutating tools remain available, including sensitive reads under their
+normal approval rules. While an earlier outcome remains unknown, the runtime
+rejects mutating or unknown effects before tool hooks/preparation completes and
+again at the durable dispatch boundary, including delegated operations and full
+access mode. Shell text is never assumed read-only by the recovery UI.
+The original owner's definitive result can settle the matching step/call; a
+reconnect, a new turn or successful unrelated inspection cannot settle it.
+Legacy post-terminal reconciliation audit records remain readable, but there is
+no result-confirmation dialog or new manual-confirmation input in this flow.
+
+The frontend offers automatic rebind only when consecutive broker generations
+confirm the replacement in the current process. Layout replacement IDs alone
+preserve history selection but do not establish reconnect eligibility. Restored
+workspace rows have no broker identity after a restart: their next connection
+starts a new broker lineage. Explicit human verification can restore a settled
+conversation after the backend checks the same host, port and login. Unknown
+outcomes restrict execution effects rather than blocking conversation access.
 
 ## Visible command typing
 

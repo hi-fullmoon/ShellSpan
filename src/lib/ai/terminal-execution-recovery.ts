@@ -11,6 +11,12 @@ export function terminalExecutionRecovery(view: AiSessionView | null | undefined
   if (!view || view.summary.archived || view.snapshot.value.header.subagent
     || view.snapshot.value.header.executionSurface !== 'boundTerminal'
     || !['waiting', 'idle', 'cancelled', 'failed'].includes(view.status)) return null;
+  const unknown = view.snapshot.value.uncertainNativeEffects
+    || view.snapshot.value.recovery.kind === 'executionInFlight'
+    || view.nodes.some(node => node.kind === 'tool' ? node.state === 'uncertain'
+      : node.kind === 'turnProcess' && node.children.some(child => child.kind === 'tool' && child.state === 'uncertain'));
+  // Stopped conversations can discuss and inspect; unknown operations stay marked in place.
+  if (unknown && ['idle', 'cancelled', 'failed'].includes(view.status)) return null;
   const recovery = view.recovery ?? view.snapshot.value.recovery;
   const summary = recovery.summary ?? '';
   const reason = view.statusReason ?? '';

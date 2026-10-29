@@ -5,6 +5,7 @@ import {
   BracesIcon,
   CheckIcon,
   ChevronDownIcon,
+  CircleHelpIcon,
   Code2Icon,
   CopyIcon,
   FilePenLineIcon,
@@ -200,6 +201,7 @@ function toolSummary(node: ToolNode, variant: AiToolVariant): string {
 
 export function toolDisplaySummary(node: ToolNode, t: ReturnType<typeof useI18n>['t']): string {
   if (node.recoveredByToolKey) return t('ai.workspace.tool.recoveredSummary');
+  if (node.state === 'uncertain') return t('ai.workspace.tool.uncertain');
   const raw = toolSummary(node, classifyAiTool(node.name, node.nativeName));
   if (node.state === 'failed' || node.state === 'rejected') {
     const translated = aiErrorMessage(raw, t);
@@ -830,7 +832,7 @@ export function AiToolRow({
           )}
         >
           <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
-            {hasError
+            {node.state === 'uncertain' ? <CircleHelpIcon /> : hasError
               ? <span className={AI_STATE_DOT_CLASS} data-state="failed" />
               : node.state === 'approval'
                 ? <ShieldAlertIcon />
@@ -885,6 +887,7 @@ export function AiToolRow({
 }
 
 export function ToolStateIcon({ node }: { readonly node: ToolNode }) {
+  if (node.state === 'uncertain') return <CircleHelpIcon aria-hidden="true" />;
   if (node.state === 'succeeded') return <CheckIcon aria-hidden="true" />;
   if (node.state === 'approval') return <ShieldAlertIcon aria-hidden="true" />;
   if (node.state === 'failed' || node.state === 'rejected') {

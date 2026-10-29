@@ -43,6 +43,10 @@ pub(crate) struct AgentRecoveryCheckpoint {
     pub(crate) effect: Option<AgentSessionEffect>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) idempotency: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) tool_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) command: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -68,6 +72,129 @@ pub(crate) struct AgentRecoveryReconcileInput {
     pub(crate) evidence: String,
 }
 
+type PendingExecutions<'a> = HashMap<(Option<&'a str>, &'a str), (&'a AgentSessionEvent, bool)>;
+
+fn pending_executions(events: &[AgentSessionEvent]) -> PendingExecutions<'_> {
+    let mut pending = HashMap::new();
+    for event in events {
+        match &event.payload {
+            AgentSessionEventPayload::ToolExecution { call_id, .. } => {
+                pending.insert((event.step_id.as_deref(), call_id.as_str()), (event, false));
+            }
+            AgentSessionEventPayload::ToolResult {
+                call_id, status, ..
+            } => {
+                let key = (event.step_id.as_deref(), call_id.as_str());
+                if *status == super::AgentToolResultStatus::Uncertain {
+                    if let Some((_, uncertain)) = pending.get_mut(&key) {
+                        *uncertain = true;
+                    }
+                } else {
+                    pending.remove(&key);
+                }
+            }
+            _ => {}
+        }
+    }
+    pending
+}
+
+pub(super) fn unresolved_execution_count(events: &[AgentSessionEvent]) -> usize {
+    pending_executions(events).len()
+}
+
+/// Closed turns retain their uncertain outcomes, but never resume their old queue.
+pub(super) fn open_turn_id(events: &[AgentSessionEvent]) -> Option<&str> {
+    for event in events.iter().rev() {
+        match event.payload {
+            AgentSessionEventPayload::TurnStart => return event.turn_id.as_deref(),
+            AgentSessionEventPayload::TurnEnd { .. }
+            | AgentSessionEventPayload::SessionEnded { .. }
+            | AgentSessionEventPayload::SessionResumed {}
+            | AgentSessionEventPayload::SubagentRecoveryStarted { .. } => return None,
+            _ => {}
+        }
+    }
+    None
+}
+
+pub(super) fn execution_writes_restricted(events: &[AgentSessionEvent]) -> bool {
+    pending_executions(events)
+        .values()
+        .any(|(dispatch, uncertain)| {
+            *uncertain
+                || events
+                    .iter()
+                    .rev()
+                    .take_while(|event| event.seq > dispatch.seq)
+                    .any(|event| match event.payload {
+                        AgentSessionEventPayload::TurnEnd { .. } => {
+                            event.turn_id == dispatch.turn_id
+                        }
+                        AgentSessionEventPayload::SessionEnded { .. }
+                        | AgentSessionEventPayload::SessionResumed {} => true,
+                        _ => false,
+                    })
+        })
+}
+
+pub(super) fn observation_effect_allowed(effect: AgentSessionEffect) -> bool {
+    matches!(
+        effect,
+        AgentSessionEffect::None | AgentSessionEffect::ReadOnly | AgentSessionEffect::SensitiveRead
+    )
+}
+
+pub(super) const UNKNOWN_EXECUTION_WRITE_BLOCKED: &str = "EXECUTION_OUTCOME_UNKNOWN: an earlier execution has an unknown outcome. Continue with non-mutating inspection; writes and automatic replay remain blocked.";
+
+/// A later step, cancellation, or restart never proves an earlier dispatch settled.
+pub(super) fn unresolved_execution(
+    events: &[AgentSessionEvent],
+) -> Option<AgentRecoveryCheckpoint> {
+    let ((_, call_id), (dispatch, uncertain)) = pending_executions(events)
+        .into_iter()
+        .max_by_key(|(_, (e, _))| e.seq)?;
+    let call = events.iter().rev().find_map(|event| {
+        if event.step_id != dispatch.step_id || event.turn_id != dispatch.turn_id {
+            return None;
+        }
+        match &event.payload {
+            AgentSessionEventPayload::ToolCall { call } if call.call_id == call_id => Some(call),
+            _ => None,
+        }
+    });
+    let AgentSessionEventPayload::ToolExecution { idempotency, .. } = &dispatch.payload else {
+        return None;
+    };
+    Some(AgentRecoveryCheckpoint {
+        kind: AgentRecoveryCheckpointKind::ExecutionInFlight,
+        status: AgentRecoveryStatus::Required,
+        summary: if uncertain {
+            "The visible terminal reported an explicit uncertain outcome; reconcile it before continuing."
+        } else {
+            "A native call was dispatched without a durable result; its outcome is uncertain."
+        }.into(),
+        last_committed_seq: events.last().map_or(0, |event| event.seq),
+        turn_id: dispatch.turn_id.clone(),
+        step_id: dispatch.step_id.clone(),
+        request_id: events.iter().rev().find_map(|event| {
+            if event.step_id != dispatch.step_id || event.turn_id != dispatch.turn_id {
+                return None;
+            }
+            match &event.payload {
+                AgentSessionEventPayload::ToolApproval { request_id, call_id: approved, .. } if approved == call_id => Some(request_id.clone()),
+                _ => None,
+            }
+        }),
+        call_id: Some(call_id.into()),
+        effect: call.and_then(|call| call.effect),
+        idempotency: Some(idempotency.clone()),
+        tool_name: call.map(|call| call.name.clone()),
+        command: call.and_then(|call| call.arguments.get("command")?.as_str())
+            .map(crate::redaction::redact_sensitive_text),
+    })
+}
+
 #[derive(Default)]
 struct ToolBoundary {
     turn_id: Option<String>,
@@ -82,6 +209,9 @@ struct ToolBoundary {
 }
 
 pub(crate) fn derive_recovery_checkpoint(events: &[AgentSessionEvent]) -> AgentRecoveryCheckpoint {
+    if let Some(checkpoint) = unresolved_execution(events) {
+        return checkpoint;
+    }
     let last_committed_seq = events.last().map(|event| event.seq).unwrap_or(0);
     let mut status = AgentSessionStatus::Idle;
     let mut ended = false;
@@ -164,7 +294,7 @@ pub(crate) fn derive_recovery_checkpoint(events: &[AgentSessionEvent]) -> AgentR
             }
             AgentSessionEventPayload::ToolResult {
                 call_id, status, ..
-            } => {
+            } if event.turn_id == turn_id => {
                 let boundary = tools.entry(call_id.clone()).or_default();
                 boundary.has_result = *status != super::AgentToolResultStatus::Uncertain;
                 boundary.uncertain_result = *status == super::AgentToolResultStatus::Uncertain;
@@ -189,6 +319,8 @@ pub(crate) fn derive_recovery_checkpoint(events: &[AgentSessionEvent]) -> AgentR
             call_id,
             effect,
             idempotency,
+            tool_name: None,
+            command: None,
         }
     };
 
@@ -509,6 +641,68 @@ mod tests {
             derive_recovery_checkpoint(&events).kind,
             AgentRecoveryCheckpointKind::ToolResultCommitted
         );
+    }
+
+    #[test]
+    fn stopped_recovery_retains_each_unresolved_scope_until_its_own_confirmation() {
+        let mut events = vec![event(0, AgentSessionEventPayload::TurnStart)];
+        for (index, step) in ["step-one", "step-two"].into_iter().enumerate() {
+            let mut dispatch = event(
+                1 + index as u64,
+                AgentSessionEventPayload::ToolExecution {
+                    call_id: "repeated-call".into(),
+                    status: AgentToolExecutionStatus::Dispatched,
+                    idempotency: "no".into(),
+                },
+            );
+            dispatch.step_id = Some(step.into());
+            events.push(dispatch);
+        }
+        events.push(event(
+            3,
+            AgentSessionEventPayload::TurnEnd {
+                reason: "cancelled".into(),
+            },
+        ));
+        events.push(event(
+            4,
+            AgentSessionEventPayload::SessionEnded {
+                status: AgentSessionStatus::Cancelled,
+                reason: Some("cancelled by user".into()),
+            },
+        ));
+        assert_eq!(
+            derive_recovery_checkpoint(&events).step_id.as_deref(),
+            Some("step-two")
+        );
+        assert_eq!(unresolved_execution_count(&events), 2);
+        let mut result = event(
+            5,
+            AgentSessionEventPayload::ToolResult {
+                call_id: "repeated-call".into(),
+                name: "run_terminal_command".into(),
+                status: AgentToolResultStatus::Cancelled,
+                summary: "Manually confirmed not applied".into(),
+                data: None,
+                duration_ms: None,
+                evidence_refs: vec![],
+            },
+        );
+        result.step_id = Some("step-two".into());
+        events.push(result.clone());
+        assert_eq!(
+            derive_recovery_checkpoint(&events).step_id.as_deref(),
+            Some("step-one")
+        );
+        assert_eq!(unresolved_execution_count(&events), 1);
+        result.seq = 6;
+        result.step_id = Some("step-one".into());
+        events.push(result);
+        assert_eq!(
+            derive_recovery_checkpoint(&events).kind,
+            AgentRecoveryCheckpointKind::Terminal
+        );
+        assert_eq!(unresolved_execution_count(&events), 0);
     }
 
     #[test]

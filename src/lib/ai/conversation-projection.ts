@@ -124,10 +124,10 @@ function toolState(status: AgentSessionToolStatus): AiToolNode['state'] {
     case 'running': return 'running';
     case 'completed': return 'succeeded';
     case 'rejected': return 'rejected';
+    case 'uncertain': return 'uncertain';
     case 'failed':
     case 'timedOut':
     case 'cancelled':
-    case 'uncertain':
       return 'failed';
   }
 }

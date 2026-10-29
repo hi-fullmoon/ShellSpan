@@ -295,6 +295,8 @@ export type AgentRecoveryCheckpointKind =
   | 'terminal';
 
 export interface AgentRecoveryCheckpoint {
+  readonly toolName?: string;
+  readonly command?: string;
   readonly kind: AgentRecoveryCheckpointKind;
   readonly status: AgentSessionRecoveryState['status'];
   readonly summary: string;

@@ -42,13 +42,12 @@ export function canContinueOnReconnectedTerminal(
 ): boolean {
   if (!isDirectReconnectedTerminal(snapshot, terminal) || !snapshot || !terminal
     || !terminal.brokerReplacedSessionIds?.includes(snapshot.header.target!.sessionId)
-    || ['running', 'waiting'].includes(snapshot.status) || snapshot.uncertainNativeEffects
+    || ['running', 'waiting'].includes(snapshot.status)
     || snapshot.header.capabilityScope
     || snapshot.inbox.nextTurn.length || snapshot.inbox.nextStep.length) return false;
-  if (snapshot.recovery.status === 'available' || snapshot.recovery.status === 'required'
+  if (snapshot.recovery.kind !== 'executionInFlight' && (snapshot.recovery.status === 'available' || snapshot.recovery.status === 'required'
     || snapshot.recovery.status === 'reconciling'
-    || snapshot.recovery.kind === 'executionInFlight'
-    || snapshot.recovery.kind === 'authorizedBeforeExecute') return false;
+    || snapshot.recovery.kind === 'authorizedBeforeExecute')) return false;
   return terminal.status === 'connected'
     && (snapshot.header.executionSurface !== 'boundTerminal'
       || (terminal.integrationState === 'ready' && terminal.promptReady === true));

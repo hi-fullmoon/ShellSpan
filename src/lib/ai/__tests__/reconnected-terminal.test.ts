@@ -38,10 +38,11 @@ describe('reconnected terminal Agent continuation', () => {
     expect(canVerifyTerminalContinuation({ ...snapshot, archived: true }, fresh)).toBe(false);
   });
 
-  it('does not mistake verification eligibility for authorization to resume uncertain execution', () => {
+  it('restores conversation access without treating the earlier unknown execution as settled', () => {
     const unsettled = { ...snapshot, uncertainNativeEffects: true };
     expect(canVerifyTerminalContinuation(unsettled, terminal)).toBe(true);
-    expect(canContinueOnReconnectedTerminal(unsettled, terminal)).toBe(false);
+    expect(canContinueOnReconnectedTerminal(unsettled, terminal)).toBe(true);
+    expect(unsettled.uncertainNativeEffects).toBe(true);
     expect(terminalReconnectErrorKey('TERMINAL_RECONNECT_UNVERIFIED: requires the same connected identity'))
       .toBe('ai.workspace.reconnectUnverified');
     expect(terminalReconnectErrorKey('TERMINAL_RECONNECT_SOURCE_ACTIVE: previous terminal is still available'))
@@ -81,12 +82,15 @@ describe('reconnected terminal Agent continuation', () => {
     expect(canContinueOnReconnectedTerminal(snapshot, { ...terminal, status: 'disconnected' })).toBe(false);
   });
 
-  it('blocks rebinding while effects need reconciliation or the root is live', () => {
+  it('allows stopped unknown outcomes while keeping active work and other recovery gates blocked', () => {
     expect(canContinueOnReconnectedTerminal({
       ...snapshot,
       recovery: { ...snapshot.recovery, status: 'required', kind: 'executionInFlight' },
+    }, terminal)).toBe(true);
+    expect(canContinueOnReconnectedTerminal({ ...snapshot, uncertainNativeEffects: true }, terminal)).toBe(true);
+    expect(canContinueOnReconnectedTerminal({ ...snapshot,
+      recovery: { ...snapshot.recovery, kind: 'artifactIntegrity', status: 'required' },
     }, terminal)).toBe(false);
-    expect(canContinueOnReconnectedTerminal({ ...snapshot, uncertainNativeEffects: true }, terminal)).toBe(false);
     expect(isDirectReconnectedTerminal({ ...snapshot, status: 'running', ended: false }, {
       ...terminal, status: 'connecting',
     })).toBe(true);

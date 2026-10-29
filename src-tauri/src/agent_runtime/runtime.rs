@@ -1372,10 +1372,17 @@ impl AgentRuntime {
             .lock()
             .map_err(|_| "MODEL_REGISTRY_UNAVAILABLE")? = Some(self.models.clone());
         let recovery = self.sessions.snapshot(session_id)?.recovery;
-        if matches!(
-            recovery.status,
-            super::AgentRecoveryStatus::Available | super::AgentRecoveryStatus::Required
-        ) || recovery.kind == super::AgentRecoveryCheckpointKind::WaitingApproval
+        let observing_closed_execution = recovery.kind
+            == super::AgentRecoveryCheckpointKind::ExecutionInFlight
+            && entry.subagent.is_none()
+            && self.sessions.read_events(session_id, |events| {
+                super::recovery::open_turn_id(events).is_none()
+            })?;
+        if !observing_closed_execution
+            && (matches!(
+                recovery.status,
+                super::AgentRecoveryStatus::Available | super::AgentRecoveryStatus::Required
+            ) || recovery.kind == super::AgentRecoveryCheckpointKind::WaitingApproval)
         {
             entry.set_phase(AgentLifecyclePhase::Waiting)?;
         }

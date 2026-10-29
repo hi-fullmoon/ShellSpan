@@ -19,6 +19,7 @@ export function httpProbeTimeoutKind(message: string): 'http' | 'ssh' | null {
 
 /** Translate recognized runtime errors without changing stored diagnostics or user content. */
 export function aiErrorMessage(message: string, t: (key: LocaleKey, values?: Record<string, string | number>) => string): string {
+  if (message.includes('EXECUTION_OUTCOME_UNKNOWN')) return t('ai.error.executionOutcomeUnknown');
   if (message.includes('INVALID_MODEL_TOKEN_BUDGET:')) return t('ai.error.modelInputBudgetInvalid');
   if (httpProbeTimeoutKind(message)) return t('ai.workspace.tool.httpProbe.timeout');
   const diagnostic = message.trim().replace(/^Error:\s*/, '');

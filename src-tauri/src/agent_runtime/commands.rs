@@ -750,13 +750,18 @@ pub(crate) async fn agent_runtime_resume_recovery(
 }
 
 #[tauri::command]
-pub(crate) fn agent_runtime_reconcile_recovery(
+pub(crate) async fn agent_runtime_reconcile_recovery(
     app: AppHandle,
     runtime: State<'_, AgentRuntime>,
     input: AgentRecoveryReconcileInput,
 ) -> Result<AgentSessionSnapshot, String> {
-    configure_runtime(&app, &runtime)?;
-    runtime.reconcile_recovery(input)
+    let runtime = runtime.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        configure_runtime(&app, &runtime)?;
+        runtime.reconcile_recovery(input)
+    })
+    .await
+    .map_err(|error| format!("reconciliation task failed: {error}"))?
 }
 
 #[tauri::command]
