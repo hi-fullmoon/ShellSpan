@@ -40,6 +40,9 @@ mod skill_bridge_tests {
 mod question_tests {
     include!("questions.rs");
 }
+mod recorded_question_continuation_tests {
+    include!("recorded_question_continuation.rs");
+}
 include!("scheduler.rs");
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};

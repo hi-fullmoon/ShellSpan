@@ -666,9 +666,20 @@ impl super::AgentToolPipeline {
         &self,
         entry: &std::sync::Arc<super::AgentEntry>,
     ) -> Result<(), String> {
-        if records(&self.sessions.all_events(&entry.session_id)?)
+        // Cancellation recovery belongs to the current run. An explicit resume
+        // or a fully settled interruption leaves cancelled questions in history;
+        // those records must never cancel a fresh Entry attached to this Session.
+        let events = self.sessions.all_events(&entry.session_id)?;
+        if events
             .iter()
-            .any(|r| r.cancelled)
+            .rev()
+            .take_while(|event| {
+                !matches!(event.payload, AgentSessionEventPayload::SessionResumed {})
+                    && !matches!(&event.payload,
+                        AgentSessionEventPayload::AgentStatus { status: super::AgentSessionStatus::Idle, reason }
+                            if reason.as_deref() == Some("stoppedByUser"))
+            })
+            .any(|event| matches!(event.payload, AgentSessionEventPayload::QuestionCancelled { .. }))
         {
             let _gate = self
                 .question_gate

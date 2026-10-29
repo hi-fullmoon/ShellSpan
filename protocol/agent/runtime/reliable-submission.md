@@ -13,6 +13,12 @@ payloads conflict. Creation uses a stable Session ID and compares the original
 creation payload before acknowledging a repeated create request. Several inputs
 submitted before creation completes share that same Session.
 
+Question cancellation recovery is scoped to the current run. A committed
+`session/resumed` or idle `agent/status` with reason `stoppedByUser` closes that
+cancellation scope. Earlier cancelled questions remain historical evidence and
+cannot cancel a newly attached Agent or reject its next user input. A cancelled
+question without either boundary still finishes cancellation after restart.
+
 When content is redacted, text admission retains a store-owned SHA-256 digest of
 the original UTF-8 content in `source.metadata.submissionContentFingerprint`.
 Inbox edits retain the corresponding optional `contentFingerprint` on
