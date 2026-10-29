@@ -256,6 +256,7 @@ describe('AI Phase 4 Turn Process renderer', () => {
       name: 'Thinking… The current reasoning starts here and keeps receiving newer text',
     })).toBe(reasoning);
     expect(summary).toHaveTextContent('The current reasoning starts here and keeps receiving newer text');
+    reasoning.focus();
 
     rerender(<AiConversationNodeList nodes={[{
       ...running,
@@ -373,14 +374,14 @@ describe('AI Phase 4 Turn Process renderer', () => {
     const { container } = render(<AiConversationNodeList nodes={nodes} />);
     const process = screen.getByRole('button', { name: label });
 
-    expect(process).toHaveAttribute('aria-expanded', 'false');
+    expect(process).toHaveAttribute('aria-expanded', 'true');
+    expect(process).toBeDisabled();
     if (hasAnswer) expect(screen.getByText(answer)).toBeVisible();
     else expect(screen.queryByText(answer)).not.toBeInTheDocument();
     expect(container.querySelector('[data-ai-node-kind="turnTail"]')).toHaveAttribute(
       'data-ai-node-kind',
       'turnTail',
     );
-    await user.click(process);
     if (!hasAnswer) {
       const alert = await screen.findByRole('alert');
       expect(alert).toHaveTextContent('Request failed');

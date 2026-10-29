@@ -307,6 +307,7 @@ function createChatProjection() {
   const requests = new Map<string, RequestFacts>();
   const failures = new Map<string, { failure: NonNullable<AiErrorNode['failure']>; retryAt?: number }>();
   const activeRequestByStep = new Map<string, string>();
+  const requestsWithToolCalls = new Set<string>();
   const tools = new Map<string, AiToolNode>();
   const unscopedNodes = new Map<string, AiConversationNode>();
   const compactions = new Map<string, AiCompactionNode>();
@@ -966,6 +967,7 @@ function createChatProjection() {
       }
       case 'assistant/chunk': {
         const request = requests.get(event.data.requestId);
+        if (event.data.toolCallDelta) requestsWithToolCalls.add(event.data.requestId);
         if (request && request.firstResponseAt === undefined
           && (event.data.reasoningDelta || event.data.textDelta || event.data.toolCallDelta)) {
           request.firstResponseAt = event.timeUnixMs;
@@ -1374,9 +1376,19 @@ function createChatProjection() {
       const previousStats = sessionStats;
 
       const assistants = [...turn.assistants.values()].sort(topLevelSort);
-      const closing = [...assistants].reverse().find((assistant) => (
-        textContent(assistant.blocks).trim() !== '' && !hasToolCall(assistant.blocks)
-      ));
+      // Only the latest step can own the answer. A later empty, failed, or
+      // tool-bearing step must not promote an earlier progress message.
+      const steps = [...turn.steps];
+      const latestStepId = steps[steps.length - 1] ?? null;
+      const candidate = assistants[assistants.length - 1];
+      const latestRequestId = latestStepId ? activeRequestByStep.get(latestStepId) : undefined;
+      const closing = candidate
+        && candidate.stepId === latestStepId
+        && (!latestRequestId || candidate.requestId === latestRequestId)
+        && !requestsWithToolCalls.has(candidate.requestId ?? '')
+        && textContent(candidate.blocks).trim() !== ''
+        && !hasToolCall(candidate.blocks)
+        ? candidate : undefined;
       const questionCallIds = new Set(
         [...turn.children.values()].flatMap((child) =>
           child.kind === 'question' ? [child.question.identity.callId] : [],
@@ -1403,6 +1415,7 @@ function createChatProjection() {
         answerGeneration,
         hasStartBoundary: turn.startSeq !== undefined,
         hasEndBoundary: turn.endSeq !== undefined,
+        hasFinalAnswer: closing?.state === 'completed',
         childKeys: children.map((child) => child.key),
         children,
       };

@@ -127,9 +127,8 @@ export const AiConversation = memo(function AiConversation({
   onLoadOlder,
 }: AiConversationProps): React.ReactNode {
   const { t } = useI18n();
-  // A streamed opening message may later acquire tool calls. Keep all visible
-  // assistant text in sibling rows so that projection changes cannot move it
-  // into a disclosure, remount Markdown or restart its reveal animation.
+  // Process prose belongs to its disclosure. Compaction remains a separate
+  // status row so it is visible before a model step has been admitted.
   const allNodes = useMemo(
     () =>
       projectedNodes.flatMap((node): AiConversationNode[] => {
@@ -137,9 +136,9 @@ export const AiConversation = memo(function AiConversation({
           return [{ ...node, state: 'cancelled', durationMs: null }];
         }
         if (node.kind !== 'turnProcess') return [node];
-        const children = node.children.filter((child) => child.kind !== 'assistantMessage' && child.kind !== 'compaction');
+        const children = node.children.filter((child) => child.kind !== 'compaction');
         const messages = node.children.filter(
-          (child) => child.kind === 'compaction' || (child.kind === 'assistantMessage' && child.blocks.some((block) => block.type === 'text' && block.text.trim().length > 0)),
+          (child) => child.kind === 'compaction',
         ).map(child => child.kind === 'compaction' && child.state === 'running' && status !== 'running'
           ? { ...child, state: 'cancelled' as const, durationMs: null } : child);
         if (children.length === node.children.length) return [node];

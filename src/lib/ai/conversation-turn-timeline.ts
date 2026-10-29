@@ -40,6 +40,7 @@ export function conversationTurnTimeline(
       status: next ? 'completed' : process.status,
       hasStartBoundary: !user && process.hasStartBoundary,
       hasEndBoundary: !next && process.hasEndBoundary,
+      hasInterleavedInput: true,
       answerGeneration: processChildren[processChildren.length - 1]?.key ?? user?.key ?? process.key,
       children: processChildren,
       childKeys: processChildren.map(child => child.key),

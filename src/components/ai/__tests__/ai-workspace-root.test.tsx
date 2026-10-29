@@ -653,7 +653,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(onOpen).toHaveBeenCalledWith(base.summary);
   });
 
-  it('keeps the stage6a question actionable outside collapsed process and preserves ordinary draft', async () => {
+  it('keeps the stage6a question actionable outside process and preserves ordinary draft', async () => {
     const base = agentView();
     const pendingQuestion: NonNullable<AiSessionView['pendingQuestion']> = {
       identity: { sessionId: 'session-fixture', turnId: 'turn-01', stepId: 'step-01', requestId: 'request-01', callId: 'q', questionRequestId: 'workspace-question' },
@@ -665,7 +665,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     const props = { scope: 'workbench' as const, canStartAgent: true, defaultDraft: 'ordinary unsent draft', onAnswerQuestion, onSubmit };
     const view = { ...base, pendingQuestion, status: 'waiting' as const };
     const { container, rerender } = render(<AiWorkspaceRoot {...props} view={view} />);
-    expect(screen.getByRole('button', { name: 'Process complete' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: 'Process complete' })).toHaveAttribute('aria-expanded', 'true');
     const panel = container.querySelector('[data-slot="ai-question-panel"]')!;
     expect(panel.closest('[data-ai-node-kind="turnProcess"]')).toBeNull();
     expect(container.querySelectorAll('[data-message-scroller-viewport]')).toHaveLength(1);
@@ -703,7 +703,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
       expect(root).toHaveAttribute('data-phase', 'active');
       expect(screen.getByText('Check nginx now.')).toBeVisible();
       expect(root?.querySelector('[data-ai-node-kind="turnProcess"]')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Process complete' })).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.getByRole('button', { name: 'Process complete' })).toHaveAttribute('aria-expanded', 'true');
       expect(screen.getByRole('textbox')).toBeVisible();
       expect(screen.getByRole('button', { name: 'Conversation history' })).toBeVisible();
       expect(screen.getByRole('button', { name: 'New conversation' })).toBeVisible();

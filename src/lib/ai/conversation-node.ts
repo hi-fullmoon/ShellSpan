@@ -243,6 +243,10 @@ export interface AiTurnProcessNode extends AiConversationNodeBase {
   readonly answerGeneration: string;
   readonly hasStartBoundary: boolean;
   readonly hasEndBoundary: boolean;
+  /** A committed reply from the latest step, separate from execution progress. */
+  readonly hasFinalAnswer?: boolean;
+  /** Keep corrections and the surrounding execution visible in their original order. */
+  readonly hasInterleavedInput?: boolean;
   readonly childKeys: readonly string[];
   readonly children: readonly AiTurnProcessChildNode[];
 }

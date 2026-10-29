@@ -507,7 +507,7 @@ function ErrorNodeView({ node }: { readonly node: AiConversationNodeOf<'error'> 
 
 interface StoredTurnProcessDisclosure {
   readonly open: boolean;
-  readonly status: AiTurnProcessStatus;
+  readonly manualOpen?: boolean;
 }
 
 const TURN_PROCESS_DISCLOSURE_LIMIT = 512;
@@ -527,8 +527,12 @@ function storeTurnProcessDisclosure(key: string, value: StoredTurnProcessDisclos
   if (oldest !== undefined) turnProcessDisclosures.delete(oldest);
 }
 
-function isSettledTurnProcess(status: AiTurnProcessStatus): boolean {
-  return status === 'completed' || status === 'incomplete' || status === 'failed' || status === 'cancelled';
+function isReadingProcess(body: HTMLDivElement | null): boolean {
+  if (!body) return false;
+  if (body.contains(document.activeElement)) return true;
+  const selection = window.getSelection();
+  return Boolean(selection && !selection.isCollapsed
+    && (body.contains(selection.anchorNode) || body.contains(selection.focusNode)));
 }
 
 function turnProcessLabelKey(status: AiTurnProcessStatus): LocaleKey {
@@ -583,18 +587,32 @@ function TurnProcessDisclosure({
   const { t } = useI18n();
   const stateKey = turnProcessDisclosureKey(node);
   const stored = turnProcessDisclosures.get(stateKey);
-  const [open, setOpen] = useState(stored?.open ?? !isSettledTurnProcess(node.status));
+  const mustStayOpen = node.status === 'failed' || node.status === 'cancelled'
+    || node.status === 'incomplete' || node.status === 'waiting' || node.status === 'partial'
+    || node.hasInterleavedInput === true || node.hasFinalAnswer === false && node.status === 'completed';
+  const foldOnCompletion = node.status === 'completed' && node.hasEndBoundary && !mustStayOpen;
+  const [automaticOpen, setAutomaticOpen] = useState(stored?.open ?? !foldOnCompletion);
+  const [manualOpen, setManualOpen] = useState(stored?.manualOpen);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const open = mustStayOpen || (manualOpen ?? automaticOpen);
   const label = t(turnProcessLabelKey(node.status));
   const summary = turnProcessSummary(node, t);
 
   const updateOpen = (next: boolean): void => {
-    storeTurnProcessDisclosure(stateKey, { open: next, status: node.status });
-    setOpen(next);
+    if (mustStayOpen) return;
+    storeTurnProcessDisclosure(stateKey, { open: next, manualOpen: next });
+    setManualOpen(next);
   };
 
+  // Measure reading intent before closing the mounted body. Moving focus or
+  // removing selected text on completion would interrupt the reader.
   useLayoutEffect(() => {
-    storeTurnProcessDisclosure(stateKey, { open, status: node.status });
-  }, [node.status, open, stateKey]);
+    setAutomaticOpen(!foldOnCompletion || isReadingProcess(bodyRef.current));
+  }, [foldOnCompletion]);
+
+  useLayoutEffect(() => {
+    storeTurnProcessDisclosure(stateKey, { open, manualOpen });
+  }, [manualOpen, open, stateKey]);
 
   return (
     <Collapsible open={open} onOpenChange={updateOpen}>
@@ -613,6 +631,7 @@ function TurnProcessDisclosure({
               className={cn(AI_DISCLOSURE_ROW_CLASS, 'ai-turn-process-trigger h-auto min-h-6 px-0 py-1')}
               aria-label={label}
               aria-expanded={open}
+              disabled={mustStayOpen}
             />
           }
         >
@@ -633,7 +652,7 @@ function TurnProcessDisclosure({
         </CollapsibleTrigger>
         <Separator className="ai-turn-process-separator" />
         <CollapsibleContent>
-          <div className="ai-turn-process-body flex w-full min-w-0 max-w-full flex-col gap-1 box-border pt-1.5 pr-0 pb-0.5">
+          <div ref={bodyRef} className="ai-turn-process-body flex w-full min-w-0 max-w-full flex-col gap-1 box-border pt-1.5 pr-0 pb-0.5">
             {node.children.map((child) => (
               <div
                 key={child.key}
@@ -760,7 +779,7 @@ export function aiConversationNodeRevision(node: AiConversationNode): string {
     case 'compaction':
       return `${base}:${node.state}:${node.durationMs ?? 'unknown'}`;
     case 'turnProcess':
-      return `${base}:${node.status}:${node.answerGeneration}:${node.hasStartBoundary}:${node.hasEndBoundary}:${node.children.length}`;
+      return `${base}:${node.status}:${node.answerGeneration}:${node.hasStartBoundary}:${node.hasEndBoundary}:${node.hasFinalAnswer}:${node.hasInterleavedInput}:${node.children.length}`;
     case 'turnTail':
       return `${base}:${node.status}`;
     case 'systemPrompt':
