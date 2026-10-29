@@ -79,6 +79,7 @@ try {
           throw new Error(`${engine.name()}/${locale}/${state}: ${error.message}; ${errors.join('; ')}`, { cause: error });
         });
         await page.locator('.ai-detail-section').first().waitFor();
+        assert.equal(await page.locator('.ai-tool-scroll-area').count(), 0, 'Details must not add nested tool scroll areas');
         if (generic || recordedPlan) {
           const output = page.locator('.ai-detail-section').nth(1);
           assert.equal(await page.locator('.ai-detail-section').first().locator('code').textContent(), expected.input);
@@ -109,7 +110,12 @@ try {
           }));
           assert.ok(sections.every(section => Math.abs(section.height - sections[0].height) < 1), 'All three sections must have equal height');
           assert.ok(sections.every(section => section.height > 40 && section.bottom <= height && section.right <= width), 'All sections must stay inside the panel');
-          assert.ok(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight), 'The panel must not add an outer scrollbar');
+          const documentSize = await page.evaluate(() => ({
+            scrollHeight: document.documentElement.scrollHeight, height: innerHeight,
+            scrollWidth: document.documentElement.scrollWidth, width: innerWidth,
+          }));
+          assert.ok(documentSize.scrollHeight <= documentSize.height,
+            `${engine.name()}/${locale}/${JSON.stringify(scenario)}/${width}: the panel must not add an outer scrollbar: ${JSON.stringify(documentSize)}`);
           for (const theme of ['light', 'dark']) {
             await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
             const headers = await page.locator('.ai-detail-section-header').evaluateAll(elements => elements.map(element => ({

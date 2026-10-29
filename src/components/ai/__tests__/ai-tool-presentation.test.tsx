@@ -101,7 +101,8 @@ describe('AI tool presentation', () => {
       expect(header).toContainElement(section.querySelector('.ai-tool-copy-button'));
       expect(section.querySelector('.ai-tool-copy-button')).toHaveClass('static', 'shrink-0');
     }
-    expect(container.querySelector('.ai-io-card')).toHaveClass('max-h-65', 'overflow-auto');
+    expect(container.querySelector('.ai-io-card')).toHaveClass('max-h-65', 'overflow-hidden');
+    expect(container.querySelector('.ai-io-card [data-slot="scroll-area-viewport"]')).toHaveStyle({ overflow: 'scroll' });
     expect(container.querySelector('.ai-io-divider, [data-slot="separator"]')).not.toBeInTheDocument();
   });
 
@@ -132,8 +133,8 @@ describe('AI tool presentation', () => {
       output: { stdout: execution.stdout, exitCode: execution.status },
     }} compact />);
     const transcript = container.querySelector('.ai-terminal-transcript');
-    expect(transcript).toHaveClass('max-h-65', 'overflow-auto');
-    expect(transcript).toHaveAttribute('tabindex', '0');
+    expect(transcript).toHaveClass('max-h-65', 'overflow-hidden');
+    expect(transcript?.querySelector('[data-slot="scroll-area-viewport"]')).toHaveStyle({ overflow: 'scroll' });
     expect([...container.querySelectorAll('.ai-block-line')].map(line => line.textContent)).toEqual(lines);
     expect(container.querySelector('.ai-block-fold')).not.toBeInTheDocument();
   });
@@ -160,8 +161,8 @@ describe('AI tool presentation', () => {
       `${locale === 'zh-CN' ? '退出码' : 'Exit'} ${execution.status}`,
     );
     expect(container.querySelector('[data-ai-terminal-output]')).toHaveTextContent(execution.stderr.trim());
-    expect(container.querySelector('.ai-terminal-transcript')).toHaveClass('max-h-65', 'overflow-auto');
-    expect(container.querySelector('.ai-terminal-transcript')).toHaveAttribute('aria-label', 'Shell');
+    expect(container.querySelector('.ai-terminal-transcript')).toHaveClass('max-h-65', 'overflow-hidden');
+    expect(container.querySelector('.ai-terminal-transcript [data-slot="scroll-area-viewport"]')).toHaveAttribute('aria-label', 'Shell');
   });
 
   it.each(['zh-CN', 'en-US'] as const)('keeps recovered read errors compact and shows one diagnostic when expanded in %s', async locale => {

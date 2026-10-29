@@ -66,6 +66,9 @@ try {
   await page.locator('[data-ai-tool-view="read"]').waitFor();
   for (const theme of ['light', 'dark']) {
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+    // The shared scroll viewport transitions its inherited color on theme changes.
+    await page.waitForFunction(() => new Set(['.ai-terminal-header', '.ai-terminal-command', '.ai-terminal-output']
+      .map(selector => getComputedStyle(document.querySelector(selector)).color)).size === 1);
     for (const width of [380, 529, 720]) {
       await page.setViewportSize({ width, height: 720 });
       const commandToggle = page.locator('.ai-terminal-command');
@@ -114,21 +117,22 @@ try {
       assert.ok(layout.header <= layout.command && layout.command < layout.output, 'Shell, command and output must stack vertically');
       assert.ok(layout.right <= width && layout.scrollWidth <= layout.clientWidth, 'Shell must fit narrow panels');
       const transcript = page.locator('.ai-terminal-transcript');
+      const viewport = transcript.locator('[data-slot="scroll-area-viewport"]');
       const scrolling = await transcript.evaluate(element => {
         const style = getComputedStyle(element);
         return { height: element.getBoundingClientRect().height, maxHeight: style.maxHeight,
-          clientHeight: element.clientHeight, scrollHeight: element.scrollHeight,
-          overflow: style.overflowY };
+          clientHeight: element.firstElementChild.clientHeight, scrollHeight: element.firstElementChild.scrollHeight,
+          overflow: getComputedStyle(element.firstElementChild).overflowY };
       });
       assert.equal(scrolling.maxHeight, '260px', 'Command content must have a fixed maximum height');
       assert.ok(scrolling.height <= 260 && scrolling.scrollHeight > scrolling.clientHeight, 'Long command output must scroll within the height limit');
-      assert.equal(scrolling.overflow, 'auto');
+      assert.equal(scrolling.overflow, 'scroll');
       assert.equal(await page.locator('.ai-terminal-block .ai-block-fold').count(), 0, 'Scrolling must expose all output without a hidden-line control');
       const headerBeforeScroll = await page.locator('.ai-terminal-header').boundingBox();
-      await transcript.evaluate(element => element.scrollTo({ top: element.scrollHeight, behavior: 'instant' }));
-      assert.ok(await transcript.evaluate(element => element.scrollTop > 0), 'Output must scroll to the final lines');
+      await viewport.evaluate(element => element.scrollTo({ top: element.scrollHeight, behavior: 'instant' }));
+      assert.ok(await viewport.evaluate(element => element.scrollTop > 0), 'Output must scroll to the final lines');
       assert.deepEqual(await page.locator('.ai-terminal-header').boundingBox(), headerBeforeScroll, 'Shell title must stay fixed while output scrolls');
-      await transcript.evaluate(element => element.scrollTo({ top: 0, behavior: 'instant' }));
+      await viewport.evaluate(element => element.scrollTo({ top: 0, behavior: 'instant' }));
       for (const selector of ['.ai-terminal-block', '.ai-read-block']) {
         const surface = page.locator(selector === '.ai-read-block' ? '[data-ai-tool-view="read"]' : selector);
         const details = surface.locator('..').locator('.ai-tool-inspect');

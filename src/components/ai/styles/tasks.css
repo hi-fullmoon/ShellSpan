@@ -1,7 +1,7 @@
 .ai-task-strip {
   border: 0.5px solid var(--ai-border-subtle);
   border-radius: 12px;
-  background: var(--ai-selector);
+  background: var(--ai-code-block);
   color: var(--ai-text-secondary);
 }
 

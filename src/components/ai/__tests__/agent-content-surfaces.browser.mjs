@@ -240,18 +240,18 @@ try {
             assert.equal((await terminalHeader.textContent()).trim(), 'Shell', 'The Shell header must omit host and directory information');
             await page.evaluate(() => document.activeElement?.blur());
             await terminalHeader.hover();
-            assert.deepEqual(await page.locator('#terminal .ai-tool-copy-button').evaluateAll(buttons => buttons.map(button => getComputedStyle(button).opacity)), ['1', '1'],
-              'Hovering the Shell card must reveal both copy icons');
+            assert.deepEqual(await page.locator('#terminal .ai-tool-copy-button').evaluateAll(buttons => buttons.map(button => getComputedStyle(button).opacity)), ['1', '0'],
+              'Hovering the Shell header reveals only the command copy action');
             for (const id of ['terminal', 'read']) {
               const regions = page.locator(`#${id} [data-ai-copy-region]`);
-              assert.equal(await regions.count(), 2, `${id}: input and output each have a copy header`);
+              assert.equal(await regions.count(), 2, `${id}: input and output have independent copy regions`);
               await page.evaluate(() => document.activeElement?.blur());
               for (const index of [0, 1]) {
                 await regions.nth(index).hover({ position: { x: 5, y: 5 } });
                 for (const other of [0, 1]) {
                   const button = regions.nth(other).locator('.ai-tool-copy-button');
-                  assert.equal(await button.evaluate(element => getComputedStyle(element).opacity), '1',
-                    `${id}/${theme}/${width}: hovering the card reveals copy action ${other}`);
+                  assert.equal(await button.evaluate(element => getComputedStyle(element).opacity), index === other ? '1' : '0',
+                    `${id}/${theme}/${width}: only the hovered region reveals copy action ${other}`);
                 }
                 if (locale === 'en-US') await page.locator(`#${id}`).screenshot({ path: join(screenshots, `${engine.name()}-${theme}-${width}-${id}-region-${index}.png`) });
               }
@@ -303,11 +303,13 @@ try {
             assert.ok(inputOutputGap >= 20, 'Spacing must distinguish tool input from output');
             for (const selector of ['#read .ai-read-lines', '#search .ai-search-results', '#web .ai-web-content',
               '#diff .ai-diff-block', '#code .ai-code-content', '#generic .ai-io-card', '#markdown .ai-code-block-pre']) {
-              const body = page.locator(selector);
+              const root = page.locator(selector);
+              const shared = await root.getAttribute('data-slot') === 'scroll-area';
+              const body = shared ? root.locator('[data-slot="scroll-area-viewport"]') : root;
               const size = await body.evaluate(element => ({ height: element.getBoundingClientRect().height,
                 overflow: getComputedStyle(element).overflowY, clientHeight: element.clientHeight, scrollHeight: element.scrollHeight }));
               assert.ok(size.height <= 260 && size.scrollHeight > size.clientHeight, `${selector}: capped content height`);
-              assert.equal(size.overflow, 'auto', `${selector}: native scrolling`);
+              assert.equal(size.overflow, shared ? 'scroll' : 'auto', `${selector}: scroll viewport`);
               await body.evaluate(element => element.scrollTo({ top: element.scrollHeight, behavior: 'instant' }));
               assert.ok(await body.evaluate(element => element.scrollTop > 0), `${selector}: final output must be reachable`);
               await body.evaluate(element => element.scrollTo({ top: 0, behavior: 'instant' }));

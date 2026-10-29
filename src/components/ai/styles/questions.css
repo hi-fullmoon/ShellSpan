@@ -1,7 +1,5 @@
 .ai-question-panel,
-.ai-approval-panel,
-.ai-composer-add-menu,
-.ai-completion-popup {
+.ai-approval-panel {
   border-radius: 22px;
   background: var(--ai-surface);
   box-shadow: var(--ai-elevation-soft);
@@ -184,13 +182,6 @@
 @container ai-workspace (max-width: 420px) {
   .ai-question-panel,
   .ai-approval-panel {
-    border-radius: 14px;
-  }
-}
-
-@media (max-width: 420px) {
-  .ai-composer-add-menu,
-  .ai-completion-popup {
     border-radius: 14px;
   }
 }

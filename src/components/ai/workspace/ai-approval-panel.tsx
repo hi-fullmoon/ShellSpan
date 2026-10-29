@@ -196,8 +196,8 @@ export function AiApprovalPanel({
       data-approval-id={approval.approvalId}
     >
       <CardHeader className="ai-approval-panel-header shrink-0 gap-2 px-4 py-3 has-data-[slot=card-action]:grid-cols-1 @min-[480px]/ai-workspace:has-data-[slot=card-action]:grid-cols-[minmax(0,1fr)_auto]">
-        <div className="flex min-w-0 items-start gap-2">
-          <span className="flex size-7 shrink-0 items-center justify-center text-app-warning" aria-hidden="true">
+        <div className="flex min-w-0 items-start gap-1">
+          <span className="flex h-7 w-6 shrink-0 items-center justify-center text-app-warning" aria-hidden="true">
             <ShieldAlertIcon />
           </span>
           <div className="flex min-w-0 flex-col gap-0.5">
@@ -211,7 +211,7 @@ export function AiApprovalPanel({
             </CardDescription>
           </div>
         </div>
-        <CardAction className="col-start-1 row-span-1 row-start-auto justify-self-start pl-9 @min-[480px]/ai-workspace:col-start-2 @min-[480px]/ai-workspace:row-start-1 @min-[480px]/ai-workspace:pl-0">
+        <CardAction className="col-start-1 row-span-1 row-start-auto justify-self-start pl-7 @min-[480px]/ai-workspace:col-start-2 @min-[480px]/ai-workspace:row-start-1 @min-[480px]/ai-workspace:pl-0">
           <Badge variant={destructive ? 'destructive' : 'outline'}>{t(recoverableDeletion ? 'ai.workspace.approval.trashRecoveryLabel' : riskKeys.label)}</Badge>
         </CardAction>
       </CardHeader>

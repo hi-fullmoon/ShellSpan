@@ -121,18 +121,45 @@ try {
               const description = element.querySelector('[data-slot="alert-description"]');
               const tone = element.classList.contains('bg-primary/10') ? 'info'
                 : element.classList.contains('bg-app-warning/10') ? 'warning'
-                  : element.classList.contains('bg-destructive/5') ? 'error' : null;
+                  : element.classList.contains('bg-destructive/5') ? 'error'
+                    : element.classList.contains('ai-queue-failure-notice') ? 'neutral' : null;
               return { size: element.dataset.size, tone,
                 iconSize: icon.getBoundingClientRect().width, fontSize: getComputedStyle(description).fontSize };
             });
             if (style) {
               assert.equal(measurements.gap, 4, `${sample.id}: notice must retain the shared 4px icon gap`);
-              assert.ok(style.tone, `${sample.id}: callout must use a semantic tinted background`);
+              assert.ok(style.tone, `${sample.id}: callout must use its semantic surface`);
               assert.deepEqual(style, { size: 'sm', tone: style.tone, iconSize: 14, fontSize: '12px' },
                 `${sample.id}: callout must use the shared compact typography and icon size`);
               if (['file-reference', 'approval-loading', 'trash-success'].includes(sample.id)) assert.equal(style.tone, 'info');
               if (['permission', 'skills-stale', 'terminal-unavailable'].includes(sample.id)) assert.equal(style.tone, 'warning');
               if (sample.id === 'approval-destructive') assert.equal(style.tone, 'error');
+              if (sample.id === 'queue-error') {
+                assert.equal(style.tone, 'neutral');
+                const surface = await element.evaluate(element => {
+                  const probe = document.createElement('span');
+                  probe.style.backgroundColor = 'var(--ai-surface)';
+                  probe.style.color = 'var(--ai-error)';
+                  element.append(probe);
+                  const expected = getComputedStyle(probe);
+                  const matches = getComputedStyle(element).backgroundColor === expected.backgroundColor
+                    && getComputedStyle(element.querySelector(':scope > svg')).color === expected.color;
+                  probe.remove();
+                  return { matches, radius: getComputedStyle(element).borderTopLeftRadius };
+                });
+                assert.deepEqual(surface, { matches: true, radius: '12px' }, 'Queue errors keep a neutral surface and semantic error icon');
+              }
+            }
+            if (sample.id === 'approval-panel') {
+              const geometry = await element.evaluate(element => {
+                const header = element.querySelector('.ai-approval-panel-header');
+                const icon = header.querySelector('svg').getBoundingClientRect();
+                const title = header.querySelector('h3').getBoundingClientRect();
+                const badge = header.querySelector('[data-slot="badge"]').getBoundingClientRect();
+                return { gap: title.left - icon.right, badgeOffset: badge.left - title.left };
+              });
+              assert.equal(geometry.gap, 4, 'Approval heading must keep a 4px gap from the SVG boundary');
+              if (width === 360) assert.equal(geometry.badgeOffset, 0, 'Narrow approval badge aligns with the heading');
             }
             await element.screenshot({ path: join(output, 'samples', name), animations: 'disabled' });
             report.push({ ...sample, theme, locale, width, ...measurements, image: `samples/${name}` });

@@ -53,6 +53,7 @@ try {
           }));
         }, { input, output, locale });
         const card = page.locator('.ai-io-card');
+        const viewport = card.locator('[data-slot="scroll-area-viewport"]');
         await card.waitFor();
         assert.deepEqual(await page.locator('.ai-io-label').allTextContents(), locale === 'zh-CN' ? ['输入', '输出'] : ['IN', 'OUT']);
         assert.deepEqual(await page.locator('.ai-io-text').allTextContents(), [JSON.stringify(input, null, 2), output]);
@@ -60,7 +61,7 @@ try {
           await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
           for (const width of [380, 720]) {
             await page.setViewportSize({ width, height: 720 });
-            await card.evaluate(element => { element.scrollTop = 0; });
+            await viewport.evaluate(element => { element.scrollTop = 0; });
             if (locale === 'zh-CN') await card.screenshot({ path: join(screenshots, `${engine.name()}-${theme}-${width}.png`) });
             const rows = await page.locator('.ai-io-section').evaluateAll(sections => sections.map(section => {
               // Measure text rather than boxes: the body owns its padding, while the label's parent owns header padding.
@@ -122,8 +123,8 @@ try {
           for (const width of [380, 720]) {
             await page.setViewportSize({ width, height: 720 });
             for (const offset of [120, 'end']) {
-              await card.evaluate((element, offset) => { element.scrollTop = offset === 'end' ? element.scrollHeight : offset; }, offset);
-              const layout = await card.evaluate(element => ({
+              await viewport.evaluate((element, offset) => { element.scrollTop = offset === 'end' ? element.scrollHeight : offset; }, offset);
+              const layout = await viewport.evaluate(element => ({
                 scrollTop: element.scrollTop,
                 clientWidth: element.clientWidth,
                 scrollWidth: element.scrollWidth,

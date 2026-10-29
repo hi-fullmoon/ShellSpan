@@ -114,7 +114,7 @@ export function AiToolDetails({
               >
                 {node.output === null && !node.error && node.state !== 'failed' && node.state !== 'rejected' && node.state !== 'running'
                   ? <p className="ai-details-empty m-0 py-3 px-3.5 [overflow-wrap:anywhere]">{t('ai.workspace.details.noOutput')}</p>
-                  : <AiToolExpandedContent node={node} showCopyActions={false} showGenericInput={false} />}
+                  : <AiToolExpandedContent node={node} showCopyActions={false} showGenericInput={false} scrollable={false} />}
                 {node.error && !toolErrorIsInOutput(node) && <p className="ai-detail-error m-0 py-3 px-3.5 [overflow-wrap:anywhere]">{node.error}</p>}
               </DetailSection>
               <DetailCode

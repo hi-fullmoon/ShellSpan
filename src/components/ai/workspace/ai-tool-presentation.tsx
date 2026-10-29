@@ -28,6 +28,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
+import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
@@ -319,7 +320,31 @@ function ToolSurfaceHeader({ title, icon: Icon, copyText, copyLabel, className, 
   );
 }
 
-function TerminalSurface({ node, showCopyActions }: { node: ToolNode; showCopyActions: boolean }) {
+function ToolScrollArea({ children, className, contentClassName, scrollable, view, label }: {
+  readonly children: ReactNode;
+  readonly className: string;
+  readonly contentClassName?: string;
+  readonly scrollable: boolean;
+  readonly view?: 'generic' | 'diff';
+  readonly label?: string;
+}) {
+  // Detail sections already own scrolling; keep their expanded contents in normal flow.
+  if (!scrollable) return <div className={cn(className, contentClassName)} data-ai-tool-view={view}>{children}</div>;
+  return (
+    <ScrollArea
+      className={cn('ai-tool-scroll-area flex min-h-0 flex-col overflow-hidden', className)}
+      data-ai-tool-view={view}
+      horizontal
+      viewportRender={<div className="ai-tool-scroll-viewport h-auto min-h-0 min-w-0 flex-1" aria-label={label} />}
+    >
+      <ScrollAreaContent className={cn('min-w-0', contentClassName)} style={{ minWidth: 0 }}>
+        {children}
+      </ScrollAreaContent>
+    </ScrollArea>
+  );
+}
+
+function TerminalSurface({ node, showCopyActions, scrollable }: { node: ToolNode; showCopyActions: boolean; scrollable: boolean }) {
   const { t } = useI18n();
   const [commandExpanded, setCommandExpanded] = useState(false);
   const input = asRecord(node.input);
@@ -352,13 +377,13 @@ function TerminalSurface({ node, showCopyActions }: { node: ToolNode; showCopyAc
         {exitCode !== null && exitCode !== 0 && <span className="ai-terminal-exit shrink-0">{t('ai.workspace.tool.exitCode', { code: exitCode })}</span>}
       </ToolSurfaceHeader>
       <div className="ai-terminal-output relative m-0 min-w-0 max-w-full">
-        <div
-          className="ai-terminal-transcript max-h-65 min-w-0 max-w-full overflow-auto"
-          tabIndex={0}
-          aria-label={t('ai.workspace.tool.shell')}
+        <ToolScrollArea
+          className="ai-terminal-transcript max-h-65 min-w-0 max-w-full"
+          scrollable={scrollable}
+          label={t('ai.workspace.tool.shell')}
         >
           {transcript}
-        </div>
+        </ToolScrollArea>
       </div>
     </div>
   );
@@ -641,7 +666,7 @@ function shownDiffLines(lines: readonly DiffLine[], compact: boolean): readonly 
   return [...removed, ...added].sort((left, right) => left - right).map((index) => lines[index]);
 }
 
-function DiffSurface({ node, compact, model, showCopyActions }: { node: ToolNode; compact: boolean; model?: DiffModel; showCopyActions: boolean }) {
+function DiffSurface({ node, compact, model, showCopyActions, scrollable }: { node: ToolNode; compact: boolean; model?: DiffModel; showCopyActions: boolean; scrollable: boolean }) {
   const { t } = useI18n();
   const currentModel = useMemo(() => model ?? diffModel(node), [model, node]);
   const hunks = useMemo(() => currentModel.hunks.map((hunk) => {
@@ -657,9 +682,9 @@ function DiffSurface({ node, compact, model, showCopyActions }: { node: ToolNode
   const copyText = firstString(asRecord(node.output), ['diff', 'patch', 'unified_diff'])
     ?? firstString(asRecord(node.input), ['patch', 'diff'])
     ?? outputText(node);
-  if (hunks.length === 0) return <IoSurface node={node} compact={compact} showCopyActions={showCopyActions} />;
+  if (hunks.length === 0) return <IoSurface node={node} compact={compact} showCopyActions={showCopyActions} scrollable={scrollable} />;
   return (
-    <div className="ai-diff-block my-1 ml-1 flex max-h-65 min-w-0 max-w-[calc(100%-4px)] flex-col gap-px overflow-auto" data-ai-tool-view="diff" tabIndex={0}>
+    <ToolScrollArea className="ai-diff-block my-1 ml-1 max-h-65 min-w-0 max-w-[calc(100%-4px)]" contentClassName="flex flex-col gap-px" scrollable={scrollable} view="diff">
       {hunks.map((hunk, index) => (
         <section key={`${hunk.path}:${index}`} className="min-w-0 max-w-full shrink-0">
           <ToolSurfaceHeader title={hunk.path} copyText={showCopyActions && index === 0 ? copyText : undefined} copyLabel={t('ai.workspace.tool.copyOutput')}>
@@ -683,7 +708,7 @@ function DiffSurface({ node, compact, model, showCopyActions }: { node: ToolNode
           </pre>
         </section>
       ))}
-    </div>
+    </ToolScrollArea>
   );
 }
 
@@ -699,7 +724,7 @@ function DiffCode({ text, path }: { text: string; path: string }) {
     : <span className="ai-diff-code table-cell px-3" dangerouslySetInnerHTML={{ __html: html || '&nbsp;' }} />;
 }
 
-function CodeSurface({ node, showCopyActions }: { node: ToolNode; showCopyActions: boolean }) {
+function CodeSurface({ node, showCopyActions, scrollable }: { node: ToolNode; showCopyActions: boolean; scrollable: boolean }) {
   const { t } = useI18n();
   const input = asRecord(node.input);
   const code = firstString(input, ['code', 'program', 'script']) ?? formatToolValue(node.input);
@@ -708,7 +733,7 @@ function CodeSurface({ node, showCopyActions }: { node: ToolNode; showCopyAction
   return (
     <div className="ai-code-block ai-tool-code-block relative my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="code">
       <ToolSurfaceHeader title={language} copyText={showCopyActions ? code : undefined} copyLabel={t('ai.workspace.tool.copyInput')} />
-      <div className="ai-code-content max-h-65 min-w-0 max-w-full overflow-auto" tabIndex={0}>
+      <ToolScrollArea className="ai-code-content max-h-65 min-w-0 max-w-full" scrollable={scrollable}>
         <pre className="ai-code-block-pre ai-tool-text m-0 max-w-full px-3.5 pt-1 pb-3 whitespace-pre-wrap [overflow-wrap:anywhere]"><code>{bounded(code)}</code></pre>
         {node.output !== null && (
           <div className="ai-io-section min-w-0">
@@ -716,22 +741,23 @@ function CodeSurface({ node, showCopyActions }: { node: ToolNode; showCopyAction
             <pre className="ai-io-text m-0 min-w-0 max-w-full px-3.5 pt-1 pb-3 whitespace-pre-wrap [overflow-wrap:anywhere]">{bounded(output)}</pre>
           </div>
         )}
-      </div>
+      </ToolScrollArea>
     </div>
   );
 }
 
-function IoSurface({ node, compact, showCopyActions, showInput = true }: {
+function IoSurface({ node, compact, showCopyActions, scrollable, showInput = true }: {
   node: ToolNode;
   compact: boolean;
   showCopyActions: boolean;
+  scrollable: boolean;
   showInput?: boolean;
 }) {
   const { t } = useI18n();
   const input = bounded(formatToolValue(node.input));
   const output = bounded(outputText(node));
   return (
-    <div className="ai-io-card my-1 ml-1 flex max-h-65 min-w-0 max-w-[calc(100%-4px)] flex-col overflow-auto" data-ai-tool-view="generic" tabIndex={0}>
+    <ToolScrollArea className="ai-io-card my-1 ml-1 max-h-65 min-w-0 max-w-[calc(100%-4px)]" contentClassName="flex flex-col" scrollable={scrollable} view="generic">
       {showInput && input && (
         <div className="ai-io-section min-w-0 shrink-0">
           <ToolSurfaceHeader title={t('ai.workspace.tool.inputLabel')} titleClassName="ai-io-label" copyText={showCopyActions ? formatToolValue(node.input) : undefined} copyLabel={t('ai.workspace.tool.copyInput')} />
@@ -746,12 +772,12 @@ function IoSurface({ node, compact, showCopyActions, showInput = true }: {
           </pre>
         </div>
       )}
-    </div>
+    </ToolScrollArea>
   );
 }
 
-function TrashSurface({ node, showCopyActions }: { readonly node: ToolNode; readonly showCopyActions: boolean }) {
-  if (node.state !== 'succeeded') return <IoSurface node={node} compact={false} showCopyActions={showCopyActions} />;
+function TrashSurface({ node, showCopyActions, scrollable }: { readonly node: ToolNode; readonly showCopyActions: boolean; readonly scrollable: boolean }) {
+  if (node.state !== 'succeeded') return <IoSurface node={node} compact={false} showCopyActions={showCopyActions} scrollable={scrollable} />;
   return <AiTrashRecoveryNotice />;
 }
 
@@ -770,12 +796,14 @@ export function AiToolExpandedContent({
   compact = false,
   showCopyActions = true,
   showGenericInput = true,
+  scrollable = true,
   diffModel: precomputedDiff,
 }: {
   readonly node: ToolNode;
   readonly compact?: boolean;
   readonly showCopyActions?: boolean;
   readonly showGenericInput?: boolean;
+  readonly scrollable?: boolean;
   readonly diffModel?: DiffModel;
 }) {
   const variant = classifyAiTool(node.name, node.nativeName);
@@ -783,17 +811,17 @@ export function AiToolExpandedContent({
   if (diagnostic && !httpProbeTimeoutKind(diagnostic)) {
     return <FailureSurface node={node} diagnostic={diagnostic} showCopyActions={showCopyActions} />;
   }
-  if (node.name === 'trash_file') return <TrashSurface node={node} showCopyActions={showCopyActions} />;
+  if (node.name === 'trash_file') return <TrashSurface node={node} showCopyActions={showCopyActions} scrollable={scrollable} />;
   switch (variant) {
-    case 'terminal': return <TerminalSurface node={node} showCopyActions={showCopyActions} />;
+    case 'terminal': return <TerminalSurface node={node} showCopyActions={showCopyActions} scrollable={scrollable} />;
     case 'read': return <ReadSurface node={node} showCopyActions={showCopyActions} />;
     case 'search': return <SearchSurface node={node} showCopyActions={showCopyActions} />;
     case 'web': return <WebSurface node={node} showCopyActions={showCopyActions} />;
     case 'write':
-    case 'edit': return <DiffSurface node={node} compact={compact} model={precomputedDiff} showCopyActions={showCopyActions} />;
-    case 'code': return <CodeSurface node={node} showCopyActions={showCopyActions} />;
+    case 'edit': return <DiffSurface node={node} compact={compact} model={precomputedDiff} showCopyActions={showCopyActions} scrollable={scrollable} />;
+    case 'code': return <CodeSurface node={node} showCopyActions={showCopyActions} scrollable={scrollable} />;
     case 'plan':
-    case 'generic': return <IoSurface node={node} compact={compact} showCopyActions={showCopyActions} showInput={showGenericInput} />;
+    case 'generic': return <IoSurface node={node} compact={compact} showCopyActions={showCopyActions} showInput={showGenericInput} scrollable={scrollable} />;
   }
 }
 

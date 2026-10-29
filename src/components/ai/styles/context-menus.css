@@ -111,7 +111,9 @@
 .ai-model-menu,
 .ai-permission-menu,
 .ai-execution-surface-menu,
-.ai-busy-preference-menu {
+.ai-busy-preference-menu,
+.ai-composer-add-menu,
+.ai-completion-popup {
   border-radius: 10px;
   background: var(--popover);
   box-shadow: var(--shadow-dialog);

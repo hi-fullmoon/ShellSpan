@@ -528,7 +528,8 @@ describe('AiConversationNodeList', () => {
     ]);
     expect(diff.querySelector('section')).toHaveClass('min-w-0', 'max-w-full');
     expect(diff.querySelector('.ai-block-banner')).toHaveClass('ai-tool-surface-header', 'px-3.5', 'py-2');
-    expect(diff).toHaveClass('max-h-65', 'overflow-auto');
+    expect(diff).toHaveClass('max-h-65', 'overflow-hidden');
+    expect(diff.querySelector('[data-slot="scroll-area-viewport"]')).toHaveStyle({ overflow: 'scroll' });
     expect(diff.querySelector('.ai-diff-body')).toHaveClass(
       'min-w-0', 'max-w-full', 'whitespace-pre',
     );
@@ -784,7 +785,8 @@ describe('AiConversationNodeList', () => {
     const card = flow.querySelector('.ai-io-card') as HTMLElement;
     const payload = flow.querySelector('.ai-io-text') as HTMLElement;
     expect(flow).toHaveClass('min-w-0');
-    expect(card).toHaveClass('max-h-65', 'max-w-[calc(100%-4px)]', 'overflow-auto');
+    expect(card).toHaveClass('max-h-65', 'max-w-[calc(100%-4px)]', 'overflow-hidden');
+    expect(card.querySelector('[data-slot="scroll-area-viewport"]')).toHaveStyle({ overflow: 'scroll' });
     expect(payload).toHaveClass('[overflow-wrap:anywhere]');
 
     const footer = screen.getByLabelText('Turn statistics');
