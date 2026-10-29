@@ -66,6 +66,29 @@ try {
           const row = page.locator('.ai-tool-row');
           await row.waitFor();
           assert.ok(!(await row.innerText()).includes(diagnostic));
+          for (const theme of ['light', 'dark']) {
+            await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+            const appearance = await row.evaluate(element => {
+              const summary = element.querySelector('.ai-disclosure-summary[data-error]');
+              const leading = element.querySelector('.ai-disclosure-leading');
+              const dot = element.querySelector('.ai-state-dot[data-state="failed"]');
+              return {
+                summary: getComputedStyle(summary).color,
+                muted: getComputedStyle(leading).color,
+                dot: getComputedStyle(dot).backgroundColor,
+                right: element.getBoundingClientRect().right,
+                label: element.getAttribute('aria-label'),
+                text: summary.textContent,
+              };
+            });
+            assert.equal(appearance.summary, appearance.muted,
+              `${engine.name()}/${locale}/${theme}/${width}: failure summary must use the muted text color`);
+            assert.notEqual(appearance.summary, appearance.dot, 'Failure emphasis must stay on the status dot');
+            assert.ok(appearance.label.includes(appearance.text), 'Failure summary must remain readable in the accessible label');
+            assert.ok(appearance.right <= width, 'Failure row must fit the narrow panel');
+            await page.screenshot({ path: join(screenshots, `${engine.name()}-${locale}-${theme}-${width}-failure.png`) });
+          }
+          await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
           await row.focus();
           await page.keyboard.press('Enter');
           await page.getByText(diagnostic, { exact: true }).waitFor();

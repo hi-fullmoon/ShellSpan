@@ -70,7 +70,7 @@
 }
 
 .ai-disclosure-summary[data-error] {
-  color: var(--ai-error);
+  color: var(--ai-text-muted);
 }
 
 .ai-disclosure-leading > * {
