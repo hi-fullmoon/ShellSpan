@@ -231,10 +231,10 @@ function FailureSurface({ node, diagnostic, showCopyActions }: {
   const { t } = useI18n();
   return (
     <div className="ai-read-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="error">
-      <div className="ai-block-banner flex min-w-0 items-center gap-2 overflow-hidden py-[9px] pr-1 pl-3.5">
+      {showCopyActions && <div className="ai-block-banner flex min-w-0 items-center gap-2 overflow-hidden py-[9px] pr-1 pl-3.5">
         <span className="min-w-0 flex-1 truncate">{t('ai.error.details')}</span>
-        {showCopyActions && <AiToolCopyButton text={diagnostic} label={t('ai.workspace.tool.copyOutput')} />}
-      </div>
+        <AiToolCopyButton text={diagnostic} label={t('ai.workspace.tool.copyOutput')} />
+      </div>}
       <pre className="ai-detail-code m-0 max-h-65 min-w-0 max-w-full overflow-auto px-3.5 py-3 whitespace-pre-wrap [overflow-wrap:anywhere]" data-error={!node.recoveredByToolKey || undefined}>
         <code>{bounded(diagnostic)}</code>
       </pre>

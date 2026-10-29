@@ -108,6 +108,9 @@ try {
           await page.locator('[data-slot="ai-tool-details"]').waitFor();
           assert.equal(await page.getByText(diagnostic, { exact: true }).count(), 1);
           assert.equal(await page.locator('.ai-detail-error').count(), 0);
+          assert.equal(await page.locator('[data-ai-tool-view="error"] > .ai-block-banner').count(), 0);
+          assert.equal(await page.getByText(locale === 'zh-CN' ? '查看错误详情' : 'View error details', { exact: true }).count(), 0);
+          assert.equal(await page.getByRole('button', { name: locale === 'zh-CN' ? '复制输出' : 'Copy Output', exact: true }).count(), 1);
           assert.ok(await page.locator('[data-slot="ai-tool-details"]').evaluate(element =>
             element.scrollWidth <= element.clientWidth));
           await page.screenshot({ path: join(screenshots, `${engine.name()}-${locale}-${width}-details.png`) });

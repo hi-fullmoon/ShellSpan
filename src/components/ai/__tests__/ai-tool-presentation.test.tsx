@@ -50,6 +50,7 @@ describe('AI tool presentation', () => {
     expect(row).not.toHaveTextContent(failure.error!);
     await user.click(row);
     expect(screen.getAllByText(failure.error!)).toHaveLength(1);
+    expect(screen.getByRole('button', { name: locale === 'zh-CN' ? '复制输出' : 'Copy output' })).toBeVisible();
     expect(container.querySelector('.ai-read-line')).toBeNull();
     expect(container.querySelector('[data-error]')).toBeInTheDocument();
 
@@ -75,9 +76,12 @@ describe('AI tool presentation', () => {
     expect(screen.getAllByText(failure.error!)).toHaveLength(1);
     expect(container.querySelector('.ai-detail-error')).toBeNull();
     expect(container.querySelector('.ai-detail-summary')).not.toHaveTextContent(failure.error!);
+    expect(container.querySelector('[data-ai-tool-view="error"] > .ai-block-banner')).toBeNull();
+    expect(screen.queryByText(locale === 'zh-CN' ? '查看错误详情' : 'View error details')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: locale === 'zh-CN' ? '复制输出' : 'Copy Output' })).toBeVisible();
     rerender(<AiToolDetails node={{ ...failure, output: null }} onBack={() => undefined} />);
     expect(screen.getAllByText(failure.error!)).toHaveLength(1);
+    expect(container.querySelector('[data-ai-tool-view="error"] > .ai-block-banner')).toBeNull();
     // A separate diagnostic remains visible alongside distinct structured output.
     const success = projectAgentChatNodes(readRecoveryCapture as readonly AgentSessionEvent[])
       .flatMap(item => item.kind === 'turnProcess' ? item.children : [])
