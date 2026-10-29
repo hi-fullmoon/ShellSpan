@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { hostname } from 'node:os';
 
 import { AiToolExpandedContent, AiToolRow, classifyAiTool } from '@/components/ai/workspace/ai-tool-presentation';
 import { AiToolDetails } from '@/components/ai/workspace/ai-tool-details';
@@ -42,7 +43,9 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('AI tool presentation', () => {
-  it('separates real tool input and output with spacing instead of a divider', () => {
+  it.each(['zh-CN', 'en-US'] as const)('puts each input and output label above its real content in %s', async locale => {
+    useAppStore.setState({ locale });
+    await initI18n(locale);
     const execution = spawnSync('git', ['log', '--oneline', '-3'], { encoding: 'utf8' });
     expect(execution.status).toBe(0);
     const { container } = render(<AiToolExpandedContent node={{
@@ -52,7 +55,13 @@ describe('AI tool presentation', () => {
     expect(sections).toHaveLength(2);
     expect(sections[0]).toHaveTextContent('git log --oneline -3');
     expect(sections[1].querySelector('pre')?.textContent).toBe(execution.stdout);
-    for (const section of sections) expect(section).toHaveClass('py-3');
+    expect(sections[0].querySelector('.ai-io-label')).toHaveTextContent(locale === 'zh-CN' ? '输入' : 'IN');
+    expect(sections[1].querySelector('.ai-io-label')).toHaveTextContent(locale === 'zh-CN' ? '输出' : 'OUT');
+    for (const section of sections) {
+      expect(section).toHaveClass('grid-cols-1', 'items-start', 'gap-y-1', 'py-3');
+      expect(section.querySelector('.ai-io-label')?.nextElementSibling).toBe(section.querySelector('pre'));
+    }
+    expect(container.querySelector('.ai-io-card')).toHaveClass('max-h-65', 'overflow-auto');
     expect(container.querySelector('.ai-io-divider, [data-slot="separator"]')).not.toBeInTheDocument();
   });
 
@@ -99,11 +108,14 @@ describe('AI tool presentation', () => {
     const { container } = render(<AiToolExpandedContent node={{
       ...node,
       input: { command: `git ${args.join(' ')}`, cwd: process.cwd() },
+      target: { kind: 'local', targetId: hostname(), sessionId: node.sessionId, label: hostname() },
       state: 'failed', summary: execution.stderr, error: execution.stderr,
       output: { stdout: execution.stdout, stderr: execution.stderr, exitCode: execution.status },
     }} />);
     expect(container.querySelector('.ai-terminal-header')).toHaveTextContent('Shell');
-    expect(container.querySelector('.ai-terminal-cwd')).toHaveAttribute('title', process.cwd());
+    expect(container.querySelector('.ai-terminal-cwd')).not.toBeInTheDocument();
+    expect(container.querySelector('.ai-terminal-header')).not.toHaveTextContent(process.cwd());
+    expect(container.querySelector('.ai-terminal-header')).not.toHaveTextContent(hostname());
     expect(container.querySelector('.ai-terminal-exit')).toHaveTextContent(
       `${locale === 'zh-CN' ? '退出码' : 'Exit'} ${execution.status}`,
     );
@@ -122,7 +134,13 @@ describe('AI tool presentation', () => {
     expect(row).not.toHaveTextContent(failure.error!);
     await user.click(row);
     expect(screen.getAllByText(failure.error!)).toHaveLength(1);
-    expect(screen.getByRole('button', { name: locale === 'zh-CN' ? '复制输出' : 'Copy output' })).toBeVisible();
+    const copy = screen.getByRole('button', { name: locale === 'zh-CN' ? '复制输出' : 'Copy output' });
+    expect(copy).toBeVisible();
+    expect(copy.closest('.ai-block-banner')).toBeNull();
+    const copyRegion = copy.closest('[data-ai-copy-region]');
+    expect(copyRegion?.querySelector('code')).toHaveTextContent(failure.error!);
+    expect(copyRegion?.querySelector('pre')).toHaveClass('pt-1', 'pr-10', 'pb-3');
+    expect(container.querySelector('[data-ai-tool-view="error"] > .ai-block-banner')).toHaveClass('pt-2', 'pb-1');
     expect(container.querySelector('.ai-read-line')).toBeNull();
     expect(container.querySelector('[data-error]')).toBeInTheDocument();
 
@@ -345,6 +363,7 @@ describe('AI tool presentation', () => {
     const outputCopy = screen.getByRole('button', { name: 'Copy output' });
     expect(commandCopy.closest('.ai-terminal-command-row')).toBeInTheDocument();
     expect(outputCopy.closest('[data-ai-terminal-output]')).toBeInTheDocument();
+    expect(commandCopy.closest('[data-ai-copy-region]')).not.toBe(outputCopy.closest('[data-ai-copy-region]'));
     expect(commandCopy.querySelector('svg')).toBeInTheDocument();
     expect(outputCopy.querySelector('svg')).toBeInTheDocument();
     rerender(<AiToolExpandedContent node={node} showCopyActions={false} />);
@@ -358,18 +377,25 @@ describe('AI tool presentation', () => {
     expect(screen.queryByText('No output')).not.toBeInTheDocument();
   });
 
-  it.each(['read_file'])('keeps one output copy action in the %s header', (name) => {
+  it.each(['read_file'])('separates the %s path and output copy actions', (name) => {
     const { container, rerender } = render(<AiToolExpandedContent node={{ ...node, name }} compact />);
     const copy = screen.getByRole('button', { name: 'Copy output' });
-    expect(container.querySelectorAll('.ai-tool-copy-button')).toHaveLength(1);
-    expect(copy.closest('.ai-terminal-header, .ai-block-banner')).toHaveClass('pr-1', 'pl-3.5');
+    const inputCopy = screen.getByRole('button', { name: 'Copy input' });
+    expect(container.querySelectorAll('.ai-tool-copy-button')).toHaveLength(2);
+    expect(inputCopy).toHaveClass('absolute');
+    expect(inputCopy.closest('.ai-block-banner')).toHaveClass('relative', 'pr-9', 'pl-3.5');
+    expect(copy.closest('.ai-block-banner')).not.toBeInTheDocument();
+    expect(copy.closest('[data-ai-copy-region]')).not.toBe(inputCopy.closest('[data-ai-copy-region]'));
     expect(screen.queryByRole('button', { name: 'Copy command' })).not.toBeInTheDocument();
 
     rerender(<AiToolExpandedContent node={{ ...node, name }} showCopyActions={false} />);
     expect(container.querySelector('.ai-tool-copy-button')).not.toBeInTheDocument();
     rerender(<AiToolExpandedContent node={{ ...node, name, output: '' }} />);
-    expect(container.querySelector('.ai-tool-copy-button')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy output' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy input' })).toBeInTheDocument();
     rerender(<AiToolExpandedContent node={{ ...node, name, state: 'running' }} />);
+    expect(screen.getByRole('button', { name: 'Copy output' })).toBeInTheDocument();
+    rerender(<AiToolExpandedContent node={{ ...node, name, input: null, output: null }} />);
     expect(container.querySelector('.ai-tool-copy-button')).not.toBeInTheDocument();
   });
 

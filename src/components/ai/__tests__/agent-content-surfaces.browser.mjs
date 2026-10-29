@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parsePatch } from 'diff';
@@ -101,7 +101,10 @@ try {
           }, content);
           const expanded = node => React.createElement(AiToolExpandedContent, { node, compact: true });
           const blocks = [
-            block('terminal', expanded(tool('exec_command', { command: `cat ${data.path}` }, data.file))),
+            block('terminal', expanded({
+              ...tool('exec_command', { command: `cat ${data.path}`, cwd: data.root }, data.file),
+              target: { kind: 'local', label: data.hostname },
+            })),
             block('read', expanded(read)),
             block('search', expanded(tool('search_text', { query: '.', path: data.path }, data.search))),
             block('web', expanded(tool('probe_http', { url: response.url }, { status: response.status, body: webBody }))),
@@ -159,6 +162,7 @@ try {
           return [
             ['terminal', t('ai.workspace.tool.copyCommand'), `cat ${data.path}`],
             ['terminal', t('ai.workspace.tool.copyOutput'), data.file],
+            ['read', t('ai.workspace.tool.copyInput'), data.path],
             ['read', t('ai.workspace.tool.copyOutput'), data.file],
             ['search', t('ai.workspace.tool.copyOutput'), data.search],
             ['web', t('ai.workspace.tool.copyOutput'), webBody],
@@ -174,7 +178,7 @@ try {
             ['markdown', t('common.copy'), data.code],
             ['artifact-text', t('common.copy'), JSON.stringify(JSON.parse(data.file), null, 2)],
           ];
-        }, { locale, path, file, code, codeOutput, search, patch, guide, recovery, recordedTerminal, assets, captureAll, longCommand, longOutput });
+        }, { locale, path, file, code, codeOutput, search, patch, guide, recovery, recordedTerminal, assets, captureAll, longCommand, longOutput, root, hostname: hostname() });
         await page.locator('#artifact-text .ai-detail-code-wrap').waitFor();
         await page.locator('#artifact-image img').waitFor();
         await page.locator('#notes button[aria-expanded="false"]').click();
@@ -185,10 +189,13 @@ try {
           const button = page.locator(`#${id}`).getByRole('button', { name: label, exact: true });
           assert.equal(await button.count(), 1, `${id}/${label}: one copy icon for each content region`);
           assert.equal(await button.locator('svg').count(), 1, `${id}/${label}: icon-only action`);
+          assert.equal(await button.evaluate(element => getComputedStyle(element).position), 'absolute',
+            `${id}/${label}: copy actions must stay out of the content flow`);
           await page.evaluate(() => document.activeElement?.blur());
           await page.mouse.move(1, 1);
           assert.equal(await button.evaluate(element => getComputedStyle(element).opacity), '0', `${id}/${label}: copy icon must be hidden at rest`);
-          const region = page.locator(`#${id}`).locator(copyRegions).first();
+          const ownRegion = button.locator('xpath=ancestor::*[@data-ai-copy-region][1]');
+          const region = await ownRegion.count() ? ownRegion : page.locator(`#${id}`).locator(copyRegions).first();
           await region.hover({ position: { x: 5, y: 5 } });
           assert.equal(await button.evaluate(element => getComputedStyle(element).opacity), '1', `${id}/${label}: hovering content must show its copy icon`);
           await page.mouse.move(1, 1);
@@ -217,6 +224,34 @@ try {
           await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
           for (const width of [380, 720]) {
             await page.setViewportSize({ width, height: 900 });
+            const copyPositions = await page.locator('.ai-tool-copy-button, .ai-markdown-code-copy, .ai-detail-copy').evaluateAll(elements =>
+              elements.map(element => ({
+                position: getComputedStyle(element).position,
+                left: element.getBoundingClientRect().left,
+                right: element.getBoundingClientRect().right,
+              })));
+            assert.ok(copyPositions.every(button => button.position === 'absolute' && button.left >= 0 && button.right <= width),
+              `${engine.name()}/${locale}/${theme}/${width}: every content copy action must be absolutely positioned inside the panel`);
+            const terminalHeader = page.locator('#terminal .ai-terminal-header');
+            assert.equal((await terminalHeader.textContent()).trim(), 'Shell', 'The Shell header must omit host and directory information');
+            await page.evaluate(() => document.activeElement?.blur());
+            await terminalHeader.hover();
+            assert.deepEqual(await page.locator('#terminal .ai-tool-copy-button').evaluateAll(buttons => buttons.map(button => getComputedStyle(button).opacity)), ['0', '0'],
+              'Hovering the Shell header must leave both copy icons hidden');
+            for (const id of ['terminal', 'read']) {
+              const regions = page.locator(`#${id} [data-ai-copy-region]`);
+              assert.equal(await regions.count(), 2, `${id}: input and output have independent hover regions`);
+              await page.evaluate(() => document.activeElement?.blur());
+              for (const index of [0, 1]) {
+                await regions.nth(index).hover({ position: { x: 5, y: 5 } });
+                for (const other of [0, 1]) {
+                  const button = regions.nth(other).locator('.ai-tool-copy-button');
+                  assert.equal(await button.evaluate(element => getComputedStyle(element).opacity), index === other ? '1' : '0',
+                    `${id}/${theme}/${width}: hovering region ${index} only reveals its own copy icon`);
+                }
+                if (locale === 'en-US') await page.locator(`#${id}`).screenshot({ path: join(screenshots, `${engine.name()}-${theme}-${width}-${id}-region-${index}.png`) });
+              }
+            }
             const surfaces = await page.locator([
               '[data-ai-tool-view]', '#markdown .ai-markdown-code-block', '.ai-approval-command',
               '.ai-semantic-note-body', '.ai-queue-notice-preview', '.ai-detail-code-wrap', '.ai-artifact-image-surface', '.ai-detail-section',

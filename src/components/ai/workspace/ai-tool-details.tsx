@@ -35,7 +35,7 @@ function DetailSection({
 }) {
   return (
     <section className="ai-detail-section flex min-h-0 min-w-0 flex-col overflow-hidden">
-      <div className="ai-detail-section-header flex min-h-10 shrink-0 items-center justify-between gap-3 px-3 py-2">
+      <div className="ai-detail-section-header relative flex min-h-10 shrink-0 items-center justify-between gap-3 px-3 py-2 pr-12 [&>.ai-tool-copy-button]:right-3">
         <h3>{title}</h3>
         {actions}
       </div>

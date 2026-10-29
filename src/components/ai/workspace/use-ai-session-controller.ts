@@ -14,6 +14,7 @@ import { acknowledgeDetachedImageDraft, holdDetachedImageDraft } from '@/lib/ai/
 import { builtinSkillPreview } from '@/lib/ai/builtin-skills';
 import { listProjectDirectories as readProjectDirectories } from '@/lib/ai/project-directory-completion';
 import { questionKey } from '@/types/agent-question';
+import { QuestionSubmissionError, questionSubmissionIssue, reconcileQuestionSubmission } from '@/lib/ai/question-submission';
 import { useImageDraft } from './use-image-draft';
 import { sessionProviderConfig } from '@/lib/ai/session-settings';
 import { initialSessionIntent } from '@/lib/ai/session-intent';
@@ -61,6 +62,7 @@ import { t } from '@/locales';
 import { useAgentPermissionStore } from '@/stores/agentPermissionStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 import { useAiDraftStore } from '@/stores/aiDraftStore';
+import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
 import { documentMessageSummary } from '@/lib/ai/document-message';
 import { chatReferenceFile } from '@/lib/ai/chat-reference';
 import { routeProviderConfigs, useLlmRoutesStore } from '@/stores/llmRoutesStore';
@@ -117,6 +119,7 @@ export interface AiSessionController {
   readonly skillsNeedsRoot: boolean;
   readonly projectTargetLabel: string;
   readonly answerQuestion: AiSessionAdapter['answerQuestion'];
+  readonly refreshQuestionAnswer: AiSessionAdapter['answerQuestion'];
   readonly view: AiSessionView | null;
   readonly restoringSession: boolean;
   readonly pendingNodes: readonly AiConversationNode[];
@@ -1882,6 +1885,16 @@ export function useAiSessionController({
       const current = viewRef.current?.pendingQuestion;
       if (!current || questionKey(current.identity) !== questionKey(input.identity)) throw new Error('Question is no longer active');
       await adapter.answerQuestion(input);
+    },
+    refreshQuestionAnswer: async (input) => {
+      const previous = useAgentQuestionStore.getState().drafts[questionKey(input.identity)]?.issue;
+      let refreshed: AiSessionView;
+      try { refreshed = await adapter.refresh(input.identity.sessionId); }
+      catch (error) { throw new QuestionSubmissionError(questionSubmissionIssue(error, 'confirm')); }
+      // A still-pending question does not invalidate an explicit answer rejection.
+      // State changes and failed synchronization still take precedence.
+      const issue = reconcileQuestionSubmission(input, refreshed, previous?.reason === 'invalid' ? previous : undefined);
+      if (issue) throw new QuestionSubmissionError(issue);
     },
     pendingNodes,
     composer,

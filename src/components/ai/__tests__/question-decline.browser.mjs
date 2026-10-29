@@ -74,8 +74,8 @@ try {
     await failure.waitFor();
     assert.match(await failure.textContent(), /相同答案重试/);
     assert.ok(await page.getByRole('textbox').isDisabled(), 'An unconfirmed answer must remain locked');
-    assert.ok(await decline.isDisabled(), 'Decline must preserve the unconfirmed operation');
-    const retry = page.getByRole('button', { name: '提交', exact: true });
+    assert.equal(await decline.count(), 0, 'Skip must not replace the unconfirmed operation');
+    const retry = page.getByRole('button', { name: '重试原答案', exact: true });
     assert.ok(await retry.isEnabled(), 'The original operation must remain retryable');
     const failureBounds = await failure.boundingBox();
     const retryBounds = await retry.boundingBox();

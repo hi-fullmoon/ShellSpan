@@ -31,9 +31,16 @@ try {
         await module.show(locale, module.originalWindow);
       }, { entry, locale });
       const meter = page.locator('.ai-context-meter-trigger');
+      await meter.hover();
+      assert.equal(await meter.evaluate(element => getComputedStyle(element).cursor), 'default');
+      assert.equal(await meter.locator('svg').evaluate(element => getComputedStyle(element).cursor), 'default');
+      const meterSize = await meter.boundingBox();
+      assert.equal(meterSize?.width, 28);
+      assert.equal(meterSize?.height, 28);
       await meter.click();
       const panel = page.locator('.ai-context-meter-panel');
       await panel.waitFor();
+      assert.equal(await meter.evaluate(element => getComputedStyle(element).cursor), 'default');
       assert.match(await panel.textContent(), /\/ 1M/u);
       await page.evaluate(async ({ entry, locale }) => (await import(entry)).show(locale, 128_000), { entry, locale });
       await page.waitForFunction(() => document.querySelector('.ai-context-meter-panel')?.textContent.includes('/ 128K'));
@@ -66,6 +73,8 @@ try {
         assert.equal(projected.usedTokens, checkpoint.used);
         const meter = page.locator('.ai-context-meter-trigger');
         if (index === 0) { await meter.focus(); await page.keyboard.press('Enter'); }
+        await meter.hover();
+        assert.equal(await meter.evaluate(element => getComputedStyle(element).cursor), 'default');
         const panel = page.locator('.ai-context-meter-panel');
         await panel.waitFor();
         const header = panel.locator('.ai-context-meter-header');

@@ -23,7 +23,6 @@
   font: 13px/20px var(--ai-font-family);
 }
 
-.ai-terminal-cwd,
 .ai-terminal-prompt {
   color: var(--ai-text-muted);
 }
@@ -43,21 +42,11 @@
     pointer-events: none;
   }
 
-  .ai-read-block .ai-tool-copy-button {
-    max-width: 0;
-    margin-inline-start: calc(-2 * var(--spacing));
-  }
-
-  :is([data-ai-tool-view], .ai-markdown-code-block, .ai-approval-command, .ai-semantic-note-body, .ai-queue-notice-preview, .ai-detail-code-wrap, .ai-detail-section):hover :is(.ai-tool-copy-button, .ai-markdown-code-copy, .ai-detail-copy),
+  :is([data-ai-tool-view]:not([data-ai-tool-view='terminal'], [data-ai-tool-view='read'], [data-ai-tool-view='error']), .ai-markdown-code-block, .ai-approval-command, .ai-semantic-note-body, .ai-queue-notice-preview, .ai-detail-code-wrap, .ai-detail-section):hover :is(.ai-tool-copy-button, .ai-markdown-code-copy, .ai-detail-copy),
+  [data-ai-copy-region]:hover > .ai-tool-copy-button,
   :is(.ai-tool-copy-button, .ai-markdown-code-copy, .ai-detail-copy):focus-visible {
     opacity: 1;
     pointer-events: auto;
-  }
-
-  .ai-read-block:hover .ai-tool-copy-button,
-  .ai-read-block .ai-tool-copy-button:focus-visible {
-    max-width: none;
-    margin-inline-start: 0;
   }
 }
 

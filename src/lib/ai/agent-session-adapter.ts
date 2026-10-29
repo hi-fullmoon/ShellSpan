@@ -5,6 +5,7 @@ import { fallbackSessionTitle } from './session-title';
 import { AiAdmissionUnconfirmedError, normalizeAiSessionError } from './session-error';
 import { invokeAnswerAgentRuntimeQuestion, invokeListAgentRuntimeSkills, invokeListAgentFileReferences } from '@/lib/ipc/tauri';
 import { projectQuestions } from './question-projection';
+import { QuestionSubmissionError, questionSubmissionIssue, reconcileQuestionSubmission, type QuestionSubmissionIssue } from './question-submission';
 import { modelRetryConfirmation } from './failure-recovery';
 import { awaitMutationAcknowledgement } from './mutation-acknowledgement';
 import { invokeSubmitAgentImages } from '@/lib/ipc/tauri';
@@ -719,16 +720,24 @@ export function createAgentSessionAdapter(
       return { sessions, nextCursor: page.nextCursor };
     },
     async answerQuestion(input): Promise<void> {
-      await dependencies.answerQuestion(input);
+      let failure: QuestionSubmissionIssue | undefined;
+      try { await dependencies.answerQuestion(input); }
+      catch (error) { failure = questionSubmissionIssue(error); }
       // IPC success alone is not the UI acknowledgement: a lost live event must
       // be repaired before the form discards its retryable draft.
       const entry = ensureEntry(input.identity.sessionId);
-      const view = entry.project(await entry.client.reconnect());
+      let view: AiSessionView;
+      try { view = entry.project(await entry.client.reconnect()); }
+      catch (error) {
+        const syncFailure = questionSubmissionIssue(error, 'confirm');
+        throw new QuestionSubmissionError(failure
+          ? { ...syncFailure, detail: [failure.detail, syncFailure.detail].filter(Boolean).join('\n') }
+          : syncFailure);
+      }
       entry.view = view;
       for (const listener of entry.listeners) listener(view);
-      if (!view.committedOperationIds?.includes(input.clientOperationId)) {
-        throw new Error('Committed question answer is not visible yet');
-      }
+      const issue = reconcileQuestionSubmission(input, view, failure ?? questionSubmissionIssue('Committed question answer is not visible yet', 'confirm'));
+      if (issue) throw new QuestionSubmissionError(issue);
     },
     async listFileReferences(sessionId, query, signal) {
       if (signal.aborted) throw new Error('Cancelled');

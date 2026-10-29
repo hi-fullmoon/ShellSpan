@@ -95,6 +95,7 @@ export interface AiComposerSeatProps extends ComposerHistoryProps {
   readonly skillsNeedsRoot?: boolean;
   readonly projectTargetLabel?: string;
   readonly onAnswerQuestion?: (input: import('@/types/agent-question').AnswerQuestionInput) => Promise<void>;
+  readonly onRefreshQuestionAnswer?: (input: import('@/types/agent-question').AnswerQuestionInput) => Promise<void>;
   readonly approvalDecision?: 'approve' | 'reject' | null;
   readonly approvalError?: string | null;
   readonly approvalArguments?: unknown | null;
@@ -146,6 +147,7 @@ export function AiComposerSeat({
   pendingApproval,
   pendingQuestion,
   onAnswerQuestion,
+  onRefreshQuestionAnswer,
   onListFileReferences,
   onListProjectDirectories,
   onListSkills,
@@ -487,7 +489,7 @@ export function AiComposerSeat({
         />}
         {statusNotices}
         {mode === 'agent' && executionSurfaceNotice}
-        {pendingQuestion && <AiQuestionPanel key={questionKey(pendingQuestion.identity)} question={pendingQuestion} onAnswer={onAnswerQuestion} />}
+        {pendingQuestion && <AiQuestionPanel key={questionKey(pendingQuestion.identity)} question={pendingQuestion} onAnswer={onAnswerQuestion} onRefresh={onRefreshQuestionAnswer} onOpenSettings={onOpenModel} />}
         {waitingApproval && pendingApproval && (
           <div
             data-slot="ai-approval-overlay"

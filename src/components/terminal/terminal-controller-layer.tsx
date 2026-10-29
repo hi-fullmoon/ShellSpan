@@ -17,7 +17,7 @@ import {
   listenToTerminalIntegrationState,
 } from '@/lib/ipc/tauri';
 import { createLogger } from '@/lib/logger';
-import { agentTerminalLeaseState } from './agent-terminal-lease-state';
+import { agentTerminalLeaseState, type AgentTerminalLeaseView } from './agent-terminal-lease-state';
 import type { TerminalController, TerminalOutputFilter } from './registry/terminal-registry';
 import type { AgentSessionEvent, AgentTerminalLeaseEvent } from '@/types/agent-session';
 
@@ -105,6 +105,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
     removeLifecycle: () => void;
   }>();
   const turnSurfaces = new Map<string, { sessionId: string; operationId: string; turnId?: string }>();
+  const suspendedTurnViews = new Map<string, AgentTerminalLeaseView>();
   const currentTurns = new Map<string, string>();
   const pendingTurnBindings = new Map<string, Promise<void>>();
   const workspaceOwners = new Map<string, TerminalWorkspace>();
@@ -153,6 +154,19 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
     retainedInputs.get(agentSessionId)?.release();
     retainedInputs.get(agentSessionId)?.removeLifecycle();
     retainedInputs.delete(agentSessionId);
+    suspendedTurnViews.delete(agentSessionId);
+    if (disposed || !surface || agentTerminalLeaseState.get(surface.sessionId)) return;
+    for (const view of [...suspendedTurnViews.values()].reverse()) {
+      const owner = turnSurfaces.get(view.agentSessionId);
+      const retained = retainedInputs.get(view.agentSessionId);
+      if (view.sessionId !== surface.sessionId
+        || owner?.sessionId !== view.sessionId || owner.operationId !== view.operationId
+        || !currentTurns.has(view.agentSessionId) || fencedTurns.has(view.agentSessionId)
+        || !retained || terminalRegistry.get(view.sessionId) !== retained.controller) continue;
+      suspendedTurnViews.delete(view.agentSessionId);
+      agentTerminalLeaseState.set(view);
+      break;
+    }
   };
 
   const cleanup = (active: ActiveLeaseResources, focus: boolean, keepForTurn = false): void => {
@@ -351,6 +365,17 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
         }
       }
       const previousView = agentTerminalLeaseState.get(lease.sessionId);
+      const delegatedInput = previousView && retainedInputs.get(previousView.agentSessionId);
+      const preserveDelegatedView = previousView?.agentSessionId !== lease.agentSessionId
+        && !!previousView && currentTurns.has(previousView.agentSessionId)
+        && turnSurfaces.get(previousView.agentSessionId)?.operationId === previousView.operationId
+        && delegatedInput?.sessionId === lease.sessionId && delegatedInput.controller === controller;
+      suspendedTurnViews.delete(lease.agentSessionId);
+      if (previousView && previousView.agentSessionId !== lease.agentSessionId
+        && currentTurns.has(previousView.agentSessionId)
+        && turnSurfaces.get(previousView.agentSessionId)?.operationId === previousView.operationId) {
+        suspendedTurnViews.set(previousView.agentSessionId, previousView);
+      }
       const pendingTurnStop = pendingTurnStops.has(lease.agentSessionId);
       const turnStartedAtUnixMs = previousView?.agentSessionId === lease.agentSessionId
         ? previousView.acquiredAtUnixMs
@@ -430,9 +455,9 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       ) return;
 
       // PTY writes target the leased transport, not the DOM keyboard focus.
-      // An existing turn already owns its transport. Repeated job management
-      // leases must preserve the user's current workspace, focus and draft.
-      const preserveView = inheritedInput !== undefined || runsBehindFocus(lease.agentSessionId);
+      // An existing turn already owns its transport. Delegated commands and
+      // repeated leases must preserve the user's current workspace, focus and draft.
+      const preserveView = inheritedInput !== undefined || preserveDelegatedView || runsBehindFocus(lease.agentSessionId);
       let terminalFocused = false;
       if (controller && controller.sessionId === lease.sessionId
         && terminalRegistry.get(lease.sessionId) === controller && !preserveView) {
@@ -521,10 +546,13 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
           if (workspace) workspaceOwners.set(event.sessionId, workspace);
           const sessionId = snapshot.header.target?.sessionId;
           if (!sessionId || turnSurfaces.has(event.sessionId)) return;
+          const operationId = `turn:${turnId}`;
+          // A parent's visible ownership must not erase its child's frozen
+          // target. Native admission validates lineage before issuing leases.
+          turnSurfaces.set(event.sessionId, { sessionId, operationId, turnId });
           const existingOwner = agentTerminalLeaseState.get(sessionId);
           if (existingOwner && existingOwner.agentSessionId !== event.sessionId) return;
           const controller = terminalRegistry.get(sessionId);
-          const operationId = `turn:${turnId}`;
           if (controller) {
             retainedInputs.set(event.sessionId, {
               sessionId,
@@ -545,7 +573,6 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
               }),
             });
           }
-          turnSurfaces.set(event.sessionId, { sessionId, operationId, turnId });
           agentTerminalLeaseState.set({
             sessionId,
             agentSessionId: event.sessionId,
@@ -601,6 +628,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       }
       retainedInputs.clear();
       turnSurfaces.clear();
+      suspendedTurnViews.clear();
       currentTurns.clear();
       pendingTurnBindings.clear();
       workspaceOwners.clear();

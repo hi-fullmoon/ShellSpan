@@ -87,6 +87,26 @@ try {
           assert.ok(sections.every(section => Math.abs(section.height - sections[0].height) < 1), 'All three sections must have equal height');
           assert.ok(sections.every(section => section.height > 40 && section.bottom <= height && section.right <= width), 'All sections must stay inside the panel');
           assert.ok(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight), 'The panel must not add an outer scrollbar');
+          for (const theme of ['light', 'dark']) {
+            await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+            const headers = await page.locator('.ai-detail-section-header').evaluateAll(elements => elements.map(element => ({
+              background: getComputedStyle(element).backgroundColor,
+              borderBottom: getComputedStyle(element).borderBottomWidth,
+              sectionBackground: getComputedStyle(element.closest('.ai-detail-section')).backgroundColor,
+              scrollArea: element.nextElementSibling.getAttribute('data-slot'),
+            })));
+            assert.equal(headers.length, 3);
+            for (const header of headers) {
+              assert.equal(header.background, header.sectionBackground,
+                `${engine.name()}/${locale}/${state}/${theme}/${width}: detail header and body must share the same background`);
+              assert.equal(header.borderBottom, '0px', 'Detail headers must not have a bottom divider');
+              assert.equal(header.scrollArea, 'scroll-area', 'Headers must stay outside the scrolling body');
+            }
+            if (state === 'succeeded' && !summary) {
+              await page.screenshot({ path: `/tmp/shellspan-tool-detail-background-${engine.name()}-${locale}-${theme}-${width}.png` });
+            }
+          }
+          await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
           if (summary) {
             const summaryRoot = page.locator('.ai-detail-summary');
             assert.equal(await summaryRoot.locator('p').textContent(), summary, 'The full summary must remain available');
@@ -131,7 +151,7 @@ try {
               });
               assert.ok(focus.visible, 'Keyboard focus must remain visible');
               assert.equal(focus.viewportOutline, 'none', 'The scroll viewport must not add a line beneath the section header');
-              assert.equal(focus.viewportShadow, 'none', 'A clipped viewport focus ring must not overlap the header divider');
+              assert.equal(focus.viewportShadow, 'none', 'A clipped viewport focus ring must not overlap the header');
               assert.equal(focus.sectionOutline, '2px', 'Focus must outline the whole section');
               assert.equal(focus.sectionOffset, '2px', 'The section focus outline must remain outside the header and content');
               await viewport.evaluate(element => element.scrollTo({ top: element.scrollHeight, behavior: 'instant' }));

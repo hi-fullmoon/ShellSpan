@@ -15,6 +15,8 @@ import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
 import type { AgentQuestionView, AnswerQuestionInput } from '@/types/agent-question';
+import { questionKey } from '@/types/agent-question';
+import { questionSubmissionIssue } from '@/lib/ai/question-submission';
 import '@/components/ai/styles/styles.css';
 
 const question: AgentQuestionView = {
@@ -51,6 +53,61 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('Stage 6A question form', () => {
+  it.each(['zh-CN', 'en-US'] as const)('retains the actual failure and offers only applicable recovery actions in %s', async locale => {
+    await initI18n(locale);
+    useAppStore.setState({ locale });
+    const user = userEvent.setup();
+    const submission: AnswerQuestionInput = {
+      identity: question.identity, clientOperationId: crypto.randomUUID(),
+      answers: [{ id: 'choice', selected: ['B'] }],
+    };
+    const refresh = locale === 'zh-CN' ? '刷新状态' : 'Refresh status';
+    const retry = locale === 'zh-CN' ? '重试原答案' : 'Retry same answers';
+    const edit = locale === 'zh-CN' ? '修改答案' : 'Edit answers';
+    const settings = locale === 'zh-CN' ? '模型设置' : 'Model settings';
+    const props = {
+      question,
+      onAnswer: async () => { throw new Error('Unexpected answer submission'); },
+      onRefresh: async () => { throw new Error('Unexpected refresh'); },
+    };
+    for (const diagnostic of [
+      'question was cancelled', 'question Session has ended', 'unknown or stale question identity',
+      'question cannot bypass required recovery reconciliation', 'question answer conflicts with its committed answer',
+    ]) {
+      useAgentQuestionStore.getState().setDraft(questionKey(question.identity), {
+        answers: submission.answers, submission, issue: questionSubmissionIssue(diagnostic),
+      });
+      const form = render(<AiQuestionPanel {...props} />);
+      expect(screen.getByRole('alert')).toHaveTextContent(diagnostic);
+      expect(screen.getByRole('button', { name: refresh })).toBeEnabled();
+      expect(screen.queryByRole('button', { name: retry })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: edit })).not.toBeInTheDocument();
+      expect(screen.getByRole('textbox')).toBeDisabled();
+      form.unmount();
+    }
+    const issue = questionSubmissionIssue('UNKNOWN_ROUTE: removed-provider');
+    useAgentQuestionStore.getState().setDraft(questionKey(question.identity), { answers: submission.answers, submission, issue });
+    let opened = 0;
+    const first = render(<AiQuestionPanel {...props} onOpenSettings={() => { opened += 1; }} />);
+    expect(screen.getByRole('button', { name: retry })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: settings }));
+    expect(opened).toBe(1);
+    first.unmount();
+    const second = render(<AiQuestionPanel {...props} />);
+    expect(screen.getByRole('alert')).toHaveTextContent(issue.detail);
+    expect(Object.values(useAgentQuestionStore.getState().drafts)[0].submission).toEqual(submission);
+    second.unmount();
+    useAgentQuestionStore.getState().setDraft(questionKey(question.identity), {
+      answers: submission.answers, submission, issue: questionSubmissionIssue('unknown answer id'),
+    });
+    render(<AiQuestionPanel {...props} />);
+    expect(screen.queryByRole('button', { name: retry })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: edit }));
+    expect(screen.getByRole('textbox')).toBeEnabled();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(Object.values(useAgentQuestionStore.getState().drafts)[0]).toEqual({ answers: submission.answers });
+  });
+
   it('keeps question decisions text-only, including disabled submission', () => {
     render(<AiQuestionPanel question={question} onAnswer={async () => {}} />);
     for (const name of ['Skip question', 'Submit']) {
@@ -96,7 +153,7 @@ describe('Stage 6A question form', () => {
     expect(submissions[0].answers[0]).toEqual({ id: 'choice', selected: ['B'] });
     first.unmount();
     render(<AiQuestionPanel {...props} />);
-    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    await user.click(screen.getByRole('button', { name: 'Retry same answers' }));
     await waitFor(() => expect(submissions).toHaveLength(2));
     expect(submissions[1]).toEqual(submissions[0]);
   });
@@ -119,7 +176,7 @@ describe('Stage 6A question form', () => {
     const original = onAnswer.mock.calls[0][0];
     first.unmount();
     render(<AiQuestionPanel question={question} onAnswer={onAnswer} />);
-    await user.click(screen.getByRole('button', { name: 'Submit' }));
+    await user.click(screen.getByRole('button', { name: 'Retry same answers' }));
     await waitFor(() => expect(onAnswer).toHaveBeenCalledTimes(2));
     expect(onAnswer.mock.calls[1][0]).toEqual(original);
     expect(original.answers).toEqual([{ id: 'choice', selected: ['B'] }]);
@@ -160,13 +217,13 @@ describe('Stage 6A question form', () => {
           expect(screen.getByRole('button', { name: 'B' })).toHaveAttribute('aria-pressed', 'true');
         }
         expect(text).toBeDisabled();
-        expect(screen.getByRole('button', { name: 'Skip question' })).toBeDisabled();
+        expect(screen.queryByRole('button', { name: 'Skip question' })).not.toBeInTheDocument();
         await user.type(text, 'Changed answer');
         // A queued change handler must not discard the saved operation either.
         fireEvent.change(text, { target: { value: 'Changed answer' } });
         expect(text).toHaveValue(multi || textOnly ? 'Original detail' : '');
         expect(Object.values(useAgentQuestionStore.getState().drafts)[0].submission).toEqual(original);
-        expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled();
+        expect(screen.getByRole('button', { name: 'Retry same answers' })).toBeEnabled();
         expect(screen.getByRole('alert')).toHaveTextContent('same answers');
       };
 
@@ -174,7 +231,7 @@ describe('Stage 6A question form', () => {
       first.unmount();
       render(<AiQuestionPanel {...props} />);
       await expectLocked();
-      await user.click(screen.getByRole('button', { name: 'Submit' }));
+      await user.click(screen.getByRole('button', { name: 'Retry same answers' }));
       await waitFor(() => expect(submissions).toHaveLength(2));
       expect(submissions[1]).toEqual(original);
       await waitFor(() => expect(useAgentQuestionStore.getState().drafts).toEqual({}));

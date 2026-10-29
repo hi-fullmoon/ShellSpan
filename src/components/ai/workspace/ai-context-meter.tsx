@@ -67,7 +67,7 @@ export function AiContextMeter({ usage }: { readonly usage?: AiContextUsage }): 
         <TooltipTrigger
           render={(
             <PopoverTrigger
-              render={<button type="button" className="ai-context-meter-trigger grid size-7 shrink-0 cursor-pointer place-items-center p-0" />}
+              render={<button type="button" className="ai-context-meter-trigger grid size-7 shrink-0 cursor-default place-items-center p-0" />}
               aria-label={ariaLabel}
             />
           )}

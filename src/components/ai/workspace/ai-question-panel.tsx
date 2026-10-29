@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   CheckIcon,
   ChevronDownIcon,
@@ -40,6 +40,8 @@ import {
 } from '@/components/ui/collapsible';
 import { useI18n } from '@/hooks/useI18n';
 import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
+import { cn } from '@/lib/utils';
+import { questionIssue, questionIssueMessageKey, questionSubmissionIssue } from '@/lib/ai/question-submission';
 import {
   questionKey,
   type AgentQuestionView,
@@ -57,6 +59,8 @@ import {
 export interface AiQuestionPanelProps {
   readonly question: AgentQuestionView;
   readonly onAnswer?: (input: AnswerQuestionInput) => Promise<void>;
+  readonly onRefresh?: (input: AnswerQuestionInput) => Promise<void>;
+  readonly onOpenSettings?: () => void;
 }
 
 const recommendedSuffix = /\s+\(Recommended\)$/i;
@@ -70,20 +74,26 @@ function isAnswerInvalid(answer: QuestionAnswer): boolean {
 export function AiQuestionPanel({
   question,
   onAnswer,
+  onRefresh,
+  onOpenSettings,
 }: AiQuestionPanelProps): React.ReactNode {
   const { t } = useI18n();
   const key = questionKey(question.identity);
   const draft = useAgentQuestionStore((state) => state.drafts[key]);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [operation, setOperation] = useState<'submit' | 'refresh' | null>(null);
+  const busy = useRef(false);
+  const content = useRef<HTMLDivElement>(null);
+  const pending = operation !== null;
   const [currentIndex, setCurrentIndex] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
   // A rejected acknowledgement does not prove the answer was rejected.
   // Keep the exact operation retryable until committed state removes the form.
   const editingLocked = pending || !!draft?.submission;
-  const submissionError = error ?? (!pending && draft?.submission
-    ? t('ai.workspace.question.submitFailed')
-    : null);
+  const submissionIssue = !pending && draft?.submission
+    ? draft.issue ?? questionIssue('unconfirmed') : null;
+  useEffect(() => {
+    if (submissionIssue && content.current) content.current.scrollTop = content.current.scrollHeight;
+  }, [submissionIssue?.reason, submissionIssue?.detail]);
   const answers: readonly QuestionAnswer[] =
     draft?.answers ??
     question.questions.map((q) => ({ id: q.id, selected: [] }));
@@ -100,7 +110,6 @@ export function AiQuestionPanel({
       .setDraft(key, {
         answers: answers.map((a) => (a.id === answer.id ? answer : a)),
       });
-    setError(null);
   };
   const updateSelection = (selected: string[]): void => {
     if (pending || useAgentQuestionStore.getState().drafts[key]?.submission) return;
@@ -120,24 +129,52 @@ export function AiQuestionPanel({
     }
   };
   const submit = async (nextAnswers = answers): Promise<void> => {
-    if (pending || nextAnswers.some(isAnswerInvalid) || !onAnswer) return;
-    const input = useAgentQuestionStore.getState().drafts[key]?.submission ?? {
+    const retained = useAgentQuestionStore.getState().drafts[key];
+    if (busy.current || nextAnswers.some(isAnswerInvalid) || !onAnswer
+      || (retained?.issue && !retained.issue.retry)) return;
+    const input = retained?.submission ?? {
       identity: question.identity,
       clientOperationId: crypto.randomUUID(),
       answers: nextAnswers,
     };
     useAgentQuestionStore
       .getState()
-      .setDraft(key, { answers: input.answers, submission: input });
-    setPending(true);
-    setError(null);
+      .setDraft(key, { answers: input.answers, submission: input, issue: retained?.issue });
+    busy.current = true;
+    setOperation('submit');
     try {
       await onAnswer(input);
       useAgentQuestionStore.getState().clear(key);
-    } catch {
-      setPending(false);
-      setError(t('ai.workspace.question.submitFailed'));
+    } catch (error) {
+      useAgentQuestionStore.getState().setDraft(key, {
+        answers: input.answers, submission: input, issue: questionSubmissionIssue(error),
+      });
+    } finally {
+      busy.current = false;
+      setOperation(null);
     }
+  };
+  const refresh = async (): Promise<void> => {
+    const input = useAgentQuestionStore.getState().drafts[key]?.submission;
+    if (busy.current || !input || !onRefresh) return;
+    busy.current = true;
+    setOperation('refresh');
+    try {
+      await onRefresh(input);
+      useAgentQuestionStore.getState().clear(key);
+    } catch (error) {
+      useAgentQuestionStore.getState().setDraft(key, {
+        answers: input.answers, submission: input, issue: questionSubmissionIssue(error, 'confirm'),
+      });
+    } finally {
+      busy.current = false;
+      setOperation(null);
+    }
+  };
+  const edit = (): void => {
+    const retained = useAgentQuestionStore.getState().drafts[key];
+    if (busy.current || !retained?.issue?.editable) return;
+    useAgentQuestionStore.getState().setDraft(key, { answers: retained.answers });
   };
   const decline = (): void => {
     if (pending || !onAnswer || useAgentQuestionStore.getState().drafts[key]?.submission) return;
@@ -149,13 +186,13 @@ export function AiQuestionPanel({
       void submit(nextAnswers);
     } else {
       useAgentQuestionStore.getState().setDraft(key, { answers: nextAnswers });
-      setError(null);
       setCurrentIndex(nextIndex);
     }
   };
   return (
     <Card
-      className="ai-question-panel min-h-0 max-h-[min(440px,40dvh)] shrink-0 gap-0 py-0"
+      className={cn('ai-question-panel min-h-0 max-h-[min(440px,40dvh)] shrink-0 gap-0 py-0',
+        draft?.submission && (draft.issue || !pending) && 'max-h-[min(600px,70dvh)]')}
       data-slot="ai-question-panel"
       data-question-id={question.identity.questionRequestId}
       data-collapsed={collapsed || undefined}
@@ -186,7 +223,7 @@ export function AiQuestionPanel({
       </CardHeader>
       {!collapsed && (
         <>
-          <CardContent className="ai-question-panel-content min-h-0 overflow-x-hidden overflow-y-auto px-4 pt-px pb-1.5 @max-[421px]/ai-workspace:px-2.5 @max-[421px]/ai-workspace:pt-0">
+          <CardContent ref={content} className="ai-question-panel-content min-h-0 overflow-x-hidden overflow-y-auto px-4 pt-px pb-1.5 @max-[421px]/ai-workspace:px-2.5 @max-[421px]/ai-workspace:pt-0">
             <FieldGroup className="ai-question-list gap-0">
               <FieldSet
                 key={currentQuestion.id}
@@ -296,6 +333,12 @@ export function AiQuestionPanel({
                 </Field>
               </FieldSet>
             </FieldGroup>
+            {submissionIssue && <FieldError className="mt-2 flex min-w-0 flex-col gap-1 [overflow-wrap:anywhere]" role="alert" data-question-error={submissionIssue.reason}>
+              <p className="m-0">{t(questionIssueMessageKey(submissionIssue))}</p>
+              {submissionIssue.detail && <pre className="m-0 max-h-24 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere]" tabIndex={0} aria-label={t('ai.workspace.question.failureReason')}>
+                {submissionIssue.detail}
+              </pre>}
+            </FieldError>}
           </CardContent>
           <CardFooter className="ai-question-panel-footer min-h-12 shrink-0 justify-between gap-2.5 px-3.5 pt-1.5 pb-[7px] @max-[421px]/ai-workspace:flex-wrap @max-[421px]/ai-workspace:px-2.5">
             <div className="ai-question-pagination flex shrink-0 items-center gap-0.5">
@@ -323,10 +366,21 @@ export function AiQuestionPanel({
                 <ChevronRightIcon aria-hidden="true" />
               </Button>
             </div>
-            <div className="ai-question-footer-message min-w-0 flex-1 @max-[421px]/ai-workspace:order-3 @max-[421px]/ai-workspace:basis-full">
-              {submissionError && <FieldError role="alert">{submissionError}</FieldError>}
-            </div>
+            <div className="ai-question-footer-message min-w-0 flex-1" />
             <div className="ai-question-footer-actions flex shrink-0 items-center gap-1.5">
+              {draft?.submission ? <>
+                {onRefresh && <Button type="button" variant={submissionIssue && !submissionIssue.retry && !submissionIssue.editable ? 'default' : 'outline'} size="sm" disabled={pending} onClick={() => void refresh()}>
+                  {t(operation === 'refresh' ? 'ai.workspace.question.refreshing' : 'ai.workspace.question.refresh')}
+                </Button>}
+                {submissionIssue?.reason === 'model' && onOpenSettings && <Button type="button" variant="outline" size="sm" disabled={pending} onClick={onOpenSettings}>
+                  {t('ai.workspace.question.openSettings')}
+                </Button>}
+                {submissionIssue?.editable ? <Button type="button" size="sm" disabled={pending} onClick={edit}>
+                  {t('ai.workspace.question.edit')}
+                </Button> : (!submissionIssue || submissionIssue.retry) && <Button type="button" size="sm" disabled={pending || !onAnswer} onClick={() => void submit()}>
+                  {t(operation === 'submit' ? 'ai.workspace.question.submitting' : 'ai.workspace.question.retry')}
+                </Button>}
+              </> : <>
               <Button
                 className="min-w-[68px] @max-[421px]/ai-workspace:min-w-auto"
                 type="button"
@@ -350,6 +404,7 @@ export function AiQuestionPanel({
                     : 'ai.workspace.question.submit',
                 )}
               </Button>
+              </>}
             </div>
           </CardFooter>
         </>

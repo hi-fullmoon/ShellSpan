@@ -31,9 +31,9 @@ const server = await createServer({
 try {
   await server.listen();
   for (const engine of [chromium, webkit]) {
-    const browser = await engine.launch();
+    const browser = await engine.launch(engine === chromium ? { channel: 'chromium' } : {});
     try {
-      const page = await browser.newPage();
+      const page = await browser.newPage(engine === chromium ? { permissions: ['clipboard-read', 'clipboard-write'] } : {});
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
       for (const locale of ['zh-CN', 'en-US']) {
@@ -93,6 +93,59 @@ try {
           await page.keyboard.press('Enter');
           await page.getByText(diagnostic, { exact: true }).waitFor();
           assert.equal(await page.getByText(diagnostic, { exact: true }).count(), 1);
+          await page.waitForFunction(() => {
+            const panel = document.querySelector('.ai-tool-row-root > [data-slot="collapsible-content"]');
+            return panel && panel.getBoundingClientRect().height >= panel.scrollHeight - 1;
+          });
+          const errorCard = page.locator('[data-ai-tool-view="error"]');
+          const copyButton = errorCard.getByRole('button', { name: locale === 'zh-CN' ? '复制输出' : 'Copy output', exact: true });
+          const errorGeometry = await errorCard.evaluate(element => {
+            const label = element.querySelector('.ai-block-banner > span').getBoundingClientRect();
+            const code = element.querySelector('code');
+            const text = document.createRange();
+            text.selectNodeContents(code);
+            const firstLine = text.getClientRects()[0];
+            const copy = element.querySelector('button');
+            const button = copy.getBoundingClientRect();
+            const pre = element.querySelector('pre');
+            const body = pre.getBoundingClientRect();
+            return {
+              gap: firstLine.top - label.bottom,
+              bodyTop: body.top,
+              textTop: firstLine.top,
+              textRight: body.right - parseFloat(getComputedStyle(pre).paddingRight),
+              buttonTop: button.top, buttonLeft: button.left, buttonRight: button.right,
+              copyInHeader: Boolean(copy.closest('.ai-block-banner')),
+              bodyOwnsCopy: copy.closest('[data-ai-copy-region]')?.contains(code),
+            };
+          });
+          assert.ok(errorGeometry.gap >= 0 && errorGeometry.gap <= 12,
+            `Error label and diagnostic must stay close: ${JSON.stringify(errorGeometry)}`);
+          assert.equal(errorGeometry.copyInHeader, false);
+          assert.equal(errorGeometry.bodyOwnsCopy, true);
+          assert.ok(errorGeometry.buttonTop >= errorGeometry.bodyTop && Math.abs(errorGeometry.buttonTop - errorGeometry.textTop) <= 6);
+          assert.ok(errorGeometry.textRight <= errorGeometry.buttonLeft && errorGeometry.buttonRight <= width,
+            'The error copy action must sit beside the diagnostic without covering text');
+          await page.mouse.move(width - 1, 600);
+          assert.equal(await copyButton.evaluate(element => getComputedStyle(element).opacity), '0',
+            'The error copy icon must stay hidden until its diagnostic is hovered');
+          assert.equal(await copyButton.evaluate(element => getComputedStyle(element).pointerEvents), 'none');
+          await errorCard.locator('.ai-block-banner').hover();
+          assert.equal(await copyButton.evaluate(element => getComputedStyle(element).opacity), '0',
+            'Hovering the error heading must not reveal the diagnostic copy icon');
+          await errorCard.locator('[data-ai-copy-region]').hover({ position: { x: 16, y: 8 } });
+          assert.equal(await copyButton.evaluate(element => getComputedStyle(element).opacity), '1');
+          await page.screenshot({ path: join(screenshots, `${engine.name()}-${locale}-${width}-error-spacing.png`) });
+          await page.mouse.move(width - 1, 600);
+          assert.equal(await copyButton.evaluate(element => getComputedStyle(element).opacity), '0',
+            'Leaving the diagnostic must hide its copy icon');
+          await copyButton.focus();
+          assert.equal(await copyButton.evaluate(element => getComputedStyle(element).opacity), '1');
+          if (engine === chromium) {
+            await copyButton.press('Enter');
+            await errorCard.getByRole('button', { name: locale === 'zh-CN' ? '已复制' : 'Copied', exact: true }).waitFor();
+            assert.equal(await page.evaluate(() => navigator.clipboard.readText()), diagnostic);
+          }
           await page.evaluate(() => window.renderRecovery('recovered'));
           await page.locator('[data-tool-recovered="true"]').waitFor();
           assert.equal(await row.getAttribute('aria-expanded'), 'false');

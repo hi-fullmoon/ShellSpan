@@ -301,20 +301,8 @@
   tab-size: 2;
 }
 
-.ai-markdown-code-toolbar + .ai-code-block-pre {
+.ai-markdown-code-block[data-language] > .ai-code-block-pre {
   padding-top: 8px;
-}
-
-.ai-markdown-code-block:not([data-language]) > .ai-markdown-code-toolbar {
-  position: absolute;
-  top: 8px;
-  right: 12px;
-  padding: 0;
-}
-
-.ai-markdown-code-block:not([data-language]) > .ai-markdown-code-toolbar + .ai-code-block-pre {
-  margin-right: 44px;
-  padding-top: 12px;
 }
 
 .ai-markdown-code-block .ai-code-block-pre:focus-visible {

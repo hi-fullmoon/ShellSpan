@@ -216,7 +216,8 @@ describe('AssistantMessageContent', () => {
     );
 
     const copyButton = screen.getByRole('button', { name: 'common.copy' });
-    expect(copyButton).toHaveClass('ai-markdown-code-copy');
+    expect(copyButton).toHaveClass('ai-markdown-code-copy', 'absolute');
+    expect(copyButton.parentElement).toHaveClass('ai-markdown-code-block', 'relative');
     expect(copyButton.textContent).toBe('');
     expect(copyButton.querySelector('svg')).toBeInTheDocument();
     expect(copyButton.closest('.ai-code-block')).toHaveAttribute('data-language', 'bash');

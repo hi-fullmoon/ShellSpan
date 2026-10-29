@@ -324,7 +324,7 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     expect(modelName).toHaveClass('max-w-60', 'flex-[0_1_auto]', 'truncate');
   });
 
-  it('shows the Runtime-backed context ring after model selection with an honest breakdown', async () => {
+  it('shows the Runtime-backed context ring and breakdown without routine explanatory notes', async () => {
     const user = userEvent.setup();
     render(
       <AiComposerSeat
@@ -350,7 +350,7 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     expect(panel).toHaveTextContent('System prompt~1.7K');
     expect(panel).toHaveTextContent('Tools~6.6K');
     expect(panel).toHaveTextContent('Conversation messages~45.8K');
-    expect(panel).toHaveTextContent('No provider-confirmed count yet; showing the latest request estimate.');
+    expect(panel.querySelector('.ai-context-meter-note')).toBeNull();
     expect(document.querySelectorAll('.ai-context-meter-bar > span')).toHaveLength(3);
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog', { name: 'Context usage' })).toBeNull();

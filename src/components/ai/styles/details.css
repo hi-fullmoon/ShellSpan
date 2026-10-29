@@ -82,8 +82,7 @@
 }
 
 .ai-detail-section-header {
-  border-bottom: 1px solid var(--ai-border-subtle);
-  background: var(--ai-canvas);
+  background: var(--ai-code-block);
 }
 
 .ai-detail-section-header h3 {

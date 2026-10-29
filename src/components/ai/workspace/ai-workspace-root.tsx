@@ -268,6 +268,7 @@ export interface AiWorkspaceRootProps {
   readonly skillsNeedsRoot?: boolean;
   readonly projectTargetLabel?: string;
   readonly onAnswerQuestion?: (input: import('@/types/agent-question').AnswerQuestionInput) => Promise<void>;
+  readonly onRefreshQuestionAnswer?: (input: import('@/types/agent-question').AnswerQuestionInput) => Promise<void>;
   readonly loadingOlder?: boolean;
   readonly queueMutation?: AiQueueMutationState | null;
   readonly renamingSessionId?: string | null;
@@ -356,6 +357,7 @@ export function AiWorkspaceRoot({
   approvalArgumentsLoading = false,
   approvalArgumentsError = null,
   onAnswerQuestion,
+  onRefreshQuestionAnswer,
   onListFileReferences,
   onListProjectDirectories,
   onListSkills,
@@ -797,6 +799,7 @@ export function AiWorkspaceRoot({
           pendingApproval={surfaceMode === 'agent' && !readOnlySession ? view?.pendingApproval : undefined}
           pendingQuestion={readOnlySession ? undefined : view?.pendingQuestion}
           onAnswerQuestion={readOnlySession ? undefined : onAnswerQuestion}
+          onRefreshQuestionAnswer={onRefreshQuestionAnswer}
           onListFileReferences={surfaceMode === 'agent' && !readOnlySession ? onListFileReferences : undefined}
           onListProjectDirectories={surfaceMode === 'agent' && !readOnlySession ? onListProjectDirectories : undefined}
           onListSkills={surfaceMode === 'agent' && !readOnlySession ? onListSkills : undefined}

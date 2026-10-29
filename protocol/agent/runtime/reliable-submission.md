@@ -131,6 +131,19 @@ recovery classification as HTTP errors.
 Approval and question gates remain in force. Tool failure recovery requires
 inspection and explicit follow-up rather than replaying tool calls.
 
+Question answers retain their original operation ID and payload until a committed
+`question/answered` receipt is visible. The client backfills the session after both
+successful and failed answer IPC calls; a durable receipt acknowledges a lost
+reply. A read-only status refresh never resubmits answers or bypasses recovery.
+Cancelled, ended, obsolete and conflicting questions offer status refresh rather
+than resubmission. Required recovery must be resolved before retrying. Explicit
+answer-validation rejection permits editing only after successful state
+reconciliation; unknown delivery and failed confirmation keep the answers frozen.
+A successful read-only refresh that finds the same question pending preserves
+its confirmed answer-validation rejection and the edit action.
+The form retains a bounded, redacted diagnostic across panel remounts and provides
+model settings for configuration or credential failures.
+
 Validation covers the pure composer and admission coordinator, real native store
 write/replay, claim-prefix recovery, native image admission, real WebKit IndexedDB
 detach/acknowledge transactions, and Chromium rendering at wide/narrow widths.

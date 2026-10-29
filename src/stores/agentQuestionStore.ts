@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { QuestionSubmissionIssue } from '@/lib/ai/question-submission';
 import type {
   AnswerQuestionInput,
   QuestionAnswer,
@@ -7,6 +8,7 @@ import type {
 interface Draft {
   readonly answers: readonly QuestionAnswer[];
   readonly submission?: AnswerQuestionInput;
+  readonly issue?: QuestionSubmissionIssue;
 }
 interface QuestionDraftState {
   readonly drafts: Readonly<Record<string, Draft>>;

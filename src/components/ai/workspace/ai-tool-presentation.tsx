@@ -231,13 +231,15 @@ function FailureSurface({ node, diagnostic, showCopyActions }: {
   const { t } = useI18n();
   return (
     <div className="ai-read-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="error">
-      {showCopyActions && <div className="ai-block-banner flex min-w-0 items-center gap-2 overflow-hidden py-[9px] pr-1 pl-3.5">
-        <span className="min-w-0 flex-1 truncate">{t('ai.error.details')}</span>
-        <AiToolCopyButton text={diagnostic} label={t('ai.workspace.tool.copyOutput')} />
+      {showCopyActions && <div className="ai-block-banner min-w-0 overflow-hidden px-3.5 pt-2 pb-1">
+        <span className="block truncate">{t('ai.error.details')}</span>
       </div>}
-      <pre className="ai-detail-code m-0 max-h-65 min-w-0 max-w-full overflow-auto px-3.5 py-3 whitespace-pre-wrap [overflow-wrap:anywhere]" data-error={!node.recoveredByToolKey || undefined}>
-        <code>{bounded(diagnostic)}</code>
-      </pre>
+      <div className="relative min-w-0" data-ai-copy-region>
+        <pre className={cn('ai-detail-code m-0 max-h-65 min-w-0 max-w-full overflow-auto px-3.5 whitespace-pre-wrap [overflow-wrap:anywhere]', showCopyActions ? 'pt-1 pr-10 pb-3' : 'py-3')} data-error={!node.recoveredByToolKey || undefined}>
+          <code>{bounded(diagnostic)}</code>
+        </pre>
+        {showCopyActions && <AiToolCopyButton text={diagnostic} label={t('ai.workspace.tool.copyOutput')} className="ai-content-copy top-1" />}
+      </div>
     </div>
   );
 }
@@ -282,7 +284,7 @@ export function AiToolCopyButton({ text, label, className }: { readonly text: st
             type="button"
             variant="ghost"
             size="icon-xs"
-            className={cn('ai-tool-copy-button shrink-0', className)}
+            className={cn('ai-tool-copy-button absolute top-2 right-1 z-10', className)}
             aria-label={copied ? t('common.copied') : (label ?? t('common.copy'))}
             onClick={() => {
               if (!navigator.clipboard || copied) return;
@@ -310,11 +312,8 @@ function TerminalSurface({ node, showCopyActions }: { node: ToolNode; showCopyAc
   const displayCommand = command || node.name;
   const outputRecord = asRecord(node.output);
   const exitCode = firstNumber(outputRecord, ['exitCode', 'exit_code', 'code']);
-  const cwd = firstString(input, ['cwd', 'workdir', 'workingDirectory'])
-    ?? node.target?.cwd
-    ?? node.target?.label;
   const transcript = <>
-    <div className="ai-terminal-command-row flex min-w-0 items-start gap-2">
+    <div className={cn('ai-terminal-command-row relative flex min-w-0 items-start gap-2', showCopyActions && command && 'min-h-6 pr-8')} data-ai-copy-region>
       <span className="ai-terminal-prompt shrink-0 select-none" aria-hidden="true">$</span>
       <button
         type="button"
@@ -325,9 +324,9 @@ function TerminalSurface({ node, showCopyActions }: { node: ToolNode; showCopyAc
       >
         {displayCommand}
       </button>
-      {showCopyActions && command && <AiToolCopyButton text={command} label={t('ai.workspace.tool.copyCommand')} />}
+      {showCopyActions && command && <AiToolCopyButton text={command} label={t('ai.workspace.tool.copyCommand')} className="ai-content-copy top-0 right-0" />}
     </div>
-    {(output || node.state !== 'running') && <div className={cn('relative mt-3', showCopyActions && output && 'pr-8')} data-ai-terminal-output>
+    {(output || node.state !== 'running') && <div className={cn('relative mt-3', showCopyActions && output && 'pr-8')} data-ai-terminal-output data-ai-copy-region>
       {output ? <TerminalOutputText text={output} /> : t('ai.workspace.tool.noOutput')}
       {showCopyActions && output && <AiToolCopyButton text={output} label={t('ai.workspace.tool.copyOutput')} className="ai-content-copy absolute top-0 right-0" />}
     </div>}
@@ -338,8 +337,7 @@ function TerminalSurface({ node, showCopyActions }: { node: ToolNode; showCopyAc
         <span className="shrink-0">
           {t('ai.workspace.tool.shell')}
         </span>
-        <span className="ai-terminal-cwd min-w-0 flex-1 truncate text-right" title={cwd ?? undefined}>{cwd}</span>
-        {exitCode !== null && exitCode !== 0 && <span className="ai-terminal-exit shrink-0">{t('ai.workspace.tool.exitCode', { code: exitCode })}</span>}
+        {exitCode !== null && exitCode !== 0 && <span className="ai-terminal-exit ml-auto shrink-0">{t('ai.workspace.tool.exitCode', { code: exitCode })}</span>}
       </div>
       <div className="ai-terminal-output relative m-0 min-w-0 max-w-full">
         <div
@@ -357,24 +355,29 @@ function TerminalSurface({ node, showCopyActions }: { node: ToolNode; showCopyAc
 function ReadSurface({ node, showCopyActions }: { node: ToolNode; showCopyActions: boolean }) {
   const { t } = useI18n();
   const input = asRecord(node.input);
-  const label = firstString(input, ['path', 'file_path', 'filePath'])
+  const path = firstString(input, ['path', 'file_path', 'filePath']);
+  const inputText = path ?? formatToolValue(node.input);
+  const label = path
     ?? (node.state === 'failed' || node.state === 'rejected' ? t('ai.workspace.tool.title.read') : node.summary || node.name);
   const output = outputText(node);
   const lines = bounded(output).split('\n');
   return (
     <div className="ai-read-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="read">
-      <div className="ai-block-banner flex min-w-0 items-center gap-2 py-[9px] pr-1 pl-3.5">
+      <div className={cn('ai-block-banner relative flex min-w-0 items-center gap-2 py-[9px] pr-1 pl-3.5', showCopyActions && 'min-h-[42px] pr-9')} data-ai-copy-region>
         <span className="min-w-0 flex-1 truncate">{label}</span>
-        {showCopyActions && node.state !== 'running' && output && <AiToolCopyButton text={output} label={t('ai.workspace.tool.copyOutput')} />}
+        {showCopyActions && inputText && <AiToolCopyButton text={inputText} label={t('ai.workspace.tool.copyInput')} />}
       </div>
-      <pre className="ai-read-lines m-0 max-h-65 max-w-full overflow-auto px-3.5 py-3 whitespace-pre" tabIndex={0}>
-        {lines.map((line, index) => (
-          <span key={index} className="ai-read-line grid min-h-[18px] grid-cols-[34px_minmax(max-content,1fr)]">
-            <span className="ai-read-line-number" aria-hidden="true">{index + 1}</span>
-            <span>{line || '\u00a0'}</span>
-          </span>
-        ))}
-      </pre>
+      <div className="relative min-w-0" data-ai-copy-region>
+        <pre className={cn('ai-read-lines m-0 max-h-65 max-w-full overflow-auto px-3.5 py-3 whitespace-pre', showCopyActions && output && 'pr-10')} tabIndex={0}>
+          {lines.map((line, index) => (
+            <span key={index} className="ai-read-line grid min-h-[18px] grid-cols-[34px_minmax(max-content,1fr)]">
+              <span className="ai-read-line-number" aria-hidden="true">{index + 1}</span>
+              <span>{line || '\u00a0'}</span>
+            </span>
+          ))}
+        </pre>
+        {showCopyActions && output && <AiToolCopyButton text={output} label={t('ai.workspace.tool.copyOutput')} className="ai-content-copy absolute top-2 right-1" />}
+      </div>
     </div>
   );
 }
@@ -388,7 +391,7 @@ function SearchSurface({ node, showCopyActions }: { node: ToolNode; showCopyActi
   const lines = bounded(output).split('\n').filter(Boolean);
   return (
     <div className="ai-search-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="search">
-      <div className="ai-block-banner flex min-w-0 items-center gap-1 py-[9px] pr-1 pl-3.5">
+      <div className={cn('ai-block-banner relative flex min-w-0 items-center gap-1 py-[9px] pr-1 pl-3.5', showCopyActions && output && 'min-h-[42px] pr-9')}>
         <SearchIcon className="shrink-0" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate">{query}</span>
         {showCopyActions && output && <AiToolCopyButton text={output} label={t('ai.workspace.tool.copyOutput')} />}
@@ -435,7 +438,7 @@ function WebSurface({ node, showCopyActions }: { node: ToolNode; showCopyActions
   const output = timeoutKind ? diagnostic : outputText(node);
   return (
     <div className="ai-web-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="web">
-      <div className="ai-block-banner flex min-w-0 items-center gap-1 py-[9px] pr-1 pl-3.5">
+      <div className={cn('ai-block-banner relative flex min-w-0 items-center gap-1 py-[9px] pr-1 pl-3.5', showCopyActions && output && 'min-h-[42px] pr-9')}>
         <GlobeIcon className="shrink-0" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate">{label}</span>
         {showCopyActions && output && <AiToolCopyButton text={output} label={t('ai.workspace.tool.copyOutput')} />}
@@ -658,13 +661,13 @@ function DiffSurface({ node, compact, model, showCopyActions }: { node: ToolNode
     <div className="ai-diff-block my-1 ml-1 flex max-h-65 min-w-0 max-w-[calc(100%-4px)] flex-col gap-px overflow-auto" data-ai-tool-view="diff" tabIndex={0}>
       {hunks.map((hunk, index) => (
         <section key={`${hunk.path}:${index}`} className="min-w-0 max-w-full shrink-0">
-          <div className="ai-block-banner flex min-w-0 items-center gap-2 px-2.5 py-1.5">
+          <div className={cn('ai-block-banner relative flex min-w-0 items-center gap-2 px-2.5 py-1.5', showCopyActions && index === 0 && copyText && 'min-h-9 pr-9')}>
             <span className="min-w-0 flex-1 truncate">{hunk.path}</span>
             {hunk.exact && currentModel.totalsKnown && <span className="ai-diff-counts shrink-0">
               <span data-diff-count="added">+{hunk.lines.filter((line) => line.kind === 'added').length}</span>{' '}
               <span data-diff-count="removed">-{hunk.lines.filter((line) => line.kind === 'removed').length}</span>
             </span>}
-            {showCopyActions && index === 0 && copyText && <AiToolCopyButton text={copyText} label={t('ai.workspace.tool.copyOutput')} />}
+            {showCopyActions && index === 0 && copyText && <AiToolCopyButton text={copyText} label={t('ai.workspace.tool.copyOutput')} className="top-1.5" />}
           </div>
           {!hunk.exact && <div className="px-2.5 py-1 text-xs text-muted-foreground" data-diff-simplified>
             {t('ai.workspace.tool.diffSimplified')}
@@ -705,7 +708,7 @@ function CodeSurface({ node, showCopyActions }: { node: ToolNode; showCopyAction
   const output = outputText(node);
   return (
     <div className="ai-code-block ai-tool-code-block relative my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="code">
-      <div className="ai-code-block-banner flex min-w-0 items-center justify-between gap-3 px-3.5 py-[9px]">
+      <div className={cn('ai-code-block-banner relative flex min-w-0 items-center justify-between gap-3 px-3.5 py-[9px]', showCopyActions && 'min-h-[42px] pr-10')}>
         <span className="ai-code-block-language min-w-0 truncate">{language}</span>
         {showCopyActions && <AiToolCopyButton text={code} />}
       </div>
@@ -730,14 +733,14 @@ function IoSurface({ node, compact, showCopyActions }: { node: ToolNode; compact
   return (
     <div className="ai-io-card my-1 ml-1 flex max-h-65 min-w-0 max-w-[calc(100%-4px)] flex-col overflow-auto" data-ai-tool-view="generic" tabIndex={0}>
       {input && (
-        <div className={cn('ai-io-section relative grid shrink-0 grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-3.5 px-4 py-3', showCopyActions && 'pr-10')}>
+        <div className={cn('ai-io-section relative grid shrink-0 grid-cols-1 items-start gap-y-1 px-4 py-3', showCopyActions && 'pr-10')}>
           <span className="ai-io-label">{t('ai.workspace.tool.inputLabel')}</span>
           <pre className="ai-io-text m-0 min-w-0 max-w-full whitespace-pre-wrap [overflow-wrap:anywhere]">{compact ? input.slice(0, 8_192) : input}</pre>
           {showCopyActions && <AiToolCopyButton text={formatToolValue(node.input)} label={t('ai.workspace.tool.copyInput')} className="ai-content-copy absolute top-2 right-1" />}
         </div>
       )}
       {output && (
-        <div className={cn('ai-io-section relative grid shrink-0 grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-3.5 px-4 py-3', showCopyActions && 'pr-10')}>
+        <div className={cn('ai-io-section relative grid shrink-0 grid-cols-1 items-start gap-y-1 px-4 py-3', showCopyActions && 'pr-10')}>
           <span className="ai-io-label">{t('ai.workspace.tool.outputLabel')}</span>
           <pre className="ai-io-text m-0 min-w-0 max-w-full whitespace-pre-wrap [overflow-wrap:anywhere]" data-error={node.state === 'failed' || undefined}>
             {output}

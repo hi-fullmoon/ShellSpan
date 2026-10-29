@@ -27,6 +27,8 @@ const { values } = parseArgs({ options: {
   'data-initialize': { type: 'boolean' },
   'data-scope': { type: 'string' },
   'terminal-contention': { type: 'boolean' },
+  'terminal-delegation': { type: 'boolean' },
+  'question-submission-recovery': { type: 'boolean' },
   'composer-input-diagnostic': { type: 'boolean' },
   'native-binary': { type: 'string' },
   'terminal-readiness': { type: 'boolean' },
@@ -41,7 +43,13 @@ const { values } = parseArgs({ options: {
 const performanceRun = values.performance === true;
 const focusRun = values.focus === true;
 const focusBackgroundRun = values['focus-background'] === true;
-const terminalContentionRun = values['terminal-contention'] === true;
+const questionSubmissionRun = values['question-submission-recovery'] === true;
+const terminalContentionRun = values['terminal-contention'] === true || values['terminal-delegation'] === true || questionSubmissionRun;
+assert(!questionSubmissionRun || (!values['no-model'] && !values['terminal-contention'] && !values['terminal-delegation']
+  && !values['composer-input-diagnostic'] && !values['cleanup-session']?.length), '--question-submission-recovery is a separate real-model regression');
+assert(!values['terminal-delegation'] || !values['no-model'], '--terminal-delegation requires real model calls');
+assert(!values['terminal-delegation'] || (!values['terminal-contention'] && !values['composer-input-diagnostic']
+  && !values['cleanup-session']?.length), '--terminal-delegation is a separate regression');
 const stableNativeEntry = terminalContentionRun || Boolean(values['native-jobs-powershell']) || values['data-initialize'] === true;
 assert(!values['native-binary'] || terminalContentionRun, '--native-binary requires --terminal-contention and a binary built for the fixed verification entry');
 assert(!terminalContentionRun || (!focusBackgroundRun && !focusRun && !performanceRun && !values['terminal-readiness']), '--terminal-contention is a separate regression');
@@ -290,6 +298,8 @@ try {
   url.searchParams.set('token', token);
   url.searchParams.set('baseline', String(baseline));
   url.searchParams.set('noModel', String(noModel));
+  if (values['terminal-delegation']) url.searchParams.set('terminalDelegation', 'true');
+  if (questionSubmissionRun) url.searchParams.set('questionSubmissionRecovery', 'true');
   if (values['composer-input-diagnostic']) url.searchParams.set('composerInputDiagnostic', 'true');
   if (values['terminal-reconnect-ssh']) url.searchParams.set('sshFixture', 'true');
   if (values['terminal-reconnect-focus']) url.searchParams.set('focusReconnect', 'true');
@@ -328,6 +338,8 @@ try {
   else if (terminalContentionRun && values['cleanup-session']?.length) console.log('Native contention fixture cleanup completed.');
   else if (values['composer-input-diagnostic']) console.log('Native production composer input passed: complete two-line draft through actual keyboard input. No close or model acceptance was performed.');
   else if (terminalContentionRun && noModel) console.log(`Native terminal close passed: real PTY command, production close confirmation, durable Agent cancellation, unrelated terminal preservation, ${process.platform==='win32'?'actual shell exit':'idle disconnect'} and idempotent close without error Toasts. No model calls were made.`);
+  else if (questionSubmissionRun) console.log('Native question recovery passed: real model question, rejected answer, repeated status refresh, answer editing and durable commit.');
+  else if (values['terminal-delegation']) console.log('Native terminal delegation passed: delegated page, terminal, focus and draft preservation; real child command, parent resumption, unrelated Agent exclusion, user input restoration and child takeover.');
   else if (terminalContentionRun) console.log('Native terminal contention passed: two real Agents, one PTY, conflict draft retention, task navigation, manual retry, simultaneous admission, confirmed takeover, running-Agent close and idempotent stale-tab cleanup.');
   else if (values['native-jobs']) console.log('Native model shell jobs passed: complete script, native job handle, three waits, terminate, nonzero exit and workspace/draft/focus preservation.');
   else if (focusBackgroundRun) console.log('Native Focus background regression passed: two real visible commands completed on the leased PTY, with Focus selection and keyboard focus preserved.');

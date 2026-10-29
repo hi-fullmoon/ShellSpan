@@ -132,6 +132,7 @@ export function AiWorkspaceController({
       imageLocked={controller.imageDraft.locked}
       submissionContext={controller.submissionContext}
       onAnswerQuestion={controller.answerQuestion}
+      onRefreshQuestionAnswer={controller.refreshQuestionAnswer}
       onListFileReferences={controller.listFileReferences}
       onListProjectDirectories={controller.listProjectDirectories}
       onListSkills={controller.listSkills}

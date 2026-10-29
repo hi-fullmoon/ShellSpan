@@ -187,22 +187,22 @@ function MarkdownCodeBlock({
 
   return (
     <div className="ai-code-block ai-markdown-code-block relative my-3 min-w-0 max-w-full overflow-hidden" data-language={language || undefined}>
-      {(language || showActions) && <div className="ai-markdown-code-toolbar flex min-w-0 items-center gap-3 px-3 pt-2">
-        {language && <span className="ai-code-block-language min-w-0 truncate">{language}</span>}
-        {showActions && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            className="ai-markdown-code-copy ml-auto shrink-0"
-            aria-label={copied ? copiedLabel : copyLabel}
-            title={copied ? copiedLabel : copyLabel}
-            onClick={copy}
-          >
-            {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
-          </Button>
-        )}
+      {language && <div className={cn('ai-markdown-code-toolbar flex min-w-0 items-center px-3 pt-2 pr-12', showActions && 'min-h-8')}>
+        <span className="ai-code-block-language min-w-0 truncate">{language}</span>
       </div>}
+      {showActions && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          className="ai-markdown-code-copy ai-content-copy absolute top-2 right-3 z-10"
+          aria-label={copied ? copiedLabel : copyLabel}
+          title={copied ? copiedLabel : copyLabel}
+          onClick={copy}
+        >
+          {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
+        </Button>
+      )}
       <pre tabIndex={0} className="ai-code-block-pre m-0 max-h-65 max-w-full overflow-auto overscroll-x-contain px-3 py-3 whitespace-pre">{children}</pre>
     </div>
   );

@@ -24,6 +24,8 @@ import {
   invokeGetCommittedAgentRuntimeEvents,
 } from '@/lib/ipc/tauri';
 import { createAgentSessionAdapter } from '@/lib/ai/agent-session-adapter';
+import { verifyTerminalDelegation } from './terminal-delegation.native';
+import { verifyQuestionSubmissionRecovery } from '@/components/ai/__tests__/question-submission.native';
 import '@/styles/base.css';
 import type { AgentSessionEvent } from '@/types/agent-session';
 
@@ -117,6 +119,16 @@ async function verify() {
     return;
   }
   await initI18n(useAppStore.getState().locale);
+  if (new URL(location.href).searchParams.get('questionSubmissionRecovery') === 'true') {
+    const selection = (await invokeListAiRoutes()).defaultSelection;
+    assert(selection, 'Configure a real model route before running question recovery acceptance');
+    await verifyQuestionSubmissionRecovery(selection);
+    return;
+  }
+  if (new URL(location.href).searchParams.get('terminalDelegation') === 'true') {
+    await verifyTerminalDelegation();
+    return;
+  }
   await getCurrentWindow().show();
   await getCurrentWindow().setFocus();
   document.documentElement.dataset.theme = 'light';
