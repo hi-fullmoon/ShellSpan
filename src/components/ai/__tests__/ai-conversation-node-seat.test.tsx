@@ -527,7 +527,7 @@ describe('AiConversationNodeList', () => {
       ['added', `3${longLine}`],
     ]);
     expect(diff.querySelector('section')).toHaveClass('min-w-0', 'max-w-full');
-    expect(diff.querySelector('.ai-block-banner')).toHaveClass('px-2.5', 'py-1.5');
+    expect(diff.querySelector('.ai-block-banner')).toHaveClass('ai-tool-surface-header', 'px-3.5', 'py-2');
     expect(diff).toHaveClass('max-h-65', 'overflow-auto');
     expect(diff.querySelector('.ai-diff-body')).toHaveClass(
       'min-w-0', 'max-w-full', 'whitespace-pre',

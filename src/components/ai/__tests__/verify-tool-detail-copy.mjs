@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, webkit } from 'playwright';
 import { createServer } from 'vite';
@@ -8,10 +10,12 @@ import tailwindcss from '@tailwindcss/vite';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const stdout = execFileSync('git', ['log', '--oneline', '-100'], { cwd: root, encoding: 'utf8' });
+const planEvents = JSON.parse(readFileSync(new URL('../../../test/fixtures/conversation-fold-runtime.json', import.meta.url), 'utf8')).completed.events;
 // Reuse the repository text that reproduced the long-summary collapse in review.
 const longSummary = readFileSync(new URL('../../../../AGENTS.md', import.meta.url), 'utf8').slice(0, 650);
 const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error',
+  cacheDir: join(tmpdir(), 'shellspan-tool-detail-copy', 'vite-cache'),
   resolve: { alias: { '@': `${root}src` } },
   esbuild: { jsx: 'automatic' },
   optimizeDeps: { include: ['react', 'react-dom/client'] },
@@ -32,7 +36,7 @@ try {
   await server.listen();
   for (const engine of [chromium, webkit]) {
     browser = await engine.launch(engine === chromium ? { channel: 'chromium' } : {});
-    const page = await browser.newPage();
+    const page = await browser.newPage(engine === chromium ? { permissions: ['clipboard-read', 'clipboard-write'] } : {});
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('requestfailed', request => errors.push(`${request.url()}: ${request.failure()?.errorText}`));
@@ -40,36 +44,55 @@ try {
       for (const scenario of [
         { state: 'failed' }, { state: 'succeeded' }, { state: 'running' },
         { state: 'running', summary: longSummary }, { state: 'succeeded', summary: longSummary },
+        { state: 'succeeded', generic: true }, { state: 'succeeded', recordedPlan: true },
       ]) {
-        const { state, summary } = scenario;
+        const { state, summary, generic, recordedPlan } = scenario;
         await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`);
-        await page.evaluate(async ({ locale, state, summary, stdout, root }) => {
-          const { default: React } = await import('/node_modules/.vite/deps/react.js');
-          const { default: ReactDOM } = await import('/node_modules/.vite/deps/react-dom_client.js');
+        const expected = await page.evaluate(async ({ locale, state, summary, stdout, root, generic, recordedPlan, planEvents }) => {
+          const { React, createRoot } = await import('/src/components/ai/__tests__/agent-content-surfaces.browser-runtime.ts');
           await import('/src/styles/base.css');
           await import('/src/components/ai/styles/styles.css');
           const { AiToolDetails } = await import('/src/components/ai/workspace/ai-tool-details.tsx');
+          const { projectAgentChatNodes } = await import('/src/lib/ai/conversation-projection.ts');
           const { initI18n } = await import('/src/locales/index.ts');
           const { useAppStore } = await import('/src/stores/appStore.ts');
           await initI18n(locale);
           useAppStore.setState({ locale });
           // Reproduce the recorded failure and render actual git output, including its running state.
           const error = state === 'failed' ? 'native result evidence did not match the frozen call' : null;
-          const node = {
-            kind: 'tool', name: error ? 'wait_process' : 'run_terminal_command', nativeName: null,
+          const node = recordedPlan ? projectAgentChatNodes(planEvents)
+            .flatMap(item => item.kind === 'turnProcess' ? item.children : [])
+            .find(item => item.kind === 'tool' && item.name === 'update_plan') : {
+            kind: 'tool', name: generic ? 'git' : error ? 'wait_process' : 'run_terminal_command', nativeName: null,
             state, summary: summary || error || 'git log --oneline -100', durationMs: null,
             input: error
               ? { maxOutputBytes: 2048, processHandle: 'proc-1f7278e9267f4637a717a4888f5681e6', timeoutMs: 2000 }
               : { command: 'git log --oneline -100', cwd: root },
-            output: error || (state === 'running' ? null : { stdout, exitCode: 0 }),
+            output: error || (state === 'running' ? null : generic ? stdout : { stdout, exitCode: 0 }),
             error, effect: 'readOnly', idempotency: 'yes',
             target: { kind: 'local', label: 'zsh' }, approval: null, evidenceRefs: [],
           };
-          ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(AiToolDetails, { node, onBack() {} }));
-        }, { locale, state, summary, stdout, root }).catch(error => {
+          if (!node) throw new Error('The real recording must contain an update_plan tool');
+          createRoot(document.getElementById('root')).render(React.createElement(AiToolDetails, { node, onBack() {} }));
+          return { input: JSON.stringify(node.input, null, 2), output: recordedPlan ? JSON.stringify(node.output, null, 2) : stdout };
+        }, { locale, state, summary, stdout, root, generic, recordedPlan, planEvents }).catch(error => {
           throw new Error(`${engine.name()}/${locale}/${state}: ${error.message}; ${errors.join('; ')}`, { cause: error });
         });
         await page.locator('.ai-detail-section').first().waitFor();
+        if (generic || recordedPlan) {
+          const output = page.locator('.ai-detail-section').nth(1);
+          assert.equal(await page.locator('.ai-detail-section').first().locator('code').textContent(), expected.input);
+          assert.equal(await output.locator('pre').textContent(), expected.output, 'The output section must contain only the complete tool result');
+          assert.equal(await output.locator('.ai-io-section').count(), 1, 'Input must not be repeated inside output');
+          assert.equal(await output.locator('.ai-io-label').count(), 0, 'The section heading already labels the output');
+          if (engine === chromium) {
+            const copy = output.getByRole('button', { name: locale === 'zh-CN' ? '复制输出' : 'Copy Output', exact: true });
+            await copy.focus();
+            await copy.press('Enter');
+            await output.getByRole('button', { name: locale === 'zh-CN' ? '已复制' : 'Copied', exact: true }).waitFor();
+            assert.equal(await page.evaluate(() => navigator.clipboard.readText()), expected.output);
+          }
+        }
         for (const { width, height } of [{ width: 390, height: 420 }, { width: 720, height: 800 }, { width: 1280, height: 1000 }]) {
           await page.setViewportSize({ width, height });
           const positions = await page.locator('.ai-tool-copy-button').evaluateAll(buttons => buttons.map(button => {
@@ -165,11 +188,14 @@ try {
             }
             await page.evaluate(() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); });
           }
-          if (state === 'succeeded') {
+          if (state === 'succeeded' && !generic && !recordedPlan) {
             const viewport = page.locator('.ai-detail-section').nth(1).locator('[data-slot="scroll-area-viewport"]');
             assert.ok(await viewport.evaluate(element => element.scrollHeight > element.clientHeight), 'Long terminal output must scroll at section level');
             assert.equal(await page.locator('.ai-terminal-output > div').evaluate(element => getComputedStyle(element).maxHeight), 'none');
             await page.screenshot({ path: `/tmp/shellspan-tool-detail-${summary ? 'long-summary-' : ''}${engine.name()}-${locale}-${width}.png` });
+          }
+          if (generic || recordedPlan) {
+            await page.screenshot({ path: `/tmp/shellspan-tool-detail-${recordedPlan ? 'plan' : 'generic'}-${engine.name()}-${locale}-${width}.png` });
           }
         }
       }

@@ -100,6 +100,7 @@ try {
           const errorCard = page.locator('[data-ai-tool-view="error"]');
           const copyButton = errorCard.getByRole('button', { name: locale === 'zh-CN' ? '复制输出' : 'Copy output', exact: true });
           const errorGeometry = await errorCard.evaluate(element => {
+            const header = element.querySelector('.ai-tool-surface-header').getBoundingClientRect();
             const label = element.querySelector('.ai-block-banner > span').getBoundingClientRect();
             const code = element.querySelector('code');
             const text = document.createRange();
@@ -111,6 +112,8 @@ try {
             const body = pre.getBoundingClientRect();
             return {
               gap: firstLine.top - label.bottom,
+              headerBottom: header.bottom,
+              lineHeight: parseFloat(getComputedStyle(pre).lineHeight),
               bodyTop: body.top,
               textTop: firstLine.top,
               textRight: body.right - parseFloat(getComputedStyle(pre).paddingRight),
@@ -119,20 +122,21 @@ try {
               bodyOwnsCopy: copy.closest('[data-ai-copy-region]')?.contains(code),
             };
           });
-          assert.ok(errorGeometry.gap >= 0 && errorGeometry.gap <= 12,
-            `Error label and diagnostic must stay close: ${JSON.stringify(errorGeometry)}`);
-          assert.equal(errorGeometry.copyInHeader, false);
-          assert.equal(errorGeometry.bodyOwnsCopy, true);
-          assert.ok(errorGeometry.buttonTop >= errorGeometry.bodyTop && Math.abs(errorGeometry.buttonTop - errorGeometry.textTop) <= 6);
-          assert.ok(errorGeometry.textRight <= errorGeometry.buttonLeft && errorGeometry.buttonRight <= width,
-            'The error copy action must sit beside the diagnostic without covering text');
+          assert.ok(Math.abs(errorGeometry.bodyTop - errorGeometry.headerBottom) < 1,
+            `The diagnostic body must directly follow its heading: ${JSON.stringify(errorGeometry)}`);
+          assert.ok(errorGeometry.gap >= 0 && errorGeometry.gap <= errorGeometry.lineHeight,
+            `Error label and diagnostic must stay within one line of each other: ${JSON.stringify(errorGeometry)}`);
+          assert.equal(errorGeometry.copyInHeader, true);
+          assert.equal(errorGeometry.bodyOwnsCopy, false);
+          assert.ok(errorGeometry.buttonTop < errorGeometry.bodyTop && errorGeometry.buttonRight <= width,
+            'The error copy action must stay in the heading above the diagnostic');
           await page.mouse.move(width - 1, 600);
           assert.equal(await copyButton.evaluate(element => getComputedStyle(element).opacity), '0',
             'The error copy icon must stay hidden until its diagnostic is hovered');
           assert.equal(await copyButton.evaluate(element => getComputedStyle(element).pointerEvents), 'none');
           await errorCard.locator('.ai-block-banner').hover();
-          assert.equal(await copyButton.evaluate(element => getComputedStyle(element).opacity), '0',
-            'Hovering the error heading must not reveal the diagnostic copy icon');
+          assert.equal(await copyButton.evaluate(element => getComputedStyle(element).opacity), '1',
+            'Hovering the error heading must reveal its copy icon');
           await errorCard.locator('[data-ai-copy-region]').hover({ position: { x: 16, y: 8 } });
           assert.equal(await copyButton.evaluate(element => getComputedStyle(element).opacity), '1');
           await page.screenshot({ path: join(screenshots, `${engine.name()}-${locale}-${width}-error-spacing.png`) });

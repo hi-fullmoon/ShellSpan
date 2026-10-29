@@ -17,8 +17,10 @@ const commandArgs = ['show', '--format=', '--unified=20', presentationRevision, 
 const commandText = `git ${commandArgs.join(' ')}`;
 const commandOutput = execFileSync('git', commandArgs, { cwd: root, encoding: 'utf8' });
 const fileOutput = await readFile(path, 'utf8');
+const capture = JSON.parse(await readFile(join(root, 'src/test/fixtures/tool-result-read-recovery.json'), 'utf8'));
 const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error',
+  cacheDir: join(screenshots, 'vite-cache'),
   resolve: { alias: { '@': `${root}src` } },
   esbuild: { jsx: 'automatic' },
   optimizeDeps: { include: ['react', 'react-dom/client'] },
@@ -40,23 +42,28 @@ try {
   browser = await chromium.launch({ channel: 'chromium' });
   const page = await browser.newPage({ permissions: ['clipboard-read', 'clipboard-write'] });
   await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`);
-  await page.evaluate(async ({ path, commandText, commandOutput, fileOutput }) => {
-    const { default: React } = await import('/node_modules/.vite/deps/react.js');
-    const { default: ReactDOM } = await import('/node_modules/.vite/deps/react-dom_client.js');
+  await page.evaluate(async ({ path, commandText, commandOutput, fileOutput, capture }) => {
+    const { React, createRoot } = await import('/src/components/ai/__tests__/agent-content-surfaces.browser-runtime.ts');
     await import('/src/styles/base.css');
     await import('/src/components/ai/styles/styles.css');
-    const { AiToolRow } = await import('/src/components/ai/workspace/ai-tool-presentation.tsx');
+    const { AiToolRow, AiToolExpandedContent } = await import('/src/components/ai/workspace/ai-tool-presentation.tsx');
+    const { projectAgentChatNodes } = await import('/src/lib/ai/conversation-projection.ts');
     const { initI18n } = await import('/src/locales/index.ts');
     await initI18n('zh-CN');
     const shared = { kind: 'tool', nativeName: null, state: 'succeeded', error: null, target: null };
-    ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(React.Fragment, null,
+    const failure = projectAgentChatNodes(capture.slice(0, 2))
+      .flatMap(node => node.kind === 'turnProcess' ? node.children : []).find(node => node.kind === 'tool');
+    if (!failure) throw new Error('Recorded tool failure is missing');
+    createRoot(document.getElementById('root')).render(React.createElement(React.Fragment, null,
       React.createElement(AiToolRow, { onInspect: () => {}, node: { ...shared, name: 'exec_command', input: { command: commandText, cwd: '~' }, output: commandOutput } }),
       React.createElement(AiToolRow, { onInspect: () => {}, node: { ...shared, name: 'read_file', input: { path }, output: fileOutput } }),
+      React.createElement(AiToolExpandedContent, { node: failure }),
+      React.createElement(AiToolExpandedContent, { node: { ...shared, name: 'git', input: { command: commandText }, output: commandOutput } }),
     ));
-  }, { path, commandText, commandOutput, fileOutput });
+  }, { path, commandText, commandOutput, fileOutput, capture });
   await page.locator('.ai-tool-row').first().click();
   await page.locator('.ai-tool-row').nth(1).click();
-  await page.locator('.ai-read-block').waitFor();
+  await page.locator('[data-ai-tool-view="read"]').waitFor();
   for (const theme of ['light', 'dark']) {
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
     for (const width of [380, 529, 720]) {
@@ -123,7 +130,7 @@ try {
       assert.deepEqual(await page.locator('.ai-terminal-header').boundingBox(), headerBeforeScroll, 'Shell title must stay fixed while output scrolls');
       await transcript.evaluate(element => element.scrollTo({ top: 0, behavior: 'instant' }));
       for (const selector of ['.ai-terminal-block', '.ai-read-block']) {
-        const surface = page.locator(selector);
+        const surface = page.locator(selector === '.ai-read-block' ? '[data-ai-tool-view="read"]' : selector);
         const details = surface.locator('..').locator('.ai-tool-inspect');
         assert.equal((await details.boundingBox()).x, (await surface.boundingBox()).x,
           `${theme}/${width}: details action must align with the card's left edge`);
@@ -133,43 +140,47 @@ try {
         if (await command.count() && await command.getAttribute('aria-expanded') !== 'true') {
           await command.click();
         }
-        await page.mouse.move(width - 1, 719);
-        await page.evaluate(() => document.activeElement?.blur());
-        assert.equal(await copy.evaluate(element => getComputedStyle(element).opacity), '0');
-        const title = surface.locator('.ai-terminal-command, .ai-block-banner > span');
-        const idleTitle = await title.boundingBox();
-        const idleHeader = await surface.locator('.ai-terminal-command-row, .ai-block-banner').boundingBox();
-        if (selector === '.ai-read-block') assert.ok(idleHeader.x + idleHeader.width - idleTitle.x - idleTitle.width <= 5,
-          `${theme}/${width}: hidden copy must not reserve read title space`);
+        await page.evaluate(() => {
+          document.activeElement?.blur();
+          window.scrollTo({ top: 0, behavior: 'instant' });
+        });
+        await page.mouse.move(0, 0);
+        assert.equal(await copy.evaluate(element => getComputedStyle(element).opacity), '0',
+          `${theme}/${width}/${selector}: ${JSON.stringify(await copy.evaluate(element => ({
+            focused: element.matches(':focus-visible'), cardHovered: element.closest('[data-ai-tool-view]').matches(':hover'),
+            regionHovered: element.parentElement.matches(':hover'), pointer: [...document.querySelectorAll(':hover')].map(item => item.className),
+          })))}`);
+        const headerRow = copy.locator('..');
+        const title = headerRow.locator(':scope > span').first();
+        const titleGeometry = () => title.evaluate(element => {
+          const box = element.getBoundingClientRect();
+          const parent = element.parentElement.getBoundingClientRect();
+          return { x: box.x - parent.x, y: box.y - parent.y, width: box.width, height: box.height };
+        });
+        const idleTitle = await titleGeometry();
+        const idleHeader = await headerRow.boundingBox();
         await surface.screenshot({ path: join(screenshots, `${theme}-${width}-${selector.slice(1)}-idle.png`) });
         await surface.hover();
         assert.equal(await copy.evaluate(element => getComputedStyle(element).opacity), '1');
-        const header = await surface.locator('.ai-terminal-command-row, .ai-block-banner').boundingBox();
+        const header = await headerRow.boundingBox();
         const button = await copy.boundingBox();
         const hoverTitle = await title.boundingBox();
-        if (selector === '.ai-read-block') assert.ok(idleTitle.width - hoverTitle.width >= button.width,
-          `${theme}/${width}: title reclaims hidden button width`);
-        else assert.deepEqual(hoverTitle, idleTitle, 'Expanded command geometry must remain stable on hover');
+        assert.deepEqual(await titleGeometry(), idleTitle, 'Heading geometry must remain stable on hover');
         assert.equal(header.height, idleHeader.height, 'Hover must not change header height');
-        if (selector === '.ai-read-block') assert.ok(hoverTitle.x + hoverTitle.width <= button.x, 'Copy must not overlap title');
+        assert.ok(hoverTitle.x + hoverTitle.width <= button.x, 'Copy must not overlap title');
         assert.ok(button.x + button.width <= header.x + header.width && button.y >= header.y);
-        if (selector === '.ai-terminal-block') {
-          assert.ok(Math.abs(button.y - header.y) <= 1,
-            'Command copy icon must align with the first command line');
-        } else {
-          assert.ok(Math.abs(button.y + button.height / 2 - hoverTitle.y - hoverTitle.height / 2) <= 1,
-            'Read path and copy button must share the same vertical center');
-          assert.ok(Math.abs(hoverTitle.y + hoverTitle.height / 2 - header.y - header.height / 2) <= 1,
-            'Read path must be vertically centered in its header');
-        }
+        assert.ok(Math.abs(button.y + button.height / 2 - hoverTitle.y - hoverTitle.height / 2) <= 1,
+          'Heading and copy button must share the same vertical center');
+        assert.ok(Math.abs(hoverTitle.y + hoverTitle.height / 2 - header.y - header.height / 2) <= 1,
+          'Heading must be vertically centered');
         await surface.screenshot({ path: join(screenshots, `${theme}-${width}-${selector.slice(1)}-hover.png`) });
-        await page.mouse.move(width - 1, 719);
+        await page.mouse.move(0, 0);
         await page.keyboard.press('Tab');
         await copy.focus();
         assert.equal(await copy.evaluate(element => getComputedStyle(element).opacity), '1');
         if (selector === '.ai-terminal-block') {
-          assert.deepEqual(await title.boundingBox(), idleTitle, 'Keyboard focus must not reflow the command');
-          assert.deepEqual(await surface.locator('.ai-terminal-command-row').boundingBox(), idleHeader);
+          assert.deepEqual(await titleGeometry(), idleTitle, 'Keyboard focus must not reflow the heading');
+          assert.equal((await headerRow.boundingBox()).height, idleHeader.height);
         }
         await copy.press('Enter');
         await page.waitForFunction(() => document.querySelector('button[aria-label="已复制"]'));
@@ -177,18 +188,18 @@ try {
         await page.waitForFunction(() => !document.querySelector('button[aria-label="已复制"]'));
         if (selector === '.ai-terminal-block') {
           await command.click();
-          await page.mouse.move(width - 1, 719);
+          await page.mouse.move(0, 0);
           await command.blur();
-          const collapsedTitle = await title.boundingBox();
+          const collapsedTitle = await titleGeometry();
           const collapsedSurface = await surface.boundingBox();
-          assert.ok(collapsedTitle.width > width / 2, 'Collapsed command must retain the transcript width');
+          assert.ok((await command.boundingBox()).width > width / 2, 'Collapsed command must retain the transcript width');
           await surface.hover();
-          assert.deepEqual(await title.boundingBox(), collapsedTitle);
-          assert.deepEqual(await surface.boundingBox(), collapsedSurface);
-          const collapsedHeader = await surface.locator('.ai-terminal-command-row').boundingBox();
+          assert.deepEqual(await titleGeometry(), collapsedTitle);
+          assert.equal((await surface.boundingBox()).height, collapsedSurface.height);
+          const collapsedHeader = await headerRow.boundingBox();
           const collapsedButton = await copy.boundingBox();
-          assert.ok(Math.abs(collapsedButton.y - collapsedHeader.y) <= 1,
-            'Copy button must align with the first line of collapsed command input');
+          assert.ok(Math.abs(collapsedButton.y + collapsedButton.height / 2 - collapsedHeader.y - collapsedHeader.height / 2) <= 1,
+            'Command copy button must remain centered in the Shell heading');
           await surface.screenshot({ path: join(screenshots, `${theme}-${width}-ai-terminal-block-collapsed.png`) });
           const outputCopy = surface.getByRole('button', { name: '复制输出', exact: true });
           await outputCopy.focus();
@@ -197,6 +208,30 @@ try {
           assert.equal(await page.evaluate(() => navigator.clipboard.readText()), commandOutput);
           await page.waitForFunction(() => !document.querySelector('button[aria-label="已复制"]'));
         }
+      }
+      const geometry = await page.locator('.ai-tool-surface-header').evaluateAll(headers => headers.map(header => {
+        const box = header.getBoundingClientRect();
+        const button = header.querySelector('.ai-tool-copy-button');
+        const copy = button.getBoundingClientRect();
+        const label = header.firstElementChild.getBoundingClientRect();
+        const style = getComputedStyle(header);
+        return { height: box.height, rightInset: box.right - copy.right, size: [copy.width, copy.height],
+          centerOffset: (copy.top + copy.bottom - box.top - box.bottom) / 2,
+          font: style.font, color: style.color, labelRight: label.right, copyLeft: copy.left,
+          right: box.right };
+      }));
+      assert.ok(geometry.length >= 7, 'Shell, file, error and input/output headings must all be measured');
+      for (const heading of geometry) {
+        assert.equal(heading.height, geometry[0].height, 'All tool headings must have equal heights');
+        assert.equal(heading.rightInset, geometry[0].rightInset, 'Copy actions must share the same right inset');
+        assert.equal(heading.font, geometry[0].font, 'Heading typography must match');
+        assert.equal(heading.color, geometry[0].color, 'Heading colors must match');
+        assert.deepEqual(heading.size, [24, 24], 'Copy actions must use the shared icon button size');
+        assert.ok(Math.abs(heading.centerOffset) < 1 && heading.labelRight <= heading.copyLeft && heading.right <= width,
+          'Copy actions must align with headings without clipping or overlapping text');
+      }
+      for (const selector of ['[data-ai-tool-view="error"]', '[data-ai-tool-view="generic"]']) {
+        await page.locator(selector).screenshot({ path: join(screenshots, `${theme}-${width}-${selector.includes('error') ? 'error' : 'generic'}.png`) });
       }
       await page.screenshot({ path: join(screenshots, `${theme}-${width}.png`) });
     }

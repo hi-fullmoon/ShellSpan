@@ -61,22 +61,30 @@ try {
           for (const width of [380, 720]) {
             await page.setViewportSize({ width, height: 720 });
             await card.evaluate(element => { element.scrollTop = 0; });
+            if (locale === 'zh-CN') await card.screenshot({ path: join(screenshots, `${engine.name()}-${theme}-${width}.png`) });
             const rows = await page.locator('.ai-io-section').evaluateAll(sections => sections.map(section => {
-              const label = section.querySelector('.ai-io-label').getBoundingClientRect();
-              const text = section.querySelector('.ai-io-text').getBoundingClientRect();
+              // Measure text rather than boxes: the body owns its padding, while the label's parent owns header padding.
+              const labelRange = document.createRange();
+              labelRange.selectNodeContents(section.querySelector('.ai-io-label'));
+              const label = labelRange.getBoundingClientRect();
+              const textRange = document.createRange();
+              textRange.selectNodeContents(section.querySelector('.ai-io-text'));
+              const text = textRange.getBoundingClientRect();
               const copy = section.querySelector('button').getBoundingClientRect();
               return { labelBottom: label.bottom, textTop: text.top, labelLeft: label.left, textLeft: text.left,
-                textRight: text.right, copyLeft: copy.left, copyRight: copy.right,
+                labelRight: label.right, copyLeft: copy.left, copyRight: copy.right, copyBottom: copy.bottom,
+                centerOffset: (copy.top + copy.bottom - label.top - label.bottom) / 2,
                 clientWidth: section.clientWidth, scrollWidth: section.scrollWidth };
             }));
             for (const row of rows) {
               assert.ok(row.labelBottom < row.textTop, `${engine.name()}/${locale}/${theme}/${width}: label must have its own row`);
-              assert.equal(row.labelLeft, row.textLeft);
-              assert.ok(row.textRight <= row.copyLeft && row.copyRight <= width);
+              assert.ok(Math.abs(row.labelLeft - row.textLeft) < 1,
+                `${engine.name()}/${locale}/${theme}/${width}: label and body text must align (${JSON.stringify(row)})`);
+              assert.ok(row.labelRight <= row.copyLeft && row.copyRight <= width);
+              assert.ok(Math.abs(row.centerOffset) < 1 && row.copyBottom <= row.textTop);
               assert.ok(row.scrollWidth <= row.clientWidth);
             }
             assert.ok((await card.boundingBox()).height <= 260);
-            if (locale === 'zh-CN') await card.screenshot({ path: join(screenshots, `${engine.name()}-${theme}-${width}.png`) });
           }
         }
         for (const [index, expected] of [JSON.stringify(input, null, 2), output].entries()) {
@@ -85,8 +93,53 @@ try {
           assert.equal(await button.evaluate(element => getComputedStyle(element).opacity), '1');
           if (engine === chromium) {
             await button.press('Enter');
-            await page.getByRole('button', { name: locale === 'zh-CN' ? '已复制' : 'Copied', exact: true }).waitFor();
+            await page.locator('.ai-io-section').nth(index).getByRole('button', { name: locale === 'zh-CN' ? '已复制' : 'Copied', exact: true }).waitFor();
             assert.equal(await page.evaluate(() => navigator.clipboard.readText()), expected);
+          }
+        }
+
+        await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`);
+        await page.evaluate(async locale => {
+          const { React, createRoot } = await import('/src/components/ai/__tests__/agent-content-surfaces.browser-runtime.ts');
+          await import('/src/styles/base.css');
+          await import('/src/components/ai/styles/styles.css');
+          const { AiToolExpandedContent } = await import('/src/components/ai/workspace/ai-tool-presentation.tsx');
+          const { projectAgentChatNodes } = await import('/src/lib/ai/conversation-projection.ts');
+          const { conversationFoldRecording } = await import('/src/test/fixtures/conversation-fold-runtime.ts');
+          const { initI18n } = await import('/src/locales/index.ts');
+          const { useAppStore } = await import('/src/stores/appStore.ts');
+          await initI18n(locale);
+          useAppStore.setState({ locale });
+          const plan = projectAgentChatNodes(conversationFoldRecording.completed.events)
+            .flatMap(item => item.kind === 'turnProcess' ? item.children : [])
+            .find(item => item.kind === 'tool' && item.name === 'update_plan');
+          if (!plan) throw new Error('Recorded plan tool is missing');
+          createRoot(document.getElementById('root')).render(React.createElement(AiToolExpandedContent, { node: plan }));
+        }, locale);
+        await card.waitFor();
+        for (const theme of ['light', 'dark']) {
+          await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+          for (const width of [380, 720]) {
+            await page.setViewportSize({ width, height: 720 });
+            for (const offset of [120, 'end']) {
+              await card.evaluate((element, offset) => { element.scrollTop = offset === 'end' ? element.scrollHeight : offset; }, offset);
+              const layout = await card.evaluate(element => ({
+                scrollTop: element.scrollTop,
+                clientWidth: element.clientWidth,
+                scrollWidth: element.scrollWidth,
+                rows: [...element.querySelectorAll('.ai-io-section')].map(section => ({
+                  labelBottom: section.querySelector('.ai-io-label').getBoundingClientRect().bottom,
+                  textTop: section.querySelector('.ai-io-text').getBoundingClientRect().top,
+                })),
+              }));
+              const context = `${engine.name()}/${locale}/${theme}/${width}/${offset}`;
+              assert.ok(layout.scrollTop > 0, `${context}: recorded plan must scroll`);
+              assert.ok(layout.scrollWidth <= layout.clientWidth, `${context}: content must fit the card`);
+              for (const row of layout.rows) {
+                assert.ok(row.labelBottom < row.textTop, `${context}: scrolled label must stay above its text`);
+              }
+              if (locale === 'zh-CN') await card.screenshot({ path: join(screenshots, `${engine.name()}-plan-${theme}-${width}-${offset === 120 ? 'middle' : 'end'}.png`) });
+            }
           }
         }
       }
@@ -94,7 +147,7 @@ try {
       await browser.close();
     }
   }
-  console.log(`Tool input/output label rows passed in Chromium/WebKit, both languages and themes, at 380px/720px. Screenshots: ${screenshots}`);
+  console.log(`Tool input/output labels and recorded plan scrolling passed in Chromium/WebKit, both languages and themes, at 380px/720px. Screenshots: ${screenshots}`);
 } finally {
   await server.close();
 }

@@ -14,6 +14,7 @@ await mkdir(screenshots, { recursive: true });
 const diagnostic = 'Target loopback HTTP request exceeded its total deadline; target loopback SSH transport exceeded its total deadline';
 const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error',
+  cacheDir: join(screenshots, 'vite-cache'),
   resolve: { alias: { '@': `${root}src` } },
   esbuild: { jsx: 'automatic' },
   optimizeDeps: { include: ['react', 'react-dom/client'] },
@@ -32,15 +33,14 @@ const server = await createServer({
 let browser;
 try {
   await server.listen();
-  browser = await chromium.launch();
+  browser = await chromium.launch({ channel: 'chromium' });
   const page = await browser.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   for (const locale of ['zh-CN', 'en-US']) {
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`);
     await page.evaluate(async ({ locale, diagnostic }) => {
-      const { default: React } = await import('/node_modules/.vite/deps/react.js');
-      const { default: ReactDOM } = await import('/node_modules/.vite/deps/react-dom_client.js');
+      const { React, createRoot } = await import('/src/components/ai/__tests__/agent-content-surfaces.browser-runtime.ts');
       await import('/src/styles/base.css');
       await import('/src/components/ai/styles/styles.css');
       const { AiToolRow } = await import('/src/components/ai/workspace/ai-tool-presentation.tsx');
@@ -48,7 +48,7 @@ try {
       const { useAppStore } = await import('/src/stores/appStore.ts');
       await initI18n(locale);
       useAppStore.setState({ locale });
-      ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(AiToolRow, {
+      createRoot(document.getElementById('root')).render(React.createElement(AiToolRow, {
         node: { kind: 'tool', name: 'probe_http', nativeName: 'probe_http', state: 'failed',
           summary: diagnostic, error: diagnostic, output: diagnostic, durationMs: null,
           input: { method: 'get', port: 80, path: '/' } },
@@ -75,7 +75,7 @@ try {
       const spacing = await page.locator('.ai-block-banner').evaluate(element => {
         const icon = element.querySelector('svg').getBoundingClientRect();
         const range = document.createRange();
-        range.selectNodeContents(element.lastChild);
+        range.selectNodeContents(element.querySelector(':scope > span'));
         return range.getBoundingClientRect().left - icon.right;
       });
       assert.ok(Math.abs(spacing - 4) < 1, `${locale}/${width}: icon/text gap must remain 4px`);

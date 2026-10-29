@@ -3,22 +3,25 @@
 .ai-search-block,
 .ai-web-block,
 .ai-diff-block,
+.ai-tool-code-block,
 .ai-io-card {
   border: 1px solid var(--ai-border-soft);
   border-radius: var(--ai-content-radius);
   background: var(--ai-code-block);
-  font: var(--ai-font-markdown-code-block-small);
-}
-
-.ai-block-banner {
-  color: var(--ai-text-secondary);
-}
-
-.ai-terminal-block {
   font: var(--ai-font-markdown-code-block);
 }
 
-.ai-terminal-header {
+.ai-block-banner,
+.ai-tool-surface-header .ai-io-label,
+.ai-tool-surface-header .ai-tool-copy-button {
+  color: var(--ai-text-secondary);
+}
+
+.ai-tool-text {
+  font: inherit;
+}
+
+.ai-tool-surface-header {
   color: var(--ai-text-secondary);
   font: 13px/20px var(--ai-font-family);
 }
@@ -42,7 +45,7 @@
     pointer-events: none;
   }
 
-  :is([data-ai-tool-view]:not([data-ai-tool-view='terminal'], [data-ai-tool-view='read'], [data-ai-tool-view='error']), .ai-markdown-code-block, .ai-approval-command, .ai-semantic-note-body, .ai-queue-notice-preview, .ai-detail-code-wrap, .ai-detail-section):hover :is(.ai-tool-copy-button, .ai-markdown-code-copy, .ai-detail-copy),
+  :is([data-ai-tool-view], .ai-markdown-code-block, .ai-approval-command, .ai-semantic-note-body, .ai-queue-notice-preview, .ai-detail-code-wrap, .ai-detail-section):hover :is(.ai-tool-copy-button, .ai-markdown-code-copy, .ai-detail-copy),
   [data-ai-copy-region]:hover > .ai-tool-copy-button,
   :is(.ai-tool-copy-button, .ai-markdown-code-copy, .ai-detail-copy):focus-visible {
     opacity: 1;
@@ -138,8 +141,6 @@
 .ai-diff-code .hljs-comment { color: var(--ai-text-muted); }
 
 .ai-io-label {
-  position: sticky;
-  top: 0;
   color: var(--ai-text-caption);
 }
 

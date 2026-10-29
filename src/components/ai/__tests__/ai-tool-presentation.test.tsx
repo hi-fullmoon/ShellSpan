@@ -14,6 +14,7 @@ import skillsCapture from '@/test/fixtures/agent-skills-runtime.json';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import type { AgentSessionEvent } from '@/types/agent-session';
 import readRecoveryCapture from '@/test/fixtures/tool-result-read-recovery.json';
+import { conversationFoldRecording } from '@/test/fixtures/conversation-fold-runtime';
 
 function capturedRead(recovered: boolean): AiConversationNodeOf<'tool'> {
   const events = readRecoveryCapture as readonly AgentSessionEvent[];
@@ -43,6 +44,42 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('AI tool presentation', () => {
+  it.each(['zh-CN', 'en-US'] as const)('shows only the recorded plan result in the output detail section in %s', async locale => {
+    useAppStore.setState({ locale });
+    await initI18n(locale);
+    const plan = projectAgentChatNodes(conversationFoldRecording.completed.events)
+      .flatMap(item => item.kind === 'turnProcess' ? item.children : [])
+      .find((item): item is AiConversationNodeOf<'tool'> => item.kind === 'tool' && item.name === 'update_plan');
+    expect(plan).toBeDefined();
+    const { container, rerender } = render(<AiToolDetails node={plan!} onBack={() => undefined} />);
+    const sections = container.querySelectorAll('.ai-detail-section');
+    expect(sections[0].querySelector('code')?.textContent).toBe(JSON.stringify(plan!.input, null, 2));
+    expect(sections[1].querySelector('pre')?.textContent).toBe(JSON.stringify(plan!.output, null, 2));
+    expect(sections[1].querySelectorAll('.ai-io-section')).toHaveLength(1);
+    expect(sections[1].querySelector('.ai-io-label')).toBeNull();
+    expect(sections[1].querySelectorAll('.ai-tool-copy-button')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: locale === 'zh-CN' ? '复制输出' : 'Copy Output' })).toBeVisible();
+
+    rerender(<AiToolExpandedContent node={plan!} />);
+    const inline = container.querySelectorAll('.ai-io-section');
+    expect(inline).toHaveLength(2);
+    expect(inline[0].querySelector('pre')?.textContent).toBe(JSON.stringify(plan!.input, null, 2));
+    expect(inline[1].querySelector('pre')?.textContent).toBe(JSON.stringify(plan!.output, null, 2));
+  });
+
+  it('shows a real generic tool result without repeating its input in the details output', () => {
+    const execution = spawnSync('git', ['log', '--oneline', '-3'], { encoding: 'utf8' });
+    expect(execution.status).toBe(0);
+    const input = { command: 'git log --oneline -3' };
+    const { container } = render(<AiToolDetails node={{
+      ...node, name: 'git', input, output: execution.stdout,
+    }} onBack={() => undefined} />);
+    const sections = container.querySelectorAll('.ai-detail-section');
+    expect(sections[0].querySelector('code')?.textContent).toBe(JSON.stringify(input, null, 2));
+    expect(sections[1].querySelector('pre')?.textContent).toBe(execution.stdout);
+    expect(sections[1].querySelectorAll('.ai-io-section')).toHaveLength(1);
+  });
+
   it.each(['zh-CN', 'en-US'] as const)('puts each input and output label above its real content in %s', async locale => {
     useAppStore.setState({ locale });
     await initI18n(locale);
@@ -58,8 +95,11 @@ describe('AI tool presentation', () => {
     expect(sections[0].querySelector('.ai-io-label')).toHaveTextContent(locale === 'zh-CN' ? '输入' : 'IN');
     expect(sections[1].querySelector('.ai-io-label')).toHaveTextContent(locale === 'zh-CN' ? '输出' : 'OUT');
     for (const section of sections) {
-      expect(section).toHaveClass('grid-cols-1', 'items-start', 'gap-y-1', 'py-3');
-      expect(section.querySelector('.ai-io-label')?.nextElementSibling).toBe(section.querySelector('pre'));
+      const header = section.querySelector('.ai-tool-surface-header');
+      expect(header).toContainElement(section.querySelector('.ai-io-label'));
+      expect(header?.nextElementSibling).toBe(section.querySelector('pre'));
+      expect(header).toContainElement(section.querySelector('.ai-tool-copy-button'));
+      expect(section.querySelector('.ai-tool-copy-button')).toHaveClass('static', 'shrink-0');
     }
     expect(container.querySelector('.ai-io-card')).toHaveClass('max-h-65', 'overflow-auto');
     expect(container.querySelector('.ai-io-divider, [data-slot="separator"]')).not.toBeInTheDocument();
@@ -136,11 +176,10 @@ describe('AI tool presentation', () => {
     expect(screen.getAllByText(failure.error!)).toHaveLength(1);
     const copy = screen.getByRole('button', { name: locale === 'zh-CN' ? '复制输出' : 'Copy output' });
     expect(copy).toBeVisible();
-    expect(copy.closest('.ai-block-banner')).toBeNull();
-    const copyRegion = copy.closest('[data-ai-copy-region]');
-    expect(copyRegion?.querySelector('code')).toHaveTextContent(failure.error!);
-    expect(copyRegion?.querySelector('pre')).toHaveClass('pt-1', 'pr-10', 'pb-3');
-    expect(container.querySelector('[data-ai-tool-view="error"] > .ai-block-banner')).toHaveClass('pt-2', 'pb-1');
+    expect(copy.closest('.ai-tool-surface-header')).toHaveTextContent(locale === 'zh-CN' ? '查看错误详情' : 'View error details');
+    expect(copy).toHaveClass('static', 'shrink-0');
+    expect(container.querySelector('[data-ai-tool-view="error"] code')).toHaveTextContent(failure.error!);
+    expect(container.querySelector('[data-ai-tool-view="error"] pre')).toHaveClass('px-3.5', 'pt-1', 'pb-3');
     expect(container.querySelector('.ai-read-line')).toBeNull();
     expect(container.querySelector('[data-error]')).toBeInTheDocument();
 
@@ -361,7 +400,7 @@ describe('AI tool presentation', () => {
     const { container, rerender } = render(<AiToolExpandedContent node={node} compact />);
     const commandCopy = screen.getByRole('button', { name: 'Copy command' });
     const outputCopy = screen.getByRole('button', { name: 'Copy output' });
-    expect(commandCopy.closest('.ai-terminal-command-row')).toBeInTheDocument();
+    expect(commandCopy.closest('.ai-terminal-header')).toBeInTheDocument();
     expect(outputCopy.closest('[data-ai-terminal-output]')).toBeInTheDocument();
     expect(commandCopy.closest('[data-ai-copy-region]')).not.toBe(outputCopy.closest('[data-ai-copy-region]'));
     expect(commandCopy.querySelector('svg')).toBeInTheDocument();
@@ -382,9 +421,9 @@ describe('AI tool presentation', () => {
     const copy = screen.getByRole('button', { name: 'Copy output' });
     const inputCopy = screen.getByRole('button', { name: 'Copy input' });
     expect(container.querySelectorAll('.ai-tool-copy-button')).toHaveLength(2);
-    expect(inputCopy).toHaveClass('absolute');
-    expect(inputCopy.closest('.ai-block-banner')).toHaveClass('relative', 'pr-9', 'pl-3.5');
-    expect(copy.closest('.ai-block-banner')).not.toBeInTheDocument();
+    expect(inputCopy).toHaveClass('static', 'shrink-0');
+    expect(inputCopy.closest('.ai-tool-surface-header')).toHaveClass('px-3.5', 'py-2');
+    expect(copy.closest('.ai-tool-surface-header')).toBeInTheDocument();
     expect(copy.closest('[data-ai-copy-region]')).not.toBe(inputCopy.closest('[data-ai-copy-region]'));
     expect(screen.queryByRole('button', { name: 'Copy command' })).not.toBeInTheDocument();
 

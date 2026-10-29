@@ -167,7 +167,7 @@ try {
             ['search', t('ai.workspace.tool.copyOutput'), data.search],
             ['web', t('ai.workspace.tool.copyOutput'), webBody],
             ['diff', t('ai.workspace.tool.copyOutput'), data.patch],
-            ['code', t('common.copy'), data.code],
+            ['code', t('ai.workspace.tool.copyInput'), data.code],
             ['code', t('ai.workspace.tool.copyOutput'), data.codeOutput],
             ['generic', t('ai.workspace.tool.copyInput'), JSON.stringify({ content: data.code }, null, 2)],
             ['generic', t('ai.workspace.tool.copyOutput'), data.file],
@@ -189,8 +189,9 @@ try {
           const button = page.locator(`#${id}`).getByRole('button', { name: label, exact: true });
           assert.equal(await button.count(), 1, `${id}/${label}: one copy icon for each content region`);
           assert.equal(await button.locator('svg').count(), 1, `${id}/${label}: icon-only action`);
-          assert.equal(await button.evaluate(element => getComputedStyle(element).position), 'absolute',
-            `${id}/${label}: copy actions must stay out of the content flow`);
+          const inHeader = await button.evaluate(element => Boolean(element.closest('.ai-tool-surface-header')));
+          assert.equal(await button.evaluate(element => getComputedStyle(element).position), inHeader ? 'static' : 'absolute',
+            `${id}/${label}: header actions must use the header layout and content actions must use overlays`);
           await page.evaluate(() => document.activeElement?.blur());
           await page.mouse.move(1, 1);
           assert.equal(await button.evaluate(element => getComputedStyle(element).opacity), '0', `${id}/${label}: copy icon must be hidden at rest`);
@@ -205,12 +206,14 @@ try {
           assert.equal(await button.evaluate(element => getComputedStyle(element).opacity), '1', `${id}/${label}: keyboard focus must reveal the copy icon`);
           if (engine === chromium && !captureAll) {
             await button.focus();
+            const copyElement = await button.elementHandle();
             await button.press('Enter');
             const copied = page.locator(`#${id}`).getByRole('button', { name: locale === 'zh-CN' ? '已复制' : 'Copied', exact: true });
             await copied.waitFor();
             assert.equal(await page.evaluate(() => navigator.clipboard.readText()), expected,
               `${id}/${label}: clipboard must contain the complete original content`);
-            await button.waitFor();
+            await page.waitForFunction(({ element, label }) => element.getAttribute('aria-label') === label,
+              { element: copyElement, label });
           }
         }
         assert.equal(await page.locator('#read .ai-read-line').count(), file.split('\n').length);
@@ -227,27 +230,28 @@ try {
             const copyPositions = await page.locator('.ai-tool-copy-button, .ai-markdown-code-copy, .ai-detail-copy').evaluateAll(elements =>
               elements.map(element => ({
                 position: getComputedStyle(element).position,
+                inHeader: Boolean(element.closest('.ai-tool-surface-header')),
                 left: element.getBoundingClientRect().left,
                 right: element.getBoundingClientRect().right,
               })));
-            assert.ok(copyPositions.every(button => button.position === 'absolute' && button.left >= 0 && button.right <= width),
-              `${engine.name()}/${locale}/${theme}/${width}: every content copy action must be absolutely positioned inside the panel`);
+            assert.ok(copyPositions.every(button => button.position === (button.inHeader ? 'static' : 'absolute') && button.left >= 0 && button.right <= width),
+              `${engine.name()}/${locale}/${theme}/${width}: copy actions must use their region's layout and stay inside the panel`);
             const terminalHeader = page.locator('#terminal .ai-terminal-header');
             assert.equal((await terminalHeader.textContent()).trim(), 'Shell', 'The Shell header must omit host and directory information');
             await page.evaluate(() => document.activeElement?.blur());
             await terminalHeader.hover();
-            assert.deepEqual(await page.locator('#terminal .ai-tool-copy-button').evaluateAll(buttons => buttons.map(button => getComputedStyle(button).opacity)), ['0', '0'],
-              'Hovering the Shell header must leave both copy icons hidden');
+            assert.deepEqual(await page.locator('#terminal .ai-tool-copy-button').evaluateAll(buttons => buttons.map(button => getComputedStyle(button).opacity)), ['1', '1'],
+              'Hovering the Shell card must reveal both copy icons');
             for (const id of ['terminal', 'read']) {
               const regions = page.locator(`#${id} [data-ai-copy-region]`);
-              assert.equal(await regions.count(), 2, `${id}: input and output have independent hover regions`);
+              assert.equal(await regions.count(), 2, `${id}: input and output each have a copy header`);
               await page.evaluate(() => document.activeElement?.blur());
               for (const index of [0, 1]) {
                 await regions.nth(index).hover({ position: { x: 5, y: 5 } });
                 for (const other of [0, 1]) {
                   const button = regions.nth(other).locator('.ai-tool-copy-button');
-                  assert.equal(await button.evaluate(element => getComputedStyle(element).opacity), index === other ? '1' : '0',
-                    `${id}/${theme}/${width}: hovering region ${index} only reveals its own copy icon`);
+                  assert.equal(await button.evaluate(element => getComputedStyle(element).opacity), '1',
+                    `${id}/${theme}/${width}: hovering the card reveals copy action ${other}`);
                 }
                 if (locale === 'en-US') await page.locator(`#${id}`).screenshot({ path: join(screenshots, `${engine.name()}-${theme}-${width}-${id}-region-${index}.png`) });
               }
