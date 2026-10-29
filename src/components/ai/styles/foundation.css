@@ -28,9 +28,10 @@
   --ai-text: var(--foreground);
   --ai-text-secondary: color-mix(in srgb, var(--foreground) 72%, transparent);
   --ai-text-muted: var(--muted-foreground);
-  --ai-code-banner: color-mix(in srgb, var(--muted) 72%, var(--card));
-  --ai-code-block: color-mix(in srgb, var(--muted) 58%, var(--card));
-  --ai-code-inline: var(--muted);
+  --ai-code-block: color-mix(in srgb, var(--ai-text) 5%, var(--ai-surface));
+  --ai-content-radius: 12px;
+  --ai-code-banner: var(--ai-code-block);
+  --ai-code-inline: var(--ai-code-block);
   --ai-scrollbar: var(--app-scrollbar-thumb);
   --ai-scrollbar-hover: var(--app-scrollbar-thumb-hover);
   --ai-accent: var(--primary);

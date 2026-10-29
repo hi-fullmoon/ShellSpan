@@ -12,7 +12,8 @@
 }
 
 .ai-semantic-note-body {
-  border-radius: 8px;
+  border: 1px solid var(--ai-border-soft);
+  border-radius: var(--ai-content-radius);
   background: var(--ai-code-block);
   color: var(--ai-text-muted);
   font: 400 11px/16px var(--ai-font-family-code);

@@ -31,7 +31,7 @@ let browser;
 try {
   await server.listen();
   for (const engine of [chromium, webkit]) {
-    browser = await engine.launch();
+    browser = await engine.launch(engine === chromium ? { channel: 'chromium' } : {});
     const page = await browser.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));

@@ -528,8 +528,9 @@ describe('AiConversationNodeList', () => {
     ]);
     expect(diff.querySelector('section')).toHaveClass('min-w-0', 'max-w-full');
     expect(diff.querySelector('.ai-block-banner')).toHaveClass('px-2.5', 'py-1.5');
+    expect(diff).toHaveClass('max-h-65', 'overflow-auto');
     expect(diff.querySelector('.ai-diff-body')).toHaveClass(
-      'min-w-0', 'max-w-full', 'overflow-auto', 'whitespace-pre',
+      'min-w-0', 'max-w-full', 'whitespace-pre',
     );
     expect(diff.querySelector('.ai-diff-body')).not.toHaveClass('whitespace-pre-wrap');
     expect(diff.querySelectorAll('[data-diff="added"]')[1]?.textContent).toBe(`3${longLine}`);
@@ -783,7 +784,7 @@ describe('AiConversationNodeList', () => {
     const card = flow.querySelector('.ai-io-card') as HTMLElement;
     const payload = flow.querySelector('.ai-io-text') as HTMLElement;
     expect(flow).toHaveClass('min-w-0');
-    expect(card).toHaveClass('max-w-[calc(100%-4px)]', 'overflow-hidden');
+    expect(card).toHaveClass('max-h-65', 'max-w-[calc(100%-4px)]', 'overflow-auto');
     expect(payload).toHaveClass('[overflow-wrap:anywhere]');
 
     const footer = screen.getByLabelText('Turn statistics');

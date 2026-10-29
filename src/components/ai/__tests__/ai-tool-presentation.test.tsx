@@ -1,6 +1,8 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 import { AiToolExpandedContent, AiToolRow, classifyAiTool } from '@/components/ai/workspace/ai-tool-presentation';
 import { AiToolDetails } from '@/components/ai/workspace/ai-tool-details';
@@ -40,6 +42,76 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('AI tool presentation', () => {
+  it('separates real tool input and output with spacing instead of a divider', () => {
+    const execution = spawnSync('git', ['log', '--oneline', '-3'], { encoding: 'utf8' });
+    expect(execution.status).toBe(0);
+    const { container } = render(<AiToolExpandedContent node={{
+      ...node, name: 'git', input: { command: 'git log --oneline -3' }, output: execution.stdout,
+    }} />);
+    const sections = [...container.querySelectorAll('.ai-io-section')];
+    expect(sections).toHaveLength(2);
+    expect(sections[0]).toHaveTextContent('git log --oneline -3');
+    expect(sections[1].querySelector('pre')?.textContent).toBe(execution.stdout);
+    for (const section of sections) expect(section).toHaveClass('py-3');
+    expect(container.querySelector('.ai-io-divider, [data-slot="separator"]')).not.toBeInTheDocument();
+  });
+
+  it.each(['read_file', 'search_text'])('shows every real %s result in a capped scrollable body', name => {
+    const path = 'package.json';
+    const execution = name === 'search_text' ? spawnSync('rg', ['--line-number', '.', path], { encoding: 'utf8' }) : null;
+    if (execution) expect(execution.status).toBe(0);
+    const output = execution?.stdout ?? readFileSync(path, 'utf8');
+    const { container } = render(<AiToolExpandedContent node={{
+      ...node, name, input: { path, query: '.' }, output,
+    }} compact />);
+    const body = container.querySelector('.ai-read-lines, .ai-search-results');
+    expect(body).toHaveClass('max-h-65', 'overflow-auto');
+    expect(body).toHaveAttribute('tabindex', '0');
+    const rows = container.querySelectorAll('.ai-read-line, .ai-search-result');
+    expect(rows).toHaveLength(name === 'read_file' ? output.split('\n').length : output.split('\n').filter(Boolean).length);
+    expect(body).not.toHaveTextContent(/… \d+ (lines|results) omitted …/u);
+  });
+
+  it('keeps every line of real command output inside the capped transcript', () => {
+    const execution = spawnSync('git', ['ls-files', 'src/components/ai/styles'], { encoding: 'utf8' });
+    expect(execution.error).toBeUndefined();
+    expect(execution.status).toBe(0);
+    const lines = execution.stdout.trimEnd().split('\n');
+    expect(lines.length).toBeGreaterThan(8);
+    const { container } = render(<AiToolExpandedContent node={{
+      ...node, input: { command: 'git ls-files src/components/ai/styles' },
+      output: { stdout: execution.stdout, exitCode: execution.status },
+    }} compact />);
+    const transcript = container.querySelector('.ai-terminal-transcript');
+    expect(transcript).toHaveClass('max-h-65', 'overflow-auto');
+    expect(transcript).toHaveAttribute('tabindex', '0');
+    expect([...container.querySelectorAll('.ai-block-line')].map(line => line.textContent)).toEqual(lines);
+    expect(container.querySelector('.ai-block-fold')).not.toBeInTheDocument();
+  });
+
+  it.each(['zh-CN', 'en-US'] as const)('shows a Shell transcript and localized exit code from a real failed command in %s', async locale => {
+    useAppStore.setState({ locale });
+    await initI18n(locale);
+    const args = ['show', 'HEAD:__shellspan_missing_file_for_presentation_check__'];
+    const execution = spawnSync('git', args, { encoding: 'utf8' });
+    expect(execution.error).toBeUndefined();
+    expect(execution.status).not.toBe(0);
+    const { container } = render(<AiToolExpandedContent node={{
+      ...node,
+      input: { command: `git ${args.join(' ')}`, cwd: process.cwd() },
+      state: 'failed', summary: execution.stderr, error: execution.stderr,
+      output: { stdout: execution.stdout, stderr: execution.stderr, exitCode: execution.status },
+    }} />);
+    expect(container.querySelector('.ai-terminal-header')).toHaveTextContent('Shell');
+    expect(container.querySelector('.ai-terminal-cwd')).toHaveAttribute('title', process.cwd());
+    expect(container.querySelector('.ai-terminal-exit')).toHaveTextContent(
+      `${locale === 'zh-CN' ? '退出码' : 'Exit'} ${execution.status}`,
+    );
+    expect(container.querySelector('[data-ai-terminal-output]')).toHaveTextContent(execution.stderr.trim());
+    expect(container.querySelector('.ai-terminal-transcript')).toHaveClass('max-h-65', 'overflow-auto');
+    expect(container.querySelector('.ai-terminal-transcript')).toHaveAttribute('aria-label', 'Shell');
+  });
+
   it.each(['zh-CN', 'en-US'] as const)('keeps recovered read errors compact and shows one diagnostic when expanded in %s', async locale => {
     useAppStore.setState({ locale });
     await initI18n(locale);
@@ -237,31 +309,56 @@ describe('AI tool presentation', () => {
     expect(screen.getByRole('button', { name: /^更新任务计划:/u })).toBeInTheDocument();
   });
 
-  it('expands a truncated command with one click and allows it to be collapsed', async () => {
+  it('limits command input to two lines and expands it with one click', async () => {
     const user = userEvent.setup();
     const { container } = render(<AiToolExpandedContent node={node} compact />);
     const toggle = screen.getByRole('button', { name: 'Show full command' });
 
     expect(toggle).toHaveTextContent(command);
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(toggle).toHaveClass('line-clamp-2');
     expect(container.querySelector('.ai-terminal-command')).toBe(toggle);
     const header = container.querySelector('.ai-terminal-header');
     const stateDot = header?.querySelector('.ai-state-dot');
-    expect(header).toHaveClass('items-start');
-    expect(stateDot).toHaveClass('mt-1.5');
+    expect(header).toHaveTextContent('Shell');
+    expect(header).toHaveClass('items-center');
+    expect(header).not.toContainElement(toggle);
+    expect(stateDot).not.toBeInTheDocument();
+    expect(container.querySelector('.ai-terminal-prompt')).toHaveTextContent('$');
+    expect(container.querySelector('.ai-terminal-output')).toContainElement(toggle);
 
     await user.click(toggle);
     expect(screen.getByRole('button', { name: 'Collapse command' })).toHaveAttribute('aria-expanded', 'true');
-    expect(header).toHaveClass('items-start');
-    expect(stateDot).toHaveClass('mt-1.5');
+    expect(toggle).toHaveClass('line-clamp-none');
+    expect(toggle).not.toHaveClass('line-clamp-2');
+    expect(header).toHaveClass('items-center');
 
     await user.click(toggle);
     expect(screen.getByRole('button', { name: 'Show full command' })).toHaveAttribute('aria-expanded', 'false');
-    expect(header).toHaveClass('items-start');
-    expect(stateDot).toHaveClass('mt-1.5');
+    expect(toggle).toHaveClass('line-clamp-2');
+    expect(header).toHaveClass('items-center');
   });
 
-  it.each(['run_terminal_command', 'read_file'])('keeps one output copy action in the %s header', (name) => {
+  it('provides separate command and output copy icons, including while running', () => {
+    const { container, rerender } = render(<AiToolExpandedContent node={node} compact />);
+    const commandCopy = screen.getByRole('button', { name: 'Copy command' });
+    const outputCopy = screen.getByRole('button', { name: 'Copy output' });
+    expect(commandCopy.closest('.ai-terminal-command-row')).toBeInTheDocument();
+    expect(outputCopy.closest('[data-ai-terminal-output]')).toBeInTheDocument();
+    expect(commandCopy.querySelector('svg')).toBeInTheDocument();
+    expect(outputCopy.querySelector('svg')).toBeInTheDocument();
+    rerender(<AiToolExpandedContent node={node} showCopyActions={false} />);
+    expect(container.querySelector('.ai-tool-copy-button')).not.toBeInTheDocument();
+    rerender(<AiToolExpandedContent node={{ ...node, state: 'running' }} />);
+    expect(screen.getByRole('button', { name: 'Copy command' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy output' })).toBeInTheDocument();
+    rerender(<AiToolExpandedContent node={{ ...node, state: 'running', output: null }} />);
+    expect(screen.getByRole('button', { name: 'Copy command' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy output' })).not.toBeInTheDocument();
+    expect(screen.queryByText('No output')).not.toBeInTheDocument();
+  });
+
+  it.each(['read_file'])('keeps one output copy action in the %s header', (name) => {
     const { container, rerender } = render(<AiToolExpandedContent node={{ ...node, name }} compact />);
     const copy = screen.getByRole('button', { name: 'Copy output' });
     expect(container.querySelectorAll('.ai-tool-copy-button')).toHaveLength(1);

@@ -196,7 +196,8 @@
 }
 
 .ai-approval-command {
-  border-radius: var(--radius-lg);
+  border: 1px solid var(--ai-border-soft);
+  border-radius: var(--ai-content-radius);
   background: var(--ai-code-block);
   color: var(--ai-text);
   font: var(--ai-font-markdown-code-block-small);

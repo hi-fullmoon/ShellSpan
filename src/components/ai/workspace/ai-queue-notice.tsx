@@ -4,6 +4,8 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useI18n } from '@/hooks/useI18n';
+import { cn } from '@/lib/utils';
+import { AiToolCopyButton } from './ai-tool-presentation';
 
 export function AiQueueNotice({ conflict, error }: {
   readonly conflict: boolean;
@@ -12,7 +14,7 @@ export function AiQueueNotice({ conflict, error }: {
   const { t } = useI18n();
   const Icon = conflict ? TriangleAlertIcon : CircleAlertIcon;
   return (
-    <Alert variant={conflict ? 'warning' : 'destructiveSubtle'} size="sm" className="min-w-0">
+    <Alert variant={conflict ? 'warning' : 'default'} size="sm" className={cn('min-w-0', !conflict && 'ai-queue-failure-notice')}>
       <Icon aria-hidden="true" />
       <AlertTitle className="min-w-0 break-words">
         {t(conflict ? 'ai.workspace.queue.conflict' : 'ai.workspace.queue.failure')}
@@ -24,8 +26,9 @@ export function AiQueueNotice({ conflict, error }: {
             {t('ai.workspace.queue.errorDetails')}
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <div className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap rounded-md bg-muted p-2 font-mono text-xs text-muted-foreground [overflow-wrap:anywhere]">
+            <div className="ai-queue-notice-preview relative mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap p-2 pr-10 font-mono text-xs text-muted-foreground [overflow-wrap:anywhere]" tabIndex={0}>
               {error}
+              <AiToolCopyButton text={error} label={t('ai.workspace.tool.copyOutput')} className="ai-content-copy absolute top-1 right-1" />
             </div>
           </CollapsibleContent>
         </Collapsible>}

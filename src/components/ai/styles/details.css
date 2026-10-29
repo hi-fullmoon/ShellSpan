@@ -34,7 +34,7 @@
 }
 
 .ai-detail-code {
-  border-radius: 12px;
+  border-radius: var(--ai-content-radius);
   background: var(--ai-code-block);
   color: var(--ai-text);
   font-family: var(--ai-font-family-code);
@@ -66,7 +66,7 @@
 
 [data-slot='ai-tool-details'] .ai-detail-section {
   border: 1px solid var(--ai-border-soft);
-  border-radius: 10px;
+  border-radius: var(--ai-content-radius);
   background: var(--ai-code-block);
 }
 
@@ -102,6 +102,7 @@
 }
 
 [data-slot='ai-tool-details'] [data-ai-tool-view] {
+  max-height: none;
   max-width: 100%;
   margin: 0;
   border: 0;
@@ -112,34 +113,34 @@
 }
 
 [data-slot='ai-tool-details'] .ai-terminal-header {
-  flex-wrap: wrap;
-  gap: 6px 8px;
   padding: 10px 14px;
 }
 
-[data-slot='ai-tool-details'] .ai-terminal-cwd {
-  min-width: 0;
-  flex: 1;
-  overflow-wrap: anywhere;
-}
-
 [data-slot='ai-tool-details'] .ai-terminal-command {
-  order: 1;
-  flex-basis: 100%;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
 /* Each detail section owns scrolling, including expanded output renderers. */
-[data-slot='ai-tool-details'] :is(.ai-detail-code, .ai-terminal-output > div, .ai-read-lines, .ai-search-results, .ai-diff-body, .ai-code-block-pre, .ai-io-section) {
+[data-slot='ai-tool-details'] :is(.ai-detail-code, .ai-terminal-output > div, .ai-read-lines, .ai-search-results, .ai-web-content, .ai-diff-body, .ai-code-content, .ai-code-block-pre, .ai-io-section) {
   max-height: none;
   overflow: visible;
 }
 
 .ai-artifact-image-surface {
-  border: 0.5px solid var(--ai-border-soft);
-  border-radius: 12px;
+  border: 1px solid var(--ai-border-soft);
+  border-radius: var(--ai-content-radius);
   background: var(--ai-code-block);
+}
+
+.ai-detail-code-wrap {
+  border: 1px solid var(--ai-border-soft);
+  border-radius: var(--ai-content-radius);
+  background: var(--ai-code-block);
+}
+
+.ai-detail-code-wrap > .ai-detail-code {
+  border-radius: 0;
 }
 
 .ai-artifact-metadata {

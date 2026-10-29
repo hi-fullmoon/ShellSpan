@@ -5,6 +5,22 @@
   color: var(--ai-text-secondary);
 }
 
+.ai-queue-notice-preview {
+  border: 1px solid var(--ai-border-soft);
+  border-radius: var(--ai-content-radius);
+  background: var(--ai-code-block);
+}
+
+.ai-queue-failure-notice {
+  border-color: var(--ai-border-soft);
+  border-radius: var(--ai-content-radius);
+  background: var(--ai-surface);
+}
+
+.ai-queue-failure-notice > svg {
+  color: var(--ai-error);
+}
+
 .ai-queue-dock {
   border: 0;
   border-radius: 12px;

@@ -28,7 +28,7 @@ import { createStreamingMarkdownSplitter } from '@/lib/streaming-markdown';
 import { taskBudgetArtifactTitleKey } from '@/lib/ai/task-token-budget';
 import { isRuntimeArtifact } from '@/lib/ai/conversation-artifact';
 import { requestErrorMessageKey, requestRetryMessageKey } from '@/lib/ai/request-error';
-import { AiToolRow } from './ai-tool-presentation';
+import { AiToolCopyButton, AiToolRow } from './ai-tool-presentation';
 import { AiTurnFooter } from './ai-turn-footer';
 import { AiProcessingStatus } from './ai-processing-status';
 import { AiCompactionStatus } from './ai-compaction-status';
@@ -104,8 +104,9 @@ function SemanticNoteDisclosure({
         </MarkerPrimitive>
         <CollapsibleContent>
           <Separator className="ai-semantic-note-separator" />
-          <div className="ai-semantic-note-body mt-1 ml-[22px] box-border max-h-[141px] w-[calc(100%-22px)] overflow-auto pt-2.5 pr-4 pb-3 pl-3 whitespace-pre-wrap [overflow-wrap:anywhere]">
+          <div className="ai-semantic-note-body relative mt-1 ml-[22px] box-border max-h-[141px] w-[calc(100%-22px)] overflow-auto pt-2.5 pr-10 pb-3 pl-3 whitespace-pre-wrap [overflow-wrap:anywhere]">
             {body}
+            <AiToolCopyButton text={body} className="ai-content-copy absolute top-1 right-1" />
           </div>
         </CollapsibleContent>
       </div>

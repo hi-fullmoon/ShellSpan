@@ -203,7 +203,7 @@ function MarkdownCodeBlock({
           </Button>
         )}
       </div>}
-      <pre tabIndex={0} className="ai-code-block-pre m-0 max-w-full overflow-x-auto overscroll-x-contain px-3 py-3 whitespace-pre">{children}</pre>
+      <pre tabIndex={0} className="ai-code-block-pre m-0 max-h-65 max-w-full overflow-auto overscroll-x-contain px-3 py-3 whitespace-pre">{children}</pre>
     </div>
   );
 }

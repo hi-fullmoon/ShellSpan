@@ -255,7 +255,8 @@
 }
 
 .ai-code-block {
-  border-radius: 12px;
+  border: 1px solid var(--ai-border-soft);
+  border-radius: var(--ai-content-radius);
   background: var(--ai-code-block);
   color: var(--ai-text);
 }
@@ -286,13 +287,6 @@
   padding: 0;
   background: none;
   font: inherit;
-}
-
-/* Message code uses a single quiet surface; tool result cards keep their layout. */
-.ai-markdown-code-block {
-  border: 1px solid var(--ai-border-soft);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--muted) 30%, var(--card));
 }
 
 .ai-markdown-code-toolbar {
