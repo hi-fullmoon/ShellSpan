@@ -70,6 +70,20 @@ function isNearBottom(viewport: HTMLElement): boolean {
   return distanceToBottom(viewport) <= SCROLL_EDGE_THRESHOLD;
 }
 
+function canNestedViewportScroll(viewport: HTMLElement, target: EventTarget, deltaY: number): boolean {
+  if (deltaY === 0) return false;
+  for (let element = target instanceof Element ? target : null;
+    element && element !== viewport; element = element.parentElement) {
+    if (element.clientHeight === 0 || element.scrollHeight <= element.clientHeight) continue;
+    const remaining = deltaY < 0 ? element.scrollTop
+      : element.scrollHeight - element.clientHeight - element.scrollTop;
+    if (remaining <= 0.5) continue;
+    const overflow = getComputedStyle(element).overflowY;
+    if (overflow === 'auto' || overflow === 'scroll' || overflow === 'overlay') return true;
+  }
+  return false;
+}
+
 function wantsScrollAnchor(child: React.ReactNode): boolean {
   return React.isValidElement<{ role?: string; scrollAnchor?: boolean }>(child)
     && (child.props.scrollAnchor ?? child.props.role === 'user');
@@ -162,6 +176,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
   const followIntentRef = useRef(following);
   followIntentRef.current = following;
   const setScrollMode = useCallback((mode: ConversationScrollMode) => {
+    if (modeRef.current === mode) return;
     modeRef.current = mode;
     followIntentRef.current = mode === 'following';
     onScrollModeChange(mode);
@@ -380,7 +395,10 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
     };
   }, []);
 
-  const handleScrollCapture = useCallback(() => {
+  const handleScrollCapture = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    // Native capture also receives scrolls from code/output viewports. They
+    // neither move this scrollport nor establish intent to resume following.
+    if (event.target !== event.currentTarget) return;
     updateBottomVisibility();
     if (pauseForSelection()) return;
     const viewport = viewportRef.current;
@@ -438,6 +456,17 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
   const handleWheelCapture = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
     if (pauseForSelection()) return;
     const viewport = viewportRef.current;
+    if (viewport && canNestedViewportScroll(viewport, event.target, event.deltaY)) {
+      wheelScrollStartRef.current = null;
+      resumeFollowOnScrollRef.current = false;
+      setFollowIntent(false);
+      suppressProgrammaticFollowRef.current = true;
+      interruptRestore();
+      // Let the nested viewport and the primitive receive native input. Do not
+      // write the outer position; at a nested edge normal scroll chaining and
+      // the outer wheel path below take over on the next wheel movement.
+      return;
+    }
     if (event.deltaY < 0) {
       wheelScrollStartRef.current = null;
       setFollowIntent(false);
@@ -453,7 +482,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
         // Keep the primitive in reading mode too. Its free-scrolling mode can
         // resume following when a resize sees the content edge before the
         // native wheel movement, even while the turn spacer is still visible.
-        preserveHistoryPosition();
+        if (!suppressProgrammaticFollowRef.current) preserveHistoryPosition();
         event.stopPropagation();
         return;
       }

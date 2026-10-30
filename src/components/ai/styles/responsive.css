@@ -31,6 +31,23 @@
   background: var(--app-scrollbar-thumb-hover);
 }
 
+@media (hover: hover) {
+  /* Keep the tracks' dimensions stable while only hiding their paint. */
+  .ai-tool-scroll-area:not(:hover) > [data-slot='scroll-area-scrollbar'] {
+    opacity: 0;
+  }
+
+  .ai-panel-shell :is(.ai-code-block, .ai-read-block, .ai-search-block, .ai-web-block):not(:hover) ::-webkit-scrollbar-thumb {
+    background: transparent;
+  }
+
+  @supports not selector(::-webkit-scrollbar) {
+    .ai-panel-shell :is(.ai-code-block, .ai-read-block, .ai-search-block, .ai-web-block):not(:hover) :is(pre, .ai-search-results, .ai-web-content) {
+      scrollbar-color: transparent transparent;
+    }
+  }
+}
+
 @container ai-workspace (min-width: 400px) {
   .ai-workspace-root {
     --ai-shell-clearance: 16px;
