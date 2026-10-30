@@ -12,8 +12,7 @@
 }
 
 .ai-block-banner,
-.ai-tool-surface-header .ai-io-label,
-.ai-tool-surface-header .ai-tool-copy-button {
+.ai-tool-surface-header .ai-io-label {
   color: var(--ai-text-secondary);
 }
 
@@ -30,13 +29,14 @@
   color: var(--ai-text-muted);
 }
 
-:is(.ai-terminal-block, .ai-read-block) .ai-tool-copy-button {
+:is(.ai-tool-copy-button, .ai-markdown-code-copy, .ai-detail-copy) {
+  background: var(--ai-code-block);
   color: var(--ai-text-secondary);
 }
 
-.ai-content-copy {
-  background: var(--ai-code-block);
-  color: var(--ai-text-secondary);
+:is(.ai-tool-copy-button, .ai-markdown-code-copy, .ai-detail-copy):is(:hover, :focus-visible) {
+  background: var(--ai-action-hover-solid);
+  color: var(--ai-text);
 }
 
 @media (hover: hover) {

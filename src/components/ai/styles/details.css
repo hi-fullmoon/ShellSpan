@@ -44,8 +44,6 @@
 
 .ai-detail-copy[data-slot='button'] {
   border-radius: 50%;
-  background: color-mix(in srgb, var(--ai-code-block) 92%, transparent);
-  color: var(--ai-text-muted);
 }
 
 .ai-detail-summary p {

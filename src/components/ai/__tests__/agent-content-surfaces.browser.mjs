@@ -236,6 +236,44 @@ try {
               })));
             assert.ok(copyPositions.every(button => button.position === (button.inHeader ? 'static' : 'absolute') && button.left >= 0 && button.right <= width),
               `${engine.name()}/${locale}/${theme}/${width}: copy actions must use their region's layout and stay inside the panel`);
+            for (const [id, selector, last] of [
+              ['terminal', '.ai-tool-copy-button', false],
+              ['read', '.ai-tool-copy-button', true],
+              ['markdown', '.ai-markdown-code-copy', false],
+              ['artifact-text', '.ai-detail-copy', false],
+            ]) {
+              const buttons = page.locator(`#${id} ${selector}`);
+              const button = last ? buttons.last() : buttons.first();
+              await page.mouse.move(0, 0);
+              await page.keyboard.press('Tab');
+              await button.focus();
+              await button.hover();
+              await button.evaluate(element => element.blur());
+              const appearance = async () => button.evaluate(async element => {
+                await Promise.all(element.getAnimations().map(animation => animation.finished.catch(() => {})));
+                const probe = document.createElement('span');
+                probe.style.backgroundColor = 'var(--ai-action-hover-solid)';
+                probe.style.color = 'var(--ai-text)';
+                element.append(probe);
+                const expected = getComputedStyle(probe);
+                const actual = getComputedStyle(element);
+                const result = { background: actual.backgroundColor, color: actual.color,
+                  expectedBackground: expected.backgroundColor, expectedColor: expected.color, opacity: actual.opacity };
+                probe.remove();
+                return result;
+              });
+              const hover = await appearance();
+              assert.equal(hover.background, hover.expectedBackground, `${id}: copy hover background must use the shared action surface`);
+              assert.equal(hover.color, hover.expectedColor, `${id}: copy hover icon must use the shared foreground`);
+              assert.equal(hover.opacity, '1', `${id}: hovering the copy button must keep it visible`);
+              if (locale === 'zh-CN') await button.screenshot({ path: join(screenshots, `${engine.name()}-${theme}-${width}-${id}-copy-hover.png`) });
+              await page.mouse.move(0, 0);
+              await page.keyboard.press('Tab');
+              await button.focus();
+              const focus = await appearance();
+              assert.deepEqual(focus, hover, `${id}: keyboard focus must provide the same feedback as pointer hover`);
+              await button.blur();
+            }
             const terminalHeader = page.locator('#terminal .ai-terminal-header');
             assert.equal((await terminalHeader.textContent()).trim(), 'Shell', 'The Shell header must omit host and directory information');
             await page.evaluate(() => document.activeElement?.blur());
