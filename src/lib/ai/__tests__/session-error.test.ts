@@ -20,6 +20,7 @@ describe('normalizeAiSessionError', () => {
     ['Session is already busy', 'conflict', true],
     ['Request cancelled', 'cancelled', false],
     ['Terminal session ended', 'terminal', false],
+    ['subagentBudgetExhausted: cumulative child budget is exhausted', 'terminal', false],
     ['Unexpected adapter failure', 'unknown', true],
   ] as const)('normalizes %s', (message, kind, retryable) => {
     expect(normalizeAiSessionError(new Error(message))).toEqual({ kind, message, retryable });

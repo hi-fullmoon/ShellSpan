@@ -281,6 +281,7 @@ export function reduceAiComposer(
       if (state.phase === 'stopping') return rejected(state, 'stopping');
       const failed = state.failedDrafts.find((entry) => entry.id === event.failedDraftId);
       if (!failed) return { state, effects: [] };
+      if (!failed.error.retryable) return { state, effects: [] };
       const decision = resolveAiSubmission({
         sessionStatus: state.runtimeStatus,
         terminal: state.terminal,

@@ -68,7 +68,7 @@ describe('Phase 6 Queue Dock', () => {
     const update = vi.fn();
     const remove = vi.fn();
     const reorder = vi.fn();
-    render(
+    const { rerender } = render(
       <AiQueueDock
         items={queue}
         onUpdate={update}
@@ -82,6 +82,9 @@ describe('Phase 6 Queue Dock', () => {
     await user.clear(input);
     await user.type(input, 'Updated task{Enter}');
     expect(update).toHaveBeenCalledWith(queue[0], 'Updated task');
+    expect(input).toHaveValue('Updated task');
+    rerender(<AiQueueDock items={[{ ...queue[0], content: 'Updated task' }, queue[1]]}
+      onUpdate={update} onRemove={remove} onReorder={reorder} />);
 
     await user.click(screen.getAllByRole('button', { name: 'Reorder queued input' })[0]);
     await user.click(await screen.findByRole('menuitem', { name: 'Move down' }));
@@ -114,7 +117,8 @@ describe('Phase 6 Queue Dock', () => {
     await user.keyboard('{Enter}');
     await user.clear(screen.getByRole('textbox'));
     await user.type(screen.getByRole('textbox'), 'Saved text{Enter}');
-    expect(screen.getByRole('button', { name: 'Edit queued input' })).toBeDisabled();
+    expect(screen.getByRole('textbox')).toHaveValue('Saved text');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
     rerender(<AiQueueDock items={[{ ...queue[0], content: 'Saved text' }]} onUpdate={save} />);
     expect(screen.getByRole('button', { name: 'Edit queued input' })).toHaveFocus();
     expect(update).toHaveBeenCalledExactlyOnceWith(queue[0], 'Saved text');

@@ -32,6 +32,7 @@ import { AiEmptyHero } from './ai-empty-hero';
 import { AiConversation } from './ai-conversation';
 import { AiFailureRecoveryContext } from './ai-failure-recovery';
 import { latestFailureRecovery } from '@/lib/ai/failure-recovery';
+import { childBudgetExhausted } from '@/lib/ai/subagent-continuation';
 import { terminalExecutionRecovery } from '@/lib/ai/terminal-execution-recovery';
 import { AiTerminalRecoveryNotice } from './ai-terminal-recovery-notice';
 import { aiAskConversationNodeRenderers } from './ai-conversation-node-seat';
@@ -271,6 +272,7 @@ export interface AiWorkspaceRootProps {
   readonly onRefreshQuestionAnswer?: (input: import('@/types/agent-question').AnswerQuestionInput) => Promise<void>;
   readonly loadingOlder?: boolean;
   readonly queueMutation?: AiQueueMutationState | null;
+  readonly onRetryQueueMutation?: () => void;
   readonly renamingSessionId?: string | null;
   readonly renameError?: string | null;
   readonly canStartAgent?: boolean;
@@ -295,6 +297,7 @@ export interface AiWorkspaceRootProps {
   readonly onBusyPreferenceChange?: (value: 'queue' | 'steer') => void;
   readonly onDismissError?: () => void;
   readonly onRetryFailedDraft?: (id: string) => void;
+  readonly failedDraftRetryBlockedReason?: string | null;
   readonly onRetrySync?: () => Promise<void>;
   readonly onOpenModel?: () => void;
   readonly onRetryModel?: (turnId: string) => void;
@@ -366,6 +369,7 @@ export function AiWorkspaceRoot({
   projectTargetLabel,
   loadingOlder = false,
   queueMutation = null,
+  onRetryQueueMutation,
   renamingSessionId = null,
   renameError = null,
   canStartAgent = false,
@@ -390,6 +394,7 @@ export function AiWorkspaceRoot({
   onBusyPreferenceChange,
   onDismissError,
   onRetryFailedDraft,
+  failedDraftRetryBlockedReason,
   onRetrySync,
   onOpenModel,
   onRetryModel,
@@ -593,6 +598,7 @@ export function AiWorkspaceRoot({
           ? (
               <AiSubagentCatalog
                 {...lineage}
+                currentBudgetExhausted={childBudgetExhausted(view?.snapshot.value)}
                 onOpen={onOpenSession}
                 onRefresh={onRefreshSessions}
               />
@@ -700,6 +706,7 @@ export function AiWorkspaceRoot({
                 onRetrySync={onRetrySync}
                 onDismissError={onDismissError}
                 onRetryFailedDraft={onRetryFailedDraft}
+                failedDraftRetryBlockedReason={failedDraftRetryBlockedReason}
               />
 
               <div
@@ -794,6 +801,7 @@ export function AiWorkspaceRoot({
           taskSteps={surfaceMode === 'agent' && (!readOnlySession || subagent) ? taskSteps : undefined}
           taskPlanActive={terminalRecovery ? false : view?.taskPlanActive}
           queueMutation={surfaceMode === 'agent' && !readOnlySession ? queueMutation : undefined}
+          onRetryQueueMutation={surfaceMode === 'agent' && !readOnlySession ? onRetryQueueMutation : undefined}
           queueMutable={Boolean(view && !terminalRecovery && !readOnlySession && !view.summary.archived && (!view.snapshot.value.ended || view.status === 'failed'))}
           announcement={announcement}
           pendingApproval={surfaceMode === 'agent' && !readOnlySession ? view?.pendingApproval : undefined}

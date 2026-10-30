@@ -2187,12 +2187,19 @@ fn child_handoff_data(
     }))
 }
 
-pub(super) fn child_has_remaining_budget(
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AgentChildContinuation {
+    pub(crate) budget_exhausted: bool,
+    pub(crate) expires_at_unix_ms: u64,
+}
+
+pub(super) fn child_continuation(
     budget: &AgentSubagentBudget,
     events: &[super::AgentSessionEvent],
     max_turns: usize,
     now: u64,
-) -> bool {
+) -> AgentChildContinuation {
     let turns = events
         .iter()
         .filter(|event| matches!(event.payload, AgentSessionEventPayload::TurnStart))
@@ -2204,14 +2211,30 @@ pub(super) fn child_has_remaining_budget(
             _ => None,
         })
         .fold(0_u64, u64::saturating_add);
-    turns < max_turns.min(budget.max_turns as usize)
+    let within_budget = turns < max_turns.min(budget.max_turns as usize)
         && budget
             .max_tool_calls
             .is_none_or(|limit| super::tool_pipeline::admitted_tool_calls(events) < limit)
         && budget.max_tokens.is_none_or(|limit| tokens < limit)
         && events
             .first()
-            .is_some_and(|event| now.saturating_sub(event.time_unix_ms) < budget.timeout_ms)
+            .is_some_and(|event| now.saturating_sub(event.time_unix_ms) < budget.timeout_ms);
+    AgentChildContinuation {
+        budget_exhausted: !within_budget,
+        expires_at_unix_ms: events
+            .first()
+            .map(|event| event.time_unix_ms.saturating_add(budget.timeout_ms))
+            .unwrap_or(now),
+    }
+}
+
+pub(super) fn child_has_remaining_budget(
+    budget: &AgentSubagentBudget,
+    events: &[super::AgentSessionEvent],
+    max_turns: usize,
+    now: u64,
+) -> bool {
+    !child_continuation(budget, events, max_turns, now).budget_exhausted
 }
 
 fn partial_tool_results(events: &[super::AgentSessionEvent]) -> Vec<serde_json::Value> {

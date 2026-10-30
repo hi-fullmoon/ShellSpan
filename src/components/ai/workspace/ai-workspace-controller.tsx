@@ -156,6 +156,7 @@ export function AiWorkspaceController({
       approvalArgumentsError={controller.approvalArgumentsError}
       loadingOlder={controller.loadingOlder}
       queueMutation={controller.queueMutation}
+      onRetryQueueMutation={controller.retryQueueMutation}
       renamingSessionId={controller.renamingSessionId}
       renameError={controller.renameError}
       canStartAgent={controller.canStartAgent}
@@ -227,6 +228,7 @@ export function AiWorkspaceController({
       onBusyPreferenceChange={controller.setBusyPreference}
       onDismissError={controller.dismissError}
       onRetryFailedDraft={controller.retryFailedDraft}
+      failedDraftRetryBlockedReason={controller.failedDraftRetryBlockedReason}
       onRetrySync={controller.retrySync}
       onRetryModel={controller.canStartAgent ? controller.retryModel : undefined}
       retryingModel={controller.retryingModel}

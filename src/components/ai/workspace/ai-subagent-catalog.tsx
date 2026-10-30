@@ -45,11 +45,13 @@ function statusLabel(status: AgentSessionRuntimeStatus, t: ReturnType<typeof use
 function CatalogRows({
   entries,
   currentSessionId,
+  currentBudgetExhausted,
   close,
   onOpen,
 }: {
   readonly entries: readonly AiSubagentCatalogEntry[];
   readonly currentSessionId: string;
+  readonly currentBudgetExhausted: boolean;
   readonly close: () => void;
   readonly onOpen: (summary: AiSessionSummary) => void;
 }): React.ReactNode {
@@ -59,7 +61,8 @@ function CatalogRows({
       {entries.map((entry) => {
         const current = entry.summary.id === currentSessionId;
         const role = roleLabel(entry.role, t);
-        const mode = t(entry.continuable
+        const mode = t(current && currentBudgetExhausted
+          ? 'ai.workspace.subagents.mode.budgetExhausted' : entry.continuable
           ? 'ai.workspace.subagents.mode.continuable'
           : 'ai.workspace.subagents.mode.oneShot');
         const status = statusLabel(entry.status, t);
@@ -123,12 +126,14 @@ function CatalogRows({
 export function AiSubagentCatalog({
   root,
   current,
+  currentBudgetExhausted = false,
   entries,
   onOpen,
   onRefresh,
 }: {
   readonly root: AiSessionSummary;
   readonly current: AiSessionSummary;
+  readonly currentBudgetExhausted?: boolean;
   readonly entries: readonly AiSubagentCatalogEntry[];
   readonly onOpen: (summary: AiSessionSummary) => void;
   readonly onRefresh?: () => void;
@@ -170,6 +175,7 @@ export function AiSubagentCatalog({
     <CatalogRows
       entries={presentedEntries}
       currentSessionId={current.id}
+      currentBudgetExhausted={currentBudgetExhausted}
       close={() => setOpen(false)}
       onOpen={onOpen}
     />

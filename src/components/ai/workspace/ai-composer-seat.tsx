@@ -84,6 +84,7 @@ export interface AiComposerSeatProps extends ComposerHistoryProps {
   readonly taskPlanActive?: boolean;
   readonly queueMutable?: boolean;
   readonly queueMutation?: AiQueueMutationState | null;
+  readonly onRetryQueueMutation?: () => void;
   readonly announcement?: string | null;
   readonly pendingApproval?: AiPendingApproval | null;
   readonly pendingQuestion?: import('@/types/agent-question').AgentQuestionView | null;
@@ -142,6 +143,7 @@ export function AiComposerSeat({
   taskSteps = [],
   taskPlanActive = false,
   queueMutation = null,
+  onRetryQueueMutation,
   queueMutable = true,
   announcement,
   pendingApproval,
@@ -478,6 +480,7 @@ export function AiComposerSeat({
         {mode === 'agent' && <AiQueueDock
           items={queueItems}
           mutation={queueMutation}
+          onRetry={onRetryQueueMutation}
           running={status === 'running'}
           mutable={!stopping && queueMutable && !['completed', 'cancelled'].includes(status)}
           resumeOnly={status === 'failed'}

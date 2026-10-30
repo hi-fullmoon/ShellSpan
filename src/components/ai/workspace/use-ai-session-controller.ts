@@ -16,6 +16,8 @@ import { listProjectDirectories as readProjectDirectories } from '@/lib/ai/proje
 import { questionKey } from '@/types/agent-question';
 import { QuestionSubmissionError, questionSubmissionIssue, reconcileQuestionSubmission } from '@/lib/ai/question-submission';
 import { useImageDraft } from './use-image-draft';
+import { useSubagentBudget } from './use-subagent-budget';
+import { childBudgetExhausted } from '@/lib/ai/subagent-continuation';
 import { sessionProviderConfig } from '@/lib/ai/session-settings';
 import { initialSessionIntent } from '@/lib/ai/session-intent';
 import { belongsToAiWorkspace, isTopLevelAiSession, listAllAiSessions } from '@/lib/ai/session-list';
@@ -158,6 +160,7 @@ export interface AiSessionController {
   readonly historicalContinuationBusy: boolean;
   readonly historicalContinuationError: string | null;
   readonly retryFailedDraft: (failedDraftId: string) => void;
+  readonly failedDraftRetryBlockedReason: string | null;
   readonly dismissError: () => void;
   readonly retrySync: () => Promise<void>;
   readonly retryModel: (turnId: string) => void;
@@ -1241,6 +1244,7 @@ export function useAiSessionController({
   }, [providers, visibleView]);
   const oneShotSubagent = visibleView?.snapshot.value.header.subagent?.continuable === false;
   const isSubagent = Boolean(visibleView?.snapshot.value.header.subagent);
+  const subagentBudgetExhausted = useSubagentBudget(visibleView?.snapshot.value, now);
   const endedSubagent = isSubagent && Boolean(visibleView?.snapshot.value.ended
     || visibleView?.summary.archived || visibleView?.snapshot.value.archived
     || ['completed', 'cancelled', 'failed'].includes(visibleView?.status ?? 'idle'));
@@ -1326,6 +1330,7 @@ export function useAiSessionController({
   const agentUnavailableReason = terminalSessionRestoring ? null
     : terminalConflict ? t('terminal.occupancy.submitBlocked') : visibleExecutionRequired ? t('focus.visibleRequired') : oneShotSubagent
     ? t('ai.workspace.subagents.oneShotReadOnly')
+    : subagentBudgetExhausted ? t('ai.error.childRecoveryBudgetExhausted')
     : canVerifyCurrentTerminal ? t(terminalReconnectBusy ? 'ai.workspace.reconnectChecking' : 'ai.workspace.reconnectAvailable')
     : canContinueHistoricalView ? terminalUnavailableReason
       : sessionProviderResolution.error
@@ -1857,6 +1862,24 @@ export function useAiSessionController({
     dispatch({ type: 'draft.changed', value: [composerRef.current.draft, text].filter(Boolean).join('\n\n') });
   }, [activeTerminalId, claimWorkspace, dispatch, focusMode, scope, terminalInsertions, workspaceChanging]);
 
+  const retrySync = async (): Promise<void> => {
+    const sessionId = viewRef.current?.summary.id;
+    const context = submissionContextRef.current;
+    if (!sessionId) return;
+    try {
+      const refreshed = await (adapter.retrySync ? adapter.retrySync(sessionId) : adapter.refresh(sessionId));
+      if (mountedRef.current && submissionContextRef.current === context && viewRef.current?.summary.id === sessionId) {
+        viewRef.current = refreshed;
+        setView(refreshed);
+      }
+    } catch (error) {
+      // Stream failures remain in the persistent synchronization notice.
+      if (mountedRef.current && submissionContextRef.current === context && !viewRef.current?.syncError) {
+        dispatch({ type: 'error.reported', error: normalizeAiSessionError(error) });
+      }
+    }
+  };
+
   return {
     submissionContext: submissionContextRef.current,
     imageDraft: {
@@ -1985,6 +2008,8 @@ export function useAiSessionController({
       if (terminalSessionRestoring) return;
       const child = viewRef.current?.snapshot.value.header.subagent;
       if (child && readOnlySession) return;
+      if (child && childBudgetExhausted(viewRef.current?.snapshot.value, now())
+        && composerRef.current.draft.trim()) return;
       const owner = agentTerminalLeaseState.get(activeTerminal?.sessionId ?? null);
       const ownSession = viewRef.current?.summary.id ?? composerRef.current.sessionId;
       // Child follow-ups use sendChildInput; they do not acquire a terminal lease.
@@ -2089,6 +2114,13 @@ export function useAiSessionController({
     historicalContinuationBusy,
     historicalContinuationError,
     retryFailedDraft: (failedDraftId) => {
+      const failed = composerRef.current.failedDrafts.find(item => item.id === failedDraftId);
+      if (!failed?.error.retryable) return;
+      if (childBudgetExhausted(viewRef.current?.snapshot.value, now())) {
+        if (failed.error.deliveryUnknown) void retrySync();
+        else toast.error(t('ai.error.childRecoveryBudgetExhausted'));
+        return;
+      }
       if (!canStartAgent) {
         setAnnouncement('sessionUnavailable');
         return;
@@ -2103,6 +2135,7 @@ export function useAiSessionController({
         canCreateSession: canStartAgent,
       });
     },
+    failedDraftRetryBlockedReason: subagentBudgetExhausted ? t('ai.error.childRecoveryBudgetExhausted') : null,
     dismissError: () => dispatch({ type: 'error.dismissed' }),
     retryingModel: retryingModelSession === view?.summary.id,
     retryModel: (turnId) => {
@@ -2123,20 +2156,7 @@ export function useAiSessionController({
         if (mountedRef.current) setRetryingModelSession(null);
       });
     },
-    retrySync: async () => {
-      const sessionId = viewRef.current?.summary.id;
-      const context = submissionContextRef.current;
-      if (!sessionId || !adapter.retrySync) return;
-      try {
-        await adapter.retrySync(sessionId);
-      } catch (error) {
-        // Stream failures remain in the persistent synchronization notice.
-        if (mountedRef.current && submissionContextRef.current === context
-          && !viewRef.current?.syncError) {
-          dispatch({ type: 'error.reported', error: normalizeAiSessionError(error) });
-        }
-      }
-    },
+    retrySync,
     openSessions,
     openSession,
     newSession,

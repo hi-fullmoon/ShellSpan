@@ -248,9 +248,16 @@ export class AgentSessionCommittedClient {
 
   private async refreshChildSnapshot(signal: AbortSignal): Promise<void> {
     if (!this.snapshotValue?.header.subagent) return;
+    const budget = this.snapshotValue.header.subagent.budget;
     for (let index = this.childSnapshotSeq + 1; index < this.events.length; index++) {
       const event = this.events.get(index)!;
-      if (event.type !== 'session/ended' && event.type !== 'subagent/recovery_started') {
+      const budgetChanged = event.type === 'turn/start'
+        || (budget.maxTokens !== undefined && event.type === 'request/usage')
+        || (budget.maxToolCalls !== undefined && (event.type === 'tool/call'
+          || (event.type === 'tool/result' && typeof event.data.data === 'object' && event.data.data !== null
+            && 'schedulerAdmission' in event.data.data && event.data.data.schedulerAdmission === 'notStarted')));
+      if (event.type !== 'session/ended' && event.type !== 'subagent/recovery_started'
+        && event.type !== 'turn/end' && !budgetChanged) {
         this.childSnapshotSeq = event.seq;
         continue;
       }

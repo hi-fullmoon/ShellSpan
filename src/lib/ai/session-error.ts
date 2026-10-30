@@ -32,6 +32,9 @@ export function normalizeAiSessionError(error: unknown): AiSessionError {
       : JSON.stringify(error);
   const text = message.toLowerCase();
   const revision = /current revision\s+(\d+)/i.exec(message);
+  if (text.startsWith('subagentbudgetexhausted:')) {
+    return { kind: 'terminal', message, retryable: false };
+  }
   if (/unauthori[sz]ed|forbidden|api key|authentication|401|403/.test(text)) {
     return { kind: 'auth', message, retryable: true };
   }

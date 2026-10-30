@@ -161,6 +161,169 @@ fn set_waiting(manager: &SubAgentManager, entry: &AgentEntry) {
 }
 
 #[tokio::test]
+async fn child_continuation_snapshot_tracks_committed_budget_and_deadline() {
+    let (root, manager, entry) = setup_with_budget(AgentSubagentBudget {
+        max_turns: 1,
+        ..default_subagent_budget()
+    });
+    let available = manager.sessions.snapshot(&entry.session_id).unwrap();
+    let available_events = manager.sessions.all_events(&entry.session_id).unwrap();
+    assert!(
+        !available
+            .child_continuation
+            .as_ref()
+            .unwrap()
+            .budget_exhausted
+    );
+    manager
+        .sessions
+        .enqueue(
+            &entry.session_id,
+            AgentInboxLane::NextTurn,
+            AgentInboxMessage {
+                message_id: "budget-initial-task".into(),
+                client_submission_id: Some("budget-initial-task".into()),
+                content: "Inspect continuation budget without a model request".into(),
+                source: AgentMessageSource::user(),
+                images: Vec::new(),
+                terminal_context: None,
+            },
+        )
+        .unwrap();
+    manager
+        .sessions
+        .append(
+            &entry.session_id,
+            None,
+            None,
+            AgentSessionEventPayload::AgentStatus {
+                status: AgentSessionStatus::Running,
+                reason: None,
+            },
+        )
+        .unwrap();
+    assert!(manager
+        .sessions
+        .begin_turn_step(
+            &entry.session_id,
+            "continuation-turn".into(),
+            "continuation-step".into()
+        )
+        .unwrap()
+        .is_some());
+    let running = manager.sessions.snapshot(&entry.session_id).unwrap();
+    manager
+        .sessions
+        .append(
+            &entry.session_id,
+            Some("continuation-turn".into()),
+            Some("continuation-step".into()),
+            AgentSessionEventPayload::StepEnd {
+                reason: "stepBudgetReached".into(),
+            },
+        )
+        .unwrap();
+    assert!(manager
+        .sessions
+        .end_turn_if_no_step_input(&entry.session_id, "continuation-turn", "stepBudgetReached")
+        .unwrap());
+    manager
+        .sessions
+        .append(
+            &entry.session_id,
+            None,
+            None,
+            AgentSessionEventPayload::AgentStatus {
+                status: AgentSessionStatus::Idle,
+                reason: Some("stepBudgetReached".into()),
+            },
+        )
+        .unwrap();
+    let exhausted = manager.sessions.snapshot(&entry.session_id).unwrap();
+    assert_eq!(exhausted.status, AgentSessionStatus::Idle);
+    assert!(!exhausted.ended);
+    assert!(exhausted.header.subagent.as_ref().unwrap().continuable);
+    assert!(
+        exhausted
+            .child_continuation
+            .as_ref()
+            .unwrap()
+            .budget_exhausted
+    );
+    let rejection = manager
+        .send_input(
+            "lifecycle-parent",
+            &entry.session_id,
+            "Continue from saved progress".into(),
+            Some("budget-rejected-followup".into()),
+        )
+        .await
+        .unwrap_err();
+    assert!(rejection.starts_with("subagentBudgetExhausted:"));
+    let restored = AgentSessionStore::default();
+    restored.configure(root.path().to_path_buf()).unwrap();
+    assert_eq!(
+        restored
+            .snapshot(&entry.session_id)
+            .unwrap()
+            .child_continuation,
+        exhausted.child_continuation
+    );
+
+    // A real idle Session has no event at its deadline. Both admission and the UI
+    // must use this original absolute deadline without resetting its allowance.
+    let (_timed_root, timed_manager, timed_entry) = setup_with_budget(AgentSubagentBudget {
+        timeout_ms: 3_000,
+        ..default_subagent_budget()
+    });
+    let timed = timed_manager
+        .sessions
+        .snapshot(&timed_entry.session_id)
+        .unwrap();
+    let timed_events = timed_manager
+        .sessions
+        .all_events(&timed_entry.session_id)
+        .unwrap();
+    let deadline = timed
+        .child_continuation
+        .as_ref()
+        .unwrap()
+        .expires_at_unix_ms;
+    assert_eq!(deadline, timed.header.created_at_unix_ms + 3_000);
+    let budget = &timed.header.subagent.as_ref().unwrap().budget;
+    assert!(child_has_remaining_budget(
+        budget,
+        &timed_events,
+        64,
+        deadline - 1
+    ));
+    assert!(!child_has_remaining_budget(
+        budget,
+        &timed_events,
+        64,
+        deadline
+    ));
+    if let Ok(path) = std::env::var("SHELLSPAN_CHILD_CONTINUATION_EVIDENCE") {
+        let output = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .unwrap();
+        serde_json::to_writer(
+            output,
+            &json!({
+                "available": { "snapshot": available, "events": available_events },
+                "running": { "snapshot": running },
+                "exhausted": { "snapshot": exhausted, "events": manager.sessions.all_events(&entry.session_id).unwrap() },
+                "timed": { "snapshot": timed, "events": timed_events },
+                "rejection": rejection,
+            }),
+        )
+        .unwrap();
+    }
+}
+
+#[tokio::test]
 async fn incompatible_spawn_batch_creates_no_children_and_preserves_parent() {
     let (_root, manager, _entry) = setup();
     let before = manager.sessions.snapshot("lifecycle-parent").unwrap();

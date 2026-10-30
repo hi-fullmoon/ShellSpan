@@ -219,6 +219,7 @@ it('allows human follow-up only for a continuable subagent', async () => {
         ...childBase.snapshot.value,
         header: {
           ...childBase.snapshot.value.header,
+          createdAtUnixMs: Date.now(),
           parentSessionId: 'agent-terminal-1-parent-session',
           subagent: {
             descriptorId: 'descriptor-child',

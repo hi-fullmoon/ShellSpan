@@ -1,5 +1,6 @@
 import type { AiConversationNode, AiErrorNode } from './conversation-node';
 import type { AiSessionView } from './session-adapter';
+import { childBudgetExhausted } from './subagent-continuation';
 
 export type AiFailureRecovery = Readonly<{
   turnId: string;
@@ -53,7 +54,7 @@ export function latestFailureRecovery(view: AiSessionView, now = Date.now()): Ai
     const recovery = snapshot.childFailureRecovery;
     if (!child.continuable || !recovery?.retryable || recovery.turnId !== latest.turnId
       || snapshot.uncertainNativeEffects
-      || now >= snapshot.header.createdAtUnixMs + child.budget.timeoutMs
+      || childBudgetExhausted(snapshot, now)
       || view.inbox.some(item => !item.consumed && (!item.paused
         || item.clientSubmissionId !== `child-retry-${latest.turnId}`
         || item.provenance?.label !== 'child-failure-retry'))) return null;

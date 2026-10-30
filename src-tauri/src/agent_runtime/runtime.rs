@@ -2086,7 +2086,20 @@ impl AgentRuntime {
     }
 
     pub(crate) fn session(&self, session_id: &str) -> Result<AgentSessionSnapshot, String> {
-        self.sessions.snapshot(session_id)
+        let mut snapshot = self.sessions.snapshot(session_id)?;
+        if let Some(child) = &snapshot.header.subagent {
+            let now = super::driver::current_unix_ms()?;
+            snapshot.child_continuation =
+                Some(self.sessions.read_events(session_id, |events| {
+                    super::subagent::child_continuation(
+                        &child.budget,
+                        events,
+                        self.driver_config.max_turns_per_session,
+                        now,
+                    )
+                })?);
+        }
+        Ok(snapshot)
     }
 
     pub(crate) fn sessions(

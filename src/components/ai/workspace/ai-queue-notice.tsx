@@ -7,9 +7,10 @@ import { useI18n } from '@/hooks/useI18n';
 import { cn } from '@/lib/utils';
 import { AiToolCopyButton } from './ai-tool-presentation';
 
-export function AiQueueNotice({ conflict, error }: {
+export function AiQueueNotice({ conflict, error, onRetry }: {
   readonly conflict: boolean;
   readonly error: string | null;
+  readonly onRetry?: () => void;
 }): React.ReactNode {
   const { t } = useI18n();
   const Icon = conflict ? TriangleAlertIcon : CircleAlertIcon;
@@ -21,6 +22,9 @@ export function AiQueueNotice({ conflict, error }: {
       </AlertTitle>
       <AlertDescription className="min-w-0">
         {t(conflict ? 'ai.workspace.queue.conflictHint' : 'ai.workspace.queue.failureHint')}
+        {onRetry && <Button type="button" variant="ghost" size="xs" onClick={onRetry}>
+          {t('common.retry')}
+        </Button>}
         {error && <Collapsible key={error} className="mt-1 min-w-0">
           <CollapsibleTrigger render={<Button variant="ghost" size="xs" />} className="group gap-1 text-[11px]">
             {t('ai.workspace.queue.errorDetails')}

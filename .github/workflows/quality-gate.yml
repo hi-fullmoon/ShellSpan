@@ -120,6 +120,8 @@ jobs:
         # Real shell/process and wall-clock tests share the runner. Match the
         # native acceptance runners so unrelated tests cannot starve deadlines.
         run: cargo test --manifest-path src-tauri/Cargo.toml --all-features --no-fail-fast --locked -- --test-threads=1
+      - name: Run native subagent budget UI regression
+        run: pnpm test:subagent-budget:native
 
   ssh-e2e:
     name: Isolated SSH/SFTP E2E

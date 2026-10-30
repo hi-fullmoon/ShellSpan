@@ -19,6 +19,7 @@ export default defineConfig({
       'node_modules',
       'dist',
       '**/.worktrees/**',
+      '**/*.native.test.{ts,tsx}',
     ],
     maxWorkers: 4,
     testTimeout: 15_000,

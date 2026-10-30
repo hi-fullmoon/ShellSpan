@@ -84,9 +84,23 @@ export function AiQuestionPanel({
   const [operation, setOperation] = useState<'submit' | 'refresh' | null>(null);
   const busy = useRef(false);
   const content = useRef<HTMLDivElement>(null);
+  const focusNextQuestion = useRef(false);
   const pending = operation !== null;
   const [currentIndex, setCurrentIndex] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    if (!focusNextQuestion.current) return;
+    focusNextQuestion.current = false;
+    // Base UI registers its replacement items after their first commit.
+    const frame = requestAnimationFrame(() => {
+      const body = content.current;
+      if (!body || document.activeElement !== document.body) return;
+      body.scrollTop = 0;
+      body.querySelector<HTMLElement>('[data-slot="toggle-group-item"]:not(:disabled), textarea:not(:disabled)')
+        ?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [currentIndex]);
   // A rejected acknowledgement does not prove the answer was rejected.
   // Keep the exact operation retryable until committed state removes the form.
   const editingLocked = pending || !!draft?.submission;
@@ -126,6 +140,7 @@ export function AiQuestionPanel({
       selected.length > 0 &&
       currentIndex < question.questions.length - 1
     ) {
+      focusNextQuestion.current = true;
       setCurrentIndex((index) => index + 1);
     }
   };

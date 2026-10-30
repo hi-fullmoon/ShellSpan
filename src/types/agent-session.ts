@@ -710,6 +710,8 @@ export interface AgentSessionSnapshot {
   /** A dispatched tool call lacks a durable result; a new terminal must not imply it was safe to replay. */
   readonly uncertainNativeEffects?: boolean;
   readonly childFailureRecovery?: Readonly<{ turnId: string; retryable: boolean; retryAt: number | null }>;
+  /** Cumulative admission limits; the deadline keeps idle UI current without new events. */
+  readonly childContinuation?: Readonly<{ budgetExhausted: boolean; expiresAtUnixMs: number }>;
   readonly eventCount: number;
   readonly surface: AgentModelSurfaceSnapshot;
   readonly inbox: Readonly<{

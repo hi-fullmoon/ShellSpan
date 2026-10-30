@@ -7,6 +7,7 @@ import { invokeAnswerAgentRuntimeQuestion, invokeListAgentRuntimeSkills, invokeL
 import { projectQuestions } from './question-projection';
 import { QuestionSubmissionError, questionSubmissionIssue, reconcileQuestionSubmission, type QuestionSubmissionIssue } from './question-submission';
 import { modelRetryConfirmation } from './failure-recovery';
+import { childBudgetExhausted } from './subagent-continuation';
 import { awaitMutationAcknowledgement } from './mutation-acknowledgement';
 import { invokeSubmitAgentImages } from '@/lib/ipc/tauri';
 import { requireVision } from '@/lib/ai/vision-contract';
@@ -855,6 +856,9 @@ export function createAgentSessionAdapter(
           throw new Error('This one-shot subagent cannot accept human follow-up messages');
         }
         if (hasImages) throw new Error('Subagent continuation accepts text only');
+        if (!committed && childBudgetExhausted(view.snapshot.value)) {
+          throw new Error('subagentBudgetExhausted: cumulative child budget is exhausted');
+        }
         await admit(resolvedSessionId, input, () => dependencies.sendChildInput({
           parentSessionId,
           childSessionId: resolvedSessionId,

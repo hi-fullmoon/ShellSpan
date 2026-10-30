@@ -155,6 +155,8 @@ pub(crate) struct AgentSessionSnapshot {
     pub(crate) uncertain_native_effects: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) child_failure_recovery: Option<super::AgentChildFailureRecovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) child_continuation: Option<super::AgentChildContinuation>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -354,6 +356,16 @@ impl AgentSessionRecord {
             recovery: super::derive_recovery_checkpoint(&self.events),
             uncertain_native_effects: has_uncertain_tool_executions(&self.events),
             child_failure_recovery: None,
+            child_continuation: self.header.subagent.as_ref().map(|child| {
+                super::subagent::child_continuation(
+                    &child.budget,
+                    &self.events,
+                    child.budget.max_turns as usize,
+                    self.events
+                        .last()
+                        .map_or(self.header.created_at_unix_ms, |event| event.time_unix_ms),
+                )
+            }),
         };
         let mut snapshot = snapshot;
         snapshot.child_failure_recovery = super::child_recovery::child_failure_recovery(

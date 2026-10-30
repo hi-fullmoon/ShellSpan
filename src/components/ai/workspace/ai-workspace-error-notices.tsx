@@ -1,3 +1,4 @@
+import { useId, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/hooks/useI18n';
 import { aiErrorMessage } from '@/lib/ai/error-message';
@@ -13,6 +14,7 @@ export interface AiWorkspaceErrorNoticesProps {
   readonly onRetrySync?: () => Promise<void>;
   readonly onDismissError?: () => void;
   readonly onRetryFailedDraft?: (id: string) => void;
+  readonly failedDraftRetryBlockedReason?: string | null;
 }
 
 /** Input and synchronization errors displayed above the composer. */
@@ -23,8 +25,22 @@ export function AiWorkspaceErrorNotices({
   onRetrySync,
   onDismissError,
   onRetryFailedDraft,
+  failedDraftRetryBlockedReason = null,
 }: AiWorkspaceErrorNoticesProps): React.ReactNode {
   const { t, locale } = useI18n();
+  const blockedReasonId = useId();
+  const checkingReceiptRef = useRef(false);
+  const [checkingReceipt, setCheckingReceipt] = useState(false);
+  const confirmReceipt = async (): Promise<void> => {
+    if (!onRetrySync || checkingReceiptRef.current) return;
+    checkingReceiptRef.current = true;
+    setCheckingReceipt(true);
+    try { await onRetrySync(); }
+    finally {
+      checkingReceiptRef.current = false;
+      setCheckingReceipt(false);
+    }
+  };
 
   return (
     <div
@@ -72,20 +88,33 @@ export function AiWorkspaceErrorNotices({
           </AiErrorNotice>
         ) : null}
       </AiNoticeTransition>
-      {composerState?.failedDrafts.map((failed) => (
+      {composerState?.failedDrafts.map((failed, index) => {
+        const confirmationOnly = Boolean(failedDraftRetryBlockedReason && failed.error.deliveryUnknown);
+        const reasonId = `${blockedReasonId}-${index}`;
+        return (
         <AiNoticeTransition key={failed.id}>
           <AiErrorNotice
             title={t('ai.workspace.recovery.title')}
             label={t(failed.error.deliveryUnknown ? 'ai.workspace.messageUnconfirmed' : 'ai.workspace.failedDraft')}
-            action={onRetryFailedDraft && <Button type="button" variant="ghost" size="xs" className="shrink-0 text-[11px]"
-              disabled={composerState.phase === 'stopping'} onClick={() => onRetryFailedDraft(failed.id)}>
-              {t(failed.error.deliveryUnknown ? 'ai.workspace.retryOriginal' : 'common.retry')}
+            action={failed.error.retryable && (confirmationOnly ? onRetrySync : onRetryFailedDraft) && <Button type="button" variant="ghost" size="xs" className="shrink-0 text-[11px]"
+              disabled={composerState.phase === 'stopping' || (confirmationOnly
+                ? checkingReceipt || syncRecovery?.retrying : Boolean(failedDraftRetryBlockedReason))}
+              aria-busy={confirmationOnly && checkingReceipt || undefined}
+              aria-describedby={failedDraftRetryBlockedReason ? reasonId : undefined}
+              onClick={() => { if (confirmationOnly) void confirmReceipt(); else onRetryFailedDraft?.(failed.id); }}>
+              {t(confirmationOnly
+                ? checkingReceipt ? 'ai.workspace.messageConfirming' : 'ai.workspace.checkReceipt'
+                : failed.error.deliveryUnknown ? 'ai.workspace.retryOriginal' : 'common.retry')}
             </Button>}
           >
             {failed.content || (failed.hasImages ? t('ai.workspace.images.attachments') : '')}
+            {failed.error.retryable && failedDraftRetryBlockedReason && <span id={reasonId} className="mt-1 block text-muted-foreground">
+              {failedDraftRetryBlockedReason}
+            </span>}
           </AiErrorNotice>
         </AiNoticeTransition>
-      ))}
+        );
+      })}
     </div>
   );
 }

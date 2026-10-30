@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import {
   ArrowDownUpIcon,
   ArrowDownIcon,
@@ -41,6 +41,7 @@ export interface AiQueueDockProps {
   readonly mutable?: boolean;
   readonly resumeOnly?: boolean;
   readonly mutation?: AiQueueMutationState | null;
+  readonly onRetry?: () => void;
   readonly onUpdate?: (item: AiInboxItem, content: string) => void;
   readonly onRemove?: (item: AiInboxItem) => void;
   readonly onSteer?: (item: AiInboxItem) => void;
@@ -99,6 +100,7 @@ export function AiQueueDock({
   mutable = true,
   resumeOnly = false,
   mutation = null,
+  onRetry,
   onUpdate,
   onRemove,
   onSteer,
@@ -112,14 +114,33 @@ export function AiQueueDock({
   const [collapsed, setCollapsed] = useState(false);
   const editButtons = useRef(new Map<string, HTMLButtonElement>());
   const restoreEditFocus = useRef<string | null>(null);
+  const editInput = useRef<HTMLInputElement>(null);
+  const submittedEdit = useRef<{ id: string; content: string; draft: string } | null>(null);
   const pending = mutation?.status === 'pending';
 
   const finishEditing = (): void => {
     restoreEditFocus.current = editingId;
     setEditingId(null);
+    submittedEdit.current = null;
   };
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    const submitted = submittedEdit.current;
+    if (!submitted || pending || mutation?.status === 'failed') return;
+    if (items.some(item => item.id === submitted.id && item.content === submitted.content)) {
+      submittedEdit.current = null;
+      // A retry acknowledges the saved version, even if the user has since
+      // edited its text. Only close the editor for that exact draft version.
+      if (editingId === submitted.id && editValue === submitted.draft) {
+        restoreEditFocus.current = submitted.id;
+        setEditingId(null);
+      } else if (editingId === submitted.id && document.activeElement === document.body) {
+        editInput.current?.focus({ preventScroll: true });
+      }
+    }
+  }, [editingId, editValue, items, mutation, pending]);
+
+  useLayoutEffect(() => {
     const id = restoreEditFocus.current;
     if (id === null || editingId !== null || pending) return;
     // The editor disappears on save/cancel. Restore its trigger after a pending
@@ -154,7 +175,7 @@ export function AiQueueDock({
   return (
     <div className="flex w-full min-w-0 shrink-0 flex-col gap-3">
       {mutation?.status === 'failed' && (
-        <AiQueueNotice conflict={mutation.conflict} error={mutation.error} />
+        <AiQueueNotice conflict={mutation.conflict} error={mutation.error} onRetry={onRetry} />
       )}
       {items.length > 0 && <section
       data-slot="ai-queue-dock"
@@ -189,8 +210,13 @@ export function AiQueueDock({
               toast.error(t(documentErrorKey(error)));
               return;
             }
-            onUpdate?.(item, content);
-            finishEditing();
+            submittedEdit.current = { id: item.id, content, draft: editValue };
+            if (mutation?.status === 'failed' && mutation.intent.type === 'update'
+              && mutation.intent.itemId === item.id && mutation.intent.content === content && onRetry) {
+              onRetry();
+            } else {
+              onUpdate?.(item, content);
+            }
           };
           const laneItems = items.filter((candidate) => (
             candidate.lane === item.lane && candidate.state === 'queued'
@@ -216,6 +242,7 @@ export function AiQueueDock({
                         {t('ai.workspace.queue.editLabel')}
                       </FieldLabel>
                       <Input
+                        ref={editInput}
                         id={`queue-edit-${item.id}`}
                         className="h-6 px-2 py-0"
                         value={editValue}
@@ -298,7 +325,9 @@ export function AiQueueDock({
                         disabled={pending || onUpdate === undefined}
                         onClick={() => {
                           setEditingId(item.id);
-                          setEditValue(documentMessage.text);
+                          setEditValue(mutation?.status === 'failed' && mutation.intent.type === 'update'
+                            && mutation.intent.itemId === item.id
+                            ? decodeDocumentMessage(mutation.intent.content).text : documentMessage.text);
                         }}
                       >
                         <PencilIcon data-icon="inline-start" />

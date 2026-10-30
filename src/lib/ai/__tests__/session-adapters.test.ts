@@ -470,6 +470,7 @@ describe('AgentSessionAdapter', () => {
       ...snapshot(),
       header: {
         ...snapshot().header,
+        createdAtUnixMs: Date.now(),
         parentSessionId: 'parent-session',
         subagent: {
           descriptorId: 'descriptor-child',
