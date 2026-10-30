@@ -1,5 +1,6 @@
 import type { IDisposable, IMarker, Terminal } from '@xterm/xterm';
 import { agentTerminalLeaseState } from '../agent-terminal-lease-state';
+import { installTerminalCommandRedraw } from './terminal-command-redraw';
 
 interface CommandRange {
   operationId: string;
@@ -13,6 +14,7 @@ interface PendingCommand {
   visible: boolean;
   anchored: boolean;
   range?: CommandRange;
+  submitted?: boolean;
 }
 
 const MAX_PENDING_COMMANDS = 256;
@@ -27,6 +29,24 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
   let promptReady = true;
   let disposed = false;
   let frame: number | undefined;
+  const displayScope = () => {
+    if (terminal.buffer.active.type !== 'normal') return undefined;
+    const pending = pendingCommands[0];
+    const lease = agentTerminalLeaseState.get(sessionId);
+    if (!pending?.visible || !pending.range || lease?.takeoverRequested || lease?.takeoverFailed) return undefined;
+    const typing = lease?.operationId === pending.operationId && lease.terminalOwned && lease.commandPhase === 'typing';
+    if (!pending.submitted && !typing) return undefined;
+    if (pending.range.start.isDisposed) {
+      // Readline's oversized-buffer ED2 redraw disposes xterm markers on
+      // erased rows. The same unconsumed command now starts at the viewport.
+      const buffer = terminal.buffer.active;
+      const start = terminal.registerMarker(buffer.viewportY - buffer.baseY - buffer.cursorY);
+      if (!start) return undefined;
+      pending.range.start = start;
+    }
+    return { operationId: pending.operationId, start: pending.range.start.line };
+  };
+  const redraw = installTerminalCommandRedraw(terminal, sessionId, displayScope);
 
   const remove = (range: CommandRange) => {
     ranges.delete(range);
@@ -48,18 +68,18 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
   };
   const render = () => {
     frame = undefined;
+    if (redraw.isHeld()) return;
     const buffer = terminal.buffer.active;
     const screen = terminal.element?.querySelector<HTMLElement>('.xterm-screen');
     if (!screen) return;
     const rowHeight = screen.clientHeight / terminal.rows;
-    const lease = agentTerminalLeaseState.get(sessionId);
+    const scope = displayScope();
     for (const range of ranges) {
       if (range.start.isDisposed || range.end?.isDisposed) {
         remove(range);
         continue;
       }
-      const typing = lease?.operationId === range.operationId && lease.terminalOwned
-        && lease.commandPhase === 'typing';
+      const typing = scope?.operationId === range.operationId;
       const end = range.end?.line ?? buffer.baseY + buffer.cursorY;
       const first = Math.max(0, range.start.line - buffer.viewportY);
       const last = Math.min(terminal.rows - 1, end - buffer.viewportY);
@@ -86,7 +106,11 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
     const lease = agentTerminalLeaseState.get(sessionId);
     const next = lease?.terminalOwned && typeof lease.commandExecution === 'boolean' ? lease.operationId : undefined;
     const visible = lease?.commandExecution === true;
-    if (next && lease?.commandPhase === 'running') submittedOperations.add(next);
+    if (next && lease?.commandPhase === 'running') {
+      submittedOperations.add(next);
+      const pending = pendingCommands.find(command => command.operationId === next);
+      if (pending) pending.submitted = true;
+    }
     schedule();
     if (next === operationId) return;
     const released = operationId;
@@ -119,7 +143,7 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
         const expired = pendingCommands.shift();
         if (expired?.range) remove(expired.range);
       }
-      pendingCommands.push({ operationId: next, visible, anchored: false });
+      pendingCommands.push({ operationId: next, visible, anchored: false, submitted: submittedOperations.has(next) });
       startPendingCommand();
       schedule();
     });
@@ -146,6 +170,9 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
         return false;
       }
       if (data !== 'C' || !promptReady || terminal.buffer.active.type !== 'normal') return false;
+      // ED2 and C may share a PTY batch, leaving no onWriteParsed/render
+      // callback between marker disposal and this immutable command end.
+      displayScope();
       promptReady = false;
       const pending = pendingCommands.shift();
       if (pending?.range) {
@@ -172,6 +199,7 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
     dispose() {
       disposed = true;
       unsubscribe();
+      redraw.dispose();
       if (frame !== undefined) cancelAnimationFrame(frame);
       subscriptions.forEach(subscription => subscription.dispose());
       for (const range of ranges) remove(range);

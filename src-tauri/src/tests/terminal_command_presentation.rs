@@ -191,6 +191,22 @@ fn native_bash_multiline_typing_renders_progress_before_single_submission() {
 }
 
 #[test]
+#[ignore = "requires SHELLSPAN_TEST_MODERN_BASH pointing to Bash 4.1+"]
+fn native_bash_multiline_typing_renders_progress_before_single_submission_long_input() {
+    let path = std::env::var("SHELLSPAN_TEST_MODERN_BASH").unwrap();
+    for columns in [40, 100] {
+        capture_native_presentation_case(
+            &path,
+            TerminalShellKind::Bash,
+            false,
+            columns,
+            false,
+            true,
+        );
+    }
+}
+
+#[test]
 #[cfg(target_os = "macos")]
 fn native_zsh_stop_and_takeover_at_receiver_ready_preserve_terminal_input() {
     capture_native_presentation("/bin/zsh", TerminalShellKind::Zsh, false, 100, true);
@@ -209,6 +225,24 @@ fn capture_native_presentation(
     reduced_motion: bool,
     columns: u16,
     receiver_ready_stop: bool,
+) {
+    capture_native_presentation_case(
+        shell_path,
+        shell,
+        reduced_motion,
+        columns,
+        receiver_ready_stop,
+        false,
+    );
+}
+
+fn capture_native_presentation_case(
+    shell_path: &str,
+    shell: TerminalShellKind,
+    reduced_motion: bool,
+    columns: u16,
+    receiver_ready_stop: bool,
+    long_input: bool,
 ) {
     use crate::agent_runtime::{
         AgentToolTargetNative, TerminalExecuteRegistry, TerminalLeaseEventState,
@@ -467,6 +501,31 @@ fn capture_native_presentation(
                 Some(String::from_utf8_lossy(&bytes[offset..offset + cycle.len()]).into_owned());
         }
         let source = "cat <<'SHELLSPAN_END'\nquoted '\"' and\tliteral Tab 中文e\u{301}👩‍💻\nSHELLSPAN_END\npwd";
+        let long_source = format!(
+            "{source}\n{}",
+            concat!(
+                "python3 - <<'PY'\n",
+                "import os\nimport platform\nfrom pathlib import Path\n\n",
+                "root = Path.cwd()\n",
+                "print('当前目录:', root)\n",
+                "print('系统信息:', platform.platform())\n",
+                "print('终端尺寸:', os.environ.get('COLUMNS'), os.environ.get('LINES'))\n",
+                "print('当前目录内容:')\n\n",
+                "for path in sorted(root.iterdir(), key=lambda item: item.name)[:30]:\n",
+                "    try:\n",
+                "        info = path.stat()\n",
+                "        kind = '目录' if path.is_dir() else '文件'\n",
+                "        print(f'{kind}\\t{info.st_size:>12}\\t{path.name}')\n",
+                "    except OSError as error:\n",
+                "        print(f'无法读取\\t{path.name}\\t{error}')\n\n",
+                "print('目录检查完成')\nPY"
+            )
+        );
+        let source = if long_input {
+            long_source.as_str()
+        } else {
+            source
+        };
         let start = display.lock().unwrap().len();
         let frame_start = display_frames.lock().unwrap().len();
         let checkpoint_start = checkpoints.lock().unwrap().len();
@@ -517,8 +576,9 @@ fn capture_native_presentation(
             .filter(|_| !receiver_ready_stop)
         {
             if !reduced_motion {
+                let variant = if long_input { "-long" } else { "" };
                 path.set_file_name(format!(
-                    "native-typing-{}-{columns}.bin",
+                    "native-typing-{}{variant}-{columns}.bin",
                     shell.protocol_name()
                 ));
             }
@@ -536,6 +596,7 @@ fn capture_native_presentation(
                     "privateLeaseEvents": private_events, "privateRunningEvents": private_running,
                     "privateDisplay": private_display.unwrap(),
                     "source": expected,
+                    "startup": String::from_utf8_lossy(&display.lock().unwrap()[..start]),
                     "frames": display_frames.lock().unwrap()[frame_start..].iter().map(|(at, bytes)| {
                         serde_json::json!({ "atMs": at.duration_since(started).as_millis(), "bytes": bytes })
                     }).collect::<Vec<_>>(),

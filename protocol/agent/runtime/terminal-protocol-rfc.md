@@ -734,6 +734,27 @@ the existing screen into terminal history. It emits cursor/newline controls,
 never copies command text or output. This preserves earlier background lines
 in narrow terminals without filtering, replaying or dropping raw output.
 
+During visible input, Bash bind-x callbacks can erase the editor before waiting
+for their private payload, then redraw the complete prefix on return. The UI
+coalesces this intermediate clearing with its real redraw using xterm 6's
+synchronized-output render buffering. The parser, live buffer, raw output and
+native A/M validation continue unchanged; no command text is synthesized or
+replayed. Only a previously painted command prefix may be held. Restoration of
+the painted tail in the current viewport releases the picture so each successive
+prefix remains visible even after native scrolling. Oversized Readline ED2
+redraws can dispose markers; an unconsumed command is reanchored at the viewport
+without losing its background. Native scrolling at the bottom does not end a
+transaction; explicit history browsing does.
+The command background follows the same render transaction. Cancellation,
+takeover, resize, buffer changes, ordered OSC 133 boundaries and disposal release
+the hold; a 750 ms ceiling releases stalled redraws and disables further holds
+for that operation. Running/released lease notifications can precede the PTY
+boundary. Display eligibility follows the submitted pending command through all
+remaining input frames until its ordered C boundary, rather than the live lease
+phase. These pending display scopes never authorize execution. Application-
+owned DEC 2026 output retains its own lifetime. These are presentation rules,
+never input readiness, acknowledgement, execution or cancellation evidence.
+
 PowerShell jobs display `job-<opaque handle> Q`, where Q is the native
 single-quoted original source (apostrophes are doubled). Before
 acceptance, the native PowerShell parser validates source and complete line;

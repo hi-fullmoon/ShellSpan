@@ -19,7 +19,7 @@ if (!suppliedDirectory || !process.env.SHELLSPAN_NATIVE_SCRIPT_TRACE_PATH) {
     const filter = suppliedDirectory
       ? 'command_presentation::native_private_controls_preserve_command_presentation'
       : 'command_presentation::';
-    execFileSync('cargo', ['test', '--manifest-path', 'src-tauri/Cargo.toml', '--lib', filter], {
+    execFileSync('cargo', ['test', '--manifest-path', 'src-tauri/Cargo.toml', '--lib', filter, '--', '--test-threads=1'], {
       cwd: root, env: { ...process.env, SHELLSPAN_COMMAND_PRESENTATION_DIR: directory,
         SHELLSPAN_NATIVE_SCRIPT_TRACE_PATH: nativeScriptPath }, stdio: 'inherit',
     });
@@ -95,8 +95,8 @@ try {
               agentTerminalLeaseState.clear('presentation', operationId);
               await write('');
               await paint();
-              if (document.querySelectorAll('.terminal-agent-command').length !== 1) {
-                throw new Error('Unconfirmed running output must not inherit typing shading');
+              if (document.querySelectorAll('.terminal-agent-command').length !== 2) {
+                throw new Error('Submitted input must retain command shading until its ordered C boundary');
               }
             }
             // Split every byte, including OSC framing, through xterm's real parser.
