@@ -227,6 +227,22 @@ try {
           await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
           for (const width of [380, 720]) {
             await page.setViewportSize({ width, height: 900 });
+            for (const preview of await page.locator([
+              '.ai-tool-scroll-area [data-slot="scroll-area-viewport"]',
+              '.ai-details-root [data-slot="scroll-area-viewport"]',
+              '.ai-markdown-code-block .ai-code-block-pre', '.ai-detail-code-wrap > .ai-detail-code',
+              '.ai-read-lines', '.ai-search-results', '.ai-web-content',
+            ].join(',')).all()) {
+              await preview.focus();
+              const focus = await preview.evaluate(element => ({
+                focused: document.activeElement === element,
+                outline: getComputedStyle(element).outlineStyle,
+                shadow: getComputedStyle(element).boxShadow,
+              }));
+              assert.deepEqual(focus, { focused: true, outline: 'none', shadow: 'none' },
+                `${engine.name()}/${locale}/${theme}/${width}: read-only previews must not add a focus border`);
+              await preview.blur();
+            }
             const copyPositions = await page.locator('.ai-tool-copy-button, .ai-markdown-code-copy, .ai-detail-copy').evaluateAll(elements =>
               elements.map(element => ({
                 position: getComputedStyle(element).position,
@@ -272,6 +288,9 @@ try {
               await button.focus();
               const focus = await appearance();
               assert.deepEqual(focus, hover, `${id}: keyboard focus must provide the same feedback as pointer hover`);
+              assert.ok(await button.evaluate(element => element.matches(':focus-visible')
+                && (getComputedStyle(element).outlineStyle !== 'none' || getComputedStyle(element).boxShadow !== 'none')),
+              `${id}: interactive controls retain a visible keyboard focus indicator`);
               await button.blur();
             }
             const terminalHeader = page.locator('#terminal .ai-terminal-header');
@@ -296,7 +315,7 @@ try {
             }
             const surfaces = await page.locator([
               '[data-ai-tool-view]', '#markdown .ai-markdown-code-block', '.ai-approval-command',
-              '.ai-semantic-note-body', '.ai-queue-notice-preview', '.ai-detail-code-wrap', '.ai-artifact-image-surface', '.ai-detail-section',
+              '.ai-semantic-note-body', '.ai-queue-notice-preview', '.ai-detail-code-wrap', '.ai-artifact-image-surface', '.ai-detail-section > .ai-tool-content-region',
             ].join(',')).evaluateAll(elements => elements.filter(element => !element.closest('.ai-detail-section [data-ai-tool-view]')).map(element => {
               const style = getComputedStyle(element);
               return { label: element.closest('section[id]').id, background: style.backgroundColor,

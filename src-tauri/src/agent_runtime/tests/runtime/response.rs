@@ -481,19 +481,19 @@ async fn cancelling_after_whitespace_keeps_the_cancelled_boundary() {
     )));
 }
 
-#[tokio::test]
-async fn terminal_without_root_only_advertises_usable_native_tools() {
-    let adapter = FakeAdapter::new(vec![reply("ready", &[])]);
-    let (_root, runtime) = configured(adapter.clone());
+#[test]
+fn terminal_without_root_only_advertises_scratch_file_tools() {
+    let root = tempfile::tempdir().unwrap();
+    let runtime = AgentRuntimeBuilder::new().build();
+    runtime.configure(root.path().into()).unwrap();
     let id = "session-unscoped-tools";
     create(&runtime, id);
-    runtime
-        .followup(id, "message-tools".into(), "inspect".into())
-        .unwrap();
-    runtime.start(id, provider(), None).unwrap();
-    runtime.await_idle(id).await.unwrap();
-    let requests = adapter.requests.lock().unwrap();
-    let tools = &requests[0].tools;
+    let header = runtime.sessions.snapshot(id).unwrap().header;
+    let request = crate::agent_runtime::assemble_model_input(
+        &header,
+        crate::agent_runtime::default_model_tools(),
+    );
+    let tools = &request.tools;
     assert!(tools.iter().any(|tool| tool.name == "run_terminal_command"));
     for name in [
         "read_file",
@@ -501,12 +501,17 @@ async fn terminal_without_root_only_advertises_usable_native_tools() {
         "search_text",
         "write_file",
         "apply_patch",
-        "transfer_file",
     ] {
-        assert!(
-            !tools.iter().any(|tool| tool.name == name),
-            "advertised unavailable {name}"
+        let tool = tools.iter().find(|tool| tool.name == name).unwrap();
+        assert_eq!(
+            tool.input_schema["properties"]["fileScope"]["enum"],
+            json!(["scratch"])
         );
+        assert!(tool.input_schema["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("fileScope")));
     }
-    assert!(requests[0].system_prompt.contains("No filesystem root"));
+    assert!(!tools.iter().any(|tool| tool.name == "transfer_file"));
+    assert!(request.system_prompt.contains("No project filesystem root"));
 }

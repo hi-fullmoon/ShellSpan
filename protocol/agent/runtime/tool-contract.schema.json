@@ -340,7 +340,7 @@
       "additionalProperties": false,
       "required": ["mustNotExist"],
       "properties": {
-        "mustNotExist": { "const": true }
+        "mustNotExist": { "type": "boolean", "const": true }
       }
     },
     "writeFileDigestPrecondition": {
@@ -691,6 +691,7 @@
         "channel": { "const": "direct" },
         "state": { "enum": ["running", "exited"] },
         "approvalReview": { "const": "boundedLocalRead" },
+        "terminationConfirmed": { "type": "boolean" },
         "exitCode": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
         "stdout": { "type": "string", "maxLength": 1048576 },
         "stderr": { "type": "string", "maxLength": 1048576 },
@@ -893,6 +894,7 @@
       "required": ["state", "stdout", "stderr", "truncated"],
       "properties": {
         "state": { "enum": ["running", "exited", "unknown"] },
+        "terminationConfirmed": { "type": "boolean" },
         "exitCode": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
         "stdout": { "type": "string", "maxLength": 1048576 },
         "stderr": { "type": "string", "maxLength": 1048576 },
@@ -904,7 +906,8 @@
       "additionalProperties": false,
       "required": ["state"],
       "properties": {
-        "state": { "enum": ["terminationRequested", "terminated", "unknown"] }
+        "state": { "enum": ["terminationRequested", "terminated", "unknown", "Running", "Exited", "Cancelled", "TimedOut", "Failed"] },
+        "terminationConfirmed": { "type": "boolean" }
       }
     },
     "readFileResultData": {

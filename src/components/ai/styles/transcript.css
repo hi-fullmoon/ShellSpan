@@ -305,11 +305,6 @@
   padding-top: 8px;
 }
 
-.ai-markdown-code-block .ai-code-block-pre:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
-}
-
 .ai-markdown-table-scroll table {
   width: max-content;
   min-width: 100%;

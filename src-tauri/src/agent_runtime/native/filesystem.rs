@@ -2294,6 +2294,10 @@ fn truncate_utf8(value: &str, limit: usize) -> String {
 }
 
 #[cfg(test)]
+#[path = "live_write_file.rs"]
+mod live_write_file;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -3049,6 +3053,33 @@ mod tests {
             target: target.clone(),
             capability_id: "capability".into(),
         };
+        // Reproduce the omitted and string-valued preconditions from provider calls.
+        // Neither may write; the corrected boolean call below must still succeed.
+        for precondition in [None, Some(json!({ "mustNotExist": "true" }))] {
+            let mut rejected = create.clone();
+            rejected
+                .arguments
+                .as_object_mut()
+                .unwrap()
+                .remove("precondition");
+            if let Some(precondition) = precondition {
+                rejected.arguments["precondition"] = precondition;
+            }
+            let error = execute_file_tool_native(FileExecutionContextNative {
+                task_id: "task",
+                call: &rejected,
+                database: &database,
+                credentials: &credentials,
+                known_hosts_path: &known_hosts_path,
+                checkpoint_root: runtime_root.path(),
+                checkpoints: &checkpoints,
+                operations: &operations,
+            })
+            .err()
+            .expect("invalid precondition must reject before writing");
+            assert!(error.contains("precondition"));
+            assert!(!workspace.path().join("cool-css-effect.html").exists());
+        }
         let created = execute_file_tool_native(FileExecutionContextNative {
             task_id: "task",
             call: &create,

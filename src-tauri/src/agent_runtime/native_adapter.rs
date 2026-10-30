@@ -40,12 +40,15 @@ struct PreparedNativeCall {
     target_id: String,
     effect: AgentSessionEffect,
     started_at_unix_ms: u64,
+    scratch: Option<super::scratch::ScratchLease>,
+    model_arguments: Value,
 }
 
 pub(crate) struct NativeToolAdapter {
     services: NativeToolServices,
     engine: Arc<NativeToolEngine>,
     prepared: Mutex<HashMap<String, PreparedNativeCall>>,
+    scratch: super::scratch::ScratchStore,
 }
 
 pub(crate) struct NativeToolServices {
@@ -79,10 +82,18 @@ impl NativeToolAdapter {
         engine: Arc<NativeToolEngine>,
     ) -> Result<Self, String> {
         engine.configure_checkpoint_root(services.data_root.clone())?;
+        let scratch = super::scratch::ScratchStore::open(&services.data_root)?;
+        scratch.start_maintenance(
+            services.database.clone(),
+            services.credentials.clone(),
+            services.known_hosts_path.clone(),
+            &engine,
+        )?;
         Ok(Self {
             services,
             engine,
             prepared: Mutex::new(HashMap::new()),
+            scratch,
         })
     }
 
@@ -200,14 +211,86 @@ impl NativeToolRuntime for NativeToolAdapter {
         )
     }
 
-    fn prepare(&self, request: NativeToolRequest) -> Result<NativeToolPreparation, String> {
+    fn prepare(&self, mut request: NativeToolRequest) -> Result<NativeToolPreparation, String> {
         let runtime = &self.engine;
         let sessions = &self.services.sessions;
         let database = &self.services.database;
         let credentials = &self.services.credentials;
         self.configure(runtime)?;
         let known_hosts_path = &self.services.known_hosts_path;
-        let owner_target = target_native(&request.target)?;
+        let original_arguments = request.model_call.arguments.clone();
+        let scratch_scope = super::scratch::take_scope(
+            &request.model_call.name,
+            &mut request.model_call.arguments,
+        )?;
+        let tracks_execution = request.model_call.name == "run_terminal_command"
+            || is_model_process_tool(&request.model_call.name);
+        let mut scratch = if scratch_scope
+            || (tracks_execution
+                && (request.target.kind == "local" || request.target.profile_id.is_some()))
+        {
+            let services = super::scratch::ScratchServices {
+                database,
+                credentials,
+                known_hosts: known_hosts_path,
+                engine: Some(runtime),
+            };
+            let reservation = if scratch_scope
+                && matches!(
+                    request.model_call.name.as_str(),
+                    "write_file" | "edit_file" | "apply_patch"
+                ) {
+                Some(
+                    request
+                        .model_call
+                        .arguments
+                        .get("content")
+                        .or_else(|| request.model_call.arguments.get("newString"))
+                        .or_else(|| request.model_call.arguments.get("patch"))
+                        .and_then(Value::as_str)
+                        .map_or(0, |s| s.len() as u64),
+                )
+            } else {
+                None
+            };
+            Some(self.scratch.acquire(
+                &request.session_id,
+                &request.task_id,
+                &request.target,
+                current_unix_ms().saturating_add(DEFAULT_NATIVE_APPROVAL_TTL_MS),
+                scratch_scope,
+                reservation,
+                &services,
+            )?)
+        } else {
+            None
+        };
+        let mut owner_target = target_native(&request.target)?;
+        if scratch_scope {
+            let root = &scratch
+                .as_ref()
+                .ok_or("scratch workspace unavailable")?
+                .root;
+            let scratch_id = format!(
+                "scratch-{}",
+                super::scratch::key(&request.session_id, &request.target)?
+            );
+            match &mut owner_target {
+                AgentToolTargetNative::Local { target_id, cwd, .. } => {
+                    *target_id = scratch_id;
+                    *cwd = Some(root.clone());
+                }
+                AgentToolTargetNative::Remote {
+                    target_id,
+                    root_path,
+                    ..
+                } => {
+                    *target_id = scratch_id;
+                    *root_path = Some(root.clone());
+                }
+                _ => return Err("scratch requires a host target".into()),
+            }
+        }
         let target = process_target_for_model_call(&request.model_call, &owner_target)?
             .unwrap_or_else(|| owner_target.clone());
         if matches!(
@@ -310,6 +393,8 @@ impl NativeToolRuntime for NativeToolAdapter {
                         target_id: request.target.target_id,
                         effect,
                         started_at_unix_ms: current_unix_ms(),
+                        scratch: None,
+                        model_arguments: original_arguments,
                     },
                 );
             return Ok(preparation);
@@ -394,7 +479,7 @@ impl NativeToolRuntime for NativeToolAdapter {
         let descriptor = runtime.tool(&native_name)?.descriptor.clone();
         let effect = effect_from_native(prepared.effect.kind);
         let token = format!("prepared-{}", Uuid::new_v4().simple());
-        let call = RecordedToolCall {
+        let mut call = RecordedToolCall {
             call_id: request.model_call.call_id.clone(),
             provider_call_id: request.model_call.provider_call_id.clone(),
             name: request.model_call.name.clone(),
@@ -411,6 +496,9 @@ impl NativeToolRuntime for NativeToolAdapter {
             effect: Some(effect),
             target: Some(request.target.clone()),
         };
+        if scratch_scope {
+            call.arguments["fileScope"] = json!("scratch");
+        }
         let expires_at_unix_ms = current_unix_ms().saturating_add(DEFAULT_NATIVE_APPROVAL_TTL_MS);
         let preparation = NativeToolPreparation {
             token: token.clone(),
@@ -446,6 +534,8 @@ impl NativeToolRuntime for NativeToolAdapter {
                     target_id: request.target.target_id,
                     effect,
                     started_at_unix_ms: current_unix_ms(),
+                    scratch: scratch.take(),
+                    model_arguments: original_arguments,
                 },
             );
         if replaced.is_some() {
@@ -460,7 +550,7 @@ impl NativeToolRuntime for NativeToolAdapter {
         approved: bool,
         cancellation: CancellationToken,
     ) -> Result<NativeToolResult, String> {
-        let stored = self
+        let mut stored = self
             .prepared
             .lock()
             .map_err(|_| "native prepared-call registry is unavailable".to_string())?
@@ -524,6 +614,9 @@ impl NativeToolRuntime for NativeToolAdapter {
                     target: native_target,
                     capability_id: grant.capability_id,
                 };
+                if let Some(scratch) = stored.scratch.as_mut() {
+                    scratch.dispatch()?;
+                }
                 let mut result = runtime.execute_tool(
                     &prepared.context,
                     call,
@@ -536,8 +629,27 @@ impl NativeToolRuntime for NativeToolAdapter {
                 let public_target_id = project_native_result_target(
                     &prepared.call.target,
                     &result.target_id,
-                    &stored.target_id,
+                    if stored
+                        .model_arguments
+                        .get("fileScope")
+                        .and_then(Value::as_str)
+                        == Some("scratch")
+                    {
+                        prepared.call.target.target_id()
+                    } else {
+                        &stored.target_id
+                    },
                 )?;
+                let public_target_id = if stored
+                    .model_arguments
+                    .get("fileScope")
+                    .and_then(Value::as_str)
+                    == Some("scratch")
+                {
+                    stored.target_id.clone()
+                } else {
+                    public_target_id
+                };
                 if matches!(
                     result.tool_name.as_str(),
                     "inspect_host" | "inspect_service" | "query_logs" | "diagnose_endpoint"
@@ -552,7 +664,7 @@ impl NativeToolRuntime for NativeToolAdapter {
                     .first()
                     .map(|effect| effect_from_native(effect.kind))
                     .unwrap_or(stored.effect);
-                Ok(NativeToolResult {
+                let mut public_result = NativeToolResult {
                     call_id: stored.public_call_id,
                     native_name: result.tool_name,
                     target_id: public_target_id,
@@ -578,7 +690,23 @@ impl NativeToolRuntime for NativeToolAdapter {
                             size_bytes: Some(artifact.byte_length),
                         })
                         .collect(),
-                })
+                };
+                if let Some(scratch) = stored.scratch.as_mut() {
+                    scratch.finish(&stored.public_name, &stored.model_arguments, &public_result)?;
+                    if stored
+                        .model_arguments
+                        .get("fileScope")
+                        .and_then(Value::as_str)
+                        == Some("scratch")
+                    {
+                        if let Some(Value::Object(data)) = public_result.data.as_mut() {
+                            data.insert("scratchRoot".into(), json!(scratch.root));
+                            data.insert("fileScope".into(), json!("scratch"));
+                            data.insert("temporary".into(), json!(true));
+                        }
+                    }
+                }
+                Ok(public_result)
             }
             PreparedAuthorization::Mcp(prepared) => {
                 let grant = runtime.issue_prepared_mcp_authorization(&prepared, approved)?;
@@ -629,7 +757,19 @@ impl NativeToolRuntime for NativeToolAdapter {
 
     fn cancel_task(&self, task_id: &str) -> Result<(), String> {
         let runtime = &self.engine;
-        runtime.cancel_task(task_id, &self.services.sessions)
+        let processes = runtime.scratch_task_processes(task_id)?;
+        let outcome = runtime.cancel_task(task_id, &self.services.sessions);
+        let confirmed: Vec<_> = processes
+            .into_iter()
+            .filter_map(|process| {
+                let snapshot = process.snapshot().ok()?;
+                snapshot
+                    .termination_confirmed
+                    .then_some(snapshot.process_handle)
+            })
+            .collect();
+        self.scratch.release_process_handles(&confirmed)?;
+        outcome
     }
 }
 
@@ -891,7 +1031,7 @@ fn process_target_for_model_call(
     }))
 }
 
-fn target_native(target: &AgentSessionTarget) -> Result<AgentToolTargetNative, String> {
+pub(super) fn target_native(target: &AgentSessionTarget) -> Result<AgentToolTargetNative, String> {
     match target.kind.as_str() {
         "local" => Ok(AgentToolTargetNative::Local {
             target_id: target.target_id.clone(),
@@ -965,7 +1105,7 @@ fn cancelled_result(stored: &PreparedNativeCall) -> NativeToolResult {
     }
 }
 
-fn stable_native_id(prefix: &str, value: &str) -> String {
+pub(super) fn stable_native_id(prefix: &str, value: &str) -> String {
     let digest = Sha256::digest(value.as_bytes());
     let suffix = digest[..16]
         .iter()

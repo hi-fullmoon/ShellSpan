@@ -605,7 +605,7 @@ impl NativeToolEngine {
         let mut effect = assess_effect_native(&tool.descriptor, &call)?;
         let scope = inspect_call_policy_scope_native(&call)?;
         enforce_native_call_policy_native(&call, &effect, &scope)?;
-        self.enforce_runtime_storage_policy(&call, &effect, &scope)?;
+        self.enforce_runtime_storage_policy_for_session(&context, &call, &effect, &scope)?;
         let ttl_ms = input.ttl_ms.unwrap_or(DEFAULT_CAPABILITY_TTL_MS);
         if ttl_ms == 0 || ttl_ms > MAX_CAPABILITY_TTL_MS {
             return Err("Capability TTL is outside the native limit".into());
@@ -870,7 +870,7 @@ impl NativeToolEngine {
         let effect = assess_effect_native(&tool.descriptor, &call)?;
         let scope = inspect_call_policy_scope_native(&call)?;
         enforce_native_call_policy_native(&call, &effect, &scope)?;
-        self.enforce_runtime_storage_policy(&call, &effect, &scope)?;
+        self.enforce_runtime_storage_policy_for_session(context, &call, &effect, &scope)?;
         let capability = self
             .capabilities
             .verify_bound_call(
@@ -1042,6 +1042,43 @@ impl NativeToolEngine {
         }
     }
 
+    pub(crate) fn scratch_task_processes(
+        &self,
+        task_id: &str,
+    ) -> Result<Vec<Arc<super::ManagedProcessNative>>, String> {
+        self.processes.task_processes(task_id)
+    }
+
+    pub(crate) fn scratch_process_outcome(
+        &self,
+        handle: &str,
+        session: &str,
+        task: &str,
+        target: &crate::agent_runtime::AgentSessionTarget,
+    ) -> Option<bool> {
+        if handle.starts_with("proc-") {
+            let snapshot = self.processes.get(handle).ok()?.snapshot().ok()?;
+            if snapshot.owner_target_id != target.target_id
+                || snapshot.task_id != task
+                || snapshot.request_id
+                    != crate::agent_runtime::native_adapter::stable_native_id("request", session)
+                || snapshot.state == ProcessLifecycleNative::Running
+                || !snapshot.termination_confirmed
+            {
+                return None;
+            }
+            Some(snapshot.state != ProcessLifecycleNative::Exited || snapshot.exit_code != Some(0))
+        } else {
+            let job = self
+                .terminal_broker
+                .shell_job(handle, &target.target_id, session, task)
+                .ok()?;
+            (matches!(job.state.as_str(), "exited" | "rejected")
+                && job.native_active == Some(false))
+            .then_some(job.state == "rejected" || job.exit_code != Some(0))
+        }
+    }
+
     pub(crate) fn prepare_for_shutdown(&self, sessions: &SessionManager) -> Result<usize, String> {
         let mut cancelled = 0;
         let mut errors = Vec::new();
@@ -1087,6 +1124,55 @@ impl NativeToolEngine {
             .map_err(|_| "Native checkpoint root is unavailable".to_string())?
             .clone()
             .ok_or_else(|| "Native checkpoint root was not configured".into())
+    }
+
+    fn enforce_runtime_storage_policy_for_session(
+        &self,
+        context: &NativeExecutionContext,
+        call: &AgentToolCallNative,
+        effect: &AgentObservedEffectNative,
+        scope: &super::CallPolicyScopeNative,
+    ) -> Result<(), String> {
+        if crate::agent_runtime::scratch::is_file_tool(&call.tool_name) {
+            let stored = self
+                .checkpoint_root
+                .lock()
+                .map_err(|_| "Native runtime storage policy is unavailable")?;
+            if let Some(root) = stored.as_ref() {
+                if crate::agent_runtime::scratch::owns_target(
+                    root,
+                    &context.request.user_session_id,
+                    &call.target,
+                )? {
+                    // File drivers separately enforce root containment, no-follow
+                    // paths, digest preconditions and approval/dispatch checks.
+                    return Ok(());
+                }
+                let managed = std::fs::canonicalize(root)
+                    .unwrap_or_else(|_| root.clone())
+                    .join("agent-runtime/scratch-v1");
+                if scope
+                    .paths
+                    .iter()
+                    .any(|path| Path::new(path).starts_with(&managed))
+                {
+                    return Err(
+                        "AGENT_SCRATCH_SCOPE_DENIED: use this session's fileScope=scratch target"
+                            .into(),
+                    );
+                }
+            }
+            if scope.paths.iter().any(|path| {
+                path.split('/')
+                    .any(|p| p.starts_with(".shellspan-agent-scratch-"))
+            }) {
+                return Err(
+                    "AGENT_SCRATCH_SCOPE_DENIED: use this session's fileScope=scratch target"
+                        .into(),
+                );
+            }
+        }
+        self.enforce_runtime_storage_policy(call, effect, scope)
     }
 
     fn enforce_runtime_storage_policy(
@@ -1958,6 +2044,7 @@ impl NativeToolEngine {
             },
             json!({
                 "state": if snapshot.state == ProcessLifecycleNative::Running { "running" } else { "exited" },
+                "terminationConfirmed": snapshot.termination_confirmed,
                 "exitCode": snapshot.exit_code,
                 "stdout": stdout,
                 "stderr": stderr,
@@ -2004,7 +2091,7 @@ impl NativeToolEngine {
             call,
             effect,
             "Process termination request was handled.",
-            json!({ "state": format!("{:?}", snapshot.state) }),
+            json!({ "state": format!("{:?}", snapshot.state), "terminationConfirmed": snapshot.termination_confirmed }),
             false,
         ))
     }
@@ -2560,6 +2647,7 @@ fn exec_process_result(
         data: Some(json!({
             "channel": "direct",
             "state": if snapshot.state == ProcessLifecycleNative::Running { "running" } else { "exited" },
+            "terminationConfirmed": snapshot.termination_confirmed,
             "exitCode": snapshot.exit_code,
             "stdout": snapshot.stdout,
             "stderr": snapshot.stderr,

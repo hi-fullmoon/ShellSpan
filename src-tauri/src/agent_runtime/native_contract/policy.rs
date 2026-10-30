@@ -448,10 +448,21 @@ const WRITE_FILE_PRECONDITION_ERROR: &str = "write_file precondition must be exa
 pub(crate) fn decode_write_file_arguments_native(
     arguments: &serde_json::Value,
 ) -> Result<WriteFileArgumentsNative, String> {
-    let precondition = arguments
-        .get("precondition")
-        .and_then(serde_json::Value::as_object)
-        .ok_or(WRITE_FILE_PRECONDITION_ERROR)?;
+    let precondition = match arguments.get("precondition") {
+        None => {
+            return Err(format!(
+                "Missing required argument precondition. {WRITE_FILE_PRECONDITION_ERROR}"
+            ));
+        }
+        Some(value) => value.as_object().ok_or(WRITE_FILE_PRECONDITION_ERROR)?,
+    };
+    if precondition.len() == 1
+        && precondition
+            .get("mustNotExist")
+            .is_some_and(serde_json::Value::is_string)
+    {
+        return Err(format!("precondition.mustNotExist has type string; expected JSON boolean true (without quotes). Resend with precondition: {{\"mustNotExist\":true}}. {WRITE_FILE_PRECONDITION_ERROR}"));
+    }
     match precondition.len() {
         1 if precondition.get("mustNotExist") == Some(&serde_json::Value::Bool(true)) => {}
         1 if precondition
@@ -1044,7 +1055,6 @@ mod tests {
             json!(null),
             json!({}),
             json!({ "must_not_exist": true }),
-            json!({ "mustNotExist": "true" }),
             json!({ "mustNotExist": false }),
             json!({ "mustNotExist": true, "sha256": null }),
             json!({ "sha256": null }),
@@ -1063,7 +1073,17 @@ mod tests {
             &json!({ "path": "page.html", "content": "private file content" }),
         )
         .unwrap_err();
-        assert_eq!(error, WRITE_FILE_PRECONDITION_ERROR);
+        assert!(error.starts_with("Missing required argument precondition."));
+        assert!(error.contains(WRITE_FILE_PRECONDITION_ERROR));
+        for value in ["true", "false", "private file content"] {
+            let error = validate_tool_arguments_native(
+                "write_file",
+                &json!({ "path": "page.html", "content": "private file content", "precondition": { "mustNotExist": value } }),
+            ).unwrap_err();
+            assert!(error.contains("expected JSON boolean true (without quotes)"));
+            assert!(error.contains(WRITE_FILE_PRECONDITION_ERROR));
+            assert!(!error.contains("private file content"));
+        }
     }
 
     #[test]

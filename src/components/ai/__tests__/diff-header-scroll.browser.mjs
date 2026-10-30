@@ -11,10 +11,11 @@ import tailwindcss from '@tailwindcss/vite';
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const artifacts = join(tmpdir(), 'shellspan-diff-header-scroll');
 await mkdir(artifacts, { recursive: true });
-const path = 'src/components/ai/workspace/ai-tool-presentation.tsx';
-const revision = execFileSync('git', ['log', '-1', '--format=%H', '--', path], { cwd: root, encoding: 'utf8' }).trim();
-const patch = execFileSync('git', ['show', '--format=', '--unified=20', revision, '--', path,
-  'src/components/ai/styles/tool-results.css'], { cwd: root, encoding: 'utf8' });
+const paths = ['src/components/ai/workspace/ai-tool-presentation.tsx', 'src/components/ai/styles/tool-results.css'];
+const patch = paths.map(path => {
+  const revision = execFileSync('git', ['log', '-1', '--format=%H', '--', path], { cwd: root, encoding: 'utf8' }).trim();
+  return execFileSync('git', ['show', '--format=', '--unified=20', revision, '--', path], { cwd: root, encoding: 'utf8' });
+}).join('');
 assert.ok(patch.length, 'Use a real repository patch');
 const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error',
@@ -75,6 +76,45 @@ try {
             checked++;
           }
           assert.ok(checked > 1, `${context}: cover multiple files with long lines`);
+          if (detail) {
+            for (const theme of ['light', 'dark']) {
+              await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+              const sections = await page.locator('.ai-detail-section').evaluateAll(elements => elements.map(section => {
+                const heading = section.querySelector('.ai-detail-section-header');
+                const card = section.querySelector(':scope > .ai-tool-content-region');
+                return {
+                  headingOutside: !card.contains(heading) && heading.getBoundingClientRect().bottom <= card.getBoundingClientRect().top,
+                  sectionBorder: getComputedStyle(section).borderTopWidth,
+                  cardBorder: getComputedStyle(card).borderTopWidth,
+                  headingBackground: getComputedStyle(heading).backgroundColor,
+                  cardBackground: getComputedStyle(card).backgroundColor,
+                  copyInside: card.contains(section.querySelector('.ai-tool-copy-button')),
+                };
+              }));
+              assert.equal(sections.length, 3);
+              for (const section of sections) {
+                assert.ok(section.headingOutside && section.copyInside, `${context}/${theme}: heading stays above the card and copy stays inside`);
+                assert.equal(section.sectionBorder, '0px');
+                assert.equal(section.cardBorder, '1px');
+                assert.equal(section.headingBackground, 'rgba(0, 0, 0, 0)');
+                assert.notEqual(section.cardBackground, 'rgba(0, 0, 0, 0)');
+              }
+              const inputViewport = page.locator('.ai-detail-section').first().locator('[data-slot="scroll-area-viewport"]');
+              await inputViewport.focus();
+              assert.deepEqual(await inputViewport.evaluate(element => ({
+                focused: element.matches(':focus-visible'),
+                outline: getComputedStyle(element).outlineStyle,
+                shadow: getComputedStyle(element).boxShadow,
+                cardOutline: getComputedStyle(element.closest('.ai-tool-content-region')).outlineStyle,
+              })), { focused: true, outline: 'none', shadow: 'none', cardOutline: 'none' },
+              `${context}/${theme}: content remains focusable without a focus border`);
+              await page.locator('[data-slot="scroll-area-viewport"], .ai-detail-sections').evaluateAll(elements => elements.forEach(element => {
+                element.scrollTop = 0;
+                element.scrollLeft = 0;
+              }));
+              await page.screenshot({ path: join(artifacts, `${context.replaceAll('/', '-')}-${theme}-external-titles.png`) });
+            }
+          }
           if (!detail) {
             const viewport = page.locator('.ai-diff-content [data-slot="scroll-area-viewport"]').first();
             assert.ok((await page.locator('.ai-diff-content').first().boundingBox()).height <= 260);

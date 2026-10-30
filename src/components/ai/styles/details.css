@@ -62,24 +62,9 @@
   height: 13px;
 }
 
-[data-slot='ai-tool-details'] .ai-detail-section {
+[data-slot='ai-tool-details'] .ai-detail-section > .ai-tool-content-region {
   border: 1px solid var(--ai-border-soft);
   border-radius: var(--ai-content-radius);
-  background: var(--ai-code-block);
-}
-
-/* Keep keyboard focus around the whole section instead of clipping it at the header. */
-[data-slot='ai-tool-details'] .ai-detail-section:has([data-slot='scroll-area-viewport']:focus-visible) {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-
-[data-slot='ai-tool-details'] .ai-detail-section [data-slot='scroll-area-viewport']:focus-visible {
-  outline: none;
-  box-shadow: none;
-}
-
-.ai-detail-section-header {
   background: var(--ai-code-block);
 }
 

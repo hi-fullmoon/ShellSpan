@@ -23,6 +23,68 @@ missing collection separately from host health and return missing capabilities t
 their parent instead of repeatedly attempting blocked file paths. Parent takeover
 is model guidance, not automatic execution or an expansion of authorization.
 
+## Managed temporary execution files
+
+The existing model-facing `read_file`, `list_directory`, `search_text`,
+`write_file`, `edit_file` and `apply_patch` tools accept optional
+`fileScope: "workspace" | "scratch"`. The default remains `workspace`.
+`scratch` selects a native-owned file target, never an arbitrary extra root.
+Without a frozen project root, these tools are restricted to an explicitly
+required `fileScope: "scratch"`. Remote file tools still require a credential-backed
+profile. Role, tool, approval and uncertain-execution gates remain authoritative.
+The adapter removes this facade field before native argument validation and
+retains it in recorded calls so approval reconstruction cannot switch roots.
+
+Local files live under
+`{dataRoot}/agent-runtime/scratch-v1/workspaces/{sessionTargetDigest}/files`.
+`dataRoot` keeps the existing development/production/custom-root separation.
+Ownership records and the random installation identity live outside the writable
+file root. Native storage protection admits only the exact registered root for
+the owning session, with ordinary no-follow, digest and dispatch validation.
+Credential-backed remote files use
+`{accountHome}/.shellspan-agent-scratch-{installationId}/{sessionTargetDigest}/files`.
+SFTP resolves the account home and checks private directory ownership. Managed
+directories may be allocated during preparation; script contents are written only
+after the existing approval gate. Targets without SFTP credentials do not receive
+this capability. Native shell execution is not a fallback for scratch provisioning.
+
+File results add `fileScope: "scratch"`, `scratchRoot` and `temporary: true` at the
+model facade, without changing the native v3 argument schemas. The model uses the
+returned absolute path with `run_terminal_command`. Script location does not
+change command cwd, visible-shell environment or the selected execution surface.
+Intermediate outputs and interpreter caches should be directed into scratch when
+supported. Relative imports may require explicit dependency configuration. Saved
+project source and deliverables still use workspace tools. This is cooperative
+file organization, not a process sandbox or a restriction on arbitrary shell writes.
+
+Approval leases and executing markers are persisted before dispatch. Every
+command in an eligible session participates, so collection does not need to parse
+shell text to discover script references. Background handles pin the workspace;
+authoritative process/job observations release them only after confirmed terminal
+state. Direct results now include optional `terminationConfirmed`. Cancellation
+also preserves references to Direct processes long enough to inspect their real
+termination result. An exception after dispatch, unconfirmed remote termination,
+or a process lost across restart leaves a persistent pin. Missing handles or a
+closed/archived chat never prove termination and never trigger command replay.
+
+Unused workspaces have a 24-hour retention period, extended to 7 days after a
+failure, nonzero exit or cancellation. Cleanup runs on startup, hourly, and before
+scratch mutations. Mutation admission checks actual bounded tree sizes against
+64 MiB per session, 512 MiB total local storage and 256 MiB per remote account and
+installation. These are admission limits, not filesystem quotas. Observation and
+process control are not blocked by a full scratch workspace. Live approvals,
+executing operations and uncertain uses cannot be evicted to satisfy capacity.
+
+Collection and lease acquisition share one registry lock. Local collection uses
+the system trash and never purges it. Remote collection uses SFTP unlink/rmdir
+only inside the validated owned workspace; symlinks, special files, ownership
+changes, bounded-inspection failures or disconnection defer collection. A later
+maintenance pass retries eligible collection, never execution. Session events,
+redacted output artifacts and file checkpoints keep their existing retention and
+are not removed by scratch collection. Expired script files must be recreated,
+not automatically rerun. There is no claim of protection against hostile same-user
+path replacement or unregistered detached processes.
+
 ## File and script limits
 
 `write_file` accepts up to 128 KiB (131072 UTF-8 bytes). This is a native safety
@@ -39,6 +101,13 @@ The 240 KiB exact-diff bound remains enforced before committing, with an explici
 `diff_too_large` error and incremental-edit guidance. Creation preconditions,
 digest checks, checkpoints, atomic replacement, cancellation and read-back
 verification remain mandatory.
+
+The model-facing `write_file.precondition` schema exposes both fields directly
+and retains the exclusive creation/digest alternatives. `mustNotExist` explicitly
+has JSON boolean type and constant `true`. Missing preconditions and string-valued
+`mustNotExist` return specific correction guidance without echoing file content
+or argument values. Native validation never coerces strings or supplies a missing
+precondition; rejected calls still change no files.
 
 Durable JSONL events allow up to 512 KiB so JSON escaping of bounded write
 arguments and exact-diff approval prompts fits. Provider replay still moves to

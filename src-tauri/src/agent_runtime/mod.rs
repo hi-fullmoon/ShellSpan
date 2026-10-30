@@ -27,6 +27,7 @@ mod request_budget;
 mod request_log;
 mod retry;
 mod runtime;
+mod scratch;
 mod session;
 mod session_title;
 pub(crate) mod skill_runtime;

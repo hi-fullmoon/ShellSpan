@@ -78,6 +78,11 @@ pub(crate) fn assemble_model_input(
     if tools.iter().any(|t| t.name == "read_file") {
         sections.push(("File references", "An @path or @\"path with spaces\" in the user's prompt refers only to a path relative to the frozen target root. A trailing slash denotes a directory. Completion does not read or attach content. Use read_file (or list_directory for a directory) explicitly when contents are needed; do not claim to have inspected a path before reading it.".into()));
     }
+    if tools.iter().any(|t| {
+        t.name == "write_file" && t.input_schema.pointer("/properties/fileScope").is_some()
+    }) {
+        sections.push(("Temporary execution files", "For temporary diagnostic, analysis or verification scripts, use the existing file tools with fileScope=scratch instead of writing process files into the project. Use a relative file name in that scope. Each session has its own private root; obtain scratchRoot from a successful file-tool result and invoke the interpreter on the absolute script path through run_terminal_command. Keep the existing command working directory and selected execution surface; do not cd into scratch or change the visible shell's global environment. Write intermediate outputs and interpreter caches into scratch when supported. Project-relative imports and dependency lookup may need explicit configuration. Never put credentials in scripts. Files required as deliverables or maintained project source belong in the normal workspace. Scratch is not a sandbox. Completed unused files are retained for 24 hours, failed files for 7 days; running, pending and uncertain operations pin their workspace. Missing collected files must be recreated through file tools, never by replaying a prior command. Remote scratch requires the supplied credential-backed file tools.".into()));
+    }
     let system_prompt = sections
         .drain(..)
         .map(|(title, content)| format!("## {title}\n{content}"))
@@ -279,7 +284,11 @@ fn workspace_prompt(
             let has_tool = |name: &str| tools.iter().any(|tool| tool.name == name);
             if matches!(target.kind.as_str(), "local" | "remote") {
                 if target_root(target).is_none() {
-                    prompt.push_str(" No filesystem root is frozen for this Session, so native file tools are unavailable. Use run_terminal_command for directory inspection and filesystem work when it is supplied; determine the current directory through that terminal instead of guessing a path. Terminal commands are limited to 8192 UTF-8 bytes, so split large writes across bounded calls; delegating to a child Agent does not remove that limit.");
+                    if tools.iter().any(|tool| super::scratch::is_file_tool(&tool.name)) {
+                        prompt.push_str(" No project filesystem root is frozen. Supplied file tools require fileScope=scratch and access only this session's temporary files; they cannot inspect project files. Use run_terminal_command when supplied to observe the current directory instead of guessing a project path. Terminal commands are limited to 8192 UTF-8 bytes; a child Agent does not remove that limit.");
+                    } else {
+                        prompt.push_str(" No filesystem root is frozen and no structured file tools are available. Use supplied terminal tools for authorized inspection. Terminal commands are limited to 8192 UTF-8 bytes; a child Agent does not remove that limit.");
+                    }
                 } else if !target_has_native_file_access(target) {
                     prompt.push_str(" The frozen remote root has no credential-backed profile, so native file tools are unavailable. Use run_terminal_command for filesystem work when it is supplied. Terminal commands are limited to 8192 UTF-8 bytes, so split large writes across bounded single-line calls; delegating to a child Agent does not remove that limit.");
                 } else if has_tool("write_file") && has_tool("apply_patch") {
@@ -329,7 +338,9 @@ fn tool_available_on_target(name: &str, header: &AgentSessionHeader) -> bool {
         "trash_file" => target
             .is_some_and(|target| target.kind == "local" && target_has_native_file_access(target)),
         "read_file" | "list_directory" | "search_text" | "write_file" | "edit_file"
-        | "apply_patch" => target.is_some_and(target_has_native_file_access),
+        | "apply_patch" => target.is_some_and(|target| {
+            target.kind == "local" || (target.kind == "remote" && target.profile_id.is_some())
+        }),
         "transfer_file" => target.is_some_and(|target| {
             target.kind == "remote"
                 && target_has_native_file_access(target)
@@ -347,6 +358,28 @@ fn tool_available_on_target(name: &str, header: &AgentSessionHeader) -> bool {
 }
 
 fn specialize_tools_for_target(tools: &mut [AgentRequestToolSchema], header: &AgentSessionHeader) {
+    if header
+        .target
+        .as_ref()
+        .is_some_and(|target| target_root(target).is_none())
+    {
+        for tool in tools
+            .iter_mut()
+            .filter(|tool| super::scratch::is_file_tool(&tool.name))
+        {
+            tool.input_schema["properties"]["fileScope"] = json!({"type":"string", "enum":["scratch"], "description":"No project root is frozen. Only this session's private scratch files are accessible."});
+            if let Some(required) = tool
+                .input_schema
+                .get_mut("required")
+                .and_then(serde_json::Value::as_array_mut)
+            {
+                if !required.iter().any(|value| value == "fileScope") {
+                    required.push(json!("fileScope"));
+                }
+            }
+            tool.description.push_str(" No project root is frozen: fileScope=scratch is required; workspace access is unavailable.");
+        }
+    }
     let remote_without_profile = header
         .target
         .as_ref()
@@ -793,9 +826,23 @@ mod tests {
             "search_text",
             "write_file",
             "apply_patch",
-            "transfer_file",
         ] {
-            assert!(!local.contains(&name.into()));
+            assert!(local.contains(&name.into()));
+        }
+        assert!(!local.contains(&"transfer_file".into()));
+        for tool in assemble_model_input(&header, crate::agent_runtime::default_model_tools())
+            .tools
+            .into_iter()
+            .filter(|tool| super::super::scratch::is_file_tool(&tool.name))
+        {
+            assert_eq!(
+                tool.input_schema["properties"]["fileScope"]["enum"],
+                json!(["scratch"])
+            );
+            assert!(tool.input_schema["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("fileScope")));
         }
 
         header.target.as_mut().unwrap().cwd = Some("/workspace".into());
@@ -965,7 +1012,7 @@ mod tests {
         assert!(unrooted
             .system_prompt
             .contains("limited to 8192 UTF-8 bytes"));
-        assert!(unrooted.system_prompt.contains("split large writes"));
+        assert!(unrooted.system_prompt.contains("fileScope=scratch"));
         assert!(unrooted
             .system_prompt
             .contains("child Agent does not remove that limit"));

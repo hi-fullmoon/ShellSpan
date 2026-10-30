@@ -24,6 +24,9 @@ use std::time::{Duration, Instant};
 
 const TERMINAL: &str = "native-regression-terminal";
 
+#[path = "scratch_execution.rs"]
+mod scratch_execution;
+
 struct Scenario {
     root: tempfile::TempDir,
     runtime: AgentRuntime,
@@ -245,10 +248,20 @@ impl Scenario {
         surface: AgentExecutionSurface,
         mode: AgentSessionPermissionMode,
     ) -> Arc<super::super::AgentEntry> {
+        self.root_with_cwd(id, surface, mode, Some(self.root.path().join("work")))
+    }
+
+    fn root_with_cwd(
+        &self,
+        id: &str,
+        surface: AgentExecutionSurface,
+        mode: AgentSessionPermissionMode,
+        cwd: Option<std::path::PathBuf>,
+    ) -> Arc<super::super::AgentEntry> {
         self.runtime.create_session(serde_json::from_value(json!({
             "sessionId": id, "taskId": id, "goal": "Review the actual repository source in the temporary workspace",
             "permissionMode": mode, "executionSurface": surface,
-            "target": { "kind": "local", "targetId": TERMINAL, "sessionId": TERMINAL, "cwd": self.root.path().join("work") },
+            "target": { "kind": "local", "targetId": TERMINAL, "sessionId": TERMINAL, "cwd": cwd },
         })).unwrap()).unwrap();
         // Attach the real HTTP adapter as an owner; these tests exercise native
         // calls directly and never manufacture a model response or contact a model.

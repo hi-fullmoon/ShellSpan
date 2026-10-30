@@ -66,6 +66,14 @@ try {
           }
           const viewport = page.locator('.ai-reasoning-viewport');
           await viewport.waitFor();
+          await page.keyboard.press('Tab');
+          await viewport.focus();
+          assert.deepEqual(await viewport.evaluate(element => ({
+            focused: element.matches(':focus-visible'),
+            outline: getComputedStyle(element).outlineStyle,
+            shadow: getComputedStyle(element).boxShadow,
+          })), { focused: true, outline: 'none', shadow: 'none' },
+          `${context}: keyboard scrolling remains available without a focus border`);
           const waitAtEnd = () => page.waitForFunction(() => {
             const element = document.querySelector('.ai-reasoning-viewport');
             return element.scrollHeight - element.scrollTop - element.clientHeight <= 2

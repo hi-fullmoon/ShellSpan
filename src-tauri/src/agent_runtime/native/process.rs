@@ -474,6 +474,20 @@ impl ProcessRegistryNative {
         Ok(())
     }
 
+    pub(crate) fn task_processes(
+        &self,
+        task_id: &str,
+    ) -> Result<Vec<Arc<ManagedProcessNative>>, String> {
+        Ok(self
+            .processes
+            .lock()
+            .map_err(|_| "Process registry is unavailable")?
+            .values()
+            .filter(|process| process.task_id == task_id)
+            .cloned()
+            .collect())
+    }
+
     pub(crate) fn owner_task_ids(&self) -> Result<Vec<String>, String> {
         let processes = self
             .processes

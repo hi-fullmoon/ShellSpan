@@ -204,8 +204,15 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
                     "path": bounded_string(4096),
                     "content": { "type": "string", "maxLength": super::MAX_WRITE_FILE_CONTENT_BYTES },
                     "precondition": {
+                        "type": "object",
+                        "description": "Required. To create a new file send {\"mustNotExist\":true}, with JSON boolean true, never the string \"true\". To replace an existing file send only {\"sha256\":\"digest returned by read_file\"}.",
+                        "additionalProperties": false,
+                        "properties": {
+                            "mustNotExist": { "type": "boolean", "const": true },
+                            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+                        },
                         "oneOf": [
-                            object_schema(&["mustNotExist"], json!({ "mustNotExist": { "const": true } })),
+                            object_schema(&["mustNotExist"], json!({ "mustNotExist": { "type": "boolean", "const": true } })),
                             object_schema(&["sha256"], json!({ "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } }))
                         ]
                     }
@@ -399,6 +406,15 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
             ),
         },
     ];
+    for tool in &mut tools {
+        if super::scratch::is_file_tool(&tool.name) {
+            tool.input_schema["properties"]["fileScope"] = json!({
+                "type": "string", "enum": ["workspace", "scratch"], "default": "workspace",
+                "description": "Use scratch for temporary execution scripts and intermediate files outside the project. Paths resolve only inside this session's private temporary file root. Omit for project files."
+            });
+            tool.description.push_str(" Set fileScope=scratch for temporary scripts and intermediate files. The result returns scratchRoot for absolute script execution; fileScope=workspace (default) keeps the frozen project root. Scratch does not grant extra tool or execution permissions. Scratch files may be collected after they are no longer in use; export deliverables to the workspace explicitly.");
+        }
+    }
     tools.extend(super::diagnostic_model_tools());
     tools
 }
@@ -818,6 +834,23 @@ mod tests {
                 ["mustNotExist"]["const"],
             true
         );
+        let precondition = &write.input_schema["properties"]["precondition"];
+        assert_eq!(precondition["type"], "object");
+        assert_eq!(precondition["additionalProperties"], false);
+        assert_eq!(
+            precondition["properties"]["mustNotExist"]["type"],
+            "boolean"
+        );
+        assert_eq!(precondition["properties"]["mustNotExist"]["const"], true);
+        assert_eq!(precondition["properties"]["sha256"]["type"], "string");
+        assert_eq!(
+            precondition["oneOf"][0]["properties"]["mustNotExist"]["type"],
+            "boolean"
+        );
+        assert!(precondition["description"]
+            .as_str()
+            .unwrap()
+            .contains("never the string"));
 
         let patch = tools
             .iter()
