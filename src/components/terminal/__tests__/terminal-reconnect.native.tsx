@@ -93,6 +93,55 @@ async function verify() {
     flushSync(() => useTerminalStore.getState().addSession(original, sshFixture ? profile.id : undefined));
     await eventually(() => live()?.status === 'connected', 'Original native PTY did not connect');
     await eventually(() => Boolean(live()?.promptReady), 'Original native shell did not reach its integrated prompt');
+    if (new URL(location.href).searchParams.get('surfaceOnly') === 'true') {
+      const originalController = terminalRegistry.get(original.sessionId);
+      assert(originalController, 'Missing original production controller');
+      const assertSurface = async () => {
+        await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+        const surfaces = document.querySelectorAll('[data-terminal-measure-session]');
+        assert(surfaces.length === 1, `Reconnect left ${surfaces.length} terminal surfaces mounted`);
+        const controller = terminalRegistry.get(live()!.sessionId);
+        assert(controller === originalController, 'Reconnect replaced the retained controller');
+        const host = document.querySelector(`[data-terminal-measure-session="${live()!.sessionId}"]`);
+        assert(host && host.contains(controller.container), 'Replacement terminal is attached to a stale host');
+        const bounds = () => ({
+          pane: host.getBoundingClientRect(),
+          viewport: document.getElementById('root')!.getBoundingClientRect(),
+          screen: controller.terminal.element!.querySelector('.xterm-screen')!.getBoundingClientRect(),
+        });
+        await eventually(() => {
+          const { pane, screen, viewport } = bounds();
+          return screen.width > 0 && screen.height > 0 && screen.top >= pane.top && screen.bottom <= pane.bottom + 1
+            && screen.top >= viewport.top && screen.bottom <= Math.min(viewport.bottom, innerHeight) + 1
+            && screen.left >= pane.left && screen.right <= pane.right + 1;
+        }, () => `Replacement terminal is outside its visible pane: ${JSON.stringify(bounds())}`);
+      };
+      const powershell = ['windowsPowerShell', 'powerShell7'].includes(
+        (await invokeGetTerminalBrokerSnapshot(original.sessionId)).session?.integrationShell ?? '',
+      );
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const previous = live()!.sessionId;
+        await invokeCloseSession(previous);
+        await eventually(() => live()?.status === 'disconnected', 'Surface terminal did not disconnect');
+        originalController.terminal.input('\r', true);
+        await eventually(() => live()?.sessionId !== previous && live()?.status === 'connected'
+          && Boolean(live()?.promptReady), 'Surface terminal did not reconnect to a ready prompt');
+        terminals.add(live()!.sessionId);
+        for (const width of ['720px', '1200px']) {
+          document.getElementById('root')!.style.width = width;
+          flushSync(() => root.render(<NativeWorkspace panel={false} />));
+          await assertSurface();
+        }
+        const marker = `reconnect-visible-${crypto.randomUUID()}`;
+        originalController.terminal.input(powershell ? `Write-Output '${marker}'\r` : `printf '%s\\n' '${marker}'\r`, true);
+        await eventually(() => {
+          const buffer = originalController.terminal.buffer.active;
+          return Array.from({ length: buffer.length }, (_, row) => buffer.getLine(row)?.translateToString(true)).some(line => line === marker);
+        }, 'Reconnected terminal did not render actual command output');
+        await assertSurface();
+      }
+      return;
+    }
     if (focusReconnect) assert(useFocusStore.getState().setTarget(original.sessionId), 'Cannot select the actual Focus target');
     const projectRoot = sshFixture ? null : await readTerminalCurrentDirectory(live()!);
     assert(sshFixture || projectRoot, 'Missing actual local project directory');
@@ -136,6 +185,16 @@ async function verify() {
       await eventually(() => live()?.sessionId !== previous && live()?.status === 'connected', 'Enter did not reconnect the real native PTY');
       const replacement = live()!.sessionId;
       terminals.add(replacement);
+      await eventually(() => Boolean(live()?.promptReady), 'Replacement shell did not reach its prompt');
+      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      const replacementController = terminalRegistry.get(replacement);
+      const replacementHost = document.querySelector(`[data-terminal-measure-session="${replacement}"]`);
+      assert(replacementController && replacementHost?.isConnected
+        && replacementHost.contains(replacementController.container)
+        && replacementController.terminal.element?.isConnected,
+      'Reconnected terminal lost its mounted xterm surface');
+      const screen = replacementController.terminal.element.querySelector('.xterm-screen')?.getBoundingClientRect();
+      assert(screen && screen.width > 0 && screen.height > 0, 'Reconnected xterm surface has no visible dimensions');
       assert(replacement !== previous, 'Reconnect did not create a real replacement PTY');
       if (focusReconnect) assert(useFocusStore.getState().targetSessionId === replacement,
         'Focus kept the removed transport ID after the terminal reconnected');

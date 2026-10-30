@@ -464,7 +464,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         <TerminalContentMenu session={activeSession} terminal={terminal} onPaste={pasteText} onSearch={handleOpenSearch}>
           <div ref={paneRef} data-terminal-measure-session={activeSession?.sessionId} className="h-full w-full p-0" />
         </TerminalContentMenu>
-        {isVisible && terminal && <TerminalResizeIndicator key={activeSessionId} terminal={terminal} boundary={resizeBoundaryRef} />}
+        {isVisible && terminal && <TerminalResizeIndicator key={`resize:${activeSessionId}`} terminal={terminal} boundary={resizeBoundaryRef} />}
       </div>
       <ConfirmationDialog
         open={Boolean(pendingPaste)}

@@ -34,6 +34,7 @@ const { values } = parseArgs({ options: {
   'terminal-readiness': { type: 'boolean' },
   'terminal-clear-screen': { type: 'boolean' },
   'terminal-reconnect': { type: 'boolean' },
+  'terminal-reconnect-surface': { type: 'boolean' },
   'terminal-reconnect-ssh': { type: 'boolean' },
   'terminal-reconnect-focus': { type: 'boolean' },
   'no-model': { type: 'boolean' }, route: { type: 'string' }, model: { type: 'string' },
@@ -56,7 +57,7 @@ assert(!terminalContentionRun || (!focusBackgroundRun && !focusRun && !performan
 assert(!focusBackgroundRun || (!focusRun && !values.performance && !values['terminal-readiness']), '--focus-background is a separate regression');
 const terminalReadinessRun = values['terminal-readiness'] === true;
 const terminalClearScreenRun = values['terminal-clear-screen'] === true;
-const terminalReconnectRun = values['terminal-reconnect'] === true || values['terminal-reconnect-ssh'] === true
+const terminalReconnectRun = values['terminal-reconnect'] === true || values['terminal-reconnect-surface'] === true || values['terminal-reconnect-ssh'] === true
   || values['terminal-reconnect-focus'] === true;
 assert(!terminalReconnectRun || (!terminalClearScreenRun && !terminalReadinessRun && !terminalContentionRun && !focusBackgroundRun && !focusRun && !performanceRun), '--terminal-reconnect is a separate regression');
 assert(!terminalClearScreenRun || (!terminalReadinessRun && !terminalContentionRun && !focusBackgroundRun && !focusRun && !performanceRun), '--terminal-clear-screen is a separate regression');
@@ -302,6 +303,7 @@ try {
   if (questionSubmissionRun) url.searchParams.set('questionSubmissionRecovery', 'true');
   if (values['composer-input-diagnostic']) url.searchParams.set('composerInputDiagnostic', 'true');
   if (values['terminal-reconnect-ssh']) url.searchParams.set('sshFixture', 'true');
+  if (values['terminal-reconnect-surface']) url.searchParams.set('surfaceOnly', 'true');
   if (values['terminal-reconnect-focus']) url.searchParams.set('focusReconnect', 'true');
   if (values['native-jobs-ssh']) url.searchParams.set('sshShell', values['native-jobs-ssh']);
   if (values['native-jobs-direct']) url.searchParams.set('directLifecycle', 'true');
@@ -345,6 +347,7 @@ try {
   else if (focusBackgroundRun) console.log('Native Focus background regression passed: two real visible commands completed on the leased PTY, with Focus selection and keyboard focus preserved.');
   else if (terminalReadinessRun) console.log('Native terminal readiness passed: registry identity across hot updates, existing and new local PTY output.');
   else if (terminalClearScreenRun) console.log('Native terminal clear-screen passed: production controller, native IPC and real local PTY.');
+  else if (values['terminal-reconnect-surface']) console.log('Native terminal reconnect surface passed: unique mounted surface, visible geometry, retained controller and real PTY input/output across repeated reconnects. No model calls were made.');
   else if (terminalReconnectRun) console.log(`Native ${values['terminal-reconnect-focus'] ? 'Focus ' : ''}${values['terminal-reconnect-ssh'] ? 'SSH' : 'local PTY'} reconnect passed: automatic verified reconnect, explicit restore without ancestry, current execution busy gate, original conversation and draft, bilingual responsive restore actions, and no automatic command replay. No model calls were made.`);
   else if (focusRun) console.log('Native focus regression passed: real local terminals, explicit targets, collapse/restore, continuation IPC, and responsive geometry. No model or remote commands were executed.');
   else console.log('Native Agent stream passed: pending subscription/snapshot cancellation, error publication, automatic gap recovery and cleanup.');
