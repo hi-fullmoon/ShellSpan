@@ -19,6 +19,7 @@
   transition: height 180ms ease-out, opacity 180ms ease-out;
 }
 
+.ai-notice-transition[data-starting-style],
 .ai-notice-transition[data-ending-style] {
   height: 0;
   opacity: 0;

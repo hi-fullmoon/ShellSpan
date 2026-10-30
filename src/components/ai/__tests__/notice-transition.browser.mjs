@@ -29,6 +29,7 @@ try {
           const { default: ReactDOM } = await import(domUrl);
           const { AiWorkspaceRoot } = await import('/src/components/ai/workspace/ai-workspace-root.tsx');
           const { createAiComposerState } = await import('/src/lib/ai/composer-machine.ts');
+          const { taskTokenBudgetView } = await import('/src/test/fixtures/task-token-budget.ts');
           const { initI18n, t } = await import('/src/locales/index.ts');
           const { useAppStore } = await import('/src/stores/appStore.ts');
           await import('/src/styles/base.css');
@@ -36,9 +37,25 @@ try {
           useAppStore.setState({ locale });
           await initI18n(locale);
           const h = React.createElement;
+          const failure = taskTokenBudgetView();
+          // Pause the real entrance transitions before they finish, including first mount.
+          const entered = new Set();
+          const captureEntrance = event => {
+            const panel = event.target;
+            if (!panel.matches('[data-slot="ai-notice-transition"][data-open]') || entered.has(panel)) return;
+            entered.add(panel);
+            panel.dataset.entranceCaptured = '';
+            for (const animation of panel.getAnimations()) {
+              animation.pause();
+              animation.currentTime = 90;
+            }
+            if (entered.size === 3) document.removeEventListener('transitionrun', captureEntrance);
+          };
+          document.addEventListener('transitionrun', captureEntrance);
           function Preview() {
             const [error, setError] = React.useState(true);
             const [reconnect, setReconnect] = React.useState(true);
+            const [failed, setFailed] = React.useState(true);
             React.useEffect(() => {
               const restore = () => { setError(true); setReconnect(true); };
               document.addEventListener('restore-notices', restore);
@@ -50,19 +67,35 @@ try {
                 composerState: {
                   ...createAiComposerState({ phase: 'idle', runtimeStatus: 'idle', draft: t('ai.workspace.reconnectAvailable') }),
                   lastError: error ? { message: t('ai.workspace.reconnectUnsettled') } : null,
+                  failedDrafts: failed ? [{ id: failure.summary.id, content: failure.snapshot.value.header.goal,
+                    mode: 'nextTurn', error: failure.error }] : [],
                 },
+                onRetryFailedDraft: () => setFailed(false),
                 onDismissError: () => setError(false),
                 onContinueOnReconnectedTerminal: reconnect ? () => setReconnect(false) : undefined,
               }));
           }
           ReactDOM.createRoot(document.getElementById('root')).render(h(Preview));
           return { dismiss: t('ai.workspace.recovery.dismiss'),
-            continue: t('ai.workspace.continueOnReconnectedTerminal') };
+            continue: t('ai.workspace.continueOnReconnectedTerminal'), retry: t('common.retry') };
         }, locale);
         const panels = page.locator('[data-slot="ai-notice-transition"]');
         await panels.first().waitFor();
         await page.evaluate(() => document.fonts.ready);
-        assert.equal(await panels.count(), 2);
+        assert.equal(await panels.count(), 3);
+        if (reducedMotion === 'no-preference') {
+          await page.waitForFunction(() => document.querySelectorAll('[data-entrance-captured]').length === 3);
+          const entrances = await panels.evaluateAll(elements => elements.map(el => ({
+            height: el.getBoundingClientRect().height, fullHeight: el.scrollHeight,
+            opacity: Number(getComputedStyle(el).opacity), inert: el.inert,
+          })));
+          assert.ok(entrances.every(panel => panel.height > 0 && panel.height < panel.fullHeight),
+            'Initially present errors, failed drafts and reconnect notices expand during entrance');
+          assert.ok(entrances.every(panel => panel.opacity > 0 && panel.opacity < 1 && !panel.inert),
+            'Notices fade in while their controls remain available');
+          await page.screenshot({ path: `/tmp/shellspan-notice-transition-${locale}-${width}-entering.png` });
+          await panels.evaluateAll(elements => elements.forEach(el => el.getAnimations().forEach(animation => animation.finish())));
+        }
         if (reducedMotion === 'reduce') {
           const durations = await panels.evaluateAll(elements => elements.map(el => ({
             transition: getComputedStyle(el).transitionDuration,
@@ -79,6 +112,8 @@ try {
         if (reducedMotion === 'no-preference') {
           await page.screenshot({ path: `/tmp/shellspan-notice-transition-${locale}-${width}-before.png` });
         }
+        await page.getByRole('button', { name: labels.retry, exact: true }).click();
+        assert.equal(await panels.count(), 2);
         for (const label of [labels.dismiss, labels.continue]) {
           const button = page.locator('button').filter({ hasText: label });
           const panel = button.locator('xpath=ancestor::*[@data-slot="ai-notice-transition"]');
@@ -122,6 +157,23 @@ try {
         assert.equal(await panels.count(), 0, 'No hidden panels remain after exit');
         assert.equal(await page.locator('[data-slot="ai-workspace-error-notices"]').isVisible(), false);
         assert.equal(await page.locator('[data-slot="ai-workspace-status-notices"]').isVisible(), false);
+        // Notices arriving after the workspace is already mounted also animate.
+        await page.evaluate(() => {
+          const capture = event => {
+            const panel = event.target;
+            if (!panel.matches('[data-slot="ai-notice-transition"][data-open]')) return;
+            panel.dataset.reentryCaptured = '';
+            panel.getAnimations().forEach(animation => { animation.pause(); animation.currentTime = 90; });
+          };
+          document.addEventListener('transitionrun', capture);
+          document.dispatchEvent(new Event('restore-notices'));
+        });
+        await panels.first().waitFor();
+        if (reducedMotion === 'no-preference') {
+          await page.waitForFunction(() => document.querySelectorAll('[data-reentry-captured]').length === 2);
+          const opacity = await panels.evaluateAll(elements => elements.map(el => Number(getComputedStyle(el).opacity)));
+          assert.ok(opacity.every(value => value > 0 && value < 1), 'Restored notices fade in again');
+        }
         assert.deepEqual(errors, []);
         await page.close();
       }

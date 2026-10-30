@@ -31,25 +31,27 @@ export function AiWorkspaceErrorNotices({
       data-slot="ai-workspace-error-notices"
       className="ai-workspace-error-notices flex w-full min-w-0 shrink-0 flex-col gap-1.5"
     >
-      {syncError && (
-        <AiErrorNotice title={t('ai.workspace.recovery.title')}>
-          <span className="flex min-w-0 flex-col gap-1">
-            <span>{t((syncRecovery?.attempts ?? 0) >= 3 ? 'ai.error.streamSyncPersistent' : 'ai.error.streamSyncFailed')}</span>
-            {syncRecovery && <span className="text-muted-foreground">
-              {t('ai.error.streamSyncAttempts', { count: syncRecovery.attempts })}
-              {syncRecovery.lastSyncedAt !== undefined && <> · {t('ai.error.streamLastSynced', {
-                time: new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-                  .format(syncRecovery.lastSyncedAt),
-              })}</>}
-            </span>}
-            {onRetrySync && <Button type="button" variant="ghost" size="xs" className="self-start text-[11px]"
-              disabled={syncRecovery?.retrying} aria-busy={syncRecovery?.retrying || undefined}
-              onClick={() => { void onRetrySync(); }}>
-              {t(syncRecovery?.retrying ? 'ai.error.streamSyncRetrying' : 'ai.error.streamSyncRetry')}
-            </Button>}
-          </span>
-        </AiErrorNotice>
-      )}
+      <AiNoticeTransition>
+        {syncError ? (
+          <AiErrorNotice title={t('ai.workspace.recovery.title')}>
+            <span className="flex min-w-0 flex-col gap-1">
+              <span>{t((syncRecovery?.attempts ?? 0) >= 3 ? 'ai.error.streamSyncPersistent' : 'ai.error.streamSyncFailed')}</span>
+              {syncRecovery && <span className="text-muted-foreground">
+                {t('ai.error.streamSyncAttempts', { count: syncRecovery.attempts })}
+                {syncRecovery.lastSyncedAt !== undefined && <> · {t('ai.error.streamLastSynced', {
+                  time: new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                    .format(syncRecovery.lastSyncedAt),
+                })}</>}
+              </span>}
+              {onRetrySync && <Button type="button" variant="ghost" size="xs" className="self-start text-[11px]"
+                disabled={syncRecovery?.retrying} aria-busy={syncRecovery?.retrying || undefined}
+                onClick={() => { void onRetrySync(); }}>
+                {t(syncRecovery?.retrying ? 'ai.error.streamSyncRetrying' : 'ai.error.streamSyncRetry')}
+              </Button>}
+            </span>
+          </AiErrorNotice>
+        ) : null}
+      </AiNoticeTransition>
       <AiNoticeTransition>
         {composerState?.lastError && !composerState.failedDrafts.some(failed => failed.error.deliveryUnknown && failed.error === composerState.lastError) ? (
           <AiErrorNotice
@@ -71,17 +73,18 @@ export function AiWorkspaceErrorNotices({
         ) : null}
       </AiNoticeTransition>
       {composerState?.failedDrafts.map((failed) => (
-        <AiErrorNotice
-          key={failed.id}
-          title={t('ai.workspace.recovery.title')}
-          label={t(failed.error.deliveryUnknown ? 'ai.workspace.messageUnconfirmed' : 'ai.workspace.failedDraft')}
-          action={onRetryFailedDraft && <Button type="button" variant="ghost" size="xs" className="shrink-0 text-[11px]"
-            disabled={composerState.phase === 'stopping'} onClick={() => onRetryFailedDraft(failed.id)}>
-            {t(failed.error.deliveryUnknown ? 'ai.workspace.retryOriginal' : 'common.retry')}
-          </Button>}
-        >
-          {failed.content || (failed.hasImages ? t('ai.workspace.images.attachments') : '')}
-        </AiErrorNotice>
+        <AiNoticeTransition key={failed.id}>
+          <AiErrorNotice
+            title={t('ai.workspace.recovery.title')}
+            label={t(failed.error.deliveryUnknown ? 'ai.workspace.messageUnconfirmed' : 'ai.workspace.failedDraft')}
+            action={onRetryFailedDraft && <Button type="button" variant="ghost" size="xs" className="shrink-0 text-[11px]"
+              disabled={composerState.phase === 'stopping'} onClick={() => onRetryFailedDraft(failed.id)}>
+              {t(failed.error.deliveryUnknown ? 'ai.workspace.retryOriginal' : 'common.retry')}
+            </Button>}
+          >
+            {failed.content || (failed.hasImages ? t('ai.workspace.images.attachments') : '')}
+          </AiErrorNotice>
+        </AiNoticeTransition>
       ))}
     </div>
   );
