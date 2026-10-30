@@ -249,6 +249,7 @@ function AssistantMessageNodeView({ node, inTurnProcess = false, deferMessageAct
 
 function ReasoningContent({ children, streaming }: { readonly children: string; readonly streaming: boolean }) {
   const { t } = useI18n();
+  const [defaultScrollPosition] = useState<'start' | 'end'>(streaming ? 'end' : 'start');
   const splitMarkdown = useMemo(() => createStreamingMarkdownSplitter(), []);
   const chunks = useMemo(() => splitMarkdown(children), [children, splitMarkdown]);
   const previousSource = useRef('');
@@ -258,7 +259,7 @@ function ReasoningContent({ children, streaming }: { readonly children: string; 
   }, [children]);
   let offset = 0;
   return (
-    <MessageScrollerProvider autoScroll={streaming} defaultScrollPosition={streaming ? 'end' : 'start'}>
+    <MessageScrollerProvider autoScroll={streaming} defaultScrollPosition={defaultScrollPosition}>
       <ContentScroller className="ai-reasoning-scroll h-auto max-h-65 w-full">
         <MessageScrollerViewport className="ai-reasoning-viewport h-auto" aria-label={t('ai.workspace.reasoning')}>
           <MessageScrollerContent className="ai-reasoning-body min-h-0 min-w-0 gap-0 py-1 pl-[22px] whitespace-normal [overflow-wrap:anywhere]">

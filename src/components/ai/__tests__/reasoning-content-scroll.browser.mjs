@@ -47,6 +47,10 @@ try {
               node = { ...node, content: `${node.content}\n\n${text}`, lastSeq: node.lastSeq + 1 };
               render();
             };
+            window.finishReasoning = () => {
+              node = { ...node, state: 'completed', lastSeq: node.lastSeq + 1 };
+              render();
+            };
             render();
           }, { source: sources[0], mode });
           const context = `${engine.name()}/${mode}/${width}`;
@@ -56,6 +60,10 @@ try {
             assert.equal(await page.locator('.ai-disclosure-summary').evaluate(element => getComputedStyle(element).webkitLineClamp), '2');
           }
           if (await trigger.getAttribute('aria-expanded') === 'false') await trigger.click();
+          else if (mode === 'ask') {
+            await trigger.press('Space');
+            await trigger.press('Space');
+          }
           const viewport = page.locator('.ai-reasoning-viewport');
           await viewport.waitFor();
           const waitAtEnd = () => page.waitForFunction(() => {
@@ -83,6 +91,18 @@ try {
           await page.evaluate(source => window.appendReasoning(source), sources[2]);
           await page.waitForFunction(length => document.querySelector('.ai-reasoning-body').textContent.length > length, previousLength);
           await waitAtEnd();
+          await viewport.hover();
+          await page.mouse.wheel(0, -400);
+          await page.waitForFunction(() => {
+            const element = document.querySelector('.ai-reasoning-viewport');
+            return element.scrollHeight - element.scrollTop - element.clientHeight > 100;
+          });
+          const beforeCompletion = await viewport.evaluate(element => element.scrollTop);
+          assert.ok(beforeCompletion > 0, `${context}: completion case starts in the middle of the content`);
+          await page.evaluate(() => window.finishReasoning());
+          await page.locator('.ai-reasoning-row[data-state="ok"]').waitFor();
+          assert.ok(Math.abs(await viewport.evaluate(element => element.scrollTop) - beforeCompletion) <= 2,
+            `${context}: completion preserves the manual reading position`);
           await page.close();
         }
       }
