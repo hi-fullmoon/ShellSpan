@@ -53,12 +53,6 @@
   }
 }
 
-.ai-terminal-command {
-  color: inherit;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-
 .ai-tool-content-region > .ai-tool-copy-button {
   top: 4px;
   right: 14px;
@@ -66,6 +60,12 @@
 
 .ai-tool-content-region:has(> .ai-tool-copy-button) > :is(pre, .ai-terminal-command-row, .ai-search-results) {
   padding-right: 48px;
+}
+
+.ai-terminal-command {
+  color: inherit;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .ai-terminal-exit {
