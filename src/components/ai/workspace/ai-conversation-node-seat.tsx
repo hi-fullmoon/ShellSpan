@@ -310,7 +310,7 @@ function ReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reas
               type="button"
               variant="plain"
               size="sm"
-              className={cn(AI_DISCLOSURE_ROW_CLASS, 'h-auto')}
+              className={AI_DISCLOSURE_ROW_CLASS}
               aria-label={summary ? `${title} ${summary}` : title}
               aria-expanded={open}
             />
@@ -356,7 +356,7 @@ function AskReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'r
         role={isStreaming ? 'status' : undefined}
       >
         <CollapsibleTrigger
-          render={<Button type="button" variant="plain" size="sm" className={cn(AI_DISCLOSURE_ROW_CLASS, 'h-auto')} aria-label={title} aria-expanded={open} />}
+          render={<Button type="button" variant="plain" size="sm" className={AI_DISCLOSURE_ROW_CLASS} aria-label={title} aria-expanded={open} />}
         >
           <span className={AI_DISCLOSURE_LEADING_CLASS} aria-hidden="true">
             <BrainIcon />
@@ -632,7 +632,7 @@ function TurnProcessDisclosure({
               type="button"
               variant="plain"
               size="sm"
-              className={cn(AI_DISCLOSURE_ROW_CLASS, 'ai-turn-process-trigger h-auto min-h-6 px-0 py-1')}
+              className={cn(AI_DISCLOSURE_ROW_CLASS, 'ai-turn-process-trigger')}
               aria-label={label}
               aria-expanded={open}
             />

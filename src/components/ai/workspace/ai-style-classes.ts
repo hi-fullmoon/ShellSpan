@@ -1,9 +1,9 @@
 /** Shared transcript layout hooks. Visual states remain in ai-panel CSS. */
 export const AI_DISCLOSURE_ROW_CLASS =
-  'ai-disclosure-row relative flex min-h-6 w-full min-w-0 cursor-pointer items-center justify-start gap-0 overflow-hidden p-0 text-left';
+  'ai-disclosure-row relative flex h-auto min-h-6 w-full min-w-0 cursor-pointer items-center justify-start gap-0 overflow-hidden p-0 text-left';
 
 export const AI_TOOL_ROW_CLASS =
-  'ai-tool-row relative flex min-h-6 w-full min-w-0 cursor-pointer items-center justify-start gap-0 overflow-hidden p-0 text-left';
+  'ai-tool-row relative flex h-auto min-h-6 w-full min-w-0 cursor-pointer items-center justify-start gap-0 overflow-hidden p-0 text-left';
 
 export const AI_DISCLOSURE_LEADING_CLASS =
   'ai-disclosure-leading relative mr-1 inline-flex size-4 shrink-0 items-center justify-center';
