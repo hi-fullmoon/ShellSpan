@@ -63,14 +63,16 @@ describe('AI details content sizing', () => {
     expect(container.querySelector('.ai-detail-code')).toHaveTextContent(longValue);
     const sections = [...container.querySelectorAll('.ai-detail-section')];
     expect(sections).toHaveLength(3);
-    expect(container.querySelector('.ai-detail-sections')).toHaveClass('flex-col', 'overflow-y-auto', 'min-h-0', 'flex-1');
+    expect(container.querySelector('.ai-detail-sections')).toHaveClass('flex-col', 'overflow-hidden', 'min-h-0', 'flex-1');
+    expect(container.querySelector('.ai-detail-sections')).not.toHaveClass('overflow-y-auto');
     expect(container.querySelector('.ai-details-body')).toHaveClass('min-h-0', 'overflow-hidden');
     expect(container.querySelectorAll('.ai-detail-section > .ai-tool-content-region > [data-slot="scroll-area"]')).toHaveLength(3);
     expect(container.querySelector('.ai-detail-summary')).toHaveClass('max-h-[30%]', 'min-h-0');
     expect(container.querySelector('.ai-detail-summary-meta')).toHaveClass('shrink-0');
     expect(container.querySelector('.ai-detail-summary .ai-content-title > span')).toHaveClass('line-clamp-2');
     for (const section of sections) {
-      expect(section).toHaveClass('flex-col', 'min-h-0');
+      expect(section).toHaveClass('flex-col', 'min-h-0', 'flex-1', 'max-h-fit');
+      expect(section).not.toHaveClass('shrink-0');
       expect(section).not.toHaveClass('overflow-hidden');
       const header = section.querySelector('.ai-detail-section-header');
       expect(header).toHaveClass('items-center', 'justify-between', 'px-3', 'shrink-0');

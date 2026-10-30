@@ -35,7 +35,7 @@ function DetailSection({
   readonly children: React.ReactNode;
 }) {
   return (
-    <section className="ai-detail-section flex min-h-0 min-w-0 shrink-0 flex-col">
+    <section className="ai-detail-section flex max-h-fit min-h-0 min-w-0 flex-1 flex-col">
       <div className="ai-detail-section-header flex min-h-10 shrink-0 items-center justify-between gap-3 px-3 py-2">
         <h3 className="min-w-0 flex-1"><AiContentTitle>{title}</AiContentTitle></h3>
       </div>
@@ -100,7 +100,7 @@ export function AiToolDetails({
               </div>
               <AiContentTitle>{node.state === 'failed' || node.state === 'rejected' ? toolDisplaySummary(node, t) : node.summary || node.name}</AiContentTitle>
             </div>
-            <div className="ai-detail-sections flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto">
+            <div className="ai-detail-sections flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden">
               <DetailCode value={node.input} label={t('ai.workspace.details.input')} />
               <DetailSection
                 title={t('ai.workspace.details.output')}
@@ -113,7 +113,7 @@ export function AiToolDetails({
               >
                 {node.output === null && !node.error && node.state !== 'failed' && node.state !== 'rejected' && node.state !== 'running'
                   ? <p className="ai-details-empty m-0 py-3 px-3.5 [overflow-wrap:anywhere]">{t('ai.workspace.details.noOutput')}</p>
-                  : <AiToolExpandedContent node={node} showCopyActions={false} showGenericInput={false} />}
+                  : <AiToolExpandedContent node={node} showCopyActions={false} showInput={false} />}
                 {node.error && !toolErrorIsInOutput(node) && <p className="ai-detail-error m-0 py-3 px-3.5 [overflow-wrap:anywhere]">{node.error}</p>}
               </DetailSection>
               <DetailCode

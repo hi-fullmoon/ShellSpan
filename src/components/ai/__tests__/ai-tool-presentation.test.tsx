@@ -80,6 +80,83 @@ describe('AI tool presentation', () => {
     expect(sections[1].querySelectorAll('.ai-io-section')).toHaveLength(1);
   });
 
+  it.each(['zh-CN', 'en-US'] as const)('keeps input out of every specialized output surface in %s', async locale => {
+    useAppStore.setState({ locale });
+    await initI18n(locale);
+    const path = `${process.cwd()}/package.json`;
+    const file = readFileSync(path, 'utf8');
+    const codePath = 'scripts/check-ai-panel-styles.mjs';
+    const code = readFileSync(codePath, 'utf8');
+    const execution = spawnSync(process.execPath, [codePath], { encoding: 'utf8' });
+    expect(execution.status).toBe(0);
+    const search = spawnSync('rg', ['--line-number', '"version"', path], { encoding: 'utf8' });
+    expect(search.status).toBe(0);
+    const cases = [
+      { name: 'run_terminal_command', input: { command: `node ${codePath}` }, output: { stdout: execution.stdout, exitCode: 0 }, result: execution.stdout.trimEnd(), selector: '[data-ai-terminal-output]' },
+      { name: 'run_code', input: { code, language: 'javascript' }, output: { stdout: execution.stdout }, result: execution.stdout, selector: '.ai-code-output pre' },
+      { name: 'read_file', input: { path }, output: file, result: file, selector: '.ai-read-lines' },
+      { name: 'search_text', input: { query: '"version"', path }, output: search.stdout, result: search.stdout.trimEnd(), selector: '.ai-search-results' },
+      { name: 'web_fetch', input: { url: new URL(`file://${path}`).href }, output: file, result: file, selector: '.ai-web-content pre' },
+      { name: 'trash_file', input: { path }, state: 'uncertain' as const, output: { path }, result: JSON.stringify({ path }, null, 2), selector: '.ai-io-output pre' },
+    ];
+    for (const entry of cases) {
+      const tool = { ...node, ...entry };
+      const { container, rerender, unmount } = render(<AiToolDetails node={tool} onBack={() => undefined} />);
+      const sections = container.querySelectorAll('.ai-detail-section');
+      expect(sections[0].querySelector('code')?.textContent, entry.name).toBe(JSON.stringify(entry.input, null, 2));
+      const output = sections[1];
+      expect(output.querySelector('.ai-terminal-command-row, .ai-code-content, .ai-io-input'), entry.name).toBeNull();
+      if (entry.name !== 'run_terminal_command') expect(output.querySelector('.ai-tool-surface-header'), entry.name).toBeNull();
+      const result = output.querySelector(entry.selector);
+      expect(result, entry.name).not.toBeNull();
+      if (entry.name === 'read_file') {
+        expect([...output.querySelectorAll('.ai-read-line > span:last-child')].map(line => line.textContent === '\u00a0' ? '' : line.textContent).join('\n'), entry.name).toBe(file);
+      } else expect(result?.textContent, entry.name).toBe(entry.result);
+      expect(output.querySelectorAll('.ai-tool-copy-button'), entry.name).toHaveLength(1);
+
+      rerender(<AiToolExpandedContent node={tool} />);
+      if (entry.name === 'run_terminal_command') expect(container.querySelector('.ai-terminal-command-row')).toHaveTextContent(`node ${codePath}`);
+      else if (entry.name === 'run_code') expect(container.querySelector('.ai-code-content pre')?.textContent).toBe(code);
+      else if (entry.name === 'trash_file') expect(container.querySelector('.ai-io-input')).toBeInTheDocument();
+      else expect(container.querySelector('.ai-tool-surface-header')).toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it.each(['run_terminal_command', 'run_code', 'read_file', 'search_text', 'web_fetch', 'trash_file'])('keeps %s input separate while running and after failure', name => {
+    const input = { path: `${process.cwd()}/package.json` };
+    const { container, rerender } = render(<AiToolDetails node={{ ...node, name, input, state: 'running', output: null }} onBack={() => undefined} />);
+    const output = () => container.querySelectorAll('.ai-detail-section')[1];
+    expect(output().querySelector('.ai-terminal-command-row, .ai-code-content, .ai-io-input')).toBeNull();
+    const failure = capturedRead(false);
+    rerender(<AiToolDetails node={{ ...failure, name, input }} onBack={() => undefined} />);
+    expect(output().querySelector('.ai-terminal-command-row, .ai-code-content, .ai-io-input')).toBeNull();
+    expect(output().querySelector('pre')?.textContent).toBe(failure.error || failure.summary);
+  });
+
+  it.each(['zh-CN', 'en-US'] as const)('does not repeat input when a large patch falls back to plain output in %s', async locale => {
+    useAppStore.setState({ locale });
+    await initI18n(locale);
+    const revision = spawnSync('git', ['log', '-1', '--format=%H', '--', 'src/components/ai'], { encoding: 'utf8' });
+    expect(revision.status).toBe(0);
+    const result = spawnSync('git', ['show', '--format=', '--unified=1000', revision.stdout.trim(), '--', 'src/components/ai'], { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
+    expect(result.status).toBe(0);
+    expect(result.stdout.length).toBeGreaterThan(64 * 1024);
+    const patchNode = { ...node, name: 'apply_patch', input: { patch: result.stdout }, output: { diff: result.stdout } };
+    const { container, rerender } = render(<AiToolDetails node={patchNode} onBack={() => undefined} />);
+    const output = container.querySelectorAll('.ai-detail-section')[1];
+    expect(output.querySelector('.ai-diff-block')).toBeNull();
+    expect(output.querySelectorAll('.ai-io-section')).toHaveLength(1);
+    expect(output.querySelector('.ai-io-input')).toBeNull();
+    expect(output.querySelector('.ai-tool-surface-header')).toBeNull();
+    expect(output.querySelector('.ai-io-output pre')?.textContent).toBe(JSON.stringify(patchNode.output, null, 2).slice(0, 64 * 1024) + '\n…');
+    expect(output.querySelectorAll('.ai-tool-copy-button')).toHaveLength(1);
+
+    rerender(<AiToolExpandedContent node={patchNode} />);
+    expect(container.querySelectorAll('.ai-io-section')).toHaveLength(2);
+    expect(container.querySelector('.ai-io-input')).toBeInTheDocument();
+  });
+
   it.each(['zh-CN', 'en-US'] as const)('separates input and output into independently scrollable content boxes in %s', async locale => {
     useAppStore.setState({ locale });
     await initI18n(locale);
