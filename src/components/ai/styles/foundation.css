@@ -95,6 +95,29 @@
   }
 }
 
+/* Transcript disclosures and read-only regions do not need a focus frame.
+ * Keep them focusable for keyboard toggling and scrolling; action buttons and
+ * editable controls continue to use their normal focus indicators. */
+.ai-panel-shell :is(
+  .ai-task-strip-trigger,
+  .ai-queue-header,
+  .ai-disclosure-row,
+  .ai-tool-row,
+  .ai-content-title > button,
+  .ai-task-strip-list,
+  .ai-content-title[data-expanded='true'],
+  .ai-disclosure-summary,
+  .ai-task-strip-progress,
+  .ai-semantic-note-body,
+  .ai-approval-command,
+  .ai-queue-notice-preview,
+  .ai-question-panel pre[tabindex],
+  .ai-question-history [data-slot='card-content'][tabindex]
+):focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
 .ai-panel-resize-handle {
   position: absolute;
   inset-block: 0;

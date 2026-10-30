@@ -57,10 +57,6 @@
   line-height: 20px;
 }
 
-.ai-panel-shell .ai-task-strip-trigger:focus-visible {
-  outline-offset: -3px;
-}
-
 .ai-task-strip-title {
   color: var(--ai-text);
 }
