@@ -375,7 +375,7 @@ describe('AI Phase 4 Turn Process renderer', () => {
     const process = screen.getByRole('button', { name: label });
 
     expect(process).toHaveAttribute('aria-expanded', 'true');
-    expect(process).toBeDisabled();
+    expect(process).toBeEnabled();
     if (hasAnswer) expect(screen.getByText(answer)).toBeVisible();
     else expect(screen.queryByText(answer)).not.toBeInTheDocument();
     expect(container.querySelector('[data-ai-node-kind="turnTail"]')).toHaveAttribute(

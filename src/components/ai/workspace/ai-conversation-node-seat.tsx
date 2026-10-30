@@ -588,19 +588,16 @@ function TurnProcessDisclosure({
   const { t } = useI18n();
   const stateKey = turnProcessDisclosureKey(node);
   const stored = turnProcessDisclosures.get(stateKey);
-  const mustStayOpen = node.status === 'failed' || node.status === 'cancelled'
-    || node.status === 'incomplete' || node.status === 'waiting' || node.status === 'partial'
-    || node.hasInterleavedInput === true || node.hasFinalAnswer === false && node.status === 'completed';
-  const foldOnCompletion = node.status === 'completed' && node.hasEndBoundary && !mustStayOpen;
+  const foldOnCompletion = node.status === 'completed' && node.hasEndBoundary
+    && node.hasInterleavedInput !== true && node.hasFinalAnswer !== false;
   const [automaticOpen, setAutomaticOpen] = useState(stored?.open ?? !foldOnCompletion);
   const [manualOpen, setManualOpen] = useState(stored?.manualOpen);
   const bodyRef = useRef<HTMLDivElement>(null);
-  const open = mustStayOpen || (manualOpen ?? automaticOpen);
+  const open = manualOpen ?? automaticOpen;
   const label = t(turnProcessLabelKey(node.status));
   const summary = turnProcessSummary(node, t);
 
   const updateOpen = (next: boolean): void => {
-    if (mustStayOpen) return;
     storeTurnProcessDisclosure(stateKey, { open: next, manualOpen: next });
     setManualOpen(next);
   };
@@ -632,7 +629,6 @@ function TurnProcessDisclosure({
               className={cn(AI_DISCLOSURE_ROW_CLASS, 'ai-turn-process-trigger h-auto min-h-6 px-0 py-1')}
               aria-label={label}
               aria-expanded={open}
-              disabled={mustStayOpen}
             />
           }
         >

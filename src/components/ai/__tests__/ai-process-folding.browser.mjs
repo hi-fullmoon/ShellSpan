@@ -39,8 +39,8 @@ try {
         const process = page.locator('.ai-turn-process-trigger').first();
         const readStart = async () => {
           const viewport = page.locator('[data-message-scroller-viewport]');
-          await viewport.focus();
-          await page.keyboard.press('Home');
+          await viewport.hover({ position: { x: 4, y: 4 } });
+          await page.mouse.wheel(0, -100000);
           await page.waitForFunction(() => document.querySelector('[data-message-scroller-viewport]').scrollTop <= 2);
         };
         const beforeCompletion = () => page.evaluate(() => {
@@ -82,9 +82,23 @@ try {
         for (const name of ['failed', 'interleaved']) {
           await reset();
           await page.evaluate(name => window.replayFoldingRecording(name), name);
+          await readStart();
           assert.ok(await page.locator('.ai-turn-process-trigger').count());
           assert.ok(await page.locator('.ai-turn-process-trigger').evaluateAll(elements => elements.every(element =>
-            element.getAttribute('aria-expanded') === 'true' && element.disabled)));
+            element.getAttribute('aria-expanded') === 'true' && !element.disabled)));
+          for (const trigger of await page.locator('.ai-turn-process-trigger').all()) {
+            const body = trigger.locator('..').locator('.ai-turn-process-body');
+            await trigger.click();
+            assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
+            await body.waitFor({ state: 'hidden' });
+            await trigger.press('Enter');
+            assert.equal(await trigger.getAttribute('aria-expanded'), 'true');
+            await body.waitFor({ state: 'visible' });
+            await trigger.press('Space');
+            await body.waitFor({ state: 'hidden' });
+            assert.equal(await trigger.evaluate(element => document.activeElement === element), true);
+          }
+          await page.screenshot({ path: `${output}/${engine.name()}-${width}-${locale}-${name}-collapsed.png`, animations: 'disabled' });
         }
         if (runtimeEvents) {
           await reset();

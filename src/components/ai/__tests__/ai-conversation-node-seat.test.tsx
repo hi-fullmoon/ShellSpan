@@ -126,7 +126,7 @@ describe('AiConversationNodeList', () => {
     const process = screen.getByRole('button', { name: 'Process complete' });
     // This recording ends after tools, without a committed final reply.
     expect(process).toHaveAttribute('aria-expanded', 'true');
-    expect(process).toBeDisabled();
+    expect(process).toBeEnabled();
     expect(await screen.findByRole('button', { name: /^Command:/ })).toBeVisible();
   });
 

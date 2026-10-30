@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it } from 'vitest';
+import userEvent from '@testing-library/user-event';
 import { AiConversation } from '../workspace/ai-conversation';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { conversationFoldRecording } from '@/test/fixtures/conversation-fold-runtime';
@@ -104,16 +105,60 @@ it('preserves selected process text when completion arrives', () => {
   }
 });
 
-it.each([
+const inspectableRecordings = [
   ['failed child', childFailureEvents],
   ['incomplete budget', taskTokenBudgetEvidence.events],
   ['interleaved input', inboxTimelineEvidence.events],
-] as const)('keeps %s execution inspectable', (_name, events) => {
-  const { container } = render(conversation(events, 'completed'));
-  const triggers = container.querySelectorAll<HTMLButtonElement>('.ai-turn-process-trigger');
+] as const;
+
+it('preserves a manual collapse when the recorded request fails and restores its error on expansion', async () => {
+  const user = userEvent.setup();
+  const failure = childFailureEvents.findIndex(event => event.type === 'request/failure');
+  expect(failure).toBeGreaterThan(0);
+  const view = render(conversation(childFailureEvents.slice(0, failure)));
+  const trigger = view.container.querySelector<HTMLButtonElement>('.ai-turn-process-trigger')!;
+  await user.click(trigger);
+  expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+  view.rerender(conversation(childFailureEvents, 'completed'));
+  expect(trigger).toHaveAccessibleName('Process failed');
+  expect(trigger).toBeEnabled();
+  expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  await user.click(trigger);
+  expect(await screen.findByRole('alert')).toHaveTextContent('Request failed');
+});
+
+it.each(inspectableRecordings.flatMap(([name, events]) =>
+  (['en-US', 'zh-CN'] as const).map(locale => ({ name, events, locale })),
+))('opens $name by default and preserves manual folding in $locale', async ({ events, locale }) => {
+  useAppStore.setState({ locale });
+  await initI18n(locale);
+  const user = userEvent.setup();
+  const view = render(conversation(events, 'completed'));
+  const triggers = view.container.querySelectorAll<HTMLButtonElement>('.ai-turn-process-trigger');
   expect(triggers.length).toBeGreaterThan(0);
   for (const trigger of triggers) {
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
-    expect(trigger).toBeDisabled();
+    expect(trigger).toBeEnabled();
+    const body = trigger.closest('.ai-turn-process')!.querySelector('.ai-turn-process-body')!;
+    expect(body).toBeVisible();
+    await user.click(trigger);
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    await waitFor(() => expect(body).not.toBeVisible());
+  }
+  view.rerender(conversation(events, 'completed'));
+  for (const trigger of triggers) expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  view.unmount();
+
+  const history = render(conversation(events, 'completed'));
+  for (const trigger of history.container.querySelectorAll<HTMLButtonElement>('.ai-turn-process-trigger')) {
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    trigger.focus();
+    await user.keyboard('{Enter}');
+    expect(trigger).toHaveFocus();
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(trigger.closest('.ai-turn-process')!.querySelector('.ai-turn-process-body')).toBeVisible();
+    await user.keyboard(' ');
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
   }
 });

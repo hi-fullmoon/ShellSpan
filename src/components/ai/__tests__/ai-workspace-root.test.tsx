@@ -168,7 +168,8 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
       );
     }
     render(<DetailsWorkspace />);
-    await user.click(screen.getByRole('button', { name: 'Process complete' }));
+    const process = screen.getByRole('button', { name: 'Process complete' });
+    if (process.getAttribute('aria-expanded') === 'false') await user.click(process);
     const tool = screen.getByRole('button', { name: /^Command:/u });
     await user.click(tool);
     const command = screen.getByRole('button', { name: 'Show full command' });
@@ -488,7 +489,8 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     const composer = screen.getByTestId('ai-workspace-composer');
     const conversation = container.querySelector('[data-message-scroller-viewport]');
     const history = screen.getByRole('button', { name: 'Conversation history' });
-    await user.click(screen.getByRole('button', { name: 'Process complete' }));
+    const process = screen.getByRole('button', { name: 'Process complete' });
+    if (process.getAttribute('aria-expanded') === 'false') await user.click(process);
     await user.click(history);
 
     const popover = await screen.findByRole('dialog', { name: 'Session history' });
