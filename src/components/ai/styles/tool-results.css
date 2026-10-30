@@ -4,7 +4,7 @@
 .ai-web-block,
 .ai-diff-block,
 .ai-tool-code-block,
-.ai-io-card {
+.ai-io-card > .ai-io-section {
   border: 1px solid var(--ai-border-soft);
   border-radius: var(--ai-content-radius);
   background: var(--ai-code-block);

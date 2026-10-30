@@ -314,7 +314,7 @@ try {
               }
             }
             const surfaces = await page.locator([
-              '[data-ai-tool-view]', '#markdown .ai-markdown-code-block', '.ai-approval-command',
+              '[data-ai-tool-view]:not([data-ai-tool-view="generic"])', '.ai-io-card > .ai-io-section', '#markdown .ai-markdown-code-block', '.ai-approval-command',
               '.ai-semantic-note-body', '.ai-queue-notice-preview', '.ai-detail-code-wrap', '.ai-artifact-image-surface', '.ai-detail-section > .ai-tool-content-region',
             ].join(',')).evaluateAll(elements => elements.filter(element => !element.closest('.ai-detail-section [data-ai-tool-view]')).map(element => {
               const style = getComputedStyle(element);
@@ -358,6 +358,27 @@ try {
                 - element.querySelector('.ai-io-input').getBoundingClientRect().bottom;
             });
             assert.ok(inputOutputGap >= 20, 'Spacing must distinguish tool input from output');
+            const generic = page.locator('#generic .ai-io-card');
+            const boxes = generic.locator(':scope > .ai-io-section');
+            assert.equal(await boxes.count(), 2, 'Input and output must have separate content boxes');
+            const splitLayout = await generic.evaluate(element => {
+              const [input, output] = element.children;
+              const inputViewport = input.querySelector('[data-slot="scroll-area-viewport"]');
+              const outputViewport = output.querySelector('[data-slot="scroll-area-viewport"]');
+              const outputTop = output.getBoundingClientRect().top;
+              inputViewport.scrollTop = inputViewport.scrollHeight;
+              return {
+                border: getComputedStyle(element).borderTopWidth,
+                gap: output.getBoundingClientRect().top - input.getBoundingClientRect().bottom,
+                independent: inputViewport.scrollTop > 0 && outputViewport.scrollTop === 0
+                  && output.getBoundingClientRect().top === outputTop,
+                fits: [...element.children].every(box => box.scrollWidth <= box.clientWidth),
+              };
+            });
+            assert.equal(splitLayout.border, '0px', 'The two content boxes must not share an outer border');
+            assert.equal(splitLayout.gap, 12, 'Separate content boxes use the shared 12px spacing');
+            assert.ok(splitLayout.independent && splitLayout.fits, 'Each content box must scroll independently within panel bounds');
+            await generic.locator('.ai-io-input [data-slot="scroll-area-viewport"]').evaluate(element => { element.scrollTop = 0; });
             for (const selector of ['#read .ai-read-lines', '#search .ai-search-results', '#web .ai-web-content',
               '#diff .ai-diff-content', '#code .ai-code-content', '#generic .ai-io-output', '#markdown .ai-code-block-pre']) {
               for (const root of await page.locator(selector).all()) {
@@ -429,7 +450,7 @@ try {
                 if (id.endsWith('-output')) await section.locator('.ai-code-content, .ai-io-card').evaluate(element => { element.scrollTop = 0; });
               }
             } else if (locale === 'en-US' && ((theme === 'light' && width === 720) || (theme === 'dark' && width === 380))) {
-              for (const id of ['read', 'diff', 'code', 'markdown']) {
+              for (const id of ['read', 'diff', 'code', 'generic', 'markdown']) {
                 await page.locator(`#${id}`).screenshot({ path: join(screenshots, `${engine.name()}-${theme}-${width}-${id}.png`) });
               }
             }

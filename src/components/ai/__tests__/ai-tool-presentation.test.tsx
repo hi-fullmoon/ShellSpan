@@ -80,7 +80,7 @@ describe('AI tool presentation', () => {
     expect(sections[1].querySelectorAll('.ai-io-section')).toHaveLength(1);
   });
 
-  it.each(['zh-CN', 'en-US'] as const)('puts each input and output label above its real content in %s', async locale => {
+  it.each(['zh-CN', 'en-US'] as const)('separates input and output into independently scrollable content boxes in %s', async locale => {
     useAppStore.setState({ locale });
     await initI18n(locale);
     const execution = spawnSync('git', ['log', '--oneline', '-3'], { encoding: 'utf8' });
@@ -95,6 +95,8 @@ describe('AI tool presentation', () => {
     expect(sections[0].querySelector('.ai-io-label')).toHaveTextContent(locale === 'zh-CN' ? '输入' : 'IN');
     expect(sections[1].querySelector('.ai-io-label')).toHaveTextContent(locale === 'zh-CN' ? '输出' : 'OUT');
     for (const section of sections) {
+      expect(section).toHaveClass('overflow-hidden');
+      expect(section.parentElement).toBe(container.querySelector('.ai-io-card'));
       const header = section.querySelector('.ai-tool-surface-header');
       expect(header).toContainElement(section.querySelector('.ai-io-label'));
       const body = section.querySelector('.ai-tool-content-region');
@@ -103,11 +105,36 @@ describe('AI tool presentation', () => {
       expect(body).toContainElement(section.querySelector('.ai-tool-copy-button'));
       expect(header?.querySelector('.ai-tool-copy-button')).toBeNull();
     }
-    expect(container.querySelector('.ai-io-card')).toHaveClass('overflow-hidden');
+    expect(container.querySelector('.ai-io-card')).toHaveClass('gap-3');
+    expect(container.querySelector('.ai-io-card')).not.toHaveClass('overflow-hidden');
     expect(container.querySelector('.ai-io-input')).toHaveClass('max-h-65');
     expect(container.querySelector('.ai-io-output')).toHaveClass('max-h-65');
     expect(container.querySelector('.ai-io-card [data-slot="scroll-area-viewport"]')).toHaveStyle({ overflow: 'scroll' });
     expect(container.querySelector('.ai-io-divider, [data-slot="separator"]')).not.toBeInTheDocument();
+  });
+
+  it('renders only populated generic content boxes while waiting for output or when input is absent', () => {
+    const execution = spawnSync('git', ['log', '--oneline', '-3'], { encoding: 'utf8' });
+    expect(execution.status).toBe(0);
+    const input = { command: 'git log --oneline -3' };
+    const { container, rerender } = render(<AiToolExpandedContent node={{
+      ...node, name: 'git', input, state: 'running', output: null,
+    }} />);
+    expect(container.querySelectorAll('.ai-io-section')).toHaveLength(1);
+    expect(container.querySelector('.ai-io-input')).toHaveTextContent(input.command);
+    expect(container.querySelector('.ai-io-output')).toBeNull();
+
+    rerender(<AiToolExpandedContent node={{ ...node, name: 'git', input, output: execution.stdout }} />);
+    expect(container.querySelectorAll('.ai-io-section')).toHaveLength(2);
+    expect(container.querySelector('.ai-io-output pre')?.textContent).toBe(execution.stdout);
+
+    rerender(<AiToolExpandedContent node={{ ...node, name: 'git', input: null, output: execution.stdout }} />);
+    expect(container.querySelectorAll('.ai-io-section')).toHaveLength(1);
+    expect(container.querySelector('.ai-io-input')).toBeNull();
+    expect(container.querySelector('.ai-io-output pre')?.textContent).toBe(execution.stdout);
+
+    rerender(<AiToolExpandedContent node={{ ...node, name: 'git', input: null, output: null }} />);
+    expect(container.querySelectorAll('.ai-io-section')).toHaveLength(0);
   });
 
   it.each(['read_file', 'search_text'])('shows every real %s result in a capped scrollable body', name => {

@@ -83,7 +83,8 @@
   tab-size: 2;
 }
 
-[data-slot='ai-tool-details'] [data-ai-tool-view] {
+[data-slot='ai-tool-details'] [data-ai-tool-view],
+[data-slot='ai-tool-details'] .ai-io-card > .ai-io-section {
   max-height: none;
   max-width: 100%;
   margin: 0;

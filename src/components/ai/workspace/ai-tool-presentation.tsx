@@ -775,9 +775,9 @@ function IoSurface({ node, showCopyActions, scrollable, showInput = true }: {
   const input = bounded(formatToolValue(node.input));
   const output = bounded(outputText(node));
   return (
-    <div className="ai-io-card my-1 ml-1 flex min-w-0 max-w-[calc(100%-4px)] flex-col overflow-hidden" data-ai-tool-view="generic">
+    <div className="ai-io-card my-1 ml-1 flex min-w-0 max-w-[calc(100%-4px)] flex-col gap-3" data-ai-tool-view="generic">
       {showInput && input && (
-        <div className="ai-io-section min-w-0 shrink-0">
+        <div className="ai-io-section min-w-0 shrink-0 overflow-hidden">
           <ToolSurfaceHeader title={t('ai.workspace.tool.inputLabel')} titleClassName="ai-io-label" />
           <AiToolContentRegion text={showCopyActions ? formatToolValue(node.input) : undefined} label={t('ai.workspace.tool.copyInput')}>
             <ToolScrollArea className="ai-io-input max-h-65 min-w-0 max-w-full" scrollable={scrollable}>
@@ -787,7 +787,7 @@ function IoSurface({ node, showCopyActions, scrollable, showInput = true }: {
         </div>
       )}
       {output && (
-        <div className="ai-io-section min-w-0 shrink-0">
+        <div className="ai-io-section min-w-0 shrink-0 overflow-hidden">
           {(showInput || showCopyActions) && <ToolSurfaceHeader title={t('ai.workspace.tool.outputLabel')} titleClassName={showInput ? 'ai-io-label' : undefined} />}
           <AiToolContentRegion text={showCopyActions ? outputText(node) : undefined} label={t('ai.workspace.tool.copyOutput')}>
             <ToolScrollArea className="ai-io-output max-h-65 min-w-0 max-w-full" scrollable={scrollable}>
