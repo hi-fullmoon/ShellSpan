@@ -126,17 +126,17 @@ try {
             `The diagnostic body must directly follow its heading: ${JSON.stringify(errorGeometry)}`);
           assert.ok(errorGeometry.gap >= 0 && errorGeometry.gap <= errorGeometry.lineHeight,
             `Error label and diagnostic must stay within one line of each other: ${JSON.stringify(errorGeometry)}`);
-          assert.equal(errorGeometry.copyInHeader, true);
-          assert.equal(errorGeometry.bodyOwnsCopy, false);
-          assert.ok(errorGeometry.buttonTop < errorGeometry.bodyTop && errorGeometry.buttonRight <= width,
-            'The error copy action must stay in the heading above the diagnostic');
+          assert.equal(errorGeometry.copyInHeader, false);
+          assert.equal(errorGeometry.bodyOwnsCopy, true);
+          assert.ok(errorGeometry.buttonTop >= errorGeometry.bodyTop && errorGeometry.buttonRight <= width,
+            'The error copy action must stay inside the diagnostic content');
           await page.mouse.move(width - 1, 600);
           assert.equal(await copyButton.evaluate(element => getComputedStyle(element).opacity), '0',
             'The error copy icon must stay hidden until its diagnostic is hovered');
           assert.equal(await copyButton.evaluate(element => getComputedStyle(element).pointerEvents), 'none');
           await errorCard.locator('.ai-block-banner').hover();
-          assert.equal(await copyButton.evaluate(element => getComputedStyle(element).opacity), '1',
-            'Hovering the error heading must reveal its copy icon');
+          assert.equal(await copyButton.evaluate(element => getComputedStyle(element).opacity), '0',
+            'Hovering the error heading must keep the content copy icon hidden');
           await errorCard.locator('[data-ai-copy-region]').hover({ position: { x: 16, y: 8 } });
           assert.equal(await copyButton.evaluate(element => getComputedStyle(element).opacity), '1');
           await page.screenshot({ path: join(screenshots, `${engine.name()}-${locale}-${width}-error-spacing.png`) });

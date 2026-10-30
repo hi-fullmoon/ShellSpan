@@ -190,6 +190,7 @@ function MarkdownCodeBlock({
       {language && <div className={cn('ai-markdown-code-toolbar flex min-w-0 items-center px-3 pt-2 pr-12', showActions && 'min-h-8')}>
         <span className="ai-code-block-language min-w-0 truncate">{language}</span>
       </div>}
+      <div className="relative min-w-0" data-ai-copy-region>
       {showActions && (
         <Button
           type="button"
@@ -204,6 +205,7 @@ function MarkdownCodeBlock({
         </Button>
       )}
       <pre tabIndex={0} className="ai-code-block-pre m-0 max-h-65 max-w-full overflow-auto overscroll-x-contain px-3 py-3 whitespace-pre">{children}</pre>
+      </div>
     </div>
   );
 }

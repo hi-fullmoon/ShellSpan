@@ -154,7 +154,8 @@ try {
             focused: element.matches(':focus-visible'), cardHovered: element.closest('[data-ai-tool-view]').matches(':hover'),
             regionHovered: element.parentElement.matches(':hover'), pointer: [...document.querySelectorAll(':hover')].map(item => item.className),
           })))}`);
-        const headerRow = copy.locator('..');
+        const headerRow = surface.locator('.ai-tool-surface-header').first();
+        const copyRegion = copy.locator('..');
         const title = headerRow.locator(':scope > span').first();
         const titleGeometry = () => title.evaluate(element => {
           const box = element.getBoundingClientRect();
@@ -164,17 +165,19 @@ try {
         const idleTitle = await titleGeometry();
         const idleHeader = await headerRow.boundingBox();
         await surface.screenshot({ path: join(screenshots, `${theme}-${width}-${selector.slice(1)}-idle.png`) });
-        await headerRow.hover();
+        await copyRegion.hover();
         assert.equal(await copy.evaluate(element => getComputedStyle(element).opacity), '1');
         const header = await headerRow.boundingBox();
         const button = await copy.boundingBox();
         const hoverTitle = await title.boundingBox();
         assert.deepEqual(await titleGeometry(), idleTitle, 'Heading geometry must remain stable on hover');
         assert.equal(header.height, idleHeader.height, 'Hover must not change header height');
-        assert.ok(hoverTitle.x + hoverTitle.width <= button.x, 'Copy must not overlap title');
         assert.ok(button.x + button.width <= header.x + header.width && button.y >= header.y);
-        assert.ok(Math.abs(button.y + button.height / 2 - hoverTitle.y - hoverTitle.height / 2) <= 1,
-          'Heading and copy button must share the same vertical center');
+        if (selector === '.ai-terminal-block') {
+          assert.ok(button.y >= header.y + header.height, 'Command copy must be inside the command content');
+        } else {
+          assert.ok(hoverTitle.x + hoverTitle.width <= button.x, 'Path copy must not overlap the path');
+        }
         assert.ok(Math.abs(hoverTitle.y + hoverTitle.height / 2 - header.y - header.height / 2) <= 1,
           'Heading must be vertically centered');
         await surface.screenshot({ path: join(screenshots, `${theme}-${width}-${selector.slice(1)}-hover.png`) });
@@ -197,13 +200,13 @@ try {
           const collapsedTitle = await titleGeometry();
           const collapsedSurface = await surface.boundingBox();
           assert.ok((await command.boundingBox()).width > width / 2, 'Collapsed command must retain the transcript width');
-          await headerRow.hover();
+          await copyRegion.hover();
           assert.deepEqual(await titleGeometry(), collapsedTitle);
           assert.equal((await surface.boundingBox()).height, collapsedSurface.height);
           const collapsedHeader = await headerRow.boundingBox();
           const collapsedButton = await copy.boundingBox();
-          assert.ok(Math.abs(collapsedButton.y + collapsedButton.height / 2 - collapsedHeader.y - collapsedHeader.height / 2) <= 1,
-            'Command copy button must remain centered in the Shell heading');
+          assert.ok(collapsedButton.y >= collapsedHeader.y + collapsedHeader.height,
+            'Command copy button must remain in the command content');
           await surface.screenshot({ path: join(screenshots, `${theme}-${width}-ai-terminal-block-collapsed.png`) });
           const outputCopy = surface.getByRole('button', { name: '复制输出', exact: true });
           await outputCopy.focus();
@@ -215,24 +218,19 @@ try {
       }
       const geometry = await page.locator('.ai-tool-surface-header').evaluateAll(headers => headers.map(header => {
         const box = header.getBoundingClientRect();
-        const button = header.querySelector('.ai-tool-copy-button');
-        const copy = button.getBoundingClientRect();
         const label = header.firstElementChild.getBoundingClientRect();
         const style = getComputedStyle(header);
-        return { height: box.height, rightInset: box.right - copy.right, size: [copy.width, copy.height],
-          centerOffset: (copy.top + copy.bottom - box.top - box.bottom) / 2,
-          font: style.font, color: style.color, labelRight: label.right, copyLeft: copy.left,
+        return { height: box.height,
+          font: style.font, color: style.color, labelRight: label.right,
           right: box.right };
       }));
       assert.ok(geometry.length >= 6, 'Shell, file, error and input/output headings must all be measured');
       for (const heading of geometry) {
         assert.equal(heading.height, geometry[0].height, 'All tool headings must have equal heights');
-        assert.equal(heading.rightInset, geometry[0].rightInset, 'Copy actions must share the same right inset');
         assert.equal(heading.font, geometry[0].font, 'Heading typography must match');
         assert.equal(heading.color, geometry[0].color, 'Heading colors must match');
-        assert.deepEqual(heading.size, [24, 24], 'Copy actions must use the shared icon button size');
-        assert.ok(Math.abs(heading.centerOffset) < 1 && heading.labelRight <= heading.copyLeft && heading.right <= width,
-          'Copy actions must align with headings without clipping or overlapping text');
+        assert.ok(heading.labelRight <= heading.right && heading.right <= width,
+          'Headings must remain inside their surfaces');
       }
       for (const selector of ['[data-ai-tool-view="error"]', '[data-ai-tool-view="generic"]']) {
         await page.locator(selector).screenshot({ path: join(screenshots, `${theme}-${width}-${selector.includes('error') ? 'error' : 'generic'}.png`) });

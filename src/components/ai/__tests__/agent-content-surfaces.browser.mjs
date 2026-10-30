@@ -240,8 +240,8 @@ try {
             assert.equal((await terminalHeader.textContent()).trim(), 'Shell', 'The Shell header must omit host and directory information');
             await page.evaluate(() => document.activeElement?.blur());
             await terminalHeader.hover();
-            assert.deepEqual(await page.locator('#terminal .ai-tool-copy-button').evaluateAll(buttons => buttons.map(button => getComputedStyle(button).opacity)), ['1', '0'],
-              'Hovering the Shell header reveals only the command copy action');
+            assert.deepEqual(await page.locator('#terminal .ai-tool-copy-button').evaluateAll(buttons => buttons.map(button => getComputedStyle(button).opacity)), ['0', '0'],
+              'Hovering the Shell header keeps content copy actions hidden');
             for (const id of ['terminal', 'read']) {
               const regions = page.locator(`#${id} [data-ai-copy-region]`);
               assert.equal(await regions.count(), 2, `${id}: input and output have independent copy regions`);

@@ -97,9 +97,11 @@ describe('AI tool presentation', () => {
     for (const section of sections) {
       const header = section.querySelector('.ai-tool-surface-header');
       expect(header).toContainElement(section.querySelector('.ai-io-label'));
-      expect(header?.nextElementSibling).toBe(section.querySelector('pre'));
-      expect(header).toContainElement(section.querySelector('.ai-tool-copy-button'));
-      expect(section.querySelector('.ai-tool-copy-button')).toHaveClass('static', 'shrink-0');
+      const body = section.querySelector('.ai-tool-content-region');
+      expect(header?.nextElementSibling).toBe(body);
+      expect(body).toContainElement(section.querySelector('pre'));
+      expect(body).toContainElement(section.querySelector('.ai-tool-copy-button'));
+      expect(header?.querySelector('.ai-tool-copy-button')).toBeNull();
     }
     expect(container.querySelector('.ai-io-card')).toHaveClass('max-h-65', 'overflow-hidden');
     expect(container.querySelector('.ai-io-card [data-slot="scroll-area-viewport"]')).toHaveStyle({ overflow: 'scroll' });
@@ -161,6 +163,9 @@ describe('AI tool presentation', () => {
       `${locale === 'zh-CN' ? '退出码' : 'Exit'} ${execution.status}`,
     );
     expect(container.querySelector('[data-ai-terminal-output]')).toHaveTextContent(execution.stderr.trim());
+    expect(container.querySelector('[data-ai-terminal-output] .ai-tool-surface-header')).toBeNull();
+    expect(container.querySelectorAll('.ai-tool-surface-header')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: locale === 'zh-CN' ? '复制输出' : 'Copy output' })).toBeVisible();
     expect(container.querySelector('.ai-terminal-transcript')).toHaveClass('max-h-65', 'overflow-hidden');
     expect(container.querySelector('.ai-terminal-transcript [data-slot="scroll-area-viewport"]')).toHaveAttribute('aria-label', 'Shell');
   });
@@ -177,8 +182,9 @@ describe('AI tool presentation', () => {
     expect(screen.getAllByText(failure.error!)).toHaveLength(1);
     const copy = screen.getByRole('button', { name: locale === 'zh-CN' ? '复制输出' : 'Copy output' });
     expect(copy).toBeVisible();
-    expect(copy.closest('.ai-tool-surface-header')).toHaveTextContent(locale === 'zh-CN' ? '查看错误详情' : 'View error details');
-    expect(copy).toHaveClass('static', 'shrink-0');
+    expect(container.querySelector('.ai-tool-surface-header')).toHaveTextContent(locale === 'zh-CN' ? '查看错误详情' : 'View error details');
+    expect(copy.closest('.ai-tool-content-region')).toContainElement(container.querySelector('code'));
+    expect(copy).toHaveClass('absolute');
     expect(container.querySelector('[data-ai-tool-view="error"] code')).toHaveTextContent(failure.error!);
     expect(container.querySelector('[data-ai-tool-view="error"] pre')).toHaveClass('px-3.5', 'pt-1', 'pb-3');
     expect(container.querySelector('.ai-read-line')).toBeNull();
@@ -401,7 +407,7 @@ describe('AI tool presentation', () => {
     const { container, rerender } = render(<AiToolExpandedContent node={node} compact />);
     const commandCopy = screen.getByRole('button', { name: 'Copy command' });
     const outputCopy = screen.getByRole('button', { name: 'Copy output' });
-    expect(commandCopy.closest('.ai-terminal-header')).toBeInTheDocument();
+    expect(commandCopy.closest('.ai-tool-content-region')).toContainElement(container.querySelector('.ai-terminal-command-row'));
     expect(outputCopy.closest('[data-ai-terminal-output]')).toBeInTheDocument();
     expect(commandCopy.closest('[data-ai-copy-region]')).not.toBe(outputCopy.closest('[data-ai-copy-region]'));
     expect(commandCopy.querySelector('svg')).toBeInTheDocument();

@@ -43,7 +43,7 @@ describe('AI details content sizing', () => {
     expect(lines).toEqual(expected);
   });
 
-  it.each(['wait_process', 'run_code', 'read_file', 'search', 'unknown_tool'])('keeps %s detail copy actions in aligned section headers and long payloads shrinkable', (name) => {
+  it.each(['wait_process', 'run_code', 'read_file', 'search', 'unknown_tool'])('keeps %s detail copy actions in content regions and long payloads shrinkable', (name) => {
     const node: AiConversationNodeOf<'tool'> = {
       ...baseNode,
       kind: 'tool', key: 'tool:long-command', callId: 'long-command',
@@ -75,7 +75,8 @@ describe('AI details content sizing', () => {
       expect(header).toHaveClass('items-center', 'justify-between', 'px-3', 'shrink-0');
       expect(section.querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'flex-1');
       expect(section.querySelector('[data-slot="scroll-area-content"]')).toHaveStyle({ minWidth: '0' });
-      expect(header?.querySelectorAll('.ai-tool-copy-button')).toHaveLength(1);
+      expect(header?.querySelectorAll('.ai-tool-copy-button')).toHaveLength(0);
+      expect(section.querySelector('.ai-tool-content-region')).toContainElement(section.querySelector('.ai-tool-copy-button'));
       expect(section.querySelectorAll('.ai-tool-copy-button')).toHaveLength(1);
     }
     expect(screen.getByRole('button', { name: 'Copy Output' })).toBeInTheDocument();

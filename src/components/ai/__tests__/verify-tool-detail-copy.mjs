@@ -98,12 +98,12 @@ try {
           await page.setViewportSize({ width, height });
           const positions = await page.locator('.ai-tool-copy-button').evaluateAll(buttons => buttons.map(button => {
             const rect = button.getBoundingClientRect();
-            const header = button.closest('.ai-detail-section-header').getBoundingClientRect();
-            return { right: rect.right, width: rect.width, centerOffset: (rect.top + rect.bottom - header.top - header.bottom) / 2 };
+            const region = button.closest('[data-ai-copy-region]').getBoundingClientRect();
+            return { right: rect.right, width: rect.width, top: rect.top - region.top };
           }));
           assert.equal(positions.length, state === 'running' ? 2 : 3);
           assert.ok(positions.every(position => Math.abs(position.right - positions[0].right) < 1));
-          assert.ok(positions.every(position => position.right <= width && position.width > 0 && Math.abs(position.centerOffset) < 1));
+          assert.ok(positions.every(position => position.right <= width && position.width === 24 && position.top === 4));
           const sections = await page.locator('.ai-detail-section').evaluateAll(elements => elements.map(element => {
             const rect = element.getBoundingClientRect();
             return { height: rect.height, bottom: rect.bottom, right: rect.right };
@@ -122,7 +122,7 @@ try {
               background: getComputedStyle(element).backgroundColor,
               borderBottom: getComputedStyle(element).borderBottomWidth,
               sectionBackground: getComputedStyle(element.closest('.ai-detail-section')).backgroundColor,
-              scrollArea: element.nextElementSibling.getAttribute('data-slot'),
+              scrollArea: element.nextElementSibling.querySelector('[data-slot="scroll-area"]').getAttribute('data-slot'),
             })));
             assert.equal(headers.length, 3);
             for (const header of headers) {

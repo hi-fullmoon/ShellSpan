@@ -100,7 +100,7 @@ try {
             for (const type of ['terminal', 'read', 'code', 'generic']) {
               for (const card of await page.locator(`[data-ai-tool-view="${type}"]`).all()) {
                 const headers = card.locator('.ai-tool-surface-header');
-                for (let index = 0; index < await headers.count(); index++) await checkRegion(card, headers.nth(index), index);
+                for (let index = 0; index < await headers.count(); index++) await checkRegion(card, headers.nth(index), type === 'read' ? 0 : -1);
                 const bodies = card.locator(type === 'terminal' ? '.ai-terminal-command-row, [data-ai-terminal-output] .ai-block-line:first-child'
                   : type === 'read' ? '.ai-read-lines' : type === 'code' ? '.ai-code-block-pre, .ai-io-text' : '.ai-io-text');
                 for (let index = 0; index < await bodies.count(); index++) await checkRegion(card, bodies.nth(index), type === 'read' ? 1 : index);
@@ -109,8 +109,16 @@ try {
             }
             for (const type of ['search', 'web', 'diff', 'error']) {
               const card = page.locator(`[data-ai-tool-view="${type}"]`);
-              await checkRegion(card, card.locator('.ai-tool-surface-header').first(), 0);
+              await checkRegion(card, card.locator('.ai-tool-surface-header').first(), -1);
               await checkRegion(card, card.locator('pre, .ai-search-results').first(), 0);
+              const copy = card.locator('.ai-tool-copy-button').first();
+              const geometry = await copy.evaluate(button => {
+                const region = button.closest('[data-ai-copy-region]').getBoundingClientRect();
+                const rect = button.getBoundingClientRect();
+                return { top: rect.top - region.top, right: region.right - rect.right, width: rect.width, height: rect.height };
+              });
+              assert.deepEqual(geometry, { top: 4, right: 14, width: 24, height: 24 }, `${context}: ${type} copy must sit inside its content`);
+              await card.screenshot({ path: join(screenshots, `${engine.name()}-${theme}-${width}-${type}.png`) });
             }
             await page.mouse.move(0, 0);
             assert.ok(await page.locator('.ai-tool-copy-button').evaluateAll(buttons => buttons.every(button => getComputedStyle(button).opacity === '0')), `${context}: leaving must hide all copies`);

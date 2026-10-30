@@ -35,7 +35,7 @@ const server = await createServer({
   cacheDir: join(screenshots, 'vite-cache'),
   resolve: { alias: { '@': `${root}src` } }, esbuild: { jsx: 'automatic' },
   optimizeDeps: { include: ['react', 'react-dom/client'] },
-  server: { host: '127.0.0.1', port: 0 },
+  server: { host: '127.0.0.1', port: 0, watch: null, hmr: false },
   plugins: [tailwindcss(), {
     name: 'tool-copy-alignment',
     configureServer(vite) {
@@ -147,25 +147,24 @@ try {
               };
               const terminal = page.locator('[data-ai-tool-view="terminal"]');
               for (const [region, index] of [
-                [terminal.locator('.ai-terminal-header'), 0], [terminal.locator('.ai-terminal-command-row'), 0],
-                [terminal.locator('[data-ai-terminal-output] .ai-tool-surface-header'), 1],
+                [terminal.locator('.ai-terminal-header'), -1], [terminal.locator('.ai-terminal-command-row'), 0],
                 [terminal.locator('[data-ai-terminal-output] .ai-block-line').first(), 1],
               ]) await assertRegionCopy(terminal, region, index);
               const code = page.locator('[data-ai-tool-view="code"]');
               for (const [region, index] of [
-                [code.locator(':scope > .ai-tool-surface-header'), 0], [code.locator('.ai-code-block-pre'), 0],
-                [code.locator('.ai-io-section .ai-tool-surface-header'), 1], [code.locator('.ai-io-text'), 1],
+                [code.locator(':scope > .ai-tool-surface-header'), -1], [code.locator('.ai-code-block-pre'), 0],
+                [code.locator('.ai-io-section .ai-tool-surface-header'), -1], [code.locator('.ai-io-text'), 1],
               ]) await assertRegionCopy(code, region, index);
               for (const card of await page.locator('[data-ai-tool-view="generic"]').all()) {
                 const sections = card.locator('.ai-io-section');
                 for (let index = 0; index < await sections.count(); index++) {
-                  await assertRegionCopy(card, sections.nth(index).locator('.ai-tool-surface-header'), index);
+                  await assertRegionCopy(card, sections.nth(index).locator('.ai-tool-surface-header'), -1);
                   await assertRegionCopy(card, sections.nth(index).locator('.ai-io-text'), index);
                 }
               }
               for (const type of ['search', 'web', 'diff', 'error']) {
                 const card = page.locator(`[data-ai-tool-view="${type}"]`);
-                await assertRegionCopy(card, card.locator('.ai-tool-surface-header').first(), 0);
+                await assertRegionCopy(card, card.locator('.ai-tool-surface-header').first(), -1);
                 await assertRegionCopy(card, card.locator('pre, .ai-search-results').first(), 0);
               }
               await page.mouse.move(0, 0);
