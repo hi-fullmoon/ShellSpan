@@ -1762,6 +1762,8 @@ export default {
   'ai.error.subagentTokenBudgetExceeded': '子代理令牌预算超出上限，最多允许 {maximum} 个令牌。',
   'ai.workspace.tool.inspect': '查看详情',
   'ai.workspace.tool.expandCommand': '显示完整命令',
+  'ai.workspace.tool.expandTitle': '展开完整标题',
+  'ai.workspace.tool.collapseTitle': '收起标题',
   'ai.workspace.tool.collapseCommand': '收起命令',
   'ai.workspace.tool.copyCommand': '复制命令',
   'ai.workspace.tool.copyInput': '复制输入',

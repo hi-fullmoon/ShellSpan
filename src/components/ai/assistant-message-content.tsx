@@ -11,6 +11,7 @@ import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
 import { Check, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { AiContentTitle } from './workspace/ai-content-title';
 
 import {
   ContextMenu,
@@ -188,23 +189,23 @@ function MarkdownCodeBlock({
   return (
     <div className="ai-code-block ai-markdown-code-block relative my-3 min-w-0 max-w-full overflow-hidden" data-language={language || undefined}>
       {language && <div className={cn('ai-markdown-code-toolbar flex min-w-0 items-center px-3 pt-2 pr-12', showActions && 'min-h-8')}>
-        <span className="ai-code-block-language min-w-0 truncate">{language}</span>
+        <AiContentTitle className="ai-code-block-language flex-1">{language}</AiContentTitle>
       </div>}
       <div className="relative min-w-0" data-ai-copy-region>
-      {showActions && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          className="ai-markdown-code-copy ai-content-copy absolute top-2 right-3 z-10"
-          aria-label={copied ? copiedLabel : copyLabel}
-          title={copied ? copiedLabel : copyLabel}
-          onClick={copy}
-        >
-          {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
-        </Button>
-      )}
-      <pre tabIndex={0} className="ai-code-block-pre m-0 max-h-65 max-w-full overflow-auto overscroll-x-contain px-3 py-3 whitespace-pre">{children}</pre>
+        {showActions && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="ai-markdown-code-copy ai-content-copy absolute top-2 right-3 z-10"
+            aria-label={copied ? copiedLabel : copyLabel}
+            title={copied ? copiedLabel : copyLabel}
+            onClick={copy}
+          >
+            {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
+          </Button>
+        )}
+        <pre tabIndex={0} className="ai-code-block-pre m-0 max-h-65 max-w-full overflow-auto overscroll-x-contain px-3 py-3 whitespace-pre">{children}</pre>
       </div>
     </div>
   );

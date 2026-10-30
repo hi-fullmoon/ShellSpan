@@ -35,6 +35,7 @@ import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { aiErrorMessage, httpProbeTimeoutKind } from '@/lib/ai/error-message';
 import { cn } from '@/lib/utils';
 import type { LocaleKey } from '@/locales';
+import { AiContentTitle } from './ai-content-title';
 import {
   AI_DISCLOSURE_LEADING_CLASS,
   AI_DISCLOSURE_SEPARATOR_CLASS,
@@ -42,6 +43,7 @@ import {
   AI_DISCLOSURE_TITLE_CLASS,
   AI_STATE_DOT_CLASS,
   AI_TOOL_ROW_CLASS,
+  AI_EXPANDED_TITLE_CLASS,
 } from './ai-style-classes';
 
 export type AiToolVariant =
@@ -313,7 +315,7 @@ function ToolSurfaceHeader({ title, icon: Icon, copyText, copyLabel, className, 
   return (
     <div className={cn('ai-block-banner ai-tool-surface-header flex min-h-10 min-w-0 shrink-0 items-center gap-1 px-3.5 py-2', className)} data-ai-copy-region={copyText ? '' : undefined}>
       {Icon && <Icon className="shrink-0" aria-hidden="true" />}
-      <span className={cn('min-w-0 flex-1 truncate', titleClassName)}>{title}</span>
+      <AiContentTitle className={cn('flex-1', titleClassName)}>{title}</AiContentTitle>
       {children}
       {copyText && <AiToolCopyButton text={copyText} label={copyLabel} className="static shrink-0" />}
     </div>
@@ -334,22 +336,23 @@ function AiToolContentRegion({ children, text, label, className }: {
   );
 }
 
-function ToolScrollArea({ children, className, contentClassName, scrollable, view, label }: {
+function ToolScrollArea({ children, className, contentClassName, scrollable, view, label, horizontal = true }: {
   readonly children: ReactNode;
   readonly className: string;
   readonly contentClassName?: string;
   readonly scrollable: boolean;
   readonly view?: 'generic' | 'diff';
   readonly label?: string;
+  readonly horizontal?: boolean;
 }) {
-  // Detail sections already own scrolling; keep their expanded contents in normal flow.
-  if (!scrollable) return <div className={cn(className, contentClassName)} data-ai-tool-view={view}>{children}</div>;
+  // Embedded previews may delegate vertical scrolling to their parent section.
+  if (!scrollable) return <div className={cn(className, contentClassName, 'max-h-none overflow-auto')} data-ai-tool-view={view}>{children}</div>;
   return (
     <ScrollArea
       className={cn('ai-tool-scroll-area flex min-h-0 flex-col overflow-hidden', className)}
       data-ai-tool-view={view}
-      horizontal
-      viewportRender={<div className="ai-tool-scroll-viewport h-auto min-h-0 min-w-0 flex-1" aria-label={label} />}
+      horizontal={horizontal}
+      viewportRender={<div className="ai-tool-scroll-viewport h-auto min-h-0 min-w-0 flex-1" aria-label={label} style={horizontal ? undefined : { overflowX: 'hidden' }} />}
     >
       <ScrollAreaContent className={cn('min-w-0', contentClassName)} style={{ minWidth: 0 }}>
         {children}
@@ -360,33 +363,21 @@ function ToolScrollArea({ children, className, contentClassName, scrollable, vie
 
 function TerminalSurface({ node, showCopyActions, scrollable }: { node: ToolNode; showCopyActions: boolean; scrollable: boolean }) {
   const { t } = useI18n();
-  const [commandExpanded, setCommandExpanded] = useState(false);
   const input = asRecord(node.input);
   const output = outputText(node);
   const command = firstString(input, ['command', 'cmd', 'script']) ?? formatToolValue(node.input);
   const displayCommand = command || node.name;
   const outputRecord = asRecord(node.output);
   const exitCode = firstNumber(outputRecord, ['exitCode', 'exit_code', 'code']);
-  const transcript = <>
+  const commandTitle = <>
     <AiToolContentRegion text={showCopyActions ? command : undefined} label={t('ai.workspace.tool.copyCommand')}>
-    <div className="ai-terminal-command-row flex min-w-0 items-start gap-1 px-3.5 pt-1 pb-3">
-      <span className="ai-terminal-prompt shrink-0 select-none" aria-hidden="true">$</span>
-      <button
-        type="button"
-        className={cn('ai-terminal-command min-w-0 flex-1 cursor-pointer p-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', commandExpanded ? 'line-clamp-none' : 'line-clamp-2')}
-        aria-expanded={commandExpanded}
-        aria-label={t(commandExpanded ? 'ai.workspace.tool.collapseCommand' : 'ai.workspace.tool.expandCommand')}
-        onClick={() => setCommandExpanded((expanded) => !expanded)}
-      >
-        {displayCommand}
-      </button>
-    </div>
+      <div className="ai-terminal-command-row flex min-w-0 items-start gap-1 px-3.5 pt-1 pb-3">
+        <span className="ai-terminal-prompt shrink-0 select-none" aria-hidden="true">$</span>
+        <AiContentTitle className="flex-1" buttonClassName="ai-terminal-command" collapsible expandLabel={t('ai.workspace.tool.expandCommand')} collapseLabel={t('ai.workspace.tool.collapseCommand')}>
+          {displayCommand}
+        </AiContentTitle>
+      </div>
     </AiToolContentRegion>
-    {(output || node.state !== 'running') && <div data-ai-terminal-output>
-      <AiToolContentRegion text={showCopyActions ? output : undefined} label={t('ai.workspace.tool.copyOutput')}>
-      <div className="px-3.5 pb-3">{output ? <TerminalOutputText text={output} /> : t('ai.workspace.tool.noOutput')}</div>
-      </AiToolContentRegion>
-    </div>}
   </>;
   return (
     <div className="ai-terminal-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="terminal" data-running={node.state === 'running' || undefined}>
@@ -394,13 +385,14 @@ function TerminalSurface({ node, showCopyActions, scrollable }: { node: ToolNode
         {exitCode !== null && exitCode !== 0 && <span className="ai-terminal-exit shrink-0">{t('ai.workspace.tool.exitCode', { code: exitCode })}</span>}
       </ToolSurfaceHeader>
       <div className="ai-terminal-output relative m-0 min-w-0 max-w-full">
-        <ToolScrollArea
-          className="ai-terminal-transcript max-h-65 min-w-0 max-w-full"
-          scrollable={scrollable}
-          label={t('ai.workspace.tool.shell')}
-        >
-          {transcript}
-        </ToolScrollArea>
+        {commandTitle}
+        {(output || node.state !== 'running') && <div data-ai-terminal-output>
+          <AiToolContentRegion text={showCopyActions ? output : undefined} label={t('ai.workspace.tool.copyOutput')}>
+            <ToolScrollArea className="ai-terminal-transcript max-h-65 min-w-0 max-w-full" scrollable={scrollable} label={t('ai.workspace.tool.shell')}>
+              <div className="px-3.5 pb-3">{output ? <TerminalOutputText text={output} /> : t('ai.workspace.tool.noOutput')}</div>
+            </ToolScrollArea>
+          </AiToolContentRegion>
+        </div>}
       </div>
     </div>
   );
@@ -444,9 +436,9 @@ function SearchSurface({ node, showCopyActions }: { node: ToolNode; showCopyActi
     <div className="ai-search-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="search">
       <ToolSurfaceHeader title={query} icon={SearchIcon} />
       <AiToolContentRegion text={showCopyActions ? output : undefined} label={t('ai.workspace.tool.copyOutput')}>
-      <div className="ai-search-results m-0 flex max-h-65 max-w-full flex-col gap-1 overflow-auto px-3.5 pt-1 pb-3" tabIndex={0}>
-        {lines.map((line, index) => <div key={index} className="ai-search-result min-w-0 [overflow-wrap:anywhere]">{line}</div>)}
-      </div>
+        <div className="ai-search-results m-0 flex max-h-65 max-w-full flex-col gap-1 overflow-auto px-3.5 pt-1 pb-3" tabIndex={0}>
+          {lines.map((line, index) => <div key={index} className="ai-search-result min-w-0 [overflow-wrap:anywhere]">{line}</div>)}
+        </div>
       </AiToolContentRegion>
     </div>
   );
@@ -489,23 +481,23 @@ function WebSurface({ node, showCopyActions }: { node: ToolNode; showCopyActions
     <div className="ai-web-block my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="web">
       <ToolSurfaceHeader title={label} icon={GlobeIcon} />
       <AiToolContentRegion text={showCopyActions ? output : undefined} label={t('ai.workspace.tool.copyOutput')}>
-      <div className="ai-web-content max-h-65 min-w-0 max-w-full overflow-auto" tabIndex={0}>
-        {(timeoutKind || answer) && <p className="ai-web-answer m-0 px-3.5 pt-3 pb-1">{timeoutKind
-          ? t(timeoutKind === 'ssh' ? 'ai.workspace.tool.httpProbe.sshTimeout' : 'ai.workspace.tool.httpProbe.httpTimeout')
-          : answer}</p>}
-        {sources.length > 0 ? (
-          <div className="ai-web-sources flex min-w-0 flex-col p-2">
-            {sources.map((source, index) => (
-              <a key={`${source.url}:${index}`} href={source.url} target="_blank" rel="noreferrer" className="ai-web-source flex min-w-0 flex-col p-1.5">
-                <span className="min-w-0 truncate">{source.title}</span>
-                {source.snippet && <small className="min-w-0 truncate">{source.snippet}</small>}
-              </a>
-            ))}
-          </div>
-        ) : (
-          <pre className="ai-detail-code ai-tool-text m-0 min-w-0 max-w-full px-3.5 pt-1 pb-3 whitespace-pre-wrap break-words">{bounded(timeoutKind ? diagnostic : outputText(node))}</pre>
-        )}
-      </div>
+        <div className="ai-web-content max-h-65 min-w-0 max-w-full overflow-auto" tabIndex={0}>
+          {(timeoutKind || answer) && <p className="ai-web-answer m-0 px-3.5 pt-3 pb-1">{timeoutKind
+            ? t(timeoutKind === 'ssh' ? 'ai.workspace.tool.httpProbe.sshTimeout' : 'ai.workspace.tool.httpProbe.httpTimeout')
+            : answer}</p>}
+          {sources.length > 0 ? (
+            <div className="ai-web-sources flex min-w-0 flex-col p-2">
+              {sources.map((source, index) => (
+                <a key={`${source.url}:${index}`} href={source.url} target="_blank" rel="noreferrer" className="ai-web-source flex min-w-0 flex-col p-1.5">
+                  <span className="min-w-0 truncate">{source.title}</span>
+                  {source.snippet && <small className="min-w-0 truncate">{source.snippet}</small>}
+                </a>
+              ))}
+            </div>
+          ) : (
+            <pre className="ai-detail-code ai-tool-text m-0 min-w-0 max-w-full px-3.5 pt-1 pb-3 whitespace-pre-wrap break-words">{bounded(timeoutKind ? diagnostic : outputText(node))}</pre>
+          )}
+        </div>
       </AiToolContentRegion>
     </div>
   );
@@ -669,24 +661,6 @@ function diffModel(node: ToolNode): DiffModel {
   return { hunks: direct, totalsKnown: direct.length > 0 && direct.every((hunk) => hunk.exact) && !replacesUnknownContent };
 }
 
-function shownDiffLines(lines: readonly DiffLine[], compact: boolean): readonly DiffLine[] {
-  if (!compact || lines.length <= 16) return lines;
-  const firstChange = lines.findIndex((line) => line.kind !== 'context');
-  const start = Math.max(0, firstChange - 3);
-  const preview = lines.slice(start, start + 16);
-  if (preview.some((line) => line.kind === 'removed') && preview.some((line) => line.kind === 'added')) {
-    return preview;
-  }
-  const removed: number[] = [];
-  const added: number[] = [];
-  for (let index = 0; index < lines.length && (removed.length < 8 || added.length < 8); index += 1) {
-    if (lines[index].kind === 'removed' && removed.length < 8) removed.push(index);
-    if (lines[index].kind === 'added' && added.length < 8) added.push(index);
-  }
-  if (removed.length === 0 || added.length === 0) return preview;
-  return [...removed, ...added].sort((left, right) => left - right).map((index) => lines[index]);
-}
-
 function DiffSurface({ node, compact, model, showCopyActions, scrollable }: { node: ToolNode; compact: boolean; model?: DiffModel; showCopyActions: boolean; scrollable: boolean }) {
   const { t } = useI18n();
   const currentModel = useMemo(() => model ?? diffModel(node), [model, node]);
@@ -700,13 +674,26 @@ function DiffSurface({ node, compact, model, showCopyActions, scrollable }: { no
       return { ...line, number };
     }) };
   }), [currentModel]);
+  const files = useMemo(() => {
+    const grouped = new Map<string, (typeof hunks)[number]>();
+    for (const hunk of hunks) {
+      const previous = grouped.get(hunk.path);
+      if (previous) {
+        previous.exact = previous.exact && hunk.exact;
+        previous.lines.push(...hunk.lines);
+      } else {
+        grouped.set(hunk.path, { ...hunk, lines: [...hunk.lines] });
+      }
+    }
+    return [...grouped.values()];
+  }, [hunks]);
   const copyText = firstString(asRecord(node.output), ['diff', 'patch', 'unified_diff'])
     ?? firstString(asRecord(node.input), ['patch', 'diff'])
     ?? outputText(node);
   if (hunks.length === 0) return <IoSurface node={node} compact={compact} showCopyActions={showCopyActions} scrollable={scrollable} />;
   return (
-    <ToolScrollArea className="ai-diff-block my-1 ml-1 max-h-65 min-w-0 max-w-[calc(100%-4px)]" contentClassName="flex flex-col gap-px" scrollable={scrollable} view="diff">
-      {hunks.map((hunk, index) => (
+    <div className="ai-diff-block my-1 ml-1 flex min-w-0 max-w-[calc(100%-4px)] flex-col gap-px overflow-hidden" data-ai-tool-view="diff">
+      {files.map((hunk, index) => (
         <section key={`${hunk.path}:${index}`} className="min-w-0 max-w-full shrink-0">
           <ToolSurfaceHeader title={hunk.path}>
             {hunk.exact && currentModel.totalsKnown && <span className="ai-diff-counts shrink-0">
@@ -715,23 +702,25 @@ function DiffSurface({ node, compact, model, showCopyActions, scrollable }: { no
             </span>}
           </ToolSurfaceHeader>
           <AiToolContentRegion text={showCopyActions && index === 0 ? copyText : undefined} label={t('ai.workspace.tool.copyOutput')}>
-          {!hunk.exact && <div className="px-2.5 py-1 text-xs text-muted-foreground" data-diff-simplified>
-            {t('ai.workspace.tool.diffSimplified')}
-          </div>}
-          <pre className="ai-diff-body m-0 min-w-0 max-w-full whitespace-pre">
-            <code className="ai-diff-lines">
-            {shownDiffLines(hunk.lines, compact).map((line, lineIndex) => (
-              <span key={lineIndex} data-diff={line.kind}>
-                <span className="ai-diff-line-number" aria-hidden="true">{line.number}</span>
-                <DiffCode text={line.text} path={hunk.path} />
-              </span>
-            ))}
-            </code>
-          </pre>
+            <ToolScrollArea className="ai-diff-content max-h-65 min-w-0 max-w-full" scrollable={scrollable}>
+              {!hunk.exact && <div className="px-2.5 py-1 text-xs text-muted-foreground" data-diff-simplified>
+                {t('ai.workspace.tool.diffSimplified')}
+              </div>}
+              <pre className="ai-diff-body m-0 min-w-0 max-w-full whitespace-pre" aria-label={hunk.path}>
+                <code className="ai-diff-lines">
+                  {hunk.lines.map((line, lineIndex) => (
+                    <span key={lineIndex} data-diff={line.kind}>
+                      <span className="ai-diff-line-number" aria-hidden="true">{line.number}</span>
+                      <DiffCode text={line.text} path={hunk.path} />
+                    </span>
+                  ))}
+                </code>
+              </pre>
+            </ToolScrollArea>
           </AiToolContentRegion>
         </section>
       ))}
-    </ToolScrollArea>
+    </div>
   );
 }
 
@@ -756,24 +745,26 @@ function CodeSurface({ node, showCopyActions, scrollable }: { node: ToolNode; sh
   return (
     <div className="ai-code-block ai-tool-code-block relative my-1 ml-1 min-w-0 max-w-[calc(100%-4px)] overflow-hidden" data-ai-tool-view="code">
       <ToolSurfaceHeader title={language} />
-      <ToolScrollArea className="ai-code-content max-h-65 min-w-0 max-w-full" scrollable={scrollable}>
-        <AiToolContentRegion text={showCopyActions ? code : undefined} label={t('ai.workspace.tool.copyInput')}>
-        <pre className="ai-code-block-pre ai-tool-text m-0 max-w-full px-3.5 pt-1 pb-3 whitespace-pre-wrap [overflow-wrap:anywhere]"><code>{bounded(code)}</code></pre>
-        </AiToolContentRegion>
-        {node.output !== null && (
-          <div className="ai-io-section min-w-0">
-            <ToolSurfaceHeader title={t('ai.workspace.tool.outputLabel')} titleClassName="ai-io-label" />
-            <AiToolContentRegion text={showCopyActions ? output : undefined} label={t('ai.workspace.tool.copyOutput')}>
-            <pre className="ai-io-text m-0 min-w-0 max-w-full px-3.5 pt-1 pb-3 whitespace-pre-wrap [overflow-wrap:anywhere]">{bounded(output)}</pre>
-            </AiToolContentRegion>
-          </div>
-        )}
-      </ToolScrollArea>
+      <AiToolContentRegion text={showCopyActions ? code : undefined} label={t('ai.workspace.tool.copyInput')}>
+        <ToolScrollArea className="ai-code-content max-h-65 min-w-0 max-w-full" scrollable={scrollable}>
+          <pre className="ai-code-block-pre ai-tool-text m-0 max-w-full px-3.5 pt-1 pb-3 whitespace-pre-wrap [overflow-wrap:anywhere]"><code>{bounded(code)}</code></pre>
+        </ToolScrollArea>
+      </AiToolContentRegion>
+      {node.output !== null && (
+        <div className="ai-io-section min-w-0">
+          <ToolSurfaceHeader title={t('ai.workspace.tool.outputLabel')} titleClassName="ai-io-label" />
+          <AiToolContentRegion text={showCopyActions ? output : undefined} label={t('ai.workspace.tool.copyOutput')}>
+            <ToolScrollArea className="ai-code-output max-h-65 min-w-0 max-w-full" scrollable={scrollable}>
+              <pre className="ai-io-text m-0 min-w-0 max-w-full px-3.5 pt-1 pb-3 whitespace-pre-wrap [overflow-wrap:anywhere]">{bounded(output)}</pre>
+            </ToolScrollArea>
+          </AiToolContentRegion>
+        </div>
+      )}
     </div>
   );
 }
 
-function IoSurface({ node, compact, showCopyActions, scrollable, showInput = true }: {
+function IoSurface({ node, showCopyActions, scrollable, showInput = true }: {
   node: ToolNode;
   compact: boolean;
   showCopyActions: boolean;
@@ -784,12 +775,14 @@ function IoSurface({ node, compact, showCopyActions, scrollable, showInput = tru
   const input = bounded(formatToolValue(node.input));
   const output = bounded(outputText(node));
   return (
-    <ToolScrollArea className="ai-io-card my-1 ml-1 max-h-65 min-w-0 max-w-[calc(100%-4px)]" contentClassName="flex flex-col" scrollable={scrollable} view="generic">
+    <div className="ai-io-card my-1 ml-1 flex min-w-0 max-w-[calc(100%-4px)] flex-col overflow-hidden" data-ai-tool-view="generic">
       {showInput && input && (
         <div className="ai-io-section min-w-0 shrink-0">
           <ToolSurfaceHeader title={t('ai.workspace.tool.inputLabel')} titleClassName="ai-io-label" />
           <AiToolContentRegion text={showCopyActions ? formatToolValue(node.input) : undefined} label={t('ai.workspace.tool.copyInput')}>
-          <pre className="ai-io-text m-0 min-w-0 max-w-full px-3.5 pt-1 pb-3 whitespace-pre-wrap [overflow-wrap:anywhere]">{compact ? input.slice(0, 8_192) : input}</pre>
+            <ToolScrollArea className="ai-io-input max-h-65 min-w-0 max-w-full" scrollable={scrollable}>
+              <pre className="ai-io-text m-0 min-w-0 max-w-full px-3.5 pt-1 pb-3 whitespace-pre-wrap [overflow-wrap:anywhere]">{input}</pre>
+            </ToolScrollArea>
           </AiToolContentRegion>
         </div>
       )}
@@ -797,13 +790,15 @@ function IoSurface({ node, compact, showCopyActions, scrollable, showInput = tru
         <div className="ai-io-section min-w-0 shrink-0">
           {(showInput || showCopyActions) && <ToolSurfaceHeader title={t('ai.workspace.tool.outputLabel')} titleClassName={showInput ? 'ai-io-label' : undefined} />}
           <AiToolContentRegion text={showCopyActions ? outputText(node) : undefined} label={t('ai.workspace.tool.copyOutput')}>
-          <pre className="ai-io-text m-0 min-w-0 max-w-full px-3.5 pt-1 pb-3 whitespace-pre-wrap [overflow-wrap:anywhere]" data-error={node.state === 'failed' || undefined}>
-            {output}
-          </pre>
+            <ToolScrollArea className="ai-io-output max-h-65 min-w-0 max-w-full" scrollable={scrollable}>
+              <pre className="ai-io-text m-0 min-w-0 max-w-full px-3.5 pt-1 pb-3 whitespace-pre-wrap [overflow-wrap:anywhere]" data-error={node.state === 'failed' || undefined}>
+                {output}
+              </pre>
+            </ToolScrollArea>
           </AiToolContentRegion>
         </div>
       )}
-    </ToolScrollArea>
+    </div>
   );
 }
 
@@ -906,7 +901,7 @@ export function AiToolRow({
           <span className={AI_DISCLOSURE_TITLE_CLASS}>{title}</span>
           <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
           <span
-            className={AI_DISCLOSURE_SUMMARY_CLASS}
+            className={cn(AI_DISCLOSURE_SUMMARY_CLASS, open && AI_EXPANDED_TITLE_CLASS)}
             data-error={hasError || undefined}
           >
             {summary}

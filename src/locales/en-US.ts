@@ -1764,6 +1764,8 @@ export default {
   'ai.error.subagentTokenBudgetExceeded': 'Subagent token budget exceeds the limit of {maximum} tokens.',
   'ai.workspace.tool.inspect': 'View details',
   'ai.workspace.tool.expandCommand': 'Show full command',
+  'ai.workspace.tool.expandTitle': 'Show full title',
+  'ai.workspace.tool.collapseTitle': 'Collapse title',
   'ai.workspace.tool.collapseCommand': 'Collapse command',
   'ai.workspace.tool.copyCommand': 'Copy command',
   'ai.workspace.tool.copyInput': 'Copy input',

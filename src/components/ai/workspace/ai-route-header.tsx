@@ -3,6 +3,7 @@ import { ArrowLeftIcon, PanelRightCloseIcon } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import { AiHeaderIconButton } from './ai-header-icon-button';
+import { AiContentTitle } from './ai-content-title';
 
 export function AiRouteHeader({
   title,
@@ -19,7 +20,7 @@ export function AiRouteHeader({
 }): React.ReactNode {
   const { t } = useI18n();
   return (
-    <header className="ai-route-header relative flex h-10 min-h-10 min-w-0 shrink-0 items-center gap-2 border-b border-app-border/50 px-[var(--ai-shell-clearance)]" data-slot="ai-route-header">
+    <header className="ai-route-header relative flex min-h-10 min-w-0 shrink-0 items-center gap-2 border-b border-app-border/50 px-[var(--ai-shell-clearance)] py-1" data-slot="ai-route-header">
       <Tooltip>
         <TooltipTrigger
           render={(
@@ -31,7 +32,7 @@ export function AiRouteHeader({
         <TooltipContent>{t('common.back')}</TooltipContent>
       </Tooltip>
       <div className="ai-route-title-cluster flex min-w-0 flex-1 items-center">
-        <h2 className="ai-route-title min-w-0 truncate text-sm font-medium leading-5 text-foreground">{title}</h2>
+        <h2 className="ai-route-title min-w-0 flex-1 text-sm font-medium leading-5 text-foreground"><AiContentTitle>{title}</AiContentTitle></h2>
         <p className="sr-only">{description}</p>
       </div>
       {(actions || onClose) && (

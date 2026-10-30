@@ -103,7 +103,9 @@ describe('AI tool presentation', () => {
       expect(body).toContainElement(section.querySelector('.ai-tool-copy-button'));
       expect(header?.querySelector('.ai-tool-copy-button')).toBeNull();
     }
-    expect(container.querySelector('.ai-io-card')).toHaveClass('max-h-65', 'overflow-hidden');
+    expect(container.querySelector('.ai-io-card')).toHaveClass('overflow-hidden');
+    expect(container.querySelector('.ai-io-input')).toHaveClass('max-h-65');
+    expect(container.querySelector('.ai-io-output')).toHaveClass('max-h-65');
     expect(container.querySelector('.ai-io-card [data-slot="scroll-area-viewport"]')).toHaveStyle({ overflow: 'scroll' });
     expect(container.querySelector('.ai-io-divider, [data-slot="separator"]')).not.toBeInTheDocument();
   });
@@ -183,6 +185,8 @@ describe('AI tool presentation', () => {
     const copy = screen.getByRole('button', { name: locale === 'zh-CN' ? '复制输出' : 'Copy output' });
     expect(copy).toBeVisible();
     expect(container.querySelector('.ai-tool-surface-header')).toHaveTextContent(locale === 'zh-CN' ? '查看错误详情' : 'View error details');
+    expect(container.querySelector('.ai-tool-surface-header')).not.toContainElement(copy);
+    expect(copy.closest('[data-ai-copy-region]')).toBe(copy.closest('.ai-tool-content-region'));
     expect(copy.closest('.ai-tool-content-region')).toContainElement(container.querySelector('code'));
     expect(copy).toHaveClass('absolute');
     expect(container.querySelector('[data-ai-tool-view="error"] code')).toHaveTextContent(failure.error!);
@@ -380,7 +384,7 @@ describe('AI tool presentation', () => {
 
     expect(toggle).toHaveTextContent(command);
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    expect(toggle).toHaveClass('line-clamp-2');
+    expect(toggle.firstElementChild).toHaveClass('line-clamp-2');
     expect(container.querySelector('.ai-terminal-command')).toBe(toggle);
     const header = container.querySelector('.ai-terminal-header');
     const stateDot = header?.querySelector('.ai-state-dot');
@@ -393,13 +397,13 @@ describe('AI tool presentation', () => {
 
     await user.click(toggle);
     expect(screen.getByRole('button', { name: 'Collapse command' })).toHaveAttribute('aria-expanded', 'true');
-    expect(toggle).toHaveClass('line-clamp-none');
-    expect(toggle).not.toHaveClass('line-clamp-2');
+    expect(toggle.firstElementChild).toHaveClass('block');
+    expect(toggle.firstElementChild).not.toHaveClass('line-clamp-2');
     expect(header).toHaveClass('items-center');
 
     await user.click(toggle);
     expect(screen.getByRole('button', { name: 'Show full command' })).toHaveAttribute('aria-expanded', 'false');
-    expect(toggle).toHaveClass('line-clamp-2');
+    expect(toggle.firstElementChild).toHaveClass('line-clamp-2');
     expect(header).toHaveClass('items-center');
   });
 
@@ -450,6 +454,24 @@ describe('AI tool presentation', () => {
     expect(screen.getByRole('button', { name: 'Copy output' })).toBeInTheDocument();
     rerender(<AiToolExpandedContent node={{ ...node, name, input: null, output: null }} />);
     expect(container.querySelector('.ai-tool-copy-button')).not.toBeInTheDocument();
+  });
+
+  it('keeps diff headers outside the horizontal scrolling body', () => {
+    const path = 'src/components/ai/workspace/ai-tool-presentation.tsx';
+    const revision = spawnSync('git', ['log', '-1', '--format=%H', '--', path], { encoding: 'utf8' });
+    expect(revision.status).toBe(0);
+    const result = spawnSync('git', ['show', '--format=', '--unified=20', revision.stdout.trim(), '--', path], { encoding: 'utf8' });
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toBe('');
+    const { container } = render(<AiToolExpandedContent node={{ ...node, name: 'apply_patch', input: { patch: result.stdout }, output: { diff: result.stdout } }} />);
+    const viewport = container.querySelector('.ai-diff-block [data-slot="scroll-area-viewport"]');
+    expect(viewport?.closest('.ai-diff-content')).toHaveClass('max-h-65');
+    for (const body of container.querySelectorAll('.ai-diff-body')) {
+      expect(body.closest('[data-slot="scroll-area-viewport"]')).not.toContainElement(body.closest('section')?.querySelector('.ai-tool-surface-header') ?? null);
+    }
+    expect(container.querySelectorAll('.ai-diff-body').length).toBeGreaterThan(0);
+    const titles = [...container.querySelectorAll('.ai-diff-block .ai-content-title')].map(title => title.textContent);
+    expect(new Set(titles).size).toBe(titles.length);
   });
 
   it('shows a leading icon on the inspect action and still opens tool details', async () => {

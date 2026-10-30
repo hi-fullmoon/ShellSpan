@@ -39,6 +39,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
 import { useI18n } from '@/hooks/useI18n';
+import { AiContentTitle } from './ai-content-title';
 import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
 import { cn } from '@/lib/utils';
 import { questionIssue, questionIssueMessageKey, questionSubmissionIssue } from '@/lib/ai/question-submission';
@@ -199,10 +200,10 @@ export function AiQuestionPanel({
     >
       <CardHeader className="ai-question-panel-header min-h-[70px] shrink-0 gap-[3px] px-[18px] pt-[11px] pb-2 @max-[421px]/ai-workspace:min-h-[66px] @max-[421px]/ai-workspace:px-3 @max-[421px]/ai-workspace:pt-2.5 @max-[421px]/ai-workspace:pb-[7px]">
         <CardDescription>
-          {currentQuestion.header ?? t('ai.workspace.question.title')}
+          <AiContentTitle>{currentQuestion.header ?? t('ai.workspace.question.title')}</AiContentTitle>
         </CardDescription>
         <CardTitle className="ai-question-panel-title">
-          {currentQuestion.question}
+          <AiContentTitle key={currentQuestion.id}>{currentQuestion.question}</AiContentTitle>
         </CardTitle>
         <CardAction className="ai-question-panel-actions flex items-center gap-0.5">
           <Button
@@ -223,7 +224,7 @@ export function AiQuestionPanel({
       </CardHeader>
       {!collapsed && (
         <>
-          <CardContent ref={content} className="ai-question-panel-content min-h-0 overflow-x-hidden overflow-y-auto px-4 pt-px pb-1.5 @max-[421px]/ai-workspace:px-2.5 @max-[421px]/ai-workspace:pt-0">
+          <CardContent ref={content} className="ai-question-panel-content max-h-65 min-h-0 overflow-x-hidden overflow-y-auto px-4 pt-px pb-1.5 @max-[421px]/ai-workspace:px-2.5 @max-[421px]/ai-workspace:pt-0">
             <FieldGroup className="ai-question-list gap-0">
               <FieldSet
                 key={currentQuestion.id}
@@ -335,7 +336,7 @@ export function AiQuestionPanel({
             </FieldGroup>
             {submissionIssue && <FieldError className="mt-2 flex min-w-0 flex-col gap-1 [overflow-wrap:anywhere]" role="alert" data-question-error={submissionIssue.reason}>
               <p className="m-0">{t(questionIssueMessageKey(submissionIssue))}</p>
-              {submissionIssue.detail && <pre className="m-0 max-h-24 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere]" tabIndex={0} aria-label={t('ai.workspace.question.failureReason')}>
+              {submissionIssue.detail && <pre className="m-0 max-h-65 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere]" tabIndex={0} aria-label={t('ai.workspace.question.failureReason')}>
                 {submissionIssue.detail}
               </pre>}
             </FieldError>}
@@ -468,14 +469,14 @@ export function AiQuestionHistory({
             <CardHeader className="sr-only">
               <CardTitle>{status}</CardTitle>
             </CardHeader>
-            <CardContent className="flex-none px-2.5">
+            <CardContent className="max-h-65 flex-none overflow-auto px-2.5" tabIndex={0}>
               <FieldGroup className="ai-question-history-list grid auto-rows-max content-start gap-1">
                 {question.questions.map((q) => {
                   const answer = question.answers.find((a) => a.id === q.id);
                   return (
                     <FieldSet className="ai-question-history-item flex-none gap-0" key={q.id}>
                       <FieldLegend className="ai-question-history-question mb-0">
-                        {q.question}
+                        <AiContentTitle>{q.question}</AiContentTitle>
                       </FieldLegend>
                       {answer && (
                         <FieldDescription className="ai-question-history-answer">

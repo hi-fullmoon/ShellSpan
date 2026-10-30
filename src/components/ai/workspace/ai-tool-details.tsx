@@ -5,6 +5,7 @@ import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { AiRouteHeader } from './ai-route-header';
+import { AiContentTitle } from './ai-content-title';
 import {
   AiToolExpandedContent,
   AiToolCopyButton,
@@ -34,18 +35,18 @@ function DetailSection({
   readonly children: React.ReactNode;
 }) {
   return (
-    <section className="ai-detail-section flex min-h-0 min-w-0 flex-col overflow-hidden">
+    <section className="ai-detail-section flex min-h-0 min-w-0 shrink-0 flex-col overflow-hidden">
       <div className="ai-detail-section-header flex min-h-10 shrink-0 items-center justify-between gap-3 px-3 py-2">
-        <h3>{title}</h3>
+        <h3 className="min-w-0 flex-1"><AiContentTitle>{title}</AiContentTitle></h3>
       </div>
-      <div className="ai-tool-content-region relative flex min-h-0 min-w-0 flex-1 flex-col" data-ai-copy-region>
-      <ScrollArea className="min-h-0 min-w-0 flex-1" horizontal aria-label={title}>
-        {/* Base UI's fit-content minimum must not widen long tool payloads. */}
-        <ScrollAreaContent className="min-w-0" style={{ minWidth: 0 }}>
-          {children}
-        </ScrollAreaContent>
-      </ScrollArea>
-      {actions}
+      <div className="ai-tool-content-region relative flex min-h-0 min-w-0 flex-col" data-ai-copy-region>
+        <ScrollArea className="flex max-h-65 min-h-0 min-w-0 flex-col" viewportRender={<div className="h-auto min-h-0 flex-1" />} horizontal aria-label={title}>
+          {/* Base UI's fit-content minimum must not widen long tool payloads. */}
+          <ScrollAreaContent className="min-w-0" style={{ minWidth: 0 }}>
+            {children}
+          </ScrollAreaContent>
+        </ScrollArea>
+        {actions}
       </div>
     </section>
   );
@@ -97,13 +98,9 @@ export function AiToolDetails({
                   <small className="ai-detail-duration inline-flex shrink-0 items-center gap-1"><Clock3Icon aria-hidden="true" />{node.durationMs} ms</small>
                 )}
               </div>
-              <ScrollArea className="min-h-0 min-w-0" aria-label={t('ai.workspace.details.summary')}>
-                <ScrollAreaContent className="min-w-0" style={{ minWidth: 0 }}>
-                  <p className="m-0 [overflow-wrap:anywhere]">{node.state === 'failed' || node.state === 'rejected' ? toolDisplaySummary(node, t) : node.summary || node.name}</p>
-                </ScrollAreaContent>
-              </ScrollArea>
+              <AiContentTitle>{node.state === 'failed' || node.state === 'rejected' ? toolDisplaySummary(node, t) : node.summary || node.name}</AiContentTitle>
             </div>
-            <div className="ai-detail-sections grid min-h-0 min-w-0 flex-1 grid-rows-3 gap-2">
+            <div className="ai-detail-sections flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto">
               <DetailCode value={node.input} label={t('ai.workspace.details.input')} />
               <DetailSection
                 title={t('ai.workspace.details.output')}
@@ -116,7 +113,7 @@ export function AiToolDetails({
               >
                 {node.output === null && !node.error && node.state !== 'failed' && node.state !== 'rejected' && node.state !== 'running'
                   ? <p className="ai-details-empty m-0 py-3 px-3.5 [overflow-wrap:anywhere]">{t('ai.workspace.details.noOutput')}</p>
-                  : <AiToolExpandedContent node={node} showCopyActions={false} showGenericInput={false} scrollable={false} />}
+                  : <AiToolExpandedContent node={node} showCopyActions={false} showGenericInput={false} />}
                 {node.error && !toolErrorIsInOutput(node) && <p className="ai-detail-error m-0 py-3 px-3.5 [overflow-wrap:anywhere]">{node.error}</p>}
               </DetailSection>
               <DetailCode

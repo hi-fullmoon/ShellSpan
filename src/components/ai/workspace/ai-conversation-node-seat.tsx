@@ -20,6 +20,12 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Marker as MarkerPrimitive, MarkerContent, MarkerIcon } from '@/components/ui/marker';
 import { Separator } from '@/components/ui/separator';
 import { Spinner } from '@/components/ui/spinner';
+import {
+  MessageScrollerProvider,
+  MessageScroller as ContentScroller,
+  MessageScrollerViewport,
+  MessageScrollerContent,
+} from '@/components/ui/message-scroller';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNode, AiConversationNodeOf, AiTurnProcessStatus } from '@/lib/ai/conversation-node';
 import type { LocaleKey } from '@/locales';
@@ -40,6 +46,7 @@ import {
   AI_DISCLOSURE_SEPARATOR_CLASS,
   AI_DISCLOSURE_SUMMARY_CLASS,
   AI_DISCLOSURE_TITLE_CLASS,
+  AI_EXPANDED_TITLE_CLASS,
 } from './ai-style-classes';
 
 type AiConversationNodeRendererProps<Kind extends AiConversationNode['kind']> = {
@@ -96,7 +103,7 @@ function SemanticNoteDisclosure({
               {summary && (
                 <>
                   <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
-                  <span className={AI_DISCLOSURE_SUMMARY_CLASS}>{summary}</span>
+                  <span className={cn(AI_DISCLOSURE_SUMMARY_CLASS, open && AI_EXPANDED_TITLE_CLASS)}>{summary}</span>
                 </>
               )}
             </MarkerContent>
@@ -104,7 +111,7 @@ function SemanticNoteDisclosure({
         </MarkerPrimitive>
         <CollapsibleContent>
           <Separator className="ai-semantic-note-separator" />
-          <div className="ai-semantic-note-body relative mt-1 ml-[22px] box-border max-h-[141px] w-[calc(100%-22px)] overflow-auto pt-2.5 pr-10 pb-3 pl-3 whitespace-pre-wrap [overflow-wrap:anywhere]">
+          <div className="ai-semantic-note-body relative mt-1 ml-[22px] box-border max-h-65 w-[calc(100%-22px)] overflow-auto pt-2.5 pr-10 pb-3 pl-3 whitespace-pre-wrap [overflow-wrap:anywhere]">
             {body}
             <AiToolCopyButton text={body} className="ai-content-copy absolute top-1 right-1" />
           </div>
@@ -251,44 +258,42 @@ function ReasoningContent({ children, streaming }: { readonly children: string; 
   }, [children]);
   let offset = 0;
   return (
-    <div className="ai-reasoning-body min-w-0 py-1 pl-[22px] whitespace-normal [overflow-wrap:anywhere]">
-      {chunks.map((chunk, index) => {
-        // A completed look-ahead line can move already visible text into a new
-        // chunk. Seed its reveal baseline instead of replaying its entrance.
-        const initialSource = previous.slice(offset, offset + chunk.length);
-        offset += chunk.length;
-        return (
-          <StreamingMarkdownContent
-            key={index}
-            initialSource={initialSource}
-            copiedLabel={t('common.copied')}
-            copyLabel={t('common.copy')}
-            showCodeBlockActions={false}
-            streaming={streaming && index === chunks.length - 1}
-          >
-            {chunk}
-          </StreamingMarkdownContent>
-        );
-      })}
-    </div>
+    <MessageScrollerProvider autoScroll={streaming} defaultScrollPosition={streaming ? 'end' : 'start'}>
+      <ContentScroller className="ai-reasoning-scroll h-auto max-h-65 w-full">
+        <MessageScrollerViewport className="ai-reasoning-viewport h-auto" aria-label={t('ai.workspace.reasoning')}>
+          <MessageScrollerContent className="ai-reasoning-body min-h-0 min-w-0 gap-0 py-1 pl-[22px] whitespace-normal [overflow-wrap:anywhere]">
+            {chunks.map((chunk, index) => {
+              // A completed look-ahead line can move already visible text into a new
+              // chunk. Seed its reveal baseline instead of replaying its entrance.
+              const initialSource = previous.slice(offset, offset + chunk.length);
+              offset += chunk.length;
+              return (
+                <StreamingMarkdownContent
+                  key={index}
+                  initialSource={initialSource}
+                  copiedLabel={t('common.copied')}
+                  copyLabel={t('common.copy')}
+                  showCodeBlockActions={false}
+                  streaming={streaming && index === chunks.length - 1}
+                >
+                  {chunk}
+                </StreamingMarkdownContent>
+              );
+            })}
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+      </ContentScroller>
+    </MessageScrollerProvider>
   );
 }
 
 function ReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reasoning'> }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
-  const summaryRef = useRef<HTMLSpanElement>(null);
   const isStreaming = node.state === 'streaming';
   const lines = node.content.trim().split('\n');
   const summary = (isStreaming ? lines[lines.length - 1] : lines[0]) || node.summary.trim();
   const title = isStreaming ? t('ai.thinking.inProgress') : node.state === 'interrupted' ? t('ai.thinking.interrupted') : t('ai.workspace.reasoning');
-
-  useLayoutEffect(() => {
-    const element = summaryRef.current;
-    if (!element) return;
-    // Only move the one-line preview; the transcript keeps its reading anchor.
-    element.scrollLeft = isStreaming ? element.scrollWidth : 0;
-  }, [isStreaming, summary]);
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -318,7 +323,7 @@ function ReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reas
           {summary && (
             <>
               <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
-              <span ref={summaryRef} className={cn(AI_DISCLOSURE_SUMMARY_CLASS, isStreaming && 'overflow-hidden whitespace-nowrap text-clip')}>
+              <span className={cn(AI_DISCLOSURE_SUMMARY_CLASS, open && AI_EXPANDED_TITLE_CLASS)}>
                 <StreamingTextContext.Provider value={isStreaming}>
                   <StreamingText key={isStreaming ? lines.length - 1 : 0}>{summary}</StreamingText>
                 </StreamingTextContext.Provider>
@@ -643,7 +648,7 @@ function TurnProcessDisclosure({
           {summary && (
             <>
               <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
-              <span className={AI_DISCLOSURE_SUMMARY_CLASS}>{summary}</span>
+              <span className={cn(AI_DISCLOSURE_SUMMARY_CLASS, open && AI_EXPANDED_TITLE_CLASS)}>{summary}</span>
             </>
           )}
         </CollapsibleTrigger>

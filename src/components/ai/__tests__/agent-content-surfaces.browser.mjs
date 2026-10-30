@@ -46,7 +46,7 @@ const server = await createServer({
   cacheDir: join(screenshots, 'vite-cache'),
   resolve: { alias: { '@': `${root}src` } }, esbuild: { jsx: 'automatic' },
   optimizeDeps: { include: ['react', 'react-dom/client'] },
-  server: { host: '127.0.0.1', port: 0 },
+  server: { host: '127.0.0.1', port: 0, hmr: false },
   plugins: [tailwindcss(), {
     name: 'agent-content-surfaces',
     configureServer(vite) {
@@ -219,9 +219,9 @@ try {
         assert.equal(await page.locator('#read .ai-read-line').count(), file.split('\n').length);
         assert.equal(await page.locator('#search .ai-search-result').count(), search.split('\n').filter(Boolean).length);
         assert.equal(await page.locator('#diff [data-diff]').count(), patchLines);
-        for (const selector of ['#details-diff .ai-diff-block', '#details-code .ai-code-content', '#details-generic .ai-io-card']) {
+        for (const selector of ['#details-diff .ai-diff-block', '#details-generic .ai-io-card']) {
           assert.equal(await page.locator(selector).evaluate(element => getComputedStyle(element).maxHeight), 'none',
-            `${selector}: detail sections must own scrolling without nested height limits`);
+            `${selector}: card containers must leave height limits to their content regions`);
         }
         for (const theme of ['light', 'dark']) {
           await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
@@ -335,22 +335,25 @@ try {
               elements.map(element => getComputedStyle(element).borderBottomWidth));
             assert.ok(dividerWidths.every(width => width === '0px'), 'Tool headers and output must share an uninterrupted surface');
             const inputOutputGap = await page.locator('#generic').evaluate(element => {
-              const content = element.querySelectorAll('.ai-io-text');
-              return content[1].getBoundingClientRect().top - content[0].getBoundingClientRect().bottom;
+              return element.querySelector('.ai-io-output').getBoundingClientRect().top
+                - element.querySelector('.ai-io-input').getBoundingClientRect().bottom;
             });
             assert.ok(inputOutputGap >= 20, 'Spacing must distinguish tool input from output');
             for (const selector of ['#read .ai-read-lines', '#search .ai-search-results', '#web .ai-web-content',
-              '#diff .ai-diff-block', '#code .ai-code-content', '#generic .ai-io-card', '#markdown .ai-code-block-pre']) {
-              const root = page.locator(selector);
-              const shared = await root.getAttribute('data-slot') === 'scroll-area';
-              const body = shared ? root.locator('[data-slot="scroll-area-viewport"]') : root;
-              const size = await body.evaluate(element => ({ height: element.getBoundingClientRect().height,
-                overflow: getComputedStyle(element).overflowY, clientHeight: element.clientHeight, scrollHeight: element.scrollHeight }));
-              assert.ok(size.height <= 260 && size.scrollHeight > size.clientHeight, `${selector}: capped content height`);
-              assert.equal(size.overflow, shared ? 'scroll' : 'auto', `${selector}: scroll viewport`);
-              await body.evaluate(element => element.scrollTo({ top: element.scrollHeight, behavior: 'instant' }));
-              assert.ok(await body.evaluate(element => element.scrollTop > 0), `${selector}: final output must be reachable`);
-              await body.evaluate(element => element.scrollTo({ top: 0, behavior: 'instant' }));
+              '#diff .ai-diff-content', '#code .ai-code-content', '#generic .ai-io-output', '#markdown .ai-code-block-pre']) {
+              for (const root of await page.locator(selector).all()) {
+                const shared = await root.getAttribute('data-slot') === 'scroll-area';
+                const body = shared ? root.locator('[data-slot="scroll-area-viewport"]') : root;
+                const size = await body.evaluate(element => ({ height: element.getBoundingClientRect().height,
+                  overflow: getComputedStyle(element).overflowY, clientHeight: element.clientHeight, scrollHeight: element.scrollHeight }));
+                assert.ok(size.height <= 260, `${selector}: each content region has its own height limit`);
+                assert.equal(size.overflow, shared ? 'scroll' : 'auto', `${selector}: scroll viewport`);
+                if (size.scrollHeight > size.clientHeight) {
+                  await body.evaluate(element => element.scrollTo({ top: element.scrollHeight, behavior: 'instant' }));
+                  assert.ok(await body.evaluate(element => element.scrollTop > 0), `${selector}: final output must be reachable`);
+                  await body.evaluate(element => element.scrollTo({ top: 0, behavior: 'instant' }));
+                }
+              }
             }
             if (captureAll) {
               const views = [

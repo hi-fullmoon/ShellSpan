@@ -67,7 +67,7 @@ function ArtifactBody({ artifact }: { readonly artifact: AgentArtifactResponse }
     return (
       <div className="ai-artifact-image-surface grid max-w-full place-items-center overflow-hidden p-3">
         <img
-          className="block max-h-[440px] max-w-full object-contain"
+          className="block max-h-65 max-w-full object-contain"
           src={`data:${artifact.metadata.mediaType};base64,${artifact.bodyBase64}`}
           alt={artifact.metadata.title}
         />
@@ -76,7 +76,7 @@ function ArtifactBody({ artifact }: { readonly artifact: AgentArtifactResponse }
   }
   return (
     <div className="ai-detail-code-wrap relative min-w-0 max-w-full overflow-hidden">
-      <pre className="ai-detail-code m-0 min-w-0 max-w-full overflow-x-auto p-4 whitespace-pre-wrap break-words">{text || t('ai.workspace.details.emptyArtifact')}</pre>
+      <pre className="ai-detail-code m-0 max-h-65 min-w-0 max-w-full overflow-auto p-4 whitespace-pre-wrap break-words" tabIndex={0}>{text || t('ai.workspace.details.emptyArtifact')}</pre>
       {text && <ArtifactCopy text={text} />}
     </div>
   );

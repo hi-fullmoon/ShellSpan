@@ -74,7 +74,7 @@ try {
       const commandToggle = page.locator('.ai-terminal-command');
       const collapsed = await commandToggle.evaluate(element => ({
         height: element.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(element).lineHeight),
-        clamp: getComputedStyle(element).webkitLineClamp, whiteSpace: getComputedStyle(element).whiteSpace,
+        clamp: getComputedStyle(element.firstElementChild).webkitLineClamp, whiteSpace: getComputedStyle(element).whiteSpace,
       }));
       assert.equal(collapsed.clamp, '2', 'Command input must default to two visual lines');
       assert.equal(collapsed.whiteSpace, 'pre-wrap', 'Command input must preserve explicit line breaks');
@@ -156,7 +156,7 @@ try {
           })))}`);
         const headerRow = surface.locator('.ai-tool-surface-header').first();
         const copyRegion = copy.locator('..');
-        const title = headerRow.locator(':scope > span').first();
+        const title = headerRow.locator('.ai-content-title').first();
         const titleGeometry = () => title.evaluate(element => {
           const box = element.getBoundingClientRect();
           const parent = element.parentElement.getBoundingClientRect();

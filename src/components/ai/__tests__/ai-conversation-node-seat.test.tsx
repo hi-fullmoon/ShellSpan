@@ -528,7 +528,8 @@ describe('AiConversationNodeList', () => {
     ]);
     expect(diff.querySelector('section')).toHaveClass('min-w-0', 'max-w-full');
     expect(diff.querySelector('.ai-block-banner')).toHaveClass('ai-tool-surface-header', 'px-3.5', 'py-2');
-    expect(diff).toHaveClass('max-h-65', 'overflow-hidden');
+    expect(diff).toHaveClass('overflow-hidden');
+    expect(diff.querySelector('.ai-diff-content')).toHaveClass('max-h-65');
     expect(diff.querySelector('[data-slot="scroll-area-viewport"]')).toHaveStyle({ overflow: 'scroll' });
     expect(diff.querySelector('.ai-diff-body')).toHaveClass(
       'min-w-0', 'max-w-full', 'whitespace-pre',
@@ -604,7 +605,9 @@ describe('AiConversationNodeList', () => {
 
     const diff = container.querySelector('[data-ai-tool-view="diff"]') as HTMLElement;
     const visible = Array.from(diff.querySelectorAll('[data-diff]'), (line) => line.textContent);
-    expect(visible).toEqual(['1798same-1797', '1799same-1798', '1800same-1799', '1801old', '1801new', '1802end']);
+    expect(visible).toHaveLength(1803);
+    expect(visible.slice(-6)).toEqual(['1798same-1797', '1799same-1798', '1800same-1799', '1801old', '1801new', '1802end']);
+    expect(diff.querySelector('.ai-diff-content')).toHaveClass('max-h-65');
     expect(diff.querySelector('[data-diff-simplified]')).toBeNull();
   });
 
@@ -626,8 +629,9 @@ describe('AiConversationNodeList', () => {
     expect(diff.querySelector('[data-diff-simplified]')).toHaveTextContent(
       'Large change shown as a whole block; line totals are omitted.',
     );
-    expect(diff.querySelectorAll('[data-diff="removed"]')).toHaveLength(8);
-    expect(diff.querySelectorAll('[data-diff="added"]')).toHaveLength(8);
+    expect(diff.querySelectorAll('[data-diff="removed"]')).toHaveLength(2000);
+    expect(diff.querySelectorAll('[data-diff="added"]')).toHaveLength(2000);
+    expect(diff.querySelector('.ai-diff-content')).toHaveClass('max-h-65');
   });
 
   it('covers running, completed, and failed tool rows, inline expansion, details, and fallback', async () => {
@@ -785,7 +789,8 @@ describe('AiConversationNodeList', () => {
     const card = flow.querySelector('.ai-io-card') as HTMLElement;
     const payload = flow.querySelector('.ai-io-text') as HTMLElement;
     expect(flow).toHaveClass('min-w-0');
-    expect(card).toHaveClass('max-h-65', 'max-w-[calc(100%-4px)]', 'overflow-hidden');
+    expect(card).toHaveClass('max-w-[calc(100%-4px)]', 'overflow-hidden');
+    expect(card.querySelector('.ai-io-input')).toHaveClass('max-h-65');
     expect(card.querySelector('[data-slot="scroll-area-viewport"]')).toHaveStyle({ overflow: 'scroll' });
     expect(payload).toHaveClass('[overflow-wrap:anywhere]');
 

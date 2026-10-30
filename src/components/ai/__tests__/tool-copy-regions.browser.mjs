@@ -30,7 +30,7 @@ const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error',
   cacheDir: join(screenshots, 'vite-cache'), resolve: { alias: { '@': `${root}src` } },
   esbuild: { jsx: 'automatic' }, optimizeDeps: { include: ['react', 'react-dom/client'] },
-  server: { host: '127.0.0.1', port: 0 },
+  server: { host: '127.0.0.1', port: 0, hmr: false },
   plugins: [tailwindcss(), {
     name: 'tool-copy-regions',
     configureServer(vite) {
@@ -57,6 +57,8 @@ try {
           await import('/src/styles/base.css');
           await import('/src/components/ai/styles/styles.css');
           const { AiToolExpandedContent } = await import('/src/components/ai/workspace/ai-tool-presentation.tsx');
+          const { AiContentTitle } = await import('/src/components/ai/workspace/ai-content-title.tsx');
+          const { AiTaskStrip } = await import('/src/components/ai/workspace/ai-task-strip.tsx');
           const { projectAgentChatNodes } = await import('/src/lib/ai/conversation-projection.ts');
           const { initI18n } = await import('/src/locales/index.ts');
           const { useAppStore } = await import('/src/stores/appStore.ts');
@@ -80,6 +82,8 @@ try {
             failure, plan,
           ];
           createRoot(document.getElementById('root')).render(React.createElement(React.Fragment, null,
+            React.createElement(AiContentTitle, { className: 'test-long-title text-sm leading-5' }, data.file),
+            React.createElement(AiTaskStrip, { steps: plan.input.steps }),
             ...nodes.map((node, key) => React.createElement(AiToolExpandedContent, { node, key }))));
         }, { data, locale });
         await page.locator('.ai-terminal-command').waitFor();
@@ -88,6 +92,44 @@ try {
           for (const width of [320, 720]) {
             await page.setViewportSize({ width, height: 1000 });
             const context = `${engine.name()}/${locale}/${theme}/${width}`;
+            const taskTrigger = page.locator('[data-slot="ai-task-strip"] [data-slot="collapsible-trigger"]');
+            await taskTrigger.click();
+            assert.equal(await taskTrigger.getAttribute('aria-expanded'), 'true');
+            assert.ok((await page.locator('.ai-task-strip-list').boundingBox()).height <= 260, `${context}: task list stays within 260px`);
+            await taskTrigger.click();
+            const title = page.locator('.test-long-title');
+            const titleButton = title.locator('button');
+            const titleSize = () => title.evaluate(element => ({ height: element.clientHeight,
+              full: element.scrollHeight, line: parseFloat(getComputedStyle(element).lineHeight) }));
+            const preview = await titleSize();
+            assert.ok(Math.abs(preview.height - 2 * preview.line) <= 1, `${context}: title defaults to two lines`);
+            await titleButton.click();
+            const expanded = await titleSize();
+            assert.ok(Math.abs(expanded.height - 6 * expanded.line) <= 1 && expanded.full > expanded.height,
+              `${context}: expanded title is capped at six lines and scrolls`);
+            await title.evaluate(element => { element.scrollTop = element.scrollHeight; });
+            assert.ok(await title.evaluate(element => element.scrollTop > 0), `${context}: full title is reachable`);
+            await titleButton.press('Enter');
+            assert.equal(await titleButton.getAttribute('aria-expanded'), 'false');
+            for (const body of await page.locator('.ai-terminal-transcript, .ai-read-lines, .ai-search-results, .ai-web-content, .ai-code-content, .ai-code-output, .ai-io-input, .ai-io-output, .ai-diff-content, [data-ai-tool-view="error"] pre').all()) {
+              const measured = await body.evaluate(element => {
+                const viewport = element.querySelector('[data-slot="scroll-area-viewport"]') ?? element;
+                const scope = element.closest('.ai-io-section, section, [data-ai-tool-view]');
+                const header = scope?.querySelector('.ai-tool-surface-header');
+                const before = header?.getBoundingClientRect().toJSON();
+                viewport.scrollTop = viewport.scrollHeight;
+                viewport.scrollLeft = viewport.scrollWidth;
+                const result = { height: element.getBoundingClientRect().height,
+                  headerFixed: JSON.stringify(before) === JSON.stringify(header?.getBoundingClientRect().toJSON()),
+                  horizontal: viewport.scrollWidth <= viewport.clientWidth || viewport.scrollLeft > 0,
+                  vertical: viewport.scrollHeight <= viewport.clientHeight || viewport.scrollTop > 0 };
+                viewport.scrollTop = 0;
+                viewport.scrollLeft = 0;
+                return result;
+              });
+              assert.ok(measured.height <= 260 && measured.headerFixed && measured.horizontal && measured.vertical,
+                `${context}: body must scroll within 260px independently of its header: ${JSON.stringify(measured)}`);
+            }
             const checkRegion = async (card, region, active) => {
               await region.hover({ position: { x: 24, y: 8 } });
               const copies = card.locator('.ai-tool-copy-button');

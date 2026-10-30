@@ -26,7 +26,7 @@ export function AiQueueNotice({ conflict, error }: {
             {t('ai.workspace.queue.errorDetails')}
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <div className="ai-queue-notice-preview relative mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap p-2 pr-10 font-mono text-xs text-muted-foreground [overflow-wrap:anywhere]" tabIndex={0}>
+            <div className="ai-queue-notice-preview relative mt-1 max-h-65 overflow-y-auto whitespace-pre-wrap p-2 pr-10 font-mono text-xs text-muted-foreground [overflow-wrap:anywhere]" tabIndex={0}>
               {error}
               <AiToolCopyButton text={error} label={t('ai.workspace.tool.copyOutput')} className="ai-content-copy absolute top-1 right-1" />
             </div>

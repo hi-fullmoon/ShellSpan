@@ -22,6 +22,7 @@ import type { LocaleKey } from '@/locales';
 import type { AgentSessionEffect } from '@/types/agent-session';
 import { AiErrorNotice } from './ai-error-notice';
 import { AiToolCopyButton } from './ai-tool-presentation';
+import { AiContentTitle } from './ai-content-title';
 
 export interface AiApprovalPanelProps {
   readonly approval: AiPendingApproval;
@@ -203,11 +204,11 @@ export function AiApprovalPanel({
           <div className="flex min-w-0 flex-col gap-0.5">
             <CardTitle className="ai-approval-panel-title">
               <h3 id="ai-approval-title" ref={headingRef} tabIndex={-1} className="outline-none">
-                {t(titleKey, { tool: approval.toolName })}
+                <AiContentTitle>{t(titleKey, { tool: approval.toolName })}</AiContentTitle>
               </h3>
             </CardTitle>
             <CardDescription id="ai-approval-description" className="break-words">
-              {t(descriptionKey, { target: targetLabel(approval) })}
+              <AiContentTitle>{t(descriptionKey, { target: targetLabel(approval) })}</AiContentTitle>
             </CardDescription>
           </div>
         </div>
@@ -216,7 +217,7 @@ export function AiApprovalPanel({
         </CardAction>
       </CardHeader>
 
-      <ScrollArea className="h-full min-h-0 min-w-0">
+      <ScrollArea className="flex max-h-65 min-h-0 min-w-0 flex-col" viewportRender={<div className="h-auto min-h-0 flex-1" />}>
         <ScrollAreaContent style={{ minWidth: 0 }}>
           <CardContent className="flex min-w-0 flex-col gap-3 px-4 pb-2">
             {!exactValue && (

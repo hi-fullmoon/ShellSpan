@@ -118,12 +118,6 @@
   overflow-wrap: anywhere;
 }
 
-/* Each detail section owns scrolling, including expanded output renderers. */
-[data-slot='ai-tool-details'] :is(.ai-detail-code, .ai-terminal-output > div, .ai-read-lines, .ai-search-results, .ai-web-content, .ai-diff-body, .ai-code-content, .ai-code-block-pre, .ai-io-section) {
-  max-height: none;
-  overflow: visible;
-}
-
 .ai-artifact-image-surface {
   border: 1px solid var(--ai-border-soft);
   border-radius: var(--ai-content-radius);

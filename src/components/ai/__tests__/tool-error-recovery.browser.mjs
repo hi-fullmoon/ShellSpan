@@ -101,7 +101,7 @@ try {
           const copyButton = errorCard.getByRole('button', { name: locale === 'zh-CN' ? '复制输出' : 'Copy output', exact: true });
           const errorGeometry = await errorCard.evaluate(element => {
             const header = element.querySelector('.ai-tool-surface-header').getBoundingClientRect();
-            const label = element.querySelector('.ai-block-banner > span').getBoundingClientRect();
+            const label = element.querySelector('.ai-block-banner > .ai-content-title').getBoundingClientRect();
             const code = element.querySelector('code');
             const text = document.createRange();
             text.selectNodeContents(code);
