@@ -501,8 +501,26 @@
         manager
             .acquire("terminal-1", "agent-1", "task-1", "operation-1", None)
             .unwrap();
+        let mut submission_attempted = false;
+        assert!(manager
+            .write_executable(
+                &sessions,
+                "terminal-1",
+                "rejected".into(),
+                TerminalInputSource::Agent {
+                    agent_session_id: "agent-1",
+                    task_id: "task-1",
+                    operation_id: "wrong-operation",
+                },
+                &mut submission_attempted,
+            )
+            .is_err());
+        assert!(
+            !submission_attempted,
+            "lease rejection must not imply transport submission"
+        );
         manager
-            .write(
+            .write_executable(
                 &sessions,
                 "terminal-1",
                 "agent".into(),
@@ -511,8 +529,10 @@
                     task_id: "task-1",
                     operation_id: "operation-1",
                 },
+                &mut submission_attempted,
             )
             .unwrap();
+        assert!(submission_attempted);
         manager
             .write(
                 &sessions,

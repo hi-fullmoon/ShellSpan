@@ -770,6 +770,7 @@ impl TerminalLeaseManager {
             TerminalInputPayload::Binary(bytes),
             source,
             TerminalInputKind::Binary,
+            || {},
         )
         .map(|_| ())
     }
@@ -788,9 +789,32 @@ impl TerminalLeaseManager {
             TerminalInputPayload::Text(data),
             source,
             input_kind,
+            || {},
         )
     }
 
+    /// Record executable submission only after lease and broker admission.
+    /// Rejection by either gate proves that no transport write was attempted.
+    pub(crate) fn write_executable(
+        &self,
+        sessions: &SessionManager,
+        session_id: &str,
+        data: String,
+        source: TerminalInputSource<'_>,
+        submission_attempted: &mut bool,
+    ) -> Result<(), String> {
+        self.write_payload_with_kind(
+            sessions,
+            session_id,
+            TerminalInputPayload::Text(data),
+            source,
+            TerminalInputKind::Text,
+            || *submission_attempted = true,
+        )
+        .map(|_| ())
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn write_payload_with_kind(
         &self,
         sessions: &SessionManager,
@@ -798,6 +822,7 @@ impl TerminalLeaseManager {
         payload: TerminalInputPayload,
         source: TerminalInputSource<'_>,
         input_kind: TerminalInputKind,
+        on_transport_admitted: impl FnOnce(),
     ) -> Result<Option<crate::terminal_broker::TerminalInputReceipt>, String> {
         // Keep authorization and enqueue in one lease critical section. Without
         // this, a User write could pass while Idle and race an Agent acquire
@@ -850,7 +875,10 @@ impl TerminalLeaseManager {
                     broker_source,
                     input_kind,
                     &observed_bytes,
-                    || sessions.write_session_input(session_id, data),
+                    || {
+                        on_transport_admitted();
+                        sessions.write_session_input(session_id, data)
+                    },
                 )
             }
             TerminalInputPayload::Binary(bytes) => {
@@ -860,7 +888,10 @@ impl TerminalLeaseManager {
                     broker_source,
                     input_kind,
                     &observed_bytes,
-                    || sessions.write_session_bytes(session_id, bytes),
+                    || {
+                        on_transport_admitted();
+                        sessions.write_session_bytes(session_id, bytes)
+                    },
                 )
             }
         }

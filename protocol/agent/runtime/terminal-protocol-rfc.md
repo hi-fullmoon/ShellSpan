@@ -661,6 +661,16 @@ Ordinary short input without potentially active controlled jobs retains its
 existing path. Old Zsh integrations without V advertise neither native script
 input nor usable native job control; data is refused before typing.
 
+On a partial, invalid or timed-out source frame, both POSIX receivers install
+the permanent SIGINT fence and mark native input quarantined **before** sending
+the failure M record. A caller may interrupt immediately upon observing that
+record; it must never observe failure while the shell can still escape back to
+the editor. Zsh drains late bytes with `sysread` on the same owned tty descriptor,
+without ZLE key/typeahead reads. EOF or an unrecoverable tty read error exits the
+quarantined shell instead of resuming an editor with untrusted bytes in flight.
+Successful frames keep the existing terminal restoration and acknowledgement
+order and do not alter the user's interrupt handlers.
+
 Poll/stop require an empty native
 editor checkpoint, then transfer a fixed 65-byte descriptor (action, opaque
 handle suffix, fresh operation nonce) to a bounded native receiver. `M` returns
@@ -822,6 +832,35 @@ Background command timeout bounds launch, readiness, typing and confirmation;
 it is not the background job lifetime. Observation timeout does not stop a job.
 Task cancellation/shutdown attempts only owned jobs through the same gates and
 records unconfirmed cleanup instead of stealing a foreground program's input.
+
+Submission certainty is recorded at the executable input boundary, independently
+of job preparation. Validation, readiness, cancellation or deadline failures
+before an accept-line/dispatch write return `failed` with `execution=notStarted`.
+Their prepared jobs become `rejected`, with `nativeActive=false`, no exit code
+and no launch confirmation. They are excluded from active-job management and
+cleanup, survive reconnect as rejected, and never require session execution
+reconciliation. Native editor recovery, when needed, remains independently
+enforced: notStarted does not authorize bypassing a quarantined input buffer.
+
+Before attempting an executable transport write, the executor records that
+submission may occur. A failed write can still have delivered bytes; errors
+after this boundary retain `uncertain`/`execution=unknown` and prohibit replay.
+The runtime must not derive this certainty from error text, elapsed time, the
+existence of a prepared handle, or the later absence of a process. Existing
+native parser rejection/completion evidence remains authoritative.
+
+Submission failures include `errorDetails` with a stable `code`, `phase`,
+`execution`, `terminalRecoveryRequired` and `nextAction`. Management failures
+report this separately as `managementError`, preserving the original job's last
+confirmed observation when no management input was submitted. Queries of a
+rejected job report failure rather than successful execution. Model requests
+for managed jobs contain foreground source; shell `&`/manual detachment is
+rejected before execution with guidance to use `background=true` alone.
+
+Tool preparation failures carry `execution=notStarted`, `executed=false`,
+`retryable=false`, and the canonical input schema when available, so a model can
+correct missing fields/enums in a fresh call without blindly replaying the
+rejected request. Existing approval, recovery and permission gates still apply.
 
 `wait_process`/`kill_process` dispatch by handle class; `proc-*` retains all
 Direct semantics. `job-*` has no isolated stdin/stdout/stderr, and

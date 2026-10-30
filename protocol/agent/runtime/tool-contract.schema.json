@@ -752,6 +752,7 @@
         "job": { "$ref": "#/$defs/nativeShellJobObservation" },
         "waitTimedOut": { "type": "boolean" }, "stopRequested": { "type": "boolean" }, "waitCancelled": { "type": "boolean" },
         "managementBlocked": { "type": ["string", "null"] }, "outputScope": { "const": "sharedTerminal" },
+        "managementError": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/terminalSubmissionErrorDetails" }] },
         "stdout": { "const": "" }, "stderr": { "const": "" }, "noAutoReplay": { "const": true }
       }
     },
@@ -778,6 +779,7 @@
         "noAutoReplay"
       ],
       "properties": {
+        "execution": { "enum": ["notStarted", "running", "completed", "unknown"] },
         "processHandle": { "type": ["string", "null"], "pattern": "^job-[0-9a-f]{32}$" },
         "launchState": { "enum": ["confirmed", "rejected", "uncertain", null] },
         "launchWaitTimedOut": { "type": "boolean" },
@@ -1060,6 +1062,42 @@
       ]
     },
     "execCommandResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "exec_command" }, "data": { "$ref": "#/$defs/execCommandResultData" } } }], "unevaluatedProperties": false },
+    "terminalSubmissionErrorDetails": {
+      "type": "object", "additionalProperties": false,
+      "required": ["code", "phase", "execution", "terminalRecoveryRequired", "nextAction"],
+      "properties": {
+        "code": { "enum": ["TERMINAL_SUBMISSION_REJECTED", "TERMINAL_SUBMISSION_UNCONFIRMED"] },
+        "phase": { "enum": ["beforeSubmission", "submission"] },
+        "execution": { "enum": ["notStarted", "unknown"] },
+        "terminalRecoveryRequired": { "type": "boolean" },
+        "nextAction": { "enum": ["correctRequest", "recoverTerminal", "reconcile"] }
+      },
+      "allOf": [{
+        "if": { "properties": { "execution": { "const": "unknown" } }, "required": ["execution"] },
+        "then": { "properties": { "code": { "const": "TERMINAL_SUBMISSION_UNCONFIRMED" }, "phase": { "const": "submission" }, "nextAction": { "const": "reconcile" } } },
+        "else": { "properties": { "code": { "const": "TERMINAL_SUBMISSION_REJECTED" }, "phase": { "const": "beforeSubmission" } } }
+      }]
+    },
+    "terminalSubmissionFailure": {
+      "type": "object", "additionalProperties": false,
+      "required": ["contractVersion", "channel", "state", "execution", "processHandle", "launchState", "job", "noAutoReplay", "error", "errorDetails", "outputScope"],
+      "properties": {
+        "contractVersion": { "const": 1 }, "channel": { "const": "terminal" },
+        "state": { "enum": ["failed", "uncertain"] },
+        "execution": { "enum": ["notStarted", "unknown"] },
+        "processHandle": { "type": ["string", "null"], "pattern": "^job-[0-9a-f]{32}$" },
+        "launchState": { "enum": ["rejected", "uncertain", null] },
+        "job": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/nativeShellJobObservation" }] },
+        "noAutoReplay": { "const": true }, "error": { "type": "string" },
+        "errorDetails": { "$ref": "#/$defs/terminalSubmissionErrorDetails" },
+        "outputScope": { "const": "sharedTerminal" }
+      },
+      "allOf": [{
+        "if": { "properties": { "execution": { "const": "notStarted" } }, "required": ["execution"] },
+        "then": { "properties": { "state": { "const": "failed" }, "launchState": { "enum": ["rejected", null] }, "errorDetails": { "type": "object", "properties": { "execution": { "const": "notStarted" } } } } },
+        "else": { "properties": { "state": { "const": "uncertain" }, "launchState": { "enum": ["uncertain", null] }, "errorDetails": { "type": "object", "properties": { "execution": { "const": "unknown" } } } } }
+      }]
+    },
     "nativeJobLaunchUnconfirmed": {
       "type": "object", "additionalProperties": false,
       "required": ["contractVersion", "channel", "processHandle", "state", "noAutoReplay", "outputScope", "error", "job"],
@@ -1071,7 +1109,7 @@
         "job": { "$ref": "#/$defs/nativeShellJobObservation" }
       }
     },
-    "terminalExecuteResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "terminal_execute" }, "data": { "oneOf": [{ "$ref": "#/$defs/terminalExecuteResultData" }, { "$ref": "#/$defs/nativeJobLaunchUnconfirmed" }] } } }], "unevaluatedProperties": false },
+    "terminalExecuteResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "terminal_execute" }, "data": { "oneOf": [{ "$ref": "#/$defs/terminalExecuteResultData" }, { "$ref": "#/$defs/nativeJobLaunchUnconfirmed" }, { "$ref": "#/$defs/terminalSubmissionFailure" }] } } }], "unevaluatedProperties": false },
     "probeHttpResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "probe_http" }, "data": { "$ref": "#/$defs/probeHttpResultData" } } }], "unevaluatedProperties": false },
     "readTerminalResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "read_terminal" }, "data": { "$ref": "#/$defs/readTerminalResultData" } } }], "unevaluatedProperties": false },
     "writeTerminalInputResult": { "type": "object", "allOf": [{ "$ref": "#/$defs/toolResultBase" }, { "type": "object", "properties": { "toolName": { "const": "write_terminal_input" }, "data": { "$ref": "#/$defs/writeTerminalInputResultData" } } }], "unevaluatedProperties": false },

@@ -47,7 +47,7 @@ use super::{
     ProcessLifecycleNative, ProcessRegistryNative, ProcessSnapshotNative, RegisteredToolNative,
     RemoteProcessStartNative, TerminalExecuteRegistry, TerminalExecuteValidationStage,
     TerminalInputSource, TerminalInteractiveRegistry, TerminalInteractiveValidationStage,
-    TerminalLeaseManager, ToolRegistryErrorNative, ToolRegistryNative,
+    TerminalLeaseManager, TerminalSubmissionError, ToolRegistryErrorNative, ToolRegistryNative,
 };
 
 pub(crate) const DEFAULT_CAPABILITY_TTL_MS: u64 = 120_000;
@@ -1638,7 +1638,7 @@ impl NativeToolEngine {
         } else {
             None
         };
-        let started = self.terminal_execute.start_native_submission_until(
+        let started = self.terminal_execute.start_native_submission_outcome_until(
             sessions,
             &session_id,
             &context.request.user_session_id,
@@ -1670,38 +1670,42 @@ impl NativeToolEngine {
         let operation = match started {
             Ok(operation) => operation,
             Err(error) => {
-                self.terminal_broker
-                    .discard_shell_job_submission(&call.call_id)?;
-                if let Some(job) = &job {
-                    let current = self.terminal_broker.shell_job(
-                        &job.process_handle,
-                        &job.owner_target_id,
-                        &context.request.user_session_id,
-                        &context.request.task_id,
-                    )?;
-                    if !current.launch_confirmed {
-                        self.terminal_broker
-                            .mark_shell_job_uncertain(&job.process_handle)?;
-                    }
-                    let mut result = completed_result(&context.request, call, effect,
-                        "Native job launch was not confirmed; retain this handle and do not replay the source.",
-                        json!({"contractVersion":1,"channel":"terminal","processHandle":job.process_handle,"state":"uncertain","noAutoReplay":true,"error":crate::redaction::redact_sensitive_text(&error),"outputScope":"sharedTerminal","job":self.terminal_broker.shell_job(&job.process_handle,&job.owner_target_id,&context.request.user_session_id,&context.request.task_id)?}), false);
-                    result.status = AgentToolResultStatusNative::Uncertain;
-                    return Ok(result);
-                }
-                return Err(error);
+                return self.terminal_submission_failure(
+                    context,
+                    call,
+                    effect,
+                    &session_id,
+                    job.as_ref(),
+                    error,
+                );
             }
         };
-        let snapshot = if let Some(deadline) = launch_deadline {
+        let waited = if let Some(deadline) = launch_deadline {
             self.terminal_execute.wait_management(
                 sessions,
                 &session_id,
                 &operation,
                 deadline.saturating_duration_since(Instant::now()),
-            )?
+            )
         } else {
             self.terminal_execute
-                .wait(sessions, &session_id, &operation, timeout)?
+                .wait(sessions, &session_id, &operation, timeout)
+        };
+        let snapshot = match waited {
+            Ok(snapshot) => snapshot,
+            Err(message) => {
+                return self.terminal_submission_failure(
+                    context,
+                    call,
+                    effect,
+                    &session_id,
+                    job.as_ref(),
+                    TerminalSubmissionError {
+                        message,
+                        submission_attempted: true,
+                    },
+                )
+            }
         };
         if let Some(job) = &job {
             let current = self.terminal_broker.shell_job(
@@ -1777,6 +1781,13 @@ impl NativeToolEngine {
                 "commandLine": snapshot.command_line,
                 "submittedCommandLine": snapshot.submitted_command_line,
                 "inputRejection": snapshot.input_rejection,
+                "execution": if snapshot.input_rejection.is_some() || job.as_ref().is_some_and(|job| job.state == "rejected") {
+                    "notStarted"
+                } else if job.as_ref().is_some_and(|job| job.state == "exited") || (job.is_none() && snapshot.state == crate::terminal_broker::TerminalCommandState::Completed) {
+                    "completed"
+                } else if job.as_ref().is_some_and(|job| job.launch_confirmed && job.native_active == Some(true)) {
+                    "running"
+                } else { "unknown" },
                 "exitCode": snapshot.exit_code,
                 "cwd": snapshot.cwd,
                 "stdout": "",
@@ -1796,6 +1807,81 @@ impl NativeToolEngine {
             effects: vec![effect.clone()],
             truncated: Some(snapshot.capture_truncated),
         })
+    }
+
+    fn terminal_submission_failure(
+        &self,
+        context: &NativeExecutionContext,
+        call: &AgentToolCallNative,
+        effect: &AgentObservedEffectNative,
+        session_id: &str,
+        job: Option<&crate::terminal_jobs::NativeShellJob>,
+        error: TerminalSubmissionError,
+    ) -> Result<AgentToolResultNative, String> {
+        let not_started = !error.submission_attempted
+            && match job {
+                Some(job) => self.terminal_broker.reject_shell_job_before_submission(
+                    job,
+                    "launch rejected before executable input was submitted; no source executed",
+                )?,
+                None => true,
+            };
+        self.terminal_broker
+            .discard_shell_job_submission(&call.call_id)?;
+        let job = job
+            .map(|job| {
+                if !not_started {
+                    self.terminal_broker
+                        .mark_shell_job_uncertain(&job.process_handle)?;
+                }
+                self.terminal_broker.shell_job(
+                    &job.process_handle,
+                    &job.owner_target_id,
+                    &context.request.user_session_id,
+                    &context.request.task_id,
+                )
+            })
+            .transpose()?;
+        let terminal_recovery_required = self
+            .terminal_broker
+            .execution_capabilities(session_id)
+            .map_or(true, |state| !state.open || state.input_recovery_required)
+            || crate::agent_runtime::is_terminal_call_blocked(&error.message);
+        let message = crate::redaction::redact_sensitive_text(&error.message);
+        let summary = if not_started {
+            format!("{message}; execution=notStarted. No source was executed. Correct the request or inspect terminal readiness before a fresh call.")
+        } else {
+            format!("{message}; execution=unknown. Execution submission was attempted; retain the original operation identity and any process handle, and reconcile without replaying the source.")
+        };
+        let mut result = completed_result(
+            &context.request,
+            call,
+            effect,
+            &summary,
+            json!({
+                "contractVersion": 1, "channel": "terminal",
+                "state": if not_started { "failed" } else { "uncertain" },
+                "execution": if not_started { "notStarted" } else { "unknown" },
+                "processHandle": job.as_ref().map(|job| &job.process_handle),
+                "launchState": job.as_ref().map(|_| if not_started { "rejected" } else { "uncertain" }),
+                "job": job, "noAutoReplay": true, "error": message,
+                "errorDetails": {
+                    "code": if not_started { "TERMINAL_SUBMISSION_REJECTED" } else { "TERMINAL_SUBMISSION_UNCONFIRMED" },
+                    "phase": if not_started { "beforeSubmission" } else { "submission" },
+                    "execution": if not_started { "notStarted" } else { "unknown" },
+                    "terminalRecoveryRequired": terminal_recovery_required,
+                    "nextAction": if !not_started { "reconcile" } else if terminal_recovery_required { "recoverTerminal" } else { "correctRequest" },
+                },
+                "outputScope": "sharedTerminal",
+            }),
+            false,
+        );
+        result.status = if not_started {
+            AgentToolResultStatusNative::Failed
+        } else {
+            AgentToolResultStatusNative::Uncertain
+        };
+        Ok(result)
     }
 
     fn read_terminal(
@@ -2184,6 +2270,7 @@ impl NativeToolEngine {
         let deadline = Instant::now() + Duration::from_millis(timeout_ms);
         let mut stop_sent = false;
         let mut blocked: Option<String> = None;
+        let mut management_error = None;
         let mut observation_budget = super::terminal_execute::TYPING_SUBMIT_PAUSE.saturating_mul(2);
         let job = loop {
             let job = self.terminal_broker.shell_job(
@@ -2258,7 +2345,7 @@ impl NativeToolEngine {
                 &operation_id,
                 stop && !stop_sent,
             )?;
-            let start = self.terminal_execute.start_native_submission_until(
+            let start = self.terminal_execute.start_native_submission_outcome_until(
                 sessions,
                 &job.transport_session_id,
                 &context.request.user_session_id,
@@ -2322,9 +2409,22 @@ impl NativeToolEngine {
                     self.terminal_broker
                         .discard_shell_job_submission(&operation_id)?;
                     blocked = Some(format!(
-                        "terminal management unconfirmed: {}; no automatic replay",
-                        crate::redaction::redact_sensitive_text(&error)
+                        "terminal management {}: {}; no automatic replay",
+                        if error.submission_attempted {
+                            "unconfirmed"
+                        } else {
+                            "not submitted"
+                        },
+                        crate::redaction::redact_sensitive_text(&error.message)
                     ));
+                    management_error = Some(json!({
+                        "code": if error.submission_attempted { "TERMINAL_SUBMISSION_UNCONFIRMED" } else { "TERMINAL_SUBMISSION_REJECTED" },
+                        "execution": if error.submission_attempted { "unknown" } else { "notStarted" },
+                        "phase": if error.submission_attempted { "submission" } else { "beforeSubmission" },
+                        "terminalRecoveryRequired": self.terminal_broker.execution_capabilities(&job.transport_session_id)
+                            .map_or(true, |state| state.input_recovery_required),
+                        "nextAction": "reconcile",
+                    }));
                     break job;
                 }
             }
@@ -2357,18 +2457,25 @@ impl NativeToolEngine {
             &context.request,
             call,
             effect,
-            "Native shell job observation completed; output is shared with the terminal.",
+            if job.state == "rejected" {
+                "Native shell job did not start; no source was executed. Correct the launch request before a fresh call."
+            } else {
+                "Native shell job observation completed; output is shared with the terminal."
+            },
             json!({
                 "state": job.state, "exitCode": job.exit_code, "processHandle": job.process_handle,
                 "job": job, "waitTimedOut": wait_timed_out,
                 "stopRequested": stop_sent, "managementBlocked": blocked,
+                "managementError": management_error,
                 "waitCancelled": cancellation.is_cancelled(),
                 "outputScope": "sharedTerminal", "stdout": "", "stderr": "",
                 "noAutoReplay": true,
             }),
             false,
         );
-        if uncertain {
+        if job.state == "rejected" {
+            result.status = AgentToolResultStatusNative::Failed;
+        } else if uncertain {
             result.status = AgentToolResultStatusNative::Uncertain;
         } else if cancellation.is_cancelled() {
             result.status = AgentToolResultStatusNative::Cancelled;
@@ -3500,7 +3607,7 @@ mod tests {
             network_destinations: Vec::new(),
         };
 
-        let error = engine
+        let result = engine
             .execute_terminal_command(
                 &context,
                 &call,
@@ -3509,11 +3616,16 @@ mod tests {
                 1_000,
                 &CancellationToken::new(),
             )
-            .unwrap_err();
+            .unwrap();
+        assert_eq!(result.status, AgentToolResultStatusNative::Failed);
         assert!(
-            crate::agent_runtime::is_terminal_target_unavailable(&error),
-            "unexpected post-lease validation error: {error}"
+            crate::agent_runtime::is_terminal_target_unavailable(&result.summary),
+            "unexpected post-lease validation result: {result:?}"
         );
+        let data = result.data.unwrap();
+        assert_eq!(data["execution"], "notStarted");
+        assert_eq!(data["errorDetails"]["terminalRecoveryRequired"], true);
+        assert_eq!(data["errorDetails"]["nextAction"], "recoverTerminal");
         assert!(
             receiver.try_recv().is_err(),
             "identity drift must write no PTY bytes"

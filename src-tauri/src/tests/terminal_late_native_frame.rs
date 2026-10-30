@@ -11,7 +11,12 @@ impl Drop for NativeShell {
     }
 }
 
-fn verify_late_frame(shell_path: &str, shell: TerminalShellKind, split: usize) {
+fn verify_late_frame(
+    shell_path: &str,
+    shell: TerminalShellKind,
+    split: usize,
+    interrupt_at_checkpoint: bool,
+) {
     let (_root, integration) = prepare_test_integration(shell);
     let home = tempfile::tempdir().unwrap();
     let pair = native_pty_system()
@@ -29,10 +34,22 @@ fn verify_late_frame(shell_path: &str, shell: TerminalShellKind, split: usize) {
     command.env("TERM", "xterm-256color");
     integration.configure_command(&mut command).unwrap();
     let mut child = NativeShell(pair.slave.spawn_command(command).unwrap());
+    let pid = child.0.process_id().expect("live native shell PID") as libc::pid_t;
     drop(pair.slave);
     let (send, events) = mpsc::channel();
-    let _control = integration.start_reader(
+    let control = integration.start_reader(
         move |event| {
+            if interrupt_at_checkpoint
+                && matches!(
+                    event,
+                    TerminalIntegrationControlEvent::NativePrivateCheckpoint { .. }
+                )
+            {
+                // Deliver a real interrupt as soon as the failure receipt is
+                // decoded, without the consumer thread's scheduling delay.
+                // SAFETY: NativeShell owns this live child until the reader is dropped.
+                assert_eq!(unsafe { libc::kill(pid, libc::SIGINT) }, 0);
+            }
             send.send(event).unwrap();
             Ok(())
         },
@@ -121,7 +138,18 @@ fn verify_late_frame(shell_path: &str, shell: TerminalShellKind, split: usize) {
     thread::sleep(Duration::from_millis(250));
     write!(writer, "{}\r", &frame[boundary..]).unwrap();
     writer.flush().unwrap();
+    if interrupt_at_checkpoint {
+        // A second signal and a second late arrival must not release quarantine.
+        // SAFETY: the child is still owned and has not been waited/reaped.
+        assert_eq!(unsafe { libc::kill(pid, libc::SIGINT) }, 0);
+        writer.write_all(b"\x03").unwrap();
+        write!(writer, "{encoded}\r").unwrap();
+        writer.flush().unwrap();
+    }
     thread::sleep(Duration::from_millis(250));
+    // Stop callbacks before reaping the child so the interrupt target cannot
+    // outlive its owned PID, even if a broken receiver emitted a late record.
+    drop(control);
     child.0.kill().unwrap();
     child.0.wait().unwrap();
     drop(writer);
@@ -131,7 +159,7 @@ fn verify_late_frame(shell_path: &str, shell: TerminalShellKind, split: usize) {
     let visible = String::from_utf8_lossy(&bytes[start..]);
     assert!(
         !visible.contains("\\x"),
-        "late private frame leaked to the terminal: {visible}"
+        "{shell_path} split={split} signal={interrupt_at_checkpoint}: late private frame leaked to the terminal: {visible}"
     );
     assert!(!effect.exists(), "a timed-out source was executed");
     assert!(
@@ -147,7 +175,20 @@ fn verify_late_frame(shell_path: &str, shell: TerminalShellKind, split: usize) {
 #[test]
 fn native_zsh_late_frames_never_reach_the_editor() {
     for split in 0..3 {
-        verify_late_frame("/bin/zsh", TerminalShellKind::Zsh, split);
+        verify_late_frame("/bin/zsh", TerminalShellKind::Zsh, split, false);
+    }
+}
+
+#[test]
+fn native_zsh_late_frames_resist_interrupts_at_failure_checkpoint() {
+    for _ in 0..2 {
+        thread::scope(|scope| {
+            for split in 0..3 {
+                scope.spawn(move || {
+                    verify_late_frame("/bin/zsh", TerminalShellKind::Zsh, split, true);
+                });
+            }
+        });
     }
 }
 
@@ -156,6 +197,7 @@ fn native_zsh_late_frames_never_reach_the_editor() {
 fn native_bash_late_frames_never_reach_the_editor() {
     let shell = std::env::var("SHELLSPAN_TEST_MODERN_BASH").unwrap();
     for split in 0..3 {
-        verify_late_frame(&shell, TerminalShellKind::Bash, split);
+        verify_late_frame(&shell, TerminalShellKind::Bash, split, false);
+        verify_late_frame(&shell, TerminalShellKind::Bash, split, true);
     }
 }

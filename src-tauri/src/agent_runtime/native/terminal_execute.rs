@@ -33,6 +33,15 @@ pub(crate) enum TerminalExecuteValidationStage {
     InputWrite,
 }
 
+#[derive(Debug)]
+pub(crate) struct TerminalSubmissionError {
+    pub(crate) message: String,
+    /// Set before attempting the executable write, since a failed transport
+    /// write can still have delivered that input. Editor/probe writes do not
+    /// cross this boundary.
+    pub(crate) submission_attempted: bool,
+}
+
 #[derive(Clone)]
 struct TerminalExecuteRegistration {
     native_editor: bool,
@@ -182,6 +191,70 @@ impl TerminalExecuteRegistry {
         deadline: Option<Instant>,
         mut revalidate: impl FnMut(TerminalExecuteValidationStage) -> Result<(), String>,
     ) -> Result<Arc<TerminalCommandOperation>, String> {
+        self.start_native_submission_outcome_until(
+            sessions,
+            session_id,
+            agent_session_id,
+            task_id,
+            operation_id,
+            command,
+            enter,
+            job_submission,
+            deadline,
+            &mut revalidate,
+        )
+        .map_err(|error| error.message)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn start_native_submission_outcome_until(
+        &self,
+        sessions: &SessionManager,
+        session_id: &str,
+        agent_session_id: &str,
+        task_id: &str,
+        operation_id: &str,
+        command: &str,
+        enter: &str,
+        job_submission: Option<&str>,
+        deadline: Option<Instant>,
+        revalidate: impl FnMut(TerminalExecuteValidationStage) -> Result<(), String>,
+    ) -> Result<Arc<TerminalCommandOperation>, TerminalSubmissionError> {
+        let mut submission_attempted = false;
+        self.start_native_submission_inner(
+            sessions,
+            session_id,
+            agent_session_id,
+            task_id,
+            operation_id,
+            command,
+            enter,
+            job_submission,
+            deadline,
+            revalidate,
+            &mut submission_attempted,
+        )
+        .map_err(|message| TerminalSubmissionError {
+            message,
+            submission_attempted,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn start_native_submission_inner(
+        &self,
+        sessions: &SessionManager,
+        session_id: &str,
+        agent_session_id: &str,
+        task_id: &str,
+        operation_id: &str,
+        command: &str,
+        enter: &str,
+        job_submission: Option<&str>,
+        deadline: Option<Instant>,
+        mut revalidate: impl FnMut(TerminalExecuteValidationStage) -> Result<(), String>,
+        submission_attempted: &mut bool,
+    ) -> Result<Arc<TerminalCommandOperation>, String> {
         // Keep the transport boundary consistent with terminal_execute policy.
         // Reject unsupported input before acquiring a lease or touching the PTY.
         validate_visible_command_input(command)?;
@@ -198,7 +271,7 @@ impl TerminalExecuteRegistry {
             TerminalShellKind::WindowsPowerShell | TerminalShellKind::PowerShell7
         );
         if !powershell && super::command_contains_background_operator_native(command) {
-            return Err("TERMINAL_BACKGROUND_UNSUPPORTED: shell background management requires stage three; no command was executed".into());
+            return Err("TERMINAL_BACKGROUND_UNSUPPORTED: submit foreground source with background=true; remove shell background operators (&), nohup and manual detachment; no command was executed".into());
         }
         if !powershell && super::shell_policy::has_incomplete_heredoc(command) {
             return Err("TERMINAL_INPUT_UNSUPPORTED: heredoc has no explicit grammar end node; no input was sent".into());
@@ -635,7 +708,7 @@ impl TerminalExecuteRegistry {
                         command,
                         private_line,
                     )?;
-                    self.leases.write(
+                    self.leases.write_executable(
                         sessions,
                         session_id,
                         "\u{18}\u{b}".into(),
@@ -644,6 +717,7 @@ impl TerminalExecuteRegistry {
                             task_id,
                             operation_id,
                         },
+                        submission_attempted,
                     )?;
                     editor_batch_pending.store(false, Ordering::Release);
                     *gate = true;
@@ -925,7 +999,7 @@ impl TerminalExecuteRegistry {
                 if native_animation {
                     operation.finish_typing_capture()?;
                 }
-                self.leases.write(
+                self.leases.write_executable(
                     sessions,
                     session_id,
                     "\u{18}\u{5}".into(),
@@ -934,6 +1008,7 @@ impl TerminalExecuteRegistry {
                         task_id,
                         operation_id,
                     },
+                    submission_attempted,
                 )?;
                 *gate = true;
                 self.leases.publish_command_phase(
@@ -956,7 +1031,7 @@ impl TerminalExecuteRegistry {
                 } else {
                     format!("{input}{enter}")
                 };
-                self.leases.write(
+                self.leases.write_executable(
                     sessions,
                     session_id,
                     data,
@@ -965,6 +1040,7 @@ impl TerminalExecuteRegistry {
                         task_id,
                         operation_id,
                     },
+                    submission_attempted,
                 )?;
                 *gate = true;
                 self.leases.publish_command_phase(
@@ -1022,7 +1098,7 @@ impl TerminalExecuteRegistry {
                 return interrupted_typing_result(operation.snapshot()?.state);
             }
             revalidate(TerminalExecuteValidationStage::InputWrite)?;
-            self.leases.write(
+            self.leases.write_executable(
                 sessions,
                 session_id,
                 enter.to_string(),
@@ -1031,6 +1107,7 @@ impl TerminalExecuteRegistry {
                     task_id,
                     operation_id,
                 },
+                submission_attempted,
             )?;
             *gate = true;
             self.leases.publish_command_phase(

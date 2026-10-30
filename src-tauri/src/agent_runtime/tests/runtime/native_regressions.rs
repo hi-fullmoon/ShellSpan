@@ -27,6 +27,9 @@ const TERMINAL: &str = "native-regression-terminal";
 #[path = "scratch_execution.rs"]
 mod scratch_execution;
 
+#[path = "terminal_submission.rs"]
+mod terminal_submission;
+
 struct Scenario {
     root: tempfile::TempDir,
     runtime: AgentRuntime,

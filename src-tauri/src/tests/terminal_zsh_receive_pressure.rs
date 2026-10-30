@@ -1,6 +1,8 @@
 use super::*;
 use portable_pty::{native_pty_system, PtySize};
+use std::ffi::CString;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::unix::{ffi::OsStrExt, fs::OpenOptionsExt};
 use std::sync::{mpsc, Mutex};
 
 struct PressureShell(Option<Box<dyn portable_pty::Child + Send + Sync>>);
@@ -11,6 +13,39 @@ impl Drop for PressureShell {
             let _ = child.kill();
             let _ = child.wait();
         }
+    }
+}
+
+/// Hold both FIFO endpoints so launch never blocks on open. A native child
+/// waits in read until this owner explicitly releases it, including on unwind.
+struct ChildExitGate {
+    path: std::path::PathBuf,
+    pipe: File,
+}
+
+impl ChildExitGate {
+    fn new(path: std::path::PathBuf) -> Self {
+        let native = CString::new(path.as_os_str().as_bytes()).unwrap();
+        // SAFETY: native is a NUL-terminated path inside this test's private directory.
+        assert_eq!(unsafe { libc::mkfifo(native.as_ptr(), 0o600) }, 0);
+        let pipe = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&path)
+            .unwrap();
+        Self { path, pipe }
+    }
+
+    fn release(&mut self) {
+        self.pipe.write_all(b"release\n").unwrap();
+    }
+}
+
+impl Drop for ChildExitGate {
+    fn drop(&mut self) {
+        // Never leave a native child blocked if an earlier assertion failed.
+        let _ = self.pipe.write_all(b"release\n");
     }
 }
 
@@ -33,7 +68,7 @@ fn send_frame(
     writer: &mut dyn Write,
     events: &mpsc::Receiver<TerminalIntegrationControlEvent>,
     source: &str,
-    exit: Option<(usize, libc::pid_t, &Path)>,
+    exit: Option<(usize, libc::pid_t, &mut ChildExitGate)>,
 ) {
     let encoded = crate::agent_runtime::native_editor_chunks(source, TerminalShellKind::Zsh)[0]
         .0
@@ -76,7 +111,7 @@ fn send_frame(
         };
         writer.write_all(&frame.as_bytes()[..boundary]).unwrap();
         writer.flush().unwrap();
-        fs::write(gate, "release").unwrap();
+        gate.release();
         let timeout = libc::timespec {
             tv_sec: 1,
             tv_nsec: 0,
@@ -195,10 +230,10 @@ fn verify_receive(case: ReceiveCase) {
     let effects = home.path().join("effects");
     if matches!(case, ReceiveCase::ChildExit) {
         for round in 0..24 {
-            let gate = home.path().join(format!("exit-{round}"));
+            let mut gate = ChildExitGate::new(home.path().join(format!("exit-{round}")));
             let handle = format!("job-{}", Uuid::new_v4().simple());
             let pid_file = home.path().join(format!("pid-{round}"));
-            let job = format!("zmodload -F zsh/system p:sysparams; builtin printf '%s' \"$sysparams[pid]\" > {}; local_deadline=$((SECONDS + 3)); while [[ ! -f {} && $SECONDS -lt $local_deadline ]]; do /bin/sleep 0.005; done; exit 19", shlex::try_quote(pid_file.to_str().unwrap()).unwrap(), shlex::try_quote(gate.to_str().unwrap()).unwrap());
+            let job = format!("zmodload -F zsh/system p:sysparams; builtin printf '%s' \"$sysparams[pid]\" > {}; IFS= builtin read -r release < {}; exit 19", shlex::try_quote(pid_file.to_str().unwrap()).unwrap(), shlex::try_quote(gate.path.to_str().unwrap()).unwrap());
             let launch =
                 crate::terminal_jobs::shell_submission(&job, &handle, TerminalShellKind::Zsh)
                     .unwrap();
@@ -229,7 +264,7 @@ printf '%s\n' {round} >> {}"#,
                 writer.as_mut(),
                 &events,
                 &source,
-                Some((round % 3, pid, &gate)),
+                Some((round % 3, pid, &mut gate)),
             );
             assert_eq!(
                 fs::read_to_string(&effects).unwrap().lines().count(),

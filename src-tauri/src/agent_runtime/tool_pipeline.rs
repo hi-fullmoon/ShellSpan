@@ -2193,11 +2193,21 @@ impl AgentToolPipeline {
                                 "retryable": false,
                                 "recoveryAction": if reason.starts_with("TERMINAL_DIRECT_REQUIRED") { "selectDirect" } else { "reconnectTerminal" },
                             }))
-                        } else { ephemeral.then(|| serde_json::json!({
+                        } else if ephemeral { Some(serde_json::json!({
                             "code": "ephemeralInputUnavailable",
                             "executed": false,
                             "retryable": false,
                             "recoveryAction": if repeated { "requestUserInput" } else { "readCurrentStateAndReconstructInput" },
+                        })) } else { Some(serde_json::json!({
+                            "code": "TOOL_PREPARATION_REJECTED",
+                            "phase": "preparation",
+                            "execution": "notStarted",
+                            "executed": false,
+                            "retryable": false,
+                            "recoveryAction": "inspectErrorAndCorrectRequest",
+                            "inputSchema": super::model_tools::default_model_tools().into_iter()
+                                .find(|tool| tool.name == request.model_call.name)
+                                .map(|tool| tool.input_schema),
                         })) },
                         duration_ms: None,
                         evidence_refs: Vec::new(),

@@ -962,6 +962,22 @@ __shellspan_prompt_cycle() {{
   __shellspan_restore_receiver_tty
   __shellspan_private_descriptor=
   __shellspan_native_edit_line=
+  __shellspan_native_status=$__shellspan_status
+  __shellspan_native_source=
+  if [[ $__shellspan_command_active -eq 0 && $__shellspan_prompt_ready -eq 1 ]]; then
+    local __shellspan_late_line
+    __shellspan_late_line=$__shellspan_pending_line
+    __shellspan_pending_line=
+    if [[ -z "$__shellspan_late_line" ]]; then
+      __shellspan_late_line=$(HISTTIMEFORMAT= builtin history 1 2>/dev/null) || __shellspan_late_line=
+      __shellspan_late_line=${{__shellspan_late_line#*[0-9]  }}
+    fi
+    __shellspan_prompt_ready=0
+    __shellspan_command_active=1
+    __shellspan_emit S "$__shellspan_late_line" "$PWD"
+  fi
+  # An asynchronous group can reach PROMPT_COMMAND without DEBUG emitting S.
+  # Accept that exact line before publishing its native job observations.
   if [[ -n ${{__shellspan_job_armed_handle-}} ]]; then
     local __shellspan_identity="${{__shellspan_control_path}}.job.${{__shellspan_job_armed_handle}}.identity" __shellspan_pid
     builtin jobs -p "%( $__shellspan_job_armed_handle;" >| "$__shellspan_identity" 2>/dev/null
@@ -977,20 +993,6 @@ __shellspan_prompt_cycle() {{
     fi
     unset -f "$__shellspan_job_armed_handle"
     __shellspan_job_armed_handle=
-  fi
-  __shellspan_native_status=$__shellspan_status
-  __shellspan_native_source=
-  if [[ $__shellspan_command_active -eq 0 && $__shellspan_prompt_ready -eq 1 ]]; then
-    local __shellspan_late_line
-    __shellspan_late_line=$__shellspan_pending_line
-    __shellspan_pending_line=
-    if [[ -z "$__shellspan_late_line" ]]; then
-      __shellspan_late_line=$(HISTTIMEFORMAT= builtin history 1 2>/dev/null) || __shellspan_late_line=
-      __shellspan_late_line=${{__shellspan_late_line#*[0-9]  }}
-    fi
-    __shellspan_prompt_ready=0
-    __shellspan_command_active=1
-    __shellspan_emit S "$__shellspan_late_line" "$PWD"
   fi
   if [[ -n "$__shellspan_previous_prompt_command" ]]; then
     builtin eval -- "$__shellspan_previous_prompt_command"
@@ -1104,13 +1106,17 @@ __shellspan_quarantine_native() {{
   # A timed-out frame may still be arriving over SSH. Never hand its tail to
   # Readline. Keep consuming silently until transport closure;
   # the broker requires a fresh terminal generation before further input.
-  __shellspan_native_quarantined=1
   # Ctrl-C cannot establish that all bytes in flight have arrived. Keep this
   # failed frame isolated even across interrupts; recovery requires reconnect.
   trap '' INT
+  __shellspan_native_quarantined=1
+  # Publish failure only after isolation is established: the caller can react
+  # to M immediately, including sending an interrupt before this write returns.
+  __shellspan_emit M "$1" "$READLINE_LINE"
   local __shellspan_discard
   while IFS= builtin read -r -s -n 1 __shellspan_discard </dev/tty; do :; done
-  return 130
+  # Loss of the tty is not permission to return queued bytes to Readline.
+  builtin exit 130
 }}
 __shellspan_native_receive_frame() {{
   local __shellspan_async_redraw=0
@@ -1121,10 +1127,10 @@ __shellspan_native_receive_frame() {{
   local __shellspan_rows __shellspan_columns __shellspan_without_newlines __shellspan_line_count __shellspan_row
   local __shellspan_deadline=$((SECONDS + 2)) __shellspan_remaining
   if ! __shellspan_read_private 65 2 __shellspan_descriptor; then
-    __shellspan_emit M '' "$READLINE_LINE"; __shellspan_quarantine_native; return
+    __shellspan_quarantine_native ''; return
   fi
   if [[ ${{#__shellspan_descriptor}} != 65 || ${{__shellspan_descriptor:0:1}} != [bc] || ${{__shellspan_descriptor:1}} == *[!0-9a-f]* ]]; then
-    __shellspan_emit M '' "$READLINE_LINE"; __shellspan_quarantine_native; return
+    __shellspan_quarantine_native ''; return
   fi
   __shellspan_count=$((16#${{__shellspan_descriptor:1:5}}))
   __shellspan_source_count=$((16#${{__shellspan_descriptor:6:4}}))
@@ -1132,7 +1138,7 @@ __shellspan_native_receive_frame() {{
   __shellspan_columns=$((16#${{__shellspan_descriptor:14:4}}))
   __shellspan_remaining=$((__shellspan_deadline - SECONDS))
   if (( __shellspan_count < 4 || __shellspan_count > 131072 || __shellspan_count % 4 || __shellspan_source_count > 32768 || __shellspan_source_count >= __shellspan_count || __shellspan_source_count % 4 || __shellspan_remaining <= 0 || __shellspan_rows < 1 || __shellspan_rows > 1000 || __shellspan_columns < 1 || __shellspan_columns > 1000 )) || ! __shellspan_read_private "$__shellspan_count" "$__shellspan_remaining" __shellspan_encoded; then
-    __shellspan_emit M "$__shellspan_descriptor" "$READLINE_LINE"; __shellspan_quarantine_native; return
+    __shellspan_quarantine_native "$__shellspan_descriptor"; return
   fi
   builtin printf -v __shellspan_decoded '%b' "${{__shellspan_encoded:__shellspan_source_count}}"
   if (( __shellspan_source_count )); then
@@ -1253,7 +1259,7 @@ __shellspan_preexec() {{
     __shellspan_debug_prompt_echo_control=$__shellspan_prompt_echo_control
   fi
   case "$__shellspan_debug_command" in
-    __shellspan_prompt_cycle|__shellspan_restore_receiver_tty|__shellspan_capture_line|__shellspan_accept_native|__shellspan_native_receive|__shellspan_native_receive_frame|__shellspan_quarantine_native|__shellspan_read_private\ *|__shellspan_native_frame_checkpoint\ *|__shellspan_private_receive|__shellspan_private_commit|__shellspan_native_checkpoint|__shellspan_discard_native|__shellspan_preexec|__shellspan_on_exit|__shellspan_on_exit\ *|__shellspan_on_interrupt|__shellspan_on_interrupt\ *) return ;;
+    __shellspan_prompt_cycle|__shellspan_restore_receiver_tty|__shellspan_capture_line|__shellspan_accept_native|__shellspan_native_receive|__shellspan_native_receive_frame|__shellspan_quarantine_native|__shellspan_quarantine_native\ *|__shellspan_read_private\ *|__shellspan_native_frame_checkpoint\ *|__shellspan_private_receive|__shellspan_private_commit|__shellspan_native_checkpoint|__shellspan_discard_native|__shellspan_preexec|__shellspan_on_exit|__shellspan_on_exit\ *|__shellspan_on_interrupt|__shellspan_on_interrupt\ *) return ;;
   esac
   if [[ $__shellspan_prompt_ready -eq 1 && ${{BASH_SUBSHELL:-0}} -eq 0 ]]; then
     local __shellspan_line
@@ -1357,10 +1363,6 @@ __shellspan_precmd() {{
   fi
   __shellspan_blocked_marker=
   __shellspan_blocked_marker_definition=
-  if [[ -n ${{__shellspan_job_armed_handle-}} ]]; then
-    __shellspan_job_confirm_zsh "$__shellspan_job_armed_handle"
-    __shellspan_job_release_marker_zsh
-  fi
   __shellspan_native_status=$__shellspan_status
   __shellspan_prompt_end_pending=1
   if (( __shellspan_native_pending && ! __shellspan_command_active )); then
@@ -1368,6 +1370,11 @@ __shellspan_precmd() {{
     __shellspan_native_pending=0
     __shellspan_native_line=
     __shellspan_command_active=1
+  fi
+  # The precmd fallback accepts the exact line before reporting its job.
+  if [[ -n ${{__shellspan_job_armed_handle-}} ]]; then
+    __shellspan_job_confirm_zsh "$__shellspan_job_armed_handle"
+    __shellspan_job_release_marker_zsh
   fi
   if (( __shellspan_command_active )); then
     __shellspan_emit E "$__shellspan_status" "$PWD"
@@ -1520,11 +1527,17 @@ __shellspan_read_native() {{
   builtin printf -v "$3" '%s' "$__shellspan_read_data"
 }}
 __shellspan_quarantine_native() {{
-  __shellspan_native_quarantined=1
   trap '' INT
+  __shellspan_native_quarantined=1
+  # M is a recovery boundary, not just a diagnostic. Establish the permanent
+  # interrupt fence before the caller can react to a failed descriptor/payload.
+  __shellspan_native_frame_checkpoint "$1"
   local __shellspan_discard
-  while read -r -s -k 1 __shellspan_discard; do :; done
-  return 130
+  # Stay outside ZLE's get-key/typeahead path while discarding late bytes.
+  # sysread retries EINTR internally; EOF or a terminal I/O error must close
+  # this shell rather than return a partially received frame to the editor.
+  while builtin sysread -i "$__shellspan_receiver_fd" -s 8192 __shellspan_discard 2>/dev/null; do :; done
+  builtin exit 130
 }}
 __shellspan_native_receive_frame() {{
   __shellspan_native_redraw_before_accept=0
@@ -1543,20 +1556,17 @@ __shellspan_native_receive_frame() {{
   local __shellspan_descriptor __shellspan_encoded __shellspan_decoded __shellspan_count
   local -F 6 __shellspan_deadline=$(( EPOCHREALTIME + 2.0 )) __shellspan_remaining
   if ! __shellspan_read_native 65 "$__shellspan_deadline" __shellspan_descriptor; then
-    __shellspan_native_frame_checkpoint ''
-    __shellspan_quarantine_native
+    __shellspan_quarantine_native ''
     return
   fi
   if [[ ${{#__shellspan_descriptor}} != 65 || ${{__shellspan_descriptor[1]}} != [ef] || ${{__shellspan_descriptor[2,-1]}} == *[!0-9a-f]* ]]; then
-    __shellspan_native_frame_checkpoint ''
-    __shellspan_quarantine_native
+    __shellspan_quarantine_native ''
     return
   fi
   __shellspan_count=$((16#${{__shellspan_descriptor[2,5]}}))
   __shellspan_remaining=$(( __shellspan_deadline - EPOCHREALTIME ))
   if (( __shellspan_count < 4 || __shellspan_count > 36864 || __shellspan_count % 4 || __shellspan_remaining <= 0 )) || ! __shellspan_read_native "$__shellspan_count" "$__shellspan_deadline" __shellspan_encoded; then
-    __shellspan_native_frame_checkpoint "$__shellspan_descriptor"
-    __shellspan_quarantine_native
+    __shellspan_quarantine_native "$__shellspan_descriptor"
     return
   fi
   builtin printf -v __shellspan_decoded '%b' "$__shellspan_encoded"

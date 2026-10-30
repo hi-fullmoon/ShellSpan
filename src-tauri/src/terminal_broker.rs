@@ -3220,6 +3220,40 @@ impl TerminalSessionBroker {
         Ok(())
     }
 
+    /// Called only with execution-layer proof that accept-line was never
+    /// attempted. Preparation and a stale transport are not launch evidence.
+    pub(crate) fn reject_shell_job_before_submission(
+        &self,
+        prepared: &crate::terminal_jobs::NativeShellJob,
+        reason: &str,
+    ) -> Result<bool, String> {
+        let mut state = self.lock()?;
+        let job = state
+            .jobs
+            .get_mut(&prepared.process_handle)
+            .ok_or("TERMINAL_JOB_UNKNOWN")?;
+        if job.owner_target_id != prepared.owner_target_id
+            || job.agent_session_id != prepared.agent_session_id
+            || job.task_id != prepared.task_id
+            || job.operation_id != prepared.operation_id
+            || job.frozen_target != prepared.frozen_target
+            || job.terminal_session_id != prepared.terminal_session_id
+            || job.terminal_generation != prepared.terminal_generation
+            || job.integration_id != prepared.integration_id
+        {
+            return Err("TERMINAL_JOB_IDENTITY_MISMATCH".into());
+        }
+        if job.launch_confirmed || job.accepted_command_line.is_some() || job.state == "exited" {
+            return Ok(false);
+        }
+        job.state = "rejected".into();
+        job.native_active = Some(false);
+        job.cleanup_reason = Some(crate::redaction::redact_sensitive_text(reason));
+        state.prepared_job_commands.remove(&prepared.operation_id);
+        self.changed.notify_all();
+        Ok(true)
+    }
+
     pub(crate) fn mark_shell_job_uncertain(&self, handle: &str) -> Result<(), String> {
         let mut state = self.lock()?;
         let job = state.jobs.get_mut(handle).ok_or("TERMINAL_JOB_UNKNOWN")?;

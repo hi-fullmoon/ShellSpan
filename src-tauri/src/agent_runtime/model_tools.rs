@@ -87,7 +87,7 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
                         "enum": ["cooperative", "directRequired"],
                         "default": "cooperative"
                     },
-                    "background": { "type": "boolean", "default": false },
+                    "background": { "type": "boolean", "default": false, "description": "On boundTerminal, submit foreground source and let the runtime own background execution; do not add shell background operators (&), nohup or manual detachment. A notStarted rejection permits a corrected fresh call; unknown execution requires reconciliation without source replay." },
                     "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 3600000 }
                 }),
             ),
