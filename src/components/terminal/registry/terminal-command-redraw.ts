@@ -19,7 +19,6 @@ export function installTerminalCommandRedraw(
   let snapshot: { operationId: string; anchor: IMarker; lines: string[] } | undefined;
   let held = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let timedOutOperation: string | undefined;
 
   const currentOperation = () => {
     return terminal.buffer.active.type === 'normal' ? commandScope()?.operationId : undefined;
@@ -62,16 +61,15 @@ export function installTerminalCommandRedraw(
       const modes = core?.decPrivateModes;
       const operationId = currentOperation();
       if (modes && !held && !modes.synchronizedOutput && operationId
-        && timedOutOperation !== operationId && snapshot?.operationId === operationId) {
+        && snapshot?.operationId === operationId) {
         // Bash bind-x erases the native input before waiting for its private
         // payload. Hold only presentation until the real redraw restores the
         // previous prefix. The live xterm buffer continues to parse every byte.
         held = true;
         modes.synchronizedOutput = true;
-        timer = setTimeout(() => {
-          timedOutOperation = operationId;
-          reset();
-        }, MAX_REDRAW_WAIT_MS);
+        // Bound this hold only. Once native echo paints again, remember()
+        // supplies a fresh snapshot for later redraws in the same operation.
+        timer = setTimeout(reset, MAX_REDRAW_WAIT_MS);
       }
       return false;
     }),

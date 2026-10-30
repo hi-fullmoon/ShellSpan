@@ -30,6 +30,13 @@ release hides an unfinished decoration; a fresh prompt also discards a released
 scope when no command boundary arrived. Rebinding or disposing removes all
 decorations.
 
+Bash's intermediate native-input clears are held until its previous painted
+prefix returns, with a 750 ms limit for each render hold. A timeout releases
+only that hold and discards its snapshot; once native echo paints again, the
+same command can protect subsequent clears. Repeated delays must not disable
+redraw protection for the remaining command. Cancellation, takeover, resize,
+buffer changes and ordered command boundaries still release held rendering.
+
 These markers are untrusted, optional presentation hints. They do not change
 the private control protocol, approvals, command capture, execution status,
 input suppression or cancellation. Existing connections without the marker

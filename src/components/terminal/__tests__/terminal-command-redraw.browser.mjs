@@ -54,7 +54,7 @@ try {
     window.runtime = { Terminal, WebglAddon, installTerminalCommandDecorations, agentTerminalLeaseState };
   });
   const cases = ['', '-long'].flatMap(variant => [100, 40].flatMap(columns =>
-    ['normal', 'running', 'released'].map(scenario => ({ variant, columns, scenario }))));
+    [...(!variant ? ['timeout'] : []), 'normal', 'running', 'released'].map(scenario => ({ variant, columns, scenario }))));
   for (const { variant, columns, scenario } of cases) {
     const metadata = JSON.parse(readFileSync(join(directory, `native-typing-bash${variant}-${columns}.bin.json`), 'utf8'));
     for (const renderer of ['dom', 'webgl']) {
@@ -79,6 +79,8 @@ try {
       let seenInput = false;
       let blankBufferFrames = 0;
       let firstHeldFrame;
+      let timeouts = 0;
+      let paintedCommand;
       const visibleInputs = new Set();
       const scrolledInputs = new Set();
       let scrolled = false;
@@ -111,6 +113,7 @@ try {
         if (seenInput && state.text.trim() && !state.synchronized) {
           visibleInputs.add(state.text);
           if (scrolled) scrolledInputs.add(state.text);
+          if (scenario === 'timeout') paintedCommand = await page.locator('.terminal-agent-command').screenshot();
         }
         if (!seenInput || state.text.trim()) continue;
         blankBufferFrames++;
@@ -136,7 +139,25 @@ try {
         }, screenshot.toString('base64'));
         assert.ok(ink > 300, `${renderer}/${columns} frame ${index}: native input disappeared (${ink} ink pixels)`);
         assert.ok(state.decorationHeight > 0, `${variant}/${scenario}/${renderer}/${columns} frame ${index}: command background must survive intermediate clearing`);
-        if (index === firstHeldFrame && scenario !== 'normal') await page.evaluate(scenario => {
+        if (scenario === 'timeout') {
+          assert.ok(paintedCommand, 'The real command must paint before a clear can be protected');
+          const heldCommand = await page.locator('.terminal-agent-command').screenshot();
+          assert.ok(heldCommand.equals(paintedCommand),
+            `${renderer}/${columns} frame ${index}: clearing after ${timeouts} timeouts changed the painted command or background`);
+        }
+        if (scenario === 'timeout' && (blankBufferFrames === 1 || blankBufferFrames === 5)) {
+          // Delay actual captured PTY bytes beyond the bounded render hold,
+          // twice within one operation. Every later native clear must regain
+          // protection and retain both painted text and its command background.
+          const heldAfterTimeout = await page.evaluate(async () => {
+            await new Promise(resolve => setTimeout(resolve, 850));
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            return window.redraw.terminal._core.coreService.decPrivateModes.synchronizedOutput;
+          });
+          assert.equal(heldAfterTimeout, false, 'A stalled redraw must still release its bounded hold');
+          timeouts++;
+        }
+        if (index === firstHeldFrame && (scenario === 'running' || scenario === 'released')) await page.evaluate(scenario => {
           const { sessionId, operationId } = window.redraw.metadata.leaseEvent;
           const leases = window.runtime.agentTerminalLeaseState;
           leases.update(sessionId, operationId, current => ({ ...current, commandPhase: 'running' }));
@@ -144,6 +165,7 @@ try {
         }, scenario);
       }
       assert.ok(blankBufferFrames > 5, 'The real Bash trace must exercise repeated clear-only frames');
+      if (scenario === 'timeout') assert.equal(timeouts, 2, 'The same command must recover after two redraw timeouts');
       assert.ok(visibleInputs.size > 5, 'Native input must continue to advance visibly');
       if (variant && columns === 40) {
         assert.ok(scrolled, 'Long native input must exercise scrolling before submission');
@@ -262,7 +284,7 @@ try {
     }
   }
   assert.deepEqual(errors, []);
-  console.log('PASS: short/long Bash input stays visible in DOM/WebGL at 40/100 columns with early running/release, native scrolling and coalesced redraws; cancellation and cleanup release rendering');
+  console.log('PASS: short/long Bash input stays visible in DOM/WebGL at 40/100 columns, including recovery after repeated 850ms redraw delays, early running/release, native scrolling and coalesced redraws; cancellation and cleanup release rendering');
 } finally {
   await browser?.close();
   await server?.close();
