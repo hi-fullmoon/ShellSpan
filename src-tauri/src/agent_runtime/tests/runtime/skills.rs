@@ -682,6 +682,23 @@ async fn skill_sensitive_complete_body_is_rejected_and_budget_blocks_oversized_f
             assert!(!serde_json::to_string(&events)
                 .unwrap()
                 .contains("super-sensitive-value"));
+            if let Ok(path) = std::env::var("SHELLSPAN_SKILL_FAILURE_FIXTURE_OUTPUT") {
+                let prepared_seq = events
+                    .iter()
+                    .find(|event| {
+                        matches!(
+                            event.payload,
+                            AgentSessionEventPayload::SkillStepPrepared { .. }
+                        )
+                    })
+                    .unwrap()
+                    .seq;
+                let failure_events: Vec<_> = events
+                    .iter()
+                    .filter(|event| event.seq <= prepared_seq)
+                    .collect();
+                std::fs::write(path, serde_json::to_vec_pretty(&failure_events).unwrap()).unwrap();
+            }
         } else {
             assert_eq!(model.request_count(), 0);
             assert!(prepared.outcomes[0].loaded.is_some());
