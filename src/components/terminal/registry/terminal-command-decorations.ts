@@ -1,12 +1,15 @@
 import type { IDisposable, IMarker, Terminal } from '@xterm/xterm';
 import { agentTerminalLeaseState } from '../agent-terminal-lease-state';
 import { installTerminalCommandRedraw } from './terminal-command-redraw';
+import { installTerminalCommandSource } from './terminal-command-source';
 
 interface CommandRange {
   operationId: string;
   start: IMarker;
   end?: IMarker;
   element?: HTMLDivElement;
+  source?: string;
+  submission?: string;
 }
 
 interface PendingCommand {
@@ -15,12 +18,14 @@ interface PendingCommand {
   anchored: boolean;
   range?: CommandRange;
   submitted?: boolean;
+  source?: string;
+  submission?: string;
 }
 
 const MAX_PENDING_COMMANDS = 256;
 
 /** Presentation only. OSC markers never acknowledge execution or release input. */
-export function installTerminalCommandDecorations(terminal: Terminal, sessionId: string): IDisposable {
+export function installTerminalCommandDecorations(terminal: Terminal, sessionId: string): IDisposable & { rebind(): void } {
   const ranges = new Set<CommandRange>();
   const pendingCommands: PendingCommand[] = [];
   const submittedOperations = new Set<string>();
@@ -47,6 +52,11 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
     return { operationId: pending.operationId, start: pending.range.start.line };
   };
   const redraw = installTerminalCommandRedraw(terminal, sessionId, displayScope);
+  const source = installTerminalCommandSource(terminal, () => [...ranges].flatMap(range =>
+    range.source && range.submission && !range.start.isDisposed && !range.end?.isDisposed
+      ? [{ id: range.operationId, source: range.source, submission: range.submission, first: range.start.line,
+        last: range.end?.line ?? terminal.buffer.active.baseY + terminal.buffer.active.cursorY, complete: Boolean(range.end) }]
+      : []));
 
   const remove = (range: CommandRange) => {
     ranges.delete(range);
@@ -62,8 +72,11 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
     const cursor = terminal.buffer.active.baseY + terminal.buffer.active.cursorY;
     const start = terminal.registerMarker(prompt && !prompt.isDisposed ? prompt.line - cursor : 0);
     if (start) {
-      pending.range = { operationId: pending.operationId, start };
+      pending.range = { operationId: pending.operationId, start, source: pending.source, submission: pending.submission };
       ranges.add(pending.range);
+      if (pending.source && pending.submission && pending.source !== pending.submission) {
+        source.begin(pending.operationId, start.line);
+      }
     }
   };
   const render = () => {
@@ -143,7 +156,8 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
         const expired = pendingCommands.shift();
         if (expired?.range) remove(expired.range);
       }
-      pendingCommands.push({ operationId: next, visible, anchored: false, submitted: submittedOperations.has(next) });
+      pendingCommands.push({ operationId: next, visible, anchored: false, submitted: submittedOperations.has(next),
+        source: lease?.commandDisplay, submission: lease?.commandSubmission });
       startPendingCommand();
       schedule();
     });
@@ -195,17 +209,18 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
   ];
   const unsubscribe = agentTerminalLeaseState.subscribe(syncLease);
   syncLease();
-  return {
-    dispose() {
-      disposed = true;
-      unsubscribe();
-      redraw.dispose();
-      if (frame !== undefined) cancelAnimationFrame(frame);
-      subscriptions.forEach(subscription => subscription.dispose());
-      for (const range of ranges) remove(range);
-      pendingCommands.length = 0;
-      submittedOperations.clear();
-      prompt?.dispose();
-    },
+  const dispose = (preserveHistory: boolean) => {
+    if (disposed) return;
+    disposed = true;
+    unsubscribe();
+    redraw.dispose();
+    source.dispose(preserveHistory);
+    if (frame !== undefined) cancelAnimationFrame(frame);
+    subscriptions.forEach(subscription => subscription.dispose());
+    for (const range of ranges) remove(range);
+    pendingCommands.length = 0;
+    submittedOperations.clear();
+    prompt?.dispose();
   };
+  return { dispose: () => dispose(false), rebind: () => dispose(true) };
 }

@@ -8,7 +8,11 @@ between independent frontend events.
 
 The frontend shades only the command range belonging to an active Agent
 lease with `commandExecution: true`. `terminal_execute` sets this acquired-event
-flag without publishing command text. Private job-control requests send
+flag and publishes the approved, redacted source as optional `commandDisplay`.
+When the shell accepts a generated submission, optional `commandSubmission`
+contains that exact line under the same redaction policy. Both fields are
+presentation metadata and confer no execution authority.
+Private job-control requests send
 `commandExecution: false`: they consume an ordered boundary slot but create no
 background range. Interactive observation and input leases omit the field.
 `commandDisplay` is optional and is not a decoration prerequisite.
@@ -55,3 +59,46 @@ Windows PowerShell runtime acceptance requires a Windows host.
 native script capture and its metadata. That path replays the actual acquired
 lease events exported by the focused native case, without synthesizing
 `commandDisplay`, command-execution flags or running-phase events.
+
+The terminal pane displays live shared output and interactive programs through
+the original xterm. Agent input echoes use a source projection when acquired
+lease metadata supplies both source and a distinct generated submission. Ordered
+OSC command boundaries delimit the input. An input-time projection additionally
+requires an editor erase/redraw, the same observed prompt, and a matching live
+cursor, allowing trailing spaces, tabs and newlines between the final matched
+character and that cursor. Previously verified input fragments keep their
+projection when Readline leaves them in scrollback during a longer redraw;
+their native prefix and prompt are still checked on every refresh. Reuse also
+requires an extent within the verified fragment, unchanged native row contents
+and unchanged erase revisions.
+An erased or overwritten row must be verified again at the live cursor (or
+the final input boundary); it cannot turn process output into an input echo.
+For a split CR-before-erase redraw, a previously observed input may be checked
+at the start of its current final row, only if its prefix consumes the entire
+remaining input span and that row has no non-whitespace suffix.
+Text resemblance alone never establishes an input echo. Completed
+projections retain each verified fragment's logical-line anchors and character
+offset, rather than rescanning unrelated output for matching prefixes.
+Process output, its ANSI attributes and native job notices remain in place.
+Original source is laid out by xterm itself, including Unicode and soft wraps.
+Selection and search use the displayed cells. Missing metadata leaves the native
+display available. Full-screen applications always use their original buffer.
+
+The xterm 6 compatibility adapter changes line references only during synchronous
+rendering and selection, restoring them in `finally`. Parsing, native lines,
+cursor state, PTY bytes, execution capture, approvals and cancellation are
+unchanged. Logical-line markers retain completed input projections across
+reflow and expire with scrollback. Rebinding the same Terminal transfers only
+completed records to its next adapter; active scopes and leases are cleared.
+Final terminal disposal clears the adapter and all records.
+No source projection writes terminal input or acknowledges a lease.
+
+`pnpm test:terminal-command-source` captures real Bash PTYs and checks original
+source, native clipboard, foreground/background output, scrolling and reflow in
+Chromium and WebKit, including each paintable input frame. Set
+`SHELLSPAN_SOURCE_RENDERER=webgl` to run the same checks with WebGL.
+The nearby unit tests replay checked-in native captures in fragmented reads
+and also verify that a real process printing the exact internal submission
+before or after the command is preserved as ordinary output, with or without
+a trailing newline or an end-of-line erase. Native bytes and cursor state must match an
+unmodified reference xterm throughout.

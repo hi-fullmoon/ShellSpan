@@ -95,6 +95,7 @@ export interface AgentTerminalLeaseEvent {
   acquiredAtUnixMs: number;
   state: 'acquired' | 'activity' | 'released';
   commandDisplay?: string;
+  commandSubmission?: string;
   /** true: visible command; false: internal control boundary; omitted: no command scope. */
   commandExecution?: boolean;
   commandPhase?: 'typing' | 'running';

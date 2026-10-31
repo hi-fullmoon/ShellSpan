@@ -50,8 +50,9 @@ try {
     const { Terminal } = await import('/node_modules/@xterm/xterm/lib/xterm.mjs');
     const { WebglAddon } = await import('/node_modules/@xterm/addon-webgl/lib/addon-webgl.mjs');
     const { installTerminalCommandDecorations } = await import('/src/components/terminal/registry/terminal-command-decorations.ts');
+    const { readNativeTerminalLine } = await import('/src/components/terminal/registry/terminal-command-source.ts');
     const { agentTerminalLeaseState } = await import('/src/components/terminal/agent-terminal-lease-state.ts');
-    window.runtime = { Terminal, WebglAddon, installTerminalCommandDecorations, agentTerminalLeaseState };
+    window.runtime = { Terminal, WebglAddon, installTerminalCommandDecorations, readNativeTerminalLine, agentTerminalLeaseState };
   });
   const cases = ['', '-long'].flatMap(variant => [100, 40].flatMap(columns =>
     [...(!variant ? ['timeout'] : []), 'normal', 'running', 'released'].map(scenario => ({ variant, columns, scenario }))));
@@ -98,7 +99,7 @@ try {
           const buffer = state.terminal.buffer.active;
           const first = Math.max(buffer.viewportY, state.commandStart.line);
           const text = Array.from({ length: Math.max(0, buffer.viewportY + state.terminal.rows - first) }, (_, row) =>
-            buffer.getLine(first + row)?.translateToString(true) ?? '').join('\n');
+            window.runtime.readNativeTerminalLine(state.terminal, first + row)).join('\n');
           return { boundary: state.boundary, text, parsed: state.raw,
             baseY: buffer.baseY,
             synchronized: state.terminal._core.coreService.decPrivateModes.synchronizedOutput,
@@ -107,7 +108,7 @@ try {
         if (state.boundary) continue;
         initialBaseY ??= state.baseY;
         scrolled ||= state.baseY > initialBaseY;
-        if (state.text.includes('(exit')) {
+        if (state.text.replace(/\s/gu, '').includes(metadata.approvedSource.slice(0, 24).replace(/\s/gu, ''))) {
           seenInput = true;
         }
         if (seenInput && state.text.trim() && !state.synchronized) {

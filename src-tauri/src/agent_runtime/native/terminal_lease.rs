@@ -59,6 +59,8 @@ pub(crate) struct AgentTerminalLeaseEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) command_display: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) command_submission: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) command_execution: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) command_phase: Option<TerminalCommandPhase>,
@@ -294,6 +296,7 @@ impl TerminalLeaseManager {
             operation_id,
             command_display,
             None,
+            None,
             false,
         )
     }
@@ -312,6 +315,7 @@ impl TerminalLeaseManager {
             operation_id,
             None,
             None,
+            None,
             true,
         )
     }
@@ -322,15 +326,19 @@ impl TerminalLeaseManager {
         agent_session_id: &str,
         task_id: &str,
         operation_id: &str,
-        visible: bool,
+        source: Option<&str>,
+        submission: Option<&str>,
     ) -> Result<AgentTerminalLease, String> {
         self.acquire_with_presentation(
             session_id,
             agent_session_id,
             task_id,
             operation_id,
-            None,
-            Some(visible),
+            source.map(crate::redaction::redact_sensitive_text),
+            source
+                .and(submission)
+                .map(crate::redaction::redact_sensitive_text),
+            Some(source.is_some()),
             false,
         )
     }
@@ -343,6 +351,7 @@ impl TerminalLeaseManager {
         task_id: &str,
         operation_id: &str,
         command_display: Option<String>,
+        command_submission: Option<String>,
         command_execution: Option<bool>,
         interactive: bool,
     ) -> Result<AgentTerminalLease, String> {
@@ -425,6 +434,7 @@ impl TerminalLeaseManager {
             acquired_at_unix_ms: lease.acquired_at_unix_ms,
             state: TerminalLeaseEventState::Acquired,
             command_display,
+            command_submission,
             command_execution,
             command_phase: None,
             reason: None,
@@ -611,6 +621,7 @@ impl TerminalLeaseManager {
             acquired_at_unix_ms: lease.acquired_at_unix_ms,
             state: TerminalLeaseEventState::Activity,
             command_display: None,
+            command_submission: None,
             command_execution: None,
             command_phase: Some(phase),
             reason: None,
@@ -1028,6 +1039,7 @@ fn released_event(
         acquired_at_unix_ms: lease.acquired_at_unix_ms,
         state: TerminalLeaseEventState::Released,
         command_display: None,
+        command_submission: None,
         command_execution: None,
         command_phase: None,
         reason: Some(reason),

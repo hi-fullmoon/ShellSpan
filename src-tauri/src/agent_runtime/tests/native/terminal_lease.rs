@@ -298,7 +298,7 @@
     }
 
     #[test]
-    fn command_presentation_is_explicit_without_publishing_source() {
+    fn command_presentation_publishes_source_only_for_visible_commands() {
         let manager = disabled_broker_manager();
         let events = Arc::new(Mutex::new(Vec::new()));
         let captured = Arc::clone(&events);
@@ -308,11 +308,19 @@
             }))
             .unwrap();
         manager
-            .acquire_command("terminal-1", "agent-1", "task-1", "command-1", true)
+            .acquire_command(
+                "terminal-1",
+                "agent-1",
+                "task-1",
+                "command-1",
+                Some("pwd"),
+                Some("pwd"),
+            )
             .unwrap();
         let command = serde_json::to_value(&events.lock().unwrap()[0]).unwrap();
         assert_eq!(command["commandExecution"], true);
-        assert!(command.get("commandDisplay").is_none());
+        assert_eq!(command["commandDisplay"], "pwd");
+        assert_eq!(command["commandSubmission"], "pwd");
         manager
             .release(
                 "terminal-1",
@@ -323,11 +331,12 @@
             )
             .unwrap();
         manager
-            .acquire_command("terminal-1", "agent-1", "task-1", "control-1", false)
+            .acquire_command("terminal-1", "agent-1", "task-1", "control-1", None, None)
             .unwrap();
         let control = serde_json::to_value(events.lock().unwrap().last().unwrap()).unwrap();
         assert_eq!(control["commandExecution"], false);
         assert!(control.get("commandDisplay").is_none());
+        assert!(control.get("commandSubmission").is_none());
         manager
             .release(
                 "terminal-1",

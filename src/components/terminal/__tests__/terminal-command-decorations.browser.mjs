@@ -158,12 +158,20 @@ try {
           await paint();
         });
         assert.equal(await page.locator('.terminal-agent-command').count(), 2);
+        const beforeReflow = await page.evaluate(() => window.presentation.terminal.markers.map(marker => marker.id).sort((a, b) => a - b));
         await page.evaluate(async () => {
           const { terminal, paint } = window.presentation;
           terminal.resize(32, 24);
           await paint();
         });
-        assert.equal(await page.locator('.terminal-agent-command').count(), 2, 'Command ranges must survive reflow');
+        // Real git diff output grows when the registry itself changes. Reflow
+        // can move a command out of the viewport without losing its range.
+        assert.deepEqual(await page.evaluate(() => window.presentation.terminal.markers.map(marker => marker.id).sort((a, b) => a - b)),
+          beforeReflow, `${shell}/${width}/${theme}/${scheme}: command markers must survive reflow`);
+        await page.evaluate(async () => { window.presentation.terminal.scrollToTop(); await window.presentation.paint(); });
+        assert.ok(await page.locator('.terminal-agent-command').count() > 0, 'Earlier command range remains available in scrollback');
+        await page.evaluate(async () => { window.presentation.terminal.scrollToBottom(); await window.presentation.paint(); });
+        assert.ok(await page.locator('.terminal-agent-command').count() > 0, 'Latest command range remains available at the prompt');
         await page.evaluate(async history => {
           const { terminal, write, paint } = window.presentation;
           await write(history.replaceAll('\n', '\r\n'));
@@ -244,8 +252,8 @@ try {
       const terminal = new Terminal({ cols: metadata.columns, rows: metadata.rows,
         allowProposedApi: true, fontSize: 14, theme: resolveTerminalTheme('app') });
       terminal.open(document.getElementById('terminal'));
-      if (!metadata.leaseEvent?.commandExecution || metadata.leaseEvent.commandDisplay !== undefined) {
-        throw new Error('Native script must use its real command acquisition event without display text');
+      if (!metadata.leaseEvent?.commandExecution || metadata.leaseEvent.commandDisplay !== (metadata.approvedSource ?? metadata.commandLine)) {
+        throw new Error('Native script must publish its approved source separately from the real PTY stream');
       }
       const decorations = installTerminalCommandDecorations(terminal, metadata.leaseEvent.sessionId);
       agentTerminalLeaseState.set({ ...metadata.leaseEvent, terminalOwned: true,

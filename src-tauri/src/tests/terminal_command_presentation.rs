@@ -379,8 +379,11 @@ fn capture_native_presentation_case(
     let acquired = Arc::clone(&acquisitions);
     let running_events = Arc::new(Mutex::new(HashMap::new()));
     let running = Arc::clone(&running_events);
+    let lease_events = Arc::new(Mutex::new(Vec::new()));
+    let published = Arc::clone(&lease_events);
     leases
         .set_publisher(Arc::new(move |event| {
+            published.lock().unwrap().push(event.clone());
             if event.command_phase == Some(crate::agent_runtime::TerminalCommandPhase::Running) {
                 running
                     .lock()
@@ -457,11 +460,22 @@ fn capture_native_presentation_case(
                 "sleep 3",
             )
             .unwrap();
-        run(
+        let launch_start = display.lock().unwrap().len();
+        let launch_result = run(
             "presentation-launch",
             "sleep 3",
             Some(&job.submitted_command_line),
         );
+        let launch_job = broker
+            .shell_job(
+                &job.process_handle,
+                "presentation-owner",
+                "presentation-agent",
+                "presentation-task",
+            )
+            .unwrap();
+        let launch_display = display.lock().unwrap()[launch_start..].to_vec();
+        let launch_startup = display.lock().unwrap()[..launch_start].to_vec();
         let cycle = b"\x1b]133;C\x07\x1b]133;A\x07";
         let mut private_display = None;
         let mut private_events = Vec::new();
@@ -500,7 +514,7 @@ fn capture_native_presentation_case(
             private_display =
                 Some(String::from_utf8_lossy(&bytes[offset..offset + cycle.len()]).into_owned());
         }
-        let source = "cat <<'SHELLSPAN_END'\nquoted '\"' and\tliteral Tab 中文e\u{301}👩‍💻\nSHELLSPAN_END\npwd";
+        let source = "cat <<'SHELLSPAN_END'\nquoted '\"' and\tliteral Tab 中文e\u{301}👩‍💻\nSHELLSPAN_END\npwd\nprintf '\\033[8mHIDDEN-BY-SGR8\\033[0m\\n'";
         let long_source = format!(
             "{source}\n{}",
             concat!(
@@ -566,7 +580,11 @@ fn capture_native_presentation_case(
             .remove("presentation-script")
             .unwrap();
         assert_eq!(event.command_execution, Some(true));
-        assert!(event.command_display.is_none());
+        assert_eq!(event.command_display.as_deref(), Some(source));
+        assert_eq!(
+            event.command_submission.as_deref(),
+            completed.submitted_command_line.as_deref()
+        );
         if let Some(mut path) = std::env::var_os("SHELLSPAN_NATIVE_SCRIPT_TRACE_PATH")
             .map(PathBuf::from)
             .or_else(|| {
@@ -593,9 +611,16 @@ fn capture_native_presentation_case(
                 format!("{}.json", path.display()),
                 serde_json::to_vec(&serde_json::json!({
                     "columns": columns, "rows": 30, "leaseEvent": event,
+                    "result": completed,
+                    "modelOutput": crate::agent_runtime::strip_ansi(&completed.combined_output),
+                    "leaseEvents": lease_events.lock().unwrap().clone(),
+                    "background": { "result": launch_result, "job": launch_job },
+                    "backgroundDisplay": launch_display,
+                    "backgroundStartup": launch_startup,
                     "privateLeaseEvents": private_events, "privateRunningEvents": private_running,
                     "privateDisplay": private_display.unwrap(),
                     "source": expected,
+                    "approvedSource": source,
                     "startup": String::from_utf8_lossy(&display.lock().unwrap()[..start]),
                     "frames": display_frames.lock().unwrap()[frame_start..].iter().map(|(at, bytes)| {
                         serde_json::json!({ "atMs": at.duration_since(started).as_millis(), "bytes": bytes })

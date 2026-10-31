@@ -1,5 +1,6 @@
 import type { IDisposable, IMarker, Terminal } from '@xterm/xterm';
 import { agentTerminalLeaseState } from '../agent-terminal-lease-state';
+import { readNativeTerminalLine } from './terminal-command-source';
 
 // xterm 6 has no public synchronous render-transaction API. This bounded
 // compatibility boundary uses its existing DEC 2026 render buffering, without
@@ -49,7 +50,7 @@ export function installTerminalCommandRedraw(
     const first = Math.max(start, buffer.viewportY);
     const last = Math.min(buffer.baseY + buffer.cursorY, buffer.viewportY + terminal.rows - 1);
     const lines = Array.from({ length: Math.max(0, last - first + 1) }, (_, index) =>
-      buffer.getLine(first + index)?.translateToString(true) ?? '');
+      readNativeTerminalLine(terminal, first + index));
     while (lines.length && !lines[lines.length - 1]) lines.pop();
     snapshot?.anchor.dispose();
     const anchor = lines.length ? terminal.registerMarker(first - buffer.baseY - buffer.cursorY) : undefined;
@@ -83,7 +84,7 @@ export function installTerminalCommandRedraw(
       const buffer = terminal.buffer.active;
       const { anchor, lines } = snapshot;
       const restoredAt = (start: number, offset: number) => lines.slice(offset).every((line, index) =>
-        buffer.getLine(start + index)?.translateToString(true).startsWith(line));
+        readNativeTerminalLine(terminal, start + index).startsWith(line));
       // Ordinary redraws must restore every painted row at its marker. ED2
       // disposes markers; after that native scrolling may drop leading rows,
       // so the surviving suffix must start at the actual viewport edge.

@@ -335,7 +335,8 @@ impl TerminalExecuteRegistry {
             agent_session_id,
             task_id,
             operation_id,
-            !private_job_control,
+            (!private_job_control).then_some(command),
+            submission.as_deref(),
         )?;
         let ready_deadline = deadline
             .unwrap_or_else(|| Instant::now() + FRONTEND_READY_TIMEOUT)

@@ -463,7 +463,7 @@ class TerminalControllerImpl implements TerminalController {
   private resizeRetryAttempts = 0;
   private rendererInitialized = false;
   private edgeBackground?: IDisposable;
-  private commandDecorations: IDisposable;
+  private commandDecorations: ReturnType<typeof installTerminalCommandDecorations>;
   private scrollbarVisibility?: IDisposable;
   private webglAddon?: WebglAddon;
   private webglContextLossDisposable?: IDisposable;
@@ -1370,7 +1370,7 @@ class TerminalControllerImpl implements TerminalController {
     this.userInputBlockedListeners.clear();
     this.agentInputBlockedFeedbackRef = false;
     this.outputGeneration += 1;
-    this.commandDecorations.dispose();
+    this.commandDecorations.rebind();
     this.sessionId = sessionId;
     this.commandDecorations = installTerminalCommandDecorations(this.terminal, sessionId);
     // Reconnection may attach a different transport; never retain ConPTY
