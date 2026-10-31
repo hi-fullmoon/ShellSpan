@@ -145,7 +145,8 @@ fn settled_tool_calls(events: &[AgentSessionEvent]) -> bool {
             Payload::QuestionRequested { identity, .. } => {
                 questions.insert(identity.question_request_id.as_str());
             }
-            Payload::QuestionAnswered { submission, .. } => {
+            Payload::QuestionAnswered { submission, .. }
+            | Payload::QuestionActionAnswered { submission, .. } => {
                 questions.remove(submission.identity.question_request_id.as_str());
             }
             _ => {}

@@ -1869,7 +1869,7 @@ fn model_tools_for(
         // Human input has its own live-root admission boundary, independent of
         // historical native capability scopes retained by a resumed root.
         .filter(|tool| {
-            (tool.name == super::user_questions::TOOL_NAME
+            (super::user_questions::is_question_tool(&tool.name)
                 || scope.tool_names.iter().any(|name| name == &tool.name))
                 && (tool.name != super::tool_output::READ_TOOL_RESULT
                     || scope.effects.contains(&super::AgentSessionEffect::ReadOnly))
@@ -2162,7 +2162,10 @@ fn repeated_tool_step_streak_bounded(
                 approval_id: Some(_),
                 ..
             }
-            | AgentSessionEventPayload::QuestionAnswered { .. } => true,
+            | AgentSessionEventPayload::QuestionActionAnswered { .. } => true,
+            AgentSessionEventPayload::QuestionAnswered { submission, .. } => {
+                !submission.client_operation_id.starts_with("reused-")
+            }
             _ => false,
         };
         if made_progress {

@@ -418,7 +418,7 @@ pub(crate) fn derive_recovery_checkpoint(events: &[AgentSessionEvent]) -> AgentR
         }
     }
     if let Some(question) = question.filter(|_| !native_unresolved) {
-        let pending = question.answer.is_none() && !question.cancelled;
+        let pending = question.waiting();
         return make(
             if pending {
                 AgentRecoveryCheckpointKind::WaitingQuestion

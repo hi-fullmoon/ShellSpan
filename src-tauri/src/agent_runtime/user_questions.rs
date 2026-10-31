@@ -1,5 +1,5 @@
 //! Durable user input, separate from native authorization.
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -8,7 +8,24 @@ use sha2::{Digest, Sha256};
 use super::{AgentSessionEvent, AgentSessionEventPayload};
 
 pub(crate) const TOOL_NAME: &str = "ask_user_question";
-pub(crate) const MODEL_INSTRUCTIONS: &str = "Whenever you need clarification, missing information, or a user decision, you must call ask_user_question and wait for its answer. This tool displays a question card and pauses the task until the user submits an answer. Do not substitute a question in ordinary chat, a final response, or a simulated card. Do not continue dependent actions, guess an answer, or treat silence as consent. Ask only when a user decision is necessary; do not ask again when the current task already supplies the answer or authorization. Only the live root Agent may call this tool; child Agents must report the unresolved decision to their parent. Answers never grant native tool permissions or bypass approval or recovery checks.";
+pub(crate) const ACTION_TOOL_NAME: &str = "request_user_action";
+pub(crate) const MODEL_INSTRUCTIONS: &str = concat!(
+    "Whenever you need clarification, missing information, or a user decision, you must call ask_user_question and wait for its answer. This tool displays a question card and pauses the task until the user submits an answer. Do not substitute a question in ordinary chat, a final response, or a simulated card. Do not continue dependent actions, guess an answer, or treat silence as consent. Ask only when a user decision is necessary; do not ask again when the current task already supplies the answer or authorization. ",
+    "Only the live root Agent may call these tools; child Agents must report the unresolved decision to their parent. Answers never grant native tool permissions or bypass approval or recovery checks. Collect non-sensitive information only; never request passwords or other credentials."
+);
+pub(crate) const WORKFLOW_INSTRUCTIONS: &str = concat!(
+    "Never solicit passwords, private keys, API keys, tokens or recovery codes in questions, options, free text or chat, or embed secrets in commands/scripts. Use supplied native credential-backed operations; no generic Agent password/sudo credential tool exists. Otherwise hand sensitive work to the user. ",
+    "A selected option is a decision, not missing text or proof of completion. Reuse decision_key and decision_context while target/account/prerequisites remain unchanged. ",
+    "Options requiring user work must attach user_action with instructions and a non-interactive verification_command, in one single-select question. Use request_user_action for standalone work only when supplied. Selection pauses until explicit completion, cancellation or change of plan. Do not re-ask the plan for completion or poll while waiting. ",
+    "After completion, run the exact verification_command alone in foreground run_terminal_command; require confirmed exitCode=0 before dependent work. On failure, explain it and request fresh user action, keeping the chosen plan. Never request broader privileges or unrestricted passwordless sudo."
+);
+pub(crate) const TOOL_INSTRUCTIONS: &str = "When clarification or a decision is necessary, you must call ask_user_question and wait for its answer. It displays a question card and pauses the task. Do not substitute a question in ordinary chat. Do not continue dependent actions. Ask only when necessary; do not ask again when the task supplies the answer. Answers never grant native tool permissions. Non-sensitive inputs only; never request credentials.";
+mod workflow;
+pub(crate) use workflow::{
+    check_call, check_queue, check_target, is_question_tool, standalone_schema,
+    supports_user_action,
+};
+pub(crate) use workflow::{UserAction, UserActionResponse};
 const MAX_BYTES: usize = 32 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -17,6 +34,8 @@ pub(crate) struct QuestionOption {
     pub(crate) label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) user_action: Option<UserAction>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -25,11 +44,19 @@ pub(crate) struct Question {
     pub(crate) id: String,
     pub(crate) question: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) input_kind: Option<workflow::QuestionInputKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) header: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) options: Option<Vec<QuestionOption>>,
     #[serde(default)]
     pub(crate) multi_select: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) decision_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) decision_context: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) user_action: Option<UserAction>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -64,6 +91,8 @@ pub(crate) struct AnswerQuestionInput {
     pub(crate) identity: QuestionIdentity,
     pub(crate) client_operation_id: String,
     pub(crate) answers: Vec<QuestionAnswer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) action: Option<UserActionResponse>,
 }
 
 #[derive(Debug, Clone)]
@@ -75,6 +104,11 @@ pub(crate) struct QuestionRecord {
     pub(crate) cancelled: bool,
     pub(crate) has_result: bool,
     pub(crate) fingerprint: Option<String>,
+    pub(crate) action_answer: Option<AnswerQuestionInput>,
+    pub(crate) action_fingerprint: Option<String>,
+    pub(crate) tool_name: String,
+    pub(crate) target: Option<super::AgentSessionTarget>,
+    pub(crate) reuse_allowed: bool,
 }
 
 fn text(value: &str, limit: usize) -> Result<(), String> {
@@ -98,11 +132,16 @@ pub(crate) fn is_same_submission(
     let fingerprint = hex::encode(Sha256::digest(
         serde_json::to_vec(input).map_err(|e| e.to_string())?,
     ));
-    Ok(record
-        .answer
+    let (answer, committed_fingerprint) =
+        if input.action.is_some() && record.action_answer.is_some() {
+            (&record.action_answer, &record.action_fingerprint)
+        } else {
+            (&record.answer, &record.fingerprint)
+        };
+    Ok(answer
         .as_ref()
         .is_some_and(|a| a.client_operation_id == input.client_operation_id)
-        && record.fingerprint.as_deref() == Some(&fingerprint))
+        && committed_fingerprint.as_deref() == Some(&fingerprint))
 }
 
 impl QuestionArguments {
@@ -120,6 +159,7 @@ impl QuestionArguments {
         }
         let mut ids = HashSet::new();
         for q in &self.questions {
+            workflow::validate_question(self, q)?;
             text(&q.id, 64)?;
             text(&q.question, 2048)?;
             if !ids.insert(&q.id) {
@@ -226,6 +266,15 @@ impl AnswerQuestionInput {
 
 pub(crate) fn records(events: &[AgentSessionEvent]) -> Vec<QuestionRecord> {
     let mut records: Vec<QuestionRecord> = Vec::new();
+    let calls: HashMap<_, _> = events
+        .iter()
+        .filter_map(|event| match &event.payload {
+            AgentSessionEventPayload::ToolCall { call } => {
+                Some(((event.step_id.as_deref(), call.call_id.as_str()), call))
+            }
+            _ => None,
+        })
+        .collect();
     for event in events {
         match &event.payload {
             AgentSessionEventPayload::QuestionRequested {
@@ -240,6 +289,16 @@ pub(crate) fn records(events: &[AgentSessionEvent]) -> Vec<QuestionRecord> {
                 cancelled: false,
                 has_result: false,
                 fingerprint: None,
+                action_answer: None,
+                action_fingerprint: None,
+                reuse_allowed: true,
+                tool_name: calls
+                    .get(&(event.step_id.as_deref(), identity.call_id.as_str()))
+                    .map(|call| call.name.clone())
+                    .unwrap_or_else(|| TOOL_NAME.into()),
+                target: calls
+                    .get(&(event.step_id.as_deref(), identity.call_id.as_str()))
+                    .and_then(|call| call.target.clone()),
             }),
             AgentSessionEventPayload::QuestionAnswered {
                 submission,
@@ -252,10 +311,39 @@ pub(crate) fn records(events: &[AgentSessionEvent]) -> Vec<QuestionRecord> {
                     record.answer = Some(submission.clone());
                     record.fingerprint = Some(fingerprint.clone());
                 }
+                if submission.action == Some(UserActionResponse::ChangePlan) {
+                    for record in &mut records {
+                        record.reuse_allowed = false;
+                    }
+                }
             }
             AgentSessionEventPayload::QuestionCancelled { identity } => {
                 if let Some(record) = records.iter_mut().find(|r| &r.identity == identity) {
                     record.cancelled = true;
+                }
+            }
+            AgentSessionEventPayload::QuestionActionAnswered {
+                submission,
+                fingerprint,
+            } => {
+                if let Some(record) = records
+                    .iter_mut()
+                    .find(|r| r.identity == submission.identity)
+                {
+                    record.action_answer = Some(submission.clone());
+                    record.action_fingerprint = Some(fingerprint.clone());
+                }
+                if submission.action == Some(UserActionResponse::ChangePlan) {
+                    for record in &mut records {
+                        record.reuse_allowed = false;
+                    }
+                }
+            }
+            AgentSessionEventPayload::UserMessage { message }
+                if message.source.kind == super::AgentMessageSourceKind::User =>
+            {
+                for record in &mut records {
+                    record.reuse_allowed = false;
                 }
             }
             AgentSessionEventPayload::ToolResult { call_id, .. } => {
@@ -290,7 +378,7 @@ pub(crate) fn question_queue(events: &[AgentSessionEvent]) -> Option<(String, St
     }
     if !window.iter().any(|e| {
         matches!(&e.payload, AgentSessionEventPayload::AssistantMessage { content, .. }
-        if super::assistant_tool_calls(content).iter().any(|c| c.name == TOOL_NAME))
+        if super::assistant_tool_calls(content).iter().any(|c| is_question_tool(&c.name)))
     }) {
         return None;
     }
@@ -306,15 +394,21 @@ pub(crate) fn question_queue(events: &[AgentSessionEvent]) -> Option<(String, St
 }
 
 pub(crate) fn schema() -> Value {
-    json!({"type":"object","additionalProperties":false,"required":["questions"],"properties":{
+    let mut schema = json!({"type":"object","additionalProperties":false,"required":["questions"],"properties":{
         "questions":{"type":"array","minItems":1,"maxItems":3,"items":{"type":"object","additionalProperties":false,"required":["id","question"],"properties":{
             "id":{"type":"string","minLength":1,"maxLength":64},"question":{"type":"string","minLength":1,"maxLength":2048},
             "header":{"type":"string","minLength":1,"maxLength":128},"multi_select":{"type":"boolean"},
+            "decision_key":{"type":"string","minLength":1,"maxLength":128},
+            "decision_context":{"type":"string","minLength":1,"maxLength":2048},
+            "input_kind":{"type":"string","enum":["non_sensitive"],"description":"Only non-sensitive information is supported. Never request passwords or other credentials."},
             "options":{"type":"array","minItems":2,"maxItems":7,"items":{"type":"object","additionalProperties":false,"required":["label"],"properties":{
                 "label":{"type":"string","minLength":1,"maxLength":256},"description":{"type":"string","minLength":1,"maxLength":1024}
             }}}
         }}}
-    }})
+    }});
+    schema["properties"]["questions"]["items"]["properties"]["options"]["items"]["properties"]
+        ["user_action"] = workflow::action_schema();
+    schema
 }
 
 fn scoped(
@@ -328,11 +422,11 @@ fn scoped(
     }
 }
 
-fn result(record: &QuestionRecord) -> AgentSessionEventPayload {
+pub(super) fn result(record: &QuestionRecord) -> AgentSessionEventPayload {
     AgentSessionEventPayload::ToolResult {
         call_id: record.identity.call_id.clone(),
-        name: TOOL_NAME.into(),
-        status: if record.answer.is_some() {
+        name: record.tool_name.clone(),
+        status: if record.answer.is_some() && !record.cancelled {
             super::AgentToolResultStatus::Completed
         } else {
             super::AgentToolResultStatus::Cancelled
@@ -346,14 +440,25 @@ fn result(record: &QuestionRecord) -> AgentSessionEventPayload {
         data: record
             .answer
             .as_ref()
-            .map(|answer| json!({"answers":answer.answers})),
+            .map(|answer| {
+                let mut data = json!({"answers":answer.answers});
+                if let Some(action) = record.user_action() {
+                    data["userAction"] = json!({
+                        "instructions":action.instructions,
+                        "verificationCommand":action.verification_command,
+                        "response":record.action_response(),
+                        "verificationRequired":record.action_response() == Some(UserActionResponse::Completed)
+                    });
+                }
+                data
+            }),
         duration_ms: None,
         evidence_refs: Vec::new(),
     }
 }
 
 pub(crate) fn matches_result(record: &QuestionRecord, payload: &AgentSessionEventPayload) -> bool {
-    (record.answer.is_some() || record.cancelled) && result(record) == *payload
+    (!record.waiting() || record.cancelled) && result(record) == *payload
 }
 
 pub(crate) fn validate_payload(event: &AgentSessionEvent) -> Result<(), String> {
@@ -370,6 +475,10 @@ pub(crate) fn validate_payload(event: &AgentSessionEvent) -> Result<(), String> 
             identity
         }
         AgentSessionEventPayload::QuestionAnswered {
+            submission,
+            fingerprint,
+        }
+        | AgentSessionEventPayload::QuestionActionAnswered {
             submission,
             fingerprint,
         } => {
@@ -408,7 +517,7 @@ pub(crate) fn validate_transition(
                 r.identity.question_request_id == identity.question_request_id
                     || (r.identity.step_id == identity.step_id
                         && r.identity.call_id == identity.call_id)
-                    || (r.answer.is_none() && !r.cancelled)
+                    || r.waiting()
             }) {
                 return Err("question identity reused or another question remains pending".into());
             }
@@ -423,8 +532,8 @@ pub(crate) fn validate_transition(
                     _ => None,
                 })
                 .ok_or("question has no durable tool call")?;
-            if call.name != TOOL_NAME
-                || QuestionArguments::parse(call.arguments.clone())? != *arguments
+            if !is_question_tool(&call.name)
+                || workflow::parse_call(&call.name, call.arguments.clone())? != *arguments
             {
                 return Err("question differs from tool arguments".into());
             }
@@ -442,22 +551,44 @@ pub(crate) fn validate_transition(
                 || record.has_result
                 || records.iter().any(|r| {
                     r.answer
-                        .as_ref()
-                        .is_some_and(|a| a.client_operation_id == submission.client_operation_id)
+                        .iter()
+                        .chain(r.action_answer.iter())
+                        .any(|a| a.client_operation_id == submission.client_operation_id)
                 })
             {
                 return Err("question answer is duplicate, stale, or cancelled".into());
             }
-            if record.arguments.normalize_answers(&submission.answers)? != submission.answers {
+            if record.validate_submission(submission)? != submission.answers {
                 return Err("answer is not canonical".into());
             }
+        }
+        AgentSessionEventPayload::QuestionActionAnswered { submission, .. } => {
+            let record = records
+                .iter()
+                .find(|r| r.identity == submission.identity)
+                .ok_or("unknown question")?;
+            if record.answer.is_none()
+                || record.action_answer.is_some()
+                || record.has_result
+                || record.cancelled
+                || submission.action.is_none()
+                || records.iter().any(|r| {
+                    r.answer
+                        .iter()
+                        .chain(r.action_answer.iter())
+                        .any(|a| a.client_operation_id == submission.client_operation_id)
+                })
+            {
+                return Err("user action response is duplicate, stale, or cancelled".into());
+            }
+            record.validate_submission(submission)?;
         }
         AgentSessionEventPayload::QuestionCancelled { identity } => {
             let record = records
                 .iter()
                 .find(|r| &r.identity == identity)
                 .ok_or("unknown question")?;
-            if record.answer.is_some() || record.cancelled || record.has_result {
+            if !record.waiting() || record.has_result {
                 return Err("question already settled".into());
             }
         }
@@ -489,7 +620,12 @@ impl super::AgentToolPipeline {
                         .into(),
                 );
             }
-            QuestionArguments::parse(call.arguments.clone())
+            let args = workflow::parse_call(&call.name, call.arguments.clone())?;
+            if args.questions.iter().any(|q| q.user_action.is_some() || q.options.iter().flatten().any(|o|o.user_action.is_some()))
+                && !supports_user_action(&self.sessions.snapshot(&entry.session_id)?.header) {
+                return Err("user action requires an available native command verification capability; do not collect credentials or promise automatic continuation".into());
+            }
+            Ok(args)
         });
         let identity = QuestionIdentity {
             session_id: entry.session_id.clone(),
@@ -499,15 +635,16 @@ impl super::AgentToolPipeline {
             call_id: call.call_id.clone(),
             question_request_id: format!("question-{}", uuid::Uuid::new_v4().simple()),
         };
+        let tool_name = call.name.clone();
         let recorded = super::RecordedToolCall {
             call_id: call.call_id,
             provider_call_id: call.provider_call_id,
-            name: TOOL_NAME.into(),
+            name: call.name.clone(),
             native_name: None,
             arguments: call.arguments,
             title: None,
             effect: Some(super::AgentSessionEffect::ReadOnly),
-            target: None,
+            target: self.sessions.snapshot(&entry.session_id)?.header.target,
         };
         let mut payloads = Vec::new();
         let existing = self
@@ -534,6 +671,12 @@ impl super::AgentToolPipeline {
         }
         match parsed {
             Ok(arguments) => {
+                let previous = records(&self.sessions.all_events(&entry.session_id)?);
+                let target = self.sessions.snapshot(&entry.session_id)?.header.target;
+                let reused = workflow::reusable(&previous, turn, &arguments, target.as_ref())
+                    .map(|record| workflow::reused_answers(record, &arguments))
+                    .transpose()?;
+                let is_reused = reused.is_some();
                 payloads.push(scoped(
                     &identity,
                     AgentSessionEventPayload::QuestionRequested {
@@ -550,7 +693,37 @@ impl super::AgentToolPipeline {
                         reason: Some("waitingForUserQuestion".into()),
                     },
                 });
+                if let Some(answers) = reused {
+                    let submission = AnswerQuestionInput {
+                        identity: identity.clone(),
+                        client_operation_id: format!("reused-{}", identity.question_request_id),
+                        answers,
+                        action: None,
+                    };
+                    let fingerprint = hex::encode(Sha256::digest(
+                        serde_json::to_vec(&submission).map_err(|e| e.to_string())?,
+                    ));
+                    payloads.push(scoped(
+                        &identity,
+                        AgentSessionEventPayload::QuestionAnswered {
+                            submission,
+                            fingerprint,
+                        },
+                    ));
+                }
                 self.sessions.append_batch(&entry.session_id, payloads)?;
+                if is_reused {
+                    let record = records(&self.sessions.all_events(&entry.session_id)?)
+                        .into_iter()
+                        .find(|r| r.identity == identity)
+                        .ok_or("reused question disappeared")?;
+                    self.sessions.append_batch(
+                        &entry.session_id,
+                        vec![scoped(&identity, result(&record))],
+                    )?;
+                    entry.set_phase(super::AgentLifecyclePhase::Running)?;
+                    return Ok(super::ToolPipelineSettlement::Completed);
+                }
                 // An earlier native approval may have cleared the in-memory Step.
                 // The question still belongs to that original assistant tool queue.
                 entry.set_scope(Some(super::AgentActiveScope {
@@ -565,7 +738,7 @@ impl super::AgentToolPipeline {
                     &identity,
                     AgentSessionEventPayload::ToolResult {
                         call_id: identity.call_id.clone(),
-                        name: TOOL_NAME.into(),
+                        name: tool_name,
                         status: super::AgentToolResultStatus::Failed,
                         summary: reason,
                         data: None,
@@ -599,8 +772,8 @@ impl super::AgentToolPipeline {
             .iter()
             .find(|r| r.identity == input.identity)
             .ok_or("unknown or cross-Session question")?;
-        input.answers = record.arguments.normalize_answers(&input.answers)?;
-        if record.answer.is_none()
+        input.answers = record.validate_submission(&input)?;
+        if record.waiting()
             && matches!(
                 self.sessions.snapshot(&entry.session_id)?.recovery.status,
                 super::AgentRecoveryStatus::Required | super::AgentRecoveryStatus::Reconciling
@@ -611,9 +784,23 @@ impl super::AgentToolPipeline {
         if record.cancelled || entry.cancellation().is_cancelled() {
             return Err("question was cancelled".into());
         }
-        if let Some(existing) = &record.answer {
+        let committed = if input.action.is_some()
+            && record.answer.as_ref().is_some_and(|a| a.action.is_none())
+        {
+            &record.action_answer
+        } else {
+            &record.answer
+        };
+        if let Some(existing) = committed {
+            let committed_fingerprint = if input.action.is_some()
+                && record.answer.as_ref().is_some_and(|a| a.action.is_none())
+            {
+                &record.action_fingerprint
+            } else {
+                &record.fingerprint
+            };
             return if existing.client_operation_id == input.client_operation_id
-                && record.fingerprint.as_deref() == Some(&fingerprint)
+                && committed_fingerprint.as_deref() == Some(&fingerprint)
             {
                 Ok(())
             } else {
@@ -630,13 +817,39 @@ impl super::AgentToolPipeline {
             &entry.session_id,
             vec![scoped(
                 &input.identity,
-                AgentSessionEventPayload::QuestionAnswered {
-                    submission: input.clone(),
-                    fingerprint,
+                if record.answer.is_some() {
+                    AgentSessionEventPayload::QuestionActionAnswered {
+                        submission: input.clone(),
+                        fingerprint,
+                    }
+                } else {
+                    AgentSessionEventPayload::QuestionAnswered {
+                        submission: input.clone(),
+                        fingerprint,
+                    }
                 },
             )],
         )?;
-        entry.set_phase(super::AgentLifecyclePhase::Running)?;
+        let waiting = input.action.is_none()
+            && input.answers.iter().any(|answer| {
+                record
+                    .arguments
+                    .questions
+                    .iter()
+                    .find(|q| q.id == answer.id)
+                    .and_then(|q| q.options.as_ref())
+                    .is_some_and(|options| {
+                        answer.custom.is_none()
+                            && options.iter().any(|o| {
+                                answer.selected.contains(&o.label) && o.user_action.is_some()
+                            })
+                    })
+            });
+        entry.set_phase(if waiting {
+            super::AgentLifecyclePhase::Waiting
+        } else {
+            super::AgentLifecyclePhase::Running
+        })?;
         Ok(())
     }
 
@@ -647,7 +860,7 @@ impl super::AgentToolPipeline {
                 continue;
             }
             let mut payloads = Vec::new();
-            if record.answer.is_none() && !record.cancelled {
+            if record.waiting() {
                 payloads.push(scoped(
                     &record.identity,
                     AgentSessionEventPayload::QuestionCancelled {
@@ -690,6 +903,60 @@ impl super::AgentToolPipeline {
             super::driver::close_open_scope(&self.sessions, entry, "cancelled")?;
             self.sessions.cancel(&entry.session_id)?;
             return entry.set_phase(super::AgentLifecyclePhase::Stopping);
+        }
+        // A crash may leave a reusable request committed before its auto-answer.
+        // Repair it from the earlier durable decision rather than asking again.
+        let needs_reuse = {
+            let records = records(&events);
+            records.iter().any(|pending| {
+                pending.waiting()
+                    && pending.answer.is_none()
+                    && workflow::reusable(
+                        &records,
+                        &pending.identity.turn_id,
+                        &pending.arguments,
+                        pending.target.as_ref(),
+                    )
+                    .is_some()
+            })
+        };
+        if needs_reuse {
+            let _gate = self
+                .question_gate
+                .lock()
+                .map_err(|_| "question gate unavailable")?;
+            let records = records(&self.sessions.all_events(&entry.session_id)?);
+            if let Some(pending) = records.iter().find(|r| r.waiting() && r.answer.is_none()) {
+                if let Some(previous) = workflow::reusable(
+                    &records,
+                    &pending.identity.turn_id,
+                    &pending.arguments,
+                    pending.target.as_ref(),
+                ) {
+                    let submission = AnswerQuestionInput {
+                        identity: pending.identity.clone(),
+                        client_operation_id: format!(
+                            "reused-{}",
+                            pending.identity.question_request_id
+                        ),
+                        answers: workflow::reused_answers(previous, &pending.arguments)?,
+                        action: None,
+                    };
+                    let fingerprint = hex::encode(Sha256::digest(
+                        serde_json::to_vec(&submission).map_err(|e| e.to_string())?,
+                    ));
+                    self.sessions.append_batch(
+                        &entry.session_id,
+                        vec![scoped(
+                            &submission.identity,
+                            AgentSessionEventPayload::QuestionAnswered {
+                                submission: submission.clone(),
+                                fingerprint,
+                            },
+                        )],
+                    )?;
+                }
+            }
         }
         let checkpoint = self.sessions.snapshot(&entry.session_id)?.recovery;
         if matches!(
@@ -748,7 +1015,7 @@ impl super::AgentToolPipeline {
                 .into_iter()
                 .find(|r| r.identity == record.identity)
                 .ok_or("question disappeared")?;
-            if record.answer.is_none() && !record.cancelled {
+            if record.waiting() {
                 return Ok(Some(super::ToolPipelineSettlement::Waiting));
             }
             if !record.has_result {

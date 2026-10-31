@@ -1,4 +1,7 @@
 /** Shared transcript layout hooks. Visual states remain in ai-panel CSS. */
+export const AI_CONTENT_CODE_CLASS =
+  'ai-content-code m-0 min-w-0 max-w-full px-3.5 py-2';
+
 export const AI_DISCLOSURE_ROW_CLASS =
   'ai-disclosure-row relative flex h-auto min-h-6 w-full min-w-0 cursor-pointer items-center justify-start gap-0 overflow-hidden p-0 text-left';
 

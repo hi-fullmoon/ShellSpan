@@ -798,6 +798,7 @@ async fn skill_question_resume_reuses_prepared_body_and_answer_slash_does_not_in
             AnswerQuestionInput {
                 identity: record.identity,
                 client_operation_id: "answer-id".into(),
+                action: None,
                 answers: vec![QuestionAnswer {
                     id: "choice".into(),
                     selected: vec![],

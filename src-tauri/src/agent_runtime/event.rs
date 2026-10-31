@@ -872,6 +872,11 @@ pub(crate) enum AgentSessionEventPayload {
         submission: super::user_questions::AnswerQuestionInput,
         fingerprint: String,
     },
+    #[serde(rename = "question/action_answered")]
+    QuestionActionAnswered {
+        submission: super::user_questions::AnswerQuestionInput,
+        fingerprint: String,
+    },
     #[serde(rename = "question/cancelled")]
     QuestionCancelled {
         identity: super::user_questions::QuestionIdentity,

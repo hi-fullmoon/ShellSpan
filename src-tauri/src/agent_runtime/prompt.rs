@@ -45,6 +45,21 @@ pub(crate) fn assemble_model_input(
     // A terminal identity alone does not establish a native filesystem root.
     // Advertise only tools that can operate on the immutable Session target.
     tools.retain(|tool| tool_available_on_target(&tool.name, header));
+    if !super::user_questions::supports_user_action(header) {
+        if let Some(tool) = tools
+            .iter_mut()
+            .find(|tool| tool.name == super::user_questions::TOOL_NAME)
+        {
+            if let Some(properties) = tool
+                .input_schema
+                .pointer_mut("/properties/questions/items/properties/options/items/properties")
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                properties.remove("user_action");
+            }
+            tool.description.push_str(" This session cannot verify manual operations. Do not attach user_action or call request_user_action; explain the capability limitation instead.");
+        }
+    }
     specialize_tools_for_target(&mut tools, header);
     let mut sections = vec![
         ("Identity", IDENTITY.to_string()),
@@ -72,7 +87,11 @@ pub(crate) fn assemble_model_input(
     {
         sections.push((
             "User questions",
-            super::user_questions::MODEL_INSTRUCTIONS.into(),
+            format!(
+                "{} {}",
+                super::user_questions::MODEL_INSTRUCTIONS,
+                super::user_questions::WORKFLOW_INSTRUCTIONS
+            ),
         ));
     }
     if tools.iter().any(|t| t.name == "read_file") {
@@ -321,6 +340,9 @@ fn target_has_native_file_access(target: &AgentSessionTarget) -> bool {
 fn tool_available_on_target(name: &str, header: &AgentSessionHeader) -> bool {
     let target = header.target.as_ref();
     match name {
+        super::user_questions::ACTION_TOOL_NAME => {
+            super::user_questions::supports_user_action(header)
+        }
         "run_terminal_command" => {
             target.is_some_and(|target| matches!(target.kind.as_str(), "local" | "remote"))
         }
@@ -715,6 +737,40 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn user_actions_require_a_real_verification_capability() {
+        let mut native = header();
+        let scope = native.capability_scope.clone();
+        native.capability_scope = None;
+        let assemble = |header: &AgentSessionHeader| {
+            assemble_model_input(header, super::super::default_model_tools())
+        };
+        assert!(assemble(&native)
+            .tools
+            .iter()
+            .any(|t| t.name == super::super::user_questions::ACTION_TOOL_NAME));
+        native.capability_scope = scope;
+        let restricted = assemble(&native);
+        assert!(!restricted
+            .tools
+            .iter()
+            .any(|t| t.name == super::super::user_questions::ACTION_TOOL_NAME));
+        assert!(restricted
+            .tools
+            .iter()
+            .find(|t| t.name == super::super::user_questions::TOOL_NAME)
+            .unwrap()
+            .input_schema
+            .pointer("/properties/questions/items/properties/options/items/properties/user_action")
+            .is_none());
+        native.target = None;
+        native.capability_scope = None;
+        assert!(!assemble(&native)
+            .tools
+            .iter()
+            .any(|t| t.name == super::super::user_questions::ACTION_TOOL_NAME));
     }
 
     #[test]

@@ -388,7 +388,7 @@ fn append_surface_events<'a>(
                             .filter(|l| l.validate().is_ok())
                             .map(|l| l.rendered)
                             .unwrap_or_else(|| "invalid complete Skill result".into())
-                    } else if name == super::user_questions::TOOL_NAME
+                    } else if super::user_questions::is_question_tool(name)
                         && *status == AgentToolResultStatus::Completed
                     {
                         serde_json::to_string(data).unwrap_or_default()

@@ -984,6 +984,14 @@ impl AgentToolPipeline {
                     && running.len() < limit
                 {
                     let call = &calls[next];
+                    let interaction_events = self.sessions.all_events(&entry.session_id)?;
+                    if let Err(reason) = super::user_questions::check_target(&interaction_events,turn_id,&target)
+                        .and_then(|()|super::user_questions::check_queue(&interaction_events,step_id,call))
+                        .and_then(|()|super::user_questions::check_call(&interaction_events, turn_id, call, calls.len())) {
+                        if !running.is_empty() { draining_barrier = true; continue; }
+                        self.commit_prepare_failure(&request_for(call.clone()), &reason)?;
+                        next += 1; committed += 1; continue;
+                    }
                     if let Some(subagent) = &entry.subagent {
                         // Every dispatched or pending call already has a durable reservation.
                         // Preparation is synchronous, so there is no unrecorded concurrent admission.
@@ -1007,7 +1015,7 @@ impl AgentToolPipeline {
                         self.process_result_read(entry, turn_id, step_id, request_id, target.clone(), call.clone()).await?;
                         next += 1; committed += 1; continue;
                     }
-                    if call.name == super::user_questions::TOOL_NAME {
+                    if super::user_questions::is_question_tool(&call.name) {
                         if !running.is_empty() {
                             draining_barrier = true;
                             continue;
@@ -2125,6 +2133,10 @@ impl AgentToolPipeline {
         request: &NativeToolRequest,
         preparation: &NativeToolPreparation,
     ) -> Result<(), String> {
+        let events = self.sessions.all_events(&request.session_id)?;
+        super::user_questions::check_target(&events, &request.turn_id, &request.target)?;
+        super::user_questions::check_queue(&events, &request.step_id, &request.model_call)?;
+        super::user_questions::check_call(&events, &request.turn_id, &request.model_call, 1)?;
         self.ensure_execution_effect(
             &request.session_id,
             preparation

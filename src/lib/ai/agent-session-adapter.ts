@@ -390,6 +390,7 @@ export function agentSessionView(state: AgentSessionStreamState, projected?: {
           return event.data.operation === 'enqueued'
             ? event.data.messages.flatMap(message => message.clientSubmissionId ? [message.clientSubmissionId] : []) : [];
         case 'question/answered':
+        case 'question/action_answered':
           return [event.data.submission.clientOperationId];
         case 'agent/inbox/item_resumed':
         case 'agent/inbox/item_updated':

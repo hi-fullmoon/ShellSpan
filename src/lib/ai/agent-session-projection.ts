@@ -1,4 +1,6 @@
 import { skillContexts } from './skill-projection';
+import { createQuestionProjection } from './question-projection';
+import { questionKey } from '@/types/agent-question';
 import { createCommittedEventProjection } from './committed-event-projection';
 import {
   type AgentActivityAgent,
@@ -134,6 +136,7 @@ interface ActivityNodeState {
 }
 
 function createActivityNodesProjection() {
+  const questionProjection = createQuestionProjection();
   const nodes: ActivityNodeState[] = [];
   const nodesByKey = new Map<string, ActivityNodeState>();
   const currentRequestByStep = new Map<string, string>();
@@ -225,6 +228,7 @@ function createActivityNodesProjection() {
   );
 
   const apply = (event: AgentSessionEvent): void => {
+    questionProjection.apply(event);
     taskKey ??= `activity:task:${event.sessionId}`;
     if (event.turnId) latestTurnId = event.turnId;
     switch (event.type) {
@@ -491,10 +495,11 @@ function createActivityNodesProjection() {
       }
       case 'question/requested':
       case 'question/answered':
+      case 'question/action_answered':
       case 'question/cancelled': {
-        const identity = event.type === 'question/answered' ? event.data.submission.identity : event.data.identity;
+        const identity = event.type === 'question/answered' || event.type === 'question/action_answered' ? event.data.submission.identity : event.data.identity;
         upsert(`activity:question:${identity.questionRequestId}`, 'question', event,
-          event.type === 'question/requested' ? 'pending' : event.type === 'question/answered' ? 'completed' : 'cancelled',
+          questionProjection.get(questionKey(identity))?.status === 'pending' ? 'pending' : event.type !== 'question/cancelled' ? 'completed' : 'cancelled',
           event.type, null, event.data, identity.requestId);
         break;
       }

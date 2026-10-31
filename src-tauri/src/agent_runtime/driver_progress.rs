@@ -124,7 +124,10 @@ impl LoopProgress {
                 approval_id: Some(_),
                 ..
             }
-            | Payload::QuestionAnswered { .. } => true,
+            | Payload::QuestionActionAnswered { .. } => true,
+            Payload::QuestionAnswered { submission, .. } => {
+                !submission.client_operation_id.starts_with("reused-")
+            }
             _ => false,
         };
         if changed {

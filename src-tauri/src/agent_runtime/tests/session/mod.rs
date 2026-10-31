@@ -7,6 +7,7 @@ include!("recorded_ui.rs");
 include!("terminal_reconnect.rs");
 include!("execution_observation.rs");
 include!("input_measurement.rs");
+include!("user_question_workflow.rs");
 
 #[test]
 fn driver_metrics_and_snapshot_cache_follow_commits_and_replay() {

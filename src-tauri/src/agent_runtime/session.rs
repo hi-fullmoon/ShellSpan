@@ -4006,6 +4006,7 @@ fn validate_event_transition(
         } => validate_tool_result_transition(record, event, call_id, *status),
         AgentSessionEventPayload::QuestionRequested { .. }
         | AgentSessionEventPayload::QuestionAnswered { .. }
+        | AgentSessionEventPayload::QuestionActionAnswered { .. }
         | AgentSessionEventPayload::QuestionCancelled { .. } => {
             super::user_questions::validate_transition(&record.events, event)
         }
@@ -4383,6 +4384,7 @@ fn validate_event_payload(event: &AgentSessionEvent) -> Result<(), String> {
     match &event.payload {
         Payload::QuestionRequested { .. }
         | Payload::QuestionAnswered { .. }
+        | Payload::QuestionActionAnswered { .. }
         | Payload::QuestionCancelled { .. } => {
             super::user_questions::validate_payload(event)?;
         }

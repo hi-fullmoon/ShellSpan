@@ -530,6 +530,7 @@ export type AgentSessionEvent =
     provider: AgentSubagentModel;
   }>
   | AgentSessionEventWithData<'question/answered', { submission: import('./agent-question').AnswerQuestionInput; fingerprint: string }>
+  | AgentSessionEventWithData<'question/action_answered', { submission: import('./agent-question').AnswerQuestionInput; fingerprint: string }>
   | AgentSessionEventWithData<'question/cancelled', { identity: import('./agent-question').QuestionIdentity }>
   | AgentSessionEventWithData<'tool/approval', {
       requestId: string;

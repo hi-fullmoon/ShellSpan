@@ -198,7 +198,12 @@ pub(crate) fn bound_request_results(
         // Human answers use a flat payload and remain complete human input.
         if matches!(
             name.as_str(),
-            "skill" | "read_terminal" | "wait_terminal" | "ask_user_question" | READ_TOOL_RESULT
+            "skill"
+                | "read_terminal"
+                | "wait_terminal"
+                | "ask_user_question"
+                | "request_user_action"
+                | READ_TOOL_RESULT
         ) || content.len() <= maximum
         {
             continue;

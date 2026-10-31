@@ -25,6 +25,17 @@
   font: 13px/20px var(--ai-font-family);
 }
 
+.ai-content-code {
+  font: var(--ai-font-markdown-code-block);
+  tab-size: 2;
+}
+
+.ai-content-code code {
+  padding: 0;
+  background: none;
+  font: inherit;
+}
+
 .ai-terminal-prompt {
   color: var(--ai-text-muted);
 }

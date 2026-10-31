@@ -94,6 +94,7 @@ impl PetdexActivities {
                         | Payload::SessionEnded { .. }
                         | Payload::ToolApproval { .. }
                         | Payload::QuestionAnswered { .. }
+                        | Payload::QuestionActionAnswered { .. }
                         | Payload::QuestionCancelled { .. }
                         | Payload::ToolExecution { .. }
                         | Payload::ToolResult { .. }

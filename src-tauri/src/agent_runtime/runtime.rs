@@ -581,15 +581,20 @@ impl AgentRuntime {
             .iter()
             .find(|r| r.identity == input.identity)
             .ok_or("unknown or stale question identity")?;
-        question.arguments.normalize_answers(&input.answers)?;
+        question.validate_submission(&input)?;
         if question.cancelled
             || self.sessions.snapshot(&session_id)?.status == super::AgentSessionStatus::Cancelled
         {
             return Err("question was cancelled".into());
         }
-        if question.answer.is_some()
-            && !super::user_questions::is_same_submission(question, &input)?
+        let already_committed = if input.action.is_some()
+            && question.answer.as_ref().is_some_and(|a| a.action.is_none())
         {
+            question.action_answer.is_some()
+        } else {
+            question.answer.is_some()
+        };
+        if already_committed && !super::user_questions::is_same_submission(question, &input)? {
             return Err("question answer conflicts with its committed answer".into());
         }
         if self.sessions.snapshot(&session_id)?.ended {

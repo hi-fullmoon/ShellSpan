@@ -45,11 +45,14 @@ import { cn } from '@/lib/utils';
 import { questionIssue, questionIssueMessageKey, questionSubmissionIssue } from '@/lib/ai/question-submission';
 import {
   questionKey,
+  pendingUserAction,
   type AgentQuestionView,
   type AnswerQuestionInput,
   type QuestionAnswer,
+  type UserActionResponse,
 } from '@/types/agent-question';
 import {
+  AI_CONTENT_CODE_CLASS,
   AI_DISCLOSURE_LEADING_CLASS,
   AI_DISCLOSURE_ROW_CLASS,
   AI_DISCLOSURE_SEPARATOR_CLASS,
@@ -79,7 +82,8 @@ export function AiQuestionPanel({
   onOpenSettings,
 }: AiQuestionPanelProps): React.ReactNode {
   const { t } = useI18n();
-  const key = questionKey(question.identity);
+  const userAction = pendingUserAction(question);
+  const key = questionKey(question.identity) + (userAction ? ':action' : '');
   const draft = useAgentQuestionStore((state) => state.drafts[key]);
   const [operation, setOperation] = useState<'submit' | 'refresh' | null>(null);
   const busy = useRef(false);
@@ -113,7 +117,7 @@ export function AiQuestionPanel({
     draft?.answers ??
     question.questions.map((q) => ({ id: q.id, selected: [] }));
   const currentQuestion = question.questions[currentIndex];
-  const currentAnswer = answers.find((answer) => answer.id === currentQuestion.id)!;
+  const currentAnswer = answers.find((answer) => answer.id === currentQuestion.id) ?? { id: currentQuestion.id, selected: [] };
   const inputId = `${question.identity.questionRequestId}-${currentIndex}`;
   const tooLong =
     new TextEncoder().encode(currentAnswer.custom ?? '').length > 8192;
@@ -144,14 +148,15 @@ export function AiQuestionPanel({
       setCurrentIndex((index) => index + 1);
     }
   };
-  const submit = async (nextAnswers = answers): Promise<void> => {
+  const submit = async (nextAnswers = answers, action?: UserActionResponse): Promise<void> => {
     const retained = useAgentQuestionStore.getState().drafts[key];
-    if (busy.current || nextAnswers.some(isAnswerInvalid) || !onAnswer
+    if (busy.current || (!action && nextAnswers.some(isAnswerInvalid)) || !onAnswer
       || (retained?.issue && !retained.issue.retry)) return;
     const input = retained?.submission ?? {
       identity: question.identity,
       clientOperationId: crypto.randomUUID(),
       answers: nextAnswers,
+      ...(action ? { action } : {}),
     };
     useAgentQuestionStore
       .getState()
@@ -215,10 +220,10 @@ export function AiQuestionPanel({
     >
       <CardHeader className="ai-question-panel-header min-h-[70px] shrink-0 gap-[3px] px-[18px] pt-[11px] pb-2 @max-[421px]/ai-workspace:min-h-[66px] @max-[421px]/ai-workspace:px-3 @max-[421px]/ai-workspace:pt-2.5 @max-[421px]/ai-workspace:pb-[7px]">
         <CardDescription>
-          <AiContentTitle>{currentQuestion.header ?? t('ai.workspace.question.title')}</AiContentTitle>
+          <AiContentTitle>{userAction ? t('ai.workspace.question.actionTitle') : currentQuestion.header ?? t('ai.workspace.question.title')}</AiContentTitle>
         </CardDescription>
         <CardTitle className="ai-question-panel-title">
-          <AiContentTitle key={currentQuestion.id}>{currentQuestion.question}</AiContentTitle>
+          <AiContentTitle key={currentQuestion.id}>{userAction ? t('ai.workspace.question.actionWaiting') : currentQuestion.question}</AiContentTitle>
         </CardTitle>
         <CardAction className="ai-question-panel-actions flex items-center gap-0.5">
           <Button
@@ -240,7 +245,13 @@ export function AiQuestionPanel({
       {!collapsed && (
         <>
           <CardContent ref={content} className="ai-question-panel-content max-h-65 min-h-0 overflow-x-hidden overflow-y-auto px-4 pt-px pb-1.5 @max-[421px]/ai-workspace:px-2.5 @max-[421px]/ai-workspace:pt-0">
-            <FieldGroup className="ai-question-list gap-0">
+            {userAction ? <FieldGroup className="gap-2" aria-live="polite">
+              <FieldDescription className="whitespace-pre-wrap [overflow-wrap:anywhere]">{userAction.instructions}</FieldDescription>
+              <Field>
+                <FieldDescription>{t('ai.workspace.question.actionVerification')}</FieldDescription>
+                <pre className={cn(AI_CONTENT_CODE_CLASS, 'whitespace-pre-wrap [overflow-wrap:anywhere]')}>{userAction.verification_command}</pre>
+              </Field>
+            </FieldGroup> : <FieldGroup className="ai-question-list gap-0">
               <FieldSet
                 key={currentQuestion.id}
                 className="ai-question-item gap-[5px] p-0"
@@ -348,7 +359,7 @@ export function AiQuestionPanel({
                   )}
                 </Field>
               </FieldSet>
-            </FieldGroup>
+            </FieldGroup>}
             {submissionIssue && <FieldError className="mt-2 flex min-w-0 flex-col gap-1 [overflow-wrap:anywhere]" role="alert" data-question-error={submissionIssue.reason}>
               <p className="m-0">{t(questionIssueMessageKey(submissionIssue))}</p>
               {submissionIssue.detail && <pre className="m-0 max-h-65 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere]" tabIndex={0} aria-label={t('ai.workspace.question.failureReason')}>
@@ -357,7 +368,7 @@ export function AiQuestionPanel({
             </FieldError>}
           </CardContent>
           <CardFooter className="ai-question-panel-footer min-h-12 shrink-0 justify-between gap-2.5 px-3.5 pt-1.5 pb-[7px] @max-[421px]/ai-workspace:flex-wrap @max-[421px]/ai-workspace:px-2.5">
-            <div className="ai-question-pagination flex shrink-0 items-center gap-0.5">
+            {!userAction && <div className="ai-question-pagination flex shrink-0 items-center gap-0.5">
               <Button
                 type="button"
                 variant="ghost"
@@ -381,9 +392,9 @@ export function AiQuestionPanel({
               >
                 <ChevronRightIcon aria-hidden="true" />
               </Button>
-            </div>
+            </div>}
             <div className="ai-question-footer-message min-w-0 flex-1" />
-            <div className="ai-question-footer-actions flex shrink-0 items-center gap-1.5">
+            <div className={cn('ai-question-footer-actions flex shrink-0 items-center gap-1.5', userAction && 'min-w-0 max-w-full flex-wrap justify-end')}>
               {draft?.submission ? <>
                 {onRefresh && <Button type="button" variant={submissionIssue && !submissionIssue.retry && !submissionIssue.editable ? 'default' : 'outline'} size="sm" disabled={pending} onClick={() => void refresh()}>
                   {t(operation === 'refresh' ? 'ai.workspace.question.refreshing' : 'ai.workspace.question.refresh')}
@@ -396,6 +407,13 @@ export function AiQuestionPanel({
                 </Button> : (!submissionIssue || submissionIssue.retry) && <Button type="button" size="sm" disabled={pending || !onAnswer} onClick={() => void submit()}>
                   {t(operation === 'submit' ? 'ai.workspace.question.submitting' : 'ai.workspace.question.retry')}
                 </Button>}
+              </> : userAction ? <>
+                <Button type="button" variant="outline" size="sm" disabled={pending || !onAnswer}
+                  onClick={() => void submit(question.answers, 'cancelled')}>{t('ai.workspace.question.actionCancel')}</Button>
+                <Button type="button" variant="outline" size="sm" disabled={pending || !onAnswer}
+                  onClick={() => void submit(question.answers, 'change_plan')}>{t('ai.workspace.question.actionChangePlan')}</Button>
+                <Button type="button" size="sm" disabled={pending || !onAnswer}
+                  onClick={() => void submit(question.answers, 'completed')}>{t('ai.workspace.question.actionComplete')}</Button>
               </> : <>
               <Button
                 className="min-w-[68px] @max-[421px]/ai-workspace:min-w-auto"
@@ -443,8 +461,10 @@ export function AiQuestionHistory({
   ).length;
   const summary = `${answered}/${question.questions.length} ${status}`;
   useEffect(() => {
-    if (question.status !== 'pending')
+    if (question.status !== 'pending') {
       useAgentQuestionStore.getState().clear(key);
+      useAgentQuestionStore.getState().clear(`${key}:action`);
+    }
   }, [key, question.status]);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -500,6 +520,7 @@ export function AiQuestionHistory({
                             .join(' · ')}
                         </FieldDescription>
                       )}
+                      {question.actionResponse && <FieldDescription>{t(`ai.workspace.question.actionResult.${question.actionResponse}`)}</FieldDescription>}
                     </FieldSet>
                   );
                 })}

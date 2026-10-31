@@ -1,5 +1,5 @@
 import type { AgentSessionEvent } from '@/types/agent-session';
-import { questionKey, type AgentQuestionView } from '@/types/agent-question';
+import { pendingUserAction, questionKey, type AgentQuestionView } from '@/types/agent-question';
 import { createCommittedEventProjection } from './committed-event-projection';
 
 /** Both views consume the same committed identity and answer, never local drafts. */
@@ -15,7 +15,7 @@ export function createQuestionProjector(): (events: readonly AgentSessionEvent[]
   return createCommittedEventProjection(createQuestionProjection);
 }
 
-function createQuestionProjection() {
+export function createQuestionProjection() {
   const questions = new Map<string, AgentQuestionView>();
   const apply = (event: AgentSessionEvent): void => {
     if (event.type === 'question/requested') {
@@ -30,25 +30,30 @@ function createQuestionProjection() {
       });
     } else if (
       event.type === 'question/answered' ||
+      event.type === 'question/action_answered' ||
       event.type === 'question/cancelled'
     ) {
       const identity =
-        event.type === 'question/answered'
+        event.type !== 'question/cancelled'
           ? event.data.submission.identity
           : event.data.identity;
       const key = questionKey(identity);
       const previous = questions.get(key);
-      if (previous)
-        questions.set(key, {
+      if (previous) {
+        const next: AgentQuestionView = {
           ...previous,
           lastSeq: event.seq,
-          status: event.type === 'question/answered' ? 'answered' : 'cancelled',
+          status: event.type !== 'question/cancelled' ? 'pending' : 'cancelled',
           answers:
-            event.type === 'question/answered'
+            event.type !== 'question/cancelled'
               ? event.data.submission.answers
-              : [],
-        });
+              : previous.answers,
+          actionResponse: event.type !== 'question/cancelled' ? event.data.submission.action : previous.actionResponse,
+        };
+        questions.set(key, next.status === 'cancelled' || pendingUserAction(next)
+          ? next : { ...next, status: 'answered' });
+      }
     }
   };
-  return { apply, snapshot: () => [...questions.values()] };
+  return { apply, get: (key: string) => questions.get(key), snapshot: () => [...questions.values()] };
 }

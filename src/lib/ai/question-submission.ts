@@ -29,6 +29,9 @@ const invalidAnswers = new Set([
   'too many selected options', 'unknown or duplicate selected option',
   'single-select question has multiple answers', 'blank answers cannot be submitted',
   'question text is empty or outside byte limits', 'question payload exceeds 32768 bytes',
+  'question has no pending user action', 'user action response cannot change the committed selection',
+  'standalone user action cannot accept question answers',
+  'user action requires an explicit completion, change_plan or cancellation',
 ]);
 
 function diagnostic(error: unknown): string {

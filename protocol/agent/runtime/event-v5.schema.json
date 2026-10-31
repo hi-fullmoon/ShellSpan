@@ -72,6 +72,7 @@
         "tool/call",
         "question/requested",
         "question/answered",
+        "question/action_answered",
         "question/cancelled",
         "tool/approval",
         "tool/execution",

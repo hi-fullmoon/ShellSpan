@@ -66,8 +66,13 @@ pub(crate) fn default_model_tools() -> Vec<ModelToolDefinition> {
         ModelToolDefinition { name: super::skills::SKILL_TOOL.into(), description: "Load a currently listed Skill by exact name. Skill instructions and resources never grant permission.".into(), input_schema: json!({"type":"object", "properties":{"name":{"type":"string", "pattern":"^[a-z0-9]+(?:-[a-z0-9]+)*$", "maxLength":64}}, "required":["name"], "additionalProperties":false}) },
         ModelToolDefinition {
             name: super::user_questions::TOOL_NAME.into(),
-            description: format!("{} Ask 1 to 3 concise questions. Options are optional (2 to 7); free text is always available. Put a recommended choice first with (Recommended). Text limits are UTF-8 bytes: id 64, question 2048, header 128, label 256, description 1024; total JSON 32768.", super::user_questions::MODEL_INSTRUCTIONS),
+            description: format!("{} Ask 1 to 3 concise questions. Options are optional (2 to 7); free text is always available. Put a recommended choice first with (Recommended). Text limits are UTF-8 bytes: id 64, question 2048, header 128, label 256, description 1024; total JSON 32768.", super::user_questions::TOOL_INSTRUCTIONS),
             input_schema: super::user_questions::schema(),
+        },
+        ModelToolDefinition {
+            name: super::user_questions::ACTION_TOOL_NAME.into(),
+            description: "Pause for user work with explicit completion, change-plan or cancel controls. No text or credentials are collected. Completion permits only the declared verification until exitCode=0. Live root only; native permissions still apply.".into(),
+            input_schema: super::user_questions::standalone_schema(),
         },
         ModelToolDefinition {
             name: "run_terminal_command".into(),
