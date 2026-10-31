@@ -14,7 +14,7 @@ await mkdir(artifacts, { recursive: true });
 const paths = ['src/components/ai/workspace/ai-tool-presentation.tsx', 'src/components/ai/styles/tool-results.css'];
 const patch = paths.map(path => {
   const revision = execFileSync('git', ['log', '-1', '--format=%H', '--', path], { cwd: root, encoding: 'utf8' }).trim();
-  return execFileSync('git', ['show', '--format=', '--unified=20', revision, '--', path], { cwd: root, encoding: 'utf8' });
+  return execFileSync('git', ['show', '--format=', '--unified=1000', revision, '--', path], { cwd: root, encoding: 'utf8' });
 }).join('');
 assert.ok(patch.length, 'Use a real repository patch');
 const server = await createServer({
@@ -34,7 +34,8 @@ try {
     try {
       for (const width of [380, 720]) {
         for (const detail of [false, true]) {
-          const page = await browser.newPage({ viewport: { width, height: 900 } });
+          const page = await browser.newPage({ viewport: { width, height: 900 },
+            ...(engine === chromium ? { permissions: ['clipboard-read', 'clipboard-write'] } : {}) });
           const errors = [];
           page.on('pageerror', error => errors.push(error.message));
           await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__diff`);
@@ -59,7 +60,7 @@ try {
           const context = `${engine.name()}/${width}/${detail}`;
           let checked = 0;
           for (const section of await page.locator('.ai-diff-block section').all()) {
-            const body = section.locator('.ai-diff-content [data-slot="scroll-area-viewport"]');
+            const body = section.locator(detail ? '.ai-diff-content' : '.ai-diff-content [data-slot="scroll-area-viewport"]');
             if (!await body.evaluate(element => element.scrollWidth > element.clientWidth)) continue;
             const header = section.locator('.ai-tool-surface-header');
             await header.scrollIntoViewIfNeeded();
@@ -67,6 +68,30 @@ try {
             const counts = await header.locator('.ai-diff-counts').boundingBox();
             const copy = section.locator('.ai-tool-copy-button');
             const copyBefore = await copy.count() ? await copy.boundingBox() : null;
+            if (copyBefore) {
+              const layout = await copy.evaluate(element => {
+                const region = element.closest('.ai-tool-content-region').getBoundingClientRect();
+                const button = element.getBoundingClientRect();
+                const header = element.closest('section').querySelector('.ai-tool-surface-header').getBoundingClientRect();
+                return { top: button.top - region.top, right: region.right - button.right,
+                  belowHeader: button.top >= header.bottom, width: button.width, height: button.height };
+              });
+              assert.deepEqual(layout, { top: 4, right: 14, belowHeader: true, width: 24, height: 24 },
+                `${context}: diff copy belongs to the body without covering the file header or counts`);
+              await header.hover({ position: { x: 20, y: 8 } });
+              assert.equal(await copy.evaluate(element => getComputedStyle(element).opacity), '0',
+                `${context}: hovering the file header must not reveal the body copy`);
+              await copy.focus();
+              assert.equal(await copy.evaluate(element => getComputedStyle(element).opacity), '1',
+                `${context}: keyboard focus reveals the body copy`);
+              if (engine === chromium && detail) {
+                await copy.click();
+                assert.equal(await page.evaluate(() => navigator.clipboard.readText()), JSON.stringify({ diff: patch }, null, 2),
+                  `${context}: moving the detail copy preserves the complete output`);
+              }
+              await copy.blur();
+            }
+            if (width === 720) assert.equal(before.height, 32, `${context}: single-line diff headers use the roomier 32px height`);
             await body.evaluate(element => { element.scrollLeft = element.scrollWidth; });
             assert.ok(await body.evaluate(element => element.scrollLeft > 0), `${context}: diff body scrolls horizontally`);
             assert.deepEqual(await header.boundingBox(), before, `${context}: file header stays fixed`);
@@ -77,6 +102,21 @@ try {
           }
           assert.ok(checked > 1, `${context}: cover multiple files with long lines`);
           if (detail) {
+            const outputSection = page.locator('.ai-detail-section').nth(1);
+            assert.equal(await outputSection.locator('[data-slot="scroll-area-viewport"]').count(), 1,
+              `${context}: diff output has only one vertical scroll viewport`);
+            assert.ok(await outputSection.locator('.ai-diff-content').evaluateAll(elements =>
+              elements.every(element => element.scrollHeight <= element.clientHeight + 1)),
+              `${context}: inner diff bodies must not scroll vertically`);
+            const outputViewport = outputSection.locator('[data-slot="scroll-area-viewport"]');
+            await outputViewport.evaluate(element => { element.scrollTop = element.scrollHeight; });
+            const end = await outputViewport.evaluate(element => {
+              const viewport = element.getBoundingClientRect();
+              const last = element.querySelector('.ai-diff-block section:last-child .ai-diff-lines > :last-child').getBoundingClientRect();
+              return { moved: element.scrollTop > 0, reachable: last.bottom <= viewport.bottom + 1 && last.top >= viewport.top };
+            });
+            assert.deepEqual(end, { moved: true, reachable: true }, `${context}: the single output scrollbar reaches the final file and line`);
+            await outputViewport.evaluate(element => { element.scrollTop = 0; });
             for (const theme of ['light', 'dark']) {
               await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
               const sections = await page.locator('.ai-detail-section').evaluateAll(elements => elements.map(section => {
@@ -108,10 +148,13 @@ try {
                 cardOutline: getComputedStyle(element.closest('.ai-tool-content-region')).outlineStyle,
               })), { focused: true, outline: 'none', shadow: 'none', cardOutline: 'none' },
               `${context}/${theme}: content remains focusable without a focus border`);
-              await page.locator('[data-slot="scroll-area-viewport"], .ai-detail-sections').evaluateAll(elements => elements.forEach(element => {
+              await page.locator('[data-slot="scroll-area-viewport"], .ai-detail-sections, .ai-diff-content').evaluateAll(elements => elements.forEach(element => {
                 element.scrollTop = 0;
                 element.scrollLeft = 0;
               }));
+              const output = page.locator('.ai-detail-section').nth(1);
+              await output.locator('.ai-tool-surface-header').first().scrollIntoViewIfNeeded();
+              await output.locator('.ai-diff-content').first().hover({ position: { x: 24, y: 8 } });
               await page.screenshot({ path: join(artifacts, `${context.replaceAll('/', '-')}-${theme}-external-titles.png`) });
             }
           }
