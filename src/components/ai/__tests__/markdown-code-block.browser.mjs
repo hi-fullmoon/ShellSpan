@@ -57,6 +57,14 @@ try {
           assert.equal(await blocks.count(), 4);
           assert.equal(await blocks.nth(2).locator('.ai-markdown-code-toolbar').count(), 0);
           assert.equal(await blocks.nth(3).locator('.ai-code-block-language').innerText(), 'markdown');
+          const toolbarHeights = [];
+          for (const index of [1, 3]) {
+            const toolbar = blocks.nth(index).locator('.ai-markdown-code-toolbar');
+            const height = await toolbar.evaluate(element => element.getBoundingClientRect().height);
+            toolbarHeights.push(height);
+            assert.equal(height, 24, `${engine.name()}/${width}/${theme}: language headers stay compact with or without copy actions`);
+          }
+          assert.equal(toolbarHeights[0], toolbarHeights[1], 'Copy actions must not change language header height');
           for (let index = 0; index < 4; index++) {
             const layout = await blocks.nth(index).evaluate(block => {
               const pre = block.querySelector('pre');
@@ -95,7 +103,7 @@ try {
               background: getComputedStyle(pre).backgroundColor,
               contentTop: pre.getBoundingClientRect().top - block.getBoundingClientRect().top + parseFloat(getComputedStyle(pre).paddingTop),
               buttonPosition: getComputedStyle(button).position,
-              buttonParent: button.offsetParent === block,
+              buttonParent: button.offsetParent === pre.parentElement,
             };
           });
           assert.equal(metrics.whiteSpace, 'pre');
@@ -107,7 +115,7 @@ try {
           assert.equal(metrics.background, 'rgba(0, 0, 0, 0)');
           assert.ok(metrics.contentTop <= 13, 'Unlabelled code starts directly below the block padding');
           assert.equal(metrics.buttonPosition, 'absolute');
-          assert.equal(metrics.buttonParent, true, 'The copy button must be anchored to the code block');
+          assert.equal(metrics.buttonParent, true, 'The copy button must be anchored to its code content region');
           for (let index = 0; index < 2; index++) {
             const block = blocks.nth(index);
             const button = block.locator('button');
@@ -129,7 +137,7 @@ try {
           }
           if (engine === chromium) {
             await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
-            await blocks.first().hover({ position: { x: 5, y: 5 } });
+            await blocks.first().locator('[data-ai-copy-region]').hover({ position: { x: 5, y: 5 } });
             assert.equal(await blocks.first().locator('button').evaluate(element => getComputedStyle(element).opacity), '1');
             await page.getByRole('button', { name: '复制', exact: true }).first().click();
             await page.getByRole('button', { name: '已复制', exact: true }).waitFor();
