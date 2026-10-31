@@ -4,7 +4,7 @@ use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::Deserialize;
 use std::{
     io::{Read, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::mpsc,
     time::{Duration, Instant},
 };
@@ -120,7 +120,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Err("native editor changed accepted buffer".into());
         }
         let selected_history = std::fs::read_to_string(&history_path)?;
-        if PathBuf::from(&selected_history) != history {
+        if Path::new(&selected_history) != history.as_path() {
             return Err("native editor reference selected a different history path".into());
         }
         std::fs::write(&output, trace)?;

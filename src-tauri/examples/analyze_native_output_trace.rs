@@ -26,7 +26,7 @@ fn present(parser: &mut vt100::Parser, marker: &str, rows: u16, columns: u16) ->
                 if cell.is_empty() {
                     text.push(' ')
                 } else {
-                    text.push_str(&cell)
+                    text.push_str(cell)
                 }
             }
         }

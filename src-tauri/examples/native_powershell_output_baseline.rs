@@ -4,7 +4,7 @@ use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::Deserialize;
 use std::{
     io::{Read, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::mpsc,
     time::{Duration, Instant},
 };
@@ -164,7 +164,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             raw.extend(b);
         }
         phases.push(serde_json::json!({"phase":"native-child-completed-after-owned-gate-release","rendered":parser.screen().contents()}));
-        if PathBuf::from(std::fs::read_to_string(&history_path)?) != history {
+        let selected_history = std::fs::read_to_string(&history_path)?;
+        if Path::new(&selected_history) != history.as_path() {
             return Err("plain reference selected a different history path".into());
         }
         Ok(())
