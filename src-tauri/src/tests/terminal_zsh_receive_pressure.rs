@@ -300,17 +300,15 @@ printf '%s\n' {round} >> {}"#,
         writer.flush().unwrap();
         let mut timed_out = false;
         while start.elapsed() < Duration::from_millis(2600) {
-            if let Ok(event) = events.try_recv() {
-                if let TerminalIntegrationControlEvent::NativePrivateCheckpoint { buffer, .. } =
-                    event
-                {
-                    assert!(
-                        buffer.is_empty(),
-                        "a partial frame must never replace BUFFER"
-                    );
-                    timed_out = true;
-                    break;
-                }
+            if let Ok(TerminalIntegrationControlEvent::NativePrivateCheckpoint { buffer, .. }) =
+                events.try_recv()
+            {
+                assert!(
+                    buffer.is_empty(),
+                    "a partial frame must never replace BUFFER"
+                );
+                timed_out = true;
+                break;
             }
             assert!(
                 sent < frame.len(),

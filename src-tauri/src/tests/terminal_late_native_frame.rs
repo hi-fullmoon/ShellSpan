@@ -123,7 +123,7 @@ fn verify_late_frame(
         1 => descriptor.len(),
         _ => descriptor.len() + encoded.len() / 2,
     };
-    writer.write_all(frame[..boundary].as_bytes()).unwrap();
+    writer.write_all(&frame.as_bytes()[..boundary]).unwrap();
     writer.flush().unwrap();
     // Wait for the real receiver deadline, then deliver bytes still in flight.
     wait("frame timeout", |event| {

@@ -561,8 +561,9 @@ fn capture_native_presentation_case(
             assert_eq!(script_checkpoints.len(), 1);
         } else {
             assert!(script_checkpoints.len() > 2 && script_checkpoints.len() <= 48);
-            for pair in script_checkpoints.windows(2) {
+            for pair in script_checkpoints[..script_checkpoints.len() - 1].windows(2) {
                 assert!(pair[1].1.starts_with(&pair[0].1));
+                assert!(source.starts_with(&pair[1].1));
                 assert!(pair[1].0.duration_since(pair[0].0) >= Duration::from_millis(30));
             }
             let bytes = display.lock().unwrap()[start..].to_vec();

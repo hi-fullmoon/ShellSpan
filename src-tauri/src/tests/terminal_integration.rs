@@ -261,7 +261,7 @@
             b"L\x000\0\0".as_slice(),
             b"L\x001\0missing".as_slice(),
             b"A\0missing".as_slice(),
-            b"B\0123\0running\0-\0".as_slice(),
+            b"B\x00123\0running\0-\0".as_slice(),
         ] {
             let mut decoder = TerminalIntegrationStreamDecoder::default();
             let result = decoder.push(bytes);
@@ -1021,7 +1021,6 @@
                 if event.state == TerminalLeaseEventState::Acquired {
                     if event.operation_id == "native-script" {
                         assert_eq!(event.command_execution, Some(true));
-                        assert!(event.command_display.is_none());
                         *observed_script_lease.lock().unwrap() = Some(event.clone());
                     }
                     acknowledger
@@ -1723,6 +1722,14 @@
                 .unwrap();
             assert_eq!(result.state, TerminalCommandState::Completed, "{result:?}");
             assert_eq!(result.command_line, command);
+            let displayed_source = native_script_lease
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .command_display
+                .clone();
+            assert_eq!(displayed_source.as_deref(), Some(command.as_str()));
             assert_eq!(
                 result.submitted_command_line,
                 if shell == TerminalShellKind::Bash {
@@ -3001,7 +3008,7 @@
                     if text.is_empty() {
                         cells.push(' ');
                     } else {
-                        cells.push_str(&text);
+                        cells.push_str(text);
                     }
                 }
             }

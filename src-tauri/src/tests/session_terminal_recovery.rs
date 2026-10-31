@@ -92,11 +92,23 @@ struct CommandRuntime {
 
 impl CommandRuntime {
     fn new(terminal: &RemoteFixtureTerminal) -> Self {
+        Self::with_reduced_motion(terminal, true)
+    }
+
+    fn with_reduced_motion(terminal: &RemoteFixtureTerminal, reduced_motion: bool) -> Self {
         let leases = TerminalLeaseManager::new(terminal.broker.clone());
         let acknowledger = leases.clone();
         leases
             .set_publisher(Arc::new(move |event| {
                 if event.state == TerminalLeaseEventState::Acquired {
+                    acknowledger
+                        .set_reduced_motion(
+                            &event.session_id,
+                            &event.agent_session_id,
+                            &event.operation_id,
+                            reduced_motion,
+                        )
+                        .unwrap();
                     acknowledger
                         .acknowledge_frontend_ready(
                             &event.session_id,
@@ -195,7 +207,11 @@ impl CommandRuntime {
         outcome
     }
 
-    fn execute(&mut self, terminal: &mut RemoteFixtureTerminal, source: &str) {
+    fn execute(
+        &mut self,
+        terminal: &mut RemoteFixtureTerminal,
+        source: &str,
+    ) -> crate::terminal_broker::TerminalCommandSnapshot {
         let registry = self.registry.clone();
         let sessions = self.sessions.clone();
         let id = terminal.transport_id.clone();
@@ -239,6 +255,92 @@ impl CommandRuntime {
         assert_eq!(result.state, TerminalCommandState::Completed);
         assert_eq!(result.exit_code, Some(0));
         self.leases.release_turn("ssh-recovery-agent").unwrap();
+        result
+    }
+}
+
+#[test]
+#[ignore = "requires the isolated tests/ssh-e2e Docker service"]
+fn isolated_ssh_buffered_editor_receipt_does_not_wait_for_more_network_input() {
+    for username in ["shellspan", "shellspan-zsh"] {
+        let broker = TerminalSessionBroker::phase4_enabled_for_test(65_536);
+        let transport = format!("buffered-receipt-{username}");
+        let mut terminal = RemoteFixtureTerminal::connect(username, &transport, None, broker);
+        pump_for(&mut terminal, Duration::from_millis(100));
+        write_all_nonblocking(&terminal.session, &mut terminal.shell_channel, b"\x18\x01").unwrap();
+        // Read only the PTY. libssh2 must dispatch the real editor receipt
+        // into the other channel's buffer while this read returns WouldBlock.
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut output = [0; 8192];
+        loop {
+            match terminal.shell_channel.read(&mut output) {
+                Ok(_) => {}
+                Err(error) if is_retryable_channel_error_kind(error.kind()) => {}
+                Err(error) => panic!("read SSH PTY while receiving editor receipt: {error}"),
+            }
+            if terminal
+                .integration
+                .as_ref()
+                .unwrap()
+                .control
+                .read_window()
+                .available
+                > 0
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "editor did not send a real receipt"
+            );
+            thread::sleep(Duration::from_millis(2));
+        }
+        let (_waker, wake) = session_wake_pair().unwrap();
+        let started = Instant::now();
+        wait_for_terminal_session_events(
+            &terminal.session,
+            &terminal.shell_channel,
+            Some(&terminal.integration.as_ref().unwrap().control),
+            &wake,
+            Duration::from_millis(800),
+        )
+        .unwrap();
+        assert!(
+            started.elapsed() < Duration::from_millis(400),
+            "{username}: buffered receipt slept until the socket deadline"
+        );
+        let integration = terminal.integration.as_mut().unwrap();
+        let count = integration.control.read(&mut output).unwrap();
+        assert!(integration.decoder.push(&output[..count]).unwrap().iter().any(
+            |event| matches!(event, crate::terminal_integration::TerminalIntegrationControlEvent::NativeCheckpoint { buffer } if buffer.is_empty())
+        ));
+    }
+}
+
+#[test]
+#[ignore = "requires the isolated tests/ssh-e2e Docker service"]
+fn isolated_ssh_long_source_frames_receive_exact_acknowledgements() {
+    for username in ["shellspan", "shellspan-zsh"] {
+        let broker = TerminalSessionBroker::phase4_enabled_for_test(65_536);
+        let transport = format!("long-frame-{username}");
+        let mut terminal = RemoteFixtureTerminal::connect(username, &transport, None, broker);
+        let mut runtime = CommandRuntime::with_reduced_motion(&terminal, false);
+        let ledger = format!("/tmp/.shellspan-source-frame-{}", Uuid::new_v4());
+        let mut expected = Vec::new();
+        for count in [64, 128, 256] {
+            let text = "中文'\"$\\\n".repeat(count);
+            let marker = format!("source-frame-complete-{count}");
+            let source = format!(
+                ": {}\nprintf '%s\\n' {marker} >> {ledger}",
+                shlex::try_quote(&text).unwrap()
+            );
+            assert!(source.len() <= 8192);
+            let result = runtime.execute(&mut terminal, &source);
+            assert_eq!(result.command_line, source);
+            expected.push(marker);
+            assert_eq!(read_ledger(&mut terminal, &ledger), expected);
+        }
+        runtime.execute(&mut terminal, &format!("rm -- {ledger}"));
     }
 }
 
@@ -562,12 +664,25 @@ fn saved_profile_ssh_input_timeout_disconnect_and_reconnect_do_not_replay() {
     verify_all_faults(Endpoint::SavedProfile);
 }
 
+fn saved_profile_build_guard() -> Result<(), &'static str> {
+    if cfg!(debug_assertions) {
+        Err("Saved production profiles require cargo test --release; development credential isolation stays enforced")
+    } else {
+        Ok(())
+    }
+}
+
+#[test]
+fn saved_profile_build_guard_matches_credential_isolation() {
+    assert_eq!(saved_profile_build_guard().is_err(), cfg!(debug_assertions));
+}
+
 fn connect_saved_profile(
     transport: &str,
     predecessor: Option<&str>,
     broker: crate::terminal_broker::TerminalSessionBroker,
 ) -> RemoteFixtureTerminal {
-    assert!(!cfg!(debug_assertions), "Saved production profiles require cargo test --release; development credential isolation stays enforced");
+    saved_profile_build_guard().expect("saved-profile acceptance requires a production build");
     let id = std::env::var("SHELLSPAN_SSH_ACCEPTANCE_PROFILE_ID")
         .expect("explicit SSH profile reference required");
     let home = std::env::var_os("HOME")

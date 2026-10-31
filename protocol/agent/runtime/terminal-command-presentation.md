@@ -60,6 +60,15 @@ native script capture and its metadata. That path replays the actual acquired
 lease events exported by the focused native case, without synthesizing
 `commandDisplay`, command-execution flags or running-phase events.
 
+The AI Shell card displays approved tool input separately from terminal output.
+For structured terminal results, `combinedOutput` is the authoritative shared
+capture, including an empty string. Direct results without that field use
+`stdout` and `stderr`. Empty streams never fall back to displaying the result
+envelope. Execution state is separate from tool-call completion and the launch
+command's exit code. Other result fields, including original and submitted
+command lines, remain available in the tool's execution details. This does not
+rewrite the native terminal stream or change the accepted shell submission.
+
 The terminal pane displays live shared output and interactive programs through
 the original xterm. Agent input echoes use a source projection when acquired
 lease metadata supplies both source and a distinct generated submission. Ordered
@@ -84,14 +93,30 @@ Original source is laid out by xterm itself, including Unicode and soft wraps.
 Selection and search use the displayed cells. Missing metadata leaves the native
 display available. Full-screen applications always use their original buffer.
 
+Native editor animation uses grapheme-safe prefixes of the approved source for
+intermediate frames. The final frame still installs and validates the exact
+generated submission before accept-line. Each frame keeps its original receipt,
+readiness, cancellation and submission fences; presentation adds no PTY writes.
+The frontend reveals the verified command view over animation frames instead of
+painting each transport batch at once. Reduced motion displays it immediately.
+The ordered command boundary flushes pending presentation before process output;
+cancellation, buffer changes and disposal discard pending animation.
+
 The xterm 6 compatibility adapter changes line references only during synchronous
-rendering and selection, restoring them in `finally`. Parsing, native lines,
-cursor state, PTY bytes, execution capture, approvals and cancellation are
-unchanged. Logical-line markers retain completed input projections across
+rendering and selection. During rendering it also places the cursor after the
+displayed prefix, including wide and combining characters, and refreshes both
+the previous and current cursor rows. All native line references and cursor
+coordinates are restored in `finally`. Parsing, native state, PTY bytes,
+execution capture, approvals and cancellation are unchanged.
+Logical-line markers retain completed input projections across
 reflow and expire with scrollback. Rebinding the same Terminal transfers only
 completed records to its next adapter; active scopes and leases are cleared.
 Final terminal disposal clears the adapter and all records.
 No source projection writes terminal input or acknowledges a lease.
+Readiness requires the selected, connected controller's actual terminal input
+to receive focus, together with
+the existing output subscription and frozen lease checks. The AI Shell card
+retains command input, execution status and captured results separately.
 
 `pnpm test:terminal-command-source` captures real Bash PTYs and checks original
 source, native clipboard, foreground/background output, scrolling and reflow in

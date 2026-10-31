@@ -1143,6 +1143,12 @@ MUST NOT source user startup files twice. The integration bootstrap is not
 typed into the PTY. Control bytes remain separate from the authoritative
 `ssh-data:<transportSessionId>` raw-output stream.
 
+The SSH loop checks both channels for bytes or EOF already buffered by libssh2
+before waiting on the transport socket. Reading or writing one channel can
+consume socket packets for the other; a buffered editor receipt must be handled
+without waiting for another packet or the keepalive deadline. This does not
+extend native frame deadlines, relax receipt matching, or permit input replay.
+
 Unsupported shells, unavailable SFTP, unreadable shell metadata, temporary-file
 failure, or control-channel failure MUST clean up partial integration resources
 and continue by starting an ordinary usable SSH shell. The generation reports

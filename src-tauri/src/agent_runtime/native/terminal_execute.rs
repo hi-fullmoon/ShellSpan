@@ -324,10 +324,8 @@ impl TerminalExecuteRegistry {
         }) {
             return Err(format!("TERMINAL_INPUT_UNSUPPORTED: native editor input exceeds {wire_limit} UTF-8 bytes; no input was sent"));
         }
-        if native_input {
-            if !self.broker.native_input_enabled(session_id)? {
-                return Err("TERMINAL_INPUT_UNSUPPORTED: complete script input requires the native Readline (Bash 4.1+), ZLE or PSReadLine integration; this shell/editor has not advertised that capability; no input was sent".into());
-            }
+        if native_input && !self.broker.native_input_enabled(session_id)? {
+            return Err("TERMINAL_INPUT_UNSUPPORTED: complete script input requires the native Readline (Bash 4.1+), ZLE or PSReadLine integration; this shell/editor has not advertised that capability; no input was sent".into());
         }
         revalidate(TerminalExecuteValidationStage::LeaseAcquisition)?;
         self.leases.acquire_command(
@@ -735,7 +733,7 @@ impl TerminalExecuteRegistry {
                     && self.broker.native_typing_enabled(session_id)?;
                 let animated_data;
                 let editor_data = if native_animation {
-                    animated_data = native_editor_typing_chunks(input, shell);
+                    animated_data = native_editor_typing_chunks(input, command, shell);
                     &animated_data
                 } else {
                     native_editor_data
@@ -1896,8 +1894,12 @@ pub(crate) fn native_editor_chunks(
 // Each intermediate frame replaces the real editor buffer with a grapheme-safe
 // prefix. Only the final frame carries the complete source validation envelope.
 // Receivers acknowledge every prefix before another frame or accept is sent.
-fn native_editor_typing_chunks(command: &str, shell: TerminalShellKind) -> Vec<(String, String)> {
-    let chunks = typing_chunks(command, false);
+fn native_editor_typing_chunks(
+    submission: &str,
+    source: &str,
+    shell: TerminalShellKind,
+) -> Vec<(String, String)> {
+    let chunks = typing_chunks(source, false);
     let mut end = 0;
     chunks
         .iter()
@@ -1905,9 +1907,9 @@ fn native_editor_typing_chunks(command: &str, shell: TerminalShellKind) -> Vec<(
         .map(|(index, chunk)| {
             end += chunk.len();
             if index + 1 == chunks.len() {
-                native_editor_chunks(command, shell).remove(0)
+                native_editor_chunks(submission, shell).remove(0)
             } else {
-                native_editor_chunks(&command[..end], TerminalShellKind::Zsh).remove(0)
+                native_editor_chunks(&source[..end], TerminalShellKind::Zsh).remove(0)
             }
         })
         .collect()

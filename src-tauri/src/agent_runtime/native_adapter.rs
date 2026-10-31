@@ -354,8 +354,8 @@ impl NativeToolRuntime for NativeToolAdapter {
                 &arguments.server_id,
                 &arguments.tool_name,
                 arguments.arguments,
-                &sessions,
-                &database,
+                sessions,
+                database,
             )?;
             let native_name = prepared.call.tool_name.clone();
             let effect = effect_from_native(prepared.effect.kind);
@@ -471,10 +471,10 @@ impl NativeToolRuntime for NativeToolAdapter {
                 target,
                 ttl_ms: Some(DEFAULT_NATIVE_APPROVAL_TTL_MS),
             },
-            &sessions,
-            &database,
-            &credentials,
-            &known_hosts_path,
+            sessions,
+            database,
+            credentials,
+            known_hosts_path,
         )?;
         let descriptor = runtime.tool(&native_name)?.descriptor.clone();
         let effect = effect_from_native(prepared.effect.kind);
@@ -620,10 +620,10 @@ impl NativeToolRuntime for NativeToolAdapter {
                 let mut result = runtime.execute_tool(
                     &prepared.context,
                     call,
-                    &sessions,
-                    &database,
-                    &credentials,
-                    &known_hosts_path,
+                    sessions,
+                    database,
+                    credentials,
+                    known_hosts_path,
                     &cancellation,
                 )?;
                 let public_target_id = project_native_result_target(
@@ -730,7 +730,7 @@ impl NativeToolRuntime for NativeToolAdapter {
                 let result = runtime.execute_mcp_call(
                     &prepared,
                     grant.capability_id,
-                    &credentials,
+                    credentials,
                     &cancellation,
                 )?;
                 Ok(NativeToolResult {

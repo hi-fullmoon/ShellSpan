@@ -99,6 +99,7 @@ fn pending_executions(events: &[AgentSessionEvent]) -> PendingExecutions<'_> {
     pending
 }
 
+#[cfg(test)]
 pub(super) fn unresolved_execution_count(events: &[AgentSessionEvent]) -> usize {
     pending_executions(events).len()
 }

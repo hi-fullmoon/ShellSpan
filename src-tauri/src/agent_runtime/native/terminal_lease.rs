@@ -281,6 +281,7 @@ impl TerminalLeaseManager {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn acquire(
         &self,
         session_id: &str,

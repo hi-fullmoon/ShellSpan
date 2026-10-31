@@ -324,17 +324,17 @@
             } else {
                 source.clone()
             };
-            let frames = native_editor_typing_chunks(&command, shell);
+            let frames = native_editor_typing_chunks(&command, &source, shell);
             assert!(frames.len() > 1 && frames.len() <= TYPING_MAX_STEPS);
             let mut previous = "";
-            for (_, prefix) in &frames {
+            for (_, prefix) in &frames[..frames.len() - 1] {
                 assert!(prefix.starts_with(previous) && prefix.len() > previous.len());
-                assert!(command.starts_with(prefix));
+                assert!(source.starts_with(prefix));
                 assert!(
-                    command
+                    source
                         .grapheme_indices(true)
                         .any(|(index, _)| index == prefix.len())
-                        || prefix.len() == command.len()
+                        || prefix.len() == source.len()
                 );
                 previous = prefix;
             }

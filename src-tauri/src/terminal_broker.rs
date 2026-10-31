@@ -766,10 +766,10 @@ impl TerminalCommandOperation {
                         .native_checkpoint
                         .as_ref()
                         .is_some_and(|(_, acknowledged)| !acknowledged)
-                    && !(data.native_read_only_probe
-                        && data.native_probe_refresh
-                        && !data.native_probe_waiting_prompt
-                        && !data.native_probe_outstanding)
+                    && (!data.native_read_only_probe
+                        || !data.native_probe_refresh
+                        || data.native_probe_waiting_prompt
+                        || data.native_probe_outstanding)
             })
             .map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE")?;
         Ok(data.state == TerminalCommandState::Submitted

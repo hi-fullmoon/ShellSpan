@@ -736,7 +736,11 @@ async fn real_child_terminal_takeover_blocks_the_entire_delegation_until_turn_en
     }
     assert!(runtime
         .native_engine
-        .begin_delegated_terminal_turn(TERMINAL, "late-child", &[parent.session_id.clone()])
+        .begin_delegated_terminal_turn(
+            TERMINAL,
+            "late-child",
+            std::slice::from_ref(&parent.session_id)
+        )
         .unwrap_err()
         .starts_with("TERMINAL_LEASE_TAKEN_OVER"));
     runtime
