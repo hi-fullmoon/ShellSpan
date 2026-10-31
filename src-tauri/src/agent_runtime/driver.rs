@@ -793,14 +793,14 @@ async fn apply_pre_step_hooks(
             });
             messages
         }));
-    let raw_budget = estimate_request_budget(sessions, &entry.session_id, &model, &request)?;
+    let raw_budget = estimate_request_budget(sessions, &entry.session_id, model, &request)?;
     if raw_budget.requires_compaction() {
         compactions.record_budget(&entry.session_id, turn_id, step_id, &request, &raw_budget)?;
     }
     let request = tools
         .bound_request_results(&entry.session_id, turn_id, step_id, request, raw_budget)
         .await?;
-    let budget = estimate_request_budget(sessions, &entry.session_id, &model, &request)?;
+    let budget = estimate_request_budget(sessions, &entry.session_id, model, &request)?;
     if budget.requires_compaction() {
         compactions.record_budget(&entry.session_id, turn_id, step_id, &request, &budget)?;
     }
@@ -1136,8 +1136,7 @@ async fn run_step(
         };
         let request_surface_generation = request.surface_generation;
         if prepared_call.is_none() {
-            let raw_budget =
-                estimate_request_budget(sessions, &entry.session_id, &model, &request)?;
+            let raw_budget = estimate_request_budget(sessions, &entry.session_id, model, &request)?;
             if raw_budget.requires_compaction() {
                 compactions.record_budget(
                     &entry.session_id,
@@ -1151,7 +1150,7 @@ async fn run_step(
                 .bound_request_results(&entry.session_id, turn_id, step_id, request, raw_budget)
                 .await?;
         }
-        let budget = estimate_request_budget(sessions, &entry.session_id, &model, &request)?;
+        let budget = estimate_request_budget(sessions, &entry.session_id, model, &request)?;
         // Retries retain the same prepared request. Its input was already
         // admitted; compaction is only appropriate when assembling a new call.
         if budget.requires_compaction() && prepared_call.is_none() {
@@ -1213,7 +1212,7 @@ async fn run_step(
             .as_ref()
             .expect("prepared call")
             .request(request_id.clone());
-        let budget = estimate_request_budget(sessions, &entry.session_id, &model, &request)?;
+        let budget = estimate_request_budget(sessions, &entry.session_id, model, &request)?;
         if !budget.fits_hard_limit() {
             compactions.record_budget(&entry.session_id, turn_id, step_id, &request, &budget)?;
             let recovery = compact_prepared_budget(

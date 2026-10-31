@@ -74,14 +74,14 @@ pub(crate) fn derive_task(events: &[AgentSessionEvent]) -> AgentTaskProjection {
             }
             // Unfinished work survives interruption and explicit continuation.
             // Only retire a completed plan when another turn starts.
-            AgentSessionEventPayload::TurnStart => {
+            AgentSessionEventPayload::TurnStart
                 if projection.plan.as_ref().is_some_and(|plan| {
                     plan.steps
                         .iter()
                         .all(|step| step.status == super::AgentPlanStepStatus::Completed)
-                }) {
-                    projection.plan = None;
-                }
+                }) =>
+            {
+                projection.plan = None;
             }
             AgentSessionEventPayload::TaskPlan { version, steps } => {
                 projection.plan = Some(AgentTaskPlanProjection {
