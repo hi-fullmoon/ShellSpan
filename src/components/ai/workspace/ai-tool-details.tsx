@@ -1,11 +1,14 @@
+import { useMemo } from 'react';
 import { Clock3Icon } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
+import { cn } from '@/lib/utils';
 import { AiRouteHeader } from './ai-route-header';
 import { AiContentTitle } from './ai-content-title';
+import { AI_CONTENT_CODE_CLASS, AI_CONTENT_HEADER_CLASS } from './ai-style-classes';
 import {
   AiToolExpandedContent,
   AiToolCopyButton,
@@ -14,6 +17,8 @@ import {
   toolOutputForCopy,
   toolDisplaySummary,
   toolErrorIsInOutput,
+  toolDiffPreview,
+  toolExecutionDetails,
 } from './ai-tool-presentation';
 
 const DETAIL_PREVIEW_LIMIT = 64 * 1024;
@@ -36,7 +41,7 @@ function DetailSection({
 }) {
   return (
     <section className="ai-detail-section flex max-h-fit min-h-0 min-w-0 flex-1 flex-col">
-      <div className="ai-detail-section-header flex min-h-10 shrink-0 items-center justify-between gap-3 px-3 py-2">
+      <div className={cn(AI_CONTENT_HEADER_CLASS, 'ai-detail-section-header justify-between')}>
         <h3 className="min-w-0 flex-1"><AiContentTitle>{title}</AiContentTitle></h3>
       </div>
       <div className="ai-tool-content-region relative flex min-h-0 min-w-0 flex-col overflow-hidden" data-ai-copy-region>
@@ -60,7 +65,7 @@ function DetailCode({ value, label }: { readonly value: unknown; readonly label:
       title={label}
       actions={<AiToolCopyButton text={text} label={t('ai.workspace.details.copy', { section: label })} />}
     >
-      <pre className="ai-detail-code m-0 min-w-0 max-w-full px-3.5 py-3 whitespace-pre-wrap break-words"><code>{text}</code></pre>
+      <pre className={cn(AI_CONTENT_CODE_CLASS, 'ai-detail-code whitespace-pre-wrap break-words')}><code>{text}</code></pre>
     </DetailSection>
   );
 }
@@ -75,6 +80,12 @@ export function AiToolDetails({
   readonly onClose?: () => void;
 }): React.ReactNode {
   const { t } = useI18n();
+  const outputDiff = useMemo(() => node ? toolDiffPreview(node) : null, [node]);
+  const outputText = node ? toolOutputForCopy(node) : '';
+  const executionDetails = node ? toolExecutionDetails(node) : null;
+  const outputCopyAction = outputText ? (
+    <AiToolCopyButton text={outputText} label={t('ai.workspace.details.copy', { section: t('ai.workspace.details.output') })} />
+  ) : undefined;
   return (
     <div className="ai-details-root flex size-full min-h-0 min-w-0 flex-col" data-slot="ai-tool-details">
       <AiRouteHeader
@@ -104,18 +115,14 @@ export function AiToolDetails({
               <DetailCode value={node.input} label={t('ai.workspace.details.input')} />
               <DetailSection
                 title={t('ai.workspace.details.output')}
-                actions={toolOutputForCopy(node) ? (
-                  <AiToolCopyButton
-                    text={toolOutputForCopy(node)}
-                    label={t('ai.workspace.details.copy', { section: t('ai.workspace.details.output') })}
-                  />
-                ) : undefined}
+                actions={outputDiff ? undefined : outputCopyAction}
               >
                 {node.output === null && !node.error && node.state !== 'failed' && node.state !== 'rejected' && node.state !== 'running'
                   ? <p className="ai-details-empty m-0 py-3 px-3.5 [overflow-wrap:anywhere]">{t('ai.workspace.details.noOutput')}</p>
-                  : <AiToolExpandedContent node={node} showCopyActions={false} showInput={false} />}
+                  : <AiToolExpandedContent node={node} showCopyActions={false} showInput={false} scrollable={false} diffModel={outputDiff ?? undefined} diffCopyAction={outputDiff ? outputCopyAction : undefined} />}
                 {node.error && !toolErrorIsInOutput(node) && <p className="ai-detail-error m-0 py-3 px-3.5 [overflow-wrap:anywhere]">{node.error}</p>}
               </DetailSection>
+              {executionDetails && <DetailCode value={executionDetails} label={t('ai.workspace.details.execution')} />}
               <DetailCode
                 value={{
                   effect: node.effect,

@@ -17,12 +17,14 @@ import { Spinner } from '@/components/ui/empty-state';
 import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
 import { useI18n } from '@/hooks/useI18n';
 import { aiErrorMessage } from '@/lib/ai/error-message';
+import { cn } from '@/lib/utils';
 import type { AiPendingApproval } from '@/lib/ai/session-adapter';
 import type { LocaleKey } from '@/locales';
 import type { AgentSessionEffect } from '@/types/agent-session';
 import { AiErrorNotice } from './ai-error-notice';
 import { AiToolCopyButton } from './ai-tool-presentation';
 import { AiContentTitle } from './ai-content-title';
+import { AI_CONTENT_CODE_CLASS } from './ai-style-classes';
 
 export interface AiApprovalPanelProps {
   readonly approval: AiPendingApproval;
@@ -225,10 +227,10 @@ export function AiApprovalPanel({
                 <p className="text-xs font-medium text-muted-foreground">{t('ai.workspace.approval.action')}</p>
                 <p className="break-words text-sm">{action}</p>
                 {actionPath && (
-                  <pre className="ai-approval-command relative max-h-65 min-w-0 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] py-2.5 pr-10 pl-3" tabIndex={0}>
-                    <code>{actionPath}</code>
-                    <AiToolCopyButton text={actionPath} label={t('ai.workspace.tool.copyInput')} className="ai-content-copy absolute top-1 right-1" />
-                  </pre>
+                  <div className="ai-approval-command ai-tool-content-region relative min-w-0 overflow-hidden" data-ai-copy-region>
+                    <pre className={cn(AI_CONTENT_CODE_CLASS, 'max-h-65 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere]')} tabIndex={0}><code>{actionPath}</code></pre>
+                    <AiToolCopyButton text={actionPath} label={t('ai.workspace.tool.copyInput')} />
+                  </div>
                 )}
                 {searchQuery && <p className="whitespace-pre-wrap break-words text-sm">{t('ai.workspace.approval.query', { query: searchQuery })}</p>}
               </div>
@@ -244,10 +246,10 @@ export function AiApprovalPanel({
             {exactValue && (
               <div className="flex min-w-0 flex-col gap-1">
                 <p className="text-xs font-medium text-muted-foreground">{t(exactValueLabel)}</p>
-                <pre className="ai-approval-command relative max-h-65 min-w-0 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] py-2.5 pr-10 pl-3" tabIndex={0}>
-                  <code>{exactValue}</code>
-                  <AiToolCopyButton text={exactValue} label={t(command ? 'ai.workspace.tool.copyCommand' : 'ai.workspace.tool.copyInput')} className="ai-content-copy absolute top-1 right-1" />
-                </pre>
+                <div className="ai-approval-command ai-tool-content-region relative min-w-0 overflow-hidden" data-ai-copy-region>
+                  <pre className={cn(AI_CONTENT_CODE_CLASS, 'max-h-65 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere]')} tabIndex={0}><code>{exactValue}</code></pre>
+                  <AiToolCopyButton text={exactValue} label={t(command ? 'ai.workspace.tool.copyCommand' : 'ai.workspace.tool.copyInput')} />
+                </div>
               </div>
             )}
 

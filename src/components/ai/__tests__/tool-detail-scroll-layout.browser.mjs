@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdir, readFile, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,10 +22,14 @@ assert.ok(largePatch.length > 64 * 1024, 'The actual repository patch must exerc
 const failures = JSON.parse(await readFile(join(root, 'src/test/fixtures/tool-result-read-recovery.json'), 'utf8'));
 const path = join(root, 'package.json');
 const file = await readFile(path, 'utf8');
-const codePath = 'scripts/check-ai-panel-styles.mjs';
-const code = await readFile(join(root, codePath), 'utf8');
-const stdout = execFileSync(process.execPath, [codePath], { cwd: root, encoding: 'utf8' });
-const search = execFileSync('rg', ['--line-number', '"version"', path], { cwd: root, encoding: 'utf8' });
+const command = 'git log --oneline -100';
+const stdout = execFileSync('git', ['log', '--oneline', '-100'], { cwd: root, encoding: 'utf8' });
+const code = 'JSON.stringify(process.versions, null, 2)';
+const codeOutput = execFileSync(process.execPath, ['--print', code], { encoding: 'utf8' });
+const search = execFileSync('rg', ['--line-number', '.', path], { cwd: root, encoding: 'utf8' });
+const failedCheck = spawnSync(process.execPath, ['--check', source], { cwd: root, encoding: 'utf8' });
+assert.notEqual(failedCheck.status, 0, 'Checking TSX with Node must produce a real diagnostic');
+assert.ok(failedCheck.stderr.length > 0);
 const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error',
   cacheDir: join(artifacts, 'vite-cache'),
@@ -49,9 +53,9 @@ try {
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
       for (const locale of ['zh-CN', 'en-US']) {
-        for (const scenario of ['terminal', 'code', 'read', 'search', 'web', 'trash', 'diff', 'large-diff', 'failure', 'empty']) {
+        for (const scenario of ['terminal', 'code', 'read', 'search', 'web', 'generic', 'trash', 'diff', 'large-diff', 'failure', 'long-failure', 'empty']) {
           await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__details`);
-          await page.evaluate(async ({ patch, failures, locale, scenario, path, file, codePath, code, stdout, search }) => {
+          await page.evaluate(async ({ patch, failures, locale, scenario, path, file, command, code, codeOutput, stdout, search, diagnostic, source }) => {
             const { React, createRoot } = await import('/src/components/ai/__tests__/agent-content-surfaces.browser-runtime.ts');
             await import('/src/styles/base.css');
             await import('/src/components/ai/styles/styles.css');
@@ -69,10 +73,12 @@ try {
                 summary: 'src/components/ai/workspace/ai-tool-details.tsx', durationMs: null,
                 input: { patch }, output: { diff: patch }, error: null, target: null,
                 effect: 'stateChange', evidenceRefs: [], idempotency: null, approval: null };
-            if (scenario === 'terminal') node = { ...node, name: 'run_terminal_command', input: { command: `node ${codePath}` }, output: { stdout, exitCode: 0 } };
-            if (scenario === 'code') node = { ...node, name: 'run_code', input: { code, language: 'javascript' }, output: { stdout } };
+            if (scenario === 'terminal') node = { ...node, name: 'run_terminal_command', input: { command }, output: { stdout, exitCode: 0 } };
+            if (scenario === 'code') node = { ...node, name: 'run_code', input: { code, language: 'javascript' }, output: { stdout: codeOutput } };
+            if (scenario === 'generic') node = { ...node, name: 'git_history', input: { command }, output: stdout };
+            if (scenario === 'long-failure') node = { ...node, name: 'run_terminal_command', state: 'failed', input: { command: `node --check ${source}` }, output: diagnostic, error: diagnostic, summary: diagnostic };
             if (scenario === 'read') node = { ...node, name: 'read_file', input: { path }, output: file };
-            if (scenario === 'search') node = { ...node, name: 'search_text', input: { path, query: '"version"' }, output: search };
+            if (scenario === 'search') node = { ...node, name: 'search_text', input: { path, query: '.' }, output: search };
             if (scenario === 'web') {
               const url = new URL('/package.json', location.href).href;
               const result = await fetch(url);
@@ -82,7 +88,7 @@ try {
             if (scenario === 'trash') node = { ...node, name: 'trash_file', state: 'running', input: { path }, output: null };
             if (scenario !== 'empty' && !node) throw new Error('The recorded tool must be available');
             createRoot(document.getElementById('root')).render(React.createElement(AiToolDetails, { node, onBack() {} }));
-          }, { patch: scenario === 'large-diff' ? largePatch : patch, failures, locale, scenario, path, file, codePath, code, stdout, search });
+          }, { patch: scenario === 'large-diff' ? largePatch : patch, failures, locale, scenario, path, file, command, code, codeOutput, stdout, search, diagnostic: failedCheck.stderr, source });
           const detail = page.locator('[data-slot="ai-tool-details"]');
           await detail.waitFor();
           if (scenario !== 'empty') await detail.locator('.ai-detail-section').first().waitFor();
@@ -92,7 +98,7 @@ try {
             if (['code', 'read', 'search', 'web', 'trash'].includes(scenario)) {
               assert.equal(await output.locator('.ai-tool-surface-header').count(), 0, `${scenario}: output must not repeat input headers`);
             }
-            if (scenario === 'code') assert.equal(await output.locator('.ai-code-output pre').textContent(), stdout);
+            if (scenario === 'code') assert.equal(await output.locator('.ai-code-output pre').textContent(), codeOutput);
             if (scenario === 'web') assert.equal(await output.locator('.ai-web-content pre').textContent(), file);
           }
           if (scenario === 'diff') await detail.locator('.ai-diff-body').first().waitFor();
@@ -118,12 +124,33 @@ try {
                 `${context}: no outer overflow: ${JSON.stringify(container)}`);
             }
             if (scenario === 'empty') continue;
+            for (const header of await detail.locator('.ai-tool-surface-header').all()) {
+              const geometry = await header.evaluate(element => {
+                const rect = element.getBoundingClientRect();
+                const title = element.querySelector('.ai-content-title').getBoundingClientRect();
+                return { minHeight: getComputedStyle(element).minHeight, height: rect.height,
+                  centered: Math.abs((rect.top + rect.bottom) / 2 - (title.top + title.bottom) / 2) <= 1 };
+              });
+              assert.equal(geometry.minHeight, '32px', `${context}: detail content headers use the shared 32px minimum`);
+              assert.ok(geometry.height >= 32 && geometry.centered, `${context}: header text stays vertically centered`);
+              if (scenario === 'terminal') assert.equal(geometry.height, 32, `${context}: Shell header stays 32px`);
+            }
             assert.equal(outside.at(-1).overflowY, 'hidden', `${context}: the section stack must not scroll`);
             const headers = detail.locator('.ai-detail-section-header');
             const positions = await headers.evaluateAll(elements => elements.map(element => element.getBoundingClientRect().top));
             const viewports = detail.locator('.ai-detail-section > .ai-tool-content-region > [data-slot="scroll-area"] > [data-slot="scroll-area-viewport"]');
-            assert.equal(await viewports.count(), 3);
-            for (let index = 0; index < 3; index++) {
+            const sectionCount = await headers.count();
+            assert.ok(sectionCount >= 3, `${context}: input, output and approval sections remain present`);
+            assert.equal(await viewports.count(), sectionCount, `${context}: each section has one scroll viewport`);
+            const output = detail.locator('.ai-detail-section').nth(1);
+            assert.equal(await output.locator('[data-slot="scroll-area-viewport"]').count(), 1,
+              `${context}: output must have exactly one scroll viewport`);
+            const nested = await viewports.nth(1).evaluate(viewport => [...viewport.querySelectorAll('*')]
+              .filter(element => ['auto', 'scroll'].includes(getComputedStyle(element).overflowY)
+                && element.clientHeight > 0 && element.scrollHeight > element.clientHeight + 1)
+              .map(element => ({ className: element.className, height: element.clientHeight, scrollHeight: element.scrollHeight })));
+            assert.deepEqual(nested, [], `${context}: output must not contain a second vertical scroll container`);
+            for (let index = 0; index < sectionCount; index++) {
               const viewport = viewports.nth(index);
               const dimensions = await viewport.evaluate(element => ({
                 height: element.clientHeight, scrollHeight: element.scrollHeight,
@@ -137,7 +164,11 @@ try {
               await page.waitForFunction(index => {
                 const viewports = document.querySelectorAll('.ai-detail-section > .ai-tool-content-region > [data-slot="scroll-area"] > [data-slot="scroll-area-viewport"]');
                 return viewports[index].scrollTop > 0;
-              }, index);
+              }, index).catch(async error => {
+                const current = await viewport.evaluate(element => ({ height: element.clientHeight, scrollHeight: element.scrollHeight,
+                  scrollTop: element.scrollTop, focused: document.activeElement === element, overflowY: getComputedStyle(element).overflowY }));
+                throw new Error(`${context}: section ${index} did not scroll with End: ${JSON.stringify(current)}`, { cause: error });
+              });
               assert.deepEqual(await headers.evaluateAll(elements => elements.map(element => element.getBoundingClientRect().top)), positions,
                 `${context}: scrolling content must keep all section headings fixed`);
               await viewport.evaluate(element => { element.scrollTop = 0; });

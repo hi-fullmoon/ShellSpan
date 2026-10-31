@@ -1,3 +1,17 @@
+/* Animate on the scroll viewport; native scrollbar pseudo-elements do not
+ * consistently run color transitions across desktop engines. */
+@property --ai-scrollbar {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: transparent;
+}
+
+@property --ai-scrollbar-hover {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: transparent;
+}
+
 @supports not selector(::-webkit-scrollbar) {
   .ai-panel-shell,
   .ai-panel-shell * {
@@ -33,6 +47,14 @@
 
 @media (hover: hover) {
   /* Keep the tracks' dimensions stable while only hiding their paint. */
+  .ai-tool-scroll-area > [data-slot='scroll-area-scrollbar'] {
+    transition: opacity var(--ai-transition-duration-slow) ease-out;
+  }
+
+  .ai-tool-scroll-area:hover > [data-slot='scroll-area-scrollbar'] {
+    transition-duration: var(--ai-transition-duration);
+  }
+
   .ai-tool-scroll-area:not(:hover) > [data-slot='scroll-area-scrollbar'] {
     opacity: 0;
   }
@@ -41,9 +63,34 @@
     background: transparent;
   }
 
+  .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true']) {
+    --ai-scrollbar: transparent;
+    --ai-scrollbar-hover: transparent;
+    transition: --ai-scrollbar var(--ai-transition-duration-slow) ease-out,
+      --ai-scrollbar-hover var(--ai-transition-duration-slow) ease-out;
+  }
+
+  .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true']):hover {
+    --ai-scrollbar: var(--app-scrollbar-thumb);
+    --ai-scrollbar-hover: var(--app-scrollbar-thumb-hover);
+    transition-duration: var(--ai-transition-duration);
+  }
+
+  .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true'])::-webkit-scrollbar-thumb {
+    background: var(--ai-scrollbar);
+  }
+
+  .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true'])::-webkit-scrollbar-thumb:hover {
+    background: var(--ai-scrollbar-hover);
+  }
+
   @supports not selector(::-webkit-scrollbar) {
     .ai-panel-shell :is(.ai-code-block, .ai-read-block, .ai-search-block, .ai-web-block):not(:hover) :is(pre, .ai-search-results, .ai-web-content) {
       scrollbar-color: transparent transparent;
+    }
+
+    .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true']) {
+      scrollbar-color: var(--ai-scrollbar) transparent;
     }
   }
 }
@@ -61,6 +108,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .ai-tool-scroll-area > [data-slot='scroll-area-scrollbar'],
+  .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true']) {
+    transition: none;
+  }
+
   .ai-disclosure-leading > * {
     transition: none !important;
   }

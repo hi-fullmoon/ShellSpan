@@ -127,6 +127,7 @@ try {
               { ...base, kind: 'systemPrompt', key: 'guide', content: data.guide },
             ] })),
             block('details', React.createElement(AiToolDetails, { node: read, onBack() {} }), 600),
+            block('details-error', React.createElement(AiToolDetails, { node: failed, onBack() {} }), 600),
           ];
           if (data.captureAll) {
             const dispatched = data.recordedTerminal.findIndex(event => event.type === 'tool/execution' && event.data.status === 'dispatched');
@@ -227,6 +228,55 @@ try {
           await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
           for (const width of [380, 720]) {
             await page.setViewportSize({ width, height: 900 });
+            const context = `${engine.name()}/${locale}/${theme}/${width}`;
+            const codeStyles = await page.locator('.ai-content-code').evaluateAll(elements => elements.map(element => {
+              const style = getComputedStyle(element);
+              return { section: element.closest('section[id]')?.id, font: style.fontFamily,
+                fontSize: style.fontSize, lineHeight: style.lineHeight, tabSize: style.tabSize,
+                paddingTop: style.paddingTop, paddingBottom: style.paddingBottom, paddingLeft: style.paddingLeft };
+            }));
+            assert.ok(codeStyles.length >= 15, `${context}: cover inline code, errors, detail panes and artifact previews`);
+            for (const style of codeStyles) {
+              assert.equal(style.font, codeStyles[0].font, `${context}/${style.section}: shared code font`);
+              assert.equal(style.fontSize, '13px', `${context}/${style.section}: shared code size`);
+              assert.equal(style.lineHeight, '22px', `${context}/${style.section}: shared code line height`);
+              assert.equal(style.tabSize, '2', `${context}/${style.section}: shared tab width`);
+              assert.equal(style.paddingTop, '8px', `${context}/${style.section}: shared top padding`);
+              assert.equal(style.paddingBottom, '8px', `${context}/${style.section}: shared bottom padding`);
+              assert.equal(style.paddingLeft, '14px', `${context}/${style.section}: shared left padding`);
+            }
+            assert.ok(await page.locator('.ai-content-code code').evaluateAll(elements => elements.every(element => {
+              const actual = getComputedStyle(element);
+              const parent = getComputedStyle(element.closest('.ai-content-code'));
+              return actual.fontFamily === parent.fontFamily && actual.fontSize === parent.fontSize && actual.lineHeight === parent.lineHeight;
+            })), `${context}: nested code elements inherit the shared typography`);
+            const headers = await page.locator('.ai-content-header').evaluateAll(elements => elements.map(element => {
+              const style = getComputedStyle(element);
+              return { roomy: Boolean(element.closest('.ai-diff-block')) || (element.matches('.ai-tool-surface-header') && Boolean(element.closest('[data-slot="ai-tool-details"]'))), minHeight: style.minHeight, fontSize: style.fontSize, lineHeight: style.lineHeight,
+                paddingTop: style.paddingTop, paddingBottom: style.paddingBottom, paddingLeft: style.paddingLeft,
+                titleSize: getComputedStyle(element.querySelector('.ai-content-title')).fontSize };
+            }));
+            assert.ok(headers.length >= 15, `${context}: every content title uses shared header styling`);
+            for (const { roomy, ...header } of headers) assert.deepEqual(header, {
+              minHeight: roomy ? '32px' : '24px', fontSize: '12px', lineHeight: '18px',
+              paddingTop: '0px', paddingBottom: '0px', paddingLeft: '14px', titleSize: '12px',
+            }, `${context}: diff and detail content headers use 32px while other headers retain their size`);
+            for (const selector of ['#markdown .ai-markdown-code-copy', '#error .ai-tool-copy-button',
+              '#details-error .ai-tool-copy-button', '#code .ai-tool-copy-button', '#artifact-text .ai-detail-copy',
+              '#queue .ai-tool-copy-button', '#approval .ai-tool-copy-button']) {
+              for (const button of await page.locator(selector).all()) {
+                const geometry = await button.evaluate(element => {
+                  const rect = element.getBoundingClientRect();
+                  const region = element.offsetParent.getBoundingClientRect();
+                  const icon = element.querySelector('svg').getBoundingClientRect();
+                  return { width: rect.width, height: rect.height, icon: icon.width,
+                    top: rect.top - region.top - element.offsetParent.clientTop,
+                    right: region.right - element.offsetParent.clientLeft - rect.right };
+                });
+                assert.deepEqual(geometry, { width: 24, height: 24, icon: 12, top: 4, right: 14 },
+                  `${context}/${selector}: shared copy action geometry`);
+              }
+            }
             for (const preview of await page.locator([
               '.ai-tool-scroll-area [data-slot="scroll-area-viewport"]',
               '.ai-details-root [data-slot="scroll-area-viewport"]',
@@ -380,7 +430,8 @@ try {
             assert.ok(splitLayout.independent && splitLayout.fits, 'Each content box must scroll independently within panel bounds');
             await generic.locator('.ai-io-input [data-slot="scroll-area-viewport"]').evaluate(element => { element.scrollTop = 0; });
             for (const selector of ['#read .ai-read-lines', '#search .ai-search-results', '#web .ai-web-content',
-              '#diff .ai-diff-content', '#code .ai-code-content', '#generic .ai-io-output', '#markdown .ai-code-block-pre']) {
+              '#diff .ai-diff-content', '#code .ai-code-content', '#generic .ai-io-output', '#markdown .ai-code-block-pre',
+              '#approval .ai-content-code', '#queue .ai-content-code']) {
               for (const root of await page.locator(selector).all()) {
                 const shared = await root.getAttribute('data-slot') === 'scroll-area';
                 const body = shared ? root.locator('[data-slot="scroll-area-viewport"]') : root;

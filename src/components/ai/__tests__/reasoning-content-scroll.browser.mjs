@@ -57,7 +57,14 @@ try {
           const trigger = page.locator('.ai-reasoning-row [data-slot="collapsible-trigger"]');
           await trigger.waitFor();
           if (mode === 'agent') {
-            assert.equal(await page.locator('.ai-disclosure-summary').evaluate(element => getComputedStyle(element).webkitLineClamp), '2');
+            const summary = page.locator('.ai-disclosure-summary');
+            assert.deepEqual(await summary.evaluate(element => ({
+              whiteSpace: getComputedStyle(element).whiteSpace,
+              overflow: getComputedStyle(element).overflowX,
+              textOverflow: getComputedStyle(element).textOverflow,
+              height: element.getBoundingClientRect().height,
+            })), { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', height: 24 },
+            `${context}: collapsed reasoning summary stays on one line`);
           }
           if (await trigger.getAttribute('aria-expanded') === 'false') await trigger.click();
           else if (mode === 'ask') {
@@ -116,5 +123,5 @@ try {
       }
     } finally { await browser.close(); }
   }
-  console.log('Reasoning height, two-line preview, stream following and manual reading passed in Chromium/WebKit, Agent/Ask, at 380px/720px.');
+  console.log('Reasoning height, single-line preview, stream following and manual reading passed in Chromium/WebKit, Agent/Ask, at 380px/720px.');
 } finally { await server.close(); }

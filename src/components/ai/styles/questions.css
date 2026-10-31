@@ -191,5 +191,5 @@
   border-radius: var(--ai-content-radius);
   background: var(--ai-code-block);
   color: var(--ai-text);
-  font: var(--ai-font-markdown-code-block-small);
+  font: var(--ai-font-markdown-code-block);
 }

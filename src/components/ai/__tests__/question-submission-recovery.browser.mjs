@@ -101,6 +101,12 @@ try {
             await content.evaluate(element => { element.scrollTop = element.scrollHeight; });
             const reason = alert.locator('pre');
             assert.ok(await reason.isVisible());
+            assert.deepEqual(await reason.evaluate(element => {
+              const style = getComputedStyle(element);
+              return { fontSize: style.fontSize, lineHeight: style.lineHeight,
+                paddingTop: style.paddingTop, paddingBottom: style.paddingBottom, paddingLeft: style.paddingLeft };
+            }), { fontSize: '13px', lineHeight: '22px', paddingTop: '8px', paddingBottom: '8px', paddingLeft: '14px' },
+            'Question diagnostics use the same typography and spacing as tool errors');
             await reason.focus();
             assert.ok(await reason.evaluate(element => document.activeElement === element));
             await page.screenshot({ path: join(screenshots, `${engine.name()}-${locale}-${width}-${issue.reason}.png`) });

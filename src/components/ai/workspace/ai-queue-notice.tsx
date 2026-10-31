@@ -6,6 +6,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { useI18n } from '@/hooks/useI18n';
 import { cn } from '@/lib/utils';
 import { AiToolCopyButton } from './ai-tool-presentation';
+import { AI_CONTENT_CODE_CLASS } from './ai-style-classes';
 
 export function AiQueueNotice({ conflict, error, onRetry }: {
   readonly conflict: boolean;
@@ -30,9 +31,9 @@ export function AiQueueNotice({ conflict, error, onRetry }: {
             {t('ai.workspace.queue.errorDetails')}
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <div className="ai-queue-notice-preview relative mt-1 max-h-65 overflow-y-auto whitespace-pre-wrap p-2 pr-10 font-mono text-xs text-muted-foreground [overflow-wrap:anywhere]" tabIndex={0}>
-              {error}
-              <AiToolCopyButton text={error} label={t('ai.workspace.tool.copyOutput')} className="ai-content-copy absolute top-1 right-1" />
+            <div className="ai-queue-notice-preview ai-tool-content-region relative mt-1 min-w-0 overflow-hidden" data-ai-copy-region>
+              <div className={cn(AI_CONTENT_CODE_CLASS, 'max-h-65 overflow-y-auto whitespace-pre-wrap text-muted-foreground [overflow-wrap:anywhere]')} tabIndex={0}>{error}</div>
+              <AiToolCopyButton text={error} label={t('ai.workspace.tool.copyOutput')} />
             </div>
           </CollapsibleContent>
         </Collapsible>}

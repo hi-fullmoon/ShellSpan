@@ -288,13 +288,14 @@ describe('AI tool presentation', () => {
     expect(screen.getAllByText(failure.error!)).toHaveLength(1);
     const copy = screen.getByRole('button', { name: locale === 'zh-CN' ? '复制输出' : 'Copy output' });
     expect(copy).toBeVisible();
-    expect(container.querySelector('.ai-tool-surface-header')).toHaveTextContent(locale === 'zh-CN' ? '查看错误详情' : 'View error details');
-    expect(container.querySelector('.ai-tool-surface-header')).not.toContainElement(copy);
+    expect(container.querySelector('[data-ai-tool-view="error"] .ai-tool-surface-header')).toBeNull();
+    expect(screen.queryByText(locale === 'zh-CN' ? '查看错误详情' : 'View error details')).not.toBeInTheDocument();
     expect(copy.closest('[data-ai-copy-region]')).toBe(copy.closest('.ai-tool-content-region'));
     expect(copy.closest('.ai-tool-content-region')).toContainElement(container.querySelector('code'));
     expect(copy).toHaveClass('absolute');
     expect(container.querySelector('[data-ai-tool-view="error"] code')).toHaveTextContent(failure.error!);
-    expect(container.querySelector('[data-ai-tool-view="error"] pre')).toHaveClass('px-3.5', 'pt-1', 'pb-3');
+    expect(container.querySelector('[data-ai-tool-view="error"] pre')).toHaveClass('ai-content-code', 'px-3.5', 'py-2');
+    expect(container.querySelector('[data-ai-tool-view="error"] pre')).toHaveAttribute('tabindex', '0');
     expect(container.querySelector('.ai-read-line')).toBeNull();
     expect(container.querySelector('[data-error]')).toBeInTheDocument();
 
@@ -479,6 +480,12 @@ describe('AI tool presentation', () => {
     expect(container.querySelector('[data-tool-variant="plan"]')).toBeInTheDocument();
     expect(container.querySelector('.lucide-list-todo')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^更新任务计划:/u })).toBeInTheDocument();
+    const summary = container.querySelector('.ai-disclosure-summary');
+    expect(summary).toHaveClass('truncate');
+    expect(summary).not.toHaveClass('line-clamp-2');
+    await userEvent.setup().click(screen.getByRole('button', { name: /^更新任务计划:/u }));
+    expect(summary).toHaveClass('truncate');
+    expect(summary).not.toHaveClass('whitespace-pre-wrap', 'overflow-auto');
   });
 
   it('limits command input to two lines and expands it with one click', async () => {
@@ -490,6 +497,10 @@ describe('AI tool presentation', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(toggle.firstElementChild).toHaveClass('line-clamp-2');
     expect(container.querySelector('.ai-terminal-command')).toBe(toggle);
+    const commandTitle = toggle.closest('.ai-content-title');
+    expect(commandTitle).toHaveClass('ai-tool-scroll-area');
+    expect(commandTitle).toHaveAttribute('data-slot', 'scroll-area');
+    expect(commandTitle?.querySelector('[data-slot="scroll-area-viewport"]')).toContainElement(toggle);
     const header = container.querySelector('.ai-terminal-header');
     const stateDot = header?.querySelector('.ai-state-dot');
     expect(header).toHaveTextContent('Shell');
@@ -497,12 +508,16 @@ describe('AI tool presentation', () => {
     expect(header).not.toContainElement(toggle);
     expect(stateDot).not.toBeInTheDocument();
     expect(container.querySelector('.ai-terminal-prompt')).toHaveTextContent('$');
+    expect(container.querySelector('.ai-terminal-command-row')).toHaveClass('py-1');
+    expect(container.querySelector('.ai-terminal-command-row')).not.toHaveClass('pb-3');
     expect(container.querySelector('.ai-terminal-output')).toContainElement(toggle);
 
     await user.click(toggle);
     expect(screen.getByRole('button', { name: 'Collapse command' })).toHaveAttribute('aria-expanded', 'true');
     expect(toggle.firstElementChild).toHaveClass('block');
     expect(toggle.firstElementChild).not.toHaveClass('line-clamp-2');
+    expect(commandTitle).toHaveClass('max-h-[6lh]');
+    expect(commandTitle).not.toHaveClass('overflow-auto');
     expect(header).toHaveClass('items-center');
 
     await user.click(toggle);
@@ -539,7 +554,7 @@ describe('AI tool presentation', () => {
     const inputCopy = screen.getByRole('button', { name: 'Copy input' });
     expect(container.querySelectorAll('.ai-tool-copy-button')).toHaveLength(2);
     expect(inputCopy).toHaveClass('static', 'shrink-0');
-    expect(inputCopy.closest('.ai-tool-surface-header')).toHaveClass('px-3.5', 'py-2');
+    expect(inputCopy.closest('.ai-tool-surface-header')).toHaveClass('ai-content-header', 'min-h-6', 'px-3.5');
     expect(copy.closest('.ai-tool-surface-header')).not.toBeInTheDocument();
     expect(copy.parentElement).toHaveAttribute('data-ai-copy-region');
     expect(copy.parentElement).toHaveClass('relative');
@@ -567,7 +582,8 @@ describe('AI tool presentation', () => {
     const result = spawnSync('git', ['show', '--format=', '--unified=20', revision.stdout.trim(), '--', path], { encoding: 'utf8' });
     expect(result.status).toBe(0);
     expect(result.stdout).not.toBe('');
-    const { container } = render(<AiToolExpandedContent node={{ ...node, name: 'apply_patch', input: { patch: result.stdout }, output: { diff: result.stdout } }} />);
+    const patchNode = { ...node, name: 'apply_patch', input: { patch: result.stdout }, output: { diff: result.stdout } };
+    const { container, rerender } = render(<AiToolExpandedContent node={patchNode} />);
     const viewport = container.querySelector('.ai-diff-block [data-slot="scroll-area-viewport"]');
     expect(viewport?.closest('.ai-diff-content')).toHaveClass('max-h-65');
     for (const body of container.querySelectorAll('.ai-diff-body')) {
@@ -576,6 +592,24 @@ describe('AI tool presentation', () => {
     expect(container.querySelectorAll('.ai-diff-body').length).toBeGreaterThan(0);
     const titles = [...container.querySelectorAll('.ai-diff-block .ai-content-title')].map(title => title.textContent);
     expect(new Set(titles).size).toBe(titles.length);
+
+    rerender(<AiToolDetails node={patchNode} onBack={() => undefined} />);
+    const output = container.querySelectorAll('.ai-detail-section')[1];
+    const copy = screen.getByRole('button', { name: 'Copy Output' });
+    const firstFile = output.querySelector('.ai-diff-block section');
+    const header = firstFile?.querySelector('.ai-tool-surface-header');
+    const body = firstFile?.querySelector('.ai-tool-content-region');
+    expect(header).toHaveClass('ai-content-header', 'min-h-8', 'items-center');
+    expect(header).not.toHaveClass('min-h-6');
+    expect(header?.nextElementSibling).toBe(body);
+    expect(body).toContainElement(copy);
+    expect(body).toHaveAttribute('data-ai-copy-region');
+    expect(header).not.toContainElement(copy);
+    expect(output.querySelectorAll('.ai-tool-copy-button')).toHaveLength(1);
+    expect(output.querySelector(':scope > .ai-tool-content-region > .ai-tool-copy-button')).toBeNull();
+    expect(output.querySelectorAll('[data-slot="scroll-area-viewport"]')).toHaveLength(1);
+    expect(output.querySelector('.ai-diff-content')).toHaveClass('max-h-none');
+    expect(output.querySelector('.ai-diff-content')).not.toHaveAttribute('data-slot', 'scroll-area');
   });
 
   it('shows a leading icon on the inspect action and still opens tool details', async () => {

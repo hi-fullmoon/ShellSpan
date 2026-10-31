@@ -395,12 +395,18 @@ describe('AiConversationNodeList', () => {
 
     const disclosure = screen.getByRole('button', { name: 'Reasoning Inspect the service state' });
     expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+    expect(disclosure.querySelector('.ai-disclosure-summary')).toHaveClass('truncate');
+    expect(disclosure.querySelector('.ai-disclosure-summary')).not.toHaveClass('line-clamp-2');
     expect(getComputedStyle(disclosure.querySelector('.ai-disclosure-leading > svg:first-child')!).translate).toBe('0 -1px');
     expect(container.querySelector('.ai-reasoning-body')).toBeNull();
     await user.click(disclosure);
     expect(container.querySelector('.ai-reasoning-body'))
       .toHaveTextContent('Inspect the service state Choose the safe read-only command.');
     expect(disclosure).toHaveAttribute('aria-expanded', 'true');
+    expect(disclosure.querySelector('.ai-disclosure-summary')).toHaveClass('truncate');
+    expect(disclosure.querySelector('.ai-disclosure-summary')).not.toHaveClass('whitespace-pre-wrap', 'overflow-auto');
+    await user.click(disclosure);
+    expect(disclosure.querySelector('.ai-disclosure-summary')).toHaveClass('truncate');
     expect(container.querySelectorAll('[data-ai-running-indicator]')).toHaveLength(0);
   });
 
@@ -527,7 +533,8 @@ describe('AiConversationNodeList', () => {
       ['added', `3${longLine}`],
     ]);
     expect(diff.querySelector('section')).toHaveClass('min-w-0', 'max-w-full');
-    expect(diff.querySelector('.ai-block-banner')).toHaveClass('ai-tool-surface-header', 'px-3.5', 'py-2');
+    expect(diff.querySelector('.ai-block-banner')).toHaveClass('ai-content-header', 'ai-tool-surface-header', 'min-h-8', 'px-3.5');
+    expect(diff.querySelector('.ai-block-banner')).not.toHaveClass('min-h-6');
     expect(diff).toHaveClass('overflow-hidden');
     expect(diff.querySelector('.ai-diff-content')).toHaveClass('max-h-65');
     expect(diff.querySelector('[data-slot="scroll-area-viewport"]')).toHaveStyle({ overflow: 'scroll' });
@@ -789,7 +796,10 @@ describe('AiConversationNodeList', () => {
     const card = flow.querySelector('.ai-io-card') as HTMLElement;
     const payload = flow.querySelector('.ai-io-text') as HTMLElement;
     expect(flow).toHaveClass('min-w-0');
-    expect(card).toHaveClass('max-w-[calc(100%-4px)]', 'overflow-hidden');
+    expect(card).toHaveClass('max-w-[calc(100%-4px)]');
+    const sections = card.querySelectorAll(':scope > .ai-io-section');
+    expect(sections).toHaveLength(2);
+    for (const section of sections) expect(section).toHaveClass('min-w-0', 'overflow-hidden');
     expect(card.querySelector('.ai-io-input')).toHaveClass('max-h-65');
     expect(card.querySelector('[data-slot="scroll-area-viewport"]')).toHaveStyle({ overflow: 'scroll' });
     expect(payload).toHaveClass('[overflow-wrap:anywhere]');

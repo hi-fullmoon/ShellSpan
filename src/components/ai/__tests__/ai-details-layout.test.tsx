@@ -75,12 +75,13 @@ describe('AI details content sizing', () => {
       expect(section).not.toHaveClass('shrink-0');
       expect(section).not.toHaveClass('overflow-hidden');
       const header = section.querySelector('.ai-detail-section-header');
-      expect(header).toHaveClass('items-center', 'justify-between', 'px-3', 'shrink-0');
+      expect(header).toHaveClass('ai-content-header', 'min-h-6', 'items-center', 'justify-between', 'px-3.5', 'shrink-0');
       const body = section.querySelector('.ai-tool-content-region');
       expect(header?.nextElementSibling).toBe(body);
       expect(body).toHaveClass('overflow-hidden');
       expect(body).not.toContainElement(header?.querySelector('h3') ?? null);
       expect(section.querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'max-h-65');
+      expect(section.querySelectorAll('[data-slot="scroll-area-viewport"]')).toHaveLength(1);
       expect(section.querySelector('[data-slot="scroll-area-content"]')).toHaveStyle({ minWidth: '0' });
       expect(header?.querySelectorAll('.ai-tool-copy-button')).toHaveLength(0);
       expect(section.querySelector('.ai-tool-content-region')).toContainElement(section.querySelector('.ai-tool-copy-button'));

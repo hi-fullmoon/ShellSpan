@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CheckIcon, CopyIcon, FileOutputIcon } from 'lucide-react';
+import { FileOutputIcon } from 'lucide-react';
 
-import { Button } from '@/components/ui/button';
 import { ScrollArea, ScrollAreaContent } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import type { AgentArtifactResponse } from '@/types/agent-session';
 import { AiRouteHeader } from './ai-route-header';
 import { taskBudgetArtifactTitleKey } from '@/lib/ai/task-token-budget';
+import { cn } from '@/lib/utils';
+import { AI_CONTENT_CODE_CLASS } from './ai-style-classes';
+import { AiToolCopyButton } from './ai-tool-presentation';
 
 const ARTIFACT_PREVIEW_BYTES = 256 * 1024;
 
@@ -29,36 +30,6 @@ function displayBody(artifact: AgentArtifactResponse): string {
   }
 }
 
-function ArtifactCopy({ text }: { readonly text: string }) {
-  const { t } = useI18n();
-  const [copied, setCopied] = useState(false);
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={(
-          <Button
-            type="button"
-            variant="plain"
-            size="icon"
-            className="ai-detail-copy absolute top-1.5 right-1.5 size-7"
-            aria-label={copied ? t('common.copied') : t('common.copy')}
-            onClick={() => {
-              if (!navigator.clipboard || copied) return;
-              void navigator.clipboard.writeText(text).then(() => {
-                setCopied(true);
-                window.setTimeout(() => setCopied(false), 1_000);
-              }).catch(() => undefined);
-            }}
-          />
-        )}
-      >
-        {copied ? <CheckIcon /> : <CopyIcon />}
-      </TooltipTrigger>
-      <TooltipContent>{copied ? t('common.copied') : t('common.copy')}</TooltipContent>
-    </Tooltip>
-  );
-}
-
 function ArtifactBody({ artifact }: { readonly artifact: AgentArtifactResponse }) {
   const { t } = useI18n();
   const text = useMemo(() => displayBody(artifact), [artifact]);
@@ -76,8 +47,8 @@ function ArtifactBody({ artifact }: { readonly artifact: AgentArtifactResponse }
   }
   return (
     <div className="ai-detail-code-wrap relative min-w-0 max-w-full overflow-hidden">
-      <pre className="ai-detail-code m-0 max-h-65 min-w-0 max-w-full overflow-auto p-4 whitespace-pre-wrap break-words" tabIndex={0}>{text || t('ai.workspace.details.emptyArtifact')}</pre>
-      {text && <ArtifactCopy text={text} />}
+      <pre className={cn(AI_CONTENT_CODE_CLASS, 'ai-detail-code max-h-65 overflow-auto whitespace-pre-wrap break-words')} tabIndex={0}>{text || t('ai.workspace.details.emptyArtifact')}</pre>
+      {text && <AiToolCopyButton text={text} className="ai-detail-copy top-1 right-3.5" />}
     </div>
   );
 }

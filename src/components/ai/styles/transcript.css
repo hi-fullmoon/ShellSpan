@@ -283,12 +283,6 @@
   font: var(--ai-font-markdown-code-block);
 }
 
-.ai-code-block-pre code {
-  padding: 0;
-  background: none;
-  font: inherit;
-}
-
 .ai-markdown-code-toolbar {
   color: var(--ai-text-muted);
   font: 12px/18px var(--ai-font-family-code);
@@ -299,10 +293,6 @@
   overflow-wrap: normal;
   word-break: normal;
   tab-size: 2;
-}
-
-.ai-markdown-code-block[data-language] > .ai-code-block-pre {
-  padding-top: 8px;
 }
 
 .ai-markdown-table-scroll table {

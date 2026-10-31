@@ -151,7 +151,8 @@ try {
             }
             for (const type of ['search', 'web', 'diff', 'error']) {
               const card = page.locator(`[data-ai-tool-view="${type}"]`);
-              await checkRegion(card, card.locator('.ai-tool-surface-header').first(), -1);
+              if (type === 'error') assert.equal(await card.locator('.ai-tool-surface-header').count(), 0, `${context}: errors display their content directly`);
+              else await checkRegion(card, card.locator('.ai-tool-surface-header').first(), -1);
               await checkRegion(card, card.locator('pre, .ai-search-results').first(), 0);
               const copy = card.locator('.ai-tool-copy-button').first();
               const geometry = await copy.evaluate(button => {

@@ -34,7 +34,7 @@ import { createStreamingMarkdownSplitter } from '@/lib/streaming-markdown';
 import { taskBudgetArtifactTitleKey } from '@/lib/ai/task-token-budget';
 import { isRuntimeArtifact } from '@/lib/ai/conversation-artifact';
 import { requestErrorMessageKey, requestRetryMessageKey } from '@/lib/ai/request-error';
-import { AiToolCopyButton, AiToolRow } from './ai-tool-presentation';
+import { AiToolCopyButton, AiToolRow, AiToolTextSection } from './ai-tool-presentation';
 import { AiTurnFooter } from './ai-turn-footer';
 import { AiProcessingStatus } from './ai-processing-status';
 import { AiCompactionStatus } from './ai-compaction-status';
@@ -46,7 +46,6 @@ import {
   AI_DISCLOSURE_SEPARATOR_CLASS,
   AI_DISCLOSURE_SUMMARY_CLASS,
   AI_DISCLOSURE_TITLE_CLASS,
-  AI_EXPANDED_TITLE_CLASS,
 } from './ai-style-classes';
 
 type AiConversationNodeRendererProps<Kind extends AiConversationNode['kind']> = {
@@ -71,11 +70,13 @@ function SemanticNoteDisclosure({
   icon,
   label,
   summary,
+  content,
 }: {
   readonly body: string;
   readonly icon: React.ReactNode;
   readonly label: string;
   readonly summary?: string;
+  readonly content?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -103,7 +104,7 @@ function SemanticNoteDisclosure({
               {summary && (
                 <>
                   <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
-                  <span className={cn(AI_DISCLOSURE_SUMMARY_CLASS, open && AI_EXPANDED_TITLE_CLASS)}>{summary}</span>
+                  <span className={AI_DISCLOSURE_SUMMARY_CLASS}>{summary}</span>
                 </>
               )}
             </MarkerContent>
@@ -111,10 +112,10 @@ function SemanticNoteDisclosure({
         </MarkerPrimitive>
         <CollapsibleContent>
           <Separator className="ai-semantic-note-separator" />
-          <div className="ai-semantic-note-body relative mt-1 ml-[22px] box-border max-h-65 w-[calc(100%-22px)] overflow-auto pt-2.5 pr-10 pb-3 pl-3 whitespace-pre-wrap [overflow-wrap:anywhere]">
+          {content ?? <div className="ai-semantic-note-body relative mt-1 ml-[22px] box-border max-h-65 w-[calc(100%-22px)] overflow-auto pt-2.5 pr-10 pb-3 pl-3 whitespace-pre-wrap [overflow-wrap:anywhere]">
             {body}
             <AiToolCopyButton text={body} className="ai-content-copy absolute top-1 right-1" />
-          </div>
+          </div>}
         </CollapsibleContent>
       </div>
     </Collapsible>
@@ -154,13 +155,18 @@ export function isUserVisibleContextInjection(node: AiConversationNodeOf<'contex
 function ContextInjectionRow({ node }: { readonly node: AiConversationNodeOf<'contextInjection'> }) {
   const { t } = useI18n();
   if (!isUserVisibleContextInjection(node)) return null;
+  const skillBody = node.loadedSkill
+    ? `${node.loadedSkill.instructions}\n\n${t('ai.workspace.skills.source')}\n${JSON.stringify(node.loadedSkill.provenance, null, 2)}\nrenderedHash: ${node.loadedSkill.renderedHash}`
+    : node.content;
+  const body = node.loadedSkill ? `${t('ai.workspace.skills.instructions')}\n${skillBody}` : node.content;
   return (
     <SemanticNoteDisclosure
-      body={
-        node.loadedSkill
-          ? `${t('ai.workspace.skills.instructions')}\n${node.loadedSkill.instructions}\n\n${t('ai.workspace.skills.source')}\n${JSON.stringify(node.loadedSkill.provenance, null, 2)}\nrenderedHash: ${node.loadedSkill.renderedHash}`
-          : node.content
-      }
+      body={body}
+      content={node.provenance.kind === 'skill-invocation' ? (
+        <div className="ai-io-card my-1 ml-1 flex min-w-0 max-w-[calc(100%-4px)] flex-col gap-3">
+          <AiToolTextSection title={t(node.loadedSkill ? 'ai.workspace.skills.instructions' : 'ai.workspace.skills.loadFailed')} text={skillBody} copyText={body} />
+        </div>
+      ) : undefined}
       icon={<FileInputIcon />}
       label={t(contextLabelKey(node.provenance.kind))}
       summary={node.provenance.label}
@@ -324,7 +330,7 @@ function ReasoningNodeView({ node }: { readonly node: AiConversationNodeOf<'reas
           {summary && (
             <>
               <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
-              <span className={cn(AI_DISCLOSURE_SUMMARY_CLASS, open && AI_EXPANDED_TITLE_CLASS)}>
+              <span className={AI_DISCLOSURE_SUMMARY_CLASS}>
                 <StreamingTextContext.Provider value={isStreaming}>
                   <StreamingText key={isStreaming ? lines.length - 1 : 0}>{summary}</StreamingText>
                 </StreamingTextContext.Provider>
@@ -649,7 +655,7 @@ function TurnProcessDisclosure({
           {summary && (
             <>
               <span className={AI_DISCLOSURE_SEPARATOR_CLASS} aria-hidden="true" />
-              <span className={cn(AI_DISCLOSURE_SUMMARY_CLASS, open && AI_EXPANDED_TITLE_CLASS)}>{summary}</span>
+              <span className={AI_DISCLOSURE_SUMMARY_CLASS}>{summary}</span>
             </>
           )}
         </CollapsibleTrigger>

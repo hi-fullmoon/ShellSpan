@@ -362,7 +362,7 @@ export function AiQuestionPanel({
             </FieldGroup>}
             {submissionIssue && <FieldError className="mt-2 flex min-w-0 flex-col gap-1 [overflow-wrap:anywhere]" role="alert" data-question-error={submissionIssue.reason}>
               <p className="m-0">{t(questionIssueMessageKey(submissionIssue))}</p>
-              {submissionIssue.detail && <pre className="m-0 max-h-65 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere]" tabIndex={0} aria-label={t('ai.workspace.question.failureReason')}>
+              {submissionIssue.detail && <pre className={cn(AI_CONTENT_CODE_CLASS, 'ai-code-block max-h-65 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere]')} tabIndex={0} aria-label={t('ai.workspace.question.failureReason')}>
                 {submissionIssue.detail}
               </pre>}
             </FieldError>}

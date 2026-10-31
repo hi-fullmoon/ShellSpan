@@ -164,7 +164,8 @@ try {
               }
               for (const type of ['search', 'web', 'diff', 'error']) {
                 const card = page.locator(`[data-ai-tool-view="${type}"]`);
-                await assertRegionCopy(card, card.locator('.ai-tool-surface-header').first(), -1);
+                if (type === 'error') assert.equal(await card.locator('.ai-tool-surface-header').count(), 0, `${context}: errors display their content directly`);
+                else await assertRegionCopy(card, card.locator('.ai-tool-surface-header').first(), -1);
                 await assertRegionCopy(card, card.locator('pre, .ai-search-results').first(), 0);
               }
               await page.mouse.move(0, 0);
@@ -176,7 +177,7 @@ try {
                 await copy.blur();
               }
               const transcript = page.locator('.ai-terminal-transcript [data-slot="scroll-area-viewport"]');
-              const generic = page.locator('.ai-io-card [data-slot="scroll-area-viewport"]').first();
+              const generic = page.locator('.ai-io-card .ai-io-output [data-slot="scroll-area-viewport"]').first();
               for (const viewport of [transcript, generic]) {
                 const overflow = await viewport.evaluate(element => element.scrollHeight > element.clientHeight);
                 assert.equal(overflow, scenario === 'long', `${context}: the real output must exercise both scrolling states`);

@@ -37,13 +37,7 @@
   border-radius: var(--ai-content-radius);
   background: var(--ai-code-block);
   color: var(--ai-text);
-  font-family: var(--ai-font-family-code);
-  font-size: 13px;
-  line-height: 22px;
-}
-
-.ai-detail-copy[data-slot='button'] {
-  border-radius: 50%;
+  font: var(--ai-font-markdown-code-block);
 }
 
 .ai-detail-summary p {
@@ -70,17 +64,16 @@
 
 .ai-detail-section-header h3 {
   margin: 0;
-  color: var(--ai-text-secondary);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 20px;
+  color: inherit;
+  font: inherit;
+}
+
+[data-slot='ai-tool-details'] .ai-tool-surface-header {
+  min-height: calc(var(--spacing) * 8);
 }
 
 [data-slot='ai-tool-details'] .ai-detail-code {
   border-radius: 0;
-  font-size: 12px;
-  line-height: 20px;
-  tab-size: 2;
 }
 
 [data-slot='ai-tool-details'] [data-ai-tool-view],
@@ -90,13 +83,7 @@
   margin: 0;
   border: 0;
   border-radius: 0;
-  font-size: 12px;
-  line-height: 20px;
   overflow: visible;
-}
-
-[data-slot='ai-tool-details'] .ai-terminal-header {
-  padding: 10px 14px;
 }
 
 [data-slot='ai-tool-details'] .ai-terminal-command {

@@ -20,9 +20,9 @@
   font: inherit;
 }
 
-.ai-tool-surface-header {
+.ai-content-header {
   color: var(--ai-text-secondary);
-  font: 13px/20px var(--ai-font-family);
+  font: 12px/18px var(--ai-font-family);
 }
 
 .ai-content-code {
@@ -69,6 +69,7 @@
   .ai-tool-scroll-area [data-slot='scroll-area-viewport'],
   .ai-details-root [data-slot='scroll-area-viewport'],
   .ai-markdown-code-block .ai-code-block-pre,
+  .ai-content-code[tabindex],
   .ai-detail-code-wrap > .ai-detail-code,
   .ai-read-lines,
   .ai-search-results,
@@ -84,7 +85,13 @@
   right: 14px;
 }
 
-.ai-tool-content-region:has(> .ai-tool-copy-button) > :is(pre, .ai-terminal-command-row, .ai-search-results) {
+.ai-tool-content-region:has(> .ai-tool-copy-button) > :is(pre, .ai-search-results) {
+  padding-right: 48px;
+}
+
+.ai-tool-content-region:has(> .ai-tool-copy-button) .ai-content-code,
+.ai-markdown-code-block [data-ai-copy-region]:has(> .ai-markdown-code-copy) > .ai-content-code,
+.ai-detail-code-wrap:has(> .ai-detail-copy) > .ai-content-code {
   padding-right: 48px;
 }
 
