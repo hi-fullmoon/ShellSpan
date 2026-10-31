@@ -1,5 +1,16 @@
 //! Opt-in integration against the repository's real loopback SSH/SFTP fixture.
 use super::*;
+use std::io::Read;
+
+fn assert_missing(sftp: &ssh2::Sftp, path: &str) {
+    let error = sftp
+        .lstat(Path::new(path))
+        .expect_err("collected scratch path still exists");
+    assert!(
+        matches!(error.code(), ssh2::ErrorCode::SFTP(2 | 10)),
+        "{error}"
+    );
+}
 
 #[test]
 #[ignore = "requires explicitly opted-in isolated SSH/SFTP fixture"]
@@ -30,7 +41,7 @@ fn scratch_remote_account_roots_execute_and_collect_without_project_writes() {
         .unwrap();
     let target: AgentSessionTarget = serde_json::from_value(json!({
         "kind":"remote", "targetId":"remote-host", "sessionId":"remote-terminal", "profileId":"scratch-sftp",
-        "host":connection.host, "port":connection.port, "username":connection.username, "rootPath":"/home/shellspan"
+        "host":connection.host, "port":connection.port, "username":connection.username, "rootPath":"/home/shellspan/upload"
     })).unwrap();
     let store = ScratchStore::open(root.path()).unwrap();
     let services = ScratchServices {
@@ -39,6 +50,16 @@ fn scratch_remote_account_roots_execute_and_collect_without_project_writes() {
         known_hosts: &known_hosts,
         engine: None,
     };
+    let connected = crate::connection::connect_sftp(&connection, None, Some(&known_hosts)).unwrap();
+    let connected = connected.lock().unwrap();
+    let project = Path::new(target.root_path.as_deref().unwrap());
+    let project_before = connected
+        .sftp
+        .readdir(project)
+        .unwrap()
+        .into_iter()
+        .map(|(path, _)| path)
+        .collect::<std::collections::BTreeSet<_>>();
     let parent = store
         .acquire(
             "remote-parent",
@@ -63,8 +84,25 @@ fn scratch_remote_account_roots_execute_and_collect_without_project_writes() {
         .unwrap();
     assert_ne!(parent.root, child.root);
     assert!(parent.root.contains("/.shellspan-agent-scratch-"));
-    let connected = crate::connection::connect_sftp(&connection, None, Some(&known_hosts)).unwrap();
-    let connected = connected.lock().unwrap();
+    assert!(!Path::new(&parent.root).starts_with(project));
+    for root in [&parent.root, &child.root] {
+        assert_eq!(
+            connected.sftp.lstat(Path::new(root)).unwrap().perm.unwrap() & 0o777,
+            0o700
+        );
+    }
+    let mut native_target = crate::agent_runtime::native_adapter::target_native(&target).unwrap();
+    if let crate::agent_runtime::AgentToolTargetNative::Remote {
+        target_id,
+        root_path,
+        ..
+    } = &mut native_target
+    {
+        *target_id = format!("scratch-{}", key("remote-parent", &target).unwrap());
+        *root_path = Some(parent.root.clone());
+    }
+    assert!(owns_target(root.path(), "remote-parent", &native_target).unwrap());
+    assert!(!owns_target(root.path(), "remote-child", &native_target).unwrap());
     let path = format!("{}/cwd.sh", parent.root);
     connected
         .sftp
@@ -72,6 +110,43 @@ fn scratch_remote_account_roots_execute_and_collect_without_project_writes() {
         .unwrap()
         .write_all(b"pwd\n")
         .unwrap();
+    let child_path = format!("{}/cwd.sh", child.root);
+    connected
+        .sftp
+        .create(Path::new(&child_path))
+        .unwrap()
+        .write_all(b"pwd -P\n")
+        .unwrap();
+    for (file, expected) in [(&path, "pwd\n"), (&child_path, "pwd -P\n")] {
+        let mut actual = String::new();
+        connected
+            .sftp
+            .open(Path::new(file))
+            .unwrap()
+            .read_to_string(&mut actual)
+            .unwrap();
+        assert_eq!(actual, expected);
+    }
+    let second_root = tempfile::tempdir().unwrap();
+    let second_store = ScratchStore::open(second_root.path()).unwrap();
+    let second_lease = second_store
+        .acquire(
+            "remote-parent",
+            "remote-task",
+            &target,
+            now() + 600_000,
+            true,
+            Some(0),
+            &services,
+        )
+        .unwrap();
+    assert_ne!(second_lease.root, parent.root);
+    let second_files = second_lease.root.clone();
+    store
+        .cleanup_at(now() + FAILURE_TTL_MS * 2, &services)
+        .unwrap();
+    assert!(connected.sftp.lstat(Path::new(&path)).is_ok());
+    assert!(connected.sftp.lstat(Path::new(&child_path)).is_ok());
     let process = super::super::super::spawn_remote_process_native(
         super::super::super::RemoteProcessStartNative {
             task_id: "remote-task".into(),
@@ -95,16 +170,40 @@ fn scratch_remote_account_roots_execute_and_collect_without_project_writes() {
     let child_root = child.root.clone();
     drop(parent);
     drop(child);
+    store
+        .cleanup_at(now() + SUCCESS_TTL_MS / 2, &services)
+        .unwrap();
+    assert!(connected.sftp.lstat(Path::new(&path)).is_ok());
+    assert!(connected.sftp.lstat(Path::new(&child_path)).is_ok());
     assert!(store
         .cleanup_at(now() + FAILURE_TTL_MS * 2, &services)
         .is_err());
     assert!(connected.sftp.lstat(Path::new(&path)).is_ok());
+    assert_missing(&connected.sftp, &child_root);
+    assert!(connected.sftp.lstat(Path::new(&second_files)).is_ok());
     connected.sftp.unlink(Path::new(&link)).unwrap();
     store
         .cleanup_at(now() + FAILURE_TTL_MS * 2, &services)
         .unwrap();
-    assert!(connected.sftp.lstat(Path::new(&parent_root)).is_err());
-    assert!(connected.sftp.lstat(Path::new(&child_root)).is_err());
+    assert_missing(&connected.sftp, &parent_root);
+    assert_missing(&connected.sftp, &child_root);
     let base = Path::new(&parent_root).parent().unwrap().parent().unwrap();
     connected.sftp.rmdir(base).unwrap();
+    drop(second_lease);
+    second_store
+        .cleanup_at(now() + FAILURE_TTL_MS * 2, &services)
+        .unwrap();
+    assert_missing(&connected.sftp, &second_files);
+    connected
+        .sftp
+        .rmdir(Path::new(&second_files).parent().unwrap().parent().unwrap())
+        .unwrap();
+    let project_after = connected
+        .sftp
+        .readdir(project)
+        .unwrap()
+        .into_iter()
+        .map(|(path, _)| path)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(project_before, project_after);
 }
