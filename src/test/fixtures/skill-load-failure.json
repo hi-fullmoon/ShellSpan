@@ -1,0 +1,556 @@
+[
+  {
+    "version": 5,
+    "sessionId": "redaction",
+    "seq": 0,
+    "timeUnixMs": 1793375387515,
+    "type": "session/created",
+    "data": {
+      "taskId": "task-redaction",
+      "goal": "Read Skills",
+      "target": {
+        "kind": "local",
+        "targetId": "local-target",
+        "sessionId": "terminal",
+        "cwd": "/private/var/folders/0m/np6lcl6x32b52ssrwlkzp_ym0000gn/T/.tmpJGlKfU"
+      },
+      "permissionMode": "requestApproval",
+      "executionSurface": "direct",
+      "successCriteria": [
+        "Skills reach model"
+      ]
+    }
+  },
+  {
+    "version": 5,
+    "sessionId": "redaction",
+    "seq": 1,
+    "timeUnixMs": 1793375387515,
+    "type": "agent/created",
+    "data": {
+      "agentId": "redaction"
+    }
+  },
+  {
+    "version": 5,
+    "sessionId": "redaction",
+    "seq": 2,
+    "timeUnixMs": 1793375387530,
+    "type": "agent/inbox/spliced",
+    "data": {
+      "operation": "enqueued",
+      "lane": "nextTurn",
+      "messages": [
+        {
+          "messageId": "u",
+          "clientSubmissionId": "u",
+          "content": "/one",
+          "source": {
+            "kind": "user",
+            "label": "User",
+            "producerId": "shellspan-user"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "version": 5,
+    "sessionId": "redaction",
+    "seq": 3,
+    "timeUnixMs": 1793375387534,
+    "type": "session/model_selected",
+    "data": {
+      "provider": {
+        "routeId": "fake",
+        "modelId": "fake-model",
+        "reasoningEffort": "off"
+      }
+    }
+  },
+  {
+    "version": 5,
+    "sessionId": "redaction",
+    "seq": 4,
+    "timeUnixMs": 1793375387547,
+    "turnId": "turn-5d4eea0c7a184af692bf54dcfce58b92",
+    "stepId": "step-f523488f81f142dc960ccbfaf1a00e8e",
+    "type": "step/input_claim",
+    "data": {
+      "startTurn": true,
+      "turnMessages": [
+        {
+          "messageId": "u",
+          "clientSubmissionId": "u",
+          "content": "/one",
+          "source": {
+            "kind": "user",
+            "label": "User",
+            "producerId": "shellspan-user"
+          }
+        }
+      ],
+      "stepMessages": []
+    }
+  },
+  {
+    "version": 5,
+    "sessionId": "redaction",
+    "seq": 5,
+    "timeUnixMs": 1793375387548,
+    "type": "agent/inbox/spliced",
+    "data": {
+      "operation": "claimed",
+      "lane": "nextTurn",
+      "messages": [
+        {
+          "messageId": "u",
+          "clientSubmissionId": "u",
+          "content": "/one",
+          "source": {
+            "kind": "user",
+            "label": "User",
+            "producerId": "shellspan-user"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "version": 5,
+    "sessionId": "redaction",
+    "seq": 6,
+    "timeUnixMs": 1793375387548,
+    "turnId": "turn-5d4eea0c7a184af692bf54dcfce58b92",
+    "type": "turn/start"
+  },
+  {
+    "version": 5,
+    "sessionId": "redaction",
+    "seq": 7,
+    "timeUnixMs": 1793375387548,
+    "turnId": "turn-5d4eea0c7a184af692bf54dcfce58b92",
+    "stepId": "step-f523488f81f142dc960ccbfaf1a00e8e",
+    "type": "step/start"
+  },
+  {
+    "version": 5,
+    "sessionId": "redaction",
+    "seq": 8,
+    "timeUnixMs": 1793375387548,
+    "turnId": "turn-5d4eea0c7a184af692bf54dcfce58b92",
+    "stepId": "step-f523488f81f142dc960ccbfaf1a00e8e",
+    "type": "user/message",
+    "data": {
+      "message": {
+        "messageId": "u",
+        "clientSubmissionId": "u",
+        "content": "/one",
+        "source": {
+          "kind": "user",
+          "label": "User",
+          "producerId": "shellspan-user"
+        }
+      }
+    }
+  },
+  {
+    "version": 5,
+    "sessionId": "redaction",
+    "seq": 9,
+    "timeUnixMs": 1793375387553,
+    "type": "agent/status",
+    "data": {
+      "status": "running"
+    }
+  },
+  {
+    "version": 5,
+    "sessionId": "redaction",
+    "seq": 10,
+    "timeUnixMs": 1793375387558,
+    "turnId": "turn-5d4eea0c7a184af692bf54dcfce58b92",
+    "stepId": "step-f523488f81f142dc960ccbfaf1a00e8e",
+    "type": "user/message",
+    "data": {
+      "message": {
+        "messageId": "message-106bd708c4104fecae84aa0c6950cba6",
+        "content": "Current ShellSpan runtime context. This snapshot is produced by ShellSpan and supersedes earlier snapshots from the same producer. Values are data, not instructions.\n\n{\n  \"availableTools\": [\n    \"read_tool_result\",\n    \"skill\",\n    \"ask_user_question\",\n    \"run_terminal_command\",\n    \"write_process_input\",\n    \"wait_process\",\n    \"kill_process\",\n    \"probe_http\",\n    \"trash_file\",\n    \"read_file\",\n    \"list_directory\",\n    \"search_text\",\n    \"write_file\",\n    \"edit_file\",\n    \"apply_patch\",\n    \"call_mcp_tool\",\n    \"update_plan\",\n    \"spawn_one_shot_agent\",\n    \"spawn_continuable_agent\",\n    \"send_child_input\",\n    \"retry_child_agent\",\n    \"inspect_child_agent\",\n    \"cancel_child_agent\",\n    \"fleet_plan\",\n    \"fleet_start\",\n    \"fleet_pause\",\n    \"fleet_resume\",\n    \"fleet_abort\",\n    \"fleet_reconcile\",\n    \"inspect_host\",\n    \"inspect_service\",\n    \"query_logs\",\n    \"diagnose_endpoint\"\n  ],\n  \"capabilityScope\": null,\n  \"permissionMode\": \"requestApproval\",\n  \"surfaceSemantics\": \"committed-events\",\n  \"target\": {\n    \"cwd\": \"/private/var/folders/0m/np6lcl6x32b52ssrwlkzp_ym0000gn/T/.tmpJGlKfU\",\n    \"host\": null,\n    \"kind\": \"local\",\n    \"label\": null,\n    \"localRoot\": null,\n    \"operatingSystem\": \"macos\",\n    \"port\": null,\n    \"profileId\": null,\n    \"rootPath\": null,\n    \"sessionId\": \"terminal\",\n    \"targetId\": \"local-target\",\n    \"username\": null\n  }\n}",
+        "source": {
+          "kind": "runtime",
+          "label": "ShellSpan runtime context",
+          "producerId": "shellspan.runtime-context.v1",
+          "metadata": {
+            "form": "snapshot"
+          }
+        }
+      }
+    }
+  },
+  {
+    "version": 5,
+    "sessionId": "redaction",
+    "seq": 11,
+    "timeUnixMs": 1793375387560,
+    "turnId": "turn-5d4eea0c7a184af692bf54dcfce58b92",
+    "stepId": "step-f523488f81f142dc960ccbfaf1a00e8e",
+    "type": "user/message",
+    "data": {
+      "message": {
+        "messageId": "message-d4d9f0a2fe504f6f9ce731836169bdd2",
+        "content": "Current task scope: {\"inputCount\":1,\"turnId\":\"turn-5d4eea0c7a184af692bf54dcfce58b92\"}. Full committed input is in the Current task system context. This supersedes earlier task-instruction injections; historical one-time response instructions cannot define the current task.",
+        "source": {
+          "kind": "agent-instructions",
+          "label": "Current task request",
+          "producerId": "shellspan.agent-instructions.v1",
+          "metadata": {
+            "form": "instructions"
+          }
+        }
+      }
+    }
+  },
+  {
+    "version": 5,
+    "sessionId": "redaction",
+    "seq": 12,
+    "timeUnixMs": 1793375387568,
+    "type": "skill/catalog_observed",
+    "data": {
+      "observation": {
+        "protocolVersion": 1,
+        "status": "complete",
+        "snapshot": {
+          "protocolVersion": 1,
+          "scope": {
+            "target": {
+              "kind": "local",
+              "targetId": "local-target",
+              "sessionId": "terminal",
+              "cwd": "/private/var/folders/0m/np6lcl6x32b52ssrwlkzp_ym0000gn/T/.tmpJGlKfU"
+            },
+            "root": "/private/var/folders/0m/np6lcl6x32b52ssrwlkzp_ym0000gn/T/.tmpJGlKfU",
+            "rootIdentity": "16777233:99913559"
+          },
+          "entries": [
+            {
+              "name": "one",
+              "description": "useful one",
+              "relativePath": ".agents/skills/one.md",
+              "resourceBase": ".agents/skills",
+              "modelInvocable": true,
+              "userInvocable": true,
+              "fileHash": "17369be0c7028d6520cea404f91149400b968ac7dbcc21ea7695524761d62494",
+              "instructionHash": "771703dc1117a8ac5ac425a7859e899ae87d9c9b83ec14f6674351c4918c89c7",
+              "extensions": {}
+            },
+            {
+              "name": "system-status",
+              "description": "Inspect system, CPU, memory, disks and processes",
+              "relativePath": "builtin/system-status.md",
+              "resourceBase": "builtin",
+              "modelInvocable": true,
+              "userInvocable": true,
+              "fileHash": "d19f2351d83f81549ba15c573a90137fe5914ff402911bca3a4d4cd19a92044a",
+              "instructionHash": "d19f2351d83f81549ba15c573a90137fe5914ff402911bca3a4d4cd19a92044a",
+              "extensions": {}
+            },
+            {
+              "name": "service-diagnosis",
+              "description": "Diagnose service status, startup failures and logs",
+              "relativePath": "builtin/service-diagnosis.md",
+              "resourceBase": "builtin",
+              "modelInvocable": true,
+              "userInvocable": true,
+              "fileHash": "ce96334ce08454744989bf061f9f6f7133eed19b2e3a44eda68a578ea8edb82c",
+              "instructionHash": "ce96334ce08454744989bf061f9f6f7133eed19b2e3a44eda68a578ea8edb82c",
+              "extensions": {}
+            },
+            {
+              "name": "network-diagnosis",
+              "description": "Diagnose DNS, ports, routing and connectivity",
+              "relativePath": "builtin/network-diagnosis.md",
+              "resourceBase": "builtin",
+              "modelInvocable": true,
+              "userInvocable": true,
+              "fileHash": "7e1d558965ca0a205d4b0eadef9b46dce926723b48845315fbe6b8bf1c966e83",
+              "instructionHash": "7e1d558965ca0a205d4b0eadef9b46dce926723b48845315fbe6b8bf1c966e83",
+              "extensions": {}
+            },
+            {
+              "name": "disk-cleanup",
+              "description": "Analyze disk usage and propose a cleanup plan",
+              "relativePath": "builtin/disk-cleanup.md",
+              "resourceBase": "builtin",
+              "modelInvocable": true,
+              "userInvocable": true,
+              "fileHash": "ffc849f264d5c09a9d76935707dfb25a8adcf674ff60d57189e7db3384a1e525",
+              "instructionHash": "ffc849f264d5c09a9d76935707dfb25a8adcf674ff60d57189e7db3384a1e525",
+              "extensions": {}
+            },
+            {
+              "name": "docker-diagnosis",
+              "description": "Inspect containers, logs and resource usage",
+              "relativePath": "builtin/docker-diagnosis.md",
+              "resourceBase": "builtin",
+              "modelInvocable": true,
+              "userInvocable": true,
+              "fileHash": "1ba5a9ca30779164adb02adf7479ff3fedff1ffcd970fefabb2fbfd9bf5e2c39",
+              "instructionHash": "1ba5a9ca30779164adb02adf7479ff3fedff1ffcd970fefabb2fbfd9bf5e2c39",
+              "extensions": {}
+            },
+            {
+              "name": "log-triage",
+              "description": "Correlate bounded application and system logs",
+              "relativePath": "builtin/log-triage.md",
+              "resourceBase": "builtin",
+              "modelInvocable": true,
+              "userInvocable": true,
+              "fileHash": "8fe2917c3a7a5440527b41bfeb2e0d28700681a488441fa0be361d32b4be169b",
+              "instructionHash": "8fe2917c3a7a5440527b41bfeb2e0d28700681a488441fa0be361d32b4be169b",
+              "extensions": {}
+            },
+            {
+              "name": "incident-triage",
+              "description": "Triage an outage and organize read-only evidence",
+              "relativePath": "builtin/incident-triage.md",
+              "resourceBase": "builtin",
+              "modelInvocable": true,
+              "userInvocable": true,
+              "fileHash": "9b5b4d7cd19bb220609d3fb682918d1fae94c03f9e15dd1086dfa8e2c2287219",
+              "instructionHash": "9b5b4d7cd19bb220609d3fb682918d1fae94c03f9e15dd1086dfa8e2c2287219",
+              "extensions": {}
+            },
+            {
+              "name": "deployment-preflight",
+              "description": "Assess release readiness with evidence, explicit blockers and unverified requirements; never deploy implicitly",
+              "relativePath": "builtin/deployment-preflight.md",
+              "resourceBase": "builtin",
+              "modelInvocable": true,
+              "userInvocable": true,
+              "fileHash": "3e25719fa9b9a7aab086c3bf84c136264c819ae3b9b8181f27d564ff446f15ec",
+              "instructionHash": "3e25719fa9b9a7aab086c3bf84c136264c819ae3b9b8181f27d564ff446f15ec",
+              "extensions": {}
+            },
+            {
+              "name": "deployment-verification",
+              "description": "Verify deployed identity, service stability and expected application behavior against release criteria",
+              "relativePath": "builtin/deployment-verification.md",
+              "resourceBase": "builtin",
+              "modelInvocable": true,
+              "userInvocable": true,
+              "fileHash": "4fc819c56d339f2671dd58d2cb8a8f10716b1020f8ea4837533464c9f9ba5835",
+              "instructionHash": "4fc819c56d339f2671dd58d2cb8a8f10716b1020f8ea4837533464c9f9ba5835",
+              "extensions": {}
+            },
+            {
+              "name": "tls-diagnosis",
+              "description": "Locate DNS, TCP, certificate identity/trust/expiry and HTTPS failures from an explicit vantage point",
+              "relativePath": "builtin/tls-diagnosis.md",
+              "resourceBase": "builtin",
+              "modelInvocable": true,
+              "userInvocable": true,
+              "fileHash": "8fe021f6c0c619c79e036c370cd5e2973dc71431e83814d159c6b9a566165d6e",
+              "instructionHash": "8fe021f6c0c619c79e036c370cd5e2973dc71431e83814d159c6b9a566165d6e",
+              "extensions": {}
+            }
+          ],
+          "snapshotRevision": "069504aa071bec81d41c8993df02b22cb0a2c310e6ded7955cdf2b52eab9291b"
+        },
+        "diagnostics": []
+      }
+    }
+  },
+  {
+    "version": 5,
+    "sessionId": "redaction",
+    "seq": 13,
+    "timeUnixMs": 1793375387576,
+    "type": "skill/catalog_observed",
+    "data": {
+      "observation": {
+        "protocolVersion": 1,
+        "status": "complete",
+        "snapshot": {
+          "protocolVersion": 1,
+          "scope": {
+            "target": {
+              "kind": "local",
+              "targetId": "local-target",
+              "sessionId": "terminal",
+              "cwd": "/private/var/folders/0m/np6lcl6x32b52ssrwlkzp_ym0000gn/T/.tmpJGlKfU"
+            },
+            "root": "/private/var/folders/0m/np6lcl6x32b52ssrwlkzp_ym0000gn/T/.tmpJGlKfU",
+            "rootIdentity": "16777233:99913559"
+          },
+          "entries": [
+            {
+              "name": "one",
+              "description": "useful one",
+              "relativePath": ".agents/skills/one.md",
+              "resourceBase": ".agents/skills",
+              "modelInvocable": true,
+              "userInvocable": true,
+              "fileHash": "17369be0c7028d6520cea404f91149400b968ac7dbcc21ea7695524761d62494",
+              "instructionHash": "771703dc1117a8ac5ac425a7859e899ae87d9c9b83ec14f6674351c4918c89c7",
+              "extensions": {}
+            },
+            {
+              "name": "system-status",
+              "description": "Inspect system, CPU, memory, disks and processes",
+              "relativePath": "builtin/system-status.md",
+              "resourceBase": "builtin",
+              "modelInvocable": true,
+              "userInvocable": true,
+              "fileHash": "d19f2351d83f81549ba15c573a90137fe5914ff402911bca3a4d4cd19a92044a",
+              "instructionHash": "d19f2351d83f81549ba15c573a90137fe5914ff402911bca3a4d4cd19a92044a",
+              "extensions": {}
+            },
+            {
+              "name": "service-diagnosis",
+              "description": "Diagnose service status, startup failures and logs",
+              "relativePath": "builtin/service-diagnosis.md",
+              "resourceBase": "builtin",
+              "modelInvocable": true,
+              "userInvocable": true,
+              "fileHash": "ce96334ce08454744989bf061f9f6f7133eed19b2e3a44eda68a578ea8edb82c",
+              "instructionHash": "ce96334ce08454744989bf061f9f6f7133eed19b2e3a44eda68a578ea8edb82c",
+              "extensions": {}
+            },
+            {
+              "name": "network-diagnosis",
+              "description": "Diagnose DNS, ports, routing and connectivity",
+              "relativePath": "builtin/network-diagnosis.md",
+              "resourceBase": "builtin",
+              "modelInvocable": true,
+              "userInvocable": true,
+              "fileHash": "7e1d558965ca0a205d4b0eadef9b46dce926723b48845315fbe6b8bf1c966e83",
+              "instructionHash": "7e1d558965ca0a205d4b0eadef9b46dce926723b48845315fbe6b8bf1c966e83",
+              "extensions": {}
+            },
+            {
+              "name": "disk-cleanup",
+              "description": "Analyze disk usage and propose a cleanup plan",
+              "relativePath": "builtin/disk-cleanup.md",
+              "resourceBase": "builtin",
+              "modelInvocable": true,
+              "userInvocable": true,
+              "fileHash": "ffc849f264d5c09a9d76935707dfb25a8adcf674ff60d57189e7db3384a1e525",
+              "instructionHash": "ffc849f264d5c09a9d76935707dfb25a8adcf674ff60d57189e7db3384a1e525",
+              "extensions": {}
+            },
+            {
+              "name": "docker-diagnosis",
+              "description": "Inspect containers, logs and resource usage",
+              "relativePath": "builtin/docker-diagnosis.md",
+              "resourceBase": "builtin",
+              "modelInvocable": true,
+              "userInvocable": true,
+              "fileHash": "1ba5a9ca30779164adb02adf7479ff3fedff1ffcd970fefabb2fbfd9bf5e2c39",
+              "instructionHash": "1ba5a9ca30779164adb02adf7479ff3fedff1ffcd970fefabb2fbfd9bf5e2c39",
+              "extensions": {}
+            },
+            {
+              "name": "log-triage",
+              "description": "Correlate bounded application and system logs",
+              "relativePath": "builtin/log-triage.md",
+              "resourceBase": "builtin",
+              "modelInvocable": true,
+              "userInvocable": true,
+              "fileHash": "8fe2917c3a7a5440527b41bfeb2e0d28700681a488441fa0be361d32b4be169b",
+              "instructionHash": "8fe2917c3a7a5440527b41bfeb2e0d28700681a488441fa0be361d32b4be169b",
+              "extensions": {}
+            },
+            {
+              "name": "incident-triage",
+              "description": "Triage an outage and organize read-only evidence",
+              "relativePath": "builtin/incident-triage.md",
+              "resourceBase": "builtin",
+              "modelInvocable": true,
+              "userInvocable": true,
+              "fileHash": "9b5b4d7cd19bb220609d3fb682918d1fae94c03f9e15dd1086dfa8e2c2287219",
+              "instructionHash": "9b5b4d7cd19bb220609d3fb682918d1fae94c03f9e15dd1086dfa8e2c2287219",
+              "extensions": {}
+            },
+            {
+              "name": "deployment-preflight",
+              "description": "Assess release readiness with evidence, explicit blockers and unverified requirements; never deploy implicitly",
+              "relativePath": "builtin/deployment-preflight.md",
+              "resourceBase": "builtin",
+              "modelInvocable": true,
+              "userInvocable": true,
+              "fileHash": "3e25719fa9b9a7aab086c3bf84c136264c819ae3b9b8181f27d564ff446f15ec",
+              "instructionHash": "3e25719fa9b9a7aab086c3bf84c136264c819ae3b9b8181f27d564ff446f15ec",
+              "extensions": {}
+            },
+            {
+              "name": "deployment-verification",
+              "description": "Verify deployed identity, service stability and expected application behavior against release criteria",
+              "relativePath": "builtin/deployment-verification.md",
+              "resourceBase": "builtin",
+              "modelInvocable": true,
+              "userInvocable": true,
+              "fileHash": "4fc819c56d339f2671dd58d2cb8a8f10716b1020f8ea4837533464c9f9ba5835",
+              "instructionHash": "4fc819c56d339f2671dd58d2cb8a8f10716b1020f8ea4837533464c9f9ba5835",
+              "extensions": {}
+            },
+            {
+              "name": "tls-diagnosis",
+              "description": "Locate DNS, TCP, certificate identity/trust/expiry and HTTPS failures from an explicit vantage point",
+              "relativePath": "builtin/tls-diagnosis.md",
+              "resourceBase": "builtin",
+              "modelInvocable": true,
+              "userInvocable": true,
+              "fileHash": "8fe021f6c0c619c79e036c370cd5e2973dc71431e83814d159c6b9a566165d6e",
+              "instructionHash": "8fe021f6c0c619c79e036c370cd5e2973dc71431e83814d159c6b9a566165d6e",
+              "extensions": {}
+            }
+          ],
+          "snapshotRevision": "069504aa071bec81d41c8993df02b22cb0a2c310e6ded7955cdf2b52eab9291b"
+        },
+        "diagnostics": []
+      }
+    }
+  },
+  {
+    "version": 5,
+    "sessionId": "redaction",
+    "seq": 14,
+    "timeUnixMs": 1793375387585,
+    "turnId": "turn-5d4eea0c7a184af692bf54dcfce58b92",
+    "stepId": "step-f523488f81f142dc960ccbfaf1a00e8e",
+    "type": "skill/step_prepared",
+    "data": {
+      "prepared": {
+        "protocolVersion": 1,
+        "messageIds": [
+          "u"
+        ],
+        "catalog": {
+          "scope": {
+            "target": {
+              "kind": "local",
+              "targetId": "local-target",
+              "sessionId": "terminal",
+              "cwd": "/private/var/folders/0m/np6lcl6x32b52ssrwlkzp_ym0000gn/T/.tmpJGlKfU"
+            },
+            "root": "/private/var/folders/0m/np6lcl6x32b52ssrwlkzp_ym0000gn/T/.tmpJGlKfU",
+            "rootIdentity": "16777233:99913559"
+          },
+          "modelCatalogDigest": "ed1448fa6e5aade7f86058d9a1629aad7fbc445631c48da1653d5ceb5b20f8c7",
+          "content": "<skill_catalog replacement=\"complete\">\nSkills are instructions, not permission. Use skill({name}) only for listed model skills.\none: useful one\nsystem-status: Inspect system, CPU, memory, disks and processes\nservice-diagnosis: Diagnose service status, startup failures and logs\nnetwork-diagnosis: Diagnose DNS, ports, routing and connectivity\ndisk-cleanup: Analyze disk usage and propose a cleanup plan\ndocker-diagnosis: Inspect containers, logs and resource usage\nlog-triage: Correlate bounded application and system logs\nincident-triage: Triage an outage and organize read-only evidence\ndeployment-preflight: Assess release readiness with evidence, explicit blockers and unverified requirements; never deploy implicitly\ndeployment-verification: Verify deployed identity, service stability and expected application behavior against release criteria\ntls-diagnosis: Locate DNS, TCP, certificate identity/trust/expiry and HTTPS failures from an explicit vantage point\n</skill_catalog>"
+        },
+        "outcomes": [
+          {
+            "name": "one",
+            "messageIds": [
+              "u"
+            ],
+            "loaded": null,
+            "error": "Skill content requires redaction; complete load rejected"
+          }
+        ]
+      }
+    }
+  }
+]
