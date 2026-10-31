@@ -1,4 +1,5 @@
 import { Terminal, type IBufferCell, type IBufferLine, type IDisposable, type IMarker } from '@xterm/xterm';
+import { commandGraphemes, createTerminalCommandTyping } from './terminal-command-typing';
 
 export interface TerminalCommandSourceRange {
   readonly id: string;
@@ -10,7 +11,7 @@ export interface TerminalCommandSourceRange {
 }
 
 // xterm 6 has no public text-projection API. Keep the version-specific access
-// here: the parser, cursor, markers and stored native lines are never modified.
+// here: parsing and stored native lines/cursor retain their original state.
 // xterm's own parser lays out the source (including wide/combining characters).
 interface NativeLine {
   readonly length: number;
@@ -77,6 +78,7 @@ interface SavedSource {
   tail: IMarker;
   columns?: number;
   cells?: ReadonlyMap<NativeLine, NativeLine>;
+  literal?: boolean;
 }
 interface VerifiedEcho {
   column: number;
@@ -103,20 +105,34 @@ export function installTerminalCommandSource(
   let restoreSelection: (() => void) | undefined;
   let rendering = false;
   let disposed = false;
+  let paintCursor: { row: number; column: number } | undefined;
+  let previousCursorRow: number | undefined;
+  const motion = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-reduced-motion: reduce)') : undefined;
+  const typing = createTerminalCommandTyping(() => Boolean(motion && !motion.matches), () => {
+    refresh();
+    terminal.refresh(0, terminal.rows - 1);
+  });
 
-  const withSourceCells = <T,>(read: () => T): T => {
+  const withSourceCells = <T,>(read: () => T, cursor = false): T => {
     if (rendering || terminal.buffer.active.type !== 'normal' || projected.size === 0) return read();
     const buffer = core._bufferService.buffer;
     const saved: Array<[number, NativeLine]> = [];
+    const { x, y } = buffer;
     for (let row = 0; row < buffer.lines.length; row++) {
       const line = buffer.lines.get(row);
       const replacement = line && projected.get(line);
       if (line && replacement) { saved.push([row, line]); buffer.lines.set(row, replacement); }
     }
     rendering = true;
+    if (cursor && paintCursor) {
+      buffer.x = paintCursor.column;
+      buffer.y = paintCursor.row - buffer.ybase;
+    }
     try { return read(); }
     finally {
       for (const [row, line] of saved) buffer.lines.set(row, line);
+      buffer.x = x;
+      buffer.y = y;
       rendering = false;
     }
   };
@@ -124,7 +140,18 @@ export function installTerminalCommandSource(
     if (wrappedRenderers.has(renderer)) return;
     const renderRows = renderer.renderRows;
     wrappedRenderers.set(renderer, renderRows);
-    renderer.renderRows = (start, end) => withSourceCells(() => renderRows.call(renderer, start, end));
+    renderer.renderRows = (start, end) => {
+      for (const row of [previousCursorRow, paintCursor?.row]) {
+        if (row === undefined) continue;
+        const visible = row - terminal.buffer.normal.viewportY;
+        if (visible >= 0 && visible < terminal.rows) {
+          start = Math.min(start, visible);
+          end = Math.max(end, visible);
+        }
+      }
+      previousCursorRow = paintCursor?.row;
+      return withSourceCells(() => renderRows.call(renderer, start, end), true);
+    };
   };
   const installRenderer = () => {
     if (rendererService || !core._renderService) return;
@@ -194,14 +221,20 @@ export function installTerminalCommandSource(
 
   const refresh = () => {
     projected.clear();
-    if (terminal.buffer.active.type !== 'normal') return;
+    paintCursor = undefined;
+    if (terminal.buffer.active.type !== 'normal') {
+      typing.retain(new Set());
+      return;
+    }
     const buffer = core._bufferService.buffer;
     for (const [id, record] of completed) {
       if (!record.anchor.isDisposed && !record.tail.isDisposed) continue;
       record.anchor.dispose(); record.tail.dispose(); completed.delete(id);
     }
     const current = ranges().filter(range => !completed.has(range.id));
+    typing.retain(new Set(current.filter(range => !range.complete).map(range => range.id)));
     const retained = [...completed].flatMap(([id, record]) => {
+      if (record.literal) return [];
       let last = record.tail.line;
       while (last + 1 < buffer.lines.length && buffer.lines.get(last + 1)?.isWrapped) last++;
       if (last < buffer.ybase && record.columns === terminal.cols && record.cells) {
@@ -209,10 +242,15 @@ export function installTerminalCommandSource(
         return [];
       }
       return [{ id, source: record.source, submission: record.submission, first: record.anchor.line,
-        target: record.target, offset: record.offset, last, complete: true, retained: true }];
+        target: record.target, offset: record.offset, last, complete: true, retained: true, literal: false }];
     });
-    for (const range of [...current.map(range => ({ ...range, target: comparable(range.submission), offset: 0, retained: false })), ...retained]) {
-      if (!range.source || range.source === range.submission) continue;
+    const active = current.flatMap(range => {
+      const submission = { ...range, target: comparable(range.submission), offset: 0, retained: false, literal: range.source === range.submission };
+      return range.source === range.submission ? [submission]
+        : [submission, { ...range, target: comparable(range.source), offset: 0, retained: false, literal: true }];
+    });
+    for (const range of [...active, ...retained]) {
+      if (!range.source) continue;
       const expected = range.target;
       if (!expected) continue;
       const last = Math.min(range.last, buffer.lines.length - 1);
@@ -268,13 +306,22 @@ export function installTerminalCommandSource(
         if (!start || !end) return false;
         let logical = start.row;
         while (logical > first && buffer.lines.get(logical)?.isWrapped) logical--;
-        const line = buffer.lines.get(logical);
-        if (!line || !origin.erased.has(line)) return false;
         let prompt = '';
         for (let row = logical; row <= start.row; row++) {
           prompt += buffer.lines.get(row)?.translateToString(true, 0, row === start.row ? start.column : undefined) ?? '';
         }
-        if (comparable(prompt) !== origin.prompt) return false;
+        if (comparable(prompt) !== origin.prompt) {
+          // Readline can explicitly CR/LF a wrapped prompt during ED2 redraw,
+          // so its literal prompt need not retain xterm's soft-wrap flags.
+          logical = start.row;
+          prompt = buffer.lines.get(logical)?.translateToString(true, 0, start.column) ?? '';
+          while (logical > first && comparable(prompt).length < origin.prompt.length) {
+            logical--;
+            prompt = (buffer.lines.get(logical)?.translateToString(true) ?? '') + prompt;
+          }
+        }
+        const line = buffer.lines.get(logical);
+        if (!line || !origin.erased.has(line) || comparable(prompt) !== origin.prompt) return false;
         const echo = origin.echoes.get(line);
         if (echo?.column === start.column && echo.length >= match.length && echo.rows.length >= end.row - logical + 1
           && echo.rows.slice(0, end.row - logical + 1).every((saved, index) => buffer.lines.get(logical + index) === saved.line
@@ -321,6 +368,23 @@ export function installTerminalCommandSource(
         const start = positions[match.at];
         const end = positions[match.at + match.length - 1];
         if (!start || !end) continue;
+        let display = range.source;
+        if (range.literal && match.length < expected.length) {
+          let count = 0;
+          display = '';
+          for (const character of commandGraphemes(range.source)) {
+            const next = count + comparable(character).length;
+            if (next > match.length) break;
+            display += character;
+            count = next;
+            if (count === match.length) break;
+          }
+        }
+        const liveTail = !range.retained && !range.complete && match.at + match.length === text.length
+          && end.row <= buffer.ybase + buffer.y;
+        if (liveTail && typeof range.id === 'string') {
+          display = typing.show(range.id, display);
+        }
         let record = range.retained ? completed.get(range.id) : undefined;
         if (range.complete && !range.retained && final) {
           let head = start.row;
@@ -331,11 +395,12 @@ export function installTerminalCommandSource(
           const tail = terminal.registerMarker(tailRow - buffer.ybase - buffer.y);
           const firstCharacter = positions.findIndex(position => position.row >= head);
           if (anchor && tail) {
-            record = { source: range.source, submission: range.submission, anchor, tail,
+            record = { source: display, submission: range.submission, anchor, tail, literal: range.literal,
               target: expected.slice(0, match.length), offset: match.at - firstCharacter };
             completed.set(match === final ? range.id : Symbol(), record);
           } else { anchor?.dispose(); tail?.dispose(); }
         }
+        if (range.literal && !liveTail) continue;
         const cells = new Map<NativeLine, NativeLine>();
         scratch.resize(terminal.cols, terminal.rows);
         scratch.reset();
@@ -343,20 +408,45 @@ export function installTerminalCommandSource(
         const originalFirst = buffer.lines.get(start.row)!;
         sourceBuffer.lines.get(0)!.copyCellsFrom(originalFirst, 0, 0, start.column);
         sourceBuffer.x = start.column;
-        native(scratch)._inputHandler.parse(literalSource(range.source));
+        native(scratch)._inputHandler.parse(literalSource(display));
+        const inputEndRow = liveTail ? buffer.ybase + buffer.y : end.row;
+        const inputEndColumn = liveTail ? terminal.cols
+          : end.column + buffer.lines.get(end.row)!.loadCell(end.column, cell).getWidth();
+        if (liveTail) {
+          const row = start.row + sourceBuffer.ybase + sourceBuffer.y;
+          let column = sourceBuffer.x;
+          const lastSourceLine = sourceBuffer.lines.get(sourceBuffer.ybase + sourceBuffer.y);
+          for (let index = 0; lastSourceLine && index < terminal.cols; index++) {
+            const value = lastSourceLine.loadCell(index, cell);
+            if (value.getChars()) column = Math.max(column, index + value.getWidth());
+          }
+          paintCursor = { row: Math.min(row, inputEndRow),
+            column: row < inputEndRow ? column : row === inputEndRow ? Math.min(column, inputEndColumn) : inputEndColumn };
+        }
         const blank = sourceBuffer.lines.get(0)!.clone();
         blank.fill(scratch.buffer.normal.getNullCell());
-        for (let row = start.row; row <= end.row; row++) {
+        for (let row = start.row; row <= inputEndRow; row++) {
           const original = buffer.lines.get(row)!;
           const replacement = (projected.get(original) ?? original).clone();
           const source = sourceBuffer.lines.get(row - start.row);
           const column = row === start.row ? start.column : 0;
-          const limit = row === end.row ? end.column + original.loadCell(end.column, cell).getWidth() : terminal.cols;
+          const limit = row === inputEndRow ? inputEndColumn : terminal.cols;
           if (source) replacement.copyCellsFrom(source, column, column, limit - column);
           else {
             // A source shorter than its quoted envelope leaves empty input cells;
             // process output retains its original rows and ANSI attributes.
             replacement.copyCellsFrom(blank, 0, column, limit - column);
+          }
+          if (range.literal && source) {
+            for (let index = column; index < limit; index++) {
+              const value = source.loadCell(index, cell);
+              const characters = value.getChars();
+              const width = value.getWidth();
+              const nativeCell = original.loadCell(index, cell);
+              if (characters && width && characters === nativeCell.getChars() && width === nativeCell.getWidth()) {
+                replacement.copyCellsFrom(original, index, index, Math.min(width, limit - index));
+              }
+            }
           }
           if (row > start.row) replacement.isWrapped = source?.isWrapped ?? false;
           projected.set(original, replacement);
@@ -413,6 +503,7 @@ export function installTerminalCommandSource(
     dispose(preserveHistory = false) {
       if (disposed) return;
       disposed = true;
+      typing.dispose();
       subscriptions.forEach(subscription => subscription.dispose());
       normal.getLine = getLine;
       terminal.getSelection = getSelection;

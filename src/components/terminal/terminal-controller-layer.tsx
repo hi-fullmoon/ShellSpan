@@ -477,6 +477,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
         if (disposed || activeLeases.get(lease.sessionId) !== active
           || controller.sessionId !== lease.sessionId
           || terminalRegistry.get(lease.sessionId) !== controller) return;
+        controller.fit();
         controller.focus();
         if (disposed || activeLeases.get(lease.sessionId) !== active
           || controller.sessionId !== lease.sessionId

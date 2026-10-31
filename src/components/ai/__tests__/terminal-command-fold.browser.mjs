@@ -17,6 +17,13 @@ const args = ['log', '-1', '--format=fuller', '--',
   'src/components/ai/__tests__/ai-tool-presentation.test.tsx'];
 const output = execFileSync('git', args, { cwd: root, encoding: 'utf8' });
 const command = `git ${args.join(' ')}`;
+const shortArgs = ['rev-parse', '--short', 'HEAD'];
+const scenarios = ['inline', 'details'].flatMap(surface => [
+  { surface, name: 'short', command: `git ${shortArgs.join(' ')}`,
+    output: execFileSync('git', shortArgs, { cwd: root, encoding: 'utf8' }) },
+  { surface, name: 'wrapped', command, output },
+  { surface, name: 'multiline', command: `git ${args.join(' \\\n  ')}`, output },
+]);
 const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error',
   cacheDir: join(artifacts, 'vite-cache'),
@@ -26,7 +33,7 @@ const server = await createServer({
 });
 server.middlewares.use('/__command', (_request, response) => {
   response.setHeader('Content-Type', 'text/html');
-  response.end('<!doctype html><html><body><main id="root" class="ai-panel-shell"></main></body></html>');
+  response.end('<!doctype html><html><body><main id="root" class="ai-panel-shell" style="height:900px"></main></body></html>');
 });
 try {
   await server.listen();
@@ -34,23 +41,23 @@ try {
     const browser = await engine.launch();
     try {
       for (const width of [380, 720]) {
-        for (const multiline of [false, true]) {
+        for (const { surface, name, command: displayCommand, output } of scenarios) {
           const page = await browser.newPage({ viewport: { width, height: 900 } });
           await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__command`);
-          const displayCommand = multiline ? `git ${args.join(' \\\n  ')}` : command;
-          await page.evaluate(async ({ command, output }) => {
+          await page.evaluate(async ({ command, output, surface }) => {
             const { React, createRoot } = await import('/src/components/ai/__tests__/agent-content-surfaces.browser-runtime.ts');
             await import('/src/styles/base.css');
             await import('/src/components/ai/styles/styles.css');
             const { AiToolExpandedContent } = await import('/src/components/ai/workspace/ai-tool-presentation.tsx');
+            const { AiToolDetails } = await import('/src/components/ai/workspace/ai-tool-details.tsx');
             const { initI18n } = await import('/src/locales/index.ts');
             await initI18n('en-US');
-            createRoot(document.getElementById('root')).render(React.createElement(AiToolExpandedContent, {
-              compact: true,
-              node: { kind: 'tool', name: 'exec_command', nativeName: null, state: 'succeeded',
-                input: { command }, output, error: null, target: null },
-            }));
-          }, { command: displayCommand, output });
+            const node = { kind: 'tool', name: 'exec_command', nativeName: null, state: 'succeeded',
+              input: { command }, output, error: null, target: null, summary: command, durationMs: null };
+            createRoot(document.getElementById('root')).render(surface === 'details'
+              ? React.createElement(AiToolDetails, { node, onBack() {} })
+              : React.createElement(AiToolExpandedContent, { compact: true, node }));
+          }, { command: displayCommand, output, surface });
           const toggle = page.locator('.ai-terminal-command');
           await toggle.waitFor();
           const geometry = () => toggle.evaluate(element => {
@@ -61,20 +68,45 @@ try {
               lineHeight: parseFloat(getComputedStyle(text).lineHeight) };
           });
           const collapsed = await geometry();
-          const context = `${engine.name()}/${width}/${multiline}`;
-          assert.ok(Math.abs(collapsed.height - collapsed.lineHeight * 2) <= 1, `${context}: exactly two visible lines`);
-          assert.ok(collapsed.fullHeight > collapsed.textHeight, `${context}: command exceeds preview`);
+          const context = `${engine.name()}/${width}/${surface}/${name}`;
+          const spacing = () => page.locator('.ai-terminal-command-row').evaluate(element => {
+            const style = getComputedStyle(element);
+            const row = element.getBoundingClientRect();
+            const title = element.querySelector('.ai-content-title').getBoundingClientRect();
+            const output = element.closest('.ai-terminal-output').querySelector('[data-ai-terminal-output]').getBoundingClientRect();
+            return { top: parseFloat(style.paddingTop), bottom: parseFloat(style.paddingBottom),
+              titleTop: title.top - row.top, outputGap: output.top - title.bottom };
+          });
+          assert.deepEqual(await spacing(), { top: 4, bottom: 4, titleTop: 4, outputGap: 4 },
+            `${context}: command title must have compact, equal vertical spacing`);
+          assert.ok(Math.abs(collapsed.height - collapsed.lineHeight * (name === 'short' ? 1 : 2)) <= 1,
+            `${context}: short commands use one line and long previews use two`);
+          assert.equal(collapsed.fullHeight > collapsed.textHeight, name !== 'short', `${context}: long command exceeds preview`);
+          const copy = page.locator('.ai-terminal-command-row').locator('..').locator('.ai-tool-copy-button');
+          assert.equal(await copy.count(), surface === 'inline' ? 1 : 0, `${context}: copy actions match the surface`);
+          if (surface === 'inline') {
+            const row = await page.locator('.ai-terminal-command-row').boundingBox();
+            const button = await copy.boundingBox();
+            assert.ok(button.y >= row.y && button.y + button.height <= row.y + row.height,
+              `${context}: copy button stays inside the compact command row`);
+            await copy.focus();
+            assert.equal(await copy.evaluate(element => getComputedStyle(element).opacity), '1',
+              `${context}: keyboard focus reveals the copy action`);
+          }
           assert.equal(await toggle.textContent(), displayCommand);
           await page.screenshot({ path: join(artifacts, `${context.replaceAll('/', '-')}-collapsed.png`) });
           await toggle.click();
           assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
           const expanded = await geometry();
-          assert.ok(expanded.height > collapsed.height, `${context}: click expands command`);
+          assert.equal(expanded.height > collapsed.height, name !== 'short', `${context}: only long commands grow on expansion`);
           assert.ok(Math.abs(expanded.textHeight - expanded.fullHeight) <= 1, `${context}: all lines are visible`);
-          const titleFrame = toggle.locator('..');
+          const titleFrame = page.locator('.ai-terminal-command-row .ai-content-title');
+          const titleViewport = titleFrame.locator('[data-slot="scroll-area-viewport"]');
+          assert.deepEqual(await spacing(), { top: 4, bottom: 4, titleTop: 4, outputGap: 4 },
+            `${context}: expanding must preserve the command title spacing`);
           assert.ok((await titleFrame.boundingBox()).height <= expanded.lineHeight * 6 + 1, `${context}: expanded command stays within six lines`);
-          await titleFrame.evaluate(element => { element.scrollTop = element.scrollHeight; });
-          assert.ok(await titleFrame.evaluate(element => element.scrollHeight <= element.clientHeight || element.scrollTop > 0), `${context}: every command line is reachable`);
+          await titleViewport.evaluate(element => { element.scrollTop = element.scrollHeight; });
+          assert.ok(await titleViewport.evaluate(element => element.scrollHeight <= element.clientHeight || element.scrollTop > 0), `${context}: every command line is reachable`);
           await page.screenshot({ path: join(artifacts, `${context.replaceAll('/', '-')}-expanded.png`) });
           await toggle.press('Enter');
           assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
@@ -88,7 +120,7 @@ try {
       await browser.close();
     }
   }
-  console.log(`Command folding passed in Chromium and WebKit at 380px and 720px. Screenshots: ${artifacts}`);
+  console.log(`Command spacing, folding and copy geometry passed in Chromium/WebKit, inline/details, short/wrapped/multiline, at 380px/720px. Screenshots: ${artifacts}`);
 } finally {
   await server.close();
 }

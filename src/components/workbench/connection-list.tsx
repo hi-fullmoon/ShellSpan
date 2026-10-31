@@ -52,6 +52,8 @@ import {
 import { WorkbenchPage, WorkbenchPageContent, WorkbenchPageHeader, WorkbenchSearchInput, WorkbenchPageToolbar } from './workbench-page';
 
 const CARD_ACTION_DEBOUNCE_MS = 500;
+const CONNECTION_TRANSFER_MENU_ITEM_CLASS =
+  "[&_svg:not([class*='size-'])]:size-3.5 [&>svg]:translate-y-px [&>svg]:text-muted-foreground";
 // Keep column changes in the same layout pass as AI-panel resizing.
 export const ConnectionCardGrid = ({ children }: { children: React.ReactNode }) => (
   <div className="@container/connections w-full">
@@ -204,11 +206,11 @@ export const ConnectionList: React.FC<ConnectionListProps> = ({
                 </Tooltip>
                 <DropdownMenuContent align="end" className="w-max min-w-0">
                   <DropdownMenuGroup>
-                    <DropdownMenuItem onClick={onImport}>
+                    <DropdownMenuItem className={CONNECTION_TRANSFER_MENU_ITEM_CLASS} onClick={onImport}>
                       <DownloadIcon />
                       {t('workbench.connections.import')}
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={onExport}>
+                    <DropdownMenuItem className={CONNECTION_TRANSFER_MENU_ITEM_CLASS} onClick={onExport}>
                       <UploadIcon />
                       {t('workbench.connections.export')}
                     </DropdownMenuItem>

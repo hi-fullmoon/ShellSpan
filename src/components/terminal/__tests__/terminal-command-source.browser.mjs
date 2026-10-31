@@ -92,11 +92,61 @@ try {
                 await handle(event);
               }
               const marker = terminal.registerMarker(0);
+              terminal.focus();
+              let complete = false;
+              terminal.parser.registerOscHandler(133, data => {
+                if (data === 'C') complete = true;
+                return false;
+              });
               const source = acquired.commandDisplay;
               const submission = acquired.commandSubmission;
               if (!submission || source === submission) throw new Error('The native test must include an actual execution envelope');
               window.sourceProjection = { terminal, baseline, decorations, inputs, write, handle, acquired,
-                source, submission, marker, readNativeTerminalLine, leases, installTerminalCommandDecorations };
+                source, submission, marker, readNativeTerminalLine, leases, installTerminalCommandDecorations,
+                complete: () => complete, renderer, smoothPaint: false, cursorChecks: 0 };
+              if (renderer === 'dom') {
+                // Observe the real row factory's cell coordinate. Emoji font
+                // fallback can have a different pixel advance from the grid.
+                const factory = terminal._core._renderService._renderer.value._rowFactory;
+                const createRow = factory.createRow;
+                factory.createRow = function (...args) {
+                  if (args[2]) window.sourceProjection.domCursor = {
+                    x: Math.min(args[5], terminal.cols - 1), y: args[1] - terminal.buffer.normal.viewportY };
+                  return createRow.apply(this, args);
+                };
+              }
+              terminal.onRender(() => {
+                const state = window.sourceProjection;
+                if (complete || terminal.buffer.active.type !== 'normal') return;
+                const buffer = terminal.buffer.normal;
+                let text = '';
+                let tail;
+                for (let row = Math.max(0, marker.line); row <= buffer.baseY + buffer.cursorY; row++) {
+                  const line = buffer.getLine(row);
+                  if (!line) continue;
+                  text += line.translateToString(true);
+                  for (let column = 0; column < terminal.cols; column++) {
+                    const cell = line.getCell(column);
+                    if (cell?.getWidth() && cell.getChars()) tail = {
+                      x: Math.min(column + cell.getWidth(), terminal.cols - 1), y: row - buffer.viewportY };
+                  }
+                }
+                if (!text.replace(/\s/gu, '').includes(source.slice(0, 8).replace(/\s/gu, ''))) return;
+                let cursor;
+                if (renderer === 'webgl') cursor = terminal._core._renderService._renderer.value._model.cursor;
+                else {
+                  const cell = terminal.element.querySelector('.xterm-cursor');
+                  const rows = Array.from(terminal.element.querySelectorAll('.xterm-rows > div'));
+                  const y = rows.findIndex(row => row.contains(cell));
+                  if (cell && y >= 0) {
+                    cursor = { x: state.domCursor?.x, y };
+                  }
+                }
+                if (cursor?.x > 0 && tail && tail.y >= 0 && tail.y < terminal.rows) {
+                  if (cursor.x !== tail.x || cursor.y !== tail.y) state.cursorError = JSON.stringify({ cursor, tail, text });
+                  state.cursorChecks++;
+                }
+              });
             }, { metadata, kind, renderer });
             const frames = kind === 'foreground' ? metadata.frames.map(frame => frame.bytes) : [metadata.backgroundDisplay];
             for (const bytes of frames) {
@@ -104,6 +154,9 @@ try {
                 const state = window.sourceProjection;
                 await state.write(Uint8Array.from(bytes));
                 const normal = state.baseline.buffer.normal;
+                if (state.terminal.buffer.normal.cursorX !== normal.cursorX || state.terminal.buffer.normal.cursorY !== normal.cursorY) {
+                  throw new Error('Presentation changed the native cursor outside rendering');
+                }
                 for (let row = 0; row < normal.length; row++) {
                   if (state.readNativeTerminalLine(state.terminal, row) !== normal.getLine(row).translateToString(true)) {
                     throw new Error(`Display projection changed native terminal cells at row ${row}`);
@@ -119,8 +172,21 @@ try {
                   if (painted.replace(/\s/gu, '').includes('(exit"$?");builtineval--')) {
                     throw new Error(`The DOM renderer painted the internal envelope:\n${painted}`);
                   }
+                  if (!state.complete() && !state.smoothPaint) {
+                    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                    const after = Array.from({ length: state.terminal.buffer.normal.length }, (_, row) =>
+                      state.terminal.buffer.normal.getLine(row).translateToString(true)).join('\n');
+                    state.smoothPaint = after !== display;
+                  }
+                  if (state.cursorError) throw new Error(`Cursor does not follow the displayed command: ${state.cursorError}`);
                 }
               }, bytes);
+            }
+            if (kind === 'foreground') {
+              const evidence = await page.evaluate(() => ({ smooth: window.sourceProjection.smoothPaint,
+                cursorChecks: window.sourceProjection.cursorChecks }));
+              assert.equal(evidence.smooth, true, `${engine.name()}/${renderer}/${columns}${variant}: a native batch must reveal multiple visual prefixes`);
+              assert.ok(evidence.cursorChecks > 0, `${engine.name()}/${renderer}/${columns}${variant}: verify the actual painted cursor`);
             }
             await page.evaluate(async () => {
               const state = window.sourceProjection;
@@ -180,5 +246,5 @@ try {
       }
     } finally { await browser.close(); }
   }
-  console.log(`Original command display and selection preserve native Bash cells and input across foreground/background execution and reflow. Artifacts: ${directory}`);
+  console.log(`Original command typing, painted cursor and selection preserve native Bash cells and input across foreground/background execution and reflow. Artifacts: ${directory}`);
 } finally { await server.close(); }

@@ -215,13 +215,6 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const activeSessionId = activeSession?.sessionId ?? null;
   const currentSessionIdRef = useRef(activeSessionId);
   currentSessionIdRef.current = activeSessionId;
-  const { focus, clearSearch } = useActiveController(
-    paneRef,
-    activeSessionId,
-    isActive && !searchOpen,
-    isVisible,
-  );
-
   const controller = useSyncExternalStore(terminalRegistry.subscribe, () =>
     activeSessionId === null ? undefined : terminalRegistry.get(activeSessionId),
   );
@@ -234,6 +227,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     agentTerminalLeaseState.subscribe,
     () => agentTerminalLeaseState.get(activeSessionId),
   );
+  const { focus, clearSearch } = useActiveController(paneRef, activeSessionId, isActive && !searchOpen, isVisible);
 
   const connecting = activeSession?.status === 'connecting' && !activeSession.reconnecting;
   // Once the overlay appears, hold it for MIN_CONNECTING_OVERLAY_MS even if
@@ -425,7 +419,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   }, [terminal, isVisible]);
 
   return (
-    <div ref={resizeBoundaryRef} className="relative flex h-full w-full flex-col overflow-hidden bg-app-bg">
+    <div ref={resizeBoundaryRef} className="relative flex h-full w-full flex-col overflow-hidden bg-app-bg" data-terminal-pane-session={activeSessionId}>
       {activeLease && (
         <AgentTerminalLeaseBar lease={activeLease} />
       )}

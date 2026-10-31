@@ -1,0 +1,251 @@
+{
+  "provenance": "Captured by terminal_integration::tests::command_presentation::native_bash_multiline_typing_renders_progress_before_single_submission on a real Bash 5.3 PTY; source, lease events and registry observations are unmodified.",
+  "approvedSource": "cat <<'SHELLSPAN_END'\nquoted '\"' and\tliteral Tab 中文é👩‍💻\nSHELLSPAN_END\npwd",
+  "leaseEvents": [
+    {
+      "acquiredAtUnixMs": 1793360368127,
+      "agentSessionId": "presentation-agent",
+      "commandDisplay": "sleep 3",
+      "commandExecution": true,
+      "operationId": "presentation-launch",
+      "sessionId": "presentation-private",
+      "state": "acquired",
+      "taskId": "presentation-task"
+    },
+    {
+      "acquiredAtUnixMs": 1793360368127,
+      "agentSessionId": "presentation-agent",
+      "commandPhase": "typing",
+      "operationId": "presentation-launch",
+      "sessionId": "presentation-private",
+      "state": "activity",
+      "taskId": "presentation-task"
+    },
+    {
+      "acquiredAtUnixMs": 1793360368127,
+      "agentSessionId": "presentation-agent",
+      "commandPhase": "running",
+      "operationId": "presentation-launch",
+      "sessionId": "presentation-private",
+      "state": "activity",
+      "taskId": "presentation-task"
+    },
+    {
+      "acquiredAtUnixMs": 1793360368127,
+      "agentSessionId": "presentation-agent",
+      "operationId": "presentation-launch",
+      "reason": "completed",
+      "sessionId": "presentation-private",
+      "state": "released",
+      "taskId": "presentation-task"
+    },
+    {
+      "acquiredAtUnixMs": 1793360370080,
+      "agentSessionId": "presentation-agent",
+      "commandExecution": false,
+      "operationId": "presentation-control-0",
+      "sessionId": "presentation-private",
+      "state": "acquired",
+      "taskId": "presentation-task"
+    },
+    {
+      "acquiredAtUnixMs": 1793360370080,
+      "agentSessionId": "presentation-agent",
+      "commandPhase": "typing",
+      "operationId": "presentation-control-0",
+      "sessionId": "presentation-private",
+      "state": "activity",
+      "taskId": "presentation-task"
+    },
+    {
+      "acquiredAtUnixMs": 1793360370080,
+      "agentSessionId": "presentation-agent",
+      "commandPhase": "running",
+      "operationId": "presentation-control-0",
+      "sessionId": "presentation-private",
+      "state": "activity",
+      "taskId": "presentation-task"
+    },
+    {
+      "acquiredAtUnixMs": 1793360370080,
+      "agentSessionId": "presentation-agent",
+      "operationId": "presentation-control-0",
+      "reason": "completed",
+      "sessionId": "presentation-private",
+      "state": "released",
+      "taskId": "presentation-task"
+    },
+    {
+      "acquiredAtUnixMs": 1793360370113,
+      "agentSessionId": "presentation-agent",
+      "commandExecution": false,
+      "operationId": "presentation-control-1",
+      "sessionId": "presentation-private",
+      "state": "acquired",
+      "taskId": "presentation-task"
+    },
+    {
+      "acquiredAtUnixMs": 1793360370113,
+      "agentSessionId": "presentation-agent",
+      "commandPhase": "typing",
+      "operationId": "presentation-control-1",
+      "sessionId": "presentation-private",
+      "state": "activity",
+      "taskId": "presentation-task"
+    },
+    {
+      "acquiredAtUnixMs": 1793360370113,
+      "agentSessionId": "presentation-agent",
+      "commandPhase": "running",
+      "operationId": "presentation-control-1",
+      "sessionId": "presentation-private",
+      "state": "activity",
+      "taskId": "presentation-task"
+    },
+    {
+      "acquiredAtUnixMs": 1793360370113,
+      "agentSessionId": "presentation-agent",
+      "operationId": "presentation-control-1",
+      "reason": "completed",
+      "sessionId": "presentation-private",
+      "state": "released",
+      "taskId": "presentation-task"
+    },
+    {
+      "acquiredAtUnixMs": 1793360370149,
+      "agentSessionId": "presentation-agent",
+      "commandExecution": false,
+      "operationId": "presentation-control-2",
+      "sessionId": "presentation-private",
+      "state": "acquired",
+      "taskId": "presentation-task"
+    },
+    {
+      "acquiredAtUnixMs": 1793360370149,
+      "agentSessionId": "presentation-agent",
+      "commandPhase": "typing",
+      "operationId": "presentation-control-2",
+      "sessionId": "presentation-private",
+      "state": "activity",
+      "taskId": "presentation-task"
+    },
+    {
+      "acquiredAtUnixMs": 1793360370149,
+      "agentSessionId": "presentation-agent",
+      "commandPhase": "running",
+      "operationId": "presentation-control-2",
+      "sessionId": "presentation-private",
+      "state": "activity",
+      "taskId": "presentation-task"
+    },
+    {
+      "acquiredAtUnixMs": 1793360370149,
+      "agentSessionId": "presentation-agent",
+      "operationId": "presentation-control-2",
+      "reason": "completed",
+      "sessionId": "presentation-private",
+      "state": "released",
+      "taskId": "presentation-task"
+    },
+    {
+      "acquiredAtUnixMs": 1793360370186,
+      "agentSessionId": "presentation-agent",
+      "commandDisplay": "cat <<'SHELLSPAN_END'\nquoted '\"' and\tliteral Tab 中文é👩‍💻\nSHELLSPAN_END\npwd",
+      "commandExecution": true,
+      "operationId": "presentation-script",
+      "sessionId": "presentation-private",
+      "state": "acquired",
+      "taskId": "presentation-task"
+    },
+    {
+      "acquiredAtUnixMs": 1793360370186,
+      "agentSessionId": "presentation-agent",
+      "commandPhase": "typing",
+      "operationId": "presentation-script",
+      "sessionId": "presentation-private",
+      "state": "activity",
+      "taskId": "presentation-task"
+    },
+    {
+      "acquiredAtUnixMs": 1793360370186,
+      "agentSessionId": "presentation-agent",
+      "commandPhase": "running",
+      "operationId": "presentation-script",
+      "sessionId": "presentation-private",
+      "state": "activity",
+      "taskId": "presentation-task"
+    },
+    {
+      "acquiredAtUnixMs": 1793360370186,
+      "agentSessionId": "presentation-agent",
+      "operationId": "presentation-script",
+      "reason": "completed",
+      "sessionId": "presentation-private",
+      "state": "released",
+      "taskId": "presentation-task"
+    }
+  ],
+  "result": {
+    "captureEndSequence": 203,
+    "captureStartSequence": 197,
+    "captureTruncated": false,
+    "combinedOutput": "\r\n\u001b[?2004l\r\u001b]133;C\u0007quoted '\"' and\tliteral Tab 中文é👩‍💻\r\n/Users/zhengbiwen/Developer/my/ShellSpan\r\n\u001b]133;A\u0007\u001b[?2004hzhengbiwendeMacBook-Pro:ShellSpan zhengbiwen$ ",
+    "commandId": "command-7fa0c520-54f6-4771-98f6-59dc9dc1b9f1",
+    "commandLine": "cat <<'SHELLSPAN_END'\nquoted '\"' and\tliteral Tab 中文é👩‍💻\nSHELLSPAN_END\npwd",
+    "cwd": "/Users/zhengbiwen/Developer/my/ShellSpan",
+    "exitCode": 0,
+    "noAutoReplay": true,
+    "operationId": "presentation-script",
+    "protocolVersion": 1,
+    "revision": 3,
+    "state": "completed",
+    "submittedCommandLine": "(exit \"$?\"); builtin eval -- \"cat <<'SHELLSPAN_END'\nquoted '\\\"' and\tliteral Tab 中文é👩‍💻\nSHELLSPAN_END\npwd\"",
+    "terminalGeneration": 1,
+    "terminalSessionId": "terminal-c01b1567-24ae-47b3-8fdd-3f40be917d30"
+  },
+  "background": {
+    "job": {
+      "acceptedCommandLine": "( job-9eeadd93f7c2464cb2f9da976c94d1b9;\nbuiltin eval -- 'sleep 3'\n) &",
+      "agentSessionId": "presentation-agent",
+      "captureStartSequence": 4,
+      "cleanupReason": null,
+      "commandLine": "sleep 3",
+      "controlLost": false,
+      "exitCode": null,
+      "launchConfirmed": true,
+      "nativeActive": true,
+      "observationRevision": 1,
+      "observedAtUnixMs": 1793360370048,
+      "observedOutputSequence": 84,
+      "operationId": "presentation-launch",
+      "ownerTargetId": "presentation-owner",
+      "processHandle": "job-9eeadd93f7c2464cb2f9da976c94d1b9",
+      "shell": "bash",
+      "state": "running",
+      "stopRequested": false,
+      "submittedCommandLine": "( job-9eeadd93f7c2464cb2f9da976c94d1b9;\nbuiltin eval -- 'sleep 3'\n) &",
+      "taskId": "presentation-task",
+      "terminalGeneration": 1,
+      "terminalSessionId": "terminal-c01b1567-24ae-47b3-8fdd-3f40be917d30",
+      "transportSessionId": "presentation-private"
+    },
+    "result": {
+      "captureEndSequence": 87,
+      "captureStartSequence": 81,
+      "captureTruncated": false,
+      "combinedOutput": "\r\n\u001b[?2004l\r[1] 54779\r\n\u001b]133;C\u0007\u001b]133;A\u0007\u001b[?2004hzhengbiwendeMacBook-Pro:ShellSpan zhengbiwen$ ",
+      "commandId": "command-e79ea7d8-2c4c-4ab7-8a82-52e19632ca7d",
+      "commandLine": "sleep 3",
+      "cwd": "/Users/zhengbiwen/Developer/my/ShellSpan",
+      "exitCode": 0,
+      "noAutoReplay": true,
+      "operationId": "presentation-launch",
+      "protocolVersion": 1,
+      "revision": 3,
+      "state": "completed",
+      "submittedCommandLine": "( job-9eeadd93f7c2464cb2f9da976c94d1b9;\nbuiltin eval -- 'sleep 3'\n) &",
+      "terminalGeneration": 1,
+      "terminalSessionId": "terminal-c01b1567-24ae-47b3-8fdd-3f40be917d30"
+    }
+  }
+}

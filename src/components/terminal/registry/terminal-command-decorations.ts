@@ -63,6 +63,10 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
     range.element?.remove();
     range.start.dispose();
     range.end?.dispose();
+    if (!disposed) {
+      source.refresh();
+      terminal.refresh(0, terminal.rows - 1);
+    }
   };
   const startPendingCommand = () => {
     const pending = pendingCommands[0];
@@ -74,7 +78,7 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
     if (start) {
       pending.range = { operationId: pending.operationId, start, source: pending.source, submission: pending.submission };
       ranges.add(pending.range);
-      if (pending.source && pending.submission && pending.source !== pending.submission) {
+      if (pending.source && pending.submission) {
         source.begin(pending.operationId, start.line);
       }
     }
@@ -157,7 +161,7 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
         if (expired?.range) remove(expired.range);
       }
       pendingCommands.push({ operationId: next, visible, anchored: false, submitted: submittedOperations.has(next),
-        source: lease?.commandDisplay, submission: lease?.commandSubmission });
+        source: lease?.commandDisplay, submission: lease?.commandSubmission ?? lease?.commandDisplay });
       startPendingCommand();
       schedule();
     });
