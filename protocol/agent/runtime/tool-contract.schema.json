@@ -1083,6 +1083,7 @@
       "required": ["contractVersion", "channel", "state", "execution", "processHandle", "launchState", "job", "noAutoReplay", "error", "errorDetails", "outputScope"],
       "properties": {
         "contractVersion": { "const": 1 }, "channel": { "const": "terminal" },
+        "operationId": { "$ref": "#/$defs/identifier" },
         "state": { "enum": ["failed", "uncertain"] },
         "execution": { "enum": ["notStarted", "unknown"] },
         "processHandle": { "type": ["string", "null"], "pattern": "^job-[0-9a-f]{32}$" },

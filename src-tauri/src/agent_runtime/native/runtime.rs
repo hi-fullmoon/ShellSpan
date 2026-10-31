@@ -1860,6 +1860,7 @@ impl NativeToolEngine {
             &summary,
             json!({
                 "contractVersion": 1, "channel": "terminal",
+                "operationId": call.call_id,
                 "state": if not_started { "failed" } else { "uncertain" },
                 "execution": if not_started { "notStarted" } else { "unknown" },
                 "processHandle": job.as_ref().map(|job| &job.process_handle),

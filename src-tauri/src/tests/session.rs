@@ -1280,6 +1280,8 @@
     fn remote_native_shell_jobs_bash_and_zsh() {
         use crate::agent_runtime::AgentToolTargetNative;
         use crate::terminal_broker::TerminalCommandState;
+        let first_count = regex::Regex::new(r"first-count:\s*1:end").unwrap();
+        let replay_count = regex::Regex::new(r"replay-count:\s*1:end").unwrap();
         for username in ["shellspan", "shellspan-zsh"] {
             let broker =
                 crate::terminal_broker::TerminalSessionBroker::phase4_enabled_for_test(16_384);
@@ -1384,9 +1386,7 @@
                 "background cwd polluted the parent control stream"
             );
             let once = terminal.execute("verify-once", &format!("printf 'first-count:%s:end' \"$(wc -l < {path})\"; cat {inherited_path}; rm {path} {inherited_path}"));
-            assert!(regex::Regex::new(r"first-count:\s*1:end")
-                .unwrap()
-                .is_match(&once.combined_output));
+            assert!(first_count.is_match(&once.combined_output));
             assert!(
                 once.combined_output
                     .contains("ssh-aliasssh-function:ssh-job-state:kept:/tmp::child-cwd:/:"),
@@ -1478,9 +1478,7 @@
                 ),
             );
             assert!(
-                regex::Regex::new(r"replay-count:\s*1:end")
-                    .unwrap()
-                    .is_match(&replay.combined_output),
+                replay_count.is_match(&replay.combined_output),
                 "background source replayed after reconnect: {replay:?}"
             );
             drop(reconnected);

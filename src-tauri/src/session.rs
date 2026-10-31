@@ -1112,7 +1112,16 @@ fn session_loop_inner(
         // Idle: sleep until the SSH socket becomes ready, a command wakes us
         // through the self-pipe, or the keepalive deadline expires — whichever
         // comes first.
-        wait_for_session_events(session, wake, keepalive_due_in)?;
+        wait_for_terminal_session_events(
+            session,
+            channel,
+            remote_integration
+                .as_ref()
+                .filter(|integration| integration.active)
+                .map(|integration| &integration.control),
+            wake,
+            keepalive_due_in,
+        )?;
     }
 }
 
@@ -1306,6 +1315,25 @@ fn session_poll_events(directions: BlockDirections) -> i16 {
         BlockDirections::Outbound => POLLOUT,
         BlockDirections::Both => POLLIN | POLLOUT,
     }
+}
+
+fn wait_for_terminal_session_events(
+    session: &Session,
+    terminal: &Channel,
+    control: Option<&Channel>,
+    wake: &SessionWakeSource,
+    timeout: Duration,
+) -> Result<(), String> {
+    // Reading or writing either channel can consume socket packets for the
+    // other one. Those bytes (or EOF) are already in libssh2, so socket poll
+    // cannot wake us for them. Drain them before waiting for new network I/O.
+    if terminal.read_window().available > 0
+        || terminal.eof()
+        || control.is_some_and(|channel| channel.read_window().available > 0 || channel.eof())
+    {
+        return Ok(());
+    }
+    wait_for_session_events(session, wake, timeout)
 }
 
 /// Waits until the SSH socket is ready, the self-pipe signals a pending

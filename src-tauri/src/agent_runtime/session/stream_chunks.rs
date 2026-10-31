@@ -50,7 +50,7 @@ pub(super) fn split_sanitized_event(event: AgentSessionEvent) -> Vec<AgentSessio
                 text_delta: text.get(position).map(|value| (*value).to_owned()),
                 reasoning_delta: reasoning.get(position).map(|value| (*value).to_owned()),
                 tool_call_delta: tool_delta,
-                usage: if position == 0 { usage.clone() } else { None },
+                usage: if position == 0 { *usage } else { None },
             };
             AgentSessionEvent::new(
                 event.session_id.clone(),

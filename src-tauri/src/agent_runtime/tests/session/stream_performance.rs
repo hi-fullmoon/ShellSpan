@@ -70,7 +70,7 @@ fn expanded_stream_chunks_keep_metadata_once_and_mixed_batches_atomic() {
                 name_delta: Some("run_command".into()),
                 arguments_delta: Some(source),
             }),
-            usage: Some(usage.clone()),
+            usage: Some(usage),
         },
     };
     let end = |reason: &str| AgentScopedPayload {
@@ -124,7 +124,7 @@ fn expanded_stream_chunks_keep_metadata_once_and_mixed_batches_atomic() {
                 delta.name_delta.as_deref(),
                 (index == 0).then_some("run_command")
             );
-            assert_eq!(*actual_usage, (index == 0).then(|| usage.clone()));
+            assert_eq!(*actual_usage, (index == 0).then_some(usage));
             assert_eq!(reasoning_delta.as_deref(), (index == 0).then_some(""));
             let piece = text_delta.as_deref().unwrap();
             let argument_piece = delta.arguments_delta.as_deref().unwrap();
