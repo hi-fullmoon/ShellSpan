@@ -2365,7 +2365,7 @@ async fn large_native_results_become_verified_redacted_artifacts() {
 
     std::fs::remove_file(
         root.path()
-            .join("agent-runtime/artifacts-v2/session-large-result")
+            .join("agent-runtime/artifacts/session-large-result")
             .join(format!("{}.bin", artifact.metadata.artifact_id)),
     )
     .unwrap();
@@ -2505,7 +2505,7 @@ async fn bound_terminal_result_is_redacted_before_model_context_and_session_pers
     let persisted = std::fs::read_to_string(
         root.path()
             .join("agent-runtime")
-            .join("sessions-v5")
+            .join("sessions")
             .join("session-visible-secret.jsonl"),
     )
     .unwrap();

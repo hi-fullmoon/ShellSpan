@@ -1,6 +1,6 @@
 // Uses real local session headers; never writes to the session store.
-// SHELLSPAN_SESSION_ARCHIVES=/path/to/archives-v5 node src/components/ai/__tests__/ai-session-records.browser.mjs
-// With fewer records, use SHELLSPAN_SESSION_DIRECTORY=/path/to/sessions-v5 and --delete-all-only.
+// SHELLSPAN_SESSION_ARCHIVES=/path/to/archives node src/components/ai/__tests__/ai-session-records.browser.mjs
+// With fewer records, use SHELLSPAN_SESSION_DIRECTORY=/path/to/sessions and --delete-all-only.
 import assert from 'node:assert/strict';
 import { open, readdir } from 'node:fs/promises';
 import os from 'node:os';
@@ -12,7 +12,7 @@ import tailwindcss from '@tailwindcss/vite';
 const root = path.resolve(import.meta.dirname, '../../../..');
 const deleteAllOnly = process.argv.includes('--delete-all-only');
 const archives = process.env.SHELLSPAN_SESSION_DIRECTORY ?? process.env.SHELLSPAN_SESSION_ARCHIVES
-  ?? path.join(process.env.SHELLSPAN_DATA_DIR ?? path.join(os.homedir(), '.shellspan'), 'agent-runtime', 'archives-v5');
+  ?? path.join(process.env.SHELLSPAN_DATA_DIR ?? path.join(os.homedir(), '.shellspan'), 'agent-runtime', 'archives');
 const records = [];
 for (const name of await readdir(archives)) {
   if (!name.endsWith('.jsonl')) continue;
@@ -23,7 +23,7 @@ for (const name of await readdir(archives)) {
       if (event.type !== 'session/created') continue;
       records.push({
         header: { ...event.data, sessionId: event.sessionId, createdAtUnixMs: event.timeUnixMs },
-        archived: path.basename(archives) === 'archives-v5',
+        archived: path.basename(archives) === 'archives',
       });
       break;
     }

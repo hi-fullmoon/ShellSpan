@@ -372,7 +372,7 @@ async fn skill_claim_every_complete_jsonl_prefix_recovers_one_input_and_prepared
         .unwrap();
     for end in from..=to {
         let storage = tempfile::tempdir().unwrap();
-        let dir = storage.path().join("agent-runtime/sessions-v5");
+        let dir = storage.path().join("agent-runtime/sessions");
         std::fs::create_dir_all(&dir).unwrap();
         let mut lines = String::new();
         for e in &events[..=end] {
@@ -547,7 +547,7 @@ async fn skill_model_tool_every_complete_prefix_reuses_committed_body_and_origin
         .unwrap();
     for end in from..=to {
         let storage = tempfile::tempdir().unwrap();
-        let dir = storage.path().join("agent-runtime/sessions-v5");
+        let dir = storage.path().join("agent-runtime/sessions");
         std::fs::create_dir_all(&dir).unwrap();
         let lines = events[..=end]
             .iter()

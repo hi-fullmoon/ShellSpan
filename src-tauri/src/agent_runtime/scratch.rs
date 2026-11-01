@@ -71,7 +71,7 @@ pub(super) fn owns_target(
     let root = fs::canonicalize(data_root)
         .map_err(|e| e.to_string())?
         .join("agent-runtime")
-        .join("scratch-v1");
+        .join("scratch");
     inspect_directory(&root.join("records"))?;
     let record: Record = read_json(&root.join("records").join(format!("{key}.json")))?;
     if record.session_id != session
@@ -157,7 +157,7 @@ impl ScratchStore {
     pub(super) fn open(data_root: &Path) -> Result<Self, String> {
         let data_root =
             fs::canonicalize(data_root).map_err(|e| format!("scratch data root: {e}"))?;
-        let root = data_root.join("agent-runtime").join("scratch-v1");
+        let root = data_root.join("agent-runtime").join("scratch");
         private_directory(&data_root.join("agent-runtime"))?;
         private_directory(&root)?;
         private_directory(&root.join("records"))?;

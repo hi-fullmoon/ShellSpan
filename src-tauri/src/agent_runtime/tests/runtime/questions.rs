@@ -182,7 +182,7 @@ async fn question_every_jsonl_prefix_repairs_answer_result_and_step_once() {
     let last = events.iter().position(|e| matches!(&e.payload, AgentSessionEventPayload::StepEnd { reason } if reason == "toolsCompleted")).unwrap();
     for end in first..=last {
         let root = tempfile::tempdir().unwrap();
-        let dir = root.path().join("agent-runtime/sessions-v5");
+        let dir = root.path().join("agent-runtime/sessions");
         std::fs::create_dir_all(&dir).unwrap();
         let lines: String = events[..=end]
             .iter()
@@ -257,7 +257,7 @@ async fn question_chain_every_prefix_preserves_unexecuted_queue_and_never_replay
     let last = events.iter().position(|e| matches!(&e.payload, AgentSessionEventPayload::StepEnd { reason } if reason == "toolsCompleted")).unwrap();
     for end in first..=last {
         let root = tempfile::tempdir().unwrap();
-        let dir = root.path().join("agent-runtime/sessions-v5");
+        let dir = root.path().join("agent-runtime/sessions");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("prefix-chain.jsonl"),
@@ -416,7 +416,7 @@ async fn question_sensitive_answer_retry_uses_raw_fingerprint_not_redacted_conte
     assert!(runtime.answer_question(changed, None).is_err());
     let logged = std::fs::read_to_string(
         root.path()
-            .join("agent-runtime/sessions-v5/secret-answer.jsonl"),
+            .join("agent-runtime/sessions/secret-answer.jsonl"),
     )
     .unwrap();
     assert!(!logged.contains("first-private-answer"));
@@ -606,7 +606,7 @@ async fn question_real_http_resume_uses_current_credentials_and_original_tool_hi
         .filter(|e| matches!(e.payload, AgentSessionEventPayload::RequestHeader { .. }))
         .all(|e| e.turn_id.as_ref() == Some(&input.identity.turn_id)));
     let log =
-        std::fs::read_to_string(root.path().join("agent-runtime/sessions-v5/wire.jsonl")).unwrap();
+        std::fs::read_to_string(root.path().join("agent-runtime/sessions/wire.jsonl")).unwrap();
     assert!(!log.contains("fixture-key"));
 }
 
@@ -750,7 +750,7 @@ async fn question_failed_answer_write_keeps_pending_and_identity_is_strict() {
             .answer_question(serde_json::from_value(value).unwrap(), None)
             .is_err());
     }
-    let file = root.path().join("agent-runtime/sessions-v5/failure.jsonl");
+    let file = root.path().join("agent-runtime/sessions/failure.jsonl");
     let backup = file.with_extension("backup");
     std::fs::rename(&file, &backup).unwrap();
     std::fs::create_dir(&file).unwrap();
@@ -887,7 +887,7 @@ async fn question_cancelled_jsonl_prefix_recovery_finishes_cancellation_without_
         .unwrap();
     for end in first..events.len() - 1 {
         let root = tempfile::tempdir().unwrap();
-        let dir = root.path().join("agent-runtime/sessions-v5");
+        let dir = root.path().join("agent-runtime/sessions");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("cancel-prefix.jsonl"),
@@ -1002,7 +1002,7 @@ async fn question_request_storage_failure_never_installs_or_publishes_pending() 
         .position(|e| matches!(e.payload, AgentSessionEventPayload::ToolCall { .. }))
         .unwrap();
     let root = tempfile::tempdir().unwrap();
-    let dir = root.path().join("agent-runtime/sessions-v5");
+    let dir = root.path().join("agent-runtime/sessions");
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("request-failure.jsonl");
     std::fs::write(

@@ -420,11 +420,8 @@ async fn stream_redaction_expansion_preserves_bounded_deltas_and_reopens() {
     let reopened = AgentSessionStore::default();
     reopened.configure(root.path().to_path_buf()).unwrap();
     assert_eq!(reopened.all_events("stream-test").unwrap(), events);
-    let log = std::fs::read_to_string(
-        root.path()
-            .join("agent-runtime/sessions-v5/stream-test.jsonl"),
-    )
-    .unwrap();
+    let log = std::fs::read_to_string(root.path().join("agent-runtime/sessions/stream-test.jsonl"))
+        .unwrap();
     assert!(!log.contains("token=a"));
 }
 
@@ -547,9 +544,7 @@ async fn stream_cancellation_flushes_accepted_text_and_rejects_late_output() {
 #[tokio::test]
 async fn stream_storage_failure_is_sticky_and_does_not_publish_uncommitted_text() {
     let (root, sink) = persisted_stream();
-    let log = root
-        .path()
-        .join("agent-runtime/sessions-v5/stream-test.jsonl");
+    let log = root.path().join("agent-runtime/sessions/stream-test.jsonl");
     let moved = log.with_extension("saved");
     sink.emit(StreamDelta::Text {
         index: 0,

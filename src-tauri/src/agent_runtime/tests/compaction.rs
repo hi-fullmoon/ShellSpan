@@ -2084,10 +2084,7 @@
                 ..
             })
         ));
-        assert!(root
-            .path()
-            .join("agent-runtime/artifacts-v2/session")
-            .exists());
+        assert!(root.path().join("agent-runtime/artifacts/session").exists());
     }
     #[tokio::test]
     async fn semantic_large_conversation_sees_early_constraints_and_explicit_tail_revocation() {

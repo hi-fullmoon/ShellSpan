@@ -263,10 +263,8 @@ async fn browser_bridge(files: bool) {
                         let hash = crate::agent_runtime::images::digest(&bytes);
                         assert_eq!(
                             bytes,
-                            std::fs::read(
-                                storage.path().join("agent-runtime/images-v1").join(hash)
-                            )
-                            .unwrap()
+                            std::fs::read(storage.path().join("agent-runtime/images").join(hash))
+                                .unwrap()
                         );
                     }
                 }

@@ -147,7 +147,7 @@ async fn scratch_write_approval_keeps_scope_and_does_not_save_script_before_deci
     let script = scenario
         .root
         .path()
-        .join("state/agent-runtime/scratch-v1/workspaces")
+        .join("state/agent-runtime/scratch/workspaces")
         .join(key)
         .join("files/check.sh");
     assert!(!script.exists());

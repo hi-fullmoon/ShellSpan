@@ -94,7 +94,7 @@ async fn recorded_cancelled_question_allows_resume_restart_and_continue_admissio
     let session_id = &events[0].session_id;
     for end in cancellation..=ended {
         let root = tempfile::tempdir().unwrap();
-        let directory = root.path().join("agent-runtime/sessions-v5");
+        let directory = root.path().join("agent-runtime/sessions");
         std::fs::create_dir_all(&directory).unwrap();
         let prefix = &events[..=end];
         std::fs::write(

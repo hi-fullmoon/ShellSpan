@@ -16,9 +16,17 @@ const MAX_ARTIFACT_COUNT: usize = 2_048;
 const MAX_REPLAY_ARTIFACT_COUNT: usize = 32_768;
 const MAX_TOTAL_ARTIFACT_BYTES: u64 = 512 * 1024 * 1024;
 const ARTIFACT_RETENTION_MS: u64 = 30 * 24 * 60 * 60 * 1_000;
+const ARTIFACT_STORE_VERSION: u8 = 2;
+const ARTIFACT_STORE_FORMAT_FILE: &str = "format.json";
 pub(crate) const AGENT_REPLAY_ARTIFACT_KIND: &str = "assistant-replay";
 pub(crate) const AGENT_REPLAY_ARTIFACT_MEDIA_TYPE: &str =
     "application/vnd.shellspan.agent-replay+zstd";
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ArtifactStoreFormat {
+    version: u8,
+}
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -75,7 +83,7 @@ pub(crate) struct AgentArtifactStore {
 
 impl AgentArtifactStore {
     pub(crate) fn configure(&self, app_data_root: &Path) -> Result<(), String> {
-        let root = app_data_root.join("agent-runtime").join("artifacts-v2");
+        let root = app_data_root.join("agent-runtime").join("artifacts");
         prepare_private_directory(&root)?;
         let mut state = self
             .state
@@ -87,6 +95,7 @@ impl AgentArtifactStore {
             }
             Some(_) => Ok(()),
             None => {
+                prepare_store_format(&root)?;
                 inspect_artifact_bounds(&root)?;
                 state.root = Some(root);
                 Ok(())
@@ -332,6 +341,9 @@ impl AgentArtifactStore {
         {
             let session_entry = session_entry
                 .map_err(|error| format!("failed to inspect Agent artifact session: {error}"))?;
+            if session_entry.file_name() == ARTIFACT_STORE_FORMAT_FILE {
+                continue;
+            }
             if !session_entry
                 .file_type()
                 .map_err(|error| format!("failed to inspect Agent artifact session: {error}"))?
@@ -414,6 +426,72 @@ pub(crate) fn validate_replay_metadata(metadata: &AgentArtifactMetadata) -> Resu
     Ok(())
 }
 
+fn prepare_store_format(root: &Path) -> Result<(), String> {
+    let path = root.join(ARTIFACT_STORE_FORMAT_FILE);
+    match fs::symlink_metadata(&path) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let occupied = fs::read_dir(root)
+                .and_then(|mut entries| entries.next().transpose())
+                .map_err(|error| format!("failed to inspect Agent artifact root: {error}"))?
+                .is_some();
+            if occupied {
+                // Another initializer may have published the format after our first check.
+                // Existing data alone never establishes a format version.
+                match fs::symlink_metadata(&path) {
+                    Ok(_) => return validate_store_format(&path),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        return Err(
+                            "Agent artifact format metadata is missing from a non-empty store"
+                                .into(),
+                        );
+                    }
+                    Err(error) => {
+                        return Err(format!("failed to inspect Agent artifact format: {error}"));
+                    }
+                }
+            }
+            // Publish a complete, synced manifest without replacing an existing one.
+            // Stage outside the store so artifact enumeration never sees the temp file.
+            let parent = root.parent().ok_or("Agent artifact root has no parent")?;
+            let mut temporary = tempfile::NamedTempFile::new_in(parent)
+                .map_err(|error| format!("failed to stage Agent artifact format: {error}"))?;
+            serde_json::to_writer(
+                &mut temporary,
+                &ArtifactStoreFormat {
+                    version: ARTIFACT_STORE_VERSION,
+                },
+            )
+            .map_err(|error| format!("failed to encode Agent artifact format: {error}"))?;
+            temporary
+                .as_file()
+                .sync_all()
+                .map_err(|error| format!("failed to flush Agent artifact format: {error}"))?;
+            match temporary.persist_noclobber(&path) {
+                Ok(_) => sync_parent(&path)?,
+                Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => {
+                    return Err(format!("failed to persist Agent artifact format: {error}"));
+                }
+            }
+        }
+        Err(error) => return Err(format!("failed to inspect Agent artifact format: {error}")),
+    }
+    validate_store_format(&path)
+}
+
+fn validate_store_format(path: &Path) -> Result<(), String> {
+    let format: ArtifactStoreFormat = serde_json::from_slice(&read_bounded(path, 1024)?)
+        .map_err(|error| format!("invalid Agent artifact format: {error}"))?;
+    if format.version != ARTIFACT_STORE_VERSION {
+        return Err(format!(
+            "Agent artifact format version {} is unsupported; expected {ARTIFACT_STORE_VERSION}",
+            format.version
+        ));
+    }
+    Ok(())
+}
+
 fn prepare_private_directory(path: &Path) -> Result<(), String> {
     fs::create_dir_all(path)
         .map_err(|error| format!("failed to create Agent artifact directory: {error}"))?;
@@ -489,6 +567,9 @@ fn inspect_artifact_bounds(root: &Path) -> Result<(usize, usize, u64), String> {
     {
         let session = session
             .map_err(|error| format!("failed to inspect Agent artifact session: {error}"))?;
+        if session.file_name() == ARTIFACT_STORE_FORMAT_FILE {
+            continue;
+        }
         if !session
             .file_type()
             .map_err(|error| format!("failed to inspect Agent artifact session: {error}"))?
@@ -583,6 +664,183 @@ fn current_unix_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn artifact_format_initializes_an_existing_empty_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("agent-runtime/artifacts");
+        fs::create_dir_all(&directory).unwrap();
+        let store = AgentArtifactStore::default();
+        store.configure(root.path()).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&fs::read(directory.join("format.json")).unwrap())
+                .unwrap(),
+            serde_json::json!({"version": 2})
+        );
+        assert_eq!(inspect_artifact_bounds(&directory).unwrap(), (0, 0, 0));
+    }
+
+    #[test]
+    fn missing_artifact_format_rejects_populated_storage_without_modifying_data() {
+        let root = tempfile::tempdir().unwrap();
+        let original = AgentArtifactStore::default();
+        original.configure(root.path()).unwrap();
+        let metadata = original
+            .store_text(
+                "session-1",
+                "summary",
+                "summary",
+                include_str!("artifact.rs"),
+            )
+            .unwrap();
+        let artifact = original.path_for_test("session-1", &metadata.artifact_id);
+        let bytes = fs::read(&artifact).unwrap();
+        let directory = root.path().join("agent-runtime/artifacts");
+        let manifest = directory.join("format.json");
+        let saved_manifest = root.path().join("saved-format.json");
+        fs::rename(&manifest, &saved_manifest).unwrap();
+        drop(original);
+
+        let reopened = AgentArtifactStore::default();
+        for _ in 0..2 {
+            assert_eq!(
+                reopened.configure(root.path()).unwrap_err(),
+                "Agent artifact format metadata is missing from a non-empty store"
+            );
+            assert!(!manifest.exists());
+            assert_eq!(fs::read(&artifact).unwrap(), bytes);
+            assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+            assert!(reopened.root().is_err());
+        }
+
+        fs::rename(&saved_manifest, &manifest).unwrap();
+        reopened.configure(root.path()).unwrap();
+        assert_eq!(
+            reopened.verify("session-1", &metadata).unwrap(),
+            AgentArtifactIntegrity::Verified
+        );
+    }
+
+    #[test]
+    fn missing_artifact_format_rejects_even_empty_session_directories() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("agent-runtime/artifacts");
+        fs::create_dir_all(directory.join("session-1")).unwrap();
+        assert_eq!(
+            AgentArtifactStore::default()
+                .configure(root.path())
+                .unwrap_err(),
+            "Agent artifact format metadata is missing from a non-empty store"
+        );
+        assert!(!directory.join("format.json").exists());
+        assert!(directory.join("session-1").is_dir());
+    }
+
+    #[test]
+    fn artifact_format_is_internal_and_survives_reopen_and_cleanup() {
+        let root = tempfile::tempdir().unwrap();
+        let store = AgentArtifactStore::default();
+        store.configure(root.path()).unwrap();
+        let directory = root.path().join("agent-runtime/artifacts");
+        let manifest = directory.join("format.json");
+        let encoded = fs::read(&manifest).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&encoded).unwrap(),
+            serde_json::json!({"version": 2})
+        );
+        let metadata = store
+            .store_text(
+                "session-1",
+                "summary",
+                "summary",
+                include_str!("artifact.rs"),
+            )
+            .unwrap();
+        assert_eq!(
+            inspect_artifact_bounds(&directory).unwrap(),
+            (1, 0, metadata.size_bytes)
+        );
+        let reopened = AgentArtifactStore::default();
+        reopened.configure(root.path()).unwrap();
+        assert_eq!(
+            reopened.verify("session-1", &metadata).unwrap(),
+            AgentArtifactIntegrity::Verified
+        );
+        let referenced = HashSet::from([("session-1".to_string(), metadata.artifact_id)]);
+        assert_eq!(reopened.cleanup_unreferenced(&referenced).unwrap(), 0);
+        assert_eq!(fs::read(&manifest).unwrap(), encoded);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(manifest).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+
+    #[test]
+    fn artifact_format_rejects_unknown_malformed_and_oversized_metadata_without_rewriting() {
+        let root = tempfile::tempdir().unwrap();
+        AgentArtifactStore::default()
+            .configure(root.path())
+            .unwrap();
+        let manifest = root.path().join("agent-runtime/artifacts/format.json");
+        for encoded in [
+            serde_json::to_vec(&serde_json::json!({"version": 255})).unwrap(),
+            b"{}".to_vec(),
+            b"{\"version\":".to_vec(),
+            vec![b' '; 1025],
+        ] {
+            fs::write(&manifest, &encoded).unwrap();
+            assert!(AgentArtifactStore::default()
+                .configure(root.path())
+                .is_err());
+            assert_eq!(fs::read(&manifest).unwrap(), encoded);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn artifact_format_rejects_symlinks() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("agent-runtime/artifacts");
+        fs::create_dir_all(&directory).unwrap();
+        let outside = root.path().join("outside.json");
+        let encoded = serde_json::to_vec(&serde_json::json!({"version": 2})).unwrap();
+        fs::write(&outside, &encoded).unwrap();
+        std::os::unix::fs::symlink(&outside, directory.join("format.json")).unwrap();
+        assert!(AgentArtifactStore::default()
+            .configure(root.path())
+            .is_err());
+        assert_eq!(fs::read(outside).unwrap(), encoded);
+    }
+
+    #[test]
+    fn concurrent_artifact_configuration_publishes_one_complete_format() {
+        let root = tempfile::tempdir().unwrap();
+        let barrier = std::sync::Barrier::new(4);
+        std::thread::scope(|scope| {
+            let handles = (0..4)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        AgentArtifactStore::default()
+                            .configure(root.path())
+                            .unwrap();
+                    })
+                })
+                .collect::<Vec<_>>();
+            for handle in handles {
+                handle.join().unwrap();
+            }
+        });
+        let format: ArtifactStoreFormat = serde_json::from_slice(
+            &fs::read(root.path().join("agent-runtime/artifacts/format.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(format.version, ARTIFACT_STORE_VERSION);
+    }
 
     #[test]
     fn artifacts_are_content_addressed_redacted_private_and_verified() {

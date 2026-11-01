@@ -343,7 +343,7 @@ impl ImageStore {
         cancelled(token)
     }
     pub(crate) fn configure(&self, root: &Path) -> Result<(), String> {
-        let root = root.join("agent-runtime/images-v1");
+        let root = root.join("agent-runtime/images");
         let mut inner = self.inner.lock().map_err(|_| "IMAGE_STORE_UNAVAILABLE")?;
         if let Some(existing) = &inner.root {
             return if *existing == root {

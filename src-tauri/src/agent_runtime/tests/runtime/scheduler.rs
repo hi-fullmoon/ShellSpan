@@ -857,7 +857,7 @@ mod scheduler_tests {
                 let directory = root
                     .path()
                     .join("agent-runtime")
-                    .join("artifacts-v2")
+                    .join("artifacts")
                     .join("storage");
                 std::fs::write(directory, "blocked artifact directory").unwrap();
             } else {

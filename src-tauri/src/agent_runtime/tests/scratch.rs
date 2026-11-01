@@ -61,6 +61,23 @@ fn scratch_roots_are_private_outside_project_and_isolated_by_session() {
     let work = Workspace::new();
     let first = work.acquire("parent");
     let child = work.acquire("child");
+    let directory = work
+        .root
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join("agent-runtime/scratch");
+    assert!(Path::new(&first.root).starts_with(directory.join("workspaces")));
+    let record: serde_json::Value = serde_json::from_slice(
+        &fs::read(
+            directory
+                .join("records")
+                .join(format!("{}.json", key("parent", &work.target).unwrap())),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(record["version"], 1);
     assert_ne!(first.root, child.root);
     assert!(!Path::new(&first.root).starts_with(work.target.cwd.as_ref().unwrap()));
     assert!(!Path::new(&first.root).join("../records").exists());

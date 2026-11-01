@@ -36,7 +36,7 @@ The adapter removes this facade field before native argument validation and
 retains it in recorded calls so approval reconstruction cannot switch roots.
 
 Local files live under
-`{dataRoot}/agent-runtime/scratch-v1/workspaces/{sessionTargetDigest}/files`.
+`{dataRoot}/agent-runtime/scratch/workspaces/{sessionTargetDigest}/files`.
 `dataRoot` keeps the existing development/production/custom-root separation.
 Ownership records and the random installation identity live outside the writable
 file root. Native storage protection admits only the exact registered root for

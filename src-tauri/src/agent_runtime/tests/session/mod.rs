@@ -415,8 +415,7 @@ fn message(id: &str, content: &str) -> AgentInboxMessage {
 }
 
 fn log_path(root: &tempfile::TempDir) -> PathBuf {
-    root.path()
-        .join("agent-runtime/sessions-v5/session-1.jsonl")
+    root.path().join("agent-runtime/sessions/session-1.jsonl")
 }
 
 fn begin_prepared_request(store: &AgentSessionStore) -> crate::llm::runtime::RequestSnapshot {
@@ -551,7 +550,7 @@ fn execution_surface_is_persisted_in_session_created_and_restored_from_header() 
 #[test]
 fn pre_surface_semantics_v1_sessions_restore_frozen_values_without_rewrite() {
     let root = tempfile::tempdir().unwrap();
-    let sessions_root = root.path().join("agent-runtime/sessions-v5");
+    let sessions_root = root.path().join("agent-runtime/sessions");
     fs::create_dir_all(&sessions_root).unwrap();
     let fixtures = [
         (
@@ -1639,7 +1638,7 @@ fn ended_logs_archive_as_read_only_and_reload_from_the_archive_root() {
     assert!(!log_path(&root).exists());
     assert!(root
         .path()
-        .join("agent-runtime/archives-v5/session-1.jsonl")
+        .join("agent-runtime/archives/session-1.jsonl")
         .is_file());
     assert!(store
         .append(
@@ -1671,9 +1670,7 @@ fn only_archived_logs_can_be_permanently_deleted() {
 
     store.cancel("session-1").unwrap();
     store.archive("session-1").unwrap();
-    let archived_path = root
-        .path()
-        .join("agent-runtime/archives-v5/session-1.jsonl");
+    let archived_path = root.path().join("agent-runtime/archives/session-1.jsonl");
     assert!(archived_path.is_file());
 
     store.delete_archived("session-1").unwrap();
@@ -1686,19 +1683,21 @@ fn only_archived_logs_can_be_permanently_deleted() {
 }
 
 #[test]
-fn v4_logs_are_ignored_without_migration_or_compatibility_reads() {
+fn versioned_directories_are_ignored_without_migration_or_compatibility_reads() {
+    let (source_root, source) = configured();
+    create(&source);
     let root = tempfile::tempdir().unwrap();
-    let previous_root = root.path().join("agent-runtime/sessions-v4");
+    let previous_root = root.path().join("agent-runtime/sessions-v5");
     fs::create_dir_all(&previous_root).unwrap();
-    let previous_path = previous_root.join("session-previous.jsonl");
-    let sentinel = b"{\"version\":4,\"sessionId\":\"session-previous\"}\n";
-    fs::write(&previous_path, sentinel).unwrap();
+    let previous_path = previous_root.join("session-1.jsonl");
+    let sentinel = fs::read(log_path(&source_root)).unwrap();
+    fs::write(&previous_path, &sentinel).unwrap();
 
     let store = AgentSessionStore::default();
     store.configure(root.path().to_path_buf()).unwrap();
     assert_eq!(fs::read(&previous_path).unwrap(), sentinel);
-    assert!(store.snapshot("session-previous").is_err());
-    assert!(root.path().join("agent-runtime/sessions-v5").is_dir());
+    assert!(store.snapshot("session-1").is_err());
+    assert!(root.path().join("agent-runtime/sessions").is_dir());
 }
 
 #[test]
@@ -2756,7 +2755,7 @@ fn startup_discards_and_audits_only_an_uncommitted_bad_tail() {
     );
     assert!(root
         .path()
-        .join("agent-runtime/sessions-v5")
+        .join("agent-runtime/sessions")
         .read_dir()
         .unwrap()
         .any(|entry| entry
@@ -3015,7 +3014,7 @@ fn persisted_directories_and_logs_are_private() {
     let (root, store) = configured();
     create(&store);
     assert_eq!(
-        fs::metadata(root.path().join("agent-runtime/sessions-v5"))
+        fs::metadata(root.path().join("agent-runtime/sessions"))
             .unwrap()
             .permissions()
             .mode()
@@ -3043,7 +3042,7 @@ fn startup_quarantines_log_symlinks_without_following_them() {
     symlink(
         &external,
         root.path()
-            .join("agent-runtime/sessions-v5/session-link.jsonl"),
+            .join("agent-runtime/sessions/session-link.jsonl"),
     )
     .unwrap();
 

@@ -97,7 +97,7 @@ async fn compaction_progress_is_published_before_work_and_records_real_outcomes(
         if outcome == "failed" {
             // A real filesystem obstruction prevents artifact publication.
             std::fs::write(
-                root.path().join("agent-runtime/artifacts-v2/progress"),
+                root.path().join("agent-runtime/artifacts/progress"),
                 "not a directory",
             )
             .unwrap();
@@ -167,7 +167,7 @@ async fn compaction_progress_is_published_before_work_and_records_real_outcomes(
         assert_eq!(ends[0].3.is_some(), outcome != "completed");
         if outcome == "failed" {
             std::fs::rename(
-                root.path().join("agent-runtime/artifacts-v2/progress"),
+                root.path().join("agent-runtime/artifacts/progress"),
                 root.path().join("blocked-artifact-entry"),
             )
             .unwrap();

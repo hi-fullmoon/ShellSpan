@@ -355,13 +355,13 @@ async fn oversized_replay_uses_a_claim_check_and_restores_after_restart() {
     assert!(artifact.size_bytes < replay_bytes as u64);
     let artifact_path = root
         .path()
-        .join("agent-runtime/artifacts-v2")
+        .join("agent-runtime/artifacts")
         .join(session_id)
         .join(format!("{}.bin", artifact.artifact_id));
     assert!(artifact_path.is_file());
     let log = std::fs::read_to_string(
         root.path()
-            .join("agent-runtime/sessions-v5")
+            .join("agent-runtime/sessions")
             .join(format!("{session_id}.jsonl")),
     )
     .unwrap();

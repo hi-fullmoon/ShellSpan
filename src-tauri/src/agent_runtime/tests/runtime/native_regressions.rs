@@ -544,7 +544,7 @@ async fn real_approval_storage_obstruction_keeps_the_decision_retryable() {
     let log = scenario
         .root
         .path()
-        .join("state/agent-runtime/sessions-v5/storage.jsonl");
+        .join("state/agent-runtime/sessions/storage.jsonl");
     let saved = log.with_extension("saved");
     std::fs::rename(&log, &saved).unwrap();
     std::fs::create_dir(&log).unwrap();

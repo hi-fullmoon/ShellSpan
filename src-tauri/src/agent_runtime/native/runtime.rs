@@ -1150,7 +1150,7 @@ impl NativeToolEngine {
                 }
                 let managed = std::fs::canonicalize(root)
                     .unwrap_or_else(|_| root.clone())
-                    .join("agent-runtime/scratch-v1");
+                    .join("agent-runtime/scratch");
                 if scope
                     .paths
                     .iter()

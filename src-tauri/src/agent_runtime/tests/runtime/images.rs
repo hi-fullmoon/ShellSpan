@@ -118,7 +118,7 @@ async fn image_second_blob_failure_keeps_first_blob_but_commits_no_partial_batch
     std::fs::create_dir(
         storage
             .path()
-            .join("agent-runtime/images-v1")
+            .join("agent-runtime/images")
             .join(&refs[0].sha256),
     )
     .unwrap();
@@ -126,7 +126,7 @@ async fn image_second_blob_failure_keeps_first_blob_but_commits_no_partial_batch
     batch.images.push(second);
     assert!(runtime.submit_images(batch).await.is_err());
     assert!(
-        std::fs::read_dir(storage.path().join("agent-runtime/images-v1"))
+        std::fs::read_dir(storage.path().join("agent-runtime/images"))
             .unwrap()
             .any(|entry| entry.unwrap().file_type().unwrap().is_file())
     );
@@ -149,7 +149,7 @@ async fn image_missing_blob_stops_request_before_provider_transport() {
     runtime.submit_images(input("one")).await.unwrap();
     runtime.await_idle("images").await.unwrap();
     drop(runtime);
-    for entry in std::fs::read_dir(storage.path().join("agent-runtime/images-v1")).unwrap() {
+    for entry in std::fs::read_dir(storage.path().join("agent-runtime/images")).unwrap() {
         std::fs::remove_file(entry.unwrap().path()).unwrap();
     }
     let model = FakeAdapter::new(vec![reply("must not be called", &[])]);
@@ -427,7 +427,7 @@ async fn image_bad_batch_write_failure_and_every_cancel_boundary_never_enqueue()
             .decode(blob.data)
             .unwrap(),
     );
-    let path = storage.path().join("agent-runtime/images-v1").join(hash);
+    let path = storage.path().join("agent-runtime/images").join(hash);
     std::fs::remove_file(&path).unwrap();
     std::fs::create_dir(&path).unwrap();
     assert!(runtime.submit_images(input("fail-write")).await.is_err());
@@ -588,7 +588,7 @@ async fn image_restart_reuses_pixels_and_missing_or_tampered_blob_fails_closed()
     drop(requests);
     let path = storage
         .path()
-        .join("agent-runtime/images-v1")
+        .join("agent-runtime/images")
         .join(&refs[0].sha256);
     let original = std::fs::read(&path).unwrap();
     std::fs::write(&path, vec![0; original.len()]).unwrap();
@@ -630,14 +630,14 @@ async fn image_every_log_prefix_repairs_claim_once_and_preserves_actual_model_in
         .iter()
         .position(|e| matches!(e.payload, AgentSessionEventPayload::RequestHeader { .. }))
         .unwrap();
-    let blobs = std::fs::read_dir(storage.path().join("agent-runtime/images-v1"))
+    let blobs = std::fs::read_dir(storage.path().join("agent-runtime/images"))
         .unwrap()
         .map(|entry| entry.unwrap().path())
         .collect::<Vec<_>>();
     for end in enqueued..=header {
         for trailing in [false, true] {
             let dir = tempfile::tempdir().unwrap();
-            let logs = dir.path().join("agent-runtime/sessions-v5");
+            let logs = dir.path().join("agent-runtime/sessions");
             std::fs::create_dir_all(&logs).unwrap();
             let mut lines = events[..=end]
                 .iter()
@@ -647,7 +647,7 @@ async fn image_every_log_prefix_repairs_claim_once_and_preserves_actual_model_in
                 lines.push_str("{\"interrupted_write\":");
             }
             std::fs::write(logs.join("images.jsonl"), lines).unwrap();
-            let image_dir = dir.path().join("agent-runtime/images-v1");
+            let image_dir = dir.path().join("agent-runtime/images");
             std::fs::create_dir_all(&image_dir).unwrap();
             for blob in &blobs {
                 std::fs::copy(blob, image_dir.join(blob.file_name().unwrap())).unwrap();

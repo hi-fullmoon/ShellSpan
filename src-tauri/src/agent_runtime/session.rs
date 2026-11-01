@@ -505,9 +505,9 @@ impl AgentSessionStore {
     pub(crate) fn configure(&self, app_data_root: PathBuf) -> Result<(), String> {
         self.artifacts.configure(&app_data_root)?;
         let runtime_root = app_data_root.join("agent-runtime");
-        // Conversation logs use only the current event namespace.
-        let root = runtime_root.join("sessions-v5");
-        let archive_root = runtime_root.join("archives-v5");
+        // Each conversation event carries its own format version.
+        let root = runtime_root.join("sessions");
+        let archive_root = runtime_root.join("archives");
         let mut inner = self
             .inner
             .lock()

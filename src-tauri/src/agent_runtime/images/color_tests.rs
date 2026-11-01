@@ -212,7 +212,7 @@ fn image_icc_invalid_and_mismatched_profiles_fail_without_publishing() {
         .unwrap_err()
         .contains("IMAGE_COLOR_PROFILE_UNSUPPORTED"));
     assert_eq!(
-        fs::read_dir(dir.path().join("agent-runtime/images-v1"))
+        fs::read_dir(dir.path().join("agent-runtime/images"))
             .unwrap()
             .count(),
         0
@@ -281,7 +281,7 @@ fn image_png_invalid_color_chunks_are_rejected_even_with_icc() {
         }
     }
     assert_eq!(
-        fs::read_dir(dir.path().join("agent-runtime/images-v1"))
+        fs::read_dir(dir.path().join("agent-runtime/images"))
             .unwrap()
             .count(),
         0

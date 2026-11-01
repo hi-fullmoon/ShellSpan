@@ -42,7 +42,7 @@ from the loopback Docker fixture in `tests/ssh-e2e`.
 | Model terminal context | A separate 256 KiB bounded frontend buffer strips ANSI, renders carriage-return/backspace effects, redacts secrets, and caches versioned snapshots. It receives the original emitted terminal event payload, while display filters may change xterm's payload. |
 | Legacy visible command | `AgentExecutionSurface = "boundTerminal"` maps the model facade to `exec_command.channel = "pty"`. POSIX wraps with `/bin/sh -c`; PowerShell wraps with nested `powershell.exe`. Authenticated BEGIN/END records are hidden, and a synthetic redacted `[Agent] $ ...` line is displayed. |
 | Legacy lease | One in-memory lease per terminal blocks user input during a wrapped command, verifies Agent/task/operation identity, waits for clean frontend readiness, and supports cancel, timeout, terminal close, shutdown, and user takeover. Leases do not survive restart. |
-| Persisted compatibility | Agent event version is 5. `direct` and `boundTerminal` are stored in `session/created` and surface-change events. Sessions live under `sessions-v5`; reconnect does not rebind an old Agent target. |
+| Persisted compatibility | Agent event version is 5. `direct` and `boundTerminal` are stored in `session/created` and surface-change events. Sessions live under `sessions`; reconnect does not rebind an old Agent target. |
 
 ## Protocol and frontend evidence
 

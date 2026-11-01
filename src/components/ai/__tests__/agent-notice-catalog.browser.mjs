@@ -21,7 +21,7 @@ async function recordedNotices() {
   const selected = new Map();
   const found = new Set();
   for (const app of ['com.shellspan', 'com.shellspan-dev']) {
-    const directory = join(homedir(), 'Library/Application Support', app, 'agent-runtime/sessions-v5');
+    const directory = join(homedir(), 'Library/Application Support', app, 'agent-runtime/sessions');
     const names = await readdir(directory).catch(() => []);
     for (const name of names.filter(name => name.endsWith('.jsonl'))) {
       const path = join(directory, name);

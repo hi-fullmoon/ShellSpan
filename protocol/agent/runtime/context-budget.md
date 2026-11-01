@@ -2,7 +2,13 @@
 
 ## 本地存储目录
 
-Agent 与数据库共用 ShellSpan 数据根目录：正式版为 `~/.shellspan`，开发版为 `~/.shellspan-dev`；显式 `SHELLSPAN_DATA_DIR` 配置优先。会话和归档位于 `agent-runtime/sessions-v5`、`agent-runtime/archives-v5`，产物位于 `agent-runtime/artifacts-v2`，图片位于 `agent-runtime/images-v1`，原生命令恢复记录位于 `agent-native-call-checkpoints`。这些路径均相对于同一个数据根目录，原生工具的数据保护也使用该根目录。
+Agent 与数据库共用 ShellSpan 数据根目录：正式版为 `~/.shellspan`，开发版为 `~/.shellspan-dev`；显式 `SHELLSPAN_DATA_DIR` 配置优先。会话和归档位于 `agent-runtime/sessions`、`agent-runtime/archives`，产物位于 `agent-runtime/artifacts`，图片位于 `agent-runtime/images`，临时工作区位于 `agent-runtime/scratch`，原生命令恢复记录位于 `agent-native-call-checkpoints`。这些路径均相对于同一个数据根目录，原生工具的数据保护也使用该根目录。
+
+目录名不携带格式版本。会话与归档的 JSONL 事件使用 `version: 5`，图片引用与临时工作区所有权记录使用 `version: 1`；产物存储通过 `artifacts/format.json` 中的 `{"version":2}` 声明格式，初始化时拒绝未知版本或无效元信息。版本变化由数据格式与读取校验负责，不通过更换目录名实现。
+
+仅新建或空的产物目录可以初始化 `format.json`。非空目录缺少该文件时拒绝配置，不补写版本、不改动已有产物；恢复原有有效格式文件后可以重新配置。
+
+当前尚未正式发布，不读取、迁移或删除此前带版本后缀的开发数据目录。
 
 不读取或迁移 Tauri 应用数据目录中的旧 Agent 数据。Tauri identifier 不再隔离 Agent 存储，独立验证必须显式指定 `SHELLSPAN_DATA_DIR`。
 

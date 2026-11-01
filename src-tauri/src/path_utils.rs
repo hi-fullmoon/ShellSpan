@@ -134,13 +134,18 @@ mod tests {
                 )
                 .unwrap();
             assert!(database_path.is_file());
+            assert!(sessions
+                .all_events(id)
+                .unwrap()
+                .iter()
+                .all(|event| event.version == crate::agent_runtime::AGENT_SESSION_EVENT_VERSION));
             assert!(root
-                .join("agent-runtime/sessions-v5")
+                .join("agent-runtime/sessions")
                 .join(format!("{id}.jsonl"))
                 .is_file());
-            assert!(root.join("agent-runtime/archives-v5").is_dir());
+            assert!(root.join("agent-runtime/archives").is_dir());
             assert!(root
-                .join("agent-runtime/artifacts-v2")
+                .join("agent-runtime/artifacts")
                 .join(id)
                 .join(format!("{}.bin", metadata.artifact_id))
                 .is_file());

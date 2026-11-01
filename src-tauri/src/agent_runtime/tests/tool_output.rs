@@ -226,7 +226,7 @@ fn safe_prefix_transfers_referenced_claim_checks_and_survives_store_reload() {
         .is_err());
         assert!(!root
             .path()
-            .join("agent-runtime/artifacts-v2/child")
+            .join("agent-runtime/artifacts/child")
             .join(format!("{}.bin", item.artifact_id))
             .exists());
     }
@@ -249,7 +249,7 @@ fn safe_prefix_transfers_referenced_claim_checks_and_survives_store_reload() {
     for item in [&leaf, &outer] {
         let path = root
             .path()
-            .join("agent-runtime/artifacts-v2/source")
+            .join("agent-runtime/artifacts/source")
             .join(format!("{}.bin", item.artifact_id));
         std::fs::rename(&path, path.with_extension("saved")).unwrap();
     }
@@ -272,7 +272,7 @@ fn safe_prefix_transfers_referenced_claim_checks_and_survives_store_reload() {
     .is_ok());
     let path = root
         .path()
-        .join("agent-runtime/artifacts-v2/child")
+        .join("agent-runtime/artifacts/child")
         .join(format!("{}.bin", leaf.artifact_id));
     std::fs::write(&path, include_str!("../../../../src-tauri/Cargo.toml")).unwrap();
     assert!(materialize_inherited_results(
@@ -358,7 +358,7 @@ fn inheritance_transfer_denies_blank_scope_missing_capability_cancellation_and_b
     assert_eq!(sessions.all_events("cancelled").unwrap(), before);
     let path = root
         .path()
-        .join("agent-runtime/artifacts-v2/source")
+        .join("agent-runtime/artifacts/source")
         .join(format!("{}.bin", item.artifact_id));
     std::fs::write(path, include_str!("../../../../src-tauri/Cargo.toml")).unwrap();
     assert!(materialize_inherited_results(
@@ -796,7 +796,7 @@ fn replay_artifacts_are_inaccessible_and_tampered_results_are_rejected() {
     publish_artifact(&sessions, "source", "turn", "step", &data).unwrap();
     let path = root
         .path()
-        .join("agent-runtime/artifacts-v2/source")
+        .join("agent-runtime/artifacts/source")
         .join(format!("{}.bin", data.artifact_id));
     std::fs::write(path, include_str!("../../../../AGENTS.md")).unwrap();
     assert!(read_result(
