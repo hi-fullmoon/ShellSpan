@@ -7,9 +7,11 @@ import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
 import { projectAgentActivity } from '@/lib/ai/agent-session-projection';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { createAiWorkspaceNavigationState } from '@/lib/ai/panel-route';
-import { createAiComposerState } from '@/lib/ai/composer-machine';
+import { createAiComposerState, reduceAiComposer } from '@/lib/ai/composer-machine';
+import { AiAdmissionUnconfirmedError, AiPreparationTimeoutError, normalizeAiSessionError } from '@/lib/ai/session-error';
+import { withOptimisticConversationNodes, withRetainedFailedSubmissions } from '@/lib/ai/optimistic-submission';
 import type { AiSessionView } from '@/lib/ai/session-adapter';
-import { initI18n } from '@/locales';
+import { initI18n, t } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { agentSessionEventFixture } from '@/test/fixtures/agent-session';
 import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
@@ -117,6 +119,100 @@ it('warns and blocks pointer and keyboard submission during terminal contention,
   expect(sent).toEqual(['hello']);
 });
 
+function failedSend(deliveryUnknown = false) {
+  const view = taskTokenBudgetView();
+  const requested = reduceAiComposer(createAiComposerState({
+    sessionId: view.summary.id, draft: view.snapshot.value.header.goal,
+  }), {
+    type: 'submit.requested', clientOperationId: `${view.summary.id}:send`,
+    gesture: 'primary', accelerated: false, now: view.snapshot.value.header.createdAtUnixMs,
+    hasProvider: true, canCreateSession: true,
+  }).state;
+  const state = reduceAiComposer(requested, {
+    type: 'submit.failed', clientOperationId: requested.pendingSubmissions[0].clientOperationId,
+    error: normalizeAiSessionError(deliveryUnknown ? new AiAdmissionUnconfirmedError() : new AiPreparationTimeoutError()),
+  }).state;
+  const nodes = withOptimisticConversationNodes([], requested.pendingSubmissions.map(item => ({
+    ...item, scopeKey: view.summary.scopeKey, expectedNextSeq: null,
+    delivery: deliveryUnknown ? 'unconfirmed' as const : 'failed' as const,
+  })), view.summary.scopeKey, view.summary.id);
+  return { state, nodes };
+}
+
+it.each(['zh-CN', 'en-US'] as const)('keeps failed-send recovery beside its message without composer Alerts in %s', async locale => {
+  useAppStore.setState({ locale });
+  await initI18n(locale);
+  const { state, nodes } = failedSend();
+  const retried: string[] = [];
+  const { container, rerender } = render(<AiWorkspaceRoot scope="workbench" view={null}
+    pendingNodes={nodes} composerState={state} onRetryFailedDraft={id => retried.push(id)} />);
+  const row = container.querySelector('[data-ai-failed-draft]')!;
+  expect(row.closest('[data-slot="ai-workspace-content"]')).not.toBeNull();
+  expect(container.querySelector('[data-slot="ai-workspace-error-notices"]')).toBeEmptyDOMElement();
+  expect(container.querySelectorAll('[data-ai-failed-draft]')).toHaveLength(1);
+  expect(container.querySelectorAll('[data-slot="alert"]')).toHaveLength(0);
+  expect(screen.getAllByText(t('ai.workspace.messageNotSent'))).toHaveLength(1);
+  expect(screen.getAllByText(state.failedDrafts[0].content)).toHaveLength(1);
+  const retry = within(row as HTMLElement).getByRole('button', { name: t('common.retry') });
+  expect(retry).toHaveClass('size-6', 'shrink-0');
+  retry.focus();
+  await userEvent.setup().keyboard('{Enter}');
+  expect(retried).toEqual([state.failedDrafts[0].id]);
+  rerender(<AiWorkspaceRoot scope="workbench" view={null} pendingNodes={nodes}
+    composerState={{ ...state, phase: 'stopping' }} onRetryFailedDraft={id => retried.push(id)} />);
+  expect(retry).toBeDisabled();
+  // Reopening rebuilds optimistic messages from retained application state.
+  const restored = withRetainedFailedSubmissions([], state, 'ask:workbench');
+  rerender(<AiWorkspaceRoot scope="workbench" view={null} composerState={state}
+    pendingNodes={withOptimisticConversationNodes([], restored, 'ask:workbench', state.sessionId)}
+    onRetryFailedDraft={id => retried.push(id)} />);
+  expect(container.querySelector('[data-slot="ai-workspace-content"]')).toHaveTextContent(state.failedDrafts[0].content);
+  expect(container.querySelector('[data-slot="ai-retained-failed-drafts"]')).toBeNull();
+  expect(container.querySelector('[data-slot="ai-workspace-error-notices"]')).toBeEmptyDOMElement();
+  expect(container.querySelectorAll('[data-ai-failed-draft]')).toHaveLength(1);
+  expect(container.querySelectorAll('[data-slot="alert"]')).toHaveLength(0);
+});
+
+it('keeps a restored failure in a read-only transcript without offering resubmission or duplicating it above the input', async () => {
+  const { state, nodes } = failedSend();
+  const base = taskTokenBudgetView();
+  const { container } = render(<AiWorkspaceRoot scope="workbench" readOnlySession
+    view={{ ...base, nodes }} composerState={state} onRetryFailedDraft={() => undefined} />);
+  const row = container.querySelector('[data-slot="ai-workspace-content"] [data-ai-failed-draft]')!;
+  expect(row).toHaveTextContent(t('ai.workspace.messageNotSent'));
+  await userEvent.setup().hover(within(row as HTMLElement).getByText(t('ai.workspace.messageNotSent')));
+  expect(await screen.findByText(t('ai.workspace.error.preparationTimeout'))).toBeVisible();
+  expect(row.querySelector('[data-ai-failed-retry]')).toBeNull();
+  expect(container.querySelector('[data-slot="ai-workspace-error-notices"]')).toBeEmptyDOMElement();
+});
+
+it.each(['zh-CN', 'en-US'] as const)('keeps receipt checks and synchronization recovery accessible without duplicate draft Alerts in %s', async locale => {
+  useAppStore.setState({ locale });
+  await initI18n(locale);
+  const { state, nodes } = failedSend(true);
+  const base = taskTokenBudgetView();
+  let checks = 0;
+  let finish!: () => void;
+  const checking = new Promise<void>(resolve => { finish = resolve; });
+  const { container } = render(<AiWorkspaceRoot scope="workbench" mode="ask"
+    view={{ ...base, nodes, syncError: state.lastError!, syncRecovery: { attempts: 3, retrying: false } }}
+    composerState={state} onRetrySync={() => { checks++; return checking; }}
+    failedDraftRetryBlockedReason={t('ai.error.childRecoveryBudgetExhausted')} />);
+  const row = container.querySelector('[data-ai-failed-draft]')!;
+  expect(row.closest('[data-slot="ai-workspace-content"]')).not.toBeNull();
+  expect(screen.getAllByText(t('ai.workspace.messageUnconfirmed'))).toHaveLength(1);
+  expect(container.querySelector('[data-slot="ai-workspace-error-notices"] [data-ai-failed-draft]')).toBeNull();
+  expect(container.querySelectorAll('[data-ai-error-notice]')).toHaveLength(1);
+  const check = within(row as HTMLElement).getByRole('button', { name: t('ai.workspace.checkReceipt') });
+  fireEvent.click(check);
+  fireEvent.click(check);
+  expect(checks).toBe(1);
+  expect(check).toBeDisabled();
+  expect(check).toHaveAccessibleDescription(t('ai.error.childRecoveryBudgetExhausted'));
+  await act(async () => { finish(); await checking; });
+  expect(check).toBeEnabled();
+});
+
 describe('AiWorkspaceRoot Phase 3 skeleton', () => {
   it.each(['zh-CN', 'en-US'] as const)('keeps the Agent header consistent with terminal availability in %s', async locale => {
     useAppStore.setState({ locale });
@@ -221,10 +317,8 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
       historicalContinuationAvailable historicalContinuationBusy historicalContinuationError="Connection lost"
       agentUnavailableReason="Connect a terminal" onContinueOnReconnectedTerminal={() => {}} />);
     const notices = container.querySelector('[data-slot="ai-workspace-status-notices"]') as HTMLElement;
-    expect(within(notices).getByText('Preparing the continued conversation…')).toBeVisible();
+    expect(within(notices).queryByText('Preparing the continued conversation…')).toBeNull();
     expect(within(notices).getByText('Connection lost')).toBeVisible();
-    expect(within(notices).getByText('Preparing the continued conversation…').closest('[data-slot="alert"]'))
-      .toHaveClass('border-primary/30', 'bg-primary/10');
     expect(within(notices).getByText('Connection lost').closest('[data-slot="alert"]'))
       .toHaveClass('border-destructive/20', 'bg-destructive/5');
     expect(within(notices).getByText('Connect a terminal').closest('[data-slot="alert"]'))
@@ -415,7 +509,6 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
         phase: 'error',
         draft: 'new input',
         lastError: error,
-        failedDrafts: [{ id: 'failed-1', content: 'failed input', mode: 'nextTurn', error }],
       }));
       return (
         <AiWorkspaceRoot
@@ -458,7 +551,6 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
 
     await user.click(screen.getByRole('button', { name: 'Dismiss error' }));
     expect(screen.queryByText(error.message)).toBeNull();
-    expect(screen.getByText('failed input')).toBeVisible();
   });
 
   it('opens history over the conversation and preserves its draft and expanded process when dismissed', async () => {

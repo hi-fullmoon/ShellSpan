@@ -3,9 +3,13 @@ import { describe, expect, it } from 'vitest';
 import {
   reconcileOptimisticSubmissions,
   withOptimisticConversationNodes,
+  withRetainedFailedSubmissions,
   type AiOptimisticSubmission,
 } from '@/lib/ai/optimistic-submission';
 import type { AiUserMessageNode } from '@/lib/ai/conversation-node';
+import { createAiComposerState, reduceAiComposer } from '@/lib/ai/composer-machine';
+import { AiAdmissionUnconfirmedError, AiPreparationTimeoutError, normalizeAiSessionError } from '@/lib/ai/session-error';
+import { AiSubmissionMemory } from '@/lib/ai/submission-memory';
 
 function pending(changes: Partial<AiOptimisticSubmission> = {}): AiOptimisticSubmission {
   return {
@@ -41,6 +45,54 @@ function committed(changes: Partial<AiUserMessageNode> = {}): AiUserMessageNode 
 }
 
 describe('optimistic submission reconcile', () => {
+  it('does not duplicate an initial failed send while its new session identity is being adopted', () => {
+    const initial = pending({ sessionId: null, delivery: 'failed' });
+    const state = createAiComposerState({ sessionId: 'session-1', failedDrafts: [{
+      id: initial.clientOperationId, content: initial.content, mode: initial.mode,
+      error: normalizeAiSessionError(new AiPreparationTimeoutError()),
+    }] });
+    expect(withRetainedFailedSubmissions([initial], state, initial.scopeKey)).toEqual([initial]);
+  });
+
+  it.each([null, 'session-1'])('restores failed sends for %s with their original identities, order and receipt state', sessionId => {
+    const memory = new AiSubmissionMemory();
+    const context = { key: pending().scopeKey };
+    let state = createAiComposerState({ sessionId });
+    for (const [index, failure] of [new AiPreparationTimeoutError(), new AiAdmissionUnconfirmedError()].entries()) {
+      const clientOperationId = `operation-${index + 1}`;
+      state = reduceAiComposer(state, { type: 'submit.requested', clientOperationId, content: pending().content,
+        gesture: 'primary', accelerated: false, now: 1000 + index, hasProvider: true, canCreateSession: true }).state;
+      state = reduceAiComposer(state, { type: 'submit.failed', clientOperationId, error: normalizeAiSessionError(failure) }).state;
+    }
+    memory.remember(context, state);
+    memory.close(context);
+    const restored = withRetainedFailedSubmissions([], memory.reopen(context.key)!.state, context.key);
+    expect(restored.map(item => [item.clientOperationId, item.delivery, item.createdAtUnixMs]))
+      .toEqual([['operation-1', 'failed', 1000], ['operation-2', 'unconfirmed', 1001]]);
+    expect(withRetainedFailedSubmissions(restored, state, context.key)).toBe(restored);
+    expect(withRetainedFailedSubmissions([restored[1]], state, context.key)).toEqual(restored);
+    const nodes = withOptimisticConversationNodes([], restored, context.key, sessionId);
+    expect(nodes.map(node => node.timestamp)).toEqual([new Date(1000).toISOString(), new Date(1001).toISOString()]);
+    expect(withOptimisticConversationNodes([], restored, 'other-workspace', sessionId)).toEqual([]);
+    if (sessionId) expect(withOptimisticConversationNodes([], restored, context.key, 'other-session')).toEqual([]);
+    if (!sessionId) return;
+    // A late committed event replaces the local failure, including after re-opening.
+    const receipt = committed();
+    expect(withOptimisticConversationNodes([receipt], restored, context.key, sessionId)).toHaveLength(2);
+    const reconciled = reconcileOptimisticSubmissions(restored, [receipt]);
+    expect(reconciled.committedOperationIds).toEqual(['operation-1']);
+    const settled = reduceAiComposer(state, { type: 'submit.committed', clientOperationId: 'operation-1' }).state;
+    expect(withRetainedFailedSubmissions(reconciled.remaining, settled, context.key)).toEqual([restored[1]]);
+    expect(reconcileOptimisticSubmissions(restored, [], [], ['operation-1']).committedOperationIds).toEqual(['operation-1']);
+    expect(reconcileOptimisticSubmissions(restored, [], [{ id: 'operation-1', content: pending().content,
+      lane: 'nextTurn', state: 'queued', source: 'user' }]).committedOperationIds).toEqual(['operation-1']);
+    const retried = reduceAiComposer(state, { type: 'retry.requested', failedDraftId: 'operation-1',
+      clientOperationId: 'unused-new-id', now: 2000, hasProvider: true, canCreateSession: true });
+    expect(retried.effects.find(effect => effect.type === 'submit')).toMatchObject({
+      payload: { clientOperationId: 'operation-1', createdAtUnixMs: 1000, content: pending().content },
+    });
+  });
+
   it('reconciles retained receipts after a message leaves both the inbox and transcript', () => {
     expect(reconcileOptimisticSubmissions([pending({ delivery: 'unconfirmed' })], [], [], ['operation-1']))
       .toEqual({ remaining: [], committedOperationIds: ['operation-1'] });

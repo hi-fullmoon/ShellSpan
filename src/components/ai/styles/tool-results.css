@@ -247,6 +247,10 @@
   color: var(--ai-error);
 }
 
+.ai-turn-error[data-ai-failed-draft] > svg {
+  margin-top: 0;
+}
+
 .ai-turn-error-copy .ai-turn-error-title {
   color: var(--ai-error);
   font-weight: 400;

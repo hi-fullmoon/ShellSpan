@@ -1,15 +1,47 @@
 import type { AiConversationNode, AiUserMessageNode } from './conversation-node';
-import type { AiDetachedSubmission } from './composer-machine';
+import type { AiComposerState, AiDetachedSubmission } from './composer-machine';
 import type { AiInboxItem } from './session-adapter';
 
 export type AiOptimisticDelivery = 'pending' | 'accepted' | 'confirming' | 'unconfirmed' | 'failed' | 'timedOut';
 
-export interface AiOptimisticSubmission extends AiDetachedSubmission {
+export interface AiOptimisticSubmission extends Omit<AiDetachedSubmission, 'createdAtUnixMs'> {
+  readonly createdAtUnixMs?: number;
   readonly scopeKey: string;
   readonly expectedNextSeq: number | null;
   readonly delivery: AiOptimisticDelivery;
   readonly startsTurn?: boolean;
   readonly error?: string;
+}
+
+/** Restore failed sends from application-owned state without submitting them again. */
+export function withRetainedFailedSubmissions(
+  submissions: readonly AiOptimisticSubmission[],
+  state: Pick<AiComposerState, 'sessionId' | 'failedDrafts'>,
+  scopeKey: string,
+): readonly AiOptimisticSubmission[] {
+  const retained = state.failedDrafts.filter(failed => !submissions.some(item => (
+    item.scopeKey === scopeKey && (item.sessionId === state.sessionId || item.sessionId === null)
+      && item.clientOperationId === failed.id
+  ))).map((failed): AiOptimisticSubmission => ({
+    clientOperationId: failed.id,
+    sessionId: state.sessionId,
+    scopeKey,
+    content: failed.content,
+    mode: failed.mode,
+    hasImages: failed.hasImages,
+    startsTurn: failed.startsTurn,
+    admissionOrder: failed.admissionOrder,
+    createdAtUnixMs: failed.createdAtUnixMs,
+    expectedNextSeq: null,
+    delivery: failed.error.deliveryUnknown ? 'unconfirmed' : 'failed',
+    error: failed.error.message,
+  }));
+  if (retained.length === 0) return submissions;
+  return [...submissions, ...retained].sort((left, right) => (
+    left.admissionOrder !== undefined && right.admissionOrder !== undefined
+      ? left.admissionOrder - right.admissionOrder
+      : (left.createdAtUnixMs ?? 0) - (right.createdAtUnixMs ?? 0)
+  ));
 }
 
 /** Reconcile only against durable Agent Runtime submission identities. */
@@ -70,7 +102,7 @@ function optimisticNode(submission: AiOptimisticSubmission): AiUserMessageNode {
     stepId: null,
     firstSeq: submission.expectedNextSeq ?? Number.MAX_SAFE_INTEGER,
     lastSeq: submission.expectedNextSeq ?? Number.MAX_SAFE_INTEGER,
-    timestamp: new Date(submission.createdAtUnixMs).toISOString(),
+    timestamp: submission.createdAtUnixMs === undefined ? '' : new Date(submission.createdAtUnixMs).toISOString(),
     messageId: submission.clientOperationId,
     clientSubmissionId: submission.clientOperationId,
     content: submission.content,

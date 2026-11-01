@@ -34,6 +34,7 @@ import {
 } from '@/lib/ai/composer-machine';
 import {
   reconcileOptimisticSubmissions,
+  withRetainedFailedSubmissions,
   withOptimisticConversationNodes,
   type AiOptimisticSubmission,
 } from '@/lib/ai/optimistic-submission';
@@ -455,6 +456,10 @@ export function useAiSessionController({
     : `agent:terminal:${activeTerminal?.sessionId ?? 'disconnected'}`;
   const appliedWorkspaceRef = useRef(workspaceScopeKey);
   const workspaceChanging = appliedWorkspaceRef.current !== workspaceScopeKey;
+  const retainedOptimistic = useMemo(() => workspaceChanging ? optimistic
+    : withRetainedFailedSubmissions(optimistic, {
+      sessionId: composer.sessionId, failedDrafts: composer.failedDrafts,
+    }, workspaceScopeKey), [composer.failedDrafts, composer.sessionId, optimistic, workspaceChanging, workspaceScopeKey]);
   const submissionContextRef = useRef({ key: workspaceScopeKey });
   const appliedSubmissionContext = useRef(submissionContextRef.current);
   if (appliedWorkspaceRef.current === workspaceScopeKey) {
@@ -1179,7 +1184,7 @@ export function useAiSessionController({
 
   useEffect(() => {
     if (!view) return;
-    const result = reconcileOptimisticSubmissions(optimisticRef.current, view.nodes, view.inbox, view.committedOperationIds);
+    const result = reconcileOptimisticSubmissions(retainedOptimistic, view.nodes, view.inbox, view.committedOperationIds);
     if (!sameOptimistic(result.remaining, optimisticRef.current)) {
       updateOptimistic(() => result.remaining);
     }
@@ -1200,7 +1205,7 @@ export function useAiSessionController({
       timeoutRef.current.delete(clientOperationId);
       dispatch({ type: 'submit.committed', clientOperationId });
     }
-  }, [dispatch, updateOptimistic, view]);
+  }, [dispatch, retainedOptimistic, updateOptimistic, view]);
 
   const visibleView = useMemo<AiSessionView | null>(() => {
     if (!view) return null;
@@ -1208,13 +1213,13 @@ export function useAiSessionController({
       ...view,
       nodes: withOptimisticConversationNodes(
         view.nodes,
-        optimistic,
+        retainedOptimistic,
         workspaceScopeKey,
         view.summary.id,
         view.inbox,
       ),
     };
-  }, [optimistic, view, workspaceScopeKey]);
+  }, [retainedOptimistic, view, workspaceScopeKey]);
   const continuationSourceId = view?.snapshot.value.header.continuedFromSessionId;
   useEffect(() => {
     if (!continuationSourceId) return;
@@ -1337,8 +1342,8 @@ export function useAiSessionController({
       ?? (historicalTargetUnavailable && !canContinueReconnectedView
         ? t('ai.workspace.sessions.previousTerminalReadOnly') : terminalUnavailableReason);
   const pendingNodes = useMemo(() => (
-    view ? [] : withOptimisticConversationNodes([], optimistic, workspaceScopeKey, null)
-  ), [optimistic, view, workspaceScopeKey]);
+    view ? [] : withOptimisticConversationNodes([], retainedOptimistic, workspaceScopeKey, null)
+  ), [retainedOptimistic, view, workspaceScopeKey]);
   const pendingApprovalKey = view?.pendingApproval
     ? approvalIdentityKey(view.pendingApproval)
     : null;

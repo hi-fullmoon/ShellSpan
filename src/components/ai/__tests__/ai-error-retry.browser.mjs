@@ -16,12 +16,13 @@ const server = await createServer({
       return `
         import React from 'react';
         import { createRoot } from 'react-dom/client';
-        import { AiWorkspaceErrorNotices } from '/src/components/ai/workspace/ai-workspace-error-notices.tsx';
+        import { AiFailedDraftRecovery } from '/src/components/ai/workspace/ai-failed-draft-recovery.tsx';
         import { createAiComposerState, reduceAiComposer } from '/src/lib/ai/composer-machine.ts';
         import { AiPreparationTimeoutError, normalizeAiSessionError } from '/src/lib/ai/session-error.ts';
         import { initI18n } from '/src/locales/index.ts';
         import { useAppStore } from '/src/stores/appStore.ts';
         import '/src/styles/base.css';
+        import '/src/components/ai/styles/styles.css';
         const locale = new URLSearchParams(location.search).get('locale');
         useAppStore.setState({ locale });
         await initI18n(locale);
@@ -33,9 +34,10 @@ const server = await createServer({
           type: 'submit.failed', clientOperationId: 'retry-review',
           error: normalizeAiSessionError(new AiPreparationTimeoutError()),
         }).state;
-        createRoot(document.getElementById('root')).render(React.createElement(AiWorkspaceErrorNotices, {
+        document.getElementById('root').className = 'ai-panel-shell';
+        createRoot(document.getElementById('root')).render(React.createElement(AiFailedDraftRecovery, {
           composerState: failed,
-          onDismissError: () => { document.body.dataset.dismissed = 'true'; },
+          failed: failed.failedDrafts[0],
           onRetryFailedDraft: id => { document.body.dataset.retried = id; },
         }));
       `;
@@ -62,30 +64,36 @@ try {
       const button = page.getByRole('button', { name: locale === 'zh-CN' ? '重试' : 'Retry', exact: true });
       await button.waitFor();
       await page.evaluate(() => document.fonts.ready);
-      assert.equal(await page.locator('[data-ai-error-notice] button svg').count(), 0);
+      assert.equal(await page.locator('[data-ai-failed-draft] button svg').count(), 1);
+      const details = page.locator('[data-ai-failed-details]');
+      await details.hover();
+      await page.getByRole('tooltip').waitFor();
       assert.equal(await page.getByText(locale === 'zh-CN'
         ? '消息准备超时，尚未发送。请检查终端连接后重试。'
         : 'Message preparation timed out before sending. Check the terminal connection and retry.', { exact: true }).count(), 1);
+      await page.mouse.move(0, 0);
+      await page.keyboard.press('Escape');
       const geometry = await button.evaluate(el => {
         const rect = el.getBoundingClientRect();
-        const notice = el.closest('[data-ai-error-notice]').getBoundingClientRect();
+        const notice = el.closest('[data-ai-failed-draft]').getBoundingClientRect();
         const style = getComputedStyle(el);
         return { height: rect.height, border: style.borderTopWidth,
           fits: rect.top >= notice.top && rect.bottom <= notice.bottom && rect.right <= notice.right,
-          gap: style.columnGap, fontSize: style.fontSize,
+          gap: style.columnGap, iconSize: el.querySelector('svg').getBoundingClientRect().width,
           icons: el.querySelectorAll('svg').length,
           icon: (() => {
-            const icon = el.closest('[data-ai-error-notice]').querySelector(':scope > svg').getBoundingClientRect();
-            const text = el.closest('[data-ai-error-notice]').querySelector('[data-slot="alert-description"] > span').getBoundingClientRect();
-            return { center: icon.y + icon.height / 2, textCenter: text.y + 8 };
+            const icon = el.closest('[data-ai-failed-draft]').querySelector(':scope > svg').getBoundingClientRect();
+            const copy = el.closest('[data-ai-failed-draft]').querySelector(':scope > div');
+            const text = copy.getBoundingClientRect();
+            return { center: icon.y + icon.height / 2, textCenter: text.y + text.height / 2 };
           })() };
       });
       assert.equal(geometry.height, 24);
-      assert.equal(geometry.icons, 0);
-      assert.ok(Math.abs(geometry.icon.center - geometry.icon.textCenter + 1) < 0.1, JSON.stringify(geometry));
+      assert.equal(geometry.icons, 1);
+      assert.ok(Math.abs(geometry.icon.center - geometry.icon.textCenter) < 0.1, JSON.stringify(geometry));
       assert.equal(geometry.border, '0px');
       assert.equal(geometry.gap, '4px');
-      assert.equal(geometry.fontSize, '11px');
+      assert.equal(geometry.iconSize, 12);
       assert.equal(geometry.fits, true);
       await page.screenshot({ path: `/tmp/shellspan-retry-${engine.name()}-${locale}-${width}.png` });
       await button.focus();

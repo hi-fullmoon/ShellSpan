@@ -22,6 +22,7 @@ import { AiComposerModelSelector } from '../workspace/ai-composer-model-selector
 import { AiContextMeter } from '../workspace/ai-context-meter';
 import { AiWorkspaceRoot } from '../workspace/ai-workspace-root';
 import { AiWorkspaceErrorNotices } from '../workspace/ai-workspace-error-notices';
+import { AiFailedDraftRecovery } from '../workspace/ai-failed-draft-recovery';
 import { AiQueueNotice } from '../workspace/ai-queue-notice';
 import '@/styles/base.css';
 import '../styles/styles.css';
@@ -91,10 +92,11 @@ export async function show(locale: Locale, width: number, scene: Scene) {
       return <div className="p-3"><AiWorkspaceErrorNotices syncError={error}
         syncRecovery={{ attempts: 1, retrying }}
         onRetrySync={async () => { setRetrying(true); record('sync'); }}
-        onDismissError={() => { setDismissed(true); record('dismiss'); }} onRetryFailedDraft={() => record('draft')}
-        composerState={createAiComposerState({ phase: 'error', lastError: dismissed ? null : error,
-          failedDrafts: [{ id: failureView.summary.id, content: failureView.snapshot.value.header.goal, mode: 'nextTurn', error }],
-        })} /><AiQueueNotice conflict={false} error={error.message} /></div>;
+        onDismissError={() => { setDismissed(true); record('dismiss'); }}
+        composerState={createAiComposerState({ phase: 'error', lastError: dismissed ? null : normalizeAiSessionError(failureView.error.message) })} />
+        <AiFailedDraftRecovery failed={{ id: failureView.summary.id, content: failureView.snapshot.value.header.goal, mode: 'nextTurn', error }}
+          onRetryFailedDraft={() => record('draft')} />
+        <AiQueueNotice conflict={false} error={error.message} /></div>;
     }
     return <AiWorkspaceRoot mode="agent" scope="terminal" view={scene === 'empty' ? null : view}
       canStartAgent={scene !== 'empty'} terminalConnected={scene !== 'empty'} historyScopeLabel={scene === 'empty' ? null : terminalLabel}

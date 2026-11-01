@@ -1415,11 +1415,14 @@ describe('AiWorkspaceController', () => {
 
     await user.type(textbox, 'newer draft');
     rejectSubmit?.(new Error('Network disconnected'));
-    await waitFor(() => expect(screen.getAllByRole('alert')).toHaveLength(2));
-    expect(screen.getByText('Network disconnected')).toBeVisible();
+    await waitFor(() => expect(screen.getAllByRole('alert')).toHaveLength(1));
+    await user.hover(screen.getByText('Not sent'));
+    expect(await screen.findByText('Network disconnected')).toBeVisible();
+    expect(screen.getByText('Not sent').closest('[data-slot="ai-workspace-content"]')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled();
     expect(screen.queryByRole('status', { name: 'Sending' })).not.toBeInTheDocument();
     expect(textbox.textContent).toBe('newer draft');
-    expect(screen.getAllByText('first input')).toHaveLength(2);
+    expect(screen.getAllByText('first input')).toHaveLength(1);
   });
 
   it('maps the full-access UI choice to the Runtime operator mode', async () => {

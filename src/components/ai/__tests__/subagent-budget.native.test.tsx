@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { useState } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, expect, it } from 'vitest';
+import userEvent from '@/test/composer-editor-user';
 import type { AgentSessionEvent, AgentSessionSnapshot } from '@/types/agent-session';
 import { childBudgetExhausted, childContinuationDeadline } from '@/lib/ai/subagent-continuation';
 import { createAiComposerState, reduceAiComposer } from '@/lib/ai/composer-machine';
@@ -14,7 +15,8 @@ import { agentSessionView } from '@/lib/ai/agent-session-adapter';
 import { initI18n, t } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { AiComposerSeat } from '../workspace/ai-composer-seat';
-import { AiWorkspaceErrorNotices } from '../workspace/ai-workspace-error-notices';
+import { AiWorkspaceRoot } from '../workspace/ai-workspace-root';
+import { withOptimisticConversationNodes, withRetainedFailedSubmissions } from '@/lib/ai/optimistic-submission';
 import { useSubagentBudget } from '../workspace/use-subagent-budget';
 import { AiSubagentCatalog } from '../workspace/ai-subagent-catalog';
 
@@ -119,9 +121,12 @@ it.each(['zh-CN', 'en-US'] as const)('preserves rejected text without offering o
   expect(error.retryable).toBe(false);
   const failed = reduceAiComposer(started, { type: 'submit.failed', clientOperationId: 'budget-rejected-followup', error }).state;
   const retried: string[] = [];
-  render(<AiWorkspaceErrorNotices composerState={failed} onRetryFailedDraft={id => retried.push(id)} />);
+  render(<AiWorkspaceRoot scope="workbench" view={null} composerState={failed}
+    pendingNodes={withOptimisticConversationNodes([], withRetainedFailedSubmissions([], failed, 'ask:workbench'), 'ask:workbench', failed.sessionId)}
+    onRetryFailedDraft={id => retried.push(id)} />);
   expect(screen.getByText(content)).toBeVisible();
-  expect(screen.getByText(t('ai.error.childRecoveryBudgetExhausted'))).toBeVisible();
+  await userEvent.setup().hover(screen.getByText(t('ai.workspace.messageNotSent')));
+  expect(await screen.findByText(t('ai.error.childRecoveryBudgetExhausted'))).toBeVisible();
   expect(screen.queryByRole('button', { name: t('common.retry') })).toBeNull();
   expect(retried).toEqual([]);
   const retry = reduceAiComposer(failed, { type: 'retry.requested', failedDraftId: 'budget-rejected-followup',

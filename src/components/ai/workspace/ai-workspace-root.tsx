@@ -46,6 +46,7 @@ import { AiToolDetails } from './ai-tool-details';
 import { AiArtifactDetails } from './ai-artifact-details';
 import type { AiQueueMutationState } from './use-ai-session-controller';
 import { AiWorkspaceErrorNotices } from './ai-workspace-error-notices';
+import { AiFailedDraftRecoveryContext } from './ai-failed-draft-recovery';
 import { AiNoticeTransition } from './ai-notice-transition';
 
 export interface AiWorkspaceSubmitInput {
@@ -669,6 +670,11 @@ export function AiWorkspaceRoot({
               onRetry: onRetryModel,
               onSettings: onOpenModel,
             }}>
+            <AiFailedDraftRecoveryContext.Provider value={{
+              composerState, syncRecovery: view?.syncRecovery,
+              onRetrySync, onRetryFailedDraft: readOnlySession ? undefined : onRetryFailedDraft,
+              failedDraftRetryBlockedReason,
+            }}>
             <AiConversation
               key={conversationIdentity.generation}
               nodes={conversationNodes}
@@ -690,6 +696,7 @@ export function AiWorkspaceRoot({
               loadingOlder={loadingOlder}
               onLoadOlder={onLoadOlder}
             />
+            </AiFailedDraftRecoveryContext.Provider>
             </AiFailureRecoveryContext.Provider>
           )}
         </div>
@@ -700,13 +707,11 @@ export function AiWorkspaceRoot({
             <>
               <AiWorkspaceErrorNotices
                 key={subagent ? selectedSessionId : undefined}
-                composerState={activeComposerState}
+                composerState={composerState}
                 syncError={view?.syncError}
                 syncRecovery={view?.syncRecovery}
                 onRetrySync={onRetrySync}
                 onDismissError={onDismissError}
-                onRetryFailedDraft={onRetryFailedDraft}
-                failedDraftRetryBlockedReason={failedDraftRetryBlockedReason}
               />
 
               <div
@@ -716,7 +721,7 @@ export function AiWorkspaceRoot({
                 {terminalRecovery && <AiTerminalRecoveryNotice id={availabilityHintId} recovery={terminalRecovery}
                   stopping={activeComposerState?.phase === 'stopping'} reconnecting={terminalReconnecting}
                   onStop={onStop} onReconnect={onReconnectTerminal} />}
-                {historicalContinuationAvailable && (
+                {historicalContinuationAvailable && !historicalContinuationError && (
                   <Alert variant="info" size="sm" role="status">
                     <InfoIcon aria-hidden="true" />
                     <AlertDescription>{t(historicalContinuationBusy

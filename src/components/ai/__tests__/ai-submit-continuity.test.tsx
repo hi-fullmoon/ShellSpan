@@ -1,4 +1,4 @@
-import { useReducer } from 'react';
+import { useReducer, type ComponentProps } from 'react';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import userEvent from '@/test/composer-editor-user';
@@ -8,7 +8,8 @@ import { useToastStore } from '@/stores/toastStore';
 import { useAppStore } from '@/stores/appStore';
 import { AiComposerSeat } from '../workspace/ai-composer-seat';
 import { AiConversation } from '../workspace/ai-conversation';
-import { AiWorkspaceErrorNotices } from '../workspace/ai-workspace-error-notices';
+import { AiWorkspaceRoot } from '../workspace/ai-workspace-root';
+import { withOptimisticConversationNodes, withRetainedFailedSubmissions } from '@/lib/ai/optimistic-submission';
 import { AiAdmissionUnconfirmedError, AiPreparationTimeoutError, normalizeAiSessionError } from '@/lib/ai/session-error';
 
 beforeEach(async () => {
@@ -17,6 +18,12 @@ beforeEach(async () => {
   useToastStore.setState({ toasts: [] });
 });
 afterEach(() => { cleanup(); useToastStore.setState({ toasts: [] }); });
+
+function FailedMessageWorkspace(props: Pick<ComponentProps<typeof AiWorkspaceRoot>, 'composerState' | 'onRetryFailedDraft'>) {
+  const state = props.composerState ?? createAiComposerState();
+  return <AiWorkspaceRoot scope="workbench" view={null} {...props} pendingNodes={withOptimisticConversationNodes([],
+    withRetainedFailedSubmissions([], state, 'ask:workbench'), 'ask:workbench', state.sessionId)} />;
+}
 
 it.each(['en-US', 'zh-CN'] as const)('offers retry for an unsent preparation timeout in %s', async locale => {
   useAppStore.setState({ locale });
@@ -29,8 +36,9 @@ it.each(['en-US', 'zh-CN'] as const)('offers retry for an unsent preparation tim
   expect(error.deliveryUnknown).toBeUndefined();
   expect(error.retryable).toBe(true);
   const failed = reduceAiComposer(started, { type: 'submit.failed', clientOperationId: 'original', error }).state;
-  const { container } = render(<AiWorkspaceErrorNotices composerState={failed} onRetryFailedDraft={() => {}} />);
-  expect(screen.getByText(locale === 'en-US'
+  const { container } = render(<FailedMessageWorkspace composerState={failed} onRetryFailedDraft={() => {}} />);
+  await userEvent.setup().hover(screen.getByText(locale === 'en-US' ? 'Not sent' : '未发送'));
+  expect(await screen.findByText(locale === 'en-US'
     ? 'Message preparation timed out before sending. Check the terminal connection and retry.'
     : '消息准备超时，尚未发送。请检查终端连接后重试。')).toBeVisible();
   expect(screen.getByRole('button', { name: locale === 'en-US' ? 'Retry' : '重试' })).toBeVisible();
@@ -46,10 +54,11 @@ it.each(['en-US', 'zh-CN'] as const)('distinguishes unconfirmed receipt from fai
   }).state;
   const failed = reduceAiComposer(started, { type: 'submit.failed', clientOperationId: 'original',
     error: normalizeAiSessionError(new AiAdmissionUnconfirmedError()) }).state;
-  const { container } = render(<AiWorkspaceErrorNotices composerState={failed} onRetryFailedDraft={() => {}} />);
+  const { container } = render(<FailedMessageWorkspace composerState={failed} onRetryFailedDraft={() => {}} />);
   expect(screen.getByText(locale === 'en-US' ? 'Receipt unconfirmed' : '接收结果未确认')).toBeVisible();
   expect(screen.getByRole('button', { name: locale === 'en-US' ? 'Check and retry' : '核对并重试' })).toBeVisible();
-  expect(container.querySelectorAll('[data-ai-error-notice]')).toHaveLength(1);
+  expect(container.querySelectorAll('[data-ai-error-notice]')).toHaveLength(0);
+  expect(container.querySelectorAll('[data-slot="ai-workspace-content"] [data-ai-failed-draft]')).toHaveLength(1);
   expect(container.textContent).not.toContain('AGENT_ADMISSION_UNCONFIRMED');
   expect(container.textContent).not.toContain(locale === 'en-US' ? 'Failed draft' : '失败草稿');
 });
@@ -77,7 +86,7 @@ it('offers a retry for the original failed identity without replacing a newer dr
   const failed = reduceAiComposer(editing, { type: 'submit.failed', clientOperationId: 'original-operation',
     error: { kind: 'offline', message: 'Disconnected', retryable: true } }).state;
   const retried: string[] = [];
-  render(<AiWorkspaceErrorNotices composerState={failed} onRetryFailedDraft={id => retried.push(id)} />);
+  render(<FailedMessageWorkspace composerState={failed} onRetryFailedDraft={id => retried.push(id)} />);
   await userEvent.setup().click(screen.getByRole('button', { name: 'Retry' }));
   expect(retried).toEqual(['original-operation']);
   expect(failed.draft).toBe('newer draft');

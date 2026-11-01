@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { use, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   BrainIcon,
   ChevronDownIcon,
@@ -40,6 +40,7 @@ import { AiProcessingStatus } from './ai-processing-status';
 import { AiCompactionStatus } from './ai-compaction-status';
 import { AiQuestionHistory } from './ai-question-panel';
 import { AiFailureRecoveryAction } from './ai-failure-recovery';
+import { AiFailedDraftRecovery, AiFailedDraftRecoveryContext, failedDraftForMessage } from './ai-failed-draft-recovery';
 import {
   AI_DISCLOSURE_LEADING_CLASS,
   AI_DISCLOSURE_ROW_CLASS,
@@ -182,13 +183,17 @@ import { AiUserMessageText } from './ai-user-message-text';
 
 function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'userMessage'> }) {
   const { t } = useI18n();
+  // Only failed sends subscribe to recovery; typing must not rerender committed history.
+  const recovery = node.delivery === 'failed' || node.delivery === 'unconfirmed'
+    ? use(AiFailedDraftRecoveryContext) : undefined;
+  const failed = failedDraftForMessage(node, recovery?.composerState?.failedDrafts ?? []);
   // Keep the same animation across receipt updates; committed history never
   // starts a send animation when it is mounted or reopened.
   const reveal = useRef(node.delivery === 'pending');
   const message = decodeDocumentMessage(node.content);
   const files = message.documents.filter(document => document.chatTitle === undefined);
   const references = message.documents.filter(document => document.chatTitle !== undefined);
-  const pendingIndicator = node.delivery === 'confirming' || node.delivery === 'unconfirmed' ? (
+  const pendingIndicator = failed ? null : node.delivery === 'confirming' || node.delivery === 'unconfirmed' ? (
     <Badge variant="secondary">{t(node.delivery === 'unconfirmed' ? 'ai.workspace.messageUnconfirmed' : 'ai.workspace.messageConfirming')}</Badge>
   ) : node.delivery === 'pending' ? (
     <Spinner className="ai-user-sending" aria-label={t('ai.workspace.messagePending')} />
@@ -212,18 +217,19 @@ function UserMessageNodeView({ node }: { readonly node: AiConversationNodeOf<'us
           </UnifiedAttachmentContext>
         </div>
       )}
-      {(message.text || node.delivery === 'failed') && (
+      {(message.text || node.delivery === 'failed' || failed?.hasImages) && (
         <Bubble role="user" className={reveal.current ? 'ai-user-bubble-enter' : undefined}>
           {pendingIndicator}
-          <AiUserMessageText key={message.text} text={message.text} />
-          {node.delivery === 'failed' && (
+          <AiUserMessageText key={message.text} text={message.text || (failed?.hasImages ? t('ai.workspace.images.attachments') : '')} />
+          {node.delivery === 'failed' && !failed && (
             <span className="ai-user-delivery mt-0.5 block" data-state={node.delivery}>
               {t('ai.workspace.messageNotSent')}
             </span>
           )}
         </Bubble>
       )}
-      <MessageActions text={message.text} timestamp={node.timestamp} align="end" />
+      {failed && <AiFailedDraftRecovery {...recovery} failed={failed} />}
+      <MessageActions text={message.text} timestamp={node.timestamp || undefined} align="end" />
     </Message>
   );
 }

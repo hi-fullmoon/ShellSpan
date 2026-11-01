@@ -21,6 +21,7 @@ import { initI18n, t } from '@/locales';
 import { applyTheme } from '@/lib/theme';
 import { useAppStore } from '@/stores/appStore';
 import { createAiComposerState } from '@/lib/ai/composer-machine';
+import { withOptimisticConversationNodes, withRetainedFailedSubmissions } from '@/lib/ai/optimistic-submission';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { terminalExecutionRecovery } from '@/lib/ai/terminal-execution-recovery';
 import { terminalRecoveryView } from '@/test/fixtures/terminal-execution-recovery';
@@ -106,7 +107,7 @@ export const cases: NoticeCase[] = [
   ...[
     ['operation-error', '操作失败 · 可关闭'], ['draft-error', '失败草稿 · 可重试'],
     ['sync-error', '消息同步中断'], ['sync-persistent', '消息同步持续失败'], ['sync-retrying', '正在重试消息同步'],
-  ].map(([id, label]) => ({ id, label, group: 'errors' as const, source: 'src/components/ai/workspace/ai-workspace-error-notices.tsx', selector: '[data-ai-error-notice]' })),
+  ].map(([id, label]) => ({ id, label, group: 'errors' as const, source: 'src/components/ai/workspace/ai-workspace-error-notices.tsx', selector: id === 'draft-error' ? '[data-ai-failed-draft]' : '[data-ai-error-notice]' })),
   ...[
     ['queue-conflict', '队列内容发生版本冲突'], ['queue-error', '队列操作失败'],
   ].map(([id, label]) => ({ id, label, group: 'errors' as const, source: 'src/components/ai/workspace/ai-queue-notice.tsx', selector: '[data-slot="alert"]' })),
@@ -176,10 +177,15 @@ function renderCase(id: string): ReactNode {
   }
   if (id.startsWith('sync-')) return <AiWorkspaceErrorNotices syncError={error!}
     syncRecovery={{ attempts: id === 'sync-persistent' ? 3 : 1, retrying: id === 'sync-retrying' }} onRetrySync={async () => record()} />;
-  if (id === 'operation-error' || id === 'draft-error') return <AiWorkspaceErrorNotices
-    composerState={createAiComposerState({ phase: 'error', lastError: id === 'operation-error' ? error : null,
-      failedDrafts: id === 'draft-error' ? [{ id: budget.summary.id, content: budget.snapshot.value.header.goal, mode: 'nextTurn', error: error! }] : [] })}
-    onDismissError={record} onRetryFailedDraft={record} />;
+  if (id === 'operation-error') return <AiWorkspaceErrorNotices
+    composerState={createAiComposerState({ phase: 'error', lastError: error })} onDismissError={record} />;
+  if (id === 'draft-error') {
+    const composerState = createAiComposerState({ sessionId: budget.summary.id, lastError: error,
+      failedDrafts: [{ id: budget.summary.id, content: budget.snapshot.value.header.goal, mode: 'nextTurn', error: error! }] });
+    const submissions = withRetainedFailedSubmissions([], composerState, budget.summary.scopeKey);
+    return workspace({ composerState, onRetryFailedDraft: record,
+      pendingNodes: withOptimisticConversationNodes([], submissions, budget.summary.scopeKey, budget.summary.id) });
+  }
   if (id.startsWith('queue-')) return <AiQueueNotice conflict={id === 'queue-conflict'} error={id === 'queue-error' ? error!.message : null} />;
   if (id === 'permission') return <AgentPermissionSelector sessionId={approval!.sessionId} mode="fullAccess" disabled />;
   if (id.startsWith('approval-')) return <AiApprovalPanel approval={approvals[id.slice(9)] ?? approval!}
