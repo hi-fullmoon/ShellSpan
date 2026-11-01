@@ -42,7 +42,7 @@ import { useI18n } from '@/hooks/useI18n';
 import { AiContentTitle } from './ai-content-title';
 import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
 import { cn } from '@/lib/utils';
-import { questionIssue, questionIssueMessageKey, questionSubmissionIssue } from '@/lib/ai/question-submission';
+import { questionIssue, questionIssueMessageKey, questionSubmissionIssue, type QuestionSubmissionIssue } from '@/lib/ai/question-submission';
 import {
   questionKey,
   pendingUserAction,
@@ -75,6 +75,17 @@ function isAnswerInvalid(answer: QuestionAnswer): boolean {
     new TextEncoder().encode(answer.custom ?? '').length > 8192;
 }
 
+function RecoveryButtonLabel({ label, busyLabel, busy }: {
+  readonly label: string;
+  readonly busyLabel: string;
+  readonly busy: boolean;
+}): React.ReactNode {
+  return <span className="grid">
+    <span className={cn('col-start-1 row-start-1', busy && 'invisible')} aria-hidden={busy || undefined}>{label}</span>
+    <span className={cn('col-start-1 row-start-1', !busy && 'invisible')} aria-hidden={!busy || undefined}>{busyLabel}</span>
+  </span>;
+}
+
 export function AiQuestionPanel({
   question,
   onAnswer,
@@ -85,7 +96,10 @@ export function AiQuestionPanel({
   const userAction = pendingUserAction(question);
   const key = questionKey(question.identity) + (userAction ? ':action' : '');
   const draft = useAgentQuestionStore((state) => state.drafts[key]);
-  const [operation, setOperation] = useState<'submit' | 'refresh' | null>(null);
+  const [operation, setOperation] = useState<{
+    readonly kind: 'submit' | 'refresh';
+    readonly issue: QuestionSubmissionIssue | null;
+  } | null>(null);
   const busy = useRef(false);
   const content = useRef<HTMLDivElement>(null);
   const focusNextQuestion = useRef(false);
@@ -108,8 +122,9 @@ export function AiQuestionPanel({
   // A rejected acknowledgement does not prove the answer was rejected.
   // Keep the exact operation retryable until committed state removes the form.
   const editingLocked = pending || !!draft?.submission;
-  const submissionIssue = !pending && draft?.submission
-    ? draft.issue ?? questionIssue('unconfirmed') : null;
+  // Retain the displayed issue, including a restored submission's fallback, during recovery.
+  const submissionIssue = draft?.submission
+    ? draft.issue ?? (operation ? operation.issue : questionIssue('unconfirmed')) : null;
   useEffect(() => {
     if (submissionIssue && content.current) content.current.scrollTop = content.current.scrollHeight;
   }, [submissionIssue?.reason, submissionIssue?.detail]);
@@ -162,7 +177,7 @@ export function AiQuestionPanel({
       .getState()
       .setDraft(key, { answers: input.answers, submission: input, issue: retained?.issue });
     busy.current = true;
-    setOperation('submit');
+    setOperation({ kind: 'submit', issue: submissionIssue });
     try {
       await onAnswer(input);
       useAgentQuestionStore.getState().clear(key);
@@ -179,7 +194,7 @@ export function AiQuestionPanel({
     const input = useAgentQuestionStore.getState().drafts[key]?.submission;
     if (busy.current || !input || !onRefresh) return;
     busy.current = true;
-    setOperation('refresh');
+    setOperation({ kind: 'refresh', issue: submissionIssue });
     try {
       await onRefresh(input);
       useAgentQuestionStore.getState().clear(key);
@@ -213,7 +228,7 @@ export function AiQuestionPanel({
   return (
     <Card
       className={cn('ai-question-panel min-h-0 max-h-[min(440px,40dvh)] shrink-0 gap-0 py-0',
-        draft?.submission && (draft.issue || !pending) && 'max-h-[min(600px,70dvh)]')}
+        submissionIssue && 'max-h-[min(600px,70dvh)]')}
       data-slot="ai-question-panel"
       data-question-id={question.identity.questionRequestId}
       data-collapsed={collapsed || undefined}
@@ -397,7 +412,7 @@ export function AiQuestionPanel({
             <div className={cn('ai-question-footer-actions flex shrink-0 items-center gap-1.5', userAction && 'min-w-0 max-w-full flex-wrap justify-end')}>
               {draft?.submission ? <>
                 {onRefresh && <Button type="button" variant={submissionIssue && !submissionIssue.retry && !submissionIssue.editable ? 'default' : 'outline'} size="sm" disabled={pending} onClick={() => void refresh()}>
-                  {t(operation === 'refresh' ? 'ai.workspace.question.refreshing' : 'ai.workspace.question.refresh')}
+                  <RecoveryButtonLabel label={t('ai.workspace.question.refresh')} busyLabel={t('ai.workspace.question.refreshing')} busy={operation?.kind === 'refresh'} />
                 </Button>}
                 {submissionIssue?.reason === 'model' && onOpenSettings && <Button type="button" variant="outline" size="sm" disabled={pending} onClick={onOpenSettings}>
                   {t('ai.workspace.question.openSettings')}
@@ -405,7 +420,7 @@ export function AiQuestionPanel({
                 {submissionIssue?.editable ? <Button type="button" size="sm" disabled={pending} onClick={edit}>
                   {t('ai.workspace.question.edit')}
                 </Button> : (!submissionIssue || submissionIssue.retry) && <Button type="button" size="sm" disabled={pending || !onAnswer} onClick={() => void submit()}>
-                  {t(operation === 'submit' ? 'ai.workspace.question.submitting' : 'ai.workspace.question.retry')}
+                  <RecoveryButtonLabel label={t('ai.workspace.question.retry')} busyLabel={t('ai.workspace.question.submitting')} busy={operation?.kind === 'submit'} />
                 </Button>}
               </> : userAction ? <>
                 <Button type="button" variant="outline" size="sm" disabled={pending || !onAnswer}

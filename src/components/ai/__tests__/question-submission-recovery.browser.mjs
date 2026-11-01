@@ -19,7 +19,7 @@ const diagnostics = [
 const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error',
   resolve: { alias: { '@': `${root}src` } }, esbuild: { jsx: 'automatic' },
-  optimizeDeps: { include: ['react', 'react-dom/client'] },
+  optimizeDeps: { include: ['react', 'react-dom', 'react-dom/client'] },
   server: { host: '127.0.0.1', port: 0 },
   plugins: [tailwindcss(), {
     name: 'question-submission-recovery',
@@ -47,13 +47,15 @@ try {
           await page.evaluate(async locale => {
             const { default: React } = await import('/node_modules/.vite/deps/react.js');
             const { default: ReactDOM } = await import('/node_modules/.vite/deps/react-dom_client.js');
+            const { default: ReactDOMBindings } = await import('/node_modules/.vite/deps/react-dom.js');
+            const { flushSync } = ReactDOMBindings;
             await import('/src/styles/base.css');
             await import('/src/components/ai/styles/styles.css');
             const { AiQuestionPanel } = await import('/src/components/ai/workspace/ai-question-panel.tsx');
             const { questionSubmissionIssue } = await import('/src/lib/ai/question-submission.ts');
             const { useAgentQuestionStore } = await import('/src/stores/agentQuestionStore.ts');
             const { questionKey } = await import('/src/types/agent-question.ts');
-            const { initI18n } = await import('/src/locales/index.ts');
+            const { initI18n, t } = await import('/src/locales/index.ts');
             const { useAppStore } = await import('/src/stores/appStore.ts');
             await initI18n(locale);
             useAppStore.setState({ locale });
@@ -66,6 +68,58 @@ try {
             };
             const submission = { identity: question.identity, clientOperationId: crypto.randomUUID(), answers: [{ id: 'retest', selected: [], custom: 'Retry the checks' }] };
             const view = ReactDOM.createRoot(document.getElementById('root'));
+            window.checkQuestionRecoveryLayout = async ({ operation, withIssue }) => {
+              const { createAgentSessionAdapter } = await import('/src/lib/ai/agent-session-adapter.ts');
+              const adapter = createAgentSessionAdapter();
+              try {
+                // Exercise the real browser-without-native-IPC failure path.
+                const issue = withIssue ? await adapter.answerQuestion(submission).then(
+                  () => { throw new Error('Native IPC unexpectedly available'); },
+                  error => questionSubmissionIssue(error),
+                ) : undefined;
+                flushSync(() => {
+                  useAgentQuestionStore.getState().setDraft(questionKey(question.identity), { answers: submission.answers, submission, issue });
+                  view.render(React.createElement(AiQuestionPanel, {
+                    key: `native-unavailable-${operation}-${withIssue}`, question, onAnswer: adapter.answerQuestion,
+                    onRefresh: async input => { await adapter.refresh(input.identity.sessionId); },
+                  }));
+                });
+                await new Promise(requestAnimationFrame);
+                const host = document.getElementById('root');
+                const alert = host.querySelector('[role="alert"]');
+                const content = host.querySelector('.ai-question-panel-content');
+                content.scrollTop = (content.scrollHeight - content.clientHeight) / 2;
+                const measure = () => ({
+                  panel: host.querySelector('[data-slot="ai-question-panel"]').getBoundingClientRect().toJSON(),
+                  footer: host.querySelector('.ai-question-panel-footer').getBoundingClientRect().toJSON(),
+                  actions: [...host.querySelectorAll('.ai-question-footer-actions button')].map(button => button.getBoundingClientRect().toJSON()),
+                  contentHeight: content.clientHeight, scrollTop: content.scrollTop,
+                });
+                const before = measure();
+                const buttons = host.querySelectorAll('.ai-question-footer-actions button');
+                const nativeRetryDetected = [...buttons].some(button => button.innerText === t('ai.workspace.question.retry'));
+                const action = buttons[operation === 'refresh' ? 0 : 1];
+                action.focus({ preventScroll: true });
+                let during;
+                let retainedAlert = false;
+                // Observe actual pending and settled commits of the unavailable native operation.
+                await new Promise((resolve, reject) => {
+                  const timeout = setTimeout(() => { observer.disconnect(); reject(new Error('Question recovery did not settle')); }, 5000);
+                  const observer = new MutationObserver(() => {
+                    if (action.disabled) {
+                      during = measure();
+                      retainedAlert = host.querySelector('[role="alert"]') === alert;
+                    } else if (during) {
+                      observer.disconnect(); clearTimeout(timeout); resolve();
+                    }
+                  });
+                  observer.observe(host, { subtree: true, attributes: true, childList: true });
+                  action.click();
+                });
+                return { before, during, retainedAlert, nativeRetryDetected,
+                  retainedOperation: useAgentQuestionStore.getState().drafts[questionKey(question.identity)]?.submission === submission };
+              } finally { adapter.dispose(); }
+            };
             // Render the production form from retained failure state; no runtime or command result is simulated.
             window.showQuestionFailure = diagnostic => {
               const issue = questionSubmissionIssue(diagnostic);
@@ -119,6 +173,16 @@ try {
               await page.getByRole('button', { name: locale === 'zh-CN' ? '模型设置' : 'Model settings', exact: true }).click();
               assert.equal(await page.locator('#root').getAttribute('data-settings-opened'), 'true');
             }
+          }
+          for (const withIssue of [true, false]) for (const operation of ['submit', 'refresh']) {
+            const result = await page.evaluate(input => window.checkQuestionRecoveryLayout(input), { operation, withIssue });
+            const context = `${engine.name()}/${locale}/${width}/${operation}/retained-issue-${withIssue}`;
+            assert.ok(result.during, `${context}: recovery must enter its pending state`);
+            assert.ok(result.retainedAlert, `${context}: pending recovery must retain the mounted error details`);
+            assert.deepEqual(result.during, result.before, `${context}: recovery must preserve panel/footer geometry and body scroll`);
+            assert.ok(result.retainedOperation, `${context}: unavailable IPC must retain the exact answer operation`);
+            assert.ok(result.nativeRetryDetected, `${context}: the native test must recognize the retry button despite its hidden label`);
+            await page.screenshot({ path: join(screenshots, `${engine.name()}-${locale}-${width}-${operation}-${withIssue ? 'failure' : 'unconfirmed'}-stable.png`) });
           }
         }
       }

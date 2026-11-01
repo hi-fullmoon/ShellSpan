@@ -17,6 +17,7 @@ import { useAgentQuestionStore } from '@/stores/agentQuestionStore';
 import type { AgentQuestionView, AnswerQuestionInput } from '@/types/agent-question';
 import { questionKey } from '@/types/agent-question';
 import { questionSubmissionIssue } from '@/lib/ai/question-submission';
+import { createAgentSessionAdapter } from '@/lib/ai/agent-session-adapter';
 import '@/components/ai/styles/styles.css';
 
 const question: AgentQuestionView = {
@@ -53,6 +54,62 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('Stage 6A question form', () => {
+  it.each([
+    ['submit', true], ['refresh', true], ['submit', false], ['refresh', false],
+  ] as const)('preserves failure content and scroll position during %s recovery (retained issue: %s)', async (operation, withIssue) => {
+    const adapter = createAgentSessionAdapter();
+    const submission: AnswerQuestionInput = {
+      identity: question.identity, clientOperationId: crypto.randomUUID(),
+      answers: [{ id: 'choice', selected: ['B'] }],
+    };
+    try {
+      // Use the production adapter's real unavailable-IPC failure, without replacing transport.
+      const failure = withIssue ? await adapter.answerQuestion(submission).then(
+        () => { throw new Error('Native IPC must be unavailable in this browser test'); },
+        error => questionSubmissionIssue(error),
+      ) : undefined;
+      useAgentQuestionStore.getState().setDraft(questionKey(question.identity), {
+        answers: submission.answers, submission, issue: failure,
+      });
+      const form = render(<AiQuestionPanel question={question} onAnswer={adapter.answerQuestion}
+        onRefresh={async input => { await adapter.refresh(input.identity.sessionId); }} />);
+      const alert = screen.getByRole('alert');
+      const panel = form.container.querySelector('[data-slot="ai-question-panel"]')!;
+      const panelClasses = panel.className;
+      const content = form.container.querySelector('.ai-question-panel-content')!;
+      content.scrollTop = 12;
+      fireEvent.click(screen.getByRole('button', {
+        name: operation === 'submit' ? 'Retry same answers' : 'Refresh status',
+      }));
+      expect(screen.getByRole('button', {
+        name: operation === 'submit' ? 'Saving answers…' : 'Checking…',
+      })).toBeDisabled();
+      expect(screen.getByRole('alert')).toBe(alert);
+      if (failure) expect(alert.querySelector('pre')?.textContent).toBe(failure.detail);
+      else expect(alert).toHaveAttribute('data-question-error', 'unconfirmed');
+      expect(panel.className).toBe(panelClasses);
+      expect(content.scrollTop).toBe(12);
+      expect(screen.getByRole('textbox')).toBeDisabled();
+      expect(useAgentQuestionStore.getState().drafts[questionKey(question.identity)].submission).toBe(submission);
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh status' })).toBeEnabled());
+      expect(screen.getByRole('alert')).toBe(alert);
+    } finally { adapter.dispose(); }
+  });
+
+  it('does not show an unconfirmed error during the first pending submission', async () => {
+    const adapter = createAgentSessionAdapter();
+    try {
+      const form = render(<AiQuestionPanel question={question} onAnswer={adapter.answerQuestion} />);
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Continue' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+      expect(screen.getByRole('button', { name: 'Saving answers…' })).toBeDisabled();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(form.container.querySelector('[data-slot="ai-question-panel"]')).toHaveClass('max-h-[min(440px,40dvh)]');
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Retry same answers' })).toBeEnabled());
+      expect(screen.getByRole('alert')).toBeVisible();
+    } finally { adapter.dispose(); }
+  });
+
   it.each(['zh-CN', 'en-US'] as const)('retains the actual failure and offers only applicable recovery actions in %s', async locale => {
     await initI18n(locale);
     useAppStore.setState({ locale });

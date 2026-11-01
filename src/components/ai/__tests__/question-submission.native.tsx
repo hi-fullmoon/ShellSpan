@@ -46,7 +46,7 @@ export async function verifyQuestionSubmissionRecovery(selection: ModelSelection
       onAnswer={controller.answerQuestion} onRefresh={controller.refreshQuestionAnswer} />;
   }
   const button = (key: Parameters<typeof t>[0]): HTMLButtonElement => {
-    const result = [...host.querySelectorAll('button')].find(element => element.textContent === t(key));
+    const result = [...host.querySelectorAll('button')].find(element => element.innerText === t(key));
     assert(result, `Missing question action: ${key}`);
     return result;
   };
@@ -99,7 +99,7 @@ export async function verifyQuestionSubmissionRecovery(selection: ModelSelection
       assert(draft.submission?.clientOperationId === input.clientOperationId, 'Refresh must preserve the rejected operation');
       assert(!api.current!.view?.committedOperationIds?.includes(input.clientOperationId), 'Refresh must not submit the rejected answers');
       assert(!button('ai.workspace.question.edit').disabled, 'Refresh must keep Edit answers available');
-      assert(![...host.querySelectorAll('button')].some(element => element.textContent === t('ai.workspace.question.retry')),
+      assert(![...host.querySelectorAll('button')].some(element => element.innerText === t('ai.workspace.question.retry')),
         'A confirmed rejection must not offer retrying the same invalid answers');
     }
     button('ai.workspace.question.edit').click();
