@@ -55,7 +55,7 @@ These are three runtime capabilities but only two user-facing surface choices. I
 | 3. Local visible command | `01a0a3a5-747a-7af2-b6ec-392a60141fed`; Windows supplement `01a0a566-6a29-74a3-945e-cc310a46cecd` | **complete — PASS** | [Phase 3 evidence](./terminal-execution-phase-3-acceptance.md) and [Windows supplement](./terminal-execution-phase-5-acceptance.md) |
 | 4. Remote real terminal | `01a0a461-d04c-7d33-ba24-d2d314c773d8`; continuations `01a0a4cf-4ef0-71d2-8845-1ae963c3090a`, `01a0a4f2-3d68-78c3-b6f1-a39b18f6f03d`, `01a0a500-3512-7be2-9516-7bfc9813ed66` | **complete — PASS** | [Phase 4 evidence](./terminal-execution-phase-4-acceptance.md) |
 | 5. Interactive operation | `01a0a566-6a29-74a3-945e-cc310a46cecd`; macOS continuation (2026-09-16) | **complete — PASS (Windows + macOS local)** | [Windows evidence](./terminal-execution-phase-5-acceptance.md) and [macOS evidence](./terminal-execution-phase-5-macos-acceptance.md) |
-| 6. Rollout and legacy removal | Windows and macOS rollout continuations (2026-09-16) | **complete — PASS (Windows + macOS local)** | [Windows evidence](./terminal-execution-phase-6-acceptance.md) and [macOS evidence](./terminal-execution-phase-6-macos-acceptance.md) |
+| 6. Rollout and legacy removal | 历史阶段记录保留于Git历史 | 当前源码需重新验收 | [当前实现与待验清单](../../../docs/design/agent-terminal-input.md) |
 | Remote bound-terminal reuse revision | implementation stages 1–7 (2026-09-17) | **automated + real-SSH PASS; native-window BLOCKED** | [Implementation plan](./remote-bound-terminal-reuse-plan.md) and the current-code gate in [test matrix](./terminal-execution-test-matrix.md) |
 
 ## Phase 0: protocol and baseline
@@ -197,10 +197,10 @@ before input. The turn guard covers the whole Agent turn, while each command has
 an operation lease. There is no implicit Direct fallback and no dedicated Agent
 SSH terminal creation, event, tab, store field, or reconnect map.
 
-Disabling `terminal_remote_bound_terminal_v1` stops new remote visible-command
+Disabling `terminal_remote_bound_terminal` stops new remote visible-command
 routing, makes in-flight commands uncertain, revokes Agent lease/turn
 protection, and leaves the user SSH transport connected. The authoritative
-environment key is `SHELLSPAN_TERMINAL_REMOTE_BOUND_TERMINAL_V1`; the read-only
+environment key is `SHELLSPAN_TERMINAL_REMOTE_BOUND_TERMINAL`; the read-only
 IPC field is `remoteBoundTerminalRollout`; rollout state is not persisted.
 The 2026-09-17 Stage 7 full repository/native and isolated Bash/Zsh SSH gates
 pass. Representative native-window checks for tab count, lease messaging,
@@ -258,7 +258,7 @@ Final gate:
 - Interactive operation is screen-driven and lease safe.
 - Frontend build, frontend tests, Rust tests, formatting, protocol checks, locale checks, AI style checks, LLM catalog checks, and the visible-terminal host gate pass at the appropriate scope.
 
-Acceptance evidence: [Windows Phase 6 Evidence](./terminal-execution-phase-6-acceptance.md) and [macOS Phase 6 Evidence](./terminal-execution-phase-6-macos-acceptance.md).
+Current implementation and deferred acceptance: [native terminal input](../../../docs/design/agent-terminal-input.md). Historical acceptance does not establish results for the current code.
 On native Windows 11 x64, absent trusted configuration now enables the local
 Broker, shell integration, `terminal_execute`, and interactive tools. Windows
 local routing cannot dispatch a wrapper, including during rollback; it exposes

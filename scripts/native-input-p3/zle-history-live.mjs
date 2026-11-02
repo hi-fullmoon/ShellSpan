@@ -23,7 +23,7 @@ const engine=values.engine??'chromium',renderer=values.renderer??'dom';assert(['
 const target=transport==='ssh'?'linux-aarch64-glibc-2.36':'macos-arm64';
 const infrastructureOwner=JSON.parse(await readFile(resolve(root,'.native-input-p3/candidate-stage.json'),'utf8')).owner;
 const marker={startup:transport==='ssh'?'P3-SSH-INITIALIZED':'P3-STARTUP:env:profile:rc:login',parent:transport==='ssh'?'P3-SSH-PERSISTED':'P3-PARENT:父Shell',background:transport==='ssh'?'P3-SSH-BG-':'P3-BACKGROUND-'};
-const validation=await editorValidationEnvironment(root,resolve(root,'.native-input-p2/resources/native-input-v1'),[target]);
+const validation=await editorValidationEnvironment(root,resolve(root,'.native-input-p2/resources/native-input'),[target]);
 const resourceAudit=auditEditorResources(root,target);assert(resourceAudit.selectedValid);
 const sources=captureValidationSources(root),runtime=await installedRuntimeManifest();
 const hash=async path=>createHash('sha256').update(await readFile(path)).digest('hex');

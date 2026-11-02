@@ -18,11 +18,11 @@ export function recordAcceptanceInputs(root,directory,selection,version,scenario
   const sources=Object.fromEntries([...files].sort().map(path=>[path,sha(resolve(root,path))]));
   const producers=[];
   for(const target of['macos-arm64','linux-aarch64-glibc-2.36']){
-    const profile=`gnu-bash-${version}-readline-${{'4.1':'6.0','4.4':'7.0','5.3':'8.3.6'}[version]}-${target}-nip1-init1-capture1`;
+    const profile=`gnu-bash-${version}-readline-${{'4.1':'6.0','4.4':'7.0','5.3':'8.3.6'}[version]}-${target}-native`;
     const path=resolve(root,'.native-input-p2/producers',profile,'manifest.json');
     if(target==='linux-aarch64-glibc-2.36'&&!existsSync(path))continue;
     const manifest=JSON.parse(readFileSync(path,'utf8'));
-    const cataloguePath=resolve(root,`.native-input-p2/resources/native-input-v1/catalogue-${target}.json`);
+    const cataloguePath=resolve(root,`.native-input-p2/resources/native-input/catalogue-${target}.json`);
     const catalogue=JSON.parse(readFileSync(cataloguePath,'utf8'));
     producers.push({profile,manifest:relative(root,path),manifestSha256:sha(path),artifacts:manifest.artifacts,sources:manifest.sources,catalogueSha256:sha(cataloguePath),distributedArtifact:catalogue.profiles.find(value=>value.id===profile)});
   }

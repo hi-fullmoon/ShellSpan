@@ -24,7 +24,7 @@ const code=await new Promise((resolve,reject)=>{child.once('error',reject);child
 writeFileSync(resolve(directory,'build-result.json'),JSON.stringify({exitCode:code}));assert.equal(code,0);
 assert.deepEqual(captureValidationSources(root),sources,'Complete Linux producer source set changed during build');
 writeFileSync(resolve(directory,'sshd_config'),'Port 22229\nListenAddress 0.0.0.0\nHostKey /tmp/p3-sshd/host_key\nPidFile /tmp/p3-sshd/pid\nPasswordAuthentication yes\nKbdInteractiveAuthentication no\nUsePAM no\nPermitRootLogin no\nAllowUsers nativeZle\nSubsystem sftp internal-sftp\nSetEnv LANG=en_US.UTF-8\nPrintMotd no\nLogLevel ERROR\n');
-const catalogue=JSON.parse(readFileSync(resolve(root,'.native-input-p2/resources/native-input-v1/editors-linux-aarch64-glibc-2.36.json'),'utf8'));
+const catalogue=JSON.parse(readFileSync(resolve(root,'.native-input-p2/resources/native-input/editors-linux-aarch64-glibc-2.36.json'),'utf8'));
 const coreObserver=catalogue.profiles.some(profile=>profile.core||profile.editorSha256)?"p3_core_scope() { builtin printf '\\e]0;P3_CORE_BUDGET_%s\\a' \"$ZLE_NATIVE_APPEND\"; }\nzle -N p3_core_scope\nbindkey '^Xz' p3_core_scope\n":"";
 writeFileSync(resolve(directory,'zshrc'),"PROMPT='%F{cyan}P3-SSH>%f '\nHISTFILE=$HOME/history\nHISTSIZE=1000\nSAVEHIST=1000\nsetopt interactivecomments\n"+coreObserver);
 execFileSync('docker',['exec',container,'mkdir','-m','700','/tmp/p3-sshd']);

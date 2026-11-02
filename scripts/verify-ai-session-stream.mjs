@@ -208,7 +208,7 @@ let frozenInterrupted;
 if(frozenNativeRun)for(const signal of['SIGINT','SIGTERM'])process.once(signal,()=>{frozenInterrupted=signal;settle({ok:false,error:`Isolated frozen validation interrupted (${signal})`});});
 const frozenManifestPath=frozenNativeRun?resolve(ownedEvidenceDirectory,`frozen-manifest-${token}.json`):undefined;
 const frozenSources=frozenNativeRun?captureValidationSources(repository):undefined;
-const nativeResourcesDirectory=frozenNativeRun&&values['data-scope']==='com.shellspan.validation.native-input-p3'?resolve(repository,'.native-input-p2/resources/native-input-v1'):undefined;
+const nativeResourcesDirectory=frozenNativeRun&&values['data-scope']==='com.shellspan.validation.native-input-p3'?resolve(repository,'.native-input-p2/resources/native-input'):undefined;
 const nativeResources=nativeResourcesDirectory?captureValidationAssets(nativeResourcesDirectory):undefined;
 if(frozenNativeRun)writeFrozenCheckpoint(resolve(ownedEvidenceDirectory,`frozen-${token}-before-frontend-build.json`),{sources:frozenSources,entry:pagePath,hmr:false,tauriWatch:false});
 const output = frozenNativeRun?resolve(ownedEvidenceDirectory,`frontend-${token}`):performanceRun ? await mkdtemp(resolve(tmpdir(), 'shellspan-agent-performance-')) : undefined;

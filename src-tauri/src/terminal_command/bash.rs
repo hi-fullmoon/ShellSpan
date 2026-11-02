@@ -14,8 +14,8 @@ pub(crate) fn bootstrap_source(module: &Path, socket: &Path) -> Result<String, S
 {job_helpers}
 __shellspan_emit() {{
   case "$1" in
-    B) builtin ss_native_input_v1_job "$2" "$3" "${{4:--}}" ;;
-    F) builtin ss_native_input_v1_job "$2" finished "$3" ;;
+    B) builtin ss_native_input_job "$2" "$3" "${{4:--}}" ;;
+    F) builtin ss_native_input_job "$2" finished "$3" ;;
   esac
 }}
 __shellspan_validate_native() {{
@@ -36,13 +36,13 @@ __shellspan_native_job_arm() {{
 }}
 __shellspan_native_control_dispatch() {{
   local __shellspan_format __shellspan_handle __shellspan_action __shellspan_nonce __shellspan_extra __shellspan_result
-  builtin ss_native_input_v1_control_access || return
+  builtin ss_native_input_control_access || return
   IFS=$'\t' builtin read -r __shellspan_format __shellspan_handle __shellspan_action __shellspan_nonce __shellspan_extra < "$__shellspan_control_path.control" || return
-  [[ $__shellspan_format == NIP1-CONTROL && -z $__shellspan_extra ]] || return
-  if builtin ss_native_input_v1_control_begin "$__shellspan_handle" "$__shellspan_action" "$__shellspan_nonce"; then
+  [[ $__shellspan_format == NIP-CONTROL && -z $__shellspan_extra ]] || return
+  if builtin ss_native_input_control_begin "$__shellspan_handle" "$__shellspan_action" "$__shellspan_nonce"; then
     __shellspan_job_control "$__shellspan_handle" "$__shellspan_action"
     __shellspan_result=$?
-    builtin ss_native_input_v1_control_end "$__shellspan_result" "$PWD"
+    builtin ss_native_input_control_end "$__shellspan_result" "$PWD"
   fi
 }}
 __shellspan_native_prompt() {{
@@ -60,15 +60,15 @@ __shellspan_native_prompt() {{
     unset -f "$__shellspan_handle"
     __shellspan_job_armed_handle=
   fi
-  builtin ss_native_input_v1_status "$__shellspan_status" "$PWD"
+  builtin ss_native_input_status "$__shellspan_status" "$PWD"
 }}
 __shellspan_prompt_declaration=$(declare -p PROMPT_COMMAND 2>/dev/null)
 __shellspan_prompt_supported=0
 case "$__shellspan_prompt_declaration" in
   ''|'declare -- '*|'declare -x '*|'declare -a '*|'declare -ax '*|'declare -xa '*) __shellspan_prompt_supported=1 ;;
 esac
-if (( __shellspan_prompt_supported )) && builtin enable -f {} ss_native_input_v1 ss_native_input_v1_display_abi ss_native_input_v1_status ss_native_input_v1_begin ss_native_input_v1_child_closed ss_native_input_v1_job ss_native_input_v1_control_access ss_native_input_v1_control_begin ss_native_input_v1_control_end ss_native_input_v1_dispatch_free; then
-  if builtin ss_native_input_v1_display_abi && builtin bind -v >/dev/null && builtin ss_native_input_v1_dispatch_free && builtin bind -x '"\C-x\C-_":__shellspan_native_control_dispatch' && builtin ss_native_input_v1 {} "$(trap -p INT)" "$BASH_VERSION"; then
+if (( __shellspan_prompt_supported )) && builtin enable -f {} ss_native_input ss_native_input_display_abi ss_native_input_status ss_native_input_begin ss_native_input_child_closed ss_native_input_job ss_native_input_control_access ss_native_input_control_begin ss_native_input_control_end ss_native_input_dispatch_free; then
+  if builtin ss_native_input_display_abi && builtin bind -v >/dev/null && builtin ss_native_input_dispatch_free && builtin bind -x '"\C-x\C-_":__shellspan_native_control_dispatch' && builtin ss_native_input {} "$(trap -p INT)" "$BASH_VERSION"; then
     if [[ $__shellspan_prompt_declaration == 'declare -a'* ]]; then
       if (( BASH_VERSINFO[0]>5 || (BASH_VERSINFO[0]==5 && BASH_VERSINFO[1]>=1) )); then
         PROMPT_COMMAND=('__shellspan_native_prompt "$?"' "${{PROMPT_COMMAND[@]}}")

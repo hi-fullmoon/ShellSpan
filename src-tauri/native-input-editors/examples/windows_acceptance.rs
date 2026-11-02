@@ -18,7 +18,7 @@ fn main() {
     let profile=nip::PeerProfile { shell: if windows51 { nip::ShellFamily::WindowsPowerShell } else { nip::ShellFamily::PowerShell7 },
         shell_version: Some(if windows51 {"5.1.26100.9711"} else {"7.6.9"}.into()),
         editor: nip::EditorFamily::PsReadLine, editor_version: Some("2.4.5".into()), editor_numeric_version: 20405,
-        adapter_version:"1".into(), verified_profile_id:Some(format!("{}-psreadline-2.4.5-windows-x64-nip1-capture1",if windows51 {"windows-powershell-5.1.26100.9711"}else{"powershell-7.6.9"})) };
+        adapter_version:"1".into(), verified_profile_id:Some(format!("{}-psreadline-2.4.5-windows-x64-native",if windows51 {"windows-powershell-5.1.26100.9711"}else{"powershell-7.6.9"})) };
     let quote=|s: &str| format!("'{}'",s.replace('\'',"''"));
     let bootstrap=evidence.join("bootstrap.ps1");
     let module=root.join("../resources/powershell/PSReadLine/2.4.5/PSReadLine.psd1");

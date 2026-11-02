@@ -72,22 +72,22 @@ phase listed below; Phase 0 only reserves their names and behavior.
 
 | Flag | Phase | Default until gate | Prerequisites | Enabled behavior | Rollback rule |
 | --- | --- | --- | --- | --- | --- |
-| `terminal_broker_v1` | 2 | on for Windows and macOS local; off elsewhere | none | Creates broker session records and fans raw bytes to bounded consumers without rewriting display bytes. | Disable dependent flags before the broker for new local generations. Close active broker generations; unresolved operations become uncertain. Deferred platforms report visible commands unavailable. |
-| `terminal_shell_integration_v1` | 3 | on for Windows and macOS local; off elsewhere | `terminal_broker_v1` | Installs supported local cooperative shell integration with a generation-bound control plane. Unsupported or failed initialization degrades explicitly. | Stop new integration bootstrap and mark affected generations degraded. Invalidate active integration; any command lacking accepted completion becomes uncertain. |
-| `terminal_execute_v1` | 3 | on for Windows and macOS local; off elsewhere | broker + ready cooperative shell integration | Routes supported visible commands regardless of effect. Ordinary commands remain wrapper-free; complete scripts use the advertised native mechanism. Explicit `directRequired` rejects bound-terminal execution. | Stop routing new calls. Existing calls finish on their chosen path or become uncertain; never replay. Rolled-out local platforms offer explicit Direct instead of reviving the wrapper. |
-| `terminal_remote_bound_terminal_v1` | remote reuse stage 6 | on for Windows and macOS desktop hosts; off on Linux | broker + shell integration + terminal execute | Prepares integration while opening an ordinary user SSH PTY and routes remote `boundTerminal` visible commands to that frozen source transport and generation. | Stop new remote visible-command routing; make active incomplete commands uncertain; revoke Agent leases and turn guards; keep the user SSH transport open. Later new/reconnected sessions use an ordinary shell. Never restore a dedicated Agent PTY. |
-| `terminal_interactive_tools_v1` | 5 | on for Windows and macOS local; off elsewhere | broker + shell integration; remote bound-terminal and remote-interactive flags for remote targets | Publishes terminal input/key/snapshot/wait tools and the headless screen model. | Remove tools from new model requests, revoke Agent leases, and reject later Agent input. Reconcile any operation without accepted completion; user ownership remains available. |
-| `terminal_remote_interactive_tools_v1` | 5 | off | interactive tools + remote bound-terminal | Separately admits screen observation and interactive input for the frozen user SSH PTY after the SSH Phase 5 gate passes. It does not gate visible commands. | Remove remote interactive tools from new model requests and reject later remote interactive input without disabling remote visible commands. |
+| `terminal_broker` | 2 | on for Windows and macOS local; off elsewhere | none | Creates broker session records and fans raw bytes to bounded consumers without rewriting display bytes. | Disable dependent flags before the broker for new local generations. Close active broker generations; unresolved operations become uncertain. Deferred platforms report visible commands unavailable. |
+| `terminal_shell_integration` | 3 | on for Windows and macOS local; off elsewhere | `terminal_broker` | Installs supported local cooperative shell integration with a generation-bound control plane. Unsupported or failed initialization degrades explicitly. | Stop new integration bootstrap and mark affected generations degraded. Invalidate active integration; any command lacking accepted completion becomes uncertain. |
+| `terminal_execute` | 3 | on for Windows and macOS local; off elsewhere | broker + ready cooperative shell integration | Routes supported visible commands regardless of effect. Ordinary commands remain wrapper-free; complete scripts use the advertised native mechanism. Explicit `directRequired` rejects bound-terminal execution. | Stop routing new calls. Existing calls finish on their chosen path or become uncertain; never replay. Rolled-out local platforms offer explicit Direct instead of reviving the wrapper. |
+| `terminal_remote_bound_terminal` | remote reuse stage 6 | on for Windows and macOS desktop hosts; off on Linux | broker + shell integration + terminal execute | Prepares integration while opening an ordinary user SSH PTY and routes remote `boundTerminal` visible commands to that frozen source transport and generation. | Stop new remote visible-command routing; make active incomplete commands uncertain; revoke Agent leases and turn guards; keep the user SSH transport open. Later new/reconnected sessions use an ordinary shell. Never restore a dedicated Agent PTY. |
+| `terminal_interactive_tools` | 5 | on for Windows and macOS local; off elsewhere | broker + shell integration; remote bound-terminal and remote-interactive flags for remote targets | Publishes terminal input/key/snapshot/wait tools and the headless screen model. | Remove tools from new model requests, revoke Agent leases, and reject later Agent input. Reconcile any operation without accepted completion; user ownership remains available. |
+| `terminal_remote_interactive_tools` | 5 | off | interactive tools + remote bound-terminal | Separately admits screen observation and interactive input for the frozen user SSH PTY after the SSH Phase 5 gate passes. It does not gate visible commands. | Remove remote interactive tools from new model requests and reject later remote interactive input without disabling remote visible commands. |
 
 ## Flag evaluation and dependency rules
 
-Phase 2 implements `terminal_broker_v1` as the backend-only process environment
-decision `SHELLSPAN_TERMINAL_BROKER_V1`. Phase 3 adds the same trusted parsing
-for `SHELLSPAN_TERMINAL_SHELL_INTEGRATION_V1` and
-`SHELLSPAN_TERMINAL_EXECUTE_V1`. The remote reuse migration uses
-`SHELLSPAN_TERMINAL_REMOTE_BOUND_TERMINAL_V1`, and Phase 5 adds
-`SHELLSPAN_TERMINAL_INTERACTIVE_TOOLS_V1` and
-`SHELLSPAN_TERMINAL_REMOTE_INTERACTIVE_TOOLS_V1`, through the same parser. On
+Phase 2 implements `terminal_broker` as the backend-only process environment
+decision `SHELLSPAN_TERMINAL_BROKER`. Phase 3 adds the same trusted parsing
+for `SHELLSPAN_TERMINAL_SHELL_INTEGRATION` and
+`SHELLSPAN_TERMINAL_EXECUTE`. The remote reuse migration uses
+`SHELLSPAN_TERMINAL_REMOTE_BOUND_TERMINAL`, and Phase 5 adds
+`SHELLSPAN_TERMINAL_INTERACTIVE_TOOLS` and
+`SHELLSPAN_TERMINAL_REMOTE_INTERACTIVE_TOOLS`, through the same parser. On
 Windows and macOS, an absent value is on for broker, integration, execute,
 remote bound-terminal routing, and local interactive tools; on Linux those absent values
 remain off. Remote interactive tools are absent-off on every platform. Accepted enabled values are `1`, `true`, and `on`,

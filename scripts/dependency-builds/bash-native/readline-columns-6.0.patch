@@ -5,9 +5,9 @@
  }
  #endif /* HANDLE_MULTIBYTE */
 +
-+/* Versioned, read-only native prompt-column extension. */
++/* Read-only native prompt-column extension. */
 +int
-+rl_native_prompt_columns_v1 (void)
++rl_native_prompt_columns (void)
 +{
 +  return prompt_physical_chars;
 +}
@@ -18,6 +18,6 @@
  extern int rl_set_prompt PARAMS((const char *));
  extern int rl_expand_prompt PARAMS((char *));
 +/* Native display columns, computed by Readline itself. */
-+extern int rl_native_prompt_columns_v1 PARAMS((void));
++extern int rl_native_prompt_columns PARAMS((void));
  
  extern int rl_initialize PARAMS((void));

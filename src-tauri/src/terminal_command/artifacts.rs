@@ -152,11 +152,11 @@ pub(crate) fn resource_root(app: &tauri::AppHandle) -> Result<std::path::PathBuf
     }
     if cfg!(debug_assertions) {
         Ok(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../.native-input-p2/resources/native-input-v1"))
+            .join("../.native-input-p2/resources/native-input"))
     } else {
         app.path()
             .resource_dir()
-            .map(|root| root.join("native-input-v1/generated"))
+            .map(|root| root.join("native-input/generated"))
             .map_err(|_| "TERMINAL_NATIVE_ARTIFACTS_UNAVAILABLE".into())
     }
 }

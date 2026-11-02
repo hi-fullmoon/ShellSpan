@@ -4,7 +4,7 @@ import {resolve,dirname} from 'node:path';
 import {requireEditorResources} from './editor-resources.mjs';
 const owner=resolve(import.meta.dirname,'../..'),producer=resolve(process.argv[2]),target=process.argv[3];
 assert(producer.startsWith(resolve(owner,'.native-input-p3/acceptance-source')+'/')&&['linux-aarch64-glibc-2.36'].includes(target));
-const source=resolve(producer,'.native-input-p2/resources/native-input-v1'),destination=resolve(owner,'.native-input-p2/resources/native-input-v1');
+const source=resolve(producer,'.native-input-p2/resources/native-input'),destination=resolve(owner,'.native-input-p2/resources/native-input');
 const catalogueName=`editors-${target}.json`;requireEditorResources(producer,target);
 const catalogue=JSON.parse(readFileSync(resolve(source,catalogueName),'utf8'));
 for(const[path,expected]of Object.entries(catalogue.sources)){

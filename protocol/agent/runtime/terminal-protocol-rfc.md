@@ -4,7 +4,7 @@ Status: accepted Phase 0 contract; amended for the cooperative-shell threat mode
 
 Roadmap: [Terminal Execution Roadmap](./terminal-execution-roadmap.md)
 
-Conformance fixture schema: [terminal-protocol-v1.schema.json](./terminal-protocol-v1.schema.json)
+Conformance fixture schema: [terminal-protocol.schema.json](./terminal-protocol.schema.json)
 
 ## Summary
 
@@ -299,9 +299,9 @@ finish. It initializes that object as `Submitted` **before typing or accept-line
 This legacy state does not prove executable submission. The executor's separate
 submission mutex, the transport-admitted `submission_attempted` error fact and
 the broker's `source_may_be_enqueued` have different meanings. None may be
-inferred from frontend activity, OSC boundaries or prompt text. Full event,
-rejection and idempotency cases are recorded in the
-[P1 state audit](../../../docs/design/agent-terminal-input-p1-state-audit.md).
+inferred from frontend activity, OSC boundaries or prompt text. Current event,
+rejection and idempotency boundaries are described in the
+[implementation guide](../../../docs/design/agent-terminal-input.md).
 
 Submission requires a ready integration, the Agent lease, no active command,
 and a command identifier registered before any input bytes are written. The
@@ -1024,16 +1024,16 @@ inline general-purpose interpreter execution, MUST NOT use `terminal_execute`.
 
 ## Phase 6 native desktop rollout profile
 
-On Windows and macOS hosts, absent trusted configuration enables `terminal_broker_v1`,
-`terminal_shell_integration_v1`, `terminal_execute_v1`, and
-`terminal_interactive_tools_v1` for local ConPTY/PTY generations, plus
-`terminal_remote_bound_terminal_v1` for remote visible commands. Remote interactive
+On Windows and macOS hosts, absent trusted configuration enables `terminal_broker`,
+`terminal_shell_integration`, `terminal_execute`, and
+`terminal_interactive_tools` for local ConPTY/PTY generations, plus
+`terminal_remote_bound_terminal` for remote visible commands. Remote interactive
 publication additionally requires the independently absent-off
-`terminal_remote_interactive_tools_v1` flag. Linux keeps the new-path flags
+`terminal_remote_interactive_tools` flag. Linux keeps the new-path flags
 absent-off.
 
 The authoritative remote environment variable is
-`SHELLSPAN_TERMINAL_REMOTE_BOUND_TERMINAL_V1`; the read-only Broker snapshot
+`SHELLSPAN_TERMINAL_REMOTE_BOUND_TERMINAL`; the read-only Broker snapshot
 serializes its decision as `remoteBoundTerminalRollout`. The decision is
 process-lifetime state and MUST NOT be persisted or exposed through a mutation
 IPC. Disabling it stops new remote visible-command routing, makes active
@@ -1190,8 +1190,9 @@ gates do; Windows remains a native-evidence debt rather than a claimed pass.
 
 ## Native input refactor P0 laboratory (2026-10-31)
 
-The separate [native feasibility report](../../../docs/design/agent-terminal-input-native-feasibility.md)
-records real Bash/Readline PTY, loopback SSH and browser experiments.
+The historical native feasibility report in Git history records real
+Bash/Readline PTY, loopback SSH and browser experiments. Current boundaries are
+listed in the [implementation guide](../../../docs/design/agent-terminal-input.md).
 `pnpm test:terminal-native-input:p0 --upstream` runs native PTYs and browsers;
 `pnpm test:terminal-native-input:p0:ssh` runs the isolated SSH lane. Add `--ssh`
 to the first command to run both and retain any earlier nonzero status.
@@ -1238,18 +1239,17 @@ The existing command registration and typed IPC adapter are reused. The separate
 `get_terminal_submission_recovery` command reads the durable SQLite intent fence
 through spawn_blocking. State authority, Revoking ownership, complete proofs,
 FULL intent transactions, post-persistence validation and the native private
-protocol are now defined in [NIP/1](native-input-v1.md) and its
-[schema](native-input-v1.schema.json). NIP/1 does not change TSP/1 or event-v5.
+protocol are now defined in [NIP](native-input.md) and its
+[schema](native-input.schema.json). NIP does not change TSP/1 or event-v5.
 The existing executor uses the same Broker lifecycle and submission gate; it no
 longer owns a second submitted flag. P2 production transport/display wiring is
-implemented; its full acceptance remains in progress. See the
-[P2 audit](../../../docs/design/agent-terminal-input-p2-audit.md) and the retained
-[P1 audit](../../../docs/design/agent-terminal-input-p1-state-audit.md).
+implemented; full acceptance remains pending. See the
+[implementation guide](../../../docs/design/agent-terminal-input.md).
 
 ### P0 continuation: causal and dependency laboratory evidence
 
-The [P0 report](../../../docs/design/agent-terminal-input-native-feasibility.md)
-now distinguishes native no-module baseline loss from bridge-specific loss.
+The historical P0 report in Git history distinguishes native no-module
+baseline loss from bridge-specific loss. The following describes those historical experiments.
 The public Readline append-only redisplay candidate and a user-authorized
 isolated generic cursor-reflow dependency experiment pass the measured native
 and browser gates without source projection, blank-screen scrolling or a short
@@ -1321,9 +1321,9 @@ identity-bound private management of existing jobs remain available. No existing
 generation is hot-switched, cleared or replayed. ZLE/PSReadLine production editor
 profiles remain empty. GNU Bash's independent source-matching catalogue and
 exact shell/module SHA admission remain unchanged.
-P4 code/static evidence and deferred acceptance are recorded in the
-[P4 audit](../../../docs/design/agent-terminal-input-p4-audit.md).
-P1 freezes online identifiers/capabilities in NIP/1. Current production recovery,
+Current code/static boundaries and deferred acceptance are recorded in the
+[implementation guide](../../../docs/design/agent-terminal-input.md).
+P1 freezes online identifiers/capabilities in NIP. Current production recovery,
 packaging and acceptance limits are recorded in the P2 audit.
 Display bytes still grant no lifecycle, readiness, input or execution authority.
 See [native display integration](../../native-input-display.md) and the P0 report.

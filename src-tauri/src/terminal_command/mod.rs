@@ -11,7 +11,7 @@ pub(crate) mod local;
     not(test),
     allow(
         dead_code,
-        reason = "NIP/1 wire contract is frozen in P1; production transport wiring is P2"
+        reason = "NIP wire contract is frozen in P1; production transport wiring is P2"
     )
 )]
 pub(crate) mod protocol;

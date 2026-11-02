@@ -13,7 +13,7 @@ const expectedCases=Number(process.argv[4]??(['normal','binding','paths','admiss
 const stage=JSON.parse(await readFile(resolve(root,'.native-input-p3/candidate-stage.json'),'utf8'));assert(stage.sealed&&stage.root===root&&stage.nativeAcceptance===false);
 const sources=captureValidationSources(root);assert.deepEqual(sources,JSON.parse(await readFile(resolve(stage.directory,'sources.json'),'utf8')));
 const resources=auditEditorResources(root,'macos-arm64');assert(resources.selectedValid);
-const selectedResources=process.env.SHELLSPAN_P3_PACKAGED_RESOURCE_ROOT??resolve(root,'.native-input-p2/resources/native-input-v1');
+const selectedResources=process.env.SHELLSPAN_P3_PACKAGED_RESOURCE_ROOT??resolve(root,'.native-input-p2/resources/native-input');
 const validation=mode==='admission'?{}:await editorValidationEnvironment(root,selectedResources,['macos-arm64']);
 const hash=async path=>createHash('sha256').update(await readFile(path)).digest('hex');
 assert.equal(await hash('/bin/zsh'),stage.mainSha256);assert.equal(await hash(stage.core),stage.coreSha256);

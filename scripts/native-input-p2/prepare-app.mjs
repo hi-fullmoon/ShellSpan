@@ -10,7 +10,7 @@ if(existsSync(sourceSnapshot))assert(JSON.parse(readFileSync(sourceSnapshot,'utf
 const version=process.argv[2]??'5.3';
 assert(['4.1','4.4','5.3'].includes(version));
 const readline={'4.1':'6.0','4.4':'7.0','5.3':'8.3.6'}[version];
-const producer=JSON.parse(readFileSync(resolve(root,`.native-input-p2/producers/gnu-bash-${version}-readline-${readline}-macos-arm64-nip1-init1-capture1/manifest.json`),'utf8'));
+const producer=JSON.parse(readFileSync(resolve(root,`.native-input-p2/producers/gnu-bash-${version}-readline-${readline}-macos-arm64-native/manifest.json`),'utf8'));
 const destination=resolve(root,`.native-input-p2/app-${version}`,new Date().toISOString().replaceAll(':','-'));
 for(const name of ['home','data'])mkdirSync(resolve(destination,name),{recursive:true,mode:0o700});
 const originalHome=process.env.HOME;
@@ -45,6 +45,6 @@ writeFileSync(resolve(destination,'route-source.json'),JSON.stringify(routeSourc
 // No user terminal workspace, history, profiles, passwords or key bytes are
 // copied. The normal isolated application resolves the existing keychain refs.
 const environment={SHELLSPAN_DATA_DIR:resolve(destination,'data'),SHELL:producer.shell,SHELLSPAN_LOCAL_HOME:resolve(destination,'home'),
-  SHELLSPAN_TERMINAL_BROKER_V1:'1',SHELLSPAN_TERMINAL_SHELL_INTEGRATION_V1:'1',SHELLSPAN_TERMINAL_EXECUTE_V1:'1',SHELLSPAN_TERMINAL_INTERACTIVE_TOOLS_V1:'1'};
+  SHELLSPAN_TERMINAL_BROKER:'1',SHELLSPAN_TERMINAL_SHELL_INTEGRATION:'1',SHELLSPAN_TERMINAL_EXECUTE:'1',SHELLSPAN_TERMINAL_INTERACTIVE_TOOLS:'1'};
 writeFileSync(resolve(destination,'environment.json'),JSON.stringify(environment,null,2)+'\n',{mode:0o600});
 console.log(JSON.stringify({destination,routes:routes.routes.length,selection:routes.defaultSelection??null}));

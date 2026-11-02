@@ -80,8 +80,8 @@ export async function verifyTerminalDelegation(): Promise<void> {
     const nativeProofs:TerminalIntegrationStateEvent[]=[];
     if(nativeP2){
       assert(nativeInitial?.inputMode==='native-inline'&&nativeInitial.integrationState==='ready'&&nativeInitial.integrationShell==='bash','P2 delegation did not use the actual ready native Bash route');
-      assert(nativeInitial.nativePeerProfile?.shell==='bash'&&nativeInitial.nativePeerProfile.editor==='readline'&&nativeInitial.nativePeerProfile.shellVersion&&nativeInitial.nativePeerProfile.verifiedProfileId?.endsWith('-nip1-init1-capture1'),'P2 delegation is missing its accepted private peer profile');
-      assert(controller.inputMode==='native-inline'&&nativeInitial.nativeDisplayBinding?.protocol==='shellspan.native-input/1'&&JSON.stringify(nativeInitial.nativeDisplayBinding)===JSON.stringify(terminal.ptyInfo?.nativeDisplayBinding),'P2 delegation renderer did not use the negotiated binding');
+      assert(nativeInitial.nativePeerProfile?.shell==='bash'&&nativeInitial.nativePeerProfile.editor==='readline'&&nativeInitial.nativePeerProfile.shellVersion&&nativeInitial.nativePeerProfile.verifiedProfileId?.endsWith('-native'),'P2 delegation is missing its accepted private peer profile');
+      assert(controller.inputMode==='native-inline'&&nativeInitial.nativeDisplayBinding?.protocol==='shellspan.native-input'&&JSON.stringify(nativeInitial.nativeDisplayBinding)===JSON.stringify(terminal.ptyInfo?.nativeDisplayBinding),'P2 delegation renderer did not use the negotiated binding');
       cleanups.push(await listenToTerminalIntegrationState(({payload})=>{
         const command=payload.inputObservation?.activeCommand;
         if(payload.sessionId===terminalId&&payload.terminalSessionId===nativeInitial.terminalSessionId&&payload.terminalGeneration===nativeInitial.terminalGeneration&&command?.fullInputConfirmed&&command.submissionIntentDurable)nativeProofs.push(payload);

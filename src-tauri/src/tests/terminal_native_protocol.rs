@@ -1,4 +1,4 @@
-//! Live NIP/1 integration: a real GNU Bash/Readline module, socket and PTY.
+//! Live NIP integration: a real GNU Bash/Readline module, socket and PTY.
 //! No synthesized lifecycle/readiness/proof events enter the Broker.
 use crate::terminal_broker::{
     TerminalCommandState, TerminalGeometry, TerminalSessionBroker, TerminalTransportKind,
@@ -160,7 +160,7 @@ impl NativeShell {
         }
         fs::write(home.path().join(".inputrc"),format!("set editing-mode {}\nset bell-style none\nset convert-meta off\nset input-meta on\n",if emacs {"emacs"} else {"vi"})).unwrap();
         let quote = |value: &str| shlex::try_quote(value).unwrap().into_owned();
-        let rc=format!("PS1='NIP> '\nPS2='CONT> '\nHISTFILE=\"$HOME/history\"\nenable -f {} ss_native_input_v1 ss_native_input_v1_status ss_native_input_v1_begin ss_native_input_v1_child_closed\nbuiltin ss_native_input_v1 {} \"$(trap -p INT)\" \"$BASH_VERSION\"\nPROMPT_COMMAND='builtin ss_native_input_v1_status \"$?\" \"$PWD\"'\ncd \"$HOME\"\n",quote(manifest["bridge"].as_str().unwrap()),quote(socket.to_str().unwrap()));
+        let rc=format!("PS1='NIP> '\nPS2='CONT> '\nHISTFILE=\"$HOME/history\"\nenable -f {} ss_native_input ss_native_input_status ss_native_input_begin ss_native_input_child_closed\nbuiltin ss_native_input {} \"$(trap -p INT)\" \"$BASH_VERSION\"\nPROMPT_COMMAND='builtin ss_native_input_status \"$?\" \"$PWD\"'\ncd \"$HOME\"\n",quote(manifest["bridge"].as_str().unwrap()),quote(socket.to_str().unwrap()));
         let rc = if manifest_path.is_some() {
             format!(
                 "{}\ncd \"$HOME\"\n",
@@ -507,7 +507,7 @@ fn native_production_private_widget_restores_real_stream_after_signal_and_contro
         .to_path_buf();
     let run = uuid::Uuid::new_v4().to_string();
     for (version, readline) in [("4.1", "6.0"), ("4.4", "7.0"), ("5.3", "8.3.6")] {
-        let manifest=root.join(format!(".native-input-p2/producers/gnu-bash-{version}-readline-{readline}-macos-arm64-nip1-init1-capture1/manifest.json"));
+        let manifest=root.join(format!(".native-input-p2/producers/gnu-bash-{version}-readline-{readline}-macos-arm64-native/manifest.json"));
         for fault in ["normal", "interrupt", "control-eof"] {
             let mut shell = NativeShell::start_with_manifest(
                 &format!("{run}/{version}-widget-{fault}"),
@@ -846,7 +846,7 @@ fn native_production_geometry_unicode_and_real_resize() {
     let run = uuid::Uuid::new_v4().to_string();
     let mut entries = Vec::new();
     for (version, readline) in [("4.1", "6.0"), ("4.4", "7.0"), ("5.3", "8.3.6")] {
-        let manifest=root.join(format!(".native-input-p2/producers/gnu-bash-{version}-readline-{readline}-macos-arm64-nip1-init1-capture1/manifest.json"));
+        let manifest=root.join(format!(".native-input-p2/producers/gnu-bash-{version}-readline-{readline}-macos-arm64-native/manifest.json"));
         for columns in [32, 40, 100, 180] {
             for (size, repeats) in [("normal", 6), ("oversize", 200)] {
                 let case = format!("{run}/{version}-{columns}-{size}");
@@ -891,7 +891,7 @@ fn native_production_geometry_unicode_and_real_resize() {
                         let bytes = shell.read();
                         shell.deliver(coordinator, &bytes);
                         let raw = shell.raw.lock().unwrap();
-                        let on = b"\x1b]1337;SetUserVar=ShellSpanNativeInputV1=MQ==\x07";
+                        let on = b"\x1b]1337;SetUserVar=ShellSpanNativeInput=MQ==\x07";
                         if let Some(at) = raw.windows(on.len()).position(|window| window == on) {
                             let prefix = &raw[at + on.len()..];
                             let applied = std::str::from_utf8(prefix)
@@ -1027,7 +1027,7 @@ fn native_linux_geometry_inputs() {
         .parent()
         .unwrap()
         .to_path_buf();
-    let resources = root.join(".native-input-p2/resources/native-input-v1");
+    let resources = root.join(".native-input-p2/resources/native-input");
     let artifacts =
         crate::terminal_command::artifacts::read_catalogue(&resources, "linux-aarch64-glibc-2.36")
             .unwrap();
@@ -1046,7 +1046,7 @@ fn native_linux_geometry_inputs() {
                 &uuid::Uuid::new_v4().simple().to_string()[..16]
             );
             let module = format!(
-                "/work/.native-input-p2/resources/native-input-v1/{}",
+                "/work/.native-input-p2/resources/native-input/{}",
                 artifact.module
             );
             let bootstrap = crate::terminal_command::bash::bootstrap_source(
@@ -1248,13 +1248,13 @@ fn native_production_capture_preserves_real_output_and_bounds_osc_across_all_spl
     let run_id = uuid::Uuid::new_v4().to_string();
     for (version, readline) in [("4.1", "6.0"), ("4.4", "7.0"), ("5.3", "8.3.6")] {
         let profile =
-            format!("gnu-bash-{version}-readline-{readline}-macos-arm64-nip1-init1-capture1");
+            format!("gnu-bash-{version}-readline-{readline}-macos-arm64-native");
         let manifest = root
             .join(".native-input-p2/producers")
             .join(&profile)
             .join("manifest.json");
-        let ordinary = b"x\xe4\xb8\xad\x1b]133;C\x07ss_native_input_v1_begin NIP> ";
-        let ordinary_source = "printf 'x中\\033]133;C\\007ss_native_input_v1_begin NIP> '";
+        let ordinary = b"x\xe4\xb8\xad\x1b]133;C\x07ss_native_input_begin NIP> ";
+        let ordinary_source = "printf 'x中\\033]133;C\\007ss_native_input_begin NIP> '";
         for (case, source, expected) in [
             ("empty", ":", Vec::new()),
             ("short", ordinary_source, ordinary.to_vec()),
@@ -1446,7 +1446,7 @@ fn native_protocol_real_bash_commit_and_duplicate_fence() {
     assert_eq!(accepted.shell, nip::ShellFamily::Bash);
     assert_eq!(
         accepted.verified_profile_id.as_deref(),
-        Some("gnu-bash-5.3-readline-8.3.6-macos-arm64-nip1")
+        Some("gnu-bash-5.3-readline-8.3.6-macos-arm64-native")
     );
     let sender = shell.writer.clone();
     shell.key(b"\x18\x1e");
@@ -1498,8 +1498,8 @@ fn native_protocol_real_bash_commit_and_duplicate_fence() {
         .windows(nip::DISPLAY_EXIT.len())
         .any(|window| window == nip::DISPLAY_EXIT.as_bytes()));
     assert!(!raw
-        .windows(b"ss_native_input_v1_begin".len())
-        .any(|window| window == b"ss_native_input_v1_begin"));
+        .windows(b"ss_native_input_begin".len())
+        .any(|window| window == b"ss_native_input_begin"));
 }
 
 #[test]
@@ -2264,7 +2264,7 @@ fn native_protocol_real_running_stop_preserves_submission_and_private_end_status
 #[ignore = "requires the rebuilt native producer"]
 fn native_protocol_real_stdout_signals_and_partial_display_eof_have_no_execution_authority() {
     let mut shell = NativeShell::start("stdout-partial-eof");
-    let source="printf '%s\\n' '{\"protocol\":\"shellspan.native-input/1\",\"payload\":{\"kind\":\"settled\",\"exitCode\":0}}'\nprintf '\\033]1337;SetUserVar=ShellSpanNativeInputV1=MQ==\\007'\nprintf '\\033]1337;SetUserVar=ShellSpanNativeInputV1=MA'\nexec /bin/sleep 5";
+    let source="printf '%s\\n' '{\"protocol\":\"shellspan.native-input\",\"payload\":{\"kind\":\"settled\",\"exitCode\":0}}'\nprintf '\\033]1337;SetUserVar=ShellSpanNativeInput=MQ==\\007'\nprintf '\\033]1337;SetUserVar=ShellSpanNativeInput=MA'\nexec /bin/sleep 5";
     let mut coordinator = shell.command(source);
     let sender = shell.writer.clone();
     shell.key(b"\x18\x1e");

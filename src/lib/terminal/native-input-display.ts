@@ -21,11 +21,11 @@ export interface NativeInputDisplayController extends IDisposable {
   closeAfterPendingOutput(): Promise<void>;
 }
 
-/** NIP/1 display binding. Installation still requires explicit native negotiation. */
-export const NATIVE_INPUT_DISPLAY_V1: NativeInputDisplayBinding = Object.freeze({
+/** NIP display binding. Installation still requires explicit native negotiation. */
+export const NATIVE_INPUT_DISPLAY: NativeInputDisplayBinding = Object.freeze({
   inputMode: 'native-inline', oscIdentifier: 1337,
-  enterPayload: 'SetUserVar=ShellSpanNativeInputV1=MQ==',
-  exitPayload: 'SetUserVar=ShellSpanNativeInputV1=MA==',
+  enterPayload: 'SetUserVar=ShellSpanNativeInput=MQ==',
+  exitPayload: 'SetUserVar=ShellSpanNativeInput=MA==',
 });
 
 const attachedTerminals = new WeakSet<Terminal>();

@@ -295,8 +295,8 @@ async function verify() {
     if(nativeP2){
       const family=nativeP3??'bash',editor=nativeP3==='zsh'?'zle':nativeP3?'psReadLine':'readline';
       assert(identity.inputMode==='native-inline'&&identity.integrationState==='ready'&&identity.integrationShell===family,'Contention did not use the selected actual ready native shell route');
-      assert(identity.nativePeerProfile?.shell===family&&identity.nativePeerProfile.editor===editor&&identity.nativePeerProfile.shellVersion&&identity.nativePeerProfile.verifiedProfileId?.endsWith(nativeP3?'-nip1-capture1':'-nip1-init1-capture1'),'Contention is missing its accepted private peer profile');
-      assert(controller.inputMode==='native-inline'&&identity.nativeDisplayBinding?.protocol==='shellspan.native-input/1'&&JSON.stringify(identity.nativeDisplayBinding)===JSON.stringify(session.ptyInfo?.nativeDisplayBinding),'P2 contention renderer did not use the negotiated binding');
+      assert(identity.nativePeerProfile?.shell===family&&identity.nativePeerProfile.editor===editor&&identity.nativePeerProfile.shellVersion&&identity.nativePeerProfile.verifiedProfileId?.endsWith(nativeP3?'-native':'-native'),'Contention is missing its accepted private peer profile');
+      assert(controller.inputMode==='native-inline'&&identity.nativeDisplayBinding?.protocol==='shellspan.native-input'&&JSON.stringify(identity.nativeDisplayBinding)===JSON.stringify(session.ptyInfo?.nativeDisplayBinding),'P2 contention renderer did not use the negotiated binding');
       cleanups.push(await listenToTerminalIntegrationState(({payload})=>{
         const command=payload.inputObservation?.activeCommand;
         if(payload.sessionId===terminalId&&payload.terminalSessionId===identity.terminalSessionId&&payload.terminalGeneration===identity.terminalGeneration&&command?.fullInputConfirmed&&command.submissionIntentDurable)nativeProofs.push(payload);

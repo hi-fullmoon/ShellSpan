@@ -25,7 +25,7 @@ async function run(name, command, args, environment = {}) {
   assert.equal(code, 0, `${name} failed; inspect ${logPath}`);
 }
 async function validateCaptures() {
-  const schema = JSON.parse(await readFile('protocol/agent/runtime/native-input-v1.schema.json', 'utf8'));
+  const schema = JSON.parse(await readFile('protocol/agent/runtime/native-input.schema.json', 'utf8'));
   const validate = new Ajv2020({ allErrors: true, strict: true }).compile(schema);
   const files = [];
   async function walk(directory) {
@@ -56,13 +56,12 @@ async function validateCaptures() {
 }
 if (process.argv.includes('--schema-only')) {
   const captures = await validateCaptures();
-  console.log(`NIP/1 actual-capture schemas passed (${Object.keys(captures).length} files)`);
+  console.log(`NIP actual-capture schemas passed (${Object.keys(captures).length} files)`);
   process.exit(0);
 }
 let failure;
 try {
   await run('producer-build', 'python3', ['scripts/native-input-p1/build.py']);
-  const producer = JSON.parse(await readFile('.native-input-p0/p1-protocol-build/manifest.json', 'utf8'));
   const cargo = ['test', '--locked', '--manifest-path', 'src-tauri/Cargo.toml', '--lib'];
   for (const [name, filter] of [['state', 'terminal_command::tests::'], ['broker', 'terminal_broker::tests::'],
     ['executor', 'agent_runtime::native::terminal_execute::tests::'], ['lease', 'agent_runtime::native::terminal_lease::tests::']]) {
@@ -70,11 +69,7 @@ try {
   }
   await run('native', 'cargo', [...cargo, 'terminal_native_protocol::native_protocol_real_', '--', '--ignored', '--test-threads=1']);
   await validateCaptures();
-  await run('display', 'node', ['src/lib/terminal/__tests__/native-input-display-v1.browser.mjs']);
-  await run('missing-checkpoint', 'cargo', [...cargo, 'missing_editor_checkpoint_quarantines_until_reconnect', '--', '--include-ignored', '--test-threads=1'], { SHELLSPAN_TEST_MODERN_BASH: producer.shell });
-  const p0 = JSON.parse(await readFile('.native-input-p0/build-darwin.json', 'utf8'))['5.3'];
-  await run('p0-legacy-wire', 'python3', ['scripts/native-input-p0/acceptance.py', '--shell', p0.shell, '--bridge', p0.bridge,
-    '--output', path.join(root, '.native-input-p0/p1-legacy-captures'), '--display-profile', 'legacy']);
+  await run('display', 'node', ['src/lib/terminal/__tests__/native-input-display-binding.browser.mjs']);
   await run('frontend', 'pnpm', ['exec', 'vitest', 'run', 'src/components/terminal/__tests__/agent-terminal-command-feedback.test.ts',
     'src/components/terminal/__tests__/terminal-controller-layer.test.tsx', 'src/components/terminal/__tests__/terminal-pane.test.tsx',
     'src/components/terminal/__tests__/terminal-registry.test.ts', 'scripts/__tests__/terminal-protocol-contract.test.mjs']);

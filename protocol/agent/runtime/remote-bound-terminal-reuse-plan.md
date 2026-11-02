@@ -148,16 +148,15 @@ FIFO 不可用或第二个控制 channel 不可创建，都不能导致 SSH 主�
 如果 Broker 内的 candidate/owner 结构不再有其他生产消费者，也应同时删除，避免旧路径在未来被
 误接回。不得仅依赖“当前调用点已移除”来保证不新建终端。
 
-### 5.7 功能开关迁移
+### 5.7 功能开关
 
-`terminal_remote_agent_pty_v1` 不再准确描述行为。新权威名称为：
+当前名称为：
 
-- flag：`terminal_remote_bound_terminal_v1`；
-- environment：`SHELLSPAN_TERMINAL_REMOTE_BOUND_TERMINAL_V1`；
+- flag：`terminal_remote_bound_terminal`；
+- environment：`SHELLSPAN_TERMINAL_REMOTE_BOUND_TERMINAL`；
 - IPC field：`remoteBoundTerminalRollout`。
 
-旧环境变量 `SHELLSPAN_TERMINAL_REMOTE_AGENT_PTY_V1` 可作为一个版本的只读兼容别名：仅当新变量
-未设置时读取，且不再在新文档或 UI 中展示旧名称。该开关不持久化。
+只读取当前名称，不注册旧变量别名。该开关不持久化。
 
 关闭开关时：
 
@@ -417,7 +416,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 ### 12.2 回滚
 
-关闭 `terminal_remote_bound_terminal_v1`：
+关闭 `terminal_remote_bound_terminal`：
 
 - 新命令不再进入远程用户 PTY；
 - 活动命令按不确定性规则结束；

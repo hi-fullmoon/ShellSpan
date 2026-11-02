@@ -17,36 +17,34 @@ use crate::terminal_command::{
 use crate::terminal_integration::{TerminalIntegrationControlEvent, TerminalShellKind};
 use crate::terminal_screen::{TerminalScreenModel, TerminalScreenSnapshot};
 
-pub(crate) const TERMINAL_BROKER_FLAG_NAME: &str = "terminal_broker_v1";
-pub(crate) const TERMINAL_BROKER_ENVIRONMENT_VARIABLE: &str = "SHELLSPAN_TERMINAL_BROKER_V1";
+pub(crate) const TERMINAL_BROKER_FLAG_NAME: &str = "terminal_broker";
+pub(crate) const TERMINAL_BROKER_ENVIRONMENT_VARIABLE: &str = "SHELLSPAN_TERMINAL_BROKER";
 pub(crate) const TERMINAL_BROKER_DEFAULT_ENABLED: bool =
     cfg!(any(target_os = "macos", target_os = "windows"));
-pub(crate) const TERMINAL_SHELL_INTEGRATION_FLAG_NAME: &str = "terminal_shell_integration_v1";
+pub(crate) const TERMINAL_SHELL_INTEGRATION_FLAG_NAME: &str = "terminal_shell_integration";
 pub(crate) const TERMINAL_SHELL_INTEGRATION_ENVIRONMENT_VARIABLE: &str =
-    "SHELLSPAN_TERMINAL_SHELL_INTEGRATION_V1";
+    "SHELLSPAN_TERMINAL_SHELL_INTEGRATION";
 pub(crate) const TERMINAL_SHELL_INTEGRATION_DEFAULT_ENABLED: bool =
     cfg!(any(target_os = "macos", target_os = "windows"));
-pub(crate) const TERMINAL_EXECUTE_FLAG_NAME: &str = "terminal_execute_v1";
-pub(crate) const TERMINAL_EXECUTE_ENVIRONMENT_VARIABLE: &str = "SHELLSPAN_TERMINAL_EXECUTE_V1";
+pub(crate) const TERMINAL_EXECUTE_FLAG_NAME: &str = "terminal_execute";
+pub(crate) const TERMINAL_EXECUTE_ENVIRONMENT_VARIABLE: &str = "SHELLSPAN_TERMINAL_EXECUTE";
 pub(crate) const TERMINAL_EXECUTE_DEFAULT_ENABLED: bool =
     cfg!(any(target_os = "macos", target_os = "windows"));
 pub(crate) const TERMINAL_REMOTE_BOUND_TERMINAL_FLAG_NAME: &str =
-    "terminal_remote_bound_terminal_v1";
+    "terminal_remote_bound_terminal";
 pub(crate) const TERMINAL_REMOTE_BOUND_TERMINAL_ENVIRONMENT_VARIABLE: &str =
-    "SHELLSPAN_TERMINAL_REMOTE_BOUND_TERMINAL_V1";
-const TERMINAL_REMOTE_BOUND_TERMINAL_LEGACY_ENVIRONMENT_VARIABLE: &str =
-    "SHELLSPAN_TERMINAL_REMOTE_AGENT_PTY_V1";
+    "SHELLSPAN_TERMINAL_REMOTE_BOUND_TERMINAL";
 pub(crate) const TERMINAL_REMOTE_BOUND_TERMINAL_DEFAULT_ENABLED: bool =
     cfg!(any(target_os = "macos", target_os = "windows"));
-pub(crate) const TERMINAL_INTERACTIVE_TOOLS_FLAG_NAME: &str = "terminal_interactive_tools_v1";
+pub(crate) const TERMINAL_INTERACTIVE_TOOLS_FLAG_NAME: &str = "terminal_interactive_tools";
 pub(crate) const TERMINAL_INTERACTIVE_TOOLS_ENVIRONMENT_VARIABLE: &str =
-    "SHELLSPAN_TERMINAL_INTERACTIVE_TOOLS_V1";
+    "SHELLSPAN_TERMINAL_INTERACTIVE_TOOLS";
 pub(crate) const TERMINAL_INTERACTIVE_TOOLS_DEFAULT_ENABLED: bool =
     cfg!(any(target_os = "macos", target_os = "windows"));
 pub(crate) const TERMINAL_REMOTE_INTERACTIVE_TOOLS_FLAG_NAME: &str =
-    "terminal_remote_interactive_tools_v1";
+    "terminal_remote_interactive_tools";
 pub(crate) const TERMINAL_REMOTE_INTERACTIVE_TOOLS_ENVIRONMENT_VARIABLE: &str =
-    "SHELLSPAN_TERMINAL_REMOTE_INTERACTIVE_TOOLS_V1";
+    "SHELLSPAN_TERMINAL_REMOTE_INTERACTIVE_TOOLS";
 pub(crate) const TERMINAL_REMOTE_INTERACTIVE_TOOLS_DEFAULT_ENABLED: bool = false;
 const DEFAULT_REPLAY_MAX_FRAMES: usize = 512;
 const DEFAULT_REPLAY_MAX_BYTES: usize = 1_048_576;
@@ -63,7 +61,7 @@ const SYSTEM_OWNER_ID: &str = "shellspan-runtime";
     not(test),
     allow(
         dead_code,
-        reason = "NIP/1 adapter is exercised by real P1 tests; production transport wiring is P2"
+        reason = "NIP adapter is exercised by real P1 tests; production transport wiring is P2"
     )
 )]
 mod native_input_coordinator;
@@ -1282,7 +1280,7 @@ pub(crate) enum TerminalInputKind {
         not(test),
         allow(
             dead_code,
-            reason = "NIP/1 private control admission is wired to production in P2"
+            reason = "NIP private control admission is wired to production in P2"
         )
     )]
     NativeControl,
@@ -1660,7 +1658,7 @@ impl SessionRecord {
         (self.input_mode == InputMode::NativeInline && self.native_display_negotiated).then(|| {
             self.native_profile
                 .as_ref()
-                .map_or_else(nip::DisplayBinding::v1, |profile| profile.display_binding())
+                .map_or_else(nip::DisplayBinding::native, |profile| profile.display_binding())
         })
     }
 
@@ -1998,9 +1996,8 @@ impl TerminalSessionBroker {
             TERMINAL_EXECUTE_DEFAULT_ENABLED,
         )?;
         let (remote_bound_terminal, remote_bound_terminal_source) =
-            trusted_rollout_value_with_legacy_alias(
+            trusted_rollout_value(
                 TERMINAL_REMOTE_BOUND_TERMINAL_ENVIRONMENT_VARIABLE,
-                TERMINAL_REMOTE_BOUND_TERMINAL_LEGACY_ENVIRONMENT_VARIABLE,
                 TERMINAL_REMOTE_BOUND_TERMINAL_DEFAULT_ENABLED,
             )?;
         let (interactive_tools, interactive_tools_source) = trusted_rollout_value(
@@ -5714,40 +5711,6 @@ fn trusted_rollout_value(
         std::env::var(environment_variable),
         default_enabled,
     )
-}
-
-fn trusted_rollout_value_with_legacy_alias(
-    environment_variable: &str,
-    legacy_environment_variable: &str,
-    default_enabled: bool,
-) -> Result<(bool, TerminalBrokerRolloutSource), String> {
-    trusted_rollout_value_with_legacy_alias_reader(
-        environment_variable,
-        legacy_environment_variable,
-        default_enabled,
-        |name| std::env::var(name),
-    )
-}
-
-fn trusted_rollout_value_with_legacy_alias_reader<F>(
-    environment_variable: &str,
-    legacy_environment_variable: &str,
-    default_enabled: bool,
-    mut read: F,
-) -> Result<(bool, TerminalBrokerRolloutSource), String>
-where
-    F: FnMut(&str) -> Result<String, std::env::VarError>,
-{
-    match read(environment_variable) {
-        Err(std::env::VarError::NotPresent) => rollout_value_from_environment_result(
-            legacy_environment_variable,
-            read(legacy_environment_variable),
-            default_enabled,
-        ),
-        result => {
-            rollout_value_from_environment_result(environment_variable, result, default_enabled)
-        }
-    }
 }
 
 fn rollout_value_from_environment_result(

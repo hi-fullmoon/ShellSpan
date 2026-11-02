@@ -12,7 +12,7 @@ import {editorValidationEnvironment} from './editor-validation.mjs';
 import {auditEditorResources} from './editor-resources.mjs';
 const owner=resolve(import.meta.dirname,'../..'),root=resolve(process.argv[2]);assert.equal(resolve(process.cwd()),root);assert(process.env.CARGO_TARGET_DIR);
 const stage=JSON.parse(await readFile(resolve(root,'.native-input-p3/candidate-stage.json'),'utf8'));assert(stage.sealed&&stage.root===root);
-const validation=await editorValidationEnvironment(root,resolve(root,'.native-input-p2/resources/native-input-v1'),['linux-aarch64-glibc-2.36']);
+const validation=await editorValidationEnvironment(root,resolve(root,'.native-input-p2/resources/native-input'),['linux-aarch64-glibc-2.36']);
 const resourceAudit=auditEditorResources(root,'linux-aarch64-glibc-2.36');assert(resourceAudit.selectedValid);
 const directory=resolve(root,'.native-input-p3/ssh-live',randomUUID());await mkdir(directory,{recursive:true});
 const sources=captureValidationSources(root);const runtime=await installedRuntimeManifest();
@@ -64,12 +64,12 @@ try{
     try{
       await page.goto(`http://127.0.0.1:${server.address().port}`);
       await page.evaluate(async({columns,unicode11})=>{
-        const {attachNativeInputDisplay,NATIVE_INPUT_DISPLAY_V1}=await import('/display.js');
+        const {attachNativeInputDisplay,NATIVE_INPUT_DISPLAY}=await import('/display.js');
         const terminal=new Terminal({cols:columns,rows:30,scrollback:20000,reflowCursorLine:false,allowProposedApi:unicode11});terminal.open(document.querySelector('#surface'));
         if(unicode11)terminal.loadAddon(new Unicode11Addon.Unicode11Addon());
         const ordinaryUnicodeVersion=unicode11?terminal.unicode.activeVersion:undefined;
         if(unicode11&&ordinaryUnicodeVersion!=='6')throw new Error('Ordinary provider default changed before owned input');
-        const search=new SearchAddon.SearchAddon();terminal.loadAddon(search);const display=attachNativeInputDisplay(terminal,NATIVE_INPUT_DISPLAY_V1,unicode11?{unicodeVersion:'11'}:{});
+        const search=new SearchAddon.SearchAddon();terminal.loadAddon(search);const display=attachNativeInputDisplay(terminal,NATIVE_INPUT_DISPLAY,unicode11?{unicodeVersion:'11'}:{});
         const original={selection:terminal.getSelection,line:terminal.buffer.normal.getLine,open:terminal.open};const decoder=new TextDecoder('utf-8',{fatal:true});
         window.p3={terminal,search,display,original,ordinaryUnicodeVersion,decoder,offset:0,eventIndex:0,wrapped:false,stopped:false,failure:undefined};
         const state=window.p3;const write=bytes=>new Promise(resolve=>terminal.write(decoder.decode(bytes,{stream:true}),resolve));

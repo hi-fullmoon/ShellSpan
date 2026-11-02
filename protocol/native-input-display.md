@@ -2,11 +2,11 @@
 
 用户于 2026-10-31 明确批准通用 xterm 光标重排、软换行复制修复及同流显示切换纳入正式实现。该授权包含默认配置历史输出的通用复制规则变化，不授权业务层文字投影或公共选择/搜索/buffer API 覆盖。
 
-P0 依赖已采用 pnpm 对精确 `@xterm/xterm@6.0.0` 的 source + UMD/ESM 构建补丁。P1 冻结 `shellspan.native-input/1`，正式 binding 为 OSC 1337 的 `SetUserVar=ShellSpanNativeInputV1=MQ==` / `MA==`，由 `NATIVE_INPUT_DISPLAY_V1` 导出；详见 [NIP/1](agent/runtime/native-input-v1.md)。P0 实验键继续只用于原型及历史 fixture，不作为正式能力证明。
+P0 依赖已采用 pnpm 对精确 `@xterm/xterm@6.0.0` 的 source + UMD/ESM 构建补丁。P1 冻结 `shellspan.native-input`，正式 binding 为 OSC 1337 的 `SetUserVar=ShellSpanNativeInput=MQ==` / `MA==`，由 `NATIVE_INPUT_DISPLAY` 导出；详见 [NIP](agent/runtime/native-input.md)。P0 实验键继续只用于原型及历史 fixture，不作为正式能力证明。
 
 ## 接入边界
 
-实现入口是 `src/lib/terminal/native-input-display.ts::attachNativeInputDisplay`。调用者必须传入显式 native 模式与已协商的 OSC identifier、enter/exit payload。模块不隐式安装正式 binding，不自行探测提示符、lease、命令文本或原生源码。registry 仅在后端协商的 native metadata 下安装；旧投影、前端动画、输入重绘保护和旧模式兼容标识均已移除。当前仅有native-inline/raw，raw不安装装饰或新handler。最新清理范围见[兼容残留清理审查](../docs/design/agent-terminal-input-compat-removal-review.md)，旧P4快照见[P4审计](../docs/design/agent-terminal-input-p4-audit.md)。
+实现入口是 `src/lib/terminal/native-input-display.ts::attachNativeInputDisplay`。调用者必须传入显式 native 模式与已协商的 OSC identifier、enter/exit payload。模块不隐式安装正式 binding，不自行探测提示符、lease、命令文本或原生源码。registry 仅在后端协商的 native metadata 下安装。当前仅有native-inline/raw，raw不安装装饰或新handler。当前实现及待验范围见[实现说明](../docs/design/agent-terminal-input.md)。
 
 普通编辑基线为 `reflowCursorLine=false`。不满足基线或同一 Terminal 重复安装时，附加操作拒绝且不改用户选项。资源释放后可显式重绑；输入权、代次和输入准入始终由既有后端边界决定。
 
@@ -16,7 +16,7 @@ ready 或版本字符串作为证明。快照与本地 Session 启动等待必�
 registry 仅据该元数据按需注册官方 provider，注册不改变普通默认；显示模块仅在完整 owned
 enter 时保存原 provider 并启用选择，exit、有序关闭及销毁时恢复。重复 enter 不覆盖原值，
 期间显式发生的外部 provider 切换予以保留。未选该配置时不访问或改变 provider。
-该实现仍受 [P3 审计](../docs/design/agent-terminal-input-p3-audit.md) 的资源、平台与窗口
+该实现仍受[实现说明](../docs/design/agent-terminal-input.md)的资源、平台与窗口
 门禁约束，不表示未验收 profile 已启用；provider 显示状态不能授权执行。
 
 同一后端验证的binding还可声明 `ownedReflowCursorLine: false`：该编辑器自行处理SIGWINCH
@@ -65,4 +65,4 @@ insert/delete/trim 事件解析其行并限制在可用滚动范围。不能继�
 
 `pnpm test:terminal-native-input:p0:formal` 从固定 GNU 源码构建原型并重新采集真实 PTY，再用正式安装包验证复制、同流模式、边界、几何和提交。也可显式传入每项真实 capture 路径回放，结果记录这些输入路径与当前源码/运行包摘要。重采集后可运行 `node scripts/export-native-display-fixture.mjs --captures <successful ownership capture>` 重新生成就近 fixture；它只导出显示字节，不伪造私有回执。
 
-冻结范围和结果见 P0 可行性报告；不外推 Linux/SSH 新扩展、Windows、其他架构或用户插件。P0 通过不等于 P1/P2 已完成，当前没有启用新的生产命令写入路径。
+历史冻结范围和结果保留在Git历史，不外推当前源码、Linux/SSH新扩展、Windows、其他架构或用户插件。当前待验范围见[实现说明](../docs/design/agent-terminal-input.md)，历史通过结果不能启用未验收的生产配置。

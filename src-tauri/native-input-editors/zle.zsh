@@ -46,7 +46,7 @@ __shellspan_nip_disable() {
     builtin ss_nip eof-cleared "$BUFFER" "$CURSOR"
   fi
   __shellspan_nip_scope_end
-  builtin printf '\e]1337;SetUserVar=ShellSpanNativeInputV1=MA==\a'
+  builtin printf '\e]1337;SetUserVar=ShellSpanNativeInput=MA==\a'
   # An accepted line which has not reached its parent remains guarded. Never
   # turn a failed handoff into permission for a later Enter to execute source.
   if builtin ss_nip pending-handoff; then return 0; fi
@@ -111,7 +111,7 @@ __shellspan_nip_dispatch() {
   elif (( SS_NIP_ACTION )); then
     if (( SS_NIP_ACTION == 1 )); then
       if ! __shellspan_nip_scope_refresh; then __shellspan_nip_disable; return 1; fi
-      builtin printf '\e]1337;SetUserVar=ShellSpanNativeInputV1=MQ==\a'
+      builtin printf '\e]1337;SetUserVar=ShellSpanNativeInput=MQ==\a'
     fi
     BUFFER=$SS_NIP_TEXT
     CURSOR=${#BUFFER}
@@ -130,7 +130,7 @@ __shellspan_nip_dispatch() {
     builtin ss_nip ack "$BUFFER" "$CURSOR" || return 1
     if (( SS_NIP_ACTION == 2 )); then
       __shellspan_nip_scope_end
-      builtin printf '\e]1337;SetUserVar=ShellSpanNativeInputV1=MA==\a'
+      builtin printf '\e]1337;SetUserVar=ShellSpanNativeInput=MA==\a'
     fi
   fi
   # Probe may arrive after line-init. Publish readiness only from this actual
@@ -178,7 +178,7 @@ __shellspan_nip_line_finish() {
   fi
 }
 __shellspan_nip_preexec() {
-  builtin printf '\e]1337;SetUserVar=ShellSpanNativeInputV1=MA==\a'
+  builtin printf '\e]1337;SetUserVar=ShellSpanNativeInput=MA==\a'
   builtin ss_nip job
   if [[ $SS_NIP_JOB_KIND == launch ]]; then
     __shellspan_job_arm_zsh "$SS_NIP_JOB_HANDLE" || return
@@ -239,4 +239,4 @@ if ! { zmodload zsh/zselect && add-zsh-hook preexec __shellspan_nip_preexec &&
   __shellspan_nip_disable
   return 1
 fi
-builtin printf '\e]1337;SetUserVar=ShellSpanNativeInputV1=MA==\a'
+builtin printf '\e]1337;SetUserVar=ShellSpanNativeInput=MA==\a'

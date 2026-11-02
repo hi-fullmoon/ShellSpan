@@ -22,11 +22,11 @@ try{
    try{
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     const observed=await page.evaluate(async({bytes,renderer})=>{
-     const {attachNativeInputDisplay,NATIVE_INPUT_DISPLAY_V1}=await import('/display.js');
+     const {attachNativeInputDisplay,NATIVE_INPUT_DISPLAY}=await import('/display.js');
      const terminal=new Terminal({cols:100,rows:30,scrollback:10000,reflowCursorLine:false});terminal.open(document.querySelector('#surface'));
      if(renderer==='webgl')terminal.loadAddon(new WebglAddon.WebglAddon());
      const original={selection:terminal.getSelection,line:terminal.buffer.normal.getLine,open:terminal.open};const responses=[];terminal.onData(value=>responses.push(value));
-     const display=attachNativeInputDisplay(terminal,NATIVE_INPUT_DISPLAY_V1);const decoder=new TextDecoder('utf-8',{fatal:true});
+     const display=attachNativeInputDisplay(terminal,NATIVE_INPUT_DISPLAY);const decoder=new TextDecoder('utf-8',{fatal:true});
      await new Promise(resolve=>terminal.write(decoder.decode(Uint8Array.from(bytes)),resolve));
      const beforeDispose=terminal.options.reflowCursorLine;
      const publicApisUnmodified=terminal.getSelection===original.selection&&terminal.buffer.normal.getLine===original.line&&terminal.open===original.open;

@@ -20,7 +20,7 @@ directory = root / '.native-input-p3/signals' / str(uuid.uuid4())
 directory.mkdir(parents=True)
 profile = {'shell': 'zsh', 'shellVersion': '5.9', 'editor': 'zle', 'editorVersion': '5.9',
            'editorNumericVersion': 509, 'adapterVersion': '1',
-           'verifiedProfileId': 'zsh-5.9-zle-5.9-macos-arm64-nip1-capture1'}
+           'verifiedProfileId': 'zsh-5.9-zle-5.9-macos-arm64-native'}
 quote = lambda value: "'" + str(value).replace("'", "'\\''") + "'"
 results = []
 for native in [False, True]:

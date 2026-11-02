@@ -19,7 +19,7 @@ root=Path(fixture['root'])
 producer=json.loads((root/'.native-input-p3/scoped-linux-producer.json').read_text())
 directory=owner/'.native-input-p3/scoped-linux-baseline'/str(uuid.uuid4())
 directory.mkdir(parents=True)
-resource_root=root/'.native-input-p2/resources/native-input-v1'
+resource_root=root/'.native-input-p2/resources/native-input'
 catalogue=json.loads((resource_root/'editors-linux-aarch64-glibc-2.36.json').read_text())
 core=resource_root/catalogue['profiles'][0].get('core','scoped-core/linux-aarch64-glibc-2.36/zsh/zle.so')
 assert hashlib.sha256(core.read_bytes()).hexdigest()==producer['coreSha256']

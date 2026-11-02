@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://shellspan.local/protocol/agent/runtime/terminal-protocol-v1.schema.json",
-  "title": "ShellSpan Terminal Session Protocol v1 conformance fixture",
+  "$id": "https://shellspan.local/protocol/agent/runtime/terminal-protocol.schema.json",
+  "title": "ShellSpan Terminal Session Protocol conformance fixture",
   "type": "array",
   "minItems": 1,
   "items": {

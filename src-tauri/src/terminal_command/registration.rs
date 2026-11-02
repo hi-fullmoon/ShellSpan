@@ -60,7 +60,9 @@ impl VerifiedNativeProfile {
         } else {
             return Err("TERMINAL_NATIVE_PROFILE_UNSUPPORTED".into());
         };
-        if profile_id != nip::VERIFIED_PROFILE
+        let test_prototype = cfg!(all(test, target_os = "macos", target_arch = "aarch64"))
+            && profile_id == nip::VERIFIED_PROFILE;
+        if !test_prototype
             && (!profile_id.contains(local_target)
                 || nip::native_profile_versions(profile_id).is_none())
         {
@@ -85,11 +87,12 @@ impl VerifiedNativeProfile {
                 && !self.shell_sha.is_empty()
                 && !self.module_sha.is_empty();
         }
-        let (bash, _readline, numeric) = if self.profile_id == nip::VERIFIED_PROFILE {
-            ("5.3", "8.3.6", 0x0803)
-        } else if let Some(versions) = nip::native_profile_versions(&self.profile_id) {
-            versions
-        } else {
+        let versions = nip::native_profile_versions(&self.profile_id);
+        #[cfg(test)]
+        let versions = versions.or_else(|| {
+            (self.profile_id == nip::VERIFIED_PROFILE).then_some(("5.3", "8.3.6", 0x0803))
+        });
+        let Some((bash, _readline, numeric)) = versions else {
             return false;
         };
         !self.shell_sha.is_empty()
@@ -109,7 +112,7 @@ impl VerifiedNativeProfile {
             && profile.adapter_version == "1"
     }
     pub fn capture_fence(&self) -> bool {
-        self.profile_id.ends_with("-capture1")
+        self.editor_profile.is_some() || nip::native_profile_versions(&self.profile_id).is_some()
     }
     pub fn supports_jobs(&self) -> bool {
         self.editor_profile.is_none() && self.capture_fence()
@@ -128,13 +131,13 @@ impl VerifiedNativeProfile {
         let supported = match (profile.shell, profile.editor) {
             (ShellFamily::Zsh, EditorFamily::Zle) => profile.shell_version.as_deref() == Some("5.9")
                 && profile.editor_version.as_deref() == Some("5.9") && profile.editor_numeric_version == 509
-                && ["zsh-5.9-zle-5.9-macos-arm64-nip1-capture1", "zsh-5.9-zle-5.9-linux-aarch64-glibc-2.36-nip1-capture1"].contains(&id),
+                && ["zsh-5.9-zle-5.9-macos-arm64-native", "zsh-5.9-zle-5.9-linux-aarch64-glibc-2.36-native"].contains(&id),
             (ShellFamily::WindowsPowerShell, EditorFamily::PsReadLine) => profile.shell_version.as_deref() == Some("5.1.26100.9711")
                 && profile.editor_version.as_deref() == Some("2.4.5") && profile.editor_numeric_version == 20405
-                && id == "windows-powershell-5.1.26100.9711-psreadline-2.4.5-windows-x64-nip1-capture1",
+                && id == "windows-powershell-5.1.26100.9711-psreadline-2.4.5-windows-x64-native",
             (ShellFamily::PowerShell7, EditorFamily::PsReadLine) => profile.shell_version.as_deref() == Some("7.6.9")
                 && profile.editor_version.as_deref() == Some("2.4.5") && profile.editor_numeric_version == 20405
-                && id == "powershell-7.6.9-psreadline-2.4.5-windows-x64-nip1-capture1",
+                && id == "powershell-7.6.9-psreadline-2.4.5-windows-x64-native",
             _ => false,
         };
         if !supported
@@ -156,10 +159,10 @@ impl VerifiedNativeProfile {
     /// from the peer's claims, frontend state or an OSC display packet.
     pub(crate) fn bind_scoped_zle_core(mut self, core: &Path) -> Result<Self, String> {
         let expected = match self.profile_id.as_str() {
-            "zsh-5.9-zle-5.9-macos-arm64-nip1-capture1" => {
+            "zsh-5.9-zle-5.9-macos-arm64-native" => {
                 "cc7f4263d1650d51ca82aead721c11409938f4808f967d4bf3c6709036533b84"
             }
-            "zsh-5.9-zle-5.9-linux-aarch64-glibc-2.36-nip1-capture1" => {
+            "zsh-5.9-zle-5.9-linux-aarch64-glibc-2.36-native" => {
                 "c9e451bd49ad6481872af4a0b069719abc5083e7c2a03c8973b2d5e718186404"
             }
             _ => return Err("TERMINAL_NATIVE_SCOPED_CORE_MISMATCH".into()),
@@ -178,7 +181,7 @@ impl VerifiedNativeProfile {
         Ok(self)
     }
     pub(crate) fn display_binding(&self) -> nip::DisplayBinding {
-        let mut binding = nip::DisplayBinding::v1();
+        let mut binding = nip::DisplayBinding::native();
         if self.scoped_editor_sha.is_some() {
             binding.unicode_version = Some(nip::DisplayUnicodeVersion::Unicode11);
             binding.owned_reflow_cursor_line = Some(true);

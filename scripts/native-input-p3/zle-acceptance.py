@@ -32,7 +32,7 @@ listener.setblocking(False)
 module = root / '.native-input-p3/ss_nip.so'
 profile = {'shell': 'zsh', 'shellVersion': '5.9', 'editor': 'zle', 'editorVersion': '5.9',
            'editorNumericVersion': 509, 'adapterVersion': '1',
-           'verifiedProfileId': 'zsh-5.9-zle-5.9-macos-arm64-nip1-capture1'}
+           'verifiedProfileId': 'zsh-5.9-zle-5.9-macos-arm64-native'}
 quote = lambda value: "'" + str(value).replace("'", "'\\''") + "'"
 (home / '.zshrc').write_text(
     "HISTFILE=$HOME/history\nHISTSIZE=100\nSAVEHIST=100\n"
@@ -95,7 +95,7 @@ def send(value):
     peer.setblocking(False)
 
 def request(identity, payload):
-    value = {'protocol': 'shellspan.native-input/1', 'requestId': uuid.uuid4().hex,
+    value = {'protocol': 'shellspan.native-input', 'requestId': uuid.uuid4().hex,
              'identity': identity, 'payload': payload}
     send(value)
     return value
@@ -119,7 +119,7 @@ results = []
 try:
     resize(100)
     pump(lambda: peer is not None)
-    probe = {'protocol': 'shellspan.native-input/1', 'requestId': 'probe',
+    probe = {'protocol': 'shellspan.native-input', 'requestId': 'probe',
              'connection': {'terminalSessionId': 'p3-zle', 'terminalGeneration': 1, 'controlId': 'p3-control'},
              'payload': {'kind': 'probe'}}
     send(probe)

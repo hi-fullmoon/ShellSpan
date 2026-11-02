@@ -9,8 +9,8 @@ import {captureValidationSources} from '../native-input-p2/frozen-validation.mjs
 import {createIndexReader} from './index-reader.mjs';
 const owner=resolve(import.meta.dirname,'../..'),action=process.argv[2];
 const hash=path=>createHash('sha256').update(readFileSync(path)).digest('hex');
-const overrides=['src-tauri/native-input-editors/src/ffi.rs','src-tauri/native-input-editors/zle.c','src-tauri/native-input-editors/zle.zsh','src-tauri/src/terminal_command/local.rs','src-tauri/src/terminal_command/remote.rs','src-tauri/src/terminal_command/remote_tests.rs','src-tauri/src/terminal_command/zle_tests.rs','scripts/native-input-p3/zle-live.mjs','scripts/native-input-p3/linux-build.sh','scripts/native-input-p3/publish-linux.py','scripts/native-input-p3/linux-fixture.mjs','src/lib/terminal/native-input-display.ts','src/lib/terminal/__tests__/native-input-display-v1.browser.mjs','src-tauri/src/terminal_command/protocol.rs','src-tauri/src/terminal_command/registration.rs','src-tauri/src/terminal_command/coordinator.rs','src-tauri/src/terminal_broker.rs','src/types/index.ts','src/components/terminal/registry/terminal-registry.ts','package.json','pnpm-lock.yaml','scripts/native-input-p3/build.mjs'];
-const reviewedInputs=['scripts/dependency-builds/zsh/pin.json','scripts/dependency-builds/zsh/scoped-display-v1.patch','scripts/native-input-p3/build-scoped-core.mjs','protocol/agent/runtime/native-editor-admission.json','scripts/native-input-p3/editor-validation.mjs'];
+const overrides=['src-tauri/native-input-editors/src/ffi.rs','src-tauri/native-input-editors/zle.c','src-tauri/native-input-editors/zle.zsh','src-tauri/src/terminal_command/local.rs','src-tauri/src/terminal_command/remote.rs','src-tauri/src/terminal_command/remote_tests.rs','src-tauri/src/terminal_command/zle_tests.rs','scripts/native-input-p3/zle-live.mjs','scripts/native-input-p3/linux-build.sh','scripts/native-input-p3/publish-linux.py','scripts/native-input-p3/linux-fixture.mjs','src/lib/terminal/native-input-display.ts','src/lib/terminal/__tests__/native-input-display-binding.browser.mjs','src-tauri/src/terminal_command/protocol.rs','src-tauri/src/terminal_command/registration.rs','src-tauri/src/terminal_command/coordinator.rs','src-tauri/src/terminal_broker.rs','src/types/index.ts','src/components/terminal/registry/terminal-registry.ts','package.json','pnpm-lock.yaml','scripts/native-input-p3/build.mjs'];
+const reviewedInputs=['scripts/dependency-builds/zsh/pin.json','scripts/dependency-builds/zsh/native-display.patch','scripts/native-input-p3/build-scoped-core.mjs','protocol/agent/runtime/native-editor-admission.json','scripts/native-input-p3/editor-validation.mjs'];
 reviewedInputs.push('scripts/dependency-builds/xterm/build.json','scripts/dependency-builds/xterm/artifacts.json','scripts/native-input-p0/xterm-viewport-reflow.patch','patches/@xterm__xterm@6.0.0.patch','pnpm-lock.yaml','pnpm-workspace.yaml');
 reviewedInputs.push('scripts/native-input-p3/app.mjs','scripts/native-input-p3/linux-peer.mjs','scripts/verify-ai-session-stream.mjs');
 reviewedInputs.push('src-tauri/src/agent_runtime/scratch.rs','src-tauri/src/agent_runtime/scratch_storage.rs','src-tauri/src/agent_runtime/tests/scratch.rs','src/components/terminal/__tests__/native-jobs.native.tsx');
@@ -33,7 +33,7 @@ if(action==='stage'){
  assert(producer.nativeAcceptance===false&&producer.productionChanges===false&&producer.unicode9Default===true);
  assert.equal(producer.shell,'/bin/zsh');assert.equal(hash('/bin/zsh'),producer.shellSha256);assert.equal(hash(producer.editor),producer.editorSha256);
  assert.equal(producer.editorSha256,'521e7ca22ecc1727d059d13f5034df71ac0eca88a176c09d5bfc59c0e46c87fc');
- const core=resolve(root,'.native-input-p2/resources/native-input-v1/scoped-core/macos-arm64/zsh/zle.so');mkdirSync(dirname(core),{recursive:true});copyFileSync(producer.editor,core);chmodSync(core,0o500);assert.equal(hash(core),producer.editorSha256);
+ const core=resolve(root,'.native-input-p2/resources/native-input/scoped-core/macos-arm64/zsh/zle.so');mkdirSync(dirname(core),{recursive:true});copyFileSync(producer.editor,core);chmodSync(core,0o500);assert.equal(hash(core),producer.editorSha256);
  writeFileSync(resolve(meta,'candidate-base-sources.json'),JSON.stringify(sources,null,2));
  writeFileSync(resolve(meta,'candidate-stage.json'),JSON.stringify({root,directory,owner,head,sealed:false,overrides,producerFile,producer,core,coreSha256:hash(core),mainSha256:hash('/bin/zsh'),nativeAcceptance:false,productionBindingChanged:false},null,2));
  console.log(JSON.stringify({root,sealed:false,sourceCount:Object.keys(sources).length}));
@@ -50,7 +50,7 @@ if(action==='stage'){
  cpSync(resolve(parent,'.native-input-p3/dependencies'),resolve(meta,'dependencies'),{recursive:true});
  copyFileSync(resolve(parent,'.native-input-p3/candidate-base-sources.json'),resolve(meta,'candidate-base-sources.json'));
  writeFileSync(resolve(meta,'candidate-parent-sources.json'),JSON.stringify(parentSources,null,2));
- const coreRelative=relative(parent,old.core);assert(coreRelative.startsWith('.native-input-p2/resources/native-input-v1/')&&!coreRelative.split('/').includes('..'));
+ const coreRelative=relative(parent,old.core);assert(coreRelative.startsWith('.native-input-p2/resources/native-input/')&&!coreRelative.split('/').includes('..'));
  const core=resolve(root,coreRelative);assert.equal(hash(core),old.coreSha256);
  writeFileSync(resolve(meta,'candidate-stage.json'),JSON.stringify({...old,root,directory,core,sealed:false,parent,overrides},null,2));
  console.log(JSON.stringify({root,parent,sealed:false,sourceCount:Object.keys(parentSources).length}));

@@ -77,8 +77,8 @@ This does not create a terminal source projection.
   output and stop semantics live in `terminal_native_protocol.rs`, native
   `local_tests.rs`/`zle_tests.rs` and P2/P3 App entry points.
 
-Retired executable regression specifications remain as non-executable evidence
-in `docs/design/p4-retired-regressions/`; original real PTY JSON and failure
-artifacts are preserved. See the [P4 audit and pending acceptance](../../../docs/design/agent-terminal-input-p4-audit.md)
-for the mapping and evidence boundaries. P4 currently has code/compile/static
-evidence only; none of the dynamic entries above ran in this stage.
+Retired regression specifications and phase reports remain in Git history.
+Original real PTY fixtures retain their captured bytes. See the
+[current implementation and pending acceptance](../../../docs/design/agent-terminal-input.md)
+for current boundaries. This revision has compile/static evidence only;
+the dynamic entries above require separately scheduled acceptance.

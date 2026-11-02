@@ -285,7 +285,7 @@ void p0_native_display_reset(void) {
   const char *protocol = getenv("SHELLSPAN_NATIVE_INPUT_PROTOCOL");
   if (protocol && strcmp(protocol, "1") == 0) {
     FILE *stream = rl_outstream ? rl_outstream : stdout;
-    fputs("\033]1337;SetUserVar=ShellSpanNativeInputV1=MA==\007", stream);
+    fputs("\033]1337;SetUserVar=ShellSpanNativeInput=MA==\007", stream);
     fflush(stream);
   }
 }

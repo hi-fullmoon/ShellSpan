@@ -9,7 +9,7 @@ management and ordinary/TUI input remain supported.
 The current code has only compile/type/static evidence. Fresh NIP read-timing
 captures, source/copy/search, continuous display, viewport, cancellation and
 cross-platform acceptance are mandatory pending gates; old pass/fail records
-below do not validate the P4 revision. See [P4 audit](../../../docs/design/agent-terminal-input-p4-audit.md).
+below do not validate the current revision. See [current acceptance boundaries](../../../docs/design/agent-terminal-input.md).
 
 Status: accepted Phase 0 matrix; Phase 3 cooperative-shell amendment: 2026-09-15; remote bound-terminal reuse gate added 2026-09-17.
 
@@ -225,23 +225,9 @@ hosts. Linux and remote interactive tools retain default-off flags. Rollback
 makes remote visible commands unavailable; it does not restore a wrapper or a
 dedicated Agent SSH terminal.
 
-## Phase 6 acceptance status
+## 当前输入实现
 
-Detailed evidence: [Terminal Execution Phase 6 Acceptance Evidence](./terminal-execution-phase-6-acceptance.md).
-
-Overall gate: **PASS for the Windows and macOS local rollout scopes**. The local
-Broker, shell integration, visible command, and interactive tools are absent-on
-after native acceptance. Neither local routing graph can select the wrapper;
-degraded or disabled generations expose Direct without rerouting or replay.
-Protocol vocabulary and persisted execution-surface values remain additive.
-
-| Lane | Phase 6 result | Evidence boundary |
-| --- | --- | --- |
-| Windows PowerShell 5.1 / PowerShell 7 local ConPTY | **PASS — DEFAULT ON** | Native Windows 11 x64, `x86_64-pc-windows-msvc`; six exact real-ConPTY Broker/visible/interactive fixtures, Direct regression, full serial Rust, and two release performance rounds pass. |
-| Persisted sessions and event-v5 vocabulary | **PASS** | `direct` / `boundTerminal` retain their stored meanings. New `exec_command` calls accept only `channel = direct`; visible commands use `terminal_execute`. |
-| macOS zsh and bash | **PASS — DEFAULT ON** | Native macOS 26.6.2 arm64; exact Broker/visible/interactive fixtures, Direct regression, 798-test serial Rust suite, and two release performance rounds pass. Local wrapper routing is removed. |
-| Linux bash and zsh | **MISSING — DEFERRED, DEFAULT OFF** | No Phase 5 native acceptance in this Windows continuation; wrapper/parser compatibility remains compiled and routable. |
-| Isolated SSH bash and zsh | **HISTORICAL VISIBLE COMMAND PASS; CURRENT REUSE GATE BELOW; INTERACTIVE MISSING — DEFAULT OFF** | Phase 4 proved the original remote shell-integration lane. Current production routing uses the frozen user SSH PTY and must satisfy the reuse gate below. The separate remote-interactive flag stays off because the SSH Phase 5 matrix has not run; rollback only disables remote visible commands. |
+当前架构及待验项统一见[原生终端输入](../../../docs/design/agent-terminal-input.md)。历史阶段报告不能作为当前源码通过的证明；不再安排旧实现兼容验收。
 
 ## Remote bound-terminal reuse current gate
 
@@ -257,7 +243,7 @@ does not prove the revised transport topology.
 | Integration preparation failure still opens an ordinary usable SSH shell and does not create a replacement terminal | Session/commands tests plus no-SFTP/unsupported-shell/control-channel real-SSH fixture | **PASS** on the 2026-09-17 isolated fallback gate |
 | Whole-turn guard, per-command lease, takeover fencing, disconnect uncertainty, and no automatic replay | Terminal lease/runtime/Broker focused tests | **AUTOMATED PASS**; native-window takeover presentation remains blocked by unavailable computer-use app/window RPC |
 | No implicit Direct fallback; effects retain approval/native deny and explicit directRequired rejects boundTerminal before input | Native adapter/effect/policy focused tests and protocol contract | Current behavior supersedes historical effect-to-Direct routing; see visible-terminal unification stage one |
-| `terminal_remote_bound_terminal_v1`, `SHELLSPAN_TERMINAL_REMOTE_BOUND_TERMINAL_V1`, and `remoteBoundTerminalRollout` are authoritative and non-persisted | Environment precedence test, Broker JSON serialization test, TypeScript IPC/type test, residual search | **PASS** in focused and full gates |
+| `terminal_remote_bound_terminal`, `SHELLSPAN_TERMINAL_REMOTE_BOUND_TERMINAL`, and `remoteBoundTerminalRollout` are authoritative and non-persisted | Environment precedence test, Broker JSON serialization test, TypeScript IPC/type test, residual search | **PASS** in focused and full gates |
 | Rollout disable makes incomplete work uncertain, revokes Agent lease/turn guard, preserves the SSH transport, and uses ordinary shell startup on later connection/reconnect | Broker rollback and Native runtime reconciliation regressions | **AUTOMATED PASS**; native-window reconnect presentation remains blocked by unavailable computer-use app/window RPC |
 
 ### Stage 7 execution record (2026-09-17, Windows 11 x64)
@@ -300,9 +286,9 @@ rather than `PASS` unless the matching Darwin Rust host, `/bin/bash`, and
 
 ## Native input refactor P0 (2026-10-31)
 
-This is separate from the historical TSP Phase 0 above. Exact commands,
-exit codes and build boundaries are in the
-[feasibility report](../../../docs/design/agent-terminal-input-native-feasibility.md).
+This is separate from the historical TSP Phase 0 above. Historical commands,
+exit codes and build boundaries remain in Git history. Current boundaries are in
+the [implementation guide](../../../docs/design/agent-terminal-input.md).
 
 | Gate | Entry | Boundary |
 | --- | --- | --- |
@@ -396,26 +382,27 @@ other native display platforms. The complete gate is
 real builds/PTY captures, or explicit capture parameters can replay recorded
 evidence. `pnpm test:terminal-native-display` uses the repository's real native
 packet fixture and passes from clean source/dependencies without old temp paths.
-P1 freezes online identifiers in [NIP/1](native-input-v1.md); production native
+P1 freezes online identifiers in [NIP](native-input.md); production native
 input remains unwired until P2.
 
 ### P1 state, ownership and recovery
 
 `pnpm test:terminal-input:p1` rebuilds the pinned native producer from source,
 runs the complete pure state/event matrix (504 cases at P1; currently 546 including stop-unconfirmed), existing Broker/executor/
-lease checks, real NIP/1 PTY/socket tests, real SIGKILL/restart windows, captured
+lease checks, real NIP PTY/socket tests, real SIGKILL/restart windows, captured
 wire schema validation, and Chromium/WebKit × DOM/WebGL formal display checks.
-It also protects the old GNU Bash/Zsh complete-script paths, missing-checkpoint
-recovery and default P0 wire format. The entry uses no timestamped build/capture
+It also verifies missing native capabilities and rejection of unverified editor
+modes; removed tests and old experimental wire cases are no longer invoked.
+The entry uses no timestamped build/capture
 dependency and enables no production route. See the
-[P1 audit](../../../docs/design/agent-terminal-input-p1-state-audit.md) for exact
-commands, results, baseline failures and platform boundaries.
+[implementation guide](../../../docs/design/agent-terminal-input.md) for current
+boundaries; exact historical results remain in Git history.
 
 ### P2 native Bash local and SSH migration
 
 The production SessionManager, Agent execution, Broker/lease, durable intent
-and frontend registry now carry NIP/1. Stage acceptance is tracked in the
-[P2 audit](../../../docs/design/agent-terminal-input-p2-audit.md); implementation
+and frontend registry now carry NIP. Pending acceptance is tracked in the
+[implementation guide](../../../docs/design/agent-terminal-input.md); implementation
 does not by itself constitute a passed stage. The current candidate profiles
 are pinned GNU Bash 4.1/Readline 6.0, 4.4/7.0 and 5.3/8.3.6, on macOS arm64
 local PTYs and isolated Linux aarch64/glibc 2.36 SSH targets. Linux target-side

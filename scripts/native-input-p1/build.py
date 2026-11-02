@@ -1,4 +1,4 @@
-"""Rebuild the NIP/1 producer from pinned GNU inputs and reviewed source patches."""
+"""Rebuild the NIP producer from pinned GNU inputs and reviewed source patches."""
 import hashlib
 import json
 import os
@@ -27,7 +27,7 @@ def main():
     # The P0 builder owns pinned GNU archive/Readline patch verification. It is
     # invoked from source; no timestamped capture/build directory is required.
     run(['python3', 'scripts/native-input-p0/build.py', '--upstream', '--versions', '5.3'])
-    profile='gnu-bash-5.3-readline-8.3.6-macos-arm64-nip1'
+    profile='gnu-bash-5.3-readline-8.3.6-macos-arm64-prototype'
     run(['cargo', 'build', '--locked', '--manifest-path', 'scripts/native-input-p0/Cargo.toml', '--target-dir', OUT / 'rust'],env={**os.environ,'SHELLSPAN_NIP_VERIFIED_PROFILE':profile})
     source = OUT / 'bridge.c'
     shutil.copy2(ROOT / 'scripts/native-input-p0/bridge.c', source)
@@ -46,7 +46,7 @@ def main():
     (OUT / 'manifest.json').write_text(json.dumps({'profile':profile,'shell': str(shell), 'bridge': str(OUT / 'bridge.so'),
         'artifacts': {str(p): sha(p) for p in [shell, source, library, OUT / 'bridge.so']},
         'sources': before}, indent=2))
-    print(f'NIP/1 native producer built: {OUT}')
+    print(f'NIP native producer built: {OUT}')
 
 if __name__ == '__main__':
     main()

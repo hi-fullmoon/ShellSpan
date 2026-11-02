@@ -47,7 +47,7 @@ for(const path of shared){
   drift.push({path,baselineSha256:old,currentSha256:current,diff:relative(owner,diffPath),diffSha256:sha(diffPath)});
 }
 assert.deepEqual(captureValidationSources(owner),before,'Owner source changed while the validation snapshot was being copied');
-for(const path of['.native-input-p2/resources/native-input-v1','.native-input-p2/producers','src-tauri/resources/native-input-v1']){
+for(const path of['.native-input-p2/resources/native-input','.native-input-p2/producers','src-tauri/resources/native-input']){
   mkdirSync(resolve(sourceRoot,path,'..'),{recursive:true});cpSync(resolve(owner,path),resolve(sourceRoot,path),{recursive:true});
 }
 const fixture='87e1754d-ca4c-4689-95ea-27faea5c8f27';

@@ -8,12 +8,12 @@ const root=resolve(import.meta.dirname,'../..');assert(root.includes('/.native-i
 const producerFile=resolve(process.argv[2]),producer=JSON.parse(readFileSync(producerFile,'utf8'));
 assert(producer.nativeAcceptance===false&&producer.productionBindingChanged===false);
 const producerRoot=resolve(producerFile,'../../..');
-const old=JSON.parse(readFileSync(resolve(producerRoot,'.native-input-p2/resources/native-input-v1/editors-macos-arm64.json'),'utf8'));
+const old=JSON.parse(readFileSync(resolve(producerRoot,'.native-input-p2/resources/native-input/editors-macos-arm64.json'),'utf8'));
 const hash=path=>createHash('sha256').update(readFileSync(path)).digest('hex');
 const compileInputs=['Cargo.toml','Cargo.lock','src/lib.rs','src/ffi.rs','zle.c'].map(path=>`src-tauri/native-input-editors/${path}`).concat(['src-tauri/src/terminal_command/protocol.rs']);
 for(const path of compileInputs)assert.equal(hash(resolve(root,path)),old.sources[path],`Actual candidate compile input changed: ${path}`);
 assert.equal(hash(producer.shell),producer.shellSha256);assert.equal(hash(producer.module),producer.moduleSha256);
-const id='zsh-5.9-zle-5.9-macos-arm64-nip1-capture1',resources=resolve(root,'.native-input-p2/resources/native-input-v1');
+const id='zsh-5.9-zle-5.9-macos-arm64-native',resources=resolve(root,'.native-input-p2/resources/native-input');
 mkdirSync(resolve(resources,id),{recursive:true});
 const directory=resolve(root,'.native-input-p3/paired-reuse');mkdirSync(directory,{recursive:true});
 copyFileSync(resolve(resources,'editors-macos-arm64.json'),resolve(directory,'previous-editor-catalogue.json'));

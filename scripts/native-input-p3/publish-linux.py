@@ -11,8 +11,8 @@ root = Path(__file__).resolve().parents[2]
 assert platform.system() == 'Linux' and platform.machine() == 'aarch64'
 assert os.confstr('CS_GNU_LIBC_VERSION') == 'glibc 2.36'
 assert subprocess.check_output(['/bin/zsh', '-f', '-c', 'print -rn -- $ZSH_VERSION']) == b'5.9'
-identifier = 'zsh-5.9-zle-5.9-linux-aarch64-glibc-2.36-nip1-capture1'
-resources = root / '.native-input-p2/resources/native-input-v1'
+identifier = 'zsh-5.9-zle-5.9-linux-aarch64-glibc-2.36-native'
+resources = root / '.native-input-p2/resources/native-input'
 destination = resources / identifier
 destination.mkdir(parents=True, exist_ok=True)
 sha = lambda path: hashlib.sha256(Path(path).read_bytes()).hexdigest()
@@ -45,7 +45,7 @@ paths += ['src-tauri/src/terminal_command/protocol.rs', 'src-tauri/src/terminal_
           'src-tauri/native-input-adapter/Cargo.toml', 'src-tauri/native-input-adapter/Cargo.lock',
           'src-tauri/native-input-adapter/src/bin/native-input-relay.rs',
           'scripts/native-input-p3/linux-build.sh', 'scripts/native-input-p3/publish-linux.py', 'scripts/native-input-p3/zsh-build-check.c']
-paths += ['scripts/dependency-builds/zsh/pin.json', 'scripts/dependency-builds/zsh/scoped-display-v1.patch',
+paths += ['scripts/dependency-builds/zsh/pin.json', 'scripts/dependency-builds/zsh/native-display.patch',
           'scripts/native-input-p3/build-scoped-core.mjs']
 profile = {'shell': 'zsh', 'shellVersion': '5.9', 'editor': 'zle', 'editorVersion': '5.9',
            'editorNumericVersion': 509, 'adapterVersion': '1', 'verifiedProfileId': identifier}

@@ -945,7 +945,7 @@ impl Bridge {
         // reads it; no user source or generated shell program is evaluated.
         write!(
             file,
-            "NIP1-CONTROL\t{handle}\t{}\t{nonce}\n",
+            "NIP-CONTROL\t{handle}\t{}\t{nonce}\n",
             if *stop { "stop" } else { "poll" }
         )?;
         drop(file);

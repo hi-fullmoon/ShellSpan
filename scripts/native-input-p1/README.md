@@ -2,13 +2,13 @@
 
 Run `pnpm test:terminal-input:p1` on the frozen macOS arm64 host. It builds the
 GNU Bash 5.3 / static Readline 8.3.6 producer using the P0 pinned archives and
-reviewed C patches, then exercises the shared NIP/1 protocol through a real PTY
+reviewed C patches, then exercises the shared NIP protocol through a real PTY
 and private Unix socket. No production session selects native mode here.
 
 `build.py` writes `.native-input-p0/p1-protocol-build/manifest.json` containing
 the exact producer sources and actual Shell/library/module hashes. Acceptance
 rejects stale or modified artifacts. `display.patch` applies after the reviewed
-P0 in-band patch and adds formal builtin aliases and the NIP/1 display key only
+P0 in-band patch and adds formal builtin aliases and the NIP display key only
 for explicitly enabled native protocol mode. P0 default behavior is independent.
 
 The entry saves per-step logs, exit codes, timings, the 504-case pure reducer

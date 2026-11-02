@@ -1,4 +1,4 @@
-//! NIP/1 producer for native ZLE and PSReadLine widgets. All calls, including
+//! NIP producer for native ZLE and PSReadLine widgets. All calls, including
 //! observations and acknowledgements, belong to the editor's original thread.
 //! This library never evaluates source, writes terminal input, or accepts a line.
 #[path = "../../src/terminal_command/protocol.rs"]

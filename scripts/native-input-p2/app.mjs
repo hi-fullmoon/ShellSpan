@@ -65,11 +65,11 @@ if(historyScenario){
     const label=execFileSync('docker',['inspect','--format','{{index .Config.Labels "shellspan.native-input-p2"}}',fixture.container],{encoding:'utf8'}).trim();
     assert(fixture.container===`shellspan-nip-p2-${label}`);
     const user=`${nativeEnvironment.SHELLSPAN_P2_SSH_USER}-${randomUUID().replaceAll('-','').slice(0,8)}`;
-    const profileId=`gnu-bash-${version}-readline-${{'4.1':'6.0','4.4':'7.0','5.3':'8.3.6'}[version]}-linux-aarch64-glibc-2.36-nip1-init1-capture1`;
+    const profileId=`gnu-bash-${version}-readline-${{'4.1':'6.0','4.4':'7.0','5.3':'8.3.6'}[version]}-linux-aarch64-glibc-2.36-native`;
     const producer=JSON.parse(readFileSync(resolve(root,`.native-input-p2/producers/${profileId}/manifest.json`),'utf8'));
     const target=fixture.shells?.[version];
     if(target){
-      const catalogue=JSON.parse(readFileSync(resolve(root,'.native-input-p2/resources/native-input-v1/catalogue-linux-aarch64-glibc-2.36.json'),'utf8'));
+      const catalogue=JSON.parse(readFileSync(resolve(root,'.native-input-p2/resources/native-input/catalogue-linux-aarch64-glibc-2.36.json'),'utf8'));
       const artifact=catalogue.profiles.find(profile=>profile.id===profileId);assert(artifact);
       assert.equal(target.path,`/opt/shellspan-native-gnu/${profileId}/bash`);
       assert.equal(target.user,nativeEnvironment.SHELLSPAN_P2_SSH_USER);assert.equal(target.sha256,artifact.shellSha256);
@@ -162,7 +162,7 @@ if(code===0&&!['lifecycle','ssh-fault','interactive','interactive-fresh'].includ
     history=execFileSync('docker',['exec',fixture.container,'cat',`/home/${nativeEnvironment.SHELLSPAN_P2_SSH_USER}/.bash_history`],{encoding:'utf8'});
   }else{history=readFileSync(resolve(environment.SHELLSPAN_LOCAL_HOME,'.bash_history'),'utf8');}
   assert(history.includes('SHELLSPAN_ACCEPTANCE')&&history.includes('(exit 7)'),'Actual native history was not retained');
-  assert(!history.includes('__shellspan_native_history_cleanup')&&!history.includes('ss_native_input_v1_control_end')&&!history.includes('__shellspan_job_control'),'Private management was persisted in user history');
+  assert(!history.includes('__shellspan_native_history_cleanup')&&!history.includes('ss_native_input_control_end')&&!history.includes('__shellspan_job_control'),'Private management was persisted in user history');
   writeFileSync(resolve(destination,'history-verification.json'),JSON.stringify({retainedVisibleCommands:true,privateControlsAbsent:true,bytes:Buffer.byteLength(history)}));
   }
 }

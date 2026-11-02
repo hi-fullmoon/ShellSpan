@@ -33,9 +33,9 @@ writeFileSync(resolve(meta,'native-resource-audit.json'),JSON.stringify(nativeRe
 assert(nativeResources.selectedValid,`Native artifact inputs changed or are stale; retained failed snapshot: ${root}`);
 const targetBindings={};
 if(process.platform==='darwin'){
-  const catalogue=JSON.parse(readFileSync(resolve(root,'.native-input-p2/resources/native-input-v1/editors-macos-arm64.json'),'utf8'));
+  const catalogue=JSON.parse(readFileSync(resolve(root,'.native-input-p2/resources/native-input/editors-macos-arm64.json'),'utf8'));
   const coreRelative=catalogue.profiles[0].core;assert(coreRelative);
-  const core=resolve(root,'.native-input-p2/resources/native-input-v1',coreRelative),sha=path=>createHash('sha256').update(readFileSync(path)).digest('hex');
+  const core=resolve(root,'.native-input-p2/resources/native-input',coreRelative),sha=path=>createHash('sha256').update(readFileSync(path)).digest('hex');
   assert.equal(sha(core),catalogue.profiles[0].editorSha256);Object.assign(targetBindings,{core,coreSha256:sha(core),mainSha256:sha('/bin/zsh')});
 }
 writeFileSync(resolve(meta,'candidate-base-sources.json'),JSON.stringify(sources,null,2));

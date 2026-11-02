@@ -34,7 +34,7 @@
   },
   "bundle": {
     "resources": {
-      "resources/native-input-v1/": "native-input-v1/"
+      "resources/native-input/": "native-input/"
     },
     "active": true,
     "targets": "all",

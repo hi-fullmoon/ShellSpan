@@ -188,7 +188,7 @@ Shell的原生只读解析器是对应语言的语法判断来源，不用Bash�
 
 ### 阶段二验证与交接
 
-实现文件：`terminal_integration.rs`、`terminal_broker.rs`、`session.rs`、`native/terminal_execute.rs`、`native/shell_policy.rs`、`native_adapter.rs`、`native_contract/policy.rs`、`native/runtime.rs`、`model_tools.rs`；类型/协议：`src/types/index.ts`、tool-contract与terminal-protocol-v1 JSON schema、当前RFC/兼容说明；回归位于就近Rust测试及 `scripts/__tests__/terminal-protocol-contract.test.mjs`。`scripts/verify-native-script-display.mjs`只重放真实PTY记录到xterm，不合成补显、不执行源码、不替代桌面/模型端到端验收。
+实现文件：`terminal_integration.rs`、`terminal_broker.rs`、`session.rs`、`native/terminal_execute.rs`、`native/shell_policy.rs`、`native_adapter.rs`、`native_contract/policy.rs`、`native/runtime.rs`、`model_tools.rs`；类型/协议：`src/types/index.ts`、tool-contract与terminal-protocol JSON schema、当前RFC/兼容说明；回归位于就近Rust测试及 `scripts/__tests__/terminal-protocol-contract.test.mjs`。`scripts/verify-native-script-display.mjs`只重放真实PTY记录到xterm，不合成补显、不执行源码、不替代桌面/模型端到端验收。
 
 | 本阶段检查 | 实际结果 |
 | --- | --- |

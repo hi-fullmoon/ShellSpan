@@ -15,7 +15,7 @@ assert.equal(execFileSync('docker',['inspect','--format','{{index .Config.Labels
 assert.equal(execFileSync('docker',['inspect','--format','{{.State.Running}}',fixture.container],{encoding:'utf8'}).trim(),'true');
 const hash=path=>createHash('sha256').update(readFileSync(path)).digest('hex'),target='linux-aarch64-glibc-2.36';
 requireEditorResources(root,target);requireEditorResources(fixture.root,target);
-const cataloguePath='.native-input-p2/resources/native-input-v1/editors-linux-aarch64-glibc-2.36.json';assert.equal(hash(resolve(root,cataloguePath)),hash(resolve(fixture.root,cataloguePath)));
+const cataloguePath='.native-input-p2/resources/native-input/editors-linux-aarch64-glibc-2.36.json';assert.equal(hash(resolve(root,cataloguePath)),hash(resolve(fixture.root,cataloguePath)));
 const catalogue=JSON.parse(readFileSync(resolve(root,cataloguePath),'utf8'));for(const[path,digest]of Object.entries(catalogue.sources))assert.equal(hash(resolve(root,path)),digest);
 const directory=resolve(root,'.native-input-p3/ssh-fixture');mkdirSync(directory,{recursive:true});
 const reused={...fixture,root};writeFileSync(resolve(directory,'fixture.json'),JSON.stringify(reused,null,2),{flag:'wx'});

@@ -2,7 +2,7 @@
   "version": "5.9",
   "archiveUrl": "https://www.zsh.org/pub/old/zsh-5.9.tar.xz",
   "archiveSha256": "9b8d1ecedd5b5e81fbf1918e876752a7dd948e05c1a0dba10ab863842d45acd5",
-  "patch": "scripts/dependency-builds/zsh/scoped-display-v1.patch",
+  "patch": "scripts/dependency-builds/zsh/native-display.patch",
   "patchSha256": "4213d322dd24ce45f0d74eddd86f0f39018b88fa7bf92997c83c765dc6ff28af",
   "sourceHashes": {
     "zle_main.c": "8e33ddccd6d0f9ac453fc80f36a9b4c939400a676cafa1e08a76b9e47f97cb5d",
@@ -20,12 +20,12 @@
     }
   },
   "api": {
-    "name": "shellspan.zle-native-append/1",
+    "name": "shellspan.zle-native-append",
     "parameter": "ZLE_NATIVE_APPEND",
     "default": 0,
     "minimum": 0,
     "maximum": 1,
-    "implementation": "native-append-v1"
+    "implementation": "native-append"
   },
   "productionProfileEnabled": false
 }

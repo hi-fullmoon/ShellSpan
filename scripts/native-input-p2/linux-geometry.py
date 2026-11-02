@@ -1,4 +1,4 @@
-"""Real Linux target geometry using formal NIP/1 modules and production glue.
+"""Real Linux target geometry using formal NIP modules and production glue.
 
 This is target-component evidence. Actual SSH SessionManager normal/fault
 transport evidence is collected separately by app.mjs; no app receipt is faked.
@@ -128,7 +128,7 @@ class NativeGeometry(base.Session):
         return next(event for event in self.events if matches(event))
 
     def progress(self, previous):
-        on = b'\x1b]1337;SetUserVar=ShellSpanNativeInputV1=MQ==\x07'
+        on = b'\x1b]1337;SetUserVar=ShellSpanNativeInput=MQ==\x07'
         source = self.item['source'].encode()
         observed = None
 

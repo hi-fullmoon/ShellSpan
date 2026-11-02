@@ -5,11 +5,11 @@
  }
  #endif /* HANDLE_MULTIBYTE */
 +
-+/* Versioned native display extension. Read the column count already computed
++/* Native display extension. Read the column count already computed
 +   by Readline for the prompt's last logical line, including its native mode
 +   string, ignored spans and multibyte-width rules. No redisplay state changes. */
 +int
-+rl_native_prompt_columns_v1 (void)
++rl_native_prompt_columns (void)
 +{
 +  return prompt_physical_chars;
 +}
@@ -20,6 +20,6 @@
  extern int rl_set_prompt (const char *);
  extern int rl_expand_prompt (char *);
 +/* Read-only native display extension; unlike rl_expand_prompt, returns columns. */
-+extern int rl_native_prompt_columns_v1 (void);
++extern int rl_native_prompt_columns (void);
  
  extern int rl_initialize (void);

@@ -1,18 +1,18 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://shellspan.local/protocol/agent/runtime/native-input-v1.schema.json",
-  "title": "Native Input Protocol 1 — registered private channels only",
+  "$id": "https://shellspan.local/protocol/agent/runtime/native-input.schema.json",
+  "title": "Native Input Protocol — registered private channels only",
   "description": "One bounded UTF-8 JSON object per LF-delimited frame. The codec enforces 131072 bytes per encoded frame; Rust additionally enforces UTF-8 byte limits and the state, identity, request, lease and monotonic-budget rules. This is independent of TSP/1 and Agent event-v5. Neither stdout nor display OSC is a control record.",
   "oneOf": [{ "$ref": "#/$defs/connectionEnvelope" }, { "$ref": "#/$defs/operationEnvelope" }],
   "$defs": {
     "operationEnvelope": {
       "type": "object", "additionalProperties": false, "required": ["protocol", "requestId", "identity", "payload"],
-      "properties": { "protocol": { "const": "shellspan.native-input/1" }, "requestId": { "$ref": "#/$defs/identifier" }, "identity": { "$ref": "#/$defs/identity" }, "payload": { "$ref": "#/$defs/payload" } }
+      "properties": { "protocol": { "const": "shellspan.native-input" }, "requestId": { "$ref": "#/$defs/identifier" }, "identity": { "$ref": "#/$defs/identity" }, "payload": { "$ref": "#/$defs/payload" } }
     },
     "connectionEnvelope": {
       "type": "object", "additionalProperties": false, "required": ["protocol", "requestId", "connection", "payload"],
       "properties": {
-        "protocol": { "const": "shellspan.native-input/1" }, "requestId": { "$ref": "#/$defs/identifier" },
+        "protocol": { "const": "shellspan.native-input" }, "requestId": { "$ref": "#/$defs/identifier" },
         "connection": {
           "type": "object", "additionalProperties": false, "required": ["terminalSessionId", "terminalGeneration", "controlId"],
           "properties": { "terminalSessionId": { "$ref": "#/$defs/identifier" }, "terminalGeneration": { "$ref": "#/$defs/counter" }, "controlId": { "$ref": "#/$defs/identifier" } }

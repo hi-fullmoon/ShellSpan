@@ -117,13 +117,13 @@ $__shellspanNipModule = New-Module -Name ShellSpanTerminalIntegration -ArgumentL
           $After=Get-NativeBuffer
           if($After[0] -cne $Buffer[0] -or $After[1] -ne $Buffer[1]){throw 'TERMINAL_INPUT_PROOF_MISMATCH'}
         }
-        if($Action -eq 1){[Console]::Write("$([char]27)]1337;SetUserVar=ShellSpanNativeInputV1=MQ==$([char]7)")}
+        if($Action -eq 1){[Console]::Write("$([char]27)]1337;SetUserVar=ShellSpanNativeInput=MQ==$([char]7)")}
         $PreviousRedraw=$script:Redraw; $script:Redraw=$true
         try{[Microsoft.PowerShell.PSConsoleReadLine]::Replace(0,$Buffer[0].Length,$Text)}finally{$script:Redraw=$PreviousRedraw}
         $Buffer=Get-NativeBuffer
         $script:Context.Observe($Buffer[0],$Buffer[1])
         if(-not $script:Context.Event(1,0,$null)){throw 'TERMINAL_INPUT_PROOF_MISMATCH'}
-        if($Action -eq 2){[Console]::Write("$([char]27)]1337;SetUserVar=ShellSpanNativeInputV1=MA==$([char]7)")}
+        if($Action -eq 2){[Console]::Write("$([char]27)]1337;SetUserVar=ShellSpanNativeInput=MA==$([char]7)")}
       }
       if($script:Context.Event(8,0,$null) -or -not $script:Context.Event(9,0,$null)){break}
       if($Clock.ElapsedMilliseconds -ge 5000){throw 'TERMINAL_NATIVE_DEADLINE_EXPIRED'}
@@ -178,7 +178,7 @@ $__shellspanNipModule = New-Module -Name ShellSpanTerminalIntegration -ArgumentL
       $script:Context.Fail()
       throw 'TERMINAL_INPUT_RECOVERY_REQUIRED'
     }
-    [Console]::Write("$([char]27)]1337;SetUserVar=ShellSpanNativeInputV1=MA==$([char]7)")
+    [Console]::Write("$([char]27)]1337;SetUserVar=ShellSpanNativeInput=MA==$([char]7)")
     [Console]::Write($script:Context.Marker($false))
     if($null -ne $Plan){return $Plan}
     return $Line
@@ -198,7 +198,7 @@ $__shellspanNipModule = New-Module -Name ShellSpanTerminalIntegration -ArgumentL
       $LastExit=$ExecutionContext.SessionState.PSVariable.GetValue('global:LASTEXITCODE',$null)
       $Status=if($Success){0}elseif($LastExit -is [int] -and $LastExit -ne 0){$LastExit}else{1}
       $null=$script:Context.Event(4,$Status,$null)
-      [Console]::Write("$([char]27)]1337;SetUserVar=ShellSpanNativeInputV1=MA==$([char]7)")
+      [Console]::Write("$([char]27)]1337;SetUserVar=ShellSpanNativeInput=MA==$([char]7)")
     }
     Restore-NativeStatus -PreviousSuccess $Success -ErrorAction Ignore
     & $script:OriginalPrompt

@@ -1,4 +1,4 @@
-"""Build distributable NIP/1 modules against pinned, independently built Bash ABIs.
+"""Build distributable NIP modules against pinned, independently built Bash ABIs.
 
 GNU source fetching/verification is shared with the P0 dependency builder. The
 production module source and Cargo target are independent of the experiment.
@@ -48,12 +48,12 @@ def main():
     sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
     before = {str(p.relative_to(ROOT)): sha(p) for p in inputs}
     builds = json.loads((OUT / f'bash-{host}.json').read_text())
-    catalogue = OUT / 'resources/native-input-v1'
+    catalogue = OUT / 'resources/native-input'
     catalogue.mkdir(parents=True, exist_ok=True)
     profiles = []
     for version in args.versions.split(','):
         readline = {'4.1': '6.0', '4.4': '7.0', '5.3': '8.3.6'}[version]
-        profile = f'gnu-bash-{version}-readline-{readline}-{target}-nip1-init1-capture1'
+        profile = f'gnu-bash-{version}-readline-{readline}-{target}-native'
         rust = OUT / 'build' / profile
         run(['cargo', 'build', '--release', '--locked', '--manifest-path', source / 'Cargo.toml', '--target-dir', rust],
             {**os.environ, 'SHELLSPAN_NIP_VERIFIED_PROFILE': profile})
@@ -71,7 +71,7 @@ def main():
              source / 'bridge.c', rust / 'release/libshellspan_native_input_adapter.a', '-lpthread', '-ldl', '-lm', '-o', candidate])
         # The real target must expose the versioned native display API. Loading
         # the actual module verifies it without opening a PTY or accepting input.
-        run([shell, '--noprofile', '--norc', '-c', 'enable -f "$1" ss_native_input_v1 ss_native_input_v1_display_abi && builtin ss_native_input_v1_display_abi', 'native-display-abi-check', candidate],
+        run([shell, '--noprofile', '--norc', '-c', 'enable -f "$1" ss_native_input ss_native_input_display_abi && builtin ss_native_input_display_abi', 'native-display-abi-check', candidate],
             {'PATH': os.defpath, 'HOME': str(OUT), 'LC_ALL': 'en_US.UTF-8'})
         os.replace(candidate, module)
         module.chmod(0o500)
@@ -109,7 +109,7 @@ def main():
             shutil.copy2(path, notices / path.name)
     shutil.copy2(ROOT / 'scripts/native-input-p0/readline-sources.json', notices / 'readline-sources.json')
     (catalogue / 'README.txt').write_text('GNU Bash/Readline: GPL-3.0-or-later. Exact source archives, official GNU patches, post-profile integration and native prompt-column patches are in sources/.\nReadline native display ABI: 1; explicit matching targets only; never replaces an already-bound Shell.\nShellSpan adapter source: src-tauri/native-input-adapter; rebuild: python3 scripts/native-input-p2/build.py\n')
-    print(f'NIP/1 production modules: {catalogue}')
+    print(f'NIP production modules: {catalogue}')
 
 
 if __name__ == '__main__':

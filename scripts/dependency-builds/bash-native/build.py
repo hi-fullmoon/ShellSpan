@@ -49,7 +49,7 @@ def main():
     builds = {}
 
     def apply_display_patch(source, patch):
-        marker = source / '.shellspan-native-display-v1'
+        marker = source / '.shellspan-native-display'
         if not marker.exists():
             run(['patch', '--batch', '-F', '0', '-p1', '-i', patch], source)
             marker.write_text(sha(patch))

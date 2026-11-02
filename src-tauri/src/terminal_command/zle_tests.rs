@@ -119,7 +119,7 @@ fn native_zle_private_namespace_guards_preserve_user_definitions() {
         }
         let prepared = PreparedNativeBash::prepare(
             std::path::Path::new("/bin/zsh"),
-            &owner.join(".native-input-p2/resources/native-input-v1"),
+            &owner.join(".native-input-p2/resources/native-input"),
         )
         .unwrap();
         let pair = native_pty_system()
@@ -313,7 +313,7 @@ fn native_zle_private_eof_preserves_ordinary_input_and_user_hooks() {
         scoped_observers(&home);
         let prepared = PreparedNativeBash::prepare(
             std::path::Path::new("/bin/zsh"),
-            &owner.join(".native-input-p2/resources/native-input-v1"),
+            &owner.join(".native-input-p2/resources/native-input"),
         )
         .unwrap();
         let pair = native_pty_system()
@@ -851,8 +851,8 @@ fn native_zle_private_eof_preserves_ordinary_input_and_user_hooks() {
                 assert!(records.iter().filter(|m| matches!(m, nip::Message::Operation(e) if matches!(e.payload, nip::Payload::SubmissionAccepted))).count() <= 1);
             }
             let bytes = raw.lock().unwrap();
-            let enter = b"\x1b]1337;SetUserVar=ShellSpanNativeInputV1=MQ==\x07";
-            let leave = b"\x1b]1337;SetUserVar=ShellSpanNativeInputV1=MA==\x07";
+            let enter = b"\x1b]1337;SetUserVar=ShellSpanNativeInput=MQ==\x07";
+            let leave = b"\x1b]1337;SetUserVar=ShellSpanNativeInput=MA==\x07";
             if let Some(last_enter) = bytes.windows(enter.len()).rposition(|value| value == enter) {
                 assert!(
                     bytes
@@ -911,7 +911,7 @@ fn native_zle_private_eof_preserves_ordinary_input_and_user_hooks() {
 fn native_editor_default_admission_is_closed() {
     assert!(std::env::var_os("SHELLSPAN_NATIVE_EDITOR_VALIDATION_ROOT").is_none());
     let owner = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    let resources = owner.join(".native-input-p2/resources/native-input-v1");
+    let resources = owner.join(".native-input-p2/resources/native-input");
     let evidence = owner
         .join(".native-input-p3/editor-admission")
         .join(uuid::Uuid::new_v4().to_string());
@@ -936,7 +936,7 @@ fn native_editor_default_admission_is_closed() {
 #[ignore = "requires actual macOS ZLE, rebuilt resource and the real Broker/private channel"]
 fn native_zle_manifest_paths_reject_before_prepare() {
     let owner = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    let resources = owner.join(".native-input-p2/resources/native-input-v1");
+    let resources = owner.join(".native-input-p2/resources/native-input");
     let target = "macos-arm64";
     let actual = super::editors::read_catalogue(&resources, target).unwrap();
     assert!(!actual.is_empty());
@@ -1016,7 +1016,7 @@ fn native_zle_actual_broker_display_binding() {
     let shell = std::path::Path::new("/bin/zsh");
     let resources = super::editors::validation_resource_root()
         .unwrap()
-        .unwrap_or_else(|| owner.join(".native-input-p2/resources/native-input-v1"));
+        .unwrap_or_else(|| owner.join(".native-input-p2/resources/native-input"));
     fs::write(
         evidence.join("actual-resource-root.txt"),
         resources.to_str().unwrap(),
@@ -1251,7 +1251,7 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
     fs::write(home.join(".zlogin"), "P3_STARTUP_ORDER+=:login\n").unwrap();
     let prepared = PreparedNativeBash::prepare(
         shell,
-        &owner.join(".native-input-p2/resources/native-input-v1"),
+        &owner.join(".native-input-p2/resources/native-input"),
     )
     .unwrap();
     let binding = prepared.profile.display_binding();

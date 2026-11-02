@@ -16,6 +16,6 @@ export async function editorValidationEnvironment(root,resources,targets){
  let packaged=false;
  try{const manifest=JSON.parse(await readFile(resolve(resources,'resource-manifest.json'),'utf8'));assert(manifest.validationOnly,'A normal app output cannot be relabeled as a validation package');packaged=true;}catch(error){if(error.code!=='ENOENT')throw error;}
  if(packaged){const marker=JSON.parse(await readFile(resolve(resources,'editor-validation.json'),'utf8'));assert.equal(marker.resourceRoot,resources);assert.equal(marker.sourceManifestSha256,sha(bytes));assert(targets.every(target=>marker.editorTargets.includes(target)));}
- else await writeFile(resolve(resources,'editor-validation.json'),JSON.stringify({protocol:'shellspan.native-editor-validation/1',resourceRoot:resources,sourceManifestSha256:sha(bytes),editorTargets:targets},null,2));
+ else await writeFile(resolve(resources,'editor-validation.json'),JSON.stringify({protocol:'shellspan.native-editor-validation',resourceRoot:resources,sourceManifestSha256:sha(bytes),editorTargets:targets},null,2));
  return{SHELLSPAN_NATIVE_EDITOR_VALIDATION_ROOT:resources};
 }

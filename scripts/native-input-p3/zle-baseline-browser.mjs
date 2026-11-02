@@ -26,9 +26,9 @@ try{
     try{
       await page.goto(`http://127.0.0.1:${server.address().port}`);
       const actual=await page.evaluate(async({entry,bytes,mode,checkpoints})=>{
-        const {attachNativeInputDisplay,NATIVE_INPUT_DISPLAY_V1}=await import('/display.js');
+        const {attachNativeInputDisplay,NATIVE_INPUT_DISPLAY}=await import('/display.js');
         const term=new Terminal({cols:entry.columns,rows:entry.rows,scrollback:20000,reflowCursorLine:false,allowProposedApi:true});term.open(document.querySelector('#surface'));
-        const original={selection:term.getSelection,line:term.buffer.normal.getLine,open:term.open};const search=new SearchAddon.SearchAddon();term.loadAddon(search);const display=attachNativeInputDisplay(term,NATIVE_INPUT_DISPLAY_V1);
+        const original={selection:term.getSelection,line:term.buffer.normal.getLine,open:term.open};const search=new SearchAddon.SearchAddon();term.loadAddon(search);const display=attachNativeInputDisplay(term,NATIVE_INPUT_DISPLAY);
         const decoder=new TextDecoder('utf-8',{fatal:true});const write=data=>new Promise(resolve=>term.write(decoder.decode(Uint8Array.from(data),{stream:true}),resolve));let offset=0;const glyphCheckpoints=[],terminalResponses=[];term.onData(value=>terminalResponses.push(value));
         for(const event of[...(mode==='native'?entry.resizeEvents:checkpoints),{offset:bytes.length}]){
           await write(bytes.slice(offset,event.offset));offset=event.offset;if(event.columns)term.resize(event.columns,entry.rows);

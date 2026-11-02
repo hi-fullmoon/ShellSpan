@@ -61,7 +61,7 @@ async function verify(){
   };
   try{
     if(ssh){const key=await invokeCheckHostKey('127.0.0.1',port);assert(key.status==='match'||key.status==='notFound','Fixture host identity changed');if(key.status==='notFound'){assert(key.fingerprint,'Host fingerprint missing');await invokeTrustHost('127.0.0.1',port,key.fingerprint);}}
-    const session=ssh?await invokeCreateSession({name:'Native history isolated SSH',host:'127.0.0.1',port,username,authMethod:'password',password:await nativeP2Password(),terminalCols:100,terminalRows:30},'shellspan.native-input/1'):await invokeCreateLocalSession(100,30,undefined,'shellspan.native-input/1');
+    const session=ssh?await invokeCreateSession({name:'Native history isolated SSH',host:'127.0.0.1',port,username,authMethod:'password',password:await nativeP2Password(),terminalCols:100,terminalRows:30},'shellspan.native-input'):await invokeCreateLocalSession(100,30,undefined,'shellspan.native-input');
     terminalId=session.sessionId;useTerminalStore.getState().addSession(session);
     const controller=terminalRegistry.create(session.sessionId,(sid,event)=>useTerminalStore.getState().setStatus(sid,event),
       (sid,event)=>useTerminalStore.getState().setClosed(sid,event),sid=>useTerminalStore.getState().sessions.find(value=>value.sessionId===sid)?.status??'connecting',()=>{},session.ptyInfo);
@@ -126,7 +126,7 @@ async function verify(){
     const output=data[5].combinedOutput;
     assert(data[1].exitCode===7&&typeof output==='string'&&output.includes('PARENT_STATUS=7'),'Private poll/stop changed the real nonzero parent status');
     assert(/^\s*\d+\*?\s+KEEP_USER_A\r?$/m.test(output)&&/^\s*\d+\*?\s+KEEP_USER_B\r?$/m.test(output),'Original individual user history entries changed');
-    assert(!output.includes('__shellspan_native_history_cleanup')&&!output.includes('ss_native_input_v1_control_end')&&!output.includes('__shellspan_job_control'),'Private management entered user history');
+    assert(!output.includes('__shellspan_native_history_cleanup')&&!output.includes('ss_native_input_control_end')&&!output.includes('__shellspan_job_control'),'Private management entered user history');
     await report({progress:'Actual continuous nonzero status/history sequence complete',evidence:{kind:'native-history-actual-model-and-application',ssh,identity,results:data,calls,output,beforeFile}});
   }catch(error){await report({progress:'History acceptance failed; retaining actual evidence',evidence:{failed:true,reason:error instanceof Error?error.message:String(error),ssh,calls,results:await Promise.allSettled(results.map(read)),afterHistory,afterHistoryRows,broker:terminalId?await invokeGetTerminalBrokerSnapshot(terminalId):undefined}});throw error;}
   finally{unlisten?.();if(created){await invokeCancelAgentRuntime({sessionId:id});await invokeArchiveAgentRuntimeSession({sessionId:id});await invokeDeleteAgentRuntimeSession({sessionId:id});}root.unmount();if(terminalId){await invokeCloseSession(terminalId);terminalRegistry.dispose(terminalId);}host.remove();}

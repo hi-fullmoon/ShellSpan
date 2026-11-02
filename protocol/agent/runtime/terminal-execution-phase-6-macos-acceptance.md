@@ -18,7 +18,7 @@ remain missing.
 
 | Requirement | Result | Evidence |
 | --- | --- | --- |
-| Default enablement | **PASS** | `terminal_broker_v1`, shell integration, execute, and interactive tools are absent-on for macOS and retain dependency gating. |
+| Default enablement | **PASS** | `terminal_broker`, shell integration, execute, and interactive tools are absent-on for macOS and retain dependency gating. |
 | Wrapper-free local route | **PASS** | Ready bash/zsh routes select `terminal_execute`; degradation or rollback selects `Unavailable`, never the wrapper. Direct `pty` dispatch returns `TERMINAL_LEGACY_WRAPPER_REMOVED_ON_MACOS`. |
 | Phase 2/3 native behavior | **PASS** | Exact bash and zsh PTY Broker plus visible-command fixtures preserve raw bytes, resize, shell state, lifecycle, capture, cancellation, timeout, takeover, and uncertainty. |
 | Phase 5 native behavior | **PASS** | Exact bash/zsh interactive fixtures cover REPL, single-key confirmation, resize, alternate screen, credential rejection, and raw observation. |

@@ -332,7 +332,7 @@ The authoritative `git status --short` at handoff is:
 ?? protocol/agent/runtime/terminal-execution-roadmap.md
 ?? protocol/agent/runtime/terminal-execution-test-matrix.md
 ?? protocol/agent/runtime/terminal-protocol-rfc.md
-?? protocol/agent/runtime/terminal-protocol-v1.schema.json
+?? protocol/agent/runtime/terminal-protocol.schema.json
 ?? scripts/__tests__/terminal-broker-windows-runner.test.mjs
 ?? scripts/__tests__/terminal-protocol-contract.test.mjs
 ?? scripts/verify-terminal-broker-linux-container.mjs
@@ -364,7 +364,7 @@ reclassified. The four known include-format debt files
 | One lease-authorized path for user, Agent, and scoped system input | **PASS** | Lease identity, sequence, takeover, system-control scope, and compatibility-write tests. |
 | Atomic local/SSH broker attachment | **PASS** | Failure tests prove child/channel, SessionManager entry, and broker state are cleaned before returning an error. |
 | Bounded closed session and transport metadata | **PASS** | Closed logical sessions are capped at 256 and superseded transport identities are dropped. |
-| Trusted non-persisted `terminal_broker_v1` rollout | **PASS** | Explicit default-off environment decision, no frontend mutation IPC, bounded ephemeral records, and rollback-close semantics. |
+| Trusted non-persisted `terminal_broker` rollout | **PASS** | Explicit default-off environment decision, no frontend mutation IPC, bounded ephemeral records, and rollback-close semantics. |
 | Shadow/compatibility mode only | **PASS** | Legacy display and wrapped PTY stay authoritative; no shell integration, `terminal_execute`, remote Agent PTY, screen model, or interactive-tool cutover. |
 | macOS zsh/bash, Linux distribution, and isolated SSH evidence | **PASS with stated boundaries** | Native macOS, Debian 12/aarch64 Docker Desktop VM/container, and loopback SSH fixture evidence above. Linux evidence is not relabeled bare-metal. |
 | Native Windows/ConPTY evidence | **MISSING — WAIVED FOR PHASE 2 ONLY** | User-approved temporary gate waiver. Static cfg/cross checks are not a native pass; debt remains mandatory before the Phase 6 boundary. |
@@ -406,7 +406,7 @@ reclassified. The four known include-format debt files
 - Bare-metal Linux remains `MISSING`; Debian in Docker Desktop is accepted as
   the required Linux distribution lane with an explicit VM/container boundary,
   not promoted to bare-metal evidence.
-- `terminal_broker_v1` remains backend-trusted, non-persisted, and default off.
+- `terminal_broker` remains backend-trusted, non-persisted, and default off.
   Legacy display and the legacy wrapper remain authoritative and independently
   rollback-safe.
 - The first parallel full-Rust retry-window failure and the earlier Docker VM

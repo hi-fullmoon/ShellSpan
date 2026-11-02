@@ -34,7 +34,7 @@ async function verify(){
     const assertPublic=()=>assert(target.terminal.getSelection===originals.selection&&target.terminal.open===originals.open&&target.terminal.buffer.normal.getLine===originals.getLine,'Native/raw rebind installed a renderer/selection/source override');
     // Real ordinary program output deliberately enters display mode and ends
     // with a partial OSC. It has no Agent operation, proof or execute authority.
-    assert(await target.writeUserInput("printf '%s%s\\n' OLD_NATIVE_ OUTPUT; printf '\\033]1337;SetUserVar=ShellSpanNativeInputV1=MQ==\\007'; printf '\\033]1337;SetUserVar=ShellSpanNativeInputV1=MQ'; exec /bin/sleep 0.3\r"),'Initial real user command blocked');
+    assert(await target.writeUserInput("printf '%s%s\\n' OLD_NATIVE_ OUTPUT; printf '\\033]1337;SetUserVar=ShellSpanNativeInput=MQ==\\007'; printf '\\033]1337;SetUserVar=ShellSpanNativeInput=MQ'; exec /bin/sleep 0.3\r"),'Initial real user command blocked');
     await until(()=>target.terminal.options.reflowCursorLine===true,'Real producer did not enter native display');
     await until(()=>useTerminalStore.getState().sessions.find(value=>value.sessionId===first.sessionId)?.status==='disconnected','Real native EOF missing');
     await until(()=>target.terminal.options.reflowCursorLine===false,'EOF did not drain/dispose native display');

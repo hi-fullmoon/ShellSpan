@@ -32,10 +32,10 @@ try{for(const[engine,type]of[['chromium',chromium],['webkit',webkit]]){
   const raw=await readFile(resolve(evidence,'raw.bin')),page=await browser.newPage({viewport:{width:1100,height:650}});
   try{await page.goto(`http://127.0.0.1:${server.address().port}`);
    const observed=await page.evaluate(async({bytes,renderer})=>{
-    const{attachNativeInputDisplay,NATIVE_INPUT_DISPLAY_V1}=await import('/display.js');
+    const{attachNativeInputDisplay,NATIVE_INPUT_DISPLAY}=await import('/display.js');
     const term=new Terminal({cols:100,rows:30,scrollback:10000,reflowCursorLine:false,allowProposedApi:true});term.loadAddon(new Unicode11Addon.Unicode11Addon());term.open(document.querySelector('#surface'));if(renderer==='webgl')term.loadAddon(new WebglAddon.WebglAddon());
     const original={selection:term.getSelection,line:term.buffer.normal.getLine,open:term.open},responses=[];term.onData(x=>responses.push(x));
-    const before=term.unicode.activeVersion,display=attachNativeInputDisplay(term,NATIVE_INPUT_DISPLAY_V1,{unicodeVersion:'11'});
+    const before=term.unicode.activeVersion,display=attachNativeInputDisplay(term,NATIVE_INPUT_DISPLAY,{unicodeVersion:'11'});
     await new Promise(done=>term.write(Uint8Array.from(bytes),done));const providerBeforeDispose=term.unicode.activeVersion,reflowBeforeDispose=term.options.reflowCursorLine;
     await display.closeAfterPendingOutput();return{ordinaryProvider:before,providerBeforeDispose,reflowBeforeDispose,providerAfterDispose:term.unicode.activeVersion,reflowAfterDispose:term.options.reflowCursorLine,publicApisUnmodified:term.getSelection===original.selection&&term.buffer.normal.getLine===original.line&&term.open===original.open,responses};
    },{bytes:[...raw],renderer});

@@ -5,7 +5,7 @@ import {mkdirSync,readFileSync,writeFileSync,copyFileSync,openSync,closeSync} fr
 import {resolve,join} from 'node:path';
 assert(process.platform==='win32'&&process.arch==='x64','Windows providers must be rebuilt on actual Windows x64');
 const root=resolve(import.meta.dirname,'../..');
-const resources=resolve(root,'.native-input-p2/resources/native-input-v1');mkdirSync(resources,{recursive:true});
+const resources=resolve(root,'.native-input-p2/resources/native-input');mkdirSync(resources,{recursive:true});
 const directory=resolve(root,'.native-input-p3');mkdirSync(directory,{recursive:true});
 const sha=path=>createHash('sha256').update(readFileSync(path)).digest('hex');
 const sourcePaths=['Cargo.toml','Cargo.lock','src/lib.rs','src/ffi.rs','zle.c','zle.zsh','psreadline.cs','psreadline.ps1'].map(path=>`src-tauri/native-input-editors/${path}`);
@@ -24,7 +24,7 @@ for(const[shell,executable,expectedVersion]of[['windowsPowerShell',powershell,'5
   if(shell==='windowsPowerShell')environment.PSModulePath=[resolve(root,'src-tauri/resources/powershell'),environment.PSModulePath??''].filter(Boolean).join(';');
   const actual=JSON.parse(execFileSync(executable,['-NoLogo','-NoProfile','-Command',"Import-Module PSReadLine -ErrorAction Stop; $m=Get-Module PSReadLine; $a=[Microsoft.PowerShell.PSConsoleReadLine].Assembly; @{engine=$PSVersionTable.PSVersion.ToString();editor=$m.Version.ToString();assembly=$a.Location}|ConvertTo-Json -Compress"],{env:environment,encoding:'utf8'}).trim());
   assert.equal(actual.engine,expectedVersion);assert.equal(actual.editor,'2.4.5');assert.equal(sha(actual.assembly),expectedEditor,'Loaded provider differs from the verified upstream assembly');
-  const id=`${shell==='windowsPowerShell'?'windows-powershell':'powershell'}-${expectedVersion}-psreadline-2.4.5-windows-x64-nip1-capture1`;
+  const id=`${shell==='windowsPowerShell'?'windows-powershell':'powershell'}-${expectedVersion}-psreadline-2.4.5-windows-x64-native`;
   const profile={shell,shellVersion:actual.engine,editor:'psReadLine',editorVersion:actual.editor,editorNumericVersion:20405,adapterVersion:'1',verifiedProfileId:id};
   mkdirSync(resolve(resources,id),{recursive:true});copyFileSync(library,resolve(resources,id,'shellspan_native_input_editors.dll'));
   profiles.push({profile,shellSha256:sha(executable),moduleSha256:sha(library),module:`${id}/shellspan_native_input_editors.dll`,editorSha256:expectedEditor});

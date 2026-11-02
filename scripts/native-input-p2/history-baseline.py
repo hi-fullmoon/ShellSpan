@@ -19,7 +19,7 @@ root = Path(__file__).resolve().parents[2]
 readline = {'4.1': '6.0', '4.4': '7.0', '5.3': '8.3.6'}[args.version]
 target = 'macos-arm64' if sys.platform == 'darwin' else 'linux-aarch64-glibc-2.36'
 manifest = json.loads((root / '.native-input-p2/producers' /
-    f'gnu-bash-{args.version}-readline-{readline}-{target}-nip1-init1-capture1/manifest.json').read_text())
+    f'gnu-bash-{args.version}-readline-{readline}-{target}-native/manifest.json').read_text())
 directory = root / '.native-input-p2/history-baseline' / str(uuid.uuid4())
 home = directory / 'home'
 home.mkdir(parents=True, mode=0o700)

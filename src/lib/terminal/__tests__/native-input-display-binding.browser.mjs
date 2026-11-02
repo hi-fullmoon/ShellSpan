@@ -1,4 +1,4 @@
-// Formal NIP/1 packets captured from the real Bash/Readline acceptance run.
+// Display binding checks against genuine Bash/Readline capture packets.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
@@ -8,7 +8,7 @@ import { chromium, webkit } from 'playwright';
 import { displayModuleJavaScript, installedRuntimeManifest } from '../../../../scripts/native-input-p0/formal-runtime.mjs';
 
 const installed = await installedRuntimeManifest();
-const output = path.resolve('.native-input-p0/p1-evidence/display-v1');
+const output = path.resolve('.native-input-p0/p1-evidence/display-binding');
 await mkdir(output, { recursive: true });
 const captures = {};
 for (const name of ['commit', 'stdout-partial-eof']) {
@@ -43,7 +43,7 @@ try {
         try {
           await page.goto(`http://127.0.0.1:${server.address().port}`);
           const result = await page.evaluate(async ({ captures, renderer }) => {
-            const { attachNativeInputDisplay, NATIVE_INPUT_DISPLAY_V1: binding } = await import('/display.js');
+            const { attachNativeInputDisplay, NATIVE_INPUT_DISPLAY: binding } = await import('/display.js');
             let assertions = 0;
             const check = (value, message) => { assertions++; if (!value) throw Error(message); };
             const term = new Terminal({ cols: 100, rows: 24, allowProposedApi: true, reflowCursorLine: false });
@@ -72,7 +72,7 @@ try {
             check(term.buffer.active.type === 'normal', 'input unexpectedly selected the alternate buffer');
             const text = Array.from({ length: term.buffer.active.length }, (_, index) => term.buffer.active.getLine(index)?.translateToString(true) ?? '').join('\n');
             check(text.includes('NIP_OUTPUT') && text.includes('中文'), 'real PTY source/output disappeared');
-            check(!text.includes('builtin ss_native_input_v1_begin'), 'internal submission plan leaked into PTY echo');
+            check(!text.includes('builtin ss_native_input_begin'), 'internal submission plan leaked into PTY echo');
             await first.closeAfterPendingOutput();
             first.dispose();
             const failed = attachNativeInputDisplay(term, binding);
@@ -113,4 +113,4 @@ try {
   }
 } finally { server.close(); }
 await writeFile(path.join(output, 'summary.json'), JSON.stringify({ installed, captures: Object.fromEntries(Object.entries(captures).map(([name, value]) => [name, value.sha256])), results }, null, 2));
-console.log(`NIP/1 display: ${results.length}/4 browser/renderer combinations; ${results.reduce((sum, value) => sum + value.assertions, 0)} assertions`);
+console.log(`NIP display: ${results.length}/4 browser/renderer combinations; ${results.reduce((sum, value) => sum + value.assertions, 0)} assertions`);

@@ -32,7 +32,7 @@ fn wait(
 #[ignore = "requires actual rebuilt Bash profiles and full frozen validation source"]
 fn prepared_bash_real_submit_draft_cancel_and_running_interrupt() {
     let owner = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    let resources = owner.join(".native-input-p2/resources/native-input-v1");
+    let resources = owner.join(".native-input-p2/resources/native-input");
     let run = uuid::Uuid::new_v4().to_string();
     let evidence = owner.join(".native-input-p3/prepared-bash").join(&run);
     fs::create_dir_all(&evidence).unwrap();
@@ -67,7 +67,7 @@ fn prepared_bash_real_submit_draft_cancel_and_running_interrupt() {
     } else {
         panic!("Unsupported actual Bash test target");
     };
-    let profile = format!("gnu-bash-{version}-readline-{readline}-{target}-nip1-init1-capture1");
+    let profile = format!("gnu-bash-{version}-readline-{readline}-{target}-native");
     let shell = resources.join(&profile).join("bash");
     let prepared = PreparedNativeBash::prepare(&shell, &resources).unwrap();
     fs::write(

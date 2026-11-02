@@ -1,6 +1,6 @@
-# ZLE native append API v1
+# ZLE native append API
 
-标识：`shellspan.zle-native-append/1`。固定源码、补丁、主程序及构建目标由
+标识：`shellspan.zle-native-append`。固定源码、补丁、主程序及构建目标由
 `scripts/dependency-builds/zsh/pin.json`记录；实际Core必须通过严格哈希和加载映射校验。
 参数存在或peer自报版本不能单独证明支持，也不能授予输入或执行权。
 
@@ -20,6 +20,7 @@ owned native append，其他值拒绝。它是模式开关，不是行数、终�
 不能再次绘制。job通知造成的暂时失效只暂停显示并保留新增偏移，不能冒充接受或丢掉真实
 源尾。清稿、私有EOF及下一次读取分别恢复自己的状态，不自动提交或重放。
 
-适配器只在owned输入范围开启1，记录并在仍匹配本操作时恢复原值。NIP/1的完整身份、
+适配器只在owned输入范围开启1，记录并在仍匹配本操作时恢复原值。NIP的完整身份、
 实际BUFFER/CURSOR证明、FULL持久意图、最终单次接受键和不明结果门禁保持原契约。
-显示API或屏幕内容不能代替上述事实。生产profile准入独立关闭，逐平台未覆盖项见P3审计。
+显示API或屏幕内容不能代替上述事实。生产profile准入独立关闭，逐平台待验项见
+[实现说明](../../../docs/design/agent-terminal-input.md)。

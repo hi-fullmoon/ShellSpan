@@ -126,7 +126,7 @@ jobs:
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: native-linux-bash
-          path: .native-input-p2/resources/native-input-v1
+          path: .native-input-p2/resources/native-input
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
@@ -171,7 +171,7 @@ jobs:
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: native-linux-bash
-          path: .native-input-p2/resources/native-input-v1
+          path: .native-input-p2/resources/native-input
 
       - name: Setup pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0

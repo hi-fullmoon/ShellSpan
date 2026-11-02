@@ -30,12 +30,12 @@ try{
         const bytes=await readFile(resolve(entry.directory,'typed-pty.bin'));
         await page.goto(`http://127.0.0.1:${server.address().port}`);
         const actual=await page.evaluate(async({entry,bytes,renderer})=>{
-          const {attachNativeInputDisplay,NATIVE_INPUT_DISPLAY_V1}=await import('/display.js');
+          const {attachNativeInputDisplay,NATIVE_INPUT_DISPLAY}=await import('/display.js');
           const term=new Terminal({cols:entry.columns,rows:entry.rows,scrollback:10000,allowProposedApi:true,reflowCursorLine:false});term.open(document.querySelector('#surface'));
           if(renderer==='webgl')term.loadAddon(new WebglAddon.WebglAddon());
           const search=new SearchAddon.SearchAddon();term.loadAddon(search);
           const originals={selection:term.getSelection,line:term.buffer.normal.getLine,open:term.open};const input=[];term.onData(value=>input.push(value));
-          const display=attachNativeInputDisplay(term,NATIVE_INPUT_DISPLAY_V1);
+          const display=attachNativeInputDisplay(term,NATIVE_INPUT_DISPLAY);
           const decoder=new TextDecoder('utf-8',{fatal:true});
           // Production ssh-data carries the backend's incrementally decoded
           // UTF-8 string. Reproduce that actual public transport type.
@@ -78,7 +78,7 @@ try{
           const after=inspect();
           if(!after.found||after.selected!==entry.source||after.all!==before.all)throw new Error('Resize changed real source/history selection');
           if(term.getSelection!==originals.selection||term.buffer.normal.getLine!==originals.line||term.open!==originals.open)throw new Error('Public xterm API was overridden');
-          if(input.length||after.all.includes('ss_native_input_v1_begin'))throw new Error('Display created input or exposed the execution plan');
+          if(input.length||after.all.includes('ss_native_input_begin'))throw new Error('Display created input or exposed the execution plan');
           await display.closeAfterPendingOutput();if(term.options.reflowCursorLine!==false)throw new Error('Display cleanup did not restore the option');
           return {before,after,wrappedBeforeResize,visibleFrames:progress.length,visibleDurationMs:progress.at(-1).atMs-progress[0].atMs,noInput:true,publicApisUnmodified:true};
         },{entry,bytes:[...bytes],renderer});

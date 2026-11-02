@@ -201,7 +201,7 @@ export interface SessionSummary {
   host: string;
   port: number;
   username: string;
-  /** Ephemeral broker-owned identity; omitted while terminal_broker_v1 is off. */
+  /** Ephemeral broker-owned identity; omitted while terminal_broker is off. */
   terminalSessionId?: string;
   /** Generation of the currently attached PTY/ConPTY/SSH PTY transport. */
   terminalGeneration?: number;
@@ -218,7 +218,7 @@ export interface SessionPtyInfo {
 }
 
 export interface SessionCreateRequest {
-  nativeInputProtocol?: 'shellspan.native-input/1';
+  nativeInputProtocol?: 'shellspan.native-input';
   initialDirectory?: string;
   operationId?: string;
   /** Frontend-only audit identity; older backends safely ignore this field. */
@@ -349,11 +349,11 @@ export interface TerminalBrokerSessionSnapshot {
     verifiedProfileId?: string;
   };
   nativeDisplayBinding?: {
-    protocol: 'shellspan.native-input/1';
+    protocol: 'shellspan.native-input';
     inputMode: 'native-inline';
     oscIdentifier: 1337;
-    enterPayload: 'SetUserVar=ShellSpanNativeInputV1=MQ==';
-    exitPayload: 'SetUserVar=ShellSpanNativeInputV1=MA==';
+    enterPayload: 'SetUserVar=ShellSpanNativeInput=MQ==';
+    exitPayload: 'SetUserVar=ShellSpanNativeInput=MA==';
     /** Backend-verified editor presentation only; never execution authority. */
     unicodeVersion?: '11';
     /** Verified editor owns redraw/resize; absent preserves the Bash default. */
@@ -425,7 +425,7 @@ export interface TerminalBrokerSessionSnapshot {
 
 export interface TerminalBrokerSnapshot {
   rollout: {
-    name: 'terminal_broker_v1';
+    name: 'terminal_broker';
     enabled: boolean;
     defaultEnabled: boolean;
     source: 'default' | 'environment';
@@ -434,23 +434,23 @@ export interface TerminalBrokerSnapshot {
     rollback: 'disableDependentFlagsThenCloseBrokerGenerations';
   };
   shellIntegrationRollout: TerminalFeatureRolloutDecision & {
-    name: 'terminal_shell_integration_v1';
+    name: 'terminal_shell_integration';
     defaultEnabled: boolean;
   };
   terminalExecuteRollout: TerminalFeatureRolloutDecision & {
-    name: 'terminal_execute_v1';
+    name: 'terminal_execute';
     defaultEnabled: boolean;
   };
   remoteBoundTerminalRollout: TerminalFeatureRolloutDecision & {
-    name: 'terminal_remote_bound_terminal_v1';
+    name: 'terminal_remote_bound_terminal';
     defaultEnabled: boolean;
   };
   interactiveToolsRollout: TerminalFeatureRolloutDecision & {
-    name: 'terminal_interactive_tools_v1';
+    name: 'terminal_interactive_tools';
     defaultEnabled: boolean;
   };
   remoteInteractiveToolsRollout: TerminalFeatureRolloutDecision & {
-    name: 'terminal_remote_interactive_tools_v1';
+    name: 'terminal_remote_interactive_tools';
     defaultEnabled: false;
   };
   counters: {

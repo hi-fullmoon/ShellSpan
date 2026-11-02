@@ -1,23 +1,23 @@
-//! NIP/1 is independent of TSP/1 and Agent events. Private channels only.
+//! NIP is independent of TSP/1 and Agent events. Private channels only.
 use bytes::BytesMut;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::time::{Duration, Instant};
 use tokio_util::codec::{Decoder as FrameDecoder, LinesCodec};
 
-pub const PROTOCOL: &str = "shellspan.native-input/1";
+pub const PROTOCOL: &str = "shellspan.native-input";
 pub const MAX_MESSAGE_BYTES: usize = 131_072;
 pub const DISPLAY_OSC: u32 = 1337;
-pub const DISPLAY_ENTER: &str = "SetUserVar=ShellSpanNativeInputV1=MQ==";
-pub const DISPLAY_EXIT: &str = "SetUserVar=ShellSpanNativeInputV1=MA==";
-pub const VERIFIED_PROFILE: &str = "gnu-bash-5.3-readline-8.3.6-macos-arm64-nip1";
+pub const DISPLAY_ENTER: &str = "SetUserVar=ShellSpanNativeInput=MQ==";
+pub const DISPLAY_EXIT: &str = "SetUserVar=ShellSpanNativeInput=MA==";
+pub const VERIFIED_PROFILE: &str = "gnu-bash-5.3-readline-8.3.6-macos-arm64-prototype";
 
 pub fn capture_marker(request_id: &str, end: bool) -> Vec<u8> {
     let token = sha(&format!(
         "{request_id}:{}",
         if end { "end" } else { "start" }
     ));
-    format!("\x1b]1337;ShellSpanCaptureV1={token}\x07").into_bytes()
+    format!("\x1b]1337;ShellSpanCapture={token}\x07").into_bytes()
 }
 
 pub fn native_profile_versions(profile: &str) -> Option<(&'static str, &'static str, u32)> {
@@ -28,7 +28,7 @@ pub fn native_profile_versions(profile: &str) -> Option<(&'static str, &'static 
     ] {
         for target in ["macos-arm64", "linux-aarch64-glibc-2.36"] {
             if profile
-                == format!("gnu-bash-{bash}-readline-{readline}-{target}-nip1-init1-capture1")
+                == format!("gnu-bash-{bash}-readline-{readline}-{target}-native")
             {
                 return Some((bash, readline, numeric));
             }
@@ -248,7 +248,7 @@ pub struct DisplayBinding {
     pub owned_reflow_cursor_line: Option<bool>,
 }
 impl DisplayBinding {
-    pub fn v1() -> Self {
+    pub fn native() -> Self {
         Self {
             protocol: PROTOCOL,
             input_mode: InputMode::NativeInline,
@@ -263,7 +263,7 @@ impl DisplayBinding {
 
 pub fn native_bash_plan(source: &str) -> Result<String, ErrorCode> {
     shlex::try_quote(source)
-        .map(|quoted| format!("builtin ss_native_input_v1_begin \"$?\"; builtin eval -- {quoted}"))
+        .map(|quoted| format!("builtin ss_native_input_begin \"$?\"; builtin eval -- {quoted}"))
         .map_err(|_| ErrorCode::Binding)
 }
 
@@ -273,7 +273,7 @@ pub fn native_foreground_plan(source: &str, shell: ShellFamily) -> Result<String
         ShellFamily::Bash => native_bash_plan(source),
         ShellFamily::Zsh => Ok(source.into()),
         ShellFamily::WindowsPowerShell | ShellFamily::PowerShell7 => {
-            serde_json::to_string(&("native-powershell-host/1", sha(source)))
+            serde_json::to_string(&("native-powershell-host", sha(source)))
                 .map_err(|_| ErrorCode::Binding)
         }
     }
@@ -328,11 +328,11 @@ pub fn native_bash_job_plan(source: &str, job: &JobExecution) -> Result<String, 
             if source != expected {
                 return Err(ErrorCode::Binding);
             }
-            return serde_json::to_string(&("native-job-control/1", handle, *stop, nonce))
+            return serde_json::to_string(&("native-job-control", handle, *stop, nonce))
                 .map_err(|_| ErrorCode::Binding);
         }
     };
-    Ok(format!("builtin ss_native_input_v1_begin \"$?\"; {body}"))
+    Ok(format!("builtin ss_native_input_begin \"$?\"; {body}"))
 }
 
 pub fn native_shell_job_plan(
@@ -359,7 +359,7 @@ pub fn native_shell_job_plan(
             if shell == ShellFamily::Zsh {
                 Ok(line)
             } else {
-                serde_json::to_string(&("native-powershell-job/1", handle, sha(source)))
+                serde_json::to_string(&("native-powershell-job", handle, sha(source)))
                     .map_err(|_| ErrorCode::Binding)
             }
         }
@@ -378,7 +378,7 @@ pub fn native_shell_job_plan(
             {
                 return Err(ErrorCode::Binding);
             }
-            serde_json::to_string(&("native-job-control/1", handle, *stop, nonce))
+            serde_json::to_string(&("native-job-control", handle, *stop, nonce))
                 .map_err(|_| ErrorCode::Binding)
         }
     }

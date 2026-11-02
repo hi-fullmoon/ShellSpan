@@ -212,7 +212,7 @@ export function parseRemoteFsError(error: unknown): RemoteFsError | null {
 
 export async function invokeCreateSession(
   request: SessionCreateRequest,
-  nativeInputProtocol: 'shellspan.native-input/1' | null = 'shellspan.native-input/1',
+  nativeInputProtocol: 'shellspan.native-input' | null = 'shellspan.native-input',
 ): Promise<SessionSummary> {
   const wireRequest={...request};
   if(nativeInputProtocol) wireRequest.nativeInputProtocol=nativeInputProtocol;
@@ -226,7 +226,7 @@ export async function invokeCreateLocalSession(
   cols = 120,
   rows = 30,
   replacesSessionId?: string,
-  nativeInputProtocol: 'shellspan.native-input/1' | null = 'shellspan.native-input/1',
+  nativeInputProtocol: 'shellspan.native-input' | null = 'shellspan.native-input',
 ): Promise<SessionSummary> {
   return invokeLogged<SessionSummary>('create_local_session', {
     cols,

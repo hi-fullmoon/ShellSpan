@@ -2,6 +2,19 @@ use super::{journal::SubmissionJournal, protocol::*, state::*};
 use crate::terminal_broker::TerminalCommandRequestedSettlement;
 use std::time::Duration;
 
+#[test]
+fn experimental_profile_is_outside_the_production_catalogue() {
+    assert!(native_profile_versions(VERIFIED_PROFILE).is_none());
+    assert_eq!(
+        native_profile_versions("gnu-bash-5.3-readline-8.3.6-macos-arm64-native"),
+        Some(("5.3", "8.3.6", 0x0803))
+    );
+    assert_eq!(
+        native_profile_versions("gnu-bash-5.3-readline-8.3.6-linux-aarch64-glibc-2.36-native"),
+        Some(("5.3", "8.3.6", 0x0803))
+    );
+}
+
 fn identity() -> Identity {
     Identity {
         terminal_session_id: "terminal:one".into(),
@@ -579,7 +592,7 @@ fn cold_recovery_does_not_replace_a_real_legacy_submission_with_an_empty_ledger(
     previous.configure(root.path()).unwrap();
     previous.record(&identity()).unwrap();
     let current = root.path().join("terminal-submissions");
-    let legacy = root.path().join("terminal-submissions-v1");
+    let legacy = root.path().join("terminal-submissions-obsolete");
     std::fs::rename(&current, &legacy).unwrap();
     let database = legacy.join("intentions.sqlite");
     let before = std::fs::read(&database).unwrap();
@@ -635,7 +648,7 @@ fn cold_recovery_keeps_a_legacy_call_fence_when_a_current_ledger_also_exists() {
     current.record(&another).unwrap();
     std::fs::rename(
         old_root.path().join("terminal-submissions"),
-        root.path().join("terminal-submissions-v1"),
+        root.path().join("terminal-submissions-obsolete"),
     )
     .unwrap();
     let restarted = SubmissionJournal::unconfigured();

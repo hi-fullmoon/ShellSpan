@@ -836,58 +836,6 @@ fn rollout_defaults_are_native_desktop_scoped_non_persisted_and_rollback_closes_
         .is_none());
 }
 
-#[test]
-fn remote_bound_terminal_environment_prefers_authoritative_name_and_reads_legacy_only_when_absent()
-{
-    let mut authoritative_reads = Vec::new();
-    let authoritative = trusted_rollout_value_with_legacy_alias_reader(
-        TERMINAL_REMOTE_BOUND_TERMINAL_ENVIRONMENT_VARIABLE,
-        TERMINAL_REMOTE_BOUND_TERMINAL_LEGACY_ENVIRONMENT_VARIABLE,
-        false,
-        |name| {
-            authoritative_reads.push(name.to_string());
-            if name == TERMINAL_REMOTE_BOUND_TERMINAL_ENVIRONMENT_VARIABLE {
-                Ok("off".into())
-            } else {
-                panic!("the legacy alias must not be read when the authoritative value exists")
-            }
-        },
-    )
-    .unwrap();
-    assert_eq!(
-        authoritative,
-        (false, TerminalBrokerRolloutSource::Environment)
-    );
-    assert_eq!(
-        authoritative_reads,
-        vec![TERMINAL_REMOTE_BOUND_TERMINAL_ENVIRONMENT_VARIABLE]
-    );
-
-    let mut fallback_reads = Vec::new();
-    let fallback = trusted_rollout_value_with_legacy_alias_reader(
-        TERMINAL_REMOTE_BOUND_TERMINAL_ENVIRONMENT_VARIABLE,
-        TERMINAL_REMOTE_BOUND_TERMINAL_LEGACY_ENVIRONMENT_VARIABLE,
-        false,
-        |name| {
-            fallback_reads.push(name.to_string());
-            if name == TERMINAL_REMOTE_BOUND_TERMINAL_ENVIRONMENT_VARIABLE {
-                Err(std::env::VarError::NotPresent)
-            } else {
-                Ok("on".into())
-            }
-        },
-    )
-    .unwrap();
-    assert_eq!(fallback, (true, TerminalBrokerRolloutSource::Environment));
-    assert_eq!(
-        fallback_reads,
-        vec![
-            TERMINAL_REMOTE_BOUND_TERMINAL_ENVIRONMENT_VARIABLE,
-            TERMINAL_REMOTE_BOUND_TERMINAL_LEGACY_ENVIRONMENT_VARIABLE,
-        ]
-    );
-}
-
 #[cfg(target_os = "windows")]
 #[test]
 fn phase6_windows_rollbacks_make_visible_commands_unavailable() {
@@ -1539,9 +1487,9 @@ fn diagnostic_snapshot_contains_counts_but_not_raw_or_captured_content() {
     assert!(json.contains("ownerId"));
     assert!(!json.contains("owner_id"));
     assert!(json.contains("captureByteCount"));
-    assert!(json.contains("terminal_broker_v1"));
+    assert!(json.contains("terminal_broker"));
     assert!(json.contains("remoteBoundTerminalRollout"));
-    assert!(json.contains("terminal_remote_bound_terminal_v1"));
+    assert!(json.contains("terminal_remote_bound_terminal"));
 }
 
 #[test]

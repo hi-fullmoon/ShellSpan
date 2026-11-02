@@ -9,7 +9,7 @@ const root=resolve(import.meta.dirname,'../..');
 const configuration=`Port 22229\nListenAddress 0.0.0.0\nHostKey /tmp/nip-sshd/host_key\nPidFile /tmp/nip-sshd/pid\nPasswordAuthentication yes\nKbdInteractiveAuthentication no\nUsePAM no\nPermitRootLogin no\nAllowUsers native41* native44* native53* nativeRaw\nSubsystem sftp internal-sftp\nSetEnv LANG=en_US.UTF-8\nPrintMotd no\nLogLevel ERROR\n`;
 if(process.argv[2]==='--from-resources'){
   const image=process.argv[3];assert(/^sha256:[a-f0-9]{64}$/.test(image),'An immutable owned fixture image is required');
-  const resources=resolve(root,'.native-input-p2/resources/native-input-v1');
+  const resources=resolve(root,'.native-input-p2/resources/native-input');
   const catalogue=JSON.parse(readFileSync(resolve(resources,'catalogue-linux-aarch64-glibc-2.36.json'),'utf8'));
   const sha=path=>createHash('sha256').update(readFileSync(path)).digest('hex');
   assert.equal(catalogue.version,1);assert.equal(catalogue.profiles.length,3);
@@ -17,7 +17,7 @@ if(process.argv[2]==='--from-resources'){
   const versions={'4.1':'6.0','4.4':'7.0','5.3':'8.3.6'};
   assert.deepEqual(catalogue.profiles.map(profile=>profile.bashVersion).sort(),Object.keys(versions).sort());
   for(const profile of catalogue.profiles){
-    assert.equal(profile.id,`gnu-bash-${profile.bashVersion}-readline-${versions[profile.bashVersion]}-linux-aarch64-glibc-2.36-nip1-init1-capture1`);
+    assert.equal(profile.id,`gnu-bash-${profile.bashVersion}-readline-${versions[profile.bashVersion]}-linux-aarch64-glibc-2.36-native`);
     assert.equal(profile.readlineDisplayAbi,1);
     assert.equal(profile.module,`${profile.id}/adapter.so`);assert.equal(profile.relay,`${profile.id}/native-input-relay`);
     for(const[path,expected]of[[`${profile.id}/bash`,profile.shellSha256],[profile.module,profile.moduleSha256],[profile.relay,profile.relaySha256]])assert.equal(sha(resolve(resources,path)),expected,`Fixture artifact changed: ${path}`);
@@ -68,7 +68,7 @@ if(process.argv[2]==='--from-resources'){
       execFileSync('docker',['exec',fixture.container,'useradd','-m','-s','/bin/bash','nativeRaw']);
     }
     for(const [user,version] of [['native41','4.1'],['native44','4.4'],['native53','5.3']]){
-      const manifest=resolve(root,`.native-input-p2/producers/gnu-bash-${version}-readline-${{'4.1':'6.0','4.4':'7.0','5.3':'8.3.6'}[version]}-linux-aarch64-glibc-2.36-nip1-init1-capture1/manifest.json`);
+      const manifest=resolve(root,`.native-input-p2/producers/gnu-bash-${version}-readline-${{'4.1':'6.0','4.4':'7.0','5.3':'8.3.6'}[version]}-linux-aarch64-glibc-2.36-native/manifest.json`);
       const shell=JSON.parse(readFileSync(manifest,'utf8')).shell;
       execFileSync('docker',['exec',fixture.container,'usermod','-s',shell,user],{stdio:'pipe'});
     }
@@ -93,7 +93,7 @@ if(process.argv[2]==='--from-resources'){
   writeFileSync(resolve(directory,'build-result.json'),JSON.stringify({exitCode:code}));
   assert.equal(code,0,`Linux build failed; evidence at ${directory}`);
   for(const [user,version] of [['native41','4.1'],['native44','4.4'],['native53','5.3']]){
-    const shell=JSON.parse(readFileSync(resolve(root,`.native-input-p2/producers/gnu-bash-${version}-readline-${{'4.1':'6.0','4.4':'7.0','5.3':'8.3.6'}[version]}-linux-aarch64-glibc-2.36-nip1-init1-capture1/manifest.json`),'utf8')).shell;
+    const shell=JSON.parse(readFileSync(resolve(root,`.native-input-p2/producers/gnu-bash-${version}-readline-${{'4.1':'6.0','4.4':'7.0','5.3':'8.3.6'}[version]}-linux-aarch64-glibc-2.36-native/manifest.json`),'utf8')).shell;
     execFileSync('docker',['exec',container,'usermod','-s',shell,user],{stdio:'pipe'});
   }
   writeFileSync(resolve(directory,'sshd_config'),configuration,{mode:0o600});

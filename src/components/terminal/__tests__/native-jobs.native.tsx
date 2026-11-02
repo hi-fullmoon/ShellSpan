@@ -465,7 +465,7 @@ async function verify() {
     assert(marker.startsWith('native-jobs-'), 'Missing independent output marker');
     const setupBase = powershell
       ? `${nativeP3?`using namespace System.Text\nparam($P3Header=$([Console]::WriteLine('P3-PRE-'+'HEADER');'header-value'))\n$P3ParentScope='scope-${marker}'; [Console]::WriteLine('P3-BODY-'+'HEADER'); `:''}Set-Location -LiteralPath $env:SHELLSPAN_NATIVE_WORKSPACE; function global:shellspan_acceptance_alias_target { 'alias-ok' }; Set-Alias -Scope Global shellspan_acceptance_alias shellspan_acceptance_alias_target; function global:shellspan_acceptance_function { 'function-ok' }`
-      : `export SHELLSPAN_ACCEPTANCE='${marker.slice(0, 18)}''${marker.slice(18)}'; ${nativeP3?`typeset P3_PARENT_SCOPE='scope-${marker}'; `:''}alias shellspan_acceptance_alias='printf %s%s alias -ok; echo'; shellspan_acceptance_function() { printf %s%s function -ok; echo; }${nativeP2&&!nativeP3?`\nprintf '%s' 'NIP> builtin ss_native_input_v1_begin "$?"; builtin eval -- '; printf "'same'"; printf '\\033]133;C\\007'`:''}`;
+      : `export SHELLSPAN_ACCEPTANCE='${marker.slice(0, 18)}''${marker.slice(18)}'; ${nativeP3?`typeset P3_PARENT_SCOPE='scope-${marker}'; `:''}alias shellspan_acceptance_alias='printf %s%s alias -ok; echo'; shellspan_acceptance_function() { printf %s%s function -ok; echo; }${nativeP2&&!nativeP3?`\nprintf '%s' 'NIP> builtin ss_native_input_begin "$?"; builtin eval -- '; printf "'same'"; printf '\\033]133;C\\007'`:''}`;
     const setup=setupBase+(postInputBackpressure?(powershell?'\nwhile (-not [IO.File]::Exists($env:SHELLSPAN_P3_BACKPRESSURE_GATE)) { Start-Sleep -Milliseconds 25 }':'\nwhile [[ ! -e $SHELLSPAN_P3_BACKPRESSURE_GATE ]]; do sleep 0.025; done'):'');
     const script = powershell
       ? `${nativeP3?'Write-Output $P3ParentScope\n':''}Write-Output $env:SHELLSPAN_ACCEPTANCE\nWrite-Output (Get-Location).Path\nshellspan_acceptance_alias\nshellspan_acceptance_function\n@'\nreal\tTab 'single' "double"\nSHELLSPAN_END\n'@\nwhile (-not [IO.File]::Exists($env:SHELLSPAN_NATIVE_COMPLETION_GATE)) { Start-Sleep -Milliseconds 25 }`
@@ -660,7 +660,7 @@ async function verify() {
         assert(first&&typeof first==='object'&&'combinedOutput'in first&&typeof first.combinedOutput==='string'
           &&first.combinedOutput.match(/P3-PRE-HEADER/g)?.length===1&&first.combinedOutput.match(/P3-BODY-HEADER/g)?.length===1
           &&first.combinedOutput.indexOf('P3-PRE-HEADER')<first.combinedOutput.indexOf('P3-BODY-HEADER'),'Real tool capture omitted or duplicated pre-body output');
-      }else if(!nativeP3){assert(first&&typeof first==='object'&&'combinedOutput'in first&&first.combinedOutput==='NIP> builtin ss_native_input_v1_begin "$?"; builtin eval -- \'same\'\u001b]133;C\u0007','Native capture lost, stripped, or added real program wrapper/prompt/control output');}
+      }else if(!nativeP3){assert(first&&typeof first==='object'&&'combinedOutput'in first&&first.combinedOutput==='NIP> builtin ss_native_input_begin "$?"; builtin eval -- \'same\'\u001b]133;C\u0007','Native capture lost, stripped, or added real program wrapper/prompt/control output');}
       if(nativeP3==='zsh'){
         const reference=await fetch(`/__native-p3-empty-output/${parameters.get('token')}`,{method:'POST',body:JSON.stringify({columns:controller.terminal.cols,rows:controller.terminal.rows})});
         assert(reference.ok,'Actual ordinary Zsh empty-command capture failed');

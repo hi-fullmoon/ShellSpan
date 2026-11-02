@@ -308,7 +308,7 @@ pub(crate) enum CommandEvent {
         not(test),
         allow(
             dead_code,
-            reason = "Strict NIP/1 event; production adapter is wired in P2"
+            reason = "Strict NIP event; production adapter is wired in P2"
         )
     )]
     Started,
@@ -317,7 +317,7 @@ pub(crate) enum CommandEvent {
         not(test),
         allow(
             dead_code,
-            reason = "Strict NIP/1 event; production adapter is wired in P2"
+            reason = "Strict NIP event; production adapter is wired in P2"
         )
     )]
     Settled,

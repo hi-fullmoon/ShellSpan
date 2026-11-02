@@ -1,21 +1,21 @@
-# Native Input Protocol 1
+# Native Input Protocol
 
-2026-10-31，P1 冻结。版本 `shellspan.native-input/1`，简称 NIP/1。
+协议标识 `shellspan.native-input`，简称 NIP。
 它是已登记私有双向控制通道上的独立协议，不扩展 TSP/1 或 Agent event-v5，
 stdout、OSC、前端 ready 和显示完成都不是控制报文。
-[schema](native-input-v1.schema.json) 与 Rust `terminal_command/protocol.rs` 同源审查。
+[schema](native-input.schema.json) 与 Rust `terminal_command/protocol.rs` 同源审查。
 
 ## 模式、身份和能力
 
 一个终端 generation 的模式初始化后固定为 `native-inline` 或 `raw`。
 不再接收或输出 `legacy-projection`，也不保留旧客户端及旧作业输入兼容分支。
-P2既有证据仍只适用于其冻结版本，见[P2审计](../../../docs/design/agent-terminal-input-p2-audit.md)。
+历史证据只适用于采样时的源码与制品，当前验收边界见[实现说明](../../../docs/design/agent-terminal-input.md)。
 不得在已有草稿或历史上热切换，不得因 native 失败改换执行路径或重放。
 能力不足的新 Agent 命令在 lease/PTY 写入前返回 `TERMINAL_NATIVE_INPUT_REQUIRED`；
 不自动选择替代 Shell。普通用户输入与 TUI 保留；当前后台作业的输入和管理均走已验证的原生通道。
 ZLE/PSReadLine 生产编辑器 profile 仍为空；
 GNU Bash 保留独立的来源匹配 catalogue、实际 Shell SHA/模块校验准入，未被该空列表关闭。
-P4 仅代码/编译/静态检查完成，统一实机验收见 [P4审计](../../../docs/design/agent-terminal-input-p4-audit.md)。
+当前已完成代码、编译和静态检查，统一实机待验项见[实现说明](../../../docs/design/agent-terminal-input.md)。
 
 初始化使用独立 `connection = {terminalSessionId, terminalGeneration, controlId}`。
 `probe` 与匹配 requestId 的 `capabilities` 不需要 Agent/task/operation，禁止制造占位身份。
@@ -26,14 +26,13 @@ P4 仅代码/编译/静态检查完成，统一实机验收见 [P4审计](../../
 
 native generation 拒绝旧集成通道注册（TERMINAL_NATIVE_MODE_NOT_LEGACY），不能覆盖原生连接身份。
 
-P1 冻结 profile 为 `gnu-bash-5.3-readline-8.3.6-macos-arm64-nip1`，保留兼容验收。
-P2 构建 profile 为 `gnu-bash-{4.1|4.4|5.3}-readline-{6.0|7.0|8.3.6}-{macos-arm64|linux-aarch64-glibc-2.36}-nip1-init1-capture1`，
-版本与 Readline 必须按上述对应关系配对，各组合的实际验收边界以 P2 审计为准。
+原生profile按实际Shell、Readline与平台组合生成，使用`native`后缀，不提供旧profile别名。
+Shell与Readline必须按构建配方的对应关系配对，实际运行范围另行验收。
 受信本地加载器必须先对固定 manifest 的 Shell/module 实际文件计算 SHA-256，
 产生 `VerifiedNativeProfile`；对端自报 Bash 版本不构成支持证明。
 实际 `$BASH_VERSION`、Readline 公共版本/数字值与编译时 profile 仍须匹配。
 当前 GNU 资源还要求 `readlineDisplayAbi: 1`，加载器与打包器拒绝缺失或未知 ABI。
-该受控扩展由 Readline 自身提供只读 `rl_native_prompt_columns_v1()`，返回其原生提示符
+该受控扩展由 Readline 自身提供只读 `rl_native_prompt_columns()`，返回其原生提示符
 显示列数；原生初始化前必须实际发现该符号，Bash4.1不能仅依赖其不调用的加载钩子。
 只读 ABI 查询由构建入口和启动组件共同检查；未知 ABI 不会安装原生输入接入。
 不能将 `rl_expand_prompt()` 的可见字节数
@@ -43,7 +42,7 @@ P2 构建 profile 为 `gnu-bash-{4.1|4.4|5.3}-readline-{6.0|7.0|8.3.6}-{macos-ar
 用户可执行文件，历史 P1/P2 证据也不能自动算作该依赖修订已验收。
 P3 实现了按完整源文件及实际制品摘要绑定的 ZLE/PSReadLine provider；独立平台验收仍在进行，
 不能将组件回执或 P2 Bash 结果视为 P3 完成。当前证据及未完成项见
-[P3 审计](../../../docs/design/agent-terminal-input-p3-audit.md)。
+[实现说明](../../../docs/design/agent-terminal-input.md)。
 SSH 制品经真实 SFTP 上传、远端读取校验与独立 relay 通道加载。其他架构、libc、
 自定义输入/redisplay/信号 provider 和未校验的普通发行版构建均不能仅凭版本得到 native 能力。
 
@@ -51,11 +50,11 @@ SSH 制品经真实 SFTP 上传、远端读取校验与独立 relay 通道加载
 
 Broker 只读快照的可选 `nativePeerProfile` 保存本 generation 私有 capabilities 已实际报告、
 且通过固定构建与完整能力校验的 Shell/编辑器版本、数字 ABI、adapterVersion 和
-verifiedProfileId；不包含源码、执行计划、凭据或额外授权。未协商的 legacy/raw 不提供该字段。
+verifiedProfileId；不包含源码、执行计划、凭据或额外授权。未协商的 raw 不提供该字段。
 验收应直接记录 inputMode、该实际 profile、binding 及完整证明/持久意图状态，不能仅按客户端
 默认请求或测试选择的可执行文件推断 native 路径已经执行。
 
-客户端通过 `nativeInputProtocol: "shellspan.native-input/1"` 请求协商；后端先验证实际绑定
+客户端通过 `nativeInputProtocol: "shellspan.native-input"` 请求协商；后端先验证实际绑定
 Shell 的文件摘要及可信资源目录的 module/relay/source 摘要。使用独立、完整构建的 GNU
 `--shellspan-native-init PATH -il` 启动：GNU 自身先按真实 HOME、login 状态和 argv0
 读取系统及用户配置，随后执行固定集成文件。不得替换 HOME 或手工再次 source profile/rc。
@@ -64,8 +63,8 @@ Shell 的文件摘要及可信资源目录的 module/relay/source 摘要。使�
 
 私有控制帧进入现有每会话有界队列（8 个 credit），由所属本地 PTY/SSH worker 写入。
 每条连接只有一个 NIP Decoder 和 generation；EOF、半包、超时及重连关闭旧身份与当前操作，
-不会转为旧协议重放。旧客户端的 Zsh/PowerShell 会话继续 legacy；native 家族重绑到未接受 Shell
-时成为 raw，保留普通用户终端而不取得 Agent 执行能力。
+不会切换执行路径或重放。不提供旧客户端输入兼容；重绑到未接受的 Shell 时成为 raw，
+保留普通用户终端而不取得 Agent 执行能力。
 
 ZLE 在私有通道 EOF 后仅清理仍由本集成拥有的 hook/widget/快捷键；用户重定义的函数或绑定
 予以保留。局部前缀清理必须在同一编辑线程重新读取真实 BUFFER/CURSOR，并与尚未交回父
@@ -143,9 +142,8 @@ schema 的 `interrupt` 是通用控制请求槽；当前 Bash provider 不把它
 也不能毒化随后合法的 draftCleared。冲突的当前绑定进入恢复；旧 generation 拒绝且不污染后继。
 
 提交由原生编辑器在同一父 Shell 顶层返回固定计划：
-`builtin ss_native_input_v1_begin "$?"; builtin eval -- <shlex quote 的源码>`。
-计划在真实源码回显后隐藏交接，不通过前端过滤。正式 builtin 别名只用于显式 NIP 模式；
-P0 默认实验报文和应用 legacy 集成保持独立。
+`builtin ss_native_input_begin "$?"; builtin eval -- <shlex quote 的源码>`。
+计划在真实源码回显后隐藏交接，不通过前端过滤。正式 builtin 只用于显式 NIP 模式。
 
 ## P3 原生编辑器与父解析器
 
@@ -172,8 +170,8 @@ PSReadLine 在实际编辑器线程调用公开 `GetBufferState`、`Replace`、`
 用户 SID 的受保护 DACL、不可继承的句柄，并双向核对真实服务端/客户端 PID。
 成熟 .NET ACL API 的实际读回校验失败时关闭 native 控制。
 
-PowerShell 前台计划是规范 JSON 元组 `['native-powershell-host/1', SHA256(source)]`；
-后台计划绑定 `native-powershell-job/1`、既有不透明 handle 和源码摘要。以上表示元组语义，
+PowerShell 前台计划是规范 JSON 元组 `['native-powershell-host', SHA256(source)]`；
+后台计划绑定 `native-powershell-job`、既有不透明 handle 和源码摘要。以上表示元组语义，
 实际线格式由 serde_json 编码。目标端只在准备期间通过真实 PowerShell AST/token extent
 生成并固定唯一 host 行：保留 using、attribute、param 和命名 block，在第一个实际执行
 block 中插入固定 begin 调用。`PSConsoleHostReadLine` 只把该行返回给真实 ConsoleHost
@@ -195,10 +193,9 @@ block 中插入固定 begin 调用。`PSConsoleHostReadLine` 只把该行返回�
 ## 持久化与恢复
 
 目录名不表达数据库版本：当前使用 `terminal-submissions/intentions.sqlite`，版本仍由
-SQLite `user_version=1` 和意图记录 `version=1` 校验。若检测到未发布旧实现留下的
-`terminal-submissions-v1`，首次后台初始化必须返回
+SQLite格式字段和意图记录格式校验。若检测到其他`terminal-submissions-`命名空间，首次后台初始化必须返回
 `TERMINAL_SUBMISSION_JOURNAL_MIGRATION_REQUIRED` 并拒绝新提交；不能通过创建空的新账本
-忽略可能已提交的旧记录或重复调用围栏。旧目录不是普通目录或为符号链接时拒绝为无效存储。
+忽略可能已提交的记录或重复调用围栏。该检查也拒绝同名前缀的文件或符号链接。
 这一路径不创建旧目录，不自动移动、合并或改写旧记录；恢复须明确处理旧存储。
 
 `terminal-submissions/intentions.sqlite` 使用 SQLite WAL、synchronous=FULL，
@@ -227,12 +224,12 @@ coordinator、捕获围栏和正在撤销的lease，让同一操作的迟到私�
 未结算记录经 `get_terminal_submission_recovery(agentSessionId)` 的 spawn_blocking 只读查询；
 新引擎对首次后台初始化时恢复出的该 Agent 未结算记录保留恢复门禁，其他 Agent 不因该查询被无差别阻塞。
 同进程仍由原有 Broker/交互准入和结果不明规则控制，不能把正在运行的 live intent 误作重启恢复，
-阻断已确认开始的 legacy pager 退出输入。查询仍完整返回 live/恢复两类未结算记录。
+阻断已确认开始的程序退出输入。查询仍完整返回 live/恢复两类未结算记录。
 不自动恢复旧 command 对象、不自动重新输入或 Enter，也不声称跨进程 exactly-once。
 
 ## 快照和前端
 
-`get_terminal_broker_snapshot` 保留旧字段，并返回固定 inputMode、显式 nativeDisplayBinding、
+`get_terminal_broker_snapshot` 返回固定 inputMode、显式 nativeDisplayBinding、
 inputObservation。现有 `terminal-integration-state` 事件也可附带同一只读 inputObservation，
 使实际 Prepared/输入确认/S/E 到达后阶段及时更新，不额外拉取每帧快照或授予输入。
 后者包括全投影 snapshotSequence、pending/recovery/clear/unavailable，
@@ -241,21 +238,21 @@ submissionIntentDurable、draftCleared、Agent/task/operation/command 与 lease/
 sourceMayBeEnqueued、executionEvidence、safeActions、脱敏 displaySource、noAutoReplay。
 Job 私有控制没有 displaySource。私有计划/摘要/原生缓冲和凭据不进入 DTO。
 
-P3受控原生ZLE Core使用[append API v1](native-zle-append-v1.md)，由严格绑定的实际Core
+原生ZLE Core使用[append API](native-zle-append.md)，由严格绑定的实际Core
 声明owned光标行重排；参数只控制显示模式，不能产生提交、清稿或结束证明。
 
 P3 受控候选的 `nativeDisplayBinding` 可选只读 `unicodeVersion: "11"`，仅由本地已校验
 ZLE Core/profile 提供，并经相同后端生成函数传入快照与 Session PTY DTO。它不是 NIP peer
 自报字段、客户端请求选项或执行许可；缺省时保持原有显示配置。完整显示作用域与恢复规则见
-[原生显示接入](../../native-input-display.md)，各平台启用门禁见 P3 审计。
+[原生显示接入](../../native-input-display.md)，各平台启用门禁见[实现说明](../../../docs/design/agent-terminal-input.md)。
 
 snapshotSequence 覆盖整个公开 session 投影，变化才递增，相同读取保持相等。
-legacyRevision/integrationStateRevision 只兼容各自旧状态，不用于合并整个命令观察。终端 ID/代次、当前 Agent/task/operation 及游标
+legacyRevision/integrationStateRevision 只对应各自状态，不用于合并整个命令观察。终端 ID/代次、当前 Agent/task/operation 及游标
 共同防止前端旧观察回退。快照只能派生现有状态条文字；不能改变输入锁、所有权、ready、
 审批、接管确认或后端恢复门禁。safeActions 是提示，执行操作仍重新授权。
 
-正式显示 binding 为 OSC 1337：`SetUserVar=ShellSpanNativeInputV1=MQ==` 开，
-`SetUserVar=ShellSpanNativeInputV1=MA==` 关，BEL/ST 由 xterm 公共 parser 处理。
+正式显示 binding 为 OSC 1337：`SetUserVar=ShellSpanNativeInput=MQ==` 开，
+`SetUserVar=ShellSpanNativeInput=MA==` 关，BEL/ST 由 xterm 公共 parser 处理。
 只在已协商 native 模式显式安装，沿用真实 PTY 顺序。
 完整输出排空后调用 closeAfterPendingOutput/dispose，再允许该 Terminal 重新绑定；
 它只恢复公开显示选项，不重置半个 OSC/UTF-8 parser 状态，不产生执行/所有权证据。
@@ -266,7 +263,7 @@ legacyRevision/integrationStateRevision 只兼容各自旧状态，不用于合�
 
 `pnpm test:terminal-input:p1` 从固定源码重建模块，运行 reducer/Broker/执行器/lease、
 真实 PTY/私有 socket、原生 SIGKILL 恢复、实际捕获的 schema 校验、浏览器排空/重绑，
-以及旧 Bash/Zsh/缺失 checkpoint/P0 默认报文和前端回归。
+以及能力缺失、未验证编辑模式拒绝和前端回归，不再调用已删除测试或旧实验报文用例。
 输出在 Git 忽略的 `.native-input-p0/p1-validation` 与 `p1-evidence`，无时间戳依赖。
 504 格状态矩阵是纯 reducer 证据；journal probe 的单独 `/bin/sh` 不是原生链路证据。
 原生崩溃证据必须来自实际 prepare/proof/intent/arm/key/Started 链路及重启后的零输入/零 accept。

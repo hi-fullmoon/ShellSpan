@@ -14,7 +14,7 @@ const stage=JSON.parse(await readFile(resolve(root,'.native-input-p3/candidate-s
 const sources=captureValidationSources(root);assert.deepEqual(sources,JSON.parse(await readFile(resolve(stage.directory,'sources.json'),'utf8')));
 const resources=auditEditorResources(root,'linux-aarch64-glibc-2.36');assert(resources.selectedValid);
 const hash=async path=>createHash('sha256').update(await readFile(path)).digest('hex');
-const resourceRoot=resolve(root,'.native-input-p2/resources/native-input-v1'),catalogue=JSON.parse(await readFile(resolve(resourceRoot,'editors-linux-aarch64-glibc-2.36.json'),'utf8'));
+const resourceRoot=resolve(root,'.native-input-p2/resources/native-input'),catalogue=JSON.parse(await readFile(resolve(resourceRoot,'editors-linux-aarch64-glibc-2.36.json'),'utf8'));
 const profile=catalogue.profiles[0];if(profile.core)assert.equal(profile.core,`${profile.profile.verifiedProfileId}/zle.so`);
 const core=resolve(resourceRoot,profile.core??'scoped-core/linux-aarch64-glibc-2.36/zsh/zle.so'),coreSha256=await hash(core);
 const directory=resolve(root,'.native-input-p3/scoped-ssh-runs',randomUUID());await mkdir(directory,{recursive:true});

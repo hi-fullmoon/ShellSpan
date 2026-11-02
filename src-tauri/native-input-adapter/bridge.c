@@ -1,4 +1,4 @@
-/* ShellSpan NIP/1 loadable builtin; compile against the verified target headers.
+/* ShellSpan NIP loadable builtin; compile against the verified target headers.
  * No Bash evaluator, parser, or private Readline symbols are used. */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1
@@ -37,7 +37,7 @@ extern void p0_service(void);
 static int (*native_prompt_columns)(void);
 static int native_display_abi_available(void) {
   if (!native_prompt_columns)
-    native_prompt_columns=(int (*)(void))dlsym(RTLD_DEFAULT,"rl_native_prompt_columns_v1");
+    native_prompt_columns=(int (*)(void))dlsym(RTLD_DEFAULT,"rl_native_prompt_columns");
   return native_prompt_columns != NULL;
 }
 int p0_builtin_load(char *name) {
@@ -160,8 +160,8 @@ static pid_t display_owner;
 static void finish_display(void);
 static void display_mode(int enabled) {
   FILE *stream = rl_outstream ? rl_outstream : stdout;
-  fputs(enabled ? "\033]1337;SetUserVar=ShellSpanNativeInputV1=MQ==\007"
-                : "\033]1337;SetUserVar=ShellSpanNativeInputV1=MA==\007", stream);
+  fputs(enabled ? "\033]1337;SetUserVar=ShellSpanNativeInput=MQ==\007"
+                : "\033]1337;SetUserVar=ShellSpanNativeInput=MA==\007", stream);
   fflush(stream);
 }
 void ss_native_capture_fence(const char *value) {
@@ -478,7 +478,7 @@ static int p0_builtin(WORD_LIST *args) {
   if (args->next && args->next->word->word[0]) return 1;
   /* Bash4.1 does not invoke the newer load hook. Check before touching its
    * input provider or opening the private control connection on every target. */
-  if (!p0_builtin_load("ss_native_input_v1")) return 1;
+  if (!p0_builtin_load("ss_native_input")) return 1;
   return p0_start(args->word->word, args->next && args->next->next ? args->next->next->word->word : NULL);
 }
 static int native_display_abi_builtin(WORD_LIST *args) {
@@ -520,29 +520,29 @@ static int native_control_end_builtin(WORD_LIST *args) {
   return ss_native_control_end(atoi(args->word->word),args->next->word->word);
 }
 void p0_builtin_unload(char *name) { (void)name; p0_stop(); }
-static char *const documentation[] = { "ShellSpan native Readline input protocol 1.", 0 };
-int ss_native_input_v1_builtin_load(char *name) { return p0_builtin_load(name); }
-void ss_native_input_v1_builtin_unload(char *name) { p0_builtin_unload(name); }
-struct builtin ss_native_input_v1_struct = { "ss_native_input_v1", p0_builtin, BUILTIN_ENABLED,
-  documentation, "ss_native_input_v1 private-socket", 0 };
-struct builtin ss_native_input_v1_display_abi_struct = { "ss_native_input_v1_display_abi", native_display_abi_builtin, BUILTIN_ENABLED,
-  documentation, "ss_native_input_v1_display_abi", 0 };
-struct builtin ss_native_input_v1_status_struct = { "ss_native_input_v1_status", p0_result_builtin, BUILTIN_ENABLED,
-  documentation, "ss_native_input_v1_status status cwd", 0 };
-struct builtin ss_native_input_v1_begin_struct = { "ss_native_input_v1_begin", p0_begin_builtin, BUILTIN_ENABLED,
-  documentation, "ss_native_input_v1_begin status", 0 };
-struct builtin ss_native_input_v1_child_closed_struct = { "ss_native_input_v1_child_closed", p0_child_builtin, BUILTIN_ENABLED,
-  documentation, "ss_native_input_v1_child_closed", 0 };
-struct builtin ss_native_input_v1_job_struct = { "ss_native_input_v1_job", native_job_builtin, BUILTIN_ENABLED,
-  documentation, "ss_native_input_v1_job handle state status", 0 };
-struct builtin ss_native_input_v1_dispatch_free_struct = { "ss_native_input_v1_dispatch_free", native_dispatch_free_builtin, BUILTIN_ENABLED,
-  documentation, "ss_native_input_v1_dispatch_free", 0 };
-struct builtin ss_native_input_v1_control_access_struct = { "ss_native_input_v1_control_access", native_control_access_builtin, BUILTIN_ENABLED,
-  documentation, "ss_native_input_v1_control_access", 0 };
-struct builtin ss_native_input_v1_control_begin_struct = { "ss_native_input_v1_control_begin", native_control_begin_builtin, BUILTIN_ENABLED,
-  documentation, "ss_native_input_v1_control_begin handle action nonce", 0 };
-struct builtin ss_native_input_v1_control_end_struct = { "ss_native_input_v1_control_end", native_control_end_builtin, BUILTIN_ENABLED,
-  documentation, "ss_native_input_v1_control_end status cwd", 0 };
+static char *const documentation[] = { "ShellSpan native Readline input protocol.", 0 };
+int ss_native_input_builtin_load(char *name) { return p0_builtin_load(name); }
+void ss_native_input_builtin_unload(char *name) { p0_builtin_unload(name); }
+struct builtin ss_native_input_struct = { "ss_native_input", p0_builtin, BUILTIN_ENABLED,
+  documentation, "ss_native_input private-socket", 0 };
+struct builtin ss_native_input_display_abi_struct = { "ss_native_input_display_abi", native_display_abi_builtin, BUILTIN_ENABLED,
+  documentation, "ss_native_input_display_abi", 0 };
+struct builtin ss_native_input_status_struct = { "ss_native_input_status", p0_result_builtin, BUILTIN_ENABLED,
+  documentation, "ss_native_input_status status cwd", 0 };
+struct builtin ss_native_input_begin_struct = { "ss_native_input_begin", p0_begin_builtin, BUILTIN_ENABLED,
+  documentation, "ss_native_input_begin status", 0 };
+struct builtin ss_native_input_child_closed_struct = { "ss_native_input_child_closed", p0_child_builtin, BUILTIN_ENABLED,
+  documentation, "ss_native_input_child_closed", 0 };
+struct builtin ss_native_input_job_struct = { "ss_native_input_job", native_job_builtin, BUILTIN_ENABLED,
+  documentation, "ss_native_input_job handle state status", 0 };
+struct builtin ss_native_input_dispatch_free_struct = { "ss_native_input_dispatch_free", native_dispatch_free_builtin, BUILTIN_ENABLED,
+  documentation, "ss_native_input_dispatch_free", 0 };
+struct builtin ss_native_input_control_access_struct = { "ss_native_input_control_access", native_control_access_builtin, BUILTIN_ENABLED,
+  documentation, "ss_native_input_control_access", 0 };
+struct builtin ss_native_input_control_begin_struct = { "ss_native_input_control_begin", native_control_begin_builtin, BUILTIN_ENABLED,
+  documentation, "ss_native_input_control_begin handle action nonce", 0 };
+struct builtin ss_native_input_control_end_struct = { "ss_native_input_control_end", native_control_end_builtin, BUILTIN_ENABLED,
+  documentation, "ss_native_input_control_end status cwd", 0 };
 
 static int native_tty_stream(FILE *stream) {
   struct stat original, target;

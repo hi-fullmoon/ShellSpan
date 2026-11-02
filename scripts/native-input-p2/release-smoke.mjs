@@ -41,14 +41,14 @@ try{
   await run('pnpm',['exec','tauri','build','--bundles','app','--config',resolve(directory,'tauri-config.json')],{...process.env,CARGO_TARGET_DIR:target});
   const bundle=resolve(target,'release/bundle/macos/ShellSpan.app');
   execFileSync('/usr/bin/codesign',['--verify','--deep','--strict',bundle],{stdio:'pipe'});
-  const resource=resolve(bundle,'Contents/Resources/native-input-v1/generated');
+  const resource=resolve(bundle,'Contents/Resources/native-input/generated');
   const catalogue=JSON.parse(await readFile(resolve(resource,'catalogue-macos-arm64.json'),'utf8'));
   const accepted=catalogue.profiles.find(value=>value.bashVersion==='5.3');assert(accepted);
   const data=resolve(directory,'data');const home=resolve(directory,'home');await mkdir(data);await mkdir(home);
   // Select the actual packaged GNU executable. The release loader must locate
   // its adapter from resource_dir(), with no debug .native-input-p2 fallback.
   releaseGui=await acquireNativeGui();
-  child=spawn(resolve(bundle,'Contents/MacOS/ShellSpan'),[],{cwd:directory,env:{...process.env,SHELLSPAN_DATA_DIR:data,SHELLSPAN_LOCAL_HOME:home,SHELL:resolve(resource,accepted.id,'bash'),SHELLSPAN_TERMINAL_BROKER_V1:'1',SHELLSPAN_TERMINAL_SHELL_INTEGRATION_V1:'1',SHELLSPAN_TERMINAL_EXECUTE_V1:'1'},stdio:'ignore'});
+  child=spawn(resolve(bundle,'Contents/MacOS/ShellSpan'),[],{cwd:directory,env:{...process.env,SHELLSPAN_DATA_DIR:data,SHELLSPAN_LOCAL_HOME:home,SHELL:resolve(resource,accepted.id,'bash'),SHELLSPAN_TERMINAL_BROKER:'1',SHELLSPAN_TERMINAL_SHELL_INTEGRATION:'1',SHELLSPAN_TERMINAL_EXECUTE:'1'},stdio:'ignore'});
   child.once('exit',code=>settle({ok:false,error:`Packaged app exited before evidence (${code})`}));
   timeout=setTimeout(()=>settle({ok:false,error:'Packaged resource smoke timeout'}),60000);
   const outcome=await result;assert.equal(outcome.ok,true,outcome.error);

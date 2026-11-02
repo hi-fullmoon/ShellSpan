@@ -62,10 +62,10 @@ try{
       await page.goto(`http://127.0.0.1:${server.address().port}`);
       const ordinaryReflow=ordinaryInput&&process.env.SHELLSPAN_P3_ORDINARY_REFLOW==='1';if(ordinaryReflow)assert(experiment,'Ordinary reflow changes require an explicit isolated experiment');
       await page.evaluate(async({columns,unicode11,ordinaryReflow})=>{
-        const {attachNativeInputDisplay,NATIVE_INPUT_DISPLAY_V1}=await import('/display.js');
+        const {attachNativeInputDisplay,NATIVE_INPUT_DISPLAY}=await import('/display.js');
         const terminal=new Terminal({cols:columns,rows:30,scrollback:20000,reflowCursorLine:false,allowProposedApi:unicode11});terminal.open(document.querySelector('#surface'));
         if(unicode11){terminal.loadAddon(new Unicode11Addon.Unicode11Addon());terminal.unicode.activeVersion='11';if(terminal.unicode.activeVersion!=='11')throw new Error('Actual candidate provider was not activated');}
-        const search=new SearchAddon.SearchAddon();terminal.loadAddon(search);const display=attachNativeInputDisplay(terminal,NATIVE_INPUT_DISPLAY_V1);
+        const search=new SearchAddon.SearchAddon();terminal.loadAddon(search);const display=attachNativeInputDisplay(terminal,NATIVE_INPUT_DISPLAY);
         if(ordinaryReflow)terminal.options.reflowCursorLine=true;
         const original={selection:terminal.getSelection,line:terminal.buffer.normal.getLine,open:terminal.open};const decoder=new TextDecoder('utf-8',{fatal:true});
         window.p3={terminal,search,display,original,decoder,offset:0,eventIndex:0,wrapped:false,stopped:false,failure:undefined};

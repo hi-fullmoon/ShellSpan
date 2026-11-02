@@ -15,9 +15,9 @@ describe('Terminal Execution Phase 4 remote SSH contracts', () => {
       readFile(path.join(repositoryRoot, 'src-tauri/src/models.rs'), 'utf8'),
       readFile(path.join(repositoryRoot, 'protocol/agent/runtime/built-in-tools.json'), 'utf8'),
     ]);
-    expect(broker).toContain('SHELLSPAN_TERMINAL_REMOTE_BOUND_TERMINAL_V1');
+    expect(broker).toContain('SHELLSPAN_TERMINAL_REMOTE_BOUND_TERMINAL');
     expect(broker).toContain('TERMINAL_REMOTE_BOUND_TERMINAL_DEFAULT_ENABLED: bool =');
-    expect(broker).toContain('SHELLSPAN_TERMINAL_REMOTE_INTERACTIVE_TOOLS_V1');
+    expect(broker).toContain('SHELLSPAN_TERMINAL_REMOTE_INTERACTIVE_TOOLS');
     expect(broker).toContain('TERMINAL_REMOTE_INTERACTIVE_TOOLS_DEFAULT_ENABLED: bool = false');
     expect(broker).not.toContain('TERMINAL_REMOTE_BOUND_TERMINAL_DISABLED');
     expect(broker).not.toContain('TERMINAL_BROKER_AGENT_SSH_CANDIDATE_NOT_READY');

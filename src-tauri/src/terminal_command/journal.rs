@@ -82,17 +82,18 @@ impl SubmissionJournal {
         self.initialize(&configured)
     }
     fn initialize(&self, app_root: &Path) -> Result<(), String> {
-        // The storage directory is now unversioned, but earlier unpublished
-        // builds may have committed an intention in the previous namespace.
-        // Never open an empty new ledger and thereby authorize a duplicate.
-        // Preserve old records for explicit recovery; do not create, rename,
-        // merge or overwrite a user's previous ledger during initialization.
-        match fs::symlink_metadata(app_root.join("terminal-submissions-v1")) {
-            Ok(metadata) => {
-                if !metadata.file_type().is_dir() {
-                    return Err(invalid());
+        // Refuse competing journal namespaces instead of creating an empty
+        // ledger that could permit replay. No foreign record is migrated.
+        match fs::read_dir(app_root) {
+            Ok(entries) => {
+                for entry in entries {
+                    let entry = entry.map_err(io_error)?;
+                    if entry.file_name().to_str().is_some_and(|name| {
+                        name.starts_with("terminal-submissions-")
+                    }) {
+                        return Err("TERMINAL_SUBMISSION_JOURNAL_MIGRATION_REQUIRED".into());
+                    }
                 }
-                return Err("TERMINAL_SUBMISSION_JOURNAL_MIGRATION_REQUIRED".into());
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(io_error(error)),

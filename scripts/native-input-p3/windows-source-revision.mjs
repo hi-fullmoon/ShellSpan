@@ -37,6 +37,6 @@ writeFileSync(resolve(meta,'import.json'),JSON.stringify({id,head:parent.head,so
   generatedByActualWindowsCompiler:generated,explicitFixtureChanges:actualChanges,sourceCount:Object.keys(sources).length,sourceArchiveSha256:hash(resolve(meta,'source.tar.gz'))},null,2));
 execFileSync('cmd.exe',['/d','/c','mklink','/J',resolve(root,'node_modules'),resolve(base,'node_modules')],{stdio:'pipe'});
 cpSync(resolve(base,'.native-input-p2/resources'),resolve(root,'.native-input-p2/resources'),{recursive:true});
-cpSync(resolve(base,'src-tauri/resources/native-input-v1/generated'),resolve(root,'src-tauri/resources/native-input-v1/generated'),{recursive:true});
+cpSync(resolve(base,'src-tauri/resources/native-input/generated'),resolve(root,'src-tauri/resources/native-input/generated'),{recursive:true});
 assert.deepEqual(captureValidationSources(root),sources);
 console.log(JSON.stringify({root,id,sourceCount:Object.keys(sources).length,sourceParent:base,generatedByActualWindowsCompiler:generated,fixtureChanges:actualChanges,nativeAcceptance:false}));

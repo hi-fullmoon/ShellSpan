@@ -83,7 +83,7 @@ Zsh 显示短 `job-*` 标记与原始脚本；标记安装完成回执后返回�
 - `scripts/verify-ai-session-stream.mjs`
 - `scripts/verify-native-editor-layout.py`
 - `scripts/__tests__/terminal-protocol-contract.test.mjs`
-- `protocol/agent/runtime/terminal-protocol-v1.schema.json`
+- `protocol/agent/runtime/terminal-protocol.schema.json`
 - `protocol/agent/runtime/terminal-protocol-rfc.md`
 - `protocol/agent/runtime/visible-terminal-unification-plan.md`
 - `protocol/agent/runtime/zsh-native-job-display-review.md`

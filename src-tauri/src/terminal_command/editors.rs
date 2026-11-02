@@ -76,7 +76,7 @@ fn validation_admitted(root: &Path, target: &str) -> bool {
         let marker: ValidationAdmission =
             serde_json::from_slice(&fs::read(actual.join("editor-validation.json")).ok()?).ok()?;
         Some(
-            marker.protocol == "shellspan.native-editor-validation/1"
+            marker.protocol == "shellspan.native-editor-validation"
                 && fs::canonicalize(marker.resource_root).ok()? == actual
                 && marker.source_manifest_sha256 == nip::sha(std::str::from_utf8(&manifest).ok()?)
                 && marker.editor_targets.iter().any(|value| value == target),
@@ -264,8 +264,8 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<EditorArti
                     include_str!("../../../scripts/dependency-builds/zsh/pin.json"),
                 ),
                 (
-                    "scripts/dependency-builds/zsh/scoped-display-v1.patch",
-                    include_str!("../../../scripts/dependency-builds/zsh/scoped-display-v1.patch"),
+                    "scripts/dependency-builds/zsh/native-display.patch",
+                    include_str!("../../../scripts/dependency-builds/zsh/native-display.patch"),
                 ),
                 (
                     "scripts/native-input-p3/build-scoped-core.mjs",

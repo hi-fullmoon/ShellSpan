@@ -280,7 +280,7 @@ describe('connection request serialization', () => {
     await invokeCreateLocalSession(100, 40, 'transport-before-reconnect');
     expect(invokeMock).toHaveBeenCalledWith('create_local_session', {
       cols: 100, rows: 40, replacesSessionId: 'transport-before-reconnect',
-      nativeInputProtocol: 'shellspan.native-input/1',
+      nativeInputProtocol: 'shellspan.native-input',
     });
   });
 

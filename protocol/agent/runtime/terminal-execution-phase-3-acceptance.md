@@ -497,7 +497,7 @@ reverted, staged, committed, tagged, pushed, or reclassified.
 ?? protocol/agent/runtime/terminal-execution-roadmap.md
 ?? protocol/agent/runtime/terminal-execution-test-matrix.md
 ?? protocol/agent/runtime/terminal-protocol-rfc.md
-?? protocol/agent/runtime/terminal-protocol-v1.schema.json
+?? protocol/agent/runtime/terminal-protocol.schema.json
 ?? scripts/__tests__/terminal-broker-windows-runner.test.mjs
 ?? scripts/__tests__/terminal-protocol-contract.test.mjs
 ?? scripts/verify-terminal-broker-linux-container.mjs

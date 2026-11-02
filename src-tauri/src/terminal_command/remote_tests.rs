@@ -93,7 +93,7 @@ fn remote_early_core_preserved(session: &Session, owner: &Path, evidence: &Path)
     let mut native = RemoteNativeBash::prepare(
         session,
         "nativeZle",
-        &owner.join(".native-input-p2/resources/native-input-v1"),
+        &owner.join(".native-input-p2/resources/native-input"),
     )
     .unwrap()
     .unwrap();
@@ -248,7 +248,7 @@ fn production_remote_zle_parent_parser_and_background() {
     let mut native = RemoteNativeBash::prepare(
         &session,
         username,
-        &owner.join(".native-input-p2/resources/native-input-v1"),
+        &owner.join(".native-input-p2/resources/native-input"),
     )
     .unwrap()
     .expect("Actual remote profile absent");

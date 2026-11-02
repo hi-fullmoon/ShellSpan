@@ -59,11 +59,11 @@ for(const {directory,expected} of candidates){
     const producer=inputs.producers.find(value=>value.profile.includes(`-${target}-`));assert(producer,'Actual target producer missing');
     assert.equal(sha(resolve(validationRoot,producer.manifest)),producer.manifestSha256,'Producer manifest drift');
     for(const [path,digest] of Object.entries(producer.sources))assert.equal(sha(resolve(validationRoot,path)),digest,`Producer source drift: ${path}`);
-    const catalogue=resolve(validationOwned,`resources/native-input-v1/catalogue-${target}.json`);
+    const catalogue=resolve(validationOwned,`resources/native-input/catalogue-${target}.json`);
     assert.equal(sha(catalogue),producer.catalogueSha256,'Distributed catalogue drift');
     const artifact=json(catalogue).profiles.find(value=>value.id===producer.profile);
     assert.deepEqual(artifact,producer.distributedArtifact,'Distributed profile differs from the run');
-    for(const [path,digest] of[[artifact.module,artifact.moduleSha256],[artifact.relay,artifact.relaySha256]])assert.equal(sha(resolve(validationOwned,'resources/native-input-v1',path)),digest,'Distributed artifact drift');
+    for(const [path,digest] of[[artifact.module,artifact.moduleSha256],[artifact.relay,artifact.relaySha256]])assert.equal(sha(resolve(validationOwned,'resources/native-input',path)),digest,'Distributed artifact drift');
     if(inputs.modelRoutesSha256)assert.equal(sha(resolve(directory,'model-routes.json')),inputs.modelRoutesSha256,'Actual isolated model configuration drifted');
     if(inputs.sourceSnapshot)assert.equal(sha(resolve(validationRoot,inputs.sourceSnapshot.path)),inputs.sourceSnapshot.sha256,'Actual source snapshot provenance drifted');
     const evidencePath=resolve(directory,'native-webview-evidence.json');const evidence=json(evidencePath);assert(!evidence.failed,'Actual WebView reported failure');
@@ -75,7 +75,7 @@ for(const {directory,expected} of candidates){
       assert.equal(initial.inputMode,'native-inline');
       {
         assert.equal(initial.nativePeerProfile?.verifiedProfileId,producer.profile,'Actual accepted peer differs from the verified artifact');
-        assert.equal(initial.nativeDisplayBinding?.protocol,'shellspan.native-input/1');
+        assert.equal(initial.nativeDisplayBinding?.protocol,'shellspan.native-input');
       }
     }
     if(['contention','delegation'].includes(inputs.scenario))assert(role?.nativeProofs?.some(view=>view.sessionId===initial.transportSessionId&&view.terminalSessionId===initial.terminalSessionId&&view.terminalGeneration===initial.terminalGeneration&&view.inputObservation?.activeCommand?.fullInputConfirmed&&view.inputObservation.activeCommand.submissionIntentDurable),'Actual role full/durable proof missing');

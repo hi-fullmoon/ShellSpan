@@ -6,7 +6,7 @@ import {randomUUID} from 'node:crypto';
 import {spawn} from 'node:child_process';
 
 const root=resolve(import.meta.dirname,'../..');
-const packaged=resolve(root,'src-tauri/resources/native-input-v1/generated');
+const packaged=resolve(root,'src-tauri/resources/native-input/generated');
 const directory=resolve(root,'.native-input-p2/source-rebuild',randomUUID());
 await mkdir(directory,{recursive:true,mode:0o700});
 const clean=resolve(directory,'ShellSpan');await cp(resolve(packaged,'sources/ShellSpan'),clean,{recursive:true});
@@ -19,7 +19,7 @@ await writeFile(resolve(directory,'result.json'),JSON.stringify({exitCode:code,s
 assert.equal(code,0,`Packaged-source reconstruction failed; ${directory}`);
 const name=process.platform==='darwin'?'catalogue-macos-arm64.json':'catalogue-linux-aarch64-glibc-2.36.json';
 const expected=JSON.parse(await readFile(resolve(packaged,name),'utf8'));
-const actual=JSON.parse(await readFile(resolve(clean,'.native-input-p2/resources/native-input-v1',name),'utf8'));
+const actual=JSON.parse(await readFile(resolve(clean,'.native-input-p2/resources/native-input',name),'utf8'));
 assert.deepEqual(actual.sources,expected.sources,'Packaged producer sources differ from the signed resource catalogue');
 assert.equal(actual.profiles.length,3);
 console.log(JSON.stringify({directory,result:'PASS',profiles:actual.profiles.map(value=>value.id)}));

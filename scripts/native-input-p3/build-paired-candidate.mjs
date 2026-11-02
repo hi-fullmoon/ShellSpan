@@ -23,8 +23,8 @@ try{
  run('cargo',['build','--locked','--release','--manifest-path','src-tauri/native-input-editors/Cargo.toml','--lib']);
  const module=resolve(directory,'ss_nip.so');
  run('cc',['-std=c11','-DMODULE','-fPIC','-bundle','-undefined','dynamic_lookup','-I',resolve(source,'Src'),'src-tauri/native-input-editors/zle.c','src-tauri/native-input-editors/target/release/libshellspan_native_input_editors.a','-lpthread','-ldl','-lm','-o',module]);
- const id='zsh-5.9-zle-5.9-macos-arm64-nip1-capture1';
- const resources=resolve(root,'.native-input-p2/resources/native-input-v1');mkdirSync(resolve(resources,id),{recursive:true});copyFileSync(module,resolve(resources,id,'ss_nip.so'));
+ const id='zsh-5.9-zle-5.9-macos-arm64-native';
+ const resources=resolve(root,'.native-input-p2/resources/native-input');mkdirSync(resolve(resources,id),{recursive:true});copyFileSync(module,resolve(resources,id,'ss_nip.so'));
  const inputs=['Cargo.toml','Cargo.lock','src/lib.rs','src/ffi.rs','zle.c','zle.zsh','psreadline.cs','psreadline.ps1'].map(path=>`src-tauri/native-input-editors/${path}`);
  inputs.push('src-tauri/src/terminal_command/protocol.rs','src-tauri/src/terminal_jobs.rs','src-tauri/src/terminal_jobs.ps1','src-tauri/src/terminal_job_host.cs','src-tauri/src/terminal_console_signals.cs','scripts/native-input-p3/build.mjs','scripts/native-input-p3/zsh-build-check.c','scripts/native-input-p3/build-paired-candidate.mjs');
  const profile={shell:'zsh',shellVersion:'5.9',editor:'zle',editorVersion:'5.9',editorNumericVersion:509,adapterVersion:'1',verifiedProfileId:id};

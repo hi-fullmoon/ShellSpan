@@ -33,7 +33,7 @@ try{
     'src-tauri/native-input-editors/zle.c','src-tauri/native-input-editors/target/release/libshellspan_native_input_editors.a','-lpthread','-ldl','-lm','-o',module]);
   const shell=process.env.SHELLSPAN_P3_ZSH??'/bin/zsh';
   assert.equal(execFileSync(shell,['-f','-c','print -rn -- $ZSH_VERSION'],{encoding:'utf8'}),'5.9');
-  const id=`zsh-5.9-zle-5.9-${target}-nip1-capture1`;
+  const id=`zsh-5.9-zle-5.9-${target}-native`;
   const profile={shell:'zsh',shellVersion:'5.9',editor:'zle',editorVersion:'5.9',editorNumericVersion:509,adapterVersion:'1',verifiedProfileId:id};
   const sourcePaths=['Cargo.toml','Cargo.lock','src/lib.rs','src/ffi.rs','zle.c','zle.zsh','psreadline.cs','psreadline.ps1'].map(path=>`src-tauri/native-input-editors/${path}`);
   sourcePaths.push('src-tauri/src/terminal_command/protocol.rs');
@@ -49,10 +49,10 @@ try{
     assert.equal(sha(resolve(root,'scripts/dependency-builds/zsh/pin.json')),coreProducer.pinSha256);
     assert.equal(sha(resolve(root,pin.patch)),pin.patchSha256);assert.deepEqual(coreProducer.nativeSourceHashes,pin.sourceHashes);assert.equal(coreProducer.patchSha256,pin.patchSha256);
     for(const[name,digest]of Object.entries(pin.sourceHashes))assert.equal(sha(resolve(coreProducer.source,'Src/Zle',name)),digest);
-    sourcePaths.push('scripts/dependency-builds/zsh/pin.json','scripts/dependency-builds/zsh/scoped-display-v1.patch','scripts/native-input-p3/build-scoped-core.mjs');
+    sourcePaths.push('scripts/dependency-builds/zsh/pin.json','scripts/dependency-builds/zsh/native-display.patch','scripts/native-input-p3/build-scoped-core.mjs');
   }
   const sources=Object.fromEntries(sourcePaths.map(path=>[path,sha(resolve(root,path))]));
-  const resources=resolve(root,'.native-input-p2/resources/native-input-v1');
+  const resources=resolve(root,'.native-input-p2/resources/native-input');
   mkdirSync(resolve(resources,id),{recursive:true});const destination=resolve(resources,id,'ss_nip.so');if(existsSync(destination))chmodSync(destination,0o600);copyFileSync(module,destination);chmodSync(destination,0o500);
   const editor={profile,shellSha256:sha(shell),moduleSha256:sha(module),module:`${id}/ss_nip.so`};
   if(coreProducer){

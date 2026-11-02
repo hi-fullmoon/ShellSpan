@@ -3,7 +3,7 @@ import {createHash} from 'node:crypto';
 import {readFileSync,readdirSync} from 'node:fs';
 import {resolve} from 'node:path';
 export function auditEditorResources(root,selectedTarget){
-  const resources=resolve(root,'.native-input-p2/resources/native-input-v1');
+  const resources=resolve(root,'.native-input-p2/resources/native-input');
   const hash=path=>createHash('sha256').update(readFileSync(path)).digest('hex');
   const entries=[];
   for(const name of readdirSync(resources).filter(name=>/^editors-.*\.json$/.test(name))){
@@ -18,7 +18,7 @@ export function auditEditorResources(root,selectedTarget){
     const required=[...['Cargo.toml','Cargo.lock','src/lib.rs','src/ffi.rs','zle.c','zle.zsh','psreadline.cs','psreadline.ps1'].map(path=>`src-tauri/native-input-editors/${path}`),
       'src-tauri/src/terminal_command/protocol.rs','src-tauri/src/terminal_jobs.rs','src-tauri/src/terminal_jobs.ps1','src-tauri/src/terminal_job_host.cs','src-tauri/src/terminal_console_signals.cs'];
     if(name==='editors-macos-arm64.json')required.push('scripts/native-input-p3/build.mjs','scripts/native-input-p3/zsh-build-check.c');
-    if(catalogue.profiles.some(profile=>profile.core))required.push('scripts/dependency-builds/zsh/pin.json','scripts/dependency-builds/zsh/scoped-display-v1.patch','scripts/native-input-p3/build-scoped-core.mjs');
+    if(catalogue.profiles.some(profile=>profile.core))required.push('scripts/dependency-builds/zsh/pin.json','scripts/dependency-builds/zsh/native-display.patch','scripts/native-input-p3/build-scoped-core.mjs');
     if(name==='editors-linux-aarch64-glibc-2.36.json')required.push('src-tauri/native-input-adapter/Cargo.toml','src-tauri/native-input-adapter/Cargo.lock',
       'src-tauri/native-input-adapter/src/bin/native-input-relay.rs','scripts/native-input-p3/linux-build.sh','scripts/native-input-p3/publish-linux.py','scripts/native-input-p3/zsh-build-check.c');
     const missingInputs=required.filter(path=>!(path in catalogue.sources));
