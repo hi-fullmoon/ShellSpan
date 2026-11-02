@@ -1,13 +1,22 @@
 import assert from 'node:assert/strict';
+import { mkdir } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { createCanvas, loadImage } from 'canvas';
 import { chromium, webkit } from 'playwright';
 
+const outputDirectory = new URL('../../../../.artifacts/tests/section-nav/', import.meta.url);
+await mkdir(outputDirectory, { recursive: true });
+const scale = Number(process.env.SHELLSPAN_TEST_SCALE ?? '1');
 const browserType = process.env.SHELLSPAN_TEST_BROWSER === 'webkit' ? webkit : chromium;
 const browser = await browserType.launch();
 try {
-  const page = await browser.newPage();
+  const page = await browser.newPage({ deviceScaleFactor: scale });
   await page.goto(new URL('/src/components/titlebar/__tests__/section-nav.browser.html', process.env.SHELLSPAN_TEST_URL ?? 'http://localhost:1420').href);
-  assert.ok(await page.evaluate(() => CSS.supports('text-box', 'trim-both cap alphabetic')),
-    'Navigation alignment requires Chromium/Edge WebView2 133+ or Safari/WKWebView 18.2+');
+  const isWindows = await page.evaluate(() => navigator.platform.toLowerCase().includes('win'));
+  if (!isWindows) {
+    assert.ok(await page.evaluate(() => CSS.supports('text-box', 'trim-both cap alphabetic')),
+      'Navigation alignment requires Chromium/Edge WebView2 133+ or Safari/WKWebView 18.2+');
+  }
   const nav = page.locator('#section-nav-review nav');
   await nav.waitFor();
   assert.equal(await nav.getByRole('button').count(), 3);
@@ -70,6 +79,8 @@ try {
             overflow: element.scrollWidth > element.clientWidth,
             transform: getComputedStyle(iconElement).transform,
             translate: getComputedStyle(iconElement).translate,
+            iconBounds: { x: icon.left - bounds.left, width: icon.width },
+            textBounds: { x: text.left - bounds.left, width: text.width },
           };
         });
         assert.ok(metrics.width >= 80);
@@ -78,10 +89,10 @@ try {
         assert.equal(metrics.gap, 4);
         assert.ok(Math.abs(metrics.offset) < 1, `${label}: content must be centered`);
         assert.equal(metrics.verticalOffset, 0, `${label}: icon must be vertically centered`);
-        const expectedTextOffset = locale === 'zh-CN' && label !== 'SFTP' ? -1 : 0;
+        const expectedTextOffset = !isWindows && locale === 'zh-CN' && label !== 'SFTP' ? -1 : 0;
         assert.ok(Math.abs(metrics.textVerticalOffset - expectedTextOffset) < 0.1, `${label}: preserve the language-specific optical alignment`);
-        assert.equal(metrics.textBox, 'trim-both');
-        assert.equal(metrics.textEdge, locale === 'zh-CN' && label !== 'SFTP' ? 'text alphabetic' : 'cap alphabetic');
+        assert.equal(metrics.textBox, isWindows ? 'none' : 'trim-both');
+        assert.equal(metrics.textEdge, isWindows ? 'auto' : locale === 'zh-CN' && label !== 'SFTP' ? 'text alphabetic' : 'cap alphabetic');
         assert.equal(metrics.radius, 6);
         assert.ok(metrics.right <= width);
         assert.equal(metrics.active, 'page');
@@ -94,10 +105,34 @@ try {
         assert.equal(metrics.overflow, false);
         assert.equal(metrics.transform, 'none');
         assert.equal(metrics.translate, 'none');
+        if (isWindows) {
+          // Element boxes can be centered while the actual Windows glyphs sit too high.
+          const image = await loadImage(await button.screenshot({ animations: 'disabled' }));
+          const context = createCanvas(image.width, image.height).getContext('2d');
+          context.drawImage(image, 0, 0);
+          const { data } = context.getImageData(0, 0, image.width, image.height);
+          const inkCenter = ({ x, width }) => {
+            let top = Infinity;
+            let bottom = -Infinity;
+            for (let y = 0; y < image.height; y++) {
+              for (let column = Math.ceil(x * scale); column < Math.floor((x + width) * scale); column++) {
+                const index = (y * image.width + column) * 4;
+                if (data[index] < 150 && data[index + 1] < 150 && data[index + 2] < 150) {
+                  top = Math.min(top, y);
+                  bottom = Math.max(bottom, y);
+                }
+              }
+            }
+            assert.ok(Number.isFinite(top), `${label}: expected visible text/icon pixels`);
+            return (top + bottom + 1) / (2 * scale);
+          };
+          const offset = inkCenter(metrics.textBounds) - inkCenter(metrics.iconBounds);
+          assert.ok(Math.abs(offset) <= 1, `${locale}/${width}/${scale}/${label}: visible text/icon centers differ by ${offset}px`);
+        }
       }
       await nav.getByRole('button', { name: labels[0], exact: true }).click();
       await page.evaluate(async () => { await document.fonts.ready; });
-      await nav.screenshot({ animations: 'disabled', path: `/tmp/shellspan-section-nav-${locale}-${width}-${browserType.name()}.png` });
+      await nav.screenshot({ animations: 'disabled', path: fileURLToPath(new URL(`${locale}-${width}-${browserType.name()}-${scale}x.png`, outputDirectory)) });
     }
     const terminal = nav.getByRole('button', { name: labels[1], exact: true });
     await terminal.focus();

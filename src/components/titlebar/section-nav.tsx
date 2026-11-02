@@ -4,6 +4,7 @@ import { useFocusStore } from '@/stores/focusStore';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/stores/appStore';
 import { useI18n } from '@/hooks/useI18n';
+import { usePlatform } from '@/hooks/usePlatform';
 import { useTrackpadSafeActivation } from '@/hooks/useTrackpadSafeActivation';
 import type { AppSection } from '@/types';
 
@@ -15,6 +16,7 @@ interface NavItemProps {
 
 const NavItem: React.FC<NavItemProps> = ({ section, label, icon: Icon }) => {
   const { locale } = useI18n();
+  const isWindows = usePlatform() === 'windows';
   const activeSection = useAppStore((state) => state.activeSection);
   const setActiveSection = useAppStore((state) => state.setActiveSection);
   const focusEnabled = useFocusStore(state => state.enabled);
@@ -42,9 +44,11 @@ const NavItem: React.FC<NavItemProps> = ({ section, label, icon: Icon }) => {
         data-label={label}
         className={cn(
           'text-center after:invisible after:block after:h-0 after:overflow-hidden after:font-medium after:content-[attr(data-label)]',
-          locale === 'zh-CN' && section !== 'sftp'
+          // Windows font metrics already center the visible glyphs in the line box.
+          // Trimming that box (and lifting CJK labels) places text above the icons.
+          !isWindows && (locale === 'zh-CN' && section !== 'sftp'
             ? 'relative -top-px [text-box:trim-both_text_alphabetic]'
-            : '[text-box:trim-both_cap_alphabetic]',
+            : '[text-box:trim-both_cap_alphabetic]'),
         )}
       >
         {label}
