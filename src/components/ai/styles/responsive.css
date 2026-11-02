@@ -63,24 +63,24 @@
     background: transparent;
   }
 
-  .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true']) {
+  .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true'], .ai-markdown-table-scroll) {
     --ai-scrollbar: transparent;
     --ai-scrollbar-hover: transparent;
     transition: --ai-scrollbar var(--ai-transition-duration-slow) ease-out,
       --ai-scrollbar-hover var(--ai-transition-duration-slow) ease-out;
   }
 
-  .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true']):hover {
+  .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true'], .ai-markdown-table-scroll):hover {
     --ai-scrollbar: var(--app-scrollbar-thumb);
     --ai-scrollbar-hover: var(--app-scrollbar-thumb-hover);
     transition-duration: var(--ai-transition-duration);
   }
 
-  .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true'])::-webkit-scrollbar-thumb {
+  .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true'], .ai-markdown-table-scroll)::-webkit-scrollbar-thumb {
     background: var(--ai-scrollbar);
   }
 
-  .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true'])::-webkit-scrollbar-thumb:hover {
+  .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true'], .ai-markdown-table-scroll)::-webkit-scrollbar-thumb:hover {
     background: var(--ai-scrollbar-hover);
   }
 
@@ -89,7 +89,7 @@
       scrollbar-color: transparent transparent;
     }
 
-    .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true']) {
+    .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true'], .ai-markdown-table-scroll) {
       scrollbar-color: var(--ai-scrollbar) transparent;
     }
   }
@@ -109,7 +109,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .ai-tool-scroll-area > [data-slot='scroll-area-scrollbar'],
-  .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true']) {
+  .ai-panel-shell :is(.ai-reasoning-viewport, .ai-semantic-note-body, .ai-content-title[data-expanded='true'], .ai-markdown-table-scroll) {
     transition: none;
   }
 
