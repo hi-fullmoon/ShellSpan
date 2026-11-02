@@ -100,7 +100,18 @@ fn scratch_roots_are_private_outside_project_and_isolated_by_session() {
         .canonicalize()
         .unwrap()
         .join("agent-runtime/scratch");
-    assert!(Path::new(&first.root).starts_with(directory.join("workspaces")));
+    assert_eq!(
+        Path::new(&first.root),
+        work.root
+            .path()
+            .canonicalize()
+            .unwrap()
+            .join("tmp")
+            .join(&key("parent", &work.target).unwrap()[..16])
+    );
+    assert_eq!(Path::new(&first.root).file_name().unwrap().len(), 16);
+    assert_eq!(Path::new(&child.root).file_name().unwrap().len(), 16);
+    assert!(!directory.join("workspaces").exists());
     let record: serde_json::Value = serde_json::from_slice(
         &fs::read(
             directory
@@ -111,6 +122,7 @@ fn scratch_roots_are_private_outside_project_and_isolated_by_session() {
     )
     .unwrap();
     assert_eq!(record["version"], 1);
+    assert_eq!(record["key"].as_str().unwrap().len(), 64);
     assert_ne!(first.root, child.root);
     assert!(!Path::new(&first.root).starts_with(work.target.cwd.as_ref().unwrap()));
     assert!(!Path::new(&first.root).join("../records").exists());
@@ -121,6 +133,10 @@ fn scratch_roots_are_private_outside_project_and_isolated_by_session() {
     }
     assert!(owns_target(work.root.path(), "parent", &target).unwrap());
     assert!(!owns_target(work.root.path(), "child", &target).unwrap());
+    if let super::super::AgentToolTargetNative::Local { cwd, .. } = &mut target {
+        *cwd = Some(child.root.clone());
+    }
+    assert!(!owns_target(work.root.path(), "parent", &target).unwrap());
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -129,6 +145,65 @@ fn scratch_roots_are_private_outside_project_and_isolated_by_session() {
             0
         );
     }
+}
+
+#[test]
+fn scratch_short_directory_is_reused_after_reopen() {
+    let work = Workspace::new();
+    let lease = work.acquire("reopen-short-directory");
+    let directory = PathBuf::from(&lease.root);
+    fs::write(directory.join("check.sh"), "pwd\n").unwrap();
+    drop(lease);
+
+    let reopened = ScratchStore::open(work.root.path()).unwrap();
+    let lease = reopened
+        .acquire(
+            "reopen-short-directory",
+            "reopened-task",
+            &work.target,
+            now() + 600_000,
+            false,
+            None,
+            &work.services(),
+        )
+        .unwrap();
+    assert_eq!(Path::new(&lease.root), directory);
+    assert_eq!(
+        fs::read_to_string(directory.join("check.sh")).unwrap(),
+        "pwd\n"
+    );
+}
+
+#[test]
+fn scratch_never_adopts_an_occupied_short_directory() {
+    let work = Workspace::new();
+    let key = key("occupied-short-directory", &work.target).unwrap();
+    let directory = work
+        .root
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join("tmp")
+        .join(&key[..16]);
+    private_directory(&directory).unwrap();
+    let script = directory.join("check.sh");
+    fs::write(&script, "pwd\n").unwrap();
+
+    let result = work.store.acquire(
+        "occupied-short-directory",
+        "occupied-task",
+        &work.target,
+        now() + 600_000,
+        false,
+        None,
+        &work.services(),
+    );
+    assert!(matches!(result, Err(error) if error.starts_with("AGENT_SCRATCH_DIRECTORY_OCCUPIED")));
+    work.store
+        .cleanup_at(now() + FAILURE_TTL_MS * 2, &work.services())
+        .unwrap();
+    assert_eq!(fs::read_to_string(script).unwrap(), "pwd\n");
+    assert!(work.store.state.lock().unwrap().records.is_empty());
 }
 
 #[cfg(unix)]
@@ -149,6 +224,12 @@ fn scratch_metadata_staging_cannot_follow_symlinks() {
 #[test]
 fn scratch_live_approval_survives_expiry_and_idle_files_go_to_system_trash() {
     let work = Workspace::new();
+    let terminal = work
+        .root
+        .path()
+        .join("tmp/shellspan-terminal-integration-test");
+    fs::create_dir(&terminal).unwrap();
+    fs::write(terminal.join("source.rs"), include_str!("../../lib.rs")).unwrap();
     let lease = work.acquire("pending");
     let root = PathBuf::from(&lease.root);
     fs::write(root.join("source.md"), include_str!("../../lib.rs")).unwrap();
@@ -163,6 +244,30 @@ fn scratch_live_approval_survives_expiry_and_idle_files_go_to_system_trash() {
     assert!(!root.exists());
     assert!(work.store.state.lock().unwrap().records.is_empty());
     assert!(Path::new(work.target.cwd.as_ref().unwrap()).exists());
+    assert!(terminal.join("source.rs").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn scratch_accepts_readable_tmp_parent_but_rejects_writable_or_symlink_parents() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = tempfile::tempdir().unwrap();
+    let temporary = root.path().join("tmp");
+    fs::create_dir(&temporary).unwrap();
+    fs::set_permissions(&temporary, fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(ScratchStore::open(root.path()).is_ok());
+    assert_eq!(
+        fs::metadata(&temporary).unwrap().permissions().mode() & 0o777,
+        0o755
+    );
+
+    fs::set_permissions(&temporary, fs::Permissions::from_mode(0o777)).unwrap();
+    assert!(ScratchStore::open(root.path()).is_err());
+
+    fs::rename(&temporary, root.path().join("tmp-original")).unwrap();
+    std::os::unix::fs::symlink(root.path().join("tmp-original"), &temporary).unwrap();
+    assert!(ScratchStore::open(root.path()).is_err());
 }
 
 #[test]
@@ -208,6 +313,40 @@ fn scratch_quota_does_not_block_process_observation_or_delete_live_files() {
     let observer = work.acquire("large");
     assert_eq!(observer.root, lease.root);
     assert!(path.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn scratch_collection_rejects_a_replaced_tmp_parent() {
+    let work = Workspace::new();
+    let lease = work.acquire("replaced-tmp-parent");
+    let directory = PathBuf::from(&lease.root);
+    fs::write(directory.join("check.sh"), "pwd\n").unwrap();
+    drop(lease);
+
+    let data = work.root.path().canonicalize().unwrap();
+    fs::rename(data.join("tmp"), data.join("original-tmp")).unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let outside = outside.path().canonicalize().unwrap();
+    let unrelated = outside.join(directory.file_name().unwrap());
+    private_directory(&unrelated).unwrap();
+    fs::write(unrelated.join("check.sh"), "pwd -P\n").unwrap();
+    std::os::unix::fs::symlink(&outside, data.join("tmp")).unwrap();
+
+    assert!(work
+        .store
+        .cleanup_at(now() + FAILURE_TTL_MS * 2, &work.services())
+        .is_err());
+    assert_eq!(
+        fs::read_to_string(unrelated.join("check.sh")).unwrap(),
+        "pwd -P\n"
+    );
+    assert!(data
+        .join("original-tmp")
+        .join(directory.file_name().unwrap())
+        .join("check.sh")
+        .exists());
+    assert!(!work.store.state.lock().unwrap().records.is_empty());
 }
 
 #[cfg(unix)]

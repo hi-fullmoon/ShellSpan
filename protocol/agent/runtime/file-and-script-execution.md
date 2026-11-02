@@ -36,11 +36,16 @@ The adapter removes this facade field before native argument validation and
 retains it in recorded calls so approval reconstruction cannot switch roots.
 
 Local files live under
-`{dataRoot}/agent-runtime/scratch/workspaces/{sessionTargetDigest}/files`.
+`{dataRoot}/tmp/{shortId}`, where `shortId` is the first 16 hexadecimal characters
+of the session/target SHA-256 digest. Ownership records and native target IDs keep
+the complete digest. A conflicting reservation or an occupied directory without
+a matching ownership record is rejected; files are never adopted or overwritten.
 `dataRoot` keeps the existing development/production/custom-root separation.
-Ownership records and the random installation identity live outside the writable
-file root. Native storage protection admits only the exact registered root for
-the owning session, with ordinary no-follow, digest and dispatch validation.
+Ownership records and the random installation identity stay in
+`{dataRoot}/agent-runtime/scratch`, outside the writable file root. No legacy
+workspace paths are read or migrated. Native storage protection admits only the
+exact registered root for the owning session, with ordinary no-follow, digest
+and dispatch validation.
 Credential-backed remote files use
 `{accountHome}/.shellspan-agent-scratch-{installationId}/{sessionTargetDigest}/files`.
 SFTP resolves the account home and checks private directory ownership. Managed
@@ -84,6 +89,14 @@ redacted output artifacts and file checkpoints keep their existing retention and
 are not removed by scratch collection. Expired script files must be recreated,
 not automatically rerun. There is no claim of protection against hostile same-user
 path replacement or unregistered detached processes.
+
+The local scratch regression executes real scripts through Direct and the
+accepted native GNU Bash transport. Build its source-verified shell/module with
+`python3 -B scripts/native-input-p2/build.py --versions 5.3`, then run
+`cargo test --manifest-path src-tauri/Cargo.toml --lib scratch`.
+The fixture requires the real native handshake; it does not grant capabilities
+to a legacy shell or change editor admission policy. Remote SFTP coverage remains
+an explicitly opted-in integration test.
 
 ## File and script limits
 

@@ -1233,13 +1233,12 @@ impl NativeToolEngine {
                     // paths, digest preconditions and approval/dispatch checks.
                     return Ok(());
                 }
-                let managed = std::fs::canonicalize(root)
-                    .unwrap_or_else(|_| root.clone())
-                    .join("agent-runtime/scratch");
+                let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.clone());
+                let managed = [root.join("agent-runtime/scratch"), root.join("tmp")];
                 if scope
                     .paths
                     .iter()
-                    .any(|path| Path::new(path).starts_with(&managed))
+                    .any(|path| managed.iter().any(|root| Path::new(path).starts_with(root)))
                 {
                     return Err(
                         "AGENT_SCRATCH_SCOPE_DENIED: use this session's fileScope=scratch target"

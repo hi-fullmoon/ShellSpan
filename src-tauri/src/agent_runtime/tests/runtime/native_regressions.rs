@@ -11,6 +11,8 @@ use crate::models::{
     SessionStatus, SessionTerminalKind, StatusEvent,
 };
 use crate::terminal_broker::{TerminalGeometry, TerminalSessionBroker, TerminalTransportKind};
+use crate::terminal_command::local::{NativeControlHandle, PreparedNativeBash};
+use crate::terminal_command::protocol::InputMode;
 use crate::terminal_integration::{
     PreparedLocalShellIntegration, TerminalIntegrationControlHandle, TerminalShellKind,
 };
@@ -39,30 +41,43 @@ struct Scenario {
     master: Box<dyn portable_pty::MasterPty + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
     control: Option<TerminalIntegrationControlHandle>,
+    native_control: Option<Arc<NativeControlHandle>>,
     output: Option<thread::JoinHandle<()>>,
     input: Option<thread::JoinHandle<()>>,
 }
 
 impl Scenario {
     fn new(shell: TerminalShellKind) -> Self {
+        Self::with_native_input(shell, false)
+    }
+
+    fn with_native_input(shell: TerminalShellKind, native_input: bool) -> Self {
         let root = tempfile::tempdir().unwrap();
         let work = root.path().join("work");
         std::fs::create_dir(&work).unwrap();
         let state = root.path().join("state");
-        let integration = PreparedLocalShellIntegration::prepare(shell, &state).unwrap();
+        let integration =
+            (!native_input).then(|| PreparedLocalShellIntegration::prepare(shell, &state).unwrap());
         let broker = TerminalSessionBroker::phase5_with_journal_for_test(65_536, &state);
         broker
-            .attach_transport(
+            .attach_transport_with_mode(
                 TERMINAL,
                 None,
                 TerminalTransportKind::LocalPty,
                 TerminalGeometry::new(120, 30),
+                if native_input {
+                    InputMode::NativeInline
+                } else {
+                    InputMode::Raw
+                },
             )
             .unwrap();
-        let integration_id = integration.integration_id().to_string();
-        broker
-            .register_integration_channel(TERMINAL, &integration_id, shell)
-            .unwrap();
+        if let Some(integration) = &integration {
+            broker
+                .register_integration_channel(TERMINAL, integration.integration_id(), shell)
+                .unwrap();
+        }
+        let engine = Arc::new(NativeToolEngine::with_terminal_broker(broker.clone()));
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows: 30,
@@ -74,28 +89,71 @@ impl Scenario {
         let mut reader = pair.master.try_clone_reader().unwrap();
         let mut writer =
             crate::local_terminal_input::take_writer(pair.master.as_ref(), shell).unwrap();
-        let executable = match shell {
-            TerminalShellKind::Bash if std::path::Path::new("/opt/homebrew/bin/bash").exists() => {
-                "/opt/homebrew/bin/bash"
-            }
-            TerminalShellKind::Bash => "/bin/bash",
-            TerminalShellKind::Zsh => "/bin/zsh",
-            _ => unreachable!(),
+        let resources = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../.artifacts/tests/native-input-p2/resources/native-input");
+        let executable = if native_input && shell == TerminalShellKind::Bash {
+            let target = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+                "macos-arm64"
+            } else {
+                "linux-aarch64-glibc-2.36"
+            };
+            let profile = crate::terminal_command::artifacts::read_catalogue(&resources, target)
+                .expect("build verified native Bash resources with scripts/native-input-p2/build.py --versions 5.3")
+                .into_iter()
+                .find(|profile| profile.bash_version == "5.3")
+                .expect("verified GNU Bash 5.3 test profile");
+            resources.join(profile.id).join("bash")
+        } else {
+            std::path::PathBuf::from(match shell {
+                TerminalShellKind::Bash
+                    if std::path::Path::new("/opt/homebrew/bin/bash").exists() =>
+                {
+                    "/opt/homebrew/bin/bash"
+                }
+                TerminalShellKind::Bash => "/bin/bash",
+                TerminalShellKind::Zsh => "/bin/zsh",
+                _ => unreachable!(),
+            })
         };
-        let mut command = CommandBuilder::new(executable);
+        let mut command = CommandBuilder::new(&executable);
         command.cwd(&work);
         command.env("HOME", root.path());
         command.env("HISTFILE", root.path().join("history"));
         command.env("TERM", "xterm-256color");
-        command.env("LC_ALL", "C");
-        integration.configure_command(&mut command).unwrap();
-        let events = broker.clone();
-        let control = integration.start_reader(
-            move |event| events.accept_integration_event(TERMINAL, &integration_id, event),
-            |_| {},
-        );
+        command.env("LC_ALL", if native_input { "en_US.UTF-8" } else { "C" });
+        let native = native_input.then(|| {
+            PreparedNativeBash::prepare(&executable, &resources).expect(
+                "build the verified native shell resources before running native integration tests",
+            )
+        });
+        if let Some(native) = &native {
+            native.configure(&mut command).unwrap();
+        }
+        let control = integration.map(|integration| {
+            integration.configure_command(&mut command).unwrap();
+            let integration_id = integration.integration_id().to_string();
+            let events = broker.clone();
+            integration.start_reader(
+                move |event| events.accept_integration_event(TERMINAL, &integration_id, event),
+                |_| {},
+            )
+        });
         let child = pair.slave.spawn_command(command).unwrap();
         drop(pair.slave);
+        let native_control = native.map(|native| {
+            let probe = engine
+                .register_native_terminal(TERMINAL, native.profile.clone())
+                .unwrap();
+            let events = engine.clone();
+            let closed = engine.clone();
+            Arc::new(native.start(
+                probe,
+                move |message| events.accept_native_terminal_message(TERMINAL, message),
+                move || {
+                    let _ = closed.native_terminal_control_closed(TERMINAL);
+                },
+            ))
+        });
         let output_broker = broker.clone();
         let output = thread::spawn(move || {
             let mut bytes = [0; 4096];
@@ -127,7 +185,7 @@ impl Scenario {
                     output_paused: Arc::new(AtomicBool::new(false)),
                     terminal_kind: SessionTerminalKind::Local,
                     identity: SessionIdentity {
-                        title: executable.into(),
+                        title: executable.to_string_lossy().into_owned(),
                         host: "local".into(),
                         port: 0,
                         username: String::new(),
@@ -135,6 +193,7 @@ impl Scenario {
                 },
             )
             .unwrap();
+        let input_control = native_control.clone();
         let input = thread::spawn(move || {
             while let Ok(command) = receiver.recv() {
                 match command {
@@ -147,12 +206,30 @@ impl Scenario {
                             break;
                         }
                     }
+                    SessionCommand::WriteBytes(data) => {
+                        writer
+                            .write_all(&data)
+                            .and_then(|()| writer.flush())
+                            .unwrap();
+                    }
+                    SessionCommand::NativeControl(frame) => {
+                        input_control
+                            .as_ref()
+                            .expect("native shell control")
+                            .write(&frame.bytes)
+                            .unwrap();
+                        if frame.wake_editor {
+                            writer
+                                .write_all(b"\x18\x1e")
+                                .and_then(|()| writer.flush())
+                                .unwrap();
+                        }
+                    }
                     SessionCommand::Close => break,
                     _ => panic!("unexpected PTY operation"),
                 }
             }
         });
-        let engine = Arc::new(NativeToolEngine::with_terminal_broker(broker.clone()));
         let acknowledger = Arc::downgrade(&engine);
         engine
             .set_terminal_lease_publisher(Arc::new(move |event| {
@@ -201,10 +278,29 @@ impl Scenario {
             shell,
             master: pair.master,
             child,
-            control: Some(control),
+            control,
+            native_control,
             output: Some(output),
             input: Some(input),
         };
+        if native_input {
+            scenario
+                .runtime
+                .native_engine
+                .wait_native_initialization(TERMINAL, Duration::from_secs(8))
+                .unwrap();
+            let snapshot = scenario
+                .broker
+                .snapshot(Some(TERMINAL))
+                .unwrap()
+                .session
+                .unwrap();
+            assert_eq!(snapshot.input_mode, InputMode::NativeInline);
+            assert!(
+                scenario.broker.native_input_enabled(TERMINAL).unwrap(),
+                "{snapshot:?}"
+            );
+        }
         scenario.wait_prompt();
         scenario
     }
@@ -431,6 +527,7 @@ impl Drop for Scenario {
         let _ = self.child.kill();
         let _ = self.child.wait();
         self.control.take();
+        self.native_control.take();
         if let Some(input) = self.input.take() {
             let _ = input.join();
         }

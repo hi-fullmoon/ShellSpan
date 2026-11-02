@@ -1,6 +1,6 @@
 //! Session-owned execution files. Metadata lives outside the writable file root.
 //! Pending approval, executing and uncertain uses are persisted before dispatch.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -26,6 +26,7 @@ const LOCAL_BYTES: u64 = 512 * 1024 * 1024;
 const REMOTE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_ENTRIES: usize = 4096;
 const MAX_TREE_ENTRIES: usize = 8192;
+const LOCAL_DIRECTORY_KEY_LEN: usize = 16;
 
 pub(super) fn is_file_tool(name: &str) -> bool {
     matches!(
@@ -58,6 +59,11 @@ pub(super) fn key(session: &str, target: &AgentSessionTarget) -> Result<String, 
     Ok(hex::encode(Sha256::digest(bytes)))
 }
 
+fn local_workspace_path(temporary_root: &Path, key: &str) -> PathBuf {
+    // Keys are validated SHA-256 hex digests. Ownership keeps the full digest.
+    temporary_root.join(&key[..LOCAL_DIRECTORY_KEY_LEN])
+}
+
 /// A narrow storage-policy exception for a runtime-owned root, never the data
 /// directory or another session's files. The on-disk record is outside that root.
 pub(super) fn owns_target(
@@ -71,10 +77,8 @@ pub(super) fn owns_target(
     if key.len() != 64 || !key.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Ok(false);
     }
-    let root = fs::canonicalize(data_root)
-        .map_err(|e| e.to_string())?
-        .join("agent-runtime")
-        .join("scratch");
+    let data_root = fs::canonicalize(data_root).map_err(|e| e.to_string())?;
+    let root = data_root.join("agent-runtime").join("scratch");
     inspect_directory(&root.join("records"))?;
     let record: Record = read_json(&root.join("records").join(format!("{key}.json")))?;
     if record.session_id != session
@@ -87,7 +91,7 @@ pub(super) fn owns_target(
     match &mut expected {
         super::AgentToolTargetNative::Local { target_id, cwd, .. } => {
             *target_id = target.target_id().into();
-            let files = root.join("workspaces").join(key).join("files");
+            let files = local_workspace_path(&data_root.join("tmp"), key);
             inspect_directory(&files)?;
             *cwd = Some(crate::portable_local_path(&files));
         }
@@ -128,6 +132,7 @@ enum Usage {
 
 struct State {
     root: PathBuf,
+    temporary_root: PathBuf,
     instance: String,
     records: BTreeMap<String, Record>,
     // A live approval cannot be evicted solely because wall time changed.
@@ -161,10 +166,11 @@ impl ScratchStore {
         let data_root =
             fs::canonicalize(data_root).map_err(|e| format!("scratch data root: {e}"))?;
         let root = data_root.join("agent-runtime").join("scratch");
+        let temporary_root = data_root.join("tmp");
         private_directory(&data_root.join("agent-runtime"))?;
         private_directory(&root)?;
         private_directory(&root.join("records"))?;
-        private_directory(&root.join("workspaces"))?;
+        storage::temporary_directory(&temporary_root)?;
         let instance_path = root.join("instance.json");
         let instance: String = if instance_path.exists() {
             read_json(&instance_path)?
@@ -177,6 +183,7 @@ impl ScratchStore {
             return Err("invalid scratch installation identity".into());
         }
         let mut records = BTreeMap::new();
+        let mut local_directories = BTreeSet::new();
         for entry in fs::read_dir(root.join("records")).map_err(|e| e.to_string())? {
             let path = entry.map_err(|e| e.to_string())?.path();
             let record: Record = read_json(&path)?;
@@ -187,6 +194,11 @@ impl ScratchStore {
             {
                 return Err("invalid scratch ownership record".into());
             }
+            if record.target.kind == "local"
+                && !local_directories.insert(local_workspace_path(&temporary_root, &record.key))
+            {
+                return Err("scratch directory ownership collision".into());
+            }
             records.insert(record.key.clone(), record);
             if records.len() > MAX_ENTRIES {
                 return Err("scratch workspace count exceeded".into());
@@ -195,6 +207,7 @@ impl ScratchStore {
         Ok(Self {
             state: Arc::new(Mutex::new(State {
                 root,
+                temporary_root,
                 instance,
                 records,
                 live: BTreeMap::new(),
@@ -227,9 +240,29 @@ impl ScratchStore {
         if target.kind == "remote" && target.profile_id.is_none() {
             return Err("remote scratch requires a credential-backed profile".into());
         }
+        if target.kind == "local" {
+            storage::temporary_directory(&state.temporary_root)?;
+        }
         if !state.records.contains_key(&key) {
             if state.records.len() >= MAX_ENTRIES {
                 return Err("scratch workspace count exceeded".into());
+            }
+            if target.kind == "local" {
+                let directory = local_workspace_path(&state.temporary_root, &key);
+                if state.records.values().any(|record| {
+                    record.target.kind == "local"
+                        && local_workspace_path(&state.temporary_root, &record.key) == directory
+                }) {
+                    return Err(
+                        "AGENT_SCRATCH_DIRECTORY_OCCUPIED: temporary directory is already reserved"
+                            .into(),
+                    );
+                }
+                match fs::symlink_metadata(&directory) {
+                    Ok(_) => return Err("AGENT_SCRATCH_DIRECTORY_OCCUPIED: temporary directory has no matching ownership record".into()),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error.to_string()),
+                }
             }
             let record = Record {
                 version: 1,
@@ -269,10 +302,9 @@ impl ScratchStore {
             }
         }
         let root = if target.kind == "local" {
-            let directory = state.root.join("workspaces").join(&key);
+            let directory = local_workspace_path(&state.temporary_root, &key);
             private_directory(&directory)?;
-            private_directory(&directory.join("files"))?;
-            crate::portable_local_path(&directory.join("files"))
+            crate::portable_local_path(&directory)
         } else if provision_remote {
             let record = &state.records[&key];
             let root = remote::provision(&state.instance, &key, record, services)?;
@@ -373,7 +405,7 @@ impl ScratchStore {
                 continue;
             }
             let result = if record.target.kind == "local" {
-                let path = state.root.join("workspaces").join(&key);
+                let path = local_workspace_path(&state.temporary_root, &key);
                 match fs::symlink_metadata(&path) {
                     Ok(_) => local_tree_bytes(&path).and_then(|_| trash_workspace(&path)),
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -584,7 +616,7 @@ fn workspace_bytes(
     services: &ScratchServices<'_>,
 ) -> Result<u64, String> {
     if record.target.kind == "local" {
-        let path = state.root.join("workspaces").join(&record.key);
+        let path = local_workspace_path(&state.temporary_root, &record.key);
         if !path.exists() {
             return Ok(0);
         }
@@ -595,6 +627,7 @@ fn workspace_bytes(
 }
 
 fn local_tree_bytes(root: &Path) -> Result<u64, String> {
+    inspect_directory(root)?;
     let mut pending = vec![(root.to_path_buf(), 0)];
     let mut count = 0;
     let mut bytes = 0_u64;

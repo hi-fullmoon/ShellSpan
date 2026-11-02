@@ -2,7 +2,7 @@
 
 ## 本地存储目录
 
-Agent 与数据库共用 ShellSpan 数据根目录：正式版为 `~/.shellspan`，开发版为 `~/.shellspan-dev`；显式 `SHELLSPAN_DATA_DIR` 配置优先。会话和归档位于 `agent-runtime/sessions`、`agent-runtime/archives`，产物位于 `agent-runtime/artifacts`，图片位于 `agent-runtime/images`，临时工作区位于 `agent-runtime/scratch`，原生命令恢复记录位于 `agent-native-call-checkpoints`。这些路径均相对于同一个数据根目录，原生工具的数据保护也使用该根目录。
+Agent 与数据库共用 ShellSpan 数据根目录：正式版为 `~/.shellspan`，开发版为 `~/.shellspan-dev`；显式 `SHELLSPAN_DATA_DIR` 配置优先。会话和归档位于 `agent-runtime/sessions`、`agent-runtime/archives`，产物位于 `agent-runtime/artifacts`，图片位于 `agent-runtime/images`，临时执行文件位于 `tmp/<shortId>`（会话与目标摘要的前 16 位十六进制字符），临时工作区所有权与清理记录位于 `agent-runtime/scratch`，内部仍保留完整摘要进行所有权校验，原生命令恢复记录位于 `agent-native-call-checkpoints`。这些路径均相对于同一个数据根目录，原生工具的数据保护也使用该根目录。
 
 目录名不携带格式版本。会话与归档的 JSONL 事件使用 `version: 5`，图片引用与临时工作区所有权记录使用 `version: 1`；产物存储通过 `artifacts/format.json` 中的 `{"version":2}` 声明格式，初始化时拒绝未知版本或无效元信息。版本变化由数据格式与读取校验负责，不通过更换目录名实现。
 

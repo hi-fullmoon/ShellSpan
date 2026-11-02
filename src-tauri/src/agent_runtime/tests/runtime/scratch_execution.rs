@@ -31,7 +31,10 @@ async fn scratch_scripts_execute_outside_project_with_original_cwd_on_both_surfa
         AgentExecutionSurface::Direct,
         AgentExecutionSurface::BoundTerminal,
     ] {
-        let scenario = Scenario::new(TerminalShellKind::Zsh);
+        let scenario = Scenario::with_native_input(
+            TerminalShellKind::Bash,
+            surface == AgentExecutionSurface::BoundTerminal,
+        );
         let session = if surface == AgentExecutionSurface::Direct {
             "scratch-direct"
         } else {
@@ -53,6 +56,19 @@ async fn scratch_scripts_execute_outside_project_with_original_cwd_on_both_surfa
         }))]).await.unwrap();
         let saved = result(&scenario, session, "save-script");
         let root = saved["scratchRoot"].as_str().unwrap();
+        let header = scenario.runtime.sessions.snapshot(session).unwrap().header;
+        let key =
+            crate::agent_runtime::scratch::key(session, header.target.as_ref().unwrap()).unwrap();
+        assert_eq!(
+            std::path::Path::new(root),
+            scenario
+                .root
+                .path()
+                .canonicalize()
+                .unwrap()
+                .join("state/tmp")
+                .join(&key[..16])
+        );
         assert_eq!(saved["fileScope"], "scratch");
         assert!(saved["verified"].as_bool().unwrap());
         let path = std::path::Path::new(root).join("cwd.sh");
@@ -147,9 +163,9 @@ async fn scratch_write_approval_keeps_scope_and_does_not_save_script_before_deci
     let script = scenario
         .root
         .path()
-        .join("state/agent-runtime/scratch/workspaces")
-        .join(key)
-        .join("files/check.sh");
+        .join("state/tmp")
+        .join(&key[..16])
+        .join("check.sh");
     assert!(!script.exists());
     let events = scenario
         .runtime
@@ -293,5 +309,73 @@ async fn scratch_is_available_without_a_project_root_and_workspace_access_stays_
             .unwrap()
             .count(),
         0
+    );
+}
+
+#[tokio::test]
+async fn scratch_files_cannot_be_read_as_another_sessions_workspace() {
+    let scenario = Scenario::new(TerminalShellKind::Zsh);
+    let owner = scenario.root(
+        "scratch-owner",
+        AgentExecutionSurface::Direct,
+        AgentSessionPermissionMode::Operator,
+    );
+    scenario.start(&owner, "owner-turn", "owner-step");
+    scenario
+        .runtime
+        .tools
+        .process_model_calls(
+            &owner,
+            "owner-turn",
+            "owner-step",
+            "owner-request",
+            vec![file_call(
+                "write_file",
+                "owner-save",
+                json!({
+                    "path":"check.sh", "content":"pwd\n", "fileScope":"scratch",
+                    "precondition":{"mustNotExist":true}
+                }),
+            )],
+        )
+        .await
+        .unwrap();
+    let saved = result(&scenario, &owner.session_id, "owner-save");
+    let root = std::path::PathBuf::from(saved["scratchRoot"].as_str().unwrap());
+    let reader = scenario.root_with_cwd(
+        "scratch-reader",
+        AgentExecutionSurface::Direct,
+        AgentSessionPermissionMode::Operator,
+        Some(root.clone()),
+    );
+    scenario.start(&reader, "reader-turn", "reader-step");
+    scenario
+        .runtime
+        .tools
+        .process_model_calls(
+            &reader,
+            "reader-turn",
+            "reader-step",
+            "reader-request",
+            vec![file_call(
+                "read_file",
+                "reader-read",
+                json!({"path":"check.sh", "encoding":"utf8"}),
+            )],
+        )
+        .await
+        .unwrap();
+    let events = scenario
+        .runtime
+        .sessions
+        .all_events(&reader.session_id)
+        .unwrap();
+    assert!(events.iter().any(|event| matches!(&event.payload,
+        AgentSessionEventPayload::ToolResult { call_id, status: AgentToolResultStatus::Rejected, summary, .. }
+            if call_id == "reader-read" && summary.contains("AGENT_SCRATCH_SCOPE_DENIED"))),
+        "cross-session scratch read was not denied: {events:?}");
+    assert_eq!(
+        std::fs::read_to_string(root.join("check.sh")).unwrap(),
+        "pwd\n"
     );
 }

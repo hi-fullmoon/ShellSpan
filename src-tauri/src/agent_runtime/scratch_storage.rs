@@ -6,6 +6,18 @@ use std::path::Path;
 use serde::Serialize;
 
 pub(super) fn private_directory(path: &Path) -> Result<(), String> {
+    create_directory(path)?;
+    inspect_directory(path)
+}
+
+// Terminal integration also uses this parent and may have created it as 0755.
+// Session file roots remain private even when their parent is readable.
+pub(super) fn temporary_directory(path: &Path) -> Result<(), String> {
+    create_directory(path)?;
+    inspect_directory_permissions(path, 0o022)
+}
+
+fn create_directory(path: &Path) -> Result<(), String> {
     #[allow(unused_mut)]
     let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]
@@ -18,15 +30,22 @@ pub(super) fn private_directory(path: &Path) -> Result<(), String> {
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
         Err(e) => return Err(e.to_string()),
     }
-    inspect_directory(path)
+    Ok(())
 }
 
 pub(super) fn inspect_directory(path: &Path) -> Result<(), String> {
+    inspect_directory_permissions(path, 0o077)
+}
+
+fn inspect_directory_permissions(path: &Path, denied_permissions: u32) -> Result<(), String> {
+    #[cfg(not(unix))]
+    let _ = denied_permissions;
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
         let metadata = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
-        if metadata.uid() != unsafe { libc::geteuid() } || metadata.mode() & 0o077 != 0 {
+        if metadata.uid() != unsafe { libc::geteuid() } || metadata.mode() & denied_permissions != 0
+        {
             return Err("scratch directory permissions or ownership changed".into());
         }
     }
