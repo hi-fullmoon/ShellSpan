@@ -42,7 +42,7 @@ try {
     const { useKnownHostsStore } = await import('/src/stores/knownHostsStore.ts');
     useKnownHostsStore.setState({ hosts, error: undefined, loading: false });
   }, hosts);
-  await mkdir('.drawer-review', { recursive: true });
+  await mkdir('.artifacts/tests/workbench', { recursive: true });
   for (const width of [1440, 960, 420, 320]) {
     await page.setViewportSize({ width, height: 720 });
     const search = page.getByRole('textbox', { name: '搜索主机、端口、指纹或密钥类型' });
@@ -63,7 +63,7 @@ try {
     assert.equal(new Set(searchLayout.tops).size, 1, 'Search and refresh must remain on one row');
     assert.ok(searchLayout.right <= searchLayout.containerRight, 'Refresh must remain inside the action row');
     if (process.argv.includes('--search-only')) {
-      await page.screenshot({ path: `.drawer-review/known-hosts-search-${width}.png` });
+      await page.screenshot({ path: `.artifacts/tests/workbench/known-hosts-search-${width}.png` });
       continue;
     }
     await page.getByRole('button', { name: '复制 ED25519 指纹', exact: true }).waitFor();
@@ -97,7 +97,7 @@ try {
     assert.equal(copyStyle.buttonWidth, 24, 'Copy hover background must remain compact');
     assert.equal(copyStyle.buttonHeight, 24);
     await copyButton.hover();
-    await page.screenshot({ path: `.drawer-review/known-hosts-copy-hover-${width}.png` });
+    await page.screenshot({ path: `.artifacts/tests/workbench/known-hosts-copy-hover-${width}.png` });
     assert.equal(copyStyle.position, 'absolute', 'Copy must not reserve fingerprint text width');
     assert.equal(copyStyle.color, copyStyle.labelColor, 'Copy should use the secondary text color');
     assert.equal(copyStyle.focused, true, 'Copy must remain keyboard focusable');
@@ -123,7 +123,7 @@ try {
     });
     assert.ok((await popover.innerText()).includes('已记录不代表服务器当前安全或在线'));
     assert.equal(await page.locator('#known-hosts-review .grid').evaluate((grid) => grid.getBoundingClientRect().top), cardTop);
-    await page.screenshot({ path: `.drawer-review/known-hosts-help-${width}.png` });
+    await page.screenshot({ path: `.artifacts/tests/workbench/known-hosts-help-${width}.png` });
     await page.keyboard.press('Escape');
     await popover.waitFor({ state: 'hidden' });
     await help.focus();
@@ -151,7 +151,7 @@ try {
     assert.equal(layout.overflow, false);
     assert.equal(layout.gap, '8px');
     await search.focus();
-    await page.screenshot({ path: `.drawer-review/known-hosts-${width}.png` });
+    await page.screenshot({ path: `.artifacts/tests/workbench/known-hosts-${width}.png` });
     await search.fill('no matching host');
     await page.getByText('没有匹配的已知主机记录', { exact: true }).waitFor();
     await search.fill('');

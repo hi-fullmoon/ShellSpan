@@ -10,7 +10,7 @@ import {parseArgs} from 'node:util';
 
 const root=resolve(import.meta.dirname,'..');
 const {values}=parseArgs({options:{fixture:{type:'string'},'components-only':{type:'boolean'}}});
-const directory=resolve(root,'.native-input-p2/validation',randomUUID());await mkdir(directory,{recursive:true,mode:0o700});
+const directory=resolve(root,'.artifacts/tests/native-input-p2/validation',randomUUID());await mkdir(directory,{recursive:true,mode:0o700});
 const steps=[];let current;let fixture;let createdFixture=false;let failure;
 for(const signal of['SIGINT','SIGTERM'])process.once(signal,()=>current?.kill(signal));
 async function run(name,command,args,environment={}){
@@ -32,7 +32,7 @@ try{
       await run('fixture-image','docker',['build','-t','shellspan-native-input-p2:local','-f','scripts/native-input-p2/Dockerfile','scripts/native-input-p2']);
       fixture=await run('fixture-start',process.execPath,['scripts/native-input-p2/ssh.mjs']);createdFixture=true;
     }
-    assert(fixture.startsWith(resolve(root,'.native-input-p2/ssh')+'/'));
+    assert(fixture.startsWith(resolve(root,'.artifacts/tests/native-input-p2/ssh')+'/'));
     const owned=JSON.parse(await readFile(fixture,'utf8'));
     await run('producer-ssh','docker',['exec',owned.container,'python3','-B','scripts/native-input-p2/build.py']);
     await run('fixture-refresh',process.execPath,['scripts/native-input-p2/ssh.mjs','--refresh',fixture]);
@@ -48,7 +48,7 @@ try{
   if(!values['components-only']){
     const owned=JSON.parse(await readFile(fixture,'utf8'));
     await run('linux-geometry-inputs','cargo',[...cargo,'native_linux_geometry_inputs','--','--ignored']);
-    const inputs=JSON.parse(await readFile(resolve(root,'.native-input-p2/linux-geometry-inputs.json'),'utf8'));
+    const inputs=JSON.parse(await readFile(resolve(root,'.artifacts/tests/native-input-p2/linux-geometry-inputs.json'),'utf8'));
     await run('linux-geometry','docker',['exec',owned.container,'python3','-B','scripts/native-input-p2/linux-geometry.py',inputs.linuxInputs]);
     await run('linux-widget-signal','docker',['exec',owned.container,'python3','-B','scripts/native-input-p2/linux-geometry.py','--widget',inputs.linuxInputs.replace(/\/inputs\.json$/,'/widget-inputs.json')]);
     await run('linux-browser',process.execPath,['scripts/native-input-p2/browser.mjs','--linux']);

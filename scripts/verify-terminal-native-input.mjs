@@ -17,7 +17,7 @@ if (args['browser-only'] && args['native-only']) {
 }
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const output = path.join(root, '.native-input-p0');
+const output = path.join(root, '.artifacts/tests/native-input-p0');
 mkdirSync(output, { recursive: true });
 function run(command, parameters, logName) {
   const result = spawnSync(command, parameters, { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });

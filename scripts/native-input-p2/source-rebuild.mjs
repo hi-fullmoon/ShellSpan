@@ -7,10 +7,10 @@ import {spawn} from 'node:child_process';
 
 const root=resolve(import.meta.dirname,'../..');
 const packaged=resolve(root,'src-tauri/resources/native-input/generated');
-const directory=resolve(root,'.native-input-p2/source-rebuild',randomUUID());
+const directory=resolve(root,'.artifacts/tests/native-input-p2/source-rebuild',randomUUID());
 await mkdir(directory,{recursive:true,mode:0o700});
 const clean=resolve(directory,'ShellSpan');await cp(resolve(packaged,'sources/ShellSpan'),clean,{recursive:true});
-const cache=resolve(clean,'.native-input-p0/upstream');await mkdir(cache,{recursive:true});
+const cache=resolve(clean,'.artifacts/tests/native-input-p0/upstream');await mkdir(cache,{recursive:true});
 for(const name of await readdir(resolve(packaged,'sources')))if(name.endsWith('.tar.gz')||/^readline83-\d+$/.test(name))await cp(resolve(packaged,'sources',name),resolve(cache,name));
 const log=openSync(resolve(directory,'build.log'),'wx',0o600);
 const child=spawn('python3',['-B','scripts/native-input-p2/build.py'],{cwd:clean,env:{...process.env,CARGO_NET_OFFLINE:'true',PYTHONDONTWRITEBYTECODE:'1'},stdio:['ignore',log,log]});
@@ -19,7 +19,7 @@ await writeFile(resolve(directory,'result.json'),JSON.stringify({exitCode:code,s
 assert.equal(code,0,`Packaged-source reconstruction failed; ${directory}`);
 const name=process.platform==='darwin'?'catalogue-macos-arm64.json':'catalogue-linux-aarch64-glibc-2.36.json';
 const expected=JSON.parse(await readFile(resolve(packaged,name),'utf8'));
-const actual=JSON.parse(await readFile(resolve(clean,'.native-input-p2/resources/native-input',name),'utf8'));
+const actual=JSON.parse(await readFile(resolve(clean,'.artifacts/tests/native-input-p2/resources/native-input',name),'utf8'));
 assert.deepEqual(actual.sources,expected.sources,'Packaged producer sources differ from the signed resource catalogue');
 assert.equal(actual.profiles.length,3);
 console.log(JSON.stringify({directory,result:'PASS',profiles:actual.profiles.map(value=>value.id)}));

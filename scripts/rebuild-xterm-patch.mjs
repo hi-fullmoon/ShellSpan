@@ -11,7 +11,7 @@ import {spawnSync} from 'node:child_process';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const args=process.argv.slice(2),record=args.includes('--record');
 const pin=JSON.parse(readFileSync(path.join(root,'scripts/dependency-builds/xterm/build.json'),'utf8'));
-const base=path.join(root,'.native-input-p0/xterm-package-builds',new Date().toISOString().replaceAll(':','-'));
+const base=path.join(root,'.artifacts/tests/native-input-p0/xterm-package-builds',new Date().toISOString().replaceAll(':','-'));
 mkdirSync(base,{recursive:true});
 const sha=file=>createHash('sha256').update(readFileSync(file)).digest('hex');
 const run=(command,parameters,cwd,log,env={})=>{
@@ -20,7 +20,7 @@ const run=(command,parameters,cwd,log,env={})=>{
   if(result.status!==0)throw new Error(`${command} failed; see ${path.join(base,log)}`);
 };
 for(const[file,digest]of Object.entries(pin.patches))assert.equal(sha(path.join(root,file)),digest,`Approved source patch changed: ${file}`);
-const toolsDir=path.join(root,'.native-input-p0/xterm-build-tools');mkdirSync(toolsDir,{recursive:true});
+const toolsDir=path.join(root,'.artifacts/tests/native-input-p0/xterm-build-tools');mkdirSync(toolsDir,{recursive:true});
 for(const file of ['package.json','pnpm-lock.yaml'])copyFileSync(path.join(root,'scripts/dependency-builds/xterm',file),path.join(toolsDir,file));
 run('pnpm',['install','--dir',toolsDir,'--frozen-lockfile','--ignore-workspace','--ignore-scripts'],root,'tools-install.log');
 const toolsRequire=createRequire(path.join(toolsDir,'package.json'));
@@ -31,7 +31,7 @@ const npmPackage=toolsRequire.resolve('npm/package.json');
 const npmMetadata=JSON.parse(readFileSync(npmPackage,'utf8'));
 assert.equal(npmMetadata.version,pin.npm);
 const npmCli=path.resolve(path.dirname(npmPackage),npmMetadata.bin.npm);
-const cachedArchive=path.join(root,'.native-input-p0/formal-xterm-upstream/source.tar.gz');
+const cachedArchive=path.join(root,'.artifacts/tests/native-input-p0/formal-xterm-upstream/source.tar.gz');
 const archive=path.join(base,'source.tar.gz');
 if(existsSync(cachedArchive)&&sha(cachedArchive)===pin.archiveSha256)copyFileSync(cachedArchive,archive);
 else{const response=await fetch(pin.archiveUrl);if(!response.ok)throw new Error(`Archive HTTP ${response.status}`);writeFileSync(archive,new Uint8Array(await response.arrayBuffer()));}

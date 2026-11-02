@@ -14,6 +14,8 @@
 
 不要手工修改 `node_modules/`、`dist/`、`src-tauri/target/` 或 `src-tauri/gen/`。`src-tauri/vendor/portable-pty/` 是项目维护的补丁依赖，只有任务明确涉及该依赖时才修改。
 
+项目自行生成的产物统一放入根目录 `.artifacts/`：测试与验收使用 `tests/`，发布使用 `releases/`，临时构建配置使用 `config/`。不得新增分散在仓库根目录的产物目录；工具默认缓存与构建目录保持各自约定，必须入库的测试采样和发布说明仍保留在源码目录。
+
 ## 常用命令
 
 ```bash

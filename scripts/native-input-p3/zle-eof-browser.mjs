@@ -9,7 +9,7 @@ import {displayModuleJavaScript,installedRuntimeManifest} from '../native-input-
 import {captureValidationSources} from '../native-input-p2/frozen-validation.mjs';
 const root=resolve(import.meta.dirname,'../..'),input=resolve(process.argv[2]);
 const sources=captureValidationSources(root),runtime=await installedRuntimeManifest();
-const directory=resolve(root,'.native-input-p3/eof-browser',randomUUID());await mkdir(directory,{recursive:true});
+const directory=resolve(root,'.artifacts/tests/native-input-p3/eof-browser',randomUUID());await mkdir(directory,{recursive:true});
 const assets={'/xterm.js':['node_modules/@xterm/xterm/lib/xterm.js','application/javascript'],'/xterm.css':['node_modules/@xterm/xterm/css/xterm.css','text/css'],'/webgl.js':['node_modules/@xterm/addon-webgl/lib/addon-webgl.js','application/javascript']};
 const server=createServer(async(request,response)=>{try{if(request.url==='/display.js'){response.setHeader('Content-Type','application/javascript');response.end(await displayModuleJavaScript());return;}const asset=assets[request.url];response.setHeader('Content-Type',asset?asset[1]:'text/html');response.end(asset?await readFile(resolve(root,asset[0])):'<!doctype html><link rel="stylesheet" href="/xterm.css"><div id="surface"></div><script src="/xterm.js"></script><script src="/webgl.js"></script>');}catch{response.writeHead(500).end();}});
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const results=[];

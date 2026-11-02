@@ -264,6 +264,6 @@ legacyRevision/integrationStateRevision 只对应各自状态，不用于合并�
 `pnpm test:terminal-input:p1` 从固定源码重建模块，运行 reducer/Broker/执行器/lease、
 真实 PTY/私有 socket、原生 SIGKILL 恢复、实际捕获的 schema 校验、浏览器排空/重绑，
 以及能力缺失、未验证编辑模式拒绝和前端回归，不再调用已删除测试或旧实验报文用例。
-输出在 Git 忽略的 `.native-input-p0/p1-validation` 与 `p1-evidence`，无时间戳依赖。
+输出在 Git 忽略的 `.artifacts/tests/native-input-p0/p1-validation` 与 `p1-evidence`，无时间戳依赖。
 504 格状态矩阵是纯 reducer 证据；journal probe 的单独 `/bin/sh` 不是原生链路证据。
 原生崩溃证据必须来自实际 prepare/proof/intent/arm/key/Started 链路及重启后的零输入/零 accept。

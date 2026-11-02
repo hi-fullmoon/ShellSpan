@@ -93,7 +93,7 @@ fn remote_early_core_preserved(session: &Session, owner: &Path, evidence: &Path)
     let mut native = RemoteNativeBash::prepare(
         session,
         "nativeZle",
-        &owner.join(".native-input-p2/resources/native-input"),
+        &owner.join(".artifacts/tests/native-input-p2/resources/native-input"),
     )
     .unwrap()
     .unwrap();
@@ -191,7 +191,7 @@ fn production_remote_zle_parent_parser_and_background() {
     let username = fixture["username"].as_str().unwrap();
     assert_eq!(username, "nativeZle");
     let evidence = owner
-        .join(".native-input-p3/production-ssh-zle")
+        .join(".artifacts/tests/native-input-p3/production-ssh-zle")
         .join(Uuid::new_v4().to_string());
     fs::create_dir_all(&evidence).unwrap();
     let columns = std::env::var("SHELLSPAN_P3_TEST_COLUMNS")
@@ -248,7 +248,7 @@ fn production_remote_zle_parent_parser_and_background() {
     let mut native = RemoteNativeBash::prepare(
         &session,
         username,
-        &owner.join(".native-input-p2/resources/native-input"),
+        &owner.join(".artifacts/tests/native-input-p2/resources/native-input"),
     )
     .unwrap()
     .expect("Actual remote profile absent");

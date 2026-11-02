@@ -13,7 +13,7 @@ const raw=await readFile(resolve(item.evidence,'raw.bin'));
 const events=JSON.parse(await readFile(resolve(item.evidence,'geometry-events.json'),'utf8'));
 const bytes=raw.subarray(0,events.at(-1).offset),sha=data=>createHash('sha256').update(data).digest('hex');
 const fixture={version:1,scope:'Real live PTY failure; viewport coordinate regression only, not new native acceptance',
- provenance:{report:input.slice(input.indexOf('.native-input-p3/')),rawSha256:sha(raw),byteRange:[0,bytes.length]},
+ provenance:{report:input.slice(input.indexOf('.artifacts/tests/native-input-p3/')),rawSha256:sha(raw),byteRange:[0,bytes.length]},
  columns:item.columns,rows:30,binding:parked.binding,park:{offset:first.offset,viewportY:first.viewportY},events,
  packet:{base64:bytes.toString('base64'),length:bytes.length,sha256:sha(bytes)}};
 assert(first.offset<events[0].offset);

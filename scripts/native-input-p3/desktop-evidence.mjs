@@ -16,8 +16,8 @@ if(phase==='before'){
   assert.deepEqual(captureValidationSources(root),sources,'Source changed while its complete archive was created');
 }
 const document={at:new Date().toISOString(),phase,sources,
-  archiveSha256:hash(archive),importedArchiveSha256:hash(resolve(root,'.native-input-p3/source.tar.gz')),
-  indexSha256:hash(resolve(root,'.native-input-p3/frozen-git-index'))};
+  archiveSha256:hash(archive),importedArchiveSha256:hash(resolve(root,'.artifacts/tests/native-input-p3/source.tar.gz')),
+  indexSha256:hash(resolve(root,'.artifacts/tests/native-input-p3/frozen-git-index'))};
 writeFileSync(resolve(directory,`source-${phase}.json`),JSON.stringify(document,null,2),{flag:'wx'});
 if(phase==='after'){
   const before=JSON.parse(readFileSync(resolve(directory,'source-before.json'),'utf8'));

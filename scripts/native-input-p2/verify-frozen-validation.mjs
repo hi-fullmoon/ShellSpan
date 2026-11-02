@@ -11,7 +11,7 @@ import tailwindcss from '@tailwindcss/vite';
 import {captureValidationSources,captureValidationAssets,writeFrozenCheckpoint,verifyFrozenValidation,attachSingleUseValidationPage} from './frozen-validation.mjs';
 
 const root=resolve(import.meta.dirname,'../..');
-const directory=resolve(root,'.native-input-p2/frozen-check',randomUUID());mkdirSync(directory,{recursive:true,mode:0o700});
+const directory=resolve(root,'.artifacts/tests/native-input-p2/frozen-check',randomUUID());mkdirSync(directory,{recursive:true,mode:0o700});
 const output=resolve(directory,'frontend');const token=randomUUID();
 const {values}=parseArgs({options:{page:{type:'string'}}});
 const pages={initialize:'native-data-initialize',history:'native-input-p2-history',jobs:'native-jobs',contention:'terminal-contention',interactive:'native-input-p2-interactive'};
@@ -43,7 +43,7 @@ try{
   for(const file of['package.json','.gitignore'])copyFileSync(resolve(root,file),resolve(sourceRoot,file));
   const entry=resolve(sourceRoot,'entry.ts');copyFileSync(resolve(root,'src/components/terminal/__tests__/native-data-initialize.native.ts'),entry);
   execFileSync('git',['init','--quiet',sourceRoot]);
-  const sourceDirectory=resolve(sourceRoot,'.native-input-p2/check');mkdirSync(sourceDirectory,{recursive:true});
+  const sourceDirectory=resolve(sourceRoot,'.artifacts/tests/native-input-p2/check');mkdirSync(sourceDirectory,{recursive:true});
   const sourceAssets=resolve(sourceDirectory,'frontend');cpSync(output,sourceAssets,{recursive:true});
   const sourceManifest=resolve(sourceDirectory,'manifest.json');
   writeFrozenCheckpoint(sourceManifest,{version:1,root:sourceRoot,directory:sourceDirectory,assetsDirectory:sourceAssets,sources:captureValidationSources(sourceRoot),assets:captureValidationAssets(sourceAssets)});

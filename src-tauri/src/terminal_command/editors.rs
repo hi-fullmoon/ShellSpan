@@ -60,7 +60,7 @@ fn validation_admitted(root: &Path, target: &str) -> bool {
             return Some(false);
         }
         let snapshot: serde_json::Value = serde_json::from_slice(
-            &fs::read(source.join(".native-input-p3/snapshot-index.json")).ok()?,
+            &fs::read(source.join(".artifacts/tests/native-input-p3/snapshot-index.json")).ok()?,
         )
         .ok()?;
         if fs::canonicalize(snapshot["root"].as_str()?).ok()? != source {
@@ -72,7 +72,7 @@ fn validation_admitted(root: &Path, target: &str) -> bool {
             return Some(false);
         }
         let manifest =
-            fs::read(source.join(".native-input-p3/editor-validation-sources.json")).ok()?;
+            fs::read(source.join(".artifacts/tests/native-input-p3/editor-validation-sources.json")).ok()?;
         let marker: ValidationAdmission =
             serde_json::from_slice(&fs::read(actual.join("editor-validation.json")).ok()?).ok()?;
         Some(

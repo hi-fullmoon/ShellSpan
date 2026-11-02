@@ -31,7 +31,7 @@ def main():
     parser.add_argument('--modes',default='pure,append-display')
     args=parser.parse_args()
     directory = OUT/'ssh'
-    directory.mkdir(mode=0o700, exist_ok=True)
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     run_output=directory/'runs'/time.strftime('%Y%m%d-%H%M%S',time.gmtime())
     run_output.mkdir(parents=True)
     (OUT/'cargo-registry').mkdir(exist_ok=True)
@@ -47,9 +47,9 @@ def main():
     (run_output/'known_hosts').write_text(f'[127.0.0.1]:{port} {public[0]} {public[1]}\n')
     (directory/'sshd_config').write_text('''Port 22229
 ListenAddress 0.0.0.0
-HostKey /work/.native-input-p0/ssh/host_key
+HostKey /work/.artifacts/tests/native-input-p0/ssh/host_key
 PidFile /tmp/p0-sshd.pid
-AuthorizedKeysFile /work/.native-input-p0/ssh/identity.pub
+AuthorizedKeysFile /work/.artifacts/tests/native-input-p0/ssh/identity.pub
 StrictModes no
 PasswordAuthentication no
 KbdInteractiveAuthentication no
@@ -71,7 +71,7 @@ LogLevel VERBOSE
              '-w','/work','shellspan-native-input-p0:local',
              'sleep','infinity'],log)
         run(['docker','exec',container,'python3','scripts/native-input-p0/build.py','--upstream','--versions',args.versions],log)
-        run(['docker','exec','-d',container,'/usr/sbin/sshd','-D','-e','-f','/work/.native-input-p0/ssh/sshd_config'],log)
+        run(['docker','exec','-d',container,'/usr/sbin/sshd','-D','-e','-f','/work/.artifacts/tests/native-input-p0/ssh/sshd_config'],log)
         for _ in range(100):
             try:
                 with socket.create_connection(('127.0.0.1',port),timeout=0.1):

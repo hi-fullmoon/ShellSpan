@@ -8,7 +8,7 @@ import {DatabaseSync} from 'node:sqlite';
 // database's credential metadata, then deletes those exact keys through Tauri.
 const root=resolve(import.meta.dirname,'../..');
 const directory=resolve(process.argv[2]);
-assert(directory.startsWith(resolve(root,'.native-input-p2/app-') ));
+assert(directory.startsWith(resolve(root,'.artifacts/tests/native-input-p2/app-') ));
 const environment=JSON.parse(readFileSync(resolve(directory,'environment.json'),'utf8'));
 assert.equal(resolve(environment.SHELLSPAN_DATA_DIR),resolve(directory,'data'));
 const db=new DatabaseSync(resolve(directory,'data/shellspan-main.db'),{readOnly:true});

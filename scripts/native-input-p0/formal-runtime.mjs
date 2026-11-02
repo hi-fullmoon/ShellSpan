@@ -5,7 +5,7 @@ import ts from 'typescript';
 import YAML from 'yaml';
 
 export const formalRuntime=process.env.SHELLSPAN_P0_FORMAL_XTERM==='1';
-export const originalRuntime=process.env.SHELLSPAN_P0_ORIGINAL_XTERM??'.native-input-p0/formal-adoption-baseline/original-xterm/lib/xterm.js';
+export const originalRuntime=process.env.SHELLSPAN_P0_ORIGINAL_XTERM??'.artifacts/tests/native-input-p0/formal-adoption-baseline/original-xterm/lib/xterm.js';
 export const candidateRuntime=lab=>formalRuntime?'node_modules/@xterm/xterm/lib/xterm.js':lab;
 export async function displayModuleJavaScript(){
   const source=await readFile('src/lib/terminal/native-input-display.ts','utf8');

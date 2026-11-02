@@ -3,7 +3,7 @@ import {readdirSync,existsSync,writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 
-const root=resolve(import.meta.dirname,'../../.native-input-p2');
+const root=resolve(import.meta.dirname,'../../.artifacts/tests/native-input-p2');
 const pending=[];let databases=0;
 for(const group of readdirSync(root).filter(name=>/^app-(4\.1|4\.4|5\.3)$/.test(name))){
   for(const run of readdirSync(resolve(root,group))){

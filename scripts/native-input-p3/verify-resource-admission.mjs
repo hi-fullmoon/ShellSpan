@@ -6,7 +6,7 @@ import {readFile,writeFile,readdir,mkdir,open} from 'node:fs/promises';
 import {resolve,relative} from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {captureValidationSources} from '../native-input-p2/frozen-validation.mjs';
-const root=resolve(process.argv[2]),sources=captureValidationSources(root),directory=resolve(root,'.native-input-p3/resource-admission',randomUUID());await mkdir(directory,{recursive:true});
+const root=resolve(process.argv[2]),sources=captureValidationSources(root),directory=resolve(root,'.artifacts/tests/native-input-p3/resource-admission',randomUUID());await mkdir(directory,{recursive:true});
 async function tree(folder,result={}){for(const entry of await readdir(folder,{withFileTypes:true})){const path=resolve(folder,entry.name);assert(!entry.isSymbolicLink());if(entry.isDirectory())await tree(path,result);else result[relative(root,path)]=createHash('sha256').update(await readFile(path)).digest('hex');}return result;}
 async function run(name,args){const log=await open(resolve(directory,`${name}.log`),'wx');const child=spawn(process.execPath,['scripts/prepare-native-input-resources.mjs','--no-build',...args],{cwd:root,stdio:['ignore',log.fd,log.fd]});const exit=await new Promise((done,reject)=>{child.once('error',reject);child.once('exit',done);});await log.close();return exit;}
 const production=resolve(root,'src-tauri/resources/native-input/generated');

@@ -9,18 +9,18 @@ import {parseArgs} from 'node:util';
 const root=resolve(import.meta.dirname,'..');
 const {values}=parseArgs({options:{'no-build':{type:'boolean'},'with-ssh':{type:'boolean'},'require-ssh':{type:'boolean'},target:{type:'string'},'validation-editor':{type:'string',multiple:true}}});
 const target=values.target??(process.platform==='darwin'&&process.arch==='arm64'?'aarch64-apple-darwin':process.platform==='linux'&&process.arch==='arm64'?'aarch64-unknown-linux-gnu':process.platform==='win32'&&process.arch==='x64'?'x86_64-pc-windows-msvc':'unsupported');
-const sourceRoot=resolve(root,'.native-input-p2/resources/native-input');
-const logDirectory=resolve(root,'.native-input-p2/resource-build');await mkdir(logDirectory,{recursive:true,mode:0o700});
+const sourceRoot=resolve(root,'.artifacts/tests/native-input-p2/resources/native-input');
+const logDirectory=resolve(root,'.artifacts/tests/native-input-p2/resource-build');await mkdir(logDirectory,{recursive:true,mode:0o700});
 const validationTargets=values['validation-editor']??[];const validationOnly=validationTargets.length>0;
 assert(validationTargets.every(value=>['macos-arm64','linux-aarch64-glibc-2.36','windows-x64'].includes(value)));
 const policy=JSON.parse(await readFile(resolve(root,'protocol/agent/runtime/native-editor-admission.json'),'utf8'));assert.equal(policy.version,1);assert(Array.isArray(policy.productionProfiles));
 let frozenSources,sourceManifestSha256;
 if(validationOnly){
-  const stage=JSON.parse(await readFile(resolve(root,'.native-input-p3/candidate-stage.json'),'utf8'));assert(stage.sealed&&stage.root===root,'Editor validation requires a sealed full source copy');
-  const manifest=await readFile(resolve(stage.directory,'sources.json'));frozenSources=JSON.parse(manifest.toString('utf8'));assert.deepEqual(captureValidationSources(root),frozenSources);sourceManifestSha256=createHash('sha256').update(manifest).digest('hex');await writeFile(resolve(root,'.native-input-p3/editor-validation-sources.json'),manifest);
+  const stage=JSON.parse(await readFile(resolve(root,'.artifacts/tests/native-input-p3/candidate-stage.json'),'utf8'));assert(stage.sealed&&stage.root===root,'Editor validation requires a sealed full source copy');
+  const manifest=await readFile(resolve(stage.directory,'sources.json'));frozenSources=JSON.parse(manifest.toString('utf8'));assert.deepEqual(captureValidationSources(root),frozenSources);sourceManifestSha256=createHash('sha256').update(manifest).digest('hex');await writeFile(resolve(root,'.artifacts/tests/native-input-p3/editor-validation-sources.json'),manifest);
 }
 const runId=randomUUID(),generated=resolve(logDirectory,`staging-${runId}`);
-const destination=validationOnly?resolve(root,'.native-input-p3/validation-resources',runId,'native-input'):resolve(root,'src-tauri/resources/native-input/generated');
+const destination=validationOnly?resolve(root,'.artifacts/tests/native-input-p3/validation-resources',runId,'native-input'):resolve(root,'src-tauri/resources/native-input/generated');
 async function run(command,args,cwd=root){
   const log=await import('node:fs').then(fs=>fs.openSync(resolve(logDirectory,'prepare.log'),'a',0o600));
   const child=spawn(command,args,{cwd,env:{...process.env,PYTHONDONTWRITEBYTECODE:'1'},stdio:['ignore',log,log]});
@@ -79,7 +79,7 @@ for(const name of editorNames){
     editorAllowed.push(id);
     if(profile.core){
       const pin=JSON.parse(await readFile(resolve(root,'scripts/dependency-builds/zsh/pin.json'),'utf8'));
-      const archive=resolve(root,`.native-input-p3/dependencies/zsh-${pin.version}.tar.xz`);assert.equal(sha(await readFile(archive)),pin.archiveSha256);
+      const archive=resolve(root,`.artifacts/tests/native-input-p3/dependencies/zsh-${pin.version}.tar.xz`);assert.equal(sha(await readFile(archive)),pin.archiveSha256);
       await mkdir(resolve(generated,'sources/dependencies'),{recursive:true});await cp(archive,resolve(generated,`sources/dependencies/zsh-${pin.version}.tar.xz`));
     }
   }

@@ -9,7 +9,7 @@ const root=resolve(import.meta.dirname,'../..');
 const {values,positionals}=parseArgs({allowPositionals:true,options:{case:{type:'string',multiple:true},'list-cases':{type:'boolean'}}});
 assert.equal(positionals.length,1,'Provide the owned fixture path');
 const fixture=resolve(positionals[0]);
-assert(fixture.startsWith(resolve(root,'.native-input-p2/ssh')+'/'));
+assert(fixture.startsWith(resolve(root,'.artifacts/tests/native-input-p2/ssh')+'/'));
 const combinations=[];
 for(const version of['4.1','4.4','5.3'])for(const transport of['local','ssh'])for(const scenario of['history-small','history-default','history-custom','history-empty','history-unset','jobs',...(transport==='ssh'?['lifecycle']:[])])combinations.push({version,transport,scenario});
 const key=value=>`${value.version}/${value.transport}/${value.scenario}`;
@@ -17,7 +17,7 @@ const selection=values.case?new Set(values.case):undefined;
 if(selection)assert(selection.size===values.case.length&&[...selection].every(value=>combinations.some(item=>key(item)===value)),'Case selectors must be unique supported version/transport/scenario combinations');
 const selected=selection?combinations.filter(value=>selection.has(key(value))):combinations;
 if(values['list-cases']){console.log(JSON.stringify({execution:false,fullMatrix:!selection,cases:selected}));process.exit(0);}
-const directory=resolve(root,'.native-input-p2/app-matrix',randomUUID());await mkdir(directory,{recursive:true,mode:0o700});
+const directory=resolve(root,'.artifacts/tests/native-input-p2/app-matrix',randomUUID());await mkdir(directory,{recursive:true,mode:0o700});
 const steps=[];const failures=[];let current;let interrupted=false;let preparationBlocked=false;
 for(const signal of['SIGINT','SIGTERM'])process.once(signal,()=>{interrupted=true;current?.kill(signal);});
 let failure;

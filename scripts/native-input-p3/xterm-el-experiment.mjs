@@ -13,13 +13,13 @@ const hash=path=>createHash('sha256').update(readFileSync(path)).digest('hex');
 const pin=JSON.parse(readFileSync(resolve(owner,'scripts/dependency-builds/xterm/build.json'),'utf8'));
 function run(command,args,cwd,log,environment={}){try{const output=execFileSync(command,args,{cwd,env:{...process.env,...environment},encoding:'utf8',maxBuffer:32*1024*1024});writeFileSync(log,output);}catch(error){writeFileSync(log,String(error.stdout??'')+String(error.stderr??''));throw new Error('Isolated upstream dependency build failed; inspect its retained build log');}}
 if(action==='prepare'){
- const id=randomUUID(),directory=resolve(owner,'.native-input-p3/xterm-el-experiment',id);mkdirSync(directory,{recursive:true});
- const archive=resolve(owner,'.native-input-p0/formal-xterm-upstream/source.tar.gz');assert.equal(hash(archive),pin.archiveSha256);
+ const id=randomUUID(),directory=resolve(owner,'.artifacts/tests/native-input-p3/xterm-el-experiment',id);mkdirSync(directory,{recursive:true});
+ const archive=resolve(owner,'.artifacts/tests/native-input-p0/formal-xterm-upstream/source.tar.gz');assert.equal(hash(archive),pin.archiveSha256);
  const source=mkdtempSync(join(tmpdir(),'shellspan-p3-xterm-el-'));
  run('tar',['-xzf',archive,'--strip-components=1','-C',source],owner,resolve(directory,'extract.log'));
  for(const[path,expected]of Object.entries(pin.patches)){assert.equal(hash(resolve(owner,path)),expected);run('patch',['--batch','--fuzz=0','-p1','-i',resolve(owner,path)],source,resolve(directory,`${path.split('/').at(-1)}.log`));}
  assert.equal(hash(resolve(source,'package-lock.json')),pin.upstreamLockSha256);
- const tools=resolve(owner,'.native-input-p0/xterm-build-tools'),require=createRequire(resolve(tools,'package.json'));
+ const tools=resolve(owner,'.artifacts/tests/native-input-p0/xterm-build-tools'),require=createRequire(resolve(tools,'package.json'));
  const npmPackage=require.resolve('npm/package.json'),npm=JSON.parse(readFileSync(npmPackage));assert.equal(npm.version,pin.npm);
  const npmCli=resolve(dirname(npmPackage),npm.bin.npm);
  run(process.execPath,[npmCli,'ci','--ignore-scripts','--no-audit','--no-fund'],source,resolve(directory,'upstream-install.log'));
@@ -27,10 +27,10 @@ if(action==='prepare'){
  writeFileSync(resolve(directory,'experiment.json'),JSON.stringify(metadata,null,2));console.log(JSON.stringify(metadata));
 }else{
  const metadata=JSON.parse(readFileSync(process.argv[3],'utf8')),source=metadata.source,directory=metadata.directory;
- assert(source.startsWith(join(tmpdir(),'shellspan-p3-xterm-el-'))&&directory.startsWith(resolve(owner,'.native-input-p3/xterm-el-experiment')+'/'));
+ assert(source.startsWith(join(tmpdir(),'shellspan-p3-xterm-el-'))&&directory.startsWith(resolve(owner,'.artifacts/tests/native-input-p3/xterm-el-experiment')+'/'));
  const require=createRequire(resolve(source,'package.json'));
  for(const name of['typescript','webpack','esbuild'])assert.equal(require(`${name}/package.json`).version,pin[name]);
- const tools=createRequire(resolve(owner,'.native-input-p0/xterm-build-tools/package.json'));
+ const tools=createRequire(resolve(owner,'.artifacts/tests/native-input-p0/xterm-build-tools/package.json'));
  const esbuildPackage=tools.resolve('esbuild/package.json'),esbuildRequire=createRequire(esbuildPackage);
  const binary=esbuildRequire.resolve(`@esbuild/${process.platform}-${process.arch}/bin/esbuild`);
  const environment={ESBUILD_BINARY_PATH:binary};

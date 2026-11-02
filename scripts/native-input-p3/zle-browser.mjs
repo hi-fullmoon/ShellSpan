@@ -9,7 +9,7 @@ import {captureValidationSources} from '../native-input-p2/frozen-validation.mjs
 const root=resolve(import.meta.dirname,'../..');
 const inputs=process.argv.slice(2).map(path=>resolve(path));assert(inputs.length>0);
 const sources=captureValidationSources(root);const installed=await installedRuntimeManifest();
-const directory=resolve(root,'.native-input-p3/browser',randomUUID());await mkdir(directory,{recursive:true});
+const directory=resolve(root,'.artifacts/tests/native-input-p3/browser',randomUUID());await mkdir(directory,{recursive:true});
 const assets={'/xterm.js':['node_modules/@xterm/xterm/lib/xterm.js','application/javascript'],
   '/xterm.css':['node_modules/@xterm/xterm/css/xterm.css','text/css'],
   '/webgl.js':['node_modules/@xterm/addon-webgl/lib/addon-webgl.js','application/javascript'],

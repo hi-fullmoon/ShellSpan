@@ -1,7 +1,7 @@
 param([Parameter(Mandatory=$true)][string]$DataDirectory,[Parameter(Mandatory=$true)][string]$Workspace)
 $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
 $data=[IO.Path]::GetFullPath($DataDirectory);$root=[IO.Path]::GetFullPath($Workspace)
-if(-not $data.StartsWith($root+'\.native-input-p2\',[StringComparison]::OrdinalIgnoreCase)){throw 'Publisher verification requires owned isolated data'}
+if(-not $data.StartsWith($root+'\.artifacts/tests/native-input-p2\',[StringComparison]::OrdinalIgnoreCase)){throw 'Publisher verification requires owned isolated data'}
 $name='PSReadLine.format.ps1xml';$expected='1ca887463598d38aa18236a97a4193b2228d1d8434fa73cc8c7932f42a0565cf'
 $source=Join-Path $root ('src-tauri/resources/powershell/PSReadLine/2.4.5/'+$name)
 if((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()-cne $expected){throw 'Approved upstream publisher file changed'}

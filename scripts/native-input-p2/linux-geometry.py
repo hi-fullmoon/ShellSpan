@@ -263,5 +263,5 @@ for item in entries:
 summary = inputs.with_name('geometry-summary.json')
 summary.write_text(json.dumps(results, ensure_ascii=False, indent=2))
 host_summary = Path(entries[0]['hostDirectory']).parent / 'geometry-summary.json'
-(ROOT / '.native-input-p2/latest-linux-geometry.json').write_text(json.dumps({'summary': str(host_summary)}))
+(ROOT / '.artifacts/tests/native-input-p2/latest-linux-geometry.json').write_text(json.dumps({'summary': str(host_summary)}))
 print(json.dumps({'scope': 'actual formal Linux target PTYs, not app transport simulation', 'result': 'PASS', 'cases': len(results), 'summary': str(host_summary)}))

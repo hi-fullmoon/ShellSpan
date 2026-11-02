@@ -55,7 +55,7 @@ try{
  $shells=@(@{kind='powerShell7';executable='D:\Programs\PowerShell\7\pwsh.exe'},@{kind='windowsPowerShell';executable=(Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe')})
  if($settings.shellKinds){foreach($kind in $settings.shellKinds){if($kind-notin @('powerShell7','windowsPowerShell')){throw 'Unknown actual shell kind'}};$shells=@($shells|Where-Object {$_.kind-in $settings.shellKinds});if(-not $shells.Count){throw 'At least one actual shell is required'}}
  foreach($shell in $shells){
-  $phase=Join-Path $root ('.native-input-p2/'+$(if($shell.kind-eq 'windowsPowerShell'){'w51-'}else{'w7-'})+$runId);New-Item -ItemType Directory -Path $phase|Out-Null
+  $phase=Join-Path $root ('.artifacts/tests/native-input-p2/'+$(if($shell.kind-eq 'windowsPowerShell'){'w51-'}else{'w7-'})+$runId);New-Item -ItemType Directory -Path $phase|Out-Null
   $shell.phase=$phase;$env:SHELLSPAN_LOCAL_SHELL=$shell.executable;$env:SHELLSPAN_DATA_DIR=Join-Path $phase 'data'
   & $shell.executable -NoLogo -NoProfile -NonInteractive -File scripts/fixtures/windows-shell-history-metadata.ps1 -Output (Join-Path $phase 'history-before.json')
   if($LASTEXITCODE-ne 0){throw 'Actual selected shell history discovery failed'}

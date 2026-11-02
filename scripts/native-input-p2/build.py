@@ -16,7 +16,7 @@ import sys
 sys.dont_write_bytecode = True
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / '.native-input-p2'
+OUT = ROOT / '.artifacts/tests/native-input-p2'
 
 
 def main():
@@ -32,7 +32,7 @@ def main():
         target = 'linux-aarch64-glibc-2.36'
     else:
         raise RuntimeError('Unaccepted module OS/libc')
-    OUT.mkdir(exist_ok=True)
+    OUT.mkdir(parents=True, exist_ok=True)
     log = OUT / f'build-{host}.log'
 
     def run(command, env=None):
@@ -99,7 +99,7 @@ def main():
     # Source archives, exact GNU patches and license notices accompany modules.
     notices = catalogue / 'sources'
     notices.mkdir(exist_ok=True)
-    for path in (ROOT / '.native-input-p0/upstream').iterdir():
+    for path in (ROOT / '.artifacts/tests/native-input-p0/upstream').iterdir():
         if path.is_file() and (path.name.endswith('.tar.gz') or path.name.startswith('readline83-')):
             shutil.copy2(path, notices / path.name)
     for name in ['COPYING', 'AUTHORS']:

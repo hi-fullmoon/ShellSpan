@@ -18,8 +18,8 @@ const captures=await Promise.all(manifest.cases.map(async name=>({
   frames:JSON.parse(await readFile(path.join(input,name,'timeline.json'),'utf8'))
 })));
 const assets={
-  '/baseline.js':['.native-input-p0/xterm-reflow-lab/xterm-baseline.js','application/javascript'],
-  '/candidate.js':[candidateRuntime('.native-input-p0/xterm-reflow-lab/xterm.js'),'application/javascript'],
+  '/baseline.js':['.artifacts/tests/native-input-p0/xterm-reflow-lab/xterm-baseline.js','application/javascript'],
+  '/candidate.js':[candidateRuntime('.artifacts/tests/native-input-p0/xterm-reflow-lab/xterm.js'),'application/javascript'],
   '/webgl.js':['node_modules/@xterm/addon-webgl/lib/addon-webgl.js','application/javascript'],
   '/xterm.css':['node_modules/@xterm/xterm/css/xterm.css','text/css']
 };
@@ -195,8 +195,8 @@ const summary={kind:'real PTY terminal-program bytes + browser public API librar
   captureHashes:await Promise.all(captures.map(async capture=>({name:capture.name,
     files:Object.fromEntries(await Promise.all(['pty.bin','timeline.json','scenario.json'].map(async name=>
       [name,createHash('sha256').update(await readFile(path.join(input,capture.name,name))).digest('hex')])))}))),
-  candidateManifest:JSON.parse(await readFile('.native-input-p0/xterm-reflow-lab/manifest.json','utf8')),
-  baselineManifest:JSON.parse(await readFile('.native-input-p0/xterm-reflow-lab/baseline-manifest.json','utf8')),
+  candidateManifest:JSON.parse(await readFile('.artifacts/tests/native-input-p0/xterm-reflow-lab/manifest.json','utf8')),
+  baselineManifest:JSON.parse(await readFile('.artifacts/tests/native-input-p0/xterm-reflow-lab/baseline-manifest.json','utf8')),
   results};
 await writeFile(path.join(output,'summary.json'),JSON.stringify(summary,null,2));
 const failures=results.filter(r=>r.result==='FAIL');

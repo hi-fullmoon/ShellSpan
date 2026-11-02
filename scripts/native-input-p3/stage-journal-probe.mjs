@@ -5,7 +5,7 @@ import {mkdirSync,writeFileSync,readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 const kind=process.argv[2]??'journal';assert(['journal','scratch'].includes(kind));
 const project=`scripts/native-input-p3/${kind}-probe`;
-const owner=resolve(import.meta.dirname,'../..'),id=randomUUID(),directory=resolve(owner,`.native-input-p3/windows-${kind}-probe`,id);mkdirSync(directory,{recursive:true});
+const owner=resolve(import.meta.dirname,'../..'),id=randomUUID(),directory=resolve(owner,`.artifacts/tests/native-input-p3/windows-${kind}-probe`,id);mkdirSync(directory,{recursive:true});
 const root=`D:/Developer/ShellSpan-native-input-p3-${kind}-probe-${id}`;
 const files=[`${project}/Cargo.toml`,`${project}/Cargo.lock`,`${project}/src/main.rs`,...(kind==='journal'?['src-tauri/src/terminal_command/journal.rs','src-tauri/src/terminal_command/protocol.rs']:['src-tauri/src/agent_runtime/scratch_storage.rs'])];
 const sources=()=>Object.fromEntries(files.map(path=>[path,createHash('sha256').update(readFileSync(resolve(owner,path))).digest('hex')]));const before=sources();

@@ -126,7 +126,7 @@ jobs:
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: native-linux-bash
-          path: .native-input-p2/resources/native-input
+          path: .artifacts/tests/native-input-p2/resources/native-input
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
@@ -171,7 +171,7 @@ jobs:
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: native-linux-bash
-          path: .native-input-p2/resources/native-input
+          path: .artifacts/tests/native-input-p2/resources/native-input
 
       - name: Setup pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
@@ -214,9 +214,10 @@ jobs:
           # 用 tag 推导出的版本号覆盖配置，使测试构建（如 2.0.30-test.1）的包版本与 tag 一致
           # signingIdentity 覆盖为 adhoc：配置文件里的 "ShellSpan Dev" 是开发者本机钥匙串里的
           # 自签名证书，runner 上没有；自签名对 Gatekeeper 本就无效，CI 用 adhoc 签名即可
-          node -e 'console.log(JSON.stringify({version: process.env.APP_VERSION, build: {beforeBuildCommand: ""}, bundle: {macOS: {signingIdentity: "-"}}}))' > tauri-ci-override.json
+          mkdir -p .artifacts/config
+          node -e 'console.log(JSON.stringify({version: process.env.APP_VERSION, build: {beforeBuildCommand: ""}, bundle: {macOS: {signingIdentity: "-"}}}))' > .artifacts/config/tauri-ci-override.json
           read -r -a bundle_args <<< "$BUNDLE_ARGS"
-          pnpm exec tauri build --target "$RUST_TARGET" "${bundle_args[@]}" --config tauri-ci-override.json
+          pnpm exec tauri build --target "$RUST_TARGET" "${bundle_args[@]}" --config .artifacts/config/tauri-ci-override.json
         env:
           APP_VERSION: ${{ needs.preflight.outputs.version }}
           BUNDLE_ARGS: ${{ matrix.bundle_args }}
@@ -238,8 +239,9 @@ jobs:
           # 用 tag 推导出的版本号覆盖配置，使测试构建（如 2.0.30-test.1）的包版本与 tag 一致
           # Windows 只发布 NSIS 安装包，更新包固定为 .nsis.zip：
           # MSI 会安装到不同目录，对 NSIS 安装做原地更新会错位。
-          @{ version = $env:APP_VERSION; build = @{ beforeBuildCommand = '' } } | ConvertTo-Json -Compress | Set-Content -Path tauri-ci-override.json
-          pnpm exec tauri build --target $env:RUST_TARGET --bundles nsis --config tauri-ci-override.json
+          New-Item -ItemType Directory -Force -Path .artifacts/config | Out-Null
+          @{ version = $env:APP_VERSION; build = @{ beforeBuildCommand = '' } } | ConvertTo-Json -Compress | Set-Content -Path .artifacts/config/tauri-ci-override.json
+          pnpm exec tauri build --target $env:RUST_TARGET --bundles nsis --config .artifacts/config/tauri-ci-override.json
 
       - name: Prepare release artifact
         shell: bash
@@ -248,7 +250,7 @@ jobs:
           RUST_TARGET: ${{ matrix.rust_target }}
           UPDATER_SUFFIX: ${{ matrix.updater_suffix }}
         run: |
-          mkdir -p release-artifact
+          mkdir -p .artifacts/releases/staging
           bundle_dir="src-tauri/target/$RUST_TARGET/release/bundle"
           if [[ ! -d "$bundle_dir" ]]; then
             bundle_dir="src-tauri/target/release/bundle"
@@ -285,14 +287,14 @@ jobs:
             codesign --verify --deep --strict --verbose=2 "$app_path"
           fi
 
-          cp -R "$bundle_dir" release-artifact/bundle
+          cp -R "$bundle_dir" .artifacts/releases/staging/bundle
 
           if [[ "$PLATFORM" == darwin-* ]]; then
-            archive="$(find release-artifact/bundle -type f -name '*.app.tar.gz' | head -n 1)"
-            dmg="$(find release-artifact/bundle -type f -name '*.dmg' | head -n 1)"
+            archive="$(find .artifacts/releases/staging/bundle -type f -name '*.app.tar.gz' | head -n 1)"
+            dmg="$(find .artifacts/releases/staging/bundle -type f -name '*.dmg' | head -n 1)"
             if [[ -z "$archive" || ! -f "${archive}.sig" || -z "$dmg" ]]; then
               echo "Required macOS release assets are incomplete" >&2
-              find release-artifact/bundle -type f -print >&2
+              find .artifacts/releases/staging/bundle -type f -print >&2
               exit 1
             fi
 
@@ -304,17 +306,17 @@ jobs:
           else
             # Windows 只发布 NSIS：更新包固定为 .nsis.zip（MSI 会安装到不同目录，
             # 对 NSIS 安装做原地更新会错位），此处仅校验产物完整。
-            installer_count="$(find release-artifact/bundle -type f -name '*-setup.exe' | wc -l | tr -d ' ')"
-            nsis_updater="$(find release-artifact/bundle -type f -name '*.nsis.zip' | head -n 1)"
+            installer_count="$(find .artifacts/releases/staging/bundle -type f -name '*-setup.exe' | wc -l | tr -d ' ')"
+            nsis_updater="$(find .artifacts/releases/staging/bundle -type f -name '*.nsis.zip' | head -n 1)"
             if [[ -z "$nsis_updater" || "$installer_count" != "1" ]]; then
               echo "Required Windows release assets are missing or ambiguous" >&2
-              find release-artifact/bundle -type f -print >&2
+              find .artifacts/releases/staging/bundle -type f -print >&2
               exit 1
             fi
             UPDATER_SUFFIX=".nsis.zip"
           fi
 
-          cat > release-artifact/release-metadata.json <<EOF
+          cat > .artifacts/releases/staging/release-metadata.json <<EOF
           {
             "platform": "$PLATFORM",
             "updaterArchiveSuffix": "$UPDATER_SUFFIX"
@@ -325,7 +327,8 @@ jobs:
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: bundle-${{ matrix.platform }}
-          path: release-artifact
+          path: .artifacts/releases/staging
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
@@ -362,7 +365,7 @@ jobs:
       - name: Download bundle artifacts
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
-          path: release-inputs
+          path: .artifacts/releases/inputs
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

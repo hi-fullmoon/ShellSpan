@@ -11,9 +11,9 @@ const target=process.platform==='darwin'&&process.arch==='arm64'?'macos-arm64':p
 assert(target&&pin.targets[target]);const specification=pin.targets[target];
 if(process.platform==='linux')assert.equal(execFileSync('getconf',['GNU_LIBC_VERSION'],{encoding:'utf8'}).trim(),'glibc 2.36');
 const main='/bin/zsh',mainSha256=hash(main);assert.equal(mainSha256,specification.mainSha256);
-const archive=resolve(process.argv[2]??resolve(root,'.native-input-p3/dependencies/zsh-5.9.tar.xz')),patch=resolve(root,pin.patch);
+const archive=resolve(process.argv[2]??resolve(root,'.artifacts/tests/native-input-p3/dependencies/zsh-5.9.tar.xz')),patch=resolve(root,pin.patch);
 assert.equal(hash(archive),pin.archiveSha256);assert.equal(hash(patch),pin.patchSha256);
-const directory=resolve(root,'.native-input-p3/pinned-core',randomUUID());mkdirSync(directory,{recursive:true,mode:0o700});
+const directory=resolve(root,'.artifacts/tests/native-input-p3/pinned-core',randomUUID());mkdirSync(directory,{recursive:true,mode:0o700});
 const source=resolve(directory,`zsh-${pin.version}`),prefix=resolve(directory,'install'),fd=openSync(resolve(directory,'build.log'),'wx');
 const configureArgs=[`--prefix=${prefix}`,'--disable-gdbm','--with-tcsetpgrp',specification.unicode9Default?'--enable-unicode9':'--disable-unicode9','CFLAGS=-O2 -std=gnu89'];
 const inputs={pinSha256:hash(pinPath),patchSha256:hash(patch),archiveSha256:hash(archive),sourceHashes:pin.sourceHashes,target,main,mainSha256,configureArgs,productionProfileEnabled:false};

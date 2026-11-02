@@ -21,6 +21,6 @@ const comparisons=candidate.results.map(row=>{
  const sameRawCells=JSON.stringify(actual.cells)===JSON.stringify(baseline.cells),sameCopy=actual.copied===baseline.copied;
  return{engine:row.engine,renderer:row.renderer,index:row.index,sourceDigest:row.sourceDigest,sameRawCells,sameCopy};
 });
-const directory=resolve(owner,'.native-input-p3/scoped-default-compare',randomUUID());await mkdir(directory,{recursive:true});
+const directory=resolve(owner,'.artifacts/tests/native-input-p3/scoped-default-compare',randomUUID());await mkdir(directory,{recursive:true});
 await writeFile(resolve(directory,'result.json'),JSON.stringify({stockPath,candidatePath,coreSha256:producer.editorSha256,scope:'actual ordinary stock vs candidate default-zero LF/Tab/CR; exact raw cells, wrap flags and public copy; no full ABI or native-App claim',comparisons},null,2));
 console.log(JSON.stringify({directory,cases:comparisons.length,passed:comparisons.filter(x=>x.sameRawCells&&x.sameCopy).length}));assert(comparisons.every(x=>x.sameRawCells&&x.sameCopy));

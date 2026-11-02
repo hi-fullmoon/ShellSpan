@@ -5,8 +5,8 @@ import {mkdirSync,readFileSync,writeFileSync,copyFileSync,openSync,closeSync} fr
 import {resolve,join} from 'node:path';
 assert(process.platform==='win32'&&process.arch==='x64','Windows providers must be rebuilt on actual Windows x64');
 const root=resolve(import.meta.dirname,'../..');
-const resources=resolve(root,'.native-input-p2/resources/native-input');mkdirSync(resources,{recursive:true});
-const directory=resolve(root,'.native-input-p3');mkdirSync(directory,{recursive:true});
+const resources=resolve(root,'.artifacts/tests/native-input-p2/resources/native-input');mkdirSync(resources,{recursive:true});
+const directory=resolve(root,'.artifacts/tests/native-input-p3');mkdirSync(directory,{recursive:true});
 const sha=path=>createHash('sha256').update(readFileSync(path)).digest('hex');
 const sourcePaths=['Cargo.toml','Cargo.lock','src/lib.rs','src/ffi.rs','zle.c','zle.zsh','psreadline.cs','psreadline.ps1'].map(path=>`src-tauri/native-input-editors/${path}`);
 sourcePaths.push('src-tauri/src/terminal_command/protocol.rs','src-tauri/src/terminal_jobs.rs','src-tauri/src/terminal_jobs.ps1','src-tauri/src/terminal_job_host.cs','src-tauri/src/terminal_console_signals.cs');

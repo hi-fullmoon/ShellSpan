@@ -9,7 +9,7 @@ import {fileURLToPath} from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const source=realpathSync(process.env.SHELLSPAN_P0_ORIGINAL_PACKAGE??path.join(root,'node_modules/@xterm/xterm'));
 const copyFix=process.argv.includes('--copy-fix');
-const out=path.join(root,copyFix?'.native-input-p0/xterm-copy-lab':'.native-input-p0/xterm-reflow-lab');
+const out=path.join(root,copyFix?'.artifacts/tests/native-input-p0/xterm-copy-lab':'.artifacts/tests/native-input-p0/xterm-reflow-lab');
 const baseline=process.argv.includes('--baseline');
 mkdirSync(out,{recursive:true});
 const copy=path.join(out,baseline?'source-baseline-copy':'source-copy');

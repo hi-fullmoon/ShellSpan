@@ -208,7 +208,7 @@ let frozenInterrupted;
 if(frozenNativeRun)for(const signal of['SIGINT','SIGTERM'])process.once(signal,()=>{frozenInterrupted=signal;settle({ok:false,error:`Isolated frozen validation interrupted (${signal})`});});
 const frozenManifestPath=frozenNativeRun?resolve(ownedEvidenceDirectory,`frozen-manifest-${token}.json`):undefined;
 const frozenSources=frozenNativeRun?captureValidationSources(repository):undefined;
-const nativeResourcesDirectory=frozenNativeRun&&values['data-scope']==='com.shellspan.validation.native-input-p3'?resolve(repository,'.native-input-p2/resources/native-input'):undefined;
+const nativeResourcesDirectory=frozenNativeRun&&values['data-scope']==='com.shellspan.validation.native-input-p3'?resolve(repository,'.artifacts/tests/native-input-p2/resources/native-input'):undefined;
 const nativeResources=nativeResourcesDirectory?captureValidationAssets(nativeResourcesDirectory):undefined;
 if(frozenNativeRun)writeFrozenCheckpoint(resolve(ownedEvidenceDirectory,`frozen-${token}-before-frontend-build.json`),{sources:frozenSources,entry:pagePath,hmr:false,tauriWatch:false});
 const output = frozenNativeRun?resolve(ownedEvidenceDirectory,`frontend-${token}`):performanceRun ? await mkdtemp(resolve(tmpdir(), 'shellspan-agent-performance-')) : undefined;
@@ -560,7 +560,7 @@ try {
   if(values['native-input-p2-ssh-fixture']){
     assert(values['native-input-p2']&&values['native-jobs'],'P2 SSH requires the explicit native acceptance mode');
     const fixturePath=resolve(values['native-input-p2-ssh-fixture']);
-    assert(fixturePath.startsWith(resolve(repository,'.native-input-p2/ssh')+'/'),'SSH fixture must belong to this isolated task root');
+    assert(fixturePath.startsWith(resolve(repository,'.artifacts/tests/native-input-p2/ssh')+'/'),'SSH fixture must belong to this isolated task root');
     const fixture=JSON.parse(await readFile(fixturePath,'utf8'));
     assert(fixture.host==='127.0.0.1'&&Number.isInteger(fixture.port)&&fixture.port>1024);
     assert(/^shellspan-nip-p2-[a-f0-9-]{36}$/.test(fixture.container));
@@ -598,7 +598,7 @@ try {
       minWidth: 1200, minHeight: 760, visible: true, focus: true, alwaysOnTop: true,
       transparent: true, titleBarStyle: 'Overlay',
     }] } } : {}),
-  })], { cwd: repository, env: frozenNativeRun?{...nativeEnvironment,CARGO_TARGET_DIR:values['data-scope']==='com.shellspan.validation.native-input-p3'&&process.env.SHELLSPAN_P3_BUILD_CACHE?process.env.SHELLSPAN_P3_BUILD_CACHE:resolve(repository,'.native-input-p2/frozen-target'),SHELLSPAN_ACCEPTANCE_FROZEN_MANIFEST:frozenManifestPath,
+  })], { cwd: repository, env: frozenNativeRun?{...nativeEnvironment,CARGO_TARGET_DIR:values['data-scope']==='com.shellspan.validation.native-input-p3'&&process.env.SHELLSPAN_P3_BUILD_CACHE?process.env.SHELLSPAN_P3_BUILD_CACHE:resolve(repository,'.artifacts/tests/native-input-p2/frozen-target'),SHELLSPAN_ACCEPTANCE_FROZEN_MANIFEST:frozenManifestPath,
     ...(frozenWindows?{RUSTUP_TOOLCHAIN:'1.95.0-x86_64-pc-windows-msvc',CARGO_BUILD_TARGET:'x86_64-pc-windows-msvc'}:{})}:nativeEnvironment, stdio: ['ignore', 'ignore', 'inherit'], detached: process.platform !== 'win32' });
   child.once('error', (error) => settle({ ok: false, error: error.message }));
   child.once('exit', (code) => settle({ ok: false, error: `Tauri exited before reporting results (${code})` }));
@@ -643,8 +643,8 @@ try {
     if(processes.length){
       frozenImageStarted=true;const application=processes[0];
       const frozenSource=JSON.parse(await readFile(frozenManifestPath,'utf8'));
-      const isolatedImage=frozenWindows?values['data-scope']==='com.shellspan.validation.native-input-p3':frozenSource.root.includes('.native-input-p3/acceptance-source/');
-      const imageParent=isolatedImage?ownedEvidenceDirectory:resolve(repository,'.native-input-p2/frozen-target');
+      const isolatedImage=frozenWindows?values['data-scope']==='com.shellspan.validation.native-input-p3':frozenSource.root.includes('.artifacts/tests/native-input-p3/acceptance-source/');
+      const imageParent=isolatedImage?ownedEvidenceDirectory:resolve(repository,'.artifacts/tests/native-input-p2/frozen-target');
       assert(Number.isSafeInteger(application.appPid)&&application.appPid>1&&application.executable.startsWith(imageParent+sep));
       if(frozenWindows){
         execFileSync('powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-File',resolve(repository,'scripts/native-input-p3/windows-image.ps1'),

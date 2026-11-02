@@ -25,6 +25,19 @@ pnpm build
 pnpm test
 ```
 
+## Generated Artifacts
+
+Keep project-generated files under the ignored repository-root `.artifacts/`:
+
+- `tests/`: test logs, screenshots, native resources and acceptance snapshots.
+- `releases/`: downloaded inputs, staged bundles and publication output.
+- `config/`: generated build configuration, including CI Tauri overrides.
+
+Vitest excludes the entire directory so archived source trees cannot be
+rediscovered as tests. Keep tool-managed `node_modules`, `dist` and Cargo `target`
+directories in their standard locations. Committed regression captures remain
+beside their tests; their historical provenance and raw bytes are unchanged.
+
 ## Commit Guidelines
 
 > **Note**: All Git commit messages must be written in English.

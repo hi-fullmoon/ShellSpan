@@ -10,14 +10,14 @@ if(action==='stage'){
  const producerFile=resolve(process.argv[3]),parent=JSON.parse(readFileSync(producerFile,'utf8'));
  assert(parent.nativeAcceptance===false&&parent.productionChanges===false&&parent.unicode9Default===true);
  assert.equal(hash(parent.editor),parent.editorSha256);assert.equal(hash(parent.shell),parent.shellSha256);
- const archive=resolve(owner,'.native-input-p3/dependencies/zsh-5.9.tar.xz');assert.equal(hash(archive),parent.archiveSha256);
- const directory=resolve(owner,'.native-input-p3/scoped-core-revision',randomUUID());mkdirSync(directory,{recursive:true,mode:0o700});
+ const archive=resolve(owner,'.artifacts/tests/native-input-p3/dependencies/zsh-5.9.tar.xz');assert.equal(hash(archive),parent.archiveSha256);
+ const directory=resolve(owner,'.artifacts/tests/native-input-p3/scoped-core-revision',randomUUID());mkdirSync(directory,{recursive:true,mode:0o700});
  execFileSync('tar',['-xf',archive,'-C',directory],{stdio:'pipe'});const source=resolve(directory,'zsh-5.9');
  for(const [name,digest]of Object.entries(parent.nativeSourceHashes)){const from=resolve(parent.source,'Src/Zle',name);assert.equal(hash(from),digest);copyFileSync(from,resolve(source,'Src/Zle',name));}
  const stage={directory,source,prefix:resolve(directory,'install'),parent:producerFile,parentHashes:parent.nativeSourceHashes,archiveSha256:parent.archiveSha256,shell:parent.shell,shellSha256:parent.shellSha256,unicode9Default:true,sealed:false,nativeAcceptance:false,productionChanges:false};
  writeFileSync(resolve(directory,'stage.json'),JSON.stringify(stage,null,2),{flag:'wx'});console.log(JSON.stringify({directory,source,sealed:false}));
 }else if(action==='build'){
- const directory=resolve(process.argv[3]);assert(directory.startsWith(resolve(owner,'.native-input-p3/scoped-core-revision')+'/'));
+ const directory=resolve(process.argv[3]);assert(directory.startsWith(resolve(owner,'.artifacts/tests/native-input-p3/scoped-core-revision')+'/'));
  const file=resolve(directory,'stage.json'),stage=JSON.parse(readFileSync(file,'utf8'));assert(stage.directory===directory&&!stage.sealed);
  const hashes=Object.fromEntries(Object.keys(stage.parentHashes).map(name=>[name,hash(resolve(stage.source,'Src/Zle',name))]));
  assert.deepEqual(Object.keys(hashes).filter(name=>hashes[name]!==stage.parentHashes[name]),['zle_refresh.c']);

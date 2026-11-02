@@ -7,8 +7,8 @@ import {resolve} from 'node:path';
 import {captureValidationSources} from '../native-input-p2/frozen-validation.mjs';
 import {auditEditorResources} from './editor-resources.mjs';
 assert.equal(process.platform,'darwin');
-const root=resolve(import.meta.dirname,'../..');const directory=resolve(root,'.native-input-p3/geometry-capture',randomUUID());await mkdir(directory,{recursive:true});
-assert.equal(JSON.parse(await readFile(resolve(root,'.native-input-p3/snapshot-index.json'),'utf8')).root,root,'Use a complete isolated source snapshot');
+const root=resolve(import.meta.dirname,'../..');const directory=resolve(root,'.artifacts/tests/native-input-p3/geometry-capture',randomUUID());await mkdir(directory,{recursive:true});
+assert.equal(JSON.parse(await readFile(resolve(root,'.artifacts/tests/native-input-p3/snapshot-index.json'),'utf8')).root,root,'Use a complete isolated source snapshot');
 const eof=process.argv[2]==='eof',guards=process.argv[2]==='guards';assert(process.argv.length===2||eof||guards);
 const expectedCases=guards?5:eof?14:1;
 const resourcesBefore=auditEditorResources(root,'macos-arm64');assert(resourcesBefore.selectedValid);
@@ -25,7 +25,7 @@ const buildCode=await built;await writeFile(resolve(directory,'build.log'),Buffe
 const hash=async path=>createHash('sha256').update(await readFile(path)).digest('hex');
 const shellSha256=await hash('/bin/zsh');
 const binary=resolve(directory,'native-zle-tests');const digest=await hash(executable);await copyFile(executable,binary);await chmod(binary,0o700);assert.equal(await hash(binary),digest);
-const actual=resolve(root,guards?'.native-input-p3/zle-guards':eof?'.native-input-p3/zle-eof':'.native-input-p3/production-zle');await mkdir(actual,{recursive:true});
+const actual=resolve(root,guards?'.artifacts/tests/native-input-p3/zle-guards':eof?'.artifacts/tests/native-input-p3/zle-eof':'.artifacts/tests/native-input-p3/production-zle');await mkdir(actual,{recursive:true});
 const results=[];
 for(const entry of(guards?[{columns:100,stage:'guards'}]:eof?[{columns:100,stage:'eof'}]:[...[32,40,100,180].map(columns=>({columns,stage:'running'})),{columns:100,stage:'handoff'}])){
   const before=new Set(await readdir(actual));const log=await open(resolve(directory,`${entry.columns}-${entry.stage}.log`),'wx');

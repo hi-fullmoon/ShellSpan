@@ -19,7 +19,7 @@ if(experiment){
 const searchCases=JSON.parse(await readFile('scripts/native-input-p0/copy-search-cases.json','utf8'));
 const stockOrdinary=process.argv.includes('--ordinary-stock-only');
 const input=path.resolve(process.argv[2]),output=path.resolve(process.argv[3]??path.join(input,'browser'));await mkdir(output,{recursive:true});
-const corpora=[{root:input,primary:true},{root:path.resolve(process.env.SHELLSPAN_P0_COPY_LEGACY_ROOT??'.native-input-p0/dependency-compat-pty-v4'),primary:false}];
+const corpora=[{root:input,primary:true},{root:path.resolve(process.env.SHELLSPAN_P0_COPY_LEGACY_ROOT??'.artifacts/tests/native-input-p0/dependency-compat-pty-v4'),primary:false}];
 const captures=[];
 for(const corpus of corpora){
   const manifest=JSON.parse(await readFile(path.join(corpus.root,'manifest.json'),'utf8'));
@@ -31,8 +31,8 @@ if(stockOrdinary)for(let i=captures.length-1;i>=0;i--)if(!captures[i].scenario.n
 const caseFilters=process.argv.filter(arg=>arg.startsWith('--case=')).map(arg=>arg.slice(7));
 if(caseFilters.length)for(let i=captures.length-1;i>=0;i--)if(!caseFilters.includes(captures[i].scenario.name))captures.splice(i,1);
 const assets={
-  '/baseline.js':[stockOrdinary?(formalRuntime?originalRuntime:'node_modules/@xterm/xterm/lib/xterm.js'):'.native-input-p0/xterm-copy-lab/xterm-baseline.js','application/javascript'],
-  '/candidate.js':[experimentalRuntime??candidateRuntime('.native-input-p0/xterm-copy-lab/xterm.js'),'application/javascript'],
+  '/baseline.js':[stockOrdinary?(formalRuntime?originalRuntime:'node_modules/@xterm/xterm/lib/xterm.js'):'.artifacts/tests/native-input-p0/xterm-copy-lab/xterm-baseline.js','application/javascript'],
+  '/candidate.js':[experimentalRuntime??candidateRuntime('.artifacts/tests/native-input-p0/xterm-copy-lab/xterm.js'),'application/javascript'],
   '/webgl.js':['node_modules/@xterm/addon-webgl/lib/addon-webgl.js','application/javascript'],
   '/search.js':['node_modules/@xterm/addon-search/lib/addon-search.js','application/javascript'],
   '/xterm.css':['node_modules/@xterm/xterm/css/xterm.css','text/css']
@@ -180,9 +180,9 @@ const summary={kind:'actual PTY/public API copy compatibility; stronger ordinary
   installedRuntime:experiment?undefined:installed,
   ...(experiment?{experimentalRuntime:{manifest:experimentPath,path:experimentalRuntime,sha256:experiment.artifacts['lib/xterm.js']},referenceInstalledRuntime:installed}:{}),
   directUnmodifiedStockComparison:stockOrdinary,
-  candidateManifest:experiment??installed??JSON.parse(await readFile('.native-input-p0/xterm-copy-lab/manifest.json','utf8')),
+  candidateManifest:experiment??installed??JSON.parse(await readFile('.artifacts/tests/native-input-p0/xterm-copy-lab/manifest.json','utf8')),
   baselineManifest:stockOrdinary?{kind:'unmodified original xterm 6.0.0',bundleSha256:createHash('sha256').update(await readFile(formalRuntime?originalRuntime:'node_modules/@xterm/xterm/lib/xterm.js')).digest('hex')}:
-    JSON.parse(await readFile('.native-input-p0/xterm-copy-lab/baseline-manifest.json','utf8')),
+    JSON.parse(await readFile('.artifacts/tests/native-input-p0/xterm-copy-lab/baseline-manifest.json','utf8')),
   captures:await Promise.all(captures.map(async c=>({root:c.root,name:c.name,sha256:createHash('sha256').update(await readFile(path.join(c.root,c.name,'pty.bin'))).digest('hex')}))),results};
 await writeFile(path.join(output,'summary.json'),JSON.stringify(summary,null,2));
 console.log(JSON.stringify({caseLanes:results.length,applicableCandidate:results.filter(r=>r.bundle==='candidate'&&r.applicable).length,

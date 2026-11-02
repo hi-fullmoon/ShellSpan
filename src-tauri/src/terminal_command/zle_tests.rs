@@ -85,7 +85,7 @@ fn native_zle_private_namespace_guards_preserve_user_definitions() {
     ] {
         let run = uuid::Uuid::new_v4().to_string();
         let evidence = owner
-            .join(".native-input-p3/zle-guards")
+            .join(".artifacts/tests/native-input-p3/zle-guards")
             .join(format!("{kind}-{run}"));
         let home = evidence.join("home");
         fs::create_dir_all(&home).unwrap();
@@ -119,7 +119,7 @@ fn native_zle_private_namespace_guards_preserve_user_definitions() {
         }
         let prepared = PreparedNativeBash::prepare(
             std::path::Path::new("/bin/zsh"),
-            &owner.join(".native-input-p2/resources/native-input"),
+            &owner.join(".artifacts/tests/native-input-p2/resources/native-input"),
         )
         .unwrap();
         let pair = native_pty_system()
@@ -297,7 +297,7 @@ fn native_zle_private_eof_preserves_ordinary_input_and_user_hooks() {
     ] {
         let run = uuid::Uuid::new_v4().to_string();
         let evidence = owner
-            .join(".native-input-p3/zle-eof")
+            .join(".artifacts/tests/native-input-p3/zle-eof")
             .join(format!("{phase}-{run}"));
         fs::create_dir_all(&evidence).unwrap();
         let home = evidence.join("home");
@@ -313,7 +313,7 @@ fn native_zle_private_eof_preserves_ordinary_input_and_user_hooks() {
         scoped_observers(&home);
         let prepared = PreparedNativeBash::prepare(
             std::path::Path::new("/bin/zsh"),
-            &owner.join(".native-input-p2/resources/native-input"),
+            &owner.join(".artifacts/tests/native-input-p2/resources/native-input"),
         )
         .unwrap();
         let pair = native_pty_system()
@@ -911,9 +911,9 @@ fn native_zle_private_eof_preserves_ordinary_input_and_user_hooks() {
 fn native_editor_default_admission_is_closed() {
     assert!(std::env::var_os("SHELLSPAN_NATIVE_EDITOR_VALIDATION_ROOT").is_none());
     let owner = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    let resources = owner.join(".native-input-p2/resources/native-input");
+    let resources = owner.join(".artifacts/tests/native-input-p2/resources/native-input");
     let evidence = owner
-        .join(".native-input-p3/editor-admission")
+        .join(".artifacts/tests/native-input-p3/editor-admission")
         .join(uuid::Uuid::new_v4().to_string());
     fs::create_dir_all(&evidence).unwrap();
     let catalogue = super::editors::read_catalogue(&resources, "macos-arm64").err();
@@ -936,12 +936,12 @@ fn native_editor_default_admission_is_closed() {
 #[ignore = "requires actual macOS ZLE, rebuilt resource and the real Broker/private channel"]
 fn native_zle_manifest_paths_reject_before_prepare() {
     let owner = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    let resources = owner.join(".native-input-p2/resources/native-input");
+    let resources = owner.join(".artifacts/tests/native-input-p2/resources/native-input");
     let target = "macos-arm64";
     let actual = super::editors::read_catalogue(&resources, target).unwrap();
     assert!(!actual.is_empty());
     let evidence = owner
-        .join(".native-input-p3/manifest-paths")
+        .join(".artifacts/tests/native-input-p3/manifest-paths")
         .join(uuid::Uuid::new_v4().to_string());
     fs::create_dir_all(&evidence).unwrap();
     let original: serde_json::Value = serde_json::from_slice(
@@ -1007,7 +1007,7 @@ fn native_zle_actual_broker_display_binding() {
     assert!(cfg!(all(target_os = "macos", target_arch = "aarch64")));
     let owner = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
     let evidence = owner
-        .join(".native-input-p3/broker-display-binding")
+        .join(".artifacts/tests/native-input-p3/broker-display-binding")
         .join(uuid::Uuid::new_v4().to_string());
     fs::create_dir_all(&evidence).unwrap();
     let home = evidence.join("home");
@@ -1016,7 +1016,7 @@ fn native_zle_actual_broker_display_binding() {
     let shell = std::path::Path::new("/bin/zsh");
     let resources = super::editors::validation_resource_root()
         .unwrap()
-        .unwrap_or_else(|| owner.join(".native-input-p2/resources/native-input"));
+        .unwrap_or_else(|| owner.join(".artifacts/tests/native-input-p2/resources/native-input"));
     fs::write(
         evidence.join("actual-resource-root.txt"),
         resources.to_str().unwrap(),
@@ -1205,7 +1205,7 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
     let owner = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
     let run = uuid::Uuid::new_v4().to_string();
     let session_id = format!("p3-zle-{run}");
-    let evidence = owner.join(".native-input-p3/production-zle").join(&run);
+    let evidence = owner.join(".artifacts/tests/native-input-p3/production-zle").join(&run);
     fs::create_dir_all(&evidence).unwrap();
     let home = evidence.join("home");
     fs::create_dir(&home).unwrap();
@@ -1251,7 +1251,7 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
     fs::write(home.join(".zlogin"), "P3_STARTUP_ORDER+=:login\n").unwrap();
     let prepared = PreparedNativeBash::prepare(
         shell,
-        &owner.join(".native-input-p2/resources/native-input"),
+        &owner.join(".artifacts/tests/native-input-p2/resources/native-input"),
     )
     .unwrap();
     let binding = prepared.profile.display_binding();

@@ -40,7 +40,7 @@ try {
     ReactDOM.createRoot(root).render(React.createElement(KeychainPanel));
   }, { publicKey, fingerprint, host: hostname(), username: userInfo().username });
 
-  await mkdir('.drawer-review', { recursive: true });
+  await mkdir('.artifacts/tests/workbench', { recursive: true });
   for (const width of [1440, 960, 420]) {
     await page.setViewportSize({ width, height: 720 });
     await page.getByRole('heading', { name: '凭据管理', exact: true }).waitFor();
@@ -62,7 +62,7 @@ try {
     assert.equal(new Set(searchLayout.tops).size, 1, 'Search and actions must remain on one row');
     assert.ok(searchLayout.right <= searchLayout.containerRight, 'Search must shrink to keep actions visible');
     if (process.argv.includes('--search-only')) {
-      await page.screenshot({ path: `.drawer-review/credential-search-${width}.png` });
+      await page.screenshot({ path: `.artifacts/tests/workbench/credential-search-${width}.png` });
       continue;
     }
     assert.equal(await page.getByText('SSH 密钥 · Ed25519', { exact: true }).count(), 1,
@@ -79,7 +79,7 @@ try {
     });
     assert.ok((await helpPanel.innerText()).includes(description));
     assert.equal(await page.locator('#credential-review .grid').evaluate((grid) => grid.getBoundingClientRect().top), cardTop);
-    await page.screenshot({ path: `.drawer-review/credential-help-${width}.png` });
+    await page.screenshot({ path: `.artifacts/tests/workbench/credential-help-${width}.png` });
     await page.keyboard.press('Escape');
     await helpPanel.waitFor({ state: 'hidden' });
     await help.focus();
@@ -112,7 +112,7 @@ try {
     assert.deepEqual(await opacity(), ['0', '0'], 'Card actions must be hidden at rest');
     await card.hover();
     assert.deepEqual(await opacity(), ['1', '1'], 'Hovering anywhere on the card must reveal both actions');
-    await page.screenshot({ path: `.drawer-review/credential-hover-${width}.png` });
+    await page.screenshot({ path: `.artifacts/tests/workbench/credential-hover-${width}.png` });
     await page.mouse.move(0, 0);
     await search.focus();
     await page.keyboard.press('Tab');
@@ -121,7 +121,7 @@ try {
     assert.ok(await actions.first().evaluate((button) => button === document.activeElement), 'Edit must remain keyboard reachable');
     assert.equal((await opacity())[0], '1', 'Keyboard focus must reveal the focused action');
     await search.focus();
-    await page.screenshot({ path: `.drawer-review/credentials-${width}.png` });
+    await page.screenshot({ path: `.artifacts/tests/workbench/credentials-${width}.png` });
     await page.getByRole('button', { name: '编辑', exact: true }).click();
     const drawer = page.getByRole('dialog');
     await drawer.waitFor();
@@ -146,7 +146,7 @@ try {
     assert.ok(scrollLayout.scrollable, 'Short windows need a scrolling form');
     assert.ok(scrollLayout.footerBottom <= scrollLayout.height, 'Save must remain visible');
     assert.equal(scrollLayout.border, '0px');
-    await page.screenshot({ path: `.drawer-review/credential-drawer-${width}.png` });
+    await page.screenshot({ path: `.artifacts/tests/workbench/credential-drawer-${width}.png` });
     await drawer.getByRole('button', { name: '关闭', exact: true }).click();
     await drawer.waitFor({ state: 'hidden' });
     await page.getByRole('button', { name: '删除', exact: true }).click();

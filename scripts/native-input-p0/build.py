@@ -13,7 +13,7 @@ import subprocess
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / '.native-input-p0'
+OUT = ROOT / '.artifacts/tests/native-input-p0'
 PINNED = {
     '4.1': '3f627124a83c6d34db503a923e20710d370573a29dd5d11d6f116d1aee7be1da',
     '4.4': 'd86b3392c1202e8ff5a423b302e6284db7f8f435ea9f39b5b1b20fd3ac36dfcb',
@@ -67,7 +67,7 @@ def main():
     parser.add_argument('--headers', default='/opt/homebrew/include/bash')
     parser.add_argument('--versions', default='4.1,4.4,5.3')
     args = parser.parse_args()
-    OUT.mkdir(exist_ok=True)
+    OUT.mkdir(parents=True, exist_ok=True)
     host = platform.system().lower()
     build = OUT / f'build-{host}'
     log = OUT / f'build-{host}.log'

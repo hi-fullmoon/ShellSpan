@@ -19,7 +19,7 @@ try {
     document.body.append(root);
     ReactDOM.createRoot(root).render(React.createElement(Workbench));
   });
-  await mkdir('.drawer-review', { recursive: true });
+  await mkdir('.artifacts/tests/workbench', { recursive: true });
   for (const width of [1440, 800, 420]) {
     await page.setViewportSize({ width, height: 720 });
     const heights = [];
@@ -54,7 +54,7 @@ try {
       assert.equal(metrics.height, 32, `${tab}: scrollbar must not consume control height`);
       assert.ok(metrics.controls.every((height) => height <= metrics.height), `${tab}: controls must fit vertically`);
       assert.equal(metrics.clippedSearch, false, `${tab}: search focus ring must have top, bottom and left clearance at ${width}px`);
-      await page.screenshot({ path: `.drawer-review/header-${tab}-${width}.png` });
+      await page.screenshot({ path: `.artifacts/tests/workbench/header-${tab}-${width}.png` });
       const scrollEdges = await actions.evaluate((element) => {
         element.scrollLeft = element.scrollWidth;
         const last = element.lastElementChild.getBoundingClientRect();

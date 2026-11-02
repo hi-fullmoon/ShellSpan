@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 const [sourceFile, discoveryFile, output] = process.argv.slice(2);
 const root = process.cwd();
 const relativeOutput = path.relative(root, path.resolve(output)).split(path.sep).join('/');
-assert(relativeOutput.startsWith('.phase4-acceptance/') && !fs.existsSync(output));
+assert(relativeOutput.startsWith('.artifacts/tests/phase4-acceptance/') && !fs.existsSync(output));
 const read = file => JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
 const digest = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const source = read(sourceFile);

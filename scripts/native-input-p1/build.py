@@ -8,7 +8,7 @@ import shutil
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / '.native-input-p0/p1-protocol-build'
+OUT = ROOT / '.artifacts/tests/native-input-p0/p1-protocol-build'
 
 def main():
     if platform.system() != 'Darwin' or platform.machine() != 'arm64':
@@ -33,8 +33,8 @@ def main():
     shutil.copy2(ROOT / 'scripts/native-input-p0/bridge.c', source)
     for patch in ['scripts/native-input-p0/inband-display.patch', 'scripts/native-input-p1/display.patch']:
         run(['patch', '--batch', '-p1', '-i', ROOT / patch], OUT)
-    build = ROOT / '.native-input-p0/build-darwin'
-    upstream = ROOT / '.native-input-p0/upstream/bash-5.3'
+    build = ROOT / '.artifacts/tests/native-input-p0/build-darwin'
+    upstream = ROOT / '.artifacts/tests/native-input-p0/upstream/bash-5.3'
     includes = [build / 'readline-8.3.6/install/include', build / 'bash-5.3-readline-8.3.6', upstream, upstream / 'include']
     library = OUT / 'rust/debug/libshellspan_native_input_p0.a'
     run(['cc', '-bundle', '-undefined', 'dynamic_lookup', *[f'-I{p}' for p in includes], *[f'-I{p / "lib"}' for p in includes],

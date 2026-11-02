@@ -9,12 +9,12 @@ import {captureValidationSources} from './frozen-validation.mjs';
 
 const owner=resolve(import.meta.dirname,'../..');
 const baseline=resolve(process.argv[2]);const currentMode=process.argv[3]==='--current';const reference=currentMode?undefined:resolve(process.argv[3]);
-assert(baseline.startsWith(resolve(owner,'.native-input-p2/baseline')+'/'));
-assert(currentMode||reference.startsWith(resolve(owner,'.native-input-p2/app-')));
+assert(baseline.startsWith(resolve(owner,'.artifacts/tests/native-input-p2/baseline')+'/'));
+assert(currentMode||reference.startsWith(resolve(owner,'.artifacts/tests/native-input-p2/app-')));
 const sha=path=>createHash('sha256').update(readFileSync(path)).digest('hex');
 const head=readFileSync(resolve(baseline,'head.txt'),'utf8').trim();assert(/^[a-f0-9]{40}$/.test(head));
 const before=captureValidationSources(owner);
-const directory=resolve(owner,'.native-input-p2/acceptance-source',randomUUID());mkdirSync(directory,{recursive:true,mode:0o700});
+const directory=resolve(owner,'.artifacts/tests/native-input-p2/acceptance-source',randomUUID());mkdirSync(directory,{recursive:true,mode:0o700});
 const sourceRoot=resolve(directory,'ShellSpan');
 execFileSync('git',['clone','--quiet','--shared','--no-checkout',owner,sourceRoot],{stdio:'pipe'});
 execFileSync('git',['-C',sourceRoot,'update-ref','refs/heads/codex/p2-validation-source',head]);
@@ -47,16 +47,16 @@ for(const path of shared){
   drift.push({path,baselineSha256:old,currentSha256:current,diff:relative(owner,diffPath),diffSha256:sha(diffPath)});
 }
 assert.deepEqual(captureValidationSources(owner),before,'Owner source changed while the validation snapshot was being copied');
-for(const path of['.native-input-p2/resources/native-input','.native-input-p2/producers','src-tauri/resources/native-input']){
+for(const path of['.artifacts/tests/native-input-p2/resources/native-input','.artifacts/tests/native-input-p2/producers','src-tauri/resources/native-input']){
   mkdirSync(resolve(sourceRoot,path,'..'),{recursive:true});cpSync(resolve(owner,path),resolve(sourceRoot,path),{recursive:true});
 }
 const fixture='87e1754d-ca4c-4689-95ea-27faea5c8f27';
-mkdirSync(resolve(sourceRoot,'.native-input-p2/ssh',fixture),{recursive:true});
-cpSync(resolve(owner,'.native-input-p2/ssh',fixture,'fixture.json'),resolve(sourceRoot,'.native-input-p2/ssh',fixture,'fixture.json'));
+mkdirSync(resolve(sourceRoot,'.artifacts/tests/native-input-p2/ssh',fixture),{recursive:true});
+cpSync(resolve(owner,'.artifacts/tests/native-input-p2/ssh',fixture,'fixture.json'),resolve(sourceRoot,'.artifacts/tests/native-input-p2/ssh',fixture,'fixture.json'));
 const metadata={createdAt:new Date().toISOString(),ownerRoot:owner,sourceRoot,baseline:relative(owner,baseline),head,
   archives:Object.fromEntries(['HEAD.tar.gz','worktree.patch','untracked.tgz'].map(name=>[name,sha(resolve(baseline,name))])),
   scope:'Isolated P2 source acceptance; does not certify the evolving whole workspace',core,overlays,sharedDrift:drift,
   sharedDriftReviewed:drift.length===0,modelConfiguration:'Read current owning native preferences at each case; never restore an old route or credential'};
-writeFileSync(resolve(sourceRoot,'.native-input-p2/source-snapshot.json'),JSON.stringify(metadata,null,2),{mode:0o600});
+writeFileSync(resolve(sourceRoot,'.artifacts/tests/native-input-p2/source-snapshot.json'),JSON.stringify(metadata,null,2),{mode:0o600});
 writeFileSync(resolve(directory,'snapshot.json'),JSON.stringify(metadata,null,2),{mode:0o600});
 console.log(JSON.stringify({directory,sourceRoot,sharedDrift:drift,reviewRequired:true}));

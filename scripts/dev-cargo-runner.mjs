@@ -77,7 +77,7 @@ async function main() {
   // Cargo releases its artifact lock before running. Other builds can replace
   // target/debug/ShellSpan while it is alive, invalidating Keychain checks.
   // Give each normal development process its own signed application image.
-  const isolatedP3=frozenManifest&&JSON.parse(await readFile(frozenManifest,'utf8')).root.includes('.native-input-p3/acceptance-source/');
+  const isolatedP3=frozenManifest&&JSON.parse(await readFile(frozenManifest,'utf8')).root.includes('.artifacts/tests/native-input-p3/acceptance-source/');
   const image = await mkdtemp(join(isolatedP3?evidenceDirectory:dirname(executable), '.shellspan-dev-'));
   try {
     const bundle = join(image, 'ShellSpan Dev.app');

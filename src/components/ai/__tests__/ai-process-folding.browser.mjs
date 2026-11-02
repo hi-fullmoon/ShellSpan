@@ -7,7 +7,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { chromium, webkit } from 'playwright';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
-const output = `${root}.ai-ui-checks/process-folding`;
+const output = `${root}.artifacts/tests/ai-ui/process-folding`;
 await mkdir(output, { recursive: true });
 // Optional complete real runtime log, replayed without changing any event.
 const runtimeEvents = process.argv[2]
