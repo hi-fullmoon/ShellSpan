@@ -22,15 +22,15 @@ import '@/components/ai/styles/styles.css';
 
 const tool: AiConversationNodeOf<'tool'> = {
   kind: 'tool',
-  key: 'tool:call-phase5',
+  key: 'tool:call-workflow',
   sourceKind: 'agent',
-  sessionId: 'agent-phase5',
+  sessionId: 'agent-workflow',
   turnId: 'turn-1',
   stepId: 'step-1',
   firstSeq: 4,
   lastSeq: 7,
   timestamp: '2026-09-03T00:00:00.000Z',
-  callId: 'call-phase5',
+  callId: 'call-workflow',
   name: 'terminal.exec',
   nativeName: 'exec_command',
   title: null,
@@ -38,7 +38,7 @@ const tool: AiConversationNodeOf<'tool'> = {
   state: 'approval',
   effect: 'stateChange',
   durationMs: null,
-  detailRef: { kind: 'agentTool', sessionId: 'agent-phase5', callId: 'call-phase5' },
+  detailRef: { kind: 'agentTool', sessionId: 'agent-workflow', callId: 'call-workflow' },
   evidenceRefs: ['evidence-1'],
   input: { command: 'systemctl restart nginx', explanation: 'Restart the web server to apply its new configuration.' },
   output: null,
@@ -46,7 +46,7 @@ const tool: AiConversationNodeOf<'tool'> = {
   target: { kind: 'remote', targetId: 'prod-1', sessionId: 'terminal-1', label: 'Production' },
   idempotency: 'conditional',
   approval: {
-    approvalId: 'approval-phase5',
+    approvalId: 'approval-workflow',
     requestId: 'request-1',
     status: 'requested',
     risk: 'stateChange',
@@ -60,7 +60,7 @@ const artifact: AiConversationNodeOf<'artifact'> = {
   kind: 'artifact',
   key: 'artifact:report',
   sourceKind: 'agent',
-  sessionId: 'agent-phase5',
+  sessionId: 'agent-workflow',
   turnId: 'turn-1',
   stepId: 'step-1',
   firstSeq: 8,
@@ -76,12 +76,12 @@ const artifact: AiConversationNodeOf<'artifact'> = {
 };
 
 const pendingApproval: AiPendingApproval = {
-  sessionId: 'agent-phase5',
+  sessionId: 'agent-workflow',
   turnId: 'turn-1',
   stepId: 'step-1',
   requestId: 'request-1',
   callId: tool.callId,
-  approvalId: 'approval-phase5',
+  approvalId: 'approval-workflow',
   risk: 'stateChange',
   prompt: 'Allow exec_command on prod-1 for Session task task-1?\n\nNative effect: StateChange\nTTL: 60000 ms',
   reason: 'nativePolicyRequiresApproval',
@@ -96,7 +96,7 @@ const pendingApproval: AiPendingApproval = {
 function agentView(approval: AiPendingApproval | null = null): AiSessionView {
   return {
     summary: {
-      id: 'agent-phase5',
+      id: 'agent-workflow',
       kind: 'agent',
       title: 'Deploy safely',
       updatedAt: '2026-09-03T00:00:01.000Z',
@@ -107,7 +107,7 @@ function agentView(approval: AiPendingApproval | null = null): AiSessionView {
     snapshot: {
       kind: 'agent',
       value: {
-        header: { sessionId: 'agent-phase5', taskId: 'task-1', goal: 'Deploy safely', executionSurface: 'direct', createdAtUnixMs: 1 },
+        header: { sessionId: 'agent-workflow', taskId: 'task-1', goal: 'Deploy safely', executionSurface: 'direct', createdAtUnixMs: 1 },
         status: approval ? 'waiting' : 'running',
         ended: false,
         archived: false,
@@ -147,7 +147,7 @@ beforeEach(async () => {
 
 afterEach(() => cleanup());
 
-describe('AI workspace Phase 5 workflows', () => {
+describe('AI workspace workflows', () => {
   it('folds the committed Runtime task plan above the Composer', async () => {
     const user = userEvent.setup();
     render(<AiWorkspaceRoot view={agentView()} scope="terminal" />);
@@ -211,7 +211,7 @@ describe('AI workspace Phase 5 workflows', () => {
       phase: 'waitingApproval',
       runtimeStatus: 'waiting',
       waitingApproval: true,
-      sessionId: 'agent-phase5',
+      sessionId: 'agent-workflow',
       draft: 'preserved draft',
     });
     const { container, rerender } = render(
@@ -287,7 +287,7 @@ describe('AI workspace Phase 5 workflows', () => {
         scope="terminal"
         composerState={createAiComposerState({
           phase: 'waitingApproval', runtimeStatus: 'waiting', waitingApproval: true,
-          sessionId: 'agent-phase5',
+          sessionId: 'agent-workflow',
         })}
         approvalArguments={{ inputKind: 'paste', text: 'printf "review-before-run"\n' }}
       />,
@@ -312,7 +312,7 @@ describe('AI workspace Phase 5 workflows', () => {
     };
     const composer = createAiComposerState({
       phase: 'waitingApproval', runtimeStatus: 'waiting', waitingApproval: true,
-      sessionId: 'agent-phase5',
+      sessionId: 'agent-workflow',
     });
     const { rerender } = render(
       <AiWorkspaceRoot
@@ -346,7 +346,7 @@ describe('AI workspace Phase 5 workflows', () => {
   it('shows approval pending and failure without reporting an approved result', () => {
     const composer = createAiComposerState({
       phase: 'waitingApproval', runtimeStatus: 'waiting', waitingApproval: true,
-      sessionId: 'agent-phase5', draft: 'keep me',
+      sessionId: 'agent-workflow', draft: 'keep me',
     });
     const { rerender } = render(
       <AiWorkspaceRoot
@@ -372,9 +372,9 @@ describe('AI workspace Phase 5 workflows', () => {
     const user = userEvent.setup();
     function Harness(): React.ReactNode {
       const [navigation, setNavigation] = useState<AiWorkspaceNavigationState>({
-        ...createAiWorkspaceNavigationState('agent-phase5'),
-        route: { kind: 'toolDetails' as const, sessionId: 'agent-phase5', nodeKey: tool.key },
-        returnFocus: { sessionId: 'agent-phase5', nodeKey: tool.key },
+        ...createAiWorkspaceNavigationState('agent-workflow'),
+        route: { kind: 'toolDetails' as const, sessionId: 'agent-workflow', nodeKey: tool.key },
+        returnFocus: { sessionId: 'agent-workflow', nodeKey: tool.key },
       });
       return (
         <div style={{ width: 720, height: 600 }}>
@@ -384,7 +384,7 @@ describe('AI workspace Phase 5 workflows', () => {
             navigation={navigation}
             onBack={() => setNavigation((current) => ({
               ...current,
-              route: { kind: 'conversation', sessionId: 'agent-phase5' },
+              route: { kind: 'conversation', sessionId: 'agent-workflow' },
             }))}
             onRouteReturnComplete={() => setNavigation((current) => ({ ...current, returnFocus: null }))}
           />
@@ -468,7 +468,7 @@ describe('AI workspace Phase 5 workflows', () => {
       bodyBase64: btoa('lazy report'),
       truncated: false,
     }));
-    const initial = createAiWorkspaceNavigationState('agent-phase5');
+    const initial = createAiWorkspaceNavigationState('agent-workflow');
     const { rerender } = render(
       <AiWorkspaceRoot view={agentView()} scope="terminal" navigation={initial} loadArtifact={loadArtifact} />,
     );
@@ -478,12 +478,12 @@ describe('AI workspace Phase 5 workflows', () => {
       <AiWorkspaceRoot
         view={agentView()}
         scope="terminal"
-        navigation={{ ...initial, route: { kind: 'artifactDetails', sessionId: 'agent-phase5', artifactId: 'report' } }}
+        navigation={{ ...initial, route: { kind: 'artifactDetails', sessionId: 'agent-workflow', artifactId: 'report' } }}
         loadArtifact={loadArtifact}
       />,
     );
     expect(await screen.findByText('lazy report')).toBeVisible();
-    expect(loadArtifact).toHaveBeenCalledWith('agent-phase5', 'report', 256 * 1024);
+    expect(loadArtifact).toHaveBeenCalledWith('agent-workflow', 'report', 256 * 1024);
 
     // Streaming projections recreate the artifact node even when its content is unchanged.
     const preview = screen.getByText('lazy report');
@@ -492,7 +492,7 @@ describe('AI workspace Phase 5 workflows', () => {
         <AiWorkspaceRoot
           view={{ ...agentView(), throughSeq, nodes: [tool, { ...artifact }] }}
           scope="terminal"
-          navigation={{ ...initial, route: { kind: 'artifactDetails', sessionId: 'agent-phase5', artifactId: 'report' } }}
+          navigation={{ ...initial, route: { kind: 'artifactDetails', sessionId: 'agent-workflow', artifactId: 'report' } }}
           loadArtifact={loadArtifact}
         />,
       );
@@ -505,7 +505,7 @@ describe('AI workspace Phase 5 workflows', () => {
       <AiWorkspaceRoot
         view={{ ...agentView(), nodes: [tool, { ...artifact, sha256: 'updated-content' }] }}
         scope="terminal"
-        navigation={{ ...initial, route: { kind: 'artifactDetails', sessionId: 'agent-phase5', artifactId: 'report' } }}
+        navigation={{ ...initial, route: { kind: 'artifactDetails', sessionId: 'agent-workflow', artifactId: 'report' } }}
         loadArtifact={loadArtifact}
       />,
     );
@@ -582,7 +582,7 @@ describe('AI workspace Phase 5 workflows', () => {
       <AiWorkspaceRoot
         view={agentView()}
         scope="terminal"
-        navigation={createAiWorkspaceNavigationState('agent-phase5')}
+        navigation={createAiWorkspaceNavigationState('agent-workflow')}
         onOpenTool={vi.fn()}
       />,
     );

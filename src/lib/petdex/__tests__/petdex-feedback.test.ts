@@ -18,7 +18,7 @@ import {
   PETDEX_PHASE3_FEEDBACK_URL,
 } from '@/lib/petdex/petdex-feedback';
 
-describe('Petdex Phase 3 feedback link', () => {
+describe('Petdex feedback link', () => {
   beforeEach(() => {
     tauriMocks.invoke.mockReset().mockResolvedValue(undefined);
     tauriMocks.isTauriRuntime.mockReset().mockReturnValue(true);

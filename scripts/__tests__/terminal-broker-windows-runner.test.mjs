@@ -32,7 +32,7 @@ function benchmarkOutput(profile, rows = [...throughputRows, ...latencyRows]) {
   ].join('\n');
 }
 
-describe('Windows Phase 2 acceptance runner fail-closed contracts', () => {
+describe('Windows broker acceptance runner fail-closed contracts', () => {
   it('scopes the native jobs candidate to its child test without changing inherited defaults', () => {
     const inherited = Object.freeze({ PATH: process.env.PATH, SHELLSPAN_NATIVE_POWERSHELL_JOBS: '1' });
     expect(windowsTestEnvironment(false, inherited).SHELLSPAN_NATIVE_POWERSHELL_JOBS).toBe('0');

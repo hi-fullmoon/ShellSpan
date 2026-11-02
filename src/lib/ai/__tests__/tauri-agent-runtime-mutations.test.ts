@@ -12,7 +12,7 @@ import {
 
 beforeEach(() => invoke.mockReset().mockResolvedValue({}));
 
-describe('Phase 6 Agent Runtime Tauri wrappers', () => {
+describe('Agent Runtime mutation Tauri wrappers', () => {
   it('forwards the complete mutation contract without flattening revision or operation id', async () => {
     const input = {
       sessionId: 'session-1',

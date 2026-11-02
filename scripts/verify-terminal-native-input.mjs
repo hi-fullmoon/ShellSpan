@@ -3,12 +3,22 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
+
+const { values: args } = parseArgs({ options: {
+  upstream: { type: 'boolean' },
+  'browser-only': { type: 'boolean' },
+  'native-only': { type: 'boolean' },
+  ssh: { type: 'boolean' },
+} });
+
+if (args['browser-only'] && args['native-only']) {
+  throw new Error('Choose either --browser-only or --native-only; their combination would run no local checks');
+}
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const output = path.join(root, '.native-input-p0');
 mkdirSync(output, { recursive: true });
-const args = process.argv.slice(2);
-const research=args.includes('--research-profile');
 function run(command, parameters, logName) {
   const result = spawnSync(command, parameters, { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
   if (logName) writeFileSync(path.join(output, logName), `${result.stdout ?? ''}${result.stderr ?? ''}\nexit=${result.status}\n`);
@@ -18,35 +28,25 @@ function run(command, parameters, logName) {
   return result.status ?? 1;
 }
 let failed = false;
-if(research) {
-  if(run('node',['scripts/native-input-p0/build-xterm-lab.mjs'],'research-dependency-build.log')) process.exit(1);
-  process.env.SHELLSPAN_P0_XTERM_LAB='1';
-  process.env.SHELLSPAN_P0_REFLOW_CURSOR='1';
-}
 const runDirectory=path.join(output,'runs',new Date().toISOString().replaceAll(':','-'));
 mkdirSync(runDirectory,{recursive:true});
-if (!args.includes('--browser-only')) {
+if (!args['browser-only']) {
   const buildArgs = ['scripts/native-input-p0/build.py'];
-  if (args.includes('--upstream')) buildArgs.push('--upstream');
+  if (args.upstream) buildArgs.push('--upstream');
   if (run('python3', buildArgs, 'build-entry.log')) process.exit(1);
   const host = process.platform === 'darwin' ? 'darwin' : 'linux';
   const builds = JSON.parse(readFileSync(path.join(output, `build-${host}.json`), 'utf8'));
   for (const [version, build] of Object.entries(builds)) {
     const captures=path.join(runDirectory,`${host}-${version}`);
     failed = Boolean(run('python3', ['scripts/native-input-p0/acceptance.py', '--shell', build.shell,
-      '--bridge', build.bridge, '--output', captures,'--display-profile',research?'append':'legacy'], `${host}-${version}.log`)) || failed;
+      '--bridge', build.bridge, '--output', captures,'--display-profile','legacy'], `${host}-${version}.log`)) || failed;
     process.env.SHELLSPAN_P0_CAPTURE_ROOT=captures;
   }
 }
-if (!args.includes('--native-only')) {
+if (!args['native-only']) {
   failed = Boolean(run('node', ['scripts/native-input-p0/browser.mjs'], 'browser-entry.log')) || failed;
 }
-if (args.includes('--ssh')) {
-  failed = Boolean(run('python3', ['scripts/native-input-p0/ssh.py','--display-profile',research?'append':'legacy'], 'ssh-entry.log')) || failed;
-}
-if(research&&!args.includes('--native-only')) {
-  const captureRoot=process.env.SHELLSPAN_P0_CAPTURE_ROOT;
-  failed = Boolean(run('node',['scripts/verify-terminal-native-compat.mjs',
-    ...(captureRoot?['--shell',path.resolve(root,captureRoot,'bash')]:[])],'research-compatibility-entry.log')) || failed;
+if (args.ssh) {
+  failed = Boolean(run('python3', ['scripts/native-input-p0/ssh.py','--display-profile','legacy'], 'ssh-entry.log')) || failed;
 }
 process.exitCode = failed ? 1 : 0;

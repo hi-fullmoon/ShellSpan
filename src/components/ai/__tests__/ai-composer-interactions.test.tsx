@@ -52,7 +52,7 @@ beforeEach(async () => {
 
 afterEach(() => cleanup());
 
-describe('AiComposerSeat Phase 4 behavior', () => {
+describe('AiComposerSeat interactions', () => {
   it('matches the AI panel menu and offers file and folder actions', async () => {
     const user = userEvent.setup();
     render(<AiComposerSeat phase="active" status="idle" onPasteImages={vi.fn()} />);
@@ -437,7 +437,7 @@ describe('AiComposerSeat Phase 4 behavior', () => {
     expect(screen.getByRole('region', { name: 'Queued input' }).querySelectorAll('li')).toHaveLength(1);
   });
 
-  it('renders Runtime Inbox with lane, state, and Phase 6 mutation controls', () => {
+  it('renders Runtime Inbox with lane, state, and mutation controls', () => {
     render(<Harness initial={createAiComposerState()} />);
     const queue = screen.getByRole('region', { name: 'Queued input' });
     expect(queue).toBeVisible();

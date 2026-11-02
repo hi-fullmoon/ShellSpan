@@ -11,6 +11,7 @@ src-tauri/target
 /tauri-ci-override.json
 /.phase3-acceptance/
 /.phase4-acceptance/
+/.ai-ui-checks/
 /.drawer-review/
 /.sftp-cancellation/
 /.native-input-p0/

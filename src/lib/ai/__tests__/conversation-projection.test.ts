@@ -115,7 +115,7 @@ function requestHeader(
   };
 }
 
-describe('AI Phase 3 chat projection', () => {
+describe('AI chat projection', () => {
   it('keeps abandoned preparation evidence out of chat without hiding admitted failures', () => {
     const attempt = sessionEvent(0, {
       type: 'context/artifact', turnId: 'preparation', stepId: 'step-preparation',

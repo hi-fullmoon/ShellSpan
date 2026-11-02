@@ -2,6 +2,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import Ajv2020 from 'ajv/dist/2020.js';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '../..');
@@ -26,15 +27,25 @@ async function combinedSource(root) {
 }
 
 describe('single Agent Runtime architecture', () => {
-  it('requires an explicit storage directory for an isolated native validation app', () => {
+  it('keeps manual test pages out of the application bootstrap', async () => {
+    const main = await readFile(path.join(repositoryRoot, 'src/main.tsx'), 'utf8');
+    const { importedFiles } = ts.preProcessFile(main, true, true);
+    const testImports = importedFiles
+      .map(({ fileName }) => fileName)
+      .filter(fileName => /(?:^|\/)(?:tests|__tests__)\//.test(fileName));
+    expect(testImports).toEqual([]);
+  });
+
+  it('rejects unscheduled native acceptance before launching an application', () => {
     const environment = { ...process.env };
+    delete environment.SHELLSPAN_ALLOW_FOREGROUND_TESTS;
     delete environment.SHELLSPAN_DATA_DIR;
     const result = spawnSync(process.execPath, [
       path.join(repositoryRoot, 'scripts/verify-ai-session-stream.mjs'),
       '--data-scope', 'com.shellspan.validation.storage-check', '--no-model',
     ], { cwd: repositoryRoot, env: environment, encoding: 'utf8', timeout: 10_000 });
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('the app identifier does not isolate stored data');
+    expect(result.stderr).toContain('Native App acceptance is disabled by default');
   });
 
   it('contains no dead-code suppression or legacy runtime control plane', async () => {

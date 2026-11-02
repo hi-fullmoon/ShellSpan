@@ -11,7 +11,7 @@ import {
   agentSessionBaselineScenarios,
 } from '@/tests/fixtures/agent-session-baseline';
 
-describe('Agent Session Phase 0 deterministic baseline', () => {
+describe('Agent Session deterministic baseline', () => {
   it('covers every frozen benchmark scenario without a provider request', () => {
     expect(agentSessionBaselineScenarioIds).toEqual([
       'hello',
@@ -30,7 +30,7 @@ describe('Agent Session Phase 0 deterministic baseline', () => {
     ]);
 
     const all = agentSessionBaselineScenarios;
-    expect(all.hello.modelInput.systemPrompt).toContain('frozen Phase 0 fixture');
+    expect(all.hello.modelInput.systemPrompt).toContain('frozen Agent Session fixture');
     expect(all.hello.modelInput.context).toContain('/workspace/shellspan-fixture');
     expect(all['direct-answer'].events.some((event) => (
       event.type === 'assistant/message'

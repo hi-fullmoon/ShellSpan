@@ -213,7 +213,7 @@ it.each(['zh-CN', 'en-US'] as const)('keeps receipt checks and synchronization r
   expect(check).toBeEnabled();
 });
 
-describe('AiWorkspaceRoot Phase 3 skeleton', () => {
+describe('AiWorkspaceRoot conversation structure', () => {
   it.each(['zh-CN', 'en-US'] as const)('keeps the Agent header consistent with terminal availability in %s', async locale => {
     useAppStore.setState({ locale });
     await initI18n(locale);
@@ -747,7 +747,7 @@ describe('AiWorkspaceRoot Phase 3 skeleton', () => {
     expect(onOpen).toHaveBeenCalledWith(base.summary);
   });
 
-  it('keeps the stage6a question actionable outside process and preserves ordinary draft', async () => {
+  it('keeps the question actionable outside process and preserves ordinary draft', async () => {
     const base = agentView();
     const pendingQuestion: NonNullable<AiSessionView['pendingQuestion']> = {
       identity: { sessionId: 'session-fixture', turnId: 'turn-01', stepId: 'step-01', requestId: 'request-01', callId: 'q', questionRequestId: 'workspace-question' },

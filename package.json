@@ -29,8 +29,6 @@
     "test:terminal-command-redraw": "node src/components/terminal/__tests__/terminal-command-stream.browser.mjs",
     "test:terminal-native-input:p0": "node scripts/verify-terminal-native-input.mjs",
     "test:terminal-native-input:p0:ssh": "python3 scripts/native-input-p0/ssh.py",
-    "test:terminal-native-input:p0:background": "node scripts/verify-terminal-native-background.mjs",
-    "test:terminal-native-input:p0:compat": "node scripts/verify-terminal-native-compat.mjs",
     "test:terminal-native-input:p0:inband": "node scripts/verify-terminal-p0-formal.mjs --inband-only",
     "test:terminal-native-input:p0:copy": "node scripts/verify-terminal-p0-formal.mjs --copy-only",
     "test:terminal-native-input:p0:formal": "node scripts/verify-terminal-p0-formal.mjs",

@@ -61,7 +61,7 @@ const answered = sessionEvent(base.length + 2, {
   data: { submission: input, fingerprint: '0'.repeat(64) },
 });
 
-describe('Stage 6A committed question projections and IPC', () => {
+describe('Committed question projections and IPC', () => {
   it('keeps one stable chat question inside the process and one Activity identity on replay', () => {
     const events = [...base, questionCall, requested, answered];
     const chat = projectAgentChatNodes(events);

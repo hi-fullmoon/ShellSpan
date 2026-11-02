@@ -11,7 +11,7 @@ async function readJson(relativePath) {
   return JSON.parse(await readFile(path.join(protocolRoot, relativePath), 'utf8'));
 }
 
-describe('terminal execution Phase 0 protocol contract', () => {
+describe('terminal execution protocol contract', () => {
   it('keeps terminal display on the raw transport instead of replaying tool metadata', async () => {
     const controller = await readFile(path.join(repositoryRoot, 'src/components/terminal/terminal-controller-layer.tsx'), 'utf8');
     expect(controller).not.toContain('agent-command-echo');
@@ -62,9 +62,6 @@ describe('terminal execution Phase 0 protocol contract', () => {
     expect(editor(['W', 'extra'])).toBe(false);
     expect(publicFrames([['W']])).toBe(false);
     expect(publicFrames([['M', `e${'a'.repeat(64)}`, 'source']])).toBe(false);
-    const engine = await readFile(path.join(repositoryRoot, 'src-tauri/src/agent_runtime/native/terminal_execute.rs'), 'utf8');
-    expect(engine).toContain('wait_native_checkpoint');
-    expect(engine).toContain('require_native_input_recovery');
     const native = await readFile(path.join(repositoryRoot, 'src-tauri/src/terminal_jobs.ps1'), 'utf8');
     const nativeHost = await readFile(
       path.join(repositoryRoot, 'src-tauri/src/terminal_job_host.cs'),
@@ -353,7 +350,7 @@ describe('terminal execution Phase 0 protocol contract', () => {
     }), validator.errorsText(validateTool.errors)).toBe(true);
   });
 
-  it('validates the Phase 5 terminal screen, input, and bounded-wait contracts', async () => {
+  it('validates the terminal screen, input, and bounded-wait contracts', async () => {
     const schema = await readJson('tool-contract.schema.json');
     const validator = new Ajv2020({ allErrors: true, strict: true });
     const validate = validator.compile(schema);

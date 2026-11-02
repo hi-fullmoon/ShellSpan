@@ -53,7 +53,7 @@ beforeEach(async () => {
 });
 afterEach(cleanup);
 
-describe('Stage 6A question form', () => {
+describe('Question form', () => {
   it.each([
     ['submit', true], ['refresh', true], ['submit', false], ['refresh', false],
   ] as const)('preserves failure content and scroll position during %s recovery (retained issue: %s)', async (operation, withIssue) => {

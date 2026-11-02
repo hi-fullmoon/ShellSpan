@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '../..');
 
-describe('Terminal Execution Phase 4 remote SSH contracts', () => {
+describe('Terminal remote SSH runner contracts', () => {
   it('ships remote visible commands separately from remote interactive tools', async () => {
     const [broker, adapter, runtime, commands, models, manifest] = await Promise.all([
       readFile(path.join(repositoryRoot, 'src-tauri/src/terminal_broker.rs'), 'utf8'),

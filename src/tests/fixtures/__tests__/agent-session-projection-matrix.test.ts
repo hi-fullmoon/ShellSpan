@@ -113,7 +113,7 @@ const rows: readonly MatrixRow[] = [
   },
 ];
 
-describe('AI Panel Phase 6 acceptance matrix', () => {
+describe('AI Panel projection matrix', () => {
   it.each(rows)('$label has direct Event, Conversation, Activity, and Stats evidence', (row) => {
     const scenario = agentSessionBaselineScenarios[row.fixture];
 

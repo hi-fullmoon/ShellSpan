@@ -6,25 +6,14 @@ import {
   type AgentSessionRecordedToolCall,
 } from '@/types/agent-session';
 
-export const AGENT_BASELINE_FIXTURE_VERSION = 1 as const;
 export const AGENT_BASELINE_TIME_UNIX_MS = Date.parse('2026-09-03T00:00:00.000Z');
 export const AGENT_BASELINE_PROVIDER = 'deepseek' as const;
 export const AGENT_BASELINE_MODEL = 'deepseek-flash' as const;
 export const AGENT_BASELINE_REASONING_LEVEL = 'medium' as const;
 export const AGENT_BASELINE_PERMISSION: AgentSessionPermissionMode = 'requestApproval';
 
-export const AGENT_BASELINE_VISUAL = {
-  viewport: { width: 1280, height: 900 },
-  surface: { width: 720, height: 900 },
-  theme: 'light',
-  locale: 'zh-CN',
-  fontScale: 1,
-  deviceScaleFactor: 1,
-  reducedMotion: 'reduce',
-} as const;
-
 export const AGENT_BASELINE_SYSTEM_PROMPT = [
-  'You are ShellSpan Agent running against the frozen Phase 0 fixture.',
+  'You are ShellSpan Agent running against the frozen Agent Session fixture.',
   'Use only the declared read-only terminal tools and report durable evidence.',
 ].join('\n');
 
@@ -84,7 +73,6 @@ export interface AgentBaselineModelInput {
 }
 
 export interface AgentSessionBaselineScenario {
-  readonly fixtureVersion: typeof AGENT_BASELINE_FIXTURE_VERSION;
   readonly id: AgentSessionBaselineScenarioId;
   readonly title: string;
   readonly sessionId: string;
@@ -322,7 +310,6 @@ function scenario(
   pages?: AgentSessionBaselineScenario['pages'],
 ): AgentSessionBaselineScenario {
   return {
-    fixtureVersion: AGENT_BASELINE_FIXTURE_VERSION,
     id,
     title,
     sessionId: `baseline-${id}`,

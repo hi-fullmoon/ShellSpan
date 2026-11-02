@@ -1893,7 +1893,7 @@ describe('AiWorkspaceController', () => {
   });
 });
 
-describe('Stage 6B cold Session Skills consumer', () => {
+describe('Cold Session Skills consumer', () => {
   it.each(['draft', 'root', 'newSession'] as const)('ignores late initial history after user intent: %s', async intent => {
     connectedTerminal();
     let release!: (value: { sessions: AiSessionView['summary'][] }) => void;

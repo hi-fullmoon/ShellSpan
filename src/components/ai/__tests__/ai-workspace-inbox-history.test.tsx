@@ -40,7 +40,7 @@ beforeEach(async () => {
 
 afterEach(cleanup);
 
-describe('Phase 6 Queue Dock', () => {
+describe('Queue Dock', () => {
   it('shows receipt uncertainty and image-only inputs without offering unsafe edits', () => {
     render(<AiQueueDock items={[{ ...queue[0], state: 'pending', confirming: true,
       content: '', hasImages: true }]} />);
@@ -156,7 +156,7 @@ describe('Phase 6 Queue Dock', () => {
   });
 });
 
-describe('Phase 6 Session Browser rename', () => {
+describe('Session Browser rename', () => {
   it('routes the history-page new button straight to Agent', async () => {
     const user = userEvent.setup();
     const onNewSession = vi.fn();

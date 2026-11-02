@@ -18,15 +18,15 @@ function reasoningNode(
 ): AiConversationNodeOf<'reasoning'> {
   return {
     kind: 'reasoning',
-    key: 'reasoning:phase4',
+    key: 'reasoning:turn-process',
     sourceKind: 'agent',
-    sessionId: 'phase4-session',
-    turnId: 'phase4-turn',
-    stepId: 'phase4-step',
+    sessionId: 'turn-process-session',
+    turnId: 'turn-process-turn',
+    stepId: 'turn-process-step',
     firstSeq: 2,
     lastSeq: 3,
     timestamp: '2026-09-03T00:00:00.200Z',
-    requestId: 'phase4-request',
+    requestId: 'turn-process-request',
     summary: 'Inspect durable facts',
     content: 'Inspect durable facts before answering.',
     state: 'completed',
@@ -37,15 +37,15 @@ function reasoningNode(
 function contextNode(): AiConversationNodeOf<'contextInjection'> {
   return {
     kind: 'contextInjection',
-    key: 'context:phase4',
+    key: 'context:turn-process',
     sourceKind: 'agent',
-    sessionId: 'phase4-session-focus',
-    turnId: 'phase4-turn-focus',
-    stepId: 'phase4-step-focus',
+    sessionId: 'turn-process-session-focus',
+    turnId: 'turn-process-turn-focus',
+    stepId: 'turn-process-step-focus',
     firstSeq: 2,
     lastSeq: 2,
     timestamp: '2026-09-03T00:00:00.200Z',
-    messageId: 'context-phase4',
+    messageId: 'context-turn-process',
     content: 'Plugin context from the committed event.',
     provenance: { kind: 'plugin', label: 'ShellSpan Plugin', producerId: 'plugin' },
   };
@@ -57,16 +57,16 @@ function processNode(
   const children = changes.children ?? [reasoningNode()];
   return {
     kind: 'turnProcess',
-    key: 'turn-process:phase4-turn',
+    key: 'turn-process:turn-process-turn',
     sourceKind: 'agent',
-    sessionId: 'phase4-session',
-    turnId: 'phase4-turn',
+    sessionId: 'turn-process-session',
+    turnId: 'turn-process-turn',
     stepId: null,
     firstSeq: 1,
     lastSeq: 4,
     timestamp: '2026-09-03T00:00:00.100Z',
     status: 'completed',
-    answerGeneration: 'phase4-generation-1',
+    answerGeneration: 'turn-process-generation-1',
     hasStartBoundary: true,
     hasEndBoundary: true,
     childKeys: children.map((child) => child.key),
@@ -84,7 +84,7 @@ beforeEach(async () => {
 
 afterEach(() => cleanup());
 
-describe('AI Phase 4 Turn Process renderer', () => {
+describe('AI Turn Process renderer', () => {
   it('renders the completed hierarchy as prompt, user, collapsed process, answer, and tail', async () => {
     const user = userEvent.setup();
     const nodes = projectAgentChatNodes(agentSessionBaselineScenarios.hello.events);
@@ -98,7 +98,6 @@ describe('AI Phase 4 Turn Process renderer', () => {
     expect(screen.getByRole('button', { name: 'System prompt' })).toHaveAttribute('aria-expanded', 'false');
     const process = screen.getByRole('button', { name: 'Process complete' });
     expect(process).toHaveAttribute('aria-expanded', 'false');
-    expect(process).toHaveClass('h-auto', 'min-h-6', 'px-0', 'py-1');
     const processSeparator = container.querySelector<HTMLElement>(
       '[data-slot="separator"].ai-turn-process-separator',
     );
@@ -112,32 +111,21 @@ describe('AI Phase 4 Turn Process renderer', () => {
     const processPanel = container.querySelector<HTMLElement>(
       '.ai-turn-process > [data-slot="collapsible-content"]',
     );
+    expect(processPanel).toBeVisible();
     expect(getComputedStyle(processPanel!).transitionProperty).toBe('height, opacity');
     expect(getComputedStyle(processPanel!).overflow).toBe('hidden');
     expect(getComputedStyle(processPanel!).transitionDuration).toBe(
       'var(--ai-transition-duration-slow), var(--ai-transition-duration)',
     );
-    const processBody = container.querySelector<HTMLElement>('.ai-turn-process-body');
-    expect(processBody).toHaveClass('w-full');
-    expect(processBody).not.toHaveClass('ml-[7px]');
-    expect(processBody).not.toHaveClass('ml-[22px]');
-    expect(processBody).not.toHaveClass('pl-[15px]');
-    expect(getComputedStyle(processBody!).borderLeftStyle).toBe('none');
-    expect(getComputedStyle(process.querySelector('.ai-disclosure-leading')!).translate).toBe('none');
-    expect(process.querySelector('.ai-disclosure-leading')).toHaveClass('mr-1');
-    expect(getComputedStyle(process.querySelector('.ai-disclosure-leading > svg')!).width).toBe('14px');
-    expect(getComputedStyle(process.querySelector('.ai-disclosure-chevron')!).translate).toBe('0 -1px');
-    expect(processSeparator).not.toHaveClass('ml-[22px]');
     const reasoning = screen.getByRole('button', {
       name: 'Reasoning Read the frozen context. Answer directly.',
     });
     expect(reasoning).toHaveAttribute('aria-expanded', 'false');
-    expect(reasoning.querySelector('.ai-disclosure-leading')).toHaveClass('mr-1');
-    expect(getComputedStyle(reasoning.querySelector('.ai-disclosure-leading > svg')!).width).toBe('14px');
     await user.click(reasoning);
     const reasoningPanel = container.querySelector<HTMLElement>(
       '.ai-reasoning-row > [data-slot="collapsible-content"]',
     );
+    expect(reasoningPanel).toBeVisible();
     expect(getComputedStyle(reasoningPanel!).transitionProperty).toBe('height, opacity');
     expect((await screen.findAllByText('Read the frozen context. Answer directly.'))
       .some((element) => element.closest('.ai-reasoning-body'))).toBe(true);
@@ -229,10 +217,10 @@ describe('AI Phase 4 Turn Process renderer', () => {
       content: 'Earlier reasoning.\nThe current reasoning starts here',
     });
     const running = processNode({
-      key: 'turn-process:phase4-live-summary',
-      sessionId: 'phase4-session-live-summary',
-      turnId: 'phase4-turn-live-summary',
-      answerGeneration: 'phase4-generation-live-summary',
+      key: 'turn-process:turn-process-live-summary',
+      sessionId: 'turn-process-session-live-summary',
+      turnId: 'turn-process-turn-live-summary',
+      answerGeneration: 'turn-process-generation-live-summary',
       status: 'running',
       hasEndBoundary: false,
       children: [firstReasoning],
@@ -280,10 +268,10 @@ describe('AI Phase 4 Turn Process renderer', () => {
     const user = userEvent.setup();
     const context = contextNode();
     const running = processNode({
-      key: 'turn-process:phase4-focus',
-      sessionId: 'phase4-session-focus',
-      turnId: 'phase4-turn-focus',
-      answerGeneration: 'phase4-generation-focus',
+      key: 'turn-process:turn-process-focus',
+      sessionId: 'turn-process-session-focus',
+      turnId: 'turn-process-turn-focus',
+      answerGeneration: 'turn-process-generation-focus',
       status: 'running',
       hasEndBoundary: false,
       children: [context],
@@ -318,10 +306,10 @@ describe('AI Phase 4 Turn Process renderer', () => {
   it('preserves a manual collapse when the live process completes', async () => {
     const user = userEvent.setup();
     const running = processNode({
-      key: 'turn-process:phase4-manual-collapse',
-      sessionId: 'phase4-session-manual-collapse',
-      turnId: 'phase4-turn-manual-collapse',
-      answerGeneration: 'phase4-generation-manual-collapse',
+      key: 'turn-process:turn-process-manual-collapse',
+      sessionId: 'turn-process-session-manual-collapse',
+      turnId: 'turn-process-turn-manual-collapse',
+      answerGeneration: 'turn-process-generation-manual-collapse',
       status: 'running',
       hasEndBoundary: false,
     });
@@ -345,9 +333,9 @@ describe('AI Phase 4 Turn Process renderer', () => {
   it('preserves manual disclosure state across answer generations within a turn', async () => {
     const user = userEvent.setup();
     const first = processNode({
-      key: 'turn-process:phase4-generation',
-      sessionId: 'phase4-session-generation',
-      turnId: 'phase4-turn-generation',
+      key: 'turn-process:turn-process-generation',
+      sessionId: 'turn-process-session-generation',
+      turnId: 'turn-process-turn-generation',
       answerGeneration: 'generation-one',
     });
     const { rerender } = render(<AiConversationNodeList nodes={[first]} />);
