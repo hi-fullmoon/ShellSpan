@@ -1,0 +1,25 @@
+{
+  "version": "6.0.0",
+  "commit": "f447274f430fd22513f6adbf9862d19524471c04",
+  "archiveSha256": "82337f91a9df63998d89ba906389d5152a2e8278b558ea72c5dec25ec93a591e",
+  "upstreamLockSha256": "be3cc17b035f88119b89a71e5c3c656bac0edcd6f9494a1393d8aef3e17b7688",
+  "node": "v24.21.0",
+  "npm": "10.9.2",
+  "typescript": "5.5.3",
+  "webpack": "5.94.0",
+  "esbuild": "0.25.2",
+  "toolsLockSha256": "5278ea83378518d15542a16347998746622b7b40848d63da6742a24973ede7b7",
+  "esbuildBinarySha256": "7db69914016b5a2d636a0c1b84d72e409b43f375c466c939582571d748124ffe",
+  "artifacts": {
+    "src/common/buffer/Buffer.ts": "1d44c9f2de0247aef0ec2c1c6e21debe491829c6bb80633c1e4c7f95fbabc582",
+    "src/common/buffer/BufferReflow.ts": "371bbfbc4cb5e0b11ad9c89bb67fada3bc895b1b64716c373d8fd656cf78d566",
+    "src/browser/services/SelectionService.ts": "2855ff0f9c77dbe99a78205ab3ee2063560026f39a27e23f7f342c854f763d1d",
+    "src/common/InputHandler.ts": "666f98d1cc6141aa8d61c527b78e414faf60a4b9f2a8e572e0852032602d5c2a",
+    "src/common/buffer/Types.ts": "36d177e732b5dff8e7c6bd0a598263898ac6d54755193ce48c2afd0a1dec66ed",
+    "lib/xterm.js": "48f368b5d73659129b6c9e607377f92ea6258e0b6945166e419011d71846f0d4",
+    "lib/xterm.js.map": "163c84ec40e51fac478b370f05679313f6c6e420e270f0eaecb837b383834cb7",
+    "lib/xterm.mjs": "37e0538c9553252190ee342eee11dad8426f2d2d94a463c91ea2bac612046840",
+    "lib/xterm.mjs.map": "7b3c37bd9520c5594cb1cf07606c7b01b7822380468f1dd284074a43ebecd9c4"
+  },
+  "generatedBy": "node scripts/rebuild-xterm-patch.mjs --record"
+}

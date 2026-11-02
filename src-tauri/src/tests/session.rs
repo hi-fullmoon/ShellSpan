@@ -1,7 +1,120 @@
     use super::*;
+    // Wire encoding belongs only to the ordinary-shell integration fixture.
+    // Agent execution has no quoted-insert or legacy transport implementation.
+    const POWERSHELL_EDITOR_BATCH_BYTES: usize = 8192;
+    // Readline/ZLE quoted-insert consumes exactly the following character. These
+    // owned key bindings are installed and advertised at each primary prompt.
+    // Neither a newline nor a Tab can invoke accept-line or completion here, and
+    // bracketed-paste state has no bearing on this native editor operation.
+    #[cfg(test)]
+    fn native_editor_input(command: &str) -> String {
+        let mut input = String::with_capacity(command.len());
+        for character in command.chars() {
+            match character {
+                '\n' => input.push_str("\u{18}n"),
+                '\t' => input.push_str("\u{18}t"),
+                '\r' => input.push_str("\u{18}r"),
+                _ => input.push(character),
+            }
+        }
+        input
+    }
 
-    mod terminal_stop_tests {
-        include!("session_terminal_stop.rs");
+    #[cfg(test)]
+    fn native_editor_input_for_shell(command: &str, shell: TerminalShellKind) -> String {
+        if !matches!(shell, TerminalShellKind::Bash | TerminalShellKind::Zsh) {
+            return native_editor_input(command);
+        }
+        let mut input = String::with_capacity(command.len().saturating_mul(3));
+        for character in command.chars() {
+            match character {
+                '\n' => input.push_str("\u{18}n"),
+                '\t' => input.push_str("\u{18}t"),
+                '\r' => input.push_str("\u{18}r"),
+                _ => {
+                    input.push_str("\u{18}\u{16}");
+                    input.push(character);
+                }
+            }
+        }
+        input
+    }
+
+    // A bounded wire chunk is followed by an editor-owned checkpoint widget. The
+    // next chunk is sent only after its exact whole-buffer acknowledgement. This
+    // provides real backpressure even where a PTY write succeeds while its input
+    // line discipline would otherwise overflow during asynchronous redisplay.
+    #[cfg(test)]
+    fn native_editor_chunks(command: &str, shell: TerminalShellKind) -> Vec<(String, String)> {
+        if matches!(shell, TerminalShellKind::Zsh | TerminalShellKind::Bash) {
+            use std::fmt::Write;
+            let mut encoded = String::with_capacity(command.len() * 4);
+            if shell == TerminalShellKind::Bash {
+                if let Some(source) = crate::terminal_integration::bash_native_eval_source(command)
+                {
+                    for byte in source.as_bytes() {
+                        write!(encoded, "\\x{byte:02x}")
+                            .expect("writing original source into a String");
+                    }
+                }
+            }
+            for byte in command.as_bytes() {
+                write!(encoded, "\\x{byte:02x}").expect("writing source bytes into a String");
+            }
+            return vec![(encoded, command.to_string())];
+        }
+        if matches!(
+            shell,
+            TerminalShellKind::WindowsPowerShell | TerminalShellKind::PowerShell7
+        ) {
+            use base64::Engine;
+            let mut chunks = Vec::new();
+            let mut data = String::new();
+            let mut prefix = String::new();
+            for character in command.chars() {
+                if !data.is_empty()
+                    && data.len() + character.len_utf8() > POWERSHELL_EDITOR_BATCH_BYTES
+                {
+                    chunks.push((
+                        format!(
+                            "{}\u{18}\u{6}",
+                            base64::engine::general_purpose::STANDARD.encode(data.as_bytes())
+                        ),
+                        prefix.clone(),
+                    ));
+                    data.clear();
+                }
+                data.push(character);
+                prefix.push(character);
+            }
+            if !data.is_empty() {
+                chunks.push((
+                    format!(
+                        "{}\u{18}\u{6}",
+                        base64::engine::general_purpose::STANDARD.encode(data.as_bytes())
+                    ),
+                    prefix,
+                ));
+            }
+            return chunks;
+        }
+        let mut chunks = Vec::new();
+        let mut wire = String::new();
+        let mut prefix = String::new();
+        for character in command.chars() {
+            let encoded = native_editor_input_for_shell(&character.to_string(), shell);
+            if !wire.is_empty() && wire.len() + encoded.len() > 512 {
+                wire.push_str("\u{18}\u{1}");
+                chunks.push((std::mem::take(&mut wire), prefix.clone()));
+            }
+            wire.push_str(&encoded);
+            prefix.push(character);
+        }
+        if !wire.is_empty() {
+            wire.push_str("\u{18}\u{1}");
+            chunks.push((wire, prefix));
+        }
+        chunks
     }
 
     mod terminal_recovery_tests {
@@ -743,7 +856,7 @@
                     .broker
                     .native_input_enabled(&self.transport_id)
                     .unwrap());
-                crate::agent_runtime::native_editor_chunks(
+                native_editor_chunks(
                     submission.as_deref().unwrap_or(command),
                     self.broker.command_shell(&self.transport_id).unwrap(),
                 )

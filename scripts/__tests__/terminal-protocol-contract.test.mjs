@@ -735,9 +735,9 @@ describe('terminal execution Phase 0 protocol contract', () => {
     expect(windowsRunner).toContain("probeVersion('pwsh.exe', 'PowerShell 7')");
     expect(windowsRunner).toContain('windows_powershell_5_1_conpty_broker_preserves_raw_bytes_order_and_resize');
     expect(windowsRunner).toContain('windows_powershell_7_conpty_broker_preserves_raw_bytes_order_and_resize');
-    expect(windowsRunner.match(/\['--ignored', '--exact'\]/g)).toHaveLength(6);
-    expect(windowsRunner).toContain('windows_powershell_5_1_visible_command_integration');
-    expect(windowsRunner).toContain('windows_powershell_7_visible_command_integration');
+    expect(windowsRunner.match(/\['--ignored', '--exact'\]/g)).toHaveLength(4);
+    expect(windowsRunner).not.toContain('windows_powershell_5_1_visible_command_integration');
+    expect(windowsRunner).not.toContain('windows_powershell_7_visible_command_integration');
     expect(windowsRunner).toContain('windows_powershell_5_1_interactive_terminal_operation');
     expect(windowsRunner).toContain('windows_powershell_7_interactive_terminal_operation');
     expect(windowsRunner).toContain("cargoTest('agent_runtime::native::process::tests')");

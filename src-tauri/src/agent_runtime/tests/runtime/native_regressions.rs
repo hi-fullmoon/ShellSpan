@@ -50,7 +50,7 @@ impl Scenario {
         std::fs::create_dir(&work).unwrap();
         let state = root.path().join("state");
         let integration = PreparedLocalShellIntegration::prepare(shell, &state).unwrap();
-        let broker = TerminalSessionBroker::phase5_enabled_for_test(65_536);
+        let broker = TerminalSessionBroker::phase5_with_journal_for_test(65_536, &state);
         broker
             .attach_transport(
                 TERMINAL,

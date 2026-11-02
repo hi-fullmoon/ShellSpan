@@ -1,0 +1,27 @@
+{
+  "kind": "actual native PTY display-packet excerpt; untrusted presentation, not control acknowledgement",
+  "provenance": {
+    "captureCase": "commit-0wwss0a2",
+    "rawPtySha256": "05124bb5aef5de64312d7b7d2ff0e109066bd09eb8f1a002d938e3ce971e3eef",
+    "shellSha256": "5dee075b3f45fa4e069c0ef15efd43901a033f327efa2636658027e2f94fbeb2",
+    "bridgeSha256": "b038140870e80dd004c61a89d87d41e2102d8dda10db49c30363c22e93e3017e",
+    "platform": "macOS arm64",
+    "bash": "5.3",
+    "readline": "8.3.6",
+    "regenerate": "node scripts/export-native-display-fixture.mjs --captures <successful ownership-window capture directory>"
+  },
+  "packets": {
+    "enter": {
+      "offset": 34,
+      "length": 51,
+      "base64": "G10xMzM3O1NldFVzZXJWYXI9U2hlbGxTcGFuUDBSZWZsb3dDdXJzb3JMaW5lPU1RPT0H",
+      "sha256": "0e00338c2c7dd7002c211310960efe2d2c03e80bfb6b2775f34a6bb8c26721dc"
+    },
+    "exit": {
+      "offset": 354,
+      "length": 51,
+      "base64": "G10xMzM3O1NldFVzZXJWYXI9U2hlbGxTcGFuUDBSZWZsb3dDdXJzb3JMaW5lPU1BPT0H",
+      "sha256": "99c2998c03bba2841748a5c8aaf1aad576f695232ebad76b6659e7b51cb379ad"
+    }
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "name": "shellspan-xterm-reflow-laboratory",
+  "private": true,
+  "dependencies": { "esbuild": "0.25.2" }
+}

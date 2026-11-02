@@ -284,15 +284,24 @@ The runtime exposes `terminal_execute` for visible commands. The removed
 `exec_command.channel = "pty"` contract MUST NOT be accepted or silently
 reinterpreted.
 
-The broker command states and allowed transitions are:
+The current Rust broker command states and direct transitions are:
 
 | State | Allowed next states |
 | --- | --- |
-| `awaitingLease` | `submitted`, `cancelled`, `failed` |
-| `submitted` | `running`, `cancelRequested`, `takenOver`, `uncertain`, `failed` |
-| `running` | `completed`, `cancelRequested`, `takenOver`, `uncertain`, `failed` |
-| `cancelRequested` | `cancelled`, `timedOut`, `completed`, `takenOver`, `uncertain`, `failed` |
+| `submitted` | `running`, `cancelRequested`, `uncertain`, `failed` |
+| `running` | `completed`, `cancelRequested`, `uncertain`, `failed` |
+| `cancelRequested` | `cancelled`, `timedOut`, `takenOver`, `uncertain` |
 | `completed`, `cancelled`, `timedOut`, `takenOver`, `uncertain`, `failed` | terminal; no transitions |
+
+The conformance schema retains `awaitingLease` as protocol vocabulary; the
+current Rust implementation has no command object until lease/readiness checks
+finish. It initializes that object as `Submitted` **before typing or accept-line**.
+This legacy state does not prove executable submission. The executor's separate
+submission mutex, the transport-admitted `submission_attempted` error fact and
+the broker's `source_may_be_enqueued` have different meanings. None may be
+inferred from frontend activity, OSC boundaries or prompt text. Full event,
+rejection and idempotency cases are recorded in the
+[P1 state audit](../../../docs/design/agent-terminal-input-p1-state-audit.md).
 
 Submission requires a ready integration, the Agent lease, no active command,
 and a command identifier registered before any input bytes are written. The
@@ -530,12 +539,13 @@ Lease ownership is either:
 - `user`, for ordinary interactive input; or
 - `agent`, bound to one Agent Session, task, and operation.
 
-Only the current lease and generation may submit input. Agent acquisition is an
-atomic compare-and-swap from user ownership after frontend readiness checks.
-Acquisition fails if there is pending or unverified user input, a credential or
-host-key prompt, another Agent owner, a disconnected terminal, or an unready
-output listener. Lease changes increment `revision` and emit an `acquired` or
-`released` frame.
+Only the current lease and generation may submit input. Agent acquisition
+reserves ownership atomically from the user before publishing `acquired` and
+waiting for frontend readiness. Another owner or backend recovery gate rejects
+acquisition. Pending/unverified user input, a credential/host-key prompt,
+disconnection or an unready output listener rejects frontend readiness and
+releases the reservation without command input. Lease changes increment the
+Broker's lease `revision`; the runtime publishes `acquired` or `released` events.
 
 Before acknowledging a connected, output-ready Agent lease, the frontend selects
 and displays the lease's target terminal, commits its attachment, and verifies
@@ -1177,3 +1187,150 @@ earlier arbitrary-same-UID interpretation was neither implementable for a real
 interactive shell nor an accurate product promise. Under the amended
 cooperative model, POSIX Phase 3 may pass when its production and adversarial
 gates do; Windows remains a native-evidence debt rather than a claimed pass.
+
+## Native input refactor P0 laboratory (2026-10-31)
+
+The separate [native feasibility report](../../../docs/design/agent-terminal-input-native-feasibility.md)
+records real Bash/Readline PTY, loopback SSH and browser experiments.
+`pnpm test:terminal-native-input:p0 --upstream` runs native PTYs and browsers;
+`pnpm test:terminal-native-input:p0:ssh` runs the isolated SSH lane. Add `--ssh`
+to the first command to run both and retain any earlier nonzero status.
+
+The experimental messages and builtins allocate no online TSP version or
+capability, change no approval/lease/target rule and enable no production route.
+**Initial unpatched control NOT PASS:** asynchronous output can be overwritten;
+intact raw bytes alone do not satisfy visual preservation. Unpatched GNU
+Readline 8.3 also has the input-stall defect fixed by `readline83-001`.
+Only exact tested builds provide evidence; the existing protocol remains binding.
+
+## P1 command state and observation (2026-10-31)
+
+`get_terminal_broker_snapshot` additionally returns `session.inputObservation`.
+It derives `commandInputPending`, `nativeRecoveryRequired`, `nativeClearPending`
+and an optional safe `activeCommand` from the existing broker record.
+`commandObservationUnavailable` is true if that active object's data cannot be
+read. Command fields now include canonical `phase`, `mayHaveSubmitted`,
+`fullInputConfirmed`, `submissionIntentDurable`, actual `draftCleared`, public
+identity/version fields, legacy projections, safe-action hints and redacted
+`displaySource` (absent for private Job control). No submission envelope, private
+buffer, digest, credential or control endpoint is added to the snapshot.
+
+Evidence is `unknown` until matched command-start evidence exists, then
+`startObserved`, or `endObserved` when that same object's exit code is recorded.
+End evidence is neither success nor a job-exit guarantee; lifecycle and job
+results remain authoritative. A legacy Submitted, local cancellation, false
+source flag, absent/retired command or missing older-backend observation does
+not prove non-execution or an empty editor. Gate facts remain visible after
+command retirement. Missing/unavailable observations must remain unknown.
+
+This is a read-only projection, not authorization. The existing
+`terminal-integration-state` event may attach the same optional
+`inputObservation` after actual control events, so confirmed typing/start/end
+can update the status without per-frame IPC pulls. `snapshotSequence` covers the
+complete public session projection, advancing only on changes. `legacyRevision`
+and `integrationStateRevision` do not cover every command/gate fact and MUST NOT
+merge the whole observation. Agent/task/operation and terminal ID/generation
+must match the current view before consuming it.
+Existing generation, lease, turn guard,
+approval, frontend readiness and admission checks remain required; consumers MUST
+NOT use the observation to acknowledge readiness, clear recovery or enable input.
+The existing command registration and typed IPC adapter are reused. The separate
+`get_terminal_submission_recovery` command reads the durable SQLite intent fence
+through spawn_blocking. State authority, Revoking ownership, complete proofs,
+FULL intent transactions, post-persistence validation and the native private
+protocol are now defined in [NIP/1](native-input-v1.md) and its
+[schema](native-input-v1.schema.json). NIP/1 does not change TSP/1 or event-v5.
+The existing executor uses the same Broker lifecycle and submission gate; it no
+longer owns a second submitted flag. P2 production transport/display wiring is
+implemented; its full acceptance remains in progress. See the
+[P2 audit](../../../docs/design/agent-terminal-input-p2-audit.md) and the retained
+[P1 audit](../../../docs/design/agent-terminal-input-p1-state-audit.md).
+
+### P0 continuation: causal and dependency laboratory evidence
+
+The [P0 report](../../../docs/design/agent-terminal-input-native-feasibility.md)
+now distinguishes native no-module baseline loss from bridge-specific loss.
+The public Readline append-only redisplay candidate and a user-authorized
+isolated generic cursor-reflow dependency experiment pass the measured native
+and browser gates without source projection, blank-screen scrolling or a short
+preview. Generic library code reads no command/operation/lease metadata.
+Production xterm, shell integration, permissions, input observation and TSP
+versions are unchanged. Laboratory success does not grant production dependency
+adoption or retire the formal P0/production migration gate.
+
+The cursor-only/async isolated controls are incomplete candidates. Tab-expanded
+cells survive, but stock selection serialization
+loses copied spaces. Ordinary Readline keeps default false; always-on opt-in is
+unsuitable for its own resize redraw. Scoped switching has serial success but
+fails for handoff resize, late open and lost close. Native edits execute correctly
+and default-off states match stock; neither excuses these failures. Display
+receipts grant no execution authority; production ordering/recovery is not
+implemented. The research browser gate stays nonzero. No production protocol
+or permission changes follow.
+
+A further isolated profile uses documented OSC 1337 SetUserVar transport and a
+lab-only display-variable binding to the public reflow option. Native provider
+on/off bytes share PTY order with actual draft/accept/clear bytes. This is not an
+allocated standard reflow mode or a production TSP capability. Any stdout copy
+can at most alter untrusted display state; native commit/lifecycle authority is
+unchanged. Public-parser fragmentation, queued resize, control EOF, TUI and real
+process exits are checked separately. SIGKILL requires actual terminal EOF
+cleanup. Production negotiation/recovery remains unimplemented; tab-copy failures
+are retained. See the P0 report and `test:terminal-native-input:p0:inband`.
+
+An actual dense-resize commit probe also exposed post-accept hidden-plan echo.
+The isolated native prototype protects the accepted return line with a temporary
+non-output redisplay provider until the fixed parent-level `p0_begin` builtin,
+after Readline returns. No execution takes place in the redisplay hook. Display
+off remains in PTY order before actual command output, and no frontend event
+authorizes restoration or submission. Scoped handoff gates pass; the additional
+copy repair and formal adoption status are recorded in the P0 report.
+
+The isolated generic copy repair now passes the measured applicable copy/search
+profile. It reads native cells and soft-wrap attributes only, with no command or
+lease metadata and no business-layer public API override. Its scope is global:
+qualifying default-configuration history also gets corrected serialization.
+Representative ordinary default-false state/copy compatibility does not prove
+all legacy copy behavior is unchanged. Ordinary native hard-line source equality
+is only a stronger diagnostic; full visible owned copy/source binding remains a
+gate. Formal adoption was explicitly approved by the user on 2026-10-31,
+including global default-configuration copy effects. No input authority changes follow.
+
+### Formal P0 disposition (2026-10-31)
+
+The exact @xterm/xterm 6.0.0 dependency now uses the maintained pnpm patch
+`patches/@xterm__xterm@6.0.0.patch`, hash
+`5aabb3510e24bc66ce0f30f510dbdcc534fce6de974287bab34d7d78d85df622`.
+It contains approved generic source fixes and officially rebuilt UMD/ESM outputs,
+with a pinned reproducible toolchain and retained MIT notice. Its copy rule is
+global, including qualifying default-mode history. This is not a business-layer
+source projection or public selection/search/buffer override.
+
+P0 passes only for the frozen complete macOS arm64 / GNU Bash 5.3 / static
+Readline 8.3.6 configuration and formal package. Earlier 4.1/4.4 baseline/commit
+evidence does not establish their new display-extension support. Windows,
+Linux/SSH new display support, other architectures and plugins remain unaccepted.
+
+`attachNativeInputDisplay` provides explicit attachment only. P2 installs it in
+the registry only for a negotiated native generation, with production local/SSH
+queues and durable coordinator fencing. Raw and native do not install legacy
+projection/typing/redraw. P4 removes these implementations for legacy labels too;
+the label remains wire-compatible, while new Agent source is explicitly rejected
+before acquiring a lease or writing input. Existing ordinary/TUI input and
+identity-bound private management of existing jobs remain available. No existing
+generation is hot-switched, cleared or replayed. ZLE/PSReadLine production editor
+profiles remain empty. GNU Bash's independent source-matching catalogue and
+exact shell/module SHA admission remain unchanged.
+P4 code/static evidence and deferred acceptance are recorded in the
+[P4 audit](../../../docs/design/agent-terminal-input-p4-audit.md).
+P1 freezes online identifiers/capabilities in NIP/1. Current production recovery,
+packaging and acceptance limits are recorded in the P2 audit.
+Display bytes still grant no lifecycle, readiness, input or execution authority.
+See [native display integration](../../native-input-display.md) and the P0 report.
+
+The formal gate regenerates real captures by default and accepts explicit replay
+manifests. The controller's nearby fixture contains actual native display bytes,
+not fabricated control receipts, and runs after a clean dependency installation
+without old ignored capture directories. Limited P0 completion permits continuing
+P1; it is not completion of the refactor. Full frontend tests retain three
+unrelated AI assertion failures reproduced with the unpatched-package baseline.

@@ -36,11 +36,17 @@ pub(crate) struct SessionPtyInfo {
     pub(crate) transport_kind: crate::terminal_broker::TerminalTransportKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) windows_build_number: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) input_mode: Option<crate::terminal_command::protocol::InputMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) native_display_binding: Option<crate::terminal_command::protocol::DisplayBinding>,
 }
 
 impl SessionPtyInfo {
     pub(crate) fn local() -> Self {
         Self {
+            input_mode: None,
+            native_display_binding: None,
             transport_kind: if cfg!(windows) {
                 crate::terminal_broker::TerminalTransportKind::WindowsConPty
             } else {
@@ -60,6 +66,8 @@ impl SessionPtyInfo {
 
     pub(crate) fn ssh() -> Self {
         Self {
+            input_mode: None,
+            native_display_binding: None,
             transport_kind: crate::terminal_broker::TerminalTransportKind::SshPty,
             windows_build_number: None,
         }
@@ -139,6 +147,8 @@ fn redact_secret(value: &Option<String>) -> Option<&'static str> {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SessionCreateRequest {
+    #[serde(default)]
+    pub(crate) native_input_protocol: Option<String>,
     #[serde(default)]
     pub(crate) initial_directory: Option<String>,
     #[serde(default)]
@@ -909,8 +919,20 @@ pub(crate) struct LocalFileEntry {
 pub(crate) enum SessionCommand {
     Write(String),
     WriteBytes(Vec<u8>),
+    NativeControl(NativeControlFrame),
     Resize { cols: u32, rows: u32 },
     Close,
+}
+
+pub(crate) struct NativeControlFrame {
+    pub bytes: Vec<u8>,
+    pub wake_editor: bool,
+    inflight: Arc<std::sync::atomic::AtomicUsize>,
+}
+impl Drop for NativeControlFrame {
+    fn drop(&mut self) {
+        self.inflight.fetch_sub(1, AtomicOrdering::AcqRel);
+    }
 }
 
 pub(crate) enum SessionCommandSender {
@@ -960,6 +982,7 @@ pub(crate) struct SessionTargetState {
 #[derive(Default)]
 struct SessionRegistry {
     sessions: HashMap<String, ManagedSession>,
+    native_inflight: HashMap<String, Arc<std::sync::atomic::AtomicUsize>>,
 }
 
 #[derive(Clone, Default)]
@@ -1704,6 +1727,43 @@ impl Drop for DeleteProgressTracker {
 }
 
 impl SessionManager {
+    pub(crate) fn write_native_control(
+        &self,
+        session_id: &str,
+        bytes: &[u8],
+        wake_editor: bool,
+    ) -> Result<(), String> {
+        if bytes.len() > crate::terminal_command::protocol::MAX_MESSAGE_BYTES {
+            return Err("TERMINAL_NATIVE_MESSAGE_LIMIT".into());
+        }
+        let mut guard = self
+            .registry
+            .lock()
+            .map_err(|_| "session registry poisoned")?;
+        if !guard.sessions.contains_key(session_id) {
+            return Err("TERMINAL_NATIVE_TRANSPORT_UNAVAILABLE".into());
+        }
+        let inflight = guard
+            .native_inflight
+            .entry(session_id.into())
+            .or_default()
+            .clone();
+        inflight
+            .fetch_update(AtomicOrdering::AcqRel, AtomicOrdering::Acquire, |count| {
+                (count < 8).then_some(count + 1)
+            })
+            .map_err(|_| "TERMINAL_NATIVE_BACKPRESSURE")?;
+        let frame = NativeControlFrame {
+            bytes: bytes.into(),
+            wake_editor,
+            inflight,
+        };
+        let managed = guard
+            .sessions
+            .get(session_id)
+            .ok_or("TERMINAL_NATIVE_TRANSPORT_UNAVAILABLE")?;
+        enqueue_session_command(managed, SessionCommand::NativeControl(frame), session_id)
+    }
     pub(crate) fn insert(&self, session_id: String, managed: ManagedSession) -> Result<(), String> {
         let mut guard = self
             .registry
@@ -1764,6 +1824,7 @@ impl SessionManager {
         let Some(managed) = guard.sessions.remove(session_id) else {
             return Ok(());
         };
+        guard.native_inflight.remove(session_id);
         // A disconnected command channel means its worker has already exited.
         // Missing sessions and exited workers both satisfy the close request.
         if managed.sender.send(SessionCommand::Close).is_ok() {
@@ -1898,6 +1959,7 @@ impl SessionManager {
             .lock()
             .map_err(|_| "session registry poisoned".to_string())?;
         guard.sessions.remove(session_id);
+        guard.native_inflight.remove(session_id);
         Ok(())
     }
 
@@ -1976,6 +2038,7 @@ mod session_manager_tests {
             .filter_map(|command| match command {
                 SessionCommand::Write(data) => Some(data),
                 SessionCommand::WriteBytes(_)
+                | SessionCommand::NativeControl(_)
                 | SessionCommand::Resize { .. }
                 | SessionCommand::Close => None,
             })

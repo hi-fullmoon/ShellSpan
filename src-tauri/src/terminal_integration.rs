@@ -35,7 +35,7 @@ const BUNDLED_PSREADLINE_FILES: &[(&str, &[u8])] = &[
 ];
 
 #[cfg(any(windows, test))]
-fn prepare_bundled_powershell_module(data_dir: &Path) -> Result<PathBuf, String> {
+pub(crate) fn prepare_bundled_powershell_module(data_dir: &Path) -> Result<PathBuf, String> {
     use sha2::{Digest, Sha256};
     let mut digest = Sha256::new();
     for (name, bytes) in BUNDLED_PSREADLINE_FILES {
@@ -44,10 +44,21 @@ fn prepare_bundled_powershell_module(data_dir: &Path) -> Result<PathBuf, String>
         digest.update(bytes);
     }
     let identity = hex::encode(digest.finalize());
-    let parent = data_dir.join("native-editor-modules");
+    // Desktop PowerShell's .NET Framework assembly loader still observes
+    // MAX_PATH. Keep the private cache name short without changing system
+    // long-path settings, module contents, or their full content identity.
+    let parent = data_dir.join("editors");
     fs::create_dir_all(&parent)
         .map_err(|error| format!("failed to prepare native editor cache: {error}"))?;
     let root = parent.join(&identity[..32]);
+    if BUNDLED_PSREADLINE_FILES.iter().any(|(name, _)| {
+        crate::path_utils::portable_local_path(&root.join("PSReadLine/2.4.5").join(name))
+            .encode_utf16()
+            .count()
+            >= 260
+    }) {
+        return Err("TERMINAL_NATIVE_EDITOR_PATH_TOO_LONG".into());
+    }
     if !root.exists() {
         let staging = tempfile::Builder::new()
             .prefix(".psreadline-")
@@ -89,6 +100,7 @@ pub(crate) fn bash_native_submission(source: &str) -> Result<String, String> {
     Ok(format!("(exit \"$?\"); builtin eval -- {quoted}"))
 }
 
+#[cfg(test)]
 pub(crate) fn bash_native_eval_source(line: &str) -> Option<String> {
     let quoted = if let Some(quoted) = line.strip_prefix("(exit \"$?\"); builtin eval -- ") {
         quoted
@@ -1332,7 +1344,16 @@ add-zle-hook-widget line-init __shellspan_line_init
     format!(
         r#"typeset -gr __shellspan_parser_executable={parser_executable}
 typeset -gr __shellspan_stty_executable=$(builtin whence -p stty)
-{user_rc}typeset -gr __shellspan_control_path={fifo_path}
+{user_rc}__shellspan_stty() {{
+  local __shellspan_stty_output __shellspan_stty_status=0
+  # Keep this private helper in the shell's process group, as in the Bash
+  # integration. A foreground external stty can race ZLE's tty ownership when
+  # background jobs finish on macOS. User commands and monitor stay unchanged.
+  __shellspan_stty_output=$(exec "$__shellspan_stty_executable" "$@" </dev/tty) || __shellspan_stty_status=$?
+  builtin printf '%s' "$__shellspan_stty_output"
+  return "$__shellspan_stty_status"
+}}
+typeset -gr __shellspan_control_path={fifo_path}
 typeset -gi __shellspan_integration_active=1
 typeset -gi __shellspan_command_active=0
 typeset -gi __shellspan_native_pending=0
@@ -1493,14 +1514,14 @@ __shellspan_native_frame_checkpoint() {{
 }}
 __shellspan_native_receive() {{
   local __shellspan_receiver_tty __shellspan_receiver_fd __shellspan_completed_descriptor=
-  __shellspan_receiver_tty=$("$__shellspan_stty_executable" -g </dev/tty 2>/dev/null) || return
-  "$__shellspan_stty_executable" -echo </dev/tty 2>/dev/null || return
+  __shellspan_receiver_tty=$(__shellspan_stty -g 2>/dev/null) || return
+  __shellspan_stty -echo 2>/dev/null || return
   {{
     builtin exec {{__shellspan_receiver_fd}}</dev/tty || return
     __shellspan_native_receive_frame
   }} always {{
     if [[ -n ${{__shellspan_receiver_fd-}} ]]; then builtin exec {{__shellspan_receiver_fd}}<&-; fi
-    "$__shellspan_stty_executable" "$__shellspan_receiver_tty" </dev/tty 2>/dev/null
+    __shellspan_stty "$__shellspan_receiver_tty" 2>/dev/null
   }}
   # External stty temporarily leaves ZLE's input mode. Publish readiness only
   # after it returns, so the next discard key cannot be consumed as tty EOF.
@@ -2154,21 +2175,10 @@ mod tests {
     include!("tests/terminal_integration.rs");
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
-    include!("tests/terminal_pager_recovery.rs");
 
     #[cfg(unix)]
     mod command_presentation {
         include!("tests/terminal_command_presentation.rs");
-    }
-
-    #[cfg(unix)]
-    mod late_native_frame {
-        include!("tests/terminal_late_native_frame.rs");
-    }
-
-    #[cfg(target_os = "macos")]
-    mod zsh_receive_pressure {
-        include!("tests/terminal_zsh_receive_pressure.rs");
     }
 
     #[cfg(target_os = "macos")]

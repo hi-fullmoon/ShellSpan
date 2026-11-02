@@ -5,7 +5,7 @@
   "identifier": "com.shellspan",
   "build": {
     "beforeDevCommand": "pnpm run dev",
-    "beforeBuildCommand": "pnpm run build",
+    "beforeBuildCommand": "pnpm native:prepare && pnpm run build",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../dist",
     "windows": {
@@ -33,6 +33,9 @@
     }
   },
   "bundle": {
+    "resources": {
+      "resources/native-input-v1/": "native-input-v1/"
+    },
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": "v1Compatible",

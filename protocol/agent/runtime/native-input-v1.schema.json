@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shellspan.local/protocol/agent/runtime/native-input-v1.schema.json",
+  "title": "Native Input Protocol 1 — registered private channels only",
+  "description": "One bounded UTF-8 JSON object per LF-delimited frame. The codec enforces 131072 bytes per encoded frame; Rust additionally enforces UTF-8 byte limits and the state, identity, request, lease and monotonic-budget rules. This is independent of TSP/1 and Agent event-v5. Neither stdout nor display OSC is a control record.",
+  "oneOf": [{ "$ref": "#/$defs/connectionEnvelope" }, { "$ref": "#/$defs/operationEnvelope" }],
+  "$defs": {
+    "operationEnvelope": {
+      "type": "object", "additionalProperties": false, "required": ["protocol", "requestId", "identity", "payload"],
+      "properties": { "protocol": { "const": "shellspan.native-input/1" }, "requestId": { "$ref": "#/$defs/identifier" }, "identity": { "$ref": "#/$defs/identity" }, "payload": { "$ref": "#/$defs/payload" } }
+    },
+    "connectionEnvelope": {
+      "type": "object", "additionalProperties": false, "required": ["protocol", "requestId", "connection", "payload"],
+      "properties": {
+        "protocol": { "const": "shellspan.native-input/1" }, "requestId": { "$ref": "#/$defs/identifier" },
+        "connection": {
+          "type": "object", "additionalProperties": false, "required": ["terminalSessionId", "terminalGeneration", "controlId"],
+          "properties": { "terminalSessionId": { "$ref": "#/$defs/identifier" }, "terminalGeneration": { "$ref": "#/$defs/counter" }, "controlId": { "$ref": "#/$defs/identifier" } }
+        },
+        "payload": { "oneOf": [
+          { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "probe" } } },
+          { "$ref": "#/$defs/capabilities" }, { "$ref": "#/$defs/editorReady" }, { "$ref": "#/$defs/directory" }, { "$ref": "#/$defs/jobObservation" }, { "$ref": "#/$defs/editorOptions" }
+        ] }
+      }
+    },
+    "identifier": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "counter": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+    "byteCount": { "type": "integer", "minimum": 0, "maximum": 8192 },
+    "nativeCursor": { "type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991 },
+    "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "identity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["terminalSessionId", "terminalGeneration", "leaseId", "leaseGeneration", "agentSessionId", "taskId", "operationId", "commandId", "sourceRevision"],
+      "properties": {
+        "terminalSessionId": { "$ref": "#/$defs/identifier" },
+        "terminalGeneration": { "$ref": "#/$defs/counter" },
+        "leaseId": { "$ref": "#/$defs/identifier" },
+        "leaseGeneration": { "$ref": "#/$defs/counter" },
+        "agentSessionId": { "$ref": "#/$defs/identifier" },
+        "taskId": { "$ref": "#/$defs/identifier" },
+        "operationId": { "$ref": "#/$defs/identifier" },
+        "commandId": { "$ref": "#/$defs/identifier" },
+        "sourceRevision": { "$ref": "#/$defs/counter" }
+      }
+    },
+    "payload": {
+      "oneOf": [
+        { "$ref": "#/$defs/emptyPayload" },
+        { "$ref": "#/$defs/prepareInput" },
+        { "$ref": "#/$defs/boundPayload" },
+        { "$ref": "#/$defs/inputProgress" },
+        { "$ref": "#/$defs/inputConfirmed" },
+        { "$ref": "#/$defs/controlInputConfirmed" },
+        { "$ref": "#/$defs/settled" },
+        { "$ref": "#/$defs/draftCleared" },
+        { "$ref": "#/$defs/snapshot" },
+        { "$ref": "#/$defs/rejected" }
+      ]
+    },
+    "emptyPayload": {
+      "type": "object", "additionalProperties": false, "required": ["kind"],
+      "properties": { "kind": { "enum": ["commitArmed", "submissionAccepted", "started", "cancelDraft", "interrupt", "query"] } }
+    },
+    "capabilities": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "profile", "nativeInline", "sourceEcho", "atomicHandoff", "completeProof", "draftClear", "inbandDisplay", "editorEmpty"],
+      "properties": {
+        "kind": { "const": "capabilities" },
+        "profile": { "$ref": "#/$defs/peerProfile" },
+        "nativeInline": { "type": "boolean" }, "sourceEcho": { "type": "boolean" },
+        "atomicHandoff": { "type": "boolean" }, "completeProof": { "type": "boolean" },
+        "draftClear": { "type": "boolean" }, "inbandDisplay": { "type": "boolean" }, "editorEmpty": { "type": "boolean" }
+      }
+    },
+    "peerProfile": {
+      "type": "object", "additionalProperties": false,
+      "required": ["shell", "shellVersion", "editor", "editorVersion", "editorNumericVersion", "adapterVersion", "verifiedProfileId"],
+      "properties": {
+        "shell": { "enum": ["bash", "zsh", "windowsPowerShell", "powerShell7"] },
+        "shellVersion": { "type": ["string", "null"], "maxLength": 128 },
+        "editor": { "enum": ["readline", "zle", "psReadLine"] },
+        "editorVersion": { "type": ["string", "null"], "maxLength": 128 },
+        "editorNumericVersion": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "adapterVersion": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "verifiedProfileId": { "type": ["string", "null"], "maxLength": 128 }
+      }
+    },
+    "editorOptions": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "interactiveComments", "nativeJobs"],
+      "properties": { "kind": { "const": "editorOptions" }, "interactiveComments": { "type": "boolean" }, "nativeJobs": { "type": "boolean" } }
+    },
+    "prepareInput": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "source", "sourceDigest", "plan", "planDigest", "budgetMs", "reducedMotion"],
+      "properties": {
+        "kind": { "const": "prepareInput" },
+        "job": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/jobExecution" }] },
+        "source": { "type": "string", "minLength": 1, "maxLength": 8192, "pattern": "^[^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]*$", "description": "The authoritative Rust/native bound is 8192 UTF-8 bytes, not 8192 code points." },
+        "sourceDigest": { "$ref": "#/$defs/digest" },
+        "plan": { "type": "string", "maxLength": 32768, "description": "At most 32768 UTF-8 bytes; source/plan are private and never enter frontend observations or the durable intent journal." },
+        "planDigest": { "$ref": "#/$defs/digest" },
+        "budgetMs": { "type": "integer", "minimum": 1, "maximum": 5000 },
+        "reducedMotion": { "type": "boolean" }
+      }
+    },
+    "jobExecution": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["kind", "handle"], "properties": { "kind": { "const": "launch" }, "handle": { "type": "string", "pattern": "^job-[0-9a-fA-F]{32}$" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "handle", "stop", "nonce"], "properties": { "kind": { "const": "control" }, "handle": { "type": "string", "pattern": "^job-[0-9a-fA-F]{32}$" }, "stop": { "type": "boolean" }, "nonce": { "type": "string", "pattern": "^[0-9a-f]{32}$" } } }
+      ]
+    },
+    "controlInputConfirmed": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "planDigest", "editorEmpty"],
+      "properties": { "kind": { "const": "controlInputConfirmed" }, "planDigest": { "$ref": "#/$defs/digest" }, "editorEmpty": { "type": "boolean" } }
+    },
+    "boundPayload": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "sourceDigest", "planDigest"],
+      "properties": {
+        "kind": { "enum": ["prepared", "commit"] },
+        "sourceDigest": { "$ref": "#/$defs/digest" }, "planDigest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "inputProgress": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "appliedUtf8Bytes"],
+      "properties": { "kind": { "const": "inputProgress" }, "appliedUtf8Bytes": { "$ref": "#/$defs/byteCount" } }
+    },
+    "inputConfirmed": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "sourceDigest", "planDigest", "utf8Bytes", "cursorUtf8Bytes", "endUtf8Bytes"],
+      "properties": {
+        "kind": { "const": "inputConfirmed" },
+        "sourceDigest": { "$ref": "#/$defs/digest" }, "planDigest": { "$ref": "#/$defs/digest" },
+        "utf8Bytes": { "$ref": "#/$defs/byteCount" }, "cursorUtf8Bytes": { "$ref": "#/$defs/byteCount" }, "endUtf8Bytes": { "$ref": "#/$defs/byteCount" }
+      }
+    },
+    "settled": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "exitCode"],
+      "properties": { "kind": { "const": "settled" }, "exitCode": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 } }
+    },
+    "editorReady": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "editorEmpty", "ownedDraftAbsent", "afterCommand"],
+      "properties": { "kind": { "const": "editorReady" }, "editorEmpty": { "type": "boolean" }, "ownedDraftAbsent": { "type": "boolean" }, "afterCommand": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/identity" }] } }
+    },
+    "directory": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "cwd"],
+      "properties": { "kind": { "const": "directory" }, "cwd": { "type": "string", "maxLength": 4096, "pattern": "^[^\u0000-\u001f\u007f-\u009f]*$" } }
+    },
+    "jobObservation": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "handle", "state", "exitCode"],
+      "properties": { "kind": { "const": "jobObservation" }, "handle": { "type": "string", "pattern": "^job-[0-9a-fA-F]{32}$" }, "state": { "enum": ["running", "queued", "stopped", "stopRequested", "finished", "settled", "terminated", "uncertain", "rejected"] }, "exitCode": { "type": ["integer", "null"], "minimum": -2147483648, "maximum": 2147483647 } }
+    },
+    "draftCleared": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "editorEmpty"],
+      "properties": { "kind": { "const": "draftCleared" }, "editorEmpty": { "type": "boolean" } }
+    },
+    "snapshot": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "phase", "mayHaveSubmitted", "editorUtf8Valid", "cursorUtf8Bytes", "endUtf8Bytes"],
+      "properties": {
+        "kind": { "const": "snapshot" },
+        "phase": { "enum": ["preparing", "typing", "inputConfirmed", "submissionAttempted", "running", "completed", "recoveryRequired"] },
+        "mayHaveSubmitted": { "type": "boolean" }, "editorUtf8Valid": { "type": "boolean" },
+        "cursorUtf8Bytes": { "$ref": "#/$defs/nativeCursor" }, "endUtf8Bytes": { "$ref": "#/$defs/nativeCursor" }
+      }
+    },
+    "rejected": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "code"],
+      "properties": { "kind": { "const": "rejected" }, "code": { "enum": ["VERSION", "IDENTITY", "DUPLICATE_REQUEST", "LIMIT", "EXPIRED", "BINDING", "STATE", "RECOVERY_REQUIRED"] } }
+    }
+  }
+}

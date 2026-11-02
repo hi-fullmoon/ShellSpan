@@ -522,14 +522,37 @@
                     operation_id: "wrong-operation",
                 },
                 &mut submission_attempted,
+                || manager
+                    .validate_control_owner("terminal-1", "agent-1", "wrong-operation")
+                    .map(|_| ()),
             )
             .is_err());
         assert!(
             !submission_attempted,
             "lease rejection must not imply transport submission"
         );
+        assert!(
+            manager
+                .write_executable(
+                    &sessions,
+                    "terminal-1",
+                    "agent".into(),
+                    TerminalInputSource::Agent {
+                        agent_session_id: "agent-1",
+                        task_id: "task-1",
+                        operation_id: "operation-1",
+                    },
+                    &mut submission_attempted,
+                    || manager
+                        .validate_control_owner("terminal-1", "agent-1", "operation-1")
+                        .map(|_| ()),
+                )
+                .is_err(),
+            "an executable write requires a registered command and durable intent"
+        );
+        assert!(!submission_attempted);
         manager
-            .write_executable(
+            .write(
                 &sessions,
                 "terminal-1",
                 "agent".into(),
@@ -538,10 +561,8 @@
                     task_id: "task-1",
                     operation_id: "operation-1",
                 },
-                &mut submission_attempted,
             )
             .unwrap();
-        assert!(submission_attempted);
         manager
             .write(
                 &sessions,
@@ -558,6 +579,7 @@
             .filter_map(|command| match command {
                 SessionCommand::Write(data) => Some(data),
                 SessionCommand::WriteBytes(_)
+                | SessionCommand::NativeControl(_)
                 | SessionCommand::Resize { .. }
                 | SessionCommand::Close => None,
             })

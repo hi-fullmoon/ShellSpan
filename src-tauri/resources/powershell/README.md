@@ -6,6 +6,11 @@ child process's PSModulePath. System modules, parent environment and user
 profiles are not edited. Profiles keep their normal startup order and can
 configure the loaded module.
 
+The content-addressed cache uses the short `editors` directory name because
+Windows PowerShell's .NET Framework loader still rejects assembly paths at
+MAX_PATH. Paths that remain too long fail native preparation explicitly; no
+system long-path or execution-policy setting is changed.
+
 Upstream: https://www.powershellgallery.com/packages/PSReadLine/2.4.5
 
 Original nupkg SHA-256:

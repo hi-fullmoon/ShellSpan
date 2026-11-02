@@ -1,0 +1,90 @@
+--- a/src/browser/services/SelectionService.ts
++++ b/src/browser/services/SelectionService.ts
+@@ -13,6 +13,7 @@
+ import * as Browser from 'common/Platform';
+ import { IBufferLine, IDisposable } from 'common/Types';
+ import { getRangeLength } from 'common/buffer/BufferRange';
++import { getWrappedLineTrimmedLength } from 'common/buffer/BufferReflow';
+ import { CellData } from 'common/buffer/CellData';
+ import { IBuffer } from 'common/buffer/Types';
+ import { IBufferService, ICoreService, IOptionsService } from 'common/services/Services';
+@@ -209,6 +210,23 @@
+ 
+     const buffer = this._bufferService.buffer;
+     const result: string[] = [];
++    let wrappedLineEnd = -1;
++    let lastContentLine = -1;
++    const selectedLineText = (row: number, startCol: number = 0, endCol?: number): string => {
++      if (!buffer.lines.get(row)) {
++        return '';
++      }
++      // Cache one logical range at a time. Empty soft-wrapped tail rows are
++      // not content; scanning each range once keeps long copies linear.
++      if (row > wrappedLineEnd) {
++        wrappedLineEnd = buffer.getWrappedRangeForLine(row).last;
++        lastContentLine = wrappedLineEnd;
++        while (lastContentLine > row && buffer.lines.get(lastContentLine)?.getTrimmedLength() === 0) {
++          lastContentLine--;
++        }
++      }
++      return this._selectedLineText(row, row < lastContentLine, startCol, endCol);
++    };
+ 
+     if (this._activeSelectionMode === SelectionMode.COLUMN) {
+       // Ignore zero width selections
+@@ -227,12 +245,12 @@
+     } else {
+       // Get first row
+       const startRowEndCol = start[1] === end[1] ? end[0] : undefined;
+-      result.push(buffer.translateBufferLineToString(start[1], true, start[0], startRowEndCol));
++      result.push(selectedLineText(start[1], start[0], startRowEndCol));
+ 
+       // Get middle rows
+       for (let i = start[1] + 1; i <= end[1] - 1; i++) {
+         const bufferLine = buffer.lines.get(i);
+-        const lineText = buffer.translateBufferLineToString(i, true);
++        const lineText = selectedLineText(i);
+         if (bufferLine?.isWrapped) {
+           result[result.length - 1] += lineText;
+         } else {
+@@ -243,7 +261,7 @@
+       // Get final row
+       if (start[1] !== end[1]) {
+         const bufferLine = buffer.lines.get(end[1]);
+-        const lineText = buffer.translateBufferLineToString(end[1], true, 0, end[0]);
++        const lineText = selectedLineText(end[1], 0, end[0]);
+         if (bufferLine && bufferLine!.isWrapped) {
+           result[result.length - 1] += lineText;
+         } else {
+@@ -259,6 +277,20 @@
+     }).join(Browser.isWindows ? '\r\n' : '\n');
+ 
+     return formattedResult;
++  }
++
++  private _selectedLineText(row: number, hasContinuationContent: boolean, startCol: number = 0, endCol?: number): string {
++    const buffer = this._bufferService.buffer;
++    const line = buffer.lines.get(row);
++    const next = buffer.lines.get(row + 1);
++    if (hasContinuationContent && line && next?.isWrapped) {
++      // A soft-wrap boundary is inside a logical line. Keep its real blank
++      // cells, but exclude the wide-character wrap gap using reflow's rule.
++      // Alternate buffers can retain their original line width after resize.
++      const length = getWrappedLineTrimmedLength([line, next], 0, line.length);
++      return line.translateToString(false, startCol, Math.min(endCol ?? length, length));
++    }
++    return buffer.translateBufferLineToString(row, true, startCol, endCol);
+   }
+ 
+   /**
+--- a/src/common/buffer/BufferReflow.ts
++++ b/src/common/buffer/BufferReflow.ts
+@@ -209,7 +209,7 @@
+   return newLineLengths;
+ }
+ 
+-export function getWrappedLineTrimmedLength(lines: BufferLine[], i: number, cols: number): number {
++export function getWrappedLineTrimmedLength(lines: IBufferLine[], i: number, cols: number): number {
+   // If this is the last row in the wrapped line, get the actual trimmed length
+   if (i === lines.length - 1) {
+     return lines[i].getTrimmedLength();

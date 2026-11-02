@@ -12,6 +12,7 @@ import { useToast } from '@/hooks/useToast';
 import { getPlatform } from '@/lib/platform';
 import { copyTerminalText } from './terminal-clipboard';
 import { terminalInputReadiness } from './terminal-input-readiness';
+import { agentTerminalCommandFeedback } from './agent-terminal-command-feedback';
 import { TerminalSearch } from './terminal-search';
 import { TerminalResizeIndicator } from './terminal-resize-indicator';
 import { TerminalPastePreview } from './terminal-paste-preview';
@@ -74,17 +75,14 @@ const AgentTerminalLeaseBar: React.FC<{
     shownFailureOperationRef.current = lease.operationId;
     showError(t('terminal.agentLease.takeoverFailed'));
   }, [lease.operationId, lease.takeoverFailed, showError, t]);
+  const feedback = agentTerminalCommandFeedback(lease);
   const interactionHint = !lease.terminalOwned
     ? t('terminal.agentLease.turnRunning')
     : lease.inputBlocked
       ? t('terminal.agentLease.inputBlockedAccessibleHint')
-      : t(lease.commandPhase === 'typing'
-        ? 'terminal.agentLease.commandTypingHint'
-        : 'terminal.agentLease.inputLocked');
+      : t(feedback.hint);
   const activityLabel = lease.terminalOwned
-    ? t(lease.commandPhase === 'typing'
-      ? 'terminal.agentLease.commandTyping'
-      : 'terminal.agentLease.commandRunning')
+    ? t(feedback.label)
     : t('terminal.agentLease.turnRunning');
 
   return (
@@ -149,7 +147,7 @@ const AgentTerminalLeaseBar: React.FC<{
           {t('terminal.agentLease.takeover')}
         </Button>
       </div>
-      <span className="sr-only">{interactionHint}</span>
+      <span className="sr-only">{activityLabel} {interactionHint}</span>
     </div>
   );
 };

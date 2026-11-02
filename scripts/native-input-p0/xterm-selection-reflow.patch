@@ -1,0 +1,252 @@
+--- a/src/common/buffer/Buffer.ts
++++ b/src/common/buffer/Buffer.ts
+@@ -12,7 +12,8 @@
+ import { CellData } from 'common/buffer/CellData';
+ import { NULL_CELL_CHAR, NULL_CELL_CODE, NULL_CELL_WIDTH, WHITESPACE_CELL_CHAR, WHITESPACE_CELL_CODE, WHITESPACE_CELL_WIDTH } from 'common/buffer/Constants';
+ import { Marker } from 'common/buffer/Marker';
+-import { IBuffer } from 'common/buffer/Types';
++import { IBuffer, IBufferReflowAnchor, IBufferReflowResizeEvent } from 'common/buffer/Types';
++import { Emitter } from 'vs/base/common/event';
+ import { DEFAULT_CHARSET } from 'common/data/Charsets';
+ import { IBufferService, IOptionsService } from 'common/services/Services';
+ 
+@@ -34,6 +35,10 @@
+  *   - scroll position
+  */
+ export class Buffer implements IBuffer {
++  private readonly _onBeforeResize = new Emitter<IBufferReflowResizeEvent>();
++  public readonly onBeforeResize = this._onBeforeResize.event;
++  private readonly _onAfterResize = new Emitter<IBufferReflowResizeEvent>();
++  public readonly onAfterResize = this._onAfterResize.event;
+   public lines: CircularList<IBufferLine>;
+   public ydisp: number = 0;
+   public ybase: number = 0;
+@@ -156,6 +161,8 @@
+    * @param newRows The new number of rows.
+    */
+   public resize(newCols: number, newRows: number): void {
++    const event = { oldCols: this._cols, oldRows: this._rows, cols: newCols, rows: newRows };
++    this._onBeforeResize.fire(event);
+     const reflowCursor = this._captureReflowCursor(newCols);
+     const reflowSavedCursor = this._captureReflowCursor(newCols, this.savedX, this.savedY);
+     // store reference to null cell with default attrs
+@@ -276,6 +283,7 @@
+       this.savedY = Math.max(0, Math.min(saved.row, this.lines.length - 1));
+     }
+ 
++    this._onAfterResize.fire(event);
+     this._memoryCleanupQueue.clear();
+     // schedule memory cleanup only, if more than 10% of the lines are affected
+     if (dirtyMemoryLines > 0.1 * this.lines.length) {
+@@ -289,13 +297,13 @@
+   // Generic terminal-state repair for the existing opt-in reflow mode. There
+   // is deliberately no application, command, source or editor metadata here.
+   // The same BufferLine widths used by reflow map the cursor's cell offset.
+-  private _captureReflowCursor(newCols: number, x: number = this.x, absoluteY: number = this.ybase + this.y): IReflowCursor | undefined {
+-    if (!this._isReflowEnabled || !this._optionsService.rawOptions.reflowCursorLine ||
++  private _captureReflowCursor(newCols: number, x: number = this.x, absoluteY: number = this.ybase + this.y, forSelection: boolean = false): IReflowCursor | undefined {
++    if (!this._isReflowEnabled || (!forSelection && !this._optionsService.rawOptions.reflowCursorLine) ||
+         newCols === this._cols || this.lines.length === 0) {
+       return undefined;
+     }
+     const current = this.lines.get(absoluteY);
+-    if (!current || x > current.getTrimmedLength()) {
++    if (!current || x < 0 || x > this._cols || (!forSelection && x > current.getTrimmedLength())) {
+       return undefined;
+     }
+     let start = absoluteY;
+@@ -338,6 +346,42 @@
+       })
+     ];
+     return cursor;
++  }
++
++  public createReflowAnchor(x: number, absoluteY: number, newCols: number): IBufferReflowAnchor | undefined {
++    if (!Number.isInteger(x) || !Number.isInteger(absoluteY) || x < 0 || x > this._cols ||
++        absoluteY < 0 || absoluteY >= this.lines.length) {
++      return undefined;
++    }
++    const range = this.getWrappedRangeForLine(absoluteY);
++    const cursor = this.ybase + this.y;
++    if (!this._optionsService.rawOptions.reflowCursorLine && cursor >= range.first && cursor <= range.last) {
++      // The application owns this line's redraw; its future contents cannot
++      // be inferred from a terminal-side coordinate transform.
++      return undefined;
++    }
++    const anchor = this._captureReflowCursor(newCols, x, absoluteY, true);
++    if (!anchor) {
++      return undefined;
++    }
++    let disposed = false;
++    return {
++      resolve: () => {
++        if (disposed) {
++          return undefined;
++        }
++        disposed = true;
++        const position = this._resolveReflowCursor(anchor, newCols);
++        return position && position.row >= 0 && position.row < this.lines.length
++          ? [Math.min(position.col, newCols), position.row] : undefined;
++      },
++      dispose: () => {
++        if (!disposed) {
++          disposed = true;
++          anchor.dispose();
++        }
++      }
++    };
+   }
+ 
+   private _resolveReflowCursor(cursor: IReflowCursor | undefined, cols: number): { row: number; col: number } | undefined {
+--- a/src/common/buffer/Types.ts
++++ b/src/common/buffer/Types.ts
+@@ -9,7 +9,21 @@
+ // BufferIndex denotes a position in the buffer: [rowIndex, colIndex]
+ export type BufferIndex = [number, number];
+ 
++export interface IBufferReflowAnchor extends IDisposable {
++  resolve(): [number, number] | undefined;
++}
++
++export interface IBufferReflowResizeEvent {
++  oldCols: number;
++  oldRows: number;
++  cols: number;
++  rows: number;
++}
++
+ export interface IBuffer {
++  readonly onBeforeResize: Event<IBufferReflowResizeEvent>;
++  readonly onAfterResize: Event<IBufferReflowResizeEvent>;
++  createReflowAnchor(x: number, absoluteY: number, newCols: number): IBufferReflowAnchor | undefined;
+   readonly lines: ICircularList<IBufferLine>;
+   ydisp: number;
+   ybase: number;
+--- a/src/browser/services/SelectionService.ts
++++ b/src/browser/services/SelectionService.ts
+@@ -15,7 +15,7 @@
+ import { getRangeLength } from 'common/buffer/BufferRange';
+ import { getWrappedLineTrimmedLength } from 'common/buffer/BufferReflow';
+ import { CellData } from 'common/buffer/CellData';
+-import { IBuffer } from 'common/buffer/Types';
++import { IBuffer, IBufferReflowAnchor, IBufferReflowResizeEvent } from 'common/buffer/Types';
+ import { IBufferService, ICoreService, IOptionsService } from 'common/services/Services';
+ import { Emitter } from 'vs/base/common/event';
+ 
+@@ -74,6 +74,8 @@
+   public serviceBrand: undefined;
+ 
+   protected _model: SelectionModel;
++  private _bufferResizeListeners: IDisposable[] = [];
++  private _selectionReflow: { start: IBufferReflowAnchor; end?: IBufferReflowAnchor; minimumEnd?: IBufferReflowAnchor } | undefined;
+ 
+   /**
+    * The amount to scroll every drag scroll update (depends on how far the mouse
+@@ -161,6 +163,75 @@
+         this.clearSelection();
+       }
+     }));
++    this._bindBufferResize(this._bufferService.buffer);
++    this._register(toDisposable(() => {
++      this._disposeSelectionReflow();
++      this._bufferResizeListeners.forEach(listener => listener.dispose());
++    }));
++  }
++
++  private _disposeSelectionReflow(): void {
++    const selection = this._selectionReflow;
++    this._selectionReflow = undefined;
++    selection?.start.dispose();
++    selection?.end?.dispose();
++    selection?.minimumEnd?.dispose();
++  }
++
++  private _bindBufferResize(buffer: IBuffer): void {
++    this._disposeSelectionReflow();
++    this._bufferResizeListeners.forEach(listener => listener.dispose());
++    this._bufferResizeListeners = [
++      buffer.onBeforeResize(event => this._captureSelectionReflow(buffer, event)),
++      buffer.onAfterResize(event => this._restoreSelectionReflow(event.cols))
++    ];
++  }
++
++  private _captureSelectionReflow(buffer: IBuffer, event: IBufferReflowResizeEvent): void {
++    this._disposeSelectionReflow();
++    const startPoint = this._model.selectionStart;
++    if (buffer !== this._bufferService.buffers.normal || event.cols === event.oldCols ||
++        event.rows !== event.oldRows || !startPoint ||
++        this._model.isSelectAllActive || this._activeSelectionMode === SelectionMode.COLUMN) {
++      return;
++    }
++    const start = buffer.createReflowAnchor(startPoint[0], startPoint[1], event.cols);
++    const endPoint = this._model.selectionEnd;
++    const end = endPoint ? buffer.createReflowAnchor(endPoint[0], endPoint[1], event.cols) : undefined;
++    let minimumEnd: IBufferReflowAnchor | undefined;
++    if (this._model.selectionStartLength) {
++      const offset = startPoint[0] + this._model.selectionStartLength - 1;
++      minimumEnd = buffer.createReflowAnchor(offset % event.oldCols + 1,
++        startPoint[1] + Math.floor(offset / event.oldCols), event.cols);
++    }
++    if (!start || (endPoint && !end) || (this._model.selectionStartLength && !minimumEnd)) {
++      start?.dispose();
++      end?.dispose();
++      minimumEnd?.dispose();
++      this.clearSelection();
++      return;
++    }
++    this._selectionReflow = { start, end, minimumEnd };
++  }
++
++  private _restoreSelectionReflow(cols: number): void {
++    const selection = this._selectionReflow;
++    if (!selection) {
++      return;
++    }
++    const start = selection.start.resolve();
++    const end = selection.end?.resolve();
++    const minimumEnd = selection.minimumEnd?.resolve();
++    this._disposeSelectionReflow();
++    if (!start || (selection.end && !end) || (selection.minimumEnd && !minimumEnd)) {
++      this.clearSelection();
++      return;
++    }
++    this._model.selectionStart = start;
++    this._model.selectionEnd = end;
++    this._model.selectionStartLength = minimumEnd
++      ? Math.max(0, (minimumEnd[1] - start[1]) * cols + minimumEnd[0] - start[0]) : 0;
++    this.refresh();
+   }
+ 
+   public reset(): void {
+@@ -796,6 +867,7 @@
+     // beneficial to leave the selection as is for these cases.
+     this._trimListener.dispose();
+     this._trimListener = e.activeBuffer.lines.onTrim(amount => this._handleTrim(amount));
++    this._bindBufferResize(e.activeBuffer);
+   }
+ 
+   /**
+--- a/src/browser/TestUtils.test.ts
++++ b/src/browser/TestUtils.test.ts
+@@ -7,7 +7,7 @@
+ import { ICharacterJoinerService, ICharSizeService, ICoreBrowserService, IMouseService, IRenderService, ISelectionService, IThemeService } from 'browser/services/Services';
+ import { IRenderDimensions, IRenderer, IRequestRedrawEvent } from 'browser/renderer/shared/Types';
+ import { IColorSet, ITerminal, ILinkifier2, IBrowser, IViewport, ICompositionHelper, CharacterJoinerHandler, IBufferRange, ReadonlyColorSet, IBufferElementProvider } from 'browser/Types';
+-import { IBuffer, IBufferSet } from 'common/buffer/Types';
++import { IBuffer, IBufferSet, IBufferReflowAnchor, IBufferReflowResizeEvent } from 'common/buffer/Types';
+ import { IBufferLine, ICellData, IAttributeData, ICircularList, XtermListener, ICharset, ITerminalOptions, ColorIndex } from 'common/Types';
+ import { Buffer } from 'common/buffer/Buffer';
+ import * as Browser from 'common/Platform';
+@@ -216,6 +216,11 @@
+ }
+ 
+ export class MockBuffer implements IBuffer {
++  public readonly onBeforeResize = new Emitter<IBufferReflowResizeEvent>().event;
++  public readonly onAfterResize = new Emitter<IBufferReflowResizeEvent>().event;
++  public createReflowAnchor(x: number, absoluteY: number, newCols: number): IBufferReflowAnchor | undefined {
++    throw new Error('Method not implemented.');
++  }
+   public markers!: IMarker[];
+   public addMarker(y: number): IMarker {
+     throw new Error('Method not implemented.');
+

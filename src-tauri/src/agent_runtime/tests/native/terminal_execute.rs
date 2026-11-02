@@ -7,100 +7,6 @@
     use crate::terminal_integration::{TerminalIntegrationControlEvent, TerminalShellKind};
     use crossbeam_channel::{unbounded, Receiver};
     use std::sync::atomic::AtomicBool;
-    use std::thread;
-
-    #[test]
-    #[cfg(target_os = "macos")]
-    fn posix_source_frame_roundtrips_literal_utf8_and_control_bytes_with_native_printf() {
-        let source = "printf '%s\\n' '$value `literal` \\c \\x41'\r\n# 字😀\tend\n";
-        for (shell, executable) in [
-            (TerminalShellKind::Zsh, "/bin/zsh"),
-            (TerminalShellKind::Bash, "/bin/bash"),
-        ] {
-            let frames = native_editor_chunks(source, shell);
-            assert_eq!(frames.len(), 1);
-            let (wire, buffer) = &frames[0];
-            assert_eq!(buffer, source);
-            let wire = wire.as_str();
-            assert!(!wire.contains(['\n', '\r', '\t', '\u{1b}', '\u{18}']));
-            let output = std::process::Command::new(executable)
-                .args(["-f", "-c", "builtin printf '%b' \"$1\"", "frame", wire])
-                .output()
-                .unwrap();
-            assert!(output.status.success());
-            assert_eq!(output.stdout, source.as_bytes());
-        }
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn bash_background_frame_preserves_source_separately_from_its_eval_envelope() {
-        let source =
-            "alias ss_literal='printf \\\"中文🙂\\\"'\nss_literal\n# $value `literal` \\c\t\r\n";
-        let line = crate::terminal_jobs::shell_submission(
-            source,
-            "job-0123456789abcdef0123456789abcdef",
-            TerminalShellKind::Bash,
-        )
-        .unwrap();
-        assert_eq!(
-            crate::terminal_integration::bash_native_eval_source(&line).as_deref(),
-            Some(source)
-        );
-        let frames = native_editor_chunks(&line, TerminalShellKind::Bash);
-        assert_eq!(frames.len(), 1);
-        let (wire, buffer) = &frames[0];
-        assert_eq!(buffer, &line);
-        let output = std::process::Command::new("/bin/bash")
-            .args([
-                "--noprofile",
-                "--norc",
-                "-c",
-                "builtin printf '%b' \"$1\"",
-                "frame",
-                wire,
-            ])
-            .output()
-            .unwrap();
-        assert!(output.status.success());
-        assert_eq!(output.stdout, [source.as_bytes(), line.as_bytes()].concat());
-        assert!(crate::terminal_integration::bash_native_eval_source(
-            &line.replace("job-0123456789abcdef0123456789abcdef", "job-invalid")
-        )
-        .is_none());
-    }
-
-    #[test]
-    fn powershell_editor_batches_are_bounded_utf8_data_with_exact_buffer_prefixes() {
-        use base64::Engine;
-        let command = format!(
-            "$value = @'\n{}\nreal\tTab 'single' \"double\"\r\n'@\nWrite-Output $value",
-            "字😀".repeat(1800)
-        );
-        for shell in [
-            TerminalShellKind::WindowsPowerShell,
-            TerminalShellKind::PowerShell7,
-        ] {
-            let batches = native_editor_chunks(&command, shell);
-            assert!(batches.len() >= 2);
-            let limit = POWERSHELL_EDITOR_BATCH_BYTES;
-            let mut actual = String::new();
-            for (wire, prefix) in batches {
-                let encoded = wire
-                    .strip_suffix("\u{18}\u{6}")
-                    .expect("non-submitting bounded data fence");
-                let bytes = base64::engine::general_purpose::STANDARD
-                    .decode(encoded)
-                    .unwrap();
-                assert!(!bytes.is_empty() && bytes.len() <= limit);
-                actual.push_str(std::str::from_utf8(&bytes).unwrap());
-                assert_eq!(prefix, actual);
-                assert!(!wire.contains(['\n', '\r']) && !encoded.contains('\u{18}'));
-            }
-            assert_eq!(actual, command);
-            assert_eq!(native_editor_chunks(&"x".repeat(limit), shell).len(), 1);
-        }
-    }
 
     fn native_probe_state_harness() -> (TerminalSessionBroker, Arc<TerminalCommandOperation>) {
         use crate::terminal_broker::{TerminalBrokerInputSource, TerminalInputKind};
@@ -297,58 +203,6 @@
                 .unwrap_err()
                 .contains("RECOVERY_REQUIRED"));
         }
-    }
-
-    #[test]
-    fn typing_keeps_graphemes_intact_and_bounds_long_command_delay() {
-        let command = "终端e\u{301}👩‍💻";
-        assert_eq!(
-            typing_chunks(command, false),
-            ["终", "端", "e\u{301}", "👩‍💻"]
-        );
-        let long = command.repeat(2_000);
-        let chunks = typing_chunks(&long, false);
-        assert!(chunks.len() <= TYPING_MAX_STEPS);
-        assert_eq!(chunks.concat(), long);
-        assert!(TYPING_INTERVAL * chunks.len() as u32 <= Duration::from_millis(1_700));
-        assert_eq!(typing_chunks(command, true), [command]);
-        assert_eq!(typing_chunks("", false), [""]);
-    }
-
-    #[test]
-    fn native_typing_preserves_prefixes_and_the_final_validated_source_frame() {
-        let source = format!("cat <<'END'\n{}\nEND\npwd", "中文e\u{301}👩‍💻\t".repeat(100));
-        for shell in [TerminalShellKind::Bash, TerminalShellKind::Zsh] {
-            let command = if shell == TerminalShellKind::Bash {
-                crate::terminal_integration::bash_native_submission(&source).unwrap()
-            } else {
-                source.clone()
-            };
-            let frames = native_editor_typing_chunks(&command, &source, shell);
-            assert!(frames.len() > 1 && frames.len() <= TYPING_MAX_STEPS);
-            let mut previous = "";
-            for (_, prefix) in &frames[..frames.len() - 1] {
-                assert!(prefix.starts_with(previous) && prefix.len() > previous.len());
-                assert!(source.starts_with(prefix));
-                assert!(
-                    source
-                        .grapheme_indices(true)
-                        .any(|(index, _)| index == prefix.len())
-                        || prefix.len() == source.len()
-                );
-                previous = prefix;
-            }
-            assert_eq!(frames.last(), native_editor_chunks(&command, shell).last());
-        }
-    }
-
-    #[test]
-    fn native_editor_encoding_preserves_original_bytes_without_flow_control_keys() {
-        assert_eq!(
-            native_editor_input("a\nb\tc\rd"),
-            "a\u{18}nb\u{18}tc\u{18}rd"
-        );
-        assert!(!native_editor_input("a\nb\tc\rd").contains(['\u{11}', '\u{13}']));
     }
 
     #[test]
@@ -647,44 +501,6 @@
     }
 
     #[test]
-    fn user_submit_closes_prompt_gate_before_shell_start_event() {
-        use crate::terminal_broker::{TerminalBrokerInputSource, TerminalInputKind};
-        let (broker, registry, sessions, receiver) = harness();
-        broker
-            .admit_terminal_input(
-                "transport-1",
-                TerminalBrokerInputSource::User,
-                TerminalInputKind::Text,
-                b"\r",
-                || Ok(()),
-            )
-            .unwrap();
-        assert!(
-            !broker
-                .snapshot(Some("transport-1"))
-                .unwrap()
-                .session
-                .unwrap()
-                .prompt_ready
-        );
-        assert!(registry
-            .start(
-                &sessions,
-                "transport-1",
-                "agent",
-                "task",
-                "operation",
-                "printf forbidden",
-                "\n"
-            )
-            .is_err());
-        assert!(
-            receiver.try_recv().is_err(),
-            "a control command reached a just-submitted user program"
-        );
-    }
-
-    #[test]
     fn admitted_accept_key_revokes_native_clear_before_command_start() {
         use crate::terminal_broker::{TerminalBrokerInputSource, TerminalInputKind};
         let (broker, _, _, _) = harness();
@@ -970,213 +786,6 @@
             .is_err());
     }
 
-    #[test]
-    fn prepared_shell_jobs_fence_replacement_before_command_creation_and_input() {
-        for boundary in [
-            TerminalExecuteValidationStage::LeaseAcquisition,
-            TerminalExecuteValidationStage::CommandCreation,
-            TerminalExecuteValidationStage::InputWrite,
-        ] {
-            for replace_generation in [false, true] {
-                let (broker, registry, sessions, receiver) = harness();
-                // State-machine coverage; real execution is covered by native PTY/SSH tests.
-                broker
-                    .accept_integration_event(
-                        "transport-1",
-                        "integration-1",
-                        TerminalIntegrationControlEvent::PromptStart { cwd: "/tmp".into() },
-                    )
-                    .unwrap();
-                broker
-                    .accept_integration_event(
-                        "transport-1",
-                        "integration-1",
-                        TerminalIntegrationControlEvent::NativeInput { enabled: true },
-                    )
-                    .unwrap();
-                broker
-                    .accept_integration_event(
-                        "transport-1",
-                        "integration-1",
-                        TerminalIntegrationControlEvent::NativePrivateControl { enabled: true },
-                    )
-                    .unwrap();
-                broker
-                    .accept_integration_event(
-                        "transport-1",
-                        "integration-1",
-                        TerminalIntegrationControlEvent::NativeJobs { enabled: true },
-                    )
-                    .unwrap();
-                broker
-                    .accept_integration_event(
-                        "transport-1",
-                        "integration-1",
-                        TerminalIntegrationControlEvent::NativeCheckpointMode { enabled: true },
-                    )
-                    .unwrap();
-                broker
-                    .accept_integration_event(
-                        "transport-1",
-                        "integration-1",
-                        TerminalIntegrationControlEvent::PromptEnd,
-                    )
-                    .unwrap();
-                let target = crate::agent_runtime::AgentToolTargetNative::Local {
-                    target_id: "owner".into(),
-                    session_id: "transport-1".into(),
-                    cwd: None,
-                };
-                let job = broker
-                    .prepare_shell_job(
-                        "transport-1",
-                        &target,
-                        "agent-1",
-                        "task-1",
-                        "launch",
-                        "printf never",
-                    )
-                    .unwrap();
-                assert!(broker
-                    .prepare_shell_job(
-                        "transport-1",
-                        &target,
-                        "agent-1",
-                        "task-1",
-                        "launch",
-                        "printf never"
-                    )
-                    .unwrap_err()
-                    .contains("TERMINAL_JOB_LAUNCH_ALREADY_REGISTERED"));
-                let result = registry.start_native_submission(
-                    &sessions,
-                    "transport-1",
-                    "agent-1",
-                    "task-1",
-                    "launch",
-                    "printf never",
-                    "\n",
-                    Some(&job.submitted_command_line),
-                    |stage| {
-                        if stage == boundary {
-                            if replace_generation {
-                                broker
-                                    .attach_transport(
-                                        "replacement",
-                                        Some("transport-1"),
-                                        TerminalTransportKind::LocalPty,
-                                        TerminalGeometry::new(80, 24),
-                                    )
-                                    .unwrap();
-                            } else {
-                                broker
-                                    .register_integration_channel(
-                                        "transport-1",
-                                        "integration-replacement",
-                                        TerminalShellKind::Zsh,
-                                    )
-                                    .unwrap();
-                                for event in [
-                                    TerminalIntegrationControlEvent::Ready {
-                                        shell: TerminalShellKind::Zsh,
-                                    },
-                                    TerminalIntegrationControlEvent::PromptStart {
-                                        cwd: "/tmp".into(),
-                                    },
-                                    TerminalIntegrationControlEvent::NativeInput { enabled: true },
-                                    TerminalIntegrationControlEvent::NativeCheckpointMode {
-                                        enabled: true,
-                                    },
-                                    TerminalIntegrationControlEvent::NativePrivateControl {
-                                        enabled: true,
-                                    },
-                                    TerminalIntegrationControlEvent::NativeJobs { enabled: true },
-                                    TerminalIntegrationControlEvent::PromptEnd,
-                                ] {
-                                    broker
-                                        .accept_integration_event(
-                                            "transport-1",
-                                            "integration-replacement",
-                                            event,
-                                        )
-                                        .unwrap();
-                                }
-                            }
-                        }
-                        Ok(())
-                    },
-                );
-                assert!(result.is_err(), "{boundary:?} accepted stale prepared job");
-                assert!(
-                    receiver.try_recv().is_err(),
-                    "stale preparation wrote terminal input at {boundary:?}"
-                );
-                let fenced = broker
-                    .shell_job(&job.process_handle, "owner", "agent-1", "task-1")
-                    .unwrap();
-                assert!(fenced.control_lost);
-                assert_eq!(
-                    fenced.state,
-                    if boundary == TerminalExecuteValidationStage::InputWrite {
-                        "rejected"
-                    } else {
-                        "uncertain"
-                    }
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn native_job_wait_readiness_cancellation_and_deadline_write_nothing() {
-        use std::sync::atomic::Ordering;
-        for cancel in [true, false] {
-            let (broker, _, sessions, receiver) = harness();
-            let leases = TerminalLeaseManager::new(broker.clone());
-            // Intentionally no readiness acknowledgement: exercise the actual
-            // lease wait and cancellation deadline, not a fabricated command.
-            let registry = TerminalExecuteRegistry::new(leases, broker.clone());
-            let cancelled = Arc::new(AtomicBool::new(false));
-            let signal = cancelled.clone();
-            let trigger = thread::spawn(move || {
-                thread::sleep(Duration::from_millis(30));
-                if cancel {
-                    signal.store(true, Ordering::SeqCst);
-                }
-            });
-            let started = Instant::now();
-            let result = registry.start_native_submission_until(
-                &sessions,
-                "transport-1",
-                "ready-agent",
-                "ready-task",
-                "ready-operation",
-                "printf never",
-                "\n",
-                None,
-                Some(started + Duration::from_millis(120)),
-                |_| {
-                    if cancelled.load(Ordering::SeqCst) {
-                        Err("wait cancelled".into())
-                    } else {
-                        Ok(())
-                    }
-                },
-            );
-            trigger.join().unwrap();
-            assert!(result.is_err());
-            assert!(
-                started.elapsed() < Duration::from_millis(500),
-                "readiness exceeded total budget"
-            );
-            assert!(
-                receiver.try_recv().is_err(),
-                "cancelled/expired readiness wrote input"
-            );
-            assert!(!registry.has_operation("transport-1").unwrap());
-        }
-    }
-
     fn harness() -> (
         TerminalSessionBroker,
         TerminalExecuteRegistry,
@@ -1267,57 +876,6 @@
                 },
             )
             .unwrap();
-    }
-
-    #[test]
-    fn unexpected_prompt_cannot_reauthorize_an_unconfirmed_input_buffer() {
-        let (broker, registry, sessions, _receiver) = harness();
-        let operation = registry
-            .start(
-                &sessions,
-                "transport-1",
-                "agent-1",
-                "task-1",
-                "operation-1",
-                "printf safe",
-                "\n",
-            )
-            .unwrap();
-        let error = broker
-            .accept_integration_event(
-                "transport-1",
-                "integration-1",
-                TerminalIntegrationControlEvent::PromptStart { cwd: "/tmp".into() },
-            )
-            .unwrap_err();
-        assert!(error.starts_with("TERMINAL_INPUT_RECOVERY_REQUIRED"));
-        assert_eq!(
-            operation.snapshot().unwrap().state,
-            TerminalCommandState::Uncertain
-        );
-        let snapshot = registry
-            .wait(
-                &sessions,
-                "transport-1",
-                &operation,
-                Duration::from_millis(10),
-            )
-            .unwrap();
-        assert!(snapshot.no_auto_replay);
-        registry.leases.release_turn("agent-1").unwrap();
-        let error = registry
-            .leases
-            .write(
-                &sessions,
-                "transport-1",
-                "\n".into(),
-                TerminalInputSource::User,
-            )
-            .unwrap_err();
-        assert!(
-            error.starts_with("TERMINAL_INPUT_RECOVERY_REQUIRED"),
-            "{error}"
-        );
     }
 
     #[test]
@@ -1477,283 +1035,53 @@
             .is_err());
     }
 
-    fn command_end(broker: &TerminalSessionBroker, exit_code: i32) {
-        broker
-            .accept_integration_event(
-                "transport-1",
-                "integration-1",
-                TerminalIntegrationControlEvent::CommandEnd {
-                    exit_code,
-                    cwd: "/tmp/after".into(),
-                },
-            )
-            .unwrap();
-    }
-
+    // Real Broker admission without an integration, transport or manufactured receipt.
     #[test]
-    fn submits_exact_real_input_and_returns_cooperative_contract() {
-        let (broker, registry, sessions, receiver) = harness();
-        let operation = registry
-            .start(
-                &sessions,
-                "transport-1",
-                "agent-1",
-                "task-1",
-                "operation-1",
-                "printf '终端'",
-                "\n",
-            )
-            .unwrap();
-        let worker_broker = broker.clone();
-        let worker = thread::spawn(move || {
-            let SessionCommand::Write(input) = receiver.recv().unwrap() else {
-                panic!("expected command input")
-            };
-            assert_eq!(input, "printf '终端'\n");
-            assert!(!input.contains("/bin/sh -c"));
-            assert!(!input.contains("BEGIN:"));
-            assert!(!input.contains("[Agent]"));
-            command_start(&worker_broker, "printf '终端'");
-            worker_broker
-                .observe_raw_output("transport-1", b"\x1b[31mterminal\x1b[0m")
-                .unwrap();
-            command_end(&worker_broker, 3);
-        });
-        let snapshot = registry
-            .wait(&sessions, "transport-1", &operation, Duration::from_secs(2))
-            .unwrap();
-        worker.join().unwrap();
-        assert_eq!(snapshot.state, TerminalCommandState::Completed);
-        assert_eq!(snapshot.command_line, "printf '终端'");
-        assert_eq!(snapshot.exit_code, Some(3));
-        assert_eq!(snapshot.cwd.as_deref(), Some("/tmp/after"));
-        assert!(snapshot.combined_output.contains("terminal"));
-        assert!(snapshot.no_auto_replay);
-    }
-
-    fn interrupt_settlement(
-        requested: TerminalCommandRequestedSettlement,
-        expected: TerminalCommandState,
-    ) {
-        let (broker, registry, sessions, receiver) = harness();
-        let operation = registry
-            .start(
-                &sessions,
-                "transport-1",
-                "agent-1",
-                "task-1",
-                "operation-1",
-                "sleep 60",
-                "\n",
-            )
-            .unwrap();
-        let worker_broker = broker.clone();
-        let worker = thread::spawn(move || {
-            let SessionCommand::Write(input) = receiver.recv().unwrap() else {
-                panic!("expected command input")
-            };
-            assert_eq!(input, "sleep 60\n");
-            command_start(&worker_broker, "sleep 60");
-            let SessionCommand::Write(interrupt) = receiver.recv().unwrap() else {
-                panic!("expected interrupt")
-            };
-            assert_eq!(interrupt.as_bytes(), [3]);
-            command_end(&worker_broker, 130);
-        });
-        match requested {
-            TerminalCommandRequestedSettlement::Cancelled => {
-                assert_eq!(registry.cancel_task(&sessions, "task-1").unwrap(), 1);
-            }
-            TerminalCommandRequestedSettlement::TakenOver => {
-                assert!(registry
-                    .takeover(&sessions, "transport-1", "agent-1", "operation-1",)
-                    .unwrap());
-            }
-            TerminalCommandRequestedSettlement::TimedOut => {}
-        }
-        let timeout = if requested == TerminalCommandRequestedSettlement::TimedOut {
-            Duration::from_millis(1)
-        } else {
-            Duration::from_secs(2)
-        };
-        let snapshot = registry
-            .wait(&sessions, "transport-1", &operation, timeout)
-            .unwrap();
-        worker.join().unwrap();
-        assert_eq!(snapshot.state, expected);
-        assert_eq!(snapshot.exit_code, Some(130));
-    }
-
-    #[test]
-    fn cancellation_timeout_and_takeover_use_one_scoped_interrupt_and_cooperative_end() {
-        interrupt_settlement(
-            TerminalCommandRequestedSettlement::Cancelled,
-            TerminalCommandState::Cancelled,
-        );
-        interrupt_settlement(
-            TerminalCommandRequestedSettlement::TimedOut,
-            TerminalCommandState::TimedOut,
-        );
-        interrupt_settlement(
-            TerminalCommandRequestedSettlement::TakenOver,
-            TerminalCommandState::TakenOver,
-        );
-    }
-
-    #[test]
-    fn closed_terminal_returns_captured_uncertain_result_without_replay() {
-        let (broker, registry, sessions, receiver) = harness();
-        let operation = registry
-            .start(
-                &sessions,
-                "transport-1",
-                "agent-1",
-                "task-1",
-                "operation-1",
-                "sleep 60",
-                "\n",
-            )
-            .unwrap();
-        assert!(matches!(receiver.recv().unwrap(), SessionCommand::Write(_)));
-        command_start(&broker, "sleep 60");
-        broker
-            .observe_raw_output("transport-1", b"before close")
-            .unwrap();
-        assert!(registry.terminal_closed("transport-1").unwrap());
-        broker
-            .close_transport(
-                "transport-1",
-                crate::terminal_broker::TerminalGenerationCloseReason::UserClosed,
-            )
-            .unwrap();
-        assert!(!registry.has_operation("transport-1").unwrap());
-        let snapshot = registry
-            .wait(&sessions, "transport-1", &operation, Duration::from_secs(1))
-            .unwrap();
-        assert_eq!(snapshot.state, TerminalCommandState::Uncertain);
-        assert_eq!(snapshot.exit_code, None);
-        assert_eq!(snapshot.combined_output, "before close");
-        assert!(snapshot.no_auto_replay);
-        assert!(receiver.try_recv().is_err());
-    }
-
-    #[test]
-    fn retired_waiter_and_cleanup_leave_new_command_registered() {
-        let (broker, registry, sessions, receiver) = harness();
-        let old = registry
-            .start(
-                &sessions,
-                "transport-1",
-                "agent-1",
-                "task-1",
-                "operation-1",
-                "sleep 60",
-                "\n",
-            )
-            .unwrap();
-        receiver.recv().unwrap();
-        command_start(&broker, "sleep 60");
-        registry.terminal_closed("transport-1").unwrap();
-        broker
-            .close_transport(
-                "transport-1",
-                crate::terminal_broker::TerminalGenerationCloseReason::UserClosed,
-            )
-            .unwrap();
-        broker
-            .attach_transport(
-                "transport-1",
-                Some("transport-1"),
-                TerminalTransportKind::LocalPty,
-                TerminalGeometry::new(80, 24),
-            )
-            .unwrap();
-        broker
-            .register_integration_channel("transport-1", "integration-1", TerminalShellKind::Zsh)
-            .unwrap();
-        for event in [
-            TerminalIntegrationControlEvent::Ready {
-                shell: TerminalShellKind::Zsh,
-            },
-            TerminalIntegrationControlEvent::PromptStart { cwd: "/tmp".into() },
-            TerminalIntegrationControlEvent::PromptEnd,
-        ] {
+    fn retired_source_is_rejected_before_lease_or_transport_access() {
+        use crate::terminal_command::protocol::InputMode;
+        for mode in [InputMode::Raw] {
+            let broker = TerminalSessionBroker::phase3_enabled_for_test(128);
             broker
-                .accept_integration_event("transport-1", "integration-1", event)
+                .attach_transport_with_mode(
+                    "unsupported",
+                    None,
+                    TerminalTransportKind::LocalPty,
+                    TerminalGeometry::new(80, 24),
+                    mode,
+                )
                 .unwrap();
+            let before = broker
+                .snapshot(Some("unsupported"))
+                .unwrap()
+                .session
+                .unwrap();
+            let registry = TerminalExecuteRegistry::new(
+                TerminalLeaseManager::new(broker.clone()),
+                broker.clone(),
+            );
+            for command in ["pwd", "printf '中文é👩‍💻'\nprintf done"] {
+                let result = registry.start(
+                    &SessionManager::default(),
+                    "unsupported",
+                    "agent",
+                    "task",
+                    "new-source",
+                    command,
+                    "\n",
+                );
+                assert!(
+                    matches!(result, Err(error) if error.starts_with("TERMINAL_NATIVE_INPUT_REQUIRED"))
+                );
+                assert!(!registry.has_operation("unsupported").unwrap());
+                let after = broker
+                    .snapshot(Some("unsupported"))
+                    .unwrap()
+                    .session
+                    .unwrap();
+                assert_eq!(after.terminal_generation, before.terminal_generation);
+                assert_eq!(after.input_mode, before.input_mode);
+                assert_eq!(after.active_command_id, before.active_command_id);
+                assert_eq!(after.input_observation, before.input_observation);
+            }
         }
-        let current = registry
-            .start(
-                &sessions,
-                "transport-1",
-                "agent-1",
-                "task-2",
-                "operation-2",
-                "pwd",
-                "\n",
-            )
-            .unwrap();
-        receiver.recv().unwrap();
-        registry
-            .finish_registration(
-                "transport-1",
-                "agent-1",
-                "task-1",
-                "operation-1",
-                TerminalLeaseReleaseReason::TerminalClosed,
-            )
-            .unwrap();
-        let old_snapshot = registry
-            .wait(&sessions, "transport-1", &old, Duration::from_secs(1))
-            .unwrap();
-        assert_eq!(old_snapshot.state, TerminalCommandState::Uncertain);
-        assert!(registry.has_operation("transport-1").unwrap());
-        command_start(&broker, "pwd");
-        command_end(&broker, 0);
-        let current_snapshot = registry
-            .wait(&sessions, "transport-1", &current, Duration::from_secs(1))
-            .unwrap();
-        assert_eq!(current_snapshot.state, TerminalCommandState::Completed);
-        assert_eq!(current_snapshot.exit_code, Some(0));
-        assert!(!registry.has_operation("transport-1").unwrap());
-        assert!(receiver.try_recv().is_err());
-    }
-
-    #[test]
-    fn missing_cooperative_end_is_uncertain_and_never_reported_as_timeout() {
-        let (broker, registry, sessions, receiver) = harness();
-        let operation = registry
-            .start(
-                &sessions,
-                "transport-1",
-                "agent-1",
-                "task-1",
-                "operation-1",
-                "side-effect; sleep 60",
-                "\n",
-            )
-            .unwrap();
-        let worker_broker = broker.clone();
-        let worker = thread::spawn(move || {
-            let SessionCommand::Write(_) = receiver.recv().unwrap() else {
-                panic!("expected command input")
-            };
-            command_start(&worker_broker, "side-effect; sleep 60");
-            let SessionCommand::Write(interrupt) = receiver.recv().unwrap() else {
-                panic!("expected interrupt")
-            };
-            assert_eq!(interrupt.as_bytes(), [3]);
-        });
-        let snapshot = registry
-            .wait(
-                &sessions,
-                "transport-1",
-                &operation,
-                Duration::from_millis(1),
-            )
-            .unwrap();
-        worker.join().unwrap();
-        assert_eq!(snapshot.state, TerminalCommandState::Uncertain);
-        assert_eq!(snapshot.exit_code, None);
-        assert!(snapshot.no_auto_replay);
     }

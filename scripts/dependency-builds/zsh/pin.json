@@ -1,0 +1,31 @@
+{
+  "version": "5.9",
+  "archiveUrl": "https://www.zsh.org/pub/old/zsh-5.9.tar.xz",
+  "archiveSha256": "9b8d1ecedd5b5e81fbf1918e876752a7dd948e05c1a0dba10ab863842d45acd5",
+  "patch": "scripts/dependency-builds/zsh/scoped-display-v1.patch",
+  "patchSha256": "4213d322dd24ce45f0d74eddd86f0f39018b88fa7bf92997c83c765dc6ff28af",
+  "sourceHashes": {
+    "zle_main.c": "8e33ddccd6d0f9ac453fc80f36a9b4c939400a676cafa1e08a76b9e47f97cb5d",
+    "zle_params.c": "c8e2d57a705bc0f218bdcc1fdbaff5207959eaef62a02de36c73fbff2eeee390",
+    "zle_refresh.c": "613969c846d30d9ba64b666543274c62b4b376581c0ef9ee0a3580dc4a459ae2"
+  },
+  "targets": {
+    "macos-arm64": {
+      "mainSha256": "abc56520c469fa4985fca02c5f55621932ad79de4f36440a64a27526f4b535ef",
+      "unicode9Default": true
+    },
+    "linux-aarch64-glibc-2.36": {
+      "mainSha256": "1ebc9b7012541bdc45fe8cbb9f752c0dc49aeb47dea0fd76d755639e7554e6d3",
+      "unicode9Default": false
+    }
+  },
+  "api": {
+    "name": "shellspan.zle-native-append/1",
+    "parameter": "ZLE_NATIVE_APPEND",
+    "default": 0,
+    "minimum": 0,
+    "maximum": 1,
+    "implementation": "native-append-v1"
+  },
+  "productionProfileEnabled": false
+}

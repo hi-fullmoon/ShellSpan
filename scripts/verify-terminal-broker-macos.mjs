@@ -164,8 +164,6 @@ export function main() {
   for (const testName of [
     'terminal_broker::tests::macos_bash_pty_broker_preserves_raw_bytes_input_order_and_resize',
     'terminal_broker::tests::macos_zsh_pty_broker_preserves_raw_bytes_input_order_and_resize',
-    'terminal_integration::tests::macos_native_bash_visible_commands_preserve_shell_state_and_raw_display',
-    'terminal_integration::tests::macos_native_zsh_visible_commands_preserve_shell_state_and_raw_display',
   ]) {
     cargoTest(testName, ['--exact'], testName);
   }

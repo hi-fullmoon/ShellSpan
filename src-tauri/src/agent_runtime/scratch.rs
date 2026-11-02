@@ -2,7 +2,6 @@
 //! Pending approval, executing and uncertain uses are persisted before dispatch.
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -15,6 +14,10 @@ use super::{AgentSessionTarget, AgentToolResultStatus, NativeToolResult};
 
 #[path = "scratch_remote.rs"]
 mod remote;
+
+#[path = "scratch_storage.rs"]
+mod storage;
+use storage::{inspect_directory, private_directory, read_json, write_json, write_json_staged};
 
 const SUCCESS_TTL_MS: u64 = 24 * 60 * 60 * 1000;
 const FAILURE_TTL_MS: u64 = 7 * SUCCESS_TTL_MS;
@@ -620,76 +623,17 @@ fn local_tree_bytes(root: &Path) -> Result<u64, String> {
     Ok(bytes)
 }
 
-fn private_directory(path: &Path) -> Result<(), String> {
-    let mut builder = fs::DirBuilder::new();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt;
-        builder.mode(0o700);
-    }
-    match builder.create(path) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-        Err(e) => return Err(e.to_string()),
-    }
-    inspect_directory(path)
-}
-
-fn inspect_directory(path: &Path) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        let metadata = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
-        if metadata.uid() != unsafe { libc::geteuid() } || metadata.mode() & 0o077 != 0 {
-            return Err("scratch directory permissions or ownership changed".into());
-        }
-    }
-    // Check every ancestor; do not canonicalize a user-controlled symlink away.
-    for ancestor in path.ancestors() {
-        let m = fs::symlink_metadata(ancestor).map_err(|e| e.to_string())?;
-        if m.file_type().is_symlink() || !m.is_dir() {
-            return Err("unsafe scratch directory".into());
-        }
-    }
-    Ok(())
-}
-
 fn persist(state: &State, record: &Record) -> Result<(), String> {
-    write_json(
+    // Only published key.json files belong in the ownership index. Reopening
+    // another runtime must not mistake an in-flight atomic write for a record.
+    write_json_staged(
         &state
             .root
             .join("records")
             .join(format!("{}.json", record.key)),
         record,
+        &state.root.join("pending"),
     )
-}
-
-fn write_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
-    let parent = path.parent().ok_or("missing scratch metadata parent")?;
-    private_directory(parent)?;
-    if let Ok(m) = fs::symlink_metadata(path) {
-        if m.file_type().is_symlink() || !m.is_file() {
-            return Err("unsafe scratch metadata".into());
-        }
-    }
-    let mut temp = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
-    temp.write_all(&serde_json::to_vec(value).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
-    temp.as_file().sync_all().map_err(|e| e.to_string())?;
-    temp.persist(path).map_err(|e| e.to_string())?;
-    #[cfg(unix)]
-    fs::File::open(parent)
-        .and_then(|file| file.sync_all())
-        .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-fn read_json<T: for<'a> Deserialize<'a>>(path: &Path) -> Result<T, String> {
-    let m = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
-    if !m.is_file() || m.file_type().is_symlink() || m.len() > 1024 * 1024 {
-        return Err("unsafe scratch metadata".into());
-    }
-    serde_json::from_slice(&fs::read(path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
 }
 
 fn trash_workspace(path: &Path) -> Result<(), String> {

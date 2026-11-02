@@ -1,5 +1,16 @@
 # Terminal Execution Platform Test Matrix
 
+2026-11-02 P4 code-only update: legacy projection/typing/redraw implementation
+and source-input producers are retired. Wire labels/history remain readable;
+new Agent source requires native negotiation, with ZLE/PSReadLine production
+editor profiles still empty. GNU Bash retains its separate source-matching
+catalogue and exact bound-shell/module SHA admission. Existing private job
+management and ordinary/TUI input remain supported.
+The current code has only compile/type/static evidence. Fresh NIP read-timing
+captures, source/copy/search, continuous display, viewport, cancellation and
+cross-platform acceptance are mandatory pending gates; old pass/fail records
+below do not validate the P4 revision. See [P4 audit](../../../docs/design/agent-terminal-input-p4-audit.md).
+
 Status: accepted Phase 0 matrix; Phase 3 cooperative-shell amendment: 2026-09-15; remote bound-terminal reuse gate added 2026-09-17.
 
 Protocol: [Terminal Session Protocol v1](./terminal-protocol-rfc.md)
@@ -286,3 +297,179 @@ matching MSVC host, Windows PowerShell 5.1, or PowerShell 7 is unavailable.
 Native macOS command: `pnpm test:terminal-rollout:macos`. It reports `MISSING`
 rather than `PASS` unless the matching Darwin Rust host, `/bin/bash`, and
 `/bin/zsh` are available.
+
+## Native input refactor P0 (2026-10-31)
+
+This is separate from the historical TSP Phase 0 above. Exact commands,
+exit codes and build boundaries are in the
+[feasibility report](../../../docs/design/agent-terminal-input-native-feasibility.md).
+
+| Gate | Entry | Boundary |
+| --- | --- | --- |
+| Native local PTY and browsers | `pnpm test:terminal-native-input:p0 --upstream` | Pinned Bash 4.1/4.4/5.3, matching headers, real bytes; any rendering failure is fatal |
+| Isolated native SSH | `pnpm test:terminal-native-input:p0:ssh` | Debian 12/aarch64 sshd, loopback port and private forwarding; no business host |
+| Both | `pnpm test:terminal-native-input:p0 --upstream --ssh` | Retains an earlier nonzero result |
+| Recorded PTY rendering | `SHELLSPAN_P0_CAPTURE_ROOT=<suite> pnpm test:terminal-native-input:p0 --browser-only` | Actual captures, public xterm; no live Tauri/Broker acceptance claim |
+
+**Initial unpatched P0 control NOT PASS:** source/state/cancellation checks have evidence,
+but background-output preservation during resize/redisplay fails in browsers.
+No production switch or retirement of old input is permitted. P1 may only do
+the native-independent state inventory allowed by the implementation plan.
+
+Continuation evidence: `pnpm test:terminal-native-input:p0:background` captures
+pure native Bash without loading any bridge, plus paired provider controls.
+`--no-resize` / `--no-edit` isolate the combined failure; `--ssh` uses only the
+disposable loopback fixture. The report records 45/45 native checks per tested
+Bash build and 8/8 browser lanes for the isolated append-provider/generic-reflow
+combination. Original and same-bundler unpatched controls remain failing.
+The dependency experiment was explicitly authorized in isolation; it is not
+adoption into the production package or authorization for P2/P4.
+
+`pnpm test:terminal-native-input:p0:compat` adds 18 real-PTY library cases and
+nine actual native-provider ownership-window scenarios, replayed through public
+browser APIs. Always-opt-in passes 60/72 and fails 12/72; all 72 default-off
+state comparisons match stock. Existing tab-expanded cells survive, but copied
+spaces are trimmed by stock selection serialization. Tabs arriving after resize
+use the actual column/stops and have separate invariants. Ordinary Readline
+should retain false; global true duplicates its redraw. Scoped switching still
+fails for a handoff resize gap, delayed open and withheld close. Stock/default
+native hard-line redraw differs from no-newline source equality; that stronger
+diagnostic is retained, but is not an original ordinary-editing requirement.
+Default-false stock state/copy compatibility and actual execution are the
+ordinary-native gates. The research
+browser entry includes both gates and stays nonzero. Display acknowledgement
+does not grant execution authority; production ordering/recovery is unimplemented.
+
+`pnpm test:terminal-native-input:p0:inband` separately tests native-ordered
+display signals via documented user-variable transport and a lab-only public
+option binding. Its 15 native cases cover queued/fragmented parsing around
+resize, cancel/takeover, real background output, TUI/control EOF, normal/SIGHUP
+exit, SIGKILL/terminal EOF and stdout without commit authority. This does not
+replace the failed global/async controls or the strict tab-copy assertion, and
+does not enable a production protocol/capability.
+
+The final in-band scoped profile records 15/15 native cases and 60/60 lanes for
+each browser delivery strategy, plus 408/408 library-only packet split/resize
+checks. A separate actual commit/resize probe first reproduced hidden-plan echo:
+`rl_done` does not prevent post-dispatch SIGWINCH redisplay. The isolated native
+prototype retains a non-output redisplay provider until the parent `p0_begin`
+builtin, when Readline has returned. Bash 4.1/4.4/5.3 each pass 64/64 dense-resize
+commits with no raw wrapper echo and exactly one side effect; the in-band 5.3
+probe also checks source → off → actual output order. Native 5.3 regression is
+45/45. The raw pre-fix and cursor-only tab-copy failures remain as controls;
+production adoption is not granted by those scoped passes.
+
+`pnpm test:terminal-native-input:p0:copy` adds a generic library serialization
+repair. **344/344 applicable case lanes pass**, including every paired owned
+Tab/copy case; the cursor-only baseline fails 56. Direct unmodified-stock
+comparison passes **12/12** representative ordinary default-false lanes (ASCII,
+Unicode and real native quoted-insert Tab). Source binding, actual side effects,
+full visible owned copy and T05 checks remain mandatory. Strong ordinary
+no-hard-newline source equality is diagnostic, not a new frozen goal.
+
+The copy repair is global, not gated by reflowCursorLine. Default-configuration
+history with qualifying soft-wrap blank cells intentionally copies differently
+to correct the stock defect. Representative ordinary matches do not establish
+universal old-copy equivalence. Formal acceptance of that generic rule change is
+now explicitly authorized; no business-layer selection/search/buffer override
+has been introduced. Unchanged in-band and 192-commit records
+are reused after source/module hash checks. See the P0 report for scope/results.
+Alternate soft-wrap/Tab resize additionally preserves the actual retained line
+width and legacy copy behavior; the initial viewport-width regression remains
+as evidence and both cases remain in the final gate.
+
+### Formal package acceptance
+
+User approval covers the global cursor/copy fixes and ordered display mechanism.
+The pnpm-patched exact 6.0.0 source and rebuilt UMD/ESM package pass **344/344**
+applicable copy/search lanes, **12/12** representative ordinary-native stock
+comparisons, **60/60** for each in-band delivery strategy, **408/408** packet
+boundaries, **52** explicit display-controller assertions and **8/8** geometry/
+theme lanes. Old source/redraw/decorations browser regressions pass with the real
+production ESM. Targeted frontend terminal/controller checks pass **166/166** and
+the frontend build passes. Full frontend retains **3** unrelated AI assertions
+also failing in the isolated unpatched-package baseline; it is not a global pass.
+
+P0 is accepted only for frozen macOS arm64 + GNU Bash 5.3 / Readline 8.3.6, not
+other native display platforms. The complete gate is
+`pnpm test:terminal-native-input:p0:formal`: missing corpora are generated through
+real builds/PTY captures, or explicit capture parameters can replay recorded
+evidence. `pnpm test:terminal-native-display` uses the repository's real native
+packet fixture and passes from clean source/dependencies without old temp paths.
+P1 freezes online identifiers in [NIP/1](native-input-v1.md); production native
+input remains unwired until P2.
+
+### P1 state, ownership and recovery
+
+`pnpm test:terminal-input:p1` rebuilds the pinned native producer from source,
+runs the complete pure state/event matrix (504 cases at P1; currently 546 including stop-unconfirmed), existing Broker/executor/
+lease checks, real NIP/1 PTY/socket tests, real SIGKILL/restart windows, captured
+wire schema validation, and Chromium/WebKit × DOM/WebGL formal display checks.
+It also protects the old GNU Bash/Zsh complete-script paths, missing-checkpoint
+recovery and default P0 wire format. The entry uses no timestamped build/capture
+dependency and enables no production route. See the
+[P1 audit](../../../docs/design/agent-terminal-input-p1-state-audit.md) for exact
+commands, results, baseline failures and platform boundaries.
+
+### P2 native Bash local and SSH migration
+
+The production SessionManager, Agent execution, Broker/lease, durable intent
+and frontend registry now carry NIP/1. Stage acceptance is tracked in the
+[P2 audit](../../../docs/design/agent-terminal-input-p2-audit.md); implementation
+does not by itself constitute a passed stage. The current candidate profiles
+are pinned GNU Bash 4.1/Readline 6.0, 4.4/7.0 and 5.3/8.3.6, on macOS arm64
+local PTYs and isolated Linux aarch64/glibc 2.36 SSH targets. Linux target-side
+component evidence is distinct from native Linux desktop acceptance.
+
+`pnpm test:terminal-input:p2 -- --fixture <owned-fixture.json>` runs the complete
+entry. `--components-only` explicitly excludes complete application acceptance.
+The actual-app matrix has 45 independent cases: five native history settings,
+the existing default legacy-client baseline and complete job tooling for each
+version/transport, plus one registry lifecycle case per version over SSH.
+Every case has its own application data, HOME, PTY and credential reference.
+Failed cases retain their original result; the matrix checks the remaining
+independent combinations and exits nonzero if any case fails. It never retries
+an operation or repairs model-generated tool parameters.
+`--case <version/transport/scenario>` selects explicit missing or failed cases
+in new contexts; a selected subset is never reported as a complete matrix.
+
+New isolated P2 GUI runs build and retain static frontend assets, serve them
+through Vite preview without HMR, and launch Tauri with `--no-watch` and an
+isolated Cargo target. A single-use HTML entry rejects reloads with HTTP 409.
+Source and asset hashes are checked around build/start/result/exit; the actual
+signed image is checked before launch and after exit. Drift invalidates the
+run. Offline build/HTTP/source-and-asset drift checks are separate from native
+application acceptance. Earlier evidence keeps its recorded provenance and is
+never backfilled with a new static-asset or image-end claim. The cumulative
+summarizer reports ordinary and frozen coverage separately; `--require-frozen`
+requires the complete frozen checkpoints and retained asset hashes.
+
+Separate real application gates cover private SSH EOF/no-replay/reconnect,
+alternate-screen/REPL/confirmation/credential rejection and physical interrupt,
+delegation/child takeover, contention/confirmed takeover and running/idempotent
+close. Read-only evidence records the actually accepted peer profile and binding,
+full-input proof and durable intent; these observations confer no execution
+authority. Public browser checks consume real target PTY streams with actual
+mid-input geometry changes, exact source selection/search and unmodified APIs.
+Source reconstruction and a signed release resource-directory smoke protect
+distribution separately. Old clients remain on their existing path; unaccepted
+native profiles remain unavailable. No Zsh/PowerShell native migration, extra
+architecture or business-host acceptance is inferred from these lanes.
+
+As of 2026-11-01, the frozen Bash production snapshot `815bf51a` has verified
+42/42 required and 3/3 lifecycle cases, including full retained static assets
+and actual signed-image exit checks. Its strict single-source report is
+`.native-input-p2/evidence-summary/eff93fac-662f-459c-a539-080c0c53e773/summary.json`.
+The complete auxiliary report `a5a5223e-ac4e-42e0-b82b-0f48789dd552` additionally
+includes the production-identical, four-file test revision `4f37bd17` for the
+fresh-task credential-input gate. It requires the same transport, terminal and
+generation for role full-input/durable proofs. The original complete entry
+`validation/4440e397-1a80-48d6-bdca-8f9c3acc4b27` remains FAIL; new isolated
+supplements do not rewrite its result or replay its operations.
+
+The later `4c61dfe8` revision changes the private legacy Zsh stty helper and is
+not production-identical to `815bf51a`. Its two real Zsh stress regressions,
+13 actual NIP tests (0 ignored) and two checkpoint regressions pass separately;
+earlier Bash images are not described as a full matrix of this revision.
+This compatibility fix does not constitute the P3 ZLE migration. Exact source
+paths, original failures and scoped stage completion are recorded in the audit.

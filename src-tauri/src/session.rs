@@ -45,6 +45,9 @@ const SSH_IDLE_WAIT_SLICE_MS: u64 = 20;
 const SSH_OUTPUT_FLUSH_THRESHOLD_BYTES: usize = 64 * 1024;
 const SSH_OUTPUT_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const SSH_STARTUP_OUTPUT_BUFFER_LIMIT_BYTES: usize = 1_000_000;
+#[path = "terminal_command/remote.rs"]
+mod remote_native;
+use remote_native::RemoteNativeBash;
 
 struct RemoteSshShellIntegration {
     integration_id: String,
@@ -490,7 +493,7 @@ fn open_remote_pty_channel(
 }
 
 pub(crate) fn run_ssh_session<
-    A: FnOnce() -> Result<(), String> + Send,
+    A: FnOnce(crate::terminal_command::protocol::InputMode) -> Result<(), String> + Send,
     C: FnOnce() -> Result<(), String> + Send,
 >(
     app: &AppHandle,
@@ -596,150 +599,282 @@ pub(crate) fn run_ssh_session<
         }
     };
 
-    let (mut remote_integration, remote_integration_error) = if bootstrap_remote_integration {
-        match RemoteSshShellIntegration::prepare(&session, &request.username) {
-            Ok(integration) => (Some(integration), None),
+    let predecessor_mode = request
+        .replaces_session_id
+        .as_deref()
+        .and_then(|previous| {
+            app.try_state::<crate::agent_runtime::AgentRuntime>()
+                .and_then(|runtime| runtime.terminal_broker_snapshot(Some(previous)).ok())
+        })
+        .and_then(|snapshot| snapshot.session)
+        .map(|session| session.input_mode);
+    let native_family = predecessor_mode.is_some();
+    let native_requested = bootstrap_remote_integration
+        && request.native_input_protocol.as_deref()
+            == Some(crate::terminal_command::protocol::PROTOCOL);
+    let (mut native_integration, native_failure) = if native_requested {
+        match crate::terminal_command::artifacts::resource_root(app).and_then(|resources| {
+            RemoteNativeBash::prepare(&session, &request.username, &resources)
+        }) {
+            Ok(None) if native_family => (None, Some("TERMINAL_NATIVE_PROFILE_UNSUPPORTED".into())),
+            Ok(native) => (native, None),
             Err(error) => (None, Some(error)),
         }
+    } else if native_family || request.native_input_protocol.is_some() {
+        (None, Some("TERMINAL_NATIVE_CLIENT_UNSUPPORTED".into()))
     } else {
         (None, None)
     };
+    let native_selected = native_integration.is_some() || native_failure.is_some();
+    let input_mode = if native_integration.is_some() {
+        crate::terminal_command::protocol::InputMode::NativeInline
+    } else {
+        crate::terminal_command::protocol::InputMode::Raw
+    };
+    let (mut remote_integration, remote_integration_error) =
+        if bootstrap_remote_integration && !native_selected {
+            match RemoteSshShellIntegration::prepare(&session, &request.username) {
+                Ok(integration) => (Some(integration), None),
+                Err(error) => (None, Some(error)),
+            }
+        } else {
+            (None, None)
+        };
 
-    with_remote_integration_cleanup(&session, &mut remote_integration, |remote_integration| {
-        let mut channel = open_remote_pty_channel(&session, request, session_id)?;
-        with_failure_cleanup(
-            &mut channel,
-            |channel| {
-                let mut integration_failure = remote_integration_error.as_deref().map(|message| {
-                    if message == "TERMINAL_INTEGRATION_UNSUPPORTED_REMOTE_SHELL" {
-                        (TerminalShellKind::Unsupported, "unsupportedRemoteShell")
-                    } else {
-                        (
-                            detect_remote_login_shell(&session, &request.username)
-                                .unwrap_or(TerminalShellKind::Unsupported),
-                            "remoteBootstrapFailed",
-                        )
-                    }
-                });
+    let result = with_remote_integration_cleanup(
+        &session,
+        &mut remote_integration,
+        |remote_integration| {
+            let mut channel = open_remote_pty_channel(&session, request, session_id)?;
+            with_failure_cleanup(
+                &mut channel,
+                |channel| {
+                    let mut integration_failure =
+                        remote_integration_error.as_deref().map(|message| {
+                            if message == "TERMINAL_INTEGRATION_UNSUPPORTED_REMOTE_SHELL" {
+                                (TerminalShellKind::Unsupported, "unsupportedRemoteShell")
+                            } else {
+                                (
+                                    detect_remote_login_shell(&session, &request.username)
+                                        .unwrap_or(TerminalShellKind::Unsupported),
+                                    "remoteBootstrapFailed",
+                                )
+                            }
+                        });
 
-                if let Some(integration) = remote_integration.as_ref() {
-                    if let Err(message) = integration.start_shell(channel) {
-                        warn!(
+                    if let Some(native) = native_integration.as_ref() {
+                        native
+                            .start_shell(channel)
+                            .map_err(|message| ConnectionError::Other { message })?;
+                    } else if let Some(integration) = remote_integration.as_ref() {
+                        if let Err(message) = integration.start_shell(channel) {
+                            warn!(
                             "Integrated remote shell startup failed; using ordinary SSH shell session_id={session_id}"
                         );
-                        let shell = integration.shell;
-                        if let Some(integration) = remote_integration.take() {
-                            integration.close(&session);
-                        }
-                        graceful_shutdown(channel);
-                        *channel = open_remote_pty_channel(&session, request, session_id)?;
-                        integration_failure = Some((shell, "remoteIntegratedShellStartFailed"));
-                        channel.shell().map_err(|error| ConnectionError::Other {
+                            let shell = integration.shell;
+                            if let Some(integration) = remote_integration.take() {
+                                integration.close(&session);
+                            }
+                            graceful_shutdown(channel);
+                            *channel = open_remote_pty_channel(&session, request, session_id)?;
+                            integration_failure = Some((shell, "remoteIntegratedShellStartFailed"));
+                            channel.shell().map_err(|error| ConnectionError::Other {
                             message: format!(
                                 "failed to start ordinary remote shell after integration fallback: {error}; integrated startup: {message}"
                             ),
                         })?;
-                    }
-                } else {
-                    channel.shell().map_err(|error| ConnectionError::Other {
-                        message: format!("failed to start remote shell: {error}"),
-                    })?;
-                }
-
-                if let Some(input) = initial_directory_input(request.initial_directory.as_deref())
-                    .map_err(|message| ConnectionError::Other { message })?
-                {
-                    // Queue one complete line before exposing the transport.
-                    // This also applies to unsupported shells and SFTP failure.
-                    channel.write_all(input.as_bytes()).map_err(|error| {
-                        ConnectionError::Other {
-                            message: format!("failed to queue initial terminal directory: {error}"),
-                        }
-                    })?;
-                }
-
-                // Register a replacement only after its SSH shell starts. The
-                // predecessor remains usable if startup fails before attachment.
-                on_broker_attached().map_err(|message| ConnectionError::Other { message })?;
-                let runtime = app
-                    .try_state::<crate::agent_runtime::AgentRuntime>()
-                    .ok_or_else(|| ConnectionError::Other {
-                        message: "terminal integration runtime is unavailable".into(),
-                    })?;
-
-                if let Some(integration) = remote_integration.as_ref() {
-                    if runtime
-                        .register_terminal_integration_channel(
-                            session_id,
-                            &integration.integration_id,
-                            integration.shell,
-                        )
-                        .is_err()
-                    {
-                        integration_failure =
-                            Some((integration.shell, "remoteControlRegistrationFailed"));
-                        // The login shell is already compatible and running.
-                        // Removing the FIFO makes its hooks disable themselves
-                        // without sourcing startup files or MOTD a second time.
-                        if let Some(integration) = remote_integration.take() {
-                            integration.close(&session);
                         }
                     } else {
+                        channel.shell().map_err(|error| ConnectionError::Other {
+                            message: format!("failed to start remote shell: {error}"),
+                        })?;
+                    }
+
+                    if let Some(input) =
+                        initial_directory_input(request.initial_directory.as_deref())
+                            .map_err(|message| ConnectionError::Other { message })?
+                    {
+                        // Queue one complete line before exposing the transport.
+                        // This also applies to unsupported shells and SFTP failure.
+                        channel.write_all(input.as_bytes()).map_err(|error| {
+                            ConnectionError::Other {
+                                message: format!(
+                                    "failed to queue initial terminal directory: {error}"
+                                ),
+                            }
+                        })?;
+                    }
+
+                    // Register a replacement only after its SSH shell starts. The
+                    // predecessor remains usable if startup fails before attachment.
+                    on_broker_attached(input_mode)
+                        .map_err(|message| ConnectionError::Other { message })?;
+                    let runtime = app
+                        .try_state::<crate::agent_runtime::AgentRuntime>()
+                        .ok_or_else(|| ConnectionError::Other {
+                            message: "terminal integration runtime is unavailable".into(),
+                        })?;
+
+                    if let Some(native) = native_integration.as_mut() {
+                        let probe = runtime
+                            .register_native_terminal(session_id, native.profile.clone())
+                            .map_err(|message| ConnectionError::Other { message })?;
+                        if native
+                            .send(
+                                &session,
+                                &probe.encode().map_err(|_| ConnectionError::Other {
+                                    message: "TERMINAL_NATIVE_PROTOCOL_INVALID".into(),
+                                })?,
+                            )
+                            .is_err()
+                        {
+                            native.fail(app, session_id);
+                        }
+                    }
+                    if let Some(integration) = remote_integration.as_ref() {
+                        if runtime
+                            .register_terminal_integration_channel(
+                                session_id,
+                                &integration.integration_id,
+                                integration.shell,
+                            )
+                            .is_err()
+                        {
+                            integration_failure =
+                                Some((integration.shell, "remoteControlRegistrationFailed"));
+                            // The login shell is already compatible and running.
+                            // Removing the FIFO makes its hooks disable themselves
+                            // without sourcing startup files or MOTD a second time.
+                            if let Some(integration) = remote_integration.take() {
+                                integration.close(&session);
+                            }
+                        } else {
+                            crate::commands::publish_terminal_integration_state(app, session_id)
+                                .map_err(|message| ConnectionError::Other { message })?;
+                        }
+                    }
+
+                    if let Some((shell, reason)) = integration_failure {
+                        if reason == "unsupportedRemoteShell" {
+                            runtime
+                                .mark_terminal_integration_unavailable(session_id, shell, reason)
+                                .map_err(|message| ConnectionError::Other { message })?;
+                        } else {
+                            runtime
+                                .mark_terminal_integration_degraded(session_id, shell, reason)
+                                .map_err(|message| ConnectionError::Other { message })?;
+                        }
                         crate::commands::publish_terminal_integration_state(app, session_id)
                             .map_err(|message| ConnectionError::Other { message })?;
                     }
-                }
-
-                if let Some((shell, reason)) = integration_failure {
-                    if reason == "unsupportedRemoteShell" {
+                    if native_failure.is_some() {
                         runtime
-                            .mark_terminal_integration_unavailable(session_id, shell, reason)
-                            .map_err(|message| ConnectionError::Other { message })?;
-                    } else {
-                        runtime
-                            .mark_terminal_integration_degraded(session_id, shell, reason)
-                            .map_err(|message| ConnectionError::Other { message })?;
-                    }
-                    crate::commands::publish_terminal_integration_state(app, session_id)
-                        .map_err(|message| ConnectionError::Other { message })?;
-                }
-                session.set_blocking(false);
-
-                publish_ssh_connection_ready(
-                    || {
-                        let event = app
-                            .try_state::<crate::models::SessionManager>()
-                            .ok_or_else(|| "SSH connection cancelled".to_string())?
-                            .commit_connection_ready(
+                            .mark_terminal_integration_unavailable(
                                 session_id,
-                                crate::connection::terminal_deadline::complete,
-                            )?;
-                        app.emit(crate::SSH_STATUS_EVENT, event)
-                            .map_err(|error| error.to_string())
-                    },
-                    || activity.transition(ActivityPhase::Connected),
-                    on_connected,
-                )
-                .map_err(|message| ConnectionError::Other { message })?;
-                info!("SSH session connected session_id={session_id}");
+                                TerminalShellKind::Bash,
+                                "nativeProfileMismatch",
+                            )
+                            .map_err(|message| ConnectionError::Other { message })?;
+                        crate::commands::emit_terminal_integration_state(app, session_id);
+                    }
+                    session.set_blocking(false);
+                    let mut initial_output = Vec::new();
+                    if let Some(native) = native_integration.as_mut() {
+                        let deadline = Instant::now() + Duration::from_secs(5);
+                        let mut bytes = [0; 8192];
+                        while native.active {
+                            if native.drain(app, session_id).is_err() {
+                                native.fail(app, session_id);
+                                break;
+                            }
+                            let ready = runtime
+                                .terminal_broker_snapshot(Some(session_id))
+                                .map_err(|message| ConnectionError::Other { message })?
+                                .session
+                                .is_some_and(|session| {
+                                    session.integration_state
+                                        == crate::terminal_broker::TerminalIntegrationState::Ready
+                                });
+                            if ready {
+                                break;
+                            }
+                            if Instant::now() >= deadline
+                                || initial_output.len() >= SSH_STARTUP_OUTPUT_BUFFER_LIMIT_BYTES
+                            {
+                                native.fail(app, session_id);
+                                break;
+                            }
+                            match channel.read(&mut bytes) {
+                                Ok(0) if channel.eof() => {
+                                    return Err(ConnectionError::Other {
+                                        message: "remote shell closed during native initialization"
+                                            .into(),
+                                    })
+                                }
+                                Ok(count) if count > 0 => {
+                                    observe_terminal_raw_output(app, session_id, &bytes[..count]);
+                                    initial_output.extend_from_slice(&bytes[..count]);
+                                }
+                                Ok(_) => {}
+                                Err(error) if is_retryable_channel_error_kind(error.kind()) => {}
+                                Err(error) => {
+                                    return Err(ConnectionError::Other {
+                                        message: format_transport_error(
+                                            "native startup PTY failed",
+                                            &error.to_string(),
+                                        ),
+                                    })
+                                }
+                            }
+                            wait_for_session_socket(
+                                &session,
+                                Duration::from_millis(SSH_IDLE_WAIT_SLICE_MS),
+                            )
+                            .map_err(|message| ConnectionError::Other { message })?;
+                        }
+                    }
 
-                session_loop(
-                    app,
-                    session_id,
-                    &session,
-                    channel,
-                    rx,
-                    &wake,
-                    &output_ready,
-                    &output_paused,
-                    remote_integration.as_mut(),
-                    Vec::new(),
-                )
-                .map_err(|message| ConnectionError::Other { message })
-            },
-            graceful_shutdown,
-        )
-    })
+                    publish_ssh_connection_ready(
+                        || {
+                            let event = app
+                                .try_state::<crate::models::SessionManager>()
+                                .ok_or_else(|| "SSH connection cancelled".to_string())?
+                                .commit_connection_ready(
+                                    session_id,
+                                    crate::connection::terminal_deadline::complete,
+                                )?;
+                            app.emit(crate::SSH_STATUS_EVENT, event)
+                                .map_err(|error| error.to_string())
+                        },
+                        || activity.transition(ActivityPhase::Connected),
+                        on_connected,
+                    )
+                    .map_err(|message| ConnectionError::Other { message })?;
+                    info!("SSH session connected session_id={session_id}");
+
+                    session_loop(
+                        app,
+                        session_id,
+                        &session,
+                        channel,
+                        rx,
+                        &wake,
+                        &output_ready,
+                        &output_paused,
+                        remote_integration.as_mut(),
+                        native_integration.as_mut(),
+                        initial_output,
+                    )
+                    .map_err(|message| ConnectionError::Other { message })
+                },
+                graceful_shutdown,
+            )
+        },
+    );
+    if let Some(native) = native_integration.take() {
+        native.close(&session);
+    }
+    result
 }
 
 fn publish_ssh_connection_ready(
@@ -797,6 +932,15 @@ fn coalesce_session_commands(commands: Vec<SessionCommand>) -> Vec<SessionComman
                     merged.push(SessionCommand::Write(std::mem::take(&mut pending_write)));
                 }
                 merged.push(SessionCommand::WriteBytes(bytes));
+            }
+            SessionCommand::NativeControl(frame) => {
+                if let Some((cols, rows)) = pending_resize.take() {
+                    merged.push(SessionCommand::Resize { cols, rows });
+                }
+                if !pending_write.is_empty() {
+                    merged.push(SessionCommand::Write(std::mem::take(&mut pending_write)));
+                }
+                merged.push(SessionCommand::NativeControl(frame));
             }
             SessionCommand::Resize { cols, rows } => {
                 if !pending_write.is_empty() {
@@ -938,6 +1082,7 @@ fn session_loop(
     output_ready: &AtomicBool,
     output_paused: &AtomicBool,
     remote_integration: Option<&mut RemoteSshShellIntegration>,
+    native_integration: Option<&mut RemoteNativeBash>,
     initial_pty_output: Vec<u8>,
 ) -> Result<Option<String>, String> {
     let mut pending_bytes = initial_pty_output;
@@ -959,6 +1104,7 @@ fn session_loop(
         output_wait_started,
         &mut output_live,
         remote_integration,
+        native_integration,
     );
     // Emit whatever decoded output remains so the final screen state is not
     // lost when the session ends.
@@ -989,6 +1135,7 @@ fn session_loop_inner(
     output_wait_started: Instant,
     output_live: &mut bool,
     mut remote_integration: Option<&mut RemoteSshShellIntegration>,
+    mut native_integration: Option<&mut RemoteNativeBash>,
 ) -> Result<Option<String>, String> {
     let mut buffer = [0u8; 8192];
     let mut next_keepalive_at =
@@ -997,6 +1144,14 @@ fn session_loop_inner(
     loop {
         let mut made_progress = false;
         let mut pending_commands = Vec::new();
+        if let Some(native) = native_integration.as_deref_mut() {
+            if native.active {
+                match native.drain(app, session_id) {
+                    Ok(progress) => made_progress |= progress,
+                    Err(_) => native.fail(app, session_id),
+                }
+            }
+        }
 
         if let Some(integration) = remote_integration.as_deref_mut() {
             if integration.active {
@@ -1038,6 +1193,18 @@ fn session_loop_inner(
                 }
                 SessionCommand::WriteBytes(bytes) => {
                     write_all_nonblocking(session, channel, &bytes)?;
+                    made_progress = true;
+                }
+                SessionCommand::NativeControl(frame) => {
+                    if let Some(native) = native_integration.as_deref_mut() {
+                        if native.send(session, &frame.bytes).is_ok() {
+                            if frame.wake_editor {
+                                write_all_nonblocking(session, channel, b"\x18\x1e")?;
+                            }
+                        } else {
+                            native.fail(app, session_id);
+                        }
+                    }
                     made_progress = true;
                 }
                 SessionCommand::Resize { cols, rows } => {
@@ -1115,10 +1282,16 @@ fn session_loop_inner(
         wait_for_terminal_session_events(
             session,
             channel,
-            remote_integration
+            native_integration
                 .as_ref()
-                .filter(|integration| integration.active)
-                .map(|integration| &integration.control),
+                .filter(|native| native.active)
+                .map(|native| &native.control)
+                .or_else(|| {
+                    remote_integration
+                        .as_ref()
+                        .filter(|integration| integration.active)
+                        .map(|integration| &integration.control)
+                }),
             wake,
             keepalive_due_in,
         )?;

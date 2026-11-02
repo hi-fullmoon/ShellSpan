@@ -49,8 +49,8 @@ describe('macOS terminal rollout runner', () => {
     expect(runner).toContain("'/bin/zsh'");
     expect(runner).toContain('macos_bash_pty_broker_preserves_raw_bytes_input_order_and_resize');
     expect(runner).toContain('macos_zsh_pty_broker_preserves_raw_bytes_input_order_and_resize');
-    expect(runner).toContain('macos_native_bash_visible_commands_preserve_shell_state_and_raw_display');
-    expect(runner).toContain('macos_native_zsh_visible_commands_preserve_shell_state_and_raw_display');
+    expect(runner).not.toContain('macos_native_bash_visible_commands_preserve_shell_state_and_raw_display');
+    expect(runner).not.toContain('macos_native_zsh_visible_commands_preserve_shell_state_and_raw_display');
     expect(runner).toContain('macos_bash_interactive_terminal_operation');
     expect(runner).toContain('macos_zsh_interactive_terminal_operation');
     expect(runner).toContain("'--test-threads=1'");

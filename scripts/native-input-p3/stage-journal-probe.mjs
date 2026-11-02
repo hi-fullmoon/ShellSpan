@@ -1,0 +1,22 @@
+import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
+import {randomUUID,createHash} from 'node:crypto';
+import {mkdirSync,writeFileSync,readFileSync} from 'node:fs';
+import {resolve} from 'node:path';
+const kind=process.argv[2]??'journal';assert(['journal','scratch'].includes(kind));
+const project=`scripts/native-input-p3/${kind}-probe`;
+const owner=resolve(import.meta.dirname,'../..'),id=randomUUID(),directory=resolve(owner,`.native-input-p3/windows-${kind}-probe`,id);mkdirSync(directory,{recursive:true});
+const root=`D:/Developer/ShellSpan-native-input-p3-${kind}-probe-${id}`;
+const files=[`${project}/Cargo.toml`,`${project}/Cargo.lock`,`${project}/src/main.rs`,...(kind==='journal'?['src-tauri/src/terminal_command/journal.rs','src-tauri/src/terminal_command/protocol.rs']:['src-tauri/src/agent_runtime/scratch_storage.rs'])];
+const sources=()=>Object.fromEntries(files.map(path=>[path,createHash('sha256').update(readFileSync(resolve(owner,path))).digest('hex')]));const before=sources();
+writeFileSync(resolve(directory,'files.list'),files.join('\0')+'\0');writeFileSync(resolve(directory,'sources.json'),JSON.stringify(before,null,2));
+execFileSync('tar',['-czf',resolve(directory,'source.tar.gz'),'--null','-T',resolve(directory,'files.list')],{cwd:owner,env:{...process.env,COPYFILE_DISABLE:'1'}});assert.deepEqual(sources(),before);
+const ssh=['-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','HostKeyAlias=100.64.0.254','-o','ConnectTimeout=8'],peer='zhengbiwen@100.64.0.82';
+const command=code=>execFileSync('ssh',[...ssh,peer,'D:/Programs/PowerShell/7/pwsh.exe -NoLogo -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand '+Buffer.from("$ProgressPreference='SilentlyContinue'; "+code,'utf16le').toString('base64')],{encoding:'utf8',timeout:180000,maxBuffer:1024*1024});
+command(`if(Test-Path '${root}'){throw 'Owned probe directory already exists'}; New-Item -ItemType Directory '${root}'|Out-Null`);
+execFileSync('scp',[...ssh,resolve(directory,'source.tar.gz'),resolve(directory,'sources.json'),`${peer}:${root}/`],{stdio:'pipe',timeout:20000});
+writeFileSync(resolve(directory,'fixture.json'),JSON.stringify({id,root,directory,sourceHashes:before,nativeAcceptance:false},null,2));
+let result,exitCode=0;
+try{result=command(`Set-Location '${root}'; tar -xzf source.tar.gz; if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}; $env:RUSTUP_TOOLCHAIN='1.95.0-x86_64-pc-windows-msvc'; $env:CARGO_TERM_COLOR='never'; $ErrorActionPreference='Continue'; cargo run --locked --manifest-path ${project}/Cargo.toml --target-dir target -- '${root}/new-owned-data' > probe-result.json 2> build.log; $code=$LASTEXITCODE; Get-Content probe-result.json; exit $code`);}catch(error){result=String(error.stdout??'');exitCode=error.status??1;writeFileSync(resolve(directory,'transport-error.log'),String(error.stderr??'').slice(0,4096));}
+writeFileSync(resolve(directory,'result.raw.txt'),result);const observed=JSON.parse(result);writeFileSync(resolve(directory,'result.json'),JSON.stringify(observed,null,2));
+console.log(JSON.stringify({directory,root,exitCode,attempted:observed.attempted,failures:observed.failures.length,unresolved:observed.unresolved}));process.exitCode=exitCode;

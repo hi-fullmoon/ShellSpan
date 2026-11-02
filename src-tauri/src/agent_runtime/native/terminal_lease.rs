@@ -611,9 +611,35 @@ impl TerminalLeaseManager {
         session_id: &str,
         agent_session_id: &str,
         operation_id: &str,
-        phase: TerminalCommandPhase,
+        legacy_phase: TerminalCommandPhase,
     ) -> Result<(), String> {
         let lease = self.validate_control_owner(session_id, agent_session_id, operation_id)?;
+        let snapshot = self.broker.snapshot(Some(session_id))?;
+        let phase = if snapshot.rollout.enabled {
+            let Some(command) = snapshot
+                .session
+                .and_then(|session| session.input_observation.active_command)
+            else {
+                return Ok(());
+            };
+            if command.operation_id != operation_id {
+                return Ok(());
+            }
+            match command.phase {
+                crate::terminal_command::state::CommandPhase::Preparing
+                | crate::terminal_command::state::CommandPhase::Typing
+                | crate::terminal_command::state::CommandPhase::InputConfirmed => {
+                    TerminalCommandPhase::Typing
+                }
+                crate::terminal_command::state::CommandPhase::SubmissionAttempted
+                | crate::terminal_command::state::CommandPhase::Running => {
+                    TerminalCommandPhase::Running
+                }
+                _ => return Ok(()),
+            }
+        } else {
+            legacy_phase
+        };
         self.publish(AgentTerminalLeaseEvent {
             session_id: lease.session_id,
             agent_session_id: lease.agent_session_id,
@@ -807,6 +833,7 @@ impl TerminalLeaseManager {
 
     /// Record executable submission only after lease and broker admission.
     /// Rejection by either gate proves that no transport write was attempted.
+    #[cfg(test)]
     pub(crate) fn write_executable(
         &self,
         sessions: &SessionManager,
@@ -814,13 +841,34 @@ impl TerminalLeaseManager {
         data: String,
         source: TerminalInputSource<'_>,
         submission_attempted: &mut bool,
+        revalidate_after_persistence: impl FnOnce() -> Result<(), String>,
     ) -> Result<(), String> {
+        let TerminalInputSource::Agent {
+            agent_session_id,
+            task_id,
+            operation_id,
+        } = source
+        else {
+            return Err(TerminalLeaseError::OperationMismatch.to_string());
+        };
+        // Durable intent precedes admission. The executor holds its serial gate,
+        // but no lease/Broker mutex spans file I/O. Admission rechecks all gates.
+        if let Err(error) =
+            self.broker
+                .prepare_executable(session_id, agent_session_id, task_id, operation_id)
+        {
+            if error == "TERMINAL_SUBMISSION_ALREADY_RECORDED" {
+                *submission_attempted = true;
+            }
+            return Err(error);
+        }
+        revalidate_after_persistence()?;
         self.write_payload_with_kind(
             sessions,
             session_id,
             TerminalInputPayload::Text(data),
             source,
-            TerminalInputKind::Text,
+            TerminalInputKind::Executable,
             || *submission_attempted = true,
         )
         .map(|_| ())
@@ -850,7 +898,11 @@ impl TerminalLeaseManager {
             .leases
             .lock()
             .map_err(|_| TerminalLeaseError::Unavailable.to_string())?;
-        authorize_input(leases.get(session_id).map(|record| &record.lease), source)?;
+        // Enabled Broker ownership is authoritative. This map retains readiness
+        // and event registrations; disabled legacy transports use the old gate.
+        if !self.broker.snapshot(None)?.rollout.enabled {
+            authorize_input(leases.get(session_id).map(|record| &record.lease), source)?;
+        }
         let broker_source = match source {
             TerminalInputSource::User => TerminalBrokerInputSource::User,
             TerminalInputSource::Agent {

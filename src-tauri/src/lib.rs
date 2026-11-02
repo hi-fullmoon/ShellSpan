@@ -31,8 +31,12 @@ mod runbook;
 mod session;
 mod sftp_pool;
 pub mod terminal_broker;
+mod terminal_command;
 pub(crate) mod terminal_integration;
 pub(crate) mod terminal_jobs;
+#[cfg(all(test, unix))]
+#[path = "tests/terminal_native_protocol.rs"]
+mod terminal_native_protocol;
 pub(crate) mod terminal_screen;
 #[cfg(all(test, windows))]
 #[path = "tests/windows_shell_history.rs"]
@@ -413,6 +417,7 @@ pub fn run() {
             commands::resize_session,
             commands::write_session_bytes,
             commands::get_terminal_broker_snapshot,
+            commands::get_terminal_submission_recovery,
             commands::close_session,
             commands::request_app_restart,
             commands::request_app_exit,

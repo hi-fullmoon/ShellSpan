@@ -36,6 +36,9 @@
 
 ## 终端实施与验收
 
+- [终端输入 P1 状态、协议和恢复验收](design/agent-terminal-input-p1-state-audit.md)与[NIP/1 契约](../protocol/agent/runtime/native-input-v1.md)：固定 macOS arm64/Bash 5.3/Readline 8.3.6 范围通过；P2 当前生产接入与矩阵结论见后续审计，全量检查限制保留。
+- [终端输入 P2 生产接入审计](design/agent-terminal-input-p2-audit.md)：本地/受控 SSH、打包资源、真实应用与浏览器的当前证据、未完成项及完整验证入口。
+- [原生输入重构实施计划](design/agent-terminal-input-refactor-implementation-plan.md)与[P0 可行性证据](design/agent-terminal-input-native-feasibility.md)：分阶段边界及可重建入口。
 - [可视终端统一实施与交接](../protocol/agent/runtime/visible-terminal-unification-plan.md)：后续路由、原生脚本提交和后台作业的实施记录及范围。
 - [Bash / PowerShell 原生显示复查](../protocol/agent/runtime/bash-powershell-native-display-review.md)
 - [Zsh 原生后台作业显示复查](../protocol/agent/runtime/zsh-native-job-display-review.md)

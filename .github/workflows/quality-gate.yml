@@ -88,6 +88,8 @@ jobs:
       - name: Run frontend tests
         if: ${{ !inputs.frontend-artifact }}
         run: pnpm test
+      - name: Check terminal command display boundary
+        run: pnpm check:terminal:boundary
       - name: Build frontend
         if: ${{ !inputs.frontend-artifact }}
         run: pnpm build

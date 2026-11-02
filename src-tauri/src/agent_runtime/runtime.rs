@@ -690,19 +690,49 @@ impl AgentRuntime {
             .observe_terminal_raw_output(session_id, bytes)
     }
 
-    pub(crate) fn attach_terminal_broker_transport(
+
+    pub(crate) fn attach_native_terminal_transport(
         &self,
-        transport_session_id: &str,
-        predecessor_transport_session_id: Option<&str>,
-        transport_kind: crate::terminal_broker::TerminalTransportKind,
+        transport: &str,
+        predecessor: Option<&str>,
+        kind: crate::terminal_broker::TerminalTransportKind,
         geometry: crate::terminal_broker::TerminalGeometry,
+        mode: crate::terminal_command::protocol::InputMode,
     ) -> Result<Option<crate::terminal_broker::TerminalBrokerAttachment>, String> {
-        self.native_engine.attach_terminal_broker_transport(
-            transport_session_id,
-            predecessor_transport_session_id,
-            transport_kind,
+        self.native_engine.attach_native_terminal_transport(
+            transport,
+            predecessor,
+            kind,
             geometry,
+            mode,
         )
+    }
+    pub(crate) fn register_native_terminal(
+        &self,
+        transport: &str,
+        profile: crate::terminal_command::registration::VerifiedNativeProfile,
+    ) -> Result<crate::terminal_command::protocol::ConnectionEnvelope, String> {
+        self.native_engine
+            .register_native_terminal(transport, profile)
+    }
+    pub(crate) fn accept_native_terminal_message(
+        &self,
+        transport: &str,
+        message: crate::terminal_command::protocol::Message,
+    ) -> Result<(), String> {
+        self.native_engine
+            .accept_native_terminal_message(transport, message)
+    }
+    pub(crate) fn native_terminal_control_closed(&self, transport: &str) -> Result<(), String> {
+        self.native_engine.native_terminal_control_closed(transport)
+    }
+    pub(crate) fn wait_native_initialization(
+        &self,
+        transport: &str,
+        timeout: std::time::Duration,
+    ) -> Result<Option<crate::terminal_command::protocol::DisplayBinding>, String> {
+        self.native_engine
+            .wait_native_initialization(transport, timeout)
     }
 
     pub(crate) fn terminal_broker_attachment(
@@ -761,6 +791,17 @@ impl AgentRuntime {
 
     pub(crate) fn terminal_shell_integration_enabled(&self) -> Result<bool, String> {
         self.native_engine.terminal_shell_integration_enabled()
+    }
+
+    pub(crate) fn terminal_submission_recovery(
+        &self,
+        app_data_root: &std::path::Path,
+        agent_session_id: &str,
+    ) -> Result<Vec<crate::terminal_command::journal::SubmissionIntent>, String> {
+        self.native_engine
+            .configure_terminal_submission_root(app_data_root)?;
+        self.native_engine
+            .terminal_submission_recovery(agent_session_id)
     }
 
     pub(crate) fn register_terminal_integration_channel(
@@ -947,6 +988,8 @@ impl AgentRuntime {
     }
 
     pub(crate) fn configure(&self, app_data_root: PathBuf) -> Result<(), String> {
+        self.native_engine
+            .configure_terminal_submission_root(&app_data_root)?;
         self.native_engine.configure_terminal_broker_rollout()?;
         let parallelism = std::env::var("SHELLSPAN_MAX_PARALLEL_TOOL_CALLS")
             .map(Some)

@@ -1,0 +1,15 @@
+{
+  "tab-history-soft-wrap": { "terms": ["A       B"] },
+  "tab-three-soft-rows": { "terms": ["A       B"] },
+  "tab-after-resize": { "checkpoints": ["arrived"], "terms": ["A  B"] },
+  "custom-tab-stop": { "terms": ["A  B"] },
+  "wide-wrap-gap": { "terms": ["abc中Z"] },
+  "explicit-space-before-wide": { "terms": ["ab 中"] },
+  "tab-before-wide": { "terms": ["a  中"] },
+  "combining-emoji-soft-wrap": { "terms": ["é中👩‍💻Z"] },
+  "owned-tab": { "terms": ["OWN_A  OWN_B"] },
+  "owned-wide": { "terms": ["中 é 👩‍💻"] },
+  "owned-multiline": { "terms": ["second"] },
+  "tabs-newlines-boundary": { "terms": ["A       B"] },
+  "native-edit-tab": { "terms": ["USER_A"] }
+}

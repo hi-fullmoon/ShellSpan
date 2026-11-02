@@ -1,0 +1,25 @@
+import assert from 'node:assert/strict';
+import {cp,mkdir,readdir,readFile,writeFile} from 'node:fs/promises';
+import {openSync,closeSync} from 'node:fs';
+import {resolve} from 'node:path';
+import {randomUUID} from 'node:crypto';
+import {spawn} from 'node:child_process';
+
+const root=resolve(import.meta.dirname,'../..');
+const packaged=resolve(root,'src-tauri/resources/native-input-v1/generated');
+const directory=resolve(root,'.native-input-p2/source-rebuild',randomUUID());
+await mkdir(directory,{recursive:true,mode:0o700});
+const clean=resolve(directory,'ShellSpan');await cp(resolve(packaged,'sources/ShellSpan'),clean,{recursive:true});
+const cache=resolve(clean,'.native-input-p0/upstream');await mkdir(cache,{recursive:true});
+for(const name of await readdir(resolve(packaged,'sources')))if(name.endsWith('.tar.gz')||/^readline83-\d+$/.test(name))await cp(resolve(packaged,'sources',name),resolve(cache,name));
+const log=openSync(resolve(directory,'build.log'),'wx',0o600);
+const child=spawn('python3',['-B','scripts/native-input-p2/build.py'],{cwd:clean,env:{...process.env,CARGO_NET_OFFLINE:'true',PYTHONDONTWRITEBYTECODE:'1'},stdio:['ignore',log,log]});
+const code=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve);});closeSync(log);
+await writeFile(resolve(directory,'result.json'),JSON.stringify({exitCode:code,sourceRoot:clean,scope:'Fresh packaged source tree, packaged GNU archives and cargo vendor, all three host ABIs; no original checkout build tree used'},null,2));
+assert.equal(code,0,`Packaged-source reconstruction failed; ${directory}`);
+const name=process.platform==='darwin'?'catalogue-macos-arm64.json':'catalogue-linux-aarch64-glibc-2.36.json';
+const expected=JSON.parse(await readFile(resolve(packaged,name),'utf8'));
+const actual=JSON.parse(await readFile(resolve(clean,'.native-input-p2/resources/native-input-v1',name),'utf8'));
+assert.deepEqual(actual.sources,expected.sources,'Packaged producer sources differ from the signed resource catalogue');
+assert.equal(actual.profiles.length,3);
+console.log(JSON.stringify({directory,result:'PASS',profiles:actual.profiles.map(value=>value.id)}));

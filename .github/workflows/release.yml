@@ -108,12 +108,36 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  build-native-bash:
+    name: Build verified Linux Bash resources
+    runs-on: ubuntu-24.04-arm
+    needs: preflight
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+      - name: Build pinned GNU/Linux targets
+        shell: bash
+        run: |
+          docker build -t shellspan-native-input-p2:local -f scripts/native-input-p2/Dockerfile scripts/native-input-p2
+          docker run --rm --user "$(id -u):$(id -g)" -e CARGO_HOME=/tmp/cargo -v "$PWD:/work" shellspan-native-input-p2:local python3 -B scripts/native-input-p2/build.py
+      - name: Upload source-verified native resources
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: native-linux-bash
+          path: .native-input-p2/resources/native-input-v1
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
   build:
     name: Build ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
     needs:
       - preflight
       - build-frontend
+      - build-native-bash
     # Build concurrently with quality checks; publication still requires both.
     strategy:
       fail-fast: false
@@ -141,6 +165,13 @@ jobs:
         with:
           name: frontend-dist
           path: dist
+
+      - name: Download Linux native resources
+        if: runner.os == 'macOS'
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: native-linux-bash
+          path: .native-input-p2/resources/native-input-v1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
@@ -179,6 +210,7 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
+          pnpm native:prepare --target "$RUST_TARGET" --require-ssh
           # 用 tag 推导出的版本号覆盖配置，使测试构建（如 2.0.30-test.1）的包版本与 tag 一致
           # signingIdentity 覆盖为 adhoc：配置文件里的 "ShellSpan Dev" 是开发者本机钥匙串里的
           # 自签名证书，runner 上没有；自签名对 Gatekeeper 本就无效，CI 用 adhoc 签名即可
@@ -201,6 +233,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
+          pnpm native:prepare --target $env:RUST_TARGET
           perl -MLocale::Maketext::Simple -e 1
           # 用 tag 推导出的版本号覆盖配置，使测试构建（如 2.0.30-test.1）的包版本与 tag 一致
           # Windows 只发布 NSIS 安装包，更新包固定为 .nsis.zip：

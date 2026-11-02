@@ -2,7 +2,6 @@ import { describe, expect, it, beforeEach, afterEach, beforeAll, vi } from 'vite
 import { enableRealCanvas } from '@/test/real-canvas';
 import { render, act, cleanup as cleanupReact } from '@testing-library/react';
 import {
-  createAgentTerminalLeaseDisplayFilter,
   createAgentTerminalLeaseCoordinator,
   TAKEOVER_CONFIRMATION_TIMEOUT_MS,
   TerminalControllerLayer,
@@ -724,26 +723,21 @@ describe('TerminalControllerLayer', () => {
       });
     });
     const releaseFirst = vi.fn();
-    const removeFirstFilter = vi.fn();
-    const removeSecondFilter = vi.fn();
     const suppress = vi.spyOn(controller, 'suppressUserInput').mockReturnValue(releaseFirst);
-    const subscribeFilter = vi.spyOn(controller, 'subscribeOutputFilter')
-      .mockReturnValueOnce(removeFirstFilter)
-      .mockReturnValueOnce(removeSecondFilter);
+    const subscribeFilter = vi.spyOn(controller, 'subscribeOutputFilter');
     const coordinator = createAgentTerminalLeaseCoordinator();
 
     coordinator.handleSession(turnEvent('turn/start'));
     await coordinator.handle(leaseEvent('operation-1').payload);
     await coordinator.handle(leaseEvent('operation-1').payload);
     expect(suppress).toHaveBeenCalledOnce();
-    expect(subscribeFilter).toHaveBeenCalledOnce();
-    expect(subscribeFilter.mock.calls[0][0]).toMatchObject({ operationId: 'operation-1' });
+    expect(subscribeFilter).not.toHaveBeenCalled();
 
     await coordinator.handle(leaseEvent('operation-2', 'acquired', {
       commandDisplay: '[Agent] $ safe command',
     }).payload);
     expect(releaseFirst).not.toHaveBeenCalled();
-    expect(removeFirstFilter).toHaveBeenCalledOnce();
+    expect(subscribeFilter).not.toHaveBeenCalled();
     expect(agentTerminalLeaseState.get('s1')).toMatchObject({
       operationId: 'operation-2',
       commandDisplay: '[Agent] $ safe command',
@@ -755,7 +749,7 @@ describe('TerminalControllerLayer', () => {
 
     await coordinator.handle(leaseEvent('operation-2', 'released').payload);
     expect(releaseFirst).not.toHaveBeenCalled();
-    expect(removeSecondFilter).toHaveBeenCalledOnce();
+    expect(subscribeFilter).not.toHaveBeenCalled();
     expect(agentTerminalLeaseState.get('s1')).toMatchObject({
       operationId: 'operation-2',
       terminalOwned: false,
@@ -959,9 +953,8 @@ describe('TerminalControllerLayer', () => {
         });
       });
       const release = vi.fn();
-      const removeFilter = vi.fn();
       vi.spyOn(controller, 'suppressUserInput').mockReturnValue(release);
-      vi.spyOn(controller, 'subscribeOutputFilter').mockReturnValue(removeFilter);
+      const subscribeFilter = vi.spyOn(controller, 'subscribeOutputFilter');
       const coordinator = createAgentTerminalLeaseCoordinator();
 
       await coordinator.handle(leaseEvent(`operation-${lifecycle}`).payload);
@@ -971,7 +964,7 @@ describe('TerminalControllerLayer', () => {
       });
 
       expect(release).toHaveBeenCalledOnce();
-      expect(removeFilter).toHaveBeenCalledOnce();
+      expect(subscribeFilter).not.toHaveBeenCalled();
       expect(agentTerminalLeaseState.get('s1')).toBeUndefined();
       coordinator.dispose();
     },
@@ -1022,11 +1015,4 @@ describe('TerminalControllerLayer', () => {
     expect(subscribeFilter).not.toHaveBeenCalled();
   });
 
-  it('uses an operation-identified transparent filter for the backend display stream', () => {
-    const filter = createAgentTerminalLeaseDisplayFilter('operation-safe-display');
-    expect(filter.operationId).toBe('operation-safe-display');
-    expect(filter.push('[Agent] $ redacted\r\noutput')).toBe('[Agent] $ redacted\r\noutput');
-    expect(filter.finish()).toBe('');
-    expect(filter.push('stale')).toBe('');
-  });
 });

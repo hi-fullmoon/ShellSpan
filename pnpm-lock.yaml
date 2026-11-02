@@ -8,6 +8,7 @@ overrides:
   shadcn@4>zod: ^3.25.76
 
 patchedDependencies:
+  '@xterm/xterm@6.0.0': dcabd41abe0c11f5843c5c54490fa5742b8bfa012016db15ba179f1f7cbc567f
   sonner@2.0.8: ee9ba08c4442fffad4efc9ff84e8e052039fbb2547c02938119ed3bc6fc58e77
 
 importers:
@@ -59,12 +60,15 @@ importers:
       '@xterm/addon-search':
         specifier: ^0.16.0
         version: 0.16.0
+      '@xterm/addon-unicode11':
+        specifier: 0.9.0
+        version: 0.9.0
       '@xterm/addon-webgl':
         specifier: ^0.19.0
         version: 0.19.0
       '@xterm/xterm':
         specifier: 6.0.0
-        version: 6.0.0
+        version: 6.0.0(patch_hash=dcabd41abe0c11f5843c5c54490fa5742b8bfa012016db15ba179f1f7cbc567f)
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -1523,6 +1527,9 @@ packages:
 
   '@xterm/addon-search@0.16.0':
     resolution: {integrity: sha512-9OeuBFu0/uZJPu+9AHKY6g/w0Czyb/Ut0A5t79I4ULoU4IfU5BEpPFVGQxP4zTTMdfZEYkVIRYbHBX1xWwjeSA==}
+
+  '@xterm/addon-unicode11@0.9.0':
+    resolution: {integrity: sha512-FxDnYcyuXhNl+XSqGZL/t0U9eiNb/q3EWT5rYkQT/zuig8Gz/VagnQANKHdDWFM2lTMk9ly0EFQxxxtZUoRetw==}
 
   '@xterm/addon-webgl@0.19.0':
     resolution: {integrity: sha512-b3fMOsyLVuCeNJWxolACEUED0vm7qC0cy4wRvf3oURSzDTYVQiGPhTnhWZwIHdvC48Y+oLhvYXnY4XDXPoJo6A==}
@@ -5646,9 +5653,11 @@ snapshots:
 
   '@xterm/addon-search@0.16.0': {}
 
+  '@xterm/addon-unicode11@0.9.0': {}
+
   '@xterm/addon-webgl@0.19.0': {}
 
-  '@xterm/xterm@6.0.0': {}
+  '@xterm/xterm@6.0.0(patch_hash=dcabd41abe0c11f5843c5c54490fa5742b8bfa012016db15ba179f1f7cbc567f)': {}
 
   accepts@2.0.0:
     dependencies:

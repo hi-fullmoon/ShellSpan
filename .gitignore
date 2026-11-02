@@ -13,3 +13,12 @@ src-tauri/target
 /.phase4-acceptance/
 /.drawer-review/
 /.sftp-cancellation/
+/.native-input-p0/
+/.native-input-p2/
+/.native-input-p3/
+/.native-input-p4/
+**/__pycache__/
+*.py[cod]
+/src-tauri/native-input-adapter/target/
+/src-tauri/native-input-editors/target/
+/src-tauri/resources/native-input-v1/generated/

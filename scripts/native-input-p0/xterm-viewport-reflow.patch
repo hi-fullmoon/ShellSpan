@@ -1,0 +1,24 @@
+--- a/src/common/buffer/Buffer.ts
++++ b/src/common/buffer/Buffer.ts
+@@ -165,6 +165,10 @@
+     this._onBeforeResize.fire(event);
+     const reflowCursor = this._captureReflowCursor(newCols);
+     const reflowSavedCursor = this._captureReflowCursor(newCols, this.savedX, this.savedY);
++    // Preserve the cell at the top of a scrolled viewport, using the same
++    // resize-local coordinates as selections. Numeric rows shift in reflow.
++    const reflowViewport = this.ydisp < this.ybase
++      ? this.createReflowAnchor(0, this.ydisp, newCols) : undefined;
+     // store reference to null cell with default attrs
+     const nullCell = this.getNullCell(DEFAULT_ATTR_DATA);
+ 
+@@ -283,6 +287,10 @@
+       this.savedY = Math.max(0, Math.min(saved.row, this.lines.length - 1));
+     }
+ 
++    const viewport = reflowViewport?.resolve();
++    if (viewport) {
++      this.ydisp = Math.max(0, Math.min(viewport[1], this.ybase));
++    }
+     this._onAfterResize.fire(event);
+     this._memoryCleanupQueue.clear();
+     // schedule memory cleanup only, if more than 10% of the lines are affected

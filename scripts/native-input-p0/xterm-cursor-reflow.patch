@@ -1,0 +1,143 @@
+--- a/src/common/buffer/Buffer.ts
++++ b/src/common/buffer/Buffer.ts
+@@ -17,6 +17,14 @@
+ import { IBufferService, IOptionsService } from 'common/services/Services';
+ 
+ export const MAX_BUFFER_SIZE = 4294967295; // 2^32 - 1
++
++interface IReflowCursor {
++  line: number;
++  cells: number;
++  pendingWrap: boolean;
++  smaller?: { row: number; col: number };
++  dispose(): void;
++}
+ 
+ /**
+  * This class represents a terminal buffer (an internal state of the terminal), where the
+@@ -148,6 +156,8 @@
+    * @param newRows The new number of rows.
+    */
+   public resize(newCols: number, newRows: number): void {
++    const reflowCursor = this._captureReflowCursor(newCols);
++    const reflowSavedCursor = this._captureReflowCursor(newCols, this.savedX, this.savedY);
+     // store reference to null cell with default attrs
+     const nullCell = this.getNullCell(DEFAULT_ATTR_DATA);
+ 
+@@ -259,6 +269,12 @@
+ 
+     this._cols = newCols;
+     this._rows = newRows;
++    this._restoreReflowCursor(reflowCursor, newCols, newRows);
++    const saved = this._resolveReflowCursor(reflowSavedCursor, newCols);
++    if (saved) {
++      this.savedX = Math.min(saved.col, newCols - 1);
++      this.savedY = Math.max(0, Math.min(saved.row, this.lines.length - 1));
++    }
+ 
+     this._memoryCleanupQueue.clear();
+     // schedule memory cleanup only, if more than 10% of the lines are affected
+@@ -269,6 +285,103 @@
+   }
+ 
+   private _memoryCleanupQueue = new IdleTaskQueue();
++
++  // Generic terminal-state repair for the existing opt-in reflow mode. There
++  // is deliberately no application, command, source or editor metadata here.
++  // The same BufferLine widths used by reflow map the cursor's cell offset.
++  private _captureReflowCursor(newCols: number, x: number = this.x, absoluteY: number = this.ybase + this.y): IReflowCursor | undefined {
++    if (!this._isReflowEnabled || !this._optionsService.rawOptions.reflowCursorLine ||
++        newCols === this._cols || this.lines.length === 0) {
++      return undefined;
++    }
++    const current = this.lines.get(absoluteY);
++    if (!current || x > current.getTrimmedLength()) {
++      return undefined;
++    }
++    let start = absoluteY;
++    while (start > 0 && this.lines.get(start)?.isWrapped) {
++      start--;
++    }
++    let cells = x;
++    for (let row = start; row < absoluteY; row++) {
++      cells += getWrappedLineTrimmedLength([
++        this.lines.get(row) as BufferLine,
++        this.lines.get(row + 1) as BufferLine
++      ], 0, this._cols);
++    }
++    // Unlike a public Marker, this resize-local anchor must retain a negative
++    // position when the beginning of its wrapped line is trimmed. The cursor
++    // may still survive in a later row of that same logical line.
++    const cursor: IReflowCursor = { line: start, cells, pendingWrap: x === this._cols,
++      dispose: () => disposables.forEach(disposable => disposable.dispose()) };
++    if (newCols < this._cols) {
++      const wrapped: BufferLine[] = [this.lines.get(start) as BufferLine];
++      for (let row = start + 1; row < this.lines.length && this.lines.get(row)?.isWrapped; row++) {
++        wrapped.push(this.lines.get(row) as BufferLine);
++      }
++      const lengths = reflowSmallerGetNewLineLengths(wrapped, this._cols, newCols);
++      let remaining = cells;
++      let row = 0;
++      while (row < lengths.length - 1 &&
++          (remaining > lengths[row] || (remaining === lengths[row] && !cursor.pendingWrap))) {
++        remaining -= lengths[row++];
++      }
++      cursor.smaller = { row, col: remaining };
++    }
++    const disposables = [
++      this.lines.onTrim(amount => cursor.line -= amount),
++      this.lines.onInsert(event => {
++        if (cursor.line >= event.index) cursor.line += event.amount;
++      }),
++      this.lines.onDelete(event => {
++        if (cursor.line >= event.index) cursor.line -= Math.min(event.amount, cursor.line - event.index);
++      })
++    ];
++    return cursor;
++  }
++
++  private _resolveReflowCursor(cursor: IReflowCursor | undefined, cols: number): { row: number; col: number } | undefined {
++    if (!cursor) {
++      return undefined;
++    }
++    cursor.dispose();
++    if (cursor.smaller) {
++      return { row: cursor.line + cursor.smaller.row, col: cursor.smaller.col };
++    }
++    let row = Math.max(0, cursor.line);
++    let remaining = cursor.cells;
++    while (row + 1 < this.lines.length && this.lines.get(row + 1)?.isWrapped) {
++      const length = getWrappedLineTrimmedLength([
++        this.lines.get(row) as BufferLine,
++        this.lines.get(row + 1) as BufferLine
++      ], 0, cols);
++      if (remaining < length || (remaining === length && cursor.pendingWrap) || length === 0) {
++        break;
++      }
++      remaining -= length;
++      row++;
++    }
++    return { row, col: Math.min(remaining, cols) };
++  }
++
++  private _restoreReflowCursor(cursor: IReflowCursor | undefined, cols: number, rows: number): void {
++    const position = this._resolveReflowCursor(cursor, cols);
++    if (position) {
++      const row = Math.max(0, position.row);
++      const following = this.ydisp === this.ybase;
++      if (row < this.ybase) {
++        this.ybase = row;
++      } else if (row >= this.ybase + rows) {
++        this.ybase = row - rows + 1;
++      }
++      if (following) {
++        this.ydisp = this.ybase;
++      }
++      this.y = Math.max(0, Math.min(rows - 1, row - this.ybase));
++      this.x = Math.min(position.col, cols);
++    }
++  }
++
+   private _memoryCleanupPosition = 0;
+ 
+   private _batchedMemoryCleanup(): boolean {

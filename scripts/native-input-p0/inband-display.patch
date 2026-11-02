@@ -1,0 +1,72 @@
+--- a/bridge.c
++++ b/bridge.c
+@@ -8,6 +8,7 @@
+ #include <readline/readline.h>
+ #include <dlfcn.h>
+ #include <sys/ioctl.h>
++#include <unistd.h>
+ extern int p0_start(const char *path, const char *shell_version);
+ extern int p0_status(int status, const char *cwd);
+ extern void p0_stop(void);
+@@ -50,6 +51,19 @@
+     rl_redisplay_function = handoff_saved_redisplay;
+   handoff_display_active = 0;
+ }
++static int inband_display, exit_registered;
++static pid_t display_owner;
++static void finish_display(void);
++/* Documented OSC 1337 SetUserVar transport; the variable-to-option binding is
++ * laboratory-only, display-only, and never a lifecycle acknowledgement. */
++static void display_mode(int enabled) {
++  fputs(enabled ? "\033]1337;SetUserVar=ShellSpanP0ReflowCursorLine=MQ==\007"
++                : "\033]1337;SetUserVar=ShellSpanP0ReflowCursorLine=MA==\007", rl_outstream);
++  fflush(rl_outstream);
++}
++static void display_at_exit(void) {
++  if (getpid() == display_owner && append_display_active) finish_display();
++}
+ static void append_display(void) {
+   size_t length = strlen(rl_line_buffer);
+   if (rl_point != rl_end) return; /* The owner detects foreign editor changes. */
+@@ -74,9 +88,17 @@
+ }
+ int p0_begin_append_display(void) {
+   if (rl_redisplay_function != rl_redisplay) return 1;
++  const char *setting = getenv("SHELLSPAN_P0_INBAND_REFLOW");
++  inband_display = setting && strcmp(setting, "1") == 0;
++  if (inband_display && !exit_registered) {
++    if (atexit(display_at_exit) != 0) return 1;
++    exit_registered = 1;
++  }
+   saved_redisplay=rl_redisplay_function;
+   displayed_bytes=0;
+   append_display_active=1;
++  display_owner = getpid();
++  if (inband_display) display_mode(1);
+   rl_redisplay_function=append_display;
+   return 0;
+ }
+@@ -149,6 +171,7 @@
+ }
+ int p0_display_rebases(void) { return display_rebases; }
+ static void finish_display(void) {
++  if (append_display_active && inband_display) display_mode(0);
+   if (handoff_display_active) {
+     geometry_display_active = viewport_protected = append_display_active = 0;
+     return;
+@@ -188,6 +211,15 @@
+ }
+ static int event_tick(void) {
+   int saved_errno = errno;
++  /* The polling hook does not enter rl_getc's interrupted-read branch. Honor
++   * the existing public signal hook before reentering Rust. Bash may install
++   * it to finish SIGHUP cleanup; no private Bash signal handler is called.
++   * Display exits in the same output stream before that foreign hook runs. */
++  if (rl_signal_event_hook) {
++    if (append_display_active && inband_display) display_mode(0);
++    (*rl_signal_event_hook)();
++    if (append_display_active && inband_display) display_mode(1);
++  }
+   p0_tick();
+   errno = saved_errno;
+   return 0;

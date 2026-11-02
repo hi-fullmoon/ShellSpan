@@ -1,0 +1,39 @@
+--- a/shell.c
++++ b/shell.c
+@@ -202,6 +202,8 @@
+ static char *bashrc_file = DEFAULT_BASHRC;
+ 
+ /* Non-zero means to act more like the Bourne shell on startup. */
++/* Explicit application integration, after the shell's normal startup files. */
++static char *shellspan_native_init_file;
+ static int act_like_sh;
+ 
+ /* Non-zero if this shell is being run by `su'. */
+@@ -264,6 +266,7 @@
+   { "protected", Int, &protected_mode, (char **)0x0 },
+ #endif
+   { "rcfile", Charp, (int *)0x0, &bashrc_file },
++  { "shellspan-native-init", Charp, (int *)0x0, &shellspan_native_init_file },
+ #if defined (RESTRICTED_SHELL)
+   { "restricted", Int, &restricted, (char **)0x0 },
+ #endif
+@@ -680,6 +683,20 @@
+       exit_immediately_on_error = 0;
+ 
+       run_startup_files ();
++      if (shellspan_native_init_file && interactive_shell
++#if defined (RESTRICTED_SHELL)
++          && restricted_shell == 0 && restricted == 0 && saverst == 0
++#endif
++         )
++        {
++          int shellspan_saved_status;
++          char *shellspan_init;
++          shellspan_saved_status = last_command_exit_value;
++          shellspan_init = shellspan_native_init_file;
++          shellspan_native_init_file = (char *)0;
++          maybe_execute_file (shellspan_init, 1);
++          last_command_exit_value = shellspan_saved_status;
++        }
+       exit_immediately_on_error += old_errexit_flag;
+     }

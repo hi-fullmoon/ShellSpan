@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
+import {createHash,randomUUID} from 'node:crypto';
+import {mkdirSync,readFileSync,writeFileSync} from 'node:fs';
+import {resolve} from 'node:path';
+import {captureValidationSources} from '../native-input-p2/frozen-validation.mjs';
+const root=resolve(import.meta.dirname,'../..');
+const directory=resolve(root,'.native-input-p3/source-revisions',randomUUID());
+mkdirSync(directory,{recursive:true,mode:0o700});
+const git=(...args)=>execFileSync('git',args,{cwd:root,maxBuffer:128*1024*1024});
+const sources=captureValidationSources(root);
+for(const[name,args]of[['head.txt',['rev-parse','HEAD']],['status.txt',['status','--short']],['index.txt',['ls-files','--stage']],['worktree.patch',['diff','--binary','HEAD']],['HEAD.tar.gz',['archive','--format=tar.gz','HEAD']],['untracked.list',['ls-files','--others','--exclude-standard','-z']]])writeFileSync(resolve(directory,name),git(...args));
+execFileSync('tar',['--null','-czf',resolve(directory,'untracked.tgz'),'-T',resolve(directory,'untracked.list')],{cwd:root});
+assert.deepEqual(captureValidationSources(root),sources,'Source changed during the P3 freeze');
+writeFileSync(resolve(directory,'sources.json'),JSON.stringify(sources,null,2)+'\n');
+const archives=Object.fromEntries(['HEAD.tar.gz','worktree.patch','untracked.tgz'].map(name=>[name,createHash('sha256').update(readFileSync(resolve(directory,name))).digest('hex')]));
+writeFileSync(resolve(directory,'freeze.json'),JSON.stringify({createdAt:new Date().toISOString(),root,directory,sourceCount:Object.keys(sources).length,archives},null,2)+'\n');
+console.log(directory);

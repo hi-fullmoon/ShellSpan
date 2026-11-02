@@ -2,10 +2,12 @@ import '@xterm/xterm/css/xterm.css';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { createTerminalResizeHandler, installTerminalScrollbarVisibility, measureTerminalGeometry, TERMINAL_CONTAINER_CLASS } from './terminal-geometry';
 import { installTerminalEdgeBackground } from './terminal-edge-background';
 import { installTerminalCommandDecorations } from './terminal-command-decorations';
+import { attachNativeInputDisplay, type NativeInputDisplayController } from '@/lib/terminal/native-input-display';
 import { terminalInputReadiness } from '../terminal-input-readiness';
 import { getTerminalScrollState } from '@/components/terminal/terminal-scroll-state';
 import {
@@ -385,6 +387,7 @@ export function resolveTerminalTheme(colorScheme: TerminalColorScheme): Terminal
 }
 
 export interface TerminalController {
+  readonly inputMode: 'native-inline' | 'raw';
   sessionId: string;
   terminal: Terminal;
   fitAddon: FitAddon;
@@ -424,6 +427,8 @@ export interface TerminalController {
 }
 
 class TerminalControllerImpl implements TerminalController {
+  inputMode: TerminalController['inputMode'] = 'raw';
+  private nativeDisplay?: NativeInputDisplayController;
   private readonly removeFromRegistry: (sessionId: string) => void;
   sessionId: string;
   terminal: Terminal;
@@ -516,7 +521,7 @@ class TerminalControllerImpl implements TerminalController {
     this.terminal.loadAddon(this.fitAddon);
     this.terminal.loadAddon(this.searchAddon);
     getTerminalScrollState(this.terminal);
-    this.commandDecorations = installTerminalCommandDecorations(this.terminal, sessionId);
+    this.commandDecorations = this.installInputRendering(ptyInfo);
 
     this.container = document.createElement('div');
     this.container.className = TERMINAL_CONTAINER_CLASS;
@@ -547,6 +552,28 @@ class TerminalControllerImpl implements TerminalController {
       logger.warn(`Failed to install terminal listeners for session ${this.sessionId}`, error);
     });
     return setup;
+  }
+
+  private installInputRendering(ptyInfo?: SessionPtyInfo): ReturnType<typeof installTerminalCommandDecorations> {
+    this.inputMode = ptyInfo?.inputMode ?? 'raw';
+    if (this.inputMode === 'native-inline' && ptyInfo?.nativeDisplayBinding) {
+      const unicodeVersion = ptyInfo.nativeDisplayBinding.unicodeVersion;
+      if (unicodeVersion === '11' && !this.terminal.unicode.versions.includes('11')) {
+        this.terminal.loadAddon(new Unicode11Addon());
+      }
+      this.nativeDisplay = attachNativeInputDisplay(this.terminal, ptyInfo.nativeDisplayBinding, { unicodeVersion });
+    }
+    // Every mode renders only PTY bytes. Decorations never receive source text.
+    return this.inputMode === 'raw'
+      ? { dispose() {}, rebind() {} }
+      : installTerminalCommandDecorations(this.terminal, this.sessionId);
+  }
+
+  private async closeInputRendering(): Promise<void> {
+    const display = this.nativeDisplay;
+    this.nativeDisplay = undefined;
+    if (display) await display.closeAfterPendingOutput();
+    else await new Promise<void>(resolve => this.terminal.write('', resolve));
   }
 
   private handleInput(data: string): void {
@@ -702,6 +729,7 @@ class TerminalControllerImpl implements TerminalController {
     const generation = this.listenerGeneration;
     const sessionId = this.sessionId;
     const dataUnlisten = await listenToSshData(sessionId, (event) => {
+      if (this.disposed || generation !== this.listenerGeneration || sessionId !== this.sessionId) return;
       if (event.payload) {
         this.unverifiedUserSubmission = false;
         this.recentOutputTail = `${this.recentOutputTail}${event.payload}`.slice(-4096);
@@ -723,6 +751,7 @@ class TerminalControllerImpl implements TerminalController {
     this.unlisten.data = dataUnlisten;
 
     const statusUnlisten = await listenToSshStatus(sessionId, (event) => {
+      if (this.disposed || generation !== this.listenerGeneration || sessionId !== this.sessionId) return;
       logger.info(`Session ${sessionId} status: ${event.payload.status}`);
       this.emitLifecycle({ type: 'status', sessionId, payload: event.payload });
       this.setStatus(sessionId, event.payload);
@@ -742,13 +771,26 @@ class TerminalControllerImpl implements TerminalController {
     this.unlisten.status = statusUnlisten;
 
     const closedUnlisten = await listenToSshClosed(sessionId, (event) => {
+      if (this.disposed || generation !== this.listenerGeneration || sessionId !== this.sessionId) return;
       logger.info(`Session ${sessionId} closed${event.payload.reason ? `: ${event.payload.reason}` : ''}`);
       this.emitLifecycle({ type: 'closed', sessionId, payload: event.payload });
       this.setClosed(sessionId, event.payload);
-      this.writeSystemLine(
+      const showClosed = () => {
+        if (this.disposed || sessionId !== this.sessionId) return;
+        this.writeSystemLine(
         formatTerminalNoticeLine(t('terminal.notice.closedLabel'), event.payload.reason ? `: ${event.payload.reason}` : undefined, '31'),
-      );
-      this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.hintLabel'), t('terminal.notice.pressEnterReconnect')));
+        );
+        this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.hintLabel'), t('terminal.notice.pressEnterReconnect')));
+      };
+      {
+        this.clearListeners();
+        void this.closeInputRendering().then(() => {
+          if (this.disposed || sessionId !== this.sessionId) return;
+          // A standard ST closes only the old stream's partial escape.
+          this.terminal.write('\u001b\\');
+          showClosed();
+        });
+      }
       this.inputBlockedNoticeRef = true;
       if (event.payload.retryable && this.preferences.autoReconnect && !this.reconnectRequestedRef) {
         this.reconnectRequestedRef = true;
@@ -1372,14 +1414,19 @@ class TerminalControllerImpl implements TerminalController {
     this.outputGeneration += 1;
     this.commandDecorations.rebind();
     this.sessionId = sessionId;
-    this.commandDecorations = installTerminalCommandDecorations(this.terminal, sessionId);
     // Reconnection may attach a different transport; never retain ConPTY
     // behavior when the replacement is SSH or has no trusted metadata.
     this.terminal.options.windowsPty = resolveWindowsPty(ptyInfo);
     rebindTerminalOutput(previousSessionId, sessionId);
     this.resetNoticeState();
     terminalInputReadiness.begin(sessionId);
-    this.listenerSetup = this.startListenerSetup();
+    const generation = this.listenerGeneration;
+    this.listenerSetup = this.closeInputRendering().then(() => {
+      if (this.disposed || generation !== this.listenerGeneration) return;
+      this.terminal.write('\u001b\\');
+      this.commandDecorations = this.installInputRendering(ptyInfo);
+      return this.startListenerSetup();
+    });
   }
 
   updateOptions(preferences: TerminalDisplayPreferences): void {
@@ -1460,6 +1507,7 @@ class TerminalControllerImpl implements TerminalController {
     this.disposeWebglRenderer();
     this.edgeBackground?.dispose();
     this.commandDecorations.dispose();
+    this.nativeDisplay?.dispose();
     this.scrollbarVisibility?.dispose();
     this.terminal.dispose();
     clearTerminalOutput(this.sessionId);

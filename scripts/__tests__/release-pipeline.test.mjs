@@ -146,7 +146,8 @@ describe('release publication gates', () => {
     const quality = parse(await readFile(path.join(root, '.github/workflows/quality-gate.yml'), 'utf8'));
     expect(release.jobs.quality.uses).toBe('./.github/workflows/quality-gate.yml');
     expect(release.jobs.quality.with.ref).toBe('${{ needs.preflight.outputs.sha }}');
-    expect(release.jobs.build.needs).toEqual(['preflight', 'build-frontend']);
+    expect(release.jobs.build.needs).toEqual(['preflight', 'build-frontend', 'build-native-bash']);
+    expect(release.jobs['build-native-bash'].needs).toBe('preflight');
     expect(release.jobs.quality.needs).toEqual(['preflight', 'build-frontend']);
     expect(release.jobs.release.needs).toContain('build');
     expect(release.jobs.release.needs).toContain('quality');
@@ -158,7 +159,7 @@ describe('release publication gates', () => {
     for (const job of Object.values(quality.jobs)) {
       expect(job.steps.find(step => step.uses?.startsWith('actions/checkout@')).with.ref).toBe('${{ inputs.ref || github.sha }}');
     }
-    for (const name of ['build', 'build-frontend', 'release']) {
+    for (const name of ['build', 'build-frontend', 'build-native-bash', 'release']) {
       expect(release.jobs[name].steps.find(step => step.uses?.startsWith('actions/checkout@')).with.ref).toBe('${{ needs.preflight.outputs.sha }}');
     }
     expect(release.on.workflow_dispatch.inputs).not.toHaveProperty('release_notes');

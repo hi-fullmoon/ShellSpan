@@ -1,0 +1,13 @@
+--- a/src/common/InputHandler.ts
++++ b/src/common/InputHandler.ts
+@@ -1286,7 +1286,9 @@
+     this._restrictCursor(this._bufferService.cols);
+     switch (params.params[0]) {
+       case 0:
+-        this._eraseInBufferLine(this._activeBuffer.y, this._activeBuffer.x, this._bufferService.cols, this._activeBuffer.x === 0, respectProtect);
++        // EL does not insert a hard line boundary. Preserve an existing soft
++        // continuation while opt-in cursor-line reflow owns a redraw.
++        this._eraseInBufferLine(this._activeBuffer.y, this._activeBuffer.x, this._bufferService.cols, this._activeBuffer.x === 0 && !this._optionsService.rawOptions.reflowCursorLine, respectProtect);
+         break;
+       case 1:
+         this._eraseInBufferLine(this._activeBuffer.y, 0, this._activeBuffer.x + 1, false, respectProtect);

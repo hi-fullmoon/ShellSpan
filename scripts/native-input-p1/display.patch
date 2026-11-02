@@ -1,0 +1,39 @@
+--- a/bridge.c
++++ b/bridge.c
+@@ -56,9 +56,15 @@
+ static void finish_display(void);
+ /* Documented OSC 1337 SetUserVar transport; the variable-to-option binding is
+  * laboratory-only, display-only, and never a lifecycle acknowledgement. */
+ static void display_mode(int enabled) {
+-  fputs(enabled ? "\033]1337;SetUserVar=ShellSpanP0ReflowCursorLine=MQ==\007"
+-                : "\033]1337;SetUserVar=ShellSpanP0ReflowCursorLine=MA==\007", rl_outstream);
++  const char *protocol = getenv("SHELLSPAN_NATIVE_INPUT_PROTOCOL");
++  if (protocol && strcmp(protocol, "1") == 0) {
++    fputs(enabled ? "\033]1337;SetUserVar=ShellSpanNativeInputV1=MQ==\007"
++                  : "\033]1337;SetUserVar=ShellSpanNativeInputV1=MA==\007", rl_outstream);
++  } else {
++    fputs(enabled ? "\033]1337;SetUserVar=ShellSpanP0ReflowCursorLine=MQ==\007"
++                  : "\033]1337;SetUserVar=ShellSpanP0ReflowCursorLine=MA==\007", rl_outstream);
++  }
+   fflush(rl_outstream);
+ }
+ static void display_at_exit(void) {
+@@ -312,6 +318,17 @@
+ struct builtin p0_child_closed_struct = { "p0_child_closed", p0_child_builtin, BUILTIN_ENABLED,
+   documentation, "p0_child_closed", 0 };
+ 
+-int p0_native_protocol_supported(void) { return 0; }
++int ss_native_input_v1_builtin_load(char *name) { return p0_builtin_load(name); }
++void ss_native_input_v1_builtin_unload(char *name) { p0_builtin_unload(name); }
++struct builtin ss_native_input_v1_struct = { "ss_native_input_v1", p0_builtin, BUILTIN_ENABLED,
++  documentation, "ss_native_input_v1 private-socket", 0 };
++struct builtin ss_native_input_v1_status_struct = { "ss_native_input_v1_status", p0_result_builtin, BUILTIN_ENABLED,
++  documentation, "ss_native_input_v1_status status cwd", 0 };
++struct builtin ss_native_input_v1_begin_struct = { "ss_native_input_v1_begin", p0_begin_builtin, BUILTIN_ENABLED,
++  documentation, "ss_native_input_v1_begin status", 0 };
++struct builtin ss_native_input_v1_child_closed_struct = { "ss_native_input_v1_child_closed", p0_child_builtin, BUILTIN_ENABLED,
++  documentation, "ss_native_input_v1_child_closed", 0 };
++/* Full display negotiation is frozen to the verified Readline 8.3 build. */
++int p0_native_protocol_supported(void) { return rl_readline_version == 0x0803 && rl_editing_mode == 1 && saved_pre_input == NULL && rl_redisplay_function == rl_redisplay; }
+ void p0_native_display_reset(void) {
+   const char *protocol = getenv("SHELLSPAN_NATIVE_INPUT_PROTOCOL");

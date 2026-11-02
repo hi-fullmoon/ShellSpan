@@ -1,0 +1,23 @@
+--- a/display.c
++++ b/display.c
+@@ -2686,3 +2686,10 @@
+   return width;
+ }
+ #endif /* HANDLE_MULTIBYTE */
++
++/* Versioned, read-only native prompt-column extension. */
++int
++rl_native_prompt_columns_v1 (void)
++{
++  return prompt_physical_chars;
++}
+--- a/readline.h
++++ b/readline.h
+@@ -285,6 +285,8 @@
+ 
+ extern int rl_set_prompt PARAMS((const char *));
+ extern int rl_expand_prompt PARAMS((char *));
++/* Native display columns, computed by Readline itself. */
++extern int rl_native_prompt_columns_v1 PARAMS((void));
+ 
+ extern int rl_initialize PARAMS((void));

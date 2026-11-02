@@ -22,12 +22,14 @@ import {
   invokeGetAgentRuntimeSession, invokeCancelAgentRuntime, invokeArchiveAgentRuntimeSession,
   invokeDeleteAgentRuntimeSession, invokeGetAgentRuntimeArtifact, listenToAgentRuntimeSession, listenToAgentTerminalLease,
   invokeGetCommittedAgentRuntimeEvents,
+  listenToTerminalIntegrationState,
 } from '@/lib/ipc/tauri';
 import { createAgentSessionAdapter } from '@/lib/ai/agent-session-adapter';
 import { verifyTerminalDelegation } from './terminal-delegation.native';
 import { verifyQuestionSubmissionRecovery } from '@/components/ai/__tests__/question-submission.native';
 import '@/styles/base.css';
 import type { AgentSessionEvent } from '@/types/agent-session';
+import type {TerminalIntegrationStateEvent} from '@/types';
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
@@ -108,6 +110,8 @@ async function confirmTabClose(id: string) {
 }
 
 async function verify() {
+  const nativeP3=new URL(location.href).searchParams.get('nativeP3');
+  const nativeP2=new URL(location.href).searchParams.get('nativeP2')==='true'||Boolean(nativeP3);
   const cleanupIds = new URL(location.href).searchParams.getAll('cleanupSession');
   if (cleanupIds.length) {
     for (const id of cleanupIds) {
@@ -287,6 +291,17 @@ async function verify() {
     assert(selection, 'A configured real model is required');
     const identity = (await invokeGetTerminalBrokerSnapshot(terminalId)).session;
     assert(identity, 'Missing broker identity for the real PTY');
+    const nativeProofs:TerminalIntegrationStateEvent[]=[];
+    if(nativeP2){
+      const family=nativeP3??'bash',editor=nativeP3==='zsh'?'zle':nativeP3?'psReadLine':'readline';
+      assert(identity.inputMode==='native-inline'&&identity.integrationState==='ready'&&identity.integrationShell===family,'Contention did not use the selected actual ready native shell route');
+      assert(identity.nativePeerProfile?.shell===family&&identity.nativePeerProfile.editor===editor&&identity.nativePeerProfile.shellVersion&&identity.nativePeerProfile.verifiedProfileId?.endsWith(nativeP3?'-nip1-capture1':'-nip1-init1-capture1'),'Contention is missing its accepted private peer profile');
+      assert(controller.inputMode==='native-inline'&&identity.nativeDisplayBinding?.protocol==='shellspan.native-input/1'&&JSON.stringify(identity.nativeDisplayBinding)===JSON.stringify(session.ptyInfo?.nativeDisplayBinding),'P2 contention renderer did not use the negotiated binding');
+      cleanups.push(await listenToTerminalIntegrationState(({payload})=>{
+        const command=payload.inputObservation?.activeCommand;
+        if(payload.sessionId===terminalId&&payload.terminalSessionId===identity.terminalSessionId&&payload.terminalGeneration===identity.terminalGeneration&&command?.fullInputConfirmed&&command.submissionIntentDurable)nativeProofs.push(payload);
+      }));
+    }
     const operations = new Set<string>();
     cleanups.push(await listenToAgentTerminalLease(({ payload }) => {
       if (payload.sessionId !== terminalId || !ids.includes(payload.agentSessionId)) return;
@@ -351,8 +366,10 @@ async function verify() {
     await eventually(() => workspaceRoot(false)?.dataset.sessionId === idleAgentId, 'Idle Agent conversation did not open');
     const markerA = `contention-a-${crypto.randomUUID()}`;
     const markerB = `contention-b-${crypto.randomUUID()}`;
-    const command = (marker: string, delay: number) => powershell ? `Start-Sleep -Seconds ${delay}; [Console]::WriteLine('${marker.slice(0,16)}'+'${marker.slice(16)}')` : `sleep ${delay}; printf '%s%s\\n' '${marker.slice(0, 16)}' '${marker.slice(16)}'`;
-    const exactCommandPrompt = (command: string) => `Call run_terminal_command exactly once on the bound visible terminal with this exact command. Do not use Direct, background execution, other tools, or alter the command. Reply done after it completes.\n${command}`;
+    const nativeGate=new URL(location.href).searchParams.get('nativeP2ContentionGate');
+    assert(!nativeGate||!powershell&&/^native-p2-contention-[a-f0-9-]{36}$/.test(nativeGate),'Invalid owned native contention gate');
+    const command = (marker: string, delay: number) => powershell ? `Start-Sleep -Seconds ${delay}; [Console]::WriteLine('${marker.slice(0,16)}'+'${marker.slice(16)}')` : `${nativeGate&&marker===markerA&&delay===10?`while test ! -f "$HOME/${nativeGate}"; do sleep 0.02; done`:`sleep ${delay}`}; printf '%s%s\\n' '${marker.slice(0, 16)}' '${marker.slice(16)}'`;
+    const exactCommandPrompt = (command: string) => `Call run_terminal_command exactly once on the bound visible terminal with this exact command.${nativeGate?' Set timeoutMs=120000 for this real controlled fixture.':''} Do not use Direct, background execution, other tools, or alter the command. Reply done after it completes.\n${command}`;
     const prompt = (marker: string, delay: number) => exactCommandPrompt(command(marker, delay));
     const send = (id: string, content: string, messageId = crypto.randomUUID()) => invokeAgentRuntimeFollowup({ sessionId: id, messageId, clientSubmissionId: messageId, content });
     await send(ids[0], prompt(markerA, 10));
@@ -431,6 +448,10 @@ async function verify() {
     await eventually(() => !Array.from(document.querySelectorAll('[data-testid="agent-terminal-lease-bar"] button'))
       .some(button => button.textContent === t('terminal.occupancy.viewTask')),
     'The task entry must disappear once its owning conversation is displayed');
+    if(nativeGate){
+      const release=await fetch(`/__native-p2-contention-gate/${new URL(location.href).searchParams.get('token')}`,{method:'POST'});
+      assert(release.ok,'The real initial foreground program completion gate failed');
+    }
     await eventually(async () => {
       assert(!failure, failure ?? 'Model failed');
       return completed.get(ids[0]) === 1 && output.includes(markerA) && await invokeGetAgentTerminalOwner(terminalId!) === null;
@@ -541,9 +562,10 @@ async function verify() {
     await invokeCloseSession(other.sessionId);
     const committedTools = await readOwnedToolJournals();
     assert(!failure, failure ?? 'Real contention proof failed');
+    if(nativeP2)assert(nativeProofs.length>0,'P2 contention did not observe a real full input proof and durable submission intent');
     await fetch(`/__agent-stream-result/${new URL(location.href).searchParams.get('token')}`, {
       method: 'POST', body: JSON.stringify({ progress: 'Captured complete owned tool journals, terminal leases and verified artifact hashes.',
-        evidence: { toolChain: { identity, operations: [...operations], leases: leaseEvidence, tools: toolEvidence, artifacts: artifactEvidence, committedTools } } }),
+        evidence: { toolChain: { identity, operations: [...operations], leases: leaseEvidence, tools: toolEvidence, artifacts: artifactEvidence, committedTools,...(nativeP2?{ptyInfo:session.ptyInfo,nativeProofs}:{}) } } }),
     });
   } catch (error) {
     try {

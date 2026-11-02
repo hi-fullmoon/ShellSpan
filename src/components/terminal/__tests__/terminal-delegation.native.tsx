@@ -15,8 +15,10 @@ import {
   invokeGetAgentRuntimeSession, invokeCancelAgentRuntime, invokeArchiveAgentRuntimeSession,
   invokeDeleteAgentRuntimeSession, invokeGetAgentTerminalOwner, invokeGetTerminalBrokerSnapshot,
   listenToAgentRuntimeSession, listenToAgentTerminalLease,
+  listenToTerminalIntegrationState,
 } from '@/lib/ipc/tauri';
 import type { AgentSessionEvent, AgentTerminalLeaseEvent } from '@/types/agent-session';
+import type {TerminalIntegrationStateEvent} from '@/types';
 
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
@@ -33,6 +35,7 @@ async function eventually(check: () => boolean | Promise<boolean>, message: stri
 // Uses the real desktop, configured provider, native Session lineage and PTY.
 // No transport, model response, lease acknowledgement or session event is replaced.
 export async function verifyTerminalDelegation(): Promise<void> {
+  const nativeP2=new URL(location.href).searchParams.get('nativeP2')==='true';
   const selection = (await invokeListAiRoutes()).defaultSelection;
   assert(selection, 'Configure a real model route before running terminal delegation acceptance');
   await getCurrentWindow().show();
@@ -73,6 +76,17 @@ export async function verifyTerminalDelegation(): Promise<void> {
     'The native terminal did not connect and reach its prompt');
     const controller = terminalRegistry.get(terminalId);
     assert(controller, 'Missing production terminal controller');
+    const nativeInitial=nativeP2?(await invokeGetTerminalBrokerSnapshot(terminalId)).session:undefined;
+    const nativeProofs:TerminalIntegrationStateEvent[]=[];
+    if(nativeP2){
+      assert(nativeInitial?.inputMode==='native-inline'&&nativeInitial.integrationState==='ready'&&nativeInitial.integrationShell==='bash','P2 delegation did not use the actual ready native Bash route');
+      assert(nativeInitial.nativePeerProfile?.shell==='bash'&&nativeInitial.nativePeerProfile.editor==='readline'&&nativeInitial.nativePeerProfile.shellVersion&&nativeInitial.nativePeerProfile.verifiedProfileId?.endsWith('-nip1-init1-capture1'),'P2 delegation is missing its accepted private peer profile');
+      assert(controller.inputMode==='native-inline'&&nativeInitial.nativeDisplayBinding?.protocol==='shellspan.native-input/1'&&JSON.stringify(nativeInitial.nativeDisplayBinding)===JSON.stringify(terminal.ptyInfo?.nativeDisplayBinding),'P2 delegation renderer did not use the negotiated binding');
+      cleanups.push(await listenToTerminalIntegrationState(({payload})=>{
+        const command=payload.inputObservation?.activeCommand;
+        if(payload.sessionId===terminalId&&payload.terminalSessionId===nativeInitial.terminalSessionId&&payload.terminalGeneration===nativeInitial.terminalGeneration&&command?.fullInputConfirmed&&command.submissionIntentDurable)nativeProofs.push(payload);
+      }));
+    }
     const otherTerminal = await invokeCreateLocalSession(100, 25);
     otherTerminalId = otherTerminal.sessionId;
     flushSync(() => useTerminalStore.getState().addSession(otherTerminal));
@@ -196,9 +210,10 @@ export async function verifyTerminalDelegation(): Promise<void> {
     assert(await controller.writeUserInput('\u000c') === true, 'Confirmed child takeover must release all frontend input locks');
     assert((await invokeGetAgentRuntimeSession({ sessionId: parentId })).status !== 'running',
       'Taking over the child must stop the parent turn');
+    if(nativeP2)assert(nativeProofs.length>0,'P2 delegation did not observe a real full input proof and durable submission intent');
     await fetch(`/__agent-stream-result/${new URL(location.href).searchParams.get('token')}`, {
       method: 'POST', body: JSON.stringify({ progress: 'Verified delegated view and focus preservation, real child execution, parent resumption, unrelated Agent exclusion and child takeover.',
-        evidence: { terminalDelegation: { parentId, childIds: [...childIds], restoredParent, events, leases, outputTail: output.slice(-8192) } } }),
+        evidence: { terminalDelegation: { parentId, childIds: [...childIds], restoredParent, events, leases, outputTail: output.slice(-8192),...(nativeP2?{nativeInitial,ptyInfo:terminal.ptyInfo,nativeProofs}: {}) } } }),
     });
   } finally {
     for (const cleanup of cleanups.reverse()) cleanup();

@@ -4,6 +4,7 @@ allowBuilds:
   protobufjs: true
   react-intl-universal: true
 patchedDependencies:
+  '@xterm/xterm@6.0.0': patches/@xterm__xterm@6.0.0.patch
   sonner@2.0.8: patches/sonner@2.0.8.patch
 overrides:
   # MCP SDK imports zod/v3 and zod/v4, which zod 3.24.x does not export.

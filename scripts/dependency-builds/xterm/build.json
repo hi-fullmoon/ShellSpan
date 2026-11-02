@@ -1,0 +1,26 @@
+{
+  "version": "6.0.0",
+  "commit": "f447274f430fd22513f6adbf9862d19524471c04",
+  "archiveUrl": "https://codeload.github.com/xtermjs/xterm.js/tar.gz/f447274f430fd22513f6adbf9862d19524471c04",
+  "archiveSha256": "82337f91a9df63998d89ba906389d5152a2e8278b558ea72c5dec25ec93a591e",
+  "upstreamLockSha256": "be3cc17b035f88119b89a71e5c3c656bac0edcd6f9494a1393d8aef3e17b7688",
+  "npm": "10.9.2",
+  "typescript": "5.5.3",
+  "webpack": "5.94.0",
+  "esbuild": "0.25.2",
+  "patches": {
+    "scripts/native-input-p0/xterm-cursor-reflow.patch": "8ee40207601e24bdf9370519f77db625536d88d9dd9436ae276e18f91fe83a7e",
+    "scripts/native-input-p0/xterm-copy-serialization.patch": "848172022f39f1ea42e312cef093333f3a6fa39504016ffe87d702945e256446",
+    "scripts/native-input-p0/xterm-el0-softwrap.patch": "49734e0287476acf28f24fa7895c1ef4068f4d8a0ce0ca66b2be1df12c12fb16",
+    "scripts/native-input-p0/xterm-selection-reflow.patch": "d8e8a47fc0cfa644cdcb5346425b32e1fc025f79ae776163ef9fb9b1a81821f7",
+    "scripts/native-input-p0/xterm-viewport-reflow.patch": "a47e57123492cc0330a2a22ca396c7ec4638add615dd83b81dcf7a999102f266"
+  },
+  "sourceFiles": [
+    "src/common/buffer/Buffer.ts",
+    "src/common/buffer/BufferReflow.ts",
+    "src/browser/services/SelectionService.ts",
+    "src/common/InputHandler.ts",
+    "src/common/buffer/Types.ts"
+  ],
+  "runtimeFiles": ["lib/xterm.js", "lib/xterm.js.map", "lib/xterm.mjs", "lib/xterm.mjs.map"]
+}

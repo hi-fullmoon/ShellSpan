@@ -144,6 +144,84 @@ impl Default for NativeToolEngine {
 }
 
 impl NativeToolEngine {
+    pub(crate) fn attach_native_terminal_transport(
+        &self,
+        transport: &str,
+        predecessor: Option<&str>,
+        kind: TerminalTransportKind,
+        geometry: TerminalGeometry,
+        mode: crate::terminal_command::protocol::InputMode,
+    ) -> Result<Option<TerminalBrokerAttachment>, String> {
+        self.terminal_broker.attach_transport_with_mode(
+            transport,
+            predecessor,
+            kind,
+            geometry,
+            mode,
+        )
+    }
+    pub(crate) fn register_native_terminal(
+        &self,
+        transport: &str,
+        profile: crate::terminal_command::registration::VerifiedNativeProfile,
+    ) -> Result<crate::terminal_command::protocol::ConnectionEnvelope, String> {
+        self.terminal_broker
+            .register_native_channel(transport, profile)
+    }
+    pub(crate) fn wait_native_initialization(
+        &self,
+        transport: &str,
+        timeout: Duration,
+    ) -> Result<Option<crate::terminal_command::protocol::DisplayBinding>, String> {
+        self.terminal_broker
+            .wait_native_initialization(transport, timeout)
+    }
+    pub(crate) fn accept_native_terminal_message(
+        &self,
+        transport: &str,
+        message: crate::terminal_command::protocol::Message,
+    ) -> Result<(), String> {
+        use crate::terminal_command::protocol::{ConnectionPayload, Message};
+        let result = match message {
+            Message::Connection(message) => match &message.payload {
+                ConnectionPayload::Capabilities { .. } => self
+                    .terminal_broker
+                    .accept_native_capabilities(transport, &message),
+                ConnectionPayload::EditorReady { .. } => self
+                    .terminal_broker
+                    .accept_native_readiness(transport, &message),
+                ConnectionPayload::Directory { .. } | ConnectionPayload::JobObservation { .. } | ConnectionPayload::EditorOptions { .. } => {
+                    self.terminal_broker
+                        .accept_native_observation(transport, &message)
+                }
+                _ => Err("TERMINAL_NATIVE_UNEXPECTED_MESSAGE".into()),
+            },
+            Message::Operation(message) => self.terminal_execute.receive_native(transport, message),
+        };
+        match result {
+            Err(error)
+                if error == "TERMINAL_NATIVE_IDENTITY_MISMATCH"
+                    || error.contains("STALE_GENERATION")
+                    || error.contains("STALE_TRANSPORT") =>
+            {
+                Ok(())
+            }
+            result => result,
+        }
+    }
+    pub(crate) fn native_terminal_control_closed(&self, transport: &str) -> Result<(), String> {
+        self.terminal_execute.native_control_closed(transport)?;
+        let shell=self.terminal_broker.snapshot(Some(transport))?.session.and_then(|session|session.integration_shell).unwrap_or(TerminalShellKind::Unsupported);
+        self.terminal_broker.mark_integration_unavailable(
+            transport,
+            shell,
+            "nativeControlClosed",
+        )
+    }
+    pub(crate) fn configure_terminal_submission_root(&self, root: &Path) -> Result<(), String> {
+        self.terminal_broker.configure_submission_journal(root)
+    }
+
     pub(crate) fn with_terminal_broker(terminal_broker: TerminalSessionBroker) -> Self {
         let terminal_leases = TerminalLeaseManager::new(terminal_broker.clone());
         let terminal_execute =
@@ -176,20 +254,6 @@ impl NativeToolEngine {
         Ok(())
     }
 
-    pub(crate) fn attach_terminal_broker_transport(
-        &self,
-        transport_session_id: &str,
-        predecessor_transport_session_id: Option<&str>,
-        transport_kind: TerminalTransportKind,
-        geometry: TerminalGeometry,
-    ) -> Result<Option<TerminalBrokerAttachment>, String> {
-        self.terminal_broker.attach_transport(
-            transport_session_id,
-            predecessor_transport_session_id,
-            transport_kind,
-            geometry,
-        )
-    }
 
     pub(crate) fn is_replacement_transport(
         &self,
@@ -282,6 +346,17 @@ impl NativeToolEngine {
         transport_session_id: Option<&str>,
     ) -> Result<TerminalBrokerSnapshot, String> {
         self.terminal_broker.snapshot(transport_session_id)
+    }
+
+    pub(crate) fn terminal_submission_recovery(
+        &self,
+        agent_session_id: &str,
+    ) -> Result<Vec<crate::terminal_command::journal::SubmissionIntent>, String> {
+        if !crate::terminal_command::protocol::valid_identifier(agent_session_id) {
+            return Err("invalid Agent Session id".into());
+        }
+        self.terminal_broker
+            .submission_recovery_for_agent(agent_session_id)
     }
 
     pub(crate) fn terminal_execution_capabilities(
@@ -868,6 +943,16 @@ impl NativeToolEngine {
             .map_err(registry_error_message)?;
         self.revalidate_target(context, &call.target, sessions, database)?;
         let effect = assess_effect_native(&tool.descriptor, &call)?;
+        if !matches!(
+            effect.kind,
+            AgentEffectKindNative::None | AgentEffectKindNative::ReadOnly
+        ) && !self
+            .terminal_broker
+            .recovered_submissions_for_agent(&context.request.user_session_id)?
+            .is_empty()
+        {
+            return Err("TERMINAL_INPUT_RECOVERY_REQUIRED: a durable terminal submission has no trusted settlement; inspect its outcome before further writes; no automatic replay".into());
+        }
         let scope = inspect_call_policy_scope_native(&call)?;
         enforce_native_call_policy_native(&call, &effect, &scope)?;
         self.enforce_runtime_storage_policy_for_session(context, &call, &effect, &scope)?;
@@ -1442,7 +1527,16 @@ impl NativeToolEngine {
                 if !lease_matches_agent {
                     return Err("TERMINAL_BROKER_LEASE_IDENTITY_MISMATCH".into());
                 }
-                if !terminal.prompt_ready || terminal.active_command_id.is_some() {
+                let own_waiting = terminal
+                    .input_observation
+                    .active_command
+                    .as_ref()
+                    .is_some_and(|command| {
+                        command.operation_id == operation_id
+                            && command.phase
+                                == crate::terminal_command::state::CommandPhase::AwaitingReady
+                    });
+                if !terminal.prompt_ready || terminal.active_command_id.is_some() && !own_waiting {
                     return Err("TERMINAL_VISIBLE_COMMAND_BUSY".into());
                 }
             }
@@ -1648,6 +1742,12 @@ impl NativeToolEngine {
             shell.enter(),
             job.as_ref().map(|job| job.submitted_command_line.as_str()),
             launch_deadline,
+            Some(crate::terminal_command::state::IntentAuthorization {
+                request_id: call.request_id.clone(),
+                capability_id: call.capability_id.clone(),
+                approved_call_id: call.call_id.clone(),
+                frozen_target: call.target.clone(),
+            }),
             |stage| {
                 if cancellation.is_cancelled() {
                     return Err("TERMINAL_JOB_LAUNCH_CANCELLED".into());
@@ -1719,8 +1819,15 @@ impl NativeToolEngine {
                     .mark_shell_job_uncertain(&job.process_handle)?;
             }
         }
-        let model_output =
-            crate::redaction::redact_sensitive_text(&super::strip_ansi(&snapshot.combined_output));
+        let plain_output = super::strip_ansi(&snapshot.combined_output);
+        let redacted_plain = crate::redaction::redact_sensitive_text(&plain_output);
+        // Native capture preserves real program controls. Keep the established
+        // sensitive-output boundary, including secrets split by ANSI sequences.
+        let model_output = if operation.is_native_protocol()? && redacted_plain == plain_output {
+            crate::redaction::redact_sensitive_text(&snapshot.combined_output)
+        } else {
+            redacted_plain
+        };
         let state = terminal_command_wire_state(snapshot.state);
         let job = job
             .map(|job| {
@@ -1781,7 +1888,7 @@ impl NativeToolEngine {
                 "commandLine": snapshot.command_line,
                 "submittedCommandLine": snapshot.submitted_command_line,
                 "inputRejection": snapshot.input_rejection,
-                "execution": if snapshot.input_rejection.is_some() || job.as_ref().is_some_and(|job| job.state == "rejected") {
+                "execution": if !snapshot.may_have_submitted || snapshot.input_rejection.is_some() || job.as_ref().is_some_and(|job| job.state == "rejected") {
                     "notStarted"
                 } else if job.as_ref().is_some_and(|job| job.state == "exited") || (job.is_none() && snapshot.state == crate::terminal_broker::TerminalCommandState::Completed) {
                     "completed"
@@ -2183,72 +2290,6 @@ impl NativeToolEngine {
         ))
     }
 
-    #[cfg(test)]
-    pub(crate) fn manage_registered_job_for_test(
-        broker: &TerminalSessionBroker,
-        leases: &TerminalLeaseManager,
-        registry: &TerminalExecuteRegistry,
-        sessions: &SessionManager,
-        job: &crate::terminal_jobs::NativeShellJob,
-        stop: bool,
-        timeout_ms: u64,
-    ) -> Result<AgentToolResultNative, String> {
-        // Wire the production manager to the real PTY acceptance registry.
-        // No replacement transport, fabricated events, provider or result.
-        let engine = Self {
-            terminal_execute: registry.clone(),
-            terminal_interactive: TerminalInteractiveRegistry::new(leases.clone(), broker.clone()),
-            terminal_leases: leases.clone(),
-            terminal_broker: broker.clone(),
-            ..Self::default()
-        };
-        let context = NativeExecutionContext {
-            request: AgentRequestNative {
-                contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
-                request_id: "native-job-wait-acceptance".into(),
-                user_session_id: job.agent_session_id.clone(),
-                task_id: job.task_id.clone(),
-                goal: "Observe the actual registered shell job".into(),
-                success_criteria: vec![],
-                targets: vec![job.frozen_target.clone()],
-                permission_mode: AgentPermissionModeNative::Operator,
-            },
-            turn_id: "native-job-wait-turn".into(),
-            step_id: "native-job-wait-step".into(),
-        };
-        let call = AgentToolCallNative {
-            request_id: context.request.request_id.clone(),
-            call_id: uuid::Uuid::new_v4().to_string(),
-            tool_name: if stop { "kill_process" } else { "wait_process" }.into(),
-            arguments: json!({"timeoutMs": timeout_ms}),
-            target: AgentToolTargetNative::Process {
-                target_id: format!("process-{}", job.process_handle),
-                owner_target_id: job.owner_target_id.clone(),
-                process_handle: job.process_handle.clone(),
-            },
-            capability_id: "real-pty-acceptance".into(),
-        };
-        let effect = AgentObservedEffectNative {
-            kind: if stop {
-                AgentEffectKindNative::StateChange
-            } else {
-                AgentEffectKindNative::ReadOnly
-            },
-            target_id: call.target.target_id().into(),
-            summary: "Observe the actual registered shell job".into(),
-            paths: vec![],
-            network_destinations: vec![],
-        };
-        engine.manage_shell_job(
-            &context,
-            &call,
-            &effect,
-            sessions,
-            stop,
-            timeout_ms,
-            &CancellationToken::new(),
-        )
-    }
 
     fn manage_shell_job(
         &self,
@@ -2356,6 +2397,12 @@ impl NativeToolEngine {
                 "\n",
                 Some(&source),
                 Some(deadline),
+                Some(crate::terminal_command::state::IntentAuthorization {
+                    request_id: call.request_id.clone(),
+                    capability_id: call.capability_id.clone(),
+                    approved_call_id: call.call_id.clone(),
+                    frozen_target: call.target.clone(),
+                }),
                 |stage| {
                     if cancellation.is_cancelled() {
                         return Err("TERMINAL_JOB_WAIT_CANCELLED".into());

@@ -18,7 +18,7 @@ import {
 } from '@/lib/ipc/tauri';
 import { createLogger } from '@/lib/logger';
 import { agentTerminalLeaseState, type AgentTerminalLeaseView } from './agent-terminal-lease-state';
-import type { TerminalController, TerminalOutputFilter } from './registry/terminal-registry';
+import type { TerminalController } from './registry/terminal-registry';
 import type { AgentSessionEvent, AgentTerminalLeaseEvent } from '@/types/agent-session';
 
 const logger = createLogger('agent-terminal-lease');
@@ -55,37 +55,20 @@ async function refreshTerminalIntegrationState(sessionId: string): Promise<void>
         ? remoteRolloutMissing ? 'remoteBoundTerminalDisabled' : 'terminalExecuteDisabled'
         : integrated.integrationReason,
     });
+    const current = useTerminalStore.getState().sessions.find((session) => session.sessionId === sessionId);
+    if (integrated.inputObservation && current?.terminalSessionId === integrated.terminalSessionId
+      && current.terminalGeneration === integrated.terminalGeneration) {
+      agentTerminalLeaseState.observe(sessionId, integrated.terminalSessionId, integrated.terminalGeneration, integrated.inputObservation);
+    }
   } catch (error) {
     logger.warn(`Failed to read terminal integration state ${sessionId}`, error);
   }
-}
-
-export interface AgentTerminalLeaseDisplayFilter extends TerminalOutputFilter {
-  readonly operationId: string;
-}
-
-export function createAgentTerminalLeaseDisplayFilter(
-  operationId: string,
-): AgentTerminalLeaseDisplayFilter {
-  // Phase 3 already turns raw PTY protocol bytes into a safe display stream.
-  // This operation-bound pass-through keeps that stream attached to the same
-  // lifecycle as input suppression without risking loss of real ANSI output.
-  let active = true;
-  return {
-    operationId,
-    push: (chunk) => active ? chunk : '',
-    finish: () => {
-      active = false;
-      return '';
-    },
-  };
 }
 
 interface ActiveLeaseResources {
   readonly lease: AgentTerminalLeaseEvent & { state: 'acquired' };
   readonly controller?: TerminalController;
   releaseInput?: () => void;
-  removeDisplayFilter?: () => void;
   removeLifecycle?: () => void;
 }
 
@@ -125,7 +108,6 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
     if (current?.lease.operationId !== lease.operationId) return false;
     activeLeases.delete(lease.sessionId);
     active.removeLifecycle?.();
-    active.removeDisplayFilter?.();
     active.releaseInput?.();
     if (
       focus
@@ -282,10 +264,11 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
       if (disposed) return;
       if (lease.state === 'activity') {
         agentTerminalLeaseState.update(lease.sessionId, lease.operationId, (current) => (
-          current.terminalOwned && current.agentSessionId === lease.agentSessionId
+          current.terminalOwned && current.agentSessionId === lease.agentSessionId && !current.backendObservation
             ? { ...current, commandPhase: lease.commandPhase }
             : current
         ));
+        await refreshTerminalIntegrationState(lease.sessionId);
         return;
       }
       if (lease.state === 'acquired') {
@@ -407,9 +390,6 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
           : {}),
       });
       if (controller) {
-        active.removeDisplayFilter = controller.subscribeOutputFilter(
-          createAgentTerminalLeaseDisplayFilter(lease.operationId),
-        );
         active.releaseInput ??= controller.suppressUserInput(() => {
           const current = agentTerminalLeaseState.get(lease.sessionId);
           if (current?.agentSessionId === lease.agentSessionId) {
@@ -435,6 +415,7 @@ export function createAgentTerminalLeaseCoordinator(): AgentTerminalLeaseCoordin
         takeoverFailed: false,
         requestTakeover: () => requestTakeover(lease.sessionId, lease.operationId),
       });
+      void refreshTerminalIntegrationState(lease.sessionId);
 
       let outputListenerReady = false;
       if (controller) {
@@ -716,9 +697,12 @@ export const TerminalControllerLayer: React.FC = () => {
         if (session.status === 'disconnected') {
           controller.writeDisconnectedHint();
         }
-        if (session.terminalSessionId) {
-          void refreshTerminalIntegrationState(session.sessionId);
-        }
+      }
+      // The visible carousel may have created the controller first. Native
+      // startup can also finish before addSession, so reconcile every newly
+      // observed identity independently of who created its renderer.
+      if (!knownRef.current.has(session.sessionId) && session.terminalSessionId) {
+        void refreshTerminalIntegrationState(session.sessionId);
       }
     }
     for (const session of sessions) {
@@ -761,6 +745,12 @@ export const TerminalControllerLayer: React.FC = () => {
     });
     void listenToTerminalIntegrationState((event) => {
       setIntegrationState(event.payload);
+      const payload = event.payload;
+      const current = useTerminalStore.getState().sessions.find((session) => session.sessionId === payload.sessionId);
+      if (payload.inputObservation && current?.terminalSessionId === payload.terminalSessionId
+        && current.terminalGeneration === payload.terminalGeneration) {
+        agentTerminalLeaseState.observe(payload.sessionId, payload.terminalSessionId, payload.terminalGeneration, payload.inputObservation);
+      }
     }).then((disposeListener) => {
       if (disposed) disposeListener();
       else {

@@ -1,5 +1,6 @@
 use super::*;
 use serde_json::json;
+use std::io::Write;
 
 #[path = "scratch_sftp.rs"]
 mod sftp;
@@ -57,6 +58,38 @@ impl Workspace {
 }
 
 #[test]
+fn scratch_metadata_writes_do_not_break_concurrent_reopen() {
+    let work = Workspace::new();
+    let _lease = work.acquire("concurrent-reopen");
+    let store = work.store.clone();
+    let data = work.root.path().to_path_buf();
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let writer_barrier = barrier.clone();
+    let writer = std::thread::spawn(move || {
+        writer_barrier.wait();
+        for _ in 0..500 {
+            let state = store.state.lock().unwrap();
+            let record = state.records.values().next().unwrap();
+            persist(&state, record).unwrap();
+        }
+    });
+    barrier.wait();
+    let mut errors = Vec::new();
+    for _ in 0..500 {
+        if let Err(error) = ScratchStore::open(&data) {
+            errors.push(error);
+        }
+    }
+    writer.join().unwrap();
+    assert!(
+        errors.is_empty(),
+        "Concurrent real scratch writes/reopen failed {}/500 times: {:?}",
+        errors.len(),
+        errors.iter().take(5).collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn scratch_roots_are_private_outside_project_and_isolated_by_session() {
     let work = Workspace::new();
     let first = work.acquire("parent");
@@ -96,6 +129,21 @@ fn scratch_roots_are_private_outside_project_and_isolated_by_session() {
             0
         );
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn scratch_metadata_staging_cannot_follow_symlinks() {
+    let work = Workspace::new();
+    let _lease = work.acquire("staging-links");
+    let state = work.store.state.lock().unwrap();
+    let pending = state.root.join("pending");
+    fs::rename(&pending, state.root.join("pending-original")).unwrap();
+    let project = Path::new(work.target.cwd.as_ref().unwrap());
+    std::os::unix::fs::symlink(project, pending).unwrap();
+    let record = state.records.values().next().unwrap();
+    assert!(persist(&state, record).is_err());
+    assert_eq!(fs::read_dir(project).unwrap().count(), 0);
 }
 
 #[test]

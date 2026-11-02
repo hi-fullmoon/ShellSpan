@@ -51,6 +51,7 @@ import type {
   StatusEvent,
   SystemHealth,
   TerminalBrokerSnapshot,
+  TerminalSubmissionIntent,
   TerminalIntegrationStateEvent,
   RemoteHealthSnapshotRequest,
   RemoteHealthSnapshotResult,
@@ -211,8 +212,12 @@ export function parseRemoteFsError(error: unknown): RemoteFsError | null {
 
 export async function invokeCreateSession(
   request: SessionCreateRequest,
+  nativeInputProtocol: 'shellspan.native-input/1' | null = 'shellspan.native-input/1',
 ): Promise<SessionSummary> {
-  return invokeLogged<SessionSummary>('create_session', { request }).catch((error) => {
+  const wireRequest={...request};
+  if(nativeInputProtocol) wireRequest.nativeInputProtocol=nativeInputProtocol;
+  else delete wireRequest.nativeInputProtocol;
+  return invokeLogged<SessionSummary>('create_session', { request: wireRequest }).catch((error) => {
     throw error as CreateSessionError;
   });
 }
@@ -221,10 +226,12 @@ export async function invokeCreateLocalSession(
   cols = 120,
   rows = 30,
   replacesSessionId?: string,
+  nativeInputProtocol: 'shellspan.native-input/1' | null = 'shellspan.native-input/1',
 ): Promise<SessionSummary> {
   return invokeLogged<SessionSummary>('create_local_session', {
     cols,
     rows,
+    ...(nativeInputProtocol ? { nativeInputProtocol } : {}),
     ...(replacesSessionId ? { replacesSessionId } : {}),
   });
 }
@@ -232,9 +239,15 @@ export async function invokeCreateLocalSession(
 export async function invokeGetTerminalBrokerSnapshot(
   sessionId?: string,
 ): Promise<TerminalBrokerSnapshot> {
+  // Includes source-free input observations; this read never acknowledges readiness
+  // or grants execution authority. Missing observations from older backends are unknown.
   return invokeLogged<TerminalBrokerSnapshot>('get_terminal_broker_snapshot', {
     ...(sessionId ? { sessionId } : {}),
   });
+}
+
+export function invokeGetTerminalSubmissionRecovery(agentSessionId: string): Promise<TerminalSubmissionIntent[]> {
+  return invokeLogged<TerminalSubmissionIntent[]>('get_terminal_submission_recovery', { agentSessionId });
 }
 
 export function invokeWriteSession(sessionId: string, data: string): Promise<void> {

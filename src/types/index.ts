@@ -211,11 +211,14 @@ export interface SessionSummary {
 
 export interface SessionPtyInfo {
   transportKind: TerminalBrokerTransportKind;
+  inputMode?: TerminalBrokerSessionSnapshot['inputMode'];
+  nativeDisplayBinding?: TerminalBrokerSessionSnapshot['nativeDisplayBinding'];
   /** Actual local Windows kernel build, absent for SSH and non-Windows PTYs. */
   windowsBuildNumber?: number;
 }
 
 export interface SessionCreateRequest {
+  nativeInputProtocol?: 'shellspan.native-input/1';
   initialDirectory?: string;
   operationId?: string;
   /** Frontend-only audit identity; older backends safely ignore this field. */
@@ -279,7 +282,83 @@ export interface NativeShellJobObservation {
   cleanupReason: string | null;
 }
 
+/** Read-only cooperative evidence. Unknown never proves that input was not submitted. */
+export interface TerminalCommandObservation {
+  submissionIntentDurable: boolean;
+  draftCleared: boolean;
+  phase: TerminalCommandPhase;
+  mayHaveSubmitted: boolean;
+  fullInputConfirmed: boolean;
+  leaseGeneration: number;
+  sourceRevision: number;
+  displaySource?: string;
+  safeActions: readonly ('query' | 'requestStop')[];
+  agentSessionId: string;
+  taskId: string;
+  operationId: string;
+  commandId: string;
+  legacyState: 'submitted' | 'running' | 'cancelRequested' | 'completed' | 'cancelled'
+    | 'timedOut' | 'takenOver' | 'uncertain' | 'failed';
+  /** Legacy state revision; other observation fields can change at the same revision. */
+  legacyRevision: number;
+  sourceMayBeEnqueued: boolean;
+  executionEvidence: 'unknown' | 'startObserved' | 'endObserved';
+  noAutoReplay: true;
+}
+
+/** Gate facts only; these flags and command evidence never authorize input. */
+export interface TerminalInputObservation {
+  snapshotSequence: number;
+  commandInputPending: boolean;
+  nativeRecoveryRequired: boolean;
+  nativeClearPending: boolean;
+  commandObservationUnavailable: boolean;
+  activeCommand?: TerminalCommandObservation;
+}
+
+export type TerminalCommandPhase = 'awaitingReady' | 'preparing' | 'typing' | 'inputConfirmed'
+  | 'submissionAttempted' | 'running' | 'completed' | 'cancelRequested' | 'cancelled'
+  | 'failed' | 'uncertain' | 'recoveryRequired';
+
+export interface TerminalSubmissionIntent {
+  version: 1;
+  identity: {
+    terminalSessionId: string;
+    terminalGeneration: number;
+    leaseId: string;
+    leaseGeneration: number;
+    agentSessionId: string;
+    taskId: string;
+    operationId: string;
+    commandId: string;
+    sourceRevision: number;
+  };
+  noAutoReplay: true;
+}
+
 export interface TerminalBrokerSessionSnapshot {
+  inputMode?: 'native-inline' | 'raw';
+  /** Accepted private-channel facts only; never an execution permission. */
+  nativePeerProfile?: {
+    shell: 'bash' | 'zsh' | 'windowsPowerShell' | 'powerShell7';
+    shellVersion?: string;
+    editor: 'readline' | 'zle' | 'psReadLine';
+    editorVersion?: string;
+    editorNumericVersion: number;
+    adapterVersion: string;
+    verifiedProfileId?: string;
+  };
+  nativeDisplayBinding?: {
+    protocol: 'shellspan.native-input/1';
+    inputMode: 'native-inline';
+    oscIdentifier: 1337;
+    enterPayload: 'SetUserVar=ShellSpanNativeInputV1=MQ==';
+    exitPayload: 'SetUserVar=ShellSpanNativeInputV1=MA==';
+    /** Backend-verified editor presentation only; never execution authority. */
+    unicodeVersion?: '11';
+    /** Verified editor owns redraw/resize; absent preserves the Bash default. */
+    ownedReflowCursorLine?: boolean;
+  };
   terminalSessionId: string;
   terminalGeneration: number;
   transportSessionId: string;
@@ -310,6 +389,8 @@ export interface TerminalBrokerSessionSnapshot {
   promptReady: boolean;
   currentDirectory?: string;
   activeCommandId?: string;
+  /** Absent on older backends; absence and unavailable observations mean unknown. */
+  inputObservation?: TerminalInputObservation;
   screenVersion: number;
   lease?: {
     leaseId: string;
@@ -317,7 +398,7 @@ export interface TerminalBrokerSessionSnapshot {
     owner:
       | { kind: 'user'; ownerId: string }
       | {
-          kind: 'agent';
+          kind: 'agent' | 'revoking';
           ownerId: string;
           agentSessionId: string;
           taskId: string;
@@ -397,6 +478,8 @@ interface TerminalFeatureRolloutDecision {
 }
 
 export interface TerminalIntegrationStateEvent {
+  /** Complete read-only command projection; independent of integration-state revision. */
+  inputObservation?: TerminalInputObservation;
   sessionId: string;
   terminalSessionId: string;
   terminalGeneration: number;

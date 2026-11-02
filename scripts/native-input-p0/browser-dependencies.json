@@ -1,0 +1,7 @@
+{
+  "name": "shellspan-native-input-p0-browser",
+  "private": true,
+  "dependencies": {
+    "@xterm/addon-unicode11": "0.9.0"
+  }
+}

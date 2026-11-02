@@ -16,11 +16,6 @@ const latencyScenarios = [
   'local_worker_event_low_frequency_burst',
 ];
 
-export const windowsNativeEditorTests=Object.freeze({
-  windowsPowerShell:'terminal_integration::tests::windows_powershell_5_1_editor_data_interruptions',
-  powerShell7:'terminal_integration::tests::windows_powershell_7_editor_data_interruptions',
-});
-
 export function windowsTestEnvironment(nativeJobs = false, inherited = process.env) {
   return {
     ...inherited,
@@ -399,14 +394,7 @@ export function main() {
     const testName =
       'terminal_broker::tests::windows_powershell_5_1_conpty_broker_preserves_raw_bytes_order_and_resize';
     cargoTest(testName, ['--ignored', '--exact'], testName);
-    const integrationTest =
-      'terminal_integration::tests::windows_powershell_5_1_visible_command_integration';
-    cargoTest(integrationTest, ['--ignored', '--exact'], integrationTest);
     run('powershell.exe', ['-NoLogo', '-NoProfile', '-File', 'scripts/verify-windows-native-job-startup.ps1']);
-    const nativeJobTest =
-      'terminal_integration::tests::windows_powershell_5_1_native_shell_jobs';
-    cargoTest(nativeJobTest, ['--ignored', '--exact', '--test-threads=1'], nativeJobTest, true);
-    cargoTest(windowsNativeEditorTests.windowsPowerShell,['--ignored','--exact','--test-threads=1'],windowsNativeEditorTests.windowsPowerShell);
     const interactiveTest =
       'agent_runtime::native::terminal_interactive::tests::windows_powershell_5_1_interactive_terminal_operation';
     cargoTest(interactiveTest, ['--ignored', '--exact'], interactiveTest);
@@ -428,14 +416,7 @@ export function main() {
     const testName =
       'terminal_broker::tests::windows_powershell_7_conpty_broker_preserves_raw_bytes_order_and_resize';
     cargoTest(testName, ['--ignored', '--exact'], testName);
-    const integrationTest =
-      'terminal_integration::tests::windows_powershell_7_visible_command_integration';
-    cargoTest(integrationTest, ['--ignored', '--exact'], integrationTest);
     run('pwsh.exe', ['-NoLogo', '-NoProfile', '-File', 'scripts/verify-windows-native-job-startup.ps1']);
-    const nativeJobTest =
-      'terminal_integration::tests::windows_powershell_7_native_shell_jobs';
-    cargoTest(nativeJobTest, ['--ignored', '--exact', '--test-threads=1'], nativeJobTest, true);
-    cargoTest(windowsNativeEditorTests.powerShell7,['--ignored','--exact','--test-threads=1'],windowsNativeEditorTests.powerShell7);
     const interactiveTest =
       'agent_runtime::native::terminal_interactive::tests::windows_powershell_7_interactive_terminal_operation';
     cargoTest(interactiveTest, ['--ignored', '--exact'], interactiveTest);

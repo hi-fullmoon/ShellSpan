@@ -4,6 +4,7 @@ use serde::Serialize;
 
 #[derive(Debug, Clone)]
 pub(crate) struct PreparedShellJob {
+    pub native_control_nonce: Option<String>,
     pub job: NativeShellJob,
     pub source: String,
     pub line: String,
