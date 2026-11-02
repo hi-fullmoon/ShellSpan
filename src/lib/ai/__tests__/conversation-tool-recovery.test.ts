@@ -3,7 +3,7 @@ import { createAgentChatProjector, projectAgentChatNodes } from '@/lib/ai/conver
 import { markRecoveredToolReads } from '@/lib/ai/conversation-tool';
 import type { AiConversationNode, AiToolNode } from '@/lib/ai/conversation-node';
 import type { AgentSessionEvent } from '@/types/agent-session';
-import capture from '@/test/fixtures/tool-result-read-recovery.json';
+import capture from '@/tests/fixtures/tool-result-read-recovery.json';
 
 // Captured read failure and retry from the reported session. Host metadata,
 // provider IDs and the private result excerpt are omitted; range evidence is intact.

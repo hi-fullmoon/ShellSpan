@@ -5,7 +5,7 @@ import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import type { AgentSessionEvent } from '@/types/agent-session';
-import capture from '@/test/fixtures/agent-skills-runtime.json';
+import capture from '@/tests/fixtures/agent-skills-runtime.json';
 
 const events = capture as AgentSessionEvent[];
 const turnEnd = events.findIndex(event => event.type === 'turn/end');

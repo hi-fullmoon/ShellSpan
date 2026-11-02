@@ -1,6 +1,6 @@
-vi.mock('@tauri-apps/api/core', async () => ({ invoke: (await import('@/test/llm-resolver-fixture')).fixtureResolve }));
+vi.mock('@tauri-apps/api/core', async () => ({ invoke: (await import('@/tests/llm-resolver-fixture')).fixtureResolve }));
 import { act, cleanup, render, renderHook, screen, waitFor } from '@testing-library/react';
-import userEvent from '@/test/composer-editor-user';
+import userEvent from '@/tests/composer-editor-user';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AiPanelShell } from '../ai-panel';
 import { AiWorkspaceController } from '../workspace/ai-workspace-controller';

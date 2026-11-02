@@ -5,7 +5,7 @@ import { AiConversationNodeList } from '../workspace/ai-conversation-node-seat';
 import { conversationArtifacts } from '@/lib/ai/conversation-artifact';
 import { createAgentChatProjector, projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { hasTokenBudgetCheckpoint } from '@/lib/ai/task-token-budget';
-import { taskTokenBudgetEvidence, taskTokenBudgetView } from '@/test/fixtures/task-token-budget';
+import { taskTokenBudgetEvidence, taskTokenBudgetView } from '@/tests/fixtures/task-token-budget';
 import type { AiArtifactNode } from '@/lib/ai/conversation-node';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';

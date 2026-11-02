@@ -31,7 +31,7 @@ try {
             await import('/src/styles/base.css');
             await import('/src/components/ai/styles/styles.css');
             const { AiConversationNodeList, aiAskConversationNodeRenderers } = await import('/src/components/ai/workspace/ai-conversation-node-seat.tsx');
-            const { taskTokenBudgetEvidence } = await import('/src/test/fixtures/task-token-budget.ts');
+            const { taskTokenBudgetEvidence } = await import('/src/tests/fixtures/task-token-budget.ts');
             const { initI18n } = await import('/src/locales/index.ts');
             await initI18n('en-US');
             const header = taskTokenBudgetEvidence.failed.header;

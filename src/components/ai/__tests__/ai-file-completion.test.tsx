@@ -1,8 +1,8 @@
-import { selectEditorText } from '@/test/composer-editor-user';
+import { selectEditorText } from '@/tests/composer-editor-user';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@/test/composer-editor-user';
+import userEvent from '@/tests/composer-editor-user';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AiComposerSeat } from '../workspace/ai-composer-seat';
 import { initI18n } from '@/locales';

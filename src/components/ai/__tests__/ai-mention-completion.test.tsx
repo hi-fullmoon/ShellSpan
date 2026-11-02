@@ -1,6 +1,6 @@
 /// <reference types="node" />
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
-import userEvent, { selectEditorText } from '@/test/composer-editor-user';
+import userEvent, { selectEditorText } from '@/tests/composer-editor-user';
 import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 import { AiComposerSeat } from '../workspace/ai-composer-seat';
 import { initI18n } from '@/locales';

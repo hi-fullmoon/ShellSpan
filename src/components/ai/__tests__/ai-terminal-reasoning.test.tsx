@@ -7,8 +7,8 @@ import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
-import { sessionEvent } from '@/test/fixtures/agent-session';
-import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
+import { sessionEvent } from '@/tests/fixtures/agent-session';
+import { agentSessionBaselineScenarios } from '@/tests/fixtures/agent-session-baseline';
 
 afterEach(() => cleanup());
 

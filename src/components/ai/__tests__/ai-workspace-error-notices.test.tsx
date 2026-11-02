@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import userEvent from '@/test/composer-editor-user';
+import userEvent from '@/tests/composer-editor-user';
 import { AiWorkspaceErrorNotices } from '../workspace/ai-workspace-error-notices';
 import { AiWorkspaceRoot } from '../workspace/ai-workspace-root';
 import type { AiFailedDraftRecoveryProps } from '../workspace/ai-failed-draft-recovery';
@@ -9,7 +9,7 @@ import { createAiComposerState, reduceAiComposer } from '@/lib/ai/composer-machi
 import { AiAdmissionUnconfirmedError, AiPreparationTimeoutError, normalizeAiSessionError } from '@/lib/ai/session-error';
 import { initI18n, t } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
-import { taskTokenBudgetView } from '@/test/fixtures/task-token-budget';
+import { taskTokenBudgetView } from '@/tests/fixtures/task-token-budget';
 
 afterEach(cleanup);
 beforeEach(async () => { useAppStore.setState({ locale: 'en-US' }); await initI18n('en-US'); });

@@ -6,8 +6,8 @@ import {
 } from '../conversation-projection';
 import type { AiDurableSessionStats } from '../conversation-node';
 import type { AgentSessionEvent } from '@/types/agent-session';
-import { taskTokenBudgetEvidence } from '@/test/fixtures/task-token-budget';
-import skillsCapture from '@/test/fixtures/agent-skills-runtime.json';
+import { taskTokenBudgetEvidence } from '@/tests/fixtures/task-token-budget';
+import skillsCapture from '@/tests/fixtures/agent-skills-runtime.json';
 
 // Replay real Rust runtime captures through the production projector.
 const captures = [

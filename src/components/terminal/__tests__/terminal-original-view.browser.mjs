@@ -8,7 +8,7 @@ import { createServer } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
-const native = JSON.parse(readFileSync(new URL('../../../test/fixtures/terminal-command-presentation-native.json', import.meta.url), 'utf8'));
+const native = JSON.parse(readFileSync(new URL('../../../tests/fixtures/terminal-command-presentation-native.json', import.meta.url), 'utf8'));
 const events = native.leaseEvents.filter(event => event.operationId === native.result.operationId);
 const directory = mkdtempSync(join(tmpdir(), 'shellspan-terminal-original-'));
 const identity = { host: hostname(), username: userInfo().username };

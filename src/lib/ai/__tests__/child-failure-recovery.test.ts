@@ -4,7 +4,7 @@ import schema from '../../../../protocol/agent/runtime/event-v5.schema.json';
 import { latestFailureRecovery, modelRetryConfirmation } from '../failure-recovery';
 import {
   childAdmittedEvents, childFailureRecordedAt, recordedChildAdmittedView, recordedChildFailureView,
-} from '@/test/fixtures/child-recovery-recording';
+} from '@/tests/fixtures/child-recovery-recording';
 
 describe('recorded child failure recovery', () => {
   it('offers recovery after completed tools while retaining their results and plan', () => {

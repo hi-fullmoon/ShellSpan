@@ -51,10 +51,10 @@ try {
           const { AiTaskStrip } = await import('/src/components/ai/workspace/ai-task-strip.tsx');
           const { AiContentTitle } = await import('/src/components/ai/workspace/ai-content-title.tsx');
           const { AiQueueDock } = await import('/src/components/ai/workspace/ai-queue-dock.tsx');
-          const { inboxTimelineEvidence, inboxTimelineView } = await import('/src/test/fixtures/agent-inbox-timeline.ts');
+          const { inboxTimelineEvidence, inboxTimelineView } = await import('/src/tests/fixtures/agent-inbox-timeline.ts');
           const { AiConversationNodeList } = await import('/src/components/ai/workspace/ai-conversation-node-seat.tsx');
           const { projectAgentChatNodes } = await import('/src/lib/ai/conversation-projection.ts');
-          const { conversationFoldRecording } = await import('/src/test/fixtures/conversation-fold-runtime.ts');
+          const { conversationFoldRecording } = await import('/src/tests/fixtures/conversation-fold-runtime.ts');
           const { Button } = await import('/src/components/ui/button.tsx');
           const { Input } = await import('/src/components/ui/input.tsx');
           const { initI18n } = await import('/src/locales/index.ts');

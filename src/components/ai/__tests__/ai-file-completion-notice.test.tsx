@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { readdir } from 'node:fs/promises';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, expect, it } from 'vitest';
-import userEvent from '@/test/composer-editor-user';
+import userEvent from '@/tests/composer-editor-user';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import type { FileReferenceList } from '@/types/agent-file-reference';

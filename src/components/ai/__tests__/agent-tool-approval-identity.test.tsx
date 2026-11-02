@@ -6,7 +6,7 @@ import { agentSessionView } from '@/lib/ai/agent-session-adapter';
 import { createAiComposerState } from '@/lib/ai/composer-machine';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
-import { agentSessionEventFixture, sessionEvent } from '@/test/fixtures/agent-session';
+import { agentSessionEventFixture, sessionEvent } from '@/tests/fixtures/agent-session';
 
 function waitingView(secondTurn = false) {
   const completedStep = agentSessionEventFixture.findIndex((event) => event.type === 'step/end');

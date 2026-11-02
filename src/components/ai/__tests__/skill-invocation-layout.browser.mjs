@@ -10,8 +10,8 @@ import tailwindcss from '@tailwindcss/vite';
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const screenshots = join(tmpdir(), 'shellspan-skill-invocation-layout');
 await mkdir(screenshots, { recursive: true });
-const events = JSON.parse(await readFile(join(root, 'src/test/fixtures/agent-skills-runtime.json'), 'utf8'));
-const failureEvents = JSON.parse(await readFile(join(root, 'src/test/fixtures/skill-load-failure.json'), 'utf8'));
+const events = JSON.parse(await readFile(join(root, 'src/tests/fixtures/agent-skills-runtime.json'), 'utf8'));
+const failureEvents = JSON.parse(await readFile(join(root, 'src/tests/fixtures/skill-load-failure.json'), 'utf8'));
 const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error',
   cacheDir: join(screenshots, 'vite-cache'),

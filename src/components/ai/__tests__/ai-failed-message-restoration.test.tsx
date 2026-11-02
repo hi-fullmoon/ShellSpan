@@ -4,7 +4,7 @@ import { AiWorkspaceController } from '../workspace/ai-workspace-controller';
 import { createAiComposerState, reduceAiComposer } from '@/lib/ai/composer-machine';
 import { AiAdmissionUnconfirmedError, AiPreparationTimeoutError, normalizeAiSessionError } from '@/lib/ai/session-error';
 import { sharedAgentSessionAdapter, submissionMemoryFor } from '@/lib/ai/submission-memory';
-import { taskTokenBudgetView } from '@/test/fixtures/task-token-budget';
+import { taskTokenBudgetView } from '@/tests/fixtures/task-token-budget';
 import { initI18n, t } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 

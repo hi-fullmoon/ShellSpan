@@ -9,8 +9,8 @@ import {
   agentSessionAllEventFamiliesFixture,
   agentSessionEventFixture,
   sessionEvent,
-} from '@/test/fixtures/agent-session';
-import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
+} from '@/tests/fixtures/agent-session';
+import { agentSessionBaselineScenarios } from '@/tests/fixtures/agent-session-baseline';
 import type { AgentSessionEvent } from '@/types/agent-session';
 
 function streamingActivityEvents(chunkCount: number): AgentSessionEvent[] {

@@ -6,7 +6,7 @@ import type { AiConversationNode } from '@/lib/ai/conversation-node';
 import {
   agentSessionBaselineScenarios,
   type AgentSessionBaselineScenarioId,
-} from '@/test/fixtures/agent-session-baseline';
+} from '@/tests/fixtures/agent-session-baseline';
 
 type MatrixRow = Readonly<{
   label: string;

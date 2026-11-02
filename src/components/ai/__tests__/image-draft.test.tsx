@@ -1,4 +1,4 @@
-vi.mock('@tauri-apps/api/core', async () => ({ invoke: (await import('@/test/llm-resolver-fixture')).fixtureResolve }));
+vi.mock('@tauri-apps/api/core', async () => ({ invoke: (await import('@/tests/llm-resolver-fixture')).fixtureResolve }));
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { useImageDraft } from '../workspace/use-image-draft';

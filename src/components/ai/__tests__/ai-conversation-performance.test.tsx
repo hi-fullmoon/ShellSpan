@@ -5,8 +5,8 @@ import { AiConversationNodeSeat, aiConversationNodeRenderers } from '../workspac
 import { createAgentChatProjector, projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import type { AgentSessionEvent } from '@/types/agent-session';
-import skillsCapture from '@/test/fixtures/agent-skills-runtime.json';
-import { taskTokenBudgetEvidence } from '@/test/fixtures/task-token-budget';
+import skillsCapture from '@/tests/fixtures/agent-skills-runtime.json';
+import { taskTokenBudgetEvidence } from '@/tests/fixtures/task-token-budget';
 import { initI18n } from '@/locales';
 
 afterEach(cleanup);

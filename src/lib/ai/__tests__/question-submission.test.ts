@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { agentSessionView } from '../agent-session-adapter';
 import { questionIssue, questionSubmissionIssue, reconcileQuestionSubmission } from '../question-submission';
-import { agentSessionEventFixture, sessionEvent } from '@/test/fixtures/agent-session';
+import { agentSessionEventFixture, sessionEvent } from '@/tests/fixtures/agent-session';
 import type { AgentSessionSnapshot } from '@/types/agent-session';
 import type { AnswerQuestionInput, AgentQuestionView } from '@/types/agent-question';
 

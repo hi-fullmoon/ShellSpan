@@ -1,6 +1,6 @@
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it } from 'vitest';
-import userEvent from '@/test/composer-editor-user';
+import userEvent from '@/tests/composer-editor-user';
 import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
 import { useAiSessionController } from '@/components/ai/workspace/use-ai-session-controller';
 import { initI18n, t } from '@/locales';

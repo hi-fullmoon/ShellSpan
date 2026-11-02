@@ -7,7 +7,7 @@ import { modelDefinitionForSave } from '../provider-setup-dialog';
 import type { ModelDefinition } from '@/lib/ai/provider-contract';
 import type { AiContextUsage } from '@/lib/ai/session-adapter';
 import { contextUsageForModel } from '@/lib/ai/session-settings';
-import evidence from '@/test/fixtures/context-budget-review.json';
+import evidence from '@/tests/fixtures/context-budget-review.json';
 import models from '../../../../protocol/llm/fixtures/resolved-models.json';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';

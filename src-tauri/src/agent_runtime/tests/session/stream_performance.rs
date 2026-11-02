@@ -1,6 +1,6 @@
 fn captured_stream_payloads() -> Vec<AgentScopedPayload> {
     let events: Vec<serde_json::Value> = serde_json::from_str(include_str!(
-        "../../../../../src/test/fixtures/agent-skills-runtime.json"
+        "../../../../../src/tests/fixtures/agent-skills-runtime.json"
     ))
     .unwrap();
     events

@@ -19,7 +19,7 @@ assert.ok(patch.length > 1000, 'The repository patch must contain enough content
 const largeRevision = execFileSync('git', ['log', '-1', '--format=%H', '--', 'src/components/ai'], { cwd: root, encoding: 'utf8' }).trim();
 const largePatch = execFileSync('git', ['show', '--format=', '--unified=1000', largeRevision, '--', 'src/components/ai'], { cwd: root, encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
 assert.ok(largePatch.length > 64 * 1024, 'The actual repository patch must exercise plain-output fallback');
-const failures = JSON.parse(await readFile(join(root, 'src/test/fixtures/tool-result-read-recovery.json'), 'utf8'));
+const failures = JSON.parse(await readFile(join(root, 'src/tests/fixtures/tool-result-read-recovery.json'), 'utf8'));
 const path = join(root, 'package.json');
 const file = await readFile(path, 'utf8');
 const command = 'git log --oneline -100';

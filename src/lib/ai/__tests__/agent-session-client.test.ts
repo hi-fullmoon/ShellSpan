@@ -5,7 +5,7 @@ import {
   type AgentSessionStreamState,
   type AgentSessionStreamTransport,
 } from '@/lib/ai/agent-session-client';
-import { agentSessionSteerFixture, sessionEvent } from '@/test/fixtures/agent-session';
+import { agentSessionSteerFixture, sessionEvent } from '@/tests/fixtures/agent-session';
 import type {
   AgentSessionEvent,
   AgentSessionSnapshot,

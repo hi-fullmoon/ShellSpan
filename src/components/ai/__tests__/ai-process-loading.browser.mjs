@@ -7,7 +7,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { chromium, webkit } from 'playwright';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
-const events = JSON.parse(await readFile(new URL('../../../../src/test/fixtures/agent-skills-runtime.json', import.meta.url), 'utf8'));
+const events = JSON.parse(await readFile(new URL('../../../../src/tests/fixtures/agent-skills-runtime.json', import.meta.url), 'utf8'));
 const server = await createServer({ root, configFile: false, appType: 'custom', logLevel: 'error',
   resolve: { alias: { '@': `${root}src` } }, plugins: [react(), tailwindcss()],
   server: { host: '127.0.0.1', port: 0 } });

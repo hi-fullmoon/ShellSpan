@@ -27,39 +27,39 @@ initGlobalErrorLogging();
 async function bootstrap(): Promise<void> {
   const params = new URLSearchParams(window.location.search);
   if (import.meta.env.DEV && params.has('aiComposerVisual')) {
-    const { mountComposerPage } = await import('./test/agent-composer-page');
+    const { mountComposerPage } = await import('./tests/agent-composer-page');
     await mountComposerPage(document.getElementById('root')!);
     return;
   }
   if (import.meta.env.DEV && params.has('aiStage6dVisual')) {
-    const { mountFilesPage } = await import('./test/agent-files-page');
+    const { mountFilesPage } = await import('./tests/agent-files-page');
     await mountFilesPage(document.getElementById('root')!);
     return;
   }
   if (import.meta.env.DEV && params.has('aiStage6cVisual')) {
-    const { mountImagesPage } = await import('./test/agent-images-page');
+    const { mountImagesPage } = await import('./tests/agent-images-page');
     await mountImagesPage(document.getElementById('root')!);
     return;
   }
   if (import.meta.env.DEV && params.has('aiStage6aVisual')) {
-    const { mountQuestionPage } = await import('./test/agent-question-page');
+    const { mountQuestionPage } = await import('./tests/agent-question-page');
     await mountQuestionPage(document.getElementById('root')!);
     return;
   }
   if (import.meta.env.DEV && params.has('aiStage6bVisual')) {
-    const { mountSkillsPage } = await import('./test/agent-skills-page');
+    const { mountSkillsPage } = await import('./tests/agent-skills-page');
     await mountSkillsPage(document.getElementById('root')!);
     return;
   }
   const phase5Scenario = params.get('aiPhase5Visual');
   if (import.meta.env.DEV && phase5Scenario !== null) {
-    const { mountAgentSessionPhase5Page } = await import('./test/agent-session-phase5-page');
+    const { mountAgentSessionPhase5Page } = await import('./tests/agent-session-phase5-page');
     await mountAgentSessionPhase5Page(document.getElementById('root')!);
     return;
   }
   const baselineScenario = params.get('aiPhase0Baseline');
   if (import.meta.env.DEV && baselineScenario !== null) {
-    const { mountAgentSessionBaselinePage } = await import('./test/agent-session-baseline-page');
+    const { mountAgentSessionBaselinePage } = await import('./tests/agent-session-baseline-page');
     await mountAgentSessionBaselinePage(document.getElementById('root')!);
     return;
   }

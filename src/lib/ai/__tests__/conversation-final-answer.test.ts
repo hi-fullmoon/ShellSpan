@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createAgentChatProjector, projectAgentChatNodes } from '../conversation-projection';
-import { conversationFoldRecording } from '@/test/fixtures/conversation-fold-runtime';
+import { conversationFoldRecording } from '@/tests/fixtures/conversation-fold-runtime';
 
 describe('recorded latest-step answer selection', () => {
   it('moves a provisional reply into process as soon as a later step starts', () => {

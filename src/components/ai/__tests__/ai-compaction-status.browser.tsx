@@ -7,7 +7,7 @@ import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import type { AgentSessionEvent } from '@/types/agent-session';
 import type { Locale } from '@/types';
-import capture from '@/test/fixtures/compaction-progress.json';
+import capture from '@/tests/fixtures/compaction-progress.json';
 import '@/styles/base.css';
 import '../styles/styles.css';
 

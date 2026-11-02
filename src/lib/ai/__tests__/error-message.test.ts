@@ -3,7 +3,7 @@ import { aiErrorMessage, httpProbeTimeoutKind } from '../error-message';
 import zhCN from '@/locales/zh-CN';
 import enUS from '@/locales/en-US';
 import { initI18n, t } from '@/locales';
-import { taskTokenBudgetView } from '@/test/fixtures/task-token-budget';
+import { taskTokenBudgetView } from '@/tests/fixtures/task-token-budget';
 
 it.each(['zh-CN', 'en-US'] as const)('localizes the recorded task budget error and retains its limit in %s', async locale => {
   await initI18n(locale);

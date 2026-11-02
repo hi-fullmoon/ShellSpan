@@ -1,7 +1,7 @@
 #[test]
 fn input_measurement_requires_bounded_identity_and_consistent_totals() {
     let capture: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../../src/test/fixtures/input-usage-anchors.json"
+        "../../../../../src/tests/fixtures/input-usage-anchors.json"
     ))
     .unwrap();
     let sample = &capture["samples"][0];

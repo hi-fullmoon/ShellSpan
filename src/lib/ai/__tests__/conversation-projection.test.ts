@@ -16,8 +16,8 @@ import {
   agentSessionEventFixture,
   agentSessionWaitingApprovalEventFixture,
   sessionEvent,
-} from '@/test/fixtures/agent-session';
-import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
+} from '@/tests/fixtures/agent-session';
+import { agentSessionBaselineScenarios } from '@/tests/fixtures/agent-session-baseline';
 import type { AgentSessionEvent } from '@/types/agent-session';
 
 const ALL_AGENT_EVENT_TYPES = [

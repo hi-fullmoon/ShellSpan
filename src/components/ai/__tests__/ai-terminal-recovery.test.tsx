@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, expect, it } from 'vitest';
 import { AiWorkspaceRoot } from '../workspace/ai-workspace-root';
 import { createAiComposerState } from '@/lib/ai/composer-machine';
-import { terminalRecoveryView } from '@/test/fixtures/terminal-execution-recovery';
+import { terminalRecoveryView } from '@/tests/fixtures/terminal-execution-recovery';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 

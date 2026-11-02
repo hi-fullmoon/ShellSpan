@@ -5,7 +5,7 @@ import { chatReferenceFile } from '@/lib/ai/chat-reference';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { decodeDocumentMessage } from '@/lib/ai/document-message';
 import { DOCUMENT_LIMITS } from '@/lib/ai/document-import';
-import { agentSessionEventFixture } from '@/test/fixtures/agent-session';
+import { agentSessionEventFixture } from '@/tests/fixtures/agent-session';
 import type { AiSessionSummary } from '@/lib/ai/session-adapter';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';

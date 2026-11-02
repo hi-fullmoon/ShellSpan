@@ -7,7 +7,7 @@ import { projectAgentActivity } from '@/lib/ai/agent-session-projection';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
-import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
+import { agentSessionBaselineScenarios } from '@/tests/fixtures/agent-session-baseline';
 import type { AgentSessionEvent } from '@/types/agent-session';
 
 // These baseline scenarios keep the same request configuration throughout.

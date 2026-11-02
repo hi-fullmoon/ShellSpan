@@ -4,7 +4,7 @@ import { afterEach, expect, it } from 'vitest';
 import { AiContextMeter } from '../workspace/ai-context-meter';
 import { projectContextUsage } from '@/lib/ai/context-usage';
 import type { AgentSessionEvent } from '@/types/agent-session';
-import capture from '@/test/fixtures/context-usage-runtime.json';
+import capture from '@/tests/fixtures/context-usage-runtime.json';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 

@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { createAgentChatProjector, projectAgentChatNodes } from '../conversation-projection';
 import { createAgentActivityProjector, projectAgentActivity } from '../agent-session-projection';
 import { createQuestionProjector, projectQuestions } from '../question-projection';
-import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
-import { agentSessionAllEventFamiliesFixture, agentSessionFailedEventFixture } from '@/test/fixtures/agent-session';
+import { agentSessionBaselineScenarios } from '@/tests/fixtures/agent-session-baseline';
+import { agentSessionAllEventFamiliesFixture, agentSessionFailedEventFixture } from '@/tests/fixtures/agent-session';
 
 const windows = [
   ...Object.values(agentSessionBaselineScenarios).map(({ events }) => events),

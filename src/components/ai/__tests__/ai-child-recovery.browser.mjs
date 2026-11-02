@@ -7,7 +7,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { chromium, webkit } from 'playwright';
 
 const root = path.resolve(import.meta.dirname, '../../../..');
-const directory = path.resolve(process.argv[2] ?? 'src/test/fixtures/child-failure-recovery');
+const directory = path.resolve(process.argv[2] ?? 'src/tests/fixtures/child-failure-recovery');
 const events = JSON.parse(await readFile(path.join(directory, 'failed-events.json'), 'utf8'));
 const snapshot = JSON.parse(await readFile(path.join(directory, 'failed-snapshot.json'), 'utf8'));
 assert.ok(snapshot.header.subagent?.continuable && snapshot.childFailureRecovery?.retryable);

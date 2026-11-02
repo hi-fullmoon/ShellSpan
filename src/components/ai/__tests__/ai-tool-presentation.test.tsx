@@ -10,11 +10,11 @@ import { AiToolDetails } from '@/components/ai/workspace/ai-tool-details';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
-import skillsCapture from '@/test/fixtures/agent-skills-runtime.json';
+import skillsCapture from '@/tests/fixtures/agent-skills-runtime.json';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import type { AgentSessionEvent } from '@/types/agent-session';
-import readRecoveryCapture from '@/test/fixtures/tool-result-read-recovery.json';
-import { conversationFoldRecording } from '@/test/fixtures/conversation-fold-runtime';
+import readRecoveryCapture from '@/tests/fixtures/tool-result-read-recovery.json';
+import { conversationFoldRecording } from '@/tests/fixtures/conversation-fold-runtime';
 
 function capturedRead(recovered: boolean): AiConversationNodeOf<'tool'> {
   const events = readRecoveryCapture as readonly AgentSessionEvent[];

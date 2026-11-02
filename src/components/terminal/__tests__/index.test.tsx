@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, beforeAll, vi } from 'vitest';
-import { enableRealCanvas } from '@/test/real-canvas';
+import { enableRealCanvas } from '@/tests/real-canvas';
 import { act, render, screen, fireEvent, within } from '@testing-library/react';
 import Terminal from '../index';
 import { useTerminalStore } from '@/stores/terminalStore';

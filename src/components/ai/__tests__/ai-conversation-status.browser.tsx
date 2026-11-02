@@ -3,14 +3,14 @@ import { flushSync } from 'react-dom';
 import { AiConversation } from '../workspace/ai-conversation';
 import { AiWorkspaceRoot } from '../workspace/ai-workspace-root';
 import { createAiComposerState } from '@/lib/ai/composer-machine';
-import { terminalRecoveryView } from '@/test/fixtures/terminal-execution-recovery';
+import { terminalRecoveryView } from '@/tests/fixtures/terminal-execution-recovery';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import type { AiSessionStatus } from '@/lib/ai/conversation-node';
 import type { AgentSessionEvent } from '@/types/agent-session';
 import type { Locale } from '@/types';
-import capture from '@/test/fixtures/agent-skills-runtime.json';
+import capture from '@/tests/fixtures/agent-skills-runtime.json';
 import '@/styles/base.css';
 import '../styles/styles.css';
 

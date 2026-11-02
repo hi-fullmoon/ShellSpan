@@ -1,10 +1,10 @@
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { initI18n } from '@/locales';
-import { taskTokenBudgetView } from '@/test/fixtures/task-token-budget';
+import { taskTokenBudgetView } from '@/tests/fixtures/task-token-budget';
 import { createAiComposerState } from '@/lib/ai/composer-machine';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
-import { conversationFoldRecording } from '@/test/fixtures/conversation-fold-runtime';
+import { conversationFoldRecording } from '@/tests/fixtures/conversation-fold-runtime';
 import { AiWorkspaceRoot } from '../workspace/ai-workspace-root';
 import { AiConversation } from '../workspace/ai-conversation';
 

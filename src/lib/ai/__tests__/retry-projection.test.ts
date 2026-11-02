@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sessionEvent } from '@/test/fixtures/agent-session';
+import { sessionEvent } from '@/tests/fixtures/agent-session';
 import { projectAgentChatNodes } from '../conversation-projection';
 import { projectAgentActivityNodes } from '@/lib/ai/agent-session-projection';
 import type { AgentSessionEvent } from '@/types/agent-session';

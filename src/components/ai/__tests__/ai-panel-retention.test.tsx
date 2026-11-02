@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 import { AiPanelShell } from '../ai-panel';
 import { WorkbenchAskController } from '../workspace/ai-workspace-controller';
 import { initI18n } from '@/locales';
-import userEvent from '@/test/composer-editor-user';
+import userEvent from '@/tests/composer-editor-user';
 
 beforeEach(async () => { await initI18n('en-US'); });
 afterEach(cleanup);

@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { fixtureResolve } from '@/test/llm-resolver-fixture';
+import { fixtureResolve } from '@/tests/llm-resolver-fixture';
 import { loadResolvedModel, modelResolution, providerCapabilities, useResolvedModel, type ResolvedModel } from '../provider-contract';
 import { sessionProviderConfig } from '../session-settings';
 import type { AiProviderConfig } from '@/types/ai';

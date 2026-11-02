@@ -1,6 +1,6 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import userEvent, { selectEditorText } from '@/test/composer-editor-user';
+import userEvent, { selectEditorText } from '@/tests/composer-editor-user';
 import { AiComposerSeat } from '../workspace/ai-composer-seat';
 import { initI18n } from '@/locales';
 import { builtinSkillPreview } from '@/lib/ai/builtin-skills';

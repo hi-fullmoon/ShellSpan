@@ -2,7 +2,7 @@ import { describe, expect, it, beforeAll, beforeEach, afterEach, vi } from 'vite
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
-import { enableRealCanvas } from '@/test/real-canvas';
+import { enableRealCanvas } from '@/tests/real-canvas';
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { COPY_ON_SELECT_DEBOUNCE_MS, TerminalPane } from '../terminal-pane';

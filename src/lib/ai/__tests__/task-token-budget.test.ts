@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { canResumeTokenBudgetedTask, hasTokenBudgetCheckpoint } from '../task-token-budget';
-import { taskTokenBudgetView } from '@/test/fixtures/task-token-budget';
+import { taskTokenBudgetView } from '@/tests/fixtures/task-token-budget';
 
 describe('persisted task token budget recovery', () => {
   it('allows only an ended, unarchived root and removes recovery after resume', () => {

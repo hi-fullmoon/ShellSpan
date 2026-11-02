@@ -11,7 +11,7 @@ const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const artifacts = join(tmpdir(), 'shellspan-transcript-row-height');
 await mkdir(artifacts, { recursive: true });
 const recordings = await Promise.all(['agent-skills-runtime.json', 'task-token-budget.json']
-  .map(async file => JSON.parse(await readFile(join(root, 'src/test/fixtures', file), 'utf8'))));
+  .map(async file => JSON.parse(await readFile(join(root, 'src/tests/fixtures', file), 'utf8'))));
 const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error',
   cacheDir: join(artifacts, 'vite-cache'),

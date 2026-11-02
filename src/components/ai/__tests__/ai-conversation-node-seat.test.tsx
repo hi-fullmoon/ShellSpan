@@ -17,7 +17,7 @@ import {
   agentSessionFailedEventFixture,
   agentSessionRunningEventFixture,
   sessionEvent,
-} from '@/test/fixtures/agent-session';
+} from '@/tests/fixtures/agent-session';
 import '@/components/ai/styles/styles.css';
 
 function toolNode(

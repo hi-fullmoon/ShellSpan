@@ -7,8 +7,8 @@ import type { AiConversationNode, AiConversationNodeOf } from '@/lib/ai/conversa
 import type { AgentSessionEvent } from '@/types/agent-session';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
-import capture from '@/test/fixtures/agent-skills-runtime.json';
-import failureCapture from '@/test/fixtures/skill-load-failure.json';
+import capture from '@/tests/fixtures/agent-skills-runtime.json';
+import failureCapture from '@/tests/fixtures/skill-load-failure.json';
 
 afterEach(cleanup);
 

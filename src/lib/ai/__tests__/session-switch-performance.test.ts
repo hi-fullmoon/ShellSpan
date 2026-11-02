@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { CommittedEventBuffer } from '../committed-event-buffer';
 import { agentSessionView, createAgentSessionViewProjector } from '../agent-session-adapter';
-import { taskTokenBudgetEvidence } from '@/test/fixtures/task-token-budget';
+import { taskTokenBudgetEvidence } from '@/tests/fixtures/task-token-budget';
 
 it('reuses nonempty publications and preserves them when committed events append', () => {
   const buffer = new CommittedEventBuffer();

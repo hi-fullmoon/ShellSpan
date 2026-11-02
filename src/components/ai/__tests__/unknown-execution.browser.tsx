@@ -6,7 +6,7 @@ import { useAppStore } from '@/stores/appStore';
 import type { AgentSessionEvent } from '@/types/agent-session';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import type { Locale } from '@/types';
-import capture from '@/test/fixtures/terminal-unknown-execution.json';
+import capture from '@/tests/fixtures/terminal-unknown-execution.json';
 import '@/styles/base.css';
 import '../styles/styles.css';
 

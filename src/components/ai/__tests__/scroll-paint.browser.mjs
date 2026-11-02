@@ -12,7 +12,7 @@ const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const capturePath = process.argv[2];
 const events = capturePath
   ? (await readFile(capturePath, 'utf8')).trim().split('\n').map(JSON.parse)
-  : JSON.parse(await readFile(new URL('../../../../src/test/fixtures/agent-skills-runtime.json', import.meta.url), 'utf8'));
+  : JSON.parse(await readFile(new URL('../../../../src/tests/fixtures/agent-skills-runtime.json', import.meta.url), 'utf8'));
 const messages = events.flatMap((event, index) => event.type === 'assistant/message' ? [index] : []);
 assert.ok(messages.length > 0, 'A recorded assistant response is required');
 const checkpoints = [...new Set([messages[Math.floor(messages.length / 3)],

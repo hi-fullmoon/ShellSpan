@@ -10,7 +10,7 @@ import tailwindcss from '@tailwindcss/vite';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const stdout = execFileSync('git', ['log', '--oneline', '-100'], { cwd: root, encoding: 'utf8' });
-const planEvents = JSON.parse(readFileSync(new URL('../../../test/fixtures/conversation-fold-runtime.json', import.meta.url), 'utf8')).completed.events;
+const planEvents = JSON.parse(readFileSync(new URL('../../../tests/fixtures/conversation-fold-runtime.json', import.meta.url), 'utf8')).completed.events;
 // Reuse the repository text that reproduced the long-summary collapse in review.
 const longSummary = readFileSync(new URL('../../../../AGENTS.md', import.meta.url), 'utf8').slice(0, 650);
 const server = await createServer({

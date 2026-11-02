@@ -5,7 +5,7 @@ import { projectAgentActivity } from '@/lib/ai/agent-session-projection';
 import {
   agentSessionEventFixture,
   sessionEvent,
-} from '@/test/fixtures/agent-session';
+} from '@/tests/fixtures/agent-session';
 import { invokeAnswerAgentRuntimeQuestion } from '@/lib/ipc/tauri';
 import { mockIPC, clearMocks } from '@tauri-apps/api/mocks';
 import type { AnswerQuestionInput } from '@/types/agent-question';

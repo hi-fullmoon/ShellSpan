@@ -22,8 +22,8 @@ const data = {
   code: 'process.version',
   codeOutput: execFileSync(process.execPath, ['--print', 'process.version'], { encoding: 'utf8' }),
   patch: execFileSync('git', ['show', '--format=', revision, '--', toolPath], { cwd: root, encoding: 'utf8' }),
-  recovery: JSON.parse(await readFile(join(root, 'src/test/fixtures/tool-result-read-recovery.json'), 'utf8')),
-  plan: JSON.parse(await readFile(join(root, 'src/test/fixtures/conversation-fold-runtime.json'), 'utf8')).completed.events,
+  recovery: JSON.parse(await readFile(join(root, 'src/tests/fixtures/tool-result-read-recovery.json'), 'utf8')),
+  plan: JSON.parse(await readFile(join(root, 'src/tests/fixtures/conversation-fold-runtime.json'), 'utf8')).completed.events,
 };
 assert.ok(data.patch, 'Coverage requires a real tool presentation patch');
 const server = await createServer({

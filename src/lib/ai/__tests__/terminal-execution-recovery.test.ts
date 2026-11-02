@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { terminalExecutionRecovery } from '../terminal-execution-recovery';
-import { terminalRecoveryView } from '@/test/fixtures/terminal-execution-recovery';
+import { terminalRecoveryView } from '@/tests/fixtures/terminal-execution-recovery';
 
 it('recognizes the recorded quarantine and its underlying control acknowledgement failure', () => {
   expect(terminalExecutionRecovery(terminalRecoveryView())).toEqual({

@@ -6,12 +6,12 @@ import { AiWorkspaceRoot } from '../workspace/ai-workspace-root';
 import { createAiComposerState } from '@/lib/ai/composer-machine';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { terminalExecutionRecovery } from '@/lib/ai/terminal-execution-recovery';
-import { terminalRecoveryView } from '@/test/fixtures/terminal-execution-recovery';
+import { terminalRecoveryView } from '@/tests/fixtures/terminal-execution-recovery';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import type { AgentSessionEvent } from '@/types/agent-session';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
-import capture from '@/test/fixtures/terminal-unknown-execution.json';
+import capture from '@/tests/fixtures/terminal-unknown-execution.json';
 
 afterEach(cleanup);
 

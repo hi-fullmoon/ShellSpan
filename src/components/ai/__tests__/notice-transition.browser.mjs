@@ -29,7 +29,7 @@ try {
           const { default: ReactDOM } = await import(domUrl);
           const { AiWorkspaceRoot } = await import('/src/components/ai/workspace/ai-workspace-root.tsx');
           const { createAiComposerState } = await import('/src/lib/ai/composer-machine.ts');
-          const { taskTokenBudgetView } = await import('/src/test/fixtures/task-token-budget.ts');
+          const { taskTokenBudgetView } = await import('/src/tests/fixtures/task-token-budget.ts');
           const { initI18n, t } = await import('/src/locales/index.ts');
           const { useAppStore } = await import('/src/stores/appStore.ts');
           await import('/src/styles/base.css');

@@ -1,10 +1,10 @@
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
-import userEvent, { selectEditorText } from '@/test/composer-editor-user';
+import userEvent, { selectEditorText } from '@/tests/composer-editor-user';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { AiComposerSeat } from '../workspace/ai-composer-seat';
 import { chatReferenceFile } from '@/lib/ai/chat-reference';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
-import { agentSessionEventFixture } from '@/test/fixtures/agent-session';
+import { agentSessionEventFixture } from '@/tests/fixtures/agent-session';
 import { decodeDocumentMessage, encodeDocumentMessage } from '@/lib/ai/document-message';
 import type { AiSessionSummary } from '@/lib/ai/session-adapter';
 import { initI18n } from '@/locales';

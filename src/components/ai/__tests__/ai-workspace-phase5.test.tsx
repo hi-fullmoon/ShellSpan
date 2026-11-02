@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@/test/composer-editor-user';
+import userEvent from '@/tests/composer-editor-user';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
 import { AgentSessionCommittedClient } from '@/lib/ai/agent-session-client';
 import { agentSessionView } from '@/lib/ai/agent-session-adapter';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
-import { agentSessionEventFixture, sessionEvent } from '@/test/fixtures/agent-session';
+import { agentSessionEventFixture, sessionEvent } from '@/tests/fixtures/agent-session';
 import type { AgentSessionEvent } from '@/types/agent-session';
 import { createAiComposerState } from '@/lib/ai/composer-machine';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';

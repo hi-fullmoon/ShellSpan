@@ -5,7 +5,7 @@ import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import type { AgentSessionEvent } from '@/types/agent-session';
-import capture from '@/test/fixtures/compaction-progress.json';
+import capture from '@/tests/fixtures/compaction-progress.json';
 import { projectAgentActivity } from '@/lib/ai/agent-session-projection';
 
 const traces = capture as unknown as Record<'completed' | 'failed' | 'cancelled', readonly AgentSessionEvent[]>;

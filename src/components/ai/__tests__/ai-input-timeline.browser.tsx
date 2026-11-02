@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import { AiWorkspaceRoot } from '../workspace/ai-workspace-root';
-import { inboxTimelineEvidence, inboxTimelineView } from '@/test/fixtures/agent-inbox-timeline';
+import { inboxTimelineEvidence, inboxTimelineView } from '@/tests/fixtures/agent-inbox-timeline';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import type { Locale } from '@/types';

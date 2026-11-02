@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 
 fn captures() -> Vec<Value> {
     serde_json::from_str::<Value>(include_str!(
-        "../../../../src/test/fixtures/input-usage-anchors.json"
+        "../../../../src/tests/fixtures/input-usage-anchors.json"
     ))
     .unwrap()["samples"]
         .as_array()
@@ -204,7 +204,7 @@ fn recalibration_uses_raw_estimates_and_never_counts_output_as_input() {
 #[test]
 fn smaller_reported_input_keeps_the_heuristic_floor() {
     let capture: Value = serde_json::from_str(include_str!(
-        "../../../../src/test/fixtures/context-budget-review.json"
+        "../../../../src/tests/fixtures/context-budget-review.json"
     ))
     .unwrap();
     let sample = json!({

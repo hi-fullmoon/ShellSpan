@@ -6,7 +6,7 @@ import { createAiComposerState, reduceAiComposer } from '@/lib/ai/composer-machi
 import { AiPreparationTimeoutError, normalizeAiSessionError } from '@/lib/ai/session-error';
 import { withOptimisticConversationNodes, withRetainedFailedSubmissions, type AiOptimisticSubmission } from '@/lib/ai/optimistic-submission';
 import { AiSubmissionMemory } from '@/lib/ai/submission-memory';
-import { taskTokenBudgetView } from '@/test/fixtures/task-token-budget';
+import { taskTokenBudgetView } from '@/tests/fixtures/task-token-budget';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import '@/styles/base.css';

@@ -1,4 +1,4 @@
-vi.mock('@tauri-apps/api/core', async () => ({ invoke: (await import('@/test/llm-resolver-fixture')).fixtureResolve }));
+vi.mock('@tauri-apps/api/core', async () => ({ invoke: (await import('@/tests/llm-resolver-fixture')).fixtureResolve }));
 import { describe, it, expect, vi } from 'vitest';
 import { providerCapabilities, resolveProviderProfile, validateProviderCapabilities, loadResolvedModel } from '../provider-contract';
 import fixtures from './provider-contract-fixtures.json';

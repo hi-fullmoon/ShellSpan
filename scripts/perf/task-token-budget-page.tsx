@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
-import { taskTokenBudgetView } from '@/test/fixtures/task-token-budget';
+import { taskTokenBudgetView } from '@/tests/fixtures/task-token-budget';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import '@/styles/base.css';

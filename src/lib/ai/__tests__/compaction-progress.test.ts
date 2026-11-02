@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { createAgentChatProjector, projectAgentChatNodes } from '../conversation-projection';
 import type { AiCompactionNode, AiConversationNode } from '../conversation-node';
 import type { AgentSessionEvent } from '@/types/agent-session';
-import capture from '@/test/fixtures/compaction-progress.json';
+import capture from '@/tests/fixtures/compaction-progress.json';
 import { projectAgentActivity } from '../agent-session-projection';
 
 const traces = capture as unknown as Record<'completed' | 'failed' | 'cancelled', readonly AgentSessionEvent[]>;

@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { initialConversationHistoryIndex } from '../conversation-history';
 import { projectAgentChatNodes } from '../conversation-projection';
-import { taskTokenBudgetEvidence } from '@/test/fixtures/task-token-budget';
+import { taskTokenBudgetEvidence } from '@/tests/fixtures/task-token-budget';
 
 const nodes = projectAgentChatNodes(taskTokenBudgetEvidence.events);
 

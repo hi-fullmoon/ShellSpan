@@ -3,12 +3,12 @@ import { afterEach, expect, it } from 'vitest';
 import { AiConversation } from '../workspace/ai-conversation';
 import { AiConversationNodeSeat } from '../workspace/ai-conversation-node-seat';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
-import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
+import { agentSessionBaselineScenarios } from '@/tests/fixtures/agent-session-baseline';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
-import skillsCapture from '@/test/fixtures/agent-skills-runtime.json';
+import skillsCapture from '@/tests/fixtures/agent-skills-runtime.json';
 import type { AgentSessionEvent } from '@/types/agent-session';
-import { inboxTimelineEvidence } from '@/test/fixtures/agent-inbox-timeline';
+import { inboxTimelineEvidence } from '@/tests/fixtures/agent-inbox-timeline';
 import { withOptimisticConversationNodes } from '@/lib/ai/optimistic-submission';
 
 afterEach(cleanup);

@@ -2,7 +2,7 @@ import { act, cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
-import { inboxTimelineEvidence, inboxTimelineView } from '@/test/fixtures/agent-inbox-timeline';
+import { inboxTimelineEvidence, inboxTimelineView } from '@/tests/fixtures/agent-inbox-timeline';
 import { AiWorkspaceRoot } from '../workspace/ai-workspace-root';
 
 beforeEach(async () => { useAppStore.setState({ locale: 'en-US' }); await initI18n('en-US'); });

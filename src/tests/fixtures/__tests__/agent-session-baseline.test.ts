@@ -9,7 +9,7 @@ import {
   AGENT_BASELINE_TIME_UNIX_MS,
   agentSessionBaselineScenarioIds,
   agentSessionBaselineScenarios,
-} from '@/test/fixtures/agent-session-baseline';
+} from '@/tests/fixtures/agent-session-baseline';
 
 describe('Agent Session Phase 0 deterministic baseline', () => {
   it('covers every frozen benchmark scenario without a provider request', () => {

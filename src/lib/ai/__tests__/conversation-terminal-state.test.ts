@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { projectAgentChatNodes } from '../conversation-projection';
 import type { AiConversationNode } from '../conversation-node';
-import { sessionEvent } from '@/test/fixtures/agent-session';
-import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
+import { sessionEvent } from '@/tests/fixtures/agent-session';
+import { agentSessionBaselineScenarios } from '@/tests/fixtures/agent-session-baseline';
 import type { AgentSessionEvent } from '@/types/agent-session';
 
 const scope = { turnId: 'turn-01', stepId: 'step-01' };

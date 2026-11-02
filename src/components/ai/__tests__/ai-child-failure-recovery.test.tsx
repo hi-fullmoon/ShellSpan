@@ -4,7 +4,7 @@ import { AiFailureRecoveryAction, AiFailureRecoveryContext } from '../workspace/
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 import { latestFailureRecovery } from '@/lib/ai/failure-recovery';
-import { childFailureRecordedAt, recordedChildFailureView } from '@/test/fixtures/child-recovery-recording';
+import { childFailureRecordedAt, recordedChildFailureView } from '@/tests/fixtures/child-recovery-recording';
 
 afterEach(cleanup);
 

@@ -25,8 +25,8 @@ const data = {
   shortCodeOutput: execFileSync(process.execPath, ['--print', 'process.version'], { encoding: 'utf8' }),
   patch: workingPatch || git(['show', '--format=', revision, '--', toolPath]),
   search: execFileSync('rg', ['--line-number', 'version', 'package.json'], { cwd: root, encoding: 'utf8' }),
-  plan: JSON.parse(await readFile(join(root, 'src/test/fixtures/conversation-fold-runtime.json'), 'utf8')).completed.events,
-  recovery: JSON.parse(await readFile(join(root, 'src/test/fixtures/tool-result-read-recovery.json'), 'utf8')),
+  plan: JSON.parse(await readFile(join(root, 'src/tests/fixtures/conversation-fold-runtime.json'), 'utf8')).completed.events,
+  recovery: JSON.parse(await readFile(join(root, 'src/tests/fixtures/tool-result-read-recovery.json'), 'utf8')),
 };
 for (const scenario of [data.short, data.long]) scenario.file = await readFile(join(root, scenario.path), 'utf8');
 assert.ok(data.patch.length > 0, 'Alignment coverage requires a real tool-presentation patch');

@@ -58,7 +58,7 @@ describe('ProviderSetupDialog', () => {
   beforeEach(() => {
     mocks.native=false;
     vi.clearAllMocks();
-    mocks.resolveModel.mockImplementation(async (command, args) => (await import('@/test/llm-resolver-fixture')).fixtureResolve(command, args));
+    mocks.resolveModel.mockImplementation(async (command, args) => (await import('@/tests/llm-resolver-fixture')).fixtureResolve(command, args));
     mocks.invokeGetAiRouteApiKey.mockResolvedValue('stored-secret');
     mocks.invokeDeleteAiApiKey.mockResolvedValue(undefined);
     mocks.invokeHasAiApiKey.mockResolvedValue(false);
@@ -733,7 +733,7 @@ describe('ProviderSetupDialog', () => {
     };
     mocks.resolveModel.mockImplementation(async (command, args) => {
       if (command === 'ai_model_declaration_template') return fallback;
-      return (await import('@/test/llm-resolver-fixture')).fixtureResolve(command, args);
+      return (await import('@/tests/llm-resolver-fixture')).fixtureResolve(command, args);
     });
     const routeSave = vi.fn().mockResolvedValue(undefined);
     useLlmRoutesStore.setState({
@@ -777,7 +777,7 @@ describe('ProviderSetupDialog', () => {
   it('removes a model in the draft and saves the remaining model as the route default', async () => {
     mocks.native = true;
     const baseProvider = useAiSettingsStore.getState().providers[0];
-    const first = await (await import('@/test/llm-resolver-fixture')).fixtureResolve(
+    const first = await (await import('@/tests/llm-resolver-fixture')).fixtureResolve(
       'ai_resolve_model',
       { provider: baseProvider },
     ) as import('@/lib/ai/provider-contract').ResolvedModel;
@@ -852,7 +852,7 @@ describe('ProviderSetupDialog', () => {
   it('preserves modelOverrides when saving provider fields without editing the catalog', async () => {
     mocks.native = true;
     const provider = useAiSettingsStore.getState().providers[0];
-    const resolved = await (await import('@/test/llm-resolver-fixture')).fixtureResolve(
+    const resolved = await (await import('@/tests/llm-resolver-fixture')).fixtureResolve(
       'ai_resolve_model',
       { provider },
     ) as import('@/lib/ai/provider-contract').ResolvedModel;
@@ -911,7 +911,7 @@ describe('ProviderSetupDialog', () => {
   it('re-resolves explicit model definitions after changing the provider profile', async () => {
     mocks.native = true;
     const provider = useAiSettingsStore.getState().providers[0];
-    const resolved = await (await import('@/test/llm-resolver-fixture')).fixtureResolve(
+    const resolved = await (await import('@/tests/llm-resolver-fixture')).fixtureResolve(
       'ai_resolve_model',
       { provider },
     ) as import('@/lib/ai/provider-contract').ResolvedModel;
@@ -960,7 +960,7 @@ describe('ProviderSetupDialog', () => {
     const pendingDeclaration = deferred<import('@/lib/ai/provider-contract').ModelDefinition>();
     mocks.resolveModel.mockImplementation(async (command, args) => {
       if (command === 'ai_model_declaration_template') return pendingDeclaration.promise;
-      return (await import('@/test/llm-resolver-fixture')).fixtureResolve(command, args);
+      return (await import('@/tests/llm-resolver-fixture')).fixtureResolve(command, args);
     });
     const [providerA, providerB] = useAiSettingsStore.getState().providers;
     const onOpenChange = vi.fn();
@@ -987,7 +987,7 @@ describe('ProviderSetupDialog', () => {
         onSaved={onSaved}
       />,
     );
-    const resolved = await (await import('@/test/llm-resolver-fixture')).fixtureResolve(
+    const resolved = await (await import('@/tests/llm-resolver-fixture')).fixtureResolve(
       'ai_resolve_model',
       { provider: providerA },
     ) as import('@/lib/ai/provider-contract').ResolvedModel;
@@ -1013,7 +1013,7 @@ describe('ProviderSetupDialog', () => {
   it('keeps RouteStore as the sole persisted state when a native save fails', async () => {
     mocks.native=true;
     const provider=useAiSettingsStore.getState().providers[0];
-    const resolved=await (await import('@/test/llm-resolver-fixture')).fixtureResolve('ai_resolve_model',{provider}) as import('@/lib/ai/provider-contract').ResolvedModel;
+    const resolved=await (await import('@/tests/llm-resolver-fixture')).fixtureResolve('ai_resolve_model',{provider}) as import('@/lib/ai/provider-contract').ResolvedModel;
     const routeSave=vi.fn().mockRejectedValue(new Error('REVISION_CONFLICT'));
     useLlmRoutesStore.setState({
       ...initialRoutesState,

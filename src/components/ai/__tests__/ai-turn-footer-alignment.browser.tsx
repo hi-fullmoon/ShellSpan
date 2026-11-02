@@ -6,7 +6,7 @@ import type { AgentSessionEvent } from '@/types/agent-session';
 import type { Locale } from '@/types';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
-import capture from '@/test/fixtures/agent-skills-runtime.json';
+import capture from '@/tests/fixtures/agent-skills-runtime.json';
 import '@/styles/base.css';
 import '../styles/styles.css';
 

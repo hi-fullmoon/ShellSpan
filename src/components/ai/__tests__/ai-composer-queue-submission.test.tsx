@@ -6,7 +6,7 @@ import { projectAgentInbox } from '@/lib/ai/agent-session-adapter';
 import { createAiComposerState, reduceAiComposer } from '@/lib/ai/composer-machine';
 import { initI18n, t } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
-import { agentSessionEventFixture, sessionEvent } from '@/test/fixtures/agent-session';
+import { agentSessionEventFixture, sessionEvent } from '@/tests/fixtures/agent-session';
 
 beforeEach(async () => {
   useAppStore.setState({ locale: 'en-US' });

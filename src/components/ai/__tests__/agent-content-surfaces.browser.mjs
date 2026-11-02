@@ -33,8 +33,8 @@ assert.ok(patch.length, 'The browser check requires an actual repository patch')
 const patchLines = parsePatch(patch).flatMap(file => file.hunks.flatMap(hunk => hunk.lines))
   .filter(line => !line.startsWith('\\')).length;
 const guide = await readFile(join(root, 'AGENTS.md'), 'utf8');
-const recovery = JSON.parse(await readFile(join(root, 'src/test/fixtures/tool-result-read-recovery.json'), 'utf8'));
-const recordedTerminal = JSON.parse(await readFile(join(root, 'src/test/fixtures/terminal-unknown-execution.json'), 'utf8'));
+const recovery = JSON.parse(await readFile(join(root, 'src/tests/fixtures/tool-result-read-recovery.json'), 'utf8'));
+const recordedTerminal = JSON.parse(await readFile(join(root, 'src/tests/fixtures/terminal-unknown-execution.json'), 'utf8'));
 const icon = await readFile(join(root, 'public/shellspan-icon.svg'));
 const sha256 = body => createHash('sha256').update(body).digest('hex');
 const assets = [

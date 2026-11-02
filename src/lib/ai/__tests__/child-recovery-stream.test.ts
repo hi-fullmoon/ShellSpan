@@ -6,10 +6,10 @@ import { fileURLToPath } from 'node:url';
 import { AgentSessionCommittedClient, type AgentSessionStreamTransport } from '../agent-session-client';
 import { agentSessionView } from '../agent-session-adapter';
 import { latestFailureRecovery } from '../failure-recovery';
-import runningSnapshotJson from '@/test/fixtures/child-failure-recovery/running-snapshot.json';
+import runningSnapshotJson from '@/tests/fixtures/child-failure-recovery/running-snapshot.json';
 import {
   childAdmittedEvents, childAdmittedSnapshot, childFailureEvents, childFailureRecordedAt, childFailureSnapshot,
-} from '@/test/fixtures/child-recovery-recording';
+} from '@/tests/fixtures/child-recovery-recording';
 import type { AgentSessionEvent, AgentSessionSnapshot } from '@/types/agent-session';
 
 it.each(['live', 'reconciliation'])('refreshes native child eligibility on %s failure and clears terminal state on the recorded recovery event', async mode => {
@@ -62,7 +62,7 @@ it.each(['live', 'reconciliation'])('retries failed child snapshot reads after %
   vi.useFakeTimers();
   const directory = await mkdtemp(join(tmpdir(), 'shellspan-child-snapshot-'));
   const snapshotPath = join(directory, 'snapshot.json');
-  const recording = resolve(dirname(fileURLToPath(import.meta.url)), '../../../test/fixtures/child-failure-recovery');
+  const recording = resolve(dirname(fileURLToPath(import.meta.url)), '../../../tests/fixtures/child-failure-recovery');
   await copyFile(join(recording, 'running-snapshot.json'), snapshotPath);
   const initial = runningSnapshotJson as unknown as AgentSessionSnapshot;
   let events: readonly AgentSessionEvent[] = childFailureEvents.slice(0, initial.eventCount);

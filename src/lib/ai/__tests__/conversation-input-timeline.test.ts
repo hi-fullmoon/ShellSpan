@@ -3,7 +3,7 @@ import { createAgentChatProjector, projectAgentChatNodes } from '../conversation
 import { withOptimisticConversationNodes } from '../optimistic-submission';
 import { createAiComposerState, reduceAiComposer } from '../composer-machine';
 import { projectAgentInbox } from '../agent-session-adapter';
-import { inboxTimelineEvidence, inboxTimelineView } from '@/test/fixtures/agent-inbox-timeline';
+import { inboxTimelineEvidence, inboxTimelineView } from '@/tests/fixtures/agent-inbox-timeline';
 
 const { events } = inboxTimelineEvidence;
 

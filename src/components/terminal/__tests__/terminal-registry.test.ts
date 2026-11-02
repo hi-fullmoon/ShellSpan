@@ -1,6 +1,6 @@
 import { act } from '@testing-library/react';
 import { describe, expect, it, beforeEach, beforeAll, vi } from 'vitest';
-import { enableRealCanvas } from '@/test/real-canvas';
+import { enableRealCanvas } from '@/tests/real-canvas';
 import type { Event as TauriEvent } from '@tauri-apps/api/event';
 import type { SessionPtyInfo } from '@/types';
 import {

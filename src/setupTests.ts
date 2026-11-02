@@ -2,7 +2,7 @@ import '@testing-library/jest-dom';
 import { beforeEach, vi } from 'vitest';
 import { clearDirectoryListingCache } from '@/lib/sftp/directory-listing-cache';
 import { useAiDraftStore } from '@/stores/aiDraftStore';
-import '@/test/real-canvas';
+import '@/tests/real-canvas';
 
 // The directory listing cache is module-level state; reset it between tests
 // so cached entries never leak across test cases.

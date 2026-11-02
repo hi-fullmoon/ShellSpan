@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { latestFailureRecovery, modelFailureRecovery, modelRetryConfirmation } from '../failure-recovery';
 import { agentSessionView } from '../agent-session-adapter';
-import { agentSessionFailedEventFixture, sessionEvent } from '@/test/fixtures/agent-session';
+import { agentSessionFailedEventFixture, sessionEvent } from '@/tests/fixtures/agent-session';
 import type { AiErrorNode } from '../conversation-node';
 import type { AgentSessionEvent } from '@/types/agent-session';
 

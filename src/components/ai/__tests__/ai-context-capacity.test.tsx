@@ -5,7 +5,7 @@ import { AiContextMeter } from '../workspace/ai-context-meter';
 import { contextUsageForModel } from '@/lib/ai/session-settings';
 import type { AiContextUsage } from '@/lib/ai/session-adapter';
 import type { AgentSessionEvent } from '@/types/agent-session';
-import capture from '@/test/fixtures/agent-skills-runtime.json';
+import capture from '@/tests/fixtures/agent-skills-runtime.json';
 import catalog from '../../../../protocol/llm/catalog.json';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';

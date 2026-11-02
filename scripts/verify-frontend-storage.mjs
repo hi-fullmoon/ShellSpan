@@ -25,7 +25,7 @@ server.middlewares.use(async (request, response, next) => {
     if (result.ok) complete?.(result); else fail?.(new Error(result.error));
   } else if (request.url?.startsWith('/?phase=')) {
     response.setHeader('Content-Type', 'text/html');
-    response.end(await server.transformIndexHtml('/', '<!doctype html><html><body><script type="module" src="/src/test/frontend-storage-native.ts"></script></body></html>'));
+    response.end(await server.transformIndexHtml('/', '<!doctype html><html><body><script type="module" src="/src/tests/frontend-storage-native.ts"></script></body></html>'));
   } else next();
 });
 try {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { projectAgentChatNodes } from '../conversation-projection';
 import { latestTerminalBusyAttempt } from '../terminal-busy-feedback';
-import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
+import { agentSessionBaselineScenarios } from '@/tests/fixtures/agent-session-baseline';
 import type { AgentSessionEvent } from '@/types/agent-session';
 
 const events = agentSessionBaselineScenarios['single-tool'].events;

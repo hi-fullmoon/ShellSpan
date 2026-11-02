@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { projectContextUsage } from '../context-usage';
 import type { AgentSessionEvent } from '@/types/agent-session';
-import capture from '@/test/fixtures/context-usage-runtime.json';
-import skillsCapture from '@/test/fixtures/agent-skills-runtime.json';
-import budgetEvidence from '@/test/fixtures/context-budget-review.json';
+import capture from '@/tests/fixtures/context-usage-runtime.json';
+import skillsCapture from '@/tests/fixtures/agent-skills-runtime.json';
+import budgetEvidence from '@/tests/fixtures/context-budget-review.json';
 
 // Accounting-only excerpts from the actual 2026-10-27 session. No message
 // bodies, tool arguments, credentials, or fabricated usage are retained.

@@ -6,7 +6,7 @@ import { createAiComposerState, reduceAiComposer, type AiComposerEvent } from '@
 import { AiConversation } from '../workspace/ai-conversation';
 import { Message, MessageScroller } from '../chat-primitives';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
-import { taskTokenBudgetEvidence } from '@/test/fixtures/task-token-budget';
+import { taskTokenBudgetEvidence } from '@/tests/fixtures/task-token-budget';
 import { initI18n } from '@/locales';
 import { withOptimisticConversationNodes } from '@/lib/ai/optimistic-submission';
 import '@/styles/base.css';

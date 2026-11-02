@@ -1,5 +1,5 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@/test/composer-editor-user';
+import userEvent from '@/tests/composer-editor-user';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AiComposerSeat } from '../workspace/ai-composer-seat';
 import { builtinSkills } from '@/lib/ai/builtin-skills';

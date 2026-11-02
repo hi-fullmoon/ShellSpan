@@ -8,7 +8,7 @@ import { createServer } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
-const capture = JSON.parse(await readFile(join(root, 'src/test/fixtures/tool-result-read-recovery.json'), 'utf8'));
+const capture = JSON.parse(await readFile(join(root, 'src/tests/fixtures/tool-result-read-recovery.json'), 'utf8'));
 const diagnostic = capture.find(event => event.type === 'tool/result' && event.data.status === 'failed').data.summary;
 const screenshots = join(tmpdir(), 'shellspan-tool-error-recovery');
 await mkdir(screenshots, { recursive: true });

@@ -106,7 +106,7 @@ try {
           await import('/src/components/ai/styles/styles.css');
           const { AiToolExpandedContent } = await import('/src/components/ai/workspace/ai-tool-presentation.tsx');
           const { projectAgentChatNodes } = await import('/src/lib/ai/conversation-projection.ts');
-          const { conversationFoldRecording } = await import('/src/test/fixtures/conversation-fold-runtime.ts');
+          const { conversationFoldRecording } = await import('/src/tests/fixtures/conversation-fold-runtime.ts');
           const { initI18n } = await import('/src/locales/index.ts');
           const { useAppStore } = await import('/src/stores/appStore.ts');
           await initI18n(locale);

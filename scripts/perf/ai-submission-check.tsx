@@ -2,8 +2,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
 import { createAiComposerState, reduceAiComposer } from '@/lib/ai/composer-machine';
 import { withOptimisticConversationNodes } from '@/lib/ai/optimistic-submission';
-import { agentSessionBaselineView } from '@/test/agent-session-baseline-page';
-import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
+import { agentSessionBaselineView } from '@/tests/agent-session-baseline-page';
+import { agentSessionBaselineScenarios } from '@/tests/fixtures/agent-session-baseline';
 import { useImageDraft } from '@/components/ai/workspace/use-image-draft';
 import { readImageDraft } from '@/lib/ai/image-drafts';
 

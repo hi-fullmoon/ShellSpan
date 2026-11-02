@@ -17,7 +17,7 @@ const commandArgs = ['show', '--format=', '--unified=20', presentationRevision, 
 const commandText = `git ${commandArgs.join(' ')}`;
 const commandOutput = execFileSync('git', commandArgs, { cwd: root, encoding: 'utf8' });
 const fileOutput = await readFile(path, 'utf8');
-const capture = JSON.parse(await readFile(join(root, 'src/test/fixtures/tool-result-read-recovery.json'), 'utf8'));
+const capture = JSON.parse(await readFile(join(root, 'src/tests/fixtures/tool-result-read-recovery.json'), 'utf8'));
 const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error',
   cacheDir: join(screenshots, 'vite-cache'),

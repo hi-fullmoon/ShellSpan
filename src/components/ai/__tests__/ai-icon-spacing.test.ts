@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { AiTaskStrip } from '../workspace/ai-task-strip';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
-import { recordedChildFailureView } from '@/test/fixtures/child-recovery-recording';
+import { recordedChildFailureView } from '@/tests/fixtures/child-recovery-recording';
 
 afterEach(cleanup);
 

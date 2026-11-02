@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { chatReferenceFile } from '../chat-reference';
 import { projectAgentChatNodes } from '../conversation-projection';
-import { agentSessionEventFixture } from '@/test/fixtures/agent-session';
+import { agentSessionEventFixture } from '@/tests/fixtures/agent-session';
 import type { AiSessionSummary } from '../session-adapter';
 import type { AiConversationNode } from '../conversation-node';
 

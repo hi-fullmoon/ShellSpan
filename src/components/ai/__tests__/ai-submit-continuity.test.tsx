@@ -1,7 +1,7 @@
 import { useReducer, type ComponentProps } from 'react';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it } from 'vitest';
-import userEvent from '@/test/composer-editor-user';
+import userEvent from '@/tests/composer-editor-user';
 import { createAiComposerState, reduceAiComposer } from '@/lib/ai/composer-machine';
 import { initI18n } from '@/locales';
 import { useToastStore } from '@/stores/toastStore';

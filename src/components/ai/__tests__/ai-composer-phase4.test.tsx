@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@/test/composer-editor-user';
+import userEvent from '@/tests/composer-editor-user';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiComposerSeat } from '@/components/ai/workspace/ai-composer-seat';
@@ -12,7 +12,7 @@ import { useAppStore } from '@/stores/appStore';
 import { useAiSettingsStore } from '@/stores/aiSettingsStore';
 
 vi.mock('@tauri-apps/api/core', () => ({
-  invoke: (command: string, args?: Record<string, unknown>) => import('@/test/llm-resolver-fixture')
+  invoke: (command: string, args?: Record<string, unknown>) => import('@/tests/llm-resolver-fixture')
     .then(({ fixtureResolve }) => fixtureResolve(command, args)),
 }));
 

@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AiConversationNodeList, aiAskConversationNodeRenderers } from '../workspace/ai-conversation-node-seat';
 import type { AiReasoningNode } from '@/lib/ai/conversation-node';
-import { taskTokenBudgetEvidence } from '@/test/fixtures/task-token-budget';
+import { taskTokenBudgetEvidence } from '@/tests/fixtures/task-token-budget';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
 

@@ -1,6 +1,6 @@
-vi.mock('@tauri-apps/api/core', async () => ({ invoke: (await import('@/test/llm-resolver-fixture')).fixtureResolve }));
+vi.mock('@tauri-apps/api/core', async () => ({ invoke: (await import('@/tests/llm-resolver-fixture')).fixtureResolve }));
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@/test/composer-editor-user';
+import userEvent from '@/tests/composer-editor-user';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiWorkspaceController } from '@/components/ai/workspace/ai-workspace-controller';
@@ -23,7 +23,7 @@ import * as imageDraftModule from '@/components/ai/workspace/use-image-draft';
 import * as visionContract from '@/lib/ai/vision-contract';
 import { terminalLoginScopeKey } from '@/lib/ai/terminal-login-scope';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
-import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
+import { agentSessionBaselineScenarios } from '@/tests/fixtures/agent-session-baseline';
 
 const provider = {
   id: 'provider-test',

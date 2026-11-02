@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { mockIPC, clearMocks } from '@tauri-apps/api/mocks';
-import fixture from '@/test/fixtures/agent-skills-runtime.json';
+import fixture from '@/tests/fixtures/agent-skills-runtime.json';
 import type { AgentSessionEvent } from '@/types/agent-session';
 import { projectAgentChatNodes } from '../conversation-projection';
 import { projectAgentActivity } from '@/lib/ai/agent-session-projection';

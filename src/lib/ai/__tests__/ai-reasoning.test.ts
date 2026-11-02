@@ -1,5 +1,5 @@
 import { loadResolvedModel } from '@/lib/ai/provider-contract';
-vi.mock('@tauri-apps/api/core', async () => ({ invoke: (await import('@/test/llm-resolver-fixture')).fixtureResolve }));
+vi.mock('@tauri-apps/api/core', async () => ({ invoke: (await import('@/tests/llm-resolver-fixture')).fixtureResolve }));
 import { describe, expect, it, vi } from 'vitest';
 import {
   effectiveReasoningEffort,

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { useState } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, expect, it } from 'vitest';
-import userEvent from '@/test/composer-editor-user';
+import userEvent from '@/tests/composer-editor-user';
 import type { AgentSessionEvent, AgentSessionSnapshot } from '@/types/agent-session';
 import { childBudgetExhausted, childContinuationDeadline } from '@/lib/ai/subagent-continuation';
 import { createAiComposerState, reduceAiComposer } from '@/lib/ai/composer-machine';

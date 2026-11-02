@@ -15,14 +15,14 @@ import {
   queuedSteerMessageFixture,
   agentSessionWaitingApprovalEventFixture,
   sessionEvent,
-} from '@/test/fixtures/agent-session';
+} from '@/tests/fixtures/agent-session';
 import type {
   AgentSessionEvent,
   AgentSessionSnapshot,
 } from '@/types/agent-session';
 import { AGENT_SESSION_EVENT_VERSION } from '@/types/agent-session';
 import { terminalLoginScopeKey } from '@/lib/ai/terminal-login-scope';
-import terminalRecoveryCapture from '@/test/fixtures/terminal-execution-recovery.json';
+import terminalRecoveryCapture from '@/tests/fixtures/terminal-execution-recovery.json';
 
 const provider = {
   id: 'provider-test',

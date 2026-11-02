@@ -2,7 +2,7 @@ import { act, renderHook } from '@testing-library/react';
 import { expect, it } from 'vitest';
 import { useConversationHistory } from '../workspace/use-conversation-history';
 import { projectAgentChatNodes } from '@/lib/ai/conversation-projection';
-import { taskTokenBudgetEvidence } from '@/test/fixtures/task-token-budget';
+import { taskTokenBudgetEvidence } from '@/tests/fixtures/task-token-budget';
 import type { AiConversationNode } from '@/lib/ai/conversation-node';
 
 // Use actual runtime nodes with a small page to exercise every boundary.

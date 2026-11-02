@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@/test/composer-editor-user';
+import userEvent from '@/tests/composer-editor-user';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AiWorkspaceRoot } from '@/components/ai/workspace/ai-workspace-root';
@@ -13,9 +13,9 @@ import { withOptimisticConversationNodes, withRetainedFailedSubmissions } from '
 import type { AiSessionView } from '@/lib/ai/session-adapter';
 import { initI18n, t } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
-import { agentSessionEventFixture } from '@/test/fixtures/agent-session';
-import { agentSessionBaselineScenarios } from '@/test/fixtures/agent-session-baseline';
-import { taskTokenBudgetView } from '@/test/fixtures/task-token-budget';
+import { agentSessionEventFixture } from '@/tests/fixtures/agent-session';
+import { agentSessionBaselineScenarios } from '@/tests/fixtures/agent-session-baseline';
+import { taskTokenBudgetView } from '@/tests/fixtures/task-token-budget';
 
 function runningHierarchyView(): AiSessionView {
   const base = agentView('running');
