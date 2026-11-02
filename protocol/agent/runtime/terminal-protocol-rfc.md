@@ -2,7 +2,11 @@
 
 Status: accepted Phase 0 contract; amended for the cooperative-shell threat model on 2026-09-15 and remote bound-terminal reuse on 2026-09-17; owner: ShellSpan Agent Runtime.
 
-Roadmap: [Terminal Execution Roadmap](./terminal-execution-roadmap.md)
+Current native input: [NIP](native-input.md). Implementation and pending platform
+acceptance: [native terminal input](../../../docs/design/agent-terminal-input.md)
+and [acceptance checklist](../../../docs/design/agent-terminal-input-acceptance-checklist.md).
+Historical phase reports are available in Git history; they do not validate the
+current revision.
 
 Conformance fixture schema: [terminal-protocol.schema.json](./terminal-protocol.schema.json)
 
@@ -393,8 +397,9 @@ reads through the non-submitting Ctrl-X Ctrl-F data fence within two seconds.
 Public PSReadLine Replace preserves CR/LF/Tab, and GetBufferState supplies the
 exact complete-buffer A acknowledgement. Native syntax coloring and prediction
 remain enabled. The 65536-byte total includes encoded data, all readiness and
-checkpoint keys, and the final accept key. Windows acceptance remains separately
-versioned in windows-desktop-terminal-acceptance.md.
+checkpoint keys, and the final accept key. Historical Windows acceptance is
+available in Git history; current Windows acceptance remains pending in the
+[acceptance checklist](../../../docs/design/agent-terminal-input-acceptance-checklist.md).
 Long single-line sources above 512 UTF-8 bytes require this native path too;
 an unavailable editor rejects before input rather than overflowing a PTY queue.
 No fixed delay is used as evidence that a chunk was consumed. The existing
@@ -927,8 +932,10 @@ Stop and cleanup target the owned Job Object, including ordinary descendants;
 control remains bound to the original opaque job/Agent/task/target/generation.
 This is cooperative lifecycle, not general same-account isolation. The former
 ThreadJob/Job2 design is historical and is not the current implementation.
-Exact real-machine versions, source/binary bindings, matrix results and remaining
-default/rollback gates are recorded in windows-desktop-terminal-acceptance.md.
+Historical real-machine versions, source/binary bindings and matrix results
+are available in Git history. Current production admission and platform gates
+follow [native input](native-input.md) and the
+[acceptance checklist](../../../docs/design/agent-terminal-input-acceptance-checklist.md).
 
 ## Direct execution boundary
 

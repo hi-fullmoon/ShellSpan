@@ -120,8 +120,9 @@ characters remain invalid. These scripts use `exec_command` only in explicitly
 selected Direct sessions. Bound-terminal sessions use the same current-shell
 native editor for complete scripts, LF, CR and Tab when advertised by the shell
 integration; unsupported editors are rejected before input. They never silently
-route to Direct. See `visible-terminal-unification-plan.md` for the exact shell
-matrix and grammar limits. CR is preserved literally, including in CRLF; no
+route to Direct. See [native input](native-input.md) for the input contract and
+the [acceptance checklist](../../../docs/design/agent-terminal-input-acceptance-checklist.md)
+for the pending shell matrix. CR is preserved literally, including in CRLF; no
 newline normalization changes approved bytes or native shell semantics.
 
 Direct execution uses the frozen host, not mutable visible shell state. Local

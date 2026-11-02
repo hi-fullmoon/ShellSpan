@@ -1,7 +1,7 @@
 # Agent 原生命令输入：阶段 0 架构与安全门禁记录
 
 > 日期：2026-09-14  
-> 历史实验记录：对应的 in-band 提案和研发计划已移除；本记录保留攻击证据，不描述当前生产实现。当前契约见[终端协议](../../protocol/agent/runtime/terminal-protocol-rfc.md)，后续实施与验证见[可视终端统一计划](../../protocol/agent/runtime/visible-terminal-unification-plan.md)。
+> 历史实验记录：对应的 in-band 提案和研发计划已移除；本记录保留攻击证据，不描述当前生产实现。当前契约见[终端协议](../../protocol/agent/runtime/terminal-protocol-rfc.md)，实现与待验范围见[原生终端输入](agent-terminal-input.md)和[验收清单](agent-terminal-input-acceptance-checklist.md)。
 > **决策：NO-GO。不得在本轮对任意原生命令根据 in-band end 自动连续写入下一条 Agent 命令；保持现有 wrapperV1。不进入阶段 1。**
 
 ## 门禁问题与实际结论

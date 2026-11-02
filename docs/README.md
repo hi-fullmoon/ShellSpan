@@ -16,7 +16,6 @@
 - [终端连接](../protocol/terminal-connection.md)
 - [终端 Session 协议](../protocol/agent/runtime/terminal-protocol-rfc.md)
 - [终端兼容与 rollout](../protocol/agent/runtime/terminal-execution-compatibility.md)
-- [终端测试矩阵](../protocol/agent/runtime/terminal-execution-test-matrix.md)
 - [文件与脚本执行、安全边界](../protocol/agent/runtime/file-and-script-execution.md)
 - [项目目录绑定](../protocol/agent/runtime/project-root-binding.md)
 - [任务与回合计划](../protocol/agent/runtime/turn-and-task-plan.md)
@@ -37,21 +36,13 @@
 ## 终端实施与验收
 
 - [Agent原生终端输入](design/agent-terminal-input.md)与[NIP契约](../protocol/agent/runtime/native-input.md)：当前实现、资源边界和统一待验事项。
-- [原生输入实施计划](design/agent-terminal-input-refactor-implementation-plan.md)：代码、静态检查与后续验收边界。
 - [原生输入验收清单](design/agent-terminal-input-acceptance-checklist.md)：执行顺序、平台矩阵、通过标准及证据记录。
-- [可视终端统一实施与交接](../protocol/agent/runtime/visible-terminal-unification-plan.md)：后续路由、原生脚本提交和后台作业的实施记录及范围。
-- [Bash / PowerShell 原生显示复查](../protocol/agent/runtime/bash-powershell-native-display-review.md)
-- [Zsh 原生后台作业显示复查](../protocol/agent/runtime/zsh-native-job-display-review.md)
-- [Windows 原生终端验收](../protocol/agent/runtime/windows-native-terminal-acceptance.md)与[桌面及模型续验](../protocol/agent/runtime/windows-desktop-terminal-acceptance.md)：分别保留底层、桌面和模型的冻结验证边界。
-- [远程绑定终端复用](../protocol/agent/runtime/remote-bound-terminal-reuse-plan.md)：保留原实施与当时未完成的原生窗口项，后续证据查阅统一计划。
-- [初期终端路线图与 Phase 0–6 验收入口](../protocol/agent/runtime/terminal-execution-roadmap.md)：历史阶段记录，不用旧阶段的限制覆盖后续协议。
 
 ## 设计与历史证据
 
 - [Agent 执行安全与使用体验](design/agent-execution-safety-and-usability.md)及[沙箱实施计划](design/agent-sandbox-implementation-plan.md)：包含未实施目标，不能视为已交付生产沙箱。
 - [Petdex 动作实施计划](design/petdex-integration-implementation-plan.md)及[验收记录](design/petdex-integration-acceptance.md)
-- [Petdex 消息设计](design/petdex-message-integration-design.md)、[实施计划](design/petdex-message-integration-plan.md)及[验收记录](design/petdex-message-integration-acceptance.md)
-- [可视终端首版设计](design/agent-visible-terminal-execution.md)及[首版验收](design/agent-visible-terminal-execution-acceptance.md)：历史 wrapper 方案背景。
+- [Petdex 消息设计](design/petdex-message-integration-design.md)及[验收记录](design/petdex-message-integration-acceptance.md)
 - [in-band 完成帧阶段 0 攻击记录](design/agent-direct-shell-execution-stage-0-gate.md)及[独立实验夹具](../tests/agent-direct-shell-gate/README.md)：保留被否决方案的反例，避免将终端输出当成可信完成信号。
 
-已被后续协议替代的早期原生命令输入提案、研发计划、受信任 Shell 研究、首版可视终端研发计划及旧 macOS / Windows rollout 说明已移除。原始版本可通过 Git 历史查阅；历史验收中的文件清单按当时事实保留。
+已被当前协议和验收清单覆盖的终端设计、路线图、阶段验收及显示复查，以及已完成的重复实施计划，统一通过 Git 历史查阅。保留文档中的历史文件清单按当时事实记录；历史通过结果不能作为当前源码的运行证明。

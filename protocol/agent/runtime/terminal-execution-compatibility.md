@@ -1,29 +1,26 @@
 # Terminal Execution Compatibility and Rollout Plan
 
-Status: historical Phase 6 local rollout and remote migration records are retained. Stage-four host-scoped Windows native/frontend/model evidence was accepted independently on 2026-10-25; untested platform and architecture lanes remain open.
+Status: historical Phase 6 local rollout and remote migration context. Current
+native-input admission is defined by [NIP](native-input.md); platform evidence
+must be collected using the [acceptance checklist](../../../docs/design/agent-terminal-input-acceptance-checklist.md).
+Historical pass/fail reports are available in Git history and do not validate
+the current revision or enable production profiles.
 
 Protocol: [Terminal Session Protocol v1](./terminal-protocol-rfc.md)
 
 Current routing amendment (2026-10-23): the selected `direct`/`boundTerminal`
-surface is binding. The [visible-terminal unification plan](./visible-terminal-unification-plan.md)
-supersedes earlier forced-Direct routing statements in historical acceptance
-documents. Effects continue to control approval, not execution routing.
+surface is binding. [File and script execution](file-and-script-execution.md)
+defines routing and approval boundaries. Effects continue to control approval,
+not execution routing.
 
 Stage-two amendment: complete native scripts preserve their approved source in
 `commandLine`. Bash records its complete visible native evaluation envelope in
 `submittedCommandLine`; lifecycle matches that actual accepted line exactly.
-ZLE and PSReadLine accept the original buffer. See the plan for parser, heredoc,
-cancellation, byte limits and version evidence. Windows native-shell evidence
-is recorded in [the Windows acceptance report](./windows-native-terminal-acceptance.md);
-stage-four desktop/model cases and the complete normal native and full frontend
-gates are recorded independently in [the Windows desktop continuation](./windows-desktop-terminal-acceptance.md).
-Both gates passed on the named Windows x64 host on 2026-10-25, with matching
-production code across their frozen runs. The final frontend supplement also
-includes the route-schema test and offline diagnostic example missing from
-the earlier Windows inventory; those additions have explicit schema/build
-checks and a complete-tree frontend pass, rather than retrospective coverage.
-This does not change older
-failed-run verdicts or establish other hosts, architectures or Linux desktop.
+ZLE and PSReadLine accept the original buffer. These stage-two details describe
+the historical implementation. Current source submission, cancellation and byte
+limits follow [native input](native-input.md). Separate frozen Windows
+native/frontend/model results remain in Git history; they do not establish
+current-code acceptance on Windows, other hosts or architectures.
 
 ## Compatibility table
 
@@ -298,7 +295,9 @@ retain the complete-frame path. The capability resets at every prompt and
 integration generation. A cancellation boundary remains before accept-line even
 in reduced motion. Other control characters stay rejected. Unsupported editors
 fail before input;
-see `visible-terminal-unification-plan.md` for shell/version and grammar limits.
+see [native input](native-input.md) for the current contract and the
+[acceptance checklist](../../../docs/design/agent-terminal-input-acceptance-checklist.md)
+for pending shell/version coverage.
 
 The broker tracks pending command input independently of the Agent lease.
 Releasing or retiring a command cannot unlock a potentially dirty edit buffer.
