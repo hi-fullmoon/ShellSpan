@@ -242,7 +242,11 @@ export const SftpFileListRow = React.memo(function SftpFileListRow({
   const mutedTextClass = selected ? 'text-app-primary' : 'text-app-text-soft';
   const cellStateClass = cn(
     'border-b border-app-border/50 transition-colors',
-    selected ? 'bg-app-primary/10' : 'group-hover:bg-app-surface-muted',
+    // Paint over the preceding divider with the same composited color as the
+    // selected bottom border, without adding height or doubling shared borders.
+    selected
+      ? 'bg-app-primary/10 shadow-[0_-1px_0_color-mix(in_srgb,var(--app-border)_50%,transparent),0_-1px_0_color-mix(in_srgb,var(--app-primary)_10%,var(--app-surface))]'
+      : 'group-hover:bg-app-primary/5',
   );
 
   return (
