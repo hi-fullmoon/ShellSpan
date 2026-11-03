@@ -44,7 +44,7 @@ export function useSkillCompletion({ text, update, query, scopeKey, disabled, ed
   const token = activeSkillToken(text, ...selection);
   const key = JSON.stringify([scopeKey, text, ...selection]);
   useEffect(() => { setDismissed(previous => previous === key ? previous : null); }, [key]);
-  const open = Boolean(query && token && focused && !disabled && !composing && dismissed !== key);
+  const open = Boolean(query && token && focused && !disabled && !composing && dismissed !== key && editor.current?.completionAllowed !== false);
   useEffect(() => {
     if (!cache.query || disabled) return;
     // Preload once per scope; reopening within 30 seconds reuses the same result.

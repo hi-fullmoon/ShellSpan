@@ -4,6 +4,32 @@
   line-height: 24px;
 }
 
+[data-composer-editor]::highlight(ai-composer-md-heading),
+[data-composer-editor]::highlight(ai-composer-md-link) {
+  color: var(--ai-syntax-title);
+}
+
+[data-composer-editor]::highlight(ai-composer-md-emphasis) {
+  color: var(--ai-syntax-keyword);
+}
+
+[data-composer-editor]::highlight(ai-composer-md-marker) {
+  color: var(--ai-text-caption);
+}
+
+[data-composer-editor]::highlight(ai-composer-md-code) {
+  color: var(--ai-text-secondary);
+  background-color: var(--ai-code-inline);
+}
+
+[data-composer-editor]::highlight(ai-composer-md-quote) {
+  color: var(--ai-text-muted);
+}
+
+[data-composer-editor]::highlight(ai-composer-md-strike) {
+  text-decoration: line-through;
+}
+
 .ai-composer-command {
   padding: 1px 5px;
   border-radius: 5px;
