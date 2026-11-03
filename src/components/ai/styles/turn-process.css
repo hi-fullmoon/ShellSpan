@@ -27,6 +27,10 @@
   color: var(--ai-text-muted);
 }
 
+.ai-tool-row-root:is([data-tool-state='failed'], [data-tool-state='rejected']):not([data-tool-recovered]) > .ai-tool-row > .ai-disclosure-leading > .ai-disclosure-chevron {
+  color: var(--ai-error);
+}
+
 .ai-block-banner > svg,
 .ai-produced-files-label svg,
 .ai-turn-error > svg,
