@@ -52,6 +52,10 @@
   --ai-conversation-row-gap: 12px;
 }
 
+.ai-conversation-content > .ai-conversation-row-slot.ai-conversation-process-prose {
+  --ai-conversation-row-gap: 4px;
+}
+
 .ai-conversation-content > .ai-conversation-process-control + .ai-conversation-process-item:not(.ai-conversation-assistant-item) {
   --ai-conversation-row-gap: 6px;
 }

@@ -268,6 +268,8 @@ export const AiConversation = memo(function AiConversation({
             'ai-conversation-row-slot flex flex-col gap-4',
             processMember && 'ai-conversation-process-item',
             node.kind === 'assistantMessage' && 'ai-conversation-assistant-item',
+            node.kind === 'assistantMessage' && process && (processMember || !process.hasEndBoundary)
+              && 'ai-conversation-process-prose',
             node.kind === 'turnProcess' && 'ai-conversation-process-control',
             node.kind === 'turnTail' && '-ml-1.5',
             '[content-visibility:visible] [contain-intrinsic-size:none]',

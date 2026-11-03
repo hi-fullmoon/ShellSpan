@@ -30,6 +30,7 @@ it('keeps the same selected text and message seat when recorded tool deltas and 
     .find(element => element.textContent === 'Two candidate project directories. Let me examine both.')!;
   expect(text).toBeInTheDocument();
   const seat = text.closest('[data-slot="message-scroller-item"]');
+  expect(seat).toHaveClass('ai-conversation-process-prose');
   const range = document.createRange();
   range.selectNodeContents(text);
   const selection = window.getSelection()!;
@@ -41,6 +42,7 @@ it('keeps the same selected text and message seat when recorded tool deltas and 
       view.rerender(replay(events.slice(0, length)));
       expect([...view.container.querySelectorAll('p')].find(element => element.textContent === selected)).toBe(text);
       expect(text.closest('[data-slot="message-scroller-item"]')).toBe(seat);
+      expect(seat).toHaveClass('ai-conversation-process-prose');
       expect(selection.toString()).toBe(selected);
     }
   } finally { selection.removeAllRanges(); }

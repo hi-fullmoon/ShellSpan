@@ -63,6 +63,8 @@ try {
           const seat = original.closest('[data-slot="message-scroller-item"]');
           const viewport = document.querySelector('[data-message-scroller-viewport]');
           const top = original.getBoundingClientRect().top + viewport.scrollTop;
+          const compactInset = () => Number.parseFloat(getComputedStyle(original.closest('.ai-conversation-row-body')).paddingTop);
+          const initialInset = compactInset();
           const range = document.createRange();
           range.selectNodeContents(original);
           window.getSelection().removeAllRanges();
@@ -76,6 +78,7 @@ try {
             samples.push({ sameNode: current === original,
               sameSeat: current.closest('[data-slot="message-scroller-item"]') === seat,
               selected: window.getSelection().toString() === selected,
+              initialInset, inset: compactInset(),
               delta: current.getBoundingClientRect().top + viewport.scrollTop - top });
           }
           window.getSelection().removeAllRanges();
@@ -83,6 +86,8 @@ try {
         });
         assert.ok(stability.every(sample => sample.sameNode && sample.sameSeat && sample.selected && Math.abs(sample.delta) < 1),
           `${engine.name()} ${width} ${locale}: tool deltas and settlement must preserve text position and selection: ${JSON.stringify(stability)}`);
+        assert.ok(stability.every(sample => sample.initialInset === 4 && sample.inset === 4),
+          'Process prose must retain 4px spacing before tool deltas and after settlement');
         await page.screenshot({ path: `${output}/${engine.name()}-${width}-${locale}-stable-prose.png`, animations: 'disabled' });
         const prose = page.getByText('Two candidate project directories. Let me examine both.', { exact: true });
         await prose.waitFor();
