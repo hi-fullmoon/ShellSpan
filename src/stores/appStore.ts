@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { normalizeTerminalColorOverrides, type TerminalColorOverrides } from '@/lib/terminal/terminal-colors';
 import { DEFAULT_TAB_TITLE_TEMPLATE, normalizeTabTitleOverrides, validTabTitleTemplate } from '@/lib/terminal/tab-title';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { shallow } from 'zustand/shallow';
@@ -74,6 +75,7 @@ interface AppPreferences extends PetdexMessagePreferences {
   terminalCopyOnSelect: boolean;
   terminalScrollback: number;
   terminalColorScheme: TerminalColorScheme;
+  terminalColorOverrides: TerminalColorOverrides;
   terminalMultiLinePasteWarning: boolean;
   terminalLargePasteWarning: boolean;
   terminalAutoReconnect: boolean;
@@ -138,6 +140,7 @@ interface AppState extends AppPreferences {
   setTerminalCopyOnSelect: (enabled: boolean) => void;
   setTerminalScrollback: (lines: number) => void;
   setTerminalColorScheme: (scheme: TerminalColorScheme) => void;
+  setTerminalColorOverrides: (colors: TerminalColorOverrides) => void;
   setTerminalMultiLinePasteWarning: (enabled: boolean) => void;
   setTerminalLargePasteWarning: (enabled: boolean) => void;
   setTerminalAutoReconnect: (enabled: boolean) => void;
@@ -166,7 +169,7 @@ const PREFERENCE_KEYS: readonly (keyof AppPreferences)[] = [
   'theme', 'locale', 'profileName', 'profileAvatar', 'startupUpdateCheck', 'showFocusMode', 'startupSection',
   'terminalFontSize', 'terminalFontFamily', 'terminalCursorBlink',
   'terminalCursorStyle', 'terminalCopyOnSelect', 'terminalScrollback',
-  'terminalColorScheme', 'terminalMultiLinePasteWarning',
+  'terminalColorScheme', 'terminalColorOverrides', 'terminalMultiLinePasteWarning',
   'terminalLargePasteWarning', 'terminalAutoReconnect',
   'terminalLineHeight', 'terminalLetterSpacing', 'terminalUrlDetection',
   'terminalTrimTrailingWhitespace',
@@ -199,6 +202,7 @@ function getDefaultPreferences(): AppPreferences {
     terminalCopyOnSelect: true,
     terminalScrollback: 10000,
     terminalColorScheme: 'app',
+    terminalColorOverrides: {},
     terminalMultiLinePasteWarning: true,
     terminalLargePasteWarning: true,
     terminalAutoReconnect: false,
@@ -306,6 +310,7 @@ function entriesToPreferences(entries: [string, string][]): Partial<AppPreferenc
     terminalCopyOnSelect: (prefs.terminalCopyOnSelect as boolean) ?? defaults.terminalCopyOnSelect,
     terminalScrollback: (prefs.terminalScrollback as number) ?? defaults.terminalScrollback,
     terminalColorScheme: (prefs.terminalColorScheme as TerminalColorScheme) ?? defaults.terminalColorScheme,
+    terminalColorOverrides: normalizeTerminalColorOverrides(prefs.terminalColorOverrides),
     terminalMultiLinePasteWarning: (prefs.terminalMultiLinePasteWarning as boolean) ?? defaults.terminalMultiLinePasteWarning,
     terminalLargePasteWarning: (prefs.terminalLargePasteWarning as boolean) ?? defaults.terminalLargePasteWarning,
     terminalAutoReconnect: (prefs.terminalAutoReconnect as boolean) ?? defaults.terminalAutoReconnect,
@@ -518,6 +523,7 @@ export const useAppStore = create<AppState>()(
     setTerminalCopyOnSelect: (terminalCopyOnSelect) => set({ terminalCopyOnSelect }),
     setTerminalScrollback: (terminalScrollback) => set({ terminalScrollback }),
     setTerminalColorScheme: (terminalColorScheme) => set({ terminalColorScheme }),
+    setTerminalColorOverrides: (colors) => set({ terminalColorOverrides: normalizeTerminalColorOverrides(colors) }),
     setTerminalMultiLinePasteWarning: (terminalMultiLinePasteWarning) => set({ terminalMultiLinePasteWarning }),
     setTerminalLargePasteWarning: (terminalLargePasteWarning) => set({ terminalLargePasteWarning }),
     setTerminalAutoReconnect: (terminalAutoReconnect) => set({ terminalAutoReconnect }),
@@ -583,6 +589,7 @@ useAppStore.subscribe(
     terminalCopyOnSelect: state.terminalCopyOnSelect,
     terminalScrollback: state.terminalScrollback,
     terminalColorScheme: state.terminalColorScheme,
+    terminalColorOverrides: state.terminalColorOverrides,
     terminalMultiLinePasteWarning: state.terminalMultiLinePasteWarning,
     terminalLargePasteWarning: state.terminalLargePasteWarning,
     terminalAutoReconnect: state.terminalAutoReconnect,

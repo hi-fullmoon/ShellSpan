@@ -35,7 +35,6 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { UpdateSection } from './update-section';
-import { TERMINAL_COLOR_SCHEME_IDS } from '@/types';
 import type {
   AppSection,
   Locale,
@@ -43,7 +42,6 @@ import type {
   SftpConflictPolicy,
   ShortcutAction,
   TerminalBellStyle,
-  TerminalColorScheme,
   TerminalCursorStyle,
   TerminalFontFamily,
   ThemeMode,
@@ -61,6 +59,7 @@ import type { PetdexCategories, PetdexDiagnostic, PetdexHealth } from '@/types';
 import { INITIAL_PETDEX_DIAGNOSTIC_VIEW, petdexDiagnosticStatus, reducePetdexDiagnosticView, PETDEX_STATUS_LABEL_KEYS, PETDEX_PREVIEW_LABEL_KEYS } from '@/lib/petdex/diagnostic';
 import { SettingRow, SettingsGroup } from './settings-layout';
 import { TerminalTitleSettings } from '@/components/terminal/terminal-title-settings';
+import { TerminalColorSchemeControl } from '@/components/terminal/terminal-color-settings';
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
 
 interface ShortcutGroup {
@@ -221,8 +220,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const setTerminalCopyOnSelect = useAppStore((state) => state.setTerminalCopyOnSelect);
   const terminalScrollback = useAppStore((state) => state.terminalScrollback);
   const setTerminalScrollback = useAppStore((state) => state.setTerminalScrollback);
-  const terminalColorScheme = useAppStore((state) => state.terminalColorScheme);
-  const setTerminalColorScheme = useAppStore((state) => state.setTerminalColorScheme);
   const terminalMultiLinePasteWarning = useAppStore((state) => state.terminalMultiLinePasteWarning);
   const setTerminalMultiLinePasteWarning = useAppStore((state) => state.setTerminalMultiLinePasteWarning);
   const terminalLargePasteWarning = useAppStore((state) => state.terminalLargePasteWarning);
@@ -771,20 +768,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   </Select>
                 </SettingRow>
                 <SettingRow label={t('settings.terminal.colorScheme')} description={t('settings.terminal.colorSchemeDescription')}>
-                  <Select value={terminalColorScheme} onValueChange={(value) => setTerminalColorScheme(value as TerminalColorScheme)}>
-                    <SelectTrigger size="sm" aria-label={t('settings.terminal.colorScheme')}>
-                      <SelectValue>{t(`settings.terminal.colorScheme.${terminalColorScheme}`)}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        {TERMINAL_COLOR_SCHEME_IDS.map((scheme) => (
-                          <SelectItem key={scheme} value={scheme}>
-                            {t(`settings.terminal.colorScheme.${scheme}`)}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
+                  <TerminalColorSchemeControl />
                 </SettingRow>
                 <SettingRow label={t('settings.terminal.fontSize')} description={t('settings.terminal.fontSizeDescription')}>
                   <Select value={String(terminalFontSize)} onValueChange={(value) => setTerminalFontSize(Number(value))}>

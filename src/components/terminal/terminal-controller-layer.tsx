@@ -633,6 +633,7 @@ export const TerminalControllerLayer: React.FC = () => {
   const terminalCursorStyle = useAppStore((s) => s.terminalCursorStyle);
   const terminalScrollback = useAppStore((s) => s.terminalScrollback);
   const terminalColorScheme = useAppStore((s) => s.terminalColorScheme);
+  const terminalColorOverrides = useAppStore((s) => s.terminalColorOverrides);
   const terminalAutoReconnect = useAppStore((s) => s.terminalAutoReconnect);
   const terminalLineHeight = useAppStore((s) => s.terminalLineHeight);
   const terminalLetterSpacing = useAppStore((s) => s.terminalLetterSpacing);
@@ -648,13 +649,14 @@ export const TerminalControllerLayer: React.FC = () => {
       cursorStyle: terminalCursorStyle,
       scrollback: terminalScrollback,
       colorScheme: terminalColorScheme,
+      colorOverrides: terminalColorOverrides,
       autoReconnect: terminalAutoReconnect,
       lineHeight: terminalLineHeight,
       letterSpacing: terminalLetterSpacing,
       urlDetection: terminalUrlDetection,
       bellStyle: terminalBellStyle,
     });
-  }, [terminalAutoReconnect, terminalBellStyle, terminalColorScheme, terminalCursorBlink, terminalCursorStyle, terminalFontFamily, terminalFontSize, terminalLetterSpacing, terminalLineHeight, terminalScrollback, terminalUrlDetection]);
+  }, [terminalAutoReconnect, terminalBellStyle, terminalColorScheme, terminalColorOverrides, terminalCursorBlink, terminalCursorStyle, terminalFontFamily, terminalFontSize, terminalLetterSpacing, terminalLineHeight, terminalScrollback, terminalUrlDetection]);
 
   useEffect(() => {
     const root = document.documentElement;

@@ -88,8 +88,9 @@ const SessionTab: React.FC<SessionTabProps> = ({
 }) => {
   const { t } = useI18n();
   const colorScheme = useAppStore((state) => state.terminalColorScheme);
+  const colorOverrides = useAppStore((state) => state.terminalColorOverrides);
   const agentTarget = useFocusStore(state => state.enabled && state.targetSessionId === session.sessionId);
-  const terminalTheme = colorScheme === 'app' ? undefined : resolveTerminalTheme(colorScheme);
+  const terminalTheme = colorScheme === 'app' ? colorOverrides : resolveTerminalTheme(colorScheme, colorOverrides);
   return (
     <div
       role="tab"
