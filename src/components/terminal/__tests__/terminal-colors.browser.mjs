@@ -221,6 +221,13 @@ try {
               await background.evaluate((element, previous) => { element.style.paddingTop = previous; }, previousPadding);
             }
             await dialog.locator('[data-slot="scroll-area-viewport"]').evaluate(element => { element.scrollTop = element.scrollHeight; });
+            await dialog.getByRole('textbox', { name: labels.activeMatch, exact: true }).fill('#ff000080');
+            await preview.scrollIntoViewIfNeeded();
+            await page.waitForFunction(() => [...document.querySelectorAll('[data-terminal-color-preview] .xterm-rows span')].some(element => getComputedStyle(element).backgroundColor === 'rgb(144, 24, 32)'));
+            await background.fill('#102030');
+            await preview.scrollIntoViewIfNeeded();
+            await page.waitForFunction(() => [...document.querySelectorAll('[data-terminal-color-preview] .xterm-rows span')].some(element => getComputedStyle(element).backgroundColor === 'rgb(136, 16, 24)'));
+            await background.fill('#203040');
             await dialog.getByRole('textbox', { name: labels.match, exact: true }).fill('#778899');
             await dialog.getByRole('textbox', { name: labels.activeMatch, exact: true }).fill('#aabbcc');
             await preview.scrollIntoViewIfNeeded();

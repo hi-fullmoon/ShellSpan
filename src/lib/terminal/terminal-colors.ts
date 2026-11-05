@@ -44,6 +44,19 @@ export function applyTerminalColorOverrides(theme: ITheme, overrides: TerminalCo
   return { ...theme, ...colors };
 }
 
+function searchBackground(color: string | undefined, background: string | undefined): string | undefined {
+  if (color?.length !== 9) return color;
+  // Search decorations only render opaque RGB. Composite with the terminal's
+  // background through the platform color renderer before passing them to xterm.
+  const context = document.createElement('canvas').getContext('2d');
+  if (!context) return undefined;
+  context.fillStyle = background ?? '#000000';
+  context.fillRect(0, 0, 1, 1);
+  context.fillStyle = color;
+  context.fillRect(0, 0, 1, 1);
+  return `#${Array.from(context.getImageData(0, 0, 1, 1).data).slice(0, 3).map(channel => channel.toString(16).padStart(2, '0')).join('')}`;
+}
+
 export function terminalSearchDecorations(theme: ITheme | undefined, overrides: TerminalColorOverrides) {
   const color = theme?.blue ?? '#808080';
   return {
@@ -51,7 +64,7 @@ export function terminalSearchDecorations(theme: ITheme | undefined, overrides: 
     activeMatchBorder: theme?.foreground ?? color,
     matchOverviewRuler: color,
     activeMatchColorOverviewRuler: color,
-    matchBackground: overrides.searchMatchBackground,
-    activeMatchBackground: overrides.searchActiveMatchBackground,
+    matchBackground: searchBackground(overrides.searchMatchBackground, theme?.background),
+    activeMatchBackground: searchBackground(overrides.searchActiveMatchBackground, theme?.background),
   };
 }

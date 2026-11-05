@@ -52,7 +52,7 @@ export function TerminalSearch({ terminal, addon, onClose, active = true }: {
   const [result, setResult] = useState<ISearchResultChangeEvent | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   // Use the terminal palette for xterm's search decorations.
-  const decorations = terminalSearchDecorations(terminal?.options.theme, colorOverrides);
+  const decorations = terminalSearchDecorations(resolveTerminalTheme(colorScheme, colorOverrides), colorOverrides);
   const options: ISearchOptions = {
     caseSensitive,
     regex,

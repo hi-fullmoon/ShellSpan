@@ -1,8 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { enableRealCanvas } from '@/tests/real-canvas';
 import { applyTerminalColorOverrides, normalizeTerminalColorOverrides, terminalSearchDecorations } from '../terminal-colors';
 import { useAppStore } from '@/stores/appStore';
 
 describe('terminal custom colors', () => {
+  beforeAll(enableRealCanvas);
   it('only accepts supported color keys and complete hexadecimal colors', () => {
     expect(normalizeTerminalColorOverrides({
       background: '#123456', foreground: '#ABCDEF', selectionBackground: '#12345680',
@@ -46,5 +48,12 @@ describe('terminal custom colors', () => {
     } finally {
       useAppStore.setState({ terminalColorScheme: before.terminalColorScheme, terminalColorOverrides: before.terminalColorOverrides });
     }
+  });
+
+  it('composites transparent search highlights against the current terminal background', () => {
+    const overrides = { searchMatchBackground: '#ff000080', searchActiveMatchBackground: '#ff000000' };
+    expect(terminalSearchDecorations({ background: '#000000' }, overrides)).toMatchObject({ matchBackground: '#800000', activeMatchBackground: '#000000' });
+    expect(terminalSearchDecorations({ background: '#ffffff' }, overrides)).toMatchObject({ matchBackground: '#ff7f7f', activeMatchBackground: '#ffffff' });
+    expect(terminalSearchDecorations({ background: '#123456' }, { searchMatchBackground: '#aabbccff' }).matchBackground).toBe('#aabbcc');
   });
 });
