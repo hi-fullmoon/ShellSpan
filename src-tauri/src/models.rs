@@ -33,6 +33,9 @@ pub(crate) struct SessionSummary {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SessionPtyInfo {
+    /// Windows child is held until the listener/viewport startup handshake.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) deferred_startup: Option<bool>,
     pub(crate) transport_kind: crate::terminal_broker::TerminalTransportKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) windows_build_number: Option<u32>,
@@ -45,6 +48,7 @@ pub(crate) struct SessionPtyInfo {
 impl SessionPtyInfo {
     pub(crate) fn local() -> Self {
         Self {
+            deferred_startup: cfg!(windows).then_some(true),
             input_mode: None,
             native_display_binding: None,
             transport_kind: if cfg!(windows) {
@@ -66,6 +70,7 @@ impl SessionPtyInfo {
 
     pub(crate) fn ssh() -> Self {
         Self {
+            deferred_startup: None,
             input_mode: None,
             native_display_binding: None,
             transport_kind: crate::terminal_broker::TerminalTransportKind::SshPty,
@@ -920,7 +925,12 @@ pub(crate) enum SessionCommand {
     Write(String),
     WriteBytes(Vec<u8>),
     NativeControl(NativeControlFrame),
-    Resize { cols: u32, rows: u32 },
+    Resize {
+        cols: u32,
+        rows: u32,
+    },
+    /// FIFO barrier after the initial resize, not a Shell input or NIP proof.
+    StartupReady,
     Close,
 }
 
@@ -1934,6 +1944,10 @@ impl SessionManager {
             .sessions
             .get(session_id)
             .ok_or_else(|| format!("session {session_id} not found"))?;
+        #[cfg(windows)]
+        if managed.terminal_kind == SessionTerminalKind::Local {
+            enqueue_session_command(managed, SessionCommand::StartupReady, session_id)?;
+        }
         managed.output_ready.store(true, AtomicOrdering::Relaxed);
         managed.wake_for_output_state_change();
         Ok(())
@@ -2040,6 +2054,7 @@ mod session_manager_tests {
                 SessionCommand::WriteBytes(_)
                 | SessionCommand::NativeControl(_)
                 | SessionCommand::Resize { .. }
+                | SessionCommand::StartupReady
                 | SessionCommand::Close => None,
             })
             .collect()
@@ -2151,6 +2166,43 @@ mod session_manager_tests {
         ));
         assert!(matches!(receiver.recv().unwrap(), SessionCommand::Close));
         assert!(manager.status("local-1").is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn local_startup_ready_follows_the_resize_in_the_worker_queue() {
+        let manager = SessionManager::default();
+        let (sender, receiver) = unbounded();
+        manager
+            .insert("local-startup".into(), managed_session(sender))
+            .unwrap();
+        manager.resize("local-startup", 199, 37).unwrap();
+        manager.mark_output_ready("local-startup").unwrap();
+        assert!(matches!(
+            receiver.recv().unwrap(),
+            SessionCommand::Resize {
+                cols: 199,
+                rows: 37
+            }
+        ));
+        assert!(matches!(
+            receiver.recv().unwrap(),
+            SessionCommand::StartupReady
+        ));
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn remote_output_readiness_does_not_send_a_local_startup_command() {
+        let manager = SessionManager::default();
+        let (sender, receiver) = unbounded();
+        let mut managed = managed_session(sender);
+        managed.terminal_kind = SessionTerminalKind::Remote;
+        let ready = managed.output_ready.clone();
+        manager.insert("remote-startup".into(), managed).unwrap();
+        manager.mark_output_ready("remote-startup").unwrap();
+        assert!(ready.load(AtomicOrdering::Relaxed));
+        assert!(receiver.try_recv().is_err());
     }
 
     #[test]

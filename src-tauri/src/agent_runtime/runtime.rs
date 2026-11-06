@@ -690,7 +690,6 @@ impl AgentRuntime {
             .observe_terminal_raw_output(session_id, bytes)
     }
 
-
     pub(crate) fn attach_native_terminal_transport(
         &self,
         transport: &str,
@@ -726,6 +725,7 @@ impl AgentRuntime {
     pub(crate) fn native_terminal_control_closed(&self, transport: &str) -> Result<(), String> {
         self.native_engine.native_terminal_control_closed(transport)
     }
+    #[cfg(unix)]
     pub(crate) fn wait_native_initialization(
         &self,
         transport: &str,
@@ -924,6 +924,57 @@ impl AgentRuntime {
 
     pub(crate) fn terminal_closed(&self, session_id: &str) -> Result<bool, String> {
         self.native_engine.terminal_closed(session_id)
+    }
+
+    pub(crate) async fn close_terminal(
+        &self,
+        sessions: &crate::models::SessionManager,
+        terminal_id: &str,
+    ) -> Result<(), String> {
+        let _closing = self.begin_terminal_close(terminal_id)?;
+        let stopped = self.stop_terminal_agents(terminal_id).await;
+        self.finish_terminal_close(sessions, terminal_id, stopped)
+            .await
+    }
+
+    async fn finish_terminal_close(
+        &self,
+        sessions: &crate::models::SessionManager,
+        terminal_id: &str,
+        stopped: Result<(), String>,
+    ) -> Result<(), String> {
+        if !self
+            .closing_terminals
+            .lock()
+            .map_err(|_| "TERMINAL_ADMISSION_UNAVAILABLE")?
+            .contains(terminal_id)
+        {
+            return Err("TERMINAL_CLOSE_NOT_STARTED".into());
+        }
+        match stopped {
+            Ok(()) => {
+                self.terminal_closed(terminal_id)?;
+                self.close_terminal_broker_transport(
+                    terminal_id,
+                    crate::terminal_broker::TerminalGenerationCloseReason::UserClosed,
+                )?;
+                sessions.close(terminal_id)
+            }
+            Err(error) if error.starts_with("TERMINAL_INPUT_RECOVERY_REQUIRED:") => {
+                // Ordinary cancellation must retain uncertain native operations.
+                // An explicit close first fences all writes and requests host
+                // teardown, then retires the registration and joins its Agents.
+                // No trusted end is manufactured and the durable intent remains.
+                self.close_terminal_broker_transport(
+                    terminal_id,
+                    crate::terminal_broker::TerminalGenerationCloseReason::UserClosed,
+                )?;
+                sessions.close(terminal_id)?;
+                self.terminal_closed(terminal_id)?;
+                self.stop_terminal_agents(terminal_id).await
+            }
+            Err(error) => Err(error),
+        }
     }
 
     pub(crate) fn begin_terminal_close(

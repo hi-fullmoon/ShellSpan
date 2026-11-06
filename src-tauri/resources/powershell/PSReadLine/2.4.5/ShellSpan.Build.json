@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "upstreamTag": "v2.4.5",
+  "sourceUrl": "https://codeload.github.com/PowerShell/PSReadLine/zip/refs/tags/v2.4.5",
+  "sourceSha256": "cdc08f77831a4b828284ef9166fbac4b49cc43b414553db34107d3f753c070af",
+  "sdkVersion": "10.0.302",
+  "patch": "patches/psreadline-2.4.5-process-exit.patch",
+  "patchSha256": "ef385f145484f32d83dd74c146858029462563895ab095be7cf233261ca3199f",
+  "buildRevision": "shellspan1",
+  "outputs": {
+    "Microsoft.PowerShell.PSReadLine.dll": "2b22b4ef790a1d9d8cca0324cd4b2a5e09d829b066139e1ffb3efdd6ac6ce7d4",
+    "netstd/Microsoft.PowerShell.PSReadLine.Polyfiller.dll": "888ca22cc4098064f44f1af8e07fecdbd5f4bcb9eab192a834afe8edeb82d297",
+    "net6plus/Microsoft.PowerShell.PSReadLine.Polyfiller.dll": "bab3bde97570168c0b21bbd0fb75f4a75d93eec06b71edc8e9c08b0a22067953"
+  }
+}

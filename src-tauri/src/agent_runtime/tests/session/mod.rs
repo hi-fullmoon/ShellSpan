@@ -4,6 +4,7 @@ include!("reliable_submission.rs");
 include!("model_retry.rs");
 include!("stream_performance.rs");
 include!("recorded_ui.rs");
+include!("historical_readonly.rs");
 include!("terminal_reconnect.rs");
 include!("execution_observation.rs");
 include!("input_measurement.rs");

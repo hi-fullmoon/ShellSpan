@@ -7,6 +7,8 @@ pub(crate) mod editors;
 pub(crate) mod journal;
 #[cfg(unix)]
 pub(crate) mod local;
+#[cfg(all(test, unix))]
+mod local_tests;
 #[cfg_attr(
     not(test),
     allow(
@@ -24,11 +26,11 @@ pub(crate) mod protocol;
 )]
 pub(crate) mod registration;
 pub(crate) mod state;
-#[cfg(windows)]
-pub(crate) mod windows;
 #[cfg(test)]
 mod tests;
-#[cfg(all(test,unix))]
-mod zle_tests;
+#[cfg(windows)]
+pub(crate) mod windows;
+#[cfg(windows)]
+pub(crate) mod windows_conpty;
 #[cfg(all(test, unix))]
-mod local_tests;
+mod zle_tests;

@@ -207,6 +207,8 @@ pub struct CommandBuilder {
     #[cfg(unix)]
     pub(crate) umask: Option<libc::mode_t>,
     controlling_tty: bool,
+    #[cfg(windows)]
+    start_suspended: bool,
 }
 
 impl CommandBuilder {
@@ -220,6 +222,8 @@ impl CommandBuilder {
             #[cfg(unix)]
             umask: None,
             controlling_tty: true,
+            #[cfg(windows)]
+            start_suspended: false,
         }
     }
 
@@ -232,6 +236,8 @@ impl CommandBuilder {
             #[cfg(unix)]
             umask: None,
             controlling_tty: true,
+            #[cfg(windows)]
+            start_suspended: false,
         }
     }
 
@@ -249,6 +255,17 @@ impl CommandBuilder {
         self.controlling_tty
     }
 
+    /// Hold the Windows primary thread until its terminal is configured.
+    #[cfg(windows)]
+    pub fn set_start_suspended(&mut self, suspended: bool) {
+        self.start_suspended = suspended;
+    }
+
+    #[cfg(windows)]
+    pub fn get_start_suspended(&self) -> bool {
+        self.start_suspended
+    }
+
     /// Create a new builder instance that will run some idea of a default
     /// program.  Such a builder will panic if `arg` is called on it.
     pub fn new_default_prog() -> Self {
@@ -259,6 +276,8 @@ impl CommandBuilder {
             #[cfg(unix)]
             umask: None,
             controlling_tty: true,
+            #[cfg(windows)]
+            start_suspended: false,
         }
     }
 

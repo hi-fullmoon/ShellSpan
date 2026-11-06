@@ -1,4 +1,12 @@
 fn main() {
+    // Tauri enumerates bundle inputs even for clean Cargo/dev builds. This only
+    // creates the directory; native:prepare owns resources and their manifest.
+    let native_resources = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("missing Cargo manifest directory"),
+    )
+    .join("../.artifacts/releases/native-input/generated");
+    std::fs::create_dir_all(native_resources)
+        .expect("failed to create native resource staging directory");
     let windows_msvc = std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
         && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc");
     if windows_msvc {

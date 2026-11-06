@@ -10,14 +10,15 @@ use std::io::Error as IoError;
 use std::os::windows::ffi::OsStringExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle};
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::{mem, ptr};
 use winapi::shared::minwindef::DWORD;
 use winapi::shared::winerror::{HRESULT, S_OK};
 use winapi::um::handleapi::*;
 use winapi::um::processthreadsapi::*;
 use winapi::um::winbase::{
-    CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT, STARTF_USESTDHANDLES, STARTUPINFOEXW,
+    CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT,
+    STARTF_USESTDHANDLES, STARTUPINFOEXW,
 };
 use winapi::um::wincon::COORD;
 use winapi::um::winnt::HANDLE;
@@ -34,6 +35,15 @@ shared_library!(ConPtyFuncs,
     ) -> HRESULT,
     pub fn ResizePseudoConsole(hpc: HPCON, size: COORD) -> HRESULT,
     pub fn ClosePseudoConsole(hpc: HPCON),
+);
+
+// The redistributable API has distinct export names. Keep its library alive
+// for the console lifetime, and never fall back to a different implementation.
+shared_library!(PrivateConPtyFuncs,
+    pub fn ConptyCreatePseudoConsole(size: COORD, input: HANDLE, output: HANDLE,
+        flags: DWORD, console: *mut HPCON) -> HRESULT,
+    pub fn ConptyResizePseudoConsole(console: HPCON, size: COORD) -> HRESULT,
+    pub fn ConptyClosePseudoConsole(console: HPCON),
 );
 
 fn load_conpty() -> ConPtyFuncs {
@@ -59,6 +69,7 @@ lazy_static! {
 
 pub struct PsuedoCon {
     con: HPCON,
+    private: Option<PrivateConPtyFuncs>,
 }
 
 unsafe impl Send for PsuedoCon {}
@@ -66,32 +77,70 @@ unsafe impl Sync for PsuedoCon {}
 
 impl Drop for PsuedoCon {
     fn drop(&mut self) {
-        unsafe { (CONPTY.ClosePseudoConsole)(self.con) };
+        unsafe {
+            if let Some(api) = &self.private {
+                (api.ConptyClosePseudoConsole)(self.con);
+            } else {
+                (CONPTY.ClosePseudoConsole)(self.con);
+            }
+        }
     }
 }
 
 impl PsuedoCon {
-    pub fn new(size: COORD, input: FileDescriptor, output: FileDescriptor) -> Result<Self, Error> {
+    pub fn new(
+        size: COORD,
+        input: FileDescriptor,
+        output: FileDescriptor,
+        grapheme_host: Option<&Path>,
+    ) -> Result<Self, Error> {
+        let private =
+            if let Some(path) = grapheme_host {
+                ensure!(
+                    path.is_absolute(),
+                    "private ConPTY requires an absolute library path"
+                );
+                Some(PrivateConPtyFuncs::open(path).map_err(|error| {
+                    anyhow::anyhow!("failed to load private ConPTY: {:?}", error)
+                })?)
+            } else {
+                None
+            };
         let mut con: HPCON = INVALID_HANDLE_VALUE;
         let result = unsafe {
-            (CONPTY.CreatePseudoConsole)(
-                size,
-                input.as_raw_handle() as _,
-                output.as_raw_handle() as _,
-                0,
-                &mut con,
-            )
+            match &private {
+                // PSEUDOCONSOLE_GLYPH_WIDTH_GRAPHEMES, from conpty.h.
+                Some(api) => (api.ConptyCreatePseudoConsole)(
+                    size,
+                    input.as_raw_handle() as _,
+                    output.as_raw_handle() as _,
+                    0x08,
+                    &mut con,
+                ),
+                None => (CONPTY.CreatePseudoConsole)(
+                    size,
+                    input.as_raw_handle() as _,
+                    output.as_raw_handle() as _,
+                    0,
+                    &mut con,
+                ),
+            }
         };
         ensure!(
             result == S_OK,
             "failed to create psuedo console: HRESULT {}",
             result
         );
-        Ok(Self { con })
+        Ok(Self { con, private })
     }
 
     pub fn resize(&self, size: COORD) -> Result<(), Error> {
-        let result = unsafe { (CONPTY.ResizePseudoConsole)(self.con, size) };
+        let result = unsafe {
+            match &self.private {
+                Some(api) => (api.ConptyResizePseudoConsole)(self.con, size),
+                None => (CONPTY.ResizePseudoConsole)(self.con, size),
+            }
+        };
         ensure!(
             result == S_OK,
             "failed to resize console to {}x{}: HRESULT: {}",
@@ -134,7 +183,13 @@ impl PsuedoCon {
                 ptr::null_mut(),
                 ptr::null_mut(),
                 0,
-                EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
+                EXTENDED_STARTUPINFO_PRESENT
+                    | CREATE_UNICODE_ENVIRONMENT
+                    | if cmd.get_start_suspended() {
+                        CREATE_SUSPENDED
+                    } else {
+                        0
+                    },
                 cmd.environment_block().as_mut_slice().as_mut_ptr() as *mut _,
                 cwd.as_ref()
                     .map(|c| c.as_slice().as_ptr())
@@ -157,11 +212,17 @@ impl PsuedoCon {
 
         // Make sure we close out the thread handle so we don't leak it;
         // we do this simply by making it owned
-        let _main_thread = unsafe { OwnedHandle::from_raw_handle(pi.hThread as _) };
+        let main_thread = unsafe { OwnedHandle::from_raw_handle(pi.hThread as _) };
+        let startup_thread = if cmd.get_start_suspended() {
+            Some(main_thread)
+        } else {
+            None
+        };
         let proc = unsafe { OwnedHandle::from_raw_handle(pi.hProcess as _) };
 
         Ok(WinChild {
             proc: Mutex::new(proc),
+            startup_thread: Arc::new(Mutex::new(startup_thread)),
         })
     }
 }

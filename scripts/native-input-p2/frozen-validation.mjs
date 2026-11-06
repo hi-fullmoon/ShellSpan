@@ -1,11 +1,16 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-import {existsSync,readFileSync,readdirSync,statSync,writeFileSync} from 'node:fs';
+import {existsSync,readFileSync,readdirSync,realpathSync,statSync,writeFileSync} from 'node:fs';
 import {isAbsolute,resolve,relative,sep} from 'node:path';
 
 const sha=path=>createHash('sha256').update(readFileSync(path)).digest('hex');
 const within=(parent,path)=>{const child=relative(resolve(parent),resolve(path));return child!==''&&child!=='..'&&!child.startsWith(`..${sep}`)&&!isAbsolute(child);};
+export function nativeValidationResourceDirectory(root,selected){
+  const actual=realpathSync(resolve(root,selected??'.artifacts/tests/native-input-p2/resources/native-input'));
+  assert(within(realpathSync(root),actual),'Selected validation resources must be a strict descendant of the frozen source root');
+  return actual;
+}
 export function readValidationGit(root,args){
   assert(Array.isArray(args)&&['ls-files','check-ignore','rev-parse'].includes(args[0]),'Only read-only validation Git commands are allowed');
   const snapshotIndex=resolve(root,'.artifacts/tests/native-input-p3/snapshot-index.json');

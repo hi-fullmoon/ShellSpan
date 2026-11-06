@@ -128,14 +128,18 @@ impl std::fmt::Debug for FullInputProof {
 }
 
 impl FullInputProof {
-    fn native_plan_matches(intent:&CommandIntent,plan:&ExecutionPlan)->bool {
-        let Some(shell)=plan.shell else{return false;};
-        let Ok(family)=super::registration::shell_family(shell)else{return false;};
-        let expected=match &plan.native_job {
-            Some(job)=>super::protocol::native_shell_job_plan(intent.source(),family,job),
-            None=>super::protocol::native_foreground_plan(intent.source(),family),
+    fn native_plan_matches(intent: &CommandIntent, plan: &ExecutionPlan) -> bool {
+        let Some(shell) = plan.shell else {
+            return false;
         };
-        expected.is_ok_and(|expected|expected==plan.submitted_line())
+        let Ok(family) = super::registration::shell_family(shell) else {
+            return false;
+        };
+        let expected = match &plan.native_job {
+            Some(job) => super::protocol::native_shell_job_plan(intent.source(), family, job),
+            None => super::protocol::native_foreground_plan(intent.source(), family),
+        };
+        expected.is_ok_and(|expected| expected == plan.submitted_line())
     }
     pub fn verify_native_control(
         intent: &CommandIntent,
@@ -144,7 +148,7 @@ impl FullInputProof {
         editor_empty: bool,
     ) -> Result<Self, String> {
         if !editor_empty
-            || !Self::native_plan_matches(intent,plan)
+            || !Self::native_plan_matches(intent, plan)
             || !matches!(
                 plan.native_job,
                 Some(super::protocol::JobExecution::Control { .. })
@@ -195,12 +199,14 @@ impl FullInputProof {
         end: usize,
     ) -> Result<Self, String> {
         if !matches!(plan.method, ExecutionMethod::NativeInline)
-            || !Self::native_plan_matches(intent,plan)
+            || !Self::native_plan_matches(intent, plan)
             || matches!(
                 plan.native_job,
                 Some(super::protocol::JobExecution::Control { .. })
             )
-            || !plan.shell.is_some_and(|shell| super::registration::shell_family(shell).is_ok())
+            || plan
+                .shell
+                .is_none_or(|shell| super::registration::shell_family(shell).is_err())
             || source_digest != intent.source_digest()
             || plan_digest != plan.digest()
             || bytes != intent.source().len()

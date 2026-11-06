@@ -490,6 +490,46 @@ impl Editor {
         self.reply(&request, nip::Payload::SubmissionAccepted);
         true
     }
+    // Read-only diagnostics for a refused physical accept. They neither reset
+    // the request deadline nor manufacture an input/acceptance observation.
+    fn accept_failure_reason(&self) -> i32 {
+        if self.thread != std::thread::current().id() {
+            return 1;
+        }
+        let Some(draft) = self.draft.as_ref() else {
+            return 2;
+        };
+        if self.failed {
+            return 3;
+        }
+        if !self.owned() {
+            return 4;
+        }
+        if self.action != Action::None {
+            return 5;
+        }
+        if self.guard.as_ref().is_none_or(nip::RequestGuard::expired) {
+            return 6;
+        }
+        if !draft.confirmed {
+            return 7;
+        }
+        if draft.accepted {
+            return 8;
+        }
+        if draft.cancel.is_some() {
+            return 9;
+        }
+        if draft.armed.is_none() {
+            return 10;
+        }
+        0
+    }
+    fn prepare_elapsed_ms(&self) -> i32 {
+        self.draft.as_ref().map_or(-1, |d| {
+            d.started.elapsed().as_millis().min(i32::MAX as u128) as i32
+        })
+    }
     pub fn started(&mut self) -> bool {
         if !self.check_thread() {
             return false;
@@ -569,4 +609,36 @@ fn scope(identity: &nip::Identity) -> String {
         ))
         .unwrap(),
     )
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+
+    #[test]
+    fn accept_diagnostics_do_not_change_state_or_thread_ownership() {
+        let profile = nip::PeerProfile {
+            shell: nip::ShellFamily::PowerShell7,
+            shell_version: Some("7.6.9".into()),
+            editor: nip::EditorFamily::PsReadLine,
+            editor_version: Some("2.4.5".into()),
+            editor_numeric_version: 20405,
+            adapter_version: "1".into(),
+            verified_profile_id: None,
+        };
+        let editor = Editor::new(profile, false);
+        assert_eq!(editor.accept_failure_reason(), 2);
+        assert_eq!(editor.prepare_elapsed_ms(), -1);
+        let editor = std::thread::spawn(move || {
+            assert_eq!(editor.accept_failure_reason(), 1);
+            assert!(!editor.failed);
+            assert!(editor.output.is_empty());
+            editor
+        })
+        .join()
+        .unwrap();
+        assert_eq!(editor.accept_failure_reason(), 2);
+        assert!(!editor.failed);
+        assert!(editor.connection.is_none());
+    }
 }

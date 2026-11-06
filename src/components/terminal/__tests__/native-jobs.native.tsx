@@ -1,6 +1,9 @@
 import { createRoot } from 'react-dom/client';
 import { nativeP2Password } from './native-input-p2-credential';
 import {acceptP3PublisherOnce} from './native-input-p3-publisher';
+import {isCurrentNativeEditorProfile} from './native-editor-profile';
+import {matchesNativeJobsApproval,matchesNativeJobsStep,matchesNativeJobsOriginalStep} from './native-jobs-approval';
+import {delegationOriginalCall} from './native-approval-delegation-plan';
 import {createNativeFocusTrace} from './native-focus-trace';
 import type {FocusCheckTrigger,NativeFocusTrace,NativeFocusTraceEvidence} from './native-focus-trace';
 import { flushSync } from 'react-dom';
@@ -119,12 +122,15 @@ async function verify() {
   const disposers: (() => void)[] = [];
   const agentId = `agent-native-jobs-${crypto.randomUUID()}`;
   const calls: Extract<AgentSessionEvent, { type: 'tool/call' }>[] = [];
+  const events: AgentSessionEvent[] = [];
   const results: Extract<AgentSessionEvent, { type: 'tool/result' }>[] = [];
   const executions: Extract<AgentSessionEvent, { type: 'tool/execution' }>[] = [];
   const operations = new Set<string>();
   const leaseEvents: AgentTerminalLeaseEvent[] = [];
   const artifactEvidence = new Map<string, unknown>();
-  const allowedCommands = new Set<string>();
+  const allowedCommands = new Map<string, boolean>();
+  const approvedNativeSteps = new Set<number>();
+  let directComparisonStarted = false;
   const approvalEvidence: { callId: string; status: string; seq: number; turnId?: string; stepId?: string }[] = [];
   let created = false;
   let failure: string | undefined;
@@ -392,6 +398,7 @@ async function verify() {
     }));
     disposers.push(await listenToAgentRuntimeSession(({ payload }) => {
       if (payload.sessionId !== agentId) return;
+      if (payload.type !== 'assistant/chunk') events.push(payload);
       latestEvent = { type: payload.type, seq: payload.seq };
       focusTrace?.runtime({type:payload.type,seq:payload.seq,backendUnixMs:payload.timeUnixMs});
       if (payload.type === 'request/failure') failure ??= `Real model request failed: ${payload.data.failure.kind}`;
@@ -411,15 +418,35 @@ async function verify() {
             const completed = await Promise.all(results.map(readResult));
             const handles = completed.flatMap(value => value && typeof value === 'object'
               && 'processHandle' in value && typeof value.processHandle === 'string' ? [value.processHandle] : []);
-            assert(('command' in args && typeof args.command === 'string' && allowedCommands.has(args.command))
-              || ('processHandle' in args && typeof args.processHandle === 'string' && handles.includes(args.processHandle)),
-            `Approval escaped the exact test commands or native job: ${JSON.stringify({ callId, command: 'command' in args ? args.command : undefined, processHandle: 'processHandle' in args ? args.processHandle : undefined, handles })}`);
+            assert(matchesNativeJobsApproval(args, allowedCommands, handles),
+            `Approval escaped the exact test plan: ${JSON.stringify({ callId, fields: Object.keys(args), knownHandles: handles.length })}`);
+            assert(!failure && results.every(event => event.data.status === 'completed'), 'A failed or uncertain operation cannot authorize a retry');
+            if (nativeP2 && !directComparisonStarted) {
+              const step = results.length;
+              const proposed = calls.find(event => event.turnId === turnId && event.stepId === stepId && event.data.call.callId === callId);
+              assert(proposed && !approvedNativeSteps.has(step) && matchesNativeJobsStep(step,args,[setup,script,finalCommand],proposed.data.call.name),
+                'Approval repeated, ran concurrently, or escaped the seven-call order');
+              approvedNativeSteps.add(step);
+            }
             if (!focusPolling && 'command' in args && typeof args.command === 'string' && args.command.includes('SHELLSPAN_END')) await userView;
             await invokeApproveAgentRuntimeTool(decision);
           })().catch(error => { failure ??= error instanceof Error ? error.message : String(error); });
         }
       }
-      if (payload.type === 'tool/call') calls.push(payload);
+      if (payload.type === 'tool/call') {
+        const step = calls.length;
+        calls.push(payload);
+        if (nativeP2 && !directComparisonStarted) {
+          try {
+            const original = delegationOriginalCall(events, payload);
+            const prepared = payload.data.call.arguments;
+            const handle = prepared && typeof prepared === 'object' && 'processHandle' in prepared && typeof prepared.processHandle === 'string' ? prepared.processHandle : undefined;
+            assert(matchesNativeJobsOriginalStep(step, original.arguments, [setup,script,finalCommand], original.name, handle)
+              && matchesNativeJobsStep(step, prepared, [setup,script,finalCommand], payload.data.call.name),
+            'Original model proposal differs from the frozen seven-call native plan; no repair or input authorized');
+          } catch (error) { failure ??= error instanceof Error ? error.message : String(error); }
+        }
+      }
       if (payload.type === 'tool/execution') executions.push(payload);
       if (payload.type === 'tool/result') {
         results.push(payload);
@@ -471,7 +498,7 @@ async function verify() {
       ? `${nativeP3?'Write-Output $P3ParentScope\n':''}Write-Output $env:SHELLSPAN_ACCEPTANCE\nWrite-Output (Get-Location).Path\nshellspan_acceptance_alias\nshellspan_acceptance_function\n@'\nreal\tTab 'single' "double"\nSHELLSPAN_END\n'@\nwhile (-not [IO.File]::Exists($env:SHELLSPAN_NATIVE_COMPLETION_GATE)) { Start-Sleep -Milliseconds 25 }`
       : `${nativeP3?'printf \'%s\\n\' "$P3_PARENT_SCOPE"\n':''}printf '%s\\n' "$SHELLSPAN_ACCEPTANCE"\npwd\nshellspan_acceptance_alias\nshellspan_acceptance_function\ncat <<'SHELLSPAN_END'\nreal\tTab\nSHELLSPAN_END\nsleep 60`;
     const finalCommand = powershell ? 'cmd.exe /d /c exit 7' : '(exit 7)';
-    for (const command of [setup, script, finalCommand]) allowedCommands.add(command);
+    allowedCommands.set(setup, false); allowedCommands.set(script, true); allowedCommands.set(finalCommand, false);
     const goal = nativeP2
       ? `Execute exactly SEVEN calls using the bound visible terminal. Do not use Direct, extra tools, retries or change source. The blocks below are RAW SHELL TEXT, not JSON string literals. Use the exact contents of each block as the command string; encode that string once in the tool arguments. Never include the fence or add backslashes to shell quotes. Preserve existing backslashes, actual tabs and adjacent single-quoted strings.${nativeP3?' Each command has NO trailing CR or LF. The single newline immediately before each closing fence is a markup separator, not part of the command; preserve every embedded newline and tab.':''} Call 1 run_terminal_command with SETUP. Call 2 run_terminal_command background=true with BACKGROUND. Calls 3, 4 and 5 wait_process on the returned job-* handle timeoutMs=1000. Call 6 kill_process on that handle signal=terminate timeoutMs=10000. Call 7 run_terminal_command with FINAL. Then reply done. Job output is sharedTerminal.\n\nSETUP:\n~~~sh\n${setup}\n~~~\n\nBACKGROUND:\n~~~sh\n${script}\n~~~\n\nFINAL:\n~~~sh\n${finalCommand}\n~~~`
       : `Execute exactly this sequence using the bound visible terminal. Do not use Direct, extra tools, change source or retry. run_terminal_command accepts only command, explanation, background, timeoutMs and lifecycleTrust; nativeScriptInput/nativeJobControl are observed capabilities, never argument fields. 1. run_terminal_command command=${JSON.stringify(setup)}. 2. run_terminal_command background=true command=${JSON.stringify(script)}. 3. On the returned job-* handle call wait_process three separate times sequentially with timeoutMs=1000. 4. kill_process with signal=terminate timeoutMs=10000. 5. run_terminal_command command=${JSON.stringify(finalCommand)}. Then reply done. Job output is sharedTerminal, never isolated stdout.`;
@@ -571,9 +598,10 @@ async function verify() {
       const settled = await invokeGetAgentRuntimeSession({ sessionId: agentId });
       assert(settled.status === 'idle' && !settled.ended, 'Explicit Direct switch requires the actual settled native conversation');
       await invokeSetAgentRuntimeExecutionSurface({ sessionId: agentId, surface: 'direct' });
+      directComparisonStarted = true;
       const directSource = powershell ? `$value=[Console]::ReadLine(); [Console]::WriteLine('received:'+$value)` : `read -r value; printf 'received:%s\\n' "$value"`;
       const directSleep = powershell ? 'Start-Sleep -Seconds 60' : 'sleep 60';
-      allowedCommands.add(directSource); allowedCommands.add(directSleep);
+      allowedCommands.set(directSource, true); allowedCommands.set(directSleep, true);
       const offset = results.length;
       ended = false;
       const directGoal = `The user explicitly switched this session to Direct. Make exactly FIVE tool calls in this order: (1) run_terminal_command background=true command=${JSON.stringify(directSource)}; (2) write_process_input on its proc-* handle with input="direct-stdin\\n"; (3) wait_process timeoutMs=10000 on that first handle; (4) run_terminal_command background=true command=${JSON.stringify(directSleep)}; (5) kill_process signal=terminate timeoutMs=10000 on the second handle. kill_process already waits for termination and retires that handle. After call 5 immediately reply done. NEVER call wait_process after kill_process, never add a sixth call, and never retry a retired handle.`;
@@ -636,7 +664,7 @@ async function verify() {
     if(nativeP2){
       assert(identity.inputMode==='native-inline'&&identity.nativeDisplayBinding&&controller.inputMode==='native-inline','Normal application initialization did not negotiate native-inline');
       assert(identity.nativePeerProfile?.shell===(nativeP3??'bash')&&identity.nativePeerProfile.editor===(nativeP3==='zsh'?'zle':nativeP3?'psReadLine':'readline')
-        &&identity.nativePeerProfile.verifiedProfileId?.endsWith('-capture1'),'Actual job peer did not report the selected verified native editor profile');
+        &&(nativeP3?isCurrentNativeEditorProfile(identity.nativePeerProfile,nativeP3):identity.nativePeerProfile.verifiedProfileId?.endsWith('-native')),'Actual job peer did not report the selected verified native editor profile');
       assert(ptyInfo?.inputMode==='native-inline'&&JSON.stringify(identity.nativeDisplayBinding)===JSON.stringify(ptyInfo.nativeDisplayBinding),'Job Broker and actual PTY native bindings differ');
       assert(!('submittedCommandLine' in launched)||launched.submittedCommandLine===null,'Private native plan escaped in the tool result');
       assert(controller.terminal.getSelection===Terminal.prototype.getSelection&&controller.terminal.open===Terminal.prototype.open
@@ -725,6 +753,7 @@ async function verify() {
         terminalSessionId: identity.terminalSessionId, generation: identity.terminalGeneration,
         approvedSource: script, nativeLayout: layoutEvidence, rendered, displayRows: display.rows, rawOutput: output,
         geometry: { columns: controller.terminal.cols, rows: controller.terminal.rows }, earlyOutput, earlyViewEvidence, approvalEvidence, executions,
+        events,
         calls: calls.slice(0,7).map(event => ({ seq: event.seq, turnId: event.turnId, stepId: event.stepId, call: event.data.call })),
         results: results.slice(0,7).map((event, index) => ({ seq: event.seq, turnId: event.turnId, stepId: event.stepId, status: event.data.status, data: data[index] })),
         direct: directEvidence, monitoredGeometry, geometryEvents, rendererTransport,backpressureEvidence,
@@ -735,8 +764,8 @@ async function verify() {
       progress: 'Native target xterm retains the complete source and real early output; native cell evidence saved.', evidence,
     }) });
     if (powershell) {
-      await getCurrentWindow().show();
-      await getCurrentWindow().setFocus();
+      // Capture the owned foreground window as it stands. A focus loss is
+      // evidence to retain, not something the acceptance fixture repairs.
       assert(sourceReviewOrigin,'Missing native source review origin');
       controller.terminal.scrollToLine(sourceReviewOrigin.row);
       await new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve())));
@@ -744,7 +773,7 @@ async function verify() {
       assert(windowProof.ok,`Owned native desktop capture failed: ${await windowProof.clone().text()}`);
       const windowEvidence:unknown=await windowProof.json();
       await fetch(`/__agent-stream-result/${parameters.get('token')}`,{method:'POST',body:JSON.stringify({
-        progress:'Model and view contracts complete; explicit user review captured the actual source terminal window.',
+        progress:'Model and view contracts complete; the owned foreground source terminal window was captured without restoring focus.',
         evidence:{...finalEvidence,windowEvidence,reviewView:{activeSessionId:useTerminalStore.getState().activeSessionId,explicitAfterAllModelOperations:true}},
       })});
     }
@@ -757,7 +786,7 @@ async function verify() {
     const broker=terminals[0]?await invokeGetTerminalBrokerSnapshot(terminals[0]).catch(()=>({diagnosticUnavailable:true})):undefined;
     await fetch(`/__agent-stream-result/${parameters.get('token')}`, { method: 'POST', body: JSON.stringify({
       progress: 'Native acceptance failed; preserving actual call/result and xterm diagnostics before cleanup.',
-      evidence: { failed: true, reason, selection, focusPolling, sshShell, calls, executions, approvalEvidence,
+      evidence: { failed: true, reason, selection, focusPolling, sshShell, agentId, events, calls, executions, approvalEvidence, nativeObservations,
         results: results.map((event, index) => ({ event, full: fullResults[index] })), rendered: display?.text,
         displayRows: display?.rows, rawOutput: output, nativeLayout: layoutEvidence, earlyViewEvidence, uiFailure, initialView, workingView, geometryEvents, rendererTransport,
         leaseEvents,backpressureEvidence,backpressureAdmission,...(focusTraceReceipt?{focusTrace:focusTraceReceipt}:{}),
@@ -774,7 +803,7 @@ async function verify() {
       if (created) {
         await invokeCancelAgentRuntime({ sessionId: agentId });
         await invokeArchiveAgentRuntimeSession({ sessionId: agentId });
-        await invokeDeleteAgentRuntimeSession({ sessionId: agentId });
+        if (!nativeP3) await invokeDeleteAgentRuntimeSession({ sessionId: agentId });
       }
     } finally {
       root.unmount();

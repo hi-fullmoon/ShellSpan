@@ -111,9 +111,7 @@ jobs:
       - name: Check LLM catalog
         run: pnpm check:llm:catalog
       - name: Run Agent terminal contract tests
-        run: |
-          cargo test --manifest-path src-tauri/Cargo.toml --locked agent::terminal -- --test-threads=1
-          cargo test --manifest-path src-tauri/Cargo.toml --locked terminal_lease -- --test-threads=1
+        run: node scripts/verify-agent-terminal-contracts.mjs
       - name: Run Petdex Phase 0 contract probe
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked --test petdex_contract_probe -- --test-threads=1
       - name: Run Clippy

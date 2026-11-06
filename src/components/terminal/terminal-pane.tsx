@@ -372,24 +372,6 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       return true;
     });
 
-    let copyTimeout: number | null = null;
-    const selectionDisposable = terminal.onSelectionChange(() => {
-      if (!copyOnSelect) return;
-      if (copyTimeout !== null) window.clearTimeout(copyTimeout);
-      copyTimeout = null;
-      const current = terminal.getSelection();
-      if (!current) return;
-      copyTimeout = window.setTimeout(() => {
-        copyTimeout = null;
-        const selection = terminal.getSelection();
-        if (!selection) return;
-        const copiedText = trimTrailingWhitespace
-          ? selection.replace(/[ \t]+(?=\r?$)/gm, '')
-          : selection;
-        void copyTerminalText(copiedText);
-      }, COPY_ON_SELECT_DEBOUNCE_MS);
-    });
-
     const element = terminal.element;
     const handlePaste = (event: ClipboardEvent): void => {
       const text = event.clipboardData?.getData('text/plain');
@@ -401,13 +383,36 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     element?.addEventListener('paste', handlePaste, true);
 
     return () => {
-      if (copyTimeout !== null) window.clearTimeout(copyTimeout);
-      selectionDisposable.dispose();
       element?.removeEventListener('paste', handlePaste, true);
       // Reset key handler to avoid stale closures when session changes.
       terminal.attachCustomKeyEventHandler(() => true);
     };
-  }, [activeLease, activeSession, activeSessionId, terminal, searchOpen, handleOpenSearch, handleCloseSearch, showError, t, copyOnSelect, largePasteWarning, multiLinePasteWarning, trimTrailingWhitespace, pasteText]);
+  }, [activeLease, activeSession, activeSessionId, terminal, searchOpen, handleOpenSearch, handleCloseSearch, showError, t, largePasteWarning, multiLinePasteWarning, trimTrailingWhitespace, pasteText]);
+
+  // Session observations and shortcut UI can rerender while a drag settles.
+  // Keep its copy timer scoped to the displayed terminal and copy preferences.
+  useEffect(() => {
+    if (!terminal || !copyOnSelect) return;
+    let copyTimeout: number | null = null;
+    const selectionDisposable = terminal.onSelectionChange(() => {
+      if (copyTimeout !== null) window.clearTimeout(copyTimeout);
+      copyTimeout = null;
+      if (!terminal.getSelection()) return;
+      copyTimeout = window.setTimeout(() => {
+        copyTimeout = null;
+        const selection = terminal.getSelection();
+        if (!selection) return;
+        const copiedText = trimTrailingWhitespace
+          ? selection.replace(/[ \t]+(?=\r?$)/gm, '')
+          : selection;
+        void copyTerminalText(copiedText);
+      }, COPY_ON_SELECT_DEBOUNCE_MS);
+    });
+    return () => {
+      if (copyTimeout !== null) window.clearTimeout(copyTimeout);
+      selectionDisposable.dispose();
+    };
+  }, [activeSessionId, terminal, copyOnSelect, trimTrailingWhitespace]);
 
   // useActiveController opens xterm in a layout effect only when visible.
   // Install after that effect, including the first hidden -> visible transition.

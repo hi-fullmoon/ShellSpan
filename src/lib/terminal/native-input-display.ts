@@ -12,6 +12,7 @@ export interface NativeInputDisplayBinding {
 /** Optional registered provider for a verified editor's owned display only. */
 export interface NativeInputDisplayOptions {
   readonly unicodeVersion?: string;
+  readonly unicodeScope?: 'session';
 }
 
 export interface NativeInputDisplayController extends IDisposable {
@@ -56,6 +57,9 @@ export function attachNativeInputDisplay(
     throw new Error('Native editor display requires an unattached default-reflow terminal');
   }
   const unicodeVersion = options.unicodeVersion;
+  if (options.unicodeScope !== undefined && (options.unicodeScope !== 'session' || unicodeVersion === undefined)) {
+    throw new TypeError('Invalid native editor Unicode scope');
+  }
   if (unicodeVersion !== undefined && (typeof unicodeVersion !== 'string'
       || !terminal.unicode.versions.includes(unicodeVersion))) {
     throw new TypeError('Native editor display requires a registered Unicode provider');
@@ -63,6 +67,12 @@ export function attachNativeInputDisplay(
 
   let disposed = false;
   let previousUnicodeVersion: string | undefined;
+  const selectUnicode = (): void => {
+    if (unicodeVersion !== undefined && previousUnicodeVersion === undefined) {
+      previousUnicodeVersion = terminal.unicode.activeVersion;
+      terminal.unicode.activeVersion = unicodeVersion;
+    }
+  };
   const restoreUnicode = (): void => {
     if (previousUnicodeVersion === undefined) return;
     // Preserve an explicit external provider change made during this scope.
@@ -74,20 +84,20 @@ export function attachNativeInputDisplay(
   const handler = terminal.parser.registerOscHandler(binding.oscIdentifier, payload => {
     if (disposed) return false;
     if (payload === binding.enterPayload) {
-      if (unicodeVersion !== undefined && previousUnicodeVersion === undefined) {
-        previousUnicodeVersion = terminal.unicode.activeVersion;
-        terminal.unicode.activeVersion = unicodeVersion;
-      }
+      selectUnicode();
       terminal.options.reflowCursorLine = binding.ownedReflowCursorLine ?? true;
       return true;
     }
     if (payload === binding.exitPayload) {
       terminal.options.reflowCursorLine = false;
-      restoreUnicode();
+      if (options.unicodeScope !== 'session') restoreUnicode();
       return true;
     }
     return false;
   });
+  // ConPTY applies its measurement to the entire stream, including ordinary
+  // command output. Keep the matching provider until this transport drains.
+  if (options.unicodeScope === 'session') selectUnicode();
   attachedTerminals.add(terminal);
   const dispose = (): void => {
     if (disposed) return;

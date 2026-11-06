@@ -542,6 +542,52 @@ describe('TerminalPane', () => {
     }
   });
 
+  it('keeps a pending selection copy when the same session rerenders', () => {
+    vi.useFakeTimers();
+    try {
+      const terminal = makeMockTerminal('selected text');
+      const session = makeSession();
+      const view = render(<TerminalPane activeSession={session} />);
+      terminal.getSelectionChangeHandlers()[0]?.();
+      act(() => vi.advanceTimersByTime(100));
+      view.rerender(<TerminalPane activeSession={{ ...session }} />);
+      act(() => vi.advanceTimersByTime(COPY_ON_SELECT_DEBOUNCE_MS));
+      expect(navigator.clipboard.writeText).toHaveBeenCalledExactlyOnceWith('selected text');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels a pending selection copy when copy on select is turned off', () => {
+    vi.useFakeTimers();
+    try {
+      const terminal = makeMockTerminal('selected text');
+      render(<TerminalPane activeSession={makeSession()} />);
+      terminal.getSelectionChangeHandlers()[0]?.();
+      act(() => vi.advanceTimersByTime(100));
+      act(() => useAppStore.setState({ terminalCopyOnSelect: false }));
+      act(() => vi.advanceTimersByTime(COPY_ON_SELECT_DEBOUNCE_MS));
+      expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels a pending selection copy when the displayed session changes', () => {
+    vi.useFakeTimers();
+    try {
+      const terminal = makeMockTerminal('old session text');
+      const view = render(<TerminalPane activeSession={makeSession()} />);
+      terminal.getSelectionChangeHandlers()[0]?.();
+      act(() => vi.advanceTimersByTime(100));
+      view.rerender(<TerminalPane activeSession={makeSession({ sessionId: 's2' })} />);
+      act(() => vi.advanceTimersByTime(COPY_ON_SELECT_DEBOUNCE_MS));
+      expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not copy selected text when copy on select is disabled', () => {
     useAppStore.setState({ terminalCopyOnSelect: false });
     const terminal = makeMockTerminal('selected text');

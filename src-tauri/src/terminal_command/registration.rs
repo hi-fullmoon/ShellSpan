@@ -13,6 +13,7 @@ pub(crate) struct VerifiedNativeProfile {
     module_sha: String,
     editor_profile: Option<PeerProfile>,
     scoped_editor_sha: Option<String>,
+    private_conpty: bool,
 }
 impl VerifiedNativeProfile {
     pub(crate) fn verify_remote(
@@ -40,8 +41,10 @@ impl VerifiedNativeProfile {
             module_sha: actual_module_sha.into(),
             editor_profile: None,
             scoped_editor_sha: None,
+            private_conpty: false,
         })
     }
+    #[cfg(unix)]
     pub fn verify_local(
         profile_id: &str,
         shell: &Path,
@@ -79,6 +82,7 @@ impl VerifiedNativeProfile {
             module_sha,
             editor_profile: None,
             scoped_editor_sha: None,
+            private_conpty: false,
         })
     }
     pub fn matches(&self, profile: &PeerProfile) -> bool {
@@ -132,12 +136,12 @@ impl VerifiedNativeProfile {
             (ShellFamily::Zsh, EditorFamily::Zle) => profile.shell_version.as_deref() == Some("5.9")
                 && profile.editor_version.as_deref() == Some("5.9") && profile.editor_numeric_version == 509
                 && ["zsh-5.9-zle-5.9-macos-arm64-native", "zsh-5.9-zle-5.9-linux-aarch64-glibc-2.36-native"].contains(&id),
-            (ShellFamily::WindowsPowerShell, EditorFamily::PsReadLine) => profile.shell_version.as_deref() == Some("5.1.26100.9711")
+            (ShellFamily::WindowsPowerShell, EditorFamily::PsReadLine) => profile.shell_version.as_deref() == Some("5.1.26100.9818")
                 && profile.editor_version.as_deref() == Some("2.4.5") && profile.editor_numeric_version == 20405
-                && id == "windows-powershell-5.1.26100.9711-psreadline-2.4.5-windows-x64-native",
+                && id == "windows-powershell-5.1.26100.9818-psreadline-2.4.5-shellspan1-conpty1.25.260930003-graphemes-windows-x64-native",
             (ShellFamily::PowerShell7, EditorFamily::PsReadLine) => profile.shell_version.as_deref() == Some("7.6.9")
                 && profile.editor_version.as_deref() == Some("2.4.5") && profile.editor_numeric_version == 20405
-                && id == "powershell-7.6.9-psreadline-2.4.5-windows-x64-native",
+                && id == "powershell-7.6.9-psreadline-2.4.5-shellspan1-conpty1.25.260930003-graphemes-windows-x64-native",
             _ => false,
         };
         if !supported
@@ -153,6 +157,7 @@ impl VerifiedNativeProfile {
             module_sha: expected_module_sha.into(),
             editor_profile: Some(profile.clone()),
             scoped_editor_sha: None,
+            private_conpty: false,
         })
     }
     /// Presentation metadata comes from the exact locally bound Core, never
@@ -182,11 +187,33 @@ impl VerifiedNativeProfile {
     }
     pub(crate) fn display_binding(&self) -> nip::DisplayBinding {
         let mut binding = nip::DisplayBinding::native();
+        if self.private_conpty {
+            binding.unicode_version = Some(nip::DisplayUnicodeVersion::Graphemes15);
+            binding.unicode_scope = Some(nip::DisplayUnicodeScope::Session);
+            binding.owned_reflow_cursor_line = Some(false);
+        }
         if self.scoped_editor_sha.is_some() {
             binding.unicode_version = Some(nip::DisplayUnicodeVersion::Unicode11);
             binding.owned_reflow_cursor_line = Some(true);
         }
         binding
+    }
+    #[cfg(windows)]
+    pub(crate) fn bind_private_conpty(mut self, library: &Path) -> Result<Self, String> {
+        if !self.profile_id.contains("-conpty1.25.260930003-graphemes-")
+            || file_sha(library)?
+                != "feeef341d891643c62d30b6b07800bc70f0bc148f44cb8c3bee84aa557ae805a"
+            || file_sha(
+                &library
+                    .parent()
+                    .ok_or("TERMINAL_NATIVE_PATH_INVALID")?
+                    .join("x64/OpenConsole.exe"),
+            )? != "3d66b23d0a71bb8eed2b77edc8b9df9bf54ce6c8fb74c863a30e760997f80586"
+        {
+            return Err("TERMINAL_NATIVE_CONPTY_MISMATCH".into());
+        }
+        self.private_conpty = true;
+        Ok(self)
     }
     pub fn shell(&self) -> crate::terminal_integration::TerminalShellKind {
         use crate::terminal_integration::TerminalShellKind as Kind;

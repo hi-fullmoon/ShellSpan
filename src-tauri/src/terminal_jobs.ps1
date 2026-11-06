@@ -173,6 +173,7 @@ try {
   Add-Type -TypeDefinition $Packet.SignalSource -ErrorAction Stop
   [ShellSpanConsoleSignals]::SetIgnore($true)
   $Pipe.WriteByte(0xA1);$Pipe.Flush()
+  if($Pipe.ReadByte()-ne 0xA2){throw 'Native worker start permission was not confirmed'}
   Add-Type -TypeDefinition $Packet.HostSource -ErrorAction Stop
   $JobHost=New-Object ShellSpanJobHost -ArgumentList $Host
   $Initial=[System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault()
@@ -218,9 +219,9 @@ function Test-ShellSpanNativeJobs {
 }
 function Remove-ShellSpanNativeMarker {
   if ($script:NativeMarkerName) {
-    $Current=Microsoft.PowerShell.Management\Get-Item -LiteralPath ('Function:\global:'+$script:NativeMarkerName) -ErrorAction Ignore
+    $Current=Microsoft.PowerShell.Management\Get-Item -LiteralPath ('Function:\'+$script:NativeMarkerName) -ErrorAction Ignore
     if ($null-ne $Current -and $Current.ScriptBlock-eq $script:NativeMarkerBody) {
-      Microsoft.PowerShell.Management\Remove-Item -LiteralPath ('Function:\global:'+$script:NativeMarkerName)
+      Microsoft.PowerShell.Management\Remove-Item -LiteralPath ('Function:\'+$script:NativeMarkerName)
     }
   }
   $script:NativeMarkerName=$null
@@ -239,7 +240,13 @@ function Install-ShellSpanNativeMarker {
   $Source=$Command.CommandElements[1].Value
   $Tokens=$null; $Errors=$null
   $null=[System.Management.Automation.Language.Parser]::ParseInput($Source,[ref]$Tokens,[ref]$Errors)
-  if ($Errors.Count-ne 0 -or (Microsoft.PowerShell.Core\Get-Command $Handle -ErrorAction Ignore)) { return $false }
+  if ($Errors.Count-ne 0) { return $false }
+  # Exact Get-Command discovery can import a module before physical acceptance.
+  # Pattern discovery lists existing commands without running module initializers;
+  # retain exact-name and executable-extension collision checks below.
+  foreach($Existing in @(Microsoft.PowerShell.Core\Get-Command ($Handle+'*') -ListImported -All -ErrorAction Ignore)) {
+    if ($Existing.Name -ieq $Handle -or (($Existing -is [Management.Automation.ApplicationInfo] -or $Existing -is [Management.Automation.ExternalScriptInfo]) -and [IO.Path]::GetFileNameWithoutExtension($Existing.Name) -ieq $Handle)) { return $false }
+  }
   # An unbound global function runs in the caller's native scope. Probe inherited
   # StrictMode there, before entering the integration module, as in the original
   # submission. The native parser decodes the literal; it is never invoked here.
@@ -373,6 +380,9 @@ function Invoke-ShellSpanNativeJobStart {
   })
   $Aliases = @(Microsoft.PowerShell.Utility\Get-Alias | Microsoft.PowerShell.Core\ForEach-Object { @{ Name=$_.Name; Definition=$_.Definition; Options=$_.Options } })
   $Snapshot = @{ Variables=$Variables; Functions=$Functions; Aliases=$Aliases; Location=(Microsoft.PowerShell.Management\Get-Location).ProviderPath; NativeDirectory=[Environment]::CurrentDirectory; Culture=$Culture; UICulture=$UICulture; Features=$FeatureNames; StyleXml=$StyleXml; VersionXml=$VersionXml; EngineVariables=$EngineVariables; ApartmentState=[Threading.Thread]::CurrentThread.GetApartmentState().ToString() }
+  $WorkerConstructionAttempted=$false
+  $JobStartStage='prepareWorker'
+  $JobStartClock=[Diagnostics.Stopwatch]::StartNew()
   try {
     $Body = {
       param($__shellspanJobSource,$__shellspanJobSnapshot,$__shellspanJobState,$__shellspanRestore,$__shellspanVersionSnapshot,$__shellspanStyleSnapshot)
@@ -463,10 +473,25 @@ function Invoke-ShellSpanNativeJobStart {
     $CurrentProcess=[Diagnostics.Process]::GetCurrentProcess()
     try{$Executable=$CurrentProcess.MainModule.FileName}finally{$CurrentProcess.Dispose()}
     if([IO.Path]::GetFileName($Executable)-notin @('powershell.exe','pwsh.exe')){throw 'Native jobs require a standard PowerShell console executable'}
-    $Job=[ShellSpanProcessJob]::new($Executable,$Snapshot.NativeDirectory,[System.Management.Automation.PSSerializer]::Serialize($Packet,100))
+    $JobStartStage='serializePacket'
+    $SerializedPacket=[System.Management.Automation.PSSerializer]::Serialize($Packet,100)
+    $JobStartStage='createWorker'
+    $WorkerConstructionAttempted=$true
+    $Job=[ShellSpanProcessJob]::new($Executable,$Snapshot.NativeDirectory,$SerializedPacket)
     $script:NativeShellJobs[$Handle] = @{ Job=$Job; InstanceId=$Job.InstanceId }
     Send-ShellSpanControl @('B',$Handle,'running','-')
-  } catch { Send-ShellSpanControl @('B',$Handle,'uncertain','-') }
+  } catch {
+    $Failure=$_.Exception.GetBaseException()
+    $LaunchFailure=$_.Exception
+    for($FailureDepth=0;$FailureDepth-lt 8 -and -not $LaunchFailure.Data.Contains('NativeWorkerStartStage') -and $null-ne $LaunchFailure.InnerException;$FailureDepth++){$LaunchFailure=$LaunchFailure.InnerException}
+    $FailureStage=if($LaunchFailure.Data['NativeWorkerStartStage']-in @('validateState','createGroup','createPipe','startProcess','connect','writeState','consoleIsolation','commitStart')){$LaunchFailure.Data['NativeWorkerStartStage']}elseif($JobStartStage-in @('prepareWorker','serializePacket','createWorker')){$JobStartStage}else{'prepareWorker'}
+    $FailureType=if($Failure.GetType().FullName-in @('System.TimeoutException','System.InvalidOperationException','System.ComponentModel.Win32Exception','System.OutOfMemoryException','System.NotSupportedException')){$Failure.GetType().FullName}else{'Other'}
+    $FailureElapsed=if($LaunchFailure.Data['NativeWorkerStartElapsedMs']-is [long]){$LaunchFailure.Data['NativeWorkerStartElapsedMs']}elseif($null-ne $JobStartClock){$JobStartClock.ElapsedMilliseconds}else{0}
+    $CleanupConfirmed=-not $WorkerConstructionAttempted -or $LaunchFailure.Data['NativeWorkerCleanupConfirmed']-eq $true
+    $StartState=if(-not $WorkerConstructionAttempted -or ($CleanupConfirmed -and $LaunchFailure.Data.Contains('NativeWorkerSourceMayHaveStarted') -and $LaunchFailure.Data['NativeWorkerSourceMayHaveStarted']-eq $false)){'rejected'}else{'uncertain'}
+    Microsoft.PowerShell.Utility\Write-Warning ('TERMINAL_NATIVE_JOB_START_FAILED: phase={0}; state={1}; errorType={2}; elapsedMs={3}; cleanupConfirmed={4}' -f $FailureStage,$StartState,$FailureType,$FailureElapsed,$CleanupConfirmed) -WarningAction Continue
+    Send-ShellSpanControl @('B',$Handle,$StartState,'-')
+  }
 }
 function Invoke-ShellSpanNativeJobControl {
   param([string]$Handle,[string]$Action)

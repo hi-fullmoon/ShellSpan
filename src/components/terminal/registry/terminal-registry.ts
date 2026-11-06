@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
+import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { createTerminalResizeHandler, installTerminalScrollbarVisibility, measureTerminalGeometry, TERMINAL_CONTAINER_CLASS } from './terminal-geometry';
 import { installTerminalEdgeBackground } from './terminal-edge-background';
@@ -543,11 +544,13 @@ class TerminalControllerImpl implements TerminalController {
     });
     this.updateLinkProvider();
 
-    this.listenerSetup = this.startListenerSetup();
+    this.listenerSetup = this.startListenerSetup(
+      ptyInfo?.transportKind === 'windowsConPty' && ptyInfo.deferredStartup === true,
+    );
   }
 
-  private startListenerSetup(): Promise<void> {
-    const setup = this.setupListeners();
+  private startListenerSetup(resizeBeforeReady = false): Promise<void> {
+    const setup = this.setupListeners(resizeBeforeReady);
     void setup.catch((error) => {
       logger.warn(`Failed to install terminal listeners for session ${this.sessionId}`, error);
     });
@@ -561,7 +564,15 @@ class TerminalControllerImpl implements TerminalController {
       if (unicodeVersion === '11' && !this.terminal.unicode.versions.includes('11')) {
         this.terminal.loadAddon(new Unicode11Addon());
       }
-      this.nativeDisplay = attachNativeInputDisplay(this.terminal, ptyInfo.nativeDisplayBinding, { unicodeVersion });
+      if (unicodeVersion === '15-graphemes' && !this.terminal.unicode.versions.includes(unicodeVersion)) {
+        const previous = this.terminal.unicode.activeVersion;
+        this.terminal.loadAddon(new UnicodeGraphemesAddon());
+        // Registration activates this addon; the negotiated display owns scope.
+        this.terminal.unicode.activeVersion = previous;
+      }
+      this.nativeDisplay = attachNativeInputDisplay(this.terminal, ptyInfo.nativeDisplayBinding, {
+        unicodeVersion, unicodeScope: ptyInfo.nativeDisplayBinding.unicodeScope,
+      });
     }
     // Every mode renders only PTY bytes. Decorations never receive source text.
     return this.inputMode === 'raw'
@@ -725,7 +736,7 @@ class TerminalControllerImpl implements TerminalController {
     return this.listenerGeneration;
   }
 
-  private async setupListeners(): Promise<void> {
+  private async setupListeners(resizeBeforeReady = false): Promise<void> {
     const generation = this.listenerGeneration;
     const sessionId = this.sessionId;
     const dataUnlisten = await listenToSshData(sessionId, (event) => {
@@ -829,6 +840,28 @@ class TerminalControllerImpl implements TerminalController {
     } catch (error) {
       if (!this.disposed && generation === this.listenerGeneration) {
         logger.warn(`Failed to reconcile session ${sessionId} status`, error);
+      }
+    }
+
+    if (resizeBeforeReady) {
+      // The existing renderer may keep its size while the replacement PTY was
+      // created with a different grid. A ResizeObserver need not fire on rebind.
+      // Synchronize before releasing startup cursor queries or shell output.
+      let dimensions: { cols: number; rows: number } | null = {
+        cols: this.terminal.cols, rows: this.terminal.rows,
+      };
+      while (dimensions) {
+        this.sendingDimensions = dimensions;
+        try {
+          await invokeResizeSession(sessionId, dimensions.cols, dimensions.rows);
+        } finally {
+          if (this.sendingDimensions === dimensions) this.sendingDimensions = null;
+        }
+        if (this.disposed || generation !== this.listenerGeneration || sessionId !== this.sessionId) return;
+        this.lastSentDimensions = dimensions;
+        const queued = this.queuedResizeDimensions;
+        this.queuedResizeDimensions = null;
+        dimensions = queued && !this.sameDimensions(dimensions, queued) ? queued : null;
       }
     }
 
@@ -1081,6 +1114,7 @@ class TerminalControllerImpl implements TerminalController {
       }
       logger.warn(`Failed to resize session ${sessionId}`, error);
     }).finally(() => {
+      if (this.disposed || this.sessionId !== sessionId) return;
       if (this.sendingDimensions === dimensions) this.sendingDimensions = null;
       if (this.queuedResizeDimensions && this.resizeRetryTimer === null) {
         this.flushResizeQueue();
@@ -1397,6 +1431,8 @@ class TerminalControllerImpl implements TerminalController {
     this.cancelPendingResize();
     this.cancelResizeRetry();
     this.queuedResizeDimensions = null;
+    this.lastSentDimensions = null;
+    this.sendingDimensions = null;
     this.resizeRetryAttempts = 0;
     this.cancelOutputResumeRetry();
     this.outputResumeRetryAttempts = 0;
@@ -1414,18 +1450,25 @@ class TerminalControllerImpl implements TerminalController {
     this.outputGeneration += 1;
     this.commandDecorations.rebind();
     this.sessionId = sessionId;
-    // Reconnection may attach a different transport; never retain ConPTY
-    // behavior when the replacement is SSH or has no trusted metadata.
-    this.terminal.options.windowsPty = resolveWindowsPty(ptyInfo);
     rebindTerminalOutput(previousSessionId, sessionId);
     this.resetNoticeState();
     terminalInputReadiness.begin(sessionId);
     const generation = this.listenerGeneration;
     this.listenerSetup = this.closeInputRendering().then(() => {
       if (this.disposed || generation !== this.listenerGeneration) return;
-      this.terminal.write('\u001b\\');
+      // Drain the old stream using its own transport behavior before switching
+      // options. A fresh ConPTY starts with viewport-absolute cursor positions;
+      // move the previous normal-screen cells into the existing scrollback so
+      // its initial cursor-home cannot overwrite the prior connection history.
+      // Use only standard stream/cursor/scroll operations, never reset/clear,
+      // parser mutation, or replaying a separately stored copy of the text.
+      this.terminal.options.windowsPty = resolveWindowsPty(ptyInfo);
+      const boundary = ptyInfo?.transportKind === 'windowsConPty' && this.terminal.buffer.active.type === 'normal'
+        ? `\u001b\\\u001b[${this.terminal.rows};1H${'\r\n'.repeat(this.terminal.rows)}\u001b[H`
+        : '\u001b\\';
+      this.terminal.write(boundary);
       this.commandDecorations = this.installInputRendering(ptyInfo);
-      return this.startListenerSetup();
+      return this.startListenerSetup(true);
     });
   }
 

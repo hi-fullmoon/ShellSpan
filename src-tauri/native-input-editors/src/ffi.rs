@@ -79,6 +79,21 @@ pub unsafe extern "C" fn ss_editor_observe_chars(
     let point = text.chars().take(cursor).map(char::len_utf8).sum();
     context.editor.observe(text, point) as i32
 }
+// A real line return is still guarded before the protected accept key, even
+// while the control channel is healthy. This query never authorizes execution.
+#[no_mangle]
+pub unsafe extern "C" fn ss_editor_guarded_handoff(context: *mut Context) -> i32 {
+    let Some(context) = context.as_ref() else {
+        return 0;
+    };
+    (context.editor.thread == std::thread::current().id()
+        && context
+            .editor
+            .draft
+            .as_ref()
+            .is_some_and(|draft| !draft.running && !draft.host_returned && !draft.local_discarded))
+        as i32
+}
 // Read-only, same-thread local cleanup decision after the transport has failed.
 // This is never a protocol DraftCleared receipt or permission to submit again.
 #[no_mangle]
@@ -350,6 +365,12 @@ pub unsafe extern "C" fn ss_editor_event(
     let Some(context) = context.as_mut() else {
         return 0;
     };
+    if event == 16 {
+        return context.editor.accept_failure_reason();
+    }
+    if event == 17 {
+        return context.editor.prepare_elapsed_ms();
+    }
     if event == 15 {
         if context.editor.thread != std::thread::current().id() {
             return -1;

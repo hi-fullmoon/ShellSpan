@@ -1,0 +1,53 @@
+import {createRoot} from 'react-dom/client';
+import {getCurrentWindow} from '@tauri-apps/api/window';
+import {TerminalControllerLayer} from '../terminal-controller-layer';
+import {terminalRegistry} from '../registry/terminal-registry';
+import {useTerminalStore} from '@/stores/terminalStore';
+import {initI18n} from '@/locales';
+import {isCurrentNativeEditorProfile} from './native-editor-profile';
+import {matchesNativeFileChainStep} from './native-file-chain-approval';
+import {invokeCreateLocalSession,invokeCloseSession,invokeGetTerminalBrokerSnapshot,invokeListAiRoutes,invokeCreateAgentRuntimeSession,invokeGetAgentRuntimeSession,invokeResumeAgentRuntime,invokeStartAgentRuntime,invokeAgentRuntimeFollowup,invokeCancelAgentRuntime,invokeArchiveAgentRuntimeSession,invokeGetPendingAgentRuntimeApprovalArguments,invokeApproveAgentRuntimeTool,listenToAgentRuntimeSession} from '@/lib/ipc/tauri';
+import type {AgentSessionEvent,AgentSessionTarget} from '@/types/agent-session';
+import '@/styles/base.css';
+function assert(value:unknown,message:string):asserts value{if(!value)throw Error(message);}
+function object(value:unknown):Record<string,unknown>{assert(value&&typeof value==='object'&&!Array.isArray(value),'Expected structured data');return value as Record<string,unknown>;}
+async function until(test:()=>boolean|Promise<boolean>,message:string){const end=Date.now()+180000;while(!await test()){assert(Date.now()<end,message);await new Promise(resolve=>setTimeout(resolve,10));}}
+async function verify(){
+ const parameters=new URL(location.href).searchParams,token=parameters.get('token'),phase=parameters.get('fileRestart');assert(token&&/^[a-f0-9-]{36}$/.test(token)&&(phase==='prepare'||phase==='verify'),'Owned restart parameters missing');
+ await initI18n('en-US');await getCurrentWindow().show();await getCurrentWindow().setFocus();const root=createRoot(document.getElementById('root')!);if(phase==='prepare')root.render(<TerminalControllerLayer/>);const host=document.createElement('div');host.style.cssText='width:100vw;height:100vh';document.body.append(host);
+ const events:AgentSessionEvent[]=[],dispose:(()=>void)[]=[],approvals=new Set<string>();let terminalId:string|undefined,id:string|undefined,created=false,success=false,failure:string|undefined;let before:unknown,saved:unknown,prewrite:unknown,restored:unknown;
+ const report=(value:unknown)=>fetch(`/__agent-stream-result/${token}`,{method:'POST',body:JSON.stringify(value)});
+ const state=async()=>{const r=await fetch(`/__native-scratch-restart/${token}`);assert(r.ok,'Owned restart state unavailable');return object(await r.json());};
+ const witness=async()=>{const r=await fetch(`/__native-scratch-restart-witness/${token}`);assert(r.ok,'Owned restart witness unavailable');return object(await r.json());};
+ try{
+  let target:AgentSessionTarget,fileName:string,content:string;
+  if(phase==='prepare'){
+   const session=await invokeCreateLocalSession(100,30);terminalId=session.sessionId;useTerminalStore.getState().addSession(session);await until(()=>!!terminalRegistry.get(session.sessionId),'Actual controller missing');const controller=terminalRegistry.get(session.sessionId)!;controller.attach(host);await controller.whenOutputReady();await until(async()=>!!(await invokeGetTerminalBrokerSnapshot(session.sessionId)).session?.promptReady,'Native prompt not ready');const broker=await invokeGetTerminalBrokerSnapshot(session.sessionId);assert(broker.session?.inputMode==='native-inline'&&isCurrentNativeEditorProfile(broker.session.nativePeerProfile,parameters.get('nativeP3')),'Actual native profile missing');assert(broker.session.currentDirectory,'Actual cwd missing');before=broker;
+   id='agent-scratch-restart-'+crypto.randomUUID();target={kind:'local',targetId:'terminal-'+session.sessionId,sessionId:session.sessionId,cwd:broker.session.currentDirectory};fileName=`acceptance-${token}.ps1`;content=`Write-Output 'SCRATCH_RESTART_${token}'`;
+  }else{
+   const value=await state();assert(typeof value.id==='string'&&typeof value.fileName==='string'&&typeof value.content==='string','Persisted restart identity missing');id=value.id;fileName=value.fileName;content=value.content;saved=value;const snapshot=await invokeGetAgentRuntimeSession({sessionId:id});assert(!snapshot.archived&&snapshot.header.sessionId===id&&snapshot.header.target&&snapshot.header.executionSurface==='boundTerminal'&&snapshot.header.permissionMode==='requestApproval','Persisted session/surface differs');assert(JSON.stringify(snapshot.header.target)===JSON.stringify(value.target),'Frozen target changed after restart');assert(!snapshot.uncertainNativeEffects&&snapshot.inbox.nextTurn.length===0&&snapshot.inbox.nextStep.length===0,'Prepared session has uncertain effects or pending input');target=snapshot.header.target;restored=snapshot;before=await witness();
+   const broker=await invokeGetTerminalBrokerSnapshot(target.sessionId);assert(!broker.session?.open,'Old PTY unexpectedly remains open');
+  }
+  const activeId=id,activeTarget=target,plan={fileName,content,setup:''},step=phase==='prepare'?1:2;
+  dispose.push(await listenToAgentRuntimeSession(({payload})=>{
+   if(payload.sessionId!==activeId)return;events.push(payload);
+   try{if(payload.type==='tool/call'){assert(events.filter(e=>e.type==='tool/call').length===1&&matchesNativeFileChainStep(step,payload.data.call.name,payload.data.call.arguments,plan),'Unexpected restart tool or replay');}}
+   catch(error){failure=String(error);}
+   if(payload.type==='tool/approval'&&payload.data.status==='requested')void(async()=>{
+    const {approvalId,callId,requestId}=payload.data,{turnId,stepId}=payload;assert(approvalId&&turnId&&stepId&&approvals.size===0&&!failure,'Unexpected approval');approvals.add(approvalId);const call=events.find((e):e is Extract<AgentSessionEvent,{type:'tool/call'}>=>e.type==='tool/call'&&e.data.call.callId===callId&&e.turnId===turnId&&e.stepId===stepId);assert(call,'Approval call missing');const decision={sessionId:activeId,approvalId,callId,requestId,turnId,stepId},args=await invokeGetPendingAgentRuntimeApprovalArguments(decision)??call.data.call.arguments;assert(matchesNativeFileChainStep(step,call.data.call.name,args,plan),'Restart approval differs');if(phase==='prepare'){prewrite=await witness();const observedFiles=object(prewrite).files;assert(Array.isArray(observedFiles)&&observedFiles.length===0,'File written before approval');}await invokeApproveAgentRuntimeTool(decision);
+   })().catch(error=>{failure=String(error);});
+  }));
+  const selection=(await invokeListAiRoutes()).defaultSelection;assert(selection,'Supplied model missing');
+  const goal=phase==='prepare'?`Call write_file exactly ONCE with exactly these arguments: ${JSON.stringify({fileScope:'scratch',path:fileName,content,precondition:{mustNotExist:true}})}. Do not read, execute, edit, or use other tools. Then stop.`:`Call read_file exactly ONCE with exactly these arguments: ${JSON.stringify({fileScope:'scratch',path:fileName,encoding:'utf8'})}. This file was already written in the previous App process. Do not write, execute, retry, repair or use other tools. Then stop.`;
+  if(phase==='prepare'){await invokeCreateAgentRuntimeSession({sessionId:activeId,taskId:activeId,goal,executionSurface:'boundTerminal',permissionMode:'requestApproval',target:activeTarget,capabilityScope:{toolNames:['write_file','read_file'],effects:['stateChange','sensitiveRead'],targetIds:[activeTarget.targetId]}});created=true;}else await invokeResumeAgentRuntime({sessionId:activeId});
+  // Commit a fresh explicit input before attaching the driver, so startup has
+  // no reason to resume the old write request.
+  const message=crypto.randomUUID();await invokeAgentRuntimeFollowup({sessionId:activeId,messageId:message,clientSubmissionId:message,content:goal});await invokeStartAgentRuntime({sessionId:activeId,selection});
+  await until(()=>{assert(!failure,failure??'Restart tool failed');return events.some(e=>e.type==='tool/result');},'Explicit restart tool did not finish');const results=events.filter((e):e is Extract<AgentSessionEvent,{type:'tool/result'}>=>e.type==='tool/result');assert(results.length===1&&results[0].data.status==='completed','Restart tool was not completed');const data=object(results[0].data.data);assert(data.fileScope==='scratch'&&data.temporary===true,'Restart tool did not use managed scratch');if(phase==='verify')assert(data.content===content&&data.sha256===object(saved).sha256&&data.path===object(saved).path,'Restart read changed file,hash or path');
+  await invokeCancelAgentRuntime({sessionId:activeId});const snapshot=await invokeGetAgentRuntimeSession({sessionId:activeId});assert(!snapshot.archived&&!snapshot.uncertainNativeEffects&&snapshot.inbox.nextTurn.length===0&&snapshot.inbox.nextStep.length===0,'Restart checkpoint is not settled');const after=await witness();assert(Array.isArray(after.files)&&after.files.length===1&&object(after.files[0]).content===content,'Actual persisted file differs');
+  if(phase==='prepare'){assert(typeof data.path==='string'&&typeof data.afterSha256==='string','Actual write metadata missing');const value={id:activeId,target:activeTarget,fileName,content,path:data.path,sha256:data.afterSha256},response=await fetch(`/__native-scratch-restart/${token}`,{method:'POST',body:JSON.stringify(value)});assert(response.ok,'Verified restart state was not saved');saved=await response.json();}
+  success=true;await report({evidence:{kind:'actual-scratch-restart-'+phase,phase,id:activeId,target:activeTarget,fileName,content,before,after,saved,restored,snapshot,prewrite,events,terminalCreated:phase==='prepare',scope:'Managed scratch write/read across actual App restart with unchanged boundTerminal identity;no Shell source executed,and no native path-invocation/reconnected-parent-state claim.'},progress:'Actual managed scratch '+phase+' phase completed.'});
+ }catch(error){await report({evidence:{failed:true,phase,id,error:String(error),events,before,saved,restored},progress:'Scratch restart failure retained;no input replay or Direct fallback.'});throw error;}
+ finally{dispose.forEach(fn=>fn());if(id&&(created||phase==='verify')){await invokeCancelAgentRuntime({sessionId:id}).catch(()=>{});if(phase==='verify'&&success)await invokeArchiveAgentRuntimeSession({sessionId:id});}if(terminalId){await invokeCloseSession(terminalId);terminalRegistry.dispose(terminalId);}root.unmount();host.remove();}
+}
+void verify().then(()=>({ok:true}),(error:unknown)=>({ok:false,error:error instanceof Error?error.message:String(error)})).then(value=>fetch(`/__agent-stream-result/${new URL(location.href).searchParams.get('token')}`,{method:'POST',body:JSON.stringify(value)}));

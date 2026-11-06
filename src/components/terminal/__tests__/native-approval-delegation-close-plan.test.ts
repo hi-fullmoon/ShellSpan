@@ -1,0 +1,16 @@
+import {describe,it,expect} from 'vitest';
+import {approvalDelegationClosePlan,matchesDelegatedTakeoverLease} from './native-approval-delegation-close-plan';
+import {matchesDelegationSpawn,matchesDelegationNativeArgs} from './native-approval-delegation-plan';
+const token='dfa69841-ea10-485b-bbda-a59cbb6a99c5';
+describe('actual delegated takeover callback identity',()=>{
+ const view={agentSessionId:'child',operationId:'native-op',terminalOwned:true,takeoverRequested:false,takeoverFailed:false},active={agentSessionId:'child',operationId:'native-op',phase:'running',fullInputConfirmed:true,submissionIntentDurable:true,executionEvidence:'startObserved'};
+ it('requires a matching real child operation with complete running facts',()=>{expect(matchesDelegatedTakeoverLease(view,active,'child')).toBe(true);});
+ it.each([{agentSessionId:'parent'},{operationId:'turn:parent'},{terminalOwned:false},{takeoverRequested:true},{takeoverFailed:true}])('rejects a stale or different visible lease: %j',change=>{expect(matchesDelegatedTakeoverLease({...view,...change},active,'child')).toBe(false);});
+ it.each([{phase:'typing'},{fullInputConfirmed:false},{submissionIntentDurable:false},{executionEvidence:'unknown'}])('rejects insufficient native operation proof: %j',change=>{expect(matchesDelegatedTakeoverLease(view,{...active,...change},'child')).toBe(false);});
+});
+describe('delegated running-terminal close acceptance plan',()=>{
+ it('requires two different owned terminals',()=>{expect(()=>approvalDelegationClosePlan(token,'terminal-one','terminal-one')).toThrow('Independent');expect(()=>approvalDelegationClosePlan(token,'terminal-one','other')).toThrow('Owned');});
+ it('predeclares takeover without changing native source or timeout',()=>{const close=approvalDelegationClosePlan(token,'terminal-one','terminal-other'),takeover=approvalDelegationClosePlan(token,'terminal-one','terminal-other','takeover');expect(takeover.child).toBe(close.child);expect(takeover.other).toBe(close.other);expect(takeover.spawn.budget).toEqual(close.spawn.budget);expect(takeover.spawn.goal).toContain('running-takeover/cancel');expect(takeover.otherGoal).toContain('"timeoutMs":30000');});
+ it('declares exact cooperative native sources with independent effects',()=>{const plan=approvalDelegationClosePlan(token,'terminal-one','terminal-other');expect(plan.child).toContain('delegation-child-'+token);expect(plan.other).toContain('delegation-other-'+token);expect(plan.child).toContain('while ($true)');expect(plan.other).toContain('while ($true)');expect(plan.child).not.toBe(plan.other);for(const source of [plan.child,plan.other])expect(matchesDelegationNativeArgs({command:source,background:false,timeoutMs:30000,lifecycleTrust:'cooperative'},source,true)).toBe(true);});
+ it('freezes the child budget,target and tool while forbidding parent native resumption',()=>{const plan=approvalDelegationClosePlan(token,'terminal-one','terminal-other');expect(matchesDelegationSpawn(plan.spawn,plan.spawn)).toBe(true);expect(plan.spawn.budget).toEqual({maxTurns:1,timeoutMs:180000});expect(plan.spawn.targetIds).toEqual(['terminal-one']);expect(plan.parentGoal).toContain('No other tools,native parent commands,retries or replacement children');});
+});

@@ -581,6 +581,7 @@
                 SessionCommand::WriteBytes(_)
                 | SessionCommand::NativeControl(_)
                 | SessionCommand::Resize { .. }
+                | SessionCommand::StartupReady
                 | SessionCommand::Close => None,
             })
             .collect::<Vec<_>>();

@@ -1,0 +1,15 @@
+[package]
+name = "shellspan-powershell-parser-reference"
+version = "1.0.0"
+edition = "2021"
+publish = false
+license = "MIT"
+
+[workspace]
+
+[dependencies]
+portable-pty = { path = "../../../src-tauri/vendor/portable-pty" }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+vt100 = "=0.16.2"
+vte = "=0.15.0"

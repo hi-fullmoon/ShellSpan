@@ -1,0 +1,59 @@
+import { spawnSync } from 'node:child_process';
+import { mkdir, mkdtemp, copyFile, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { expect, it } from 'vitest';
+import { nativeInputReleaseDirectory } from '../native-input-p2/resource-paths.mjs';
+import {copyNativeRebuildSources} from '../native-input-p2/rebuild-sources.mjs';
+
+const root = path.resolve(import.meta.dirname, '../..');
+
+it('runs the real default-denial packager twice without changing legacy output or bundling its backup', async () => {
+  const artifacts = path.join(root, '.artifacts/tests/native-resource-packaging');
+  await mkdir(artifacts, { recursive: true });
+  const directory = await mkdtemp(path.join(artifacts, 'run-'));
+  try {
+    for (const name of ['scripts/prepare-native-input-resources.mjs', 'scripts/native-input-p2/frozen-validation.mjs',
+      'scripts/native-input-p2/resource-paths.mjs','scripts/native-input-p2/rebuild-sources.mjs', 'protocol/agent/runtime/native-editor-admission.json']) {
+      await mkdir(path.dirname(path.join(directory, name)), { recursive: true });
+      await copyFile(path.join(root, name), path.join(directory, name));
+    }
+    const legacy = path.join(directory, 'src-tauri/resources/native-input/generated');
+    await mkdir(legacy, { recursive: true });
+    await writeFile(path.join(legacy, 'retained.txt'), 'owned prior fixture');
+    const execute = () => spawnSync(process.execPath, ['scripts/prepare-native-input-resources.mjs',
+      '--no-build', '--target', 'x86_64-pc-windows-msvc'], { cwd: directory, windowsHide: true, encoding: 'utf8', timeout: 10_000 });
+    const first = execute();
+    expect(first.status, first.stderr).toBe(0);
+    const output = JSON.parse(first.stdout);
+    expect(output.directory).toBe(nativeInputReleaseDirectory(directory));
+    const manifest = JSON.parse(await readFile(path.join(output.directory, 'resource-manifest.json'), 'utf8'));
+    expect(manifest).toMatchObject({ targets: [], unsupportedHost: true, validationOnly: false });
+    expect(await readdir(output.directory)).toEqual(['resource-manifest.json']);
+    const second = execute();
+    expect(second.status, second.stderr).toBe(0);
+    const repeated = JSON.parse(second.stdout);
+    expect(repeated.previousRetained).toContain(path.join(directory, '.artifacts/releases/native-input/resource-build'));
+    expect(JSON.parse(await readFile(path.join(repeated.previousRetained, 'resource-manifest.json'), 'utf8'))).toEqual(manifest);
+    expect(await readFile(path.join(legacy, 'retained.txt'), 'utf8')).toBe('owned prior fixture');
+    expect(await readdir(output.directory)).toEqual(['resource-manifest.json']);
+  } finally {
+    const relative = path.relative(artifacts, directory);
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Unsafe fixture cleanup path');
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it('ships the Windows example capture include and excludes build/cache output',async()=>{
+  const artifacts=path.join(root,'.artifacts/tests/native-resource-packaging');await mkdir(artifacts,{recursive:true});const directory=await mkdtemp(path.join(artifacts,'sources-'));
+  try{
+    const input=path.join(directory,'input'),output=path.join(directory,'output');
+    for(const name of ['src-tauri/native-input-editors/examples','src-tauri/native-input-adapter','src-tauri/vendor/portable-pty','src-tauri/src/terminal_command','src-tauri/native-input-editors/target','src-tauri/native-input-editors/__pycache__'])await mkdir(path.join(input,name),{recursive:true});
+    for(const name of ['src-tauri/native-input-editors/examples/windows_acceptance.rs','src-tauri/src/terminal_command/capture.rs','src-tauri/src/terminal_command/protocol.rs'])await copyFile(path.join(root,name),path.join(input,name));
+    for(const name of ['target/old.dll','__pycache__/old.pyc'])await writeFile(path.join(input,'src-tauri/native-input-editors',name),'excluded generated fixture');
+    await copyNativeRebuildSources(input,output);
+    const example=path.join(output,'src-tauri/native-input-editors/examples/windows_acceptance.rs');
+    expect(await readFile(path.resolve(path.dirname(example),'../../src/terminal_command/capture.rs'))).toEqual(await readFile(path.join(root,'src-tauri/src/terminal_command/capture.rs')));
+    expect(await readFile(path.join(output,'src-tauri/src/terminal_command/protocol.rs'))).toEqual(await readFile(path.join(root,'src-tauri/src/terminal_command/protocol.rs')));
+    for(const name of ['target','__pycache__'])await expect(readdir(path.join(output,'src-tauri/native-input-editors',name))).rejects.toMatchObject({code:'ENOENT'});
+  }finally{const relative=path.relative(artifacts,directory);if(!relative||relative.startsWith('..')||path.isAbsolute(relative))throw Error('Unsafe fixture cleanup path');await rm(directory,{recursive:true,force:true});}
+});

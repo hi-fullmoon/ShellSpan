@@ -15,7 +15,13 @@ const base=path.join(root,'.artifacts/tests/native-input-p0/xterm-package-builds
 mkdirSync(base,{recursive:true});
 const sha=file=>createHash('sha256').update(readFileSync(file)).digest('hex');
 const run=(command,parameters,cwd,log,env={})=>{
-  const result=spawnSync(command,parameters,{cwd,env:{...process.env,...env},encoding:'utf8',maxBuffer:32*1024*1024});
+  let executable=command,arguments_=parameters;
+  if(process.platform==='win32'&&command==='pnpm'){
+    const cli=process.env.npm_execpath;
+    assert(cli&&/pnpm\.(?:mjs|cjs|js)$/.test(cli),'Run the Windows rebuild through pnpm check:xterm:rebuild');
+    executable=process.execPath;arguments_=[cli,...parameters];
+  }
+  const result=spawnSync(executable,arguments_,{cwd,env:{...process.env,...env},encoding:'utf8',maxBuffer:32*1024*1024});
   writeFileSync(path.join(base,log),`${result.stdout??''}${result.stderr??''}\nexit=${result.status}\n`);
   if(result.status!==0)throw new Error(`${command} failed; see ${path.join(base,log)}`);
 };
@@ -26,7 +32,7 @@ run('pnpm',['install','--dir',toolsDir,'--frozen-lockfile','--ignore-workspace',
 const toolsRequire=createRequire(path.join(toolsDir,'package.json'));
 const esbuildPackage=toolsRequire.resolve('esbuild/package.json');
 const esbuildRequire=createRequire(esbuildPackage);
-const binary=esbuildRequire.resolve(`@esbuild/${process.platform}-${process.arch}/bin/esbuild`);
+const binary=esbuildRequire.resolve(`@esbuild/${process.platform}-${process.arch}/${process.platform==='win32'?'esbuild.exe':'bin/esbuild'}`);
 const npmPackage=toolsRequire.resolve('npm/package.json');
 const npmMetadata=JSON.parse(readFileSync(npmPackage,'utf8'));
 assert.equal(npmMetadata.version,pin.npm);
@@ -40,7 +46,8 @@ if(args.includes('--prepared-source'))throw new Error('Maintained rebuilds requi
 // External build roots prevent a parent's @xterm declarations from entering tsc.
 const source=mkdtempSync(path.join(tmpdir(),'shellspan-xterm-6.0.0-'));
 run('tar',['-xzf',archive,'--strip-components=1','-C',source],root,'extract.log');
-for(const file of Object.keys(pin.patches))run('patch',['--batch','--fuzz=0','-p1','-i',path.join(root,file)],source,`${path.basename(file)}.log`);
+const patchCommand=process.env.SHELLSPAN_XTERM_PATCH??'patch';
+for(const file of Object.keys(pin.patches))run(patchCommand,['--batch','--fuzz=0','-p1','-i',path.join(root,file)],source,`${path.basename(file)}.log`);
 assert.equal(sha(path.join(source,'package-lock.json')),pin.upstreamLockSha256,'Upstream lock differs');
 const upstreamPackage=JSON.parse(readFileSync(path.join(source,'package.json'),'utf8'));
 assert.equal(upstreamPackage.version,pin.version);assert.equal(upstreamPackage.name,'@xterm/xterm');
@@ -56,7 +63,7 @@ run(process.execPath,[path.join(source,'node_modules/webpack-cli/bin/cli.js'),'-
 run(process.execPath,['bin/esbuild.mjs','--prod'],source,'esm.log',env);
 const files=[...pin.sourceFiles,...pin.runtimeFiles];
 const artifacts=Object.fromEntries(files.map(file=>[file,sha(path.join(source,file))]));
-const manifest={...pin,node:process.version,buildRoot:source,reusedPreparedInstall:false,
+const manifest={...pin,node:process.version,buildRoot:source,reusedPreparedInstall:false,patchCommand,
   toolsLockSha256:sha(path.join(toolsDir,'pnpm-lock.yaml')),esbuildBinarySha256:sha(binary),artifacts,
   commands:['npm ci --ignore-scripts','npm run build','webpack --config webpack.config.js','node bin/esbuild.mjs --prod'],record};
 writeFileSync(path.join(base,'manifest.json'),JSON.stringify(manifest,null,2));

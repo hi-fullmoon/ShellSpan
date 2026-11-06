@@ -209,10 +209,13 @@ public sealed class ShellSpanProcessJob : IDisposable {
     public bool StopRequested { get; private set; }
     public ShellSpanProcessJob(string executable, string directory, string packet) {
         InstanceId = Guid.NewGuid();
-        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(packet);
-        if (bytes.Length > 16777216) throw new NotSupportedException("Native worker state exceeds 16 MiB");
         var clock = System.Diagnostics.Stopwatch.StartNew();
+        string stage = "validateState";
+        bool sourceMayHaveStarted = false;
         try {
+            byte[] bytes = System.Text.Encoding.UTF8.GetBytes(packet);
+            if (bytes.Length > 16777216) throw new NotSupportedException("Native worker state exceeds 16 MiB");
+            stage = "createGroup";
             job = CreateJobObject(IntPtr.Zero, null);
             if (job == IntPtr.Zero) throw new System.ComponentModel.Win32Exception();
             var limits = new ExtendedLimit();
@@ -223,6 +226,7 @@ public sealed class ShellSpanProcessJob : IDisposable {
                 System.Runtime.InteropServices.Marshal.StructureToPtr(limits, memory, false);
                 if (!SetInformationJobObject(job, 9, memory, (uint)size)) throw new System.ComponentModel.Win32Exception();
             } finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(memory); }
+            stage = "createPipe";
             string name = "shellspan-job-" + System.Diagnostics.Process.GetCurrentProcess().Id + "-" + Guid.NewGuid().ToString("N");
             pipe = new System.IO.Pipes.NamedPipeServerStream(name, System.IO.Pipes.PipeDirection.InOut, 1,
                 System.IO.Pipes.PipeTransmissionMode.Byte, System.IO.Pipes.PipeOptions.Asynchronous);
@@ -242,10 +246,12 @@ public sealed class ShellSpanProcessJob : IDisposable {
             start.RedirectStandardInput = true;
             start.WorkingDirectory = directory;
             IAsyncResult connected = pipe.BeginWaitForConnection(null, null);
+            stage = "startProcess";
             process = System.Diagnostics.Process.Start(start);
             process.StandardInput.Close();
             if (!AssignProcessToJobObject(job, process.Handle)) throw new System.ComponentModel.Win32Exception();
             assigned = true;
+            stage = "connect";
             try {
                 if (!connected.AsyncWaitHandle.WaitOne(Math.Max(0, 5000 - (int)clock.ElapsedMilliseconds))) throw new TimeoutException("Native worker connection timed out");
                 pipe.EndWaitForConnection(connected);
@@ -253,6 +259,7 @@ public sealed class ShellSpanProcessJob : IDisposable {
             uint client;
             if (!GetNamedPipeClientProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out client) || client != (uint)process.Id)
                 throw new InvalidOperationException("Unexpected native worker pipe client");
+            stage = "writeState";
             var writing = System.Threading.Tasks.Task.Factory.StartNew(() => {
                 var writer = new System.IO.BinaryWriter(pipe, System.Text.Encoding.UTF8, true);
                 writer.Write(bytes.Length); writer.Write(bytes); writer.Flush();
@@ -260,6 +267,7 @@ public sealed class ShellSpanProcessJob : IDisposable {
                 System.Threading.Tasks.TaskScheduler.Default);
             if (!writing.Wait(Math.Max(0, 5000 - (int)clock.ElapsedMilliseconds))) throw new TimeoutException("Native worker state delivery timed out");
             writing.GetAwaiter().GetResult();
+            stage = "consoleIsolation";
             var ready = System.Threading.Tasks.Task.Factory.StartNew(() => pipe.ReadByte(),
                 System.Threading.CancellationToken.None, System.Threading.Tasks.TaskCreationOptions.LongRunning,
                 System.Threading.Tasks.TaskScheduler.Default);
@@ -274,7 +282,16 @@ public sealed class ShellSpanProcessJob : IDisposable {
                 return System.Text.Encoding.UTF8.GetString(value);
             }, System.Threading.CancellationToken.None, System.Threading.Tasks.TaskCreationOptions.LongRunning,
                 System.Threading.Tasks.TaskScheduler.Default);
+            // A ready worker is still waiting behind its start fence. Mark
+            // uncertainty before the one byte that can release user source.
+            stage = "commitStart";
+            sourceMayHaveStarted = true;
+            pipe.WriteByte(0xA2);
+            pipe.Flush();
         } catch (Exception failure) {
+            failure.Data["NativeWorkerStartStage"] = stage;
+            failure.Data["NativeWorkerStartElapsedMs"] = clock.ElapsedMilliseconds;
+            failure.Data["NativeWorkerSourceMayHaveStarted"] = sourceMayHaveStarted;
             // Preserve real cleanup evidence before closing the only group
             // handle. No source text or variable payload enters diagnostics.
             bool confirmed = process == null;

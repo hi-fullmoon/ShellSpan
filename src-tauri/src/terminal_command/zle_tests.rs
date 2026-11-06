@@ -1205,7 +1205,9 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
     let owner = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
     let run = uuid::Uuid::new_v4().to_string();
     let session_id = format!("p3-zle-{run}");
-    let evidence = owner.join(".artifacts/tests/native-input-p3/production-zle").join(&run);
+    let evidence = owner
+        .join(".artifacts/tests/native-input-p3/production-zle")
+        .join(&run);
     fs::create_dir_all(&evidence).unwrap();
     let home = evidence.join("home");
     fs::create_dir(&home).unwrap();

@@ -1,26 +1,34 @@
 param([Parameter(Mandatory=$true)][int]$RootPid,[Parameter(Mandatory=$true)][int]$OwnerPid,[Parameter(Mandatory=$true)][string]$RootExecutable,[string]$Output)
 $ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot 'windows-process-ownership.ps1')
 $all=@(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CreationDate,ExecutablePath)
-$root=@($all|Where-Object {$_.ProcessId-eq $RootPid})
 $result=@{kind='owned-native-cli-process-tree-cleanup';rootPid=$RootPid;ownerPid=$OwnerPid;ok=$false}
+$pinned=[Collections.Generic.List[object]]::new()
 try {
-  if($root.Count-eq 0){
-    if(@($all|Where-Object {$_.ParentProcessId-eq $RootPid}).Count){throw 'Missing root still has descendants; ownership cannot be re-established'}
+  $selection=Select-OwnedNativeProcessTree -Processes $all -RootPid $RootPid -OwnerPid $OwnerPid -RootExecutable $RootExecutable
+  $result.rejectedEdges=@($selection.rejectedEdges)
+  if($selection.alreadyExited){
     $result.alreadyExited=$true;$result.before=@();$result.remaining=@();$result.ok=$true
   }else{
-    if($root.Count-ne 1-or $root[0].ParentProcessId-ne $OwnerPid-or -not [string]::Equals($root[0].ExecutablePath,$RootExecutable,[StringComparison]::OrdinalIgnoreCase)){throw 'Native CLI root identity changed; no process terminated'}
-    $tree=[Collections.Generic.List[object]]::new();$tree.Add($root[0]);$frontier=@($RootPid)
-    while($frontier.Count){
-      $children=@($all|Where-Object {$_.ParentProcessId-in $frontier})
-      foreach($child in $children){$tree.Add($child)}
-      $frontier=@($children|ForEach-Object {$_.ProcessId})
-    }
-    $known=@($tree|ForEach-Object {@{pid=$_.ProcessId;parentPid=$_.ParentProcessId;created=$_.CreationDate.ToFileTimeUtc().ToString();executable=$_.ExecutablePath}})
+    $known=@($selection.processes|ForEach-Object {@{pid=$_.ProcessId;parentPid=$_.ParentProcessId;created=([datetime]$_.CreationDate).ToFileTimeUtc().ToString();executable=$_.ExecutablePath}})
     $result.before=$known
-    $ErrorActionPreference='Continue'
-    & taskkill.exe /PID $RootPid /T /F 2>&1|Out-Null
-    $result.taskkillExitCode=$LASTEXITCODE
-    $ErrorActionPreference='Stop'
+    # Pin every identity before terminating any process. A handle remains bound
+    # to its original process even if that numeric PID is subsequently reused.
+    foreach($entry in $known){
+      $process=$null
+      try{$process=[Diagnostics.Process]::GetProcessById($entry.pid)}catch [ArgumentException]{continue}
+      try{
+        $null=$process.Handle
+        if($process.HasExited){$process.Dispose();continue}
+        $actual=@(Get-CimInstance Win32_Process -Filter ('ProcessId='+$entry.pid) -Property ProcessId,CreationDate,ExecutablePath)
+        if($actual.Count-ne1-or$actual[0].CreationDate.ToFileTimeUtc().ToString()-ne$entry.created-or
+          -not [string]::Equals($actual[0].ExecutablePath,$entry.executable,[StringComparison]::OrdinalIgnoreCase)-or
+          [Math]::Abs($process.StartTime.ToFileTimeUtc()-[long]$entry.created)-ge10){throw 'Native CLI process identity changed while pinning; no process terminated'}
+        $pinned.Add($process);$process=$null
+      }finally{if($null-ne$process){$process.Dispose()}}
+    }
+    for($index=$pinned.Count-1;$index-ge0;$index--){if(-not$pinned[$index].HasExited){$pinned[$index].Kill()}}
+    $result.termination='verified-process-handles';$result.treeKillUsed=$false
     $deadline=[Diagnostics.Stopwatch]::StartNew()
     do {
       $current=@(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CreationDate,ExecutablePath)
@@ -34,6 +42,7 @@ try {
   }
 }catch{$result.error=$_.Exception.Message}
 finally{
+  foreach($process in $pinned){$process.Dispose()}
   if($Output){$result|ConvertTo-Json -Depth 6|Set-Content -Encoding utf8 -LiteralPath $Output}
 }
 if(-not $result.ok){throw $result.error}

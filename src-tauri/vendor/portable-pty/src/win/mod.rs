@@ -16,10 +16,25 @@ mod procthreadattr;
 mod psuedocon;
 
 use filedescriptor::OwnedHandle;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct WinChild {
     proc: Mutex<OwnedHandle>,
+    startup_thread: Arc<Mutex<Option<OwnedHandle>>>,
+}
+
+fn resume_startup(thread: &Mutex<Option<OwnedHandle>>) -> IoResult<()> {
+    let mut guard = thread
+        .lock()
+        .map_err(|_| IoError::other("startup thread lock poisoned"))?;
+    if let Some(thread) = guard.as_ref() {
+        if unsafe { ResumeThread(thread.as_raw_handle() as _) } == u32::MAX {
+            return Err(IoError::last_os_error());
+        }
+        guard.take();
+    }
+    Ok(())
 }
 
 impl WinChild {
@@ -42,7 +57,7 @@ impl WinChild {
         let proc = self.proc.lock().unwrap().try_clone().unwrap();
         let res = unsafe { TerminateProcess(proc.as_raw_handle() as _, 1) };
         let err = IoError::last_os_error();
-        if res != 0 {
+        if res == 0 {
             Err(err)
         } else {
             Ok(())
@@ -51,27 +66,36 @@ impl WinChild {
 }
 
 impl ChildKiller for WinChild {
+    fn resume_startup(&mut self) -> IoResult<()> {
+        resume_startup(&self.startup_thread)
+    }
     fn kill(&mut self) -> IoResult<()> {
-        self.do_kill().ok();
-        Ok(())
+        self.do_kill()
     }
 
     fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
         let proc = self.proc.lock().unwrap().try_clone().unwrap();
-        Box::new(WinChildKiller { proc })
+        Box::new(WinChildKiller {
+            proc,
+            startup_thread: self.startup_thread.clone(),
+        })
     }
 }
 
 #[derive(Debug)]
 pub struct WinChildKiller {
     proc: OwnedHandle,
+    startup_thread: Arc<Mutex<Option<OwnedHandle>>>,
 }
 
 impl ChildKiller for WinChildKiller {
+    fn resume_startup(&mut self) -> IoResult<()> {
+        resume_startup(&self.startup_thread)
+    }
     fn kill(&mut self) -> IoResult<()> {
         let res = unsafe { TerminateProcess(self.proc.as_raw_handle() as _, 1) };
         let err = IoError::last_os_error();
-        if res != 0 {
+        if res == 0 {
             Err(err)
         } else {
             Ok(())
@@ -80,7 +104,10 @@ impl ChildKiller for WinChildKiller {
 
     fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
         let proc = self.proc.try_clone().unwrap();
-        Box::new(WinChildKiller { proc })
+        Box::new(WinChildKiller {
+            proc,
+            startup_thread: self.startup_thread.clone(),
+        })
     }
 }
 

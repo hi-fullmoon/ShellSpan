@@ -95,7 +95,9 @@ impl NativeShell {
                 manifest_path
                     .map(std::path::Path::to_path_buf)
                     .unwrap_or_else(|| {
-                        root.join(".artifacts/tests/native-input-p0/p1-protocol-build/manifest.json")
+                        root.join(
+                            ".artifacts/tests/native-input-p0/p1-protocol-build/manifest.json",
+                        )
                     }),
             )
             .expect("run the NIP source builder"),
@@ -1032,14 +1034,17 @@ fn native_linux_geometry_inputs() {
         crate::terminal_command::artifacts::read_catalogue(&resources, "linux-aarch64-glibc-2.36")
             .unwrap();
     let run = uuid::Uuid::new_v4().to_string();
-    let output = root.join(".artifacts/tests/native-input-p2/linux-geometry").join(&run);
+    let output = root
+        .join(".artifacts/tests/native-input-p2/linux-geometry")
+        .join(&run);
     fs::create_dir_all(&output).unwrap();
     let mut entries = Vec::new();
     for artifact in artifacts {
         for columns in [32, 40, 100, 180] {
             let case = format!("{}-{columns}-oversize", artifact.bash_version);
             let host = output.join(&case);
-            let linux = format!("/work/.artifacts/tests/native-input-p2/linux-geometry/{run}/{case}");
+            let linux =
+                format!("/work/.artifacts/tests/native-input-p2/linux-geometry/{run}/{case}");
             fs::create_dir_all(&host).unwrap();
             let socket = format!(
                 "/tmp/ss-lg-{}/control",
@@ -1247,8 +1252,7 @@ fn native_production_capture_preserves_real_output_and_bounds_osc_across_all_spl
     let mut summary = Vec::new();
     let run_id = uuid::Uuid::new_v4().to_string();
     for (version, readline) in [("4.1", "6.0"), ("4.4", "7.0"), ("5.3", "8.3.6")] {
-        let profile =
-            format!("gnu-bash-{version}-readline-{readline}-macos-arm64-native");
+        let profile = format!("gnu-bash-{version}-readline-{readline}-macos-arm64-native");
         let manifest = root
             .join(".artifacts/tests/native-input-p2/producers")
             .join(&profile)
@@ -2213,6 +2217,7 @@ fn native_protocol_real_running_stop_preserves_submission_and_private_end_status
     coordinator
         .interrupt(
             crate::terminal_broker::TerminalCommandRequestedSettlement::TakenOver,
+            Instant::now() + Duration::from_secs(2),
             || {
                 sender
                     .send(Input::Pty(vec![3]))

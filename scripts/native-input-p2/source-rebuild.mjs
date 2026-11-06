@@ -4,9 +4,10 @@ import {openSync,closeSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {spawn} from 'node:child_process';
+import {nativeInputReleaseDirectory} from './resource-paths.mjs';
 
 const root=resolve(import.meta.dirname,'../..');
-const packaged=resolve(root,'src-tauri/resources/native-input/generated');
+const packaged=nativeInputReleaseDirectory(root);
 const directory=resolve(root,'.artifacts/tests/native-input-p2/source-rebuild',randomUUID());
 await mkdir(directory,{recursive:true,mode:0o700});
 const clean=resolve(directory,'ShellSpan');await cp(resolve(packaged,'sources/ShellSpan'),clean,{recursive:true});

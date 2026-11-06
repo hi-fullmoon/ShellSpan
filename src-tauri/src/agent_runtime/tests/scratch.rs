@@ -101,13 +101,25 @@ fn scratch_roots_are_private_outside_project_and_isolated_by_session() {
         .unwrap()
         .join("agent-runtime/scratch");
     assert_eq!(
-        Path::new(&first.root),
+        Path::new(&first.root).canonicalize().unwrap(),
         work.root
             .path()
             .canonicalize()
             .unwrap()
             .join("tmp")
             .join(&key("parent", &work.target).unwrap()[..16])
+            .canonicalize()
+            .unwrap()
+    );
+    assert!(Path::new(&first.root).is_absolute());
+    assert!(!fs::symlink_metadata(&first.root)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    #[cfg(windows)]
+    assert!(
+        !first.root.starts_with(r"\\?\"),
+        "public script paths must remain ordinary drive paths"
     );
     assert_eq!(Path::new(&first.root).file_name().unwrap().len(), 16);
     assert_eq!(Path::new(&child.root).file_name().unwrap().len(), 16);

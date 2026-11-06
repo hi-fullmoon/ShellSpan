@@ -950,6 +950,15 @@ fn coalesce_session_commands(commands: Vec<SessionCommand>) -> Vec<SessionComman
                 // the most recent one instead of replaying every step.
                 pending_resize = Some((cols, rows));
             }
+            SessionCommand::StartupReady => {
+                if let Some((cols, rows)) = pending_resize.take() {
+                    merged.push(SessionCommand::Resize { cols, rows });
+                }
+                if !pending_write.is_empty() {
+                    merged.push(SessionCommand::Write(std::mem::take(&mut pending_write)));
+                }
+                merged.push(SessionCommand::StartupReady);
+            }
             SessionCommand::Close => {
                 if let Some((cols, rows)) = pending_resize.take() {
                     merged.push(SessionCommand::Resize { cols, rows });
@@ -1210,6 +1219,9 @@ fn session_loop_inner(
                 SessionCommand::Resize { cols, rows } => {
                     resize_pty_nonblocking(session, channel, cols, rows)?;
                     made_progress = true;
+                }
+                SessionCommand::StartupReady => {
+                    return Err("local startup notification is invalid for SSH".into());
                 }
                 SessionCommand::Close => {
                     info!("SSH session closed locally session_id={session_id}");

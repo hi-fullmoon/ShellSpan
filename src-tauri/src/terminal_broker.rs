@@ -30,8 +30,7 @@ pub(crate) const TERMINAL_EXECUTE_FLAG_NAME: &str = "terminal_execute";
 pub(crate) const TERMINAL_EXECUTE_ENVIRONMENT_VARIABLE: &str = "SHELLSPAN_TERMINAL_EXECUTE";
 pub(crate) const TERMINAL_EXECUTE_DEFAULT_ENABLED: bool =
     cfg!(any(target_os = "macos", target_os = "windows"));
-pub(crate) const TERMINAL_REMOTE_BOUND_TERMINAL_FLAG_NAME: &str =
-    "terminal_remote_bound_terminal";
+pub(crate) const TERMINAL_REMOTE_BOUND_TERMINAL_FLAG_NAME: &str = "terminal_remote_bound_terminal";
 pub(crate) const TERMINAL_REMOTE_BOUND_TERMINAL_ENVIRONMENT_VARIABLE: &str =
     "SHELLSPAN_TERMINAL_REMOTE_BOUND_TERMINAL";
 pub(crate) const TERMINAL_REMOTE_BOUND_TERMINAL_DEFAULT_ENABLED: bool =
@@ -275,9 +274,29 @@ pub(crate) struct TerminalExecutionCapabilities {
     pub(crate) input_recovery_required: bool,
 }
 
+/// Read-only result-capture observation for explicitly opted-in debug acceptance.
+/// No private request IDs, control endpoints or authority are exposed.
+#[cfg(all(feature = "native-input-acceptance", debug_assertions))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TerminalAcceptanceCommandCapture {
+    command_id: String,
+    operation_id: String,
+    bytes: Vec<u8>,
+    capture_open: bool,
+    truncated: bool,
+    native_fence_registered: bool,
+    native_fence_complete: bool,
+    start_sequence: u64,
+    end_sequence: Option<u64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TerminalBrokerSessionSnapshot {
+    #[cfg(all(feature = "native-input-acceptance", debug_assertions))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) acceptance_command_capture: Option<TerminalAcceptanceCommandCapture>,
     pub(crate) input_mode: InputMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) native_display_binding: Option<nip::DisplayBinding>,
@@ -531,6 +550,8 @@ pub(crate) enum TerminalVisibleCommandRoute {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TerminalCommandSnapshot {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) command_observation: Option<TerminalCommandObservation>,
     pub(crate) phase: CommandPhase,
     pub(crate) may_have_submitted: bool,
     pub(crate) protocol_version: u8,
@@ -812,56 +833,37 @@ impl TerminalCommandOperation {
         Ok(command_snapshot(&data))
     }
 
-    fn observation(&self) -> Result<TerminalCommandObservation, String> {
+    pub(crate) fn snapshot_for_result(&self) -> Result<TerminalCommandSnapshot, String> {
         let data = self.lock()?;
-        Ok(TerminalCommandObservation {
-            submission_intent_durable: data.submission_intent_recorded,
-            draft_cleared: data.lifecycle.draft_cleared(),
-            phase: data.lifecycle.phase(),
-            may_have_submitted: data.lifecycle.may_have_submitted(),
-            full_input_confirmed: data.input_proof.is_some(),
-            lease_generation: data.intent.identity.lease_generation,
-            source_revision: data.intent.identity.source_revision,
-            display_source: (!matches!(
-                data.plan.native_job,
-                Some(nip::JobExecution::Control { .. })
-            ) && !matches!(
-                data.plan.method,
-                crate::terminal_command::state::ExecutionMethod::NativeJobControl
-            ))
-            .then(|| crate::redaction::redact_sensitive_text(data.intent.source())),
-            safe_actions: if data.native_protocol
-                && matches!(
-                    data.lifecycle.phase(),
-                    CommandPhase::Uncertain | CommandPhase::RecoveryRequired
-                )
-                && data.lifecycle.may_have_submitted()
-                && !data.lifecycle.ended()
-            {
-                vec!["query", "requestStop"]
-            } else if data.lifecycle.is_terminal() {
-                vec!["query"]
-            } else {
-                vec!["query", "requestStop"]
-            },
-            agent_session_id: data.intent.identity.agent_session_id.clone(),
-            task_id: data.intent.identity.task_id.clone(),
-            operation_id: data.intent.identity.operation_id.clone(),
+        let mut snapshot = command_snapshot(&data);
+        snapshot.command_observation = data.native_protocol.then(|| command_observation(&data));
+        Ok(snapshot)
+    }
+
+    #[cfg(all(feature = "native-input-acceptance", debug_assertions))]
+    fn acceptance_capture(&self) -> Result<TerminalAcceptanceCommandCapture, String> {
+        let data = self.lock()?;
+        Ok(TerminalAcceptanceCommandCapture {
             command_id: data.intent.identity.command_id.clone(),
-            legacy_state: data.state(),
-            legacy_revision: data.revision,
-            source_may_be_enqueued: data.source_may_be_enqueued,
-            execution_evidence: if data.lifecycle.ended() && data.lifecycle.may_have_submitted() {
-                TerminalCommandExecutionEvidence::EndObserved
-            } else if data.lifecycle.started() {
-                TerminalCommandExecutionEvidence::StartObserved
-            } else {
-                TerminalCommandExecutionEvidence::Unknown
-            },
-            no_auto_replay: true,
+            operation_id: data.intent.identity.operation_id.clone(),
+            bytes: data.capture.clone(),
+            capture_open: data.capture_open,
+            truncated: data.capture_truncated,
+            native_fence_registered: data.native_capture.is_some(),
+            native_fence_complete: data
+                .native_capture
+                .as_ref()
+                .is_some_and(|fence| fence.complete()),
+            start_sequence: data.capture_start_sequence,
+            end_sequence: data.capture_end_sequence,
         })
     }
-    #[cfg(test)]
+
+    fn observation(&self) -> Result<TerminalCommandObservation, String> {
+        let data = self.lock()?;
+        Ok(command_observation(&data))
+    }
+    #[cfg(all(test, unix))]
     pub(crate) fn observation_for_test(&self) -> Result<TerminalCommandObservation, String> {
         self.observation()
     }
@@ -1189,9 +1191,6 @@ impl TerminalCommandOperation {
         self.expect_native_data_checkpoint(descriptor, "")
     }
 
-
-
-
     #[cfg(test)]
     pub(crate) fn expect_native_data_checkpoint(
         &self,
@@ -1226,7 +1225,6 @@ impl TerminalCommandOperation {
                 .is_some_and(|(_, _, ready)| *ready))
     }
 
-
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, TerminalCommandData>, String> {
         self.data
             .lock()
@@ -1246,8 +1244,58 @@ fn next_command_revision(current: u64) -> Result<u64, String> {
     Ok(next)
 }
 
+fn command_observation(data: &TerminalCommandData) -> TerminalCommandObservation {
+    TerminalCommandObservation {
+        submission_intent_durable: data.submission_intent_recorded,
+        draft_cleared: data.lifecycle.draft_cleared(),
+        phase: data.lifecycle.phase(),
+        may_have_submitted: data.lifecycle.may_have_submitted(),
+        full_input_confirmed: data.input_proof.is_some(),
+        lease_generation: data.intent.identity.lease_generation,
+        source_revision: data.intent.identity.source_revision,
+        display_source: (!matches!(
+            data.plan.native_job,
+            Some(nip::JobExecution::Control { .. })
+        ) && !matches!(
+            data.plan.method,
+            crate::terminal_command::state::ExecutionMethod::NativeJobControl
+        ))
+        .then(|| crate::redaction::redact_sensitive_text(data.intent.source())),
+        safe_actions: if data.native_protocol
+            && matches!(
+                data.lifecycle.phase(),
+                CommandPhase::Uncertain | CommandPhase::RecoveryRequired
+            )
+            && data.lifecycle.may_have_submitted()
+            && !data.lifecycle.ended()
+        {
+            vec!["query", "requestStop"]
+        } else if data.lifecycle.is_terminal() {
+            vec!["query"]
+        } else {
+            vec!["query", "requestStop"]
+        },
+        agent_session_id: data.intent.identity.agent_session_id.clone(),
+        task_id: data.intent.identity.task_id.clone(),
+        operation_id: data.intent.identity.operation_id.clone(),
+        command_id: data.intent.identity.command_id.clone(),
+        legacy_state: data.state(),
+        legacy_revision: data.revision,
+        source_may_be_enqueued: data.source_may_be_enqueued,
+        execution_evidence: if data.lifecycle.ended() && data.lifecycle.may_have_submitted() {
+            TerminalCommandExecutionEvidence::EndObserved
+        } else if data.lifecycle.started() {
+            TerminalCommandExecutionEvidence::StartObserved
+        } else {
+            TerminalCommandExecutionEvidence::Unknown
+        },
+        no_auto_replay: true,
+    }
+}
+
 fn command_snapshot(data: &TerminalCommandData) -> TerminalCommandSnapshot {
     TerminalCommandSnapshot {
+        command_observation: None,
         phase: data.lifecycle.phase(),
         may_have_submitted: data.lifecycle.may_have_submitted(),
         protocol_version: 1,
@@ -1658,7 +1706,9 @@ impl SessionRecord {
         (self.input_mode == InputMode::NativeInline && self.native_display_negotiated).then(|| {
             self.native_profile
                 .as_ref()
-                .map_or_else(nip::DisplayBinding::native, |profile| profile.display_binding())
+                .map_or_else(nip::DisplayBinding::native, |profile| {
+                    profile.display_binding()
+                })
         })
     }
 
@@ -1670,6 +1720,12 @@ impl SessionRecord {
             .transpose();
         let command_observation_unavailable = command_observation.is_err();
         let mut snapshot = TerminalBrokerSessionSnapshot {
+            #[cfg(all(feature = "native-input-acceptance", debug_assertions))]
+            acceptance_command_capture: self
+                .active_command
+                .as_ref()
+                .map(|command| command.acceptance_capture())
+                .transpose()?,
             input_mode: self.input_mode,
             native_peer_profile: self.native_peer_profile.clone(),
             native_display_binding: self.native_display_binding(),
@@ -1746,9 +1802,16 @@ impl SessionRecord {
         // Version the complete public projection, including every gate, lease,
         // proof and intent fact. Re-reading unchanged data does not manufacture
         // a state change; the legacy lifecycle revision is never used as a cursor.
+        // Acceptance-only observations must not change the production cursor.
+        #[cfg(all(feature = "native-input-acceptance", debug_assertions))]
+        let acceptance_capture = snapshot.acceptance_command_capture.take();
         let digest = nip::sha(
             &serde_json::to_string(&snapshot).map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE")?,
         );
+        #[cfg(all(feature = "native-input-acceptance", debug_assertions))]
+        {
+            snapshot.acceptance_command_capture = acceptance_capture;
+        }
         let mut cursor = self
             .snapshot_sequence
             .lock()
@@ -1865,7 +1928,7 @@ impl TerminalSessionBroker {
         self.submission_journal.configure(root)
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn unresolved_submissions(
         &self,
     ) -> Result<Vec<crate::terminal_command::journal::SubmissionIntent>, String> {
@@ -1995,11 +2058,10 @@ impl TerminalSessionBroker {
             TERMINAL_EXECUTE_ENVIRONMENT_VARIABLE,
             TERMINAL_EXECUTE_DEFAULT_ENABLED,
         )?;
-        let (remote_bound_terminal, remote_bound_terminal_source) =
-            trusted_rollout_value(
-                TERMINAL_REMOTE_BOUND_TERMINAL_ENVIRONMENT_VARIABLE,
-                TERMINAL_REMOTE_BOUND_TERMINAL_DEFAULT_ENABLED,
-            )?;
+        let (remote_bound_terminal, remote_bound_terminal_source) = trusted_rollout_value(
+            TERMINAL_REMOTE_BOUND_TERMINAL_ENVIRONMENT_VARIABLE,
+            TERMINAL_REMOTE_BOUND_TERMINAL_DEFAULT_ENABLED,
+        )?;
         let (interactive_tools, interactive_tools_source) = trusted_rollout_value(
             TERMINAL_INTERACTIVE_TOOLS_ENVIRONMENT_VARIABLE,
             TERMINAL_INTERACTIVE_TOOLS_DEFAULT_ENABLED,
@@ -2555,6 +2617,15 @@ impl TerminalSessionBroker {
         transport_session_id: &str,
         request: TerminalWaitRequest,
     ) -> Result<TerminalWaitResult, String> {
+        self.wait_terminal_observed(transport_session_id, request, || {})
+    }
+
+    fn wait_terminal_observed(
+        &self,
+        transport_session_id: &str,
+        request: TerminalWaitRequest,
+        on_attached: impl FnOnce(),
+    ) -> Result<TerminalWaitResult, String> {
         let deadline = Instant::now() + request.timeout;
         let mut state = self.lock()?;
         if !state.interactive_tools_rollout.enabled {
@@ -2563,6 +2634,7 @@ impl TerminalSessionBroker {
         let attachment = current_attachment(&state, transport_session_id)?.clone();
         let terminal_session_id = attachment.terminal_session_id;
         let terminal_generation = attachment.terminal_generation;
+        on_attached();
         loop {
             let record = state
                 .sessions
@@ -3505,8 +3577,14 @@ impl TerminalSessionBroker {
                     && if record.input_mode == InputMode::NativeInline {
                         prepared_native_job(prepared)
                             .and_then(|job| {
-                                nip::native_shell_job_plan(command_line, crate::terminal_command::registration::shell_family(prepared.job.shell)?, &job)
-                                    .map_err(|_| "TERMINAL_NATIVE_PLAN_INVALID".into())
+                                nip::native_shell_job_plan(
+                                    command_line,
+                                    crate::terminal_command::registration::shell_family(
+                                        prepared.job.shell,
+                                    )?,
+                                    &job,
+                                )
+                                .map_err(|_| "TERMINAL_NATIVE_PLAN_INVALID".into())
                             })
                             .is_ok_and(|expected| expected == submitted)
                     } else {
@@ -3517,12 +3595,20 @@ impl TerminalSessionBroker {
                 validate_prepared_shell_job(record, prepared, operation_id)?;
             }
             let expected_bash = if record.input_mode == InputMode::NativeInline {
-                nip::native_foreground_plan(command_line, crate::terminal_command::registration::shell_family(record.integration_shell.ok_or("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?)?)
-                    .map_err(|_| "TERMINAL_NATIVE_SUBMISSION_MISMATCH")?
+                nip::native_foreground_plan(
+                    command_line,
+                    crate::terminal_command::registration::shell_family(
+                        record
+                            .integration_shell
+                            .ok_or("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?,
+                    )?,
+                )
+                .map_err(|_| "TERMINAL_NATIVE_SUBMISSION_MISMATCH")?
             } else {
                 crate::terminal_integration::bash_native_submission(command_line)?
             };
-            let bash_source_matches = (record.input_mode == InputMode::NativeInline || record.integration_shell == Some(TerminalShellKind::Bash))
+            let bash_source_matches = (record.input_mode == InputMode::NativeInline
+                || record.integration_shell == Some(TerminalShellKind::Bash))
                 && submitted == expected_bash
                 && (record.native_input
                     || (command_line.len() <= 512 && !command_line.contains(['\n', '\r', '\t'])));
@@ -3767,8 +3853,12 @@ impl TerminalSessionBroker {
         let attachment = current_attachment(&state, transport)?.clone();
         let record = current_record_mut(&mut state, transport, &attachment)?;
         validate_prepared_shell_job_binding(record, &prepared, operation, false)?;
-        nip::native_shell_job_plan(source, crate::terminal_command::registration::shell_family(prepared.job.shell)?, &prepared_native_job(&prepared)?)
-            .map_err(|_| "TERMINAL_NATIVE_PLAN_INVALID".into())
+        nip::native_shell_job_plan(
+            source,
+            crate::terminal_command::registration::shell_family(prepared.job.shell)?,
+            &prepared_native_job(&prepared)?,
+        )
+        .map_err(|_| "TERMINAL_NATIVE_PLAN_INVALID".into())
     }
 
     pub(crate) fn native_job_started(
@@ -3896,7 +3986,6 @@ impl TerminalSessionBroker {
         validate_prepared_shell_job(record, &prepared, operation)
     }
 
-
     pub(crate) fn discard_shell_job_submission(&self, operation: &str) -> Result<(), String> {
         self.lock()?.prepared_job_commands.remove(operation);
         Ok(())
@@ -3972,7 +4061,6 @@ impl TerminalSessionBroker {
         Ok(())
     }
 
-
     #[cfg(test)]
     pub(crate) fn expect_native_clear(
         &self,
@@ -4045,7 +4133,6 @@ impl TerminalSessionBroker {
             }))
     }
 
-
     /// Called only with execution-layer proof that accept-line was never
     /// attempted. Preparation and a stale transport are not launch evidence.
     pub(crate) fn reject_shell_job_before_submission(
@@ -4107,7 +4194,7 @@ impl TerminalSessionBroker {
             .collect())
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn has_active_shell_jobs(&self, transport: &str) -> Result<bool, String> {
         let state = self.lock()?;
         let attachment = current_attachment(&state, transport)?;
@@ -4849,7 +4936,7 @@ impl TerminalSessionBroker {
         broker
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn phase3_with_journal_for_test(capture: usize, root: &std::path::Path) -> Self {
         let mut broker = Self::phase3_enabled_for_test(capture);
         let journal = SubmissionJournal::unconfigured();

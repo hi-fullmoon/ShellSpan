@@ -8,6 +8,13 @@ Every newly assembled request derives its current task from committed user input
 
 Session creation `goal` and `successCriteria` describe the initial task. Creation criteria are not injected as standing instructions for subsequent user turns, nor are inherited parent criteria treated as a child's delegated task criteria. Earlier one-time response instructions remain historical; applicable preferences and explicit continuations can still use the conversation and retained evidence. This scope follows committed input provenance and turn identities, without guessing task boundaries from keywords.
 
+The native-tool request projection preserves its complete frozen `goal` and
+explicit success criteria. If criteria are omitted, a goal of at most 2,048 UTF-8
+bytes is also the default criterion. A longer goal remains intact in `goal`,
+while the default criterion refers to completing that preserved goal; it is not
+duplicated into the criterion field's smaller 2,048-byte limit. This projection
+does not change tool arguments, target identity, permission mode or approval.
+
 The current task snapshot is independently included in the system context before budget estimation and request freezing. A scope receipt using `shellspan.agent-instructions.v1` supersedes previous task injections without duplicating the full input in model history. Model history includes only the latest injection from that producer; original human messages and all audit events remain intact. Transport retries reuse their frozen input. Restart and compaction rebuild the snapshot from the durable log, rather than trusting a previous summary's claim about the current request.
 
 ## Turn limits

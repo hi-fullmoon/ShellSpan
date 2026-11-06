@@ -58,6 +58,7 @@ $__shellspanNipModule = New-Module -Name ShellSpanTerminalIntegration -ArgumentL
   $script:Context=[ShellSpanNativeEditor]::new($Library,$PrivatePipe,$ExpectedClientPid,$ProfileJson,$true)
   $script:ReadLineFailureReported=$false
   $script:JobsLoaded=$false
+  $script:NativePromptRefreshPending=$false
   if($JobHelpersPath -and $JobHostPath -and $ConsoleSignalPath){
     $script:NativeJobHostSource=[IO.File]::ReadAllText($JobHostPath)
     $script:ConsoleSignalSource=[IO.File]::ReadAllText($ConsoleSignalPath)
@@ -69,14 +70,31 @@ $__shellspanNipModule = New-Module -Name ShellSpanTerminalIntegration -ArgumentL
   }
   function Send-ShellSpanControl {
     param([string[]]$Fields)
-    if($Fields[0] -ceq 'B'){$Status=if($Fields[3] -eq '-'){$null}else{[int]$Fields[3]};$script:Context.ObserveJob($Fields[1],$Fields[2],$Status)}
-    elseif($Fields[0] -ceq 'F'){$script:Context.ObserveJob($Fields[1],'finished',[int]$Fields[2])}
+    if($Fields[0] -ceq 'B'){
+      $Status=if($Fields[3] -eq '-'){$null}else{[int]$Fields[3]}
+      $script:Context.ObserveJob($Fields[1],$Fields[2],$Status)
+      if($Fields[2] -in @('settled','terminated')){$script:NativePromptRefreshPending=$true}
+    }
+    elseif($Fields[0] -ceq 'F'){$script:Context.ObserveJob($Fields[1],'finished',[int]$Fields[2]);$script:NativePromptRefreshPending=$true}
     else{throw 'TERMINAL_NATIVE_UNEXPECTED_LEGACY_EVENT'}
   }
   function Get-NativeBuffer {
     $Line=$null; $Cursor=0
     [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$Line,[ref]$Cursor)
     return @([string]$Line,[int]$Cursor)
+  }
+  function Sync-NativeJobPrompt {
+    # A finished job can leave the active map before the next input. Re-anchor
+    # at the real console cursor without replaying output or changing input.
+    $Buffer=Get-NativeBuffer
+    $PreviousRedraw=$script:Redraw;$script:Redraw=$true
+    try{
+      if([Console]::CursorLeft -gt 0){[Console]::WriteLine()}
+      [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt($null,[int][Console]::CursorTop)
+    }finally{$script:Redraw=$PreviousRedraw}
+    $After=Get-NativeBuffer
+    if($After[0] -cne $Buffer[0] -or $After[1] -ne $Buffer[1]){throw 'TERMINAL_INPUT_PROOF_MISMATCH'}
+    $script:NativePromptRefreshPending=$false
   }
   function Invoke-NativeService {
     $EditorType=[Microsoft.PowerShell.PSConsoleReadLine]
@@ -86,10 +104,15 @@ $__shellspanNipModule = New-Module -Name ShellSpanTerminalIntegration -ArgumentL
       if($null -ne $Method -and $Method.IsPublic -and $Method.IsStatic -and $Method.DeclaringType -eq $EditorType -and $Method.Name -ceq 'ReadLine'){$EditorActive=$true;break}
     }
     if(-not $EditorActive){return}
+    if($script:Context.ControlClosed){
+      $Buffer=Get-NativeBuffer
+      $null=$script:Context.ConfirmFailedDraftCleared($Buffer[0],$Buffer[1])
+      return
+    }
     $Clock=[Diagnostics.Stopwatch]::StartNew()
     $JobReady=$script:JobsLoaded -and (Test-ShellSpanNativeJobs)
     $OptionsPublished=$false
-    do {
+    try { do {
       $Buffer=Get-NativeBuffer
       $script:Context.Pump($Buffer[0],$Buffer[1])
       if(-not $OptionsPublished){$null=$script:Context.Event(11,$(if($JobReady){2}else{0}),$null);$OptionsPublished=$true}
@@ -108,14 +131,8 @@ $__shellspanNipModule = New-Module -Name ShellSpanTerminalIntegration -ArgumentL
         $null=$script:Context.Event(10,[int]$Valid,$null)
       }elseif($Action -gt 0){
         $Text=$script:Context.Text()
-        if($script:JobsLoaded -and $script:NativeShellJobs.Count -gt 0){
-          $PreviousRedraw=$script:Redraw;$script:Redraw=$true
-          try{
-            if([Console]::CursorLeft -gt 0){[Console]::WriteLine()}
-            [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt($null,[int][Console]::CursorTop)
-          }finally{$script:Redraw=$PreviousRedraw}
-          $After=Get-NativeBuffer
-          if($After[0] -cne $Buffer[0] -or $After[1] -ne $Buffer[1]){throw 'TERMINAL_INPUT_PROOF_MISMATCH'}
+        if($script:JobsLoaded -and ($script:NativeShellJobs.Count -gt 0 -or $script:NativePromptRefreshPending)){
+          Sync-NativeJobPrompt
         }
         if($Action -eq 1){[Console]::Write("$([char]27)]1337;SetUserVar=ShellSpanNativeInput=MQ==$([char]7)")}
         $PreviousRedraw=$script:Redraw; $script:Redraw=$true
@@ -128,30 +145,63 @@ $__shellspanNipModule = New-Module -Name ShellSpanTerminalIntegration -ArgumentL
       if($script:Context.Event(8,0,$null) -or -not $script:Context.Event(9,0,$null)){break}
       if($Clock.ElapsedMilliseconds -ge 5000){throw 'TERMINAL_NATIVE_DEADLINE_EXPIRED'}
       [Threading.Thread]::Sleep(16)
-    }while($true)
+    }while($true) } catch {
+      $script:Context.Fail()
+      $Buffer=Get-NativeBuffer
+      if($script:Context.CanClearFailedDraft($Buffer[0],$Buffer[1])){
+        $PreviousRedraw=$script:Redraw;$script:Redraw=$true
+        try{[Microsoft.PowerShell.PSConsoleReadLine]::Replace(0,$Buffer[0].Length,'')}finally{$script:Redraw=$PreviousRedraw}
+        $After=Get-NativeBuffer
+        if(-not $script:Context.ConfirmFailedDraftCleared($After[0],$After[1])){throw 'TERMINAL_INPUT_RECOVERY_REQUIRED'}
+        [Console]::Write("$([char]27)]1337;SetUserVar=ShellSpanNativeInput=MA==$([char]7)")
+      }
+      throw
+    }
   }
   function Invoke-NativeAccept {
-    $Buffer=Get-NativeBuffer
-    $script:Context.Observe($Buffer[0],$Buffer[1])
-    $JobKind=$script:Context.Job(0)
-    if($JobKind -eq 'launch'){
-      $Line=$script:Context.Job(3);$Tokens=$null;$ParseErrors=$null
-      $Ast=[Management.Automation.Language.Parser]::ParseInput($Line,[ref]$Tokens,[ref]$ParseErrors)
-      if($ParseErrors.Count -or -not (Install-ShellSpanNativeMarker $Line $Ast)){throw 'TERMINAL_NATIVE_JOB_MARKER_REJECTED'}
+    $AcceptClock=[Diagnostics.Stopwatch]::StartNew();$AcceptStage='service'
+    try {
+      # Control bytes precede the physical key but need not have a separate poll
+      # key. Observe pending cancel/failure before using an armed handoff.
+      Invoke-NativeService
+      $AcceptStage='observe'
+      $Buffer=Get-NativeBuffer
+      $script:Context.Observe($Buffer[0],$Buffer[1])
+      $JobKind=$script:Context.Job(0)
+      if($JobKind -eq 'launch'){
+        $AcceptStage='marker'
+        $Line=$script:Context.Job(3);$Tokens=$null;$ParseErrors=$null
+        $Ast=[Management.Automation.Language.Parser]::ParseInput($Line,[ref]$Tokens,[ref]$ParseErrors)
+        if($ParseErrors.Count -or -not (Install-ShellSpanNativeMarker $Line $Ast)){throw 'TERMINAL_NATIVE_JOB_MARKER_REJECTED'}
+      }
+      $AcceptStage='acceptEvent'
+      if(-not $script:Context.Event(2,0,$null)){
+        $Reason=$script:Context.AcceptFailureReason()
+        if($Reason -ne 2){
+          $Elapsed=$script:Context.PrepareElapsedMilliseconds()
+          Microsoft.PowerShell.Utility\Write-Warning ('TERMINAL_NATIVE_ACCEPT_UNCONFIRMED: reason={0}; prepareElapsedMs={1}' -f $Reason,$Elapsed) -WarningAction Continue
+        }
+        return
+      }
+      if($JobKind -eq 'control'){
+        $Handle=$script:Context.Job(1);$Action=$script:Context.Job(2)
+        [Console]::Write($script:Context.Marker($false))
+        if(-not $script:Context.Event(3,0,$null)){throw 'TERMINAL_NATIVE_START_REJECTED'}
+        Invoke-ShellSpanNativeJobControl $Handle $Action
+        if($script:NativePromptRefreshPending){Sync-NativeJobPrompt}
+        [Console]::Write($script:Context.Marker($true))
+        $null=$script:Context.Event(4,0,$null)
+        $null=$script:Context.Event(5,0,(Get-Location).ProviderPath)
+        return
+      }
+      $AcceptStage='hostAcceptLine'
+      $PreviousRedraw=$script:Redraw; $script:Redraw=$true
+      try{[Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()}finally{$script:Redraw=$PreviousRedraw}
+    } catch {
+      $FailureType=$_.Exception.GetBaseException().GetType().FullName
+      Microsoft.PowerShell.Utility\Write-Warning ('TERMINAL_NATIVE_ACCEPT_FAILED: phase={0}; elapsedMs={1}; exceptionType={2}' -f $AcceptStage,$AcceptClock.ElapsedMilliseconds,$FailureType) -WarningAction Continue
+      throw
     }
-    if(-not $script:Context.Event(2,0,$null)){return}
-    if($JobKind -eq 'control'){
-      $Handle=$script:Context.Job(1);$Action=$script:Context.Job(2)
-      [Console]::Write($script:Context.Marker($false))
-      if(-not $script:Context.Event(3,0,$null)){throw 'TERMINAL_NATIVE_START_REJECTED'}
-      Invoke-ShellSpanNativeJobControl $Handle $Action
-      [Console]::Write($script:Context.Marker($true))
-      $null=$script:Context.Event(4,0,$null)
-      $null=$script:Context.Event(5,0,(Get-Location).ProviderPath)
-      return
-    }
-    $PreviousRedraw=$script:Redraw; $script:Redraw=$true
-    try{[Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()}finally{$script:Redraw=$PreviousRedraw}
   }
   function Invoke-NativeReadLine {
     param([bool]$PreviousSuccess)
@@ -170,13 +220,17 @@ $__shellspanNipModule = New-Module -Name ShellSpanTerminalIntegration -ArgumentL
     }
     if($null -eq $Line){return $null}
     try{
-      $Accepted=$script:Context.Accepted()
+      $Accepted=$script:Context.RequiresHandoff()
       if(-not $Accepted){return $Line}
       $Plan=$script:Context.Plan($Line)
       if($Accepted -and $null -eq $Plan){throw 'TERMINAL_INPUT_PROOF_MISMATCH'}
     }catch{
       $script:Context.Fail()
-      throw 'TERMINAL_INPUT_RECOVERY_REQUIRED'
+      # An exception escaping PSConsoleHostReadLine makes ConsoleHost abandon
+      # this public reader. Return an empty, unexecuted line instead; the real
+      # draft is never handed to its parser, and the next editor stays usable.
+      [Console]::Error.WriteLine('TERMINAL_INPUT_RECOVERY_REQUIRED')
+      return ''
     }
     [Console]::Write("$([char]27)]1337;SetUserVar=ShellSpanNativeInput=MA==$([char]7)")
     [Console]::Write($script:Context.Marker($false))

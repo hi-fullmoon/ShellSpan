@@ -148,6 +148,13 @@ impl_downcast!(Child);
 
 /// Represents the ability to signal a Child to terminate
 pub trait ChildKiller: std::fmt::Debug + Downcast + Send {
+    /// Release an explicitly suspended Windows startup, once only.
+    fn resume_startup(&mut self) -> IoResult<()> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "suspended startup is not supported by this child",
+        ))
+    }
     /// Terminate the child process
     fn kill(&mut self) -> IoResult<()>;
 

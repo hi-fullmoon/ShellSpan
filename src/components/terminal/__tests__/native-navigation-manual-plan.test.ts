@@ -1,0 +1,7 @@
+import {expect,it} from 'vitest';
+import {nativeNavigationManualPlan,matchesNavigationArgs,navigationDrafts} from './native-navigation-manual-plan';
+const token='dfa69841-ea10-485b-bbda-a59cbb6a99c5';
+it('declares an exact owned cooperative command before the trusted start',()=>{const plan=nativeNavigationManualPlan(token);expect(plan.source).toContain('navigation-'+token);expect(plan.source).toContain('while ($true)');expect(plan.args.timeoutMs).toBe(180000);expect(plan.goal).toContain(JSON.stringify(plan.args));expect(matchesNavigationArgs(plan.args,plan.source)).toBe(true);expect(navigationDrafts.owner).not.toBe(navigationDrafts.other);});
+it('rejects unowned file identities',()=>{expect(()=>nativeNavigationManualPlan('../escape')).toThrow('Owned');});
+it.each([{background:true},{lifecycleTrust:'directRequired'},{timeoutMs:30000},{command:'changed'},{extra:'value'}])('rejects altered original navigation parameters: %j',change=>{const plan=nativeNavigationManualPlan(token);expect(matchesNavigationArgs({...plan.args,...change},plan.source)).toBe(false);});
+it('checks the native projection separately without accepting it as an original proposal',()=>{const plan=nativeNavigationManualPlan(token),prepared={command:plan.source,explanation:'owned test',timeoutMs:180000};expect(matchesNavigationArgs(prepared,plan.source,true)).toBe(true);expect(matchesNavigationArgs(prepared,plan.source)).toBe(false);expect(matchesNavigationArgs({...prepared,background:true},plan.source,true)).toBe(false);});

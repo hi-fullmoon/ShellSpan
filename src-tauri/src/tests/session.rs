@@ -535,6 +535,37 @@
     }
 
     #[test]
+    fn coalesce_session_commands_preserves_the_startup_barrier() {
+        let merged = coalesce_session_commands(vec![
+            SessionCommand::Resize {
+                cols: 100,
+                rows: 30,
+            },
+            SessionCommand::StartupReady,
+            SessionCommand::Resize {
+                cols: 199,
+                rows: 37,
+            },
+        ]);
+        assert_eq!(merged.len(), 3);
+        assert!(matches!(
+            merged[0],
+            SessionCommand::Resize {
+                cols: 100,
+                rows: 30
+            }
+        ));
+        assert!(matches!(merged[1], SessionCommand::StartupReady));
+        assert!(matches!(
+            merged[2],
+            SessionCommand::Resize {
+                cols: 199,
+                rows: 37
+            }
+        ));
+    }
+
+    #[test]
     fn retryable_channel_error_kind_includes_wouldblock_and_interrupted() {
         assert!(is_retryable_channel_error_kind(ErrorKind::WouldBlock));
         assert!(is_retryable_channel_error_kind(ErrorKind::Interrupted));

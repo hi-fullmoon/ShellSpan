@@ -2,7 +2,8 @@ import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { hostname } from 'node:os';
 
 import { AiToolExpandedContent, AiToolRow, classifyAiTool } from '@/components/ai/workspace/ai-tool-presentation';
@@ -95,7 +96,7 @@ describe('AI tool presentation', () => {
       { name: 'run_terminal_command', input: { command: `node ${codePath}` }, output: { stdout: execution.stdout, exitCode: 0 }, result: execution.stdout.trimEnd(), selector: '[data-ai-terminal-output]' },
       { name: 'run_code', input: { code, language: 'javascript' }, output: { stdout: execution.stdout }, result: execution.stdout, selector: '.ai-code-output pre' },
       { name: 'read_file', input: { path }, output: file, result: file, selector: '.ai-read-lines' },
-      { name: 'search_text', input: { query: '"version"', path }, output: search.stdout, result: search.stdout.trimEnd(), selector: '.ai-search-results' },
+      { name: 'search_text', input: { query: '"version"', path }, output: search.stdout, result: search.stdout.replace(/\n$/u, ''), selector: '.ai-search-results' },
       { name: 'web_fetch', input: { url: new URL(`file://${path}`).href }, output: file, result: file, selector: '.ai-web-content pre' },
       { name: 'trash_file', input: { path }, state: 'uncertain' as const, output: { path }, result: JSON.stringify({ path }, null, 2), selector: '.ai-io-output pre' },
     ];
@@ -137,10 +138,15 @@ describe('AI tool presentation', () => {
   it.each(['zh-CN', 'en-US'] as const)('does not repeat input when a large patch falls back to plain output in %s', async locale => {
     useAppStore.setState({ locale });
     await initI18n(locale);
-    const revision = spawnSync('git', ['log', '-1', '--format=%H', '--', 'src/components/ai'], { encoding: 'utf8' });
-    expect(revision.status).toBe(0);
-    const result = spawnSync('git', ['show', '--format=', '--unified=1000', revision.stdout.trim(), '--', 'src/components/ai'], { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
-    expect(result.status).toBe(0);
+    const artifacts = join(process.cwd(), '.artifacts/tests/ai-tool-presentation');
+    mkdirSync(artifacts, { recursive: true });
+    const directory = mkdtempSync(join(artifacts, 'large-diff-'));
+    const before = join(directory, 'before.txt'), after = join(directory, 'after.txt');
+    writeFileSync(before, 'Original content\n');
+    writeFileSync(after, Array.from({ length: 3000 }, (_, index) => `Changed line ${index}: large patch presentation fixture\n`).join(''));
+    const result = spawnSync('git', ['diff', '--no-index', '--no-ext-diff', '--', before, after], { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(1); // git diff reports actual differences with exit 1.
     expect(result.stdout.length).toBeGreaterThan(64 * 1024);
     const patchNode = { ...node, name: 'apply_patch', input: { patch: result.stdout }, output: { diff: result.stdout } };
     const { container, rerender } = render(<AiToolDetails node={patchNode} onBack={() => undefined} />);
@@ -231,13 +237,13 @@ describe('AI tool presentation', () => {
   });
 
   it('keeps every line of real command output inside the capped transcript', () => {
-    const execution = spawnSync('git', ['ls-files', 'src/components/ai/styles'], { encoding: 'utf8' });
+    const execution = spawnSync('rg', ['--files', '--no-ignore', 'src/components/ai/styles'], { encoding: 'utf8' });
     expect(execution.error).toBeUndefined();
     expect(execution.status).toBe(0);
     const lines = execution.stdout.trimEnd().split('\n');
     expect(lines.length).toBeGreaterThan(8);
     const { container } = render(<AiToolExpandedContent node={{
-      ...node, input: { command: 'git ls-files src/components/ai/styles' },
+      ...node, input: { command: 'rg --files --no-ignore src/components/ai/styles' },
       output: { stdout: execution.stdout, exitCode: execution.status },
     }} compact />);
     const transcript = container.querySelector('.ai-terminal-transcript');
@@ -577,10 +583,17 @@ describe('AI tool presentation', () => {
 
   it('keeps diff headers outside the horizontal scrolling body', () => {
     const path = 'src/components/ai/workspace/ai-tool-presentation.tsx';
-    const revision = spawnSync('git', ['log', '-1', '--format=%H', '--', path], { encoding: 'utf8' });
-    expect(revision.status).toBe(0);
-    const result = spawnSync('git', ['show', '--format=', '--unified=20', revision.stdout.trim(), '--', path], { encoding: 'utf8' });
-    expect(result.status).toBe(0);
+    // Use a real Git diff of owned files, without depending on repository
+    // discovery, commit objects or the caller's mutable working tree.
+    const parent = join(process.cwd(), '.artifacts/tests/ai-tool-diff');
+    mkdirSync(parent, { recursive: true });
+    const directory = mkdtempSync(join(parent, 'case-'));
+    const before = join(directory, 'before.tsx'), after = join(directory, 'after.tsx');
+    const source = readFileSync(path, 'utf8');
+    writeFileSync(before, source); writeFileSync(after, source + '\n// owned diff fixture\n');
+    const result = spawnSync('git', ['diff', '--no-index', '--unified=20', '--', before, after], { encoding: 'utf8' });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(1); // Git reports an actual difference with exit 1.
     expect(result.stdout).not.toBe('');
     const patchNode = { ...node, name: 'apply_patch', input: { patch: result.stdout }, output: { diff: result.stdout } };
     const { container, rerender } = render(<AiToolExpandedContent node={patchNode} />);

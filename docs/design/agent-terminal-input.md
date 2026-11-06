@@ -18,7 +18,7 @@
 | 控制协议与schema | `protocol/agent/runtime/native-input.md`、`native-input.schema.json` |
 | 协调、状态、账本、资源 | `src-tauri/src/terminal_command/` |
 | Shell适配扩展 | `src-tauri/native-input-adapter/`、`src-tauri/native-input-editors/` |
-| 资源目录 | `src-tauri/resources/native-input/` |
+| 资源目录 | 仓库正式暂存 `.artifacts/releases/native-input/generated/`；包内 `native-input/generated/` |
 | 原生显示 | `src/lib/terminal/native-input-display.ts`、terminal registry |
 | 原生列接口 | `rl_native_prompt_columns` |
 | Bash内置命令 | `ss_native_input`及同前缀私有操作 |

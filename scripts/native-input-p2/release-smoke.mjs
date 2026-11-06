@@ -9,6 +9,7 @@ import {build} from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import {acquireNativeGui} from './gui-lock.mjs';
+import {packageFrontendDirectory} from '../native-input-p3/package-config.mjs';
 
 const root=resolve(import.meta.dirname,'../..');
 assert(process.platform==='darwin'&&process.arch==='arm64');
@@ -35,7 +36,7 @@ try{
   await run(process.execPath,['scripts/prepare-native-input-resources.mjs','--no-build','--require-ssh']);
   const frontend=resolve(directory,'frontend');
   await build({configFile:false,root,base:'/',logLevel:'error',resolve:{alias:{'@':resolve(root,'src')}},plugins:[react(),tailwindcss()],define:{__NATIVE_P2_RELEASE_REPORT__:JSON.stringify(report)},build:{outDir:frontend,emptyOutDir:true,rolldownOptions:{input:resolve(root,'src/components/terminal/__tests__/native-input-p2-release.native.html')}}});
-  const config={identifier:'com.shellspan.validation.native-input-p2-release',build:{beforeBuildCommand:'',frontendDist:frontend},app:{windows:[{label:'main',url:'src/components/terminal/__tests__/native-input-p2-release.native.html',width:1200,height:800}],security:{csp:`default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost ${new URL(report).origin}; font-src 'self' data:`}},bundle:{createUpdaterArtifacts:false,macOS:{signingIdentity:'Apple Development'}}};
+  const config={identifier:'com.shellspan.validation.native-input-p2-release',build:{beforeBuildCommand:'',frontendDist:packageFrontendDirectory(root,frontend)},app:{windows:[{label:'main',url:'src/components/terminal/__tests__/native-input-p2-release.native.html',width:1200,height:800}],security:{csp:`default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost ${new URL(report).origin}; font-src 'self' data:`}},bundle:{createUpdaterArtifacts:false,macOS:{signingIdentity:'Apple Development'}}};
   await writeFile(resolve(directory,'tauri-config.json'),JSON.stringify(config,null,2));
   const target=resolve(root,'.artifacts/tests/native-input-p2/release-target');
   await run('pnpm',['exec','tauri','build','--bundles','app','--config',resolve(directory,'tauri-config.json')],{...process.env,CARGO_TARGET_DIR:target});

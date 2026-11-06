@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import {createHash,randomUUID} from 'node:crypto';
 import {execFileSync,spawnSync} from 'node:child_process';
-import {mkdirSync,readFileSync,writeFileSync,cpSync,readdirSync} from 'node:fs';
+import {mkdirSync,readFileSync,writeFileSync,cpSync,readdirSync,existsSync} from 'node:fs';
 import {resolve,relative} from 'node:path';
 import {captureValidationSources} from './frozen-validation.mjs';
 
@@ -50,6 +50,8 @@ assert.deepEqual(captureValidationSources(owner),before,'Owner source changed wh
 for(const path of['.artifacts/tests/native-input-p2/resources/native-input','.artifacts/tests/native-input-p2/producers','src-tauri/resources/native-input']){
   mkdirSync(resolve(sourceRoot,path,'..'),{recursive:true});cpSync(resolve(owner,path),resolve(sourceRoot,path),{recursive:true});
 }
+const packagedResources='.artifacts/releases/native-input/generated';
+if(existsSync(resolve(owner,packagedResources))){mkdirSync(resolve(sourceRoot,packagedResources,'..'),{recursive:true});cpSync(resolve(owner,packagedResources),resolve(sourceRoot,packagedResources),{recursive:true});}
 const fixture='87e1754d-ca4c-4689-95ea-27faea5c8f27';
 mkdirSync(resolve(sourceRoot,'.artifacts/tests/native-input-p2/ssh',fixture),{recursive:true});
 cpSync(resolve(owner,'.artifacts/tests/native-input-p2/ssh',fixture,'fixture.json'),resolve(sourceRoot,'.artifacts/tests/native-input-p2/ssh',fixture,'fixture.json'));

@@ -136,32 +136,56 @@ pub(crate) fn failure_reason() -> Option<String> {
 }
 
 pub(super) fn handshake(session: &mut Session) -> Result<(), String> {
-    let Some(attempt) = active() else {
+    let attempt = active();
+    let scoped = SCOPED_CONNECTION_IO.with(|slot| slot.borrow().clone());
+    if attempt.is_none() && scoped.is_none() {
         return session.handshake().map_err(|error| error.to_string());
+    }
+    let check = || {
+        if let Some(attempt) = &attempt {
+            attempt.check()?;
+        }
+        if let Some(scoped) = &scoped {
+            if scoped.cancellation.is_cancelled() {
+                return Err("scoped connection cancelled".to_string());
+            }
+            if scoped.finished.load(AtomicOrdering::SeqCst) {
+                return Err("scoped connection closed".to_string());
+            }
+            if Instant::now() >= scoped.deadline {
+                return Err("scoped connection deadline exceeded".to_string());
+            }
+        }
+        Ok(())
     };
+    let operation_deadline = attempt
+        .as_ref()
+        .map(|value| value.deadline)
+        .into_iter()
+        .chain(scoped.as_ref().map(|value| value.deadline))
+        .min()
+        .expect("a connection context is present");
     let blocking = session.is_blocking();
     let deadline = if session.timeout() == 0 {
-        attempt.deadline
+        operation_deadline
     } else {
-        attempt
-            .deadline
-            .min(Instant::now() + Duration::from_millis(u64::from(session.timeout())))
+        operation_deadline.min(Instant::now() + Duration::from_millis(u64::from(session.timeout())))
     };
     // Winsock shutdown does not reliably wake libssh2's blocking wait. Use
-    // libssh2's resumable nonblocking handshake and check the attempt directly.
+    // libssh2's resumable nonblocking handshake and check each owning context.
     session.set_blocking(false);
     let result = (|| loop {
-        attempt.check()?;
+        check()?;
         if Instant::now() >= deadline {
             return Err("SSH handshake timed out".into());
         }
         match session.handshake() {
-            Ok(()) => return attempt.check(),
+            Ok(()) => return check(),
             Err(error) if error.code() == ssh2::ErrorCode::Session(-37) => {
                 thread::sleep(Duration::from_millis(10));
             }
             Err(error) => {
-                attempt.check()?;
+                check()?;
                 return Err(error.to_string());
             }
         }
@@ -239,6 +263,101 @@ mod tests {
         let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
         let (server, _) = listener.accept().unwrap();
         (client, server)
+    }
+
+    #[test]
+    fn scoped_nonblocking_handshake_obeys_deadline_and_restores_caller_mode() {
+        use std::io::{BufRead, BufReader, Read};
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut reader = BufReader::new(socket);
+            let mut banner = String::new();
+            reader.read_line(&mut banner).unwrap();
+            assert!(banner.starts_with("SSH-"));
+            let mut bytes = [0; 1024];
+            loop {
+                match reader.read(&mut bytes) {
+                    Ok(0) => break,
+                    Ok(_) => continue,
+                    Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
+                    Err(error) => panic!("scoped handshake left its real socket open: {error}"),
+                }
+            }
+        });
+        let started = Instant::now();
+        with_scoped_connection_io(
+            CancellationToken::new(),
+            started + Duration::from_millis(200),
+            || {
+                let tcp = Arc::new(TcpStream::connect(address).unwrap());
+                register_scoped_socket(&tcp).unwrap();
+                let mut session = Session::new().unwrap();
+                session.set_tcp_stream(SharedTcpStream(tcp));
+                session.set_blocking(false);
+                session.set_timeout(15_000);
+                let error = handshake(&mut session).unwrap_err();
+                assert!(error.contains("deadline"), "{error}");
+                assert!(!session.is_blocking());
+            },
+        );
+        server.join().unwrap();
+        assert!(started.elapsed() >= Duration::from_millis(150));
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn scoped_ssh_transport_shares_one_os_socket_and_closes_retained_owner() {
+        let (mut client, mut server) = socket_pair();
+        server
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        client.write_all(b"live").unwrap();
+        let peer = thread::spawn(move || {
+            let mut sent = [0; 4];
+            server.read_exact(&mut sent).unwrap();
+            assert_eq!(&sent, b"live");
+            let mut byte = [0; 1];
+            assert_eq!(
+                server.read(&mut byte).unwrap(),
+                0,
+                "scope must close the real peer before returning"
+            );
+        });
+        let retained = Arc::new(client);
+        let session = with_scoped_connection_io(
+            CancellationToken::new(),
+            Instant::now() + Duration::from_secs(2),
+            || {
+                register_scoped_socket(&retained).unwrap();
+                let mut session = Session::new().unwrap();
+                session.set_tcp_stream(SharedTcpStream(Arc::clone(&retained)));
+                let context = context_clone();
+                let sockets = context.sockets.lock().unwrap();
+                #[cfg(windows)]
+                {
+                    use std::os::windows::io::AsRawSocket;
+                    assert_eq!(session.as_raw_socket(), sockets[0].as_ref().as_raw_socket());
+                    assert_eq!(session.as_raw_socket(), retained.as_ref().as_raw_socket());
+                }
+                #[cfg(unix)]
+                {
+                    use std::os::fd::AsRawFd;
+                    assert_eq!(session.as_raw_fd(), sockets[0].as_ref().as_raw_fd());
+                    assert_eq!(session.as_raw_fd(), retained.as_ref().as_raw_fd());
+                }
+                drop(sockets);
+                session
+            },
+        );
+        // Keep both real socket owners alive across the scope's cleanup.
+        peer.join().unwrap();
+        assert!(!session.authenticated());
+        assert!(retained.as_ref().write_all(b"late").is_err());
     }
 
     #[test]

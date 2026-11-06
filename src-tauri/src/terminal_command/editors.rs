@@ -71,8 +71,10 @@ fn validation_admitted(root: &Path, target: &str) -> bool {
         if hex::encode(sha2::Sha256::digest(index)) != snapshot["indexSha256"].as_str()? {
             return Some(false);
         }
-        let manifest =
-            fs::read(source.join(".artifacts/tests/native-input-p3/editor-validation-sources.json")).ok()?;
+        let manifest = fs::read(
+            source.join(".artifacts/tests/native-input-p3/editor-validation-sources.json"),
+        )
+        .ok()?;
         let marker: ValidationAdmission =
             serde_json::from_slice(&fs::read(actual.join("editor-validation.json")).ok()?).ok()?;
         Some(
@@ -167,6 +169,26 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<EditorArti
         if catalogue.sources.get(path) != Some(&nip::sha(contents)) {
             return Err("TERMINAL_NATIVE_STALE_ARTIFACTS".into());
         }
+    }
+    if target == "windows-x64"
+        && catalogue
+            .sources
+            .get("src-tauri/resources/powershell/PSReadLine/2.4.5/ShellSpan.Build.json")
+            != Some(&nip::sha(include_str!(
+                "../../resources/powershell/PSReadLine/2.4.5/ShellSpan.Build.json"
+            )))
+    {
+        return Err("TERMINAL_NATIVE_STALE_ARTIFACTS".into());
+    }
+    if target == "windows-x64"
+        && catalogue
+            .sources
+            .get("src-tauri/resources/conpty/1.25.260930003/pin.json")
+            != Some(&nip::sha(include_str!(
+                "../../resources/conpty/1.25.260930003/pin.json"
+            )))
+    {
+        return Err("TERMINAL_NATIVE_STALE_ARTIFACTS".into());
     }
     if target == "macos-arm64" {
         for (path, contents) in [

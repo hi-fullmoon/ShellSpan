@@ -5,13 +5,15 @@ import {cp,mkdir,readdir,readFile,writeFile,rm,chmod,stat,rename} from 'node:fs/
 import {captureValidationSources} from './native-input-p2/frozen-validation.mjs';
 import {resolve} from 'node:path';
 import {parseArgs} from 'node:util';
+import {nativeInputReleaseDirectory} from './native-input-p2/resource-paths.mjs';
+import {copyNativeRebuildSources} from './native-input-p2/rebuild-sources.mjs';
 
 const root=resolve(import.meta.dirname,'..');
 const {values}=parseArgs({options:{'no-build':{type:'boolean'},'with-ssh':{type:'boolean'},'require-ssh':{type:'boolean'},target:{type:'string'},'validation-editor':{type:'string',multiple:true}}});
 const target=values.target??(process.platform==='darwin'&&process.arch==='arm64'?'aarch64-apple-darwin':process.platform==='linux'&&process.arch==='arm64'?'aarch64-unknown-linux-gnu':process.platform==='win32'&&process.arch==='x64'?'x86_64-pc-windows-msvc':'unsupported');
 const sourceRoot=resolve(root,'.artifacts/tests/native-input-p2/resources/native-input');
-const logDirectory=resolve(root,'.artifacts/tests/native-input-p2/resource-build');await mkdir(logDirectory,{recursive:true,mode:0o700});
 const validationTargets=values['validation-editor']??[];const validationOnly=validationTargets.length>0;
+const logDirectory=resolve(root,validationOnly?'.artifacts/tests/native-input-p3/resource-build':'.artifacts/releases/native-input/resource-build');await mkdir(logDirectory,{recursive:true,mode:0o700});
 assert(validationTargets.every(value=>['macos-arm64','linux-aarch64-glibc-2.36','windows-x64'].includes(value)));
 const policy=JSON.parse(await readFile(resolve(root,'protocol/agent/runtime/native-editor-admission.json'),'utf8'));assert.equal(policy.version,1);assert(Array.isArray(policy.productionProfiles));
 let frozenSources,sourceManifestSha256;
@@ -20,7 +22,7 @@ if(validationOnly){
   const manifest=await readFile(resolve(stage.directory,'sources.json'));frozenSources=JSON.parse(manifest.toString('utf8'));assert.deepEqual(captureValidationSources(root),frozenSources);sourceManifestSha256=createHash('sha256').update(manifest).digest('hex');await writeFile(resolve(root,'.artifacts/tests/native-input-p3/editor-validation-sources.json'),manifest);
 }
 const runId=randomUUID(),generated=resolve(logDirectory,`staging-${runId}`);
-const destination=validationOnly?resolve(root,'.artifacts/tests/native-input-p3/validation-resources',runId,'native-input'):resolve(root,'src-tauri/resources/native-input/generated');
+const destination=validationOnly?resolve(root,'.artifacts/tests/native-input-p3/validation-resources',runId,'native-input'):nativeInputReleaseDirectory(root);
 async function run(command,args,cwd=root){
   const log=await import('node:fs').then(fs=>fs.openSync(resolve(logDirectory,'prepare.log'),'a',0o600));
   const child=spawn(command,args,{cwd,env:{...process.env,PYTHONDONTWRITEBYTECODE:'1'},stdio:['ignore',log,log]});
@@ -111,7 +113,8 @@ if(includeBash){
   for(const entry of await readdir(generated))if(!allowed.has(entry))await rm(resolve(generated,entry),{recursive:true});
   await cp(resolve(sourceRoot,'sources'),resolve(generated,'sources'),{recursive:true});
   const tree=resolve(generated,'sources/ShellSpan');await mkdir(tree,{recursive:true});
-  for(const name of ['src-tauri/native-input-adapter','src-tauri/native-input-editors','src-tauri/vendor/portable-pty','scripts/dependency-builds/bash-native','scripts/native-input-p0']){
+  await copyNativeRebuildSources(root,tree);
+  for(const name of ['scripts/dependency-builds/bash-native','scripts/native-input-p0']){
     await cp(resolve(root,name),resolve(tree,name),{recursive:true,filter:path=>!path.split('/').some(part=>['target','__pycache__'].includes(part))});
   }
   for(const name of ['src-tauri/src/terminal_command/protocol.rs','scripts/native-input-p2/build.py']){
@@ -129,7 +132,7 @@ if(includeBash){
   const allowed=new Set(['sources',...targets,...editorAllowed]);
   for(const entry of await readdir(generated))if(!allowed.has(entry))await rm(resolve(generated,entry),{recursive:true});
   const tree=resolve(generated,'sources/ShellSpan');await mkdir(tree,{recursive:true});
-  for(const name of ['src-tauri/native-input-editors','src-tauri/native-input-adapter','src-tauri/vendor/portable-pty'])await cp(resolve(root,name),resolve(tree,name),{recursive:true,filter:path=>!path.split(/[\\/]/).includes('target')});
+  await copyNativeRebuildSources(root,tree);
   for(const catalogue of editorNames)for(const path of Object.keys(JSON.parse(await readFile(resolve(sourceRoot,catalogue),'utf8')).sources)){
     assert((path.startsWith('src-tauri/')||path.startsWith('scripts/native-input-p3/')||path.startsWith('scripts/dependency-builds/zsh/'))&&!path.includes('..'));
     await mkdir(resolve(tree,path,'..'),{recursive:true});await cp(resolve(root,path),resolve(tree,path));

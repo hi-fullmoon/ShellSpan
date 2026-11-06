@@ -18,6 +18,7 @@ export function auditEditorResources(root,selectedTarget){
     const required=[...['Cargo.toml','Cargo.lock','src/lib.rs','src/ffi.rs','zle.c','zle.zsh','psreadline.cs','psreadline.ps1'].map(path=>`src-tauri/native-input-editors/${path}`),
       'src-tauri/src/terminal_command/protocol.rs','src-tauri/src/terminal_jobs.rs','src-tauri/src/terminal_jobs.ps1','src-tauri/src/terminal_job_host.cs','src-tauri/src/terminal_console_signals.cs'];
     if(name==='editors-macos-arm64.json')required.push('scripts/native-input-p3/build.mjs','scripts/native-input-p3/zsh-build-check.c');
+    if(name==='editors-windows-x64.json')required.push('src-tauri/resources/powershell/PSReadLine/2.4.5/ShellSpan.Build.json','src-tauri/resources/conpty/1.25.260930003/pin.json');
     if(catalogue.profiles.some(profile=>profile.core))required.push('scripts/dependency-builds/zsh/pin.json','scripts/dependency-builds/zsh/native-display.patch','scripts/native-input-p3/build-scoped-core.mjs');
     if(name==='editors-linux-aarch64-glibc-2.36.json')required.push('src-tauri/native-input-adapter/Cargo.toml','src-tauri/native-input-adapter/Cargo.lock',
       'src-tauri/native-input-adapter/src/bin/native-input-relay.rs','scripts/native-input-p3/linux-build.sh','scripts/native-input-p3/publish-linux.py','scripts/native-input-p3/zsh-build-check.c');

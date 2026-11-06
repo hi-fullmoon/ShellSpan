@@ -57,6 +57,11 @@ File results add `fileScope: "scratch"`, `scratchRoot` and `temporary: true` at 
 model facade, without changing the native v3 argument schemas. The model uses the
 returned absolute path with `run_terminal_command`. Script location does not
 change command cwd, visible-shell environment or the selected execution surface.
+Local `write_file` and `read_file` results expose the portable absolute path
+format. On Windows this removes the internal `\\?\` canonical-path prefix and
+uses forward slashes, so the returned path can be passed directly to PowerShell
+script authorization. Canonical paths remain in filesystem validation, I/O and
+checkpoints; remote POSIX paths are returned unchanged.
 Intermediate outputs and interpreter caches should be directed into scratch when
 supported. Relative imports may require explicit dependency configuration. Saved
 project source and deliverables still use workspace tools. This is cooperative

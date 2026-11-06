@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {createHash,randomUUID} from 'node:crypto';
-import {readFileSync,writeFileSync,mkdirSync,copyFileSync,cpSync} from 'node:fs';
+import {readFileSync,writeFileSync,mkdirSync,copyFileSync,cpSync,existsSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {resolve,dirname,sep} from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -37,6 +37,7 @@ writeFileSync(resolve(meta,'import.json'),JSON.stringify({id,head:parent.head,so
   generatedByActualWindowsCompiler:generated,explicitFixtureChanges:actualChanges,sourceCount:Object.keys(sources).length,sourceArchiveSha256:hash(resolve(meta,'source.tar.gz'))},null,2));
 execFileSync('cmd.exe',['/d','/c','mklink','/J',resolve(root,'node_modules'),resolve(base,'node_modules')],{stdio:'pipe'});
 cpSync(resolve(base,'.artifacts/tests/native-input-p2/resources'),resolve(root,'.artifacts/tests/native-input-p2/resources'),{recursive:true});
-cpSync(resolve(base,'src-tauri/resources/native-input/generated'),resolve(root,'src-tauri/resources/native-input/generated'),{recursive:true});
+const packagedResources='.artifacts/releases/native-input/generated';
+if(existsSync(resolve(base,packagedResources))){mkdirSync(dirname(resolve(root,packagedResources)),{recursive:true});cpSync(resolve(base,packagedResources),resolve(root,packagedResources),{recursive:true});}
 assert.deepEqual(captureValidationSources(root),sources);
 console.log(JSON.stringify({root,id,sourceCount:Object.keys(sources).length,sourceParent:base,generatedByActualWindowsCompiler:generated,fixtureChanges:actualChanges,nativeAcceptance:false}));

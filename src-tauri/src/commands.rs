@@ -549,48 +549,83 @@ fn create_local_session_blocking(
         None
     };
     let native_family = predecessor_mode.is_some();
-    let native_client = native_input_protocol.as_deref()
-        == Some(crate::terminal_command::protocol::PROTOCOL);
+    let native_client =
+        native_input_protocol.as_deref() == Some(crate::terminal_command::protocol::PROTOCOL);
     #[cfg(unix)]
-    let prepared_native =
-        if native_client && shell_integration_enabled && matches!(shell_kind,TerminalShellKind::Bash|TerminalShellKind::Zsh) {
-            crate::terminal_command::artifacts::resource_root(&app)
-                .and_then(|resource_root| {
-                    crate::terminal_command::local::PreparedNativeBash::prepare(
-                        std::path::Path::new(&shell),
-                        &resource_root,
-                    )
-                })
-                .ok()
-        } else {
-            None
-        };
-    #[cfg(windows)]
-    let mut prepared_native = if native_client && shell_integration_enabled && matches!(shell_kind,TerminalShellKind::WindowsPowerShell|TerminalShellKind::PowerShell7) {
-        crate::terminal_command::artifacts::resource_root(&app).and_then(|resources| {
-            let home=app.path().home_dir().map_err(|_|"TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
-            crate::terminal_command::windows::PreparedNativePowerShell::prepare(std::path::Path::new(&shell),&resources,&crate::shellspan_data_dir(&home),shell_kind)
-        }).ok()
-    } else {None};
-    #[cfg(any(unix,windows))]
-    let native_mode =
-        if native_client && shell_integration_enabled && shell_kind.supported() {
-            Some(if prepared_native.is_some() {
-                crate::terminal_command::protocol::InputMode::NativeInline
-            } else {
-                crate::terminal_command::protocol::InputMode::Raw
+    let prepared_native = if native_client
+        && shell_integration_enabled
+        && matches!(shell_kind, TerminalShellKind::Bash | TerminalShellKind::Zsh)
+    {
+        crate::terminal_command::artifacts::resource_root(&app)
+            .and_then(|resource_root| {
+                crate::terminal_command::local::PreparedNativeBash::prepare(
+                    std::path::Path::new(&shell),
+                    &resource_root,
+                )
             })
-        } else if native_family
-            || native_input_protocol.is_some()
-                && shell_kind.supported()
-        {
-            Some(crate::terminal_command::protocol::InputMode::Raw)
+            .ok()
+    } else {
+        None
+    };
+    #[cfg(windows)]
+    let mut prepared_native = if native_client
+        && shell_integration_enabled
+        && matches!(
+            shell_kind,
+            TerminalShellKind::WindowsPowerShell | TerminalShellKind::PowerShell7
+        ) {
+        crate::terminal_command::artifacts::resource_root(&app)
+            .and_then(|resources| {
+                let home = app
+                    .path()
+                    .home_dir()
+                    .map_err(|_| "TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
+                crate::terminal_command::windows::PreparedNativePowerShell::prepare(
+                    std::path::Path::new(&shell),
+                    &resources,
+                    &crate::shellspan_data_dir(&home),
+                    shell_kind,
+                )
+            })
+            .inspect_err(|reason| {
+                let code = if reason.starts_with("TERMINAL_NATIVE_")
+                    && reason.len() <= 128
+                    && reason.bytes().all(|byte| {
+                        byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_'
+                    }) {
+                    reason.as_str()
+                } else {
+                    "TERMINAL_NATIVE_PREPARATION_FAILED"
+                };
+                warn!(
+                    "Native Windows input preparation rejected session_id={session_id} code={code}"
+                );
+            })
+            .ok()
+    } else {
+        None
+    };
+    #[cfg(any(unix, windows))]
+    let native_mode = if native_client && shell_integration_enabled && shell_kind.supported() {
+        Some(if prepared_native.is_some() {
+            crate::terminal_command::protocol::InputMode::NativeInline
         } else {
-            None
-        };
-    #[cfg(not(any(unix,windows)))]
+            crate::terminal_command::protocol::InputMode::Raw
+        })
+    } else if native_family || native_input_protocol.is_some() && shell_kind.supported() {
+        Some(crate::terminal_command::protocol::InputMode::Raw)
+    } else {
+        None
+    };
+    #[cfg(not(any(unix, windows)))]
     let native_mode: Option<crate::terminal_command::protocol::InputMode> = None;
     summary.pty_info.input_mode = native_mode;
+    #[cfg(windows)]
+    if let Some(native) = prepared_native.as_ref() {
+        // Selected local rendering is verified independently of peer readiness.
+        // The suspended Shell negotiates actual input capabilities after resume.
+        summary.pty_info.native_display_binding = Some(native.profile.display_binding());
+    }
     let prepared_integration = if shell_integration_enabled
         && shell_kind.supported()
         && native_mode.is_none()
@@ -618,7 +653,14 @@ fn create_local_session_blocking(
         None
     };
 
-    let pair = native_pty_system()
+    #[cfg(windows)]
+    let pty_system: Box<dyn portable_pty::PtySystem + Send> = match &prepared_native {
+        Some(native) => Box::new(native.pty_system()),
+        None => native_pty_system(),
+    };
+    #[cfg(not(windows))]
+    let pty_system = native_pty_system();
+    let pair = pty_system
         .openpty(PtySize {
             rows: rows.max(1),
             cols: cols.max(1),
@@ -630,6 +672,8 @@ fn create_local_session_blocking(
             format!("failed to create local terminal: {error}")
         })?;
     let mut command = CommandBuilder::new(&shell);
+    #[cfg(windows)]
+    command.set_start_suspended(true);
     configure_local_terminal_environment(&mut command);
     if let Some(home) = std::env::var_os("SHELLSPAN_LOCAL_HOME") {
         let home = std::path::PathBuf::from(home);
@@ -639,7 +683,7 @@ fn create_local_session_blocking(
         command.env("HOME", &home);
         command.cwd(&home);
     }
-    #[cfg(any(unix,windows))]
+    #[cfg(any(unix, windows))]
     if let Some(native) = prepared_native.as_ref() {
         native.configure(&mut command)?;
     }
@@ -660,7 +704,9 @@ fn create_local_session_blocking(
         format!("failed to start local shell: {error}")
     })?;
     #[cfg(windows)]
-    if let Some(native)=prepared_native.as_mut(){native.bind_process(child.process_id());}
+    if let Some(native) = prepared_native.as_mut() {
+        native.bind_process(child.process_id());
+    }
     drop(pair.slave);
     let mut reader = pair.master.try_clone_reader().map_err(|error| {
         error!("Failed to clone local terminal reader session_id={session_id}: {error}");
@@ -716,8 +762,7 @@ fn create_local_session_blocking(
                 replaces_session_id.as_deref(),
                 transport_kind,
                 crate::terminal_broker::TerminalGeometry::new(u32::from(cols), u32::from(rows)),
-                native_mode
-                    .unwrap_or(crate::terminal_command::protocol::InputMode::Raw),
+                native_mode.unwrap_or(crate::terminal_command::protocol::InputMode::Raw),
             )
         });
     match broker_attachment {
@@ -728,7 +773,7 @@ fn create_local_session_blocking(
         Ok(None) if !terminal_broker_enabled => {}
         Ok(None) => {
             return Err(rollback_local_broker_attachment_failure(
-                &state,
+                state,
                 &session_id,
                 child.as_mut(),
                 move || {
@@ -741,7 +786,7 @@ fn create_local_session_blocking(
         }
         Err(error) => {
             return Err(rollback_local_broker_attachment_failure(
-                &state,
+                state,
                 &session_id,
                 child.as_mut(),
                 move || {
@@ -755,12 +800,12 @@ fn create_local_session_blocking(
     }
 
     let mut terminal_integration_control = None;
-    #[cfg(any(unix,windows))]
+    #[cfg(any(unix, windows))]
     let mut native_control = None;
     if terminal_broker_enabled {
         let Some(runtime) = app.try_state::<crate::agent_runtime::AgentRuntime>() else {
             return Err(rollback_local_broker_attachment_failure(
-                &state,
+                state,
                 &session_id,
                 child.as_mut(),
                 move || {
@@ -771,7 +816,7 @@ fn create_local_session_blocking(
                 "terminal integration runtime is unavailable",
             ));
         };
-        #[cfg(any(unix,windows))]
+        #[cfg(any(unix, windows))]
         if let Some(native) = prepared_native {
             let probe = runtime.register_native_terminal(&session_id, native.profile.clone())?;
             let event_app = app.clone();
@@ -806,7 +851,7 @@ fn create_local_session_blocking(
                 integration.shell(),
             ) {
                 return Err(rollback_local_broker_attachment_failure(
-                    &state,
+                    state,
                     &session_id,
                     child.as_mut(),
                     move || {
@@ -870,7 +915,7 @@ fn create_local_session_blocking(
                 runtime.mark_terminal_integration_degraded(&session_id, shell_kind, reason)
             } {
                 return Err(rollback_local_broker_attachment_failure(
-                    &state,
+                    state,
                     &session_id,
                     child.as_mut(),
                     move || {
@@ -886,6 +931,7 @@ fn create_local_session_blocking(
     }
 
     let worker_id = session_id.clone();
+    #[cfg(unix)]
     let initialization_app = app.clone();
     let worker_output_ready = output_ready;
     let worker_output_paused = output_paused;
@@ -897,13 +943,27 @@ fn create_local_session_blocking(
     };
     thread::spawn(move || {
         let _terminal_integration_control = terminal_integration_control;
-        #[cfg(any(unix,windows))]
+        #[cfg(any(unix, windows))]
         let native_control = native_control;
         let (output_tx, output_rx) = bounded::<Vec<u8>>(LOCAL_OUTPUT_QUEUE_CAPACITY);
         let (child_exit_tx, child_exit_rx) = bounded::<()>(1);
         let mut child_killer = child.clone_killer();
+        #[cfg(windows)]
+        let native_bootstrap = native_control
+            .as_ref()
+            .map(|control| control.bootstrap_lifetime());
         let child_handle = thread::spawn(move || {
-            let _ = child.wait();
+            #[cfg(windows)]
+            let _native_bootstrap = native_bootstrap;
+            let wait_result = child.wait();
+            #[cfg(windows)]
+            if wait_result.is_ok() {
+                if let Some(bootstrap) = &_native_bootstrap {
+                    bootstrap.confirm_host_exit();
+                }
+            }
+            #[cfg(not(windows))]
+            let _ = wait_result;
             let _ = child_exit_tx.send(());
         });
         let reader_id = worker_id.clone();
@@ -1004,17 +1064,22 @@ fn create_local_session_blocking(
                     }
                 }
                 LocalWorkerActivity::Command(Ok(SessionCommand::NativeControl(frame))) => {
-                    #[cfg(any(unix,windows))]
+                    #[cfg(any(unix, windows))]
                     let result = native_control
                         .as_ref()
                         .ok_or("TERMINAL_NATIVE_CONTROL_UNAVAILABLE".to_string())
                         .and_then(|control| control.write(&frame.bytes));
-                    #[cfg(not(any(unix,windows)))]
+                    #[cfg(not(any(unix, windows)))]
                     let result: Result<(), String> =
                         Err("TERMINAL_NATIVE_PROFILE_UNSUPPORTED".into());
                     if result.is_ok() && frame.wake_editor {
-                        if let Err(error) =
-                            writer.write_all(if cfg!(windows) {b"\x18\x02"}else{b"\x18\x1e"}).and_then(|_| writer.flush())
+                        if let Err(error) = writer
+                            .write_all(if cfg!(windows) {
+                                b"\x18\x02"
+                            } else {
+                                b"\x18\x1e"
+                            })
+                            .and_then(|_| writer.flush())
                         {
                             warn!("Native editor wake failed session_id={worker_id}: {error}");
                         }
@@ -1036,6 +1101,14 @@ fn create_local_session_blocking(
                         warn!(
                             "Failed to resize local terminal session_id={worker_id} cols={cols} rows={rows}: {error}"
                         );
+                    }
+                }
+                LocalWorkerActivity::Command(Ok(SessionCommand::StartupReady)) => {
+                    #[cfg(windows)]
+                    if let Err(error) = child_killer.resume_startup() {
+                        warn!("Failed to resume local startup session_id={worker_id}: {error}");
+                        let _ = child_killer.kill();
+                        break;
                     }
                 }
                 LocalWorkerActivity::Command(Ok(SessionCommand::Close)) => {
@@ -1177,6 +1250,7 @@ fn create_local_session_blocking(
                     Ok(SessionCommand::Write(_))
                     | Ok(SessionCommand::WriteBytes(_))
                     | Ok(SessionCommand::NativeControl(_))
+                    | Ok(SessionCommand::StartupReady)
                     | Ok(SessionCommand::Resize { .. }) => {}
                 },
                 recv(output_state_rx) -> state => {
@@ -1223,6 +1297,7 @@ fn create_local_session_blocking(
         );
     });
     info!("Created local session session_id={session_id} shell={shell}");
+    #[cfg(unix)]
     if native_mode == Some(crate::terminal_command::protocol::InputMode::NativeInline) {
         if let Some(runtime) = initialization_app.try_state::<crate::agent_runtime::AgentRuntime>()
         {
@@ -1358,14 +1433,7 @@ pub(crate) async fn close_session(
     session_id: String,
 ) -> Result<(), String> {
     info!("Closing SSH session session_id={session_id}");
-    let _closing = agent_runtime.begin_terminal_close(&session_id)?;
-    agent_runtime.stop_terminal_agents(&session_id).await?;
-    agent_runtime.terminal_closed(&session_id)?;
-    agent_runtime.close_terminal_broker_transport(
-        &session_id,
-        crate::terminal_broker::TerminalGenerationCloseReason::UserClosed,
-    )?;
-    let result = state.close(&session_id);
+    let result = agent_runtime.close_terminal(&state, &session_id).await;
     if let Err(error) = &result {
         warn!("Failed to close SSH session session_id={session_id}: {error}");
     }

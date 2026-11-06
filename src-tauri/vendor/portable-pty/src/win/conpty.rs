@@ -3,11 +3,24 @@ use crate::win::psuedocon::PsuedoCon;
 use crate::{Child, MasterPty, PtyPair, PtySize, PtySystem, SlavePty};
 use anyhow::Error;
 use filedescriptor::{FileDescriptor, Pipe};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use winapi::um::wincon::COORD;
 
 #[derive(Default)]
-pub struct ConPtySystem {}
+pub struct ConPtySystem {
+    grapheme_host: Option<PathBuf>,
+}
+
+impl ConPtySystem {
+    /// Use an explicitly verified redistributable with grapheme measurement.
+    /// Missing libraries/exports are errors; system ConPTY is never substituted.
+    pub fn with_grapheme_host(library: PathBuf) -> Self {
+        Self {
+            grapheme_host: Some(library),
+        }
+    }
+}
 
 impl PtySystem for ConPtySystem {
     fn openpty(&self, size: PtySize) -> anyhow::Result<PtyPair> {
@@ -21,6 +34,7 @@ impl PtySystem for ConPtySystem {
             },
             stdin.read,
             stdout.write,
+            self.grapheme_host.as_deref(),
         )?;
 
         let master = ConPtyMasterPty {

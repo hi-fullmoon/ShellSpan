@@ -6,8 +6,9 @@ import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 import frontend from '../../vitest.config.ts';
 import { artifactWorkspace } from '../artifact-paths.mjs';
-import { captureValidationSources, readValidationGit } from '../native-input-p2/frozen-validation.mjs';
+import { captureValidationSources, readValidationGit, nativeValidationResourceDirectory, captureValidationAssets } from '../native-input-p2/frozen-validation.mjs';
 import { createIndexReader } from '../native-input-p3/index-reader.mjs';
+import { editorValidationEnvironment } from '../native-input-p3/editor-validation.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
 const artifactRoot = path.join(root, '.artifacts/tests/artifact-layout');
@@ -23,6 +24,73 @@ async function withArtifactDirectory(check) {
 }
 
 describe('generated artifact layout', () => {
+  it('excludes the credential helper Cargo cache from Git, frozen sources and ordinary test discovery', async () => {
+    expect(frontend.test.exclude).toContain('**/scripts/native-input-p3/credential-cleanup/target/**');
+    await withArtifactDirectory(async directory => {
+      const snapshot = path.join(directory, 'ShellSpan'), source = 'scripts/native-input-p3/credential-cleanup/src/main.rs', generated = 'scripts/native-input-p3/credential-cleanup/target/debug/cache.test.mjs';
+      await mkdir(path.dirname(path.join(snapshot, source)), { recursive: true });
+      for (const file of ['.gitignore', source]) await copyFile(path.join(root, file), path.join(snapshot, file));
+      await writeFile(path.join(snapshot, 'ordinary.test.mjs'), "import {it} from 'vitest';it('ordinary',()=>{});\n");
+      const meta = path.join(snapshot, '.artifacts/tests/native-input-p3'), originalIndex = readValidationGit(root, ['rev-parse', '--path-format=absolute', '--git-path', 'index']).toString().trim(), head = readValidationGit(root, ['rev-parse', 'HEAD']).toString().trim();
+      const {gitDirectory, index} = createIndexReader(meta, originalIndex, head);await chmod(index, 0o400);
+      const indexSha256 = createHash('sha256').update(await readFile(index)).digest('hex');await writeFile(path.join(meta, 'snapshot-index.json'), JSON.stringify({version: 1, root: snapshot, gitDirectory, index, indexSha256}));
+      const before = captureValidationSources(snapshot);expect(Object.keys(before).sort()).toEqual(['.gitignore', 'ordinary.test.mjs', source].sort());
+      await mkdir(path.dirname(path.join(snapshot, generated)), {recursive: true});await writeFile(path.join(snapshot, generated), "throw Error('Cargo cache must not be collected');\n");
+      expect(readValidationGit(snapshot, ['check-ignore', '--no-index', generated]).toString().trim()).toBe(generated);expect(captureValidationSources(snapshot)).toEqual(before);
+      const discovered = execFileSync(process.execPath, [path.join(root, 'node_modules/vitest/vitest.mjs'), 'list', '--filesOnly', '--config', path.join(root, 'vitest.config.ts'), '--root', snapshot], {cwd: root, encoding: 'utf8', timeout: 20000});
+      expect(discovered).toContain('ordinary.test.mjs');expect(discovered).not.toContain('cache.test.mjs');expect(createHash('sha256').update(await readFile(index)).digest('hex')).toBe(indexSha256);
+    });
+  }, 25000);
+  it('freezes the actual selected resource tree instead of the default producer inputs', async () => {
+    await withArtifactDirectory(async directory => {
+      const snapshot=path.join(directory,'ShellSpan'),defaultResources=path.join(snapshot,'.artifacts/tests/native-input-p2/resources/native-input'),selected=path.join(snapshot,'.artifacts/tests/rebuilt/native-input'),sibling=path.join(directory,'other');
+      for(const folder of [defaultResources,selected,sibling])await mkdir(folder,{recursive:true});
+      await writeFile(path.join(defaultResources,'module.dll'),'old');await writeFile(path.join(selected,'module.dll'),'rebuilt');
+      expect(captureValidationAssets(nativeValidationResourceDirectory(snapshot,selected))).toEqual({'module.dll':createHash('sha256').update('rebuilt').digest('hex')});
+      expect(captureValidationAssets(nativeValidationResourceDirectory(snapshot))).toEqual({'module.dll':createHash('sha256').update('old').digest('hex')});
+      for(const invalid of [snapshot,sibling])expect(()=>nativeValidationResourceDirectory(snapshot,invalid)).toThrow('strict descendant');
+    });
+  });
+  it('admits frozen descendant editor resources with native platform path separators', async () => {
+    await withArtifactDirectory(async directory => {
+      const snapshot = path.join(directory, 'ShellSpan');
+      await mkdir(snapshot, { recursive: true });
+      await copyFile(path.join(root, '.gitignore'), path.join(snapshot, '.gitignore'));
+      const meta = path.join(snapshot, '.artifacts/tests/native-input-p3');
+      const originalIndex = readValidationGit(root, ['rev-parse', '--path-format=absolute', '--git-path', 'index']).toString().trim();
+      const head = readValidationGit(root, ['rev-parse', 'HEAD']).toString().trim();
+      const { gitDirectory, index } = createIndexReader(meta, originalIndex, head);
+      await chmod(index, 0o400);
+      const indexSha256 = createHash('sha256').update(await readFile(index)).digest('hex');
+      await writeFile(path.join(meta, 'snapshot-index.json'), JSON.stringify({ root: snapshot, gitDirectory, index, indexSha256 }));
+      const stage = path.join(directory, 'stage');
+      await mkdir(stage);
+      const sources = captureValidationSources(snapshot);
+      await writeFile(path.join(stage, 'sources.json'), JSON.stringify(sources));
+      await writeFile(path.join(meta, 'candidate-stage.json'), JSON.stringify({ root: snapshot, directory: stage, sealed: true }));
+      const resources = path.join(meta, 'validation-resources');
+      await mkdir(resources);
+      expect(await editorValidationEnvironment(snapshot, resources, ['windows-x64'])).toEqual({ SHELLSPAN_NATIVE_EDITOR_VALIDATION_ROOT: resources });
+      expect(JSON.parse(await readFile(path.join(resources, 'editor-validation.json'), 'utf8')).sourceManifestSha256)
+        .toBe(createHash('sha256').update(await readFile(path.join(stage, 'sources.json'))).digest('hex'));
+      expect(captureValidationSources(snapshot)).toEqual(sources);
+      expect(createHash('sha256').update(await readFile(index)).digest('hex')).toBe(indexSha256);
+    });
+  });
+
+  it('rejects a snapshot root and sibling directories before writing validation markers', async () => {
+    await withArtifactDirectory(async directory => {
+      const snapshot = path.join(directory, 'ShellSpan');
+      const sibling = path.join(directory, 'ShellSpan-resources');
+      await mkdir(snapshot);
+      await mkdir(sibling);
+      for (const resources of [snapshot, sibling]) {
+        await expect(editorValidationEnvironment(snapshot, resources, ['windows-x64']))
+          .rejects.toThrow('strict descendant');
+        await expect(access(path.join(resources, 'editor-validation.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+      }
+    });
+  });
   it('ignores real copied test sources in Git, frozen inventories and Vitest discovery', async () => {
     expect(frontend.test.exclude).toContain('**/.artifacts/**');
     await withArtifactDirectory(async directory => {

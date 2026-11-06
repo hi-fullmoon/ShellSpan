@@ -1,0 +1,16 @@
+import {describe,it,expect} from 'vitest';import {stopBoundaryPlan,matchesStopBoundaryArgs,isPreAcceptBoundary,isConfirmedPreAcceptCancel,stopBoundaryStages} from './native-stop-boundary-plan';
+describe('native stop boundary plan',()=>{
+ it('keeps submitted acceptance-boundary source interruptible and rejects changed arguments',()=>{
+  for(const stage of ['beforeAccept','afterAccept'] as const)for(const action of ['cancel','takeover'] as const){
+   const plan=stopBoundaryPlan('12345678-1234-1234-1234-123456789abc',stage,action);
+   expect(plan.command).toContain("'START'");expect(plan.command).toContain('while ($true)');expect(plan.command).toContain("'DONE'");
+   expect(matchesStopBoundaryArgs(plan.args,plan.command)).toBe(true);
+   expect(matchesStopBoundaryArgs({...plan.args,command:plan.command+';'},plan.command)).toBe(false);
+   expect(matchesStopBoundaryArgs({...plan.args,timeoutMs:5000},plan.command)).toBe(false);
+  }
+ });
+ it('allows only the explicit taken-over lease rejection for takeover',()=>{const result={execution:'notStarted',noAutoReplay:true,error:'TERMINAL_BROKER_LEASE_IDENTITY_MISMATCH',errorDetails:{code:'TERMINAL_SUBMISSION_REJECTED',phase:'beforeSubmission',execution:'notStarted',terminalRecoveryRequired:false}};expect(isConfirmedPreAcceptCancel('failed',result,'takeover')).toBe(true);expect(isConfirmedPreAcceptCancel('failed',result,'cancel')).toBe(false);expect(isConfirmedPreAcceptCancel('failed',{...result,error:'OTHER'},'takeover')).toBe(false);expect(isConfirmedPreAcceptCancel('failed',{...result,errorDetails:{...result.errorDetails,terminalRecoveryRequired:true}},'takeover')).toBe(false);});
+ it('requires confirmed not-started cancellation instead of a transient projection',()=>{const result={execution:'notStarted',noAutoReplay:true,errorDetails:{phase:'beforeSubmission',execution:'notStarted',terminalRecoveryRequired:false}};expect(isConfirmedPreAcceptCancel('cancelled',result)).toBe(true);expect(isConfirmedPreAcceptCancel('uncertain',result)).toBe(false);expect(isConfirmedPreAcceptCancel('cancelled',{...result,errorDetails:{...result.errorDetails,terminalRecoveryRequired:true}})).toBe(false);expect(isConfirmedPreAcceptCancel('cancelled',{...result,execution:'unknown'})).toBe(false);expect(isConfirmedPreAcceptCancel('cancelled',{})).toBe(false);});
+ it('keeps all seven required stages and exact one-shot current-stage arguments',()=>{expect(stopBoundaryStages).toHaveLength(7);for(const stage of['durableIntent','armed'] as const)for(const action of['cancel','takeover'] as const){const plan=stopBoundaryPlan('12345678-1234-1234-1234-123456789abc',stage,action);expect(matchesStopBoundaryArgs(plan.args,plan.command)).toBe(true);expect(plan.goal).toContain(JSON.stringify(plan.args));expect(matchesStopBoundaryArgs({...plan.args,background:true},plan.command)).toBe(false);expect(matchesStopBoundaryArgs({...plan.args,command:plan.command+';'},plan.command)).toBe(false);}});
+ it('does not accept empty or incomplete evidence as a pre-accept boundary',()=>{expect(isPreAcceptBoundary(undefined,'agent')).toBe(false);expect(()=>stopBoundaryPlan('../','armed','cancel')).toThrow();expect(matchesStopBoundaryArgs({command:'x',timeoutMs:30000},'x')).toBe(false);});
+});

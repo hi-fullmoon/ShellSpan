@@ -1,9 +1,15 @@
 # Native Bash resources
 
 `pnpm native:prepare` builds the host's accepted GNU Bash targets and stages
-verified resources in `generated/`. `--with-ssh` also builds the Linux aarch64
+verified resources in `.artifacts/releases/native-input/generated/` at the repository
+root. Preparation logs, staging and retained prior output are in the sibling
+`resource-build/` directory and are not bundled. `--with-ssh` also builds the Linux aarch64
 glibc 2.36 targets in the pinned Docker environment. CI imports that target's
 source-verified artifact before staging the macOS application.
+
+Clean Cargo/dev builds create only an empty staging directory for Tauri resource
+discovery; they do not generate or admit any native profile. Isolated validation
+preparation remains under `.artifacts/tests/` and does not replace release input.
 
 Generated binaries are excluded from Git. The Tauri resource map preserves
 `native-input/generated/` in the final bundle; release loading uses that

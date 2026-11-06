@@ -1,6 +1,8 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
+import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { AiToolDetails } from '@/components/ai/workspace/ai-tool-details';
@@ -77,10 +79,20 @@ describe('terminal result presentation', () => {
 
   it('keeps a shared capture authoritative even when separate streams are also supplied', () => {
     const result = execute('console.log(process.cwd()); console.error(process.version)');
-    const combined = spawnSync('/bin/bash', ['--noprofile', '--norc', '-c', '"$1" -e "$2" 2>&1', 'capture', process.execPath, 'console.log(process.cwd()); console.error(process.version)'], { encoding: 'utf8' });
-    expect(combined.status).toBe(0);
-    const node = terminalNode(result.command, { ...result, combinedOutput: combined.stdout });
-    expect(toolOutputForCopy(node)).toBe(combined.stdout);
+    const artifacts = join(process.cwd(), '.artifacts/tests/terminal-result-presentation');
+    mkdirSync(artifacts, { recursive: true });
+    const capture = join(mkdtempSync(join(artifacts, 'combined-')), 'output.txt');
+    const fd = openSync(capture, 'wx');
+    try {
+      const combined = spawnSync(process.execPath, ['-e', 'console.log(process.cwd()); console.error(process.version)'], { stdio: ['ignore', fd, fd] });
+      expect(combined.error).toBeUndefined();
+      expect(combined.status).toBe(0);
+    } finally {
+      closeSync(fd);
+    }
+    const combinedOutput = readFileSync(capture, 'utf8');
+    const node = terminalNode(result.command, { ...result, combinedOutput });
+    expect(toolOutputForCopy(node)).toBe(combinedOutput);
     expect(toolOutputForCopy(node).split(process.version)).toHaveLength(2);
   });
 

@@ -11,7 +11,8 @@ public static class ShellSpanCapture {
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window,out Rect rect);
 }
 '@
-$own = @(Get-Process -Name ShellSpan -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $Executable -and $_.SessionId -eq [Diagnostics.Process]::GetCurrentProcess().SessionId -and $_.MainWindowHandle -ne 0 })
+$ownName = [IO.Path]::GetFileNameWithoutExtension($Executable)
+$own = @(Get-Process -Name $ownName -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $Executable -and $_.SessionId -eq [Diagnostics.Process]::GetCurrentProcess().SessionId -and $_.MainWindowHandle -ne 0 })
 if ($own.Count -ne 1) { throw 'Expected one owned interactive ShellSpan window' }
 $window = $own[0]
 if ([ShellSpanCapture]::GetForegroundWindow() -ne $window.MainWindowHandle) { throw 'Owned window is not foreground; no other desktop content captured' }

@@ -2,6 +2,153 @@ use super::*;
 use crate::terminal_screen::TerminalScreenBuffer;
 
 #[test]
+fn acceptance_capture_is_opt_in_read_only_and_does_not_advance_input_cursor() {
+    let mut record = SessionRecord::open(
+        "capture-terminal".into(),
+        1,
+        "capture-transport".into(),
+        TerminalTransportKind::LocalPty,
+        TerminalGeometry::new(80, 24),
+        false,
+    );
+    let operation = Arc::new(TerminalCommandOperation::new(
+        "capture-terminal".into(),
+        1,
+        "capture-operation".into(),
+        "fixture".into(),
+        None,
+        1,
+        1024,
+        Arc::new(TerminalRolloutCounters::default()),
+    ));
+    record.active_command = Some(operation.clone());
+    let before = record.snapshot().unwrap();
+    let before_operation = operation.snapshot().unwrap();
+    {
+        let mut data = operation.lock().unwrap();
+        // Projection fixture bytes, not native input or lifecycle receipts.
+        data.capture = vec![0, 0xff, b'T'];
+        data.native_capture = Some(crate::terminal_command::capture::CaptureFence::new(
+            "unit-private-request",
+        ));
+    }
+    let observed = record.snapshot().unwrap();
+    assert_eq!(before.input_observation, observed.input_observation);
+    assert_eq!(before.next_input_sequence, observed.next_input_sequence);
+    assert_eq!(before.lease, observed.lease);
+    assert_eq!(before_operation.phase, operation.snapshot().unwrap().phase);
+    assert_eq!(record.snapshot().unwrap(), observed);
+    let json = serde_json::to_value(&observed).unwrap();
+    #[cfg(all(feature = "native-input-acceptance", debug_assertions))]
+    {
+        let capture = observed.acceptance_command_capture.unwrap();
+        assert_eq!(capture.bytes, [0, 0xff, b'T']);
+        assert_eq!(capture.operation_id, "capture-operation");
+        assert_eq!(capture.command_id, before_operation.command_id);
+        assert!(capture.capture_open && capture.native_fence_registered);
+        assert!(!capture.native_fence_complete && !capture.truncated);
+        assert_eq!(
+            json["acceptanceCommandCapture"]["bytes"],
+            serde_json::json!([0, 255, 84])
+        );
+        let text = json.to_string();
+        assert!(!text.contains("unit-private-request"));
+    }
+    #[cfg(not(all(feature = "native-input-acceptance", debug_assertions)))]
+    assert!(json.get("acceptanceCommandCapture").is_none());
+}
+
+#[test]
+fn result_observation_is_atomic_and_never_promotes_unfinished_projection_inputs() {
+    // Projection-only unit data, not native receipts or proof of execution.
+    let operation = Arc::new(TerminalCommandOperation::new(
+        "result-terminal".into(),
+        1,
+        "result-operation".into(),
+        "echo fixture".into(),
+        None,
+        1,
+        1024,
+        Arc::new(TerminalRolloutCounters::default()),
+    ));
+    assert!(operation
+        .snapshot_for_result()
+        .unwrap()
+        .command_observation
+        .is_none());
+    operation.lock().unwrap().native_protocol = true;
+    let writer = operation.clone();
+    let updater = std::thread::spawn(move || {
+        for revision in 1..2000 {
+            let mut data = writer.lock().unwrap();
+            data.revision = revision;
+            data.source_may_be_enqueued = revision % 2 == 0;
+        }
+    });
+    for _ in 0..2000 {
+        let snapshot = operation.snapshot_for_result().unwrap();
+        let observation = snapshot.command_observation.unwrap();
+        assert_eq!(observation.legacy_revision, snapshot.revision);
+        assert_eq!(observation.operation_id, snapshot.operation_id);
+        assert_eq!(observation.command_id, snapshot.command_id);
+        assert_eq!(observation.phase, snapshot.phase);
+        assert_eq!(observation.may_have_submitted, snapshot.may_have_submitted);
+        assert_eq!(
+            observation.execution_evidence,
+            TerminalCommandExecutionEvidence::Unknown
+        );
+        assert!(!observation.full_input_confirmed && !observation.submission_intent_durable);
+    }
+    updater.join().unwrap();
+}
+
+#[test]
+fn result_observation_survives_view_retirement_and_keeps_job_control_source_hidden() {
+    // A local view-lifetime model; no synthetic completion or native proof.
+    let operation = Arc::new(TerminalCommandOperation::new(
+        "result-terminal".into(),
+        1,
+        "result-operation".into(),
+        "private control fixture".into(),
+        None,
+        1,
+        1024,
+        Arc::new(TerminalRolloutCounters::default()),
+    ));
+    {
+        let mut data = operation.lock().unwrap();
+        data.native_protocol = true;
+        data.plan.method = crate::terminal_command::state::ExecutionMethod::NativeJobControl;
+    }
+    let mut record = SessionRecord::open(
+        "result-terminal".into(),
+        1,
+        "result-transport".into(),
+        TerminalTransportKind::LocalPty,
+        TerminalGeometry::new(80, 24),
+        false,
+    );
+    record.active_command = Some(operation.clone());
+    let captured = operation.snapshot_for_result().unwrap();
+    record.active_command = None;
+    drop(operation);
+    assert!(record
+        .snapshot()
+        .unwrap()
+        .input_observation
+        .active_command
+        .is_none());
+    let observation = captured.command_observation.unwrap();
+    assert_eq!(observation.operation_id, "result-operation");
+    assert!(observation.display_source.is_none());
+    assert!(observation.no_auto_replay);
+    assert_eq!(
+        observation.execution_evidence,
+        TerminalCommandExecutionEvidence::Unknown
+    );
+}
+
+#[test]
 fn complete_snapshot_cursor_covers_gate_lease_and_durable_facts_without_changing_legacy_revision() {
     // Pure public-projection inputs, not native receipts or proof of execution.
     let mut record = SessionRecord::open(
@@ -2426,11 +2573,12 @@ fn interactive_wait_observes_idle_and_terminal_closure_without_replay() {
         .unwrap();
     assert_eq!(idle.reason, TerminalWaitReason::Idle);
 
+    let (started, attached_receiver) = std::sync::mpsc::channel();
     let waiter = {
         let broker = broker.clone();
         std::thread::spawn(move || {
             broker
-                .wait_terminal(
+                .wait_terminal_observed(
                     "interactive-close",
                     TerminalWaitRequest {
                         after_screen_version: Some(u64::MAX - 1),
@@ -2441,11 +2589,14 @@ fn interactive_wait_observes_idle_and_terminal_closure_without_replay() {
                         idle: None,
                         timeout: Duration::from_secs(2),
                     },
+                    || started.send(()).unwrap(),
                 )
                 .unwrap()
         })
     };
-    std::thread::sleep(Duration::from_millis(10));
+    attached_receiver
+        .recv_timeout(Duration::from_secs(1))
+        .expect("waiter did not attach before close");
     broker
         .close_transport(
             "interactive-close",

@@ -10,8 +10,11 @@ fn diagnostic_json_capture_redacts_escaped_credentials_before_snapshots() {
         let input = json!({"schemaVersion":1,"status":"ok","data":{
             "entries":[{"message":credential}], credential.clone(): "key evidence"
         }});
-        let mut child = Command::new("python3")
-            .args([
+        let mut python = Command::new(if cfg!(windows) { "py" } else { "python3" });
+        if cfg!(windows) {
+            python.arg("-3");
+        }
+        let mut child = python.args([
                 "-I",
                 "-c",
                 "import json,sys; print(json.dumps(json.load(sys.stdin.buffer), ensure_ascii=True))",

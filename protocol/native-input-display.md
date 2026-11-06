@@ -19,6 +19,22 @@ enter 时保存原 provider 并启用选择，exit、有序关闭及销毁时恢
 该实现仍受[实现说明](../docs/design/agent-terminal-input.md)的资源、平台与窗口
 门禁约束，不表示未验收 profile 已启用；provider 显示状态不能授权执行。
 
+Windows 私有 ConPTY `1.25.260930003` 的新 profile 在 DLL 与 OpenConsole 实际摘要校验后，
+声明 `unicodeVersion: "15-graphemes"`、`unicodeScope: "session"` 和
+`ownedReflowCursorLine: false`。其 0x08 字素宽度模式作用于整个 PTY 流，因此官方
+`@xterm/addon-unicode-graphemes@0.4.0` 的 provider 从安装 binding 起保持到旧传输排空；
+owned exit 只退出输入显示，普通命令输出继续使用相同宽度规则。关闭或重绑恢复原 provider，
+期间外部显式切换仍予以保留。注册 addon 自带的激活先恢复基线，再由 binding 管理作用域。
+系统 ConPTY、旧 profile 与 raw 模式不能仅凭版本名取得这一元数据；生产准入仍关闭。
+
+Windows 本地会话另声明只读 `deferredStartup: true`：主线程以挂起状态创建，
+registry 先提交实际渲染尺寸，再发送既有 ready 通知。后端同一工作队列先处理 resize，
+再仅一次恢复 Shell，避免用新尺寸解释旧尺寸下已产生的提示符。准备前关闭只终止该挂起进程。
+创建响应中的 binding 来自本地已校验的加载器和已创建的 ConPTY，是显示配置，
+不表示 peer/编辑器就绪；Windows 不再在创建响应中等待挂起 Shell 的协商。
+实际私有 capabilities、peer 摘要、promptReady 及输入准入仍独立核验，尚未协商时不能提交 Agent 输入。
+Unix/SSH 启动保持既有行为，ready 通知也不是输入证明或执行回执。
+
 同一后端验证的binding还可声明 `ownedReflowCursorLine: false`：该编辑器自行处理SIGWINCH
 与原生重画，owned enter也保持公开reflow选项为false。字段缺省仍为true，保持既有Bash
 owned路径；普通用户默认、exit和有序关闭仍为false。当前原生append型ZLE profile明确
@@ -36,6 +52,11 @@ SIGKILL 无法由死进程补发 off；真实传输 EOF 负责最终显示清理
 
 排空/dispose 不重置 xterm 尚未结束的 OSC 或 UTF-8 解析状态。P2 的真实 registry 验证覆盖 native→native→raw→native、实际 producer 的半个 OSC/UTF-8、后继普通文字与原历史。关闭及重绑先停止旧回调入队，再排空、卸载并发送标准流边界，不调用 terminal.reset、清屏、重放历史或私有 parser。生产 ssh-data 使用后端增量 UTF-8 解码后的字符串；浏览器复验按这一真实传输类型回放原始 PTY 捕获。
 
+Windows 新 ConPTY 的初始光标位置相对于新的可见屏幕。重绑到该传输时，先按旧传输语义排空输出，
+再切换 ConPTY 选项；普通缓冲区通过标准光标定位和换行将旧屏幕 cell 滚入现有 scrollback，
+保留原 cell 和其选择/视口坐标关系，然后从新的光标原点解析后继流，避免启动时的 cursor-home 覆盖旧历史。
+这一步不调用 erase/reset，不读取并重写历史文本，也不修改私有解析器；alt buffer 边界另行验收。
+
 ## 权威与通用规则
 
 任何进程 stdout 都可能产生同文 OSC，它至多改变不可信终端显示。模块不提供生命周期、ready、输入、审批或 lease 回调，不投递终端输入，不生成执行证据。只有匹配的原生私有控制/提交机制能推进命令事实。
@@ -45,6 +66,10 @@ SIGKILL 无法由死进程补发 off；真实传输 EOF 负责最终显示清理
 正式xterm构建同时保留显式reflow模式中EL0清除的软换行关系；默认模式继续使用原EL0
 行为。源码补丁、UMD/ESM与固定构建输入由 `scripts/dependency-builds/xterm/` 共同记录，
 通过 `scripts/rebuild-xterm-patch.mjs` 重建，不单独手改安装包。该通用显示规则不产生执行权限。
+
+通用 UTF8 byte 输入解码必须跨真实片段保留 continuation byte，包括低六位为零的 0x80，
+不能把它当成不存在的残留项而丢失 U+200D 等字符。维护补丁与固定重建同时覆盖此规则；
+真实捕获的 1/2/3 byte、普通分片和整块回放分别验证原字符、复制及搜索，不以解码后的字符串接口成功替代 byte 接口证据。
 
 横向重排同时使用真实cell偏移更新普通历史选区的起止锚点，复用Buffer已有的换行、宽字符
 间隙及insert/delete/trim坐标变换；不保存选中文字、不搜索原文回选，不覆盖公共选择接口。

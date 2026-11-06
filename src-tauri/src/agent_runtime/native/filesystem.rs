@@ -349,6 +349,18 @@ fn execute_trash_file(
     })
 }
 
+fn public_file_path(target: &AgentToolTargetNative, path: &str) -> String {
+    match target {
+        // Canonical Windows paths use a device prefix that PowerShell can resolve
+        // but its script authorization manager cannot execute. Keep canonical
+        // paths for validation and I/O; expose the existing portable path format.
+        AgentToolTargetNative::Local { .. } if cfg!(windows) => {
+            crate::portable_local_path(Path::new(path))
+        }
+        _ => path.to_string(),
+    }
+}
+
 fn execute_read_file(
     context: &FileExecutionContextNative<'_>,
     operation: &FileOperationGuardNative,
@@ -417,7 +429,7 @@ fn execute_read_file(
     Ok(FileToolOutputNative {
         summary: "Read a bounded file through the native filesystem driver.".into(),
         data: json!({
-            "path": path,
+            "path": public_file_path(&context.call.target, &path),
             "encoding": arguments.encoding,
             "byteLength": bytes.len(),
             "sha256": digest,
@@ -597,7 +609,7 @@ fn execute_write_file(
         data: json!({
             "written": true,
             "operation": operation_name,
-            "path": preview.path,
+            "path": public_file_path(&context.call.target, &preview.path),
             "byteLength": preview.after.len(),
             "beforeSha256": preview.before_sha256,
             "afterSha256": preview.after_sha256,
@@ -2345,6 +2357,14 @@ mod tests {
             .find(|(_, character)| character.len_utf8() > 1)
             .unwrap();
         let page = run("utf8", 0, multibyte_offset + 1).unwrap();
+        assert_eq!(
+            page.data["path"],
+            crate::portable_local_path(&root.join("AGENTS.md"))
+        );
+        assert_eq!(
+            fs::read_to_string(page.data["path"].as_str().unwrap()).unwrap(),
+            source
+        );
         assert_eq!(page.data["content"], &source[..multibyte_offset]);
         assert_eq!(page.data["readBytes"], multibyte_offset);
         assert_eq!(page.data["nextOffset"], multibyte_offset);
@@ -3093,6 +3113,14 @@ mod tests {
         .unwrap();
         let path = workspace.path().join("cool-css-effect.html");
         let before = fs::read(&path).unwrap();
+        assert_eq!(
+            created.data["path"],
+            crate::portable_local_path(&fs::canonicalize(&path).unwrap())
+        );
+        assert_eq!(
+            fs::read(created.data["path"].as_str().unwrap()).unwrap(),
+            before
+        );
         assert_eq!(
             before.len(),
             create.arguments["content"].as_str().unwrap().len()

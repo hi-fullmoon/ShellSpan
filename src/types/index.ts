@@ -210,6 +210,8 @@ export interface SessionSummary {
 }
 
 export interface SessionPtyInfo {
+  /** Local Windows startup waits for the renderer's initial resize/ready FIFO. */
+  deferredStartup?: boolean;
   transportKind: TerminalBrokerTransportKind;
   inputMode?: TerminalBrokerSessionSnapshot['inputMode'];
   nativeDisplayBinding?: TerminalBrokerSessionSnapshot['nativeDisplayBinding'];
@@ -355,7 +357,8 @@ export interface TerminalBrokerSessionSnapshot {
     enterPayload: 'SetUserVar=ShellSpanNativeInput=MQ==';
     exitPayload: 'SetUserVar=ShellSpanNativeInput=MA==';
     /** Backend-verified editor presentation only; never execution authority. */
-    unicodeVersion?: '11';
+    unicodeVersion?: '11' | '15-graphemes';
+    unicodeScope?: 'session';
     /** Verified editor owns redraw/resize; absent preserves the Bash default. */
     ownedReflowCursorLine?: boolean;
   };

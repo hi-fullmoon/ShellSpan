@@ -460,26 +460,27 @@ impl ScratchStore {
         let engine = Arc::downgrade(engine);
         std::thread::Builder::new()
             .name("agent-scratch-cleanup".into())
-            .spawn(move || loop {
-                let Some(state) = weak.upgrade() else { break };
-                let Some(engine) = engine.upgrade() else {
-                    break;
-                };
-                let store = Self { state };
-                if let Err(error) = store.cleanup(&ScratchServices {
-                    database: &database,
-                    credentials: &credentials,
-                    known_hosts: &known_hosts,
-                    engine: Some(&engine),
-                }) {
-                    log::warn!(
-                        "Agent scratch cleanup deferred: {}",
-                        crate::redaction::redact_sensitive_text(&error)
-                    );
+            .spawn(move || {
+                while let Some(state) = weak.upgrade() {
+                    let Some(engine) = engine.upgrade() else {
+                        break;
+                    };
+                    let store = Self { state };
+                    if let Err(error) = store.cleanup(&ScratchServices {
+                        database: &database,
+                        credentials: &credentials,
+                        known_hosts: &known_hosts,
+                        engine: Some(&engine),
+                    }) {
+                        log::warn!(
+                            "Agent scratch cleanup deferred: {}",
+                            crate::redaction::redact_sensitive_text(&error)
+                        );
+                    }
+                    drop(store);
+                    drop(engine);
+                    std::thread::sleep(std::time::Duration::from_secs(3600));
                 }
-                drop(store);
-                drop(engine);
-                std::thread::sleep(std::time::Duration::from_secs(3600));
             })
             .map(|_| ())
             .map_err(|error| format!("failed to start scratch cleanup: {error}"))

@@ -131,7 +131,7 @@ describe('terminalRegistry', () => {
     vi.clearAllMocks();
   });
 
-  it('uses only backend ConPTY metadata and resets it on reconnect', () => {
+  it('uses only backend ConPTY metadata and changes it after old output drains', async () => {
     const controller = createController('local', {
       transportKind: 'windowsConPty', windowsBuildNumber: 26300,
     });
@@ -139,12 +139,117 @@ describe('terminalRegistry', () => {
     terminalRegistry.rebindSession('local', 'remote', {
       transportKind: 'sshPty', windowsBuildNumber: 26300,
     });
+    expect(controller.terminal.options.windowsPty).toEqual({ backend: 'conpty', buildNumber: 26300 });
+    await controller.whenOutputReady();
     expect(controller.terminal.options.windowsPty).toEqual({});
     terminalRegistry.rebindSession('remote', 'unknown-build', { transportKind: 'windowsConPty' });
+    await controller.whenOutputReady();
     expect(controller.terminal.options.windowsPty).toEqual({ backend: 'conpty' });
     terminalRegistry.rebindSession('unknown-build', 'legacy');
+    await controller.whenOutputReady();
     expect(controller.terminal.options.windowsPty).toEqual({});
     expect(createController('posix', { transportKind: 'localPty' }).terminal.options.windowsPty).toEqual({});
+  });
+
+  it('keeps verified ConPTY grapheme measurement across output and restores it after rebind drains', async () => {
+    const controller = createController('graphemes', {
+      transportKind: 'windowsConPty', inputMode: 'native-inline',
+      nativeDisplayBinding: {
+        protocol: 'shellspan.native-input', inputMode: 'native-inline', oscIdentifier: 1337,
+        enterPayload: 'SetUserVar=ShellSpanNativeInput=MQ==', exitPayload: 'SetUserVar=ShellSpanNativeInput=MA==',
+        unicodeVersion: '15-graphemes', unicodeScope: 'session', ownedReflowCursorLine: false,
+      },
+    });
+    await controller.whenOutputReady();
+    const term = controller.terminal;
+    const write = (text: string) => new Promise<void>(resolve => term.write(text, resolve));
+    expect(term.unicode.activeVersion).toBe('15-graphemes');
+    await write('\x1b]1337;SetUserVar=ShellSpanNativeInput=MQ==\x07👩🏽‍💻\x1b]1337;SetUserVar=ShellSpanNativeInput=MA==\x07');
+    expect(term.unicode.activeVersion).toBe('15-graphemes');
+    expect(term.options.reflowCursorLine).toBe(false);
+    expect(term.buffer.active.cursorX).toBe(2);
+    await write('👩🏽‍💻');
+    expect(term.buffer.active.cursorX).toBe(4);
+    terminalRegistry.rebindSession('graphemes', 'raw-output', { transportKind: 'windowsConPty', inputMode: 'raw' });
+    await controller.whenOutputReady();
+    expect(term.unicode.activeVersion).toBe('6');
+    expect(term.options.reflowCursorLine).toBe(false);
+    expect(term.buffer.active.getLine(0)?.translateToString(true)).toBe('👩🏽‍💻👩🏽‍💻');
+  });
+
+  it('resizes each replacement PTY to the existing renderer before releasing its output', async () => {
+    const ipc = await import('@/lib/ipc/tauri');
+    const controller = createController('before-rebind', { transportKind: 'windowsConPty' });
+    await controller.whenOutputReady();
+    controller.terminal.resize(97, 31);
+    vi.mocked(ipc.invokeResizeSession).mockClear();
+    vi.mocked(ipc.invokeMarkSessionReady).mockClear();
+    let acknowledge: (() => void) | undefined;
+    vi.mocked(ipc.invokeResizeSession).mockImplementationOnce(() => new Promise<void>(resolve => { acknowledge = resolve; }));
+    terminalRegistry.rebindSession('before-rebind', 'after-rebind', { transportKind: 'windowsConPty' });
+    await vi.waitFor(() => expect(ipc.invokeResizeSession).toHaveBeenCalledWith('after-rebind', 97, 31));
+    expect(ipc.invokeMarkSessionReady).not.toHaveBeenCalled();
+    acknowledge!();
+    await controller.whenOutputReady();
+    expect(ipc.invokeMarkSessionReady).toHaveBeenCalledWith('after-rebind');
+    vi.mocked(ipc.invokeResizeSession).mockClear();
+    terminalRegistry.rebindSession('after-rebind', 'third-connection', { transportKind: 'windowsConPty' });
+    await controller.whenOutputReady();
+    expect(ipc.invokeResizeSession).toHaveBeenCalledWith('third-connection', 97, 31);
+  });
+
+  it('configures a deferred Windows startup before releasing its output', async () => {
+    const ipc = await import('@/lib/ipc/tauri');
+    vi.mocked(ipc.invokeResizeSession).mockClear();
+    vi.mocked(ipc.invokeMarkSessionReady).mockClear();
+    let acknowledge: (() => void) | undefined;
+    vi.mocked(ipc.invokeResizeSession).mockImplementationOnce(() => new Promise<void>(resolve => { acknowledge = resolve; }));
+    const controller = createController('deferred-console', { transportKind: 'windowsConPty', deferredStartup: true });
+    controller.terminal.resize(132, 28);
+    await vi.waitFor(() => expect(ipc.invokeResizeSession).toHaveBeenCalledWith('deferred-console', 132, 28));
+    expect(ipc.invokeMarkSessionReady).not.toHaveBeenCalled();
+    acknowledge!();
+    await controller.whenOutputReady();
+    expect(ipc.invokeMarkSessionReady).toHaveBeenCalledWith('deferred-console');
+  });
+
+  it('ignores a previous connection resize acknowledgement after a second rebind', async () => {
+    const ipc = await import('@/lib/ipc/tauri');
+    const controller = createController('original');
+    await controller.whenOutputReady();
+    vi.mocked(ipc.invokeMarkSessionReady).mockClear();
+    let acknowledge: (() => void) | undefined;
+    vi.mocked(ipc.invokeResizeSession).mockImplementationOnce(() => new Promise<void>(resolve => { acknowledge = resolve; }));
+    terminalRegistry.rebindSession('original', 'superseded');
+    await vi.waitFor(() => expect(acknowledge).toBeDefined());
+    terminalRegistry.rebindSession('superseded', 'current');
+    await controller.whenOutputReady();
+    acknowledge!();
+    await act(async () => { await Promise.resolve(); });
+    expect(ipc.invokeMarkSessionReady).toHaveBeenCalledWith('current');
+    expect(ipc.invokeMarkSessionReady).not.toHaveBeenCalledWith('superseded');
+  });
+
+  it('preserves old normal-screen cells when a new ConPTY starts at cursor home', async () => {
+    const ptyInfo: SessionPtyInfo = { transportKind: 'windowsConPty', windowsBuildNumber: 26300 };
+    const controller = createController('old-console', ptyInfo);
+    await controller.whenOutputReady();
+    controller.terminal.resize(40, 6);
+    const write = (text: string) => new Promise<void>(resolve => controller.terminal.write(text, resolve));
+    await write('OLD_CONNECTION_OUTPUT\r\nold prompt>');
+    const selection = controller.terminal.getSelection;
+    const reset = vi.spyOn(controller.terminal, 'reset');
+    const clear = vi.spyOn(controller.terminal, 'clear');
+    terminalRegistry.rebindSession('old-console', 'new-console', ptyInfo);
+    await controller.whenOutputReady();
+    await write('\u001b[HNEW_CONNECTION_OUTPUT\r\nnew prompt>');
+    const buffer = controller.terminal.buffer.normal;
+    const text = Array.from({ length: buffer.length }, (_, row) => buffer.getLine(row)?.translateToString(true) ?? '').join('\n');
+    expect(text).toContain('OLD_CONNECTION_OUTPUT');
+    expect(text).toContain('NEW_CONNECTION_OUTPUT');
+    expect(controller.terminal.getSelection).toBe(selection);
+    expect(reset).not.toHaveBeenCalled();
+    expect(clear).not.toHaveBeenCalled();
   });
 
   it('create attaches container to a host and write appends to buffer', () => {
@@ -424,6 +529,7 @@ describe('terminalRegistry', () => {
     expect(controller.sessionId).toBe('s2');
     expect(controller.terminal).toBe(terminal);
     expect(controller.terminal.buffer.active.length).toBe(bufferLength);
+    await controller.whenOutputReady();
     expect(listenToSshData).toHaveBeenCalledWith('s2', expect.any(Function));
 
     // Input within the post-reconnect grace window is dropped so a stray
@@ -972,8 +1078,7 @@ describe('terminalRegistry', () => {
         },
       });
       await act(async () => {
-        vi.advanceTimersByTime(1500);
-        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(1500);
       });
       expect(requestReconnect).toHaveBeenCalledTimes(1);
 
@@ -985,11 +1090,14 @@ describe('terminalRegistry', () => {
         },
       });
       await act(async () => {
-        vi.advanceTimersByTime(1500);
-        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(1500);
       });
-
+      // The closed stream's listener was invalidated. Its stale event must not
+      // schedule a new reconnect; an explicit user retry uses the released guard.
+      expect(requestReconnect).toHaveBeenCalledTimes(1);
+      controller.simulateInput('\r');
       expect(requestReconnect).toHaveBeenCalledTimes(2);
+      expect(requestReconnect).toHaveBeenLastCalledWith('s1');
     } finally {
       vi.useRealTimers();
     }

@@ -40,7 +40,7 @@ try{
   application=spawn(binary,applicationArgs,{stdio:'inherit'});
   exited=new Promise((resolve,reject)=>{application.once('error',reject);application.once('exit',code=>resolve(code));});
   const metadata=JSON.parse(execFileSync('powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-File',resolve(import.meta.dirname,'windows-image.ps1'),
-    '-Action','Inspect','-ApplicationPid',String(application.pid),'-RunnerPid',String(process.pid),'-Executable',binary],{encoding:'utf8'}));
+    '-Action','Inspect','-ApplicationPid',String(application.pid),'-RunnerPid',String(process.pid),'-Executable',binary],{encoding:'utf8',windowsHide:true}));
   assert.equal(metadata.sha256,binarySha256);
   writeFrozenCheckpoint(join(evidence,`native-image-${recordId}.json`),{frozenManifest:manifest,binarySha256,frozenInputs,metadata,
     tauriConfigSha256:createHash('sha256').update(process.env.TAURI_CONFIG??'').digest('hex')});
@@ -54,7 +54,7 @@ try{
 }finally{
   if(application&&application.exitCode===null&&application.signalCode===null){
     execFileSync('powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-File',resolve(import.meta.dirname,'windows-image.ps1'),
-      '-Action','Stop','-ApplicationPid',String(application.pid),'-RunnerPid',String(process.pid),'-Executable',join(image,'ShellSpan.exe')],{stdio:'pipe',timeout:20000});await exited;
+      '-Action','Stop','-ApplicationPid',String(application.pid),'-RunnerPid',String(process.pid),'-Executable',join(image,'ShellSpan.exe')],{stdio:'pipe',windowsHide:true,timeout:20000});await exited;
   }
   await rm(image,{recursive:true,force:true});
 }

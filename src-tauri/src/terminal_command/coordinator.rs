@@ -3,6 +3,10 @@
 use super::*;
 use nip::{Envelope, Payload};
 
+#[cfg(test)]
+#[path = "coordinator_interrupt_tests.rs"]
+mod interrupt_tests;
+
 pub(crate) struct NativeInputCoordinator {
     broker: TerminalSessionBroker,
     transport: String,
@@ -10,6 +14,7 @@ pub(crate) struct NativeInputCoordinator {
     requests: HashMap<&'static str, String>,
     receipts: HashMap<&'static str, String>,
     deadline: Option<Instant>,
+    interrupt_before_start_deadline: Option<Instant>,
 }
 
 impl TerminalSessionBroker {
@@ -251,6 +256,7 @@ impl TerminalSessionBroker {
         self.changed.notify_all();
         Ok(())
     }
+    #[cfg(unix)]
     pub(crate) fn wait_native_initialization(
         &self,
         transport: &str,
@@ -305,6 +311,7 @@ impl TerminalSessionBroker {
             requests: HashMap::new(),
             receipts: HashMap::new(),
             deadline: None,
+            interrupt_before_start_deadline: None,
         })
     }
 }
@@ -360,9 +367,11 @@ impl NativeInputCoordinator {
     pub(crate) fn identity(&self) -> Result<CommandIdentity, String> {
         Ok(self.operation.lock()?.intent.identity.clone())
     }
+    #[cfg(unix)]
     pub(crate) fn editor_ready_confirmed(&self) -> Result<bool, String> {
         Ok(self.operation.lock()?.native_editor_ready_confirmed)
     }
+    #[cfg(unix)]
     pub(crate) fn capabilities_confirmed(&self) -> Result<bool, String> {
         Ok(self.operation.lock()?.native_capabilities_confirmed)
     }
@@ -553,6 +562,7 @@ impl NativeInputCoordinator {
         self.admit(TerminalInputKind::Executable, b"\x18a", enqueue_key)
     }
 
+    #[cfg(unix)]
     pub(crate) fn cancel_draft(
         &mut self,
         enqueue: impl FnOnce(&[u8]) -> Result<(), String>,
@@ -597,6 +607,7 @@ impl NativeInputCoordinator {
         })
     }
 
+    #[cfg(unix)]
     pub(crate) fn query(&mut self) -> Result<Vec<u8>, String> {
         self.verify_current(false)?;
         self.request("query", Payload::Query)?
@@ -609,6 +620,7 @@ impl NativeInputCoordinator {
     pub(crate) fn interrupt(
         &mut self,
         reason: TerminalCommandRequestedSettlement,
+        stop_deadline: Instant,
         enqueue: impl FnOnce() -> Result<(), String>,
     ) -> Result<bool, String> {
         let gate = self.operation.submission_gate.clone();
@@ -624,7 +636,57 @@ impl NativeInputCoordinator {
         if !send {
             return Ok(false);
         }
-        let id = self.operation.lock()?.intent.identity.operation_id.clone();
+        let (id, started) = {
+            let data = self.operation.lock()?;
+            (
+                data.intent.identity.operation_id.clone(),
+                data.lifecycle.started(),
+            )
+        };
+        self.broker.admit_terminal_input(
+            &self.transport,
+            TerminalBrokerInputSource::System { operation_id: id },
+            TerminalInputKind::Interrupt,
+            &[3],
+            enqueue,
+        )?;
+        if !started {
+            self.interrupt_before_start_deadline = Some(stop_deadline);
+        }
+        Ok(true)
+    }
+
+    /// A stop queued in the accepting editor can precede the actual program.
+    /// Only its matching real Started permits one further scoped interrupt,
+    /// within the first stop's deadline. This is never settlement evidence.
+    pub(crate) fn interrupt_after_started(
+        &mut self,
+        enqueue: impl FnOnce() -> Result<(), String>,
+    ) -> Result<bool, String> {
+        let Some(deadline) = self.interrupt_before_start_deadline else {
+            return Ok(false);
+        };
+        let gate = self.operation.submission_gate.clone();
+        let _gate = gate.lock().map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE")?;
+        let id = {
+            let data = self.operation.lock()?;
+            if Instant::now() >= deadline || data.lifecycle.is_terminal() || data.lifecycle.ended()
+            {
+                self.interrupt_before_start_deadline = None;
+                return Ok(false);
+            }
+            if !data.lifecycle.started()
+                || data.lifecycle.phase() != CommandPhase::CancelRequested
+                || data.lifecycle.requested_settlement().is_none()
+            {
+                return Ok(false);
+            }
+            data.intent.identity.operation_id.clone()
+        };
+        // Consume before any fallible admission/write: partial delivery must
+        // not create another retry. Recheck the original operation and owner.
+        self.interrupt_before_start_deadline = None;
+        self.verify_stop_scope()?;
         self.broker.admit_terminal_input(
             &self.transport,
             TerminalBrokerInputSource::System { operation_id: id },

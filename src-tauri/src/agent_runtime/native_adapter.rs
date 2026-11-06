@@ -316,11 +316,7 @@ impl NativeToolRuntime for NativeToolAdapter {
             user_session_id: request.session_id.clone(),
             task_id: request.task_id.clone(),
             goal: request.goal.clone(),
-            success_criteria: if request.success_criteria.is_empty() {
-                vec![request.goal.clone()]
-            } else {
-                request.success_criteria.clone()
-            },
+            success_criteria: native_success_criteria(&request.goal, &request.success_criteria),
             targets: frozen_targets,
             permission_mode: permission_mode_native(request.permission_mode),
         };
@@ -948,6 +944,19 @@ fn terminal_command_recovery(target: &AgentToolTargetNative) -> &'static str {
 
 fn recorded_native_arguments(tool_name: &str, arguments: &Value) -> Value {
     super::model::recorded_tool_arguments(tool_name, arguments)
+}
+
+fn native_success_criteria(goal: &str, criteria: &[String]) -> Vec<String> {
+    if !criteria.is_empty() {
+        return criteria.to_vec();
+    }
+    if goal.len() <= 2_048 {
+        vec![goal.to_owned()]
+    } else {
+        // The full goal remains in AgentRequestNative.goal. Refer to it rather
+        // than duplicating it into a field with a smaller wire-contract limit.
+        vec!["Complete the goal preserved in this frozen request.".into()]
+    }
 }
 
 fn omit_null_fields(mut value: Value) -> Value {

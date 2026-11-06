@@ -190,23 +190,46 @@ impl TerminalExecuteRegistry {
         reason: TerminalCommandRequestedSettlement,
     ) -> Result<(), String> {
         let coordinator = &registration.native;
-        {
+        let stop_deadline = {
             let mut coordinator = coordinator
                 .lock()
                 .map_err(|_| "TERMINAL_NATIVE_COORDINATOR_UNAVAILABLE")?;
             if registration.operation.submission_may_have_occurred()? {
-                coordinator.interrupt(reason, || {
+                let stop_deadline = Instant::now() + INTERRUPT_SETTLEMENT_TIMEOUT;
+                coordinator.interrupt(reason, stop_deadline, || {
                     sessions.write_session_input(session, "\x03".into())
                 })?;
+                Some(stop_deadline)
             } else {
                 coordinator.cancel_draft_for(reason, |bytes| {
-                    sessions.write_native_control(session, bytes, false)
+                    // Arming ends the editor's polling widget. A later cancel
+                    // needs its non-executable service wake to observe/clear
+                    // the owned draft and produce the real acknowledgement.
+                    sessions.write_native_control(session, bytes, true)
                 })?;
+                None
             }
-        }
-        let snapshot = registration
-            .operation
-            .wait_until_terminal(INTERRUPT_SETTLEMENT_TIMEOUT)?;
+        };
+        let snapshot = if let Some(stop_deadline) = stop_deadline {
+            loop {
+                coordinator
+                    .lock()
+                    .map_err(|_| "TERMINAL_NATIVE_COORDINATOR_UNAVAILABLE")?
+                    .interrupt_after_started(|| {
+                        sessions.write_session_input(session, "\x03".into())
+                    })?;
+                let snapshot = registration.operation.wait_until_terminal(
+                    WAIT_SLICE.min(stop_deadline.saturating_duration_since(Instant::now())),
+                )?;
+                if snapshot.phase.is_terminal() || Instant::now() >= stop_deadline {
+                    break snapshot;
+                }
+            }
+        } else {
+            registration
+                .operation
+                .wait_until_terminal(INTERRUPT_SETTLEMENT_TIMEOUT)?
+        };
         if !snapshot.phase.is_terminal() {
             self.broker
                 .require_native_input_recovery(session, &registration.operation_id)?;
@@ -839,7 +862,7 @@ impl TerminalExecuteRegistry {
         if !hard_deadline && !operation.is_native_protocol()? {
             std::thread::sleep(CAPTURE_DRAIN_GRACE);
         }
-        let mut snapshot = operation.snapshot()?;
+        let mut snapshot = operation.snapshot_for_result()?;
         if operation.native_observation_pending()? {
             // Unknown is a completed wait, not a completed operation. Keep its
             // capture fence, coordinator and revoking lease for late receipts.
@@ -857,7 +880,7 @@ impl TerminalExecuteRegistry {
             .map(|session| session.next_output_sequence.saturating_sub(1))
             .unwrap_or(snapshot.capture_end_sequence.unwrap_or(0));
         operation.finalize_capture(through_sequence)?;
-        snapshot = operation.snapshot()?;
+        snapshot = operation.snapshot_for_result()?;
         let reason = release_reason(snapshot.state);
         // Closing a terminal may already have retired this registration. The
         // operation still owns its final result, even if a new command exists.

@@ -1,0 +1,37 @@
+--- a/PSReadLine/ReadLine.cs
++++ b/PSReadLine/ReadLine.cs
+@@ -944,6 +944,7 @@
+ 
+             _readKeyThread = new Thread(ReadKeyThreadProc) {IsBackground = true, Name = "PSReadLine ReadKey Thread"};
+             _readKeyThread.Start();
++            AppDomain.CurrentDomain.ProcessExit += SaveHistoryOnProcessExit;
+         }
+ 
+         private static void Chord(ConsoleKeyInfo? key = null, object arg = null)
+--- a/PSReadLine/History.cs
++++ b/PSReadLine/History.cs
+@@ -285,6 +285,24 @@
+             WriteHistoryRange(0, _history.Count - 1, overwritten: true);
+         }
+ 
++        private void SaveHistoryOnProcessExit(object sender, EventArgs args)
++        {
++            if (_options.HistorySaveStyle != HistorySaveStyle.SaveAtExit)
++            {
++                return;
++            }
++
++            try
++            {
++                SaveHistoryAtExit();
++            }
++            catch (ObjectDisposedException)
++            {
++                // The console-closing path already saved history and disposed
++                // its mutex. A normal typed exit has not taken that path.
++            }
++        }
++
+         private int historyErrorReportedCount;
+         private void ReportHistoryFileError(Exception e)
+         {

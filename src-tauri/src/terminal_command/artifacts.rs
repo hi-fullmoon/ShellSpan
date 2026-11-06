@@ -3,6 +3,8 @@
 use serde::Deserialize;
 use std::{collections::HashMap, fs, path::Path};
 
+pub(crate) const BUNDLE_RESOURCE_DIRECTORY: &str = "native-input/generated";
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Catalogue {
@@ -156,7 +158,11 @@ pub(crate) fn resource_root(app: &tauri::AppHandle) -> Result<std::path::PathBuf
     } else {
         app.path()
             .resource_dir()
-            .map(|root| root.join("native-input/generated"))
+            .map(|root| root.join(BUNDLE_RESOURCE_DIRECTORY))
             .map_err(|_| "TERMINAL_NATIVE_ARTIFACTS_UNAVAILABLE".into())
     }
 }
+
+#[cfg(test)]
+#[path = "artifact_layout_tests.rs"]
+mod layout_tests;

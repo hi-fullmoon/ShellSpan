@@ -15,6 +15,79 @@ fn experimental_profile_is_outside_the_production_catalogue() {
     );
 }
 
+#[test]
+fn windows_editor_binding_requires_the_updated_exact_host_and_artifacts() {
+    use super::registration::VerifiedNativeProfile;
+    use sha2::{Digest, Sha256};
+
+    let directory = tempfile::tempdir().unwrap();
+    let module = directory.path().join("provider.dll");
+    std::fs::write(&module, b"binding unit fixture").unwrap();
+    let module_sha = hex::encode(Sha256::digest(std::fs::read(&module).unwrap()));
+    let shell_sha = "1".repeat(64);
+    let mut profile = PeerProfile {
+        shell: ShellFamily::WindowsPowerShell,
+        shell_version: Some("5.1.26100.9818".into()),
+        editor: EditorFamily::PsReadLine,
+        editor_version: Some("2.4.5".into()),
+        editor_numeric_version: 20405,
+        adapter_version: "1".into(),
+        verified_profile_id: Some(
+            "windows-powershell-5.1.26100.9818-psreadline-2.4.5-shellspan1-conpty1.25.260930003-graphemes-windows-x64-native".into(),
+        ),
+    };
+    let verify = |profile: &PeerProfile, actual_shell: &str| {
+        VerifiedNativeProfile::verify_editor(
+            profile,
+            &shell_sha,
+            actual_shell,
+            &module,
+            &module_sha,
+        )
+    };
+    assert!(verify(&profile, &shell_sha).is_ok());
+    #[cfg(windows)]
+    {
+        let verified = verify(&profile, &shell_sha).unwrap();
+        assert_eq!(verified.display_binding().unicode_version, None);
+        let runtime = super::windows_conpty::prepare(directory.path()).unwrap();
+        let binding = verified
+            .bind_private_conpty(&runtime)
+            .unwrap()
+            .display_binding();
+        assert_eq!(
+            binding.unicode_version,
+            Some(DisplayUnicodeVersion::Graphemes15)
+        );
+        assert_eq!(binding.unicode_scope, Some(DisplayUnicodeScope::Session));
+        assert_eq!(binding.owned_reflow_cursor_line, Some(false));
+        std::fs::write(
+            runtime.parent().unwrap().join("x64/OpenConsole.exe"),
+            b"tampered",
+        )
+        .unwrap();
+        assert!(verify(&profile, &shell_sha)
+            .unwrap()
+            .bind_private_conpty(&runtime)
+            .is_err());
+    }
+    assert!(verify(&profile, &"2".repeat(64)).is_err());
+    profile.shell_version = Some("5.1.26100.9711".into());
+    assert!(verify(&profile, &shell_sha).is_err());
+    profile.shell_version = Some("5.1.26100.9818".into());
+    profile.verified_profile_id =
+        Some("windows-powershell-5.1.26100.9818-psreadline-2.4.5-windows-x64-native".into());
+    assert!(verify(&profile, &shell_sha).is_err());
+    profile.verified_profile_id =
+        Some("windows-powershell-5.1.26100.9711-psreadline-2.4.5-windows-x64-native".into());
+    assert!(verify(&profile, &shell_sha).is_err());
+    profile.verified_profile_id = Some(
+        "windows-powershell-5.1.26100.9818-psreadline-2.4.5-shellspan1-conpty1.25.260930003-graphemes-windows-x64-native".into(),
+    );
+    std::fs::write(&module, b"modified binding fixture").unwrap();
+    assert!(verify(&profile, &shell_sha).is_err());
+}
+
 fn identity() -> Identity {
     Identity {
         terminal_session_id: "terminal:one".into(),
@@ -54,11 +127,20 @@ fn journal_concurrent_connections_preserve_every_fence_and_settlement() {
                     id.agent_session_id = format!("concurrent-agent-{worker}");
                     id.operation_id = format!("concurrent-operation-{index}");
                     id.command_id = format!("concurrent-command-{worker}-{index}");
-                    journal.ensure_new_operation(&id.agent_session_id, &id.task_id, &id.operation_id).unwrap();
+                    journal
+                        .ensure_new_operation(&id.agent_session_id, &id.task_id, &id.operation_id)
+                        .unwrap();
                     journal.record(&id).unwrap();
-                    assert!(journal.unresolved_for_agent(Some(&id.agent_session_id)).unwrap().iter().any(|intent| intent.identity == id));
+                    assert!(journal
+                        .unresolved_for_agent(Some(&id.agent_session_id))
+                        .unwrap()
+                        .iter()
+                        .any(|intent| intent.identity == id));
                     journal.settle(&id).unwrap();
-                    assert_eq!(journal.record(&id).unwrap_err(), "TERMINAL_SUBMISSION_ALREADY_RECORDED");
+                    assert_eq!(
+                        journal.record(&id).unwrap_err(),
+                        "TERMINAL_SUBMISSION_ALREADY_RECORDED"
+                    );
                 }
             })
         })
@@ -71,8 +153,17 @@ fn journal_concurrent_connections_preserve_every_fence_and_settlement() {
     let restarted = SubmissionJournal::unconfigured();
     restarted.configure(directory.path()).unwrap();
     assert!(restarted.unresolved().unwrap().is_empty());
-    let connection = rusqlite::Connection::open(directory.path().join("terminal-submissions/intentions.sqlite")).unwrap();
-    let counts: (i64, i64) = connection.query_row("SELECT count(*),sum(settled) FROM submissions", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+    let connection = rusqlite::Connection::open(
+        directory
+            .path()
+            .join("terminal-submissions/intentions.sqlite"),
+    )
+    .unwrap();
+    let counts: (i64, i64) = connection
+        .query_row("SELECT count(*),sum(settled) FROM submissions", [], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
+        .unwrap();
     assert_eq!(counts, (800, 800));
 }
 
@@ -135,7 +226,17 @@ fn codec_accepts_large_coalesced_frames_and_bounds_each_partial_frame() {
     }
     assert!(joined.len() > MAX_MESSAGE_BYTES);
     let mut decoder = Decoder::default();
-    assert_eq!(decoder.push(&joined).unwrap().len(), 6);
+    let messages = decoder.push(&joined).unwrap();
+    assert_eq!(messages.len(), 6);
+    for message in messages {
+        let decoded = message
+            .into_operation()
+            .expect("Prepare must remain an operation frame");
+        assert_eq!(
+            serde_json::to_value(decoded).unwrap(),
+            serde_json::to_value(&request).unwrap()
+        );
+    }
     decoder.finish().unwrap();
     let mut decoder = Decoder::default();
     assert!(decoder
@@ -144,7 +245,17 @@ fn codec_accepts_large_coalesced_frames_and_bounds_each_partial_frame() {
         .is_empty());
     let mut next = encoded[encoded.len() - 3..].to_vec();
     next.extend_from_slice(&joined);
-    assert_eq!(decoder.push(&next).unwrap().len(), 7);
+    let messages = decoder.push(&next).unwrap();
+    assert_eq!(messages.len(), 7);
+    for message in messages {
+        let decoded = message
+            .into_operation()
+            .expect("Split/coalesced Prepare changed frame kind");
+        assert_eq!(
+            serde_json::to_value(decoded).unwrap(),
+            serde_json::to_value(&request).unwrap()
+        );
+    }
     decoder.finish().unwrap();
     let mut decoder = Decoder::default();
     assert!(decoder.push(&vec![b'x'; MAX_MESSAGE_BYTES + 1]).is_err());
@@ -673,7 +784,7 @@ fn submission_storage_keeps_its_version_inside_the_database() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        1
+        2
     );
     let encoded: String = connection
         .query_row("SELECT record_json FROM submissions", [], |row| row.get(0))
@@ -682,7 +793,7 @@ fn submission_storage_keeps_its_version_inside_the_database() {
         serde_json::from_str::<serde_json::Value>(&encoded).unwrap()["version"],
         1
     );
-    connection.pragma_update(None, "user_version", 2).unwrap();
+    connection.pragma_update(None, "user_version", 99).unwrap();
     let restarted = SubmissionJournal::unconfigured();
     restarted.configure(root.path()).unwrap();
     assert!(restarted.unresolved().is_err());
@@ -690,7 +801,7 @@ fn submission_storage_keeps_its_version_inside_the_database() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        2
+        99
     );
 }
 

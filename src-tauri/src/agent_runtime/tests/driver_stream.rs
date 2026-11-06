@@ -61,11 +61,39 @@ async fn bounded_writer_pressure_leaves_the_async_scheduler_responsive() {
     ready.await.unwrap();
     let producer_sink = Arc::clone(&sink);
     let producer = tokio::task::spawn_blocking(move || {
+        // Reproduce a blocking-pool startup delay: cancellation must be tested
+        // after actual pressure, not merely after scheduling this worker.
+        std::thread::sleep(std::time::Duration::from_millis(100));
         producer_sink.emit(StreamDelta::Text {
             index: 0,
             text: include_str!("../driver_metrics.rs").repeat(256),
         })
     });
+    let pressure = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let bytes = match sink.collected.lock().unwrap().blocks.get(&0) {
+                Some(PartialContentBlock::Text(text)) => text.len(),
+                _ => 0,
+            };
+            // One batch is held at the store lock, two fill the bounded writer
+            // queue, and the fourth batch blocks the producer's next flush.
+            if bytes >= STREAM_BATCH_MAX_BYTES * 4
+                && matches!(
+                    sink.pending.try_lock(),
+                    Err(std::sync::TryLockError::WouldBlock)
+                )
+            {
+                break;
+            }
+            assert!(
+                !producer.is_finished(),
+                "producer exited before establishing pressure"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+    })
+    .await;
+    assert!(pressure.is_ok(), "real writer pressure was not established");
     // The real writer is waiting for the real store lock; after a timer tick the
     // scheduler must still accept cancellation while the bounded producer waits.
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;

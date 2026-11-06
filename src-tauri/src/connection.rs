@@ -523,11 +523,12 @@ fn open_handshaken_session(
     host: &str,
     port: u16,
 ) -> Result<Session, ConnectionError> {
+    let tcp = Arc::new(tcp);
     register_scoped_socket(&tcp).map_err(|message| ConnectionError::Other { message })?;
     let mut session = Session::new().map_err(|error| ConnectionError::Other {
         message: format!("session init failed: {error}"),
     })?;
-    session.set_tcp_stream(tcp);
+    session.set_tcp_stream(SharedTcpStream(tcp));
     session.set_timeout(SSH_SESSION_IO_TIMEOUT_MS);
     terminal_deadline::handshake(&mut session).map_err(|error| {
         error!("SSH handshake failed remote={host}:{port}: {error}");
@@ -1411,10 +1412,29 @@ mod tests {
 // Scoped native readers own every socket until the operation has joined. Closing
 // those sockets interrupts libssh2 handshake/authentication/SFTP, rather than
 // merely abandoning a blocked worker when a Tokio timeout fires.
+// libssh2 and cancellation must address the same OS socket. In particular,
+// Winsock shutdown of a WSADuplicateSocket handle can report NotConnected while
+// the original SSH transport remains open.
+struct SharedTcpStream(Arc<TcpStream>);
+
+#[cfg(windows)]
+impl std::os::windows::io::AsRawSocket for SharedTcpStream {
+    fn as_raw_socket(&self) -> std::os::windows::io::RawSocket {
+        std::os::windows::io::AsRawSocket::as_raw_socket(self.0.as_ref())
+    }
+}
+
+#[cfg(unix)]
+impl std::os::fd::AsRawFd for SharedTcpStream {
+    fn as_raw_fd(&self) -> std::os::fd::RawFd {
+        std::os::fd::AsRawFd::as_raw_fd(self.0.as_ref())
+    }
+}
+
 struct ScopedConnectionIo {
     cancellation: tokio_util::sync::CancellationToken,
     deadline: std::time::Instant,
-    sockets: Mutex<Vec<TcpStream>>,
+    sockets: Mutex<Vec<Arc<TcpStream>>>,
     workers: Mutex<Vec<thread::JoinHandle<()>>>,
     finished: AtomicBool,
 }
@@ -1521,7 +1541,7 @@ fn skill_scoped_connection_cancellation_and_deadline_join_stalled_handshake() {
         assert!(SCOPED_CONNECTION_IO.with(|slot| slot.borrow().is_none()));
     }
 }
-fn register_scoped_socket(tcp: &TcpStream) -> Result<(), String> {
+fn register_scoped_socket(tcp: &Arc<TcpStream>) -> Result<(), String> {
     terminal_deadline::register(tcp)?;
     SCOPED_CONNECTION_IO.with(|slot| {
         if let Some(context) = slot.borrow().as_ref() {
@@ -1533,7 +1553,7 @@ fn register_scoped_socket(tcp: &TcpStream) -> Result<(), String> {
                 .sockets
                 .lock()
                 .map_err(|_| "scoped socket registry unavailable")?
-                .push(tcp.try_clone().map_err(|e| e.to_string())?);
+                .push(Arc::clone(tcp));
         }
         Ok(())
     })

@@ -168,6 +168,7 @@ impl NativeToolEngine {
         self.terminal_broker
             .register_native_channel(transport, profile)
     }
+    #[cfg(unix)]
     pub(crate) fn wait_native_initialization(
         &self,
         transport: &str,
@@ -190,10 +191,11 @@ impl NativeToolEngine {
                 ConnectionPayload::EditorReady { .. } => self
                     .terminal_broker
                     .accept_native_readiness(transport, &message),
-                ConnectionPayload::Directory { .. } | ConnectionPayload::JobObservation { .. } | ConnectionPayload::EditorOptions { .. } => {
-                    self.terminal_broker
-                        .accept_native_observation(transport, &message)
-                }
+                ConnectionPayload::Directory { .. }
+                | ConnectionPayload::JobObservation { .. }
+                | ConnectionPayload::EditorOptions { .. } => self
+                    .terminal_broker
+                    .accept_native_observation(transport, &message),
                 _ => Err("TERMINAL_NATIVE_UNEXPECTED_MESSAGE".into()),
             },
             Message::Operation(message) => self.terminal_execute.receive_native(transport, message),
@@ -211,12 +213,14 @@ impl NativeToolEngine {
     }
     pub(crate) fn native_terminal_control_closed(&self, transport: &str) -> Result<(), String> {
         self.terminal_execute.native_control_closed(transport)?;
-        let shell=self.terminal_broker.snapshot(Some(transport))?.session.and_then(|session|session.integration_shell).unwrap_or(TerminalShellKind::Unsupported);
-        self.terminal_broker.mark_integration_unavailable(
-            transport,
-            shell,
-            "nativeControlClosed",
-        )
+        let shell = self
+            .terminal_broker
+            .snapshot(Some(transport))?
+            .session
+            .and_then(|session| session.integration_shell)
+            .unwrap_or(TerminalShellKind::Unsupported);
+        self.terminal_broker
+            .mark_integration_unavailable(transport, shell, "nativeControlClosed")
     }
     pub(crate) fn configure_terminal_submission_root(&self, root: &Path) -> Result<(), String> {
         self.terminal_broker.configure_submission_journal(root)
@@ -253,7 +257,6 @@ impl NativeToolEngine {
         }
         Ok(())
     }
-
 
     pub(crate) fn is_replacement_transport(
         &self,
@@ -1749,7 +1752,12 @@ impl NativeToolEngine {
             }),
             |stage| {
                 if cancellation.is_cancelled() {
-                    return Err("TERMINAL_JOB_LAUNCH_CANCELLED".into());
+                    return Err(if arguments.background {
+                        "TERMINAL_JOB_LAUNCH_CANCELLED"
+                    } else {
+                        "TERMINAL_SUBMISSION_CANCELLED"
+                    }
+                    .into());
                 }
                 if launch_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                     return Err("TERMINAL_JOB_LAUNCH_DEADLINE: no automatic replay".into());
@@ -1887,6 +1895,7 @@ impl NativeToolEngine {
                 "commandLine": snapshot.command_line,
                 "submittedCommandLine": snapshot.submitted_command_line,
                 "inputRejection": snapshot.input_rejection,
+                "commandObservation": snapshot.command_observation,
                 "execution": if !snapshot.may_have_submitted || snapshot.input_rejection.is_some() || job.as_ref().is_some_and(|job| job.state == "rejected") {
                     "notStarted"
                 } else if job.as_ref().is_some_and(|job| job.state == "exited") || (job.is_none() && snapshot.state == crate::terminal_broker::TerminalCommandState::Completed) {
@@ -1954,7 +1963,14 @@ impl NativeToolEngine {
             .map_or(true, |state| !state.open || state.input_recovery_required)
             || crate::agent_runtime::is_terminal_call_blocked(&error.message);
         let message = crate::redaction::redact_sensitive_text(&error.message);
-        let summary = if not_started {
+        let cancelled = not_started
+            && matches!(
+                error.message.as_str(),
+                "TERMINAL_SUBMISSION_CANCELLED" | "TERMINAL_JOB_LAUNCH_CANCELLED"
+            );
+        let summary = if cancelled {
+            format!("{message}; execution=notStarted. The request was cancelled before submission. No source was executed; do not automatically replay it.")
+        } else if not_started {
             format!("{message}; execution=notStarted. No source was executed. Correct the request or inspect terminal readiness before a fresh call.")
         } else {
             format!("{message}; execution=unknown. Execution submission was attempted; retain the original operation identity and any process handle, and reconcile without replaying the source.")
@@ -1967,23 +1983,25 @@ impl NativeToolEngine {
             json!({
                 "contractVersion": 1, "channel": "terminal",
                 "operationId": call.call_id,
-                "state": if not_started { "failed" } else { "uncertain" },
+                "state": if cancelled { "cancelled" } else if not_started { "failed" } else { "uncertain" },
                 "execution": if not_started { "notStarted" } else { "unknown" },
                 "processHandle": job.as_ref().map(|job| &job.process_handle),
                 "launchState": job.as_ref().map(|_| if not_started { "rejected" } else { "uncertain" }),
                 "job": job, "noAutoReplay": true, "error": message,
                 "errorDetails": {
-                    "code": if not_started { "TERMINAL_SUBMISSION_REJECTED" } else { "TERMINAL_SUBMISSION_UNCONFIRMED" },
+                    "code": if cancelled { "TERMINAL_SUBMISSION_CANCELLED" } else if not_started { "TERMINAL_SUBMISSION_REJECTED" } else { "TERMINAL_SUBMISSION_UNCONFIRMED" },
                     "phase": if not_started { "beforeSubmission" } else { "submission" },
                     "execution": if not_started { "notStarted" } else { "unknown" },
                     "terminalRecoveryRequired": terminal_recovery_required,
-                    "nextAction": if !not_started { "reconcile" } else if terminal_recovery_required { "recoverTerminal" } else { "correctRequest" },
+                    "nextAction": if !not_started { "reconcile" } else if terminal_recovery_required { "recoverTerminal" } else if cancelled { "none" } else { "correctRequest" },
                 },
                 "outputScope": "sharedTerminal",
             }),
             false,
         );
-        result.status = if not_started {
+        result.status = if cancelled {
+            AgentToolResultStatusNative::Cancelled
+        } else if not_started {
             AgentToolResultStatusNative::Failed
         } else {
             AgentToolResultStatusNative::Uncertain
@@ -2288,7 +2306,6 @@ impl NativeToolEngine {
             false,
         ))
     }
-
 
     fn manage_shell_job(
         &self,
@@ -2857,7 +2874,6 @@ mod tests {
     };
     use crossbeam_channel::unbounded;
     use std::sync::atomic::AtomicBool;
-    use std::thread;
 
     fn engine_with_terminal_broker_for_test(
         terminal_broker: TerminalSessionBroker,
@@ -2899,6 +2915,116 @@ mod tests {
             checkpoints: CheckpointStoreNative::default(),
             file_operations: FileOperationRegistryNative::default(),
             checkpoint_root: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    #[test]
+    fn submission_cancellation_preserves_execution_and_recovery_boundaries() {
+        let engine = NativeToolEngine::default();
+        let target = AgentToolTargetNative::Local {
+            target_id: "cancel-target".into(),
+            session_id: "cancel-terminal".into(),
+            cwd: None,
+        };
+        let context = NativeExecutionContext {
+            request: AgentRequestNative {
+                contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
+                request_id: "cancel-request".into(),
+                user_session_id: "cancel-agent".into(),
+                task_id: "cancel-task".into(),
+                goal: "cancel before submission".into(),
+                success_criteria: vec!["preserve uncertainty and recovery".into()],
+                targets: vec![target.clone()],
+                permission_mode: AgentPermissionModeNative::Operator,
+            },
+            turn_id: "cancel-turn".into(),
+            step_id: "cancel-step".into(),
+        };
+        let call = AgentToolCallNative {
+            request_id: context.request.request_id.clone(),
+            call_id: "cancel-operation".into(),
+            tool_name: "terminal_execute".into(),
+            arguments: json!({ "command": "must not execute" }),
+            target,
+            capability_id: "cancel-capability".into(),
+        };
+        let effect = AgentObservedEffectNative {
+            kind: AgentEffectKindNative::StateChange,
+            target_id: "cancel-target".into(),
+            summary: "cancel test".into(),
+            paths: Vec::new(),
+            network_destinations: Vec::new(),
+        };
+        for (message, attempted, status, state, execution, code, action) in [
+            (
+                "TERMINAL_SUBMISSION_CANCELLED",
+                false,
+                AgentToolResultStatusNative::Cancelled,
+                "cancelled",
+                "notStarted",
+                "TERMINAL_SUBMISSION_CANCELLED",
+                "recoverTerminal",
+            ),
+            (
+                "TERMINAL_JOB_LAUNCH_CANCELLED",
+                false,
+                AgentToolResultStatusNative::Cancelled,
+                "cancelled",
+                "notStarted",
+                "TERMINAL_SUBMISSION_CANCELLED",
+                "recoverTerminal",
+            ),
+            (
+                "TERMINAL_SUBMISSION_CANCELLED",
+                true,
+                AgentToolResultStatusNative::Uncertain,
+                "uncertain",
+                "unknown",
+                "TERMINAL_SUBMISSION_UNCONFIRMED",
+                "reconcile",
+            ),
+            (
+                "TERMINAL_JOB_LAUNCH_CANCELLED",
+                true,
+                AgentToolResultStatusNative::Uncertain,
+                "uncertain",
+                "unknown",
+                "TERMINAL_SUBMISSION_UNCONFIRMED",
+                "reconcile",
+            ),
+            (
+                "TERMINAL_NATIVE_INPUT_REQUIRED",
+                false,
+                AgentToolResultStatusNative::Failed,
+                "failed",
+                "notStarted",
+                "TERMINAL_SUBMISSION_REJECTED",
+                "recoverTerminal",
+            ),
+        ] {
+            let result = engine
+                .terminal_submission_failure(
+                    &context,
+                    &call,
+                    &effect,
+                    "cancel-terminal",
+                    None,
+                    TerminalSubmissionError {
+                        message: message.into(),
+                        submission_attempted: attempted,
+                    },
+                )
+                .unwrap();
+            assert_eq!(result.status, status, "{message}/{attempted}");
+            let data = result.data.unwrap();
+            assert_eq!(data["state"], state);
+            assert_eq!(data["execution"], execution);
+            assert_eq!(data["errorDetails"]["code"], code);
+            assert_eq!(data["errorDetails"]["nextAction"], action);
+            // A result label cannot manufacture a clear receipt or reopen input.
+            assert_eq!(data["errorDetails"]["terminalRecoveryRequired"], true);
+            assert_eq!(data["noAutoReplay"], true);
+            assert_eq!(data["operationId"], call.call_id);
         }
     }
 
@@ -3197,7 +3323,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_terminal_execute_uses_the_frozen_source_session_without_an_agent_terminal_map() {
+    fn remote_terminal_execute_reuses_the_frozen_source_and_rejects_raw_agent_input() {
         const SOURCE_SESSION_ID: &str = "user-owned-remote-terminal";
         const INTEGRATION_ID: &str = "integration-user-owned-remote-terminal";
         const COMMAND: &str = "printf source-shell";
@@ -3259,62 +3385,6 @@ mod tests {
                 },
             )
             .unwrap();
-
-        let worker_broker = broker.clone();
-        let worker = thread::spawn(move || -> Result<(), String> {
-            for iteration in 1..=2 {
-                let SessionCommand::Write(input) = receiver
-                    .recv_timeout(Duration::from_millis(500))
-                    .map_err(|error| {
-                        format!(
-                            "Native Tool did not write call {iteration} to the frozen source SSH session: {error}"
-                        )
-                    })?
-                else {
-                    return Err("expected command input on the frozen source SSH session".into());
-                };
-                let submitted =
-                    crate::terminal_integration::bash_native_submission(COMMAND).unwrap();
-                assert!(input.starts_with(&submitted));
-                worker_broker
-                    .accept_integration_event(
-                        SOURCE_SESSION_ID,
-                        INTEGRATION_ID,
-                        TerminalIntegrationControlEvent::CommandStart {
-                            command_line: submitted,
-                            cwd: "/home/tester".into(),
-                        },
-                    )
-                    .unwrap();
-                worker_broker
-                    .observe_raw_output(
-                        SOURCE_SESSION_ID,
-                        format!("source-shell-{iteration}").as_bytes(),
-                    )
-                    .unwrap();
-                worker_broker
-                    .accept_integration_event(
-                        SOURCE_SESSION_ID,
-                        INTEGRATION_ID,
-                        TerminalIntegrationControlEvent::CommandEnd {
-                            exit_code: 0,
-                            cwd: "/home/tester".into(),
-                        },
-                    )
-                    .unwrap();
-                for event in [
-                    TerminalIntegrationControlEvent::PromptStart {
-                        cwd: "/home/tester".into(),
-                    },
-                    TerminalIntegrationControlEvent::PromptEnd,
-                ] {
-                    worker_broker
-                        .accept_integration_event(SOURCE_SESSION_ID, INTEGRATION_ID, event)
-                        .unwrap();
-                }
-            }
-            Ok(())
-        });
 
         let target = AgentToolTargetNative::Remote {
             target_id: "target-remote".into(),
@@ -3387,13 +3457,46 @@ mod tests {
             1_000,
             &CancellationToken::new(),
         );
-        let worker_result = worker.join();
         assert!(
             first_result.is_ok() && second_result.is_ok(),
             "consecutive remote terminal_execute calls must reuse the frozen source session: first={first_result:?} second={second_result:?}"
         );
+        for result in [first_result.unwrap(), second_result.unwrap()] {
+            assert_eq!(result.status, AgentToolResultStatusNative::Failed);
+            assert!(result.summary.contains("TERMINAL_NATIVE_INPUT_REQUIRED"));
+            let data = result.data.unwrap();
+            assert_eq!(data["execution"], "notStarted");
+            assert_eq!(data["noAutoReplay"], true);
+        }
+        assert_eq!(
+            engine
+                .interactive_terminal_session_id(&context, &second_call, &sessions)
+                .unwrap(),
+            SOURCE_SESSION_ID,
+        );
         assert_eq!(sessions.session_count().unwrap(), session_count_before);
-        worker_result.unwrap().unwrap();
+        assert!(
+            receiver.try_recv().is_err(),
+            "raw Agent refusal must not write PTY bytes"
+        );
+        let terminal = broker
+            .snapshot(Some(SOURCE_SESSION_ID))
+            .unwrap()
+            .session
+            .unwrap();
+        assert!(
+            terminal.open
+                && matches!(
+                    terminal.lease.unwrap().owner,
+                    TerminalLeaseOwner::User { .. }
+                )
+        );
+        engine
+            .write_user_terminal_input(&sessions, SOURCE_SESSION_ID, "ordinary-user-input".into())
+            .unwrap();
+        assert!(
+            matches!(receiver.recv_timeout(Duration::from_millis(250)).unwrap(), SessionCommand::Write(input) if input == "ordinary-user-input")
+        );
     }
 
     #[test]
@@ -3503,7 +3606,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_terminal_execute_revalidates_frozen_identity_after_lease_before_write() {
+    fn remote_terminal_execution_revalidates_frozen_identity_after_lease_before_write() {
         const SOURCE_SESSION_ID: &str = "user-owned-remote-terminal";
         const INTEGRATION_ID: &str = "integration-user-owned-remote-terminal";
         let broker = TerminalSessionBroker::phase4_enabled_for_test(256);
@@ -3654,14 +3757,65 @@ mod tests {
             network_destinations: Vec::new(),
         };
 
+        // Exercise the actual post-lease validation independently of native
+        // source admission. This fixture has no NIP producer and grants none.
+        let before = engine
+            .terminal_broker
+            .snapshot(Some(SOURCE_SESSION_ID))
+            .unwrap()
+            .session
+            .unwrap();
+        let validate = |stage| {
+            engine.revalidate_terminal_execution(
+                &call.target,
+                &sessions,
+                &before.terminal_session_id,
+                before.terminal_generation,
+                &context.request.user_session_id,
+                &context.request.task_id,
+                &call.call_id,
+                stage,
+            )
+        };
+        validate(TerminalExecuteValidationStage::LeaseAcquisition).unwrap();
+        engine
+            .terminal_leases
+            .acquire_command(
+                SOURCE_SESSION_ID,
+                &context.request.user_session_id,
+                &context.request.task_id,
+                &call.call_id,
+                Some("printf must-not-run"),
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            sessions
+                .target_state(SOURCE_SESSION_ID)
+                .unwrap()
+                .identity
+                .host,
+            "drifted.example"
+        );
+        let message = validate(TerminalExecuteValidationStage::CommandCreation).unwrap_err();
+        let final_error = validate(TerminalExecuteValidationStage::InputWrite).unwrap_err();
+        assert!(crate::agent_runtime::is_terminal_target_unavailable(
+            &final_error
+        ));
+        assert!(crate::agent_runtime::is_terminal_target_unavailable(
+            &message
+        ));
         let result = engine
-            .execute_terminal_command(
+            .terminal_submission_failure(
                 &context,
                 &call,
                 &effect,
-                &sessions,
-                1_000,
-                &CancellationToken::new(),
+                SOURCE_SESSION_ID,
+                None,
+                TerminalSubmissionError {
+                    message,
+                    submission_attempted: false,
+                },
             )
             .unwrap();
         assert_eq!(result.status, AgentToolResultStatusNative::Failed);
@@ -3677,5 +3831,12 @@ mod tests {
             receiver.try_recv().is_err(),
             "identity drift must write no PTY bytes"
         );
+        assert!(engine
+            .terminal_leases
+            .release_terminal(
+                SOURCE_SESSION_ID,
+                super::super::TerminalLeaseReleaseReason::Failed
+            )
+            .unwrap());
     }
 }

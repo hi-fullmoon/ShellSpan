@@ -137,7 +137,7 @@ fn selected_plan_remains_waiting_and_completion_cannot_change_it() {
     let events = selected("test -r /etc/hosts");
     let record = records(&events).pop().unwrap();
     assert!(record.waiting());
-    assert!(matches_result(&record, &result(&record)) == false);
+    assert!(!matches_result(&record, &result(&record)));
     assert!(record
         .validate_submission(&submission(Some(UserActionResponse::Completed)))
         .is_ok());
@@ -182,7 +182,33 @@ fn durable_replay_preserves_selection_and_completion_receipts() {
 fn real_foreground_verification_is_required_before_dependent_work() {
     let root = tempfile::tempdir().unwrap();
     let prerequisite = root.path().join("ready");
-    let source = format!("test -f '{}'", prerequisite.display());
+    let source = if cfg!(windows) {
+        format!(
+            "if ([IO.File]::Exists('{}')) {{ exit 0 }} else {{ exit 1 }}",
+            prerequisite.display().to_string().replace('\'', "''")
+        )
+    } else {
+        format!("test -f '{}'", prerequisite.display())
+    };
+    let run_verification = || {
+        let mut command = std::process::Command::new(if cfg!(windows) {
+            "powershell.exe"
+        } else {
+            "sh"
+        });
+        if cfg!(windows) {
+            command.args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                &source,
+            ]);
+        } else {
+            command.args(["-c", &source]);
+        }
+        command.status().unwrap()
+    };
     let verify = command("verify", &source);
     let dependent = command("dependent", "printf dependent");
     let mut events = selected(&source);
@@ -202,10 +228,7 @@ fn real_foreground_verification_is_required_before_dependent_work() {
         "a prepared but undispatched verification must pass the dispatch recheck"
     );
     // This is an actual subprocess result, not a mocked execution or success.
-    let failure = std::process::Command::new("sh")
-        .args(["-c", &source])
-        .status()
-        .unwrap();
+    let failure = run_verification();
     assert!(!failure.success());
     let mut failed_events = events.clone();
     record_execution(&mut failed_events, &verify, failure.code().unwrap());
@@ -214,10 +237,7 @@ fn real_foreground_verification_is_required_before_dependent_work() {
         .unwrap_err()
         .starts_with("USER_ACTION_VERIFICATION_FAILED"));
     std::fs::write(prerequisite, "ready").unwrap();
-    let success = std::process::Command::new("sh")
-        .args(["-c", &source])
-        .status()
-        .unwrap();
+    let success = run_verification();
     assert!(success.success());
     record_execution(&mut events, &verify, success.code().unwrap());
     assert!(check_call(&events, "turn", &dependent, 1).is_ok());

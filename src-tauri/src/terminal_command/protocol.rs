@@ -27,9 +27,7 @@ pub fn native_profile_versions(profile: &str) -> Option<(&'static str, &'static 
         ("5.3", "8.3.6", 0x0803),
     ] {
         for target in ["macos-arm64", "linux-aarch64-glibc-2.36"] {
-            if profile
-                == format!("gnu-bash-{bash}-readline-{readline}-{target}-native")
-            {
+            if profile == format!("gnu-bash-{bash}-readline-{readline}-{target}-native") {
                 return Some((bash, readline, numeric));
             }
         }
@@ -232,6 +230,8 @@ pub enum InputMode {
 pub enum DisplayUnicodeVersion {
     #[serde(rename = "11")]
     Unicode11,
+    #[serde(rename = "15-graphemes")]
+    Graphemes15,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -245,6 +245,8 @@ pub struct DisplayBinding {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unicode_version: Option<DisplayUnicodeVersion>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub unicode_scope: Option<DisplayUnicodeScope>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub owned_reflow_cursor_line: Option<bool>,
 }
 impl DisplayBinding {
@@ -256,9 +258,16 @@ impl DisplayBinding {
             enter_payload: DISPLAY_ENTER,
             exit_payload: DISPLAY_EXIT,
             unicode_version: None,
+            unicode_scope: None,
             owned_reflow_cursor_line: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DisplayUnicodeScope {
+    Session,
 }
 
 pub fn native_bash_plan(source: &str) -> Result<String, ErrorCode> {

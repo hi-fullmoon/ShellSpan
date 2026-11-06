@@ -40,7 +40,7 @@ if(zshHelper){
   assert.equal(diff.status,1,'The declared Zsh helper revision has no inspectable source difference');
   writeFileSync(resolve(directory,'zsh-helper.diff'),diff.stdout,{mode:0o600});
 }
-for(const path of['.artifacts/tests/native-input-p2/resources/native-input','.artifacts/tests/native-input-p2/producers','src-tauri/resources/native-input','src-tauri/resources/preview-licenses']){
+for(const path of['.artifacts/tests/native-input-p2/resources/native-input','.artifacts/tests/native-input-p2/producers','.artifacts/releases/native-input/generated','src-tauri/resources/native-input','src-tauri/resources/preview-licenses']){
   if(!existsSync(resolve(parent,path)))continue;
   mkdirSync(resolve(sourceRoot,path,'..'),{recursive:true});cpSync(resolve(parent,path),resolve(sourceRoot,path),{recursive:true});
 }

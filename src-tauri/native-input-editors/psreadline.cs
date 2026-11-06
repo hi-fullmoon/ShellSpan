@@ -11,6 +11,10 @@ using Microsoft.Win32.SafeHandles;
 public sealed class ShellSpanNativeEditor : IDisposable {
     [DllImport("kernel32", CharSet=CharSet.Unicode, SetLastError=true)]
     static extern IntPtr LoadLibraryW(string path);
+    [DllImport("kernel32", CharSet=CharSet.Ansi, ExactSpelling=true, SetLastError=true)]
+    static extern IntPtr GetProcAddress(IntPtr module, string name);
+    [DllImport("kernel32", SetLastError=true)]
+    static extern bool FreeLibrary(IntPtr module);
     [DllImport("kernel32", SetLastError=true)]
     static extern bool PeekNamedPipe(SafePipeHandle handle, IntPtr buffer, uint size,
         IntPtr read, out uint available, IntPtr remaining);
@@ -44,6 +48,12 @@ public sealed class ShellSpanNativeEditor : IDisposable {
     [DllImport(Library, CallingConvention=CallingConvention.Cdecl)]
     static extern int ss_editor_event(IntPtr context, int kind, int status, byte[] cwd);
     [DllImport(Library, CallingConvention=CallingConvention.Cdecl)]
+    static extern int ss_editor_guarded_handoff(IntPtr context);
+    [DllImport(Library, CallingConvention=CallingConvention.Cdecl)]
+    static extern int ss_editor_eof_owned_chars(IntPtr context, byte[] text, UIntPtr cursor);
+    [DllImport(Library, CallingConvention=CallingConvention.Cdecl)]
+    static extern int ss_editor_eof_cleared(IntPtr context, byte[] text, UIntPtr cursor);
+    [DllImport(Library, CallingConvention=CallingConvention.Cdecl)]
     static extern IntPtr ss_editor_output(IntPtr context, out UIntPtr size);
     [DllImport(Library, CallingConvention=CallingConvention.Cdecl)]
     static extern void ss_editor_drop(IntPtr context);
@@ -51,8 +61,23 @@ public sealed class ShellSpanNativeEditor : IDisposable {
     readonly NamedPipeServerStream pipe;
     IntPtr context;
     readonly int thread;
+    bool controlClosed;
+    static void VerifyNativeExports(IntPtr module) {
+        int count=0;
+        foreach(var method in typeof(ShellSpanNativeEditor).GetMethods(System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Static)) {
+            var import=(DllImportAttribute)Attribute.GetCustomAttribute(method,typeof(DllImportAttribute));
+            if(import==null || !String.Equals(import.Value,Library,StringComparison.Ordinal)) continue;
+            string entry=String.IsNullOrEmpty(import.EntryPoint)?method.Name:import.EntryPoint;
+            if(GetProcAddress(module,entry)==IntPtr.Zero) throw new IOException("TERMINAL_NATIVE_REQUIRED_SYMBOL_UNAVAILABLE:"+entry);
+            count++;
+        }
+        if(count==0) throw new IOException("TERMINAL_NATIVE_REQUIRED_SYMBOL_UNAVAILABLE:ABI");
+    }
     public ShellSpanNativeEditor(string library, NamedPipeServerStream privatePipe, uint expectedClient, string profile, bool supported) {
-        if(LoadLibraryW(library)==IntPtr.Zero) throw new IOException("Native editor library unavailable");
+        IntPtr module=LoadLibraryW(library);
+        if(module==IntPtr.Zero) throw new IOException("Native editor library unavailable");
+        try { VerifyNativeExports(module); }
+        catch { FreeLibrary(module); throw; }
         thread=System.Threading.Thread.CurrentThread.ManagedThreadId;
         context=ss_editor_new(Z(profile),supported?1:0);
         if(context==IntPtr.Zero) throw new IOException("Native editor profile invalid");
@@ -82,22 +107,31 @@ public sealed class ShellSpanNativeEditor : IDisposable {
             throw new IOException("Native editor observation rejected");
     }
     public void Pump(string buffer,int cursor) {
-        Observe(buffer,cursor);
-        uint available;
-        while(true) {
-            if(!PeekNamedPipe(pipe.SafePipeHandle,IntPtr.Zero,0,IntPtr.Zero,out available,IntPtr.Zero)) {
-                ss_editor_event(context,6,0,null); throw new IOException("Native private control closed");
+        Check();
+        try {
+            Observe(buffer,cursor);
+            uint available;
+            while(true) {
+                if(!PeekNamedPipe(pipe.SafePipeHandle,IntPtr.Zero,0,IntPtr.Zero,out available,IntPtr.Zero))
+                    throw new IOException("Native private control closed");
+                if(available==0) break;
+                var bytes=new byte[Math.Min(available,8192)];
+                int count=pipe.Read(bytes,0,bytes.Length);
+                if(count==0 || ss_editor_receive(context,bytes,(UIntPtr)count)!=1) throw new IOException("Native private protocol rejected");
             }
-            if(available==0) break;
-            var bytes=new byte[Math.Min(available,8192)];
-            int count=pipe.Read(bytes,0,bytes.Length);
-            if(count==0 || ss_editor_receive(context,bytes,(UIntPtr)count)!=1) throw new IOException("Native private protocol rejected");
+            Flush();
+        } catch {
+            // PSReadLine may catch a custom key-handler exception and continue
+            // its editor loop. Close here so the backend observes the failure.
+            Fail();
+            throw;
         }
-        Flush();
     }
     public int Action() { Check(); return ss_editor_action(context); }
     public string Text() { Check(); return S(ss_editor_text(context)); }
     public bool Event(int kind,int status,string cwd) { Check(); bool result=ss_editor_event(context,kind,status,cwd==null?null:Z(cwd))==1; Flush(); return result; }
+    public int AcceptFailureReason() { Check(); return ss_editor_event(context,16,0,null); }
+    public int PrepareElapsedMilliseconds() { Check(); return ss_editor_event(context,17,0,null); }
     public string Plan(string actual) { Check(); return actual==null?null:S(ss_editor_plan(context,Z(actual))); }
     public bool SetHostPlan(string plan) { Check(); return plan!=null && ss_editor_host_plan(context,Z(plan))==1; }
     public static string BuildHostPlan(string source) {
@@ -122,20 +156,52 @@ public sealed class ShellSpanNativeEditor : IDisposable {
         Parser.ParseInput(plan,out tokens,out errors);
         return errors.Length==0?plan:null;
     }
-    public bool Accepted() { Check(); int state=ss_editor_event(context,15,0,null);if(state<0)throw new IOException("Native editor thread changed");return state==1; }
-    public void Fail() { Check(); ss_editor_event(context,6,0,null);pipe.Dispose(); }
+    public bool RequiresHandoff() {
+        Check(); int state=ss_editor_event(context,15,0,null);
+        if(state<0)throw new IOException("Native editor thread changed");
+        return state==1 || ss_editor_guarded_handoff(context)==1;
+    }
+    public bool CanClearFailedDraft(string buffer,int cursor) {
+        Check();
+        if(!controlClosed || cursor!=buffer.Length) return false;
+        byte[] bytes=Z(buffer); // Strict UTF-8 conversion rejects lone surrogates.
+        int scalars=0;
+        for(int index=0;index<cursor;index++,scalars++)
+            if(char.IsHighSurrogate(buffer[index])) index++;
+        return ss_editor_eof_owned_chars(context,bytes,(UIntPtr)scalars)==1;
+    }
+    public bool ConfirmFailedDraftCleared(string buffer,int cursor) {
+        Check();
+        return controlClosed && buffer.Length==0 && cursor==0 &&
+            ss_editor_eof_cleared(context,Z(buffer),UIntPtr.Zero)==1;
+    }
+    public bool ControlClosed { get { Check(); return controlClosed; } }
+    public void Fail() {
+        Check();
+        if(controlClosed) return;
+        controlClosed=true;
+        ss_editor_event(context,6,0,null);
+        pipe.Dispose();
+    }
     public string Job(int field) { Check(); return S(ss_editor_job(context,field)); }
     public void ObserveJob(string handle,string state,int? status) { Check(); if(ss_editor_job_observation(context,Z(handle),Z(state),status.GetValueOrDefault(),status.HasValue?1:0)!=1)throw new IOException("Native job observation rejected"); Flush(); }
     public string Marker(bool end) { Check(); return S(ss_editor_marker(context,end?1:0)); }
     public void Flush() {
-        Check(); UIntPtr size; IntPtr pointer;
-        while((pointer=ss_editor_output(context,out size))!=IntPtr.Zero && size.ToUInt64()!=0) {
-            int length=checked((int)size.ToUInt64()); var bytes=new byte[length]; Marshal.Copy(pointer,bytes,0,length);
-            var written=pipe.BeginWrite(bytes,0,length,null,null);
-            if(!written.AsyncWaitHandle.WaitOne(1000)) { pipe.Dispose(); throw new TimeoutException("Native control backpressure"); }
-            pipe.EndWrite(written);
+        Check();
+        if(controlClosed) return;
+        try {
+            UIntPtr size; IntPtr pointer;
+            while((pointer=ss_editor_output(context,out size))!=IntPtr.Zero && size.ToUInt64()!=0) {
+                int length=checked((int)size.ToUInt64()); var bytes=new byte[length]; Marshal.Copy(pointer,bytes,0,length);
+                var written=pipe.BeginWrite(bytes,0,length,null,null);
+                if(!written.AsyncWaitHandle.WaitOne(1000)) throw new TimeoutException("Native control backpressure");
+                pipe.EndWrite(written);
+            }
+            pipe.Flush();
+        } catch {
+            Fail();
+            throw;
         }
-        pipe.Flush();
     }
     public void Dispose() { if(context!=IntPtr.Zero) { Check(); ss_editor_drop(context); context=IntPtr.Zero; } pipe.Dispose(); }
 }

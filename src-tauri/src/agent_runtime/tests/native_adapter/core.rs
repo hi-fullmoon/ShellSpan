@@ -1,6 +1,44 @@
     use super::*;
     use crate::agent_runtime::{AgentExecutionSurface, ModelToolCall};
 
+    #[test]
+    fn long_goal_with_default_success_criteria_remains_a_valid_native_request() {
+        let goal = "界".repeat(800);
+        let mut native = AgentRequestNative {
+            contract_version: NATIVE_TOOL_CONTRACT_VERSION,
+            request_id: "long-goal-request".into(),
+            user_session_id: "long-goal-session".into(),
+            task_id: "long-goal-task".into(),
+            goal: goal.clone(),
+            success_criteria: vec![goal.clone()],
+            targets: vec![AgentToolTargetNative::Local {
+                target_id: "long-goal-target".into(),
+                session_id: "long-goal-terminal".into(),
+                cwd: None,
+            }],
+            permission_mode: AgentPermissionModeNative::RequestApproval,
+        };
+        assert!(crate::agent_runtime::validate_agent_request_native(&native).is_err());
+        native.success_criteria = native_success_criteria(&goal, &[]);
+        assert!(crate::agent_runtime::validate_agent_request_native(&native).is_ok());
+        assert_eq!(native.goal, goal, "the frozen goal must not be truncated");
+        assert_eq!(
+            native.permission_mode,
+            AgentPermissionModeNative::RequestApproval
+        );
+    }
+
+    #[test]
+    fn native_criteria_projection_preserves_explicit_criteria_and_short_defaults() {
+        let criteria = vec!["Keep the requested exact result".into()];
+        assert_eq!(
+            native_success_criteria(&"g".repeat(8_192), &criteria),
+            criteria
+        );
+        let boundary = "g".repeat(2_048);
+        assert_eq!(native_success_criteria(&boundary, &[]), vec![boundary]);
+    }
+
     fn local_target() -> AgentSessionTarget {
         AgentSessionTarget {
             kind: "local".into(),

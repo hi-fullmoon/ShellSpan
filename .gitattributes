@@ -9,3 +9,10 @@ src/lib/petdex/diagnostic-validators.js text eol=lf
 # Rust golden fixtures are compared with generated LF text. Keep checkout
 # bytes deterministic while the tests also tolerate an existing CRLF checkout.
 src-tauri/src/agent_runtime/testdata/*.golden.txt text eol=lf
+
+# Dependency patches and their reviewed inputs must keep identical bytes on
+# Windows: pnpm applies patch line endings to the installed xterm artifacts.
+patches/@xterm__xterm@6.0.0.patch text eol=lf
+scripts/native-input-p0/*.patch text eol=lf
+patches/psreadline-2.4.5-process-exit.patch text eol=lf
+scripts/dependency-builds/psreadline/*.json text eol=lf

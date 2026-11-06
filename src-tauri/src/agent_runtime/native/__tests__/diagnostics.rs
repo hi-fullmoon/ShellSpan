@@ -167,6 +167,9 @@ fn diagnostic_ssh_handshake_obeys_total_deadline_and_cancellation() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let _entered = rt.enter();
     for cancel in [false, true] {
+        let epoch = Instant::now();
+        let timeline = Arc::new(Mutex::new(Vec::new()));
+        let server_timeline = Arc::clone(&timeline);
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         listener.set_nonblocking(true).unwrap();
@@ -186,6 +189,10 @@ fn diagnostic_ssh_handshake_obeys_total_deadline_and_cancellation() {
                     Err(_) => panic!("diagnostic must initiate the real handshake"),
                 }
             };
+            server_timeline
+                .lock()
+                .unwrap()
+                .push(("accepted", epoch.elapsed()));
             socket.set_nonblocking(false).unwrap();
             socket
                 .set_read_timeout(Some(Duration::from_secs(3)))
@@ -194,6 +201,10 @@ fn diagnostic_ssh_handshake_obeys_total_deadline_and_cancellation() {
             let mut banner = String::new();
             reader.read_line(&mut banner).unwrap();
             assert!(banner.starts_with("SSH-"));
+            server_timeline
+                .lock()
+                .unwrap()
+                .push(("banner", epoch.elapsed()));
             // Leave the real transport stalled before the peer's SSH banner.
             if cancel {
                 server_cancellation.cancel();
@@ -204,8 +215,12 @@ fn diagnostic_ssh_handshake_obeys_total_deadline_and_cancellation() {
                     Ok(0) => break,
                     Ok(_) => continue,
                     Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
-                    Err(_) => {
-                        panic!("diagnostic must close the socket, not abandon a blocked handshake")
+                    Err(error) => {
+                        panic!(
+                            "diagnostic must close the socket, not abandon a blocked handshake: cancel={cancel}, error={error:?}, elapsed={:?}, timeline={:?}",
+                            epoch.elapsed(),
+                            server_timeline.lock().unwrap()
+                        )
                     }
                 }
             }
@@ -247,6 +262,7 @@ fn diagnostic_ssh_handshake_obeys_total_deadline_and_cancellation() {
             &cancellation,
         )
         .unwrap();
+        timeline.lock().unwrap().push(("returned", epoch.elapsed()));
         server.join().unwrap();
         assert!(
             started.elapsed() < Duration::from_secs(4),

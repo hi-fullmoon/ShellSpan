@@ -8,6 +8,7 @@ import {invokeCreateLocalSession,invokeCreateSession,invokeCloseSession,invokeGe
   invokeCheckHostKey,invokeTrustHost} from '@/lib/ipc/tauri';
 import type {SessionSummary} from '@/types';
 import '@/styles/base.css';
+import {verifyWindowsNativeLifecycle} from './native-input-windows-lifecycle';
 
 function assert(value:unknown,message:string):asserts value{if(!value)throw new Error(message);}
 async function until(test:()=>boolean|Promise<boolean>,message:string){const end=Date.now()+10000;while(!await test()){assert(Date.now()<end,message);await new Promise(resolve=>setTimeout(resolve,10));}}
@@ -15,6 +16,12 @@ function text(controller:ReturnType<typeof terminalRegistry.create>){const buffe
 async function verify(){
   await initI18n('en-US');await getCurrentWindow().show();
   const parameters=new URL(location.href).searchParams;
+  if(['powerShell7','windowsPowerShell'].includes(parameters.get('nativeP3')??'')){
+    // One initial activation for the explicitly scheduled standalone case.
+    // Subsequent focus changes are observed, never forcibly reclaimed.
+    await getCurrentWindow().setFocus();
+    return verifyWindowsNativeLifecycle(parameters);
+  }
   const port=Number(parameters.get('nativeP2SshPort'));assert(port>1024,'Owned SSH fixture required');
   const stages:unknown[]=[];const sessions:string[]=[];
   const host=document.createElement('div');host.style.cssText='width:1100px;height:650px';document.body.append(host);

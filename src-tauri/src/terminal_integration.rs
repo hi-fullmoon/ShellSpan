@@ -32,10 +32,29 @@ const BUNDLED_PSREADLINE_FILES: &[(&str, &[u8])] = &[
     ("net6plus/Microsoft.PowerShell.PSReadLine.Polyfiller.dll", include_bytes!("../resources/powershell/PSReadLine/2.4.5/net6plus/Microsoft.PowerShell.PSReadLine.Polyfiller.dll")),
     ("License.txt", include_bytes!("../resources/powershell/PSReadLine/2.4.5/License.txt")),
     ("Upstream.PSReadLine.psd1", include_bytes!("../resources/powershell/PSReadLine/2.4.5/Upstream.PSReadLine.psd1")),
+    ("ShellSpan.Build.json", include_bytes!("../resources/powershell/PSReadLine/2.4.5/ShellSpan.Build.json")),
 ];
 
 #[cfg(any(windows, test))]
 pub(crate) fn prepare_bundled_powershell_module(data_dir: &Path) -> Result<PathBuf, String> {
+    prepare_bundled_powershell_module_for_host(data_dir, true)
+}
+
+#[cfg(any(windows, test))]
+fn native_editor_cache_error(stage: &str, error: io::Error) -> String {
+    let code = match error.raw_os_error() {
+        Some(value) if value < 0 => format!("NEG_{}", value.unsigned_abs()),
+        Some(value) => value.to_string(),
+        None => "NONE".into(),
+    };
+    format!("TERMINAL_NATIVE_EDITOR_CACHE_{stage}_OS_{code}")
+}
+
+#[cfg(any(windows, test))]
+pub(crate) fn prepare_bundled_powershell_module_for_host(
+    data_dir: &Path,
+    legacy_path_limit: bool,
+) -> Result<PathBuf, String> {
     use sha2::{Digest, Sha256};
     let mut digest = Sha256::new();
     for (name, bytes) in BUNDLED_PSREADLINE_FILES {
@@ -49,43 +68,84 @@ pub(crate) fn prepare_bundled_powershell_module(data_dir: &Path) -> Result<PathB
     // long-path settings, module contents, or their full content identity.
     let parent = data_dir.join("editors");
     fs::create_dir_all(&parent)
-        .map_err(|error| format!("failed to prepare native editor cache: {error}"))?;
+        .map_err(|error| native_editor_cache_error("CREATE_PARENT", error))?;
     let root = parent.join(&identity[..32]);
-    if BUNDLED_PSREADLINE_FILES.iter().any(|(name, _)| {
-        crate::path_utils::portable_local_path(&root.join("PSReadLine/2.4.5").join(name))
-            .encode_utf16()
-            .count()
-            >= 260
-    }) {
+    if legacy_path_limit
+        && BUNDLED_PSREADLINE_FILES.iter().any(|(name, _)| {
+            crate::path_utils::portable_local_path(&root.join("PSReadLine/2.4.5").join(name))
+                .encode_utf16()
+                .count()
+                >= 260
+        })
+    {
         return Err("TERMINAL_NATIVE_EDITOR_PATH_TOO_LONG".into());
     }
     if !root.exists() {
         let staging = tempfile::Builder::new()
             .prefix(".psreadline-")
             .tempdir_in(&parent)
-            .map_err(|error| format!("failed to stage native editor: {error}"))?;
+            .map_err(|error| native_editor_cache_error("CREATE_STAGE", error))?;
         let version = staging.path().join("PSReadLine/2.4.5");
-        for (name, bytes) in BUNDLED_PSREADLINE_FILES {
+        for (index, (name, bytes)) in BUNDLED_PSREADLINE_FILES.iter().enumerate() {
             let path = version.join(name);
-            fs::create_dir_all(path.parent().ok_or("invalid bundled editor path")?)
-                .map_err(|error| format!("failed to prepare native editor directory: {error}"))?;
+            fs::create_dir_all(path.parent().ok_or("invalid bundled editor path")?).map_err(
+                |error| native_editor_cache_error(&format!("CREATE_DIRECTORY_{index}"), error),
+            )?;
             fs::write(path, bytes)
-                .map_err(|error| format!("failed to stage native editor file: {error}"))?;
+                .map_err(|error| native_editor_cache_error(&format!("WRITE_{index}"), error))?;
         }
-        if let Err(error) = fs::rename(staging.path(), &root) {
+        #[cfg(windows)]
+        let installed =
+            install_bundled_powershell_cache(staging.path(), &root, Duration::from_millis(500));
+        #[cfg(not(windows))]
+        let installed = fs::rename(staging.path(), &root);
+        if let Err(error) = installed {
             if !root.exists() {
-                return Err(format!("failed to install native editor: {error}"));
+                return Err(native_editor_cache_error("INSTALL", error));
             }
         }
     }
-    for (name, bytes) in BUNDLED_PSREADLINE_FILES {
+    for (index, (name, bytes)) in BUNDLED_PSREADLINE_FILES.iter().enumerate() {
         let actual = fs::read(root.join("PSReadLine/2.4.5").join(name))
-            .map_err(|error| format!("failed to verify native editor: {error}"))?;
+            .map_err(|error| native_editor_cache_error(&format!("READ_{index}"), error))?;
         if actual.as_slice() != *bytes {
-            return Err("bundled native editor integrity mismatch".into());
+            return Err(format!(
+                "TERMINAL_NATIVE_EDITOR_CACHE_INTEGRITY_MISMATCH_{index}"
+            ));
         }
     }
     Ok(root)
+}
+
+#[cfg(windows)]
+fn install_bundled_powershell_cache(
+    staging: &Path,
+    root: &Path,
+    budget: Duration,
+) -> io::Result<()> {
+    let deadline = Instant::now() + budget;
+    loop {
+        match fs::rename(staging, root) {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                // A reader without FILE_SHARE_DELETE can temporarily prevent
+                // renaming either this directory (32) or a contained file (5).
+                // This is cache publication before any Shell/source admission.
+                // A competing destination is still verified byte-for-byte by
+                // the caller; no permissions or existing files are changed.
+                if root.exists()
+                    || !matches!(error.raw_os_error(), Some(5 | 32))
+                    || Instant::now() >= deadline
+                {
+                    return Err(error);
+                }
+                thread::sleep(
+                    Duration::from_millis(10)
+                        .min(deadline.saturating_duration_since(Instant::now())),
+                );
+            }
+        }
+    }
 }
 
 pub(crate) fn bash_native_submission(source: &str) -> Result<String, String> {
@@ -559,13 +619,11 @@ impl PreparedLocalShellIntegration {
             let bootstrap_path = bootstrap_root.path().join("shellspan-integration.ps1");
             let mut script = powershell_bootstrap(&pipe_name, shell);
             if let Some(directory) = crate::path_utils::configured_data_directory() {
-                let history = directory.join("shell-history");
-                fs::create_dir_all(&history).map_err(|error| {
-                    format!("failed to prepare isolated shell history: {error}")
-                })?;
+                let history = prepare_isolated_powershell_history_directory(directory)?;
                 script = format!(
                     "{}\n{script}",
                     powershell_history_redirect(
+                        directory,
                         &history.join(format!("{}.txt", shell.protocol_name()))
                     )
                 );
@@ -1729,9 +1787,77 @@ fn quote_posix(value: &str) -> String {
 }
 
 #[cfg(any(windows, test))]
-fn powershell_history_redirect(path: &Path) -> String {
-    let literal = crate::portable_local_path(path).replace('\'', "''");
-    format!("Import-Module PSReadLine -ErrorAction Stop\nSet-PSReadLineOption -HistorySavePath '{literal}' -ErrorAction Stop")
+pub(crate) fn prepare_isolated_powershell_history_directory(
+    directory: &Path,
+) -> Result<PathBuf, String> {
+    let history = directory.join("shell-history");
+    let reject_link = |metadata: &fs::Metadata| {
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            metadata.file_attributes() & 0x400 != 0
+        }
+        #[cfg(not(windows))]
+        {
+            metadata.file_type().is_symlink()
+        }
+    };
+    match fs::symlink_metadata(&history) {
+        Ok(metadata) if !metadata.is_dir() || reject_link(&metadata) => {
+            return Err("TERMINAL_HISTORY_ISOLATION_INVALID".into());
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if let Err(error) = fs::create_dir(&history) {
+                if error.kind() != std::io::ErrorKind::AlreadyExists {
+                    return Err("TERMINAL_HISTORY_ISOLATION_UNAVAILABLE".into());
+                }
+            }
+            let metadata = fs::symlink_metadata(&history)
+                .map_err(|_| "TERMINAL_HISTORY_ISOLATION_UNAVAILABLE")?;
+            if !metadata.is_dir() || reject_link(&metadata) {
+                return Err("TERMINAL_HISTORY_ISOLATION_INVALID".into());
+            }
+        }
+        Err(_) => return Err("TERMINAL_HISTORY_ISOLATION_UNAVAILABLE".into()),
+    }
+    Ok(history)
+}
+
+#[cfg(any(windows, test))]
+pub(crate) fn powershell_history_redirect(directory: &Path, path: &Path) -> String {
+    let root = crate::portable_local_path(directory).replace('\'', "''");
+    let fallback = crate::portable_local_path(path).replace('\'', "''");
+    format!(
+        r#"Import-Module PSReadLine -ErrorAction Stop
+& {{
+  param($HistoryRoot,$HistoryFallback)
+  $HistoryRoot=[IO.Path]::GetFullPath($HistoryRoot).TrimEnd([char[]]'\/')
+  $OwnedHistoryPath={{
+    param($HistoryCandidate)
+    try {{
+      if(-not [IO.Path]::IsPathRooted($HistoryCandidate)){{return $false}}
+      $FullHistoryPath=[IO.Path]::GetFullPath($HistoryCandidate)
+      if(-not $FullHistoryPath.StartsWith($HistoryRoot+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase) -or [IO.Directory]::Exists($FullHistoryPath)){{return $false}}
+      $HistoryCursor=[IO.FileInfo]::new($FullHistoryPath)
+      while($null-ne $HistoryCursor){{
+        if($HistoryCursor.Exists){{
+          $HistoryEntry=Microsoft.PowerShell.Management\Get-Item -LiteralPath $HistoryCursor.FullName -Force -ErrorAction Stop
+          if(($HistoryEntry.Attributes-band [IO.FileAttributes]::ReparsePoint)-ne 0){{return $false}}
+          if($HistoryEntry-is [IO.FileInfo] -and ($null-eq $HistoryEntry.PSObject.Properties['LinkType'] -or [string]$HistoryEntry.LinkType-eq 'HardLink')){{return $false}}
+        }}
+        if($HistoryCursor.FullName.TrimEnd([char[]]'\/').Equals($HistoryRoot,[StringComparison]::OrdinalIgnoreCase)){{return $true}}
+        $HistoryCursor=if($HistoryCursor-is [IO.FileInfo]){{$HistoryCursor.Directory}}else{{$HistoryCursor.Parent}}
+      }}
+    }}catch{{return $false}}
+    return $false
+  }}
+  if(-not (& $OwnedHistoryPath $HistoryFallback)){{throw 'TERMINAL_HISTORY_ISOLATION_INVALID'}}
+  $CurrentHistoryPath=(PSReadLine\Get-PSReadLineOption).HistorySavePath
+  if(-not (& $OwnedHistoryPath $CurrentHistoryPath)){{PSReadLine\Set-PSReadLineOption -HistorySavePath $HistoryFallback -ErrorAction Stop}}
+}} '{root}' '{fallback}'
+"#
+    )
 }
 
 #[cfg(any(windows, test))]
@@ -2173,9 +2299,11 @@ fn parse_shell(value: &str) -> Result<TerminalShellKind, String> {
 #[cfg(test)]
 mod tests {
     include!("tests/terminal_integration.rs");
+    mod powershell_history {
+        include!("tests/powershell_history.rs");
+    }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
-
     #[cfg(unix)]
     mod command_presentation {
         include!("tests/terminal_command_presentation.rs");
