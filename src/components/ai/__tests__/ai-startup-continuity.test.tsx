@@ -35,14 +35,19 @@ it('preserves the final reply DOM through the recorded message and turn boundari
   const { events } = conversationFoldRecording.completed;
   const message = events.map(event => event.type).lastIndexOf('assistant/message');
   const at = (length: number) => projectAgentChatNodes(events.slice(0, length));
+  const replies = at(events.length).filter(node => node.kind === 'assistantMessage');
+  const finalReply = replies[replies.length - 1];
+  if (!finalReply) throw new Error('The recorded completed turn must contain its final reply');
   const { container, rerender } = render(<AiConversation nodes={at(message)} status="running" throughSeq={null} />);
-  const element = () => container.querySelector('[data-ai-node-kind="assistantMessage"]');
+  const finalElements = () => [...container.querySelectorAll<HTMLElement>('[data-ai-node-kind="assistantMessage"]')]
+    .filter(element => element.dataset.aiNodeKey === finalReply.key);
+  const element = () => finalElements()[0];
   const before = element();
   expect(before).toBeInTheDocument();
   rerender(<AiConversation nodes={at(message + 1)} status="running" throughSeq={null} />);
   expect(element()).toBe(before);
-  expect(before?.closest('.ai-turn-process')).toBeNull();
-  expect(container.querySelectorAll('[data-ai-node-kind="assistantMessage"]')).toHaveLength(1);
+  expect(before?.closest('[data-ai-process-owner]')).toBeNull();
+  expect(finalElements()).toHaveLength(1);
   rerender(<AiConversation nodes={at(events.length)} status="completed" throughSeq={null} />);
   expect(element()).toBe(before);
 });

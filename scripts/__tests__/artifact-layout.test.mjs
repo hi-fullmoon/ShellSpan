@@ -24,18 +24,21 @@ async function withArtifactDirectory(check) {
 }
 
 describe('generated artifact layout', () => {
-  it('excludes the credential helper Cargo cache from Git, frozen sources and ordinary test discovery', async () => {
-    expect(frontend.test.exclude).toContain('**/scripts/native-input-p3/credential-cleanup/target/**');
+  it.each([
+    ['scripts/native-input-p0', 'Cargo.toml'],
+    ['scripts/native-input-p3/credential-cleanup', 'src/main.rs'],
+  ])('excludes the %s Cargo cache from Git, frozen sources and ordinary test discovery', async (tool, sourceFile) => {
+    expect(frontend.test.exclude).toContain(`**/${tool}/target/**`);
     await withArtifactDirectory(async directory => {
-      const snapshot = path.join(directory, 'ShellSpan'), source = 'scripts/native-input-p3/credential-cleanup/src/main.rs', generated = 'scripts/native-input-p3/credential-cleanup/target/debug/cache.test.mjs';
+      const snapshot = path.join(directory, 'ShellSpan'), source = `${tool}/${sourceFile}`, generated = `${tool}/target/debug/cache.test.mjs`;
       await mkdir(path.dirname(path.join(snapshot, source)), { recursive: true });
       for (const file of ['.gitignore', source]) await copyFile(path.join(root, file), path.join(snapshot, file));
-      await writeFile(path.join(snapshot, 'ordinary.test.mjs'), "import {it} from 'vitest';it('ordinary',()=>{});\n");
+      await copyFile(path.join(root, 'scripts/__tests__/native-input-runner.test.mjs'), path.join(snapshot, 'ordinary.test.mjs'));
       const meta = path.join(snapshot, '.artifacts/tests/native-input-p3'), originalIndex = readValidationGit(root, ['rev-parse', '--path-format=absolute', '--git-path', 'index']).toString().trim(), head = readValidationGit(root, ['rev-parse', 'HEAD']).toString().trim();
       const {gitDirectory, index} = createIndexReader(meta, originalIndex, head);await chmod(index, 0o400);
       const indexSha256 = createHash('sha256').update(await readFile(index)).digest('hex');await writeFile(path.join(meta, 'snapshot-index.json'), JSON.stringify({version: 1, root: snapshot, gitDirectory, index, indexSha256}));
       const before = captureValidationSources(snapshot);expect(Object.keys(before).sort()).toEqual(['.gitignore', 'ordinary.test.mjs', source].sort());
-      await mkdir(path.dirname(path.join(snapshot, generated)), {recursive: true});await writeFile(path.join(snapshot, generated), "throw Error('Cargo cache must not be collected');\n");
+      await mkdir(path.dirname(path.join(snapshot, generated)), {recursive: true});await copyFile(path.join(root, 'scripts/__tests__/native-input-runner.test.mjs'), path.join(snapshot, generated));
       expect(readValidationGit(snapshot, ['check-ignore', '--no-index', generated]).toString().trim()).toBe(generated);expect(captureValidationSources(snapshot)).toEqual(before);
       const discovered = execFileSync(process.execPath, [path.join(root, 'node_modules/vitest/vitest.mjs'), 'list', '--filesOnly', '--config', path.join(root, 'vitest.config.ts'), '--root', snapshot], {cwd: root, encoding: 'utf8', timeout: 20000});
       expect(discovered).toContain('ordinary.test.mjs');expect(discovered).not.toContain('cache.test.mjs');expect(createHash('sha256').update(await readFile(index)).digest('hex')).toBe(indexSha256);

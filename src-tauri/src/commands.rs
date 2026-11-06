@@ -1103,6 +1103,7 @@ fn create_local_session_blocking(
                         );
                     }
                 }
+                #[cfg(any(windows, test))]
                 LocalWorkerActivity::Command(Ok(SessionCommand::StartupReady)) => {
                     #[cfg(windows)]
                     if let Err(error) = child_killer.resume_startup() {
@@ -1250,8 +1251,9 @@ fn create_local_session_blocking(
                     Ok(SessionCommand::Write(_))
                     | Ok(SessionCommand::WriteBytes(_))
                     | Ok(SessionCommand::NativeControl(_))
-                    | Ok(SessionCommand::StartupReady)
                     | Ok(SessionCommand::Resize { .. }) => {}
+                    #[cfg(any(windows, test))]
+                    Ok(SessionCommand::StartupReady) => {}
                 },
                 recv(output_state_rx) -> state => {
                     if state.is_err() {

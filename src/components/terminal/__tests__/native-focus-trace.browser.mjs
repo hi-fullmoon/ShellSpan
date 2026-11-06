@@ -46,6 +46,7 @@ try{for(const[name,launcher]of[['chromium',chromium],['webkit',webkit]]){
   await page.locator('#other').click();
   await page.evaluate(()=>{
    const s=window.probe;if(document.activeElement===s.editor)throw Error('Actual focus did not leave the editor');
+   s.trace.check('store-app',new Error('Observed store transition').stack);
    s.trace.violate('focusin');
   });
   await page.locator('#editor').click();
@@ -66,6 +67,8 @@ try{for(const[name,launcher]of[['chromium',chromium],['webkit',webkit]]){
   assert.equal(report.firstViolation.snapshot.active.role,'other');
   assert(report.states.some(s=>s.editor?.role==='textbox'));
   assert(report.entries.some(e=>e.kind==='dom:focusout'));
+  assert(report.entries.some(e=>e.kind==='check'&&e.data?.trigger==='store-app'
+    &&typeof e.data.stack==='string'&&e.data.stack.length>0&&e.data.stack.length<=4096));
   assert(report.entries.some(e=>e.kind==='mutation:childList'&&e.data.removedEditor));
   assert(report.entries.some(e=>e.kind==='mutation:attributes'&&e.data.attribute==='contenteditable'));
   assert(report.states.some(s=>s.active?.terminal));

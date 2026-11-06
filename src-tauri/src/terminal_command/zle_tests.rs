@@ -9,6 +9,29 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+fn require_macos_arm64() {
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+    panic!("Native ZLE acceptance requires actual macOS arm64");
+}
+
+fn verified_test_shell(owner: &std::path::Path) -> PathBuf {
+    if let Some(shell) = std::env::var_os("SHELLSPAN_P3_TEST_ZSH") {
+        return shell.into();
+    }
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        super::editors::local_zle_shell(
+            &owner.join(".artifacts/tests/native-input-p2/resources/native-input"),
+        )
+        .expect("Build the pinned private main/Core and explicitly select validation resources")
+    }
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+    {
+        let _ = owner;
+        panic!("Actual macOS arm64 ZLE resources required")
+    }
+}
+
 fn publish(path: &std::path::Path, value: &serde_json::Value) {
     let pending = path.with_extension("pending");
     fs::write(&pending, serde_json::to_vec_pretty(value).unwrap()).unwrap();
@@ -47,6 +70,53 @@ fn scope_snapshot(writer: &mut dyn Write, home: &std::path::Path) -> serde_json:
         thread::sleep(Duration::from_millis(5));
     }
 }
+
+fn read_public_zle_history(directory: &std::path::Path) -> serde_json::Value {
+    assert_eq!(
+        fs::read_to_string(directory.join("ready")).unwrap(),
+        "complete"
+    );
+    let mut entries = std::collections::BTreeMap::new();
+    let mut configuration = std::collections::BTreeMap::new();
+    for entry in fs::read_dir(directory).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name().into_string().unwrap();
+        if let Some(index) = name.strip_prefix("entry-") {
+            entries.insert(
+                index.parse::<u64>().unwrap(),
+                fs::read_to_string(entry.path()).unwrap(),
+            );
+        } else if name != "ready" {
+            configuration.insert(name, fs::read_to_string(entry.path()).unwrap());
+        }
+    }
+    serde_json::json!({"entries":entries.into_values().collect::<Vec<_>>(),"configuration":configuration})
+}
+
+fn public_zle_history_snapshot(
+    writer: &mut dyn Write,
+    home: &std::path::Path,
+) -> serde_json::Value {
+    let directory = home.join(format!("history-observation-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&directory).unwrap();
+    fs::write(
+        home.join("history-observation-target"),
+        directory.to_str().unwrap(),
+    )
+    .unwrap();
+    writer.write_all(b"\x18h").unwrap();
+    writer.flush().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !directory.join("ready").exists() {
+        assert!(
+            Instant::now() < deadline,
+            "Actual public ZLE history widget did not respond"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+    read_public_zle_history(&directory)
+}
+
 fn wait(
     messages: &mpsc::Receiver<nip::Message>,
     records: &mut Vec<nip::Message>,
@@ -68,7 +138,7 @@ fn wait(
 #[test]
 #[ignore = "requires the actual macOS Zsh and its production native module"]
 fn native_zle_private_namespace_guards_preserve_user_definitions() {
-    assert!(cfg!(all(target_os = "macos", target_arch = "aarch64")));
+    require_macos_arm64();
     let owner = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
     for kind in [
         "function",
@@ -117,8 +187,9 @@ fn native_zle_private_namespace_guards_preserve_user_definitions() {
             )
             .unwrap();
         }
+        let shell = verified_test_shell(&owner);
         let prepared = PreparedNativeBash::prepare(
-            std::path::Path::new("/bin/zsh"),
+            &shell,
             &owner.join(".artifacts/tests/native-input-p2/resources/native-input"),
         )
         .unwrap();
@@ -130,7 +201,7 @@ fn native_zle_private_namespace_guards_preserve_user_definitions() {
                 pixel_height: 0,
             })
             .unwrap();
-        let mut command = CommandBuilder::new("/bin/zsh");
+        let mut command = CommandBuilder::new(&shell);
         command.env("HOME", &home);
         command.env("LC_ALL", "en_US.UTF-8");
         command.env("TERM", "xterm-256color");
@@ -277,7 +348,7 @@ fn native_zle_private_namespace_guards_preserve_user_definitions() {
 #[test]
 #[ignore = "requires the actual macOS system Zsh and rebuilt native module"]
 fn native_zle_private_eof_preserves_ordinary_input_and_user_hooks() {
-    assert!(cfg!(all(target_os = "macos", target_arch = "aarch64")));
+    require_macos_arm64();
     let owner = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
     for phase in [
         "idle",
@@ -311,8 +382,9 @@ fn native_zle_private_eof_preserves_ordinary_input_and_user_hooks() {
         startup.write_all(b"p3_user_edit() { BUFFER+=' #USER_MOD'; CURSOR=${#BUFFER}; }\nzle -N p3_user_edit\nbindkey '^Xh' p3_user_edit\n").unwrap();
         drop(startup);
         scoped_observers(&home);
+        let shell = verified_test_shell(&owner);
         let prepared = PreparedNativeBash::prepare(
-            std::path::Path::new("/bin/zsh"),
+            &shell,
             &owner.join(".artifacts/tests/native-input-p2/resources/native-input"),
         )
         .unwrap();
@@ -324,7 +396,7 @@ fn native_zle_private_eof_preserves_ordinary_input_and_user_hooks() {
                 pixel_height: 0,
             })
             .unwrap();
-        let mut command = CommandBuilder::new("/bin/zsh");
+        let mut command = CommandBuilder::new(&shell);
         command.env("HOME", &home);
         command.env("LC_ALL", "en_US.UTF-8");
         command.env("TERM", "xterm-256color");
@@ -933,6 +1005,94 @@ fn native_editor_default_admission_is_closed() {
 }
 
 #[test]
+#[ignore = "requires the real rebuilt pinned macOS private Zsh executable"]
+fn native_zle_private_main_resources_reject_invalid_paths_and_bytes() {
+    require_macos_arm64();
+    let owner = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
+    let resources = owner.join(".artifacts/tests/native-input-p2/resources/native-input");
+    let original: serde_json::Value =
+        serde_json::from_slice(&fs::read(resources.join("editors-macos-arm64.json")).unwrap())
+            .unwrap();
+    let id = original["profiles"][0]["profile"]["verifiedProfileId"]
+        .as_str()
+        .unwrap();
+    let source = resources.join(original["profiles"][0]["shell"].as_str().unwrap());
+    let evidence = owner
+        .join(".artifacts/tests/native-input-p3/private-main-admission")
+        .join(uuid::Uuid::new_v4().to_string());
+    fs::create_dir_all(&evidence).unwrap();
+    let mut cases = Vec::new();
+    for kind in [
+        "traversal",
+        "absolute",
+        "other-profile",
+        "missing",
+        "tampered",
+        "symlink",
+        "unselected-valid",
+    ] {
+        let root = evidence.join(kind);
+        fs::create_dir(&root).unwrap();
+        let mut catalogue = original.clone();
+        let relative = format!("{id}/zsh");
+        let destination = root.join(&relative);
+        fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        let expected = match kind {
+            "traversal" => {
+                catalogue["profiles"][0]["shell"] = "../zsh".into();
+                "TERMINAL_NATIVE_MANIFEST_INVALID"
+            }
+            "absolute" => {
+                catalogue["profiles"][0]["shell"] = source.to_str().unwrap().into();
+                "TERMINAL_NATIVE_MANIFEST_INVALID"
+            }
+            "other-profile" => {
+                catalogue["profiles"][0]["shell"] = "other/zsh".into();
+                "TERMINAL_NATIVE_MANIFEST_INVALID"
+            }
+            "missing" => "TERMINAL_NATIVE_ARTIFACTS_UNAVAILABLE",
+            "tampered" => {
+                let mut bytes = fs::read(&source).unwrap();
+                bytes[0] ^= 1;
+                fs::write(&destination, bytes).unwrap();
+                "TERMINAL_NATIVE_PROFILE_ARTIFACT_MISMATCH"
+            }
+            "symlink" => {
+                let retained = root.join("original-zsh");
+                fs::copy(&source, &retained).unwrap();
+                std::os::unix::fs::symlink(&retained, &destination).unwrap();
+                "TERMINAL_NATIVE_PROFILE_ARTIFACT_MISMATCH"
+            }
+            "unselected-valid" => {
+                fs::copy(&source, &destination).unwrap();
+                "TERMINAL_NATIVE_PROFILE_NOT_ACCEPTED"
+            }
+            _ => unreachable!(),
+        };
+        fs::write(
+            root.join("editors-macos-arm64.json"),
+            serde_json::to_vec_pretty(&catalogue).unwrap(),
+        )
+        .unwrap();
+        let error = super::editors::read_catalogue(&root, "macos-arm64").err();
+        assert_eq!(
+            error.as_deref(),
+            Some(expected),
+            "Incorrect rejection for {kind}"
+        );
+        assert_eq!(
+            PreparedNativeBash::prepare(&source, &root).err().as_deref(),
+            Some(expected)
+        );
+        cases.push(serde_json::json!({"kind":kind,"error":error}));
+    }
+    publish(
+        &evidence.join("result.json"),
+        &serde_json::json!({"ok":true,"cases":cases,"realPrivateMainBytes":true,"executions":0,"nativeAcceptance":false}),
+    );
+}
+
+#[test]
 #[ignore = "requires actual macOS ZLE, rebuilt resource and the real Broker/private channel"]
 fn native_zle_manifest_paths_reject_before_prepare() {
     let owner = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
@@ -1004,7 +1164,7 @@ fn native_zle_actual_broker_display_binding() {
         TerminalGenerationCloseReason, TerminalGeometry, TerminalSessionBroker,
         TerminalTransportKind,
     };
-    assert!(cfg!(all(target_os = "macos", target_arch = "aarch64")));
+    require_macos_arm64();
     let owner = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
     let evidence = owner
         .join(".artifacts/tests/native-input-p3/broker-display-binding")
@@ -1013,10 +1173,11 @@ fn native_zle_actual_broker_display_binding() {
     let home = evidence.join("home");
     fs::create_dir(&home).unwrap();
     fs::write(home.join(".zshrc"), "PROMPT='P3-BINDING> '\n").unwrap();
-    let shell = std::path::Path::new("/bin/zsh");
     let resources = super::editors::validation_resource_root()
         .unwrap()
         .unwrap_or_else(|| owner.join(".artifacts/tests/native-input-p2/resources/native-input"));
+    let owned_shell = verified_test_shell(&owner);
+    let shell = owned_shell.as_path();
     fs::write(
         evidence.join("actual-resource-root.txt"),
         resources.to_str().unwrap(),
@@ -1201,7 +1362,7 @@ fn native_zle_actual_broker_display_binding() {
 #[test]
 #[ignore = "requires rebuilt P3 module and the actual macOS arm64 system Zsh"]
 fn native_zle_production_startup_parent_parser_and_jobs() {
-    assert!(cfg!(all(target_os = "macos", target_arch = "aarch64")));
+    require_macos_arm64();
     let owner = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
     let run = uuid::Uuid::new_v4().to_string();
     let session_id = format!("p3-zle-{run}");
@@ -1212,9 +1373,8 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
     let home = evidence.join("home");
     fs::create_dir(&home).unwrap();
     let candidate_shell = std::env::var_os("SHELLSPAN_P3_TEST_ZSH").map(PathBuf::from);
-    let shell = candidate_shell
-        .as_deref()
-        .unwrap_or(std::path::Path::new("/bin/zsh"));
+    let owned_shell = verified_test_shell(&owner);
+    let shell = owned_shell.as_path();
     let mut zshenv = "P3_STARTUP_ORDER=env\n".to_string();
     if let Some(modules) = std::env::var_os("SHELLSPAN_P3_TEST_ZSH_MODULE_PATH") {
         assert!(
@@ -1229,6 +1389,39 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
     fs::write(home.join(".zshenv"), zshenv).unwrap();
     fs::write(home.join(".zprofile"), "P3_STARTUP_ORDER+=:profile\n").unwrap();
     let mut zshrc="P3_STARTUP_ORDER+=:rc\nPROMPT='%F{blue}P3-NATIVE>%f '\nHISTFILE=$HOME/history\nHISTSIZE=100\nSAVEHIST=100\nsetopt interactivecomments\n".to_string();
+    let history_mode = std::env::var("SHELLSPAN_P3_HISTORY_MODE").ok();
+    let history_path = home.join(if history_mode.as_deref() == Some("custom") {
+        "历史 custom/history.txt"
+    } else {
+        "history"
+    });
+    let history_seeds = [
+        "builtin print -r -- P3_EXISTING_1",
+        "builtin print -r -- P3_EXISTING_2",
+    ];
+    let observer = owner.join("scripts/native-input-p3/zle-history-observer.zsh");
+    if let Some(mode) = &history_mode {
+        assert!(matches!(
+            mode.as_str(),
+            "default" | "small" | "custom" | "empty" | "unset" | "incremental" | "shared"
+        ));
+        fs::create_dir_all(history_path.parent().unwrap()).unwrap();
+        fs::write(&history_path, format!("{}\n", history_seeds.join("\n"))).unwrap();
+        match mode.as_str() {
+            "small" => zshrc.push_str("HISTSIZE=3\nSAVEHIST=3\n"),
+            "custom" => zshrc.push_str(&format!(
+                "HISTFILE={}\nreadonly HISTFILE\n",
+                shlex::try_quote(history_path.to_str().unwrap()).unwrap()
+            )),
+            "empty" => zshrc.push_str("HISTFILE=''\n"),
+            "unset" => zshrc.push_str("unset HISTFILE\n"),
+            "incremental" => zshrc.push_str("setopt inc_append_history\n"),
+            "shared" => zshrc.push_str("setopt share_history\n"),
+            "default" => {}
+            _ => unreachable!(),
+        }
+        zshrc.push_str(&format!("zmodload zsh/parameter\nsource {}\np3_history_snapshot() {{ local p3_previous=$?; p3_history_export \"$(<$HOME/history-observation-target)\"; return $p3_previous; }}\nzle -N p3_history_snapshot\nbindkey '^Xh' p3_history_snapshot\n", shlex::try_quote(observer.to_str().unwrap()).unwrap()));
+    }
     if std::env::var_os("SHELLSPAN_P3_TEST_COMBINING_CHARS").is_some() {
         assert!(candidate_shell.is_some());
         zshrc.push_str("setopt combining_chars\n");
@@ -1378,6 +1571,7 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
     let job_pid_file = evidence.join("background.pid");
     let target_observation = evidence.join("signal-target.json");
     let mut source_corpus = Vec::new();
+    let mut history_snapshots = Vec::new();
     let interrupt_source = std::env::var("SHELLSPAN_P3_SIGNAL_TARGET")
         .map(|program| {
             format!(
@@ -1409,6 +1603,11 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
             "The reviewed private Core was not actually mapped"
         );
         assert_eq!(scope_snapshot(&mut *writer, &home)["budget"], 0);
+        if history_mode.is_some() {
+            let initial = public_zle_history_snapshot(&mut *writer, &home);
+            publish(&evidence.join("history-initial.json"), &initial);
+            history_snapshots.push(initial);
+        }
         let handle = "job-0123456789abcdef0123456789abcdef";
         let long_value = format!(
             "{}{}",
@@ -1420,6 +1619,11 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
         } else {
             "sleep 30"
         };
+        let child_options = if history_mode.is_some() {
+            "builtin print -rn -- $options[rcs] > $HOME/child-rcs; "
+        } else {
+            ""
+        };
         let mut startup_source =
             "printf 'P3-STARTUP:%s\\n' \"$P3_STARTUP_ORDER\"; typeset P3_PARENT='父Shell-é-👩🏽‍💻'"
                 .to_string();
@@ -1430,7 +1634,7 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
         }
         let sources=[(startup_source,None),
             ("[[ $P3_PARENT == '父Shell-é-👩🏽‍💻' ]] && printf '%s%s\\n' P3-PARENT: \"$P3_PARENT\"".into(),None),
-            (format!("zmodload zsh/system; builtin printf '%s' \"$sysparams[pid]\" > {}; {}",shlex::try_quote(job_pid_file.to_str().unwrap()).unwrap(),background_body),Some(nip::JobExecution::Launch{handle:handle.into()})),
+            (format!("zmodload zsh/system; builtin printf '%s' \"$sysparams[pid]\" > {}; {}{}",shlex::try_quote(job_pid_file.to_str().unwrap()).unwrap(),child_options,background_body),Some(nip::JobExecution::Launch{handle:handle.into()})),
             (format!("typeset P3_LONG='{}'; [[ ${{#P3_LONG}} == {} ]] && printf '%s%s\\n' P3-LONG- COMPLETE",long_value,long_value.chars().count()),None),
             (format!("__shellspan_job_control {handle} poll"),Some(nip::JobExecution::Control{handle:handle.into(),stop:false,nonce:"0123456789abcdef0123456789abcdef".into()})),
             (format!("__shellspan_job_control {handle} stop"),Some(nip::JobExecution::Control{handle:handle.into(),stop:true,nonce:"1123456789abcdef0123456789abcdef".into()})),
@@ -1440,7 +1644,7 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
             ("false".into(),None),
             ("[[ $? == 1 ]] && typeset -g P3_MULTI=$'first\nsecond'; [[ $P3_MULTI == $'first\nsecond' ]] && printf '%s%s\\n' P3-MULTILINE- STATUS".into(),None),
             ("typeset -g P3_TABS=$'A\tB'; [[ $P3_TABS == $'A\tB' ]] && printf '%s%s\\n' P3-REDUCED- TABS".into(),None),
-            ("typeset -g P3_CR=$'C\rD'; [[ $P3_CR == $'C\rD' ]] && printf '%s%s\\n' P3-LITERAL- CR".into(),None)];
+            ("typeset -g P3_CR=$'C\rD'; [[ $P3_CR == $'C\rD' ]] && typeset -g P3_BANG=\"literal!!\"; [[ $P3_BANG == 'literal!!' ]] && printf '%s%s\\n' P3-LITERAL- CR".into(),None)];
         if trace_schedule {
             publish(
                 &evidence.join("baseline-prelude.json"),
@@ -1624,28 +1828,30 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
                     |m| matches!(m,nip::Message::Operation(e)if e.request_id==prepare.request_id&&matches!(e.payload,nip::Payload::Started)),
                 );
                 let deadline = Instant::now() + Duration::from_secs(2);
-                while !handoff_interrupt {
-                    let group = pair.master.process_group_leader().unwrap();
-                    let image = std::process::Command::new("/bin/ps")
-                        .args(["-p", &group.to_string(), "-o", "comm="])
-                        .output()
-                        .unwrap();
-                    let name = String::from_utf8(image.stdout).unwrap();
-                    let name = std::path::Path::new(name.trim()).file_name();
-                    if group != child.process_id().unwrap() as i32
-                        && (if std::env::var_os("SHELLSPAN_P3_SIGNAL_TARGET").is_some() {
-                            target_observation.exists()
-                        } else {
-                            name.is_some_and(|name| name == "sleep")
-                        })
-                    {
-                        break;
+                if !handoff_interrupt {
+                    loop {
+                        let group = pair.master.process_group_leader().unwrap();
+                        let image = std::process::Command::new("/bin/ps")
+                            .args(["-p", &group.to_string(), "-o", "comm="])
+                            .output()
+                            .unwrap();
+                        let name = String::from_utf8(image.stdout).unwrap();
+                        let name = std::path::Path::new(name.trim()).file_name();
+                        if group != child.process_id().unwrap() as i32
+                            && (if std::env::var_os("SHELLSPAN_P3_SIGNAL_TARGET").is_some() {
+                                target_observation.exists()
+                            } else {
+                                name.is_some_and(|name| name == "sleep")
+                            })
+                        {
+                            break;
+                        }
+                        assert!(
+                            Instant::now() < deadline,
+                            "The actual foreground command did not acquire its PTY process group"
+                        );
+                        thread::sleep(Duration::from_millis(5));
                     }
-                    assert!(
-                        Instant::now() < deadline,
-                        "The actual foreground command did not acquire its PTY process group"
-                    );
-                    thread::sleep(Duration::from_millis(5));
                 }
                 let group = pair.master.process_group_leader().unwrap();
                 let processes = std::process::Command::new("/bin/ps")
@@ -1692,6 +1898,14 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
                 &mut records,
                 |m| matches!(m,nip::Message::Connection(e)if matches!(&e.payload,nip::ConnectionPayload::EditorReady{after_command:Some(last),editor_empty:true,..}if last==&id)),
             );
+            if history_mode.is_some() {
+                let snapshot = public_zle_history_snapshot(&mut *writer, &home);
+                publish(
+                    &evidence.join(format!("history-after-{index}.json")),
+                    &snapshot,
+                );
+                history_snapshots.push(snapshot);
+            }
         }
         let stream = String::from_utf8(raw.lock().unwrap().clone()).unwrap();
         assert!(stream.contains("P3-STARTUP:env:profile:rc:login"));
@@ -1736,8 +1950,113 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
             "No actual owned native render enabled the versioned append mode"
         );
         assert!(observations.iter().all(|value| value["rows"] == 30));
+        if let Some(mode) = &history_mode {
+            let persistent = !matches!(mode.as_str(), "empty" | "unset");
+            assert_eq!(
+                fs::read_to_string(home.join("child-rcs")).unwrap(),
+                "on",
+                "Native child changed the user's startup/history RCS option"
+            );
+            let initial: Vec<String> = if persistent {
+                history_seeds
+                    .iter()
+                    .map(|value| (*value).to_string())
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            // Collect every mismatch before asserting so the same independent
+            // case can retain its real normal-exit and disk evidence as well.
+            let mut differences = Vec::new();
+            if history_snapshots[0]["entries"] != serde_json::json!(initial) {
+                differences.push(serde_json::json!({"stage":"initial","expected":initial,"actual":history_snapshots[0]["entries"]}));
+            }
+            let configuration = &history_snapshots[0]["configuration"];
+            let mut expected = initial;
+            for (index, item) in source_corpus.iter().enumerate() {
+                if ![4, 5, 6].contains(&index) {
+                    expected.push(item["source"].as_str().unwrap().to_string());
+                    if mode == "small" && expected.len() > 3 {
+                        expected.remove(0);
+                    }
+                }
+                if &history_snapshots[index + 1]["configuration"] != configuration {
+                    differences.push(serde_json::json!({"stage":"configuration","operation":index,"expected":configuration,"actual":history_snapshots[index+1]["configuration"]}));
+                }
+                if history_snapshots[index + 1]["entries"] != serde_json::json!(expected) {
+                    differences.push(serde_json::json!({"stage":"memory","operation":index,"expected":expected,"actual":history_snapshots[index+1]["entries"]}));
+                }
+            }
+            writer.write_all(b"exit\r").unwrap();
+            writer.flush().unwrap();
+            let deadline = Instant::now() + Duration::from_secs(8);
+            let status = loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    break status;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "History Shell did not exit normally"
+                );
+                thread::sleep(Duration::from_millis(5));
+            };
+            assert!(
+                status.success(),
+                "History Shell normal exit failed: {status:?}"
+            );
+            let disk = evidence.join("history-disk-read");
+            fs::create_dir(&disk).unwrap();
+            let parsed = std::process::Command::new(shell)
+                .args(["-f", "-c", "HISTSIZE=1000; zmodload zsh/parameter; source \"$1\"; fc -R \"$2\" || exit; print -s -- OWNED_READER_CURRENT_EVENT; p3_history_export \"$3\"", "owned-history-reader"])
+                .arg(&observer).arg(&history_path).arg(&disk)
+                .env("HOME", &home).env("ZDOTDIR", &home).env("LC_ALL", "en_US.UTF-8")
+                .output().unwrap();
+            assert!(
+                parsed.status.success(),
+                "Actual Zsh history reader failed: {}",
+                String::from_utf8_lossy(&parsed.stderr)
+            );
+            let saved = read_public_zle_history(&disk);
+            publish(&evidence.join("history-disk.json"), &saved);
+            if persistent {
+                expected.push("exit".into());
+                if mode == "small" && expected.len() > 3 {
+                    expected.remove(0);
+                }
+            } else {
+                expected = history_seeds
+                    .iter()
+                    .map(|value| (*value).to_string())
+                    .collect();
+            }
+            if saved["entries"] != serde_json::json!(expected) {
+                differences.push(serde_json::json!({"stage":"disk","expected":expected,"actual":saved["entries"]}));
+            }
+            let private_controls_excluded = [4, 5, 6].into_iter().all(|index| {
+                history_snapshots[index + 1]["entries"] == history_snapshots[index]["entries"]
+            });
+            let configuration_preserved = history_snapshots
+                .iter()
+                .all(|snapshot| &snapshot["configuration"] == configuration);
+            publish(
+                &evidence.join("history-differences.json"),
+                &serde_json::json!(differences),
+            );
+            publish(
+                &evidence.join("history-result.json"),
+                &serde_json::json!({"mode":mode,"ok":differences.is_empty(),"normalExit":true,"observations":history_snapshots.len(),"privateJobControlsExcluded":private_controls_excluded,"configurationPreserved":configuration_preserved,"diskReadByActualZsh":true,"scope":"Actual native module and PTY, not an App/model or multi-process shared-history proof"}),
+            );
+            assert!(
+                differences.is_empty(),
+                "Native history source/configuration differs; inspect history-differences.json"
+            );
+            assert!(
+                private_controls_excluded,
+                "Private management command entered history"
+            );
+        }
     }));
-    if outcome.is_err() {
+    if outcome.is_err() && child.try_wait().unwrap().is_none() {
         let ids = format!(
             "{},{}",
             child.process_id().unwrap(),
@@ -1761,7 +2080,9 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
             }
         }
     }
-    let _ = child.kill();
+    if child.try_wait().unwrap().is_none() {
+        let _ = child.kill();
+    }
     let _ = child.wait();
     drop(writer);
     drop(pair.master);
@@ -1798,7 +2119,7 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
         );
     }
     fs::write(evidence.join("geometry.json"),serde_json::to_vec_pretty(&serde_json::json!({"source":geometry_source,"prefixBeforeFirstResize":geometry_source.get(..usize::from(columns)+40),"sourceSha256":nip::sha(&geometry_source),"columns":columns,"rows":30,"resizeEvents":resize_events,"kind":"actual-production-pty-capture"})).unwrap()).unwrap();
-    fs::write(evidence.join("result.json"),serde_json::to_vec_pretty(&serde_json::json!({"ok":outcome.is_ok(),"plannedOperations":13,"shortFalseAndPreviousStatus":outcome.is_ok(),"literalControlCharacters":outcome.is_ok(),"multilineAndReducedMotionTabs":outcome.is_ok(),"dynamicWidths":[columns,32,180,40],"foregroundInterrupt":if handoff_interrupt{"handoff"}else{"running"},"shell":shell,"candidateEditor":true,"backgroundOutput":background_output,"nativeAcceptance":false,"productionBindingChanged":false,"coreSha256":"cc7f4263d1650d51ca82aead721c11409938f4808f967d4bf3c6709036533b84"})).unwrap()).unwrap();
+    fs::write(evidence.join("result.json"),serde_json::to_vec_pretty(&serde_json::json!({"ok":outcome.is_ok(),"plannedOperations":13,"shortFalseAndPreviousStatus":outcome.is_ok(),"literalControlCharacters":outcome.is_ok(),"multilineAndReducedMotionTabs":outcome.is_ok(),"dynamicWidths":[columns,32,180,40],"foregroundInterrupt":if handoff_interrupt{"handoff"}else{"running"},"shell":shell,"candidateEditor":true,"backgroundOutput":background_output,"nativeAcceptance":false,"productionBindingChanged":false,"coreSha256":super::registration::mac_zle_pin("privateCoreSha256").unwrap()})).unwrap()).unwrap();
     if let Err(error) = outcome {
         std::panic::resume_unwind(error);
     }

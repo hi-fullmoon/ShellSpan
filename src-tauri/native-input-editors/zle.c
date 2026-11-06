@@ -41,6 +41,14 @@ static int endpoint = -1;
 static int fork_registered;
 static sigset_t handoff_mask;
 static int handoff_masked;
+#ifdef SHELLSPAN_ZLE_BOUND_HISTORY
+typedef int (*NativeHistoryBind)(const char *, const char *);
+typedef void (*NativeHistoryChild)(pid_t);
+static NativeHistoryBind history_bind;
+static NativeHistoryChild history_child;
+static pid_t history_parent;
+static int history_job;
+#endif
 static void restore_handoff(void) {
     if(handoff_masked) {
         handoff_masked=0;
@@ -48,10 +56,21 @@ static void restore_handoff(void) {
     }
 }
 static void child_closed(void) {
+#ifdef SHELLSPAN_ZLE_BOUND_HISTORY
+    /* Parent-owned native history must not be flushed by the asynchronous
+     * child's normal/TERM exit. The validated callback only sets a main flag;
+     * no allocation, lookup, shell callback or Rust state is used after fork. */
+    if(history_job&&history_child) history_child(history_parent);
+    history_job=0;
+    history_child=NULL;
+#endif
     restore_handoff();
     if (endpoint >= 0) close(endpoint);
     endpoint = -1;
     editor = NULL;
+#ifdef SHELLSPAN_ZLE_BOUND_HISTORY
+    history_bind = NULL;
+#endif
 }
 static int flush_output(void) {
     size_t size;
@@ -107,6 +126,22 @@ static int bin_ssnip(char *name, char **args, Options opts, int func) {
             !realpath(core_path,expected)||!realpath(information.dli_fname,actual)||strcmp(expected,actual)){
             zwarnnam(name,"TERMINAL_NATIVE_SCOPED_CORE_MISMATCH");return 1;
         }
+#ifdef SHELLSPAN_ZLE_BOUND_HISTORY
+        int (*history_api)(void)=(int (*)(void))dlsym(RTLD_DEFAULT,"zle_native_history_api");
+        history_bind=(NativeHistoryBind)dlsym(RTLD_DEFAULT,"zle_native_bind_handoff");
+        history_child=(NativeHistoryChild)dlsym(RTLD_DEFAULT,"zle_native_history_child");
+        Dl_info history_info;
+        if(!history_api||!history_bind||!history_child||history_api()!=1||
+            !dladdr((void *)history_api,&history_info)||!history_info.dli_fname||
+            !realpath(history_info.dli_fname,actual)||strcmp(expected,actual)||
+            !dladdr((void *)history_bind,&history_info)||!history_info.dli_fname||
+            !realpath(history_info.dli_fname,actual)||strcmp(expected,actual)||
+            !dladdr((void *)history_child,&history_info)||!history_info.dli_fname||
+            !realpath(history_info.dli_fname,actual)||strcmp(expected,actual)) {
+            history_bind=NULL;history_child=NULL;zwarnnam(name,"TERMINAL_NATIVE_HISTORY_API_UNAVAILABLE");return 1;
+        }
+        history_parent=getpid();history_job=0;
+#endif
         const char *codeset=nl_langinfo(CODESET);
         if(!codeset || (strcasecmp(codeset,"UTF-8") && strcasecmp(codeset,"UTF8"))) {zwarnnam(name,"TERMINAL_NATIVE_UTF8_LOCALE_REQUIRED");return 1;}
         if(!fork_registered) { if(pthread_atfork(NULL,NULL,child_closed)) return 1; fork_registered=1; }
@@ -160,6 +195,9 @@ static int bin_ssnip(char *name, char **args, Options opts, int func) {
     if(count == 1 && !strcmp(args[0],"idle")) return ss_editor_event(editor,9,0,NULL) != 0;
     if(count == 1 && !strcmp(args[0],"typing")) return !ss_editor_event(editor,7,0,NULL);
     if(count == 1 && !strcmp(args[0],"close")) {
+#ifdef SHELLSPAN_ZLE_BOUND_HISTORY
+        history_job=0;
+#endif
         restore_handoff();
         ss_editor_event(editor,6,0,NULL);
         if(endpoint>=0) {shutdown(endpoint,SHUT_RDWR);close(endpoint);endpoint=-1;}
@@ -212,14 +250,24 @@ static int bin_ssnip(char *name, char **args, Options opts, int func) {
     }
     if(count == 2 && !strcmp(args[0],"plan")) {
         if(!ss_editor_event(editor,15,0,NULL)) return 2;
-        char *source=plain(args[1]);const char *plan=ss_editor_plan(editor,source);
+        char *source=plain(args[1]);
         if(!source) return 1;
+        const char *plan=ss_editor_plan(editor,source);
         if(!plan) {zsfree(source);return 1;}
         if(strcmp(plan,source) && !handoff_masked) {
             sigset_t resize;sigemptyset(&resize);sigaddset(&resize,SIGWINCH);
             if(sigprocmask(SIG_BLOCK,&resize,&handoff_mask)) {zsfree(source);return 1;}
             handoff_masked=1;
         }
+#ifdef SHELLSPAN_ZLE_BOUND_HISTORY
+        if(!history_bind) {zsfree(source);return 1;}
+        char *history_source=metafy(source,-1,META_DUP),*history_plan=metafy((char *)plan,-1,META_DUP);
+        int history_result=history_bind(history_source,history_plan);
+        zsfree(history_source);zsfree(history_plan);
+        if(history_result) {zsfree(source);return 1;}
+        const char *history_kind=ss_editor_job(editor,0);
+        history_job=history_kind&&!strcmp(history_kind,"launch");
+#endif
         zsfree(source);
         setsparam("SS_NIP_PLAN",metafy((char *)plan,-1,META_DUP));return 0;
     }
@@ -228,6 +276,9 @@ static int bin_ssnip(char *name, char **args, Options opts, int func) {
         return flush_output() || !result;
     }
     if(count == 2 && !strcmp(args[0],"settle")) {
+#ifdef SHELLSPAN_ZLE_BOUND_HISTORY
+        history_job=0;
+#endif
         restore_handoff();
         stream_marker(1); ss_editor_event(editor,4,atoi(args[1]),NULL);
         return flush_output();

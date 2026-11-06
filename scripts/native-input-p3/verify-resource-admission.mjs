@@ -48,7 +48,7 @@ await writeFile(resolve(negativeDirectory,'sources.json'),JSON.stringify(sources
 await writeFile(resolve(meta,'candidate-stage.json'),JSON.stringify({root:negativeRoot,directory:negativeDirectory,owner:root,sealed:true}));
 assert.deepEqual(captureValidationSources(negativeRoot),sources,'The negative source copy differs');
 const negativeCatalogue=resolve(negativeRoot,relative(root,cataloguePath));await mkdir(resolve(negativeCatalogue,'..'),{recursive:true});
-for(const profile of stale.profiles)for(const name of [profile.module,profile.relay,profile.core,profile.coreLicense].filter(Boolean)){
+for(const profile of stale.profiles)for(const name of [profile.module,profile.shell,profile.relay,profile.core,profile.coreLicense].filter(Boolean)){
   assert(name.startsWith(`${profile.profile.verifiedProfileId}/`)&&!name.includes('..')&&!name.includes('\\'),'Invalid negative resource path');
   const path=resolve(negativeRoot,'.artifacts/tests/native-input-p2/resources/native-input',name);await mkdir(resolve(path,'..'),{recursive:true});await copyFile(resolve(root,'.artifacts/tests/native-input-p2/resources/native-input',name),path);
 }

@@ -181,7 +181,7 @@ fn prepared_bash_real_submit_draft_cancel_and_running_interrupt() {
                 wait(
                     &rx,
                     &mut records,
-                    |m| matches!(m,nip::Message::Operation(e)if e.request_id==prepare.request_id&&matches!(e.payload,nip::Payload::InputProgress{applied_utf8_bytes}if applied_utf8_bytes>0)||e.request_id==prepare.request_id&&matches!(e.payload,nip::Payload::InputConfirmed{..})),
+                    |m| matches!(m,nip::Message::Operation(e)if e.request_id==prepare.request_id&&(matches!(e.payload,nip::Payload::InputProgress{applied_utf8_bytes}if applied_utf8_bytes>0)||matches!(e.payload,nip::Payload::InputConfirmed{..}))),
                 );
                 let cancel = nip::Envelope {
                     protocol: nip::PROTOCOL.into(),

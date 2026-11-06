@@ -294,7 +294,7 @@ async function verify() {
       focused: document.activeElement === editor, actual: draftText(), activeTag: document.activeElement?.tagName,
       section: useAppStore.getState().activeSection, width: editor?.getBoundingClientRect().width,
       height: editor?.getBoundingClientRect().height });
-    if(postInputBackpressure&&nativeP3==='zsh'){
+    if(nativeP3==='zsh'){
       const trace=createNativeFocusTrace({editor:()=>editor,context:()=>({monitoring,stage:userViewStage,
         section:useAppStore.getState().activeSection,activeSessionId:useTerminalStore.getState().activeSessionId,
         expectedSessionId:terminals[1]??null,focusEnabled:useFocusStore.getState().enabled,
@@ -306,7 +306,7 @@ async function verify() {
       disposers.push(await window_.onFocusChanged(({payload})=>trace.nativeFocus(payload)));
       trace.nativeFocus(await window_.isFocused());
     }
-    const checkView = (trigger:FocusCheckTrigger) => {
+    const checkView = (trigger:FocusCheckTrigger, stack?:string) => {
       if (monitoring && (document.activeElement !== editor || draftText() !== 'preserve native polling draft'
         || useAppStore.getState().activeSection !== (focusPolling ? 'terminal' : 'workbench')
         || focusPolling && (!useFocusStore.getState().enabled || useFocusStore.getState().targetSessionId !== terminals[1])
@@ -325,7 +325,7 @@ async function verify() {
         failure ??= `Native job lease changed user view: ${JSON.stringify(uiFailure)}`;
         focusTrace?.violate(trigger);
       }
-      focusTrace?.check(trigger);
+      focusTrace?.check(trigger, stack);
     };
     const armUserView = async () => {
       if (focusPolling || armingUserView || !firstResult || !firstRelease) return;
@@ -380,7 +380,9 @@ async function verify() {
         turnId: event.turnId, stepId: event.stepId, callId: event.data.callId }, nativeActive: true, gate: await gate.json(),
         job: value.job, rendered: actual.text, displayRows: actual.rows };
     };
-    disposers.push(useAppStore.subscribe(()=>checkView('store-app')), useTerminalStore.subscribe(()=>checkView('store-terminal')), useFocusStore.subscribe(()=>checkView('store-focus')));
+    disposers.push(useAppStore.subscribe((state, previous)=>checkView('store-app',
+      state.activeSection !== previous.activeSection ? new Error('Native App section transition').stack : undefined)),
+      useTerminalStore.subscribe(()=>checkView('store-terminal')), useFocusStore.subscribe(()=>checkView('store-focus')));
     const checkFocusIn=()=>checkView('focusin');
     document.addEventListener('focusin', checkFocusIn);
     disposers.push(() => document.removeEventListener('focusin', checkFocusIn));

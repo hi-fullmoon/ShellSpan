@@ -15,21 +15,35 @@ const archive=resolve(process.argv[2]??resolve(root,'.artifacts/tests/native-inp
 assert.equal(hash(archive),pin.archiveSha256);assert.equal(hash(patch),pin.patchSha256);
 const directory=resolve(root,'.artifacts/tests/native-input-p3/pinned-core',randomUUID());mkdirSync(directory,{recursive:true,mode:0o700});
 const source=resolve(directory,`zsh-${pin.version}`),prefix=resolve(directory,'install'),fd=openSync(resolve(directory,'build.log'),'wx');
-const configureArgs=[`--prefix=${prefix}`,'--disable-gdbm','--with-tcsetpgrp',specification.unicode9Default?'--enable-unicode9':'--disable-unicode9','CFLAGS=-O2 -std=gnu89'];
-const inputs={pinSha256:hash(pinPath),patchSha256:hash(patch),archiveSha256:hash(archive),sourceHashes:pin.sourceHashes,target,main,mainSha256,configureArgs,productionProfileEnabled:false};
+const boundHistory=target==='macos-arm64';
+const historyPatch=boundHistory?resolve(root,pin.history.patch):undefined;
+if(boundHistory){assert.equal(pin.history.api,'shellspan.zle-native-history');assert.equal(pin.history.version,1);assert.equal(hash(historyPatch),pin.history.patchSha256);}
+const configureArgs=boundHistory?['--prefix=/usr','--enable-fndir=/usr/share/zsh/5.9/functions',
+ '--enable-site-fndir=/usr/share/zsh/site-functions','--disable-gdbm','--with-tcsetpgrp','--enable-unicode9','CFLAGS=-O2 -std=gnu89']
+ :[`--prefix=${prefix}`,'--disable-gdbm','--with-tcsetpgrp',specification.unicode9Default?'--enable-unicode9':'--disable-unicode9','CFLAGS=-O2 -std=gnu89'];
+const sourceHashes=boundHistory?pin.history.sourceHashes:pin.sourceHashes;
+const inputs={pinSha256:hash(pinPath),patchSha256:hash(patch),archiveSha256:hash(archive),sourceHashes,target,main,mainSha256,configureArgs,boundHistory,
+ ...(boundHistory?{historyPatchSha256:pin.history.patchSha256}:{}),productionProfileEnabled:false};
 writeFileSync(resolve(directory,'inputs.json'),JSON.stringify(inputs,null,2),{flag:'wx'});
 const run=(command,args,cwd=root)=>execFileSync(command,args,{cwd,stdio:['ignore',fd,fd]});
 try{
  run('tar',['-xf',archive,'-C',directory]);run('patch',['-p1','-F','0','-t','-i',patch],source);
  for(const[name,digest]of Object.entries(pin.sourceHashes))assert.equal(hash(resolve(source,'Src/Zle',name)),digest);
+ if(boundHistory){run('patch',['-p1','-F','0','-t','-i',historyPatch],source);for(const[path,digest]of Object.entries(sourceHashes))assert.equal(hash(resolve(source,path)),digest);}
  if(!process.argv.includes('--source-only')){
-  run('./configure',configureArgs,source);run('make',['-j4'],source);run('make',['install.modules'],source);
-  const editor=resolve(prefix,`lib/zsh/${pin.version}/zsh/zle.so`);assert.equal(hash(main),mainSha256);
+  run('./configure',configureArgs,source);run('make',['-j4'],source);
+  if(boundHistory){run('make',[`DESTDIR=${prefix}`,'install.bin'],source);run('make',[`DESTDIR=${prefix}`,'install.modules'],source);}
+  else run('make',['install.modules'],source);
+  const editor=resolve(prefix,boundHistory?`usr/lib/zsh/${pin.version}/zsh/zle.so`:`lib/zsh/${pin.version}/zsh/zle.so`);
+  const shell=boundHistory?resolve(prefix,'usr/bin/zsh'):main;
+  assert.equal(hash(main),mainSha256);
+  if(boundHistory){assert.equal(hash(shell),specification.privateMainSha256);assert.equal(hash(editor),specification.privateCoreSha256);}
   copyFileSync(resolve(source,'LICENCE'),resolve(directory,'LICENCE.zsh'));
-  writeFileSync(resolve(directory,'producer.json'),JSON.stringify({...inputs,directory,source,prefix,editor,editorSha256:hash(editor),unicode9Default:specification.unicode9Default,shell:main,shellSha256:mainSha256,nativeSourceHashes:pin.sourceHashes,nativeAcceptance:false,productionChanges:false},null,2),{flag:'wx'});
+  writeFileSync(resolve(directory,'producer.json'),JSON.stringify({...inputs,directory,source,prefix,editor,editorSha256:hash(editor),unicode9Default:specification.unicode9Default,shell,shellSha256:hash(shell),nativeSourceHashes:sourceHashes,nativeAcceptance:false,productionChanges:false},null,2),{flag:'wx'});
  }
  assert.equal(hash(pinPath),inputs.pinSha256);assert.equal(hash(patch),inputs.patchSha256);
- for(const[name,digest]of Object.entries(pin.sourceHashes))assert.equal(hash(resolve(source,'Src/Zle',name)),digest);
+ for(const[name,digest]of Object.entries(sourceHashes))assert.equal(hash(resolve(source,boundHistory?name:`Src/Zle/${name}`)),digest);
+ if(boundHistory)assert.equal(hash(historyPatch),pin.history.patchSha256);
  writeFileSync(resolve(directory,'result.json'),JSON.stringify({ok:true,directory,sourceOnly:process.argv.includes('--source-only'),inputs},null,2),{flag:'wx'});
  console.log(JSON.stringify({directory,sourceOnly:process.argv.includes('--source-only'),ok:true}));
 }finally{closeSync(fd);}

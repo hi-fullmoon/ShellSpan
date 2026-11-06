@@ -4,6 +4,18 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
+pub(crate) fn mac_zle_pin(field: &str) -> Result<String, String> {
+    let pin: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../scripts/dependency-builds/zsh/pin.json"
+    ))
+    .map_err(|_| "TERMINAL_NATIVE_SCOPED_CORE_MISMATCH")?;
+    pin["targets"]["macos-arm64"][field]
+        .as_str()
+        .filter(|value| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .map(str::to_owned)
+        .ok_or_else(|| "TERMINAL_NATIVE_SCOPED_CORE_MISMATCH".into())
+}
+
 /// Constructed by a trusted local loader from its pinned build manifest, never
 /// from frontend JSON or from a peer's self-reported shell name/version.
 #[derive(Debug, Clone)]
@@ -147,6 +159,8 @@ impl VerifiedNativeProfile {
         if !supported
             || profile.adapter_version != "1"
             || expected_shell_sha != actual_shell_sha
+            || id == "zsh-5.9-zle-5.9-macos-arm64-native"
+                && expected_shell_sha != mac_zle_pin("privateMainSha256")?
             || file_sha(module)? != expected_module_sha
         {
             return Err("TERMINAL_NATIVE_PROFILE_ARTIFACT_MISMATCH".into());
@@ -164,11 +178,9 @@ impl VerifiedNativeProfile {
     /// from the peer's claims, frontend state or an OSC display packet.
     pub(crate) fn bind_scoped_zle_core(mut self, core: &Path) -> Result<Self, String> {
         let expected = match self.profile_id.as_str() {
-            "zsh-5.9-zle-5.9-macos-arm64-native" => {
-                "cc7f4263d1650d51ca82aead721c11409938f4808f967d4bf3c6709036533b84"
-            }
+            "zsh-5.9-zle-5.9-macos-arm64-native" => mac_zle_pin("privateCoreSha256")?,
             "zsh-5.9-zle-5.9-linux-aarch64-glibc-2.36-native" => {
-                "c9e451bd49ad6481872af4a0b069719abc5083e7c2a03c8973b2d5e718186404"
+                "c9e451bd49ad6481872af4a0b069719abc5083e7c2a03c8973b2d5e718186404".into()
             }
             _ => return Err("TERMINAL_NATIVE_SCOPED_CORE_MISMATCH".into()),
         };
@@ -182,7 +194,7 @@ impl VerifiedNativeProfile {
         {
             return Err("TERMINAL_NATIVE_SCOPED_CORE_MISMATCH".into());
         }
-        self.scoped_editor_sha = Some(expected.into());
+        self.scoped_editor_sha = Some(expected);
         Ok(self)
     }
     pub(crate) fn display_binding(&self) -> nip::DisplayBinding {

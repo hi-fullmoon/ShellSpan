@@ -11,6 +11,8 @@ use std::{collections::HashMap, fs, path::Path};
 pub(crate) struct EditorArtifact {
     pub profile: nip::PeerProfile,
     pub shell_sha256: String,
+    #[serde(default)]
+    pub shell: Option<String>,
     pub module_sha256: String,
     pub module: String,
     #[serde(default)]
@@ -298,8 +300,39 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<EditorArti
                     return Err("TERMINAL_NATIVE_STALE_ARTIFACTS".into());
                 }
             }
+            if target == "macos-arm64"
+                && (artifact.shell.as_deref() != Some(format!("{id}/zsh").as_str())
+                    || artifact.shell_sha256
+                        != super::registration::mac_zle_pin("privateMainSha256")?
+                    || catalogue
+                        .sources
+                        .get("scripts/dependency-builds/zsh/native-history.patch")
+                        != Some(&nip::sha(include_str!(
+                            "../../../scripts/dependency-builds/zsh/native-history.patch"
+                        ))))
+            {
+                return Err("TERMINAL_NATIVE_MANIFEST_INVALID".into());
+            }
         } else if artifact.core_license.is_some() || artifact.core_license_sha256.is_some() {
             return Err("TERMINAL_NATIVE_MANIFEST_INVALID".into());
+        }
+        if let Some(shell) = &artifact.shell {
+            if target != "macos-arm64"
+                || artifact.core.is_none()
+                || artifact.profile.shell != nip::ShellFamily::Zsh
+                || shell != &format!("{id}/zsh")
+            {
+                return Err("TERMINAL_NATIVE_MANIFEST_INVALID".into());
+            }
+            let path = root.join(shell);
+            if fs::symlink_metadata(&path)
+                .map_err(|_| "TERMINAL_NATIVE_ARTIFACTS_UNAVAILABLE")?
+                .file_type()
+                .is_symlink()
+                || file_sha(&path)? != artifact.shell_sha256
+            {
+                return Err("TERMINAL_NATIVE_PROFILE_ARTIFACT_MISMATCH".into());
+            }
         }
         let extension = if target == "windows-x64" {
             "shellspan_native_input_editors.dll"
@@ -341,6 +374,17 @@ pub(crate) fn verify(
         module,
         &artifact.module_sha256,
     )
+}
+#[cfg(all(test, target_os = "macos", target_arch = "aarch64"))]
+pub(crate) fn local_zle_shell(root: &Path) -> Result<std::path::PathBuf, String> {
+    let artifact = read_catalogue(root, "macos-arm64")?
+        .into_iter()
+        .find(|artifact| artifact.profile.shell == nip::ShellFamily::Zsh)
+        .ok_or("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
+    artifact
+        .shell
+        .map(|path| root.join(path))
+        .ok_or_else(|| "TERMINAL_NATIVE_PROFILE_UNSUPPORTED".into())
 }
 pub(crate) fn zle_bootstrap(
     module: &Path,

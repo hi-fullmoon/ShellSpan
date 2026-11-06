@@ -6,11 +6,12 @@ import {mkdir,readFile,readdir,writeFile,copyFile,chmod,open} from 'node:fs/prom
 import {resolve} from 'node:path';
 import {captureValidationSources} from '../native-input-p2/frozen-validation.mjs';
 import {auditEditorResources} from './editor-resources.mjs';
+import {evaluateZleCapture} from './zle-capture-evidence.mjs';
 assert.equal(process.platform,'darwin');
 const root=resolve(import.meta.dirname,'../..');const directory=resolve(root,'.artifacts/tests/native-input-p3/geometry-capture',randomUUID());await mkdir(directory,{recursive:true});
 assert.equal(JSON.parse(await readFile(resolve(root,'.artifacts/tests/native-input-p3/snapshot-index.json'),'utf8')).root,root,'Use a complete isolated source snapshot');
 const eof=process.argv[2]==='eof',guards=process.argv[2]==='guards';assert(process.argv.length===2||eof||guards);
-const expectedCases=guards?5:eof?14:1;
+const mode=guards?'guards':eof?'eof':'geometry';
 const resourcesBefore=auditEditorResources(root,'macos-arm64');assert(resourcesBefore.selectedValid);
 const sources=captureValidationSources(root);const target=process.env.CARGO_TARGET_DIR;assert(target,'Explicit owned component build cache required');
 const build=spawn('cargo',['test','--locked','--manifest-path','src-tauri/Cargo.toml','--lib','--no-run','--message-format=json-render-diagnostics'],{cwd:root,stdio:['ignore','pipe','pipe']});
@@ -23,23 +24,25 @@ for await(const line of createInterface({input:build.stdout})){
 }
 const buildCode=await built;await writeFile(resolve(directory,'build.log'),Buffer.concat(diagnostics));assert.equal(buildCode,0);assert(executable);
 const hash=async path=>createHash('sha256').update(await readFile(path)).digest('hex');
-const shellSha256=await hash('/bin/zsh');
+const catalogue=JSON.parse(await readFile(resolve(root,'.artifacts/tests/native-input-p2/resources/native-input/editors-macos-arm64.json'),'utf8'));
+const shell=resolve(root,'.artifacts/tests/native-input-p2/resources/native-input',catalogue.profiles[0].shell);
+const shellSha256=await hash(shell);assert.equal(shellSha256,catalogue.profiles[0].shellSha256);
 const binary=resolve(directory,'native-zle-tests');const digest=await hash(executable);await copyFile(executable,binary);await chmod(binary,0o700);assert.equal(await hash(binary),digest);
 const actual=resolve(root,guards?'.artifacts/tests/native-input-p3/zle-guards':eof?'.artifacts/tests/native-input-p3/zle-eof':'.artifacts/tests/native-input-p3/production-zle');await mkdir(actual,{recursive:true});
 const results=[];
 for(const entry of(guards?[{columns:100,stage:'guards'}]:eof?[{columns:100,stage:'eof'}]:[...[32,40,100,180].map(columns=>({columns,stage:'running'})),{columns:100,stage:'handoff'}])){
   const before=new Set(await readdir(actual));const log=await open(resolve(directory,`${entry.columns}-${entry.stage}.log`),'wx');
   const child=spawn(binary,[guards?'terminal_command::zle_tests::native_zle_private_namespace_guards_preserve_user_definitions':eof?'terminal_command::zle_tests::native_zle_private_eof_preserves_ordinary_input_and_user_hooks':'terminal_command::zle_tests::native_zle_production_startup_parent_parser_and_jobs','--ignored','--exact'],{cwd:root,stdio:['ignore',log.fd,log.fd],
-    env:{...process.env,SHELLSPAN_P3_TEST_COLUMNS:String(entry.columns),SHELLSPAN_P3_INTERRUPT_STAGE:entry.stage}});
+    env:{...process.env,SHELLSPAN_P3_TEST_ZSH:shell,SHELLSPAN_P3_TEST_COLUMNS:String(entry.columns),SHELLSPAN_P3_INTERRUPT_STAGE:entry.stage}});
   const exitCode=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve);});await log.close();
-  const created=(await readdir(actual)).filter(name=>!before.has(name));assert(created.length>0&&created.length<=expectedCases);
+  const created=(await readdir(actual)).filter(name=>!before.has(name));
   const observations=[];for(const name of created){const evidence=resolve(actual,name);observations.push({evidence,...JSON.parse(await readFile(resolve(evidence,'result.json'),'utf8'))});}
-  const evidence=actual;const observed={ok:observations.every(value=>value.ok)&&observations.length===expectedCases,observations};
+  const evidence=actual;const observed=evaluateZleCapture(mode,observations);
   assert.equal(await hash(binary),digest,'Actual component test executable changed during execution');
   results.push({...entry,exitCode,evidence,observed});
 }
 assert.deepEqual(captureValidationSources(root),sources,'Complete component source set changed');
-assert.deepEqual(auditEditorResources(root,'macos-arm64'),resourcesBefore);assert.equal(await hash('/bin/zsh'),shellSha256);
+assert.deepEqual(auditEditorResources(root,'macos-arm64'),resourcesBefore);assert.equal(await hash(shell),shellSha256);
 await writeFile(resolve(directory,'result.json'),JSON.stringify({binarySha256:digest,shellSha256,sourceCount:Object.keys(sources).length,resources:resourcesBefore,results},null,2));
 console.log(JSON.stringify({directory,results:results.map(({columns,stage,exitCode,evidence})=>({columns,stage,exitCode,evidence}))}));
 assert(results.every(value=>value.exitCode===0&&value.observed.ok),'An actual component round failed; each original result is retained');

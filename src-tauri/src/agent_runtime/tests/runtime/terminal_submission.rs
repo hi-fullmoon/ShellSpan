@@ -28,7 +28,7 @@ fn recorded_result(
 #[tokio::test]
 async fn rejected_background_launch_does_not_restrict_later_execution_or_reopen_as_unknown() {
     for shell in [TerminalShellKind::Bash, TerminalShellKind::Zsh] {
-        let scenario = Scenario::new(shell);
+        let scenario = Scenario::with_native_input(shell, true);
         let session = "launch-rejection";
         let entry = scenario.root(
             session,
@@ -176,7 +176,7 @@ async fn background_launch_deadline_before_accept_line_reports_not_started() {
 #[tokio::test]
 async fn losing_completion_after_real_execution_remains_unknown_and_blocks_writes() {
     for shell in [TerminalShellKind::Bash, TerminalShellKind::Zsh] {
-        let scenario = Scenario::new(shell);
+        let scenario = Scenario::with_native_input(shell, true);
         let session = "executed-without-completion";
         let entry = scenario.root(
             session,

@@ -1,0 +1,383 @@
+--- a/Src/zsh.h
++++ b/Src/zsh.h
+@@ -3257,7 +3257,8 @@
+     ZLE_CMD_REFRESH,
+     ZLE_CMD_SET_KEYMAP,
+     ZLE_CMD_GET_KEY,
+-    ZLE_CMD_SET_HIST_LINE
++    ZLE_CMD_SET_HIST_LINE,
++    ZLE_CMD_NATIVE_HISTORY
+ };
+ 
+ /***************************************/
+--- a/Src/input.c
++++ b/Src/input.c
+@@ -423,6 +423,11 @@
+ 	    flags |= ZLRF_IGNOREEOF;
+ 	ingetcline = zleentry(ZLE_CMD_READ, ingetcpmptl, ingetcpmptr,
+ 			      flags, context);
++	if (ingetcline) {
++	    char *source = zleentry(ZLE_CMD_NATIVE_HISTORY, ingetcline);
++	    if (source)
++		hist_native_bind(ztrdup(ingetcline), source);
++	}
+ 	histdone |= HISTFLAG_SETTY;
+     }
+     if (!ingetcline) {
+--- a/Src/hist.c
++++ b/Src/hist.c
+@@ -235,6 +235,101 @@
+ static int histsave_stack_pos = 0;
+ 
+ static zlong histfile_linect;
++
++/* Experimental private-main API. Source is selected before stock filters,
++ * never inserted into, removed from, or rewritten in saved history. */
++static char *native_history_source, *native_history_plan;
++static struct native_history_context {
++    const struct hist_stack *owner;
++    char *source, *plan;
++    struct native_history_context *previous;
++} *native_history_contexts;
++
++/**/
++mod_export int
++zsh_native_history_api(void)
++{
++    return 1;
++}
++
++/* Called only by the validated provider's child-side atfork callback. This
++ * changes no shell option and leaves explicit user fc writes available. */
++/**/
++mod_export void
++zsh_native_history_child(pid_t parent)
++{
++    if (parent > 1 && getpid() != parent)
++        nohistsave = 1;
++}
++
++/**/
++static void
++native_history_clear(void)
++{
++    if (native_history_source) zsfree(native_history_source);
++    if (native_history_plan) zsfree(native_history_plan);
++    native_history_source = native_history_plan = NULL;
++}
++
++/**/
++mod_export void
++hist_native_bind(char *plan, char *source)
++{
++    if (native_history_source || native_history_plan || !histactive ||
++        (histactive & HA_NOINC)) {
++        zsfree(plan);
++        zsfree(source);
++        zerr("invalid native history handoff context");
++        return;
++    }
++    native_history_source = source;
++    native_history_plan = plan;
++    /* Approved source was parsed non-interactively before acceptance. Do not
++     * introduce interactive bang expansion while consuming its fixed plan. */
++    if (!stophist) stophist = 1;
++}
++
++/**/
++static int
++native_history_apply(Eprog *history_prog)
++{
++    char *source = native_history_source, *plan = native_history_plan;
++    char *replacement;
++    short *words = NULL;
++    int wordlen = 0, wordpos = 0, length;
++    native_history_source = native_history_plan = NULL;
++    if (!source) return 1;
++    if (!plan || !chline || strcmp(chline, plan)) {
++        zsfree(source);
++        if (plan) zsfree(plan);
++        zerr("native history plan changed before parser handoff");
++        return 0;
++    }
++    zsfree(plan);
++    histsplitwords(source, &words, &wordlen, &wordpos, 1);
++    if (!errflag && (isset(HISTNOFUNCTIONS) || isset(HISTNOSTORE))) {
++        *history_prog = parse_string(source, 1);
++        if (!*history_prog) errflag |= ERRFLAG_ERROR;
++    }
++    if (errflag) {
++        if (words) zfree(words, wordlen * sizeof(short));
++        zsfree(source);
++        return 0;
++    }
++    length = strlen(source) + 1;
++    replacement = zalloc(length);
++    memcpy(replacement, source, length);
++    zsfree(source);
++    zfree(chline, hlinesz);
++    zfree(chwords, chwordlen * sizeof(short));
++    chline = replacement;
++    hlinesz = length;
++    hptr = chline + length - 1;
++    chwords = words;
++    chwordlen = wordlen;
++    chwordpos = wordpos;
++    return 1;
++}
+ 
+ /* save history context */
+ 
+@@ -242,6 +337,15 @@
+ void
+ hist_context_save(struct hist_stack *hs, int toplevel)
+ {
++    if (native_history_source || native_history_plan) {
++        struct native_history_context *saved = zalloc(sizeof(*saved));
++        saved->owner = hs;
++        saved->source = native_history_source;
++        saved->plan = native_history_plan;
++        saved->previous = native_history_contexts;
++        native_history_contexts = saved;
++        native_history_source = native_history_plan = NULL;
++    }
+     if (toplevel) {
+ 	/* top level, make this version visible to ZLE */
+ 	zle_chline = chline;
+@@ -290,6 +394,14 @@
+ void
+ hist_context_restore(const struct hist_stack *hs, int toplevel)
+ {
++    native_history_clear();
++    if (native_history_contexts && native_history_contexts->owner == hs) {
++        struct native_history_context *saved = native_history_contexts;
++        native_history_contexts = saved->previous;
++        native_history_source = saved->source;
++        native_history_plan = saved->plan;
++        zfree(saved, sizeof(*saved));
++    }
+     if (toplevel) {
+ 	/* Back to top level: don't need special ZLE value */
+ 	DPUTS(hs->hline != zle_chline, "BUG: Ouch, wrong chline for ZLE");
+@@ -1104,6 +1216,7 @@
+ {
+     char *hf;
+ 
++    native_history_clear();
+     isfirstln = isfirstch = 1;
+     errflag &= ~ERRFLAG_ERROR;
+     histdone = 0;
+@@ -1461,6 +1574,7 @@
+ mod_export int
+ hend(Eprog prog)
+ {
++    Eprog history_prog = prog;
+     int flag, hookret, stack_pos = histsave_stack_pos;
+     /*
+      * save:
+@@ -1499,6 +1613,14 @@
+ 	 */
+ 	DPUTS(hptr < chline, "History end pointer off start of line");
+ 	*hptr = '\0';
++    }
++    if (!native_history_apply(&history_prog)) {
++        save = 0;
++        histdone |= HISTFLAG_NOEXEC;
++        lastval = 1;
++        if (chline) *chline = '\0';
++        hptr = chline;
++        chwordpos = 0;
+     }
+     if (*chline) {
+ 	LinkList hookargs = newlinklist();
+@@ -1531,7 +1653,7 @@
+ 	}
+ 	if (chwordpos <= 2 && !hist_keep_comment)
+ 	    save = 0;
+-	else if (should_ignore_line(prog))
++	else if (should_ignore_line(history_prog))
+ 	    save = -1;
+ 	else if (hookret == 2)
+ 	    save = -2;
+--- a/Src/Zle/zle_main.c
++++ b/Src/Zle/zle_main.c
+@@ -29,6 +29,7 @@
+ 
+ #include "zle.mdh"
+ #include "zle_main.pro"
++#include <dlfcn.h>
+ 
+ #ifdef HAVE_POLL_H
+ # include <poll.h>
+@@ -1208,8 +1209,66 @@
+  * - init: "zle-line-init"
+  * - finish: "zle-line-finish"
+  */
++
++/**/
++static char *native_handoff_source, *native_handoff_plan;
++static void (*native_history_child)(pid_t);
++
++/**/
++mod_export int
++zle_native_history_api(void)
++{
++    int (*version)(void);
++    version = (int (*)(void))dlsym(RTLD_DEFAULT, "zsh_native_history_api");
++    native_history_child = (void (*)(pid_t))dlsym(RTLD_DEFAULT, "zsh_native_history_child");
++    return version && native_history_child ? version() : 0;
++}
+ 
+ /**/
++mod_export void
++zle_native_history_child(pid_t parent)
++{
++    if (native_history_child)
++        native_history_child(parent);
++}
++
++/**/
++static void
++native_handoff_clear(void)
++{
++    if (native_handoff_source) zsfree(native_handoff_source);
++    if (native_handoff_plan) zsfree(native_handoff_plan);
++    native_handoff_source = native_handoff_plan = NULL;
++}
++
++/* Metadata binding only. The caller still owns all NIP proof, durable intent
++ * and accept authorization; this API cannot accept or execute a line. */
++/**/
++mod_export int
++zle_native_bind_handoff(const char *source, const char *plan)
++{
++    char *actual;
++    if (!zleactive || !done || zlecontext != ZLCON_LINE_START ||
++        zle_native_append_mode != 1 || native_handoff_source ||
++        zle_native_history_api() != 1 ||
++        !source || !*source || !plan || !*plan ||
++        strlen(source) > 16384 || strlen(plan) > 65536) {
++        zerr("invalid native source/plan binding");
++        return 1;
++    }
++    actual = zlegetline(NULL, NULL);
++    if (strcmp(actual, source)) {
++        zsfree(actual);
++        zerr("native source changed before plan binding");
++        return 1;
++    }
++    zsfree(actual);
++    native_handoff_source = ztrdup(source);
++    native_handoff_plan = ztrdup(plan);
++    return 0;
++}
++
++/**/
+ char *
+ zleread(char **lp, char **rp, int flags, int context, char *init, char *finish)
+ {
+@@ -1217,6 +1276,7 @@
+     int old_errno = errno;
+     int tmout = getiparam("TMOUT");
+ 
++    if (!zleactive) native_handoff_clear();
+ #if defined(HAVE_POLL) || defined(HAVE_SELECT)
+     /* may not be set, but that's OK since getiparam() returns 0 == off */
+     baud = getiparam("BAUD");
+@@ -1372,6 +1432,12 @@
+ 	    zle_owned_append_finish();
+ 	zlecallhook(finish, NULL);
+     }
++    if (native_handoff_plan && !errflag) {
++        char *actual = zlegetline(NULL, NULL);
++        if (strcmp(actual, native_handoff_plan))
++            zerr("native plan changed after binding");
++        zsfree(actual);
++    }
+ 
+     statusline = NULL;
+     invalidatelist();
+@@ -1384,6 +1450,7 @@
+ 
+     freeundo();
+     if (eofsent || errflag || exit_pending) {
++	native_handoff_clear();
+ 	s = NULL;
+     } else {
+ 	zleline[zlell++] = ZWC('\n');
+@@ -2184,6 +2251,22 @@
+ 	chrp = va_arg(ap, int *);
+ 	*chrp = getbyte(do_keytmout, timeout, 0);
+ 	break;
++    }
++
++    case ZLE_CMD_NATIVE_HISTORY:
++    {
++        char *actual = va_arg(ap, char *);
++        char *source = NULL;
++        if (native_handoff_source && native_handoff_plan) {
++            size_t size = strlen(native_handoff_plan);
++            if (strlen(actual) == size + 1 && actual[size] == '\n' &&
++                !memcmp(actual, native_handoff_plan, size))
++                source = tricat(native_handoff_source, "\n", "");
++            else
++                zerr("native parser line changed after ZLE");
++        }
++        native_handoff_clear();
++        return source;
+     }
+ 
+     case ZLE_CMD_SET_HIST_LINE:
+--- a/Src/Zle/zle_params.c
++++ b/Src/Zle/zle_params.c
+@@ -78,6 +78,10 @@
+ { get_widgetstyle, nullstrsetfn, zleunsetfn };
+ static const struct gsu_scalar zle_state_gsu =
+ { get_zle_state, nullstrsetfn, zleunsetfn };
++static const struct gsu_scalar native_handoff_gsu =
++{ get_native_handoff, set_native_handoff, zleunsetfn };
++static const struct gsu_integer native_history_api_gsu =
++{ get_native_history_api, NULL, zleunsetfn };
+ 
+ static const struct gsu_integer bufferlines_gsu =
+ { get_bufferlines, NULL, zleunsetfn };
+@@ -185,6 +189,8 @@
+     { "SUFFIX_END", PM_INTEGER, GSU(suffixend_gsu), NULL },
+     { "SUFFIX_ACTIVE", PM_INTEGER | PM_READONLY, GSU(suffixactive_gsu), NULL },
+     { "ZLE_NATIVE_APPEND", PM_INTEGER, GSU(native_append_gsu), NULL },
++    { "ZLE_NATIVE_HANDOFF", PM_SCALAR, GSU(native_handoff_gsu), NULL },
++    { "ZLE_NATIVE_HISTORY_API", PM_INTEGER | PM_READONLY, GSU(native_history_api_gsu), NULL },
+     { "ZLE_RECURSIVE", PM_INTEGER | PM_READONLY, GSU(recursive_gsu), NULL },
+     { "ZLE_STATE", PM_SCALAR | PM_READONLY, GSU(zle_state_gsu), NULL },
+     { NULL, 0, NULL, NULL }
+@@ -530,6 +536,30 @@
+ get_native_append(UNUSED(Param pm))
+ {
+     return zle_native_append_mode;
++}
++
++/**/
++static char *
++get_native_handoff(UNUSED(Param pm))
++{
++    return ztrdup("");
++}
++
++/**/
++static void
++set_native_handoff(UNUSED(Param pm), char *value)
++{
++    char *source = zlegetline(NULL, NULL);
++    (void)zle_native_bind_handoff(source, value);
++    zsfree(source);
++    if (value) zsfree(value);
++}
++
++/**/
++static zlong
++get_native_history_api(UNUSED(Param pm))
++{
++    return zle_native_history_api();
+ }
+ 
+ /**/

@@ -59,6 +59,7 @@ interface TraceData {
   lease?: FocusLeaseFact;
   runtime?: FocusRuntimeFact;
   trigger?: FocusCheckTrigger;
+  stack?: string;
 }
 
 export function createNativeFocusTrace(options: Options) {
@@ -188,7 +189,7 @@ export function createNativeFocusTrace(options: Options) {
     for (const type of ['focus', 'blur', 'resize']) window.removeEventListener(type, win);
   }
   return {
-    check(trigger: FocusCheckTrigger) { record('check', { trigger, runtime, lease }); },
+    check(trigger: FocusCheckTrigger, stack?: string) { record('check', { trigger, runtime, lease, ...(stack ? { stack: stack.slice(0, 4096) } : {}) }); },
     violate(trigger: FocusCheckTrigger) {
       if (stopped || firstViolation) return;
       firstViolation = { entry: entries.length, clientMs: performance.now(), clientUnixMs: Date.now(), trigger, snapshot: capture() };

@@ -68,7 +68,9 @@ if(process.platform==='darwin'&&!values['controller-only']){
   const catalogue=JSON.parse(readFileSync(resolve(root,'.artifacts/tests/native-input-p2/resources/native-input/editors-macos-arm64.json'),'utf8'));
   const coreRelative=catalogue.profiles[0].core;assert(coreRelative);
   const core=resolve(root,'.artifacts/tests/native-input-p2/resources/native-input',coreRelative),sha=path=>createHash('sha256').update(readFileSync(path)).digest('hex');
-  assert.equal(sha(core),catalogue.profiles[0].editorSha256);Object.assign(targetBindings,{core,coreSha256:sha(core),mainSha256:sha('/bin/zsh')});
+  const main=catalogue.profiles[0].shell?resolve(root,'.artifacts/tests/native-input-p2/resources/native-input',catalogue.profiles[0].shell):'/bin/zsh';
+  assert.equal(sha(core),catalogue.profiles[0].editorSha256);assert.equal(sha(main),catalogue.profiles[0].shellSha256);
+  Object.assign(targetBindings,{core,coreSha256:sha(core),main,mainSha256:sha(main)});
 }
 writeFileSync(resolve(meta,'candidate-base-sources.json'),JSON.stringify(sources,null,2));
 writeFileSync(resolve(meta,'candidate-stage.json'),JSON.stringify({root,directory,owner,head,sealed:true,contextKind:values['controller-only']?'controller-only':'artifact-source',overrides:[],explicitOverrides:[],sourceCount:Object.keys(sources).length,...targetBindings,windowsEditorsRebuilt:Boolean(values['rebuild-windows-editors']),nativeAcceptance:false,productionBindingChanged:false,completeOwnerSnapshot:true},null,2));

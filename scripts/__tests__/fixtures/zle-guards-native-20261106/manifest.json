@@ -1,0 +1,99 @@
+{
+  "capturedAt": "2026-11-06T04:18:33.532Z",
+  "source": "Actual macOS ZLE guard execution; metadata copied byte-for-byte, no manufactured receipts",
+  "root": "/Users/zhengbiwen/Developer/my/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/d5aed42d-df9f-48a1-bbad-c56941112e97/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/b4797b7a-38b2-4f7b-a499-2282b2ca44a4/ShellSpan",
+  "selectedTest": "terminal_command::zle_tests::native_zle_private_namespace_guards_preserve_user_definitions",
+  "sourceSha256": "e17a4b99922496dab51e21e81481a68dac7bb7b96f03ef13ea89a19c2d806b77",
+  "originalRunLog": "/Users/zhengbiwen/Developer/my/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/d5aed42d-df9f-48a1-bbad-c56941112e97/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/b4797b7a-38b2-4f7b-a499-2282b2ca44a4/ShellSpan/.artifacts/tests/native-input-p3/geometry-capture/c6df6096-b589-48d2-8fd9-1262bb3a17fc/100-guards.log",
+  "records": [
+    {
+      "kind": "alias",
+      "file": "alias.json",
+      "sha256": "6938456f52feab5698c247abd40a88346633c494d8db630b2dce4d8adeb8d952",
+      "rawSha256": "d26dfd2241825efcf29adfdb67775b1bc815a6794173e26388414667a5ddad8a",
+      "controlSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "originalEvidence": "/Users/zhengbiwen/Developer/my/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/d5aed42d-df9f-48a1-bbad-c56941112e97/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/b4797b7a-38b2-4f7b-a499-2282b2ca44a4/ShellSpan/.artifacts/tests/native-input-p3/zle-guards/alias-ce7a2e42-47e9-4ff9-bc28-bd81b75f7d9f"
+    },
+    {
+      "kind": "chord",
+      "file": "chord.json",
+      "sha256": "0ddf2db202ba1322b0c2a3d7ad5701fa7cd79bebcdafd9311f2c18fdbeb58b2e",
+      "rawSha256": "0e8301a0567568c3b8b00c38469cb5fd6588dfb15750290f45df2f800e75e370",
+      "controlSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "originalEvidence": "/Users/zhengbiwen/Developer/my/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/d5aed42d-df9f-48a1-bbad-c56941112e97/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/b4797b7a-38b2-4f7b-a499-2282b2ca44a4/ShellSpan/.artifacts/tests/native-input-p3/zle-guards/chord-d344840f-7a14-4710-a572-389231daa0f0"
+    },
+    {
+      "kind": "early-core",
+      "file": "early-core.json",
+      "sha256": "7b6a0d6939a5c6b2481e6a1d3c531a0fa1c3a802984fb4a19465a6ef1387b7db",
+      "rawSha256": "de293998f8f623e8e5697432f635c6f38ba7dae0bbbefa52d62cbd2ef520866c",
+      "controlSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "originalEvidence": "/Users/zhengbiwen/Developer/my/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/d5aed42d-df9f-48a1-bbad-c56941112e97/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/b4797b7a-38b2-4f7b-a499-2282b2ca44a4/ShellSpan/.artifacts/tests/native-input-p3/zle-guards/early-core-26889cdb-5622-4ed4-813a-ee9f0ba26257"
+    },
+    {
+      "kind": "function",
+      "file": "function.json",
+      "sha256": "c1a892a41d1be4f234680e1ab754e649af8caf230d0096740f22e6675773443f",
+      "rawSha256": "8ccdab48903ba5061cf730fb8ade508c51e2db19c15eb8a31f4d5bd355a77cbc",
+      "controlSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "originalEvidence": "/Users/zhengbiwen/Developer/my/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/d5aed42d-df9f-48a1-bbad-c56941112e97/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/b4797b7a-38b2-4f7b-a499-2282b2ca44a4/ShellSpan/.artifacts/tests/native-input-p3/zle-guards/function-4b9e00cb-3372-45ff-8cdd-81c8bd7f9ecd"
+    },
+    {
+      "kind": "global-alias",
+      "file": "global-alias.json",
+      "sha256": "69cc8b96f3db3def582d93b94919fbce2ffd0206da3fa22d56cc87f8a4b1571c",
+      "rawSha256": "c9284707e221d9d85f457e5d3ebdf60a7c9b026f6370f1e0559aeb61662c8d9f",
+      "controlSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "originalEvidence": "/Users/zhengbiwen/Developer/my/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/d5aed42d-df9f-48a1-bbad-c56941112e97/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/b4797b7a-38b2-4f7b-a499-2282b2ca44a4/ShellSpan/.artifacts/tests/native-input-p3/zle-guards/global-alias-7983a6d1-d7f3-4b03-84d9-a34446eb464e"
+    },
+    {
+      "kind": "metadata-cols",
+      "file": "metadata-cols.json",
+      "sha256": "e59c721d9b101021660cfdfd358d5891508f833988f1d530cda1a3a87d187ba6",
+      "rawSha256": "776cec7ef4e2685d3688a47f498963048cbbd8c2bc7f2bbd38eab73f10a18ebc",
+      "controlSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "originalEvidence": "/Users/zhengbiwen/Developer/my/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/d5aed42d-df9f-48a1-bbad-c56941112e97/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/b4797b7a-38b2-4f7b-a499-2282b2ca44a4/ShellSpan/.artifacts/tests/native-input-p3/zle-guards/metadata-cols-070f4b07-7571-4ed0-9c89-c3dc909b3fef"
+    },
+    {
+      "kind": "metadata-lines",
+      "file": "metadata-lines.json",
+      "sha256": "555276615f9d9459cd54a7900841f5dca24a9357ece4380e8057fe8d3d44f03e",
+      "rawSha256": "602bbdc3784d0af81b05d04495a86f68f1970aff5a2f2fe6310d04286ee018a8",
+      "controlSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "originalEvidence": "/Users/zhengbiwen/Developer/my/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/d5aed42d-df9f-48a1-bbad-c56941112e97/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/b4797b7a-38b2-4f7b-a499-2282b2ca44a4/ShellSpan/.artifacts/tests/native-input-p3/zle-guards/metadata-lines-844d6eb6-8fc3-4b5b-81fa-1deacfa158ad"
+    },
+    {
+      "kind": "metadata-rows",
+      "file": "metadata-rows.json",
+      "sha256": "20a00127b5ef236a8aff69cc33a9974dd6dd0d7dd862f7b8b6e3f6edf82f017d",
+      "rawSha256": "ca420a44292df8c822b44ea8a3497c5a499403b99b40aff7d78a79c005d1cbdf",
+      "controlSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "originalEvidence": "/Users/zhengbiwen/Developer/my/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/d5aed42d-df9f-48a1-bbad-c56941112e97/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/b4797b7a-38b2-4f7b-a499-2282b2ca44a4/ShellSpan/.artifacts/tests/native-input-p3/zle-guards/metadata-rows-fb6dbf1c-a4e5-42e1-acb3-1cdd1a0055ff"
+    },
+    {
+      "kind": "scope-applied",
+      "file": "scope-applied.json",
+      "sha256": "f46e2b9bfd2ebdfd0f1df82d9b82565e21b60524027be8450c0b28f8d3b0d2ee",
+      "rawSha256": "87d9a730c621621faa4a3c65525ff959b0827ebe861499049394ee2cb3d4feb5",
+      "controlSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "originalEvidence": "/Users/zhengbiwen/Developer/my/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/d5aed42d-df9f-48a1-bbad-c56941112e97/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/b4797b7a-38b2-4f7b-a499-2282b2ca44a4/ShellSpan/.artifacts/tests/native-input-p3/zle-guards/scope-applied-10350cb1-0356-4b22-9883-6c4d801004b9"
+    },
+    {
+      "kind": "scope-previous",
+      "file": "scope-previous.json",
+      "sha256": "0dcab2b153661d824c3d4df1a6110d6165cce007d1d6e8c3b56f86d2e7248181",
+      "rawSha256": "383128e1b199bde6f4eb91aa39fceb675fc64410297f991a3f43abd43e1b223f",
+      "controlSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "originalEvidence": "/Users/zhengbiwen/Developer/my/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/d5aed42d-df9f-48a1-bbad-c56941112e97/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/b4797b7a-38b2-4f7b-a499-2282b2ca44a4/ShellSpan/.artifacts/tests/native-input-p3/zle-guards/scope-previous-193fc4e7-c19a-4987-9ddb-5bb74541092c"
+    },
+    {
+      "kind": "widget",
+      "file": "widget.json",
+      "sha256": "732fe43358d6745d8539afa6bb0a3b76a29671e8daff9d555757027bd646c3d5",
+      "rawSha256": "5140572cd8592ff073d11fba058394caaf2b84db881f6b7f5ec01ea1d447078a",
+      "controlSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "originalEvidence": "/Users/zhengbiwen/Developer/my/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/d5aed42d-df9f-48a1-bbad-c56941112e97/ShellSpan/.artifacts/tests/native-input-p3/acceptance-source/b4797b7a-38b2-4f7b-a499-2282b2ca44a4/ShellSpan/.artifacts/tests/native-input-p3/zle-guards/widget-c6af1f73-0b27-4088-bf29-39a134970fd1"
+    }
+  ],
+  "scope": "Evidence-validator regression sample; does not prove future binaries or complete native acceptance"
+}

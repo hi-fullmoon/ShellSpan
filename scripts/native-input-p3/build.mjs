@@ -12,6 +12,9 @@ const log=openSync(resolve(directory,'build.log'),'a',0o600);
 function run(command,args,cwd=root){execFileSync(command,args,{cwd,stdio:['ignore',log,log]});}
 const archive=resolve(dependencies,'zsh-5.9.tar.xz');
 const sha=path=>createHash('sha256').update(readFileSync(path)).digest('hex');
+const coreProducerPath=process.env.SHELLSPAN_P3_SCOPED_CORE_PRODUCER;
+const coreProducer=coreProducerPath?JSON.parse(readFileSync(coreProducerPath,'utf8')):undefined;
+const boundHistory=target==='macos-arm64'&&coreProducer?.boundHistory===true;
 try{
   if(!existsSync(archive))run('curl',['--fail','--location','--proto','=https','--tlsv1.2','https://www.zsh.org/pub/old/zsh-5.9.tar.xz','-o',archive]);
   assert.equal(sha(archive),'9b8d1ecedd5b5e81fbf1918e876752a7dd948e05c1a0dba10ab863842d45acd5');
@@ -29,9 +32,9 @@ try{
   run('cargo',['build','--locked','--release','--manifest-path','src-tauri/native-input-editors/Cargo.toml','--lib']);
   const module=resolve(directory,'ss_nip.so');
   const flags=target==='macos-arm64'?['-bundle','-undefined','dynamic_lookup']:['-shared','-Wl,--exclude-libs,ALL'];
-  run(process.env.CC??'cc',['-std=c11','-DMODULE','-fPIC',...flags,'-I',resolve(source,'Src'),
+  run(process.env.CC??'cc',['-std=c11','-DMODULE','-fPIC',...(boundHistory?['-DSHELLSPAN_ZLE_BOUND_HISTORY=1']:[]),...flags,'-I',resolve(source,'Src'),
     'src-tauri/native-input-editors/zle.c','src-tauri/native-input-editors/target/release/libshellspan_native_input_editors.a','-lpthread','-ldl','-lm','-o',module]);
-  const shell=process.env.SHELLSPAN_P3_ZSH??'/bin/zsh';
+  const shell=process.env.SHELLSPAN_P3_ZSH??coreProducer?.shell??'/bin/zsh';
   assert.equal(execFileSync(shell,['-f','-c','print -rn -- $ZSH_VERSION'],{encoding:'utf8'}),'5.9');
   const id=`zsh-5.9-zle-5.9-${target}-native`;
   const profile={shell:'zsh',shellVersion:'5.9',editor:'zle',editorVersion:'5.9',editorNumericVersion:509,adapterVersion:'1',verifiedProfileId:id};
@@ -39,16 +42,21 @@ try{
   sourcePaths.push('src-tauri/src/terminal_command/protocol.rs');
   sourcePaths.push('src-tauri/src/terminal_jobs.rs','src-tauri/src/terminal_jobs.ps1','src-tauri/src/terminal_job_host.cs','src-tauri/src/terminal_console_signals.cs');
   sourcePaths.push('scripts/native-input-p3/build.mjs','scripts/native-input-p3/zsh-build-check.c');
-  const coreProducerPath=process.env.SHELLSPAN_P3_SCOPED_CORE_PRODUCER;
-  let coreProducer;
   if(coreProducerPath){
-    coreProducer=JSON.parse(readFileSync(coreProducerPath,'utf8'));
     assert(coreProducer.nativeAcceptance===false&&coreProducer.productionChanges===false&&coreProducer.target===target);
     assert.equal(sha(coreProducer.editor),coreProducer.editorSha256);assert.equal(coreProducer.shell,shell);assert.equal(coreProducer.shellSha256,sha(shell));
     const pin=JSON.parse(readFileSync(resolve(root,'scripts/dependency-builds/zsh/pin.json'),'utf8'));
     assert.equal(sha(resolve(root,'scripts/dependency-builds/zsh/pin.json')),coreProducer.pinSha256);
-    assert.equal(sha(resolve(root,pin.patch)),pin.patchSha256);assert.deepEqual(coreProducer.nativeSourceHashes,pin.sourceHashes);assert.equal(coreProducer.patchSha256,pin.patchSha256);
-    for(const[name,digest]of Object.entries(pin.sourceHashes))assert.equal(sha(resolve(coreProducer.source,'Src/Zle',name)),digest);
+    assert.equal(sha(resolve(root,pin.patch)),pin.patchSha256);assert.equal(coreProducer.patchSha256,pin.patchSha256);
+    const expectedSources=boundHistory?pin.history.sourceHashes:pin.sourceHashes;
+    assert.deepEqual(coreProducer.nativeSourceHashes,expectedSources);
+    for(const[name,digest]of Object.entries(expectedSources))assert.equal(sha(resolve(coreProducer.source,boundHistory?name:`Src/Zle/${name}`)),digest);
+    if(target==='macos-arm64'){
+      assert(boundHistory,'The macOS native editor requires its matched history-capable private main/Core');
+      assert.equal(sha(shell),pin.targets[target].privateMainSha256);assert.equal(sha(coreProducer.editor),pin.targets[target].privateCoreSha256);
+      assert.equal(coreProducer.historyPatchSha256,pin.history.patchSha256);assert.equal(sha(resolve(root,pin.history.patch)),pin.history.patchSha256);
+      sourcePaths.push(pin.history.patch);
+    }
     sourcePaths.push('scripts/dependency-builds/zsh/pin.json','scripts/dependency-builds/zsh/native-display.patch','scripts/native-input-p3/build-scoped-core.mjs');
   }
   const sources=Object.fromEntries(sourcePaths.map(path=>[path,sha(resolve(root,path))]));
@@ -59,6 +67,11 @@ try{
     const core=resolve(resources,id,'zle.so');if(existsSync(core))chmodSync(core,0o600);copyFileSync(coreProducer.editor,core);chmodSync(core,0o500);assert.equal(sha(core),coreProducer.editorSha256);
     copyFileSync(resolve(coreProducer.directory,'LICENCE.zsh'),resolve(resources,id,'LICENCE.zsh'));
     Object.assign(editor,{core:`${id}/zle.so`,editorSha256:sha(core),coreLicense:`${id}/LICENCE.zsh`,coreLicenseSha256:sha(resolve(resources,id,'LICENCE.zsh'))});
+    if(boundHistory){
+      const privateShell=resolve(resources,id,'zsh');if(existsSync(privateShell))chmodSync(privateShell,0o600);
+      copyFileSync(shell,privateShell);chmodSync(privateShell,0o500);assert.equal(sha(privateShell),editor.shellSha256);
+      editor.shell=`${id}/zsh`;
+    }
   }
   const catalogue={version:1,profiles:[editor],sources};
   writeFileSync(resolve(resources,`editors-${target}.json`),JSON.stringify(catalogue,null,2)+'\n');

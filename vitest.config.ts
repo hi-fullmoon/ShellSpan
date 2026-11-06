@@ -20,6 +20,7 @@ export default defineConfig({
       'dist',
       '**/.worktrees/**',
       '**/.artifacts/**',
+      '**/scripts/native-input-p0/target/**',
       '**/scripts/native-input-p3/credential-cleanup/target/**',
       '**/*.native.test.{ts,tsx}',
     ],

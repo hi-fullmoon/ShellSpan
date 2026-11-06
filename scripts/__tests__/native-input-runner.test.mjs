@@ -227,7 +227,7 @@ describe('native input runner argument validation', () => {
       cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1'},encoding:'utf8',timeout:5000,
     });
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('--native-input-p3-storage-admission requires one isolated real-model Windows native case');
+    expect(result.stderr).toContain('--native-input-p3-storage-admission requires one isolated real-model native case with an exact supported host, editor and owned data');
   });
   it('rejects a storage refusal expectation outside read-only recovery mode', () => {
     const result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),'--journal-recovery-error','TERMINAL_SUBMISSION_JOURNAL_UNAVAILABLE'],{

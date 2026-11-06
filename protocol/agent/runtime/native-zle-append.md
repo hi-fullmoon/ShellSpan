@@ -24,3 +24,27 @@ owned native append，其他值拒绝。它是模式开关，不是行数、终�
 实际BUFFER/CURSOR证明、FULL持久意图、最终单次接受键和不明结果门禁保持原契约。
 显示API或屏幕内容不能代替上述事实。生产profile准入独立关闭，逐平台待验项见
 [实现说明](../../../docs/design/agent-terminal-input.md)。
+
+## 同一读取的源码与计划交接
+
+macOS原生验证组合同时绑定私有Zsh 5.9主程序和Core的精确摘要。主程序从同一固定归档、
+显示补丁及`native-history.patch`构建，使用固定安装前缀和隔离DESTDIR；系统`/bin/zsh`
+保持原样。资源中的`{profileId}/zsh`与`zle.so`必须匹配pin，不能把新Core配给旧主程序。
+
+`shellspan.zle-native-history`接口版本1提供`zle_native_history_api()`与
+`zle_native_bind_handoff(source, plan)`。绑定只允许在已接受的顶层ZLE读取内进行，
+读取真实BUFFER并与source比较，保存本次不可变plan；所有finish hook结束后再次核对
+实际交出行。主程序单次消费该映射，在原生历史过滤、hook及保存策略运行之前选择
+source作为历史行，以Zsh自己的lexer生成词边界。它不向已保存历史强插、删行或改写。
+取消、EOF、出错或下一次读取清除映射，嵌套lexer上下文分别保存和恢复自己的状态。
+
+读取已验证计划时不引入交互历史展开；用户的BANG_HIST选项以及普通手工输入路径不变。
+历史hook得到原始源码及其正常结束换行，原HISTSIZE、SAVEHIST、HISTFILE、去重与过滤
+仍由Zsh处理。`ZLE_NATIVE_HANDOFF`和只读`ZLE_NATIVE_HISTORY_API`参数用于该公开接口的
+独立PTY验证，不是原生提交或执行授权。
+
+已验证provider只在绑定后台启动计划后为对应fork子进程标记自动历史保存归父进程所有。
+预先解析并核对来自同一Core的`zle_native_history_child(parentPid)`，child侧atfork回调仅
+调用已绑定函数及异步信号安全的PID检查/标量赋值；不查符号、不分配内存、不执行Shell
+callback或Rust状态。子进程的用户历史选项及显式`fc`写入保持可用，普通/TERM退出不重复
+自动保存父历史。该接口不生成任何NIP回执，也不替代完整证明、持久意图或单次接受键。

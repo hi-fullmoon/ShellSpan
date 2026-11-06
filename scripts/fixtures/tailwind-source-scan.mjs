@@ -1,0 +1,23 @@
+import assert from 'node:assert/strict';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { resolve, dirname } from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const root = resolve(process.argv[2]);
+const require = createRequire(import.meta.resolve('@tailwindcss/vite'));
+const { compile } = await import(pathToFileURL(require.resolve('@tailwindcss/node')).href);
+const { Scanner } = require('@tailwindcss/oxide');
+const cssPath = resolve(root, 'src/styles/base.css');
+const compiler = await compile(readFileSync(cssPath, 'utf8'), { base: dirname(cssPath), from: cssPath, onDependency() {} });
+assert.notEqual(compiler.root, 'none');
+const scanner = new Scanner({ sources: [{ ...(compiler.root ?? { base: root, pattern: '**/*' }), negated: false }, ...compiler.sources] });
+const candidates = scanner.scan();
+const css = compiler.build(candidates);
+const output = resolve(root, '.artifacts/compiled-source-check.css');
+writeFileSync(output, css, { flag: 'wx' });
+const postcssRequire = createRequire(import.meta.resolve('vite'));
+const postcss = postcssRequire('postcss');
+const selectors = [];
+postcss.parse(css).walkRules(rule => selectors.push(rule.selector));
+console.log(JSON.stringify({ root, sources: compiler.sources, scanned: scanner.files, candidates: candidates.length, selectors, css: output }));

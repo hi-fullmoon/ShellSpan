@@ -47,7 +47,11 @@ if(fixture==='submit-fault'){
  writeFileSync(resolve(directory,'submit-fault-program.json'),JSON.stringify({program,sha256:submittedProgramSha256,sourceSha256:createHash('sha256').update(readFileSync(resolve(root,'scripts/native-input-p3/signal-target.c'))).digest('hex'),gate:'public user preexec, local INT trap held until explicit FIFO release',productionShellOrUserConfigurationChanged:false},null,2));
 }
 const validation=await editorValidationEnvironment(root,resolve(root,'.artifacts/tests/native-input-p2/resources/native-input'),ssh?['macos-arm64','linux-aarch64-glibc-2.36']:['macos-arm64']);
-const environment={...process.env,...validation,SHELLSPAN_DATA_DIR:resolve(directory,'data'),SHELLSPAN_LOCAL_HOME:resolve(directory,'home'),SHELLSPAN_LOCAL_SHELL:'/bin/zsh',SHELL:'/bin/zsh',LC_ALL:'en_US.UTF-8',
+const localArtifact=JSON.parse(readFileSync(resolve(root,'.artifacts/tests/native-input-p2/resources/native-input/editors-macos-arm64.json'),'utf8')).profiles[0];
+assert(localArtifact.shell&&localArtifact.profile.shell==='zsh');
+const localShell=resolve(root,'.artifacts/tests/native-input-p2/resources/native-input',localArtifact.shell);
+assert.equal(createHash('sha256').update(readFileSync(localShell)).digest('hex'),localArtifact.shellSha256);
+const environment={...process.env,...validation,SHELLSPAN_DATA_DIR:resolve(directory,'data'),SHELLSPAN_LOCAL_HOME:resolve(directory,'home'),SHELLSPAN_LOCAL_SHELL:localShell,SHELL:localShell,LC_ALL:'en_US.UTF-8',
   ...(ssh?{SHELLSPAN_P2_CREDENTIAL_REFERENCE:`native-p2-secret-${randomUUID()}`,SHELLSPAN_P2_SSH_USER:'nativeZle'}:{}),
   SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:directory,SHELLSPAN_DEV_SIGNING_KEYCHAIN:resolve(originalHome,'Library/Keychains/login.keychain-db')};
 async function run(name,args,provision){const log=openSync(resolve(directory,`${name}.log`),'wx',0o600);const child=spawn(process.execPath,['scripts/verify-ai-session-stream.mjs',...args],{cwd:root,env:environment,stdio:[provision?'pipe':'ignore',log,log]});if(provision)child.stdin.end(JSON.stringify(provision));const outcome=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',(code,signal)=>resolve({code,signal}));});closeSync(log);writeFileSync(resolve(directory,`${name}-process-exit.json`),JSON.stringify(outcome,null,2));return outcome.code??1;}
