@@ -31,6 +31,104 @@ fn capabilities(cumulative: bool) -> ProviderCapabilities {
     }
 }
 
+#[derive(Default)]
+struct ToolDeltaSink(Mutex<Vec<StreamDelta>>);
+
+impl ModelStreamSink for ToolDeltaSink {
+    fn emit(&self, delta: StreamDelta) -> Result<(), NormalizedModelError> {
+        self.0.lock().unwrap().push(delta);
+        Ok(())
+    }
+}
+
+#[test]
+fn repeated_complete_tool_ids_do_not_duplicate_identity_or_argument_deltas() {
+    // Reproduces the recorded MiniMax stream shape. These are parser inputs,
+    // not a model or native execution acceptance substitute.
+    let id = "chatcmpl-tool-95dee3dac0ec7e5c";
+    let recording = Arc::new(ToolDeltaSink::default());
+    let sink: Arc<dyn ModelStreamSink> = recording.clone();
+    let mut accumulated = ChatAccumulator::default();
+    let mut usage = ProviderUsage::default();
+    let mut completed = false;
+    let mut reason = ModelFinishReason::Other;
+    let mut fragments = vec!["{\"value\":\"".to_owned()];
+    fragments.extend((0..12).map(|_| "a".to_owned()));
+    fragments.push("\"}".to_owned());
+    for (index, arguments) in fragments.iter().enumerate() {
+        let mut function = json!({"arguments":arguments});
+        if index == 0 {
+            function["name"] = json!("read_file");
+        }
+        let event = json!({"choices":[{"delta":{"tool_calls":[{
+            "index":0,"id":id,"function":function
+        }]}}]});
+        process_chat_event(
+            &format!("data: {event}"),
+            capabilities(false),
+            &sink,
+            &mut accumulated,
+            &mut usage,
+            &mut completed,
+            &mut reason,
+        )
+        .unwrap();
+    }
+    let blocks = accumulated.finish(true, false).unwrap();
+    assert!(matches!(&blocks[0],ModelContentBlock::ToolCall{call}
+        if call.provider_call_id.as_deref()==Some(id)
+        &&call.name=="read_file"&&call.arguments==json!({"value":"aaaaaaaaaaaa"})));
+    let deltas = recording.0.lock().unwrap();
+    let ids: Vec<_> = deltas
+        .iter()
+        .filter_map(|delta| match delta {
+            StreamDelta::ToolCall {
+                call_id: Some(id), ..
+            } => Some(id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ids, [id]);
+    let arguments: String = deltas
+        .iter()
+        .filter_map(|delta| match delta {
+            StreamDelta::ToolCall {
+                arguments_delta: Some(text),
+                ..
+            } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        arguments,
+        fragments.concat(),
+        "equal argument fragments must still append"
+    );
+}
+
+#[test]
+fn repeated_ids_do_not_relax_the_provider_id_byte_limit() {
+    let sink: Arc<dyn ModelStreamSink> = Arc::new(ToolDeltaSink::default());
+    let mut accumulated = ChatAccumulator::default();
+    let mut usage = ProviderUsage::default();
+    let mut completed = false;
+    let mut reason = ModelFinishReason::Other;
+    let event = json!({"choices":[{"delta":{"tool_calls":[{
+        "index":0,"id":"x".repeat(257),"function":{"name":"read_file","arguments":"{}"}
+    }]}}]});
+    process_chat_event(
+        &format!("data: {event}"),
+        capabilities(false),
+        &sink,
+        &mut accumulated,
+        &mut usage,
+        &mut completed,
+        &mut reason,
+    )
+    .unwrap();
+    assert!(accumulated.finish(true, false).is_err());
+}
+
 fn snapshot() -> RequestSnapshot {
     RequestSnapshot::Prepared {
         route_id: "route-a".into(),

@@ -459,7 +459,11 @@ pub(in crate::llm) fn process_chat_event(
             let mut call_id = None;
             let mut name_delta = None;
             let mut arguments_delta = None;
-            if let Some(id) = call.get("id").and_then(Value::as_str) {
+            // Some compatible providers repeat the complete opaque id on
+            // argument deltas. It carries no new identity bytes; do not grow
+            // either the final id or the downstream id delta in that case.
+            let incoming_id = call.get("id").and_then(Value::as_str);
+            if let Some(id) = incoming_id.filter(|id| accumulator.id.as_deref() != Some(*id)) {
                 let delta = match accumulator.id.as_deref() {
                     Some(previous)
                         if capabilities.cumulative_stream && id.starts_with(previous) =>

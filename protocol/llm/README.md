@@ -2,6 +2,16 @@
 
 `catalog.json` is ShellSpan's built-in exact-model catalog. It separates provider transport facts from model capability facts: each preset owns the adapter protocol and default compatibility behavior, while each model declares only its own capacities and capabilities plus any compatibility fields that differ from the preset.
 
+## Tool stream identity
+
+Chat-completions tool streams may repeat the same complete opaque call ID on
+successive argument deltas. An ID identical to the already accumulated ID is
+idempotent: it adds no identity bytes and emits no extra ID delta. Argument and
+name fragments still follow the route's existing delta/cumulative behavior;
+equal argument fragments are not discarded. The 256-byte provider-ID limit and
+64 KiB argument limit remain enforced on the final call. This normalization
+does not change the command, frozen target, capability or approval identity.
+
 ## Provider connection checks
 
 `ai_test_connection` accepts an unsaved provider configuration and a Tauri result
