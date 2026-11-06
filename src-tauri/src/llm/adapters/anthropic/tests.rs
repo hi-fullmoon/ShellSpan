@@ -92,11 +92,15 @@
     fn serve_stalled(
         prefix: Option<&'static [u8]>,
         headers: bool,
-    ) -> (String, thread::JoinHandle<()>) {
+    ) -> (String, thread::JoinHandle<()>, std::sync::mpsc::Sender<()>) {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let address = listener.local_addr().unwrap();
+        let (release, finished) = std::sync::mpsc::channel();
         let server = thread::spawn(move || {
             let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
             let mut request = [0_u8; 4096];
             let _ = socket.read(&mut request);
             if headers {
@@ -108,10 +112,11 @@
                 }
                 socket.flush().unwrap();
             }
-            thread::sleep(Duration::from_millis(100));
-            let _ = socket.write_all(b"0\r\n\r\n");
+            // Keep this phase stalled until the client returns, rather than
+            // racing its timeout against a second, unrelated server timer.
+            let _ = finished.recv_timeout(Duration::from_secs(3));
         });
-        (format!("http://{address}"), server)
+        (format!("http://{address}"), server, release)
     }
 
     #[tokio::test]
@@ -368,18 +373,44 @@
         .unwrap_err();
         assert_eq!(cancelled.kind, NormalizedModelErrorKind::Cancelled);
 
-        let timeouts = ModelTimeoutPolicy {
-            request_headers: Duration::from_millis(20),
-            first_byte: Duration::from_millis(20),
-            stream_idle: Duration::from_millis(20),
-        };
+        let phase_budget = Duration::from_millis(20);
+        let setup_budget = Duration::from_secs(2);
         const START: &[u8] = b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg\",\"role\":\"assistant\",\"content\":[],\"model\":\"model\"}}\n\n";
-        for (prefix, headers, expected) in [
-            (None, false, "REQUEST_HEADERS_TIMEOUT"),
-            (None, true, "FIRST_BYTE_TIMEOUT"),
-            (Some(START), true, "STREAM_IDLE_TIMEOUT"),
+        // The phase under test stays at 20ms. Earlier phases have a setup
+        // budget so scheduler load cannot make the wrong timer win first.
+        for (prefix, headers, expected, timeouts) in [
+            (
+                None,
+                false,
+                "REQUEST_HEADERS_TIMEOUT",
+                ModelTimeoutPolicy {
+                    request_headers: phase_budget,
+                    first_byte: setup_budget,
+                    stream_idle: setup_budget,
+                },
+            ),
+            (
+                None,
+                true,
+                "FIRST_BYTE_TIMEOUT",
+                ModelTimeoutPolicy {
+                    request_headers: setup_budget,
+                    first_byte: phase_budget,
+                    stream_idle: setup_budget,
+                },
+            ),
+            (
+                Some(START),
+                true,
+                "STREAM_IDLE_TIMEOUT",
+                ModelTimeoutPolicy {
+                    request_headers: setup_budget,
+                    first_byte: setup_budget,
+                    stream_idle: phase_budget,
+                },
+            ),
         ] {
-            let (base_url, server) = serve_stalled(prefix, headers);
+            let (base_url, server, release) = serve_stalled(prefix, headers);
             let error = AnthropicMessagesAdapter {
                 http: HttpConfig {
                     client: build_streaming_client().unwrap(),
@@ -395,10 +426,11 @@
             )
             .await
             .unwrap_err();
+            let _ = release.send(());
+            server.join().unwrap();
             assert_eq!(error.kind, NormalizedModelErrorKind::Timeout);
             assert_eq!(error.code.as_deref(), Some(expected));
             assert!(!error.message.contains("stage-e-secret"));
-            server.join().unwrap();
         }
     }
 
