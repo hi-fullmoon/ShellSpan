@@ -1,4 +1,4 @@
-import { memo, useMemo, type ComponentProps, type ReactNode } from 'react';
+import { memo, useId, useLayoutEffect, useMemo, useRef, type ComponentProps, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { Marker, MarkerContent, MarkerIcon } from '@/components/ui/marker';
 import { BrainIcon } from 'lucide-react';
@@ -11,6 +11,9 @@ import { useConversationHistory } from './use-conversation-history';
 import { AiProcessingStatus } from './ai-processing-status';
 import { MessageScroller } from '../chat-primitives';
 import { AiConversationNodeSeat, isUserVisibleContextInjection, type AiConversationNodeRendererMap } from './ai-conversation-node-seat';
+import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible';
+import { conversationRows, type AiConversationRow } from './ai-conversation-rows';
+import { processDisclosureKey, registerProcessMember, useProcessDisclosure } from './ai-process-disclosure';
 
 const statusItemClassName = '[content-visibility:visible] [contain-intrinsic-size:none]';
 const HISTORY_PAGE_SIZE = 80;
@@ -81,13 +84,30 @@ function conversationItemId(node: AiConversationNode): string {
 
 const ConversationRow = memo(function ConversationRow({
   indicator,
+  process,
+  processMember,
+  hasResponse,
+  panelId,
   ...props
-}: ComponentProps<typeof AiConversationNodeSeat> & { indicator?: ReactNode }) {
+}: ComponentProps<typeof AiConversationNodeSeat> & Omit<AiConversationRow, 'node'> & { indicator?: ReactNode; panelId: string }) {
+  const { open } = useProcessDisclosure(process);
+  const ref = useRef<HTMLDivElement>(null);
+  const processKey = process && processDisclosureKey(process);
+  useLayoutEffect(() => {
+    if (process && processMember && ref.current) return registerProcessMember(process, ref.current);
+  }, [processKey, processMember]);
   return (
-    <>
-      <AiConversationNodeSeat {...props} />
+    <Collapsible className="ai-conversation-row flex min-w-0 flex-col gap-4" open={!processMember || open}
+      data-ai-process-owner={processMember ? process?.key : undefined}>
+      <CollapsibleContent id={panelId} keepMounted className="ai-conversation-row-panel">
+        <div ref={ref} className="ai-conversation-row-body" data-ai-process-child={processMember ? props.node.kind : undefined}
+          data-ai-process-child-key={processMember ? props.node.key : undefined}>
+          <AiConversationNodeSeat {...props} inTurnProcess={processMember}
+            processControlOnly={props.node.kind === 'turnProcess'} hasResponse={hasResponse} />
+        </div>
+      </CollapsibleContent>
       {indicator && (props.node.kind === 'turnTail' ? <div className="ml-1.5">{indicator}</div> : indicator)}
-    </>
+    </Collapsible>
   );
 });
 
@@ -127,8 +147,9 @@ export const AiConversation = memo(function AiConversation({
   onLoadOlder,
 }: AiConversationProps): React.ReactNode {
   const { t } = useI18n();
-  // Process prose belongs to its disclosure. Compaction remains a separate
-  // status row so it is visible before a model step has been admitted.
+  const panelPrefix = useId();
+  // Compaction remains independent of process folding and is visible before
+  // a model step has been admitted.
   const allNodes = useMemo(
     () =>
       projectedNodes.flatMap((node): AiConversationNode[] => {
@@ -153,6 +174,7 @@ export const AiConversation = memo(function AiConversation({
     onAnchorChange,
     onLoadOlder,
   );
+  const rows = useMemo(() => conversationRows(nodes), [nodes]);
   const running = status === 'running' || status === 'waiting';
   const submitting = allNodes.some(node => node.kind === 'userMessage'
     && (node.delivery === 'pending' || node.delivery === 'confirming' || node.delivery === 'unconfirmed'));
@@ -211,7 +233,7 @@ export const AiConversation = memo(function AiConversation({
   return (
     <MessageScroller
       className="min-h-0 flex-1"
-      contentClassName="ai-conversation-content mx-auto min-w-0 w-[min(calc(100%-var(--ai-shell-clearance)-var(--ai-transcript-extra-inset)-var(--ai-shell-clearance)-var(--ai-transcript-extra-inset)),var(--ai-chat-content-max-width))] gap-4 px-0 pt-5 pb-7"
+      contentClassName="ai-conversation-content mx-auto min-w-0 w-[min(calc(100%-var(--ai-shell-clearance)-var(--ai-transcript-extra-inset)-var(--ai-shell-clearance)-var(--ai-transcript-extra-inset)),var(--ai-chat-content-max-width))] gap-0 px-0 pt-5 pb-7"
       followKey={followKey(nodes, throughSeq)}
       scrollToBottomKeys={latestTurnIndex >= 0 ? [conversationItemId(allNodes[latestTurnIndex])] : []}
       generating={pending || submitting || (status === 'running' && !latestProcess?.hasEndBoundary)}
@@ -229,21 +251,32 @@ export const AiConversation = memo(function AiConversation({
         )
       }
     >
-      {nodes.map((node, index) => (
+      {rows.map(({ node, process, processMember, hasResponse }, index) => (
         <ConversationRow
           key={conversationItemId(node)}
           node={node}
           renderers={renderers}
+          process={process}
+          processMember={processMember}
+          hasResponse={hasResponse}
+          panelId={`${panelPrefix}:${node.key}`}
+          processPanelIds={node.kind === 'turnProcess'
+            ? node.children.map(child => `${panelPrefix}:${child.key}`).join(' ') : undefined}
           deferMessageActions={node.kind === 'assistantMessage' && (running || pending) && footerTurns.has(`${node.sessionId}:${node.turnId}`)}
           scrollItemId={conversationItemId(node)}
           scrollItemClassName={cn(
-            'flex flex-col gap-4',
+            'ai-conversation-row-slot flex flex-col gap-4',
+            processMember && 'ai-conversation-process-item',
+            node.kind === 'assistantMessage' && 'ai-conversation-assistant-item',
+            node.kind === 'assistantMessage' && process && (processMember || !process.hasEndBoundary)
+              && 'ai-conversation-process-prose',
+            node.kind === 'turnProcess' && 'ai-conversation-process-control',
             node.kind === 'turnTail' && '-ml-1.5',
-            index + startIndex >= latestUserIndex && '[content-visibility:visible] [contain-intrinsic-size:none]',
+            '[content-visibility:visible] [contain-intrinsic-size:none]',
           )}
           onOpenTool={onOpenTool}
           onOpenArtifact={onOpenArtifact}
-          indicator={index === nodes.length - 1 ? indicator : undefined}
+          indicator={index === rows.length - 1 ? indicator : undefined}
         />
       ))}
       {!nodes.length && indicator}

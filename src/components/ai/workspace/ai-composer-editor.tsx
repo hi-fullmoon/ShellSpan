@@ -10,12 +10,14 @@ import {
 
 import { cn } from '@/lib/utils';
 import { activeFileToken } from '@/lib/ai/file-reference-grammar';
+import { createComposerMarkdown } from './composer-markdown';
 
 /** Plain-text offsets shared by the editor and completion menus. */
 export interface ComposerEditorHandle {
   readonly value: string;
   readonly selectionStart: number;
   readonly selectionEnd: number;
+  readonly completionAllowed: boolean;
   readonly element: HTMLDivElement | null;
   focus(): void;
   setSelectionRange(start: number, end: number): void;
@@ -118,6 +120,7 @@ interface Props extends Omit<HTMLAttributes<HTMLDivElement>, 'onChange' | 'onSel
   ref?: Ref<ComposerEditorHandle>;
   value: string;
   historyKey?: string;
+  markdown?: boolean;
   disabled?: boolean;
   placeholder: string;
   commandNames: readonly string[];
@@ -128,7 +131,7 @@ interface Props extends Omit<HTMLAttributes<HTMLDivElement>, 'onChange' | 'onSel
 }
 
 /** Lexical owns editing, history and token selection; persisted drafts remain plain text. */
-export function AiComposerEditor({ ref, value, historyKey, disabled, placeholder, commandNames, chatTitles = [], onChange, onSelectionChange, onKeyDown, onPaste, className, ...props }: Props) {
+export function AiComposerEditor({ ref, value, historyKey, markdown = false, disabled, placeholder, commandNames, chatTitles = [], onChange, onSelectionChange, onKeyDown, onPaste, className, ...props }: Props) {
   const element = useRef<HTMLDivElement>(null);
   const latest = useRef({ onChange, onSelectionChange, onKeyDown, commandNames, chatTitles });
   latest.current = { onChange, onSelectionChange, onKeyDown, commandNames, chatTitles };
@@ -138,16 +141,37 @@ export function AiComposerEditor({ ref, value, historyKey, disabled, placeholder
   const [empty, setEmpty] = useState(!value);
   const offsets = useRef<[number, number]>([0, 0]);
   const text = useRef(value);
+  const [syntax] = useState(createComposerMarkdown);
   useLayoutEffect(() => {
     editor.setRootElement(element.current);
     const removePlain = registerPlainText(editor);
     // Run the composer's submit/completion policy before Lexical's Enter handling.
     const removeKeys = editor.registerCommand(KEY_DOWN_COMMAND, event => {
       latest.current.onKeyDown?.(event);
+      if (!event.defaultPrevented && markdown && !event.isComposing && !editor.isComposing()
+        && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && !event.repeat) {
+        const marker = ({ b: '**', i: '*', e: '`' } as Record<string, string | undefined>)[event.key.toLowerCase()];
+        const selection = $getSelection();
+        if (marker && $isRangeSelection(selection)) {
+          event.preventDefault();
+          const [start, end] = selectionOffsets();
+          const selected = selection.getTextContent();
+          selection.insertText(`${marker}${selected}${marker}`);
+          selectOffsets(start + marker.length, end + marker.length);
+        }
+      }
       return event.defaultPrevented;
     }, COMMAND_PRIORITY_CRITICAL);
     const transformText = (node: TextNode) => {
       if (editor.isComposing()) return;
+      let sourceStart = 0;
+      if (markdown) for (const leaf of leaves()) { if (leaf === node) break; sourceStart += leaf.getTextContentSize(); }
+      const code = markdown ? syntax.read($getRoot().getTextContent()).filter(span => span.kind === 'code') : [];
+      const isCodeAt = (offset: number) => code.some(span => sourceStart + offset >= span.from && sourceStart + offset < span.to);
+      if (code.some(span => sourceStart >= span.from && sourceStart + node.getTextContentSize() <= span.to)) {
+        if (node instanceof DirectoryReferenceNode || node instanceof CommandNode || node instanceof ChatReferenceNode) node.replace($createTextNode(node.getTextContent()));
+        return;
+      }
       if (node instanceof DirectoryReferenceNode) {
         return;
       }
@@ -157,7 +181,7 @@ export function AiComposerEditor({ ref, value, historyKey, disabled, placeholder
       for (let end = content.length; end > 0; end--) {
         if (content[end - 1] !== '/') continue;
         const token = activeFileToken(content, end);
-        if (!token || token.query.length <= 1) continue;
+        if (!token || token.query.length <= 1 || isCodeAt(token.start)) continue;
         const referenceEnd = token.quoted && content[end] === '"' ? end + 1 : end;
         const pieces = node.splitText(token.start, referenceEnd);
         pieces[token.start === 0 ? 0 : 1].replace(new DirectoryReferenceNode(content.slice(token.start, referenceEnd)).setMode('token'));
@@ -166,7 +190,7 @@ export function AiComposerEditor({ ref, value, historyKey, disabled, placeholder
       for (const title of latest.current.chatTitles) {
         if (!title) continue;
         const start = content.indexOf(title);
-        if (start < 0) continue;
+        if (start < 0 || isCodeAt(start)) continue;
         const pieces = node.splitText(start, start + title.length);
         pieces[start === 0 ? 0 : 1].replace(new ChatReferenceNode(title).setMode('token'));
         return;
@@ -175,6 +199,7 @@ export function AiComposerEditor({ ref, value, historyKey, disabled, placeholder
       for (const match of content.matchAll(/(^|\s)(\/[\p{L}\p{N}-]+)(?=\s)/gu)) {
         if (!names.has(match[2].slice(1))) continue;
         const start = match.index + match[1].length;
+        if (isCodeAt(start)) continue;
         const pieces = node.splitText(start, start + match[2].length);
         const target = pieces[start === 0 ? 0 : 1];
         target.replace(new CommandNode(match[2]).setMode('token'));
@@ -188,6 +213,7 @@ export function AiComposerEditor({ ref, value, historyKey, disabled, placeholder
         offsets.current = selectionOffsets();
         setEmpty(next.length === 0);
         if (next !== text.current) { text.current = next; latest.current.onChange(next); }
+        if (markdown) syntax.paint(editor);
         latest.current.onSelectionChange();
       });
     });
@@ -195,6 +221,7 @@ export function AiComposerEditor({ ref, value, historyKey, disabled, placeholder
       get value() { return text.current; },
       get selectionStart() { return offsets.current[0]; },
       get selectionEnd() { return offsets.current[1]; },
+      get completionAllowed() { return !markdown || !syntax.read(text.current).some(span => span.kind === 'code' && offsets.current[0] >= span.from && offsets.current[0] <= span.to); },
       get element() { return element.current; },
       focus() { editor.focus(); },
       setSelectionRange(start, end) { editor.update(() => selectOffsets(start, end), { discrete: true }); },
@@ -202,9 +229,10 @@ export function AiComposerEditor({ ref, value, historyKey, disabled, placeholder
     if (typeof ref === 'function') ref(handle); else if (ref) ref.current = handle;
     return () => {
       removeUpdate(); removeTransform(); removeKeys(); removePlain(); editor.setRootElement(null);
+      syntax.dispose();
       if (typeof ref === 'function') ref(null); else if (ref) ref.current = null;
     };
-  }, [editor, ref]);
+  }, [editor, ref, markdown, syntax]);
   useLayoutEffect(() => { editor.setEditable(!disabled); }, [editor, disabled]);
   const chatTitlesKey = JSON.stringify(chatTitles);
   useLayoutEffect(() => {

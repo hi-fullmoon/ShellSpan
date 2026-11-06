@@ -70,6 +70,14 @@ function isNearBottom(viewport: HTMLElement): boolean {
   return distanceToBottom(viewport) <= SCROLL_EDGE_THRESHOLD;
 }
 
+function lastVisibleMessageItem(content: HTMLElement): Element | null {
+  let item = content.lastElementChild;
+  while (item && (!item.hasAttribute('data-message-id') || item.getBoundingClientRect().height === 0)) {
+    item = item.previousElementSibling;
+  }
+  return item;
+}
+
 function canNestedViewportScroll(viewport: HTMLElement, target: EventTarget, deltaY: number): boolean {
   if (deltaY === 0) return false;
   for (let element = target instanceof Element ? target : null;
@@ -219,7 +227,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
     const content = contentRef.current;
     if (modeRef.current !== 'anchored' || !activeTurnRef.current.generated || !positionReady || !viewport || !content) return;
     const anchor = content.querySelector<HTMLElement>('[data-scroll-anchor="true"]');
-    const last = content.querySelector<HTMLElement>('[data-message-scroller-spacer]')?.previousElementSibling;
+    const last = lastVisibleMessageItem(content);
     if (!anchor || !last) return;
     const style = getComputedStyle(content);
     const turnHeight = last.getBoundingClientRect().bottom - anchor.getBoundingClientRect().top
@@ -344,7 +352,7 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
     interruptRestore();
     suppressProgrammaticFollowRef.current = false;
     pointerScrollStartRef.current = null;
-    const lastMessageId = contentRef.current?.lastElementChild?.previousElementSibling?.getAttribute('data-message-id');
+    const lastMessageId = contentRef.current && lastVisibleMessageItem(contentRef.current)?.getAttribute('data-message-id');
     const smooth = !wasFollowing && !!lastMessageId
       && !!viewportRef.current && !isNearBottom(viewportRef.current)
       && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -543,21 +551,14 @@ const ConversationScroller: React.FC<ConversationScrollerProps> = ({
     const content = contentRef.current;
     if (!content || !onAnchorChange) return;
     const viewportTop = scrollport.getBoundingClientRect().top;
-    const rows = content.children;
-    const count = rows.length - (content.lastElementChild?.hasAttribute('data-message-scroller-spacer') ? 1 : 0);
-    // Search row boundaries rather than measuring every message descendant.
-    let low = 0;
-    let high = count;
-    while (low < high) {
-      const middle = (low + high) >>> 1;
-      if (rows[middle].getBoundingClientRect().bottom <= viewportTop) low = middle + 1;
-      else high = middle;
-    }
-    for (let index = low; index < count; index += 1) {
-      const row = rows[index];
+    // Collapsed rows have zero rectangles between visible rows, so their
+    // boundaries cannot participate in a binary search by screen position.
+    for (const row of content.children) {
+      if (!row.hasAttribute('data-message-id')) continue;
+      const rect = row.getBoundingClientRect();
+      if (rect.height === 0 || rect.bottom <= viewportTop) continue;
       const nodeKey = row.querySelector<HTMLElement>('[data-ai-node-key]')?.dataset.aiNodeKey;
       if (!nodeKey) continue;
-      const rect = row.getBoundingClientRect();
       onAnchorChange({
         nodeKey, offset: rect.top - viewportTop, scrollTop: scrollport.scrollTop,
         atBottom: followIntentRef.current && !suppressProgrammaticFollowRef.current && isNearBottom(scrollport),

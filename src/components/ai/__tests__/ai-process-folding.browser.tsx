@@ -8,10 +8,12 @@ import { childFailureEvents } from '@/tests/fixtures/child-recovery-recording';
 import { inboxTimelineEvidence } from '@/tests/fixtures/agent-inbox-timeline';
 import { initI18n } from '@/locales';
 import type { AgentSessionEvent } from '@/types/agent-session';
+import type { AiScrollAnchor } from '@/lib/ai/panel-route';
 import '@/styles/base.css';
 import '../styles/styles.css';
 
 const root = createRoot(document.getElementById('root')!);
+let lastAnchor: AiScrollAnchor | undefined;
 const recordings = {
   ...Object.fromEntries(Object.entries(conversationFoldRecording).map(([name, recording]) => [name, recording.events])),
   failed: childFailureEvents,
@@ -25,6 +27,7 @@ function replay(events: readonly AgentSessionEvent[]) {
   flushSync(() => root.render(
     <main className="ai-workspace-root ai-panel-shell flex h-dvh min-h-0 w-full flex-col" data-ai-scope="workbench">
       <AiWorkspaceRoot scope="workbench" mode="agent" view={null} pendingNodes={nodes}
+        onScrollAnchorChange={anchor => { lastAnchor = anchor; }}
         composerState={createAiComposerState({ runtimeStatus: running ? 'running' : 'completed' })} />
     </main>,
   ));
@@ -35,6 +38,7 @@ Object.assign(window, {
   foldingRecordings: recordings,
   setFoldingLocale: initI18n,
   replayFoldingEvents: replay,
+  foldingAnchor: () => lastAnchor,
   replayFoldingRecording(name: keyof typeof recordings, length?: number) {
     return replay(recordings[name].slice(0, length));
   },

@@ -203,7 +203,8 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const largePasteWarning = useAppStore((state) => state.terminalLargePasteWarning);
   const trimTrailingWhitespace = useAppStore((state) => state.terminalTrimTrailingWhitespace);
   const colorScheme = useAppStore((state) => state.terminalColorScheme);
-  const terminalTheme = colorScheme === 'app' ? undefined : resolveTerminalTheme(colorScheme);
+  const colorOverrides = useAppStore((state) => state.terminalColorOverrides);
+  const terminalTheme = colorScheme === 'app' ? colorOverrides : resolveTerminalTheme(colorScheme, colorOverrides);
   const terminalSurfaceStyle: React.CSSProperties = {
     backgroundColor: terminalTheme?.background ?? 'var(--app-surface)',
     color: terminalTheme?.foreground ?? 'var(--app-text)',

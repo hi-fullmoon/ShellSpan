@@ -210,6 +210,10 @@
   --app-error: #dc2626;
   --app-warning: #d97706;
   --app-success: #16a34a;
+  --app-syntax-keyword: #7c20e8;
+  --app-syntax-string: #116329;
+  --app-syntax-number: #ad5100;
+  --app-syntax-title: #1659bf;
   --app-tab-active: color-mix(in srgb, var(--app-primary) 10%, transparent);
   --app-tab-accent: var(--app-primary);
   --app-scrollbar-thumb: color-mix(in srgb, var(--app-text-soft) 32%, transparent);
@@ -270,6 +274,10 @@
   --app-error: #fb7185;
   --app-warning: #fbbf24;
   --app-success: #4ade80;
+  --app-syntax-keyword: #c792ea;
+  --app-syntax-string: #7ee787;
+  --app-syntax-number: #f5b775;
+  --app-syntax-title: #82aaff;
   --app-tab-active: color-mix(in srgb, var(--app-primary) 14%, transparent);
   --app-tab-accent: var(--app-primary);
   --shadow-card: 0 1px 0 0 rgba(255, 255, 255, 0.035), 0 16px 32px -20px rgba(0, 0, 0, 0.86);
@@ -306,6 +314,32 @@
   --sidebar-accent-foreground: var(--app-text);
   --sidebar-border: var(--app-border);
   --sidebar-ring: var(--app-primary);
+}
+
+.sftp-source-code,
+.sftp-source-code * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.sftp-source-code :is(.hljs-keyword, .hljs-selector-tag, .hljs-meta) {
+  color: var(--app-syntax-keyword);
+}
+
+.sftp-source-code :is(.hljs-string, .hljs-regexp, .hljs-attr, .hljs-selector-class, .hljs-selector-id) {
+  color: var(--app-syntax-string);
+}
+
+.sftp-source-code :is(.hljs-number, .hljs-literal, .hljs-built_in) {
+  color: var(--app-syntax-number);
+}
+
+.sftp-source-code :is(.hljs-title, .hljs-name, .hljs-attribute, .hljs-type) {
+  color: var(--app-syntax-title);
+}
+
+.sftp-source-code :is(.hljs-comment, .hljs-quote) {
+  color: var(--muted-foreground);
 }
 
 /* History is portalled outside the AI panel, so map its row tokens here. */

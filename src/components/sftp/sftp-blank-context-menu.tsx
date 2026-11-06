@@ -59,7 +59,7 @@ const MenuItem: React.FC<MenuItemProps> = ({ onClick, disabled, icon, children }
       'flex w-full items-center gap-1 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors',
       disabled
         ? 'pointer-events-none text-app-text-soft opacity-40'
-        : 'text-app-text hover:bg-app-primary/10 hover:text-app-primary',
+        : 'text-app-text hover:bg-accent hover:text-app-primary',
     )}
   >
     <span className="flex size-3.5 shrink-0 items-center justify-center text-muted-foreground">

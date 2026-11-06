@@ -23,6 +23,43 @@
   display: none;
 }
 
+/* Process membership changes visibility, never a message's parent or spacing. */
+.ai-conversation-row-slot:has(> .ai-conversation-row > .ai-conversation-row-panel[hidden]):not(:has([data-ai-running-indicator], [data-ai-thinking-indicator])),
+.ai-conversation-row-slot:has(> .ai-conversation-row > .ai-conversation-row-panel > div > .ai-transcript-flow-item:empty):not(:has([data-ai-running-indicator], [data-ai-thinking-indicator])) {
+  display: none;
+}
+
+.ai-conversation-row-slot {
+  --ai-conversation-row-gap: 16px;
+  --ai-conversation-row-inset: 0px;
+}
+
+.ai-conversation-content > :where(.ai-conversation-row-slot:not(:has(> .ai-conversation-row > .ai-conversation-row-panel[hidden])):not(:has(.ai-transcript-flow-item:only-child:empty)))
+  ~ .ai-conversation-row-slot {
+  --ai-conversation-row-inset: var(--ai-conversation-row-gap);
+}
+
+/* Include the gap in the collapsing height, avoiding a final spacing jump. */
+.ai-conversation-row-panel > .ai-conversation-row-body {
+  padding-top: var(--ai-conversation-row-inset, 0px);
+}
+
+.ai-conversation-content > .ai-conversation-row-slot.ai-conversation-process-item {
+  --ai-conversation-row-gap: 4px;
+}
+
+.ai-conversation-content > .ai-conversation-row-slot.ai-conversation-assistant-item {
+  --ai-conversation-row-gap: 12px;
+}
+
+.ai-conversation-content > .ai-conversation-row-slot.ai-conversation-process-prose {
+  --ai-conversation-row-gap: 4px;
+}
+
+.ai-conversation-content > .ai-conversation-process-control + .ai-conversation-process-item:not(.ai-conversation-assistant-item) {
+  --ai-conversation-row-gap: 6px;
+}
+
 .ai-message-bubble-user .ai-message-bubble-content {
   border: 0;
   border-radius: 22px;

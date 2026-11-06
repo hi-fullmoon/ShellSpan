@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
 import { resolveTerminalTheme } from './registry/terminal-registry';
+import { terminalSearchDecorations } from '@/lib/terminal/terminal-colors';
 
 export function TerminalSearch({ terminal, addon, onClose, active = true }: {
   terminal?: Terminal;
@@ -16,7 +17,8 @@ export function TerminalSearch({ terminal, addon, onClose, active = true }: {
 }) {
   const { t } = useI18n();
   const colorScheme = useAppStore((state) => state.terminalColorScheme);
-  const theme = colorScheme === 'app' ? undefined : resolveTerminalTheme(colorScheme);
+  const colorOverrides = useAppStore((state) => state.terminalColorOverrides);
+  const theme = colorScheme === 'app' ? colorOverrides : resolveTerminalTheme(colorScheme, colorOverrides);
   const background = theme?.background ?? 'var(--app-surface)';
   const foreground = theme?.foreground ?? 'var(--app-text)';
   // Scope the shared control tokens to this floating terminal surface.
@@ -50,16 +52,11 @@ export function TerminalSearch({ terminal, addon, onClose, active = true }: {
   const [result, setResult] = useState<ISearchResultChangeEvent | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   // Use the terminal palette for xterm's search decorations.
-  const color = terminal?.options.theme?.blue ?? '#808080';
+  const decorations = terminalSearchDecorations(resolveTerminalTheme(colorScheme, colorOverrides), colorOverrides);
   const options: ISearchOptions = {
     caseSensitive,
     regex,
-    decorations: {
-      matchBorder: color,
-      activeMatchBorder: terminal?.options.theme?.foreground ?? color,
-      matchOverviewRuler: color,
-      activeMatchColorOverviewRuler: color,
-    },
+    decorations,
   };
   const optionsRef = useRef(options);
   optionsRef.current = options;
@@ -84,7 +81,7 @@ export function TerminalSearch({ terminal, addon, onClose, active = true }: {
     const found = addon.findNext(query, { ...optionsRef.current, incremental: true });
     if (!found) setResult({ resultIndex: -1, resultCount: 0 });
     return () => subscription.dispose();
-  }, [addon, query, caseSensitive, regex, invalidRegex, color]);
+  }, [addon, query, caseSensitive, regex, invalidRegex, decorations.matchBorder, decorations.activeMatchBorder, decorations.matchBackground, decorations.activeMatchBackground]);
 
   useEffect(() => () => addon?.clearDecorations(), [addon]);
 

@@ -26,18 +26,26 @@ function conversation(events: readonly AgentSessionEvent[], status: 'running' | 
   return <AiConversation nodes={nodes} status={status} throughSeq={events[events.length - 1]?.seq ?? null} />;
 }
 
-it('keeps recorded process prose inside the disclosure without separate copy actions', async () => {
+function processRows(container: HTMLElement, trigger: HTMLElement): HTMLElement[] {
+  const key = trigger.closest<HTMLElement>('[data-ai-node-key]')!.dataset.aiNodeKey;
+  return [...container.querySelectorAll<HTMLElement>('[data-ai-process-owner]')]
+    .filter(row => row.dataset.aiProcessOwner === key
+      && row.querySelector('.ai-transcript-flow-item')?.childElementCount);
+}
+
+it('folds recorded process prose in its stable message row without separate copy actions', async () => {
   const { events } = conversationFoldRecording.progress;
   const { container } = render(conversation(events));
   const message = screen.getByText('Two candidate project directories. Let me examine both.');
-  expect(message.closest('.ai-turn-process-body')).toBeInTheDocument();
+  expect(message.closest('[data-ai-process-owner]')).toBeInTheDocument();
   expect(within(message.closest('[role="article"]') as HTMLElement).queryByRole('button', { name: 'Copy' })).toBeNull();
   const trigger = container.querySelector<HTMLButtonElement>('.ai-turn-process-trigger')!;
   fireEvent.click(trigger);
   await waitFor(() => expect(message).not.toBeVisible());
-  expect(container.querySelectorAll('[data-ai-node-kind="assistantMessage"]')).toHaveLength(0);
+  expect(container.querySelectorAll('[data-ai-node-kind="assistantMessage"]')).toHaveLength(2);
   fireEvent.click(trigger);
-  expect(await screen.findByText('Two candidate project directories. Let me examine both.')).toBeVisible();
+  expect(await screen.findByText('Two candidate project directories. Let me examine both.')).toBe(message);
+  expect(message).toBeVisible();
 });
 
 it.each(['en-US', 'zh-CN'] as const)('automatically folds a normally completed recorded turn in %s while keeping its answer visible', async locale => {
@@ -75,7 +83,7 @@ it('keeps focused process controls mounted when completion arrives', async () =>
   const end = events.findIndex(event => event.type === 'turn/end');
   const { container, rerender } = render(conversation(events.slice(0, end)));
   const trigger = container.querySelector<HTMLButtonElement>('.ai-turn-process-trigger')!;
-  const control = container.querySelector<HTMLButtonElement>('.ai-turn-process-body button')!;
+  const control = container.querySelector<HTMLButtonElement>('[data-ai-process-owner] button')!;
   expect(control).toBeInTheDocument();
   control.focus();
   rerender(conversation(events, 'completed'));
@@ -88,7 +96,7 @@ it('preserves selected process text when completion arrives', () => {
   const { events } = conversationFoldRecording.completed;
   const end = events.findIndex(event => event.type === 'turn/end');
   const { container, rerender } = render(conversation(events.slice(0, end)));
-  const body = container.querySelector<HTMLDivElement>('.ai-turn-process-body')!;
+  const body = container.querySelector<HTMLDivElement>('[data-ai-process-child="tool"]')!;
   const range = document.createRange();
   range.selectNodeContents(body);
   const selection = window.getSelection()!;
@@ -140,7 +148,7 @@ it.each(inspectableRecordings.flatMap(([name, events]) =>
   for (const trigger of triggers) {
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
     expect(trigger).toBeEnabled();
-    const body = trigger.closest('.ai-turn-process')!.querySelector('.ai-turn-process-body')!;
+    const body = processRows(view.container, trigger)[0];
     expect(body).toBeVisible();
     await user.click(trigger);
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
@@ -157,7 +165,7 @@ it.each(inspectableRecordings.flatMap(([name, events]) =>
     await user.keyboard('{Enter}');
     expect(trigger).toHaveFocus();
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
-    expect(trigger.closest('.ai-turn-process')!.querySelector('.ai-turn-process-body')).toBeVisible();
+    expect(processRows(history.container, trigger)[0]).toBeVisible();
     await user.keyboard(' ');
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
   }

@@ -43,6 +43,7 @@ import type {
 } from '@/types';
 import type { IBuffer, IBufferCellPosition, IDisposable, ILink } from '@xterm/xterm';
 import { useTerminalStore } from '@/stores/terminalStore';
+import { applyTerminalColorOverrides, type TerminalColorOverrides } from '@/lib/terminal/terminal-colors';
 
 const logger = createLogger('terminal');
 
@@ -77,6 +78,7 @@ export interface TerminalDisplayPreferences {
   cursorStyle: TerminalCursorStyle;
   scrollback: number;
   colorScheme: TerminalColorScheme;
+  colorOverrides?: TerminalColorOverrides;
   autoReconnect: boolean;
   lineHeight: number;
   letterSpacing: number;
@@ -366,7 +368,7 @@ function readAppColor(variable: string, lightFallback: string, darkFallback: str
   return document.documentElement.dataset.theme === 'dark' ? darkFallback : lightFallback;
 }
 
-export function resolveTerminalTheme(colorScheme: TerminalColorScheme): TerminalTheme {
+function resolveBaseTerminalTheme(colorScheme: TerminalColorScheme): TerminalTheme {
   if (colorScheme !== 'app') return { ...TERMINAL_COLOR_THEMES[colorScheme], overviewRulerBorder: '#00000000' };
   return {
     // Keep search markers without xterm's default full-height ruler border.
@@ -385,6 +387,10 @@ export function resolveTerminalTheme(colorScheme: TerminalColorScheme): Terminal
       'rgba(244, 244, 245, 0.12)',
     ),
   };
+}
+
+export function resolveTerminalTheme(colorScheme: TerminalColorScheme, overrides: TerminalColorOverrides = {}): TerminalTheme {
+  return applyTerminalColorOverrides(resolveBaseTerminalTheme(colorScheme) ?? {}, overrides);
 }
 
 export interface TerminalController {
@@ -507,7 +513,7 @@ class TerminalControllerImpl implements TerminalController {
       allowProposedApi: true,
       fontFamily: TERMINAL_FONT_FAMILIES[preferences.fontFamily],
       fontSize: preferences.fontSize,
-      theme: resolveTerminalTheme(preferences.colorScheme),
+      theme: resolveTerminalTheme(preferences.colorScheme, preferences.colorOverrides),
       cursorBlink: preferences.cursorBlink,
       rightClickSelectsWord: false,
       cursorStyle: preferences.cursorStyle,
@@ -633,7 +639,7 @@ class TerminalControllerImpl implements TerminalController {
     });
   }
 
-  private updateElementStyles(theme = resolveTerminalTheme(this.preferences.colorScheme)): void {
+  private updateElementStyles(theme = resolveTerminalTheme(this.preferences.colorScheme, this.preferences.colorOverrides)): void {
     const element = this.terminal.element;
     if (!element) return;
 
@@ -1497,8 +1503,8 @@ class TerminalControllerImpl implements TerminalController {
     if (previous.scrollback !== preferences.scrollback) {
       this.terminal.options.scrollback = preferences.scrollback;
     }
-    if (previous.colorScheme !== preferences.colorScheme) {
-      const theme = resolveTerminalTheme(preferences.colorScheme);
+    if (previous.colorScheme !== preferences.colorScheme || previous.colorOverrides !== preferences.colorOverrides) {
+      const theme = resolveTerminalTheme(preferences.colorScheme, preferences.colorOverrides);
       this.terminal.options.theme = theme;
       this.updateElementStyles(theme);
     }
@@ -1527,7 +1533,7 @@ class TerminalControllerImpl implements TerminalController {
 
   refreshTheme(): void {
     if (this.disposed || this.preferences.colorScheme !== 'app') return;
-    const theme = resolveTerminalTheme('app');
+    const theme = resolveTerminalTheme('app', this.preferences.colorOverrides);
     this.terminal.options.theme = theme;
     this.updateElementStyles(theme);
   }

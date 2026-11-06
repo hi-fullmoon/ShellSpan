@@ -49,7 +49,7 @@ export function useFileCompletion({ text, update, query, listDirectories, scopeK
   // Dismiss only this visit to the token. Editing away must retire the old key,
   // otherwise returning to identical text keeps its list hidden indefinitely.
   useEffect(() => { setDismissed(previous => previous === key ? previous : null); }, [key]);
-  const open = Boolean((query || context) && token && !disabled && !composing && focused && dismissed !== key);
+  const open = Boolean((query || context) && token && !disabled && !composing && focused && dismissed !== key && editor.current?.completionAllowed !== false);
   const queryText = token?.query ?? '';
   const rootRequired = needsRoot || Boolean(error && /RootRequired/.test(error));
   const showFiles = Boolean(query && (!context || browsing || queryText));

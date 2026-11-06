@@ -37,6 +37,11 @@ try {
           await page.evaluate(locale => window.setFoldingLocale(locale), locale);
         };
         const process = page.locator('.ai-turn-process-trigger').first();
+        const processRows = async (trigger = process) => {
+          const key = await trigger.evaluate(element => element.closest('[data-ai-node-key]').dataset.aiNodeKey);
+          return page.locator(`[data-ai-process-owner=${JSON.stringify(key)}]`)
+            .filter({ has: page.locator('.ai-transcript-flow-item:not(:empty)') });
+        };
         const readStart = async () => {
           const viewport = page.locator('[data-message-scroller-viewport]');
           await viewport.hover({ position: { x: 4, y: 4 } });
@@ -48,30 +53,82 @@ try {
           window.replayFoldingRecording('completed', events.findIndex(event => event.type === 'turn/end'));
         });
         await reset();
-        await page.evaluate(() => window.replayFoldingRecording('progress'));
+        await page.evaluate(() => window.replayFoldingRecording('progress', 15));
+        await page.locator('[data-slot="message-scroller"]:not(.invisible)').waitFor();
+        await page.evaluate(() => document.fonts.ready);
+        const stability = await page.evaluate(async () => {
+          const find = () => [...document.querySelectorAll('.ai-assistant-markdown p')]
+            .find(p => p.textContent === 'Two candidate project directories. Let me examine both.');
+          const original = find();
+          const seat = original.closest('[data-slot="message-scroller-item"]');
+          const viewport = document.querySelector('[data-message-scroller-viewport]');
+          const top = original.getBoundingClientRect().top + viewport.scrollTop;
+          const compactInset = () => Number.parseFloat(getComputedStyle(original.closest('.ai-conversation-row-body')).paddingTop);
+          const initialInset = compactInset();
+          const range = document.createRange();
+          range.selectNodeContents(original);
+          window.getSelection().removeAllRanges();
+          window.getSelection().addRange(range);
+          const selected = window.getSelection().toString();
+          const samples = [];
+          for (const length of [16, 17, 19]) {
+            window.replayFoldingRecording('progress', length);
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            const current = find();
+            samples.push({ sameNode: current === original,
+              sameSeat: current.closest('[data-slot="message-scroller-item"]') === seat,
+              selected: window.getSelection().toString() === selected,
+              initialInset, inset: compactInset(),
+              delta: current.getBoundingClientRect().top + viewport.scrollTop - top });
+          }
+          window.getSelection().removeAllRanges();
+          return samples;
+        });
+        assert.ok(stability.every(sample => sample.sameNode && sample.sameSeat && sample.selected && Math.abs(sample.delta) < 1),
+          `${engine.name()} ${width} ${locale}: tool deltas and settlement must preserve text position and selection: ${JSON.stringify(stability)}`);
+        assert.ok(stability.every(sample => sample.initialInset === 4 && sample.inset === 4),
+          'Process prose must retain 4px spacing before tool deltas and after settlement');
+        await page.screenshot({ path: `${output}/${engine.name()}-${width}-${locale}-stable-prose.png`, animations: 'disabled' });
         const prose = page.getByText('Two candidate project directories. Let me examine both.', { exact: true });
         await prose.waitFor();
-        assert.equal(await prose.evaluate(element => Boolean(element.closest('.ai-turn-process-body'))), true);
-        assert.equal(await page.locator('[data-ai-node-kind="assistantMessage"]').count(), 0);
+        assert.equal(await prose.evaluate(element => Boolean(element.closest('[data-ai-process-owner]'))), true);
+        assert.equal(await page.locator('[data-ai-node-kind="assistantMessage"]').count(), 2);
         await process.click();
         await prose.waitFor({ state: 'hidden' });
         await process.press('Enter');
         await prose.waitFor();
         await reset();
-        await beforeCompletion();
+        await page.evaluate(() => {
+          const events = window.foldingRecordings.completed;
+          window.replayFoldingRecording('completed', events.findLastIndex(event => event.type === 'assistant/message'));
+        });
+        await page.locator('[data-slot="message-scroller"]:not(.invisible)').waitFor();
         assert.equal(await process.getAttribute('aria-expanded'), 'true');
-        await page.evaluate(() => window.replayFoldingRecording('completed'));
+        const finalSelection = await page.evaluate(() => {
+          const paragraph = [...document.querySelectorAll('.ai-assistant-markdown p')]
+            .find(element => element.textContent === 'COMPACT-CHECK-4719');
+          const range = document.createRange();
+          range.selectNodeContents(paragraph);
+          window.getSelection().removeAllRanges();
+          window.getSelection().addRange(range);
+          window.replayFoldingRecording('completed');
+          return { sameNode: [...document.querySelectorAll('.ai-assistant-markdown p')]
+            .find(element => element.textContent === 'COMPACT-CHECK-4719') === paragraph,
+            selected: window.getSelection().toString() };
+        });
+        assert.deepEqual(finalSelection, { sameNode: true, selected: 'COMPACT-CHECK-4719' });
+        await page.evaluate(() => window.getSelection().removeAllRanges());
         await page.waitForFunction(() => document.querySelector('.ai-turn-process-trigger')?.getAttribute('aria-expanded') === 'false');
-        await page.locator('.ai-turn-process-body').waitFor({ state: 'hidden' });
+        await (await processRows()).first().waitFor({ state: 'hidden' });
         await page.getByText(/COMPACT-CHECK-4719/).waitFor();
-        assert.equal(await page.locator('[data-ai-node-kind="assistantMessage"]').count(), 1);
+        assert.equal(await page.locator('[data-ai-node-kind="assistantMessage"]:visible').count(), 1);
         await page.screenshot({ path: `${output}/${engine.name()}-${width}-${locale}-completed.png`, animations: 'disabled' });
         await process.click();
-        await page.locator('.ai-turn-process-body').waitFor();
+        await (await processRows()).first().waitFor();
         await page.screenshot({ path: `${output}/${engine.name()}-${width}-${locale}-expanded.png`, animations: 'disabled' });
         await reset();
         await beforeCompletion();
-        const control = page.locator('.ai-turn-process-body button').first();
+        const control = page.locator('[data-ai-process-owner] button').first();
         await control.waitFor({ state: 'visible' });
         await control.focus();
         assert.equal(await control.evaluate(element => document.activeElement === element), true,
@@ -87,7 +144,7 @@ try {
           assert.ok(await page.locator('.ai-turn-process-trigger').evaluateAll(elements => elements.every(element =>
             element.getAttribute('aria-expanded') === 'true' && !element.disabled)));
           for (const trigger of await page.locator('.ai-turn-process-trigger').all()) {
-            const body = trigger.locator('..').locator('.ai-turn-process-body');
+            const body = (await processRows(trigger)).first();
             await trigger.click();
             assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
             await body.waitFor({ state: 'hidden' });
@@ -106,7 +163,7 @@ try {
           assert.ok(end > 0);
           await page.evaluate(events => window.replayFoldingEvents(events), runtimeEvents.slice(0, end));
           await readStart();
-          const progress = page.locator('.ai-turn-process-body .ai-assistant-markdown p').first();
+          const progress = page.locator('[data-ai-process-owner] .ai-assistant-markdown p').first();
           await progress.scrollIntoViewIfNeeded();
           const selected = await progress.evaluate(element => {
             const range = document.createRange();
@@ -132,9 +189,29 @@ try {
           await process.click();
           await page.getByText('Two candidate project directories. Let me examine both.', { exact: true }).waitFor();
           assert.equal(await page.getByText('Two candidate project directories. Let me examine both.', { exact: true })
-            .evaluate(element => Boolean(element.closest('.ai-turn-process-body'))), true);
+            .evaluate(element => Boolean(element.closest('[data-ai-process-owner]'))), true);
         }
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'Conversation must fit its container');
+        await reset();
+        await page.setViewportSize({ width, height: 280 });
+        await page.evaluate(() => window.replayFoldingRecording('completed'));
+        await page.waitForFunction(() => document.querySelector('.ai-turn-process-trigger')?.getAttribute('aria-expanded') === 'false');
+        await (await processRows()).first().waitFor({ state: 'hidden' });
+        const viewport = page.locator('[data-message-scroller-viewport]');
+        await viewport.focus();
+        await viewport.press('End');
+        await page.waitForFunction(() => document.querySelector('[data-message-scroller-viewport]').scrollTop > 0);
+        await viewport.press('Home');
+        await page.waitForFunction(() => window.foldingAnchor()?.scrollTop === 0);
+        const reading = await page.evaluate(() => {
+          const viewport = document.querySelector('[data-message-scroller-viewport]');
+          const top = viewport.getBoundingClientRect().top;
+          const visible = [...viewport.querySelectorAll('[data-slot="message-scroller-item"]')]
+            .find(item => item.getBoundingClientRect().height > 0 && item.getBoundingClientRect().bottom > top);
+          return { expected: visible.querySelector('[data-ai-node-key]').dataset.aiNodeKey,
+            actual: window.foldingAnchor()?.nodeKey };
+        });
+        assert.equal(reading.actual, reading.expected, 'Collapsed process rows must not displace the saved reading anchor');
         assert.deepEqual(errors, [], `${engine.name()} ${width} ${locale}`);
         await page.close();
       }

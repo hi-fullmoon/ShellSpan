@@ -7,6 +7,17 @@
   flex-shrink: 0;
 }
 
+.ai-composer-toolbar :is(
+  .ai-composer-add,
+  .ai-permission-trigger,
+  .ai-execution-surface-trigger,
+  .ai-model-trigger,
+  .ai-busy-preference-trigger,
+  .ai-context-meter-trigger
+):is(:hover, [aria-expanded='true']):not(:disabled) {
+  background: var(--ai-action-hover);
+}
+
 .ai-composer-toolbar[data-compact]:not([data-compact='full']) .ai-model-trigger-name {
   max-width: 96px;
 }

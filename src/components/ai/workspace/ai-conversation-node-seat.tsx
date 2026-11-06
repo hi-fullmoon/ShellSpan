@@ -41,6 +41,7 @@ import { AiCompactionStatus } from './ai-compaction-status';
 import { AiQuestionHistory } from './ai-question-panel';
 import { AiFailureRecoveryAction } from './ai-failure-recovery';
 import { AiFailedDraftRecovery, AiFailedDraftRecoveryContext, failedDraftForMessage } from './ai-failed-draft-recovery';
+import { isReadingProcess, processDisclosureKey, processFoldsOnCompletion, storeProcessDisclosure, useProcessDisclosure } from './ai-process-disclosure';
 import {
   AI_DISCLOSURE_LEADING_CLASS,
   AI_DISCLOSURE_ROW_CLASS,
@@ -53,6 +54,9 @@ type AiConversationNodeRendererProps<Kind extends AiConversationNode['kind']> = 
   readonly node: AiConversationNodeOf<Kind>;
   readonly inTurnProcess?: boolean;
   readonly deferMessageActions?: boolean;
+  readonly processControlOnly?: boolean;
+  readonly hasResponse?: boolean;
+  readonly processPanelIds?: string;
   readonly renderers?: AiConversationNodeRendererMap;
   readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
   readonly onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void;
@@ -524,34 +528,10 @@ function ErrorNodeView({ node }: { readonly node: AiConversationNodeOf<'error'> 
   );
 }
 
-interface StoredTurnProcessDisclosure {
-  readonly open: boolean;
-  readonly manualOpen?: boolean;
-}
-
-const TURN_PROCESS_DISCLOSURE_LIMIT = 512;
-const turnProcessDisclosures = new Map<string, StoredTurnProcessDisclosure>();
-
 function turnProcessDisclosureKey(node: AiConversationNodeOf<'turnProcess'>): string {
   // Tool continuations and retries change the request, not the displayed turn.
   // Remounting here restarts the panel's height animation and loses user state.
-  return JSON.stringify([node.sessionId, node.key]);
-}
-
-function storeTurnProcessDisclosure(key: string, value: StoredTurnProcessDisclosure): void {
-  turnProcessDisclosures.delete(key);
-  turnProcessDisclosures.set(key, value);
-  if (turnProcessDisclosures.size <= TURN_PROCESS_DISCLOSURE_LIMIT) return;
-  const oldest = turnProcessDisclosures.keys().next().value as string | undefined;
-  if (oldest !== undefined) turnProcessDisclosures.delete(oldest);
-}
-
-function isReadingProcess(body: HTMLDivElement | null): boolean {
-  if (!body) return false;
-  if (body.contains(document.activeElement)) return true;
-  const selection = window.getSelection();
-  return Boolean(selection && !selection.isCollapsed
-    && (body.contains(selection.anchorNode) || body.contains(selection.focusNode)));
+  return processDisclosureKey(node);
 }
 
 function turnProcessLabelKey(status: AiTurnProcessStatus): LocaleKey {
@@ -597,38 +577,35 @@ function TurnProcessDisclosure({
   onOpenArtifact,
   onOpenTool,
   renderers,
+  processControlOnly = false,
+  processPanelIds,
 }: {
   readonly node: AiConversationNodeOf<'turnProcess'>;
   readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
   readonly onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void;
   readonly renderers: AiConversationNodeRendererMap;
+  readonly processControlOnly?: boolean;
+  readonly processPanelIds?: string;
 }) {
   const { t } = useI18n();
   const stateKey = turnProcessDisclosureKey(node);
-  const stored = turnProcessDisclosures.get(stateKey);
-  const foldOnCompletion = node.status === 'completed' && node.hasEndBoundary
-    && node.hasInterleavedInput !== true && node.hasFinalAnswer !== false;
-  const [automaticOpen, setAutomaticOpen] = useState(stored?.open ?? !foldOnCompletion);
-  const [manualOpen, setManualOpen] = useState(stored?.manualOpen);
+  const { open, stored } = useProcessDisclosure(node);
+  const foldOnCompletion = processFoldsOnCompletion(node);
   const bodyRef = useRef<HTMLDivElement>(null);
-  const open = manualOpen ?? automaticOpen;
   const label = t(turnProcessLabelKey(node.status));
   const summary = turnProcessSummary(node, t);
 
   const updateOpen = (next: boolean): void => {
-    storeTurnProcessDisclosure(stateKey, { open: next, manualOpen: next });
-    setManualOpen(next);
+    storeProcessDisclosure(stateKey, { open: next, manualOpen: next });
   };
 
   // Measure reading intent before closing the mounted body. Moving focus or
   // removing selected text on completion would interrupt the reader.
   useLayoutEffect(() => {
-    setAutomaticOpen(!foldOnCompletion || isReadingProcess(bodyRef.current));
-  }, [foldOnCompletion]);
-
-  useLayoutEffect(() => {
-    storeTurnProcessDisclosure(stateKey, { open, manualOpen });
-  }, [manualOpen, open, stateKey]);
+    if (stored?.manualOpen === undefined) {
+      storeProcessDisclosure(stateKey, { open: !foldOnCompletion || isReadingProcess(node, bodyRef.current) });
+    }
+  }, [foldOnCompletion, stateKey]);
 
   return (
     <Collapsible open={open} onOpenChange={updateOpen}>
@@ -639,6 +616,7 @@ function TurnProcessDisclosure({
         data-answer-generation={node.answerGeneration}
       >
         <CollapsibleTrigger
+          {...(processControlOnly ? { 'aria-controls': processPanelIds || undefined } : {})}
           render={
             <Button
               type="button"
@@ -666,7 +644,7 @@ function TurnProcessDisclosure({
           )}
         </CollapsibleTrigger>
         <Separator className="ai-turn-process-separator" />
-        <CollapsibleContent>
+        {!processControlOnly && <CollapsibleContent>
           <div ref={bodyRef} className="ai-turn-process-body flex w-full min-w-0 max-w-full flex-col gap-1 box-border pt-1.5 pr-0 pb-0.5">
             {node.children.map((child) => (
               <div
@@ -679,7 +657,7 @@ function TurnProcessDisclosure({
               </div>
             ))}
           </div>
-        </CollapsibleContent>
+        </CollapsibleContent>}
       </div>
     </Collapsible>
   );
@@ -690,10 +668,14 @@ function TurnProcessRow({
   onOpenArtifact,
   onOpenTool,
   renderers = aiConversationNodeRenderers,
+  processControlOnly,
+  hasResponse,
+  processPanelIds,
 }: AiConversationNodeRendererProps<'turnProcess'>) {
-  if (!node.children.some((child) => child.kind !== 'contextInjection' || isUserVisibleContextInjection(child))) return null;
+  if (!node.children.some((child) => child.kind !== 'contextInjection' || isUserVisibleContextInjection(child))
+    && !(processControlOnly && hasResponse && !node.hasEndBoundary)) return null;
   const key = turnProcessDisclosureKey(node);
-  return <TurnProcessDisclosure key={key} node={node} renderers={renderers} onOpenTool={onOpenTool} onOpenArtifact={onOpenArtifact} />;
+  return <TurnProcessDisclosure key={key} node={node} renderers={renderers} onOpenTool={onOpenTool} onOpenArtifact={onOpenArtifact} processControlOnly={processControlOnly} processPanelIds={processPanelIds} />;
 }
 
 export const aiConversationNodeRenderers = {
@@ -730,6 +712,9 @@ function renderNode(
   onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void,
   inTurnProcess = false,
   deferMessageActions = false,
+  processControlOnly = false,
+  hasResponse = false,
+  processPanelIds?: string,
 ): React.ReactNode {
   switch (node.kind) {
     case 'compaction':
@@ -764,6 +749,9 @@ function renderNode(
         renderers,
         onOpenTool,
         onOpenArtifact,
+        processControlOnly,
+        hasResponse,
+        processPanelIds,
       });
     case 'turnTail':
       return React.createElement(renderers.turnTail, { node, renderers });
@@ -845,6 +833,10 @@ export const AiConversationNodeSeat = React.memo(
     onOpenTool,
     onOpenArtifact,
     deferMessageActions = false,
+    inTurnProcess = false,
+    processControlOnly = false,
+    hasResponse = false,
+    processPanelIds,
   }: {
     readonly node: AiConversationNode;
     readonly renderers?: AiConversationNodeRendererMap;
@@ -852,6 +844,10 @@ export const AiConversationNodeSeat = React.memo(
     readonly scrollItemId?: string;
     readonly scrollItemClassName?: string;
     readonly deferMessageActions?: boolean;
+    readonly inTurnProcess?: boolean;
+    readonly processControlOnly?: boolean;
+    readonly hasResponse?: boolean;
+    readonly processPanelIds?: string;
     readonly onOpenTool?: (node: AiConversationNodeOf<'tool'>) => void;
     readonly onOpenArtifact?: (node: AiConversationNodeOf<'artifact'>) => void;
   }) {
@@ -862,7 +858,7 @@ export const AiConversationNodeSeat = React.memo(
         data-ai-node-kind={node.kind}
         data-ai-turn-id={node.turnId ?? undefined}
       >
-        {renderNode(node, renderers, onOpenTool, onOpenArtifact, false, deferMessageActions)}
+        {renderNode(node, renderers, onOpenTool, onOpenArtifact, inTurnProcess, deferMessageActions, processControlOnly, hasResponse, processPanelIds)}
       </div>
     );
   },
@@ -871,6 +867,10 @@ export const AiConversationNodeSeat = React.memo(
     previous.onOpenTool === next.onOpenTool &&
     previous.onOpenArtifact === next.onOpenArtifact &&
     previous.deferMessageActions === next.deferMessageActions &&
+    previous.inTurnProcess === next.inTurnProcess &&
+    previous.processControlOnly === next.processControlOnly &&
+    previous.hasResponse === next.hasResponse &&
+    previous.processPanelIds === next.processPanelIds &&
     sameConversationNode(previous.node, next.node),
 );
 AiConversationNodeSeat.displayName = 'AiConversationNodeSeat';

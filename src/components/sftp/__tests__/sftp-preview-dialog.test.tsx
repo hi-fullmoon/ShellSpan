@@ -1,6 +1,8 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { strToU8, zipSync } from 'fflate';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { SftpPreviewDialog } from '../sftp-preview-dialog';
 import type { ReadRemoteFileResponse } from '@/types';
 
@@ -62,11 +64,11 @@ describe('SftpPreviewDialog', () => {
     expect(document.querySelector('pre')).toHaveTextContent(/first\s+second/);
     const dialogHeader = document.querySelector('[data-slot="dialog-header"]');
     expect(dialogHeader?.nextElementSibling).not.toHaveClass('border-t');
-    const metadataSeparator = document.querySelector(
-      '[data-slot="separator"][data-orientation="vertical"]',
-    );
-    expect(metadataSeparator).toHaveClass('h-4', 'data-vertical:self-center');
-    expect(metadataSeparator).not.toHaveClass('data-vertical:self-stretch');
+    const toolbar = document.querySelector('[data-slot="sftp-text-toolbar"]');
+    expect(toolbar).toHaveTextContent('TXT·12 B·2 lines');
+    expect(toolbar?.querySelector('[data-slot="badge"]')).toBeNull();
+    expect(toolbar?.querySelector('[data-slot="separator"]')).toBeNull();
+    expect(screen.queryByText('sftp.preview.kind.text')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'sftp.preview.openExternally' }));
     expect(onOpenExternally).toHaveBeenCalledWith('/srv/readme.txt');
   });
@@ -97,6 +99,51 @@ describe('SftpPreviewDialog', () => {
     expect(screen.getByRole('columnheader', { name: 'host' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'port' })).toBeInTheDocument();
     expect(screen.getByRole('cell', { name: 'web-01' })).toBeInTheDocument();
+  });
+
+  it('shows the original JSON source immediately without table or view tabs', () => {
+    const path = resolve(process.cwd(), 'src/lib/ai/retry-policy.json');
+    const source = readFileSync(path, 'utf8');
+    render(
+      <SftpPreviewDialog
+        open
+        content={{
+          path,
+          name: 'retry-policy.json',
+          content: source,
+          size: Buffer.byteLength(source),
+          isText: true,
+          contentEncoding: 'utf8',
+          truncated: false,
+        }}
+        onClose={() => {}}
+      />,
+    );
+
+    expect(document.querySelector('pre')?.textContent).toBe(source);
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-slot="sftp-text-toolbar"]')).toHaveTextContent('JSON');
+    expect(screen.getByRole('button', { name: 'sftp.preview.copyContent' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'sftp.preview.toggleWrap' }));
+    expect(document.querySelector('pre')).toHaveClass('whitespace-pre-wrap');
+    expect(document.querySelector('pre')?.textContent).toBe(source);
+  });
+
+  it('labels readable files without an extension by their preview kind', () => {
+    const path = resolve(process.cwd(), 'LICENSE');
+    const source = readFileSync(path, 'utf8');
+    render(
+      <SftpPreviewDialog
+        open
+        content={{ path, name: 'LICENSE', content: source, size: Buffer.byteLength(source), isText: true, contentEncoding: 'utf8', truncated: false }}
+        onClose={() => {}}
+      />,
+    );
+
+    expect(document.querySelector('[data-slot="sftp-preview-metadata"]')).toHaveTextContent('sftp.preview.kind.text');
+    expect(screen.queryByText('sftp.preview.kind.unavailable')).not.toBeInTheDocument();
+    expect(document.querySelector('pre')?.textContent).toBe(source);
   });
 
   it('renders a ZIP archive as a file listing', () => {
@@ -162,6 +209,10 @@ describe('SftpPreviewDialog', () => {
       'data:image/png;base64,iVBORw0KGgo=',
     );
     expect(screen.getByText('PNG')).toBeInTheDocument();
+    const metadata = document.querySelector('[data-slot="sftp-preview-metadata"]');
+    expect(metadata).toHaveTextContent('PNG·8 B');
+    expect(metadata?.querySelector('[data-slot="badge"]')).toBeNull();
+    expect(screen.queryByText('sftp.preview.kind.image')).not.toBeInTheDocument();
   });
 
   it('stretches PDF previews through the remaining dialog height', () => {
@@ -183,6 +234,11 @@ describe('SftpPreviewDialog', () => {
     const frame = screen.getByTitle('manual.pdf');
     expect(frame).toHaveClass('min-h-0', 'w-full', 'flex-1');
     expect(frame.parentElement).toHaveClass('min-h-0', 'flex-1', 'overflow-hidden');
+    const metadata = document.querySelector('[data-slot="sftp-preview-metadata"]');
+    expect(metadata).toHaveTextContent('PDF·8 B');
+    expect(metadata).toHaveClass('text-xs', 'text-muted-foreground');
+    expect(metadata?.querySelector('[data-slot="badge"]')).toBeNull();
+    expect(screen.queryByText('sftp.preview.kind.pdf')).not.toBeInTheDocument();
   });
 
   it('renders UTF-8 SVG content as an encoded image source', () => {

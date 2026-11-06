@@ -543,6 +543,7 @@ export function AiComposerSeat({
             </div>}
             <AiComposerEditor
               {...completion.editorProps}
+              markdown={mode === 'agent'}
               {...(skillCompletion.open ? {
                 'aria-controls': skillCompletion.editorProps['aria-controls'],
                 'aria-expanded': true,

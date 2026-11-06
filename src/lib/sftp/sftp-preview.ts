@@ -119,7 +119,8 @@ export function getSftpPreviewDescriptor(
       return { kind: 'markdown', mimeType: 'text/markdown;charset=utf-8', extension, icon: FileTextIcon };
     }
     if (DATA_EXTENSIONS.has(extension)) {
-      return { kind: 'data', mimeType: 'text/plain;charset=utf-8', extension, icon: extension === 'json' || extension === 'jsonl' || extension === 'ndjson' ? BracesIcon : Table2Icon };
+      const isJson = extension === 'json' || extension === 'jsonl' || extension === 'ndjson';
+      return { kind: isJson ? 'text' : 'data', mimeType: 'text/plain;charset=utf-8', extension, icon: isJson ? BracesIcon : Table2Icon };
     }
     const icon = DATA_EXTENSIONS.has(extension)
       ? (extension === 'json' || extension === 'jsonl' ? BracesIcon : Table2Icon)

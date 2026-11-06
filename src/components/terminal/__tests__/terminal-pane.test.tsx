@@ -35,7 +35,8 @@ vi.mock('@/hooks/useToast', () => ({
   }),
 }));
 
-vi.mock('@/components/terminal/registry/terminal-registry', () => ({
+vi.mock('@/components/terminal/registry/terminal-registry', async (importOriginal) => ({
+  resolveTerminalTheme: (await importOriginal<typeof import('@/components/terminal/registry/terminal-registry')>()).resolveTerminalTheme,
   terminalRegistry: {
     get: vi.fn(),
     create: vi.fn(),
