@@ -125,12 +125,14 @@ export function checkNotes(version, root = process.cwd()) {
     const unexpected = changed.filter(file => !allowed.has(file));
     if (unexpected.length) throw new Error(`Code changed after notes were prepared: ${unexpected.join(', ')}; regenerate and review the release range`);
   }
-  const packageName = parseToml(command('git', ['show', `${meta.headSha}:src-tauri/Cargo.toml`], root)).package.name;
+  const refs=VERSION_FILES.flatMap(file=>[`${meta.headSha}:${file}`,`HEAD:${file}`,`:${file}`]);
+  const manifests=readManifestBlobs(refs,root);
+  const packageName = parseToml(manifests.get(`${meta.headSha}:src-tauri/Cargo.toml`)).package.name;
   for (const file of VERSION_FILES) {
-    const baseline = manifestContent(file, command('git', ['show', `${meta.headSha}:${file}`], root), packageName);
+    const baseline = manifestContent(file, manifests.get(`${meta.headSha}:${file}`), packageName);
     for (const [location, source] of [
-      ['HEAD', command('git', ['show', `HEAD:${file}`], root)],
-      ['index', command('git', ['show', `:${file}`], root)],
+      ['HEAD', manifests.get(`HEAD:${file}`)],
+      ['index', manifests.get(`:${file}`)],
       ['worktree', readFileSync(path.join(root, file), 'utf8')],
     ]) {
       const candidate = manifestContent(file, source, packageName);
@@ -140,6 +142,23 @@ export function checkNotes(version, root = process.cwd()) {
     }
   }
   return { meta, notes };
+}
+
+function readManifestBlobs(refs,root){
+  const objectLimit=16*1024*1024;
+  const output=execFileSync('git',['cat-file','--batch'],{cwd:root,input:refs.join('\n')+'\n',maxBuffer:refs.length*(objectLimit+1024)});
+  const contents=new Map();let offset=0;
+  for(const ref of refs){
+    const end=output.indexOf(10,offset);
+    if(end<0)throw new Error('Incomplete release manifest object header');
+    const header=output.toString('ascii',offset,end),match=/^(?:[a-f0-9]{40}|[a-f0-9]{64}) blob (\d+)$/.exec(header);
+    if(!match)throw new Error('Release manifest object is missing or is not a blob');
+    const size=Number(match[1]),start=end+1,next=start+size;
+    if(!Number.isSafeInteger(size)||size<0||size>objectLimit||next>=output.length||output[next]!==10)throw new Error('Incomplete release manifest object body');
+    contents.set(ref,output.toString('utf8',start,next));offset=next+1;
+  }
+  if(offset!==output.length)throw new Error('Unexpected release manifest object output');
+  return contents;
 }
 
 function manifestContent(file, source, packageName) {

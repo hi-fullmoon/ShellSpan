@@ -1,7 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtemp, mkdir, readFile, writeFile, copyFile, rm, access } from 'node:fs/promises';
 import { execSync } from 'node:child_process';
-import os from 'node:os';
 import path from 'node:path';
 import semver from 'semver';
 import { command, readVersions, checkNotes, updateChangelog, VERSION_FILES, REPOSITORY } from '../release-notes.mjs';
@@ -11,9 +10,16 @@ const root = path.resolve(import.meta.dirname, '../..');
 const directories = [];
 const notes = '### 问题修复\n\n- 修复 SSH 命令取消后无法立即重试的问题。';
 
-async function copyManifests() {
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'shellspan-release-regression-'));
+async function fixtureDirectory(prefix) {
+  const base=path.join(root,'.artifacts/tests/release-review');
+  await mkdir(base,{recursive:true});
+  const directory=await mkdtemp(path.join(base,prefix));
   directories.push(directory);
+  return directory;
+}
+
+async function copyManifests() {
+  const directory = await fixtureDirectory('regression-');
   await mkdir(path.join(directory, 'src-tauri'));
   for (const file of [...VERSION_FILES, 'CHANGELOG.md', '.gitignore']) {
     await copyFile(path.join(root, file), path.join(directory, file));
@@ -21,8 +27,15 @@ async function copyManifests() {
   return directory;
 }
 
-async function reviewedRepository() {
+async function reviewedRepository(unicodeManifests = false) {
   const directory = await copyManifests();
+  if (unicodeManifests) {
+    const file=path.join(directory,'package.json');
+    const pkg=JSON.parse(await readFile(file,'utf8'));
+    pkg.description='多字节版本边界 e\u0301 👩🏽‍💻';
+    await writeFile(file,JSON.stringify(pkg,null,2)+'\r\n');
+    await writeFile(path.join(directory,'src-tauri/Cargo.toml'),'\r\n# 多字节对象长度 👩🏽‍💻\r\n',{flag:'a'});
+  }
   const git = args => command('git', args, directory);
   git(['init', '--quiet']);
   git(['config', 'user.name', 'Release regression tests']);
@@ -68,6 +81,19 @@ afterEach(async () => {
 });
 
 describe('reviewed release boundary', () => {
+  it('preserves UTF-8 object byte lengths and CRLF manifest content in batched Git reads',async()=>{
+    const {directory,version,git}=await reviewedRepository(true);
+    expect(checkNotes(version,directory).notes).toBe(notes);
+    git(['add','.']);
+    expect(checkNotes(version,directory).notes).toBe(notes);
+  });
+
+  it('fails closed when a required manifest is missing from the index',async()=>{
+    const {directory,version,git}=await reviewedRepository();
+    git(['update-index','--force-remove','src-tauri/Cargo.lock']);
+    expect(()=>checkNotes(version,directory)).toThrow('Release manifest object is missing or is not a blob');
+  });
+
   it('accepts version-only preparation before staging, after staging, and after committing', async () => {
     const { directory, version, git, commit } = await reviewedRepository();
     expect(checkNotes(version, directory).notes).toBe(notes);
@@ -181,8 +207,7 @@ describe('release preparation recovery', () => {
   });
 
   it('prepares all files successfully for a real Cargo project', async () => {
-    const directory = await mkdtemp(path.join(os.tmpdir(), 'shellspan-release-success-'));
-    directories.push(directory);
+    const directory = await fixtureDirectory('success-');
     command('cargo', ['init', '--lib', '--name', 'release_preparation_probe', '--vcs', 'none', 'src-tauri'], directory);
     command('cargo', ['generate-lockfile', '--manifest-path', 'src-tauri/Cargo.toml'], directory);
     for (const file of ['package.json', 'src-tauri/tauri.conf.json']) {
@@ -225,6 +250,12 @@ describe('release preparation recovery', () => {
     await copyFile(path.join(root, 'scripts/reject-package-version.mjs'), path.join(directory, 'scripts/reject-package-version.mjs'));
     const pkg = JSON.parse(await readFile(path.join(directory, 'package.json'), 'utf8'));
     expect(pkg.scripts).not.toHaveProperty('version');
+    await writeFile(path.join(directory,'pnpm-workspace.yaml'),'packages: []\n');
+    // Keep pnpm's Git discovery inside this fixture even under .artifacts/.
+    // A clean local baseline lets the real preversion hook be the refusal.
+    command('git',['init','--quiet'],directory);
+    command('git',['add','.'],directory);
+    command('git',['-c','user.name=Release regression tests','-c','user.email=release-regression@localhost','-c','commit.gpgsign=false','commit','--quiet','-m','chore: fixture baseline'],directory);
     let result;
     try {
       // Constant shell command works with both the Windows pnpm.cmd shim and
