@@ -6,13 +6,18 @@ import { evaluateZleCapture } from '../native-input-p3/zle-capture-evidence.mjs'
 
 const directory = resolve(import.meta.dirname, 'fixtures/zle-guards-native-20261106');
 const manifest = JSON.parse(readFileSync(resolve(directory, 'manifest.json'), 'utf8'));
-const observations = manifest.records.map(record => {
-  const bytes = readFileSync(resolve(directory, record.file));
-  expect(createHash('sha256').update(bytes).digest('hex')).toBe(record.sha256);
-  return JSON.parse(bytes);
-});
+const receipts = manifest.records.map(record => ({
+  ...record,
+  bytes: readFileSync(resolve(directory, record.file)),
+}));
+const observations = receipts.map(record => JSON.parse(record.bytes));
 
 describe('actual ZLE capture evidence validation', () => {
+  it('preserves every captured receipt byte before evaluating native evidence', () => {
+    for (const record of receipts) {
+      expect(createHash('sha256').update(record.bytes).digest('hex'), record.file).toBe(record.sha256);
+    }
+  });
   it('accepts all eleven byte-preserved native guard receipts, including the expanded namespace cases', () => {
     expect(evaluateZleCapture('guards', observations)).toMatchObject({ ok: true, expectedCases: 11, missing: [], duplicates: [], unexpected: [] });
   });
