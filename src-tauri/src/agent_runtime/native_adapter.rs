@@ -229,6 +229,7 @@ impl NativeToolRuntime for NativeToolAdapter {
             || (tracks_execution
                 && (request.target.kind == "local" || request.target.profile_id.is_some()))
         {
+            super::scratch::validate_transport_target(&request.scratch_target, &request.target)?;
             let services = super::scratch::ScratchServices {
                 database,
                 credentials,
@@ -256,7 +257,7 @@ impl NativeToolRuntime for NativeToolAdapter {
             Some(self.scratch.acquire(
                 &request.session_id,
                 &request.task_id,
-                &request.target,
+                &request.scratch_target,
                 current_unix_ms().saturating_add(DEFAULT_NATIVE_APPROVAL_TTL_MS),
                 scratch_scope,
                 reservation,
@@ -265,6 +266,9 @@ impl NativeToolRuntime for NativeToolAdapter {
         } else {
             None
         };
+        if let Some(lease) = &mut scratch {
+            lease.bind_execution_target(&request.target)?;
+        }
         let mut owner_target = target_native(&request.target)?;
         if scratch_scope {
             let root = &scratch
@@ -273,7 +277,7 @@ impl NativeToolRuntime for NativeToolAdapter {
                 .root;
             let scratch_id = format!(
                 "scratch-{}",
-                super::scratch::key(&request.session_id, &request.target)?
+                super::scratch::key(&request.session_id, &request.scratch_target)?
             );
             match &mut owner_target {
                 AgentToolTargetNative::Local { target_id, cwd, .. } => {

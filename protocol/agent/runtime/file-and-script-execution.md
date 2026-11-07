@@ -37,7 +37,15 @@ retains it in recorded calls so approval reconstruction cannot switch roots.
 
 Local files live under
 `{dataRoot}/tmp/{shortId}`, where `shortId` is the first 16 hexadecimal characters
-of the session/target SHA-256 digest. Ownership records and native target IDs keep
+of the session/initial-target SHA-256 digest. The immutable `session/created`
+target supplies this storage identity. A verified terminal reconnect updates
+the live execution target and resets approval; it preserves this original
+scratch identity, file paths and process pins. The current header must still
+match the request, and only transport/target IDs may differ from the storage
+owner: login, credentials and file/project roots cannot change this way.
+The native file target still uses the current transport and its normal live
+identity checks; a storage record never proves that a connection is available.
+Ownership records and native target IDs keep
 the complete digest. A conflicting reservation or an occupied directory without
 a matching ownership record is rejected; files are never adopted or overwritten.
 `dataRoot` keeps the existing development/production/custom-root separation.
@@ -76,6 +84,17 @@ also preserves references to Direct processes long enough to inspect their real
 termination result. An exception after dispatch, unconfirmed remote termination,
 or a process lost across restart leaves a persistent pin. Missing handles or a
 closed/archived chat never prove termination and never trigger command replay.
+
+New process pins use ownership-record version 2 and carry their actual
+`executionTarget`. Maintenance validates that target against the immutable
+storage scope, then uses its complete execution identity to confirm termination.
+Version-1 records remain readable; old process pins without this field use their
+original record target and remain pinned if authoritative state is unavailable.
+An existing record advances to version 2 when a new process pin is stored; file
+operations and foreground completion alone do not rewrite it as a new version.
+Unknown versions or a process target outside the owning host/file scope fail
+closed. Older runtimes that only understand version 1 must reject version 2;
+they must not reinterpret, clear or replay its process pins.
 
 Unused workspaces have a 24-hour retention period, extended to 7 days after a
 failure, nonzero exit or cancellation. Cleanup runs on startup, hourly, and before

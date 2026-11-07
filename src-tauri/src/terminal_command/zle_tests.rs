@@ -388,6 +388,7 @@ fn native_zle_private_eof_preserves_ordinary_input_and_user_hooks() {
             &owner.join(".artifacts/tests/native-input-p2/resources/native-input"),
         )
         .unwrap();
+        let eof_display_binding = prepared.profile.display_binding();
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows: 30,
@@ -440,6 +441,10 @@ fn native_zle_private_eof_preserves_ordinary_input_and_user_hooks() {
                 &rx,
                 &mut records,
                 |m| matches!(m, nip::Message::Connection(e) if matches!(e.payload, nip::ConnectionPayload::EditorReady { editor_empty: true, .. })),
+            );
+            publish(
+                &evidence.join("verified-display-binding.json"),
+                &serde_json::to_value(&eof_display_binding).unwrap(),
             );
             let raw_deadline = Instant::now() + Duration::from_secs(2);
             while pair.master.get_termios().unwrap().local_flags.bits() & libc::ICANON != 0 {
@@ -1291,11 +1296,16 @@ fn native_zle_actual_broker_display_binding() {
             binding.unicode_version,
             Some(nip::DisplayUnicodeVersion::Unicode11)
         );
+        assert_eq!(
+            binding.unicode_scope,
+            Some(nip::DisplayUnicodeScope::Session)
+        );
         let mut pty = crate::models::SessionPtyInfo::local();
         pty.input_mode = Some(snapshot.input_mode);
         pty.native_display_binding = Some(binding);
         let dto = serde_json::to_value(&pty).unwrap();
         assert_eq!(dto["nativeDisplayBinding"]["unicodeVersion"], "11");
+        assert_eq!(dto["nativeDisplayBinding"]["unicodeScope"], "session");
         assert_eq!(dto["nativeDisplayBinding"]["ownedReflowCursorLine"], true);
         assert_eq!(
             broker
@@ -1372,6 +1382,87 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
     fs::create_dir_all(&evidence).unwrap();
     let home = evidence.join("home");
     fs::create_dir(&home).unwrap();
+    let handoff_interrupt =
+        std::env::var("SHELLSPAN_P3_INTERRUPT_STAGE").is_ok_and(|value| value == "handoff");
+    let gated_handoff = std::env::var_os("SHELLSPAN_P3_HANDOFF_GATE").is_some();
+    assert!(
+        !gated_handoff || handoff_interrupt,
+        "The real preexec gate is only for the explicit handoff interrupt case"
+    );
+    let handoff_baseline = gated_handoff.then(|| {
+        let path = PathBuf::from(
+            std::env::var_os("SHELLSPAN_P3_HANDOFF_BASELINE")
+                .expect("A gated user-hook interrupt requires its actual ordinary Shell baseline"),
+        );
+        assert!(path.is_absolute());
+        assert!(!fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(path.canonicalize().unwrap().starts_with(
+            owner
+                .canonicalize()
+                .unwrap()
+                .join(".artifacts/tests/native-input-p3/handoff-baseline")
+        ));
+        let bytes = fs::read(&path).unwrap();
+        assert!(bytes.len() <= 65_536);
+        let baseline: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(baseline["kind"], "actual-ordinary-zle-handoff-baseline");
+        assert_eq!(
+            baseline["mainSha256"].as_str().unwrap(),
+            super::registration::mac_zle_pin("privateMainSha256").unwrap()
+        );
+        assert_eq!(
+            baseline["coreSha256"].as_str().unwrap(),
+            super::registration::mac_zle_pin("privateCoreSha256").unwrap()
+        );
+        assert_eq!(
+            baseline["userGateSha256"].as_str().unwrap(),
+            nip::sha(
+                &fs::read_to_string(owner.join("scripts/native-input-p3/zle-handoff-gate.zsh"))
+                    .unwrap()
+            )
+        );
+        let folder = path.parent().unwrap();
+        for name in [
+            "raw.bin",
+            "actual-mapped-files.txt",
+            "result.json",
+            "actual-source.bin",
+        ] {
+            let file = folder.join(name);
+            assert!(!fs::symlink_metadata(&file)
+                .unwrap()
+                .file_type()
+                .is_symlink());
+            assert!(fs::metadata(&file).unwrap().len() <= 2_097_152);
+            assert_eq!(
+                nip::sha(&fs::read_to_string(file).unwrap()),
+                baseline["files"][name].as_str().unwrap()
+            );
+        }
+        let ordinary: serde_json::Value =
+            serde_json::from_slice(&fs::read(folder.join("result.json")).unwrap()).unwrap();
+        assert_eq!(ordinary["kind"], "ordinary-zsh-user-preexec-interrupt");
+        assert_eq!(ordinary["nativeModuleLoaded"], false);
+        assert_eq!(ordinary["returnedToPrompt"], true);
+        assert_eq!(ordinary["normalExit"], true);
+        assert_eq!(ordinary["actualExitCode"], 0);
+        assert_eq!(
+            ordinary["pid"],
+            ordinary["foregroundGroupImmediatelyBeforeCtrlC"]
+        );
+        let status = ordinary["observedParentStatus"].as_i64().unwrap();
+        assert!((0..=255).contains(&status));
+        assert_eq!(ordinary["nextOrdinarySourceConfirmedStatus"], status);
+        let mapped = fs::read_to_string(folder.join("actual-mapped-files.txt")).unwrap();
+        assert!(mapped.contains("/scoped/zsh/zle.so") && !mapped.contains("ss_nip.so"));
+        assert!(fs::read_to_string(folder.join("raw.bin"))
+            .unwrap()
+            .contains(&format!("REFERENCE_STATUS={status}\r\n")));
+        (baseline, status as i32)
+    });
     let candidate_shell = std::env::var_os("SHELLSPAN_P3_TEST_ZSH").map(PathBuf::from);
     let owned_shell = verified_test_shell(&owner);
     let shell = owned_shell.as_path();
@@ -1441,6 +1532,32 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
             })
             .collect::<Vec<_>>()
     });
+    let _handoff_gate_keepalive = if gated_handoff {
+        use std::os::unix::fs::OpenOptionsExt;
+        let fifo = home.join("handoff-gate.fifo");
+        let name = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        zshrc.push_str(&format!(
+            "source {}\n",
+            shlex::try_quote(
+                owner
+                    .join("scripts/native-input-p3/zle-handoff-gate.zsh")
+                    .to_str()
+                    .unwrap()
+            )
+            .unwrap()
+        ));
+        Some(
+            fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .custom_flags(libc::O_NONBLOCK)
+                .open(fifo)
+                .unwrap(),
+        )
+    } else {
+        None
+    };
     fs::write(home.join(".zshrc"), zshrc).unwrap();
     scoped_observers(&home);
     fs::write(home.join(".zlogin"), "P3_STARTUP_ORDER+=:login\n").unwrap();
@@ -1468,17 +1585,10 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
             .is_err(),
         "A real wrong executable was accepted as the reviewed Core"
     );
-    fs::write(
-        evidence.join("verified-display-binding.json"),
-        serde_json::to_vec_pretty(&binding).unwrap(),
-    )
-    .unwrap();
     let columns = std::env::var("SHELLSPAN_P3_TEST_COLUMNS")
         .map(|value| value.parse::<u16>().unwrap())
         .unwrap_or(100);
     assert!([32, 40, 100, 180].contains(&columns));
-    let handoff_interrupt =
-        std::env::var("SHELLSPAN_P3_INTERRUPT_STAGE").is_ok_and(|value| value == "handoff");
     let pair = native_pty_system()
         .openpty(PtySize {
             rows: 30,
@@ -1716,6 +1826,13 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
             let source_digest = nip::sha(&source);
             let plan_digest = nip::bound_plan_digest(&source_digest, &plan);
             source_corpus.push(serde_json::json!({"index":index,"source":source,"sourceDigest":source_digest,"utf8Bytes":source.len(),"literalLf":source.chars().filter(|value|*value=='\n').count(),"literalTab":source.chars().filter(|value|*value=='\t').count(),"literalCr":source.chars().filter(|value|*value=='\r').count(),"reducedMotion":index>=11,"expectedRequestNotReceipt":true}));
+            if gated_handoff && index == 7 {
+                assert_eq!(
+                    handoff_baseline.as_ref().unwrap().0["sourceDigest"],
+                    source_digest
+                );
+                fs::write(home.join("handoff-gate-source"), &source).unwrap();
+            }
             let prepare = nip::Envelope {
                 protocol: nip::PROTOCOL.into(),
                 request_id: format!("prepare-{index}"),
@@ -1828,6 +1945,28 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
                     |m| matches!(m,nip::Message::Operation(e)if e.request_id==prepare.request_id&&matches!(e.payload,nip::Payload::Started)),
                 );
                 let deadline = Instant::now() + Duration::from_secs(2);
+                if gated_handoff {
+                    while !home.join("handoff-gate-entered").exists() {
+                        assert!(
+                            Instant::now() < deadline,
+                            "Real user preexec gate did not follow native Started"
+                        );
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    assert_eq!(
+                        fs::read_to_string(home.join("handoff-gate-actual-source")).unwrap(),
+                        source_corpus[index]["source"].as_str().unwrap()
+                    );
+                    assert_eq!(
+                        fs::read_to_string(home.join("handoff-gate-parent-pid")).unwrap(),
+                        child.process_id().unwrap().to_string()
+                    );
+                    assert_eq!(
+                        pair.master.process_group_leader().unwrap(),
+                        child.process_id().unwrap() as i32,
+                        "The blocked parent must still own the actual foreground group"
+                    );
+                }
                 if !handoff_interrupt {
                     loop {
                         let group = pair.master.process_group_leader().unwrap();
@@ -1878,11 +2017,19 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
                 }
                 let mode = pair.master.get_termios().unwrap();
                 fs::write(evidence.join("interrupt-pty.json"),serde_json::to_vec_pretty(&serde_json::json!({"shellPid":child.process_id(),"foregroundGroup":group,"localFlags":mode.local_flags.bits(),"inputFlags":mode.input_flags.bits(),"interruptCharacter":mode.control_chars[libc::VINTR],"signalsEnabled":mode.local_flags.bits()&libc::ISIG!=0})).unwrap()).unwrap();
+                if gated_handoff {
+                    let immediate_group = pair.master.process_group_leader().unwrap();
+                    assert_eq!(immediate_group, child.process_id().unwrap() as i32);
+                    publish(
+                        &evidence.join("handoff-gate-observation.json"),
+                        &serde_json::json!({"parentPid":child.process_id(),"foregroundGroupImmediatelyBeforeCtrlC":immediate_group,"actualPreexecSourceSha256":nip::sha(&fs::read_to_string(home.join("handoff-gate-actual-source")).unwrap()),"expectedSourceSha256":source_corpus[index]["sourceDigest"].as_str().unwrap(),"gateHeldByEmptyRealFifo":true,"signalIgnoredOrTrapped":false}),
+                    );
+                }
                 writer.write_all(b"\x03").unwrap();
                 writer.flush().unwrap();
             }
             let expected_exit = if index == 7 {
-                130
+                handoff_baseline.as_ref().map_or(130, |(_, status)| *status)
             } else if index == 9 {
                 1
             } else {
@@ -2119,7 +2266,7 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
         );
     }
     fs::write(evidence.join("geometry.json"),serde_json::to_vec_pretty(&serde_json::json!({"source":geometry_source,"prefixBeforeFirstResize":geometry_source.get(..usize::from(columns)+40),"sourceSha256":nip::sha(&geometry_source),"columns":columns,"rows":30,"resizeEvents":resize_events,"kind":"actual-production-pty-capture"})).unwrap()).unwrap();
-    fs::write(evidence.join("result.json"),serde_json::to_vec_pretty(&serde_json::json!({"ok":outcome.is_ok(),"plannedOperations":13,"shortFalseAndPreviousStatus":outcome.is_ok(),"literalControlCharacters":outcome.is_ok(),"multilineAndReducedMotionTabs":outcome.is_ok(),"dynamicWidths":[columns,32,180,40],"foregroundInterrupt":if handoff_interrupt{"handoff"}else{"running"},"shell":shell,"candidateEditor":true,"backgroundOutput":background_output,"nativeAcceptance":false,"productionBindingChanged":false,"coreSha256":super::registration::mac_zle_pin("privateCoreSha256").unwrap()})).unwrap()).unwrap();
+    fs::write(evidence.join("result.json"),serde_json::to_vec_pretty(&serde_json::json!({"ok":outcome.is_ok(),"plannedOperations":13,"shortFalseAndPreviousStatus":outcome.is_ok(),"literalControlCharacters":outcome.is_ok(),"multilineAndReducedMotionTabs":outcome.is_ok(),"dynamicWidths":[columns,32,180,40],"foregroundInterrupt":if handoff_interrupt{"handoff"}else{"running"},"gatedParentHandoff":gated_handoff,"shell":shell,"candidateEditor":true,"backgroundOutput":background_output,"nativeAcceptance":false,"productionBindingChanged":false,"coreSha256":super::registration::mac_zle_pin("privateCoreSha256").unwrap()})).unwrap()).unwrap();
     if let Err(error) = outcome {
         std::panic::resume_unwind(error);
     }

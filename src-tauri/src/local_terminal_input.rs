@@ -2,6 +2,11 @@ use crate::terminal_integration::TerminalShellKind;
 use portable_pty::MasterPty;
 use std::io::Write;
 
+#[cfg(target_os = "macos")]
+mod pump;
+#[cfg(target_os = "macos")]
+pub(crate) use pump::LocalInputPump;
+
 pub(crate) fn take_writer(
     master: &dyn MasterPty,
     shell: TerminalShellKind,

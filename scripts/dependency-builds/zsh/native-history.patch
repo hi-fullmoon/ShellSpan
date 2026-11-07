@@ -12,21 +12,47 @@
  /***************************************/
 --- a/Src/input.c
 +++ b/Src/input.c
-@@ -423,6 +423,11 @@
+@@ -369,7 +369,10 @@
+ inputline(void)
+ {
+     char *ingetcline, **ingetcpmptl = NULL, **ingetcpmptr = NULL;
+-    int context = ZLCON_LINE_START;
++    int context = ZLCON_LINE_START, native_zle_read = 0;
++
++    if (hist_native_continuation())
++        return lexstop = 1;
+ 
+     /* If reading code interactively, work out the prompts. */
+     if (interact && isset(SHINSTDIN)) {
+@@ -423,6 +426,7 @@
  	    flags |= ZLRF_IGNOREEOF;
  	ingetcline = zleentry(ZLE_CMD_READ, ingetcpmptl, ingetcpmptr,
  			      flags, context);
-+	if (ingetcline) {
-+	    char *source = zleentry(ZLE_CMD_NATIVE_HISTORY, ingetcline);
-+	    if (source)
-+		hist_native_bind(ztrdup(ingetcline), source);
-+	}
++	native_zle_read = 1;
  	histdone |= HISTFLAG_SETTY;
      }
      if (!ingetcline) {
+@@ -466,6 +470,17 @@
+ 	    }
+ 	}
+     }
++    /* Verify the exact final input bytes after keyboard-hack processing,
++     * before the lexer applies any history escaping/canonicalization. */
++    if (native_zle_read) {
++        char *source = zleentry(ZLE_CMD_NATIVE_HISTORY, ingetcline);
++        if (source)
++            hist_native_bind(ztrdup(ingetcline), source);
++        if (errflag) {
++            free(ingetcline);
++            return lexstop = 1;
++        }
++    }
+     isfirstch = 1;
+     if ((inbufflags & INP_APPEND) && inbuf) {
+ 	/*
 --- a/Src/hist.c
 +++ b/Src/hist.c
-@@ -235,6 +235,101 @@
+@@ -235,13 +235,138 @@
  static int histsave_stack_pos = 0;
  
  static zlong histfile_linect;
@@ -83,6 +109,17 @@
 +     * introduce interactive bang expansion while consuming its fixed plan. */
 +    if (!stophist) stophist = 1;
 +}
+ 
++/**/
++mod_export int
++hist_native_continuation(void)
++{
++    if (!native_history_source) return 0;
++    if (native_history_plan) zsfree(native_history_plan);
++    native_history_plan = NULL;
++    zerr("native plan requested unbound continuation input");
++    return 1;
++}
 +
 +/**/
 +static int
@@ -94,10 +131,10 @@
 +    int wordlen = 0, wordpos = 0, length;
 +    native_history_source = native_history_plan = NULL;
 +    if (!source) return 1;
-+    if (!plan || !chline || strcmp(chline, plan)) {
++    if (!plan || !chline) {
 +        zsfree(source);
 +        if (plan) zsfree(plan);
-+        zerr("native history plan changed before parser handoff");
++        zerr("native history handoff was not completely bound");
 +        return 0;
 +    }
 +    zsfree(plan);
@@ -111,7 +148,17 @@
 +        zsfree(source);
 +        return 0;
 +    }
-+    length = strlen(source) + 1;
++    length = strlen(source);
++    /* hend() counts the read's terminating newline before deciding whether
++     * an event has words, then removes that final boundary before storing.
++     * histsplitwords() returns the source tokens without this read frame. */
++    if (length && source[length - 1] == '\n') {
++        wordlen = wordpos + 2;
++        words = zrealloc(words, wordlen * sizeof(short));
++        words[wordpos++] = length - 1;
++        words[wordpos++] = length;
++    }
++    length++;
 +    replacement = zalloc(length);
 +    memcpy(replacement, source, length);
 +    zsfree(source);
@@ -125,10 +172,10 @@
 +    chwordpos = wordpos;
 +    return 1;
 +}
- 
++
  /* save history context */
  
-@@ -242,6 +337,15 @@
+ /**/
  void
  hist_context_save(struct hist_stack *hs, int toplevel)
  {
@@ -144,7 +191,7 @@
      if (toplevel) {
  	/* top level, make this version visible to ZLE */
  	zle_chline = chline;
-@@ -290,6 +394,14 @@
+@@ -290,6 +415,14 @@
  void
  hist_context_restore(const struct hist_stack *hs, int toplevel)
  {
@@ -159,7 +206,7 @@
      if (toplevel) {
  	/* Back to top level: don't need special ZLE value */
  	DPUTS(hs->hline != zle_chline, "BUG: Ouch, wrong chline for ZLE");
-@@ -1104,6 +1216,7 @@
+@@ -1104,6 +1237,7 @@
  {
      char *hf;
  
@@ -167,7 +214,7 @@
      isfirstln = isfirstch = 1;
      errflag &= ~ERRFLAG_ERROR;
      histdone = 0;
-@@ -1461,6 +1574,7 @@
+@@ -1461,6 +1595,7 @@
  mod_export int
  hend(Eprog prog)
  {
@@ -175,11 +222,10 @@
      int flag, hookret, stack_pos = histsave_stack_pos;
      /*
       * save:
-@@ -1499,6 +1613,14 @@
- 	 */
+@@ -1500,6 +1635,14 @@
  	DPUTS(hptr < chline, "History end pointer off start of line");
  	*hptr = '\0';
-+    }
+     }
 +    if (!native_history_apply(&history_prog)) {
 +        save = 0;
 +        histdone |= HISTFLAG_NOEXEC;
@@ -187,10 +233,11 @@
 +        if (chline) *chline = '\0';
 +        hptr = chline;
 +        chwordpos = 0;
-     }
++    }
      if (*chline) {
  	LinkList hookargs = newlinklist();
-@@ -1531,7 +1653,7 @@
+ 	int save_errflag = errflag;
+@@ -1531,7 +1674,7 @@
  	}
  	if (chwordpos <= 2 && !hist_keep_comment)
  	    save = 0;

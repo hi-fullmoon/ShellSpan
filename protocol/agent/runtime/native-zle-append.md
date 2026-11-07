@@ -25,6 +25,13 @@ owned native append，其他值拒绝。它是模式开关，不是行数、终�
 显示API或屏幕内容不能代替上述事实。生产profile准入独立关闭，逐平台待验项见
 [实现说明](../../../docs/design/agent-terminal-input.md)。
 
+已绑定精确私有Main/Core的macOS Zsh 5.9组合发布Unicode 11及`unicodeScope=session`。
+同一Core也使用该宽度处理普通ZLE编辑，因此普通输入和输出保持同一已验证provider，
+不在原生输入结束OSC后恢复旧provider；换行重排开关仍只在owned输入区间开启。
+有序排空并关闭该transport后恢复先前provider，native/raw重绑不能继承旧会话范围。
+这只是显示元数据，不改变用户Shell选项、输入/审批/执行权或生产profile准入；
+其他profile的显示范围不由这个macOS组合推断。
+
 ## 同一读取的源码与计划交接
 
 macOS原生验证组合同时绑定私有Zsh 5.9主程序和Core的精确摘要。主程序从同一固定归档、
@@ -37,6 +44,8 @@ macOS原生验证组合同时绑定私有Zsh 5.9主程序和Core的精确摘要�
 实际交出行。主程序单次消费该映射，在原生历史过滤、hook及保存策略运行之前选择
 source作为历史行，以Zsh自己的lexer生成词边界。它不向已保存历史强插、删行或改写。
 取消、EOF、出错或下一次读取清除映射，嵌套lexer上下文分别保存和恢复自己的状态。
+主程序在keyboard-hack处理后、实际输入通道进入lexer之前再次比较计划字节；历史转义后的
+文本不作为执行计划比较对象。若固定计划耗尽后仍请求续行，拒绝未绑定的额外输入并阻止执行。
 
 读取已验证计划时不引入交互历史展开；用户的BANG_HIST选项以及普通手工输入路径不变。
 历史hook得到原始源码及其正常结束换行，原HISTSIZE、SAVEHIST、HISTFILE、去重与过滤

@@ -59,6 +59,19 @@ pub(super) fn key(session: &str, target: &AgentSessionTarget) -> Result<String, 
     Ok(hex::encode(Sha256::digest(bytes)))
 }
 
+pub(super) fn validate_transport_target(
+    owner: &AgentSessionTarget,
+    current: &AgentSessionTarget,
+) -> Result<(), String> {
+    let mut expected = owner.clone();
+    expected.session_id = current.session_id.clone();
+    expected.target_id = current.target_id.clone();
+    if expected != *current {
+        return Err("scratch ownership cannot move to a different host or file scope".into());
+    }
+    Ok(())
+}
+
 fn local_workspace_path(temporary_root: &Path, key: &str) -> PathBuf {
     // Keys are validated SHA-256 hex digests. Ownership keeps the full digest.
     temporary_root.join(&key[..LOCAL_DIRECTORY_KEY_LEN])
@@ -81,6 +94,7 @@ pub(super) fn owns_target(
     let root = data_root.join("agent-runtime").join("scratch");
     inspect_directory(&root.join("records"))?;
     let record: Record = read_json(&root.join("records").join(format!("{key}.json")))?;
+    validate_record_version(&record)?;
     if record.session_id != session
         || record.key != key
         || self::key(session, &record.target)? != key
@@ -88,19 +102,40 @@ pub(super) fn owns_target(
         return Ok(false);
     }
     let mut expected = super::native_adapter::target_native(&record.target)?;
-    match &mut expected {
-        super::AgentToolTargetNative::Local { target_id, cwd, .. } => {
+    // Files keep their original ownership digest. The separate native target
+    // must still name the current, independently validated transport.
+    match (&mut expected, target) {
+        (
+            super::AgentToolTargetNative::Local {
+                target_id,
+                session_id,
+                cwd,
+            },
+            super::AgentToolTargetNative::Local {
+                session_id: current,
+                ..
+            },
+        ) => {
             *target_id = target.target_id().into();
+            *session_id = current.clone();
             let files = local_workspace_path(&data_root.join("tmp"), key);
             inspect_directory(&files)?;
             *cwd = Some(crate::portable_local_path(&files));
         }
-        super::AgentToolTargetNative::Remote {
-            target_id,
-            root_path,
-            ..
-        } => {
+        (
+            super::AgentToolTargetNative::Remote {
+                target_id,
+                session_id,
+                root_path,
+                ..
+            },
+            super::AgentToolTargetNative::Remote {
+                session_id: current,
+                ..
+            },
+        ) => {
             *target_id = target.target_id().into();
+            *session_id = current.clone();
             *root_path = record.remote_root;
         }
         _ => return Ok(false),
@@ -124,10 +159,40 @@ struct Record {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "camelCase", deny_unknown_fields)]
 enum Usage {
-    Pending { expires_at: u64 },
+    Pending {
+        expires_at: u64,
+    },
     Executing,
-    Process { handle: String, task_id: String },
+    Process {
+        handle: String,
+        task_id: String,
+        #[serde(
+            default,
+            rename = "executionTarget",
+            skip_serializing_if = "Option::is_none"
+        )]
+        execution_target: Option<Box<AgentSessionTarget>>,
+    },
     Uncertain,
+}
+
+fn validate_record_version(record: &Record) -> Result<(), String> {
+    if !matches!(record.version, 1 | 2) {
+        return Err("invalid scratch ownership record version".into());
+    }
+    for usage in record.uses.values() {
+        if let Usage::Process {
+            execution_target: Some(target),
+            ..
+        } = usage
+        {
+            if record.version != 2 {
+                return Err("scratch execution target requires record version 2".into());
+            }
+            validate_transport_target(&record.target, target)?;
+        }
+    }
+    Ok(())
 }
 
 struct State {
@@ -158,6 +223,7 @@ pub(super) struct ScratchLease {
     dispatched: bool,
     settled: bool,
     task_id: String,
+    execution_target: AgentSessionTarget,
     pub root: String,
 }
 
@@ -187,8 +253,8 @@ impl ScratchStore {
         for entry in fs::read_dir(root.join("records")).map_err(|e| e.to_string())? {
             let path = entry.map_err(|e| e.to_string())?.path();
             let record: Record = read_json(&path)?;
-            if record.version != 1
-                || key(&record.session_id, &record.target)? != record.key
+            validate_record_version(&record)?;
+            if key(&record.session_id, &record.target)? != record.key
                 || path.file_name().and_then(|n| n.to_str())
                     != Some(&format!("{}.json", record.key))
             {
@@ -332,6 +398,7 @@ impl ScratchStore {
             dispatched: false,
             settled: false,
             task_id: task.into(),
+            execution_target: target.clone(),
             root,
         })
     }
@@ -370,13 +437,20 @@ impl ScratchStore {
             }
             let mut settled_process = false;
             record.uses.retain(|_, usage| {
-                if let (Some(engine), Usage::Process { handle, task_id }) = (services.engine, usage)
+                if let (
+                    Some(engine),
+                    Usage::Process {
+                        handle,
+                        task_id,
+                        execution_target,
+                    },
+                ) = (services.engine, usage)
                 {
                     if let Some(failed) = engine.scratch_process_outcome(
                         handle,
                         &record.session_id,
                         task_id,
-                        &record.target,
+                        execution_target.as_deref().unwrap_or(&record.target),
                     ) {
                         record.failed |= failed;
                         settled_process = true;
@@ -488,6 +562,15 @@ impl ScratchStore {
 }
 
 impl ScratchLease {
+    pub(super) fn bind_execution_target(
+        &mut self,
+        target: &AgentSessionTarget,
+    ) -> Result<(), String> {
+        validate_transport_target(&self.execution_target, target)?;
+        self.execution_target = target.clone();
+        Ok(())
+    }
+
     pub(super) fn dispatch(&mut self) -> Result<(), String> {
         self.update(Some(Usage::Executing), false)?;
         self.dispatched = true;
@@ -534,6 +617,7 @@ impl ScratchLease {
                     .map(|h| Usage::Process {
                         handle: h.into(),
                         task_id: self.task_id.clone(),
+                        execution_target: Some(Box::new(self.execution_target.clone())),
                     })
                     .unwrap_or(Usage::Uncertain),
             )
@@ -579,6 +663,15 @@ impl ScratchLease {
             .clone();
         record.touched_at = now();
         record.failed |= failed;
+        if matches!(
+            &usage,
+            Some(Usage::Process {
+                execution_target: Some(_),
+                ..
+            })
+        ) {
+            record.version = 2;
+        }
         if let Some(usage) = usage {
             record.uses.insert(self.id.clone(), usage);
         } else {

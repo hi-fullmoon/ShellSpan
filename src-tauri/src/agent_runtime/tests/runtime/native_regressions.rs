@@ -368,10 +368,24 @@ impl Scenario {
         mode: AgentSessionPermissionMode,
         cwd: Option<std::path::PathBuf>,
     ) -> Arc<super::super::AgentEntry> {
+        let target = serde_json::from_value(json!({
+            "kind":"local", "targetId":TERMINAL, "sessionId":TERMINAL, "cwd":cwd,
+        }))
+        .unwrap();
+        self.root_for_target(id, surface, mode, target)
+    }
+
+    fn root_for_target(
+        &self,
+        id: &str,
+        surface: AgentExecutionSurface,
+        mode: AgentSessionPermissionMode,
+        target: crate::agent_runtime::AgentSessionTarget,
+    ) -> Arc<super::super::AgentEntry> {
         self.runtime.create_session(serde_json::from_value(json!({
             "sessionId": id, "taskId": id, "goal": "Review the actual repository source in the temporary workspace",
             "permissionMode": mode, "executionSurface": surface,
-            "target": { "kind": "local", "targetId": TERMINAL, "sessionId": TERMINAL, "cwd": cwd },
+            "target": target,
         })).unwrap()).unwrap();
         // Attach the real HTTP adapter as an owner; these tests exercise native
         // calls directly and never manufacture a model response or contact a model.

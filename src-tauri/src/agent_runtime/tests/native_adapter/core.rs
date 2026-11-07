@@ -87,6 +87,7 @@
                 arguments,
             },
             target: local_target(),
+            scratch_target: local_target(),
             permission_mode: AgentSessionPermissionMode::RequestApproval,
             execution_surface: AgentExecutionSurface::Direct,
         }

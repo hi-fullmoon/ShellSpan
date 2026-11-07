@@ -252,6 +252,12 @@ static int bin_ssnip(char *name, char **args, Options opts, int func) {
         if(!ss_editor_event(editor,15,0,NULL)) return 2;
         char *source=plain(args[1]);
         if(!source) return 1;
+#ifdef SHELLSPAN_ZLE_BOUND_HISTORY
+        /* Rust string exports share one borrowed CString slot. Read job kind
+         * before obtaining the plan; no later export may invalidate plan. */
+        const char *history_kind=ss_editor_job(editor,0);
+        int history_launch=history_kind&&!strcmp(history_kind,"launch");
+#endif
         const char *plan=ss_editor_plan(editor,source);
         if(!plan) {zsfree(source);return 1;}
         if(strcmp(plan,source) && !handoff_masked) {
@@ -265,8 +271,7 @@ static int bin_ssnip(char *name, char **args, Options opts, int func) {
         int history_result=history_bind(history_source,history_plan);
         zsfree(history_source);zsfree(history_plan);
         if(history_result) {zsfree(source);return 1;}
-        const char *history_kind=ss_editor_job(editor,0);
-        history_job=history_kind&&!strcmp(history_kind,"launch");
+        history_job=history_launch;
 #endif
         zsfree(source);
         setsparam("SS_NIP_PLAN",metafy((char *)plan,-1,META_DUP));return 0;

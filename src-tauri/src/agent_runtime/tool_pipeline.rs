@@ -112,6 +112,8 @@ pub(crate) struct NativeToolRequest {
     pub(crate) request_id: String,
     pub(crate) model_call: ModelToolCall,
     pub(crate) target: AgentSessionTarget,
+    /// Immutable Session creation target; never grants current execution rights.
+    pub(crate) scratch_target: AgentSessionTarget,
     pub(crate) permission_mode: super::AgentSessionPermissionMode,
     pub(crate) execution_surface: super::AgentExecutionSurface,
 }
@@ -948,6 +950,9 @@ impl AgentToolPipeline {
         let permission_mode = snapshot.header.permission_mode.ok_or_else(|| {
             "nativePermissionMissing: Session has no Rust permission mode".to_string()
         })?;
+        let scratch_target = self
+            .sessions
+            .scratch_ownership_target(&entry.session_id, &target)?;
         let request_for = |model_call: ModelToolCall| NativeToolRequest {
             session_id: entry.session_id.clone(),
             task_id: snapshot.header.task_id.clone(),
@@ -958,6 +963,7 @@ impl AgentToolPipeline {
             request_id: request_id.into(),
             model_call,
             target: target.clone(),
+            scratch_target: scratch_target.clone(),
             permission_mode,
             execution_surface: snapshot.header.execution_surface,
         };
@@ -1481,6 +1487,9 @@ impl AgentToolPipeline {
             request_id: request_id.into(),
             model_call: call.clone(),
             target: target.clone(),
+            scratch_target: self
+                .sessions
+                .scratch_ownership_target(&entry.session_id, &target)?,
             permission_mode: header
                 .permission_mode
                 .unwrap_or(super::AgentSessionPermissionMode::RequestApproval),
@@ -1600,6 +1609,9 @@ impl AgentToolPipeline {
             request_id: request_id.into(),
             model_call: call.clone(),
             target: target.clone(),
+            scratch_target: self
+                .sessions
+                .scratch_ownership_target(&entry.session_id, &target)?,
             permission_mode: header
                 .permission_mode
                 .unwrap_or(super::AgentSessionPermissionMode::RequestApproval),
@@ -3108,6 +3120,9 @@ impl AgentToolPipeline {
                     name: raw_call.name.clone(),
                     arguments: raw_call.arguments.clone(),
                 },
+                scratch_target: self
+                    .sessions
+                    .scratch_ownership_target(&entry.session_id, &target)?,
                 target,
                 permission_mode: snapshot
                     .header
@@ -3604,6 +3619,7 @@ mod ephemeral_terminal_result_tests {
                 name: "write_terminal_input".into(),
                 arguments: serde_json::json!({"inputKind": "text", "text": "[ephemeral terminal input omitted]"}),
             },
+            scratch_target: target.clone(),
             target,
             permission_mode: super::super::AgentSessionPermissionMode::RequestApproval,
             execution_surface: super::super::AgentExecutionSurface::BoundTerminal,

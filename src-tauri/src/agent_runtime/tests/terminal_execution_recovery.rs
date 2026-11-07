@@ -91,6 +91,7 @@ fn recovery_pipeline() -> (tempfile::TempDir, AgentToolPipeline, NativeToolReque
             name: "run_terminal_command".into(),
             arguments: serde_json::json!({"command":"pwd", "explanation":"Inspect current directory"}),
         },
+        scratch_target: target.clone(),
         target,
         permission_mode: super::super::AgentSessionPermissionMode::Operator,
         execution_surface: super::super::AgentExecutionSurface::BoundTerminal,

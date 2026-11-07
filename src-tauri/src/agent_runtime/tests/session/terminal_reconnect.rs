@@ -17,6 +17,12 @@ fn terminal_reconnect_preserves_conversation_and_replays_the_new_target() {
     };
     store.create(request).unwrap();
     let before = store.snapshot("reconnect-agent").unwrap();
+    assert_eq!(
+        store
+            .scratch_ownership_target("reconnect-agent", &target())
+            .unwrap(),
+        target()
+    );
     let replacement = AgentSessionTarget {
         session_id: "terminal-2".into(),
         target_id: "target-2".into(),
@@ -29,6 +35,15 @@ fn terminal_reconnect_preserves_conversation_and_replays_the_new_target() {
     assert_eq!(after.header.task_id, before.header.task_id);
     assert_eq!(after.header.goal, before.header.goal);
     assert_eq!(after.header.target, Some(replacement.clone()));
+    assert_eq!(
+        store
+            .scratch_ownership_target("reconnect-agent", &replacement)
+            .unwrap(),
+        target()
+    );
+    assert!(store
+        .scratch_ownership_target("reconnect-agent", &target())
+        .is_err());
     assert_eq!(
         after.header.permission_mode,
         Some(AgentSessionPermissionMode::RequestApproval)
@@ -47,6 +62,12 @@ fn terminal_reconnect_preserves_conversation_and_replays_the_new_target() {
     let restored = AgentSessionStore::default();
     restored.configure(root.path().to_path_buf()).unwrap();
     assert_eq!(restored.snapshot("reconnect-agent").unwrap(), after);
+    assert_eq!(
+        restored
+            .scratch_ownership_target("reconnect-agent", after.header.target.as_ref().unwrap())
+            .unwrap(),
+        target()
+    );
 }
 
 #[test]

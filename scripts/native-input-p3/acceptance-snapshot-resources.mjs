@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict';
-import {readFileSync,realpathSync,readdirSync} from 'node:fs';
+import {readFileSync,realpathSync,readdirSync,cpSync,constants} from 'node:fs';
 import {resolve} from 'node:path';
 import {captureValidationSources} from '../native-input-p2/frozen-validation.mjs';
 import {auditEditorResources} from './editor-resources.mjs';
 import {inside,inventory,hashFile,digest} from './acceptance-inputs.mjs';
+
+export function copySnapshotResources(source,destination){
+  // A filesystem clone has independent contents on first write. Where clones
+  // are unsupported Node falls back to a regular copy, never a hard link.
+  cpSync(source,destination,{recursive:true,mode:constants.COPYFILE_FICLONE});
+}
 
 export async function selectSnapshotResources(owner,value){
   const root=realpathSync(value);inside(resolve(owner,'.artifacts/tests/p3'),root);

@@ -10,8 +10,8 @@ const instructions:readonly LocaleKey[]=[
  'terminal.acceptance.step4','terminal.acceptance.step5','terminal.acceptance.step6',
 ];
 const samples=[nativeDisplaySamples.ascii,nativeDisplaySamples.ascii,nativeDisplaySamples.unicode,nativeDisplaySamples.soft,nativeDisplaySamples.hard,nativeDisplaySamples.history];
-type Props={ready:boolean;started:boolean;busy:boolean;step:number;message:string;onStart:(event:MouseEvent<HTMLButtonElement>)=>void;onVerify:()=>void;onDefer:()=>void};
-export function NativeDisplayManualInstructions({ready,started,busy,step,message,onStart,onVerify,onDefer}:Props){
+type Props={ready:boolean;started:boolean;busy:boolean;step:number;message:string;macCopy?:boolean;onStart:(event:MouseEvent<HTMLButtonElement>)=>void;onVerify:()=>void;onDefer:()=>void};
+export function NativeDisplayManualInstructions({ready,started,busy,step,message,macCopy=false,onStart,onVerify,onDefer}:Props){
  const [confirmDefer,setConfirmDefer]=useState(false);
  return <Card size="sm" radius="compact" variant="outline" className="min-h-0 max-h-[45vh] shrink-0" data-testid="manual-instructions">
   <CardHeader className="shrink-0">
@@ -23,7 +23,7 @@ export function NativeDisplayManualInstructions({ready,started,busy,step,message
    <div className="flex flex-col gap-3">
     <Alert variant="info">
      <AlertTitle>{t('terminal.acceptance.current',{step:Math.min(step+1,6)})}</AlertTitle>
-     <AlertDescription>{t(instructions[Math.min(step,5)])}</AlertDescription>
+     <AlertDescription>{t(macCopy&&step===4?'terminal.acceptance.step5Mac':instructions[Math.min(step,5)])}</AlertDescription>
     </Alert>
     <div><p>{t('terminal.acceptance.sample')}</p><pre className="whitespace-pre-wrap break-all select-none" aria-label={t('terminal.acceptance.sample')}>{samples[Math.min(step,5)]}</pre></div>
     <p role="status" aria-live="polite">{message}</p>

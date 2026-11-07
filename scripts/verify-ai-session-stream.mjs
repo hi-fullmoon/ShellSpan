@@ -27,6 +27,7 @@ import {windowsHistoryModes} from './native-input-p3/windows-history-profile.mjs
 import {readWindowsHistoryDisk,readWindowsHistoryExit} from './native-input-p3/windows-history-witness.mjs';
 import {createCredentialLifecycleWitness,credentialLifecycleWindowOptions} from './native-input-p3/credential-lifecycle.mjs';
 import {attachAiCredentialLifecycle} from './native-input-p3/ai-credential-lifecycle.mjs';
+import {zleAppHistoryModes,attachZleAppHistory} from './native-input-p3/zle-app-history.mjs';
 
 // Requires a native desktop and Rust/Tauri. The default regression creates one
 // idle session without provider calls. --performance also reads stored journals
@@ -38,6 +39,7 @@ const { values } = parseArgs({ options: {
   'focus-background': { type: 'boolean' },
   'native-jobs': { type: 'boolean' },
   'native-terminal-manual': { type: 'string' },
+  'native-terminal-manual-form': { type: 'string' },
   'native-terminal-recovery': { type: 'string' },
   'native-input-p3-job-lifecycle': { type: 'boolean' },
   'native-input-p3-job-completion': { type: 'string' },
@@ -86,6 +88,7 @@ const { values } = parseArgs({ options: {
   'native-input-p3-stop-boundary': { type: 'string' },
   'native-input-p3-before-accept': { type: 'boolean' },
   'native-input-p2-history': { type: 'boolean' },
+  'native-input-p3-zle-history': { type: 'string' },
   'native-input-p2-history-small': { type: 'boolean' },
   'native-input-p2-lifecycle': { type: 'boolean' },
   'native-input-p2-ssh-fault': { type: 'boolean' },
@@ -127,6 +130,9 @@ assert(!values['terminal-delegation'] || (!values['terminal-contention'] && !val
   && !values['cleanup-session']?.length), '--terminal-delegation is a separate regression');
 const p3Startup=values['native-input-p3-startup'];
 const nativeManual=values['native-terminal-manual'];
+const nativeManualForm=values['native-terminal-manual-form'];
+assert(nativeManualForm===undefined||nativeManual&&['nfc','nfd'].includes(nativeManualForm),
+  '--native-terminal-manual-form requires one manual case and exact nfc/nfd input');
 const nativeRecovery=values['native-terminal-recovery'];
 assert(!nativeRecovery || process.platform==='darwin'&&process.arch==='arm64'&&['bash','zsh'].includes(nativeRecovery)
   && !values['no-model'] && values['data-scope']===(nativeRecovery==='zsh'?'com.shellspan.validation.native-input-p3':'com.shellspan.validation.native-input-p2')
@@ -137,13 +143,21 @@ assert(!nativeRecovery || process.platform==='darwin'&&process.arch==='arm64'&&[
   '--native-terminal-recovery requires one isolated macOS real-model crash case with exact owned data and HOME');
 assert(!nativeManual || process.platform==='darwin'&&process.arch==='arm64'&&['bash','zsh'].includes(nativeManual)
   && values['no-model']===true && values['data-scope']===(nativeManual==='zsh'?'com.shellspan.validation.native-input-p3':'com.shellspan.validation.native-input-p2')
-  && Object.keys(values).every(key=>['native-terminal-manual','no-model','data-scope','native-input-p3-review'].includes(key)),
+  && Object.keys(values).every(key=>['native-terminal-manual','native-terminal-manual-form','no-model','data-scope','native-input-p3-review'].includes(key)),
   '--native-terminal-manual requires an isolated macOS no-model case with one exact native family and no mixed operation');
 assert(!values['native-input-p3-startup-diagnostic']||p3Startup&&p3Startup!=='zsh');
 assert(!values['native-input-p3-startup-user-edit']||p3Startup&&p3Startup!=='zsh','Ordinary startup editing requires an isolated Windows startup case');
 assert(!p3Startup||values['no-model']&&values['data-scope']==='com.shellspan.validation.native-input-p3'&&!values['native-jobs']&&!values['data-initialize']);
 assert(!values['native-input-p3-review']||nativeManual||p3Startup||values['native-input-p3-submit-fault']||values['native-input-p2-lifecycle']&&['powerShell7','windowsPowerShell'].includes(values['native-input-p3']));
 const nativeP3=values['native-input-p3']??p3Startup;
+const zleAppHistory=values['native-input-p3-zle-history'];
+assert(zleAppHistory===undefined||process.platform==='darwin'&&process.arch==='arm64'&&nativeP3==='zsh'
+ &&zleAppHistoryModes.includes(zleAppHistory)&&values['data-scope']==='com.shellspan.validation.native-input-p3'
+ &&process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR&&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR)
+ &&process.env.SHELLSPAN_LOCAL_HOME===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'home')
+ &&process.env.SHELLSPAN_DATA_DIR===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'data')
+ &&Object.keys(values).every(key=>['native-input-p3-zle-history','native-input-p3','data-scope','route','model'].includes(key)),
+ '--native-input-p3-zle-history requires one isolated macOS ZLE model/history operation');
 assert(!values['native-input-p3-cancel']||nativeP3==='zsh'&&!values['no-model']);
 assert(!values['native-input-p3-submit-fault']||values['native-input-p3-cancel']&&nativeP3==='zsh');
 assert(!values['native-input-p3-backpressure']||nativeP3&&values['native-jobs']&&!values['no-model']);
@@ -175,8 +189,18 @@ const macStorageAdmission=Boolean(storageAdmission&&process.platform==='darwin'&
   &&process.env.SHELLSPAN_LOCAL_HOME===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'home')
   &&Object.keys(values).every(key=>['native-input-p3-storage-admission','native-input-p3','native-input-p2','data-scope'].includes(key)));
 const fileChain=values['native-input-p3-file-chain']===true;
+const ownedMacFileRun=key=>process.platform==='darwin'&&process.arch==='arm64'
+  &&(nativeP3==='zsh'&&values['data-scope']==='com.shellspan.validation.native-input-p3'&&!values['native-input-p2']
+    ||values['native-input-p2']===true&&!nativeP3&&values['data-scope']==='com.shellspan.validation.native-input-p2')
+  &&process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR&&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR)
+  &&process.env.SHELLSPAN_DATA_DIR===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'data')
+  &&process.env.SHELLSPAN_LOCAL_HOME===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'home')
+  &&Object.keys(values).every(argument=>[key,'native-input-p3','native-input-p2','data-scope'].includes(argument));
+const macFileChain=Boolean(fileChain&&ownedMacFileRun('native-input-p3-file-chain'));
 const fileFault=values['native-input-p3-file-fault'];
 const fileRestart=values['native-input-p3-file-restart'];
+const macFileFault=Boolean(fileFault&&ownedMacFileRun('native-input-p3-file-fault'));
+const macFileRestart=Boolean(fileRestart&&ownedMacFileRun('native-input-p3-file-restart'));
 const byteBoundary=values['native-input-p3-byte-boundary'];
 const windowsStop=values['native-input-p3-windows-stop'];
 const windowsDraftCancel=values['native-input-p3-windows-draft-cancel']===true;
@@ -263,19 +287,19 @@ assert(byteBoundary===undefined||process.platform==='win32'&&process.arch==='x64
   &&Boolean(values.route)===Boolean(values.model)
   &&Object.keys(values).every(key=>['native-input-p3-byte-boundary','native-input-p3','data-scope','route','model'].includes(key)),
   '--native-input-p3-byte-boundary requires one isolated real-model Windows byte-boundary case');
-assert(fileRestart===undefined||process.platform==='win32'&&process.arch==='x64'
-  &&['prepare','verify'].includes(fileRestart)&&!noModel&&['powerShell7','windowsPowerShell'].includes(nativeP3)
-  &&values['data-scope']==='com.shellspan.validation.native-input-p3'
-  &&Object.keys(values).every(key=>['native-input-p3-file-restart','native-input-p3','data-scope'].includes(key)),
-  '--native-input-p3-file-restart requires one isolated real-model Windows scratch restart phase');
-assert(fileFault===undefined||process.platform==='win32'&&process.arch==='x64'
-  &&['occupied-directory','existing-file'].includes(fileFault)&&!noModel
-  &&['powerShell7','windowsPowerShell'].includes(nativeP3)&&values['data-scope']==='com.shellspan.validation.native-input-p3'
-  &&Object.keys(values).every(key=>['native-input-p3-file-fault','native-input-p3','data-scope'].includes(key)),
-  '--native-input-p3-file-fault requires one isolated real-model Windows scratch refusal case');
-assert(!fileChain||!noModel&&['powerShell7','windowsPowerShell'].includes(nativeP3)&&values['data-scope']==='com.shellspan.validation.native-input-p3'
+assert(fileRestart===undefined||['prepare','verify'].includes(fileRestart)&&!noModel
+  &&(process.platform==='win32'&&process.arch==='x64'&&['powerShell7','windowsPowerShell'].includes(nativeP3)
+    &&values['data-scope']==='com.shellspan.validation.native-input-p3'
+    &&Object.keys(values).every(key=>['native-input-p3-file-restart','native-input-p3','data-scope'].includes(key))||macFileRestart),
+  '--native-input-p3-file-restart requires one isolated real-model native scratch restart phase');
+assert(fileFault===undefined||['occupied-directory','existing-file'].includes(fileFault)&&!noModel
+  &&(process.platform==='win32'&&process.arch==='x64'&&['powerShell7','windowsPowerShell'].includes(nativeP3)
+    &&values['data-scope']==='com.shellspan.validation.native-input-p3'
+    &&Object.keys(values).every(key=>['native-input-p3-file-fault','native-input-p3','data-scope'].includes(key))||macFileFault),
+  '--native-input-p3-file-fault requires one isolated real-model native scratch refusal case');
+assert(!fileChain||!noModel&&(['powerShell7','windowsPowerShell'].includes(nativeP3)&&values['data-scope']==='com.shellspan.validation.native-input-p3'||macFileChain)
   &&!storageAdmission&&!values['data-initialize']&&!values['native-jobs']&&!values['native-input-p3-cancel']&&!terminalContentionRun,
-  '--native-input-p3-file-chain requires one isolated real-model Windows native file chain');
+  '--native-input-p3-file-chain requires one isolated real-model native file chain with owned macOS data or a supported Windows host');
 assert(!storageAdmission||['healthy','missing','read-only','unknown-format','invalid-marker','foreign-namespace','missing-directory','directory-junction','corrupt-database','read-denied','crash-after-start','crash-prepare','crash-proof','crash-intent','crash-arm','crash-key'].includes(storageAdmission)&&!noModel
   &&(['powerShell7','windowsPowerShell'].includes(nativeP3)&&values['data-scope']==='com.shellspan.validation.native-input-p3'||macStorageAdmission)
   &&!values['data-initialize']&&!values['native-jobs']&&!values['native-input-p3-cancel']&&!terminalContentionRun,
@@ -429,7 +453,7 @@ if(p3BackpressureGate)nativeEnvironment={...nativeEnvironment,SHELLSPAN_P3_BACKP
 assert(!ownedEvidenceDirectory || isAbsolute(ownedEvidenceDirectory)
   && process.env.SHELLSPAN_DATA_DIR && resolve(ownedEvidenceDirectory, 'data') === resolve(process.env.SHELLSPAN_DATA_DIR),
   'Owned evidence directory must be the explicit independent data directory parent');
-const nativeEvidencePath = nativeManual || nativeRecovery || aiCredentialMode!==undefined || credentialLifecycleRun || values['native-jobs'] || terminalContentionRun || p3Startup || modelPreflightRun || journalRecoveryAgent || storageAdmission || fileChain || fileFault || fileRestart || byteBoundary || windowsStop || windowsDraftCancel || windowsLifetime || approvalContention || approvalDelegation || navigationManual || activeEof || lateReceipt || captureTail || stopBoundary
+const nativeEvidencePath = zleAppHistory!==undefined || nativeManual || nativeRecovery || aiCredentialMode!==undefined || credentialLifecycleRun || values['native-jobs'] || terminalContentionRun || p3Startup || modelPreflightRun || journalRecoveryAgent || storageAdmission || fileChain || fileFault || fileRestart || byteBoundary || windowsStop || windowsDraftCancel || windowsLifetime || approvalContention || approvalDelegation || navigationManual || activeEof || lateReceipt || captureTail || stopBoundary
   ? ownedEvidenceDirectory ? resolve(ownedEvidenceDirectory, 'native-webview-evidence.json')
     : resolve(tmpdir(), `shellspan-${terminalContentionRun ? 'terminal-contention' : 'native-jobs'}-${token}.json`) : undefined;
 // Keep the compiled macOS application identity stable between contention runs.
@@ -448,6 +472,7 @@ const pagePath = historyStartup!==undefined ? 'src/components/terminal/__tests__
   : fileChain ? 'src/components/terminal/__tests__/native-file-chain.native.html'
   : storageAdmission ? 'src/components/terminal/__tests__/native-storage-admission.native.html'
   : modelPreflightRun ? 'src/components/terminal/__tests__/native-model-preflight.native.html'
+  : zleAppHistory!==undefined ? 'src/components/terminal/__tests__/native-zle-history.native.html'
   : values['native-input-p3-cancel'] ? 'src/components/terminal/__tests__/native-input-p3-cancel.native.html'
   : nativeManual ? 'src/components/terminal/__tests__/native-terminal-manual.native.html'
   : nativeRecovery ? 'src/components/terminal/__tests__/native-terminal-recovery.native.html'
@@ -584,7 +609,7 @@ const attachResult = (vite) => {
     if(request.method!=='GET'){response.writeHead(405).end();return;}
     try{
       assert(ownedEvidenceDirectory&&process.env.SHELLSPAN_LOCAL_HOME===resolve(ownedEvidenceDirectory,'home'));
-      const fileName=fileRestart==='prepare'?`acceptance-${token}.ps1`:(await readScratchRestart(ownedEvidenceDirectory)).fileName;
+      const fileName=fileRestart==='prepare'?`acceptance-${token}.${macFileRestart?'sh':'ps1'}`:(await readScratchRestart(ownedEvidenceDirectory)).fileName;
       response.setHeader('Content-Type','application/json');response.end(JSON.stringify(await scratchRestartWitness(ownedEvidenceDirectory,fileName)));
     }catch{response.writeHead(500).end('Owned scratch restart witness unavailable');}
   });
@@ -596,7 +621,7 @@ const attachResult = (vite) => {
     try{
       assert(ownedEvidenceDirectory&&process.env.SHELLSPAN_LOCAL_HOME===resolve(ownedEvidenceDirectory,'home'));
       const chunks=[];let length=0;for await(const chunk of request){length+=chunk.length;assert(length<=8192);chunks.push(chunk);}
-      const injected=await injectOccupiedScratch(ownedEvidenceDirectory,token,JSON.parse(Buffer.concat(chunks).toString('utf8')));
+      const injected=await injectOccupiedScratch(ownedEvidenceDirectory,token,JSON.parse(Buffer.concat(chunks).toString('utf8')),macFileFault);
       await writeFile(resolve(ownedEvidenceDirectory,'native-file-fault-injection.json'),JSON.stringify(injected,null,2),{flag:'wx',mode:0o600});
       response.setHeader('Content-Type','application/json');response.end(JSON.stringify(injected));
     }catch{response.writeHead(400).end('Owned scratch fault precondition rejected');}
@@ -610,12 +635,12 @@ const attachResult = (vite) => {
       stage='scratch-directory-list';let directories=[];try{directories=await readdir(temporary,{withFileTypes:true});}catch(error){if(error.code!=='ENOENT')throw error;}
       for(const entry of directories)if(entry.isDirectory()&&/^[a-f0-9]{16}$/.test(entry.name)){
         stage='scratch-script-read';
-        const file=resolve(temporary,entry.name,`acceptance-${token}.ps1`);try{const bytes=await readFile(file);files.push({path:file,byteLength:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex'),content:bytes.toString('utf8')});}catch(error){if(error.code!=='ENOENT')throw error;}
+        const file=resolve(temporary,entry.name,`acceptance-${token}.${macFileChain||macFileFault?'sh':'ps1'}`);try{const bytes=await readFile(file);files.push({path:file,byteLength:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex'),content:bytes.toString('utf8')});}catch(error){if(error.code!=='ENOENT')throw error;}
       }
       stage='scratch-record-list';let names=[];try{names=await readdir(recordDirectory);}catch(error){if(error.code!=='ENOENT')throw error;}
       for(const name of names)if(/^[a-f0-9]{64}\.json$/.test(name)){stage='scratch-record-read';records.push(JSON.parse(await readFile(resolve(recordDirectory,name),'utf8')));}
       stage='scratch-effect-read';let entries=[];try{entries=(await readFile(resolve(process.env.SHELLSPAN_LOCAL_HOME,`scratch-effect-${token}.txt`),'utf8')).split(/\r?\n/).filter(Boolean);}catch(error){if(error.code!=='ENOENT')throw error;}
-      stage='bootstrap-witness';const bootstrap=fileChain?{nativeBootstrap:windowsBootstrapWitness(data)}:{};
+      stage='bootstrap-witness';const bootstrap=fileChain&&!macFileChain?{nativeBootstrap:windowsBootstrapWitness(data)}:{};
       response.setHeader('Content-Type','application/json');response.end(JSON.stringify({files,records,effectEntries:entries,...bootstrap}));
     }catch(error){if(ownedEvidenceDirectory)await recordWitnessFailure(ownedEvidenceDirectory,'scratch-file',stage,error);response.writeHead(500).end('Owned scratch witness unavailable');}
   });
@@ -672,6 +697,7 @@ const attachResult = (vite) => {
   if(nativeP3==='zsh'){
     assert(ownedEvidenceDirectory&&frozenNativeRun);
     attachFocusTraceChannel(vite,token,ownedEvidenceDirectory);
+    if(zleAppHistory!==undefined)attachZleAppHistory(vite,token,ownedEvidenceDirectory);
   }
   if(values['native-input-p3-publisher-run-once'])vite.middlewares.use(`/__native-p3-publisher/${token}`,(request,response)=>{
     void(async()=>{
@@ -918,7 +944,7 @@ const attachResult = (vite) => {
       const value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       if (value.evidence) {
         assert(nativeEvidencePath && typeof value.evidence === 'object', 'Unexpected native evidence payload');
-        if(nativeP3&&ownedEvidenceDirectory&&value.progress)await writeFile(resolve(ownedEvidenceDirectory,`native-p3-progress-${randomUUID()}.json`),JSON.stringify({progress:value.progress,evidence:value.evidence},null,2),{flag:'wx',mode:0o600});
+        if((nativeP3||nativeManual)&&ownedEvidenceDirectory&&value.progress)await writeFile(resolve(ownedEvidenceDirectory,`native-p3-progress-${randomUUID()}.json`),JSON.stringify({progress:value.progress,evidence:value.evidence},null,2),{flag:'wx',mode:0o600});
         if (terminalContentionRun) contentionEvidence.push(value.evidence);
         await writeFile(nativeEvidencePath, JSON.stringify(terminalContentionRun ? { events: contentionEvidence } : value.evidence, null, 2));
         console.log(`Native target WebView evidence: ${nativeEvidencePath}`);
@@ -997,8 +1023,11 @@ try {
   if (values['terminal-reconnect-focus']) url.searchParams.set('focusReconnect', 'true');
   if (values['native-jobs-ssh']) url.searchParams.set('sshShell', values['native-jobs-ssh']);
   if(values['native-input-p2']) url.searchParams.set('nativeP2','true');
+  if(macFileChain)url.searchParams.set('macFileChain','true');
+  if(macFileRestart||macFileFault)url.searchParams.set('macScratchFile','true');
   if(nativeP3) url.searchParams.set('nativeP3',nativeP3);
-  if(nativeManual){url.searchParams.set('manualNativeFamily',nativeManual);url.searchParams.set('manualMarker',`MAC_MANUAL_${token.replaceAll('-','').slice(0,12)}`);url.searchParams.set('manualReview',String(Boolean(values['native-input-p3-review'])));}
+  if(zleAppHistory!==undefined)url.searchParams.set('zleHistoryMode',zleAppHistory);
+  if(nativeManual){url.searchParams.set('manualNativeFamily',nativeManual);url.searchParams.set('manualForm',nativeManualForm??'nfc');url.searchParams.set('manualMarker',`MAC_MANUAL_${token.replaceAll('-','').slice(0,12)}`);url.searchParams.set('manualReview',String(Boolean(values['native-input-p3-review'])));}
   if(nativeRecovery)url.searchParams.set('recoveryNativeFamily',nativeRecovery);
   if(jobCompletion!==undefined)url.searchParams.set('jobNaturalExit',jobCompletion);
   if(jobOwnership!==undefined)url.searchParams.set('jobForeignTool',jobOwnership==='wait'?'wait_process':'kill_process');

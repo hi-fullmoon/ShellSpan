@@ -6,6 +6,7 @@ import {useTerminalStore} from '@/stores/terminalStore';
 import {initI18n} from '@/locales';
 import {isCurrentNativeEditorProfile} from './native-editor-profile';
 import {matchesNativeFileChainStep} from './native-file-chain-approval';
+import {isMacFileChainProfile} from './native-file-chain-posix';
 import {invokeCreateLocalSession,invokeCloseSession,invokeGetTerminalBrokerSnapshot,invokeListAiRoutes,invokeCreateAgentRuntimeSession,invokeStartAgentRuntime,invokeAgentRuntimeFollowup,invokeCancelAgentRuntime,invokeArchiveAgentRuntimeSession,invokeGetPendingAgentRuntimeApprovalArguments,invokeApproveAgentRuntimeTool,listenToAgentRuntimeSession,listenToTerminalIntegrationState} from '@/lib/ipc/tauri';
 import type {AgentSessionEvent} from '@/types/agent-session';
 import type {TerminalIntegrationStateEvent} from '@/types';
@@ -16,16 +17,17 @@ function object(value:unknown):Record<string,unknown>{assert(value&&typeof value
 async function until(test:()=>boolean|Promise<boolean>,message:string){const end=Date.now()+180000;while(!await test()){assert(Date.now()<end,message);await new Promise(resolve=>setTimeout(resolve,10));}}
 async function verify(){
  const parameters=new URL(location.href).searchParams,token=parameters.get('token'),mode=parameters.get('fileFault');
+ const mac=parameters.get('macScratchFile')==='true',family=parameters.get('nativeP3')??(parameters.get('nativeP2')==='true'?'bash':null);
  assert(token&&/^[a-f0-9-]{36}$/.test(token)&&(mode==='occupied-directory'||mode==='existing-file'),'Owned scratch fault parameters missing');
  await initI18n('en-US');await getCurrentWindow().show();await getCurrentWindow().setFocus();const root=createRoot(document.getElementById('root')!);root.render(<TerminalControllerLayer/>);const host=document.createElement('div');host.style.cssText='width:100vw;height:100vh';document.body.append(host);
  const id='agent-file-fault-'+crypto.randomUUID(),events:AgentSessionEvent[]=[],observations:TerminalIntegrationStateEvent[]=[],dispose:(()=>void)[]=[],reserved=new Set<string>(),prewrite:unknown[]=[];
- const original=`Write-Output 'SCRATCH_ORIGINAL_${token}'`,replacement=`Write-Output 'SCRATCH_REPLACEMENT_${token}'`,fileName=`acceptance-${token}.ps1`,expectedCalls=mode==='existing-file'?2:1;
+ const original=mac?`printf '%s\\n' 'SCRATCH_ORIGINAL_${token}'`:`Write-Output 'SCRATCH_ORIGINAL_${token}'`,replacement=mac?`printf '%s\\n' 'SCRATCH_REPLACEMENT_${token}'`:`Write-Output 'SCRATCH_REPLACEMENT_${token}'`,fileName=`acceptance-${token}.${mac?'sh':'ps1'}`,expectedCalls=mode==='existing-file'?2:1;
  let terminalId:string|undefined,created=false,failure:string|undefined,raw='';let injection:unknown;
  const report=(value:unknown)=>fetch(`/__agent-stream-result/${token}`,{method:'POST',body:JSON.stringify(value)});
  const witness=async()=>{const response=await fetch(`/__native-file-witness/${token}`);assert(response.ok,'Scratch witness unavailable');return object(await response.json());};
  try{
   const session=await invokeCreateLocalSession(100,30);terminalId=session.sessionId;useTerminalStore.getState().addSession(session);await until(()=>!!terminalRegistry.get(session.sessionId),'Terminal controller missing');const controller=terminalRegistry.get(session.sessionId)!;controller.attach(host);await controller.whenOutputReady();
-  await until(async()=>!!(await invokeGetTerminalBrokerSnapshot(session.sessionId)).session?.promptReady,'Native prompt not ready');const before=await invokeGetTerminalBrokerSnapshot(session.sessionId);assert(before.session?.inputMode==='native-inline'&&isCurrentNativeEditorProfile(before.session.nativePeerProfile,parameters.get('nativeP3')),'Actual native profile missing');const cwd=before.session.currentDirectory;assert(cwd,'Actual cwd missing');const target={kind:'local' as const,targetId:`terminal-${session.sessionId}`,sessionId:session.sessionId,cwd};
+  await until(async()=>!!(await invokeGetTerminalBrokerSnapshot(session.sessionId)).session?.promptReady,'Native prompt not ready');const before=await invokeGetTerminalBrokerSnapshot(session.sessionId);assert(before.session?.inputMode==='native-inline'&&(mac?isMacFileChainProfile(before.session.nativePeerProfile,family):isCurrentNativeEditorProfile(before.session.nativePeerProfile,parameters.get('nativeP3'))),'Actual native profile missing');const cwd=before.session.currentDirectory;assert(cwd,'Actual cwd missing');const target={kind:'local' as const,targetId:`terminal-${session.sessionId}`,sessionId:session.sessionId,cwd};
   dispose.push(controller.subscribeOutput(value=>{if(raw.length<262144)raw+=value;}));dispose.push(await listenToTerminalIntegrationState(({payload})=>{if(payload.sessionId===session.sessionId)observations.push(payload);}));
   const expectedContent=(index:number)=>mode==='existing-file'&&index===0?original:replacement;
   const matches=(index:number,name:string,args:unknown)=>index<expectedCalls&&matchesNativeFileChainStep(1,name,args,{fileName,content:expectedContent(index),setup:''});

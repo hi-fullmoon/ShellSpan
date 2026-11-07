@@ -207,6 +207,12 @@ impl VerifiedNativeProfile {
         if self.scoped_editor_sha.is_some() {
             binding.unicode_version = Some(nip::DisplayUnicodeVersion::Unicode11);
             binding.owned_reflow_cursor_line = Some(true);
+            if self.profile_id == "zsh-5.9-zle-5.9-macos-arm64-native" {
+                // This verified Main/Core also measures ordinary ZLE editing
+                // with these widths. An OSC exit must not switch it back to
+                // the frontend's older provider while the transport is alive.
+                binding.unicode_scope = Some(nip::DisplayUnicodeScope::Session);
+            }
         }
         binding
     }

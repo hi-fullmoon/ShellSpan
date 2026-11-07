@@ -13,11 +13,11 @@
     "api": "shellspan.zle-native-history",
     "version": 1,
     "patch": "scripts/dependency-builds/zsh/native-history.patch",
-    "patchSha256": "165820780c7c57fcb83de0f35a05d24f657f7bbca9a2d4d7fa4389439f213feb",
+    "patchSha256": "966950479db88f81e948b6717dcd9128c2f7d60ea26beea9111cba32a22581fe",
     "sourceHashes": {
       "Src/zsh.h": "9ad2e36d6cc0c19adaf3e1c392864799edfcf08fec2fcc33456651961aba672a",
-      "Src/input.c": "8a9b849d68ebfab3b935576a1cccd7ef45301db4ca948efbabec81c2c4122f19",
-      "Src/hist.c": "c74bc48ec85ad24ceb8aca6b77bded7718f14ac629b27d2ba558ef7e8cb30afb",
+      "Src/input.c": "5ff0f3650ac789869463dd103098bea915c5d37444fec5688ccf06025776b9ca",
+      "Src/hist.c": "5ee3355c17c3878671a7befd76a0741627a29f87ee126f9dc4e828aaf96f68e6",
       "Src/Zle/zle_main.c": "8cd1ed136a6e6eefe55e4f1173f9144d99b33af7e607a8bc79f35b75902628d4",
       "Src/Zle/zle_params.c": "7a1e3027adcfacb22b9d3ebd1f3948a91186e4cfd287cf5625588e510a66827f",
       "Src/Zle/zle_refresh.c": "613969c846d30d9ba64b666543274c62b4b376581c0ef9ee0a3580dc4a459ae2"
@@ -27,7 +27,7 @@
     "macos-arm64": {
       "mainSha256": "abc56520c469fa4985fca02c5f55621932ad79de4f36440a64a27526f4b535ef",
       "unicode9Default": true,
-      "privateMainSha256": "317f1c2c211e6b78dac7f6945c11e114036b6d86cc2710e0da9e6959217a6d39",
+      "privateMainSha256": "330f10b8e506f2e7e8a693ce8ebf942c3e2e0aa0b007bd9770ea1120bcfc41e4",
       "privateCoreSha256": "bdbef566aaa40d04c23e47c2c6f1ff03255570c29929cd8ddbbb65232767f4c3"
     },
     "linux-aarch64-glibc-2.36": {

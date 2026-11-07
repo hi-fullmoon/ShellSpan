@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash,randomUUID} from 'node:crypto';
-import {copyFileSync,mkdirSync,readFileSync,writeFileSync,cpSync,chmodSync,existsSync} from 'node:fs';
+import {copyFileSync,mkdirSync,readFileSync,writeFileSync,chmodSync,existsSync} from 'node:fs';
 import {resolve,dirname} from 'node:path';
 import {parseArgs} from 'node:util';
 import {windowsShortSnapshotLocation} from './windows-profiles.mjs';
 import {captureValidationSources} from '../native-input-p2/frozen-validation.mjs';
 import {createIndexReader} from './index-reader.mjs';
 import {auditEditorResources} from './editor-resources.mjs';
-import {selectSnapshotResources,verifySnapshotResourceCopy} from './acceptance-snapshot-resources.mjs';
+import {selectSnapshotResources,verifySnapshotResourceCopy,copySnapshotResources} from './acceptance-snapshot-resources.mjs';
 const owner=resolve(import.meta.dirname,'../..');
 const {values}=parseArgs({options:{'short-windows-paths':{type:'boolean'},'rebuild-windows-editors':{type:'boolean'},'windows-resources-from':{type:'string'},'controller-only':{type:'boolean'}}});
 assert(!values['controller-only']||!values['rebuild-windows-editors']&&!values['windows-resources-from'],'Controller-only snapshots cannot rebuild or admit native resources');
@@ -47,7 +47,7 @@ writeFileSync(resolve(directory,'snapshot.json'),JSON.stringify({owner,root,dire
 // source. Their source manifests are checked again by the production loaders.
 const resourceDestination=resolve(root,'.artifacts/tests/native-input-p2/resources');
 if(!values['controller-only']){
-cpSync(reusedResources?.directory??resolve(owner,'.artifacts/tests/native-input-p2/resources'),resourceDestination,{recursive:true});
+copySnapshotResources(reusedResources?.directory??resolve(owner,'.artifacts/tests/native-input-p2/resources'),resourceDestination);
 if(reusedResources){
   await verifySnapshotResourceCopy(reusedResources,resourceDestination);
   writeFileSync(resolve(meta,'resource-reuse.json'),JSON.stringify({sourceRoot:reusedResources.root,sourceManifestSha256:reusedResources.sourceManifestSha256,resourcesSha256:reusedResources.resourcesSha256,originalBytesCopied:true,recompiled:false},null,2));
