@@ -2,10 +2,13 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{mpsc, Mutex};
-use std::time::{Duration, Instant};
+#[cfg(any(windows, test))]
+use std::time::Duration;
+use std::time::Instant;
 
 const MAX_CELLS: usize = 65_536;
 type DisplayOriginCells = (Vec<u8>, bool);
+#[cfg(any(windows, test))]
 type DisplayOriginPending = (DisplayOriginRequest, mpsc::Receiver<DisplayOriginCells>);
 
 #[cfg(windows)]
@@ -20,6 +23,7 @@ pub(crate) struct DisplayOriginGeometry {
     pub cursor_x: u16,
     pub cursor_y: u16,
 }
+#[cfg(any(windows, test))]
 impl DisplayOriginGeometry {
     fn valid(&self) -> bool {
         self.columns > 0
@@ -29,6 +33,7 @@ impl DisplayOriginGeometry {
     }
 }
 
+#[cfg(any(windows, test))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DisplayOriginBinding {
     pub session_id: String,
@@ -95,7 +100,9 @@ struct Pending {
     result: mpsc::SyncSender<DisplayOriginCells>,
 }
 struct Session {
+    #[cfg(any(windows, test))]
     binding: DisplayOriginBinding,
+    #[cfg(any(windows, test))]
     last_request_index: u32,
     pending: Option<Pending>,
 }
@@ -105,6 +112,7 @@ pub(crate) struct DisplayOriginRegistry {
 }
 impl DisplayOriginRegistry {
     /// Only a verified transport calls this; the UI cannot create a binding.
+    #[cfg(any(windows, test))]
     pub(crate) fn bind(
         &self,
         session_id: &str,
@@ -139,6 +147,7 @@ impl DisplayOriginRegistry {
         Ok(binding)
     }
 
+    #[cfg(any(windows, test))]
     pub(crate) fn request(
         &self,
         binding: &DisplayOriginBinding,
@@ -227,6 +236,7 @@ impl DisplayOriginRegistry {
             .map_err(|_| "TERMINAL_DISPLAY_ORIGIN_STALE".into())
     }
 
+    #[cfg(any(windows, test))]
     pub(crate) fn cancel(&self, binding: &DisplayOriginBinding, request_id: &str) {
         if let Ok(mut sessions) = self.sessions.lock() {
             if let Some(session) = sessions
@@ -243,6 +253,7 @@ impl DisplayOriginRegistry {
             }
         }
     }
+    #[cfg(any(windows, test))]
     pub(crate) fn unbind(&self, binding: &DisplayOriginBinding) {
         if let Ok(mut sessions) = self.sessions.lock() {
             if sessions
@@ -258,6 +269,29 @@ impl DisplayOriginRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unsolicited_response_cannot_create_a_display_binding() {
+        let registry = DisplayOriginRegistry::default();
+        let request = DisplayOriginRequest {
+            session_id: "unbound-ui".into(),
+            terminal_session_id: "unbound-terminal".into(),
+            terminal_generation: 1,
+            request_id: uuid::Uuid::new_v4().to_string(),
+            request_index: 1,
+            timeout_ms: 1000,
+            geometry: geometry(),
+        };
+        assert_eq!(
+            registry.respond(DisplayOriginResponse {
+                request,
+                cell_widths: vec![1, 2],
+                wrap_pending: false,
+            }),
+            Err("TERMINAL_DISPLAY_ORIGIN_IDENTITY".into())
+        );
+        assert!(registry.sessions.lock().unwrap().is_empty());
+    }
+
     fn geometry() -> DisplayOriginGeometry {
         DisplayOriginGeometry {
             columns: 47,
