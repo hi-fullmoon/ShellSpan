@@ -28,6 +28,7 @@ import {
   invokeListRemoteDirectory,
   invokeOpenRemoteFile,
   invokeReadLogFile,
+  invokeRespondTerminalPromptOrigin,
   invokeRevealPath,
   invokePreflightConnection,
   invokePreviewRemoteFile,
@@ -74,6 +75,17 @@ it('passes a local path unchanged to the reveal command', async () => {
   const path = 'C:\\Users\\tester\\a,b & c.html';
   await invokeRevealPath(path);
   expect(invokeMock).toHaveBeenCalledWith('reveal_path', { path });
+});
+
+it('replies with the bound numeric display observation and explicit pending-wrap flag without logging it', async () => {
+  invokeMock.mockResolvedValue(undefined);
+  const request = {sessionId:'ui',terminalSessionId:'terminal',terminalGeneration:2,requestId:'request',requestIndex:3,timeoutMs:1000,
+    geometry:{columns:40,rows:30,cursorX:39,cursorY:4}};
+  await invokeRespondTerminalPromptOrigin(request, {...request.geometry,requestId:3,cellWidths:[1,2,1],wrapPending:true});
+  expect(invokeMock).toHaveBeenCalledExactlyOnceWith('respond_terminal_prompt_origin', {
+    response:{request,cellWidths:[1,2,1],wrapPending:true},
+  });
+  expect(loggerDebugMock).not.toHaveBeenCalled();expect(loggerErrorMock).not.toHaveBeenCalled();
 });
 
 describe('AI route credentials', () => {

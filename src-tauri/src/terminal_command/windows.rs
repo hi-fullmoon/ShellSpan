@@ -197,7 +197,11 @@ impl PreparedNativePowerShell {
         let transport = root.path().join("transport.cs");
         fs::write(
             &transport,
-            include_str!("../../native-input-editors/psreadline.cs"),
+            concat!(
+                include_str!("../../native-input-editors/psreadline.cs"),
+                "\n",
+                include_str!("../terminal_display_origin_pipe.cs")
+            ),
         )
         .map_err(|_| "TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
         let provider = root.path().join("provider.ps1");
@@ -261,6 +265,25 @@ impl PreparedNativePowerShell {
     }
     pub fn bind_process(&mut self, pid: Option<u32>) {
         self.server_process_id = pid;
+    }
+    pub(crate) fn start_display_origin(
+        &self,
+        app: tauri::AppHandle,
+        session_id: String,
+        connection: &nip::ConnectionIdentity,
+    ) -> Option<crate::terminal_display_origin::windows_pipe::DisplayOriginPipe> {
+        if !self.profile.display_origin_channel() {
+            return None;
+        }
+        let pid = self.server_process_id?;
+        Some(crate::terminal_display_origin::windows_pipe::start(
+            app,
+            session_id,
+            connection.terminal_session_id.clone(),
+            connection.terminal_generation,
+            format!("{}-display-origin", self.pipe_path),
+            pid,
+        ))
     }
     pub fn configure(&self, command: &mut portable_pty::CommandBuilder) -> Result<(), String> {
         if let Some(modules) = &self.modules {

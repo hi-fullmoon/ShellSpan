@@ -1,0 +1,382 @@
+===================================================================
+--- a/PSReadLine/ReadLine.cs	
++++ b/PSReadLine/ReadLine.cs	
+@@ -423,6 +423,7 @@
+                     {
+                         firstTime = false;
+                         _singleton.Initialize(runspace, engineIntrinsics);
++                        ShellSpanEditorLifecycle.ReadLineInitialized();
+                     }
+ 
+                     _singleton._readLineReady = true;
+@@ -785,6 +786,7 @@
+             _inputAccepted = false;
+             _initialX = _console.CursorLeft;
+             _initialY = _console.CursorTop;
++            ShellSpanPromptOrigin.Begin(ref _initialX, ref _initialY, _console);
+             _initialForeground = _console.ForegroundColor;
+             _initialBackground = _console.BackgroundColor;
+             _previousRender = _initialPrevRender;
+@@ -875,6 +877,12 @@
+                     }
+                     if (evaluatedPrompt != null)
+                     {
++                        if (ShellSpanLayout.Enabled)
++                        {
++                            string inferredSuffix = ShellSpanLayout.PromptSuffix(evaluatedPrompt);
++                            if (!string.IsNullOrEmpty(inferredSuffix)) _options.PromptText = new[] { inferredSuffix };
++                            evaluatedPrompt = string.Empty;
++                        }
+                         int i;
+                         for (i = evaluatedPrompt.Length - 1; i >= 0; i--)
+                         {
+@@ -944,6 +952,7 @@
+ 
+             _readKeyThread = new Thread(ReadKeyThreadProc) {IsBackground = true, Name = "PSReadLine ReadKey Thread"};
+             _readKeyThread.Start();
++            AppDomain.CurrentDomain.ProcessExit += SaveHistoryOnProcessExit;
+         }
+ 
+         private static void Chord(ConsoleKeyInfo? key = null, object arg = null)
+@@ -1106,6 +1115,7 @@
+             console.Write(newPrompt);
+             _singleton._initialX = console.CursorLeft;
+             _singleton._initialY = console.CursorTop;
++            ShellSpanPromptOrigin.Begin(ref _singleton._initialX, ref _singleton._initialY, console);
+             _singleton._previousRender = _initialPrevRender;
+             _singleton._previousRender.UpdateConsoleInfo(console);
+             _singleton._previousRender.initialY = _singleton._initialY;
+===================================================================
+--- a/PSReadLine/History.cs	
++++ b/PSReadLine/History.cs	
+@@ -285,6 +285,24 @@
+             WriteHistoryRange(0, _history.Count - 1, overwritten: true);
+         }
+ 
++        private void SaveHistoryOnProcessExit(object sender, EventArgs args)
++        {
++            if (_options.HistorySaveStyle != HistorySaveStyle.SaveAtExit)
++            {
++                return;
++            }
++
++            try
++            {
++                SaveHistoryAtExit();
++            }
++            catch (ObjectDisposedException)
++            {
++                // The console-closing path already saved history and disposed
++                // its mutex. A normal typed exit has not taken that path.
++            }
++        }
++
+         private int historyErrorReportedCount;
+         private void ReportHistoryFileError(Exception e)
+         {
+===================================================================
+--- a/PSReadLine/Render.cs	
++++ b/PSReadLine/Render.cs	
+@@ -43,6 +43,7 @@
+ 
+         public int PhysicalLineCount(int bufferWidth, int initialX, out int lenLastPhysicalLine)
+         {
++            if (ShellSpanLayout.Enabled) return ShellSpanLayout.Physical(Line, bufferWidth, _isFirstLogicalLine ? initialX : 0, out lenLastPhysicalLine);
+             bool useCachedValues = bufferWidth == _bufferWidth && (!_isFirstLogicalLine || initialX == _initialX);
+             if (useCachedValues)
+             {
+@@ -220,6 +221,10 @@
+ 
+         private void Render(bool force = false)
+         {
++            if (ShellSpanLayout.Enabled && _buffer.Length > 0 && char.IsHighSurrogate(_buffer[_buffer.Length - 1]))
++            {
++                _tokens = null; _ast = null; _parseErrors = null; _waitingToRender = true; return;
++            }
+             if (!force)
+             {
+                 // If there are a bunch of keys queued up, skip rendering if we've rendered very recently.
+@@ -991,7 +996,17 @@
+                 if (lenToClear > 0)
+                 {
+                     UpdateColorsIfNecessary(defaultColor);
+-                    _console.Write(Spaces(lenToClear));
++                    if (ShellSpanLayout.Enabled)
++                    {
++                        // Erase cells rather than authoring trailing spaces. The
++                        // next logical line starts with newline; the final caret
++                        // is positioned from renderData after all clearing.
++                        _console.Write("\x1b[" + lenToClear.ToString(CultureInfo.InvariantCulture) + "X");
++                    }
++                    else
++                    {
++                        _console.Write(Spaces(lenToClear));
++                    }
+                 }
+             }
+ 
+@@ -1251,6 +1266,50 @@
+                 return;
+             }
+ 
++            if (ShellSpanLayout.Enabled && ShellSpanPromptOrigin.Available)
++            {
++                var previousOffset = ShellSpanLayout.RenderOffset(_initialX, _initialY, _previousRender);
++                if (previousOffset.LogicalLineIndex >= 0)
++                {
++                    int left = ShellSpanPromptOrigin.Column(_console.BufferWidth);
++                    int top = _console.CursorTop;
++                    var point = ShellSpanLayout.RenderPoint(left, 0, _console.BufferWidth, _previousRender, previousOffset);
++                    _initialX = left; _initialY = top - point.Y;
++                    return;
++                }
++            }
++
++            // An empty previously rendered input has no input-relative offset.
++            // Preserve the actual prompt end after resize instead of repeatedly
++            // reducing its old physical column modulo successive widths.
++            if (_previousRender.lines.Length == 1 && _previousRender.lines[0].Line.Length == 0)
++            {
++                _initialX = _console.CursorLeft;
++                _initialY = _console.CursorTop;
++                return;
++            }
++
++            // Recover a first-logical-line origin from the actual resized cursor
++            // and the previous rendered prefix, rather than modulo an old column.
++            // Later logical lines do not uniquely identify the prompt origin.
++            if (ShellSpanLayout.Enabled && _previousRender.lines[0].Line.IndexOf('\n') < 0)
++            {
++                var previousOffset = ShellSpanLayout.RenderOffset(_initialX, _initialY, _previousRender);
++                if (previousOffset.LogicalLineIndex == 0)
++                {
++                    int prefixCells = 0;
++                    var units = ShellSpanLayout.Units(_previousRender.lines[0].Line);
++                    int count = previousOffset.VisibleCharIndex == int.MaxValue ? units.Count : Math.Max(0, previousOffset.VisibleCharIndex);
++                    for (int index = 0; index < count; index++) prefixCells += units[index].Width;
++                    int width = _console.BufferWidth;
++                    int left = _console.CursorLeft, top = _console.CursorTop;
++                    _initialX = (left - prefixCells % width + width) % width;
++                    var point = ShellSpanLayout.RenderPoint(_initialX, 0, width, _previousRender, previousOffset);
++                    _initialY = top - point.Y;
++                    return;
++                }
++            }
++
+             // If the console buffer width or height changed, our initial coordinates may have as well.
+             if (isTextBufferUnchanged)
+             {
+@@ -1366,6 +1425,7 @@
+             // This lets us re-use the logic in the screen reader rendering implementation
+             // where the status line is added to the buffer without modifying the local state.
+             buffer ??= _buffer;
++            if (ShellSpanLayout.Enabled) return ShellSpanLayout.Offset(buffer.ToString(), offset, _initialX, _initialY, _console.BufferWidth, Options.ScreenReaderModeEnabled ? 0 : LengthInBufferCells(Options.ContinuationPrompt));
+ 
+             int x = _initialX;
+             int y = _initialY;
+@@ -1420,6 +1480,7 @@
+ 
+         private int ConvertLineAndColumnToOffset(Point point)
+         {
++            if (ShellSpanLayout.Enabled) return ShellSpanLayout.ToOffset(_buffer.ToString(), point, _initialX, _initialY, _console.BufferWidth, Options.ScreenReaderModeEnabled ? 0 : LengthInBufferCells(Options.ContinuationPrompt));
+             int offset;
+             int x = _initialX;
+             int y = _initialY;
+@@ -1476,6 +1537,7 @@
+ 
+         internal Point ConvertRenderDataOffsetToPoint(int initialX, int initialY, int bufferWidth, RenderData renderData, RenderDataOffset offset)
+         {
++            if (ShellSpanLayout.Enabled) return ShellSpanLayout.RenderPoint(initialX, initialY, bufferWidth, renderData, offset);
+             if (offset.LogicalLineIndex == 0 && offset.VisibleCharIndex == -1)
+             {
+                 // (0, -1) means the cursor should be right at the initial coordinate.
+@@ -1602,6 +1664,7 @@
+ 
+         internal RenderDataOffset ConvertPointToRenderDataOffset(int initialX, int initialY, RenderData renderData)
+         {
++            if (ShellSpanLayout.Enabled) return ShellSpanLayout.RenderOffset(initialX, initialY, renderData);
+             int x = initialX;
+             int y = initialY;
+             var point = new Point { X = renderData.cursorLeft, Y = renderData.cursorTop };
+===================================================================
+--- a/PSReadLine/Render.Helper.cs	
++++ b/PSReadLine/Render.Helper.cs	
+@@ -53,6 +53,7 @@
+ 
+         internal static int LengthInBufferCells(string str, int start, int end)
+         {
++            if (ShellSpanLayout.Enabled) return ShellSpanLayout.Measure(str, start, end);
+             var sum = 0;
+             for (var i = start; i < end; i++)
+             {
+@@ -73,6 +74,7 @@
+ 
+         internal static int LengthInBufferCells(StringBuilder sb, int start, int end)
+         {
++            if (ShellSpanLayout.Enabled) return ShellSpanLayout.Measure(sb.ToString(), start, end);
+             var sum = 0;
+             for (var i = start; i < end; i++)
+             {
+@@ -138,6 +140,7 @@
+ 
+         private static int SubstringLengthByCells(string text, int start, int countOfCells)
+         {
++            if (ShellSpanLayout.Enabled) return ShellSpanLayout.Slice(text, start, countOfCells);
+             int cellLength = 0;
+             int charLength = 0;
+ 
+@@ -168,6 +171,7 @@
+ 
+         private static int SubstringLengthByCellsFromEnd(string text, int start, int countOfCells)
+         {
++            if (ShellSpanLayout.Enabled) return ShellSpanLayout.SliceFromEnd(text, start, countOfCells);
+             int cellLength = 0;
+             int charLength = 0;
+ 
+===================================================================
+--- /dev/null	
++++ b/PSReadLine/ShellSpanLayout.cs	
+@@ -0,0 +1,33 @@
++// Application-private layout enabled only by the verified host provider. No source-buffer or authority mutation.
++using System;
++using System.Collections.Generic;
++using System.Text;
++namespace Microsoft.PowerShell {
++ internal static class ShellSpanLayout {
++  internal static bool Enabled;
++  internal sealed class Unit {internal int Start,End,Width;internal bool Newline;}
++  internal static List<Unit> Units(string text,bool sgr=true){
++   var result=new List<Unit>();int preceding=0;
++   for(int index=0;index<text.Length;){int start=index;char first=text[index];
++    if(sgr&&first==0x1b&&index+1<text.Length&&text[index+1]=='['){index+=2;while(index<text.Length&&text[index]!='m')index++;if(index<text.Length)index++;continue;}
++    if(first=='\n'||char.IsControl(first)){result.Add(new Unit{Start=start,End=++index,Width=first=='\n'?0:2,Newline=first=='\n'});preceding=0;continue;}
++    int cp=first;index++;if(char.IsHighSurrogate(first)&&index<text.Length&&char.IsLowSurrogate(text[index])){cp=char.ConvertToUtf32(first,text[index]);index++;}
++    int properties=ShellSpanGraphemeData.Properties(cp,preceding),width=(properties>>1)&3;
++    if((properties&1)!=0&&result.Count>0&&!result[result.Count-1].Newline){var unit=result[result.Count-1];unit.End=index;unit.Width=width;}
++    else result.Add(new Unit{Start=start,End=index,Width=width});preceding=properties;
++   }return result;
++  }
++  internal static string PromptSuffix(string prompt){var visible=new StringBuilder();for(int index=0;index<prompt.Length;index++){if(prompt[index]==0x1b&&index+1<prompt.Length&&prompt[index+1]=='['){index+=2;while(index<prompt.Length&&prompt[index]!='m')index++;continue;}visible.Append(prompt[index]);}string text=visible.ToString();var units=Units(text,false);for(int index=units.Count-1;index>=0;index--)if(!char.IsWhiteSpace(text[units[index].Start]))return text.Substring(units[index].Start);return null;}
++  internal static int Measure(string text,int start,int end){int cells=0;foreach(var unit in Units(text))if(unit.Start>=start&&unit.Start<end)cells+=unit.Width;return cells;}
++  internal static int Slice(string text,int start,int cells){int width=0,end=start;foreach(var unit in Units(text,false)){if(unit.Start<start)continue;if(width+unit.Width>cells)break;width+=unit.Width;end=unit.End;}return end-start;}
++  internal static int SliceFromEnd(string text,int start,int cells){int width=0,end=start+1,begin=end;var units=Units(text,false);for(int i=units.Count-1;i>=0;i--){var unit=units[i];if(unit.End>end)continue;if(width+unit.Width>cells)break;width+=unit.Width;begin=unit.Start;}return end-begin;}
++  internal static int Physical(string text,int width,int initialX,out int last){int x=initialX,y=1;last=0;foreach(var unit in Units(text)){if(unit.Newline){y++;x=0;last=0;continue;}if(x==0&&last>0){y++;last=0;}x+=unit.Width;last+=unit.Width;if(x==width)x=0;else if(x>width){x=unit.Width;y++;last=unit.Width;}}return y;}
++  static void Advance(Unit unit,ref int x,ref int y,int width,int continuation,bool nextNewline){if(unit.Newline){y++;x=continuation;return;}x+=unit.Width;if(x>=width){x=x==width?0:unit.Width;if(x!=0||!nextNewline)y++;}}
++  internal static Point Offset(string text,int offset,int initialX,int initialY,int width,int continuation){int x=initialX,y=initialY;var units=Units(text,false);for(int i=0;i<units.Count;i++){var unit=units[i];if(unit.Start>=offset)break;Advance(unit,ref x,ref y,width,continuation,i+1<units.Count&&units[i+1].Start<offset&&units[i+1].Newline);}foreach(var unit in units)if(unit.Start==offset&&!unit.Newline&&x+unit.Width>width){x=0;y++;break;}return new Point{X=x,Y=y};}
++  internal static int ToOffset(string text,Point point,int initialX,int initialY,int width,int continuation){int x=initialX,y=initialY;var units=Units(text,false);for(int i=0;i<units.Count;i++){var unit=units[i];if(point.Y==y&&point.X<=x)return unit.Start;if(unit.Newline&&point.Y==y)return unit.Start;if(!unit.Newline&&x+unit.Width>width){x=0;y++;}if(!unit.Newline&&point.Y==y&&point.X<x+unit.Width)return unit.Start;Advance(unit,ref x,ref y,width,continuation,i+1<units.Count&&units[i+1].Newline);if(point.Y<y)return unit.Start;}return point.Y==y?text.Length:-1;}
++  internal sealed class LinePoints {internal List<Point> Starts=new List<Point>();internal Point End;}
++  static List<LinePoints> Lines(int initialX,int initialY,int width,RenderData data){int x=initialX,y=initialY;var lines=new List<LinePoints>();foreach(var line in data.lines){var points=new LinePoints();var units=Units(line.Line);foreach(var unit in units){if(unit.Newline){points.Starts.Add(new Point{X=x,Y=y});y++;x=0;continue;}if(x+unit.Width>width){x=0;y++;}points.Starts.Add(new Point{X=x,Y=y});x+=unit.Width;if(x==width){x=0;y++;}}points.End=new Point{X=x,Y=y};lines.Add(points);if(x>0||units.Count==0){x=0;y++;}}return lines;}
++  internal static Point RenderPoint(int initialX,int initialY,int width,RenderData data,RenderDataOffset offset){if(offset.LogicalLineIndex==0&&offset.VisibleCharIndex==-1)return new Point{X=initialX,Y=initialY};var line=Lines(initialX,initialY,width,data)[offset.LogicalLineIndex];return offset.VisibleCharIndex==int.MaxValue||offset.VisibleCharIndex>=line.Starts.Count?line.End:line.Starts[offset.VisibleCharIndex];}
++  internal static RenderDataOffset RenderOffset(int initialX,int initialY,RenderData data){var point=new Point{X=data.cursorLeft,Y=data.cursorTop};if(point.X==initialX&&point.Y==initialY)return new RenderDataOffset(0,-1);var lines=Lines(initialX,initialY,data.bufferWidth,data);for(int i=0;i<lines.Count;i++){var line=lines[i];if(point.X==line.End.X&&point.Y==line.End.Y)return new RenderDataOffset(i,int.MaxValue);for(int index=0;index<line.Starts.Count;index++){var pos=line.Starts[index];if(point.Y==pos.Y&&point.X<=pos.X)return new RenderDataOffset(i,index);}}return new RenderDataOffset(-1,-1);}
++ }
++}
+===================================================================
+--- /dev/null	
++++ b/PSReadLine/ShellSpanGraphemeData.cs	
+@@ -0,0 +1,22 @@
++// Derived from @xterm/addon-unicode-graphemes 0.4.0, MIT.
++// Copyright (c) 2023 The xterm.js authors. See XTERM-LICENSE.
++// Display measurements only. Editor offsets and source remain UTF-16.
++using System;
++internal static class ShellSpanGraphemeData {
++ static readonly int[] Ends={160,161,163,164,166,168,169,170,172,173,174,175,180,181,186,187,191,197,198,207,208,214,216,221,225,229,230,231,234,235,237,239,240,241,243,246,250,251,252,253,254,256,257,272,273,274,275,282,283,293,295,298,299,304,307,311,312,318,322,323,324,327,331,332,333,337,339,357,359,362,363,461,462,463,464,465,466,467,468,469,470,471,472,473,474,475,476,592,593,608,609,707,708,710,711,712,715,716,717,719,720,727,731,732,733,734,735,767,879,912,929,930,937,944,961,962,969,1024,1025,1039,1103,1104,1105,1154,1161,1424,1469,1470,1471,1472,1474,1475,1477,1478,1479,1535,1541,1551,1562,1610,1631,1647,1648,1749,1756,1757,1758,1764,1766,1768,1769,1773,1806,1807,1808,1809,1839,1866,1957,1968,2026,2035,2044,2045,2069,2073,2074,2083,2084,2087,2088,2093,2136,2139,2258,2273,2274,2306,2307,2361,2362,2363,2364,2365,2368,2376,2380,2381,2383,2384,2391,2401,2403,2432,2433,2435,2491,2492,2493,2494,2496,2500,2502,2504,2506,2508,2509,2518,2519,2529,2531,2557,2558,2560,2562,2563,2619,2620,2621,2624,2626,2630,2632,2634,2637,2640,2641,2671,2673,2676,2677,2688,2690,2691,2747,2748,2749,2752,2757,2758,2760,2761,2762,2764,2765,2785,2787,2809,2815,2816,2817,2819,2875,2876,2877,2879,2880,2884,2886,2888,2890,2892,2893,2900,2903,2913,2915,2945,2946,3005,3006,3007,3008,3010,3013,3016,3017,3020,3021,3030,3031,3071,3072,3075,3076,3133,3136,3140,3141,3144,3145,3149,3156,3158,3169,3171,3200,3201,3203,3259,3260,3261,3262,3263,3265,3266,3268,3269,3270,3272,3273,3275,3277,3284,3286,3297,3299,3327,3329,3331,3386,3388,3389,3390,3392,3396,3397,3400,3401,3404,3405,3406,3414,3415,3425,3427,3456,3457,3459,3529,3530,3534,3535,3537,3540,3541,3542,3543,3550,3551,3569,3571,3632,3633,3634,3635,3642,3654,3662,3760,3761,3762,3763,3772,3783,3789,3863,3865,3892,3893,3894,3895,3896,3897,3901,3903,3952,3966,3967,3972,3973,3975,3980,3991,3992,4028,4037,4038,4140,4144,4145,4151,4152,4154,4156,4158,4181,4183,4185,4189,4192,4208,4212,4225,4226,4227,4228,4230,4236,4237,4252,4253,4351,4447,4519,4607,4956,4959,5905,5908,5937,5940,5969,5971,6001,6003,6067,6069,6070,6077,6085,6086,6088,6099,6108,6109,6154,6157,6276,6278,6312,6313,6431,6434,6438,6440,6443,6447,6449,6450,6456,6459,6678,6680,6682,6683,6740,6741,6742,6743,6750,6751,6752,6753,6754,6756,6764,6770,6780,6782,6783,6831,6848,6911,6915,6916,6963,6970,6971,6972,6977,6978,6980,7018,7027,7039,7041,7042,7072,7073,7077,7079,7081,7082,7085,7141,7142,7143,7145,7148,7149,7150,7153,7155,7203,7211,7219,7221,7223,7375,7378,7379,7392,7393,7400,7404,7405,7411,7412,7414,7415,7417,7615,7673,7674,7679,8203,8204,8205,8207,8208,8210,8214,8215,8217,8219,8221,8223,8226,8227,8231,8239,8240,8241,8243,8244,8245,8250,8251,8252,8253,8254,8264,8265,8307,8308,8318,8319,8320,8324,8363,8364,8399,8432,8450,8451,8452,8453,8456,8457,8466,8467,8469,8470,8480,8481,8482,8485,8486,8490,8491,8504,8505,8530,8532,8538,8542,8543,8555,8559,8569,8584,8585,8591,8595,8601,8616,8618,8631,8633,8657,8658,8659,8660,8678,8679,8703,8704,8705,8707,8710,8712,8714,8715,8718,8719,8720,8721,8724,8725,8729,8730,8732,8736,8738,8739,8740,8741,8742,8748,8749,8750,8755,8759,8763,8765,8775,8776,8779,8780,8785,8786,8799,8801,8803,8807,8809,8811,8813,8815,8833,8835,8837,8839,8852,8853,8856,8857,8868,8869,8894,8895,8977,8978,8985,8987,8999,9000,9002,9095,9096,9166,9167,9192,9196,9199,9200,9202,9203,9207,9210,9311,9409,9410,9449,9450,9547,9551,9587,9599,9615,9617,9621,9631,9633,9634,9641,9643,9649,9651,9653,9654,9655,9659,9661,9663,9664,9665,9669,9672,9674,9675,9677,9681,9697,9701,9710,9711,9722,9724,9726,9727,9732,9733,9734,9736,9737,9741,9743,9746,9747,9749,9755,9756,9757,9758,9791,9792,9793,9794,9799,9811,9823,9825,9826,9829,9830,9834,9835,9837,9838,9839,9854,9855,9861,9871,9874,9875,9885,9887,9888,9889,9897,9899,9916,9918,9919,9923,9925,9933,9934,9939,9940,9953,9954,9955,9959,9961,9962,9969,9971,9972,9973,9977,9978,9980,9981,9983,9988,9989,9991,9993,9995,10002,10003,10004,10005,10006,10012,10013,10016,10017,10023,10024,10034,10036,10044,10045,10051,10052,10054,10055,10059,10060,10061,10062,10066,10069,10070,10071,10082,10087,10101,10111,10132,10135,10144,10145,10159,10160,10174,10175,10239,10495,10547,10549,10998,11000,11012,11015,11034,11036,11087,11088,11092,11093,11097,11502,11505,11646,11647,11743,11775,11903,11929,11930,12019,12031,12245,12271,12283,12287,12329,12335,12336,12348,12349,12350,12352,12438,12440,12442,12543,12548,12591,12592,12686,12687,12771,12783,12830,12831,12871,12879,12950,12951,12952,12953,19903,19967,42124,42127,42182,42606,42610,42611,42621,42653,42655,42735,42737,43009,43010,43013,43014,43018,43019,43042,43044,43046,43047,43051,43052,43135,43137,43187,43203,43205,43231,43249,43262,43263,43301,43309,43334,43345,43347,43359,43388,43391,43394,43395,43442,43443,43445,43449,43451,43453,43456,43492,43493,43560,43566,43568,43570,43572,43574,43586,43587,43595,43596,43597,43643,43644,43695,43696,43697,43700,43702,43704,43709,43711,43712,43713,43754,43755,43757,43759,43764,43765,43766,44002,44004,44005,44007,44008,44010,44011,44012,44013,44031,44032,44059,44060,44087,44088,44115,44116,44143,44144,44171,44172,44199,44200,44227,44228,44255,44256,44283,44284,44311,44312,44339,44340,44367,44368,44395,44396,44423,44424,44451,44452,44479,44480,44507,44508,44535,44536,44563,44564,44591,44592,44619,44620,44647,44648,44675,44676,44703,44704,44731,44732,44759,44760,44787,44788,44815,44816,44843,44844,44871,44872,44899,44900,44927,44928,44955,44956,44983,44984,45011,45012,45039,45040,45067,45068,45095,45096,45123,45124,45151,45152,45179,45180,45207,45208,45235,45236,45263,45264,45291,45292,45319,45320,45347,45348,45375,45376,45403,45404,45431,45432,45459,45460,45487,45488,45515,45516,45543,45544,45571,45572,45599,45600,45627,45628,45655,45656,45683,45684,45711,45712,45739,45740,45767,45768,45795,45796,45823,45824,45851,45852,45879,45880,45907,45908,45935,45936,45963,45964,45991,45992,46019,46020,46047,46048,46075,46076,46103,46104,46131,46132,46159,46160,46187,46188,46215,46216,46243,46244,46271,46272,46299,46300,46327,46328,46355,46356,46383,46384,46411,46412,46439,46440,46467,46468,46495,46496,46523,46524,46551,46552,46579,46580,46607,46608,46635,46636,46663,46664,46691,46692,46719,46720,46747,46748,46775,46776,46803,46804,46831,46832,46859,46860,46887,46888,46915,46916,46943,46944,46971,46972,46999,47000,47027,47028,47055,47056,47083,47084,47111,47112,47139,47140,47167,47168,47195,47196,47223,47224,47251,47252,47279,47280,47307,47308,47335,47336,47363,47364,47391,47392,47419,47420,47447,47448,47475,47476,47503,47504,47531,47532,47559,47560,47587,47588,47615,47616,47643,47644,47671,47672,47699,47700,47727,47728,47755,47756,47783,47784,47811,47812,47839,47840,47867,47868,47895,47896,47923,47924,47951,47952,47979,47980,48007,48008,48035,48036,48063,48064,48091,48092,48119,48120,48147,48148,48175,48176,48203,48204,48231,48232,48259,48260,48287,48288,48315,48316,48343,48344,48371,48372,48399,48400,48427,48428,48455,48456,48483,48484,48511,48512,48539,48540,48567,48568,48595,48596,48623,48624,48651,48652,48679,48680,48707,48708,48735,48736,48763,48764,48791,48792,48819,48820,48847,48848,48875,48876,48903,48904,48931,48932,48959,48960,48987,48988,49015,49016,49043,49044,49071,49072,49099,49100,49127,49128,49155,49156,49183,49184,49211,49212,49239,49240,49267,49268,49295,49296,49323,49324,49351,49352,49379,49380,49407,49408,49435,49436,49463,49464,49491,49492,49519,49520,49547,49548,49575,49576,49603,49604,49631,49632,49659,49660,49687,49688,49715,49716,49743,49744,49771,49772,49799,49800,49827,49828,49855,49856,49883,49884,49911,49912,49939,49940,49967,49968,49995,49996,50023,50024,50051,50052,50079,50080,50107,50108,50135,50136,50163,50164,50191,50192,50219,50220,50247,50248,50275,50276,50303,50304,50331,50332,50359,50360,50387,50388,50415,50416,50443,50444,50471,50472,50499,50500,50527,50528,50555,50556,50583,50584,50611,50612,50639,50640,50667,50668,50695,50696,50723,50724,50751,50752,50779,50780,50807,50808,50835,50836,50863,50864,50891,50892,50919,50920,50947,50948,50975,50976,51003,51004,51031,51032,51059,51060,51087,51088,51115,51116,51143,51144,51171,51172,51199,51200,51227,51228,51255,51256,51283,51284,51311,51312,51339,51340,51367,51368,51395,51396,51423,51424,51451,51452,51479,51480,51507,51508,51535,51536,51563,51564,51591,51592,51619,51620,51647,51648,51675,51676,51703,51704,51731,51732,51759,51760,51787,51788,51815,51816,51843,51844,51871,51872,51899,51900,51927,51928,51955,51956,51983,51984,52011,52012,52039,52040,52067,52068,52095,52096,52123,52124,52151,52152,52179,52180,52207,52208,52235,52236,52263,52264,52291,52292,52319,52320,52347,52348,52375,52376,52403,52404,52431,52432,52459,52460,52487,52488,52515,52516,52543,52544,52571,52572,52599,52600,52627,52628,52655,52656,52683,52684,52711,52712,52739,52740,52767,52768,52795,52796,52823,52824,52851,52852,52879,52880,52907,52908,52935,52936,52963,52964,52991,52992,53019,53020,53047,53048,53075,53076,53103,53104,53131,53132,53159,53160,53187,53188,53215,53216,53243,53244,53271,53272,53299,53300,53327,53328,53355,53356,53383,53384,53411,53412,53439,53440,53467,53468,53495,53496,53523,53524,53551,53552,53579,53580,53607,53608,53635,53636,53663,53664,53691,53692,53719,53720,53747,53748,53775,53776,53803,53804,53831,53832,53859,53860,53887,53888,53915,53916,53943,53944,53971,53972,53999,54000,54027,54028,54055,54056,54083,54084,54111,54112,54139,54140,54167,54168,54195,54196,54223,54224,54251,54252,54279,54280,54307,54308,54335,54336,54363,54364,54391,54392,54419,54420,54447,54448,54475,54476,54503,54504,54531,54532,54559,54560,54587,54588,54615,54616,54643,54644,54671,54672,54699,54700,54727,54728,54755,54756,54783,54784,54811,54812,54839,54840,54867,54868,54895,54896,54923,54924,54951,54952,54979,54980,55007,55008,55035,55036,55063,55064,55091,55092,55119,55120,55147,55148,55175,55176,55203,55215,55238,55242,55291,57343,63743,64255,64285,64286,65023,65039,65049,65055,65071,65106,65107,65126,65127,65131,65280,65376,65437,65439,65503,65510,65532,65533,66044,66045,66271,66272,66421,66426,68096,68099,68100,68102,68107,68111,68151,68154,68158,68159,68324,68326,68899,68903,69290,69292,69445,69456,69631,69632,69633,69634,69687,69702,69758,69761,69762,69807,69810,69814,69816,69818,69820,69821,69836,69837,69887,69890,69926,69931,69932,69940,69956,69958,70002,70003,70015,70017,70018,70066,70069,70078,70080,70081,70083,70088,70092,70093,70094,70095,70187,70190,70193,70195,70196,70197,70199,70205,70206,70366,70367,70370,70378,70399,70401,70403,70458,70460,70461,70462,70463,70464,70468,70470,70472,70474,70477,70486,70487,70497,70499,70501,70508,70511,70516,70708,70711,70719,70721,70724,70725,70726,70749,70750,70831,70832,70834,70840,70841,70842,70844,70845,70846,70848,70849,70851,71086,71087,71089,71093,71095,71099,71101,71102,71104,71131,71133,71215,71218,71226,71228,71229,71230,71232,71338,71339,71340,71341,71343,71349,71350,71351,71452,71455,71457,71461,71462,71467,71723,71726,71735,71736,71738,71983,71984,71989,71990,71992,71994,71996,71997,71998,71999,72000,72001,72002,72003,72144,72147,72151,72153,72155,72159,72160,72163,72164,72192,72202,72242,72248,72249,72250,72254,72262,72263,72272,72278,72280,72283,72323,72329,72342,72343,72345,72750,72751,72758,72759,72765,72766,72767,72849,72871,72872,72873,72880,72881,72883,72884,72886,73008,73014,73017,73018,73019,73021,73022,73029,73030,73031,73097,73102,73103,73105,73106,73108,73109,73110,73111,73458,73460,73462,92911,92916,92975,92982,94030,94031,94032,94087,94094,94098,94175,94179,94180,94191,94193,94207,100343,100351,101589,101631,101640,110591,110878,110927,110930,110947,110951,110959,111355,113820,113822,119140,119141,119142,119145,119148,119149,119154,119162,119170,119172,119179,119209,119213,119361,119364,121343,121398,121402,121452,121460,121461,121475,121476,121498,121503,121504,121519,122879,122886,122887,122904,122906,122913,122914,122916,122917,122922,123183,123190,123627,123631,125135,125142,125251,125258,126975,126979,126980,127182,127183,127231,127242,127244,127247,127277,127278,127279,127337,127339,127343,127345,127357,127359,127373,127374,127376,127386,127404,127461,127487,127488,127490,127503,127513,127514,127534,127535,127537,127546,127547,127551,127560,127567,127569,127583,127589,127743,127776,127788,127797,127798,127868,127869,127891,127903,127946,127950,127955,127967,127984,127987,127988,127991,127994,127999,128062,128063,128064,128065,128252,128254,128317,128325,128330,128334,128335,128359,128377,128378,128404,128406,128419,128420,128506,128591,128639,128709,128715,128716,128719,128722,128724,128727,128746,128748,128755,128764,128767,128883,128895,128980,128991,129003,129023,129035,129039,129095,129103,129113,129119,129159,129167,129197,129279,129291,129338,129339,129349,129350,129400,129401,129483,129484,129535,129647,129652,129655,129658,129663,129670,129679,129704,129711,129718,129727,129730,129743,129750,129791,130047,131069,131071,196605,196607,262141,917535,917631,917759,917999,983039,1048573,1048575,1114109,1114111};
++ static readonly byte[] Values={0,32,0,32,0,32,11,32,0,32,43,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,34,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,2,0,2,0,2,0,2,0,2,0,2,0,1,0,2,0,2,0,2,0,2,1,0,2,0,2,0,2,0,1,0,2,0,2,0,2,0,2,0,2,0,2,0,2,0,2,0,2,0,2,0,2,1,2,4,0,2,4,2,0,4,2,4,2,4,0,2,0,2,0,2,4,0,2,0,2,4,2,0,4,0,4,2,0,2,0,2,0,2,0,2,4,0,2,0,4,2,0,2,0,2,0,2,0,2,0,2,0,2,4,0,2,0,4,2,0,2,4,0,4,2,0,2,0,2,0,2,4,0,2,0,2,4,2,0,4,0,4,2,0,2,0,2,0,2,0,2,4,2,4,0,4,0,4,2,0,2,0,2,4,2,0,2,4,0,2,0,2,0,2,0,2,0,2,4,0,2,0,4,2,4,2,4,0,2,4,0,4,2,0,2,0,2,0,2,4,0,2,0,2,4,2,0,4,0,4,2,1,0,2,0,2,0,2,4,0,2,0,2,4,2,0,2,0,4,2,0,4,0,2,0,4,2,0,2,0,2,0,4,2,0,2,0,2,0,2,0,2,0,2,0,4,0,2,4,2,0,2,0,2,0,2,0,2,0,2,4,2,0,2,4,2,0,4,2,0,2,0,2,0,2,0,4,2,0,2,0,2,0,53,6,7,0,2,0,2,0,2,0,2,0,2,0,2,4,2,4,2,4,2,0,2,0,2,0,2,0,2,0,2,4,2,4,0,4,2,4,2,0,2,4,2,0,4,2,4,2,0,2,0,2,0,2,4,2,0,2,0,2,0,2,4,0,2,4,2,4,2,4,0,2,0,2,4,0,4,2,4,2,4,2,0,2,4,2,4,2,4,2,4,0,4,2,4,2,0,2,0,2,4,2,0,2,0,2,0,4,2,0,2,0,2,0,2,10,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,11,0,32,0,11,0,32,0,32,0,32,0,32,0,2,0,32,0,32,0,32,0,32,0,32,0,32,43,0,32,0,32,0,11,0,32,0,32,0,32,0,32,0,32,0,32,43,0,11,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,32,0,59,0,11,48,0,11,0,11,0,59,11,59,11,59,0,11,0,32,43,32,0,32,0,32,0,32,0,32,0,32,0,32,11,0,32,0,43,32,0,32,0,43,32,0,32,0,32,0,32,0,32,0,32,0,11,59,0,11,43,32,11,43,11,43,11,0,59,11,43,11,43,11,43,11,43,11,59,11,43,11,43,11,43,11,43,11,43,11,59,11,0,11,59,11,43,11,59,11,59,11,59,43,11,59,43,59,43,59,43,11,43,11,43,59,43,59,43,59,43,59,43,59,43,11,59,0,11,59,11,0,11,0,11,0,11,0,11,0,59,0,11,0,32,0,11,0,11,0,59,0,59,0,59,0,59,0,11,0,32,0,59,0,11,0,59,0,59,0,16,0,11,0,16,0,11,0,59,0,59,0,59,32,0,2,0,2,0,2,0,48,0,48,0,48,0,48,0,48,50,59,48,59,48,0,48,0,50,48,0,48,0,48,0,48,0,48,0,48,32,48,59,48,59,48,0,48,0,48,0,2,0,2,0,2,0,2,0,2,0,2,0,2,0,4,2,4,0,2,0,4,0,4,2,0,2,0,2,0,2,0,2,4,0,53,0,2,4,0,2,4,2,4,2,4,0,2,0,2,4,2,4,2,0,2,0,2,4,0,2,0,2,0,2,0,2,0,2,0,2,0,4,2,4,0,4,2,0,4,2,4,2,4,0,4,2,0,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,56,57,0,6,0,7,0,32,48,0,2,0,34,48,0,2,48,0,48,0,48,0,48,0,2,0,48,0,32,0,2,0,2,0,2,0,2,0,2,0,2,0,2,0,2,0,2,0,2,0,2,0,2,0,4,2,4,0,2,0,2,4,0,4,2,4,2,0,1,0,1,0,2,0,2,4,2,0,4,0,2,0,2,4,0,4,2,4,0,1,0,2,0,4,2,0,4,2,4,2,4,2,0,2,0,2,4,2,0,2,4,0,2,0,2,4,2,4,0,4,0,4,0,2,0,4,0,2,0,2,0,4,2,4,2,4,2,0,2,0,2,4,2,4,2,4,2,4,2,4,2,0,2,4,2,0,4,2,4,2,0,2,0,4,2,4,2,4,2,0,2,4,2,4,2,4,2,0,2,4,2,4,2,0,4,2,4,2,0,2,4,0,4,0,2,4,2,1,4,1,4,2,0,4,2,0,2,4,2,0,4,0,2,0,2,4,1,2,0,2,0,2,4,2,0,1,2,4,2,0,4,2,0,2,4,2,0,2,0,4,2,4,2,4,2,0,2,0,2,0,2,0,2,1,2,0,4,0,2,0,4,2,4,2,0,2,4,0,2,0,2,0,2,0,4,0,2,0,48,50,0,52,0,48,0,48,0,48,0,48,0,48,0,48,0,48,0,2,0,2,4,2,0,4,2,0,2,0,2,0,2,0,2,0,2,0,2,0,2,0,2,0,2,0,2,0,2,0,2,0,2,0,2,0,2,0,2,0,2,0,2,0,2,0,11,59,11,59,11,32,0,11,32,0,11,32,0,11,43,32,43,32,59,32,59,32,11,19,48,59,11,48,59,48,59,48,59,48,11,48,11,59,11,59,11,59,11,59,11,59,11,59,11,59,11,59,11,59,11,59,11,59,50,59,11,59,11,59,11,59,0,11,59,11,59,11,59,11,59,11,59,11,59,0,59,11,59,11,59,11,59,11,59,11,59,11,0,11,0,11,59,11,0,11,0,11,0,11,0,11,0,11,0,59,0,59,0,59,11,59,11,59,11,59,11,59,11,59,11,59,11,59,11,59,11,59,11,0,11,0,48,0,48,0,2,0,34,0,32,0,32,0};
++ public static int Info(int codepoint){if(codepoint<0||codepoint>0x10ffff)throw new ArgumentOutOfRangeException();int index=Array.BinarySearch(Ends,codepoint);return Values[index<0?~index:index];}
++ static bool Join(int before,int after){
++  if(before>=5&&before<=9){if(before==5&&(after==5||after==6||after==8||after==9))return true;if((before==8||before==6)&&(after==6||after==7))return true;if((before==9||before==7)&&after==7)return true;}
++  if(after==2||after==10||before==1||after==4)return true;
++  if(before==10&&after==11)return true;
++  return before==3&&after==3;
++ }
++ public static int Properties(int codepoint,int preceding){
++  if(codepoint>=32&&codepoint<127&&(preceding>>3)==0)return 2;
++  int info=Info(codepoint),width=(info>>4)&3;width=width>=2&&(width==3||codepoint==0xfe0f)?2:1;bool joined=false;
++  if(preceding!=0){int oldWidth=(preceding>>1)&3,after=info&15,before=(preceding>>3)&15;info=Join(before,after)?(after==3?32:after+16):after-16;joined=info>0;if(joined){if(oldWidth>width)width=oldWidth;else if(info==32)width=2;}}
++  return ((info&0xffffff)<<3)|((width&3)<<1)|(joined?1:0);
++ }
++ public static int Width(string text){int preceding=0,total=0;for(int index=0;index<text.Length;index++){int cp=text[index];if(char.IsHighSurrogate(text[index])&&index+1<text.Length&&char.IsLowSurrogate(text[index+1])){cp=char.ConvertToUtf32(text[index],text[index+1]);index++;}int next=Properties(cp,preceding);total+=((next>>1)&3)-((next&1)!=0?((preceding>>1)&3):0);preceding=next;}return total;}
++}
+===================================================================
+--- /dev/null	
++++ b/PSReadLine/ShellSpanPromptOrigin.cs	
+@@ -0,0 +1,35 @@
++using System;
++using System.Threading;
++namespace Microsoft.PowerShell {
++ internal static class ShellSpanPromptOrigin {
++  static Func<int,int,int,int,Tuple<int[],bool>> provider;
++  static int editorThread;
++  static int[] widths;
++  internal static void ConfigureProvider(Func<int,int,int,int,Tuple<int[],bool>> observe){
++   if(observe==null)throw new ArgumentNullException(nameof(observe));
++   if(provider!=null)throw new InvalidOperationException("Display provider already configured");
++   editorThread=Thread.CurrentThread.ManagedThreadId;
++   provider=observe;ShellSpanLayout.Enabled=true;
++  }
++  internal static void Begin(ref int x,ref int y,Microsoft.PowerShell.Internal.IConsole console){
++   widths=null;if(!ShellSpanLayout.Enabled||provider==null)return;
++   if(Thread.CurrentThread.ManagedThreadId!=editorThread)throw new InvalidOperationException("Display editor thread changed");
++   int columns=console.BufferWidth,rows=console.BufferHeight;
++   var observation=provider(columns,rows,x,y);
++   int[] observed=observation==null?null:observation.Item1;
++   if(observed==null||observed.Length>65536)throw new InvalidOperationException("Display observation unavailable");
++   int[] copy=new int[observed.Length];for(int i=0;i<copy.Length;i++){if(observed[i]!=1&&observed[i]!=2)throw new InvalidOperationException("Display width rejected");copy[i]=observed[i];}
++   widths=copy;
++   if(observation.Item2){
++    if(x!=columns-1||Column(columns)!=0||widths.Length==0){widths=null;throw new InvalidOperationException("Invalid pending-wrap observation");}
++    // Materialize the terminal's already pending soft wrap, without inserting
++    // into the editor buffer or evaluating/returning source. Backspace leaves
++    // the next input origin at column zero, including a real bottom-row scroll.
++    console.Write(" \b");x=console.CursorLeft;y=console.CursorTop;
++    if(x!=0){widths=null;throw new InvalidOperationException("Pending wrap did not settle");}
++   }else if(Column(columns)!=x){widths=null;throw new InvalidOperationException("Display observation does not reproduce the actual cursor");}
++  }
++  internal static bool Available {get{return widths!=null;}}
++  internal static int Column(int columns){int x=0;if(widths==null)return -1;foreach(int width in widths){if(x+width>columns)x=0;x+=width;if(x==columns)x=0;}return x;}
++ }
++}
+===================================================================
+--- /dev/null	
++++ b/PSReadLine/ShellSpanEditorLifecycle.cs	
+@@ -0,0 +1,18 @@
++using System;
++using System.Threading;
++namespace Microsoft.PowerShell {
++ internal static class ShellSpanEditorLifecycle {
++  static Action initialized;
++  static int editorThread;
++  internal static void Configure(Action observer){
++   if(observer==null)throw new ArgumentNullException(nameof(observer));
++   if(initialized!=null)throw new InvalidOperationException("Editor lifecycle already configured");
++   editorThread=Thread.CurrentThread.ManagedThreadId;initialized=observer;
++  }
++  internal static void ReadLineInitialized(){
++   if(initialized==null)return;
++   if(Thread.CurrentThread.ManagedThreadId!=editorThread)throw new InvalidOperationException("Editor lifecycle thread changed");
++   initialized();
++  }
++ }
++}
+===================================================================
+--- /dev/null	
++++ b/PSReadLine/XTERM-LICENSE	
+@@ -0,0 +1,19 @@
++Copyright (c) 2023, The xterm.js authors (https://github.com/xtermjs/xterm.js)
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in
++all copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
++THE SOFTWARE.

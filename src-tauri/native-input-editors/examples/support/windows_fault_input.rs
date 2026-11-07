@@ -7,26 +7,45 @@ pub(super) fn read_actual_editor(
     sample: usize,
 ) -> serde_json::Value {
     let path = evidence.join(format!("actual-editor-{sample}.json"));
-    fs::write(evidence.join("editor-read-request.txt"), sample.to_string()).unwrap();
+    assert!((1..=9).contains(&sample), "Invalid read-only editor sample");
+    // One non-printing ConsoleKey event per sample. A flushed chord prefix must
+    // never leave a printable sample digit in the editor's input buffer.
+    let key: &[u8] = match sample {
+        1 => b"\x1b[1;5P",
+        2 => b"\x1b[1;5Q",
+        3 => b"\x1b[1;5R",
+        4 => b"\x1b[1;5S",
+        5 => b"\x1b[15;5~",
+        6 => b"\x1b[17;5~",
+        7 => b"\x1b[18;5~",
+        8 => b"\x1b[19;5~",
+        9 => b"\x1b[20;5~",
+        _ => unreachable!(),
+    };
     let mut next_read = Instant::now();
+    let mut observed = None;
     // A custom-key error can flush queued console keys. Retrying this read-only
     // public-editor observation is safe; no source or submission is replayed.
     wait(
         || {
-            if fs::read(&path)
-                .is_ok_and(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).is_ok())
-            {
-                return true;
+            if let Ok(bytes) = fs::read(&path) {
+                if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                    observed = Some(value);
+                    return true;
+                }
             }
             if Instant::now() >= next_read {
-                write(writer, b"\x18\x14");
+                write(writer, key);
                 next_read = Instant::now() + Duration::from_millis(100);
             }
             false
         },
         raw,
     );
-    let observed: serde_json::Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+    // Repeated read-only keys can rewrite the file after this valid snapshot.
+    // Keep the parsed value instead of racing another truncate/write cycle.
+    let observed = observed.expect("Actual editor observation was not captured");
+    assert_eq!(observed["sample"], sample);
     assert_eq!(observed["activeEditor"], true);
     assert_eq!(observed["thread"], observed["expectedThread"]);
     observed

@@ -32,6 +32,7 @@ mod session;
 mod sftp_pool;
 pub mod terminal_broker;
 mod terminal_command;
+pub(crate) mod terminal_display_origin;
 pub(crate) mod terminal_integration;
 pub(crate) mod terminal_jobs;
 #[cfg(all(test, unix))]
@@ -323,6 +324,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(SessionManager::default())
+        .manage(terminal_display_origin::DisplayOriginRegistry::default())
         .manage(agent_runtime::AgentRuntime::default())
         .manage(UploadCancellationRegistry::default())
         .manage(DeleteCancellationRegistry::default())
@@ -411,6 +413,7 @@ pub fn run() {
             commands::create_session,
             commands::create_local_session,
             commands::write_session,
+            commands::respond_terminal_prompt_origin,
             commands::get_session_status,
             commands::mark_session_ready,
             commands::set_session_output_paused,

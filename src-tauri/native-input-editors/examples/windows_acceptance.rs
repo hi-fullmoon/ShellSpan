@@ -27,6 +27,8 @@ mod history_cases;
 mod transport_cases;
 #[path="support/windows_loader_abi.rs"]
 mod loader_abi;
+#[path="support/windows_display_origin.rs"]
+mod display_origin;
 #[cfg(windows)]
 fn open_windows_conpty(conpty: PathBuf) -> portable_pty::PtyPair {
     portable_pty::win::conpty::ConPtySystem::with_grapheme_host(conpty)
@@ -40,6 +42,8 @@ fn main() {
     assert!(cfg!(windows), "ConPTY acceptance requires the actual Windows host");
     let args: Vec<_> = std::env::args().collect(); assert!(args.len()==4||args.len()==5&&(history_cases::is_mode(&args[4])||transport_cases::is_mode(&args[4])||matches!(args[4].as_str(),"loader-abi"|"display-capture"|"negative"|"input-boundaries"|"invalid-overlimit"|"invalid-empty"|"invalid-nul"|"invalid-control"|"invalid-utf8"|"invalid-json"|"invalid-version"|"invalid-after-input"|"fault-typing"|"fault-complete"|"fault-armed"|"fault-unowned"|"fault-unicode"|"fault-armed-enter"|"pending-cancel"|"jobs")));
     assert!(matches!(args[3].as_str(),"7"|"51"),"Unknown frozen Windows host selector");
+    assert_eq!(std::env::var("SHELLSPAN_ACCEPTANCE_DISPLAY_BRIDGE").as_deref(),Ok("actual-xterm"),"SDK3 requires the live display bridge, never a legacy renderer fallback");
+    assert_eq!(std::env::var("SHELLSPAN_ALLOW_FOREGROUND_TESTS").as_deref(),Ok("1"),"Real native acceptance must be explicitly scheduled");
     let shell=PathBuf::from(&args[1]); let evidence=PathBuf::from(&args[2]);
     let loader_mode=args.get(4).is_some_and(|mode|mode=="loader-abi");
     let display_mode=args.get(4).is_some_and(|mode|mode=="display-capture");
@@ -55,9 +59,11 @@ fn main() {
     let mut profile=nip::PeerProfile { shell: if windows51 { nip::ShellFamily::WindowsPowerShell } else { nip::ShellFamily::PowerShell7 },
         shell_version: Some(if windows51 {"5.1.26100.9818"} else {"7.6.9"}.into()),
         editor: nip::EditorFamily::PsReadLine, editor_version: Some("2.4.5".into()), editor_numeric_version: 20405,
-        adapter_version:"1".into(), verified_profile_id:Some(format!("{}-psreadline-2.4.5-shellspan1-conpty1.25.260930003-graphemes-windows-x64-native",if windows51 {"windows-powershell-5.1.26100.9818"}else{"powershell-7.6.9"})) };
+        adapter_version:"1".into(), verified_profile_id:Some(format!("{}-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native",if windows51 {"windows-powershell-5.1.26100.9818"}else{"powershell-7.6.9"})) };
     let quote=|s: &str| format!("'{}'",s.replace('\'',"''"));
     let bootstrap=evidence.join("bootstrap.ps1");
+    let transport_source=evidence.join("transport.cs");
+    fs::write(&transport_source,concat!(include_str!("../psreadline.cs"),"\n",include_str!("../../src/terminal_display_origin_pipe.cs"))).unwrap();
     let candidate_module=std::env::var_os("SHELLSPAN_ACCEPTANCE_PSREADLINE_MANIFEST").map(PathBuf::from);
     let module=candidate_module.clone().unwrap_or_else(||root.join("../resources/powershell/PSReadLine/2.4.5/PSReadLine.psd1"));
     let editor_hash=if candidate_module.is_some() {
@@ -65,12 +71,15 @@ fn main() {
         assert!(module.is_absolute()&&module.canonicalize().unwrap().starts_with(owned),"Candidate module must be inside owned test artifacts");
         let expected=std::env::var("SHELLSPAN_ACCEPTANCE_PSREADLINE_SHA256").expect("Explicit candidate assembly digest");
         assert_eq!(expected,hex::encode(sha2::Sha256::digest(fs::read(module.parent().unwrap().join("Microsoft.PowerShell.PSReadLine.dll")).unwrap())));
-        profile.verified_profile_id.as_mut().unwrap().push_str("-history-process-exit-candidate");
+        // Keep the explicit candidate distinct without exceeding NIP's
+        // existing 128-byte profile identifier bound on the longer P5 host.
+        profile.verified_profile_id.as_mut().unwrap().push_str("-candidate");
+        assert!(profile.verified_profile_id.as_ref().unwrap().len() <= 128);
         expected
     }else{hex::encode(sha2::Sha256::digest(fs::read(root.join("../resources/powershell/PSReadLine/2.4.5/Microsoft.PowerShell.PSReadLine.dll")).unwrap()))};
     let history=evidence.join("history.txt");
     let history_mode=args.get(4).filter(|mode|history_cases::is_mode(mode));
-    let library=if loader_mode||display_mode {
+    let library=if loader_mode||display_mode||std::env::var_os("SHELLSPAN_ACCEPTANCE_NATIVE_LIBRARY").is_some() {
         let candidate=PathBuf::from(std::env::var_os("SHELLSPAN_ACCEPTANCE_NATIVE_LIBRARY").expect("Explicit loader candidate"));
         assert!(candidate.is_absolute()&&candidate.canonicalize().unwrap().starts_with(root.join("../../.artifacts/tests").canonicalize().unwrap()));
         assert_eq!(candidate.file_name().unwrap(),"shellspan_native_input_editors.dll");
@@ -90,7 +99,7 @@ $__shellspanFixtureRecord=@{{engine=$PSVersionTable.PSVersion.ToString();edition
 if($__shellspanFixtureModule.Version.ToString()-cne '2.4.5'){{throw 'Actual module is not the frozen provider'}}
 . {} -Library {} -PipeName {} -ProfileJson $__shellspanFixtureProfile -TransportSource ([IO.File]::ReadAllText({})) -ExpectedClientPid {} -ExpectedEditorHash {} -JobHelpersPath {} -JobHostPath {} -ConsoleSignalPath {} -HostReferencePath {}
 "#,quote(&module.to_string_lossy()),quote(&history.to_string_lossy()),quote(&serde_json::to_string(&profile).unwrap()),
-        quote(&evidence.join("actual-provider.json").to_string_lossy()),quote(&root.join("psreadline.ps1").to_string_lossy()),quote(&library.to_string_lossy()),pipe_argument,quote(&root.join("psreadline.cs").to_string_lossy()),std::process::id(),quote(&editor_hash),quote(&root.join("../src/terminal_jobs.ps1").to_string_lossy()),quote(&root.join("../src/terminal_job_host.cs").to_string_lossy()),quote(&root.join("../src/terminal_console_signals.cs").to_string_lossy()),quote(&root.join("../resources/powershell/PSReadLine/2.4.5/Upstream.PSReadLine.ps1").to_string_lossy()));
+        quote(&evidence.join("actual-provider.json").to_string_lossy()),quote(&root.join("psreadline.ps1").to_string_lossy()),quote(&library.to_string_lossy()),pipe_argument,quote(&transport_source.to_string_lossy()),std::process::id(),quote(&editor_hash),quote(&root.join("../src/terminal_jobs.ps1").to_string_lossy()),quote(&root.join("../src/terminal_job_host.cs").to_string_lossy()),quote(&root.join("../src/terminal_console_signals.cs").to_string_lossy()),quote(&root.join("../resources/powershell/PSReadLine/2.4.5/Upstream.PSReadLine.ps1").to_string_lossy()));
     if let Some(mode)=history_mode {
         let setup=history_cases::bootstrap(mode,&evidence);
         let previous=format!("Set-PSReadLineOption -HistorySavePath {} -ErrorAction Stop\n",quote(&history.to_string_lossy()));
@@ -114,9 +123,8 @@ throw
     }
     if args.get(4).is_some_and(|mode|mode.starts_with("fault-")||history_cases::is_mode(mode)||transport_cases::is_mode(mode)) {
         script.push_str(&format!(r#"
-if(@(PSReadLine\Get-PSReadLineKeyHandler -Chord 'Ctrl+x,Ctrl+t').Count -gt 0){{throw 'Acceptance read-only key unavailable'}}
 $global:__shellspanAcceptanceEditorThread=[Threading.Thread]::CurrentThread.ManagedThreadId
-PSReadLine\Set-PSReadLineKeyHandler -Chord 'Ctrl+x,Ctrl+t' -ScriptBlock {{
+$AcceptanceReadTemplate=@'
   $line=$null;$cursor=0
   [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line,[ref]$cursor)
   $active=$false
@@ -125,14 +133,20 @@ PSReadLine\Set-PSReadLineKeyHandler -Chord 'Ctrl+x,Ctrl+t' -ScriptBlock {{
     if($null-ne $method -and $method.DeclaringType-eq [Microsoft.PowerShell.PSConsoleReadLine] -and $method.Name-ceq 'ReadLine'){{$active=$true;break}}
   }}
   $directory={}
-  $sample=[int][IO.File]::ReadAllText((Join-Path $directory 'editor-read-request.txt'))
+  $sample=__SHELLSPAN_SAMPLE__
   if($sample-lt 1 -or $sample-gt 9){{throw 'Invalid acceptance sample'}}
   $path=Join-Path $directory ('actual-editor-'+$sample+'.json')
   $options=PSReadLine\Get-PSReadLineOption
   $history=@([Microsoft.PowerShell.PSConsoleReadLine]::GetHistoryItems()|ForEach-Object {{$_.CommandLine}})
   $closed=& $global:__shellspanModule {{$script:Context.ControlClosed}}
-  $record=@{{text=[string]$line;cursorUtf16=$cursor;activeEditor=$active;thread=[Threading.Thread]::CurrentThread.ManagedThreadId;expectedThread=$global:__shellspanAcceptanceEditorThread;controlClosed=[bool]$closed;historyOptions=@{{path=$options.HistorySavePath;maximum=$options.MaximumHistoryCount;style=[string]$options.HistorySaveStyle}};history=$history;scope='Actual public editor read only, not a NIP proof or execution receipt'}}
+  $record=@{{sample=$sample;text=[string]$line;cursorUtf16=$cursor;activeEditor=$active;thread=[Threading.Thread]::CurrentThread.ManagedThreadId;expectedThread=$global:__shellspanAcceptanceEditorThread;controlClosed=[bool]$closed;historyOptions=@{{path=$options.HistorySavePath;maximum=$options.MaximumHistoryCount;style=[string]$options.HistorySaveStyle}};history=$history;scope='Actual public editor read only, not a NIP proof or execution receipt'}}
   [IO.File]::WriteAllText($path,($record|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
+'@
+foreach($ReadSample in 1..9){{
+  $ReadChord='Ctrl+F'+[string]$ReadSample
+  if(@(PSReadLine\Get-PSReadLineKeyHandler -Chord $ReadChord).Count -gt 0){{throw 'Acceptance read-only key unavailable'}}
+  $ReadHandler=[scriptblock]::Create($AcceptanceReadTemplate.Replace('__SHELLSPAN_SAMPLE__',[string]$ReadSample))
+  PSReadLine\Set-PSReadLineKeyHandler -Chord $ReadChord -ScriptBlock $ReadHandler
 }}
 "#,quote(&evidence.to_string_lossy())));
     }
@@ -147,8 +161,9 @@ PSReadLine\Set-PSReadLineKeyHandler -Chord 'Ctrl+x,Ctrl+t' -ScriptBlock {{
     }
     let pair=open_windows_conpty(conpty);
     let mut command=CommandBuilder::new(&shell); command.args(["-NoLogo","-NoProfile","-NoExit","-File"]);command.arg(&bootstrap);
-    if loader_mode||display_mode {command.env("SHELLSPAN_ACCEPTANCE_PIPE",&id);command.env("PSModuleAnalysisCachePath",evidence.join("module.cache"));}
-    if history_mode.is_some()||loader_mode||display_mode {
+    if loader_mode||display_mode {command.env("SHELLSPAN_ACCEPTANCE_PIPE",&id);}
+    command.env("PSModuleAnalysisCachePath",evidence.join("module.cache"));
+    {
         for (name,folder) in [("HOME","profile"),("USERPROFILE","profile"),("APPDATA","roaming"),("LOCALAPPDATA","local")] {
             let path=evidence.join("isolated").join(folder);fs::create_dir_all(&path).unwrap();command.env(name,path);
         }
@@ -161,6 +176,7 @@ PSReadLine\Set-PSReadLineKeyHandler -Chord 'Ctrl+x,Ctrl+t' -ScriptBlock {{
         command.env("PSModulePath",std::env::join_paths(paths).unwrap());
     }
     let mut child=pair.slave.spawn_command(command).unwrap();drop(pair.slave);
+    let display_worker=display_origin::start(&id,child.process_id().unwrap(),evidence.clone());
     let writer=Arc::new(Mutex::new(pair.master.take_writer().unwrap()));
     let mut reader=pair.master.try_clone_reader().unwrap();
     let raw=Arc::new(Mutex::new(Vec::new()));let capture=raw.clone();
@@ -284,7 +300,7 @@ PSReadLine\Set-PSReadLineKeyHandler -Chord 'Ctrl+x,Ctrl+t' -ScriptBlock {{
             thread::sleep(Duration::from_millis(10));
         }
     }
-    let _=child.kill();let _=child.wait(); drop(writer);drop(pair.master);let _=output.join();
+    let _=child.kill();let _=child.wait();drop(display_worker);drop(writer);drop(pair.master);let _=output.join();
     fs::write(evidence.join("raw.bin"),&*raw.lock().unwrap_or_else(|e|e.into_inner())).unwrap();
     fs::write(evidence.join("read-events.json"),serde_json::to_vec_pretty(&*read_events.lock().unwrap_or_else(|e|e.into_inner())).unwrap()).unwrap();
     fs::write(evidence.join("resize-events.json"),serde_json::to_vec_pretty(&resize_events).unwrap()).unwrap();

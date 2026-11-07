@@ -64,6 +64,11 @@ export function attachNativeInputDisplay(
       || !terminal.unicode.versions.includes(unicodeVersion))) {
     throw new TypeError('Native editor display requires a registered Unicode provider');
   }
+  // The verified private ConPTY owns redraw while native input is staged,
+  // but an ordinary idle prompt still needs xterm to preserve its cursor line
+  // on resize. Other profiles retain the existing false idle baseline.
+  const idleReflowCursorLine = unicodeVersion === '15-graphemes'
+    && options.unicodeScope === 'session' && binding.ownedReflowCursorLine === false;
 
   let disposed = false;
   let previousUnicodeVersion: string | undefined;
@@ -89,7 +94,7 @@ export function attachNativeInputDisplay(
       return true;
     }
     if (payload === binding.exitPayload) {
-      terminal.options.reflowCursorLine = false;
+      terminal.options.reflowCursorLine = idleReflowCursorLine;
       if (options.unicodeScope !== 'session') restoreUnicode();
       return true;
     }
@@ -98,6 +103,7 @@ export function attachNativeInputDisplay(
   // ConPTY applies its measurement to the entire stream, including ordinary
   // command output. Keep the matching provider until this transport drains.
   if (options.unicodeScope === 'session') selectUnicode();
+  terminal.options.reflowCursorLine = idleReflowCursorLine;
   attachedTerminals.add(terminal);
   const dispose = (): void => {
     if (disposed) return;

@@ -278,7 +278,13 @@ describe('native input runner argument validation', () => {
       expect(createHash('sha256').update(readFileSync(assembly)).digest('hex'), name).toBe(expected);
     }
     expect(JSON.parse(readFileSync(path.join(root, 'src-tauri/resources/powershell/PSReadLine/2.4.5/ShellSpan.Build.json'), 'utf8'))).toEqual(pin);
-    expect(pin.buildRevision).toBe('shellspan1');
+    expect(pin.buildRevision).toBe('shellspan6');
+    expect(pin.graphemeProvider).toMatchObject({package:'@xterm/addon-unicode-graphemes',version:'0.4.0',license:'XTERM-LICENSE'});
+    expect(createHash('sha256').update(readFileSync(path.join(root,'src-tauri/resources/powershell/PSReadLine/2.4.5',pin.graphemeProvider.license))).digest('hex')).toBe(pin.graphemeProvider.licenseSha256);
+    const patch=readFileSync(path.join(root,pin.patch),'utf8');
+    expect(patch).toContain('ConfigureProvider');
+    expect(patch).not.toContain('SHELLSPAN_ACCEPTANCE_ORIGIN_CHANNEL');
+    expect(patch).not.toContain('SHELLSPAN_ACCEPTANCE_LAYOUT');
     expect(execFileSync('git', ['check-attr', 'eol', '--', pin.patch], { cwd: root, encoding: 'utf8' }).trim()).toBe(`${pin.patch}: eol: lf`);
   });
   it('keeps short Windows snapshots owned and the PS5 editor cache below MAX_PATH', () => {

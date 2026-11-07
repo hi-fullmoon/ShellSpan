@@ -51,25 +51,7 @@ fn snapshot(
     evidence: &std::path::Path,
     index: usize,
 ) -> serde_json::Value {
-    fs::write(evidence.join("editor-read-request.txt"), index.to_string()).unwrap();
-    let path = evidence.join(format!("actual-editor-{index}.json"));
-    let mut next = Instant::now();
-    wait(
-        || {
-            if fs::read(&path)
-                .is_ok_and(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).is_ok())
-            {
-                return true;
-            }
-            if Instant::now() >= next {
-                write(writer, b"\x18\x14");
-                next = Instant::now() + Duration::from_millis(100);
-            }
-            false
-        },
-        raw,
-    );
-    let data: serde_json::Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+    let data = fault_input::read_actual_editor(writer, raw, evidence, index);
     assert_eq!(data["activeEditor"], true);
     assert_eq!(data["thread"], data["expectedThread"]);
     assert_eq!(data["text"], "");

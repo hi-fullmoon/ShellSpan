@@ -53,6 +53,10 @@ const { values } = parseArgs({ options: {
   'native-input-p3': { type: 'string' },
   'native-input-p3-credential': { type: 'string' },
   'native-input-p3-startup': { type: 'string' },
+  'native-input-p3-display-auto': { type: 'boolean' },
+  'native-input-p3-display-reflow-diagnostic': { type: 'boolean' },
+  'native-input-p3-display-cursor-diagnostic': { type: 'boolean' },
+  'native-input-p3-display-active-input': { type: 'boolean' },
   'native-input-p3-startup-diagnostic': { type: 'boolean' },
   'native-input-p3-startup-user-edit': { type: 'boolean' },
   'native-input-p3-require-jobs': { type: 'boolean' },
@@ -123,6 +127,21 @@ assert(!values['terminal-delegation'] || !values['no-model'], '--terminal-delega
 assert(!values['terminal-delegation'] || (!values['terminal-contention'] && !values['composer-input-diagnostic']
   && !values['cleanup-session']?.length), '--terminal-delegation is a separate regression');
 const p3Startup=values['native-input-p3-startup'];
+const displayAuto=values['native-input-p3-display-auto']===true;
+const displayReflowDiagnostic=values['native-input-p3-display-reflow-diagnostic']===true;
+assert(!displayReflowDiagnostic||displayAuto,'Display reflow diagnostic requires the isolated automatic display case');
+const displayCursorDiagnostic=values['native-input-p3-display-cursor-diagnostic']===true;
+const displayActiveInput=values['native-input-p3-display-active-input']===true;
+assert(!displayActiveInput||displayAuto&&!displayReflowDiagnostic&&!displayCursorDiagnostic,'Active-input display requires the isolated unmodified display configuration');
+assert(!displayCursorDiagnostic||displayAuto&&!displayReflowDiagnostic,'Cursor sampling requires the isolated default display case without a reflow override');
+assert(!displayAuto||process.platform==='win32'&&process.arch==='x64'&&['powerShell7','windowsPowerShell'].includes(p3Startup)
+  &&values['no-model']&&values['data-scope']==='com.shellspan.validation.native-input-p3'
+  &&process.env.SHELLSPAN_ALLOW_FOREGROUND_TESTS==='1'
+  &&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR??'')
+  &&process.env.SHELLSPAN_DATA_DIR===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'data')
+  &&process.env.SHELLSPAN_LOCAL_HOME===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'home')
+  &&Object.keys(values).every(key=>['native-input-p3-startup','native-input-p3-display-auto','native-input-p3-display-reflow-diagnostic','native-input-p3-display-cursor-diagnostic','native-input-p3-display-active-input','no-model','data-scope'].includes(key)),
+  '--native-input-p3-display-auto requires an isolated scheduled Windows startup display case without model or other modes');
 assert(!values['native-input-p3-startup-diagnostic']||p3Startup&&p3Startup!=='zsh');
 assert(!values['native-input-p3-startup-user-edit']||p3Startup&&p3Startup!=='zsh','Ordinary startup editing requires an isolated Windows startup case');
 assert(!p3Startup||values['no-model']&&values['data-scope']==='com.shellspan.validation.native-input-p3'&&!values['native-jobs']&&!values['data-initialize']);
@@ -165,6 +184,9 @@ const activeEof=values['native-input-p3-active-eof']===true;
 const lateReceipt=values['native-input-p3-late-receipt']===true;
 const captureTail=values['native-input-p3-capture-tail']===true;
 const stopBoundary=values['native-input-p3-stop-boundary'];
+const originDiagnostic=process.env.SHELLSPAN_ACCEPTANCE_ORIGIN_DIAGNOSTIC;
+assert(originDiagnostic===undefined||originDiagnostic==='1'&&stopBoundary,
+  'Origin geometry diagnostics require an explicit isolated stop-boundary case');
 assert(stopBoundary===undefined||process.platform==='win32'&&process.arch==='x64'&&!noModel&&['powerShell7','windowsPowerShell'].includes(nativeP3)
   &&/^(durableIntent|armed|beforeAccept|afterAccept)-(cancel|takeover)$/.test(stopBoundary)&&values['data-scope']==='com.shellspan.validation.native-input-p3'
   &&process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR&&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR)
@@ -414,7 +436,7 @@ let contentionEntryUrl;
 let settle;
 const result = new Promise((resolveResult) => { settle = resolveResult; });
 const page = performanceRun ? 'agent-panel-performance.native.html' : 'agent-session-stream.native.html';
-const pagePath = historyStartup!==undefined ? 'src/components/terminal/__tests__/native-history.native.html' : jobRetired!==undefined ? 'src/components/terminal/__tests__/native-job-retired.native.html' : jobOwnership!==undefined ? 'src/components/terminal/__tests__/native-job-ownership.native.html' : jobCompletion!==undefined ? 'src/components/terminal/__tests__/native-job-completion.native.html' : jobLifecycle ? 'src/components/terminal/__tests__/native-job-lifecycle.native.html' : stopBoundary ? 'src/components/terminal/__tests__/native-stop-boundary.native.html' : captureTail ? 'src/components/terminal/__tests__/native-capture-tail.native.html' : lateReceipt ? 'src/components/terminal/__tests__/native-late-receipt.native.html' : windowsLifetime==='control-eof-draft' ? 'src/components/terminal/__tests__/native-user-draft-eof.native.html' : activeEof ? 'src/components/terminal/__tests__/native-active-eof.native.html' : navigationManual ? 'src/components/terminal/__tests__/native-navigation-manual.native.html' : delegationClose || delegationTakeover ? 'src/components/terminal/__tests__/native-approval-delegation-close.native.html' : approvalDelegation ? 'src/components/terminal/__tests__/native-approval-delegation.native.html' : approvalContention ? 'src/components/terminal/__tests__/native-approval-contention.native.html' : windowsLifetime ? 'src/components/terminal/__tests__/native-windows-lifetime.native.html' : windowsDraftCancel ? 'src/components/terminal/__tests__/native-windows-draft.native.html'
+const pagePath = displayAuto ? 'src/components/terminal/__tests__/native-display-auto.native.html' : historyStartup!==undefined ? 'src/components/terminal/__tests__/native-history.native.html' : jobRetired!==undefined ? 'src/components/terminal/__tests__/native-job-retired.native.html' : jobOwnership!==undefined ? 'src/components/terminal/__tests__/native-job-ownership.native.html' : jobCompletion!==undefined ? 'src/components/terminal/__tests__/native-job-completion.native.html' : jobLifecycle ? 'src/components/terminal/__tests__/native-job-lifecycle.native.html' : stopBoundary ? 'src/components/terminal/__tests__/native-stop-boundary.native.html' : captureTail ? 'src/components/terminal/__tests__/native-capture-tail.native.html' : lateReceipt ? 'src/components/terminal/__tests__/native-late-receipt.native.html' : windowsLifetime==='control-eof-draft' ? 'src/components/terminal/__tests__/native-user-draft-eof.native.html' : activeEof ? 'src/components/terminal/__tests__/native-active-eof.native.html' : navigationManual ? 'src/components/terminal/__tests__/native-navigation-manual.native.html' : delegationClose || delegationTakeover ? 'src/components/terminal/__tests__/native-approval-delegation-close.native.html' : approvalDelegation ? 'src/components/terminal/__tests__/native-approval-delegation.native.html' : approvalContention ? 'src/components/terminal/__tests__/native-approval-contention.native.html' : windowsLifetime ? 'src/components/terminal/__tests__/native-windows-lifetime.native.html' : windowsDraftCancel ? 'src/components/terminal/__tests__/native-windows-draft.native.html'
   : windowsStop ? 'src/components/terminal/__tests__/native-windows-stop.native.html'
   : byteBoundary ? 'src/components/terminal/__tests__/native-byte-boundary.native.html'
   : fileRestart ? 'src/components/terminal/__tests__/native-file-restart.native.html'
@@ -785,7 +807,7 @@ const attachResult = (vite) => {
       response.setHeader('Content-Type','application/json');response.end(JSON.stringify({...record,ready:true}));
     }catch{response.statusCode=500;response.end('Actual owned native module inspection unavailable');}
   });}
-  if(jobLifecycle||jobCompletion!==undefined||jobOwnership!==undefined||jobRetired!==undefined||historyStartup!==undefined)attachJobModuleObserver('__native-job-observer','native-job-observer.json');
+  if(jobLifecycle||jobCompletion!==undefined||jobOwnership!==undefined||jobRetired!==undefined||historyStartup!==undefined||displayAuto)attachJobModuleObserver('__native-job-observer','native-job-observer.json');
   if(jobRetired!==undefined)attachJobModuleObserver('__native-job-replacement-observer','native-job-replacement-observer.json',true);
   if(historyStartup!==undefined)vite.middlewares.use(`/__native-history-profile/${token}`,async(request,response)=>{
     if(request.method!=='GET'){response.statusCode=405;response.end();return;}
@@ -806,6 +828,52 @@ const attachResult = (vite) => {
     try { await assert.rejects(stat(windowsCompletionGate),{code:'ENOENT'}); response.setHeader('Content-Type','application/json'); response.end(JSON.stringify({closed:true,gate:windowsCompletionGate,checkedAtUnixMs:Date.now()})); }
     catch {response.statusCode=500;response.end('Owned completion gate was unexpectedly released');}
   });
+  if(displayAuto){
+    let visibleOutputWritten=false;
+    vite.middlewares.use(`/__native-display-visible-output/${token}`,async(request,response)=>{
+      if(request.method!=='POST'){response.writeHead(405).end();return;}
+      try{
+        assert(ownedEvidenceDirectory&&!visibleOutputWritten,'Only one owned visible output is admitted');visibleOutputWritten=true;
+        const chunks=[];let length=0;for await(const chunk of request){length+=chunk.length;assert(length<=4*1024*1024,'Owned visible output exceeds bound');chunks.push(chunk);}
+        const data=Buffer.concat(chunks);new TextDecoder('utf-8',{fatal:true}).decode(data);const file=resolve(ownedEvidenceDirectory,'native-display-visible-output.utf8');await writeFile(file,data,{flag:'wx',mode:0o600});response.setHeader('Content-Type','application/json');response.end(JSON.stringify({file,bytes:data.length,sha256:createHash('sha256').update(data).digest('hex'),scope:'Actual registry visible writes including local bytes and filtered session output;not original wire or lifecycle proof'}));
+      }catch(error){response.writeHead(500).end(String(error));}
+    });
+    let displayTraceWritten=false;
+    vite.middlewares.use(`/__native-display-trace/${token}`,async(request,response)=>{
+      if(request.method!=='POST'){response.writeHead(405).end();return;}
+      try{
+        assert(ownedEvidenceDirectory&&!displayTraceWritten,'Only one owned display trace is admitted');displayTraceWritten=true;
+        const chunks=[];let length=0;for await(const chunk of request){length+=chunk.length;assert(length<=8*1024*1024,'Owned display trace exceeds bound');chunks.push(chunk);}
+        const data=Buffer.concat(chunks),value=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(data));assert(value.version===2&&value.streamKind==='actual-visible-output'&&Array.isArray(value.events)&&value.events.length<=40000,'Invalid owned display trace');
+        const file=resolve(ownedEvidenceDirectory,'native-display-trace.json');await writeFile(file,data,{flag:'wx',mode:0o600});response.setHeader('Content-Type','application/json');response.end(JSON.stringify({file,bytes:data.length,sha256:createHash('sha256').update(data).digest('hex'),scope:'Observed decoded display order and checkpoints only;no wire,input or lifecycle authority'}));
+      }catch(error){response.writeHead(500).end(String(error));}
+    });
+    let displayOutputWritten=false;
+    vite.middlewares.use(`/__native-display-output/${token}`,async(request,response)=>{
+      if(request.method!=='POST'){response.writeHead(405).end();return;}
+      try{
+        assert(ownedEvidenceDirectory&&!displayOutputWritten,'Only one owned decoded display output is admitted');displayOutputWritten=true;
+        const chunks=[];let length=0;for await(const chunk of request){length+=chunk.length;assert(length<=4*1024*1024,'Owned display output exceeds bound');chunks.push(chunk);}
+        const data=Buffer.concat(chunks);new TextDecoder('utf-8',{fatal:true}).decode(data);
+        const file=resolve(ownedEvidenceDirectory,'native-display-output.utf8');await writeFile(file,data,{flag:'wx',mode:0o600});
+        response.setHeader('Content-Type','application/json');response.end(JSON.stringify({file,bytes:data.length,sha256:createHash('sha256').update(data).digest('hex'),scope:'Actual decoded owned PTY output re-encoded once as UTF8;not original wire or lifecycle proof'}));
+      }catch(error){response.writeHead(500).end(String(error));}
+    });
+    vite.middlewares.use(`/__native-display-exit/${token}`,async(request,response)=>{
+      if(request.method!=='GET'){response.writeHead(405).end();return;}
+      try{assert(ownedEvidenceDirectory);response.setHeader('Content-Type','application/json');response.end(JSON.stringify(await readWindowsHistoryExit(ownedEvidenceDirectory)));}catch{response.writeHead(500).end('Original owned display Shell exit unavailable');}
+    });
+    let displayCaptures=0;
+    vite.middlewares.use(`/__native-display-capture/${token}`,async(request,response)=>{
+      if(request.method!=='POST'){response.writeHead(405).end();return;}
+      try{
+        assert(ownedEvidenceDirectory&&displayCaptures<21&&request.url===`/${displayCaptures}`,'Only twenty-one ordered owned display and history-selection captures are admitted');
+        const file=resolve(ownedEvidenceDirectory,`native-display-${displayCaptures++}.png`),executable=await windowsValidationImage();
+        const metadata=await new Promise((complete,reject)=>execFile('powershell.exe',['-NoLogo','-NoProfile','-File',resolve(repository,'scripts/fixtures/windows-desktop-capture.ps1'),'-Executable',executable,'-Output',file],{timeout:15000,maxBuffer:65536,windowsHide:true},(error,stdout,stderr)=>error?reject(new Error(stderr||error.message)):complete(stdout)));
+        response.setHeader('Content-Type','application/json');response.end(metadata);
+      }catch(error){response.writeHead(500).end(String(error));}
+    });
+  }
   if (windowsShell) vite.middlewares.use(`/__native-window-evidence/${token}`, async (request,response) => {
     if (request.method !== 'POST') { response.statusCode=405; response.end(); return; }
     try {
@@ -970,6 +1038,10 @@ try {
   if (values['native-jobs-ssh']) url.searchParams.set('sshShell', values['native-jobs-ssh']);
   if(values['native-input-p2']) url.searchParams.set('nativeP2','true');
   if(nativeP3) url.searchParams.set('nativeP3',nativeP3);
+  if(originDiagnostic==='1')url.searchParams.set('nativeOriginDiagnostic','true');
+  if(displayReflowDiagnostic)url.searchParams.set('nativeDisplayReflowDiagnostic','true');
+  if(displayCursorDiagnostic)url.searchParams.set('nativeDisplayCursorDiagnostic','true');
+  if(displayActiveInput)url.searchParams.set('nativeDisplayActiveInput','true');
   if(jobCompletion!==undefined)url.searchParams.set('jobNaturalExit',jobCompletion);
   if(jobOwnership!==undefined)url.searchParams.set('jobForeignTool',jobOwnership==='wait'?'wait_process':'kill_process');
   if(jobRetired!==undefined)url.searchParams.set('jobRetiredTool',jobRetired==='wait'?'wait_process':'kill_process');
@@ -1052,6 +1124,7 @@ try {
   const outcome = await result;
   if(frozenNativeRun)writeFrozenCheckpoint(resolve(ownedEvidenceDirectory,`frozen-${token}-after-webview-result.json`),verifyFrozenValidation(frozenManifestPath,'after-webview-result'));
   assert.equal(outcome.ok, true, outcome.error);
+  if(displayAuto){const evidence=JSON.parse(await readFile(nativeEvidencePath,'utf8'));assert(evidence.kind==='actual-native-display-auto'&&evidence.activeInput===displayActiveInput&&evidence.records?.length===6&&evidence.normalExit&&evidence.exit?.exitCode===0&&evidence.ordinaryInputCalls===(displayActiveInput?14:8)&&evidence.modelCalls===0&&evidence.agentSubmissions===0&&evidence.clipboardReads===0&&evidence.clipboardWrites===0,'Actual live display matrix incomplete');}
   if(navigationManual){const evidence=JSON.parse(await readFile(nativeEvidencePath,'utf8'));assert.equal(evidence.kind,'actual-native-navigation-manual');if(evidence.deferred){assert.equal(evidence.manualCasePassed,false);console.log('Manual navigation deferred;no manual acceptance pass claimed.');}else{assert(evidence.manualCasePassed&&evidence.receipts?.length===5,'Manual navigation requires all five trusted human steps');}}
   if(frozenNativeRun)frozenSucceeded=true;
   else{

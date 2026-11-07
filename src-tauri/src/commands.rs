@@ -802,6 +802,8 @@ fn create_local_session_blocking(
     let mut terminal_integration_control = None;
     #[cfg(any(unix, windows))]
     let mut native_control = None;
+    #[cfg(windows)]
+    let mut native_origin = None;
     if terminal_broker_enabled {
         let Some(runtime) = app.try_state::<crate::agent_runtime::AgentRuntime>() else {
             return Err(rollback_local_broker_attachment_failure(
@@ -819,6 +821,11 @@ fn create_local_session_blocking(
         #[cfg(any(unix, windows))]
         if let Some(native) = prepared_native {
             let probe = runtime.register_native_terminal(&session_id, native.profile.clone())?;
+            #[cfg(windows)]
+            {
+                native_origin =
+                    native.start_display_origin(app.clone(), session_id.clone(), &probe.connection);
+            }
             let event_app = app.clone();
             let event_id = session_id.clone();
             let closed_app = app.clone();
@@ -945,6 +952,8 @@ fn create_local_session_blocking(
         let _terminal_integration_control = terminal_integration_control;
         #[cfg(any(unix, windows))]
         let native_control = native_control;
+        #[cfg(windows)]
+        let mut native_origin = native_origin;
         let (output_tx, output_rx) = bounded::<Vec<u8>>(LOCAL_OUTPUT_QUEUE_CAPACITY);
         let (child_exit_tx, child_exit_rx) = bounded::<()>(1);
         let mut child_killer = child.clone_killer();
@@ -1160,6 +1169,8 @@ fn create_local_session_blocking(
             }
         }
         // Wait for the reader thread to finish so output still in flight
+        #[cfg(windows)]
+        drop(native_origin.take());
         // (e.g. the shell's final exit message) is not lost, then flush.
         // Releasing the PTY lets a reader blocked in read observe EOF, and
         // the watchdog bounds the wait: a grandchild process can keep the
@@ -1320,6 +1331,15 @@ pub(crate) fn write_session(
         warn!("Failed to write SSH session input session_id={session_id}: {error}");
     }
     result
+}
+
+/// Resolves an existing display-only request. It cannot create a binding or write input.
+#[tauri::command]
+pub(crate) fn respond_terminal_prompt_origin(
+    registry: State<'_, crate::terminal_display_origin::DisplayOriginRegistry>,
+    response: crate::terminal_display_origin::DisplayOriginResponse,
+) -> Result<(), String> {
+    registry.respond(response)
 }
 
 #[tauri::command]

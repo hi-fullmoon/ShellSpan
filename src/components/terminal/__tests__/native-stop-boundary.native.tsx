@@ -10,6 +10,8 @@ import {nativeFileCoreSetup,readNativeFileLoadedCore} from './native-file-chain-
 import {delegationOriginalCall} from './native-approval-delegation-plan';
 import {matchesWindowsStopResult} from './native-windows-stop-plan';
 import {stopBoundaryPlan,matchesStopBoundaryArgs,isPreAcceptBoundary,isConfirmedPreAcceptCancel} from './native-stop-boundary-plan';
+import {createNativeOriginDiagnostic, type NativeOriginDiagnosticRecord} from './native-origin-diagnostic';
+import {listenToTerminalPromptOrigin} from '@/lib/ipc/tauri';
 import {invokeCreateLocalSession,invokeCloseSession,invokeGetTerminalBrokerSnapshot,invokeListAiRoutes,invokeCreateAgentRuntimeSession,invokeAgentRuntimeFollowup,invokeStartAgentRuntime,invokeCancelAgentRuntime,invokeArchiveAgentRuntimeSession,invokeGetAgentRuntimeSession,invokeGetPendingAgentRuntimeApprovalArguments,invokeApproveAgentRuntimeTool,invokeGetTerminalSubmissionRecovery,invokeWriteSession,listenToAgentRuntimeSession,listenToTerminalIntegrationState} from '@/lib/ipc/tauri';
 import type {AgentSessionEvent} from '@/types/agent-session';
 import type {TerminalIntegrationStateEvent} from '@/types';
@@ -23,7 +25,8 @@ async function verify(){
  assert((fixture.stage==='durableIntent'||fixture.stage==='armed'||fixture.stage==='beforeAccept'||fixture.stage==='afterAccept')&&(fixture.action==='cancel'||fixture.action==='takeover'),'Explicit stop boundary missing');
  const plan=stopBoundaryPlan(token,fixture.stage,fixture.action),submittedBoundary=plan.stage==='beforeAccept'||plan.stage==='afterAccept',id='agent-stop-boundary-'+crypto.randomUUID(),events:AgentSessionEvent[]=[],observations:TerminalIntegrationStateEvent[]=[],queries:unknown[]=[],dispose:(()=>void)[]=[];
  let raw='',failure:string|undefined,created=false,terminalId:string|undefined,closed=false;
- const report=(evidence:unknown)=>fetch(`/__agent-stream-result/${token}`,{method:'POST',body:JSON.stringify({evidence,progress:'Actual native cancellation boundary acceptance'})});
+ let originDiagnostics: NativeOriginDiagnosticRecord[] = [];
+ const report=(evidence:unknown)=>fetch(`/__agent-stream-result/${token}`,{method:'POST',body:JSON.stringify({evidence:{...object(evidence),originDiagnostics},progress:'Actual native cancellation boundary acceptance'})});
  const witness=async()=>{const r=await fetch(`/__native-stop-boundary/${token}`);assert(r.ok,'Owned tail witness unavailable');return object(await r.json());};
  await initI18n('en-US');await getCurrentWindow().show();await getCurrentWindow().setFocus();const root=createRoot(document.getElementById('root')!);root.render(<TerminalControllerLayer/>);
  const host=document.createElement('div');host.style.cssText='position:fixed;inset:0';document.body.appendChild(host);
@@ -31,6 +34,13 @@ async function verify(){
   assert(fixture.entries instanceof Array&&fixture.entries.length===0,'Stop source effect before approval');
   const session=await invokeCreateLocalSession(100,30);terminalId=session.sessionId;useTerminalStore.getState().addSession(session);
   await until(()=>!!terminalRegistry.get(session.sessionId),'Actual capture controller missing');const controller=terminalRegistry.get(session.sessionId)!;controller.attach(host);await controller.whenOutputReady();
+  if(params.get('nativeOriginDiagnostic')==='true'){
+   const diagnostic=createNativeOriginDiagnostic(controller.terminal);originDiagnostics=diagnostic.records;
+   dispose.push(()=>diagnostic.dispose());dispose.push(await listenToTerminalPromptOrigin(({payload})=>{
+    const current=useTerminalStore.getState().sessions.find(value=>value.sessionId===session.sessionId);
+    if(payload.sessionId===session.sessionId&&payload.terminalSessionId===current?.terminalSessionId&&payload.terminalGeneration===current?.terminalGeneration)diagnostic.observe(payload);
+   }));
+  }
   await until(async()=>!!(await invokeGetTerminalBrokerSnapshot(session.sessionId)).session?.promptReady,'Native capture prompt missing');
   const before=await invokeGetTerminalBrokerSnapshot(session.sessionId);assert(before.session?.inputMode==='native-inline'&&isCurrentNativeEditorProfile(before.session.nativePeerProfile,params.get('nativeP3')),'Capture provider differs');
   dispose.push(controller.subscribeOutput(v=>{assert(raw.length<524288,'Actual capture display exceeded bound');raw+=v;}));

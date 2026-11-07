@@ -7,8 +7,8 @@ it('keeps the original background field explicit and rejects normalization befor
  expect(matchesNativeByteBoundaryOriginal({command:source,timeoutMs:15000},source)).toBe(false);
  for(const command of [source.normalize('NFC'),source.replace(/\n/g,'\r\n'),source.replace('\t',''),source.replace('👩🏽‍💻','👩‍💻')])expect(matchesNativeByteBoundaryOriginal({...args,command},source)).toBe(false);
 });
-it('makes Unicode and mixed-ending preservation explicit without changing the selected source',()=>{
- for(const bytes of [8192,8193] as const){const source=nativeByteBoundarySource(token,bytes),goal=nativeByteBoundaryGoal(source,bytes),json=goal.split('~~~json\n')[1].split('\n~~~')[0],args=JSON.parse(json);expect(args.command).toBe(source);expect(new TextEncoder().encode(args.command)).toHaveLength(bytes);expect(goal).toContain('CR count=1,LF count=126,Tab count=1');expect(goal).toContain('must NOT become U+00E9');expect(goal).toContain('U+1F469,U+1F3FD,U+200D,U+1F4BB');}
+it('presents raw source with its exact controls and graphemes rather than an already escaped JSON command',()=>{
+ for(const bytes of [8192,8193] as const){const source=nativeByteBoundarySource(token,bytes),goal=nativeByteBoundaryGoal(source,bytes),raw=goal.split('~~~powershell\n')[1].split('\n~~~')[0];expect(raw).toBe(source);expect(new TextEncoder().encode(raw)).toHaveLength(bytes);expect(goal).toContain('CR count=1,LF count=126,Tab count=1');expect(goal).toContain('must NOT become U+00E9');expect(goal).toContain('U+1F469,U+1F3FD,U+200D,U+1F4BB');expect(goal).not.toContain('~~~json');expect(goal).toContain('command has no trailing CR or LF');}
  expect(()=>nativeByteBoundaryGoal('changed',8192)).toThrow('unchanged byte-exact');
 });
 it('constructs exact UTF8 byte boundaries with real CRLF,Tab and graphemes',()=>{

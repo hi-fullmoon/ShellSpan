@@ -6,7 +6,25 @@ import { getSftpCodeLanguage, highlightSftpCode } from '../sftp-code-highlight';
 
 const readSource = (path: string): string => readFileSync(resolve(process.cwd(), path), 'utf8');
 
+function renderedCode(source: string, language: string): HTMLElement {
+  const html = highlightSftpSource(source, language);
+  expect(html).not.toBeNull();
+  const code = document.createElement('code');
+  code.innerHTML = html!;
+  // HTML parsing folds literal CR/CRLF to LF, independently of highlighting.
+  expect(code.textContent).toBe(source.replace(/\r\n?/g, '\n'));
+  // Preserve CR as a reference only in this raw-markup check, so the HTML
+  // parser cannot hide a change to the original source's line endings.
+  const raw = document.createElement('code');
+  raw.innerHTML = html!.replace(/\r/g, '&#13;');
+  expect(raw.textContent).toBe(source);
+  return code;
+}
+
 describe('SFTP source highlighting', () => {
+  it.each(['\n', '\r\n', '\r'])('preserves raw source and browser text for %j line endings', ending => {
+    renderedCode(`const value = 1;${ending}// 中文${ending}`, 'typescript');
+  });
   it.each([
     ['button.tsx', 'typescript'], ['index.ts', 'typescript'],
     ['component.jsx', 'javascript'], ['module.mjs', 'javascript'],
@@ -25,29 +43,21 @@ describe('SFTP source highlighting', () => {
     ['src-tauri/src/lib.rs', 'rust', '.hljs-keyword', '.hljs-string'],
   ])('highlights the real source in %s without changing its text', (path, language, firstToken, secondToken) => {
     const source = readSource(path);
-    const html = highlightSftpSource(source, language);
-    expect(html).not.toBeNull();
-    const code = document.createElement('code');
-    code.innerHTML = html!;
-    expect(code.textContent).toBe(source);
+    const code = renderedCode(source, language);
     expect(code.querySelector(firstToken)).not.toBeNull();
     expect(code.querySelector(secondToken)).not.toBeNull();
   });
 
   it('displays markup from a real HTML file as source instead of executable elements', () => {
     const source = readSource('index.html');
-    const code = document.createElement('code');
-    code.innerHTML = highlightSftpSource(source, 'xml')!;
-    expect(code.textContent).toBe(source);
+    const code = renderedCode(source, 'xml');
     expect(code.querySelector('script, img, iframe, link')).toBeNull();
     expect(code.querySelector('.hljs-tag')).not.toBeNull();
   });
 
   it('keeps a truncated JSON source readable', () => {
     const source = readSource('src/lib/ai/retry-policy.json').slice(0, 100);
-    const code = document.createElement('code');
-    code.innerHTML = highlightSftpSource(source, 'json')!;
-    expect(code.textContent).toBe(source);
+    renderedCode(source, 'json');
   });
 
   it('leaves unsupported filenames and languages as plain source', async () => {

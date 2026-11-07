@@ -10,11 +10,11 @@ interface NativeEditorProfile {
 const bindings = {
   powerShell7: {
     shellVersion: '7.6.9', editor: 'psReadLine', editorVersion: '2.4.5',
-    ids: ['powershell-7.6.9-psreadline-2.4.5-shellspan1-conpty1.25.260930003-graphemes-windows-x64-native'],
+    ids: ['powershell-7.6.9-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native'],
   },
   windowsPowerShell: {
     shellVersion: '5.1.26100.9818', editor: 'psReadLine', editorVersion: '2.4.5',
-    ids: ['windows-powershell-5.1.26100.9818-psreadline-2.4.5-shellspan1-conpty1.25.260930003-graphemes-windows-x64-native'],
+    ids: ['windows-powershell-5.1.26100.9818-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native'],
   },
   zsh: {
     shellVersion: '5.9', editor: 'zle', editorVersion: '5.9',

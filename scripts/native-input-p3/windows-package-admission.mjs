@@ -9,7 +9,7 @@ export function packageAdmissionFault(original,host,name,library){
  const catalogue=structuredClone(original),selected=catalogue.profiles.find(entry=>entry.profile.shell===host);assert(selected,'Admission host missing');let bytes=Buffer.from(library);
  if(name==='unknown-source')catalogue.sources['src-tauri/native-input-editors/src/lib.rs']='0'.repeat(64);
  if(name==='unknown-adapter')selected.profile.adapterVersion='unreviewed-build';
- if(name==='unknown-profile')selected.profile.verifiedProfileId=selected.profile.verifiedProfileId.replace('shellspan1','shellspan9');
+ if(name==='unknown-profile')selected.profile.verifiedProfileId=selected.profile.verifiedProfileId.replace('shellspan6','shellspan9');
  if(name==='bad-digest')selected.moduleSha256='0'.repeat(64);
  if(name==='wrong-platform')selected.profile.verifiedProfileId=selected.profile.verifiedProfileId.replace('windows-x64','macos-arm64');
  if(name==='wrong-shell-family')selected.profile.shell=host==='powerShell7'?'windowsPowerShell':'powerShell7';

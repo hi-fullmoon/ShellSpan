@@ -16,3 +16,5 @@ patches/@xterm__xterm@6.0.0.patch text eol=lf
 scripts/native-input-p0/*.patch text eol=lf
 patches/psreadline-2.4.5-process-exit.patch text eol=lf
 scripts/dependency-builds/psreadline/*.json text eol=lf
+patches/psreadline-2.4.5-history-and-resize.patch text eol=lf
+src-tauri/resources/powershell/PSReadLine/2.4.5/XTERM-LICENSE text eol=lf

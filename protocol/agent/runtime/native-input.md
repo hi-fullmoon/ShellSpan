@@ -105,6 +105,12 @@ UTF-16 游标转换为 Unicode scalar 位置后供 Core 比对；用户已修改
 接受的原生草稿返回父解析器；拒绝交接时返回空行并保持原公开读取器，不能因异常让
 ConsoleHost 换用不受保护的输入路径。后端恢复门禁及持久围栏仍需独立事实才能解除。
 
+私有PSReadLine的初始化回调独立于显示观察：仅在新一轮公开ReadLine调用首次重置缓冲和游标后
+触发，异常恢复中的临时清空随后会恢复旧行，禁止在该分支确认丢弃。宿主在原编辑线程仅在
+控制已失败时通过公开GetBufferState再次读取实际状态，沿用既有空缓冲/零游标确认退役本地
+交接保护，不能依赖Ctrl+C可能冲掉的服务键或空闲轮询。此确认不生成DraftCleared/Settled，
+不改变已接受/历史/失败事实，不解除后端持久围栏或归还编辑权。
+
 `prepareInput.job` 区分 native launch 和私有 control。control 的 handle/stop/nonce
 与计划摘要绑定，`controlInputConfirmed` 证明当前真实编辑缓冲区为空。受保护的单次键只调用
 固定 bind-x 组件读取规范化 TSV 元数据；不接受任何控制命令为 Readline 历史行。

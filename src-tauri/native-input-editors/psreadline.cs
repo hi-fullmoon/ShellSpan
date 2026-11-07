@@ -62,6 +62,7 @@ public sealed class ShellSpanNativeEditor : IDisposable {
     IntPtr context;
     readonly int thread;
     bool controlClosed;
+    IDisposable displayOrigin;
     static void VerifyNativeExports(IntPtr module) {
         int count=0;
         foreach(var method in typeof(ShellSpanNativeEditor).GetMethods(System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Static)) {
@@ -176,10 +177,36 @@ public sealed class ShellSpanNativeEditor : IDisposable {
             ss_editor_eof_cleared(context,Z(buffer),UIntPtr.Zero)==1;
     }
     public bool ControlClosed { get { Check(); return controlClosed; } }
+    public bool BindReadLineInitialized(System.Reflection.Assembly editor) {
+        Check();
+        var lifecycle=editor.GetType("Microsoft.PowerShell.ShellSpanEditorLifecycle",false);
+        var configure=lifecycle==null?null:lifecycle.GetMethod("Configure",System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic);
+        var reader=editor.GetType("Microsoft.PowerShell.PSConsoleReadLine",false);
+        var read=reader==null?null:reader.GetMethod("GetBufferState",new Type[]{typeof(string).MakeByRefType(),typeof(int).MakeByRefType()});
+        if(configure==null||read==null)return false;
+        configure.Invoke(null,new object[]{new Action(()=>{
+            if(context==IntPtr.Zero)return;
+            Check();
+            if(!controlClosed)return;
+            var arguments=new object[]{null,0};read.Invoke(null,arguments);
+            if(!(arguments[0] is string)||!(arguments[1] is int))throw new IOException("Native editor observation unavailable");
+            ConfirmFailedDraftCleared((string)arguments[0],(int)arguments[1]);
+        })});
+        return true;
+    }
+    public void AttachDisplayOrigin(IDisposable ownedOrigin) {
+        Check();
+        if(ownedOrigin==null) throw new ArgumentNullException("ownedOrigin");
+        if(controlClosed || displayOrigin!=null) { ownedOrigin.Dispose(); throw new InvalidOperationException("Display endpoint unavailable"); }
+        displayOrigin=ownedOrigin;
+    }
     public void Fail() {
         Check();
         if(controlClosed) return;
         controlClosed=true;
+        // NIP failure revokes control, not the still-live PTY's display service.
+        // PSReadLine needs that independent read-only provider to clear a failed
+        // draft and continue ordinary editing. Dispose closes both lifetimes.
         ss_editor_event(context,6,0,null);
         pipe.Dispose();
     }
@@ -203,5 +230,5 @@ public sealed class ShellSpanNativeEditor : IDisposable {
             throw;
         }
     }
-    public void Dispose() { if(context!=IntPtr.Zero) { Check(); ss_editor_drop(context); context=IntPtr.Zero; } pipe.Dispose(); }
+    public void Dispose() { if(context!=IntPtr.Zero) { Check(); if(displayOrigin!=null) { displayOrigin.Dispose(); displayOrigin=null; } ss_editor_drop(context); context=IntPtr.Zero; } pipe.Dispose(); }
 }

@@ -33,7 +33,7 @@ fn windows_editor_binding_requires_the_updated_exact_host_and_artifacts() {
         editor_numeric_version: 20405,
         adapter_version: "1".into(),
         verified_profile_id: Some(
-            "windows-powershell-5.1.26100.9818-psreadline-2.4.5-shellspan1-conpty1.25.260930003-graphemes-windows-x64-native".into(),
+            "windows-powershell-5.1.26100.9818-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native".into(),
         ),
     };
     let verify = |profile: &PeerProfile, actual_shell: &str| {
@@ -46,15 +46,27 @@ fn windows_editor_binding_requires_the_updated_exact_host_and_artifacts() {
         )
     };
     assert!(verify(&profile, &shell_sha).is_ok());
+    let mut previous_provider = profile.clone();
+    previous_provider.verified_profile_id = profile
+        .verified_profile_id
+        .as_ref()
+        .map(|id| id.replace("shellspan6", "shellspan5"));
+    assert!(verify(&previous_provider, &shell_sha).is_err());
+    let mut stale_provider = profile.clone();
+    stale_provider.verified_profile_id = profile
+        .verified_profile_id
+        .as_ref()
+        .map(|id| id.replace("shellspan6", "shellspan1"));
+    assert!(verify(&stale_provider, &shell_sha).is_err());
     #[cfg(windows)]
     {
         let verified = verify(&profile, &shell_sha).unwrap();
+        assert!(!verified.display_origin_channel());
         assert_eq!(verified.display_binding().unicode_version, None);
         let runtime = super::windows_conpty::prepare(directory.path()).unwrap();
-        let binding = verified
-            .bind_private_conpty(&runtime)
-            .unwrap()
-            .display_binding();
+        let verified = verified.bind_private_conpty(&runtime).unwrap();
+        assert!(verified.display_origin_channel());
+        let binding = verified.display_binding();
         assert_eq!(
             binding.unicode_version,
             Some(DisplayUnicodeVersion::Graphemes15)
@@ -82,7 +94,7 @@ fn windows_editor_binding_requires_the_updated_exact_host_and_artifacts() {
         Some("windows-powershell-5.1.26100.9711-psreadline-2.4.5-windows-x64-native".into());
     assert!(verify(&profile, &shell_sha).is_err());
     profile.verified_profile_id = Some(
-        "windows-powershell-5.1.26100.9818-psreadline-2.4.5-shellspan1-conpty1.25.260930003-graphemes-windows-x64-native".into(),
+        "windows-powershell-5.1.26100.9818-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native".into(),
     );
     std::fs::write(&module, b"modified binding fixture").unwrap();
     assert!(verify(&profile, &shell_sha).is_err());

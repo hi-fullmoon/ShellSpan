@@ -1,6 +1,6 @@
 import {expect,it} from 'vitest';
 import {packageAdmissionCases,packageAdmissionFault,admissionBootstrapList} from '../native-input-p3/windows-package-admission.mjs';
-const id='powershell-7.6.9-psreadline-2.4.5-shellspan1-conpty1.25.260930003-graphemes-windows-x64-native';
+const id='powershell-7.6.9-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native';
 const catalogue={version:1,sources:{'src-tauri/native-input-editors/src/lib.rs':'a'.repeat(64)},profiles:[{profile:{shell:'powerShell7',adapterVersion:'1',verifiedProfileId:id},module:id+'/shellspan_native_input_editors.dll',moduleSha256:'b'.repeat(64)}]};
 it('reads the actual witness object rather than treating it as an array or missing data as empty',()=>{
  expect(admissionBootstrapList({bootstraps:[]})).toEqual([]);

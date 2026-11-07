@@ -16,6 +16,13 @@ pub(crate) struct VerifiedNativeProfile {
     private_conpty: bool,
 }
 impl VerifiedNativeProfile {
+    pub(crate) fn display_origin_channel(&self) -> bool {
+        self.private_conpty
+            && self.editor_profile.is_some()
+            && matches!(self.profile_id.as_str(),
+                "powershell-7.6.9-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native"
+                | "windows-powershell-5.1.26100.9818-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native")
+    }
     pub(crate) fn verify_remote(
         profile_id: &str,
         expected_shell_sha: &str,
@@ -138,10 +145,10 @@ impl VerifiedNativeProfile {
                 && ["zsh-5.9-zle-5.9-macos-arm64-native", "zsh-5.9-zle-5.9-linux-aarch64-glibc-2.36-native"].contains(&id),
             (ShellFamily::WindowsPowerShell, EditorFamily::PsReadLine) => profile.shell_version.as_deref() == Some("5.1.26100.9818")
                 && profile.editor_version.as_deref() == Some("2.4.5") && profile.editor_numeric_version == 20405
-                && id == "windows-powershell-5.1.26100.9818-psreadline-2.4.5-shellspan1-conpty1.25.260930003-graphemes-windows-x64-native",
+                && id == "windows-powershell-5.1.26100.9818-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native",
             (ShellFamily::PowerShell7, EditorFamily::PsReadLine) => profile.shell_version.as_deref() == Some("7.6.9")
                 && profile.editor_version.as_deref() == Some("2.4.5") && profile.editor_numeric_version == 20405
-                && id == "powershell-7.6.9-psreadline-2.4.5-shellspan1-conpty1.25.260930003-graphemes-windows-x64-native",
+                && id == "powershell-7.6.9-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native",
             _ => false,
         };
         if !supported

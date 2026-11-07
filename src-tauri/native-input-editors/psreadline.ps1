@@ -56,6 +56,24 @@ $__shellspanNipModule = New-Module -Name ShellSpanTerminalIntegration -ArgumentL
     $PrivatePipe.Dispose();throw 'TERMINAL_NATIVE_PRIVATE_ENDPOINT_ACCESS_MISMATCH'
   }
   $script:Context=[ShellSpanNativeEditor]::new($Library,$PrivatePipe,$ExpectedClientPid,$ProfileJson,$true)
+  if(-not $script:Context.BindReadLineInitialized($Assembly)){$script:Context.Dispose();throw 'TERMINAL_NATIVE_PROFILE_ARTIFACT_MISMATCH'}
+  # A separate endpoint handles numeric layout observations. It never pumps
+  # editor operations while the original editor thread waits for display data.
+  $script:DisplayOrigin=$null
+  $DisplayType='ShellSpan.Display.OriginPipe' -as [type]
+  if($null-ne $DisplayType -and [ShellSpan.Display.OriginPipe]::Supports($Assembly)){
+    if($PSVersionTable.PSEdition -eq 'Desktop'){
+      $DisplayPipe=[IO.Pipes.NamedPipeServerStream]::new(($PipeName+'-display-origin'),[IO.Pipes.PipeDirection]::InOut,1,[IO.Pipes.PipeTransmissionMode]::Byte,[IO.Pipes.PipeOptions]::Asynchronous,131072,131072,$Security)
+    }else{
+      $DisplayPipe=[IO.Pipes.NamedPipeServerStreamAcl]::Create(($PipeName+'-display-origin'),[IO.Pipes.PipeDirection]::InOut,1,[IO.Pipes.PipeTransmissionMode]::Byte,[IO.Pipes.PipeOptions]::Asynchronous,131072,131072,$Security,[IO.HandleInheritability]::None,[IO.Pipes.PipeAccessRights]0)
+    }
+    $DisplaySecurity=if($PSVersionTable.PSEdition -eq 'Desktop'){$DisplayPipe.GetAccessControl()}else{[IO.Pipes.PipesAclExtensions]::GetAccessControl($DisplayPipe)}
+    $DisplayRules=$DisplaySecurity.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])
+    if(-not $DisplaySecurity.AreAccessRulesProtected -or $DisplaySecurity.GetOwner([Security.Principal.SecurityIdentifier]).Value -cne $User.Value -or $DisplayRules.Count -ne 1 -or $DisplayRules[0].IdentityReference.Value -cne $User.Value -or $DisplayRules[0].AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or ($DisplayRules[0].PipeAccessRights -band [IO.Pipes.PipeAccessRights]::ReadWrite) -ne [IO.Pipes.PipeAccessRights]::ReadWrite){$DisplayPipe.Dispose();throw 'TERMINAL_NATIVE_PRIVATE_ENDPOINT_ACCESS_MISMATCH'}
+    $script:DisplayOrigin=[ShellSpan.Display.OriginPipe]::new($DisplayPipe,$ExpectedClientPid)
+    $script:Context.AttachDisplayOrigin($script:DisplayOrigin)
+    if(-not $script:DisplayOrigin.Install($Assembly)){$script:DisplayOrigin.Dispose();throw 'TERMINAL_NATIVE_PROFILE_ARTIFACT_MISMATCH'}
+  }
   $script:ReadLineFailureReported=$false
   $script:JobsLoaded=$false
   $script:NativePromptRefreshPending=$false

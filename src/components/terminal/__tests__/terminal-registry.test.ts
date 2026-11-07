@@ -3,6 +3,10 @@ import { describe, expect, it, beforeEach, beforeAll, vi } from 'vitest';
 import { enableRealCanvas } from '@/tests/real-canvas';
 import type { Event as TauriEvent } from '@tauri-apps/api/event';
 import type { SessionPtyInfo } from '@/types';
+import { useTerminalStore } from '@/stores/terminalStore';
+import { useToastStore } from '@/stores/toastStore';
+import { t } from '@/locales';
+import {formatTerminalStatusLine} from '@/lib/terminal/terminal';
 import {
   appendTerminalOutput,
   getRecentTerminalOutput,
@@ -91,6 +95,8 @@ vi.mock('@/lib/ipc/tauri', () => ({
   listenToSshData: vi.fn().mockResolvedValue(() => {}),
   listenToSshStatus: vi.fn().mockResolvedValue(() => {}),
   listenToSshClosed: vi.fn().mockResolvedValue(() => {}),
+  listenToTerminalPromptOrigin: vi.fn().mockResolvedValue(() => {}),
+  invokeRespondTerminalPromptOrigin: vi.fn().mockResolvedValue(undefined),
 }));
 
 function createController(sessionId: string, ptyInfo?: SessionPtyInfo) {
@@ -107,6 +113,8 @@ function createController(sessionId: string, ptyInfo?: SessionPtyInfo) {
 describe('terminalRegistry', () => {
   beforeAll(enableRealCanvas);
   beforeEach(() => {
+    useTerminalStore.setState({sessions: []});
+    useToastStore.setState({toasts: []});
     document.documentElement.dataset.theme = 'light';
     document.documentElement.style.setProperty('--app-surface', '#ffffff');
     document.documentElement.style.setProperty('--app-text', '#0f172a');
@@ -131,6 +139,148 @@ describe('terminalRegistry', () => {
     vi.clearAllMocks();
   });
 
+  it('observes actual startup status and filtered session display bytes separately from original output', async () => {
+    const ipc = await import('@/lib/ipc/tauri');
+    const controller = terminalRegistry.create('display-observer', vi.fn(), vi.fn(), () => 'connecting', vi.fn()), visible: {source: string; data: string}[] = [], original: string[] = [];
+    const apis = [controller.terminal.write, controller.terminal.writeln, controller.terminal.getSelection];
+    const stop = controller.subscribeDisplayOutput(value => visible.push(value));
+    const stopRaw = controller.subscribeOutput(value => original.push(value));
+    await controller.whenOutputReady();await new Promise<void>(resolve => controller.terminal.write('', resolve));
+    expect(visible).toContainEqual({source: 'local', data: formatTerminalStatusLine('connected', 'ready') + '\r\n'});
+    expect(original).toEqual([]);visible.length = 0;
+    const removeFilter = controller.subscribeOutputFilter({push: value => value.replace('private-frame', 'visible'), finish: () => 'filter-tail'});
+    const calls = vi.mocked(ipc.listenToSshData).mock.calls, onData = calls[calls.length - 1][1];
+    onData({event: 'ssh-data:display-observer', id: 1, payload: 'private-frame\t中 é 👩🏽‍💻\r\n'});
+    removeFilter();await new Promise<void>(resolve => controller.terminal.write('', resolve));
+    expect(original).toEqual(['private-frame\t中 é 👩🏽‍💻\r\n']);
+    expect(visible).toEqual([{source: 'session', data: 'visible\t中 é 👩🏽‍💻\r\n'}, {source: 'session', data: 'filter-tail'}]);
+    expect([controller.terminal.write, controller.terminal.writeln, controller.terminal.getSelection]).toEqual(apis);
+    expect(ipc.invokeWriteSession).not.toHaveBeenCalled();expect(ipc.invokeWriteSessionBytes).not.toHaveBeenCalled();
+    stop();stopRaw();controller.dispose();
+  });
+
+  it('unsubscribes display observers and drops disposed listeners without changing rendering', async () => {
+    const controller = createController('display-observer-lifetime');await controller.whenOutputReady();
+    const first = vi.fn(), second = vi.fn(), stop = controller.subscribeDisplayOutput(first);
+    controller.subscribeDisplayOutput(second);controller.write('A\t中\r\n');
+    expect(first).toHaveBeenCalledExactlyOnceWith({source: 'local', data: 'A\t中\r\n'});
+    stop();stop();controller.write('B');expect(first).toHaveBeenCalledTimes(1);expect(second).toHaveBeenCalledTimes(2);
+    await new Promise<void>(resolve => controller.terminal.write('', resolve));
+    expect(controller.terminal.buffer.active.getLine(controller.terminal.buffer.active.cursorY)?.translateToString(true)).toBe('B');
+    controller.dispose();const late = vi.fn();controller.subscribeDisplayOutput(late);controller.write('ignored-after-dispose');expect(second).toHaveBeenCalledTimes(2);expect(late).not.toHaveBeenCalled();
+  });
+
+  it('answers only the current generation display request and stops the old listener on rebind', async () => {
+    const ipc = await import('@/lib/ipc/tauri');
+    const unlisten = vi.fn();
+    vi.mocked(ipc.listenToTerminalPromptOrigin).mockClear();
+    vi.mocked(ipc.listenToTerminalPromptOrigin).mockResolvedValueOnce(unlisten);
+    vi.mocked(ipc.invokeRespondTerminalPromptOrigin).mockClear();
+    useTerminalStore.getState().addSession({sessionId: 'origin-ui', title: 'owned', host: 'local', port: 0, username: 'test', terminalSessionId: 'origin-terminal', terminalGeneration: 7});
+    const controller = createController('origin-ui', {transportKind: 'windowsConPty', inputMode: 'native-inline', nativeDisplayBinding: {
+      protocol: 'shellspan.native-input', inputMode: 'native-inline', oscIdentifier: 1337,
+      enterPayload: 'SetUserVar=ShellSpanNativeInput=MQ==', exitPayload: 'SetUserVar=ShellSpanNativeInput=MA==',
+      unicodeVersion: '15-graphemes', unicodeScope: 'session', ownedReflowCursorLine: false,
+    }});
+    await controller.whenOutputReady();
+    await new Promise<void>(resolve => controller.terminal.write('PS 👩🏽‍💻> ', resolve));
+    const originCalls = vi.mocked(ipc.listenToTerminalPromptOrigin).mock.calls;
+    const callback = originCalls[originCalls.length - 1]?.[0];expect(callback).toBeDefined();
+    const request = {sessionId: 'origin-ui', terminalSessionId: 'origin-terminal', terminalGeneration: 7, requestId: 'owned-request', requestIndex: 1, timeoutMs: 500,
+      geometry: {columns: controller.terminal.cols, rows: controller.terminal.rows, cursorX: controller.terminal.buffer.active.cursorX, cursorY: controller.terminal.buffer.active.cursorY}};
+    callback?.({event: 'terminal-prompt-origin-request', id: 1, payload: {...request, terminalGeneration: 6}});
+    await act(async () => {await Promise.resolve();});expect(ipc.invokeRespondTerminalPromptOrigin).not.toHaveBeenCalled();
+    callback?.({event: 'terminal-prompt-origin-request', id: 1, payload: request});
+    callback?.({event: 'terminal-prompt-origin-request', id: 1, payload: request});
+    await vi.waitFor(() => expect(ipc.invokeRespondTerminalPromptOrigin).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(ipc.invokeRespondTerminalPromptOrigin).mock.calls[0][1].cellWidths).toEqual([1, 1, 1, 2, 1, 1]);
+    const waiting = {...request, requestId: 'waiting-request', requestIndex: 2, geometry: {...request.geometry, cursorX: request.geometry.cursorX + 1}};
+    callback?.({event: 'terminal-prompt-origin-request', id: 1, payload: waiting});
+    terminalRegistry.rebindSession('origin-ui', 'new-origin-ui', {transportKind: 'windowsConPty', inputMode: 'raw'});
+    await controller.whenOutputReady();expect(unlisten).toHaveBeenCalledTimes(1);
+    callback?.({event: 'terminal-prompt-origin-request', id: 1, payload: request});
+    await act(async () => {await new Promise(resolve => setTimeout(resolve, 30));});
+    expect(ipc.invokeRespondTerminalPromptOrigin).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers the next display request when it arrives before the prior response invocation resolves', async () => {
+    const ipc = await import('@/lib/ipc/tauri');
+    let releaseResponse: (() => void) | undefined;
+    vi.mocked(ipc.invokeRespondTerminalPromptOrigin).mockImplementationOnce(() => new Promise<void>(resolve => {releaseResponse = resolve;}));
+    useTerminalStore.getState().addSession({sessionId: 'origin-overlap', title: 'owned', host: 'local', port: 0, username: 'test', terminalSessionId: 'origin-overlap-terminal', terminalGeneration: 7});
+    const controller = createController('origin-overlap', {transportKind: 'windowsConPty', inputMode: 'native-inline', nativeDisplayBinding: {
+      protocol: 'shellspan.native-input', inputMode: 'native-inline', oscIdentifier: 1337,
+      enterPayload: 'SetUserVar=ShellSpanNativeInput=MQ==', exitPayload: 'SetUserVar=ShellSpanNativeInput=MA==',
+      unicodeVersion: '15-graphemes', unicodeScope: 'session', ownedReflowCursorLine: false,
+    }});
+    await controller.whenOutputReady();
+    const calls = vi.mocked(ipc.listenToTerminalPromptOrigin).mock.calls;
+    const callback = calls[calls.length - 1]?.[0];expect(callback).toBeDefined();
+    const request = {sessionId: 'origin-overlap', terminalSessionId: 'origin-overlap-terminal', terminalGeneration: 7,
+      requestId: 'first-origin', requestIndex: 1, timeoutMs: 1000,
+      geometry: {columns: controller.terminal.cols, rows: controller.terminal.rows,
+        cursorX: controller.terminal.buffer.active.cursorX, cursorY: controller.terminal.buffer.active.cursorY}};
+    try {
+      callback?.({event: 'terminal-prompt-origin-request', id: 1, payload: request});
+      await vi.waitFor(() => expect(ipc.invokeRespondTerminalPromptOrigin).toHaveBeenCalledTimes(1));
+      callback?.({event: 'terminal-prompt-origin-request', id: 2, payload: {...request, requestId: 'next-origin', requestIndex: 2}});
+      callback?.({event: 'terminal-prompt-origin-request', id: 2, payload: {...request, requestId: 'next-origin', requestIndex: 2}});
+      callback?.({event: 'terminal-prompt-origin-request', id: 3, payload: {...request, requestId: 'excess-origin', requestIndex: 3}});
+      releaseResponse?.();
+      await vi.waitFor(() => expect(ipc.invokeRespondTerminalPromptOrigin).toHaveBeenCalledTimes(2));
+      expect(vi.mocked(ipc.invokeRespondTerminalPromptOrigin).mock.calls[1][0].requestId).toBe('next-origin');
+    } finally {releaseResponse?.();}
+  });
+
+  it('does not extend a queued display request deadline while awaiting the previous IPC response', async () => {
+    const ipc = await import('@/lib/ipc/tauri');
+    let releaseResponse: (() => void) | undefined;
+    vi.mocked(ipc.invokeRespondTerminalPromptOrigin).mockImplementationOnce(() => new Promise<void>(resolve => {releaseResponse = resolve;}));
+    useTerminalStore.getState().addSession({sessionId: 'origin-expiry', title: 'owned', host: 'local', port: 0, username: 'test', terminalSessionId: 'origin-expiry-terminal', terminalGeneration: 7});
+    const controller = createController('origin-expiry', {transportKind: 'windowsConPty', inputMode: 'native-inline', nativeDisplayBinding: {
+      protocol: 'shellspan.native-input', inputMode: 'native-inline', oscIdentifier: 1337,
+      enterPayload: 'SetUserVar=ShellSpanNativeInput=MQ==', exitPayload: 'SetUserVar=ShellSpanNativeInput=MA==',
+      unicodeVersion: '15-graphemes', unicodeScope: 'session', ownedReflowCursorLine: false,
+    }});
+    await controller.whenOutputReady();
+    const calls = vi.mocked(ipc.listenToTerminalPromptOrigin).mock.calls;
+    const callback = calls[calls.length - 1]?.[0];expect(callback).toBeDefined();
+    const request = {sessionId: 'origin-expiry', terminalSessionId: 'origin-expiry-terminal', terminalGeneration: 7,
+      requestId: 'expiry-first', requestIndex: 1, timeoutMs: 1000,
+      geometry: {columns: controller.terminal.cols, rows: controller.terminal.rows,
+        cursorX: controller.terminal.buffer.active.cursorX, cursorY: controller.terminal.buffer.active.cursorY}};
+    const clock = vi.spyOn(Date, 'now');
+    try {
+      callback?.({event: 'terminal-prompt-origin-request', id: 1, payload: request});
+      await vi.waitFor(() => expect(ipc.invokeRespondTerminalPromptOrigin).toHaveBeenCalledTimes(1));
+      clock.mockReturnValue(100);
+      callback?.({event: 'terminal-prompt-origin-request', id: 2, payload: {...request, requestId: 'expiry-next', requestIndex: 2, timeoutMs: 10}});
+      clock.mockReturnValue(200);releaseResponse?.();
+      await act(async () => {await new Promise(resolve => setTimeout(resolve, 20));});
+      expect(ipc.invokeRespondTerminalPromptOrigin).toHaveBeenCalledTimes(1);
+    } finally {clock.mockRestore();releaseResponse?.();}
+  });
+
+  it.each([47, 199])('keeps the native prompt cursor at width %i when rejected input produces deduplicated feedback', async columns => {
+    const ipc = await import('@/lib/ipc/tauri');
+    const controller = createController(`origin-write-feedback-${columns}`, {transportKind: 'windowsConPty', inputMode: 'native-inline'});
+    await controller.whenOutputReady();controller.terminal.resize(columns, 30);
+    await new Promise<void>(resolve => controller.terminal.write('PS owned> ', resolve));
+    const before = {x: controller.terminal.buffer.active.cursorX, y: controller.terminal.buffer.active.cursorY};
+    vi.mocked(ipc.invokeWriteSession).mockRejectedValue(new Error('TERMINAL_INPUT_RECOVERY_REQUIRED'));
+    try {
+      controller.simulateInput('\u001b[1;11R');
+      await act(async () => {await new Promise(resolve => setTimeout(resolve, 10));});
+      await new Promise<void>(resolve => controller.terminal.write('', resolve));
+      expect({x: controller.terminal.buffer.active.cursorX, y: controller.terminal.buffer.active.cursorY}).toEqual(before);
+      expect(ipc.invokeWriteSession).toHaveBeenCalledWith(`origin-write-feedback-${columns}`, '\u001b[1;11R');
+      controller.simulateInput('x');controller.simulateInput('y');
+      await act(async () => {await new Promise(resolve => setTimeout(resolve, 10));});
+      expect(useToastStore.getState().toasts).toHaveLength(1);
+      expect(useToastStore.getState().toasts[0]).toMatchObject({variant: 'error', message: t('terminal.notice.writeFailedMessage')});
+    } finally {vi.mocked(ipc.invokeWriteSession).mockResolvedValue(undefined);}
+  });
+
   it('uses only backend ConPTY metadata and changes it after old output drains', async () => {
     const controller = createController('local', {
       transportKind: 'windowsConPty', windowsBuildNumber: 26300,
@@ -151,7 +301,7 @@ describe('terminalRegistry', () => {
     expect(createController('posix', { transportKind: 'localPty' }).terminal.options.windowsPty).toEqual({});
   });
 
-  it('keeps verified ConPTY grapheme measurement across output and restores it after rebind drains', async () => {
+  it('keeps verified ConPTY idle reflow and grapheme measurement until rebind drains', async () => {
     const controller = createController('graphemes', {
       transportKind: 'windowsConPty', inputMode: 'native-inline',
       nativeDisplayBinding: {
@@ -164,10 +314,13 @@ describe('terminalRegistry', () => {
     const term = controller.terminal;
     const write = (text: string) => new Promise<void>(resolve => term.write(text, resolve));
     expect(term.unicode.activeVersion).toBe('15-graphemes');
-    await write('\x1b]1337;SetUserVar=ShellSpanNativeInput=MQ==\x07👩🏽‍💻\x1b]1337;SetUserVar=ShellSpanNativeInput=MA==\x07');
+    expect(term.options.reflowCursorLine).toBe(true);
+    await write('\x1b]1337;SetUserVar=ShellSpanNativeInput=MQ==\x07👩🏽‍💻');
     expect(term.unicode.activeVersion).toBe('15-graphemes');
     expect(term.options.reflowCursorLine).toBe(false);
     expect(term.buffer.active.cursorX).toBe(2);
+    await write('\x1b]1337;SetUserVar=ShellSpanNativeInput=MA==\x07');
+    expect(term.options.reflowCursorLine).toBe(true);
     await write('👩🏽‍💻');
     expect(term.buffer.active.cursorX).toBe(4);
     terminalRegistry.rebindSession('graphemes', 'raw-output', { transportKind: 'windowsConPty', inputMode: 'raw' });

@@ -3,7 +3,7 @@ import { isCurrentNativeEditorProfile } from './native-editor-profile';
 
 const current = {
   shell: 'powerShell7', shellVersion: '7.6.9', editor: 'psReadLine', editorVersion: '2.4.5',
-  adapterVersion: '1', verifiedProfileId: 'powershell-7.6.9-psreadline-2.4.5-shellspan1-conpty1.25.260930003-graphemes-windows-x64-native',
+  adapterVersion: '1', verifiedProfileId: 'powershell-7.6.9-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native',
 };
 
 describe('native editor acceptance identity', () => {
@@ -12,6 +12,11 @@ describe('native editor acceptance identity', () => {
   });
 
   it.each([
+    { verifiedProfileId: current.verifiedProfileId.replace('shellspan6', 'shellspan5') },
+    { verifiedProfileId: current.verifiedProfileId.replace('shellspan6', 'shellspan4') },
+    { verifiedProfileId: current.verifiedProfileId.replace('shellspan6', 'shellspan3') },
+    { verifiedProfileId: current.verifiedProfileId.replace('shellspan6', 'shellspan2') },
+    { verifiedProfileId: current.verifiedProfileId.replace('shellspan6', 'shellspan1') },
     { verifiedProfileId: `${current.verifiedProfileId}-capture1` },
     { verifiedProfileId: 'unverified-windows-x64-native' },
     { verifiedProfileId: 'powershell-7.6.9-psreadline-2.4.5-windows-x64-native' },
@@ -31,8 +36,14 @@ describe('native editor acceptance identity', () => {
 
   it('binds Windows PowerShell to the new exact host version and rejects mixed or old identities', () => {
     const windows = { ...current, shell: 'windowsPowerShell', shellVersion: '5.1.26100.9818',
-      verifiedProfileId: 'windows-powershell-5.1.26100.9818-psreadline-2.4.5-shellspan1-conpty1.25.260930003-graphemes-windows-x64-native' };
+      verifiedProfileId: 'windows-powershell-5.1.26100.9818-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native' };
     expect(isCurrentNativeEditorProfile(windows, 'windowsPowerShell')).toBe(true);
+    expect(isCurrentNativeEditorProfile({ ...windows,
+      verifiedProfileId: windows.verifiedProfileId.replace('shellspan6', 'shellspan4') }, 'windowsPowerShell')).toBe(false);
+    expect(isCurrentNativeEditorProfile({ ...windows,
+      verifiedProfileId: windows.verifiedProfileId.replace('shellspan6', 'shellspan3') }, 'windowsPowerShell')).toBe(false);
+    expect(isCurrentNativeEditorProfile({ ...windows,
+      verifiedProfileId: windows.verifiedProfileId.replace('shellspan6', 'shellspan1') }, 'windowsPowerShell')).toBe(false);
     expect(isCurrentNativeEditorProfile({ ...windows, shellVersion: '5.1.26100.9711' }, 'windowsPowerShell')).toBe(false);
     expect(isCurrentNativeEditorProfile({ ...windows,
       verifiedProfileId: 'windows-powershell-5.1.26100.9711-psreadline-2.4.5-windows-x64-native' }, 'windowsPowerShell')).toBe(false);

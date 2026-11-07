@@ -1,4 +1,5 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
+import type { NativePromptOriginObservation } from '@/lib/terminal/native-prompt-origin';
 import type { PetdexCategories, PetdexDiagnostic, PetdexTestResult, PetdexCheckResult } from '@/types';
 import { createLogger } from '@/lib/logger';
 import { modelDefinitionOf } from '@/lib/ai/provider-contract';
@@ -161,6 +162,7 @@ async function invokeLogged<T>(
 }
 
 type TerminalHotPathCommand =
+  | 'respond_terminal_prompt_origin'
   | 'write_session'
   | 'write_session_bytes'
   | 'set_session_output_paused'
@@ -252,6 +254,31 @@ export function invokeGetTerminalSubmissionRecovery(agentSessionId: string): Pro
 
 export function invokeWriteSession(sessionId: string, data: string): Promise<void> {
   return invokeTerminalHotPath('write_session', { sessionId, data });
+}
+
+export interface TerminalPromptOriginRequest {
+  readonly sessionId: string;
+  readonly terminalSessionId: string;
+  readonly terminalGeneration: number;
+  readonly requestId: string;
+  readonly requestIndex: number;
+  readonly timeoutMs: number;
+  readonly geometry: {readonly columns: number; readonly rows: number; readonly cursorX: number; readonly cursorY: number};
+}
+
+export function invokeRespondTerminalPromptOrigin(
+  request: TerminalPromptOriginRequest,
+  observation: NativePromptOriginObservation,
+): Promise<void> {
+  return invokeTerminalHotPath('respond_terminal_prompt_origin', {
+    response: {request, cellWidths: observation.cellWidths, wrapPending: observation.wrapPending},
+  });
+}
+
+export function listenToTerminalPromptOrigin(
+  callback: EventCallback<TerminalPromptOriginRequest>,
+): Promise<UnlistenFn> {
+  return listen<TerminalPromptOriginRequest>('terminal-prompt-origin-request', callback);
 }
 
 export function invokeWriteSessionBytes(sessionId: string, bytes: Uint8Array): Promise<void> {

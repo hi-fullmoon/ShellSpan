@@ -30,7 +30,7 @@ it('keeps both native profile paths within NSIS limits without changing their id
  // A sealed source copy is deliberately deeper than the packaging workspace.
  const owner=path.resolve(path.parse(path.resolve(import.meta.dirname)).root,'owned'),root=windowsShortSnapshotLocation(owner,'12345678-1234-1234-1234-123456789abc').root;
  const install=path.join(root,'.artifacts/tests/pk/12345678/i');
- const profiles=['powershell-7.6.9','windows-powershell-5.1.26100.9818'].map(host=>`${host}-psreadline-2.4.5-shellspan1-conpty1.25.260930003-graphemes-windows-x64-native/shellspan_native_input_editors.dll`);
+ const profiles=['powershell-7.6.9','windows-powershell-5.1.26100.9818'].map(host=>`${host}-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native/shellspan_native_input_editors.dll`);
  expect(()=>assertPackageResourcePaths(root,install,profiles)).not.toThrow();
  expect(()=>assertPackageResourcePaths(root,path.join(install,'too-long-install-directory'),profiles)).toThrow('MAX_PATH');
  expect(()=>assertPackageResourcePaths(path.join(root,'long'.repeat(80)),install,profiles)).toThrow('MAX_PATH');

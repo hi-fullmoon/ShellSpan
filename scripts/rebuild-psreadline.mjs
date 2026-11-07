@@ -12,6 +12,9 @@ const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const resources=resolve(root,'src-tauri/resources/powershell/PSReadLine/2.4.5');
 const {values}=parseArgs({options:{'verify-only':{type:'boolean'},install:{type:'boolean'},archive:{type:'string'}}});
 assert.equal(sha(readFileSync(resolve(root,pin.patch))),pin.patchSha256,'Reviewed PSReadLine patch differs');
+const license=pin.graphemeProvider?.license;
+assert.equal(license,'XTERM-LICENSE','Reviewed display provider license required');
+assert.equal(sha(readFileSync(resolve(resources,license))),pin.graphemeProvider.licenseSha256,'Bundled display provider license differs');
 if(values['verify-only']){
   assert(!values.install&&!values.archive);
   for(const[path,expected]of Object.entries(pin.outputs))assert.equal(sha(readFileSync(resolve(resources,path))),expected,`Bundled PSReadLine differs: ${path}`);
@@ -44,6 +47,7 @@ const patch=process.env.SHELLSPAN_GNU_PATCH??(process.platform==='win32'
   ?resolve(execFileSync('git',['--exec-path'],{encoding:'utf8',windowsHide:true}).trim(),'../../../usr/bin/patch.exe'):'patch');
 assert(execFileSync(patch,['--version'],{encoding:'utf8',windowsHide:true}).startsWith('GNU patch 2.7.6'),'Use reviewed GNU patch2.7.6');
 execFileSync(patch,['--batch','--forward','--fuzz=0','-p1','-i',resolve(root,pin.patch)],{cwd:source,stdio:'pipe',windowsHide:true});
+assert.equal(sha(readFileSync(resolve(source,'PSReadLine',license))),pin.graphemeProvider.licenseSha256,'Patched display provider license differs');
 for(const project of ['PSReadLine','Polyfill'])copyFileSync(resolve(root,`scripts/dependency-builds/psreadline/${project}.packages.lock.json`),resolve(source,project,'packages.lock.json'));
 const flags=['-c','Release','--nologo','-p:Deterministic=true','-p:DebugType=none','-p:ContinuousIntegrationBuild=true','-p:EnableSourceControlManagerQueries=false','-p:EnableSourceLink=false','-p:RestoreLockedMode=true',`-p:PathMap=${source}=/_/PSReadLine-v2.4.5`];
 const log=openSync(resolve(directory,'build.log'),'wx');

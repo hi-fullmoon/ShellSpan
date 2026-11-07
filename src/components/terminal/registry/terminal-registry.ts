@@ -9,7 +9,9 @@ import { createTerminalResizeHandler, installTerminalScrollbarVisibility, measur
 import { installTerminalEdgeBackground } from './terminal-edge-background';
 import { installTerminalCommandDecorations } from './terminal-command-decorations';
 import { attachNativeInputDisplay, type NativeInputDisplayController } from '@/lib/terminal/native-input-display';
+import { observeNativePromptOrigin } from '@/lib/terminal/native-prompt-origin';
 import { terminalInputReadiness } from '../terminal-input-readiness';
+import { useToastStore } from '@/stores/toastStore';
 import { getTerminalScrollState } from '@/components/terminal/terminal-scroll-state';
 import {
   invokeGetSessionStatus,
@@ -22,6 +24,9 @@ import {
   listenToSshClosed,
   listenToSshData,
   listenToSshStatus,
+  listenToTerminalPromptOrigin,
+  invokeRespondTerminalPromptOrigin,
+  type TerminalPromptOriginRequest,
 } from '@/lib/ipc/tauri';
 import { formatTerminalNoticeLine, formatTerminalStatusLine, shouldDisableTerminalInput, shouldReconnectFromInput } from '@/lib/terminal/terminal';
 import { t } from '@/locales';
@@ -60,6 +65,9 @@ export type ClosedCallback = (sessionId: string, payload: ClosedEvent) => void;
 export type GetStatusCallback = (sessionId: string) => SessionStatus;
 export type RequestReconnectCallback = (sessionId: string, automatic?: boolean) => void;
 export type TerminalOutputCallback = (chunk: string) => void;
+/** Actual bytes sent to the display; does not grant PTY input or execution authority. */
+export type TerminalDisplayOutput = Readonly<{source: 'session' | 'local'; data: string}>;
+export type TerminalDisplayOutputCallback = (output: TerminalDisplayOutput) => void;
 export interface TerminalOutputFilter {
   push(chunk: string): string;
   finish(): string;
@@ -421,6 +429,7 @@ export interface TerminalController {
   writeInput(data: string): Promise<void>;
   whenOutputReady(): Promise<void>;
   subscribeOutput(listener: TerminalOutputCallback): () => void;
+  subscribeDisplayOutput(listener: TerminalDisplayOutputCallback): () => void;
   subscribeOutputFilter(filter: TerminalOutputFilter): () => void;
   subscribeLifecycle(listener: TerminalLifecycleCallback): () => void;
   write(chunk: string): void;
@@ -436,6 +445,10 @@ export interface TerminalController {
 class TerminalControllerImpl implements TerminalController {
   inputMode: TerminalController['inputMode'] = 'raw';
   private nativeDisplay?: NativeInputDisplayController;
+  private originEligible = false;
+  private originUnlisten?: () => void;
+  private readonly originPending = new Set<string>();
+  private originTail: Promise<void> = Promise.resolve();
   private readonly removeFromRegistry: (sessionId: string) => void;
   sessionId: string;
   terminal: Terminal;
@@ -486,6 +499,7 @@ class TerminalControllerImpl implements TerminalController {
   private outputResumeRetryTimer: number | null = null;
   private outputResumeRetryAttempts = 0;
   private readonly outputListeners = new Set<TerminalOutputCallback>();
+  private readonly displayOutputListeners = new Set<TerminalDisplayOutputCallback>();
   private readonly outputFilters = new Set<TerminalOutputFilter>();
   private readonly lifecycleListeners = new Set<TerminalLifecycleCallback>();
   private listenerSetup: Promise<void>;
@@ -564,6 +578,10 @@ class TerminalControllerImpl implements TerminalController {
   }
 
   private installInputRendering(ptyInfo?: SessionPtyInfo): ReturnType<typeof installTerminalCommandDecorations> {
+    this.originEligible = ptyInfo?.transportKind === 'windowsConPty' && ptyInfo.inputMode === 'native-inline'
+      && ptyInfo.nativeDisplayBinding?.unicodeVersion === '15-graphemes'
+      && ptyInfo.nativeDisplayBinding.unicodeScope === 'session'
+      && ptyInfo.nativeDisplayBinding.ownedReflowCursorLine === false;
     this.inputMode = ptyInfo?.inputMode ?? 'raw';
     if (this.inputMode === 'native-inline' && ptyInfo?.nativeDisplayBinding) {
       const unicodeVersion = ptyInfo.nativeDisplayBinding.unicodeVersion;
@@ -599,7 +617,7 @@ class TerminalControllerImpl implements TerminalController {
     if (status === 'connected') {
       void this.writeUserInput(data).catch((error) => {
         logger.error(`Failed to write input to session ${this.sessionId}`, error);
-        this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.writeFailedLabel'), t('terminal.notice.writeFailedMessage'), '31'));
+        this.showWriteFailure();
       });
       return;
     }
@@ -635,7 +653,7 @@ class TerminalControllerImpl implements TerminalController {
     const bytes = Uint8Array.from(data, (character) => character.charCodeAt(0) & 0xff);
     void this.writeUserBinaryInput(bytes).catch((error) => {
       logger.error(`Failed to write binary input to session ${this.sessionId}`, error);
-      this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.writeFailedLabel'), t('terminal.notice.writeFailedMessage'), '31'));
+      this.showWriteFailure();
     });
   }
 
@@ -697,7 +715,24 @@ class TerminalControllerImpl implements TerminalController {
 
   private writeSystemLine(line: string): void {
     if (this.disposed) return;
+    this.emitDisplayOutput(line + '\r\n', 'local');
     this.terminal.writeln(line);
+  }
+
+  private emitDisplayOutput(data: string, source: TerminalDisplayOutput['source']): void {
+    if (this.disposed || !data) return;
+    for (const listener of this.displayOutputListeners) {
+      try {listener({source, data});}
+      catch (error) {logger.warn(`Terminal display output subscriber failed for session ${this.sessionId}`, error);}
+    }
+  }
+
+  private showWriteFailure(): void {
+    const message = t('terminal.notice.writeFailedMessage');
+    const store = useToastStore.getState();
+    if (!store.toasts.some(toast => toast.variant === 'error' && toast.message === message)) {
+      store.addToast(message, 'error');
+    }
   }
 
   private updateLinkProvider(): void {
@@ -735,6 +770,7 @@ class TerminalControllerImpl implements TerminalController {
 
   private clearListeners(): number {
     this.listenerGeneration += 1;
+    this.originUnlisten?.();this.originUnlisten = undefined;this.originPending.clear();this.originTail = Promise.resolve();
     this.unlisten.data?.();
     this.unlisten.status?.();
     this.unlisten.closed?.();
@@ -804,6 +840,7 @@ class TerminalControllerImpl implements TerminalController {
         void this.closeInputRendering().then(() => {
           if (this.disposed || sessionId !== this.sessionId) return;
           // A standard ST closes only the old stream's partial escape.
+          this.emitDisplayOutput('\u001b\\', 'local');
           this.terminal.write('\u001b\\');
           showClosed();
         });
@@ -827,6 +864,14 @@ class TerminalControllerImpl implements TerminalController {
       return;
     }
     this.unlisten.closed = closedUnlisten;
+
+    if (this.originEligible) {
+      const originUnlisten = await listenToTerminalPromptOrigin(event => {
+        void this.answerPromptOrigin(event.payload, sessionId, generation);
+      });
+      if (this.disposed || generation !== this.listenerGeneration || sessionId !== this.sessionId) originUnlisten();
+      else this.originUnlisten = originUnlisten;
+    }
 
     try {
       const snapshot = await invokeGetSessionStatus(sessionId);
@@ -889,6 +934,7 @@ class TerminalControllerImpl implements TerminalController {
     ) {
       this.setOutputPaused(true);
     }
+    this.emitDisplayOutput(chunk, 'session');
     this.terminal.write(chunk, () => {
       if (this.disposed || generation !== this.outputGeneration) return;
       this.pendingOutputCharacters = Math.max(0, this.pendingOutputCharacters - length);
@@ -1325,6 +1371,48 @@ class TerminalControllerImpl implements TerminalController {
     return true;
   }
 
+  private async answerPromptOrigin(request: TerminalPromptOriginRequest, sessionId: string, generation: number): Promise<void> {
+    const current = () => {
+      const session = useTerminalStore.getState().sessions.find(value => value.sessionId === sessionId);
+      return !this.disposed && this.originEligible && generation === this.listenerGeneration && sessionId === this.sessionId
+        && request.sessionId === sessionId && session?.terminalSessionId === request.terminalSessionId
+        && session.terminalGeneration === request.terminalGeneration;
+    };
+    if (!request || typeof request !== 'object' || !Number.isSafeInteger(request.timeoutMs)
+      || request.timeoutMs < 1 || request.timeoutMs > 10_000 || !request.geometry
+      || typeof request.requestId !== 'string' || request.requestId.length > 128
+      || !current() || this.originPending.has(request.requestId) || this.originPending.size >= 2) return;
+    this.originPending.add(request.requestId);
+    const end = Date.now() + request.timeoutMs;
+    // The transport can emit its next request before the IPC acknowledgement
+    // for our previous response returns. Keep one successor and answer it only
+    // after that response completes, within the original received deadline.
+    const previous = this.originTail;
+    let release: (() => void) | undefined;
+    this.originTail = new Promise<void>(resolve => {release = resolve;});
+    try {
+      await previous;
+      while (current() && Date.now() < end) {
+        const drained = await new Promise<boolean>(resolve => {
+          let settled = false;
+          const finish = (value: boolean) => {if (settled) return;settled = true;clearTimeout(timer);resolve(value);};
+          const timer = setTimeout(() => finish(false), Math.max(1, end - Date.now()));
+          this.terminal.write('', () => finish(true));
+        });
+        if (!drained) return;
+        if (!current()) return;
+        const observation = observeNativePromptOrigin(this.terminal, {...request.geometry, requestId: request.requestIndex});
+        if (observation) {
+          await invokeRespondTerminalPromptOrigin(request, observation);
+          return;
+        }
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+    } catch (error) {
+      if (current()) logger.warn('Display origin observation could not be delivered', error);
+    } finally {this.originPending.delete(request.requestId);release?.();}
+  }
+
   writeUserInput(data: string): Promise<boolean> {
     if (this.disposed || this.getStatus(this.sessionId) !== 'connected') {
       return Promise.resolve(false);
@@ -1370,6 +1458,12 @@ class TerminalControllerImpl implements TerminalController {
     return () => this.outputListeners.delete(listener);
   }
 
+  subscribeDisplayOutput(listener: TerminalDisplayOutputCallback): () => void {
+    if (this.disposed) return () => {};
+    this.displayOutputListeners.add(listener);
+    return () => this.displayOutputListeners.delete(listener);
+  }
+
   subscribeOutputFilter(filter: TerminalOutputFilter): () => void {
     if (this.disposed) return () => {};
     this.outputFilters.add(filter);
@@ -1399,6 +1493,7 @@ class TerminalControllerImpl implements TerminalController {
   }
 
   write(chunk: string): void {
+    this.emitDisplayOutput(chunk, 'local');
     this.terminal.write(chunk);
   }
 
@@ -1407,6 +1502,7 @@ class TerminalControllerImpl implements TerminalController {
   writeConnectionFailure(message: string): void {
     if (this.failureMessage === message) return;
     this.failureMessage = message;
+    this.emitDisplayOutput('\r\n\u001b[?25l', 'local');
     this.terminal.write('\r\n\u001b[?25l');
     this.writeSystemLine(formatTerminalStatusLine('error', message));
     this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.hintLabel'), t('terminal.notice.connectionFailedHint')));
@@ -1425,6 +1521,7 @@ class TerminalControllerImpl implements TerminalController {
   rebindSession(sessionId: string, ptyInfo?: SessionPtyInfo): void {
     if (this.disposed || sessionId === this.sessionId) return;
     this.failureMessage = undefined;
+    this.emitDisplayOutput('\u001b[?25h', 'local');
     this.terminal.write('\u001b[?25h');
     const previousSessionId = this.sessionId;
     terminalInputReadiness.finish(previousSessionId);
@@ -1472,6 +1569,7 @@ class TerminalControllerImpl implements TerminalController {
       const boundary = ptyInfo?.transportKind === 'windowsConPty' && this.terminal.buffer.active.type === 'normal'
         ? `\u001b\\\u001b[${this.terminal.rows};1H${'\r\n'.repeat(this.terminal.rows)}\u001b[H`
         : '\u001b\\';
+      this.emitDisplayOutput(boundary, 'local');
       this.terminal.write(boundary);
       this.commandDecorations = this.installInputRendering(ptyInfo);
       return this.startListenerSetup(true);
@@ -1561,6 +1659,7 @@ class TerminalControllerImpl implements TerminalController {
     this.terminal.dispose();
     clearTerminalOutput(this.sessionId);
     this.outputListeners.clear();
+    this.displayOutputListeners.clear();
     this.outputFilters.clear();
     this.userInputSuppressions = 0;
     this.userInputBlockedListeners.clear();
