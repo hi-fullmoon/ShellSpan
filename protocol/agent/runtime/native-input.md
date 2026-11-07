@@ -5,6 +5,23 @@
 stdout、OSC、前端 ready 和显示完成都不是控制报文。
 [schema](native-input.schema.json) 与 Rust `terminal_command/protocol.rs` 同源审查。
 
+## 实现与资源入口
+
+| 范围 | 入口 |
+| --- | --- |
+| 控制协议与 schema | `protocol/agent/runtime/native-input.md`、`native-input.schema.json` |
+| 协调、状态、账本、资源加载 | `src-tauri/src/terminal_command/` |
+| Shell 适配扩展 | `src-tauri/native-input-adapter/`、`src-tauri/native-input-editors/` |
+| 正式资源暂存及包内路径 | `.artifacts/releases/native-input/generated/`、`native-input/generated/` |
+| 原生显示与只读装饰 | `src/lib/terminal/native-input-display.ts`、`NATIVE_INPUT_DISPLAY`、terminal registry、`terminal-command-decorations.ts` |
+| Bash 内置命令及只读列接口 | `ss_native_input` 及同前缀私有操作、`rl_native_prompt_columns` |
+| 静态边界检查 | `scripts/check-terminal-command-boundary.mjs` |
+
+当前实现不提供旧命名别名、协议翻译或旧客户端兼容入口；第三方版本、标准路径、标准 API 名称及原始采样保留真实内容。
+原始源码、光标、输入推进和回显属于 Shell 编辑器及同一 PTY 数据流，前端不维护替代编辑器或改写公开选择、搜索方法。
+维护的通用 xterm 重排、复制及同流显示补丁仍按[显示契约](../../native-input-display.md)和[统一验收清单](../../../docs/design/agent-terminal-input-acceptance-checklist.md)核对影响范围。
+前台实机运行须有用户明确安排的时段，`SHELLSPAN_ALLOW_FOREGROUND_TESTS=1` 仅传给该次命令，不写入用户配置或默认脚本。
+
 ## 模式、身份和能力
 
 Windows 原生输入新身份包含 `shellspan1-conpty1.25.260930003-graphemes`，
@@ -31,13 +48,13 @@ Windows 后台标记的名称冲突检查不得自动导入模块或执行模块
 
 一个终端 generation 的模式初始化后固定为 `native-inline` 或 `raw`。
 不再接收或输出 `legacy-projection`，也不保留旧客户端及旧作业输入兼容分支。
-历史证据只适用于采样时的源码与制品，当前验收边界见[实现说明](../../../docs/design/agent-terminal-input.md)。
+历史证据只适用于采样时的源码与制品，当前验收边界见[统一验收清单](../../../docs/design/agent-terminal-input-acceptance-checklist.md)。
 不得在已有草稿或历史上热切换，不得因 native 失败改换执行路径或重放。
 能力不足的新 Agent 命令在 lease/PTY 写入前返回 `TERMINAL_NATIVE_INPUT_REQUIRED`；
 不自动选择替代 Shell。普通用户输入与 TUI 保留；当前后台作业的输入和管理均走已验证的原生通道。
 ZLE/PSReadLine 生产编辑器 profile 仍为空；
 GNU Bash 保留独立的来源匹配 catalogue、实际 Shell SHA/模块校验准入，未被该空列表关闭。
-当前已完成代码、编译和静态检查，统一实机待验项见[实现说明](../../../docs/design/agent-terminal-input.md)。
+各平台实际结果分别留证，统一实机待验项见[验收清单](../../../docs/design/agent-terminal-input-acceptance-checklist.md)。
 
 初始化使用独立 `connection = {terminalSessionId, terminalGeneration, controlId}`。
 `probe` 与匹配 requestId 的 `capabilities` 不需要 Agent/task/operation，禁止制造占位身份。
@@ -67,7 +84,7 @@ Shell与Readline必须按构建配方的对应关系配对，实际运行范围�
 不授予执行或编辑权限；后端仍须等待匹配的真实清稿回执，未确认前保留输入门禁。
 P3 实现了按完整源文件及实际制品摘要绑定的 ZLE/PSReadLine provider；独立平台验收仍在进行，
 不能将组件回执或 P2 Bash 结果视为 P3 完成。当前证据及未完成项见
-[实现说明](../../../docs/design/agent-terminal-input.md)。
+[统一验收清单](../../../docs/design/agent-terminal-input-acceptance-checklist.md)。
 SSH 制品经真实 SFTP 上传、远端读取校验与独立 relay 通道加载。其他架构、libc、
 自定义输入/redisplay/信号 provider 和未校验的普通发行版构建均不能仅凭版本得到 native 能力。
 
@@ -340,7 +357,7 @@ Job 私有控制没有 displaySource。私有计划/摘要/原生缓冲和凭据
 P3 受控候选的 `nativeDisplayBinding` 可选只读 `unicodeVersion: "11"`，仅由本地已校验
 ZLE Core/profile 提供，并经相同后端生成函数传入快照与 Session PTY DTO。它不是 NIP peer
 自报字段、客户端请求选项或执行许可；缺省时保持原有显示配置。完整显示作用域与恢复规则见
-[原生显示接入](../../native-input-display.md)，各平台启用门禁见[实现说明](../../../docs/design/agent-terminal-input.md)。
+[原生显示接入](../../native-input-display.md)，各平台启用门禁见[统一验收清单](../../../docs/design/agent-terminal-input-acceptance-checklist.md)。
 
 snapshotSequence 覆盖整个公开 session 投影，变化才递增，相同读取保持相等。
 legacyRevision/integrationStateRevision 只对应各自状态，不用于合并整个命令观察。终端 ID/代次、当前 Agent/task/operation 及游标

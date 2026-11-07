@@ -23,7 +23,7 @@ owned native append，其他值拒绝。它是模式开关，不是行数、终�
 适配器只在owned输入范围开启1，记录并在仍匹配本操作时恢复原值。NIP的完整身份、
 实际BUFFER/CURSOR证明、FULL持久意图、最终单次接受键和不明结果门禁保持原契约。
 显示API或屏幕内容不能代替上述事实。生产profile准入独立关闭，逐平台待验项见
-[实现说明](../../../docs/design/agent-terminal-input.md)。
+[统一验收清单](../../../docs/design/agent-terminal-input-acceptance-checklist.md)。
 
 已绑定精确私有Main/Core的macOS Zsh 5.9组合发布Unicode 11及`unicodeScope=session`。
 同一Core也使用该宽度处理普通ZLE编辑，因此普通输入和输出保持同一已验证provider，

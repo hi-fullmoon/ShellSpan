@@ -2,9 +2,8 @@
 
 Status: accepted Phase 0 contract; amended for the cooperative-shell threat model on 2026-09-15 and remote bound-terminal reuse on 2026-09-17; owner: ShellSpan Agent Runtime.
 
-Current native input: [NIP](native-input.md). Implementation and pending platform
-acceptance: [native terminal input](../../../docs/design/agent-terminal-input.md)
-and [acceptance checklist](../../../docs/design/agent-terminal-input-acceptance-checklist.md).
+Current native input and implementation: [NIP](native-input.md). Pending platform
+acceptance: [acceptance checklist](../../../docs/design/agent-terminal-input-acceptance-checklist.md).
 Historical phase reports are available in Git history; they do not validate the
 current revision.
 
@@ -305,7 +304,7 @@ submission mutex, the transport-admitted `submission_attempted` error fact and
 the broker's `source_may_be_enqueued` have different meanings. None may be
 inferred from frontend activity, OSC boundaries or prompt text. Current event,
 rejection and idempotency boundaries are described in the
-[implementation guide](../../../docs/design/agent-terminal-input.md).
+[NIP contract](native-input.md).
 
 Submission requires a ready integration, the Agent lease, no active command,
 and a command identifier registered before any input bytes are written. The
@@ -1199,7 +1198,7 @@ gates do; Windows remains a native-evidence debt rather than a claimed pass.
 
 The historical native feasibility report in Git history records real
 Bash/Readline PTY, loopback SSH and browser experiments. Current boundaries are
-listed in the [implementation guide](../../../docs/design/agent-terminal-input.md).
+listed in the [acceptance checklist](../../../docs/design/agent-terminal-input-acceptance-checklist.md).
 `pnpm test:terminal-native-input:p0 --upstream` runs native PTYs and browsers;
 `pnpm test:terminal-native-input:p0:ssh` runs the isolated SSH lane. Add `--ssh`
 to the first command to run both and retain any earlier nonzero status.
@@ -1251,7 +1250,7 @@ protocol are now defined in [NIP](native-input.md) and its
 The existing executor uses the same Broker lifecycle and submission gate; it no
 longer owns a second submitted flag. P2 production transport/display wiring is
 implemented; full acceptance remains pending. See the
-[implementation guide](../../../docs/design/agent-terminal-input.md).
+[acceptance checklist](../../../docs/design/agent-terminal-input-acceptance-checklist.md).
 
 ### P0 continuation: causal and dependency laboratory evidence
 
@@ -1329,7 +1328,7 @@ generation is hot-switched, cleared or replayed. ZLE/PSReadLine production edito
 profiles remain empty. GNU Bash's independent source-matching catalogue and
 exact shell/module SHA admission remain unchanged.
 Current code/static boundaries and deferred acceptance are recorded in the
-[implementation guide](../../../docs/design/agent-terminal-input.md).
+[NIP contract](native-input.md) and [acceptance checklist](../../../docs/design/agent-terminal-input-acceptance-checklist.md).
 P1 freezes online identifiers/capabilities in NIP. Current production recovery,
 packaging and acceptance limits are recorded in the P2 audit.
 Display bytes still grant no lifecycle, readiness, input or execution authority.

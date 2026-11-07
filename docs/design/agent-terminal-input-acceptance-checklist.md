@@ -3,8 +3,9 @@
 更新：2026-11-07。本文只定义验收要求与证据规则，不承担逐批运行流水或当前代码通过证明。
 
 - Windows 执行与四期安排见[Windows 分期验收](agent-terminal-input-windows-acceptance.md)。
+- macOS 本机四组合的执行安排见[六期验收计划](agent-terminal-input-macos-plan.md)，与 Windows 分别记录结果；各平台标准仍以本文为准。
 - macOS 独立批次见[macOS arm64 验收记录](agent-terminal-input-macos-acceptance-2026-11-06.md)。
-- 实现与边界见[实现说明](agent-terminal-input.md)、[NIP 契约](../../protocol/agent/runtime/native-input.md)、[显示契约](../../protocol/native-input-display.md)及[临时脚本契约](../../protocol/agent/runtime/file-and-script-execution.md)。
+- 实现与边界见[NIP 契约与实现入口](../../protocol/agent/runtime/native-input.md)、[显示契约](../../protocol/native-input-display.md)及[临时脚本契约](../../protocol/agent/runtime/file-and-script-execution.md)。
 
 ## 验收范围
 

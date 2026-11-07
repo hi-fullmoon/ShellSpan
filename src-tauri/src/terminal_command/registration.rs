@@ -28,6 +28,7 @@ pub(crate) struct VerifiedNativeProfile {
     private_conpty: bool,
 }
 impl VerifiedNativeProfile {
+    #[cfg(windows)]
     pub(crate) fn display_origin_channel(&self) -> bool {
         self.private_conpty
             && self.editor_profile.is_some()
