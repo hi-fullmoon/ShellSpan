@@ -24,6 +24,9 @@ it('requires unchanged recorded source, native mode and returned handle across a
   expect(check(0,{command:sources[0],background:false,lifecycleTrust:'cooperative'})).toBe(true);
   expect(check(1,{command:sources[1],background:true})).toBe(true);
   expect(check(6,{command:sources[2],timeoutMs:5000})).toBe(true);
+  for(const [step,index] of [[0,0],[1,1],[6,2]])for(const suffix of ['\n','\r','\r\n']) {
+    expect(check(step,{command:sources[index]+suffix,...(step===1?{background:true}:{})})).toBe(false);
+  }
   for(const step of [2,3,4])expect(check(step,{processHandle:'job-owned',timeoutMs:1000})).toBe(true);
   expect(check(5,{processHandle:'job-owned',signal:'terminate',timeoutMs:10000})).toBe(true);
   for(const args of [
