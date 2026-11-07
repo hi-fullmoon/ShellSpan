@@ -79,6 +79,6 @@ This does not create a terminal source projection.
 
 Retired regression specifications and phase reports remain in Git history.
 Original real PTY fixtures retain their captured bytes. See the
-[current implementation and pending acceptance](../../../docs/design/agent-terminal-input.md)
+[NIP contract](native-input.md) and [acceptance checklist](../../../docs/design/agent-terminal-input-acceptance-checklist.md)
 for current boundaries. This revision has compile/static evidence only;
 the dynamic entries above require separately scheduled acceptance.

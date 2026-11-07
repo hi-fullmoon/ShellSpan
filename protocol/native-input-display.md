@@ -12,7 +12,7 @@ P0 依赖已采用 pnpm 对精确 `@xterm/xterm@6.0.0` 的 source + UMD/ESM 构�
 
 前端只对后端协商的 Windows ConPTY/native-inline/15-graphemes/session/ownedReflow=false 绑定观察，匹配当前 session/terminal ID、代次与监听代次；等待已有输出排空、尺寸及光标吻合，关闭/重绑时停止。观察不移动光标、不写输入、不决定 promptReady、清稿、恢复或执行。shellspan6 的认证原生请求生产端已接入协调器，UI 没有自行创建绑定或请求的命令；应用级初始化、显示与关闭仍待完整验收。历史候选文件通道不能作为产品通道或正式验收通过证明。
 
-实现入口是 `src/lib/terminal/native-input-display.ts::attachNativeInputDisplay`。调用者必须传入显式 native 模式与已协商的 OSC identifier、enter/exit payload。模块不隐式安装正式 binding，不自行探测提示符、lease、命令文本或原生源码。registry 仅在后端协商的 native metadata 下安装。当前仅有native-inline/raw，raw不安装装饰或新handler。当前实现及待验范围见[实现说明](../docs/design/agent-terminal-input.md)。
+实现入口是 `src/lib/terminal/native-input-display.ts::attachNativeInputDisplay`。调用者必须传入显式 native 模式与已协商的 OSC identifier、enter/exit payload。模块不隐式安装正式 binding，不自行探测提示符、lease、命令文本或原生源码。registry 仅在后端协商的 native metadata 下安装。当前仅有native-inline/raw，raw不安装装饰或新handler。当前实现及待验范围见[NIP 契约](agent/runtime/native-input.md)和[统一验收清单](../docs/design/agent-terminal-input-acceptance-checklist.md)。
 
 安装基线为 `reflowCursorLine=false`。不满足基线或同一 Terminal 重复安装时，附加操作拒绝且不改用户选项。资源释放后可显式重绑；输入权、代次和输入准入始终由既有后端边界决定。
 
@@ -32,7 +32,7 @@ ready 或版本字符串作为证明。快照与本地 Session 启动等待必�
 registry 仅据该元数据按需注册官方 provider，注册不改变普通默认；显示模块仅在完整 owned
 enter 时保存原 provider 并启用选择，exit、有序关闭及销毁时恢复。重复 enter 不覆盖原值，
 期间显式发生的外部 provider 切换予以保留。未选该配置时不访问或改变 provider。
-该实现仍受[实现说明](../docs/design/agent-terminal-input.md)的资源、平台与窗口
+该实现仍受[统一验收清单](../docs/design/agent-terminal-input-acceptance-checklist.md)的资源、平台与窗口
 门禁约束，不表示未验收 profile 已启用；provider 显示状态不能授权执行。
 
 Windows 私有 ConPTY `1.25.260930003` 的新 profile 在 DLL 与 OpenConsole 实际摘要校验后，
@@ -109,4 +109,4 @@ insert/delete/trim 事件解析其行并限制在可用滚动范围。不能继�
 
 `pnpm test:terminal-native-input:p0:formal` 从固定 GNU 源码构建原型并重新采集真实 PTY，再用正式安装包验证复制、同流模式、边界、几何和提交。也可显式传入每项真实 capture 路径回放，结果记录这些输入路径与当前源码/运行包摘要。重采集后可运行 `node scripts/export-native-display-fixture.mjs --captures <successful ownership capture>` 重新生成就近 fixture；它只导出显示字节，不伪造私有回执。
 
-历史冻结范围和结果保留在Git历史，不外推当前源码、Linux/SSH新扩展、Windows、其他架构或用户插件。当前待验范围见[实现说明](../docs/design/agent-terminal-input.md)，历史通过结果不能启用未验收的生产配置。
+历史冻结范围和结果保留在Git历史，不外推当前源码、Linux/SSH新扩展、Windows、其他架构或用户插件。当前待验范围见[统一验收清单](../docs/design/agent-terminal-input-acceptance-checklist.md)，历史通过结果不能启用未验收的生产配置。

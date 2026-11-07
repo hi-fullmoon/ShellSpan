@@ -3,7 +3,7 @@
 These tools provide isolated native-input and terminal-display checks. They do
 not establish current production admission. Current implementation boundaries
 and pending platform acceptance are defined by
-[the native-input overview](../../docs/design/agent-terminal-input.md) and
+[the NIP contract](../../protocol/agent/runtime/native-input.md) and
 [the acceptance checklist](../../docs/design/agent-terminal-input-acceptance-checklist.md).
 
 Only compile, type and static checks are currently authorized. The commands
