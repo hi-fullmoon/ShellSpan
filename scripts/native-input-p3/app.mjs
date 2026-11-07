@@ -1,15 +1,18 @@
 import assert from 'node:assert/strict';
 import {spawn,execFileSync} from 'node:child_process';
 import {createHash,randomUUID,randomBytes} from 'node:crypto';
-import {mkdirSync,readFileSync,writeFileSync,existsSync,openSync,closeSync} from 'node:fs';
+import {mkdirSync,readFileSync,writeFileSync,existsSync,openSync,closeSync,readdirSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import {captureValidationSources} from '../native-input-p2/frozen-validation.mjs';
 import {editorValidationEnvironment} from './editor-validation.mjs';
 import {assertNativeGuiAllowed} from '../native-input-p2/gui-lock.mjs';
+import {prepareZleAppHistory,readZleAppHistoryDisk,zleAppHistoryModes} from './zle-app-history.mjs';
 assertNativeGuiAllowed();
 const root=resolve(import.meta.dirname,'../..');
-const fixture=process.env.SHELLSPAN_P3_CASE??'jobs';assert(['jobs','contention','interactive','cancel','submit-fault'].includes(fixture));
+const fixture=process.env.SHELLSPAN_P3_CASE??'jobs';assert(['jobs','contention','interactive','cancel','submit-fault','history'].includes(fixture));
+const historyMode=fixture==='history'?process.env.SHELLSPAN_P3_HISTORY_MODE:undefined;
+assert(fixture!=='history'||zleAppHistoryModes.includes(historyMode),'An exact independent ZLE history mode is required');
 const sshFixturePath=process.env.SHELLSPAN_P3_SSH_FIXTURE?resolve(process.env.SHELLSPAN_P3_SSH_FIXTURE):undefined;
 const ssh=sshFixturePath?JSON.parse(readFileSync(sshFixturePath,'utf8')):undefined;
 if(ssh){
@@ -37,7 +40,8 @@ for(const route of routes.routes){
 const requested=process.env.SHELLSPAN_P3_MODEL;
 if(requested){const selected=routes.routes.find(route=>route.id===routes.defaultSelection.routeId);assert(selected.models[requested]);routes.defaultSelection={routeId:selected.id,modelId:requested,...(process.env.SHELLSPAN_P3_REASONING?{reasoningEffort:process.env.SHELLSPAN_P3_REASONING}:{})};}
 writeFileSync(resolve(directory,'route-source.json'),JSON.stringify({path:sourcePath,valueSha256:createHash('sha256').update(row.value).digest('hex'),selection:routes.defaultSelection}));
-writeFileSync(resolve(directory,'home/.zshrc'),"PROMPT='%F{cyan}P3 %n@%m %~%f %# '\nHISTFILE=$HOME/history\nHISTSIZE=1000\nSAVEHIST=1000\nsetopt interactivecomments\n");
+const historyPlan=fixture==='history'?prepareZleAppHistory(root,directory,historyMode):undefined;
+if(!historyPlan)writeFileSync(resolve(directory,'home/.zshrc'),"PROMPT='%F{cyan}P3 %n@%m %~%f %# '\nHISTFILE=$HOME/history\nHISTSIZE=1000\nSAVEHIST=1000\nsetopt interactivecomments\n");
 let submittedProgramSha256;
 if(fixture==='submit-fault'){
  const home=resolve(directory,'home'),program=resolve(home,'p3-stop-target');
@@ -47,7 +51,11 @@ if(fixture==='submit-fault'){
  writeFileSync(resolve(directory,'submit-fault-program.json'),JSON.stringify({program,sha256:submittedProgramSha256,sourceSha256:createHash('sha256').update(readFileSync(resolve(root,'scripts/native-input-p3/signal-target.c'))).digest('hex'),gate:'public user preexec, local INT trap held until explicit FIFO release',productionShellOrUserConfigurationChanged:false},null,2));
 }
 const validation=await editorValidationEnvironment(root,resolve(root,'.artifacts/tests/native-input-p2/resources/native-input'),ssh?['macos-arm64','linux-aarch64-glibc-2.36']:['macos-arm64']);
-const environment={...process.env,...validation,SHELLSPAN_DATA_DIR:resolve(directory,'data'),SHELLSPAN_LOCAL_HOME:resolve(directory,'home'),SHELLSPAN_LOCAL_SHELL:'/bin/zsh',SHELL:'/bin/zsh',LC_ALL:'en_US.UTF-8',
+const localArtifact=JSON.parse(readFileSync(resolve(root,'.artifacts/tests/native-input-p2/resources/native-input/editors-macos-arm64.json'),'utf8')).profiles[0];
+assert(localArtifact.shell&&localArtifact.profile.shell==='zsh');
+const localShell=resolve(root,'.artifacts/tests/native-input-p2/resources/native-input',localArtifact.shell);
+assert.equal(createHash('sha256').update(readFileSync(localShell)).digest('hex'),localArtifact.shellSha256);
+const environment={...process.env,...validation,SHELLSPAN_DATA_DIR:resolve(directory,'data'),SHELLSPAN_LOCAL_HOME:resolve(directory,'home'),SHELLSPAN_LOCAL_SHELL:localShell,SHELL:localShell,LC_ALL:'en_US.UTF-8',
   ...(ssh?{SHELLSPAN_P2_CREDENTIAL_REFERENCE:`native-p2-secret-${randomUUID()}`,SHELLSPAN_P2_SSH_USER:'nativeZle'}:{}),
   SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:directory,SHELLSPAN_DEV_SIGNING_KEYCHAIN:resolve(originalHome,'Library/Keychains/login.keychain-db')};
 async function run(name,args,provision){const log=openSync(resolve(directory,`${name}.log`),'wx',0o600);const child=spawn(process.execPath,['scripts/verify-ai-session-stream.mjs',...args],{cwd:root,env:environment,stdio:[provision?'pipe':'ignore',log,log]});if(provision)child.stdin.end(JSON.stringify(provision));const outcome=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',(code,signal)=>resolve({code,signal}));});closeSync(log);writeFileSync(resolve(directory,`${name}-process-exit.json`),JSON.stringify(outcome,null,2));return outcome.code??1;}
@@ -60,7 +68,18 @@ const database=new DatabaseSync(resolve(directory,'data/shellspan-main.db'));
 database.exec('BEGIN');const empty=database.prepare("SELECT value FROM preferences WHERE key='llm.routes.v1'").get();assert.equal(JSON.parse(empty.value).routes.length,0);
 database.prepare("UPDATE preferences SET value=? WHERE key='llm.routes.v1'").run(JSON.stringify(routes));database.exec('COMMIT');database.close();
 const selection=routes.defaultSelection;assert(selection?.routeId&&selection?.modelId);
-const code=await run('application',[fixture==='contention'?'--terminal-contention':'--native-jobs',...(fixture==='interactive'?['--native-input-p2-interactive-fresh']:['cancel','submit-fault'].includes(fixture)?['--native-input-p3-cancel',...(fixture==='submit-fault'?['--native-input-p3-submit-fault']:[])]:[]),...(ssh?['--native-input-p2','--native-input-p2-ssh-fixture',sshFixturePath]:[]),'--native-input-p3','zsh','--data-scope','com.shellspan.validation.native-input-p3','--route',selection.routeId,'--model',selection.modelId,...(process.env.SHELLSPAN_P3_BACKPRESSURE==='1'?['--native-input-p3-backpressure']:[]),...(process.env.SHELLSPAN_P3_REVIEW==='1'?['--native-input-p3-review']:[])]);
+const code=await run('application',[...(historyPlan?['--native-input-p3-zle-history',historyMode]:[fixture==='contention'?'--terminal-contention':'--native-jobs']),...(fixture==='interactive'?['--native-input-p2-interactive-fresh']:['cancel','submit-fault'].includes(fixture)?['--native-input-p3-cancel',...(fixture==='submit-fault'?['--native-input-p3-submit-fault']:[])]:[]),...(ssh?['--native-input-p2','--native-input-p2-ssh-fixture',sshFixturePath]:[]),'--native-input-p3','zsh','--data-scope','com.shellspan.validation.native-input-p3','--route',selection.routeId,'--model',selection.modelId,...(process.env.SHELLSPAN_P3_BACKPRESSURE==='1'?['--native-input-p3-backpressure']:[]),...(process.env.SHELLSPAN_P3_REVIEW==='1'?['--native-input-p3-review']:[])]);
+if(historyPlan&&code===0){
+ const results=readdirSync(directory).filter(name=>name.startsWith('native-p3-progress-')).map(name=>JSON.parse(readFileSync(resolve(directory,name),'utf8'))).filter(value=>value.evidence?.kind==='actual-zle-app-model-history');
+ assert.equal(results.length,1);const evidence=results[0].evidence;assert.equal(evidence.mode,historyMode);assert.equal(evidence.cases.length,9);assert.equal(evidence.snapshots.length,10);assert.equal(evidence.normalUserExit,true);
+ assert.equal(readFileSync(resolve(directory,'home/rc-count'),'utf8'),'rc\n','User startup profile was sourced more than once');
+ const disk=readZleAppHistoryDisk(directory,localShell);
+ let expected=historyPlan.persistent?[...evidence.acceptedSources,'exit']:historyPlan.seedSources;
+ if(historyPlan.persistent&&historyMode==='small')expected=expected.slice(-3);
+ assert.deepEqual(disk.entries,expected,'Normal App Shell exit did not preserve original source/history policy');
+ assert(!existsSync(resolve(directory,'home/history-cancel-effect')));
+ writeFileSync(resolve(directory,'history-verification.json'),JSON.stringify({mode:historyMode,actualAppAndModel:true,publicObservations:10,realToolCalls:9,acceptedSourceCount:5,privateControls:3,ordinaryUserExit:true,originalSourcesOnDisk:true,startupLoads:1,cancelledSourceAbsent:true,multiProcessSharing:false},null,2),{flag:'wx',mode:0o600});
+}
 if(submittedProgramSha256){
  assert.equal(createHash('sha256').update(readFileSync(resolve(directory,'home/p3-stop-target'))).digest('hex'),submittedProgramSha256);
  if(code===0){

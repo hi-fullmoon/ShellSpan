@@ -930,6 +930,7 @@ pub(crate) enum SessionCommand {
         rows: u32,
     },
     /// FIFO barrier after the initial resize, not a Shell input or NIP proof.
+    #[cfg(any(windows, test))]
     StartupReady,
     Close,
 }
@@ -2188,6 +2189,27 @@ mod session_manager_tests {
         assert!(matches!(
             receiver.recv().unwrap(),
             SessionCommand::StartupReady
+        ));
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn local_output_readiness_does_not_send_a_windows_startup_command() {
+        let manager = SessionManager::default();
+        let (sender, receiver) = unbounded();
+        let managed = managed_session(sender);
+        let ready = managed.output_ready.clone();
+        manager.insert("local-startup".into(), managed).unwrap();
+        manager.resize("local-startup", 199, 37).unwrap();
+        manager.mark_output_ready("local-startup").unwrap();
+        assert!(ready.load(AtomicOrdering::Relaxed));
+        assert!(matches!(
+            receiver.recv().unwrap(),
+            SessionCommand::Resize {
+                cols: 199,
+                rows: 37
+            }
         ));
         assert!(receiver.try_recv().is_err());
     }

@@ -950,6 +950,7 @@ fn coalesce_session_commands(commands: Vec<SessionCommand>) -> Vec<SessionComman
                 // the most recent one instead of replaying every step.
                 pending_resize = Some((cols, rows));
             }
+            #[cfg(any(windows, test))]
             SessionCommand::StartupReady => {
                 if let Some((cols, rows)) = pending_resize.take() {
                     merged.push(SessionCommand::Resize { cols, rows });
@@ -1220,6 +1221,7 @@ fn session_loop_inner(
                     resize_pty_nonblocking(session, channel, cols, rows)?;
                     made_progress = true;
                 }
+                #[cfg(any(windows, test))]
                 SessionCommand::StartupReady => {
                     return Err("local startup notification is invalid for SSH".into());
                 }

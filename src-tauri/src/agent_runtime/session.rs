@@ -2552,6 +2552,33 @@ impl AgentSessionStore {
             .clone())
     }
 
+    /// Storage ownership survives a verified transport reconnect. The immutable
+    /// creation event supplies its target; the current header still grants all
+    /// execution and approval authority.
+    pub(super) fn scratch_ownership_target(
+        &self,
+        session_id: &str,
+        current: &AgentSessionTarget,
+    ) -> Result<AgentSessionTarget, String> {
+        let inner = self.lock_configured()?;
+        let record = inner
+            .sessions
+            .get(session_id)
+            .ok_or("Agent session was not found")?;
+        if record.header.target.as_ref() != Some(current) {
+            return Err("scratch request does not match the current frozen target".into());
+        }
+        let owner = match record.events.first().map(|event| &event.payload) {
+            Some(AgentSessionEventPayload::SessionCreated {
+                target: Some(target),
+                ..
+            }) => target,
+            _ => return Err("scratch ownership has no immutable creation target".into()),
+        };
+        super::scratch::validate_transport_target(owner, current)?;
+        Ok(owner.clone())
+    }
+
     /// Synchronous read only: the callback must not call back into this store.
     pub(super) fn read_events<T>(
         &self,

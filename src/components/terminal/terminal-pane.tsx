@@ -10,7 +10,7 @@ import { installTerminalSelectionGuard } from '@/components/terminal/terminal-se
 import { useTerminalStore, type TerminalSession as TerminalSessionState } from '@/stores/terminalStore';
 import { useToast } from '@/hooks/useToast';
 import { getPlatform } from '@/lib/platform';
-import { copyTerminalText } from './terminal-clipboard';
+import { copyTerminalText, installTerminalPasteHandler } from './terminal-clipboard';
 import { terminalInputReadiness } from './terminal-input-readiness';
 import { agentTerminalCommandFeedback } from './agent-terminal-command-feedback';
 import { TerminalSearch } from './terminal-search';
@@ -373,18 +373,10 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       return true;
     });
 
-    const element = terminal.element;
-    const handlePaste = (event: ClipboardEvent): void => {
-      const text = event.clipboardData?.getData('text/plain');
-      if (!text) return;
-      event.preventDefault();
-      event.stopPropagation();
-      pasteText(text);
-    };
-    element?.addEventListener('paste', handlePaste, true);
+    const disposePaste = installTerminalPasteHandler(terminal, pasteText, () => showError(t('terminal.feedback.pasteFailed')));
 
     return () => {
-      element?.removeEventListener('paste', handlePaste, true);
+      disposePaste?.();
       // Reset key handler to avoid stale closures when session changes.
       terminal.attachCustomKeyEventHandler(() => true);
     };

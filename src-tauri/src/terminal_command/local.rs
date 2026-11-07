@@ -108,6 +108,11 @@ impl PreparedNativeBash {
             .into_iter()
             .find(|a| a.shell_sha256 == digest)
             .ok_or("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
+        if artifact.shell.is_some()
+            && file_sha(Path::new("/bin/zsh"))? != super::registration::mac_zle_pin("mainSha256")?
+        {
+            return Err("TERMINAL_NATIVE_PROFILE_UNSUPPORTED".into());
+        }
         let root = tempfile::Builder::new()
             .prefix("ss-nip-zle-")
             .tempdir()
@@ -218,7 +223,7 @@ impl PreparedNativeBash {
         self,
         probe: nip::ConnectionEnvelope,
         mut on_message: impl FnMut(nip::Message) -> Result<(), String> + Send + 'static,
-        on_closed: impl FnOnce() -> () + Send + 'static,
+        on_closed: impl FnOnce() + Send + 'static,
     ) -> NativeControlHandle {
         let socket = Arc::new(Mutex::new(None));
         let writer = socket.clone();

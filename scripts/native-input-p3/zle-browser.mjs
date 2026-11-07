@@ -13,12 +13,13 @@ const directory=resolve(root,'.artifacts/tests/native-input-p3/browser',randomUU
 const assets={'/xterm.js':['node_modules/@xterm/xterm/lib/xterm.js','application/javascript'],
   '/xterm.css':['node_modules/@xterm/xterm/css/xterm.css','text/css'],
   '/webgl.js':['node_modules/@xterm/addon-webgl/lib/addon-webgl.js','application/javascript'],
+  '/unicode11.js':['node_modules/@xterm/addon-unicode11/lib/addon-unicode11.js','application/javascript'],
   '/search.js':['node_modules/@xterm/addon-search/lib/addon-search.js','application/javascript']};
 const server=createServer(async(request,response)=>{
   try{
     if(request.url==='/display.js'){response.setHeader('Content-Type','application/javascript');response.end(await displayModuleJavaScript());return;}
     const asset=assets[request.url];response.setHeader('Content-Type',asset?asset[1]:'text/html');
-    response.end(asset?await readFile(resolve(root,asset[0])):'<!doctype html><link rel="stylesheet" href="/xterm.css"><div id="surface"></div><script src="/xterm.js"></script><script src="/webgl.js"></script><script src="/search.js"></script>');
+    response.end(asset?await readFile(resolve(root,asset[0])):'<!doctype html><link rel="stylesheet" href="/xterm.css"><div id="surface"></div><script src="/xterm.js"></script><script src="/webgl.js"></script><script src="/search.js"></script><script src="/unicode11.js"></script>');
   }catch{response.writeHead(500).end();}
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -30,6 +31,9 @@ try{
       const entry=JSON.parse(await readFile(resolve(input,'geometry.json'),'utf8'));
       const outcome=JSON.parse(await readFile(resolve(input,'result.json'),'utf8'));assert(outcome.ok);
       const bytes=await readFile(resolve(input,'raw.bin'));
+      const bindingBytes=await readFile(resolve(input,'verified-display-binding.json'));
+      const binding=JSON.parse(bindingBytes.toString('utf8'));
+      assert(binding.protocol==='shellspan.native-input'&&binding.inputMode==='native-inline'&&binding.unicodeVersion==='11','Actual captured ZLE display binding is required');
       const wire=(await readFile(resolve(input,'control.jsonl'),'utf8')).trim().split('\n').map(JSON.parse);
       const digest=createHash('sha256').update(entry.source).digest('hex');assert.equal(digest,entry.sourceSha256);
       assert(wire.some(message=>message.payload.kind==='inputConfirmed'&&message.payload.sourceDigest===digest&&
@@ -37,13 +41,14 @@ try{
       const page=await browser.newPage({viewport:{width:1500,height:640}});
       try{
         await page.goto(`http://127.0.0.1:${server.address().port}`);
-        const actual=await page.evaluate(async({entry,bytes,renderer})=>{
-          const {attachNativeInputDisplay,NATIVE_INPUT_DISPLAY}=await import('/display.js');
-          const term=new Terminal({cols:entry.columns,rows:entry.rows,scrollback:20000,reflowCursorLine:false});term.open(document.querySelector('#surface'));
+        const actual=await page.evaluate(async({entry,bytes,renderer,binding})=>{
+          const {attachNativeInputDisplay}=await import('/display.js');
+          const term=new Terminal({cols:entry.columns,rows:entry.rows,scrollback:20000,reflowCursorLine:false,allowProposedApi:true});term.open(document.querySelector('#surface'));
           if(renderer==='webgl')term.loadAddon(new WebglAddon.WebglAddon());
+          term.loadAddon(new Unicode11Addon.Unicode11Addon());
           const search=new SearchAddon.SearchAddon();term.loadAddon(search);
           const originals={selection:term.getSelection,line:term.buffer.normal.getLine,open:term.open};const input=[];term.onData(value=>input.push(value));
-          const display=attachNativeInputDisplay(term,NATIVE_INPUT_DISPLAY);const decoder=new TextDecoder('utf-8',{fatal:true});
+          const display=attachNativeInputDisplay(term,binding,{unicodeVersion:binding.unicodeVersion,unicodeScope:binding.unicodeScope});const decoder=new TextDecoder('utf-8',{fatal:true});
           const write=chunk=>new Promise(resolve=>term.write(decoder.decode(Uint8Array.from(chunk),{stream:true}),resolve));
           let offset=0,wrappedBeforeResize;const geometry=[];
           for(const event of[...entry.resizeEvents,{offset:bytes.length}]){
@@ -66,10 +71,10 @@ try{
           await display.closeAfterPendingOutput();if(term.options.reflowCursorLine!==false)throw new Error('Actual native display interval remained enabled');
           return{wrappedBeforeResize,geometry,asciiPrefixCopy:true,asciiPrefixSearch:true,exactSourceFound,exactSourceSelection,
             exactUnicodeSourceCopy:exactSourceFound&&exactSourceSelection===entry.source,publicApisUnmodified:true,noInput:true,all};
-        },{entry,bytes:[...bytes],renderer});
+        },{entry,bytes:[...bytes],renderer,binding});
         if(actual.failure){await writeFile(resolve(directory,'failure.json'),JSON.stringify({engine,renderer,input,entry,actual},null,2));await page.screenshot({path:resolve(directory,'failure.png')});assert.fail(`${actual.failure}; ${directory}`);}
         await page.screenshot({path:resolve(directory,`${engine}-${renderer}-${entry.columns}.png`)});
-        results.push({engine,renderer,input,columns:entry.columns,sourceSha256:digest,ptySha256:createHash('sha256').update(bytes).digest('hex'),...actual});
+        results.push({engine,renderer,input,columns:entry.columns,sourceSha256:digest,ptySha256:createHash('sha256').update(bytes).digest('hex'),displayBindingSha256:createHash('sha256').update(bindingBytes).digest('hex'),displayBinding:binding,...actual});
       }finally{await page.close();}
     }}finally{await browser.close();}
   }

@@ -11,6 +11,14 @@ async function ownedCase(){
  return {evidence,token,value:{id,target:{kind:'local',targetId:'terminal-'+sessionId,sessionId,cwd:join(evidence,'home')}}};
 }
 describe('owned scratch fault injection',()=>{
+ it.skipIf(process.platform!=='darwin'||process.arch!=='arm64')('creates a real POSIX occupied directory without inventing an ownership record',async()=>{
+  const c=await ownedCase(),result=await injectOccupiedScratch(c.evidence,c.token,c.value,true);
+  expect(result.file).toBe(join(result.directory,`acceptance-${c.token}.sh`));
+  expect(await readFile(result.file,'utf8')).toBe(`printf '%s\\n' 'SCRATCH_ORIGINAL_${c.token}'`);
+  expect(await readdir(join(c.evidence,'data'))).toEqual(['tmp']);
+  await expect(injectOccupiedScratch(c.evidence,c.token,c.value,true)).rejects.toThrow();
+  expect(await readFile(result.file,'utf8')).toBe(result.content);
+ });
  it('creates only the exact unowned directory and immutable original file,without an ownership record',async()=>{
   const c=await ownedCase(),result=await injectOccupiedScratch(c.evidence,c.token,c.value);
   const expected=createHash('sha256').update(JSON.stringify([c.value.id,c.value.target])).digest('hex');

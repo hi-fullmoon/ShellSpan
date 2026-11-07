@@ -1,0 +1,32 @@
+{
+  "kind": "actual-macos-zle-ordinary-keyboard-capture",
+  "sourceBatch": "20261106-macos-native-77",
+  "raw": "\u001b[1m\u001b[7m%\u001b[27m\u001b[1m\u001b[0m                                                                                                   \r \r\u001b]1337;SetUserVar=ShellSpanNativeInput=MA==\u0007\r\u001b[0m\u001b[27m\u001b[24m\u001b[JMANUAL-CHECK> \u001b[K\u001b[?2004h\r\r\u001b[0m\u001b[27m\u001b[24m\u001b[JMANUAL-CHECK> \u001b[7mprintf '%s\\n' 'MAC_MANUAL_793d21b6ce4d 中文 é 👩🏽<200d>\u001b[27m\u001b[7m💻 edit=BAD'\u001b[27m\u001b[68D\u001b[27mp\u001b[27mr\u001b[27mi\u001b[27mn\u001b[27mt\u001b[27mf\u001b[27m \u001b[27m'\u001b[27m%\u001b[27ms\u001b[27m\\\u001b[27mn\u001b[27m'\u001b[27m \u001b[27m'\u001b[27mM\u001b[27mA\u001b[27mC\u001b[27m_\u001b[27mM\u001b[27mA\u001b[27mN\u001b[27mU\u001b[27mA\u001b[27mL\u001b[27m_\u001b[27m7\u001b[27m9\u001b[27m3\u001b[27md\u001b[27m2\u001b[27m1\u001b[27mb\u001b[27m6\u001b[27mc\u001b[27me\u001b[27m4\u001b[27md\u001b[27m \u001b[27m中\u001b[27m\u001b[27m文\u001b[27m\u001b[27m \u001b[27mé\u001b[27m \u001b[27m👩\u001b[27m\u001b[27m🏽\u001b[27m\u001b[6C\u001b[27m💻\u001b[27m\u001b[27m \u001b[27me\u001b[27md\u001b[27mi\u001b[27mt\u001b[27m=\u001b[27mB\u001b[27mA\u001b[27mD\u001b[27m'\b\b' \b\bD'\b\u001b[?2004l\r\r\n\u001b]1337;SetUserVar=ShellSpanNativeInput=MA==\u0007MAC_MANUAL_793d21b6ce4d 中文 é 👩🏽‍💻 edit=BAD\r\n\u001b[1m\u001b[7m%\u001b[27m\u001b[1m\u001b[0m                                                                                                                                                                      \r \r\r\u001b[0m\u001b[27m\u001b[24m\u001b[JMANUAL-CHECK> \u001b[K\u001b[?2004h",
+  "rawSha256": "5d640a88da62d1c19d8d24cbfdd02c8d16af719190893428294e3affe47454d5",
+  "originalBinding": {
+    "protocol": "shellspan.native-input",
+    "inputMode": "native-inline",
+    "oscIdentifier": 1337,
+    "enterPayload": "SetUserVar=ShellSpanNativeInput=MQ==",
+    "exitPayload": "SetUserVar=ShellSpanNativeInput=MA==",
+    "unicodeVersion": "11",
+    "ownedReflowCursorLine": true
+  },
+  "geometry": {
+    "rows": 44,
+    "columns": 167
+  },
+  "input": [
+    "\u001b[200~printf '%s\\n' 'MAC_MANUAL_793d21b6ce4d 中文 é 👩🏽‍💻 edit=BAD'\u001b[201~",
+    "\u001b[D",
+    "",
+    "D",
+    "\r"
+  ],
+  "marker": "MAC_MANUAL_793d21b6ce4d",
+  "expectedOutput": "MAC_MANUAL_793d21b6ce4d 中文 é 👩🏽‍💻 edit=BAD",
+  "originalCorruptEcho": "MANUAL-CHECprintf '%s\\n' 'MAC_MANUAL_793d21b6ce4d 中文 é 👩🏽 👩🏽<20💻 edit=BAD'AD'",
+  "expectedCorrectedEcho": "MANUAL-CHECK> printf '%s\\n' 'MAC_MANUAL_793d21b6ce4d 中文 é 👩🏽<200d>💻 edit=BAD'",
+  "scope": "Original raw PTY and keyboard input from actual signed App and system clipboard. Corrected echo is a regression expectation from the separately identified renderer experiment, not a received host receipt."
+}
+

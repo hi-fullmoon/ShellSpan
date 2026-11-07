@@ -103,6 +103,17 @@ impl Scenario {
                 .find(|profile| profile.bash_version == "5.3")
                 .expect("verified GNU Bash 5.3 test profile");
             resources.join(profile.id).join("bash")
+        } else if native_input && shell == TerminalShellKind::Zsh {
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            {
+                crate::terminal_command::editors::local_zle_shell(&resources).expect(
+                    "Build the pinned private Zsh main/Core and select its validation resources",
+                )
+            }
+            #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+            {
+                std::path::PathBuf::from("/bin/zsh")
+            }
         } else {
             std::path::PathBuf::from(match shell {
                 TerminalShellKind::Bash
@@ -357,10 +368,24 @@ impl Scenario {
         mode: AgentSessionPermissionMode,
         cwd: Option<std::path::PathBuf>,
     ) -> Arc<super::super::AgentEntry> {
+        let target = serde_json::from_value(json!({
+            "kind":"local", "targetId":TERMINAL, "sessionId":TERMINAL, "cwd":cwd,
+        }))
+        .unwrap();
+        self.root_for_target(id, surface, mode, target)
+    }
+
+    fn root_for_target(
+        &self,
+        id: &str,
+        surface: AgentExecutionSurface,
+        mode: AgentSessionPermissionMode,
+        target: crate::agent_runtime::AgentSessionTarget,
+    ) -> Arc<super::super::AgentEntry> {
         self.runtime.create_session(serde_json::from_value(json!({
             "sessionId": id, "taskId": id, "goal": "Review the actual repository source in the temporary workspace",
             "permissionMode": mode, "executionSurface": surface,
-            "target": { "kind": "local", "targetId": TERMINAL, "sessionId": TERMINAL, "cwd": cwd },
+            "target": target,
         })).unwrap()).unwrap();
         // Attach the real HTTP adapter as an owner; these tests exercise native
         // calls directly and never manufacture a model response or contact a model.
@@ -666,7 +691,7 @@ async fn real_approval_storage_obstruction_keeps_the_decision_retryable() {
 }
 
 async fn delegated_terminal_roundtrip(shell: TerminalShellKind) {
-    let scenario = Scenario::new(shell);
+    let scenario = Scenario::with_native_input(shell, true);
     let runtime = &scenario.runtime;
     let parent = scenario.root(
         "parent",
@@ -744,7 +769,7 @@ async fn real_zsh_delegation_preserves_approval_exclusion_and_parent_continuatio
 
 #[tokio::test]
 async fn real_child_terminal_takeover_blocks_the_entire_delegation_until_turn_end() {
-    let scenario = Scenario::new(TerminalShellKind::Bash);
+    let scenario = Scenario::with_native_input(TerminalShellKind::Bash, true);
     let runtime = &scenario.runtime;
     let parent = scenario.root(
         "takeover-parent",
@@ -886,7 +911,7 @@ async fn real_child_terminal_takeover_blocks_the_entire_delegation_until_turn_en
 
 #[tokio::test]
 async fn real_parent_stop_joins_the_approved_child_command_and_releases_the_terminal() {
-    let scenario = Scenario::new(TerminalShellKind::Bash);
+    let scenario = Scenario::with_native_input(TerminalShellKind::Bash, true);
     let runtime = &scenario.runtime;
     let parent = scenario.root(
         "stop-parent",

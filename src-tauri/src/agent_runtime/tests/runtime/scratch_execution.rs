@@ -1,6 +1,6 @@
 //! Real native file tools, SQLite, process execution and PTY integration.
 use super::*;
-use crate::agent_runtime::AgentSessionEventPayload;
+use crate::agent_runtime::{AgentSessionEventPayload, AgentSessionTarget};
 
 fn result(scenario: &Scenario, session: &str, id: &str) -> serde_json::Value {
     scenario
@@ -264,6 +264,132 @@ async fn scratch_background_process_pins_files_until_confirmed_termination() {
         true
     );
     let reopened = crate::agent_runtime::scratch::ScratchStore::open(&data_root).unwrap();
+    reopened.cleanup_at(future, &services).unwrap();
+    assert!(!root.exists());
+}
+
+#[tokio::test]
+async fn scratch_reconnected_process_uses_original_files_and_current_termination_identity() {
+    let scenario = Scenario::new(TerminalShellKind::Zsh);
+    let session = "scratch-reconnected-background";
+    let previous = uuid::Uuid::new_v4().to_string();
+    // A persisted destination starts unavailable. Reconnect below admits the
+    // fixture's actual live PTY through the normal runtime, not a ready stub.
+    let owner: AgentSessionTarget = serde_json::from_value(json!({
+        "kind":"local", "sessionId":previous, "targetId":format!("terminal-{previous}"),
+        "cwd":scenario.root.path().join("work"),
+    }))
+    .unwrap();
+    let entry = scenario.root_for_target(
+        session,
+        AgentExecutionSurface::Direct,
+        AgentSessionPermissionMode::Operator,
+        owner.clone(),
+    );
+    let restored = scenario
+        .runtime
+        .reconnect_terminal(&scenario.transport, session, &owner.session_id, TERMINAL)
+        .unwrap();
+    let current = restored.header.target.clone().unwrap();
+    assert_eq!(current.session_id, TERMINAL);
+    assert_eq!(
+        restored.header.permission_mode,
+        Some(AgentSessionPermissionMode::RequestApproval)
+    );
+    scenario.start(&entry, "reconnected-turn", "reconnected-step");
+    let run = |calls| {
+        let scenario = &scenario;
+        let entry = &entry;
+        async move {
+            let settled = scenario
+                .runtime
+                .tools
+                .process_model_calls(
+                    entry,
+                    "reconnected-turn",
+                    "reconnected-step",
+                    "reconnected-request",
+                    calls,
+                )
+                .await?;
+            if settled == ToolPipelineSettlement::Waiting {
+                scenario
+                    .runtime
+                    .tools
+                    .decide(
+                        entry,
+                        scenario.approval(session),
+                        AgentToolDecision::Approve,
+                    )
+                    .await?;
+            }
+            Ok::<(), String>(())
+        }
+    };
+    run(vec![file_call("write_file", "reconnected-script", json!({
+        "path":"wait.sh", "content":"while [ ! -f \"$0.release\" ]; do sleep 0.01; done\n", "fileScope":"scratch", "precondition":{"mustNotExist":true}
+    }))]).await.unwrap();
+    let saved = result(&scenario, session, "reconnected-script");
+    let root = std::path::PathBuf::from(saved["scratchRoot"].as_str().unwrap());
+    let data_root = scenario.root.path().join("state").canonicalize().unwrap();
+    let key = crate::agent_runtime::scratch::key(session, &owner).unwrap();
+    assert_eq!(root, data_root.join("tmp").join(&key[..16]));
+    run(vec![file_call("run_terminal_command", "reconnected-start", json!({
+        "command":format!("/bin/sh {}", shlex::try_quote(root.join("wait.sh").to_str().unwrap()).unwrap()),
+        "explanation":"Run the owned gate until its actual release file appears", "background":true, "timeoutMs":60000
+    }))]).await.unwrap();
+    let started = result(&scenario, session, "reconnected-start");
+    assert_eq!(started["state"], "running");
+    let handle = started["processHandle"].as_str().unwrap();
+    let record: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(
+            data_root
+                .join("agent-runtime/scratch/records")
+                .join(format!("{key}.json")),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(record["version"], 2);
+    assert_eq!(record["target"], serde_json::to_value(&owner).unwrap());
+    assert!(record["uses"]
+        .as_object()
+        .unwrap()
+        .values()
+        .any(|usage| usage["handle"] == handle
+            && usage["executionTarget"] == serde_json::to_value(&current).unwrap()));
+    let database = crate::db::Database::open(&data_root.join("profiles.db")).unwrap();
+    let credentials = crate::keychain::CredentialManager::new();
+    let known_hosts = data_root.join("known_hosts");
+    let services = crate::agent_runtime::scratch::ScratchServices {
+        database: &database,
+        credentials: &credentials,
+        known_hosts: &known_hosts,
+        engine: Some(&scenario.runtime.native_engine),
+    };
+    let future = crate::agent_runtime::native::current_unix_ms() + 30 * 24 * 60 * 60 * 1000;
+    let reopened = crate::agent_runtime::scratch::ScratchStore::open(&data_root).unwrap();
+    reopened.cleanup_at(future, &services).unwrap();
+    assert!(root.join("wait.sh").exists());
+    std::fs::write(root.join("wait.sh.release"), b"release").unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while scenario
+        .runtime
+        .native_engine
+        .scratch_process_outcome(handle, session, session, &current)
+        .is_none()
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "The real background process did not exit after its release file"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(scenario
+        .runtime
+        .native_engine
+        .scratch_process_outcome(handle, session, session, &owner)
+        .is_none());
     reopened.cleanup_at(future, &services).unwrap();
     assert!(!root.exists());
 }

@@ -15,12 +15,15 @@ import {invokeCreateLocalSession,invokeCloseSession,invokeGetTerminalBrokerSnaps
 import {isCurrentNativeEditorProfile} from './native-editor-profile';
 import {nativeDisplaySamples,isManualSelection,manualPointerRow,matchesKnownClipboard,type ManualPointerGesture} from './native-display-manual-plan';
 import {nativeFileCoreSetup,readNativeFileLoadedCore} from './native-file-chain-approval';
+import {isMacFileChainProfile} from './native-file-chain-posix';
+import {macDisplayOutputCommand} from './native-display-manual-posix';
 import '@/styles/base.css';
 
 declare const __PACKAGE_REPORT__:string;
 declare const __PACKAGE_SHELL_KIND__:string;
 declare const __PACKAGE_SHELL_VERSION__:string;
 declare const __PACKAGE_NATIVE_SHA__:string|null;
+const mac=__PACKAGE_SHELL_KIND__==='zsh'||__PACKAGE_SHELL_KIND__==='bash';
 function assert(value:unknown,message:string):asserts value{if(!value)throw Error(message);}
 const wait=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
 async function until(test:()=>boolean|Promise<boolean>,message:string){const deadline=Date.now()+20000;while(!await test()){assert(Date.now()<deadline,message);await wait(25);}}
@@ -32,7 +35,7 @@ const steps=[
  {key:'hard',label:'Select HARD_FIRST through HARD_SECOND; press Ctrl+Shift+C',direction:'forward'},
 ] as const;
 type Receipt=Readonly<Record<string,unknown>>;
-const diagnostic:{raw:string;rawCharacters:number;before:Awaited<ReturnType<typeof invokeGetTerminalBrokerSnapshot>>|null;displayedLines:readonly string[];loadedCore:ReturnType<typeof readNativeFileLoadedCore>}={raw:'',rawCharacters:0,before:null,displayedLines:[],loadedCore:null};
+const diagnostic:{raw:string;rawCharacters:number;before:Awaited<ReturnType<typeof invokeGetTerminalBrokerSnapshot>>|null;after?:Awaited<ReturnType<typeof invokeGetTerminalBrokerSnapshot>>;snapshotError?:string;input?:{bytes:number;accepted:boolean;controllerCurrent:boolean};displayedLines:readonly string[];loadedCore:ReturnType<typeof readNativeFileLoadedCore>}={raw:'',rawCharacters:0,before:null,displayedLines:[],loadedCore:null};
 function ManualDisplay({sessionId,finish}:{sessionId:string;finish:(receipts:Receipt[])=>Promise<void>}){
  const session=useTerminalStore(s=>s.sessions.find(v=>v.sessionId===sessionId)??null);
  const [ready,setReady]=useState(false),[started,setStarted]=useState(false),[step,setStep]=useState(0),[message,setMessage]=useState(t('terminal.acceptance.preparing')),[receipts,setReceipts]=useState<Receipt[]>([]),[narrow,setNarrow]=useState(false);
@@ -45,7 +48,7 @@ function ManualDisplay({sessionId,finish}:{sessionId:string;finish:(receipts:Rec
   const pointerRow=(y:number)=>{const terminal=terminalRegistry.get(sessionId)?.terminal,bounds=terminal?.element?.querySelector('.xterm-screen')?.getBoundingClientRect();return terminal&&bounds?manualPointerRow(y,bounds.top,bounds.height,terminal.rows):null;};
   const down=(e:PointerEvent)=>{if(terminalTarget(e)&&e.button===0){const row=pointerRow(e.clientY);start=row===null?undefined:{x:e.clientX,y:e.clientY,row,trusted:e.isTrusted};}};
   const up=(e:PointerEvent)=>{if(start&&terminalTarget(e)){const row=pointerRow(e.clientY);if(row!==null)setGesture({trusted:start.trusted&&e.isTrusted,startX:start.x,startY:start.y,endX:e.clientX,endY:e.clientY,startRow:start.row,endRow:row});}start=undefined;};
-  const key=(e:KeyboardEvent)=>{if(terminalTarget(e)&&e.isTrusted&&e.ctrlKey&&e.shiftKey&&e.key.toLowerCase()==='c')setCopyKey(true);};
+  const key=(e:KeyboardEvent)=>{if(terminalTarget(e)&&e.isTrusted&&(mac?e.metaKey&&!e.ctrlKey:e.ctrlKey&&e.shiftKey)&&e.key.toLowerCase()==='c')setCopyKey(true);};
   const scroll=(e:WheelEvent)=>{if(terminalTarget(e)&&e.isTrusted&&e.deltaY<0)setWheel(true);};
   document.addEventListener('pointerdown',down,true);document.addEventListener('pointerup',up,true);document.addEventListener('keydown',key,true);document.addEventListener('wheel',scroll,true);
   return()=>{document.removeEventListener('pointerdown',down,true);document.removeEventListener('pointerup',up,true);document.removeEventListener('keydown',key,true);document.removeEventListener('wheel',scroll,true);};
@@ -53,18 +56,23 @@ function ManualDisplay({sessionId,finish}:{sessionId:string;finish:(receipts:Rec
  useEffect(()=>{let releaseInput:(()=>void)|undefined,unsubscribe:(()=>void)|undefined;let cancelled=false;
   void(async()=>{
    await until(()=>!!terminalRegistry.get(sessionId)?.host,'Actual TerminalPane did not attach');const controller=terminalRegistry.get(sessionId)!;await controller.whenOutputReady();
-   await until(async()=>{const s=(await invokeGetTerminalBrokerSnapshot(sessionId)).session;return !!s?.promptReady&&isCurrentNativeEditorProfile(s.nativePeerProfile,__PACKAGE_SHELL_KIND__);},'Actual native provider unavailable');
+   await until(async()=>{const s=(await invokeGetTerminalBrokerSnapshot(sessionId)).session;return !!s?.promptReady&&(mac?isMacFileChainProfile(s.nativePeerProfile,__PACKAGE_SHELL_KIND__):isCurrentNativeEditorProfile(s.nativePeerProfile,__PACKAGE_SHELL_KIND__));},'Actual native provider unavailable');
    const before=await invokeGetTerminalBrokerSnapshot(sessionId);assert(before.session?.nativePeerProfile?.shellVersion===__PACKAGE_SHELL_VERSION__,'Wrong host version');
    diagnostic.before=before;unsubscribe=controller.subscribeOutput(value=>{diagnostic.rawCharacters+=value.length;if(diagnostic.raw.length<1048576)diagnostic.raw+=value.slice(0,1048576-diagnostic.raw.length);});
    const payload=Array.from({length:120},(_,i)=>`HISTORY_${String(i).padStart(3,'0')} stable anchor`).join('\n')+'\n'+[nativeDisplaySamples.ascii,nativeDisplaySamples.unicode,nativeDisplaySamples.soft,nativeDisplaySamples.hard,'MANUAL_DISPLAY_READY'].join('\n');
    const encoded=btoa(Array.from(new TextEncoder().encode(payload),b=>String.fromCharCode(b)).join(''));
-   assert(await controller.writeUserInput(nativeFileCoreSetup+`; [Console]::WriteLine([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encoded}')))\r`),'Fixture output command was blocked');
-   await until(()=>Array.from({length:controller.terminal.buffer.normal.length},(_,i)=>controller.terminal.buffer.normal.getLine(i)?.translateToString(true)).includes('MANUAL_DISPLAY_READY'),'Actual PTY output missing');
+   const command=mac?macDisplayOutputCommand(payload):nativeFileCoreSetup+`; [Console]::WriteLine([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encoded}')))\r`;
+   assert(terminalRegistry.get(sessionId)===controller,'Fixture controller changed before input');
+   const accepted=await controller.writeUserInput(command);diagnostic.input={bytes:new TextEncoder().encode(command).length,accepted,controllerCurrent:terminalRegistry.get(sessionId)===controller};assert(accepted,'Fixture output command was blocked');
+   diagnostic.after=await invokeGetTerminalBrokerSnapshot(sessionId);
+   await fetch(__PACKAGE_REPORT__,{method:'POST',body:JSON.stringify({progress:true,evidence:{kind:'manual-native-display-input',diagnostic}})});
+   await until(()=>{assert(terminalRegistry.get(sessionId)===controller,'Fixture controller changed after input');return Array.from({length:controller.terminal.buffer.normal.length},(_,i)=>controller.terminal.buffer.normal.getLine(i)?.translateToString(true)).includes('MANUAL_DISPLAY_READY');},'Actual PTY output missing');
    releaseInput=controller.suppressUserInput();
-   diagnostic.displayedLines=Array.from({length:controller.terminal.buffer.normal.length},(_,i)=>controller.terminal.buffer.normal.getLine(i)?.translateToString(true)??'');diagnostic.loadedCore=readNativeFileLoadedCore(diagnostic.raw);assert(diagnostic.loadedCore?.sha256===__PACKAGE_NATIVE_SHA__,'Actual display Shell did not load the selected DLL');
+   diagnostic.displayedLines=Array.from({length:controller.terminal.buffer.normal.length},(_,i)=>controller.terminal.buffer.normal.getLine(i)?.translateToString(true)??'');
+   if(!mac){diagnostic.loadedCore=readNativeFileLoadedCore(diagnostic.raw);assert(diagnostic.loadedCore?.sha256===__PACKAGE_NATIVE_SHA__,'Actual display Shell did not load the selected DLL');}
    await fetch(__PACKAGE_REPORT__,{method:'POST',body:JSON.stringify({ready:true,evidence:{kind:'manual-native-display-ready',before,clipboardRead:false,operatorActions:0,scope:'Actual ordinary-user PTY output;no Agent/source proof or completed manual cases.'}})});
    if(!cancelled){setReady(true);setMessage(t('terminal.acceptance.ready'));}
-  })().catch(error=>{setMessage(t('terminal.acceptance.failure'));void fetch(__PACKAGE_REPORT__,{method:'POST',body:JSON.stringify({ok:false,error:String(error),evidence:{kind:'manual-display-preparation-failure',diagnostic}})});});
+  })().catch(async error=>{const controller=terminalRegistry.get(sessionId);if(controller)diagnostic.displayedLines=Array.from({length:controller.terminal.buffer.normal.length},(_,i)=>controller.terminal.buffer.normal.getLine(i)?.translateToString(true)??'');try{diagnostic.after=await invokeGetTerminalBrokerSnapshot(sessionId);}catch(snapshotError){diagnostic.snapshotError=String(snapshotError);}setMessage(t('terminal.acceptance.failure'));await fetch(__PACKAGE_REPORT__,{method:'POST',body:JSON.stringify({ok:false,error:String(error),evidence:{kind:'manual-display-preparation-failure',diagnostic}})});});
   return()=>{cancelled=true;releaseInput?.();unsubscribe?.();};
  },[sessionId]);
  const verify=async()=>{
@@ -72,7 +80,7 @@ function ManualDisplay({sessionId,finish}:{sessionId:string;finish:(receipts:Rec
   const controller=terminalRegistry.get(sessionId);assert(controller,'Actual controller missing');
   if(step<steps.length){
    const current=steps[step],expected=nativeDisplaySamples[current.key],selection=controller.terminal.getSelection();
-   if(!isManualSelection(expected,selection,gesture,current.direction)||(step===4&&!copyKey)){setMessage(t('terminal.acceptance.mismatch'));return;}
+   if(!isManualSelection(expected,selection,gesture,current.direction)||(step===4&&!copyKey)){setMessage(t(mac?'terminal.acceptance.mismatchMac':'terminal.acceptance.mismatch'));return;}
    await wait(350);const deadline=Date.now()+3000;let matched:ReturnType<typeof matchesKnownClipboard>=null;
    do{await wait(100);matched=matchesKnownClipboard(expected,await readClipboardText());}while(!matched&&Date.now()<deadline);
    const settings=useAppStore.getState();
@@ -93,7 +101,7 @@ function ManualDisplay({sessionId,finish}:{sessionId:string;finish:(receipts:Rec
  const defer=()=>fetch(__PACKAGE_REPORT__,{method:'POST',body:JSON.stringify({ok:false,blocked:true,error:'MANUAL_OPERATOR_DEFERRED',evidence:{kind:'manual-native-display-deferred',receipts:receiptsRef.current,diagnostic}})});
  const verifyOnce=()=>{if(busyRef.current)return;busyRef.current=true;setBusy(true);void verify().catch(error=>{setReady(false);setMessage(t('terminal.acceptance.failure'));return fetch(__PACKAGE_REPORT__,{method:'POST',body:JSON.stringify({ok:false,error:String(error),evidence:{kind:'manual-native-display-failure',receipts:receiptsRef.current,diagnostic}})});}).finally(()=>{busyRef.current=false;setBusy(false);});};
  const startManual=(event:React.MouseEvent<HTMLButtonElement>)=>{if(!event.isTrusted||!ready||started||busyRef.current)return;busyRef.current=true;setBusy(true);void(async()=>{const response=await fetch(__PACKAGE_REPORT__,{method:'POST',body:JSON.stringify({started:true,evidence:{kind:'manual-native-display-start',trusted:event.isTrusted}})});assert(response.ok,'Operator start was not acknowledged');setGesture(undefined);setCopyKey(false);setWheel(false);setStarted(true);setMessage(t('terminal.acceptance.started'));})().catch(error=>{setReady(false);setMessage(t('terminal.acceptance.failure'));return fetch(__PACKAGE_REPORT__,{method:'POST',body:JSON.stringify({ok:false,error:String(error)})});}).finally(()=>{busyRef.current=false;setBusy(false);});};
- return <div className="flex h-screen min-h-0 flex-col gap-3 p-3"><TerminalControllerLayer/><NativeDisplayManualInstructions ready={ready} started={started} busy={busy} step={receipts.length} message={message} onStart={startManual} onVerify={verifyOnce} onDefer={()=>{void defer();}}/><div className="min-h-0 flex-1" style={{width:narrow?Math.min(640,Math.max(120,Math.floor((innerWidth-24)*0.7))):'100%'}}><TerminalPane activeSession={session} isActive isVisible/></div></div>;
+ return <div className="flex h-screen min-h-0 flex-col gap-3 p-3"><TerminalControllerLayer/><NativeDisplayManualInstructions ready={ready} started={started} busy={busy} step={receipts.length} macCopy={mac} message={message} onStart={startManual} onVerify={verifyOnce} onDefer={()=>{void defer();}}/><div className="min-h-0 flex-1" style={{width:narrow?Math.min(640,Math.max(120,Math.floor((innerWidth-24)*0.7))):'100%'}}><TerminalPane activeSession={session} isActive isVisible/></div></div>;
 }
 async function start(){
  await initI18n('zh-CN');document.documentElement.lang='zh-CN';document.title=t('terminal.acceptance.title');await getCurrentWindow().show();await getCurrentWindow().setFocus();

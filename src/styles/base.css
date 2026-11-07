@@ -3,6 +3,8 @@
 @import 'shadcn/tailwind.css';
 @import '@fontsource-variable/geist';
 
+@source not '../../.artifacts';
+
 @custom-variant dark (&:is([data-theme="dark"] *));
 
 .xterm[data-no-scrollback] .xterm-scrollable-element > .scrollbar.vertical {

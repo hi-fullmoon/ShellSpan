@@ -198,6 +198,10 @@ Zsh 使用公开 module/builtin API、ZLE widget、`BUFFER`/`CURSOR`、`zle -F -
 line-finish 将经过绑定的固定作业计划交给父解析器，隐藏计划期间只临时保留 WINCH 屏蔽位，
 在真实 preexec、precmd 或关闭时恢复。普通用户命令及后台输出仍走同一个真实 PTY。
 目标解析器先验证原始源码和完整计划；语法失败不得开始输入或执行任何前缀。
+macOS组合使用内容绑定的私有Main/Core历史接口，将本次源码与实际计划在同一ZLE读取内
+固定；主程序在正常历史策略之前记录源码，并将原生后台子进程的自动历史保存交由父Shell
+负责。系统Shell不替换，用户历史选项和显式历史写入不覆盖。旧Main/错Core拒绝该能力；
+该元数据接口本身不授予输入或执行权限，详见[ZLE接口](native-zle-append.md)。
 
 Windows 两个主机独立验证：Windows PowerShell `5.1.26100.9818` 与 PowerShell `7.6.9`，
 均绑定 PSReadLine `2.4.5-shellspan1` 已复核构建（模块 API 版本仍为 `2.4.5`）的实际

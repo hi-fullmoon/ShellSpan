@@ -23,7 +23,9 @@ use crossbeam_channel::{after, bounded, never, unbounded, Receiver};
 use log::{debug, error, info, warn};
 use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
 use serde::{Deserialize, Serialize};
-use std::io::{Read, Write};
+use std::io::Read;
+#[cfg(not(target_os = "macos"))]
+use std::io::Write;
 use std::sync::{
     atomic::{AtomicBool, Ordering as AtomicOrdering},
     mpsc, Arc,
@@ -694,7 +696,7 @@ fn create_local_session_blocking(
     {
         command.arg("-l");
     }
-    let mut writer = crate::local_terminal_input::take_writer(pair.master.as_ref(), shell_kind)
+    let writer = crate::local_terminal_input::take_writer(pair.master.as_ref(), shell_kind)
         .map_err(|error| {
             error!("Failed to take local terminal writer session_id={session_id}: {error}");
             format!("failed to write local terminal: {error}")
@@ -954,6 +956,27 @@ fn create_local_session_blocking(
         let native_control = native_control;
         #[cfg(windows)]
         let mut native_origin = native_origin;
+        #[cfg(not(target_os = "macos"))]
+        let mut writer = writer;
+        #[cfg(target_os = "macos")]
+        let mut input_pump = {
+            let event_app = app.clone();
+            let event_id = worker_id.clone();
+            crate::local_terminal_input::LocalInputPump::spawn(
+                writer,
+                master,
+                native_control,
+                worker_id.clone(),
+                move || {
+                    if let Some(runtime) =
+                        event_app.try_state::<crate::agent_runtime::AgentRuntime>()
+                    {
+                        let _ = runtime.native_terminal_control_closed(&event_id);
+                    }
+                    emit_terminal_integration_state(&event_app, &event_id);
+                },
+            )
+        };
         let (output_tx, output_rx) = bounded::<Vec<u8>>(LOCAL_OUTPUT_QUEUE_CAPACITY);
         let (child_exit_tx, child_exit_rx) = bounded::<()>(1);
         let mut child_killer = child.clone_killer();
@@ -1056,6 +1079,18 @@ fn create_local_session_blocking(
             );
 
             match activity {
+                #[cfg(target_os = "macos")]
+                LocalWorkerActivity::Command(Ok(
+                    command @ (SessionCommand::Write(_)
+                    | SessionCommand::WriteBytes(_)
+                    | SessionCommand::NativeControl(_)
+                    | SessionCommand::Resize { .. }),
+                )) => {
+                    if let Err(error) = input_pump.send(command) {
+                        warn!("Local terminal input unavailable session_id={worker_id}: {error}");
+                    }
+                }
+                #[cfg(not(target_os = "macos"))]
                 LocalWorkerActivity::Command(Ok(SessionCommand::Write(data))) => {
                     if let Err(error) = writer.write_all(data.as_bytes()) {
                         warn!("Failed to write local shell input session_id={worker_id}: {error}");
@@ -1064,6 +1099,7 @@ fn create_local_session_blocking(
                         warn!("Failed to flush local shell input session_id={worker_id}: {error}");
                     }
                 }
+                #[cfg(not(target_os = "macos"))]
                 LocalWorkerActivity::Command(Ok(SessionCommand::WriteBytes(bytes))) => {
                     if let Err(error) = writer.write_all(&bytes) {
                         warn!("Failed to write local shell binary input session_id={worker_id}: {error}");
@@ -1072,6 +1108,7 @@ fn create_local_session_blocking(
                         warn!("Failed to flush local shell binary input session_id={worker_id}: {error}");
                     }
                 }
+                #[cfg(not(target_os = "macos"))]
                 LocalWorkerActivity::Command(Ok(SessionCommand::NativeControl(frame))) => {
                     #[cfg(any(unix, windows))]
                     let result = native_control
@@ -1100,6 +1137,7 @@ fn create_local_session_blocking(
                         emit_terminal_integration_state(&app, &worker_id);
                     }
                 }
+                #[cfg(not(target_os = "macos"))]
                 LocalWorkerActivity::Command(Ok(SessionCommand::Resize { cols, rows })) => {
                     if let Err(error) = master.resize(PtySize {
                         rows: rows.max(1) as u16,
@@ -1112,6 +1150,7 @@ fn create_local_session_blocking(
                         );
                     }
                 }
+                #[cfg(any(windows, test))]
                 LocalWorkerActivity::Command(Ok(SessionCommand::StartupReady)) => {
                     #[cfg(windows)]
                     if let Err(error) = child_killer.resume_startup() {
@@ -1178,10 +1217,18 @@ fn create_local_session_blocking(
         // stays detached and its next send fails once the output receiver is
         // dropped at the end of this closure.
         worker_output_paused.store(false, AtomicOrdering::Relaxed);
+        #[cfg(target_os = "macos")]
+        input_pump.stop();
+        #[cfg(not(target_os = "macos"))]
         drop(writer);
+        #[cfg(not(target_os = "macos"))]
         drop(master);
+        #[cfg(target_os = "macos")]
+        let mut input_closed = false;
+        #[cfg(not(target_os = "macos"))]
+        let input_closed = true;
         let shutdown_timeout = after(LOCAL_READER_SHUTDOWN_TIMEOUT);
-        while !reader_closed || !child_exited {
+        while !reader_closed || !child_exited || !input_closed {
             let selectable_output = if reader_closed {
                 &never_output
             } else {
@@ -1193,6 +1240,15 @@ fn create_local_session_blocking(
             } else {
                 &child_exit_rx
             };
+            let never_input: Receiver<()> = never();
+            #[cfg(target_os = "macos")]
+            let selectable_input = if input_closed {
+                &never_input
+            } else {
+                input_pump.finished()
+            };
+            #[cfg(not(target_os = "macos"))]
+            let selectable_input = &never_input;
             crossbeam_channel::select_biased! {
                 recv(shutdown_timeout) -> _ => {
                     warn!("Local shell shutdown did not complete session_id={worker_id}; detaching remaining waiter");
@@ -1206,6 +1262,16 @@ fn create_local_session_blocking(
                     Err(_) => reader_closed = true,
                 },
                 recv(selectable_child) -> _ => child_exited = true,
+                recv(selectable_input) -> _ => {
+                    #[cfg(target_os = "macos")]
+                    { input_closed = true; }
+                },
+            }
+        }
+        #[cfg(target_os = "macos")]
+        if input_closed {
+            if let Err(error) = input_pump.join_finished() {
+                warn!("Local terminal input shutdown failed session_id={worker_id}: {error}");
             }
         }
         if reader_closed {
@@ -1261,8 +1327,9 @@ fn create_local_session_blocking(
                     Ok(SessionCommand::Write(_))
                     | Ok(SessionCommand::WriteBytes(_))
                     | Ok(SessionCommand::NativeControl(_))
-                    | Ok(SessionCommand::StartupReady)
                     | Ok(SessionCommand::Resize { .. }) => {}
+                    #[cfg(any(windows, test))]
+                    Ok(SessionCommand::StartupReady) => {}
                 },
                 recv(output_state_rx) -> state => {
                     if state.is_err() {

@@ -74,7 +74,8 @@ for(const name of editorNames){
     const id=profile.profile.verifiedProfileId;assert(/^[a-zA-Z0-9][a-zA-Z0-9.-]+$/.test(id));
     assert.equal(profile.module,`${id}/${name==='editors-windows-x64.json'?'shellspan_native_input_editors.dll':'ss_nip.so'}`);
     if(profile.core){assert.equal(profile.core,`${id}/zle.so`);assert.equal(profile.coreLicense,`${id}/LICENCE.zsh`);}
-    for(const[path,expected]of [[profile.module,profile.moduleSha256],...(profile.relay?[[profile.relay,profile.relaySha256]]:[]),...(profile.core?[[profile.core,profile.editorSha256],[profile.coreLicense,profile.coreLicenseSha256]]:[])]){
+    if(profile.shell){assert.equal(name,'editors-macos-arm64.json');assert(profile.core&&profile.profile.shell==='zsh');assert.equal(profile.shell,`${id}/zsh`);}
+    for(const[path,expected]of [[profile.module,profile.moduleSha256],...(profile.shell?[[profile.shell,profile.shellSha256]]:[]),...(profile.relay?[[profile.relay,profile.relaySha256]]:[]),...(profile.core?[[profile.core,profile.editorSha256],[profile.coreLicense,profile.coreLicenseSha256]]:[])]){
       assert(path.startsWith(`${id}/`)&&!path.includes('..'));assert.equal(sha(await readFile(resolve(sourceRoot,path))),expected);
       await mkdir(resolve(generated,id),{recursive:true});await cp(resolve(sourceRoot,path),resolve(generated,path));
     }

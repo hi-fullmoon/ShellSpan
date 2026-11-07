@@ -39,3 +39,9 @@ it('keeps instruction keys aligned in both languages, including the final scroll
  expect(screen.getByLabelText(t('terminal.acceptance.sample')).textContent).toBe(nativeDisplaySamples.history);
  expect(screen.getByRole('button',{name:'Verify this step'})).toBeEnabled();
 });
+it('names the actual macOS copy shortcut without changing the Windows instruction',()=>{
+ render(<NativeDisplayManualInstructions ready started busy={false} step={4} macCopy message="" onStart={()=>{}} onVerify={()=>{}} onDefer={()=>{}}/>);
+ expect(screen.getByText(t('terminal.acceptance.step5Mac'))).toBeVisible();
+ expect(screen.getByText(t('terminal.acceptance.step5Mac')).textContent).toContain('⌘C');
+ expect(screen.queryByText(t('terminal.acceptance.step5'))).toBeNull();
+});

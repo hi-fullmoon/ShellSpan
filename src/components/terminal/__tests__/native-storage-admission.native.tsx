@@ -19,6 +19,7 @@ function assert(value:unknown,message:string):asserts value{if(!value)throw new 
 async function until(test:()=>boolean|Promise<boolean>,message:string){const end=Date.now()+120000;while(!await test()){assert(Date.now()<end,message);await new Promise(resolve=>setTimeout(resolve,10));}}
 async function verify(){
   const parameters=new URL(location.href).searchParams,token=parameters.get('token'),mode=parameters.get('storageAdmission');
+  const posix=parameters.get('nativeP3')==='zsh'||parameters.get('nativeP2')==='true';
   const refusals:Record<string,string>={missing:'TERMINAL_SUBMISSION_JOURNAL_UNAVAILABLE',
     'read-only':'TERMINAL_SUBMISSION_JOURNAL_UNAVAILABLE','unknown-format':'TERMINAL_SUBMISSION_JOURNAL_INVALID',
     'invalid-marker':'TERMINAL_SUBMISSION_JOURNAL_INVALID','foreign-namespace':'TERMINAL_SUBMISSION_JOURNAL_MIGRATION_REQUIRED',
@@ -29,7 +30,7 @@ async function verify(){
   await initI18n('en-US');await getCurrentWindow().show();await getCurrentWindow().setFocus();
   const root=createRoot(document.getElementById('root')!);root.render(<TerminalControllerLayer/>);
   const host=document.createElement('div');host.style.cssText='width:100vw;height:100vh';document.body.append(host);
-  const markStarted=`[IO.File]::AppendAllText((Join-Path $env:SHELLSPAN_LOCAL_HOME 'storage-${token}.txt'),'ONCE'+[Environment]::NewLine)`;
+  const markStarted=posix?`builtin printf 'ONCE\\n' >> "$HOME/storage-${token}.txt"`:`[IO.File]::AppendAllText((Join-Path $env:SHELLSPAN_LOCAL_HOME 'storage-${token}.txt'),'ONCE'+[Environment]::NewLine)`;
   const source=crash?`${markStarted}; $end=[DateTime]::UtcNow.AddSeconds(30); while(-not (Test-Path (Join-Path $env:SHELLSPAN_LOCAL_HOME 'crash-release-${token}.txt')) -and [DateTime]::UtcNow -lt $end){Start-Sleep -Milliseconds 50}; if(Test-Path (Join-Path $env:SHELLSPAN_LOCAL_HOME 'crash-release-${token}.txt')){[IO.File]::AppendAllText((Join-Path $env:SHELLSPAN_LOCAL_HOME 'crash-after-${token}.txt'),'AFTER')}`:markStarted;
   const id=`agent-storage-${crypto.randomUUID()}`,events:AgentSessionEvent[]=[],observations:TerminalIntegrationStateEvent[]=[],dispose:(()=>void)[]=[];
   let terminalId:string|undefined,created=false,approvalReserved=false,failure:string|undefined,raw='';
@@ -39,7 +40,11 @@ async function verify(){
     await until(()=>!!terminalRegistry.get(session.sessionId),'Actual terminal controller missing');
     const controller=terminalRegistry.get(session.sessionId)!;controller.attach(host);await controller.whenOutputReady();
     await until(async()=>!!(await invokeGetTerminalBrokerSnapshot(session.sessionId)).session?.promptReady,'Native prompt not ready');
-    const before=await invokeGetTerminalBrokerSnapshot(session.sessionId);assert(before.session?.inputMode==='native-inline'&&isCurrentNativeEditorProfile(before.session.nativePeerProfile,parameters.get('nativeP3')),'Actual native editor unavailable');
+    const before=await invokeGetTerminalBrokerSnapshot(session.sessionId);
+    const peer=before.session?.nativePeerProfile;
+    const gnu=parameters.get('nativeP2')==='true'&&peer?.shell==='bash'&&peer.editor==='readline'&&peer.adapterVersion==='1'
+      &&['gnu-bash-4.1-readline-6.0-macos-arm64-native','gnu-bash-4.4-readline-7.0-macos-arm64-native','gnu-bash-5.3-readline-8.3.6-macos-arm64-native'].includes(peer.verifiedProfileId??'');
+    assert(before.session?.inputMode==='native-inline'&&(gnu||isCurrentNativeEditorProfile(peer,parameters.get('nativeP3'))),'Actual native editor unavailable');
     dispose.push(controller.subscribeOutput(value=>{if(raw.length<262144)raw+=value;}));
     dispose.push(await listenToTerminalIntegrationState(({payload})=>{if(payload.sessionId===session.sessionId)observations.push(payload);}));
     dispose.push(await listenToAgentRuntimeSession(({payload})=>{
@@ -63,7 +68,7 @@ async function verify(){
     }));
     const selection=(await invokeListAiRoutes()).defaultSelection;assert(selection,'Supplied model is missing');
     const goal=`Call run_terminal_command exactly ONCE with background=false and timeoutMs=${timeoutMs} using the source below, with no trailing newline. Do not retry or use other tools even if refused. Then stop.
-~~~powershell
+~~~${posix?'sh':'powershell'}
 ${source}
 ~~~`;
     await invokeCreateAgentRuntimeSession({sessionId:id,taskId:id,goal,executionSurface:'boundTerminal',permissionMode:'requestApproval',target:{kind:'local',targetId:`terminal-${session.sessionId}`,sessionId:session.sessionId,cwd:before.session.currentDirectory},capabilityScope:{toolNames:['run_terminal_command'],effects:['none','readOnly','stateChange','externalSideEffect'],targetIds:[`terminal-${session.sessionId}`]}});created=true;

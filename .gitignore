@@ -10,5 +10,6 @@ src-tauri/target
 *.py[cod]
 /src-tauri/native-input-adapter/target/
 /src-tauri/native-input-editors/target/
+/scripts/native-input-p0/target/
 /scripts/native-input-p3/credential-cleanup/target/
 /src-tauri/resources/native-input*/generated/
