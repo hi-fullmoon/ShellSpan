@@ -1,0 +1,54 @@
+--- a/display.c
++++ b/display.c
+@@ -2494,6 +2494,23 @@
+   rl_restore_prompt();
+ }
+       
++/* Backport the owned visible-line clearing used by Readline 8.3's resize
++   path. Only rows occupied by this editor line are erased, not history. */
++static void
++clear_visible_line_for_resize (void)
++{
++  int curr_line;
++
++  cr ();
++  _rl_move_vert (_rl_vis_botlin);
++  for (curr_line = _rl_last_v_pos; curr_line >= 0; curr_line--)
++    {
++      _rl_move_vert (curr_line);
++      _rl_clear_to_eol (_rl_screenwidth);
++      cr ();
++    }
++}
++
+ /* Redisplay the current line after a SIGWINCH is received. */
+ void
+ _rl_redisplay_after_sigwinch ()
+@@ -2506,26 +2523,7 @@
+      screen line. */
+   if (_rl_term_cr)
+     {
+-      _rl_move_vert (_rl_vis_botlin);
+-
+-#if defined (__MSDOS__)
+-      putc ('\r', rl_outstream);
+-#else
+-      tputs (_rl_term_cr, 1, _rl_output_character_function);
+-#endif
+-      _rl_last_c_pos = 0;
+-#if defined (__MSDOS__)
+-      space_to_eol (_rl_screenwidth);
+-      putc ('\r', rl_outstream);
+-#else
+-      if (_rl_term_clreol)
+-	tputs (_rl_term_clreol, 1, _rl_output_character_function);
+-      else
+-	{
+-	  space_to_eol (_rl_screenwidth);
+-	  tputs (_rl_term_cr, 1, _rl_output_character_function);
+-	}
+-#endif
++      clear_visible_line_for_resize ();
+       if (_rl_last_v_pos > 0)
+ 	_rl_move_vert (0);
+     }

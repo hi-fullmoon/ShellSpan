@@ -68,7 +68,7 @@ case "$__shellspan_prompt_declaration" in
   ''|'declare -- '*|'declare -x '*|'declare -a '*|'declare -ax '*|'declare -xa '*) __shellspan_prompt_supported=1 ;;
 esac
 if (( __shellspan_prompt_supported )) && builtin enable -f {} ss_native_input ss_native_input_display_abi ss_native_input_status ss_native_input_begin ss_native_input_child_closed ss_native_input_job ss_native_input_control_access ss_native_input_control_begin ss_native_input_control_end ss_native_input_dispatch_free; then
-  if builtin ss_native_input_display_abi && builtin bind -v >/dev/null && builtin ss_native_input_dispatch_free && builtin bind -x '"\C-x\C-_":__shellspan_native_control_dispatch' && builtin ss_native_input {} "$(trap -p INT)" "$BASH_VERSION"; then
+  if builtin ss_native_input_display_abi && builtin bind -v >/dev/null && builtin ss_native_input_dispatch_free && builtin bind -x '"\C-x\C-_":__shellspan_native_control_dispatch' && builtin bind 'set enable-bracketed-paste on' && builtin ss_native_input {} "$(trap -p INT)" "$BASH_VERSION"; then
     if [[ $__shellspan_prompt_declaration == 'declare -a'* ]]; then
       if (( BASH_VERSINFO[0]>5 || (BASH_VERSINFO[0]==5 && BASH_VERSINFO[1]>=1) )); then
         PROMPT_COMMAND=('__shellspan_native_prompt "$?"' "${{PROMPT_COMMAND[@]}}")

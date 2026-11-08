@@ -1,0 +1,206 @@
+diff --git a/bind.c b/bind.c
+index fc8c2a26..f9ac6215 100644
+--- a/bind.c
++++ b/bind.c
+@@ -1428,6 +1428,7 @@ static const struct {
+   { "disable-completion",	&rl_inhibit_completion,		0 },
+   { "echo-control-characters",	&_rl_echo_control_chars,	0 },
+   { "enable-keypad",		&_rl_enable_keypad,		0 },
++  { "enable-bracketed-paste",	&_rl_enable_bracketed_paste,	0 },
+   { "enable-meta-key",		&_rl_enable_meta,		0 },
+   { "expand-tilde",		&rl_complete_with_tilde_expansion, 0 },
+   { "history-preserve-point",	&_rl_history_preserve_point,	0 },
+diff --git a/funmap.c b/funmap.c
+index cccddb62..e7c58851 100644
+--- a/funmap.c
++++ b/funmap.c
+@@ -68,6 +68,7 @@ static const FUNMAP default_funmap[] = {
+   { "backward-word", rl_backward_word },
+   { "beginning-of-history", rl_beginning_of_history },
+   { "beginning-of-line", rl_beg_of_line },
++  { "bracketed-paste-begin", rl_bracketed_paste_begin },
+   { "call-last-kbd-macro", rl_call_last_kbd_macro },
+   { "capitalize-word", rl_capitalize_word },
+   { "character-search", rl_char_search },
+diff --git a/kill.c b/kill.c
+index a4d6d148..a7c6e3a6 100644
+--- a/kill.c
++++ b/kill.c
+@@ -656,6 +656,54 @@ rl_yank_last_arg (count, key)
+   return retval;
+ }
+ 
++/* Readline 7.0 implementation, from the pinned Bash 4.4 source archive.
++   Read the bracketed input as one insertion without interpreting Tab or LF. */
++int
++rl_bracketed_paste_begin (count, key)
++     int count, key;
++{
++  int retval, c;
++  size_t len, cap;
++  char *buf;
++
++  retval = 1;
++  len = 0;
++  buf = xmalloc (cap = 64);
++
++  RL_SETSTATE (RL_STATE_MOREINPUT);
++  while ((c = rl_read_key ()) >= 0)
++    {
++      if (RL_ISSTATE (RL_STATE_MACRODEF))
++        _rl_add_macro_char (c);
++
++      if (c == '\r')
++        c = '\n';
++
++      if (len == cap)
++        buf = xrealloc (buf, cap *= 2);
++
++      buf[len++] = c;
++      if (len >= BRACK_PASTE_SLEN && c == BRACK_PASTE_LAST &&
++          STREQN (buf + len - BRACK_PASTE_SLEN, BRACK_PASTE_SUFF, BRACK_PASTE_SLEN))
++        {
++          len -= BRACK_PASTE_SLEN;
++          break;
++        }
++    }
++  RL_UNSETSTATE (RL_STATE_MOREINPUT);
++
++  if (c >= 0)
++    {
++      if (len == cap)
++        buf = xrealloc (buf, cap + 1);
++      buf[len] = '\0';
++      retval = rl_insert_text (buf);
++    }
++
++  xfree (buf);
++  return (retval);
++}
++
+ /* A special paste command for users of Cygnus's cygwin32. */
+ #if defined (__CYGWIN__)
+ #include <windows.h>
+diff --git a/readline.c b/readline.c
+index c0e78d4f..bcba6e96 100644
+--- a/readline.c
++++ b/readline.c
+@@ -88,6 +88,7 @@ static void readline_initialize_everything PARAMS((void));
+ 
+ static void bind_arrow_keys_internal PARAMS((Keymap));
+ static void bind_arrow_keys PARAMS((void));
++static void bind_bracketed_paste_prefix PARAMS((void));
+ 
+ static void readline_default_bindings PARAMS((void));
+ static void reset_default_bindings PARAMS((void));
+@@ -278,6 +279,8 @@ int _rl_revert_all_at_newline = 0;
+ /* Non-zero means to honor the termios ECHOCTL bit and echo control
+    characters corresponding to keyboard-generated signals. */
+ int _rl_echo_control_chars = 1;
++/* Readline 7.0 bracketed-paste backport; default remains off. */
++int _rl_enable_bracketed_paste = 0;
+ 
+ /* **************************************************************** */
+ /*								    */
+@@ -1090,6 +1093,7 @@ readline_initialize_everything ()
+ 
+   /* Try to bind a common arrow key prefix, if not already bound. */
+   bind_arrow_keys ();
++  bind_bracketed_paste_prefix ();
+ 
+   /* Enable the meta key, if this terminal has one. */
+   if (_rl_enable_meta)
+@@ -1255,3 +1259,19 @@ rl_restore_state (sp)
+ 
+   return (0);
+ }
++
++static void
++bind_bracketed_paste_prefix ()
++{
++  Keymap xkeymap;
++
++  xkeymap = _rl_keymap;
++
++  _rl_keymap = emacs_standard_keymap;
++  rl_bind_keyseq_if_unbound (BRACK_PASTE_PREF, rl_bracketed_paste_begin);
++
++  _rl_keymap = vi_insertion_keymap;
++  rl_bind_keyseq_if_unbound (BRACK_PASTE_PREF, rl_bracketed_paste_begin);
++
++  _rl_keymap = xkeymap;
++}
+diff --git a/readline.h b/readline.h
+index 7a4ffaa5..5821ef43 100644
+--- a/readline.h
++++ b/readline.h
+@@ -172,6 +172,7 @@ extern int rl_yank PARAMS((int, int));
+ extern int rl_yank_pop PARAMS((int, int));
+ extern int rl_yank_nth_arg PARAMS((int, int));
+ extern int rl_yank_last_arg PARAMS((int, int));
++extern int rl_bracketed_paste_begin PARAMS((int, int));
+ /* Not available unless __CYGWIN__ is defined. */
+ #ifdef __CYGWIN__
+ extern int rl_paste_from_clipboard PARAMS((int, int));
+diff --git a/rlprivate.h b/rlprivate.h
+index 819f1278..20371576 100644
+--- a/rlprivate.h
++++ b/rlprivate.h
+@@ -169,6 +169,12 @@ extern int rl_blink_matching_paren;
+  *************************************************************************/
+ 
+ /* kill.c */
++#define BRACK_PASTE_PREF "\033[200~"
++#define BRACK_PASTE_SUFF "\033[201~"
++#define BRACK_PASTE_LAST '~'
++#define BRACK_PASTE_SLEN 6
++#define BRACK_PASTE_INIT "\033[?2004h"
++#define BRACK_PASTE_FINI "\033[?2004l"
+ extern int rl_set_retained_kills PARAMS((int));
+ 
+ /* terminal.c */
+@@ -422,6 +428,7 @@ extern int _rl_output_meta_chars;
+ extern int _rl_bind_stty_chars;
+ extern int _rl_revert_all_at_newline;
+ extern int _rl_echo_control_chars;
++extern int _rl_enable_bracketed_paste;
+ extern char *_rl_comment_begin;
+ extern unsigned char _rl_parsing_conditionalized_out;
+ extern Keymap _rl_keymap;
+diff --git a/rltty.c b/rltty.c
+index 0dd5d104..2f603638 100644
+--- a/rltty.c
++++ b/rltty.c
+@@ -62,6 +62,8 @@ static void set_winsize PARAMS((int));
+ 
+ /* Non-zero means that the terminal is in a prepped state. */
+ static int terminal_prepped;
++#define TPX_PREPPED 0x01
++#define TPX_BRACKPASTE 0x02
+ 
+ static _RL_TTY_CHARS _rl_tty_chars, _rl_last_tty_chars;
+ 
+@@ -659,8 +661,13 @@ rl_prep_terminal (meta_flag)
+   if (_rl_enable_keypad)
+     _rl_control_keypad (1);
+ 
++  terminal_prepped = TPX_PREPPED;
++  if (_rl_enable_bracketed_paste)
++    {
++      fprintf (rl_outstream, BRACK_PASTE_INIT);
++      terminal_prepped |= TPX_BRACKPASTE;
++    }
+   fflush (rl_outstream);
+-  terminal_prepped = 1;
+   RL_SETSTATE(RL_STATE_TERMPREPPED);
+ 
+   _rl_release_sigint ();
+@@ -680,6 +687,9 @@ rl_deprep_terminal ()
+ 
+   tty = fileno (rl_instream);
+ 
++  if (terminal_prepped & TPX_BRACKPASTE)
++    fprintf (rl_outstream, BRACK_PASTE_FINI);
++
+   if (_rl_enable_keypad)
+     _rl_control_keypad (0);

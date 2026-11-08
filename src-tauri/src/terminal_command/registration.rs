@@ -222,6 +222,17 @@ impl VerifiedNativeProfile {
                 binding.unicode_scope = Some(nip::DisplayUnicodeScope::Session);
             }
         }
+        if matches!(
+            self.profile_id.as_str(),
+            "gnu-bash-4.1-readline-6.0-macos-arm64-native"
+                | "gnu-bash-4.4-readline-7.0-macos-arm64-native"
+                | "gnu-bash-5.3-readline-8.3.6-macos-arm64-native"
+        ) {
+            // Only the exact locally verified private main may select this
+            // presentation width provider; peer claims and raw queries cannot.
+            binding.unicode_version = Some(nip::DisplayUnicodeVersion::Unicode11);
+            binding.unicode_scope = Some(nip::DisplayUnicodeScope::Session);
+        }
         binding
     }
     #[cfg(windows)]

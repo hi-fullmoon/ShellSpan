@@ -23,12 +23,19 @@
       "Src/Zle/zle_refresh.c": "613969c846d30d9ba64b666543274c62b4b376581c0ef9ee0a3580dc4a459ae2"
     }
   },
+  "macosRefresh": {
+    "patch": "scripts/dependency-builds/zsh/native-macos-refresh.patch",
+    "patchSha256": "82c34dbeb5086a762accdf4945c4f353669a01147caf8c6f776bb99ef88ed1d3",
+    "sourceHashes": {
+      "Src/Zle/zle_refresh.c": "b3ab633537b09a9d44df5aa275f0a662e69f8ba15de8134ace4e0728b22e2b3e"
+    }
+  },
   "targets": {
     "macos-arm64": {
       "mainSha256": "abc56520c469fa4985fca02c5f55621932ad79de4f36440a64a27526f4b535ef",
       "unicode9Default": true,
       "privateMainSha256": "330f10b8e506f2e7e8a693ce8ebf942c3e2e0aa0b007bd9770ea1120bcfc41e4",
-      "privateCoreSha256": "bdbef566aaa40d04c23e47c2c6f1ff03255570c29929cd8ddbbb65232767f4c3"
+      "privateCoreSha256": "9ed979f0f6665c6eab49e070612aeb98f6a9c4801de3c09f8530e99ad67fe487"
     },
     "linux-aarch64-glibc-2.36": {
       "mainSha256": "1ebc9b7012541bdc45fe8cbb9f752c0dc49aeb47dea0fd76d755639e7554e6d3",

@@ -9,6 +9,7 @@ import { createTerminalResizeHandler, installTerminalScrollbarVisibility, measur
 import { installTerminalEdgeBackground } from './terminal-edge-background';
 import { installTerminalCommandDecorations } from './terminal-command-decorations';
 import { attachNativeInputDisplay, type NativeInputDisplayController } from '@/lib/terminal/native-input-display';
+import { attachRawInputDisplay } from '@/lib/terminal/raw-input-display';
 import { observeNativePromptOrigin } from '@/lib/terminal/native-prompt-origin';
 import { terminalInputReadiness } from '../terminal-input-readiness';
 import { useToastStore } from '@/stores/toastStore';
@@ -445,6 +446,7 @@ export interface TerminalController {
 class TerminalControllerImpl implements TerminalController {
   inputMode: TerminalController['inputMode'] = 'raw';
   private nativeDisplay?: NativeInputDisplayController;
+  private rawDisplay?: IDisposable;
   private originEligible = false;
   private originUnlisten?: () => void;
   private readonly originPending = new Set<string>();
@@ -583,6 +585,7 @@ class TerminalControllerImpl implements TerminalController {
       && ptyInfo.nativeDisplayBinding.unicodeScope === 'session'
       && ptyInfo.nativeDisplayBinding.ownedReflowCursorLine === false;
     this.inputMode = ptyInfo?.inputMode ?? 'raw';
+    this.rawDisplay = attachRawInputDisplay(this.terminal, ptyInfo);
     if (this.inputMode === 'native-inline' && ptyInfo?.nativeDisplayBinding) {
       const unicodeVersion = ptyInfo.nativeDisplayBinding.unicodeVersion;
       if (unicodeVersion === '11' && !this.terminal.unicode.versions.includes('11')) {
@@ -606,9 +609,12 @@ class TerminalControllerImpl implements TerminalController {
 
   private async closeInputRendering(): Promise<void> {
     const display = this.nativeDisplay;
+    const rawDisplay = this.rawDisplay;
     this.nativeDisplay = undefined;
     if (display) await display.closeAfterPendingOutput();
     else await new Promise<void>(resolve => this.terminal.write('', resolve));
+    rawDisplay?.dispose();
+    if (this.rawDisplay === rawDisplay) this.rawDisplay = undefined;
   }
 
   private handleInput(data: string): void {
@@ -1655,6 +1661,8 @@ class TerminalControllerImpl implements TerminalController {
     this.edgeBackground?.dispose();
     this.commandDecorations.dispose();
     this.nativeDisplay?.dispose();
+    this.rawDisplay?.dispose();
+    this.rawDisplay = undefined;
     this.scrollbarVisibility?.dispose();
     this.terminal.dispose();
     clearTerminalOutput(this.sessionId);

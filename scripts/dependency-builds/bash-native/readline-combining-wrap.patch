@@ -1,0 +1,15 @@
+--- a/display.c
++++ b/display.c
+@@ -1193,6 +1193,12 @@
+ 
+ 	      _rl_wrapped_multicolumn = 0;
+ 
++	      /* Keep zero-width suffixes with a base that filled the last
++		 column.  A literal input newline has a NUL separator here. */
++	      if (wc_width == 0 && lpos == 0 && newlines > 0 && in > 0 &&
++		  out > 0 && inv_lbreaks[newlines] == out && invisible_line[out-1])
++		inv_lbreaks[newlines] += wc_bytes;
++
+ 	      if (_rl_screenwidth < lpos + wc_width)
+ 		for (i = lpos; i < _rl_screenwidth; i++)
+ 		  {

@@ -41,15 +41,22 @@ def main():
     patches = {version: Path(__file__).with_name(f'startup-init-{version}.patch') for version in ['4.1', '4.4', '5.3']}
     readline_versions = {'4.1': '6.0', '4.4': '7.0', '5.3': '8.3.6'}
     display_patches = {version: Path(__file__).with_name(f'readline-columns-{readline_versions[version]}.patch') for version in patches}
+    paste_patch = Path(__file__).with_name('readline-paste-6.0.patch')
+    darwin_patch = Path(__file__).with_name('darwin-headers-4.1.patch')
+    bind_x_patch = Path(__file__).with_name('bash-bind-x-return-4.1.patch')
+    combining_patch = Path(__file__).with_name('readline-combining-wrap.patch')
+    setpgid_patches = {version: Path(__file__).with_name('darwin-setpgid.patch' if version == '4.1' else f'darwin-setpgid-{version}.patch') for version in patches}
+    setpgid_header = Path(__file__).with_name('darwin-setpgid.h')
+    resize_patches = {version: Path(__file__).with_name(f'readline-resize-{readline_versions[version]}.patch') for version in ['4.1', '4.4']}
     sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
-    stamp = hashlib.sha256((''.join(sha(patch) for patch in [*patches.values(), *display_patches.values()]) + sha(Path(__file__)) + sha(helper_path) + sha(ROOT / 'scripts/native-input-p0/readline-sources.json')).encode()).hexdigest()[:20]
+    stamp = hashlib.sha256((''.join(sha(patch) for patch in [*patches.values(), *display_patches.values(), paste_patch, darwin_patch, bind_x_patch, combining_patch, *setpgid_patches.values(), setpgid_header, *resize_patches.values()]) + sha(Path(__file__)) + sha(helper_path) + sha(ROOT / 'scripts/native-input-p0/readline-sources.json')).encode()).hexdigest()[:20]
     base = OUT / f'bash-{host}' / stamp
     sources = base / 'source'
     sources.mkdir(parents=True, exist_ok=True)
     builds = {}
 
-    def apply_display_patch(source, patch):
-        marker = source / '.shellspan-native-display'
+    def apply_display_patch(source, patch, marker_name='.shellspan-native-display'):
+        marker = source / marker_name
         if not marker.exists():
             run(['patch', '--batch', '-F', '0', '-p1', '-i', patch], source)
             marker.write_text(sha(patch))
@@ -76,12 +83,14 @@ def main():
             if marker.read_text() != expected:
                 raise RuntimeError('Stale GNU Readline source patch')
         apply_display_patch(source, display_patches['5.3'])
+        if host == 'darwin':
+            apply_display_patch(source, combining_patch, '.shellspan-combining-wrap')
         target = base / 'readline-build'
         prefix = base / 'readline-install'
         target.mkdir(exist_ok=True)
         if not (target / 'Makefile').exists():
             run([source / 'configure', f'--prefix={prefix}', '--disable-shared', '--enable-static', 'CFLAGS=-O2 -fPIC'], target)
-        run(['make', '-j4'], target)
+        run(['make', '-j4', 'CFLAGS=-O2 -fPIC -Werror=implicit-function-declaration'], target)
         run(['make', 'install'], target)
         return prefix, source
 
@@ -102,19 +111,38 @@ def main():
                     shutil.copy2(Path('/usr/share/misc') / name, source / 'support' / name)
         if (source / '.shellspan-startup-init').read_text() != sha(patch):
             raise RuntimeError('Stale GNU source patch')
+        if host == 'darwin':
+            setpgid_patch = setpgid_patches[version]
+            apply_display_patch(source, setpgid_patch, '.shellspan-darwin-setpgid')
+            copied_header = source / 'shellspan-darwin-setpgid.h'
+            if not copied_header.exists():
+                shutil.copy2(setpgid_header, copied_header)
+            if sha(copied_header) != sha(setpgid_header):
+                raise RuntimeError('Stale Darwin process-group completion header')
+        if host == 'darwin' and version == '4.1':
+            apply_display_patch(source, darwin_patch, '.shellspan-darwin-headers')
+            apply_display_patch(source, bind_x_patch, '.shellspan-bind-x-return')
         if version == '5.3':
             readline, readline_source = build_readline83()
         else:
             readline = None
             readline_source = source / 'lib/readline'
             apply_display_patch(readline_source, display_patches[version])
+            apply_display_patch(readline_source, resize_patches[version], '.shellspan-owned-line-resize')
+            if host == 'darwin':
+                apply_display_patch(readline_source, combining_patch, '.shellspan-combining-wrap')
+            if version == '4.1':
+                apply_display_patch(readline_source, paste_patch, '.shellspan-bracketed-paste')
         target = base / f'build-{version}'
         target.mkdir(exist_ok=True)
         if not (target / 'Makefile').exists():
             run([source / 'configure', '--without-bash-malloc', '--disable-nls',
-                 'CFLAGS=-O2 -std=gnu89 -Wno-implicit-function-declaration -Wno-int-conversion',
+                 'CFLAGS=-O2 -std=gnu89 -Wno-error=implicit-function-declaration -Wno-error=int-conversion',
                  *([f'--with-installed-readline={readline}'] if readline else [])], target)
-        run(['make', '-j4'], target)
+        if host == 'darwin' and version == '4.1':
+            # Compile the actual production bind-x callback with its return contract checked.
+            run(['make', 'bashline.o', 'CFLAGS=-O2 -std=gnu89 -Werror=implicit-function-declaration -Werror=return-type'], target)
+        run(['make', '-j4', 'CFLAGS=-O2 -std=gnu89 -Werror=implicit-function-declaration'], target)
         shell = target / 'bash'
         builds[version] = {'shell': str(shell), 'source': str(source), 'includes':
                           [*([str(readline / 'include')] if readline else []), str(target), str(source), str(source / 'include')],
@@ -123,7 +151,13 @@ def main():
                           'readlineSource': str(readline_source),
                           'readlineDisplayPatch': str(display_patches[version].relative_to(ROOT)),
                           'readlineDisplayPatchSha256': sha(display_patches[version]),
-                          'readlineNativeSources': {name: sha(readline_source / name) for name in ['display.c', 'readline.h']}}
+                          'readlinePasteBackport': {'from': 'Bash 4.4 / Readline 7.0', 'patch': str(paste_patch.relative_to(ROOT)), 'sha256': sha(paste_patch)} if version == '4.1' else None,
+                          'readlineNativeSources': {name: sha(readline_source / name) for name in ['display.c', 'terminal.c', 'readline.h', 'readline.c', 'rlprivate.h', 'rltty.c', 'bind.c', 'funmap.c', 'kill.c']},
+                          'readlineResizeBackport': {'from': 'Readline 8.3.6', 'patch': str(resize_patches[version].relative_to(ROOT)), 'sha256': sha(resize_patches[version])} if version in resize_patches else None,
+                          'readlineCombiningWrapPatch': {'patch': str(combining_patch.relative_to(ROOT)), 'sha256': sha(combining_patch)} if host == 'darwin' else None,
+                          'darwinSetpgidSynchronization': {'patch': str(setpgid_patch.relative_to(ROOT)), 'sha256': sha(setpgid_patch), 'header': str(setpgid_header.relative_to(ROOT)), 'headerSha256': sha(setpgid_header), 'jobsSourceSha256': sha(source / 'jobs.c')} if host == 'darwin' else None,
+                          'darwinHeaderPatch': {'patch': str(darwin_patch.relative_to(ROOT)), 'sha256': sha(darwin_patch)} if host == 'darwin' and version == '4.1' else None,
+                          'bindXReturnBackport': {'from': 'Bash 4.4', 'patch': str(bind_x_patch.relative_to(ROOT)), 'sha256': sha(bind_x_patch), 'sourceSha256': sha(source / 'bashline.c'), 'compileGuard': '-Werror=return-type'} if host == 'darwin' and version == '4.1' else None}
     (OUT / f'bash-{host}.json').write_text(json.dumps(builds, indent=2))
     print(f'GNU Bash post-profile targets: {OUT / f"bash-{host}.json"}')
 

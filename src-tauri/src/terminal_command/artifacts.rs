@@ -101,6 +101,38 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<NativeArti
             ),
         ),
         (
+            "scripts/dependency-builds/bash-native/readline-paste-6.0.patch",
+            include_str!("../../../scripts/dependency-builds/bash-native/readline-paste-6.0.patch"),
+        ),
+        (
+            "scripts/dependency-builds/bash-native/darwin-headers-4.1.patch",
+            include_str!("../../../scripts/dependency-builds/bash-native/darwin-headers-4.1.patch"),
+        ),
+        (
+            "scripts/dependency-builds/bash-native/bash-bind-x-return-4.1.patch",
+            include_str!(
+                "../../../scripts/dependency-builds/bash-native/bash-bind-x-return-4.1.patch"
+            ),
+        ),
+        (
+            "scripts/dependency-builds/bash-native/readline-combining-wrap.patch",
+            include_str!(
+                "../../../scripts/dependency-builds/bash-native/readline-combining-wrap.patch"
+            ),
+        ),
+        (
+            "scripts/dependency-builds/bash-native/readline-resize-6.0.patch",
+            include_str!(
+                "../../../scripts/dependency-builds/bash-native/readline-resize-6.0.patch"
+            ),
+        ),
+        (
+            "scripts/dependency-builds/bash-native/readline-resize-7.0.patch",
+            include_str!(
+                "../../../scripts/dependency-builds/bash-native/readline-resize-7.0.patch"
+            ),
+        ),
+        (
             "scripts/dependency-builds/bash-native/readline-columns-8.3.6.patch",
             include_str!(
                 "../../../scripts/dependency-builds/bash-native/readline-columns-8.3.6.patch"

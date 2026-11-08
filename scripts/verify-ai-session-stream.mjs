@@ -16,6 +16,7 @@ import {attachFocusTraceChannel} from './native-input-p3/focus-trace-channel.mjs
 import {closeNativeValidationServer} from './native-input-p3/close-validation-server.mjs';
 import {assertNativeGuiAllowed} from './native-input-p2/gui-lock.mjs';
 import {isMacLocalLifecycle} from './native-input-p3/mac-local-lifecycle.mjs';
+import {macDailyAcceptance,attachMacDailyCheckpoints,macDailyAppConfiguration} from './native-input-p3/mac-daily.mjs';
 import {attachMacLateLifecycle} from './native-input-p3/mac-late-lifecycle.mjs';
 import {macRawAdmission,attachMacRawAdmission} from './native-input-p3/mac-raw-admission.mjs';
 import {windowsValidationPaths} from './native-input-p3/windows-profiles.mjs';
@@ -42,6 +43,7 @@ const { values } = parseArgs({ options: {
   'focus-background': { type: 'boolean' },
   'native-jobs': { type: 'boolean' },
   'native-terminal-manual': { type: 'string' },
+  'native-mac-daily': { type: 'string' },
   'native-terminal-manual-form': { type: 'string' },
   'native-terminal-recovery': { type: 'string' },
   'native-input-p3-job-lifecycle': { type: 'boolean' },
@@ -154,6 +156,7 @@ assert(!displayAuto||process.platform==='win32'&&process.arch==='x64'&&['powerSh
   &&Object.keys(values).every(key=>['native-input-p3-startup','native-input-p3-display-auto','native-input-p3-display-reflow-diagnostic','native-input-p3-display-cursor-diagnostic','native-input-p3-display-active-input','no-model','data-scope'].includes(key)),
   '--native-input-p3-display-auto requires an isolated scheduled Windows startup display case without model or other modes');
 const nativeManual=values['native-terminal-manual'];
+const nativeDaily=macDailyAcceptance(values);
 const nativeManualForm=values['native-terminal-manual-form'];
 assert(nativeManualForm===undefined||nativeManual&&['nfc','nfd'].includes(nativeManualForm),
   '--native-terminal-manual-form requires one manual case and exact nfc/nfd input');
@@ -193,7 +196,7 @@ assert(!values['native-input-p3-publisher-run-once']||process.platform==='win32'
 const p3CredentialMode=values['native-input-p3-credential'];
 assert(!p3CredentialMode||['source','destination','verify-absence'].includes(p3CredentialMode));
 assert(!nativeP3||['zsh','windowsPowerShell','powerShell7'].includes(nativeP3),'P3 requires an exact shell/editor family');
-const stableNativeEntry = terminalContentionRun || modelPreflightRun || Boolean(values['native-jobs-powershell']) || values['data-initialize'] === true || values['native-input-p2'] === true || Boolean(nativeP3) || Boolean(nativeManual) || Boolean(nativeRecovery) || Boolean(nativeRaw);
+const stableNativeEntry = terminalContentionRun || modelPreflightRun || Boolean(values['native-jobs-powershell']) || values['data-initialize'] === true || values['native-input-p2'] === true || Boolean(nativeP3) || Boolean(nativeManual) || Boolean(nativeRecovery) || Boolean(nativeRaw) || Boolean(nativeDaily);
 assert(!values['native-binary'] || terminalContentionRun, '--native-binary requires --terminal-contention and a binary built for the fixed verification entry');
 assert(!terminalContentionRun || (!focusBackgroundRun && !focusRun && !performanceRun && !values['terminal-readiness']), '--terminal-contention is a separate regression');
 assert(!focusBackgroundRun || (!focusRun && !values.performance && !values['terminal-readiness']), '--focus-background is a separate regression');
@@ -477,6 +480,8 @@ const windowsOutputMarker = windowsShell ? `native-jobs-${randomUUID()}` : undef
 const windowsCompletionGate = windowsShell ? resolve(ownedEvidenceDirectory ?? tmpdir(), `shellspan-completion-gate-${token}`) : undefined;
 let nativeEnvironment = windowsShell ? { ...process.env, SHELLSPAN_ACCEPTANCE: windowsOutputMarker,
   SHELLSPAN_NATIVE_COMPLETION_GATE: windowsCompletionGate, SHELLSPAN_NATIVE_WORKSPACE:repository } : process.env;
+if(nativeDaily)nativeEnvironment={...nativeEnvironment,SHELLSPAN_ACCEPTANCE_WEBKIT_STORE:token};
+if(nativeDaily?.startsWith('raw-'))nativeEnvironment={...nativeEnvironment,SHELLSPAN_ACCEPTANCE_RAW_PREPARE:'1'};
 assert(!modelPreflightRun || ownedEvidenceDirectory && isAbsolute(ownedEvidenceDirectory),
   '--model-preflight requires an explicit owned frozen evidence directory');
 const p3BackpressureGate=values['native-input-p3-backpressure']?resolve(ownedEvidenceDirectory,`native-output-gate-${token}`):undefined;
@@ -484,7 +489,7 @@ if(p3BackpressureGate)nativeEnvironment={...nativeEnvironment,SHELLSPAN_P3_BACKP
 assert(!ownedEvidenceDirectory || isAbsolute(ownedEvidenceDirectory)
   && process.env.SHELLSPAN_DATA_DIR && resolve(ownedEvidenceDirectory, 'data') === resolve(process.env.SHELLSPAN_DATA_DIR),
   'Owned evidence directory must be the explicit independent data directory parent');
-const nativeEvidencePath = nativeRaw || macLocalLifecycle || zleAppHistory!==undefined || nativeManual || nativeRecovery || aiCredentialMode!==undefined || credentialLifecycleRun || values['native-jobs'] || terminalContentionRun || p3Startup || modelPreflightRun || journalRecoveryAgent || storageAdmission || fileChain || fileFault || fileRestart || byteBoundary || windowsStop || windowsDraftCancel || windowsLifetime || approvalContention || approvalDelegation || navigationManual || activeEof || lateReceipt || captureTail || stopBoundary
+const nativeEvidencePath = nativeDaily || nativeRaw || macLocalLifecycle || zleAppHistory!==undefined || nativeManual || nativeRecovery || aiCredentialMode!==undefined || credentialLifecycleRun || values['native-jobs'] || terminalContentionRun || p3Startup || modelPreflightRun || journalRecoveryAgent || storageAdmission || fileChain || fileFault || fileRestart || byteBoundary || windowsStop || windowsDraftCancel || windowsLifetime || approvalContention || approvalDelegation || navigationManual || activeEof || lateReceipt || captureTail || stopBoundary
   ? ownedEvidenceDirectory ? resolve(ownedEvidenceDirectory, 'native-webview-evidence.json')
     : resolve(tmpdir(), `shellspan-${terminalContentionRun ? 'terminal-contention' : 'native-jobs'}-${token}.json`) : undefined;
 // Keep the compiled macOS application identity stable between contention runs.
@@ -505,6 +510,7 @@ const pagePath = displayAuto ? 'src/components/terminal/__tests__/native-display
   : modelPreflightRun ? 'src/components/terminal/__tests__/native-model-preflight.native.html'
   : zleAppHistory!==undefined ? 'src/components/terminal/__tests__/native-zle-history.native.html'
   : values['native-input-p3-cancel'] ? 'src/components/terminal/__tests__/native-input-p3-cancel.native.html'
+  : nativeDaily ? 'src/components/terminal/__tests__/mac-daily.native.html'
   : nativeManual ? 'src/components/terminal/__tests__/native-terminal-manual.native.html'
   : nativeRecovery ? 'src/components/terminal/__tests__/native-terminal-recovery.native.html'
   : nativeRaw ? 'src/components/terminal/__tests__/mac-raw-admission.native.html'
@@ -524,7 +530,7 @@ const pagePath = displayAuto ? 'src/components/terminal/__tests__/native-display
   : focusRun ? 'src/components/focus/__tests__/focus.native.html' : `src/lib/ai/__tests__/${page}`;
 const frozenNativeRun=Boolean(ownedEvidenceDirectory&&(
   values['data-scope']==='com.shellspan.validation.native-input-p2'&&(values['native-input-p2']||initializationRun||nativeManual||nativeRecovery||nativeRaw)
-  || values['data-scope']==='com.shellspan.validation.native-input-p3'&&(nativeP3||initializationRun||modelPreflightRun||nativeManual||nativeRecovery||nativeRaw)));
+  || values['data-scope']==='com.shellspan.validation.native-input-p3'&&(nativeP3||initializationRun||modelPreflightRun||nativeManual||nativeRecovery||nativeRaw||nativeDaily)));
 assert(!frozenNativeRun||process.platform==='darwin'&&process.arch==='arm64'||process.platform==='win32'&&process.arch==='x64'&&values['data-scope']==='com.shellspan.validation.native-input-p3','Frozen native verification requires an explicitly supported actual host');
 const frozenWindows=frozenNativeRun&&process.platform==='win32';
 const isolatedWindowsPaths=frozenWindows?windowsValidationPaths(ownedEvidenceDirectory):undefined;
@@ -733,6 +739,7 @@ const attachResult = (vite) => {
   }
   if(macLateLifecycle)attachMacLateLifecycle(vite,token,ownedEvidenceDirectory);
   if(nativeRaw)attachMacRawAdmission(vite,token,ownedEvidenceDirectory);
+  if(nativeDaily)attachMacDailyCheckpoints(vite,token,ownedEvidenceDirectory);
   if(values['native-input-p3-publisher-run-once'])vite.middlewares.use(`/__native-p3-publisher/${token}`,(request,response)=>{
     void(async()=>{
       assert(request.method==='POST'&&ownedEvidenceDirectory);
@@ -894,7 +901,7 @@ const attachResult = (vite) => {
     try { await assert.rejects(stat(windowsCompletionGate),{code:'ENOENT'}); response.setHeader('Content-Type','application/json'); response.end(JSON.stringify({closed:true,gate:windowsCompletionGate,checkedAtUnixMs:Date.now()})); }
     catch {response.statusCode=500;response.end('Owned completion gate was unexpectedly released');}
   });
-  if(displayAuto){
+  if(displayAuto||nativeDaily){
     let visibleOutputWritten=false;
     vite.middlewares.use(`/__native-display-visible-output/${token}`,async(request,response)=>{
       if(request.method!=='POST'){response.writeHead(405).end();return;}
@@ -1013,18 +1020,21 @@ const attachResult = (vite) => {
   });
   vite.middlewares.use(`/__agent-stream-result/${token}`, async (request, response) => {
     if (request.method !== 'POST') { response.statusCode = 405; response.end(); return; }
+    let bytes = 0, resultStage = 'read';
+    const resultLimit = nativeEvidencePath ? 1024 * 1024 : 8192;
     try {
       const chunks = [];
-      let bytes = 0;
       for await (const chunk of request) {
         bytes += chunk.length;
-        if (bytes > (nativeEvidencePath ? 1024 * 1024 : 8192)) throw new Error('Oversized test result');
+        if (bytes > resultLimit) throw new Error('Oversized test result');
         chunks.push(chunk);
       }
+      resultStage = 'parse';
       const value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      resultStage = 'retain-evidence';
       if (value.evidence) {
         assert(nativeEvidencePath && typeof value.evidence === 'object', 'Unexpected native evidence payload');
-        if((nativeP3||nativeManual)&&ownedEvidenceDirectory&&value.progress)await writeFile(resolve(ownedEvidenceDirectory,`native-p3-progress-${randomUUID()}.json`),JSON.stringify({progress:value.progress,evidence:value.evidence},null,2),{flag:'wx',mode:0o600});
+        if((nativeP3||nativeManual||nativeDaily)&&ownedEvidenceDirectory&&value.progress)await writeFile(resolve(ownedEvidenceDirectory,`native-p3-progress-${randomUUID()}.json`),JSON.stringify({progress:value.progress,evidence:value.evidence},null,2),{flag:'wx',mode:0o600});
         if (terminalContentionRun) contentionEvidence.push(value.evidence);
         await writeFile(nativeEvidencePath, JSON.stringify(terminalContentionRun ? { events: contentionEvidence } : value.evidence, null, 2));
         console.log(`Native target WebView evidence: ${nativeEvidencePath}`);
@@ -1035,7 +1045,11 @@ const attachResult = (vite) => {
       response.end('ok');
       if (value.progress) { console.log(value.progress); return; }
       settle(value);
-    } catch {
+    } catch (error) {
+      if(nativeDaily&&ownedEvidenceDirectory){
+        try{await writeFile(resolve(ownedEvidenceDirectory,`mac-daily-result-rejection-${randomUUID()}.json`),JSON.stringify({at:new Date().toISOString(),stage:resultStage,bytes,limit:resultLimit,error:String(error),payloadRetained:false,scope:'Actual evidence-receiver rejection metadata; no result or receipt supplied'},null,2),{flag:'wx',mode:0o600});}
+        catch(recordError){console.error('Failed to retain macOS daily evidence rejection',recordError);}
+      }
       response.statusCode = 400;
       response.end();
       settle({ ok: false, error: 'Invalid native test result' });
@@ -1046,7 +1060,7 @@ const resultPlugin = { name: 'native-agent-stream-result', configureServer: atta
 let server;
 try {
   if (output) await build({
-    configFile: false, root: repository, logLevel: 'error',
+    configFile: false, root: repository, logLevel: nativeDaily ? 'warn' : 'error',
     resolve: { alias: { '@': resolve(repository, 'src') } },
     plugins: [baselinePlugin, react(), tailwindcss()],
     build: { outDir: output, emptyOutDir: true,
@@ -1093,6 +1107,8 @@ try {
   if(fileFault)url.searchParams.set('fileFault',fileFault);
   if(fileRestart)url.searchParams.set('fileRestart',fileRestart);
   if(macLocalLifecycle)url.searchParams.set('nativeLocalLifecycle','true');
+  if(nativeDaily)url.searchParams.set('macDaily',nativeDaily);
+  if(nativeDaily?.startsWith('raw-')||nativeDaily?.startsWith('toast-'))url.searchParams.set('caseHome',resolve(ownedEvidenceDirectory,'home'));
   if(macLateLifecycle)url.searchParams.set('nativeLocalLifecycleLate','true');
   if(byteBoundary)url.searchParams.set('byteBoundary',byteBoundary);
   if(windowsStop)url.searchParams.set('windowsStop',windowsStop);
@@ -1179,7 +1195,7 @@ try {
     : spawn(process.platform === 'win32' ? process.execPath : 'pnpm', [
       ...(process.platform === 'win32' ? [fileURLToPath(new URL('./tauri.js', import.meta.resolve('@tauri-apps/cli')))] : ['exec','tauri']),
       'dev', '--no-watch',
-      ...(captureTail?['--features','native-input-acceptance']:[]),
+      ...(captureTail||nativeDaily?['--features','native-input-acceptance']:[]),
       ...(process.platform === 'darwin' ? ['--runner', resolve(repository, 'scripts/dev-cargo-runner.mjs')] : frozenWindows?['--runner',resolve(repository,'scripts/native-input-p3/windows-cargo-runner.cmd')]:[]),
       '--config', resolve(repository, 'src-tauri/tauri.dev.conf.json'), '--config', JSON.stringify({
     identifier: values['data-scope'] ?? 'com.shellspan-dev', build: { beforeDevCommand: '', devUrl },
@@ -1189,7 +1205,7 @@ try {
       minWidth: navigationManual?960:1200, minHeight: navigationManual?640:760, ...credentialLifecycleWindowOptions(credentialLifecycleRun||aiCredentialMode!==undefined), alwaysOnTop: !frozenNativeRun,
       transparent: true, titleBarStyle: 'Overlay',
       ...(isolatedWindowsPaths?{dataDirectory:isolatedWindowsPaths.dataDirectory}:{}),
-    }] } } : {}),
+    }] } } : nativeDaily?{app:await macDailyAppConfiguration(repository,ownedEvidenceDirectory,token)}:{}),
   })], { cwd: repository, env: frozenNativeRun?{...nativeEnvironment,CARGO_TARGET_DIR:(values['data-scope']==='com.shellspan.validation.native-input-p3'||macLocalLifecycle||nativeRaw)&&process.env.SHELLSPAN_P3_BUILD_CACHE?process.env.SHELLSPAN_P3_BUILD_CACHE:resolve(repository,'.artifacts/tests/native-input-p2/frozen-target'),SHELLSPAN_ACCEPTANCE_FROZEN_MANIFEST:frozenManifestPath,
     ...(frozenWindows?{RUSTUP_TOOLCHAIN:'1.95.0-x86_64-pc-windows-msvc',CARGO_BUILD_TARGET:'x86_64-pc-windows-msvc'}:{})}:nativeEnvironment, stdio: ['ignore', 'ignore', 'inherit'], detached: process.platform !== 'win32' });
   child.once('error', (error) => settle({ ok: false, error: error.message }));

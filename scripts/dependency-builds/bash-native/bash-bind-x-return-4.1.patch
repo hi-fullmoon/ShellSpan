@@ -1,0 +1,13 @@
+--- a/bashline.c
++++ b/bashline.c
+@@ -3421,7 +3421,9 @@
+ putx(c)
+      int c;
+ {
+-  putc (c, rl_outstream);
++  int x;
++  x = putc (c, rl_outstream);
++  return x;
+ }
+   
+ static int

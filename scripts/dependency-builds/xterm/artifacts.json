@@ -3,24 +3,24 @@
   "commit": "f447274f430fd22513f6adbf9862d19524471c04",
   "archiveSha256": "82337f91a9df63998d89ba906389d5152a2e8278b558ea72c5dec25ec93a591e",
   "upstreamLockSha256": "be3cc17b035f88119b89a71e5c3c656bac0edcd6f9494a1393d8aef3e17b7688",
-  "node": "v26.5.0",
+  "node": "v24.21.0",
   "npm": "10.9.2",
   "typescript": "5.5.3",
   "webpack": "5.94.0",
   "esbuild": "0.25.2",
-  "toolsLockSha256": "371c7e07fc743441fabaf3aedf4d80a06dc7a8798201048c32ec48176dc9163b",
-  "esbuildBinarySha256": "09a7a102650362264c1d3b846081824260e634c39035fcd1284e879e60f51650",
+  "toolsLockSha256": "5278ea83378518d15542a16347998746622b7b40848d63da6742a24973ede7b7",
+  "esbuildBinarySha256": "7db69914016b5a2d636a0c1b84d72e409b43f375c466c939582571d748124ffe",
   "artifacts": {
-    "src/common/buffer/Buffer.ts": "1d44c9f2de0247aef0ec2c1c6e21debe491829c6bb80633c1e4c7f95fbabc582",
+    "src/common/buffer/Buffer.ts": "ba17923541ee4419222f3c1acb183895e1e5c9b3d5b080e81b19bc7b08a31a18",
     "src/common/buffer/BufferReflow.ts": "371bbfbc4cb5e0b11ad9c89bb67fada3bc895b1b64716c373d8fd656cf78d566",
-    "src/browser/services/SelectionService.ts": "2855ff0f9c77dbe99a78205ab3ee2063560026f39a27e23f7f342c854f763d1d",
+    "src/browser/services/SelectionService.ts": "3ffcb9aedfb61630ac40eb9a99bed5297dd325929927275c369f588ab4a07d5e",
     "src/common/InputHandler.ts": "666f98d1cc6141aa8d61c527b78e414faf60a4b9f2a8e572e0852032602d5c2a",
     "src/common/buffer/Types.ts": "36d177e732b5dff8e7c6bd0a598263898ac6d54755193ce48c2afd0a1dec66ed",
     "src/common/input/TextDecoder.ts": "701e7f458f15e5f8d9a08414d676e8d69daecb413ad5be49b253b4725df792fc",
-    "lib/xterm.js": "cd27ea7a0f45c9d0eeb94b589d9dbf05ab89deaefd9818a14bbaf4a84db3f8a9",
-    "lib/xterm.js.map": "b9040bd2ab0d611a85f901b7e1ad656c5fb330d5b0fd9e3eb8c769a7c80cd3de",
-    "lib/xterm.mjs": "bf96542db7e81d7cc5bf322c29b0360d762fd777d0a865d9a594881be5177cb5",
-    "lib/xterm.mjs.map": "a4722828f76000d6b044a73bd271383378b177d45de6ee9e6e235b53bccafc6d"
+    "lib/xterm.js": "d5bb2b53179136f7a912bf6bd11cf77dd283abec302f999402b92ec1269e589b",
+    "lib/xterm.js.map": "e1276acf5d1c7ca8655871d38d8efff9a1f0e80d38048e63905db4c5553d346a",
+    "lib/xterm.mjs": "a3b07697b370801483c7cdad174defb286ea4d180a5b3c9f62cb565b8c5e6fab",
+    "lib/xterm.mjs.map": "2ab59910b56f7bb484689797138d5de3ec79a89ca3da4cc012010dd2929aabc9"
   },
   "generatedBy": "node scripts/rebuild-xterm-patch.mjs --record"
 }

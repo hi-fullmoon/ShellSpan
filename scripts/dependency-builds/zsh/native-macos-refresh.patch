@@ -1,0 +1,52 @@
+--- a/Src/Zle/zle_refresh.c
++++ b/Src/Zle/zle_refresh.c
+@@ -2032,6 +2032,22 @@
+     while (olds->chr && ZR_equal(*olds, *news))
+ 	olds++, news++, i++;
+     return i;
++}
++
++/* Diagnostic producer candidate: clearing a wrapped continuation must not
++ * turn it into a hard line. ECH clears the same cells without changing the
++ * terminal's automatic-wrap relationship. Other terminal capabilities retain
++ * the original operation. */
++static void
++clear_refresh_eol(int ln)
++{
++    if (vcs == 0 && hasam && ln > 0 && nbuf[ln - 1] &&
++	nbuf[ln - 1][winw + 1].chr == ZWC('\n') &&
++	(!strcmp(tcstr[TCCLEAREOL], "\033[K") ||
++	 !strcmp(tcstr[TCCLEAREOL], "\033[0K")))
++	fprintf(shout, "\033[%dX", winw);
++    else
++	tcoutclear(TCCLEAREOL);
+ }
+ 
+ /* refresh one line, using whatever speed-up tricks are provided by the tty */
+@@ -2067,7 +2083,7 @@
+     if (cleareol && !nllen && !(hasam && ln < nlnct - 1)
+ 	&& tccan(TCCLEAREOL)) {
+ 	moveto(ln, 0);
+-	tcoutclear(TCCLEAREOL);
++	clear_refresh_eol(ln);
+ 	return;	
+     }
+ 
+@@ -2212,7 +2228,7 @@
+ 
+ 	    /* if we can finish quickly, do so */
+ 	    if ((col_cleareol >= 0) && (ccs >= col_cleareol)) {
+-		tcoutclear(TCCLEAREOL);
++		clear_refresh_eol(ln);
+ 		return;
+ 	    }
+ 
+@@ -2246,7 +2262,7 @@
+ 		zwrite(nl, i);
+ 		vcs += i;
+ 		if (col_cleareol >= 0)
+-		    tcoutclear(TCCLEAREOL);
++		    clear_refresh_eol(ln);
+ 		return;
+ 	    }
+ 

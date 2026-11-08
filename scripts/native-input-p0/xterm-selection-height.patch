@@ -1,0 +1,28 @@
+--- a/src/common/buffer/Buffer.ts
++++ b/src/common/buffer/Buffer.ts
+@@ -310 +310 @@
+-        newCols === this._cols || this.lines.length === 0) {
++        (!forSelection && newCols === this._cols) || this.lines.length === 0) {
+--- a/src/browser/services/SelectionService.ts
++++ b/src/browser/services/SelectionService.ts
+@@ -78,0 +79 @@
++  private _selectionResizeRestored = false;
+@@ -159,2 +160,2 @@
+-    // Clear selection when resizing vertically. This experience could be improved, this is the
+-    // simple option to fix the buggy behavior. https://github.com/xtermjs/xterm.js/issues/5300
++    // Normal selections restore through buffer anchors, including height changes.
++    // Keep the upstream clear fallback when that restoration is unavailable.
+@@ -162 +163 @@
+-      if (e.rowsChanged) {
++      if (e.rowsChanged && !this._selectionResizeRestored) {
+@@ -164,0 +166 @@
++      this._selectionResizeRestored = false;
+@@ -191,0 +194 @@
++    this._selectionResizeRestored = false;
+@@ -193,2 +196,2 @@
+-    if (buffer !== this._bufferService.buffers.normal || event.cols === event.oldCols ||
+-        event.rows !== event.oldRows || !startPoint ||
++    if (buffer !== this._bufferService.buffers.normal ||
++        (event.cols === event.oldCols && event.rows === event.oldRows) || !startPoint ||
+@@ -233,0 +237 @@
++    this._selectionResizeRestored = true;

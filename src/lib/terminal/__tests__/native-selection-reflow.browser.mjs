@@ -56,7 +56,7 @@ try{for(const[engine,launcher]of[['chromium',chromium],['webkit',webkit]]){
      for(const cols of columns){terminal.resize(cols,kind==='vertical-resize'?fixture.rows-1:fixture.rows);states.push({cols,text:terminal.getSelection(),position:terminal.getSelectionPosition()});}
      return{states,unchangedApis:terminal.getSelection===original.selection&&terminal.select===original.select&&terminal.buffer.normal.getLine===original.line};
     },{fixture,kind});
-    assert(observed.unchangedApis);const expected=['invalid-row','vertical-resize'].includes(kind)?'':prepared.needle;
+    assert(observed.unchangedApis);const expected=kind==='invalid-row'?'':prepared.needle;
     assert(observed.states.every(state=>state.text===expected),`${engine}/${renderer}/${reflow}/${kind}: selection did not follow actual content`);
     cases.push({reflow,kind,resizes:observed.states.length,expected,states:observed.states});
    }

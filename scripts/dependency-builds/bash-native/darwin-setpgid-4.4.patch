@@ -1,0 +1,46 @@
+diff --git a/jobs.c b/jobs.c
+index cef3c79..7174b9a 100644
+--- a/jobs.c
++++ b/jobs.c
+@@ -69,6 +69,9 @@
+ #include "bashintl.h"
+ #include "shell.h"
+ #include "jobs.h"
++#if defined (__APPLE__)
++#  include "shellspan-darwin-setpgid.h"
++#endif
+ #include "execute_cmd.h"
+ #include "flags.h"
+
+@@ -1876,6 +1879,9 @@ make_child (command, async_p)
+   int forksleep;
+   sigset_t set, oset;
+   pid_t pid;
++#if defined (__APPLE__)
++  int shellspan_pgrp_pipe[2];
++#endif
+
+   /* XXX - block SIGTERM here and unblock in child after fork resets the
+      set of pending signals? */
+@@ -1902,7 +1908,11 @@ make_child (command, async_p)
+   RESET_SIGTERM;
+
+   /* Create the child, handle severe errors.  Retry on EAGAIN. */
++#if defined (__APPLE__)
++  while ((pid = shellspan_darwin_fork (job_control, shellspan_pgrp_pipe)) < 0 && errno == EAGAIN && forksleep < FORKSLEEP_MAX)
++#else
+   while ((pid = fork ()) < 0 && errno == EAGAIN && forksleep < FORKSLEEP_MAX)
++#endif
+     {
+       /* bash-4.2 */
+       sigprocmask (SIG_SETMASK, &oset, (sigset_t *)NULL);
+@@ -2057,6 +2067,9 @@ make_child (command, async_p)
+ 	    pipeline_pgrp = shell_pgrp;
+ 	}
+
++#if defined (__APPLE__)
++      shellspan_darwin_fork_parent_done (shellspan_pgrp_pipe);
++#endif
+       /* Place all processes into the jobs array regardless of the
+ 	 state of job_control. */
+       add_process (command, pid);

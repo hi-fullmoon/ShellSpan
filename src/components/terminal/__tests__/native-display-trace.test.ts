@@ -47,3 +47,8 @@ it('distinguishes actual local status bytes from session bytes without regenerat
   expect(result.events.filter(event => event.type === 'output').map(event => event.source)).toEqual(['local', 'session']);
   expect(result.replayable).toBe(true);
 });
+it('retains the original public search action instead of reconstructing its selection',()=>{
+ const trace=new NativeDisplayTrace(initial);trace.action({kind:'searchNext',term:'actual historical 中文 e\u0301'});
+ const value=trace.snapshot('');expect(value.events).toEqual([{type:'action',action:{kind:'searchNext',term:'actual historical 中文 e\u0301'},outputSequence:-1,parsedThrough:-1}]);
+ expect(value.outputEvents).toBe(0);expect(value.inputOrLifecycleAuthority).toBe(false);
+});

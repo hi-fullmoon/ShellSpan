@@ -252,6 +252,85 @@ export function invokeGetTerminalSubmissionRecovery(agentSessionId: string): Pro
   return invokeLogged<TerminalSubmissionIntent[]>('get_terminal_submission_recovery', { agentSessionId });
 }
 
+export interface TerminalAcceptanceRawOutput {
+  readonly dataStoreIdentifier: readonly number[] | null;
+  readonly terminalSessionId: string;
+  readonly terminalGeneration: number;
+  readonly transportSessionId: string;
+  readonly open: boolean;
+  readonly completeFromStart: boolean;
+  readonly capturedBytes: readonly number[];
+  readonly captureTruncated: boolean;
+  readonly captureCompleteFromStart: boolean;
+  readonly capturedFrameCount: number;
+  readonly capturedByteCount: number;
+  readonly nextOutputSequence: number;
+  readonly nextByteOffset: number;
+  readonly frames: readonly {
+    readonly protocolVersion: number;
+    readonly terminalSessionId: string;
+    readonly terminalGeneration: number;
+    readonly type: string;
+    readonly sequence: number;
+    readonly byteOffset: number;
+    readonly bytes: readonly number[];
+  }[];
+}
+
+/** Explicit debug acceptance only; never input, readiness or execution authority. */
+export function invokeGetTerminalAcceptanceRawOutput(sessionId: string): Promise<TerminalAcceptanceRawOutput> {
+  return invokeLogged<TerminalAcceptanceRawOutput>('get_terminal_acceptance_raw_output', { sessionId });
+}
+
+export interface TerminalAcceptanceRawFrameEvent {
+  readonly transportSessionId: string;
+  readonly frame: TerminalAcceptanceRawOutput['frames'][number];
+}
+
+/** Explicit acceptance only. Register before creating the owned terminal. */
+export function listenToTerminalAcceptanceRawOutput(callback: EventCallback<TerminalAcceptanceRawFrameEvent>): Promise<UnlistenFn> {
+  return listen<TerminalAcceptanceRawFrameEvent>('terminal-acceptance-raw-output', callback);
+}
+
+export interface TerminalAcceptanceRawPreparation {
+  readonly requestId: string;
+  readonly invocationOrigin: string;
+  readonly stage: string;
+  readonly source: string;
+  readonly background: boolean;
+  readonly rejection: string | null;
+  readonly unexpectedPreparationAbandoned: boolean;
+  readonly headerBefore: AgentSessionSnapshot['header'];
+  readonly sessionAfter: AgentSessionSnapshot;
+  readonly brokerBefore: TerminalBrokerSnapshot;
+  readonly brokerAfter: TerminalBrokerSnapshot;
+  readonly recoveryBefore: readonly TerminalSubmissionIntent[];
+  readonly recoveryAfter: readonly TerminalSubmissionIntent[];
+  readonly effectPath: string;
+  readonly effectBefore: boolean;
+  readonly effectAfter: boolean;
+}
+
+/** Explicit isolated debug entrance to production preparation; never executes. */
+export function invokePrepareTerminalAcceptanceRawCommand(agentSessionId: string, background: boolean): Promise<TerminalAcceptanceRawPreparation> {
+  return invokeLogged('prepare_terminal_acceptance_raw_command', { agentSessionId, background });
+}
+
+export interface TerminalAcceptanceInputLease {
+  readonly operationId: string;
+  readonly stage: string;
+  readonly released: boolean;
+  readonly brokerBefore: TerminalBrokerSnapshot;
+  readonly brokerAfter: TerminalBrokerSnapshot;
+  readonly modelCalls: number;
+  readonly agentSourceWrites: number;
+}
+
+/** Isolated macOS debug acceptance only; uses the real production lease manager. */
+export function invokeControlTerminalAcceptanceInputLease(agentSessionId: string, release: boolean): Promise<TerminalAcceptanceInputLease> {
+  return invokeLogged('control_terminal_acceptance_input_lease', { agentSessionId, release });
+}
+
 export function invokeWriteSession(sessionId: string, data: string): Promise<void> {
   return invokeTerminalHotPath('write_session', { sessionId, data });
 }

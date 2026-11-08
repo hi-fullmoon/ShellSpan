@@ -164,14 +164,15 @@ impl NativeCase {
                 recv(self.case.received) -> bytes => self.case.raw.extend(bytes.unwrap()),
                 recv(self.messages) -> message => {
                     let message=message.unwrap();
-                    let matched=if let nip::Message::Connection(value)=&message {
+                    self.records.push(message);
+                    let matched=if let nip::Message::Connection(value)=self.records.last().unwrap() {
                         if value.request_id==request {
                             if let nip::ConnectionPayload::Capabilities {profile,native_inline,editor_empty,..}=&value.payload {
-                                assert!(*native_inline);assert!(self.expected.matches(profile));assert_eq!(*editor_empty,empty);Some(profile.clone())
+                                assert!(*native_inline);assert!(self.expected.matches(profile));assert_eq!(*editor_empty,empty,"real editor state for {request}");Some(profile.clone())
                             } else {None}
                         } else {None}
                     } else {None};
-                    self.records.push(message);if let Some(profile)=matched{return profile;}
+                    if let Some(profile)=matched{return profile;}
                 },
                 recv(deadline) -> _ => panic!("real native pump capability response missing: {request}"),
             }
@@ -281,6 +282,15 @@ fn native_input_pump_large_input_control_order_and_cancel_preserve_real_pty() {
         let mut native =
             NativeCase::start(&shell, &resources, evidence.join(format!("{name}-failed")));
         let profile = native.capabilities("initial", true);
+        let binding = native.expected.display_binding();
+        assert_eq!(
+            binding.unicode_version,
+            Some(nip::DisplayUnicodeVersion::Unicode11)
+        );
+        assert_eq!(
+            binding.unicode_scope,
+            Some(nip::DisplayUnicodeScope::Session)
+        );
         native.editor_idle();
         native.phase = "original4790-byte-output";
         native
@@ -332,6 +342,267 @@ fn native_input_pump_large_input_control_order_and_cancel_preserve_real_pty() {
         )
         .unwrap();
         fs::write(evidence.join(format!("{name}.pty")), &native.case.raw).unwrap();
+    }
+}
+
+#[test]
+#[ignore = "requires exact macOS native resources; real ordinary paste and editor probes"]
+fn native_ordinary_bracketed_paste_preserves_bytes_before_enter() {
+    require_native_mac();
+    let owner = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
+    let resources = owner.join(".artifacts/tests/native-input-p2/resources/native-input");
+    let evidence = owner
+        .join(".artifacts/tests/native-input-p3/ordinary-paste")
+        .join(uuid::Uuid::new_v4().to_string());
+    fs::create_dir_all(&evidence).unwrap();
+    let shells = [
+        (
+            "zsh",
+            crate::terminal_command::editors::local_zle_shell(&resources).unwrap(),
+        ),
+        (
+            "bash-4.1",
+            resources.join("gnu-bash-4.1-readline-6.0-macos-arm64-native/bash"),
+        ),
+        (
+            "bash-4.4",
+            resources.join("gnu-bash-4.4-readline-7.0-macos-arm64-native/bash"),
+        ),
+        (
+            "bash-5.3",
+            resources.join("gnu-bash-5.3-readline-8.3.6-macos-arm64-native/bash"),
+        ),
+    ];
+    for (name, shell) in shells {
+        let mut native =
+            NativeCase::start(&shell, &resources, evidence.join(format!("{name}-failed")));
+        let profile = native.capabilities("initial", true);
+        native.editor_idle();
+        native.case.until(b"\x1b[?2004h");
+        native.phase = "ordinary-bracketed-paste";
+        let mut observations = Vec::new();
+        let values = [
+            "two  spaces\t'quoted' \"double\"".to_string(),
+            "中文 café Å".into(),
+            "中文 cafe\u{301} A\u{30a}".into(),
+            "first line\nsecond\tline\nthird line".into(),
+            String::new(),
+        ];
+        for (index, mut value) in values.into_iter().enumerate() {
+            let source_for = |text: &str| {
+                format!(
+                    "printf '%s%s' PASTE_ 'CASE_{index}:'; printf '%s' {} | /usr/bin/od -An -v -tx1 | /usr/bin/tr -d ' \\n'; printf ':END\\n'",
+                    shlex::try_quote(text).unwrap()
+                )
+            };
+            if index == 4 {
+                // Quoting a nonempty alphanumeric value needs no quote pair.
+                let overhead = source_for("x").len() - 1;
+                value = "x".repeat(4790 - overhead);
+            }
+            let source = source_for(&value);
+            if index == 4 {
+                assert_eq!(source.len(), 4790);
+            }
+            let expected = format!(
+                "PASTE_CASE_{index}:{}:END\r\n",
+                hex::encode(value.as_bytes())
+            );
+            let offset = native.case.raw.len();
+            let paste = format!("\x1b[200~{source}\x1b[201~");
+            fs::write(
+                evidence.join(format!("{name}-paste-{index}-input.json")),
+                serde_json::to_vec_pretty(&serde_json::json!({
+                    "connection": native.connection, "index": index,
+                    "source": source, "pasteHex": hex::encode(paste.as_bytes()),
+                    "expectedStdout": expected, "scope": "Planned ordinary input; not a submission receipt"
+                })).unwrap(),
+            ).unwrap();
+            native
+                .case
+                .pump
+                .send(SessionCommand::Write(paste.clone()))
+                .unwrap();
+            // Private Probe can run before queued ordinary PTY bytes reach
+            // ZLE/Readline. Wait for this paste's real redraw before querying.
+            native.case.until(format!("'CASE_{index}:'").as_bytes());
+            let staged = format!("paste-{index}-staged");
+            native.probe(&staged);
+            native.capabilities(&staged, false);
+            assert!(!native.case.raw[offset..]
+                .windows(expected.len())
+                .any(|bytes| bytes == expected.as_bytes()));
+            native
+                .case
+                .pump
+                .send(SessionCommand::Write("\r".into()))
+                .unwrap();
+            native.case.until(expected.as_bytes());
+            native.editor_idle();
+            let ready = format!("paste-{index}-ready");
+            native.probe(&ready);
+            native.capabilities(&ready, true);
+            assert_eq!(
+                native.case.raw[offset..]
+                    .windows(expected.len())
+                    .filter(|bytes| *bytes == expected.as_bytes())
+                    .count(),
+                1
+            );
+            observations.push(serde_json::json!({
+                "index": index, "source": source, "paste": paste,
+                "sourceBytes": source.len(), "valueHex": hex::encode(value.as_bytes()),
+                "expectedIndependentStdout": expected, "nonemptyBeforeEnter": true
+            }));
+        }
+        native
+            .transport
+            .remove(&native.connection.terminal_session_id)
+            .unwrap();
+        native.case.stop();
+        fs::write(
+            evidence.join(format!("{name}.json")),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "profile": profile, "observations": observations, "records": &native.records,
+                "rawSha256": hex::encode(Sha256::digest(&native.case.raw)),
+                "scope": "Real ordinary PTY paste, negotiated bracketed mode and real editor probes. No App, model or Agent source submission credit."
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::write(evidence.join(format!("{name}.pty")), &native.case.raw).unwrap();
+    }
+}
+
+#[test]
+#[ignore = "requires rebuilt exact macOS native resources; actual editor geometry and Unicode bytes"]
+fn native_ordinary_resize_keeps_real_editor_geometry_and_exact_bytes() {
+    require_native_mac();
+    let owner = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
+    let resources = owner.join(".artifacts/tests/native-input-p2/resources/native-input");
+    let evidence = owner
+        .join(".artifacts/tests/native-input-p3/ordinary-resize")
+        .join(uuid::Uuid::new_v4().to_string());
+    fs::create_dir_all(&evidence).unwrap();
+    let shells = [
+        (
+            "zsh",
+            crate::terminal_command::editors::local_zle_shell(&resources).unwrap(),
+        ),
+        (
+            "bash-4.1",
+            resources.join("gnu-bash-4.1-readline-6.0-macos-arm64-native/bash"),
+        ),
+        (
+            "bash-4.4",
+            resources.join("gnu-bash-4.4-readline-7.0-macos-arm64-native/bash"),
+        ),
+        (
+            "bash-5.3",
+            resources.join("gnu-bash-5.3-readline-8.3.6-macos-arm64-native/bash"),
+        ),
+    ];
+    for (name, shell) in shells {
+        let mut native =
+            NativeCase::start(&shell, &resources, evidence.join(format!("{name}-failure")));
+        let profile = native.capabilities("initial", true);
+        let mut observations = Vec::new();
+        for (index, (cols, rows)) in [(50u16, 18u16), (41, 33), (128, 18), (128, 37)]
+            .into_iter()
+            .enumerate()
+        {
+            let value = format!(
+                "NFD_中e\u{301}_👩🏽‍💻_{}_{}",
+                "e\u{301}\u{327}".repeat(180),
+                "long".repeat(30)
+            );
+            let source = format!("printf 'GEOM_CASE_{index}:%sx%s:' \"$COLUMNS\" \"$LINES\"; printf '%s' {} | /usr/bin/od -An -v -tx1 | /usr/bin/tr -d ' \\n'; printf ':END\\n'", shlex::try_quote(&value).unwrap());
+            let expected = format!(
+                "GEOM_CASE_{index}:{cols}x{rows}:{}:END\r\n",
+                hex::encode(value.as_bytes())
+            );
+            let offset = native.case.raw.len();
+            native.phase = "ordinary-resize-staged";
+            fs::write(
+                evidence.join(format!("{name}-{index}-planned-input.json")),
+                serde_json::to_vec_pretty(&serde_json::json!({"source":source,"inputHex":hex::encode(source.as_bytes()),"columns":cols,"rows":rows,"expectedIndependentStdout":expected,"scope":"Planned ordinary input, not an acceptance or execution receipt"})).unwrap(),
+            ).unwrap();
+            native
+                .case
+                .pump
+                .send(SessionCommand::Write(source.clone()))
+                .unwrap();
+            native.case.until(format!("'GEOM_CASE_{index}:").as_bytes());
+            native.probe(&format!("resize-{index}-staged"));
+            native.capabilities(&format!("resize-{index}-staged"), false);
+            assert!(!native.case.raw[offset..]
+                .windows(expected.len())
+                .any(|bytes| bytes == expected.as_bytes()));
+            native
+                .case
+                .pump
+                .send(SessionCommand::Resize {
+                    cols: u32::from(cols),
+                    rows: u32::from(rows),
+                })
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(8);
+            loop {
+                let mut size = std::mem::MaybeUninit::<libc::winsize>::uninit();
+                let read = unsafe {
+                    libc::ioctl(
+                        native.terminal.as_raw_fd(),
+                        libc::TIOCGWINSZ,
+                        size.as_mut_ptr(),
+                    )
+                };
+                if read == 0 {
+                    let size = unsafe { size.assume_init() };
+                    if size.ws_col == cols && size.ws_row == rows {
+                        break;
+                    }
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "Actual PTY geometry did not become {cols}x{rows}"
+                );
+                thread::sleep(Duration::from_millis(2));
+            }
+            native.probe(&format!("resize-{index}-before-enter"));
+            native.capabilities(&format!("resize-{index}-before-enter"), false);
+            native
+                .case
+                .pump
+                .send(SessionCommand::Write("\r".into()))
+                .unwrap();
+            native.case.until(expected.as_bytes());
+            native.editor_idle();
+            native.probe(&format!("resize-{index}-ready"));
+            native.capabilities(&format!("resize-{index}-ready"), true);
+            native.phase = "ordinary-resize-combining-output";
+            let split_combining = "e \r\u{301}".as_bytes();
+            assert!(
+                !native.case.raw[offset..]
+                    .windows(split_combining.len())
+                    .any(|bytes| bytes == split_combining),
+                "Actual editor inserted wrap movement between an NFD base and combining suffix"
+            );
+            assert_eq!(
+                native.case.raw[offset..]
+                    .windows(expected.len())
+                    .filter(|bytes| *bytes == expected.as_bytes())
+                    .count(),
+                1
+            );
+            observations.push(serde_json::json!({"index":index,"columns":cols,"rows":rows,"source":source,"inputHex":hex::encode(source.as_bytes()),"valueHex":hex::encode(value.as_bytes()),"actualPtyGeometryVerified":true,"expectedIndependentStdout":expected}));
+        }
+        native
+            .transport
+            .remove(&native.connection.terminal_session_id)
+            .unwrap();
+        native.case.stop();
+        fs::write(evidence.join(format!("{name}.pty")), &native.case.raw).unwrap();
+        fs::write(evidence.join(format!("{name}.json")), serde_json::to_vec_pretty(&serde_json::json!({"profile":profile,"observations":observations,"records":native.records,"scope":"Actual native Shell/PTY/editor geometry and byte regression; not App, browser, model or human acceptance."})).unwrap()).unwrap();
     }
 }
 

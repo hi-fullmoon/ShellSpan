@@ -374,6 +374,66 @@ legacyRevision/integrationStateRevision 只对应各自状态，不用于合并�
 
 ## 验收入口
 
+仅限显式 native-input-acceptance feature、macOS arm64 debug、冻结验收目录与进程级开关
+同时满足时，get_terminal_acceptance_raw_output 可以只读取得生产 Broker 在 UTF-8 解码前
+保留的原始 PTY 帧。它不创建订阅者、不推进输入或快照游标、不授予原生能力；退役代次拒绝，
+保留缓冲发生驱逐时必须报告原始前缀不完整。原始字节、解码会话流及实际可见写入分别留证，
+局部 UI 状态或控制序列不能补写到原始 PTY 捕获中。默认和发布构建拒绝该接口。
+有界 replay 窗口和既有生产 capture 订阅者的字节缓冲分别报告完整性：replay 驱逐不代表
+capture 已丢失，capture 触及原有上限则必须判不完整，不提高上限或补造前缀。
+验收可只读复制 capture 从代次开始保留的实际字节，并核对原始字节计数、帧计数、
+输出序号、末端偏移及仍保留的 replay 后缀；不能将解码流重新编码冒充该缓冲。
+代次关闭仍按生产规则清零 replay/capture。需要保存含 EOF 的完整原始流时，在创建
+Shell 前订阅相同显式门禁下的 `terminal-acceptance-raw-output` 实际帧事件；事件位于
+Broker 接受原始帧之后、UTF-8 解码之前，不改变 Broker 订阅者、输入或生命周期。
+按原始序号和字节偏移保留全部字节，关闭后与只读终端计数核对；事件丢失、重复、错序或
+计数不符必须失败，不从关闭后的空缓冲或解码输出补造原始流。
+
+同一隔离目录另有显式 `SHELLSPAN_ACCEPTANCE_RAW_PREPARE=1` 时，
+`prepare_terminal_acceptance_raw_command` 从真实已创建、未选择模型的 BoundTerminal
+会话读取冻结本地目标，通过已安装的生产 `NativeToolAdapter.prepare` 准备固定源码或后台作业。
+入口不启动模型、driver、审批或执行；意外获得准备 token 时只调用正常 abandon 并保留失败。
+它返回实际拒绝原因、前后 Broker 输入序号、恢复 journal 和隔离 HOME 中测试效果文件的存在状态。
+测试须逐项断言拒绝阶段、零输入、零提交、零效果及未切换 Direct，不能仅凭接口返回成功计通过。
+
+同一隔离门禁另有显式 `SHELLSPAN_ACCEPTANCE_INPUT_LEASE=1` 时，
+`control_terminal_acceptance_input_lease` 仅接受当前独立 HOME 中真实无模型 BoundTerminal
+验收会话，通过生产 `TerminalLeaseManager.acquire_command` 取得真实租约，或按同一身份
+执行正常 `release` / `release_turn`。它不写 Agent 源码、不确认输入、不启动作业或模型。
+普通输入反馈验收仍须观察实际生产写入拒绝、原输入序号、真实 Toaster、日志和释放后的恢复；
+接口返回本身不是 Toast、零输入或执行证据。其他构建/平台及缺少进程开关时拒绝该入口。
+
+GNU 原生候选的普通粘贴使用 Readline 的标准 bracketed-paste 模式；模式开关只影响
+普通行编辑，不授予 NIP 输入、接受或作业权限。显式 native Bash 启动入口在打开 NIP 前
+启用该选项，实际前端仍按终端协商调用 xterm 公共 paste。Readline 6.0 的缺失实现从
+固定 Bash 4.4 / Readline 7.0 上游回移，保留 6.0 ABI、默认关闭及用户自定义键绑定。
+来源、补丁与实际 Readline 源文件摘要随资源构建记录；修改后必须实际重建
+Shell/module/relay，不能仅更新 catalogue。系统 raw Shell 不加载该集成。
+这项修复仍须分别取得四本地组合的真实 PTY、App、Unicode、取消与显示证据；
+其他平台不继承本机结果，生产编辑器列表继续为空。
+
+macOS GNU 普通编辑的显示宽度由内容核验后的三个本地 profile 显式选择 Unicode 11/session，
+与本机实际 `wcwidth` 测量及目标输入集合对应；raw 查询或远端声明不授予原生 binding 或能力。
+Readline 6.0 的 Darwin `ioctl` 声明和标准 signal 声明补齐后，实际代码以隐式声明为错误编译；
+旧 configure 仅使用警告可见的 C89 探测兼容参数，不将错误 feature 探测当资源通过。
+macOS Bash 4.1 的生产 `bind -x` 输出回调另回移固定 Bash 4.4 的 `putc` 返回值，
+实际 `bashline.o` 以返回值警告为错误编译；不改变绑定、历史、接受或执行权限。
+Readline 6.0/7.0 的 SIGWINCH 路径回移 8.3.6 对当前编辑行所占行的清理，避免提交后残尾，
+不清除历史或整个屏幕，不修改 xterm parser。来源变化必须实际重建 Shell/module/relay 并重验。
+macOS 三套 Readline 的行边界另保留基字符后的零宽后缀，不在二者之间输出换行移动；
+仅调整已有不可见缓冲的换行索引，保留硬换行、开头零宽输入及全部 NFC/NFD 原始字节。
+
+本机 macOS `localPty/raw` 显示使用已有 Unicode 11 provider，排空实际输出后恢复原 provider，
+并保留外部显式 provider 变化。它不安装原生 OSC handler、不创建 native binding，
+不改变 raw 模式、只读查询、Agent 准备拒绝或执行权限。其他传输与平台不继承此本机选择。
+
+macOS 私有 Zsh Core 的普通编辑刷新另按固定 `native-macos-refresh.patch` 构建：
+当自动换行续行在列零清除、且现有清行能力是 ANSI EL0 时，使用 ECH 清除同范围单元格，
+保留终端的软换行关系。其他清除能力沿用原路径；此补丁只应用于 macOS arm64 的配对构建，
+不修改 xterm parser，不为普通输入开启原生追加模式。来源补丁、最终源码及实际 Core 摘要
+必须同时对应，失效资源须实际重建。独立真实 PTY 和浏览器诊断只支持缺陷定位与回归，
+正式验收仍需要新签名 App 的缩放、取消、选择、Unicode 和生命周期直接证据。
+
 `pnpm test:terminal-input:p1` 从固定源码重建模块，运行 reducer/Broker/执行器/lease、
 真实 PTY/私有 socket、原生 SIGKILL 恢复、实际捕获的 schema 校验、浏览器排空/重绑，
 以及能力缺失、未验证编辑模式拒绝和前端回归，不再调用已删除测试或旧实验报文用例。

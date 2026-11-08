@@ -1034,6 +1034,7 @@ fn native_zle_private_main_resources_reject_invalid_paths_and_bytes() {
         "missing",
         "tampered",
         "symlink",
+        "missing-macos-refresh-source",
         "unselected-valid",
     ] {
         let root = evidence.join(kind);
@@ -1067,6 +1068,14 @@ fn native_zle_private_main_resources_reject_invalid_paths_and_bytes() {
                 fs::copy(&source, &retained).unwrap();
                 std::os::unix::fs::symlink(&retained, &destination).unwrap();
                 "TERMINAL_NATIVE_PROFILE_ARTIFACT_MISMATCH"
+            }
+            "missing-macos-refresh-source" => {
+                catalogue["sources"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("scripts/dependency-builds/zsh/native-macos-refresh.patch");
+                fs::copy(&source, &destination).unwrap();
+                "TERMINAL_NATIVE_MANIFEST_INVALID"
             }
             "unselected-valid" => {
                 fs::copy(&source, &destination).unwrap();

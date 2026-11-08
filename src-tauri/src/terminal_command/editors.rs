@@ -309,6 +309,12 @@ pub(crate) fn read_catalogue(root: &Path, target: &str) -> Result<Vec<EditorArti
                         .get("scripts/dependency-builds/zsh/native-history.patch")
                         != Some(&nip::sha(include_str!(
                             "../../../scripts/dependency-builds/zsh/native-history.patch"
+                        )))
+                    || catalogue
+                        .sources
+                        .get("scripts/dependency-builds/zsh/native-macos-refresh.patch")
+                        != Some(&nip::sha(include_str!(
+                            "../../../scripts/dependency-builds/zsh/native-macos-refresh.patch"
                         ))))
             {
                 return Err("TERMINAL_NATIVE_MANIFEST_INVALID".into());

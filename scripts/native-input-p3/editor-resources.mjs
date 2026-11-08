@@ -29,7 +29,7 @@ export function auditEditorResources(root,selectedTarget){
     if(name==='editors-macos-arm64.json')required.push('scripts/native-input-p3/build.mjs','scripts/native-input-p3/zsh-build-check.c');
     if(name==='editors-windows-x64.json')required.push('src-tauri/resources/powershell/PSReadLine/2.4.5/ShellSpan.Build.json','src-tauri/resources/conpty/1.25.260930003/pin.json');
     if(catalogue.profiles.some(profile=>profile.core))required.push('scripts/dependency-builds/zsh/pin.json','scripts/dependency-builds/zsh/native-display.patch','scripts/native-input-p3/build-scoped-core.mjs');
-    if(name==='editors-macos-arm64.json'&&catalogue.profiles.some(profile=>profile.core))required.push('scripts/dependency-builds/zsh/native-history.patch');
+    if(name==='editors-macos-arm64.json'&&catalogue.profiles.some(profile=>profile.core))required.push('scripts/dependency-builds/zsh/native-history.patch','scripts/dependency-builds/zsh/native-macos-refresh.patch');
     if(name==='editors-linux-aarch64-glibc-2.36.json')required.push('src-tauri/native-input-adapter/Cargo.toml','src-tauri/native-input-adapter/Cargo.lock',
       'src-tauri/native-input-adapter/src/bin/native-input-relay.rs','scripts/native-input-p3/linux-build.sh','scripts/native-input-p3/publish-linux.py','scripts/native-input-p3/zsh-build-check.c');
     const missingInputs=required.filter(path=>!(path in catalogue.sources));

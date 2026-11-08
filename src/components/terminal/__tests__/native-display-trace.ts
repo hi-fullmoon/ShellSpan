@@ -12,7 +12,8 @@ export interface NativeDisplayTraceInitial {
 export type NativeDisplayTraceAction =
   | {kind: 'selectAll'} | {kind: 'clearSelection'}
   | {kind: 'select'; column: number; row: number; length: number}
-  | {kind: 'scrollToLine'; row: number} | {kind: 'scrollToBottom'};
+  | {kind: 'scrollToLine'; row: number} | {kind: 'scrollToBottom'}
+  | {kind: 'searchNext'; term: string};
 type TraceEvent =
   | {type: 'output'; sequence: number; offset: number; characters: number; source: 'session' | 'local'}
   | {type: 'resize'; columns: number; rows: number; outputSequence: number; parsedThrough: number}

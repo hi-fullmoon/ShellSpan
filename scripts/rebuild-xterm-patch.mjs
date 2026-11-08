@@ -71,7 +71,11 @@ if(record){
   const edit=path.join(base,'package');
   run('pnpm',['patch',`@xterm/xterm@${pin.version}`,'--ignore-existing','--edit-dir',edit],root,'patch-prepare.log');
   for(const file of files)copyFileSync(path.join(source,file),path.join(edit,file));
-  run('pnpm',['patch-commit',edit],root,'patch-commit.log');
+  // Retain context for pnpm's insertion matching, while emitting blank context
+  // lines without trailing spaces in the recorded unified diff.
+  run('pnpm',['patch-commit',edit],root,'patch-commit.log',{
+    GIT_CONFIG_COUNT:'1',GIT_CONFIG_KEY_0:'diff.suppressBlankEmpty',GIT_CONFIG_VALUE_0:'true'
+  });
   writeFileSync(path.join(root,'scripts/dependency-builds/xterm/artifacts.json'),JSON.stringify({
     version:pin.version,commit:pin.commit,archiveSha256:pin.archiveSha256,upstreamLockSha256:pin.upstreamLockSha256,
     node:process.version,npm:pin.npm,typescript:pin.typescript,webpack:pin.webpack,esbuild:pin.esbuild,

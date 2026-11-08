@@ -2602,9 +2602,19 @@ mod tests {
         assert!(!original.exists());
         #[cfg(target_os = "macos")]
         {
-            let trashed = PathBuf::from(std::env::var_os("HOME").unwrap())
-                .join(".Trash")
-                .join(&filename);
+            use core_foundation::base::TCFType;
+            // Foundation's system Trash uses the login user's home even when
+            // the test process deliberately runs with an isolated HOME.
+            #[link(name = "Foundation", kind = "framework")]
+            unsafe extern "C" {
+                fn NSHomeDirectory() -> core_foundation_sys::string::CFStringRef;
+            }
+            let system_home = unsafe {
+                let home = NSHomeDirectory();
+                assert!(!home.is_null());
+                core_foundation::string::CFString::wrap_under_get_rule(home).to_string()
+            };
+            let trashed = PathBuf::from(system_home).join(".Trash").join(&filename);
             assert_eq!(fs::read(&trashed).unwrap(), content);
             fs::rename(&trashed, &original).unwrap();
             assert_eq!(fs::read(&original).unwrap(), content);

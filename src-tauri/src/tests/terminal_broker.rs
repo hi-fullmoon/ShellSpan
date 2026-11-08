@@ -2,6 +2,90 @@ use super::*;
 use crate::terminal_screen::TerminalScreenBuffer;
 
 #[test]
+fn raw_acceptance_observation_keeps_original_bytes_and_all_input_gates_unchanged() {
+    // Broker projection data only, not a claim of PTY/App execution.
+    let broker = TerminalSessionBroker::enabled_for_test(8, 1024, 1024);
+    attached(&broker, "raw-observer");
+    broker
+        .observe_raw_output("raw-observer", &[0, 0xe2, 0x82])
+        .unwrap();
+    let before = broker.snapshot(Some("raw-observer")).unwrap();
+    let raw = broker.acceptance_raw_output("raw-observer").unwrap();
+    assert!(raw.complete_from_start);
+    assert!(raw.capture_complete_from_start);
+    assert_eq!(raw.captured_bytes, [0, 0xe2, 0x82]);
+    assert!(!raw.capture_truncated);
+    assert_eq!(raw.frames[0].bytes, [0, 0xe2, 0x82]);
+    assert_eq!(raw.frames[0].sequence, 1);
+    assert_eq!(raw.frames[0].byte_offset, 0);
+    assert_eq!(raw.next_output_sequence, 2);
+    assert_eq!(raw.next_byte_offset, 3);
+    assert_eq!(broker.snapshot(Some("raw-observer")).unwrap(), before);
+    assert_eq!(broker.acceptance_raw_output("raw-observer").unwrap(), raw);
+    assert_eq!(before.session.as_ref().unwrap().input_mode, InputMode::Raw);
+    assert!(before.session.unwrap().native_peer_profile.is_none());
+    broker
+        .close_transport("raw-observer", TerminalGenerationCloseReason::UserClosed)
+        .unwrap();
+    let closed = broker.acceptance_raw_output("raw-observer").unwrap();
+    assert!(!closed.open);
+    assert!(closed.captured_bytes.is_empty() && closed.frames.is_empty());
+    assert!(!closed.capture_complete_from_start);
+    assert_eq!(closed.captured_frame_count, 1);
+    assert_eq!(closed.captured_byte_count, 3);
+    assert_eq!(closed.next_output_sequence, 2);
+    assert_eq!(closed.next_byte_offset, 3);
+}
+
+#[test]
+fn raw_acceptance_reports_eviction_and_refuses_a_retired_generation() {
+    let broker = TerminalSessionBroker::enabled_for_test(1, 16, 16);
+    attached(&broker, "old-raw");
+    broker.observe_raw_output("old-raw", b"old").unwrap();
+    broker.observe_raw_output("old-raw", &[0xff]).unwrap();
+    let raw = broker.acceptance_raw_output("old-raw").unwrap();
+    assert!(!raw.complete_from_start);
+    assert!(raw.capture_complete_from_start);
+    assert_eq!(raw.captured_bytes, [b'o', b'l', b'd', 0xff]);
+    assert_eq!(raw.captured_frame_count, 2);
+    assert_eq!(raw.captured_byte_count, 4);
+    assert_eq!(raw.frames[0].sequence, 2);
+    assert_eq!(raw.frames[0].byte_offset, 3);
+    assert_eq!(raw.frames[0].bytes, [0xff]);
+    broker
+        .attach_transport(
+            "new-raw",
+            Some("old-raw"),
+            TerminalTransportKind::LocalPty,
+            TerminalGeometry::new(80, 24),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        broker.acceptance_raw_output("old-raw").unwrap_err(),
+        "TERMINAL_BROKER_STALE_GENERATION"
+    );
+}
+
+#[test]
+fn raw_acceptance_never_claims_a_truncated_session_capture_is_complete() {
+    // Actual Broker projection semantics, not PTY/App acceptance evidence.
+    let broker = TerminalSessionBroker::enabled_for_test(1, 16, 3);
+    attached(&broker, "truncated-raw");
+    broker.observe_raw_output("truncated-raw", b"old").unwrap();
+    broker.observe_raw_output("truncated-raw", &[0xff]).unwrap();
+    let before = broker.snapshot(Some("truncated-raw")).unwrap();
+    let raw = broker.acceptance_raw_output("truncated-raw").unwrap();
+    assert!(raw.capture_truncated);
+    assert!(!raw.capture_complete_from_start);
+    assert!(!raw.complete_from_start);
+    assert_eq!(raw.captured_bytes, b"old");
+    assert_eq!(raw.captured_byte_count, 4);
+    assert_eq!(raw.next_byte_offset, 4);
+    assert_eq!(broker.snapshot(Some("truncated-raw")).unwrap(), before);
+}
+
+#[test]
 fn acceptance_capture_is_opt_in_read_only_and_does_not_advance_input_cursor() {
     let mut record = SessionRecord::open(
         "capture-terminal".into(),

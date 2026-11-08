@@ -105,7 +105,7 @@ def main():
     for name in ['COPYING', 'AUTHORS']:
         shutil.copy2(upstream / name, notices / f'bash-{name}')
     for path in (ROOT / 'scripts/dependency-builds/bash-native').iterdir():
-        if path.is_file() and path.suffix == '.patch':
+        if path.is_file() and path.suffix in ['.patch', '.h']:
             shutil.copy2(path, notices / path.name)
     shutil.copy2(ROOT / 'scripts/native-input-p0/readline-sources.json', notices / 'readline-sources.json')
     (catalogue / 'README.txt').write_text('GNU Bash/Readline: GPL-3.0-or-later. Exact source archives, official GNU patches, post-profile integration and native prompt-column patches are in sources/.\nReadline native display ABI: 1; explicit matching targets only; never replaces an already-bound Shell.\nShellSpan adapter source: src-tauri/native-input-adapter; rebuild: python3 scripts/native-input-p2/build.py\n')

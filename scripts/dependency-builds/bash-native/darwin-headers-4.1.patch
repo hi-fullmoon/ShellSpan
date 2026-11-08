@@ -1,0 +1,44 @@
+--- a/lib/readline/terminal.c
++++ b/lib/readline/terminal.c
+@@ -56,6 +56,9 @@
+ #endif /* GWINSZ_IN_SYS_IOCTL && !TIOCGWINSZ */
+ 
+ #include "rltty.h"
++#if defined (__APPLE__)
++#  include <sys/ioctl.h> /* Declare the variadic ioctl ABI even when termios defines TIOCGWINSZ. */
++#endif
+ #include "tcap.h"
+ 
+ /* Some standard library routines. */
+--- a/lib/readline/rltty.c
++++ b/lib/readline/rltty.c
+@@ -42,6 +42,9 @@
+ #endif /* GWINSZ_IN_SYS_IOCTL */
+ 
+ #include "rltty.h"
++#if defined (__APPLE__)
++#  include <sys/ioctl.h> /* Match the variadic ioctl declaration on Darwin arm64. */
++#endif
+ #include "readline.h"
+ #include "rlprivate.h"
+ 
+--- a/trap.c
++++ b/trap.c
+@@ -30,6 +30,7 @@
+ 
+ #include <stdio.h>
+ #include <errno.h>
++#include <signal.h>
+ 
+ #include "bashintl.h"
+ 
+--- a/builtins/kill.def
++++ b/builtins/kill.def
+@@ -47,6 +47,7 @@
+ 
+ #include <stdio.h>
+ #include <errno.h>
++#include <signal.h>
+ #if defined (HAVE_UNISTD_H)
+ #  ifdef _MINIX
+ #    include <sys/types.h>

@@ -236,6 +236,33 @@ pub(crate) struct TerminalRawOutputFrame {
     pub(crate) bytes: Vec<u8>,
 }
 
+#[cfg(any(
+    test,
+    all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    )
+))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TerminalAcceptanceRawOutput {
+    pub(crate) terminal_session_id: String,
+    pub(crate) terminal_generation: u64,
+    pub(crate) transport_session_id: String,
+    pub(crate) open: bool,
+    pub(crate) next_output_sequence: u64,
+    pub(crate) next_byte_offset: u64,
+    pub(crate) complete_from_start: bool,
+    pub(crate) captured_bytes: Vec<u8>,
+    pub(crate) capture_truncated: bool,
+    pub(crate) capture_complete_from_start: bool,
+    pub(crate) captured_frame_count: u64,
+    pub(crate) captured_byte_count: u64,
+    pub(crate) frames: Vec<TerminalRawOutputFrame>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum TerminalSubscriberStatus {
@@ -4814,6 +4841,73 @@ impl TerminalSessionBroker {
             remote_interactive_tools_rollout: state.remote_interactive_tools_rollout.clone(),
             counters: self.counters.snapshot(),
             session,
+        })
+    }
+
+    #[cfg(any(
+        test,
+        all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        )
+    ))]
+    pub(crate) fn acceptance_raw_output(
+        &self,
+        transport_session_id: &str,
+    ) -> Result<TerminalAcceptanceRawOutput, String> {
+        validate_identifier(transport_session_id, "transport session id")?;
+        let state = self.lock()?;
+        let attachment = state.transports.get(transport_session_id).ok_or_else(|| {
+            if state.sessions.values().any(|record| {
+                record
+                    .predecessor_transport_session_ids
+                    .iter()
+                    .any(|previous| previous == transport_session_id)
+            }) {
+                "TERMINAL_BROKER_STALE_GENERATION".to_string()
+            } else {
+                "TERMINAL_BROKER_SESSION_NOT_FOUND".to_string()
+            }
+        })?;
+        let record = state
+            .sessions
+            .get(&attachment.terminal_session_id)
+            .ok_or("TERMINAL_BROKER_SESSION_NOT_FOUND")?;
+        if record.terminal_generation != attachment.terminal_generation
+            || record.transport_session_id != transport_session_id
+        {
+            return Err("TERMINAL_BROKER_STALE_GENERATION".into());
+        }
+        let complete_from_start = match (record.replay.front(), record.replay.back()) {
+            (Some(first), Some(last)) => {
+                first.sequence == 1
+                    && first.byte_offset == 0
+                    && record.replay_bytes as u64 == record.next_byte_offset
+                    && last.sequence.checked_add(1) == Some(record.next_output_sequence)
+            }
+            (None, None) => record.next_output_sequence == 1 && record.next_byte_offset == 0,
+            _ => false,
+        };
+        Ok(TerminalAcceptanceRawOutput {
+            terminal_session_id: record.terminal_session_id.clone(),
+            terminal_generation: record.terminal_generation,
+            transport_session_id: record.transport_session_id.clone(),
+            open: record.open,
+            next_output_sequence: record.next_output_sequence,
+            next_byte_offset: record.next_byte_offset,
+            complete_from_start,
+            captured_bytes: record.capture.clone(),
+            capture_truncated: record.capture_truncated,
+            capture_complete_from_start: !record.capture_truncated
+                && record.capture.len() as u64 == record.next_byte_offset
+                && record.subscribers.capture.next_sequence == record.next_output_sequence
+                && record.subscribers.capture.observed_frames + 1 == record.next_output_sequence
+                && record.subscribers.capture.observed_bytes == record.next_byte_offset,
+            captured_frame_count: record.subscribers.capture.observed_frames,
+            captured_byte_count: record.subscribers.capture.observed_bytes,
+            frames: record.replay.iter().cloned().collect(),
         })
     }
 

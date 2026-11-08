@@ -8,7 +8,7 @@ overrides:
   shadcn@4>zod: ^3.25.76
 
 patchedDependencies:
-  '@xterm/xterm@6.0.0': d52677209882b1d7894605bebf0d9a428be03d72fd3779c27d2440ce7f59a555
+  '@xterm/xterm@6.0.0': 944a2191fc1c4dc3d194935c3be3147ea4c027fe878a50bfb108137290448e15
   sonner@2.0.8: ee9ba08c4442fffad4efc9ff84e8e052039fbb2547c02938119ed3bc6fc58e77
 
 importers:
@@ -74,7 +74,7 @@ importers:
         version: 0.19.0
       '@xterm/xterm':
         specifier: 6.0.0
-        version: 6.0.0(patch_hash=d52677209882b1d7894605bebf0d9a428be03d72fd3779c27d2440ce7f59a555)
+        version: 6.0.0(patch_hash=944a2191fc1c4dc3d194935c3be3147ea4c027fe878a50bfb108137290448e15)
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -5023,7 +5023,7 @@ snapshots:
 
   '@xterm/addon-webgl@0.19.0': {}
 
-  '@xterm/xterm@6.0.0(patch_hash=d52677209882b1d7894605bebf0d9a428be03d72fd3779c27d2440ce7f59a555)': {}
+  '@xterm/xterm@6.0.0(patch_hash=944a2191fc1c4dc3d194935c3be3147ea4c027fe878a50bfb108137290448e15)': {}
 
   accepts@2.0.0:
     dependencies:

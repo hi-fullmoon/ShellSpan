@@ -26,5 +26,55 @@ hashes and `readlineDisplayAbi: 1`. Source inputs invalidate cached builds when
 the recipe or patches change. GNU archives, official and integration patches,
 source notices and the rebuild instructions accompany the resource kit.
 
+Readline 6.0 also receives the bracketed-paste implementation from the pinned
+Bash 4.4 / Readline 7.0 archive (SHA-256
+d86b3392c1202e8ff5a423b302e6284db7f8f435ea9f39b5b1b20fd3ac36dfcb).
+The readline-paste-6.0.patch backports the insertion function, standard key binding,
+public declaration, option and terminal enter/leave handling. It keeps the
+standalone dependency's default off and preserves custom key bindings.
+The explicit native Bash startup enables the standard option for its own
+interactive session before opening NIP. Ordinary pasted Tab/newline bytes are
+then inserted by Readline rather than interpreted as completion/accept keys.
+No user startup or inputrc file is changed. The actual editor ABI remains 6.0;
+this does not relabel the dependency as Readline 7.0. The affected Readline
+source files and the backport patch are recorded in the build provenance.
+
+Darwin Bash 4.1 additionally receives the standard `ioctl` and signal headers
+present in the newer GNU sources. The variadic `ioctl` declaration must be
+visible even when Darwin's termios headers already define `TIOCGWINSZ`.
+Actual compilation rejects implicit function declarations; old configure probes
+keep their GNU C89 compatibility with warnings visible, not suppressed.
+
+The macOS Bash 4.1 target also backports Bash 4.4's `putx` return value from the
+same pinned archive. The native production service key uses `bind -x`; its tputs
+output callback must return the result of `putc`, matching its declared `int`
+contract. The actual `bashline.o` is compiled with `-Werror=return-type` before
+the full build. This patch and the final `bashline.c` hash accompany provenance;
+it does not alter a key binding, user history or permission to accept input.
+
+Readline 6.0 and 7.0 backport the Readline 8.3.6 resize path's clearing of only
+the screen rows occupied by the current editor line. This preserves historical
+output while removing obsolete rows when the editor becomes narrower/shorter.
+It does not clear the terminal screen or reconstruct display from a source copy.
+The three verified macOS GNU main/module profiles select the existing Unicode 11
+provider for their session so ordinary editing uses the measured native widths.
+Unsupported raw shells and other platforms do not acquire this metadata from queries.
+
+The macOS Readline 6.0/7.0/8.3.6 producers keep zero-width suffix bytes in the
+same display row as a base character that fills the right margin. The patch
+advances only the existing invisible-buffer break; it preserves source bytes,
+hard newline separators and leading zero-width input. It uses Readline's own
+multibyte/width results and does not normalize NFC/NFD or parse terminal output.
+The patch and final display source hashes invalidate old resources for rebuilding.
+
+The macOS GNU jobs path uses a private pipe to order the original parent and
+child `setpgid` calls. The child continues after the parent closes its write
+end following its original process-group assignment. The existing child call
+and diagnostic remain unchanged; no syscall error is reclassified, retried or
+suppressed. Failed fork attempts close both pipe ends; an unexpected child
+read failure exits that child without executing the job. The patch/header and
+final jobs source hashes invalidate old resources and accompany the actual
+build. This changes no user monitor setting, signal disposition or startup file.
+
 Building resources is not platform acceptance or production enablement. Every
 target still requires its real Shell/PTY/SSH/display/lifecycle acceptance evidence.

@@ -1513,6 +1513,157 @@ pub(crate) async fn get_terminal_submission_recovery(
     .map_err(|_| "TERMINAL_SUBMISSION_JOURNAL_UNAVAILABLE".to_string())?
 }
 
+#[cfg(all(
+    feature = "native-input-acceptance",
+    debug_assertions,
+    target_os = "macos",
+    target_arch = "aarch64"
+))]
+pub(crate) fn terminal_acceptance_directory() -> Result<std::path::PathBuf, String> {
+    let directory = std::env::var_os("SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR")
+        .map(std::path::PathBuf::from)
+        .ok_or("TERMINAL_ACCEPTANCE_DISABLED")?;
+    let manifest = std::env::var_os("SHELLSPAN_ACCEPTANCE_FROZEN_MANIFEST")
+        .map(std::path::PathBuf::from)
+        .ok_or("TERMINAL_ACCEPTANCE_DISABLED")?;
+    if std::env::var("SHELLSPAN_ALLOW_FOREGROUND_TESTS").as_deref() != Ok("1")
+        || std::env::var("SHELLSPAN_ACCEPTANCE_RAW_PTY").as_deref() != Ok("1")
+        || !directory.is_absolute()
+        || manifest.parent() != Some(directory.as_path())
+        || std::env::var_os("SHELLSPAN_DATA_DIR") != Some(directory.join("data").into_os_string())
+        || std::env::var_os("SHELLSPAN_LOCAL_HOME") != Some(directory.join("home").into_os_string())
+    {
+        return Err("TERMINAL_ACCEPTANCE_DISABLED".into());
+    }
+    Ok(directory)
+}
+
+#[tauri::command]
+pub(crate) async fn prepare_terminal_acceptance_raw_command(
+    agent_runtime: State<'_, crate::agent_runtime::AgentRuntime>,
+    agent_session_id: String,
+    background: bool,
+) -> Result<serde_json::Value, String> {
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    {
+        let directory = terminal_acceptance_directory()?;
+        if std::env::var("SHELLSPAN_ACCEPTANCE_RAW_PREPARE").as_deref() != Ok("1") {
+            return Err("TERMINAL_ACCEPTANCE_DISABLED".into());
+        }
+        let runtime = agent_runtime.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            runtime.terminal_acceptance_prepare_raw(
+                &agent_session_id,
+                &directory.join("home"),
+                &directory.join("data"),
+                background,
+            )
+        })
+        .await
+        .map_err(|_| "TERMINAL_ACCEPTANCE_PREPARATION_UNAVAILABLE".to_string())?
+    }
+    #[cfg(not(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    )))]
+    {
+        let _ = (agent_runtime, agent_session_id, background);
+        Err("TERMINAL_ACCEPTANCE_DISABLED".into())
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn get_terminal_acceptance_raw_output(
+    app: AppHandle,
+    agent_runtime: State<'_, crate::agent_runtime::AgentRuntime>,
+    session_id: String,
+) -> Result<serde_json::Value, String> {
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    {
+        terminal_acceptance_directory()?;
+        let runtime = agent_runtime.inner().clone();
+        let store = app
+            .config()
+            .app
+            .windows
+            .iter()
+            .find(|window| window.label == "main")
+            .and_then(|window| window.data_store_identifier);
+        tauri::async_runtime::spawn_blocking(move || {
+            let mut value =
+                serde_json::to_value(runtime.terminal_acceptance_raw_output(&session_id)?)
+                    .map_err(|_| "TERMINAL_ACCEPTANCE_CAPTURE_UNAVAILABLE".to_string())?;
+            value["dataStoreIdentifier"] = serde_json::to_value(store)
+                .map_err(|_| "TERMINAL_ACCEPTANCE_CAPTURE_UNAVAILABLE".to_string())?;
+            Ok(value)
+        })
+        .await
+        .map_err(|_| "TERMINAL_ACCEPTANCE_CAPTURE_UNAVAILABLE".to_string())?
+    }
+    #[cfg(not(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    )))]
+    {
+        let _ = (app, agent_runtime, session_id);
+        Err("TERMINAL_ACCEPTANCE_DISABLED".into())
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn control_terminal_acceptance_input_lease(
+    agent_runtime: State<'_, crate::agent_runtime::AgentRuntime>,
+    agent_session_id: String,
+    release: bool,
+) -> Result<serde_json::Value, String> {
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    {
+        let directory = terminal_acceptance_directory()?;
+        if std::env::var("SHELLSPAN_ACCEPTANCE_INPUT_LEASE").as_deref() != Ok("1") {
+            return Err("TERMINAL_ACCEPTANCE_DISABLED".into());
+        }
+        let runtime = agent_runtime.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            runtime.terminal_acceptance_input_lease(
+                &agent_session_id,
+                &directory.join("home"),
+                release,
+            )
+        })
+        .await
+        .map_err(|_| "TERMINAL_ACCEPTANCE_LEASE_UNAVAILABLE".to_string())?
+    }
+    #[cfg(not(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    )))]
+    {
+        let _ = (agent_runtime, agent_session_id, release);
+        Err("TERMINAL_ACCEPTANCE_DISABLED".into())
+    }
+}
+
 #[tauri::command]
 pub(crate) async fn close_session(
     state: State<'_, SessionManager>,

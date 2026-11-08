@@ -793,6 +793,121 @@ impl AgentRuntime {
         self.native_engine.terminal_shell_integration_enabled()
     }
 
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    pub(crate) fn terminal_acceptance_raw_output(
+        &self,
+        transport_session_id: &str,
+    ) -> Result<crate::terminal_broker::TerminalAcceptanceRawOutput, String> {
+        self.native_engine
+            .terminal_acceptance_raw_output(transport_session_id)
+    }
+
+    /// Exercises the installed production adapter's preparation boundary without
+    /// starting a model, driver, approval or execution. The source is fixed and
+    /// bounded to the explicitly isolated acceptance HOME.
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    pub(crate) fn terminal_acceptance_prepare_raw(
+        &self,
+        agent_session_id: &str,
+        home: &std::path::Path,
+        data: &std::path::Path,
+        background: bool,
+    ) -> Result<serde_json::Value, String> {
+        let snapshot = self.sessions.snapshot(agent_session_id)?;
+        let header = &snapshot.header;
+        let target = header.target.as_ref().ok_or("ACCEPTANCE_TARGET_REQUIRED")?;
+        if snapshot.ended
+            || header.model_selection.is_some()
+            || header.execution_surface != super::AgentExecutionSurface::BoundTerminal
+            || header.permission_mode != Some(super::AgentSessionPermissionMode::RequestApproval)
+            || target.kind != "local"
+            || target.cwd.as_deref() != home.to_str()
+            || target.local_root.as_deref() != home.to_str()
+        {
+            return Err("ACCEPTANCE_ISOLATED_BOUND_TARGET_REQUIRED".into());
+        }
+        let before = self.terminal_broker_snapshot(Some(&target.session_id))?;
+        if before.session.as_ref().map(|session| session.input_mode)
+            != Some(crate::terminal_command::protocol::InputMode::Raw)
+        {
+            return Err("ACCEPTANCE_ACTUAL_RAW_TRANSPORT_REQUIRED".into());
+        }
+        let effect = home.join("phase2-raw-agent-effect");
+        let effect_before = effect.try_exists().map_err(|error| error.to_string())?;
+        let recovery_before = self.terminal_submission_recovery(data, agent_session_id)?;
+        let scratch_target = self
+            .sessions
+            .scratch_ownership_target(agent_session_id, target)?;
+        let request_id = format!("acceptance-{}", uuid::Uuid::new_v4());
+        let source = "printf '%s' RAW_AGENT_EFFECT > \"$HOME/phase2-raw-agent-effect\"";
+        let request = super::tool_pipeline::NativeToolRequest {
+            session_id: header.session_id.clone(),
+            task_id: header.task_id.clone(),
+            goal: header.goal.clone(),
+            success_criteria: header.success_criteria.clone(),
+            turn_id: request_id.clone(),
+            step_id: request_id.clone(),
+            request_id: request_id.clone(),
+            model_call: crate::llm::types::ModelToolCall {
+                call_id: request_id.clone(),
+                provider_call_id: None,
+                name: "run_terminal_command".into(),
+                arguments: serde_json::json!({
+                    "command": source,
+                    "explanation": "Verify actual unsupported raw terminal preparation refusal without execution",
+                    "background": background,
+                    "timeoutMs": 5000
+                }),
+            },
+            target: target.clone(),
+            scratch_target,
+            permission_mode: super::AgentSessionPermissionMode::RequestApproval,
+            execution_surface: super::AgentExecutionSurface::BoundTerminal,
+        };
+        let adapter = self
+            .native_slot
+            .as_ref()
+            .ok_or("ACCEPTANCE_ADAPTER_REQUIRED")?;
+        let (rejection, unexpected_preparation_abandoned) = match adapter.prepare(request) {
+            Err(error) => (Some(error), false),
+            Ok(prepared) => {
+                adapter.abandon(&prepared.token);
+                (None, true)
+            }
+        };
+        let after = self.terminal_broker_snapshot(Some(&target.session_id))?;
+        let recovery_after = self.terminal_submission_recovery(data, agent_session_id)?;
+        let effect_after = effect.try_exists().map_err(|error| error.to_string())?;
+        Ok(serde_json::json!({
+            "requestId": request_id,
+            "invocationOrigin": "explicit no-model acceptance request",
+            "stage": "installed NativeToolAdapter.prepare",
+            "source": source,
+            "background": background,
+            "rejection": rejection,
+            "unexpectedPreparationAbandoned": unexpected_preparation_abandoned,
+            "headerBefore": header,
+            "sessionAfter": self.sessions.snapshot(agent_session_id)?,
+            "brokerBefore": before,
+            "brokerAfter": after,
+            "recoveryBefore": recovery_before,
+            "recoveryAfter": recovery_after,
+            "effectPath": effect,
+            "effectBefore": effect_before,
+            "effectAfter": effect_after
+        }))
+    }
+
     pub(crate) fn terminal_submission_recovery(
         &self,
         app_data_root: &std::path::Path,
@@ -802,6 +917,40 @@ impl AgentRuntime {
             .configure_terminal_submission_root(app_data_root)?;
         self.native_engine
             .terminal_submission_recovery(agent_session_id)
+    }
+
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    pub(crate) fn terminal_acceptance_input_lease(
+        &self,
+        agent_session_id: &str,
+        home: &std::path::Path,
+        release: bool,
+    ) -> Result<serde_json::Value, String> {
+        let snapshot = self.sessions.snapshot(agent_session_id)?;
+        let header = &snapshot.header;
+        let target = header.target.as_ref().ok_or("ACCEPTANCE_TARGET_REQUIRED")?;
+        if snapshot.ended
+            || !agent_session_id.starts_with("phase2-toast-")
+            || header.model_selection.is_some()
+            || header.execution_surface != super::AgentExecutionSurface::BoundTerminal
+            || header.permission_mode != Some(super::AgentSessionPermissionMode::RequestApproval)
+            || target.kind != "local"
+            || target.cwd.as_deref() != home.to_str()
+            || target.local_root.as_deref() != home.to_str()
+        {
+            return Err("ACCEPTANCE_ISOLATED_BOUND_TARGET_REQUIRED".into());
+        }
+        self.native_engine.terminal_acceptance_input_lease(
+            &target.session_id,
+            &header.session_id,
+            &header.task_id,
+            release,
+        )
     }
 
     pub(crate) fn register_terminal_integration_channel(

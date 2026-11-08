@@ -48,14 +48,15 @@ try{
     const pin=JSON.parse(readFileSync(resolve(root,'scripts/dependency-builds/zsh/pin.json'),'utf8'));
     assert.equal(sha(resolve(root,'scripts/dependency-builds/zsh/pin.json')),coreProducer.pinSha256);
     assert.equal(sha(resolve(root,pin.patch)),pin.patchSha256);assert.equal(coreProducer.patchSha256,pin.patchSha256);
-    const expectedSources=boundHistory?pin.history.sourceHashes:pin.sourceHashes;
+    const expectedSources=boundHistory?{...pin.history.sourceHashes,...pin.macosRefresh.sourceHashes}:pin.sourceHashes;
     assert.deepEqual(coreProducer.nativeSourceHashes,expectedSources);
     for(const[name,digest]of Object.entries(expectedSources))assert.equal(sha(resolve(coreProducer.source,boundHistory?name:`Src/Zle/${name}`)),digest);
     if(target==='macos-arm64'){
       assert(boundHistory,'The macOS native editor requires its matched history-capable private main/Core');
       assert.equal(sha(shell),pin.targets[target].privateMainSha256);assert.equal(sha(coreProducer.editor),pin.targets[target].privateCoreSha256);
       assert.equal(coreProducer.historyPatchSha256,pin.history.patchSha256);assert.equal(sha(resolve(root,pin.history.patch)),pin.history.patchSha256);
-      sourcePaths.push(pin.history.patch);
+      assert.equal(coreProducer.macosRefreshPatchSha256,pin.macosRefresh.patchSha256);assert.equal(sha(resolve(root,pin.macosRefresh.patch)),pin.macosRefresh.patchSha256);
+      sourcePaths.push(pin.history.patch,pin.macosRefresh.patch);
     }
     sourcePaths.push('scripts/dependency-builds/zsh/pin.json','scripts/dependency-builds/zsh/native-display.patch','scripts/native-input-p3/build-scoped-core.mjs');
   }

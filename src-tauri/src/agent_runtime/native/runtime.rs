@@ -351,6 +351,68 @@ impl NativeToolEngine {
         self.terminal_broker.snapshot(transport_session_id)
     }
 
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    pub(crate) fn terminal_acceptance_raw_output(
+        &self,
+        transport_session_id: &str,
+    ) -> Result<crate::terminal_broker::TerminalAcceptanceRawOutput, String> {
+        self.terminal_broker
+            .acceptance_raw_output(transport_session_id)
+    }
+
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    pub(crate) fn terminal_acceptance_input_lease(
+        &self,
+        transport: &str,
+        agent: &str,
+        task: &str,
+        release: bool,
+    ) -> Result<serde_json::Value, String> {
+        let operation = format!("phase2-toast-{agent}");
+        let before = self.terminal_broker.snapshot(Some(transport))?;
+        let terminal = before
+            .session
+            .as_ref()
+            .ok_or("ACCEPTANCE_TARGET_REQUIRED")?;
+        if !terminal.open || terminal.native_peer_profile.is_none() {
+            return Err("ACCEPTANCE_ACTUAL_NATIVE_TRANSPORT_REQUIRED".into());
+        }
+        if release {
+            if !self.terminal_leases.release(
+                transport,
+                agent,
+                task,
+                &operation,
+                super::TerminalLeaseReleaseReason::Completed,
+            )? {
+                return Err("ACCEPTANCE_OWNED_LEASE_REQUIRED".into());
+            }
+            self.terminal_leases.release_turn(agent)?;
+        } else {
+            self.terminal_leases
+                .acquire_command(transport, agent, task, &operation, None, None)?;
+        }
+        Ok(serde_json::json!({
+            "operationId": operation,
+            "stage": if release { "production TerminalLeaseManager.release and release_turn" } else { "production TerminalLeaseManager.acquire_command" },
+            "released": release,
+            "brokerBefore": before,
+            "brokerAfter": self.terminal_broker.snapshot(Some(transport))?,
+            "modelCalls": 0,
+            "agentSourceWrites": 0
+        }))
+    }
+
     pub(crate) fn terminal_submission_recovery(
         &self,
         agent_session_id: &str,

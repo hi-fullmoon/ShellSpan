@@ -110,6 +110,7 @@ async function main() {
     if(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR){
       const evidence=process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR;
       assert(isAbsolute(evidence)&&join(evidence,'data')===process.env.SHELLSPAN_DATA_DIR,'Acceptance image record requires the owned isolated data directory');
+      if(frozenManifest)await writeFile(join(evidence,`native-image-${recordId}-config.json`),process.env.TAURI_CONFIG??'',{flag:'wx',mode:0o600});
       await writeFile(join(evidence,`native-image-${recordId}.json`),JSON.stringify({capturedAt:new Date().toISOString(),identifier:config.identifier,binarySha256,signing,
         ...(frozenManifest?{frozenManifest,frozenInputs:frozenStart,tauriConfigSha256:createHash('sha256').update(process.env.TAURI_CONFIG??'').digest('hex')}:{})},null,2),{flag:'wx',mode:0o600});
     }

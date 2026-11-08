@@ -124,11 +124,36 @@ pub(crate) fn emit_data(app: &AppHandle, session_id: &str, chunk: String) -> Res
 /// established display path remains authoritative and keeps running.
 pub(crate) fn observe_terminal_raw_output(app: &AppHandle, session_id: &str, bytes: &[u8]) {
     if let Some(runtime) = app.try_state::<agent_runtime::AgentRuntime>() {
-        if let Err(error) = runtime.observe_terminal_raw_output(session_id, bytes) {
-            log::warn!(
+        match runtime.observe_terminal_raw_output(session_id, bytes) {
+            Err(error) => log::warn!(
                 "Terminal broker raw-output observation failed session_id={session_id} byte_count={}: {error}",
                 bytes.len()
-            );
+            ),
+            Ok(frame) => {
+                #[cfg(all(
+                    feature = "native-input-acceptance",
+                    debug_assertions,
+                    target_os = "macos",
+                    target_arch = "aarch64"
+                ))]
+                if let Some(frame) = frame {
+                    if commands::terminal_acceptance_directory().is_ok() {
+                        if let Err(error) = app.emit(
+                            "terminal-acceptance-raw-output",
+                            serde_json::json!({"transportSessionId": session_id, "frame": frame}),
+                        ) {
+                            log::warn!("Acceptance raw-frame observation delivery failed session_id={session_id}: {error}");
+                        }
+                    }
+                }
+                #[cfg(not(all(
+                    feature = "native-input-acceptance",
+                    debug_assertions,
+                    target_os = "macos",
+                    target_arch = "aarch64"
+                )))]
+                let _ = frame;
+            }
         }
     }
 }
@@ -312,6 +337,29 @@ pub fn run() {
             let runtime = app.state::<agent_runtime::AgentRuntime>();
             agent_runtime::configure_runtime(app.handle(), &runtime)?;
             runtime.configure_credentials(credentials)?;
+            #[cfg(all(
+                feature = "native-input-acceptance",
+                debug_assertions,
+                target_os = "macos",
+                target_arch = "aarch64"
+            ))]
+            if std::env::var_os("SHELLSPAN_ACCEPTANCE_WEBKIT_STORE").is_some() {
+                let config = app
+                    .config()
+                    .app
+                    .windows
+                    .iter()
+                    .find(|window| window.label == "main")
+                    .expect("owned main WebKit configuration required")
+                    .clone();
+                let store = config
+                    .data_store_identifier
+                    .expect("owned WebKit identifier required");
+                let window = tauri::WebviewWindowBuilder::from_config(app, &config)?
+                    .data_store_identifier(store)
+                    .build()?;
+                window.set_title("").ok();
+            }
             #[cfg(debug_assertions)]
             if std::env::args_os().any(|argument| argument == "--check-keychain-access") {
                 keychain_diagnostics::start(app.handle().clone())?;
@@ -420,6 +468,9 @@ pub fn run() {
             commands::resize_session,
             commands::write_session_bytes,
             commands::get_terminal_broker_snapshot,
+            commands::get_terminal_acceptance_raw_output,
+            commands::prepare_terminal_acceptance_raw_command,
+            commands::control_terminal_acceptance_input_lease,
             commands::get_terminal_submission_recovery,
             commands::close_session,
             commands::request_app_restart,
@@ -511,8 +562,45 @@ pub fn run() {
             remote_health::cancel_remote_health_snapshot,
         ]);
 
+    let context = tauri::generate_context!();
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    let context = {
+        let mut context = context;
+        if let Ok(value) = std::env::var("SHELLSPAN_ACCEPTANCE_WEBKIT_STORE") {
+            let evidence = std::env::var_os("SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR")
+                .map(std::path::PathBuf::from)
+                .expect("owned WebKit evidence directory required");
+            let manifest = std::env::var_os("SHELLSPAN_ACCEPTANCE_FROZEN_MANIFEST")
+                .map(std::path::PathBuf::from)
+                .expect("frozen WebKit inputs required");
+            assert!(evidence.is_absolute() && manifest.parent() == Some(evidence.as_path()));
+            assert_eq!(
+                std::env::var("SHELLSPAN_ACCEPTANCE_RAW_PTY").as_deref(),
+                Ok("1")
+            );
+            let identifier =
+                uuid::Uuid::parse_str(&value).expect("exact WebKit case UUID required");
+            let window = context
+                .config_mut()
+                .app
+                .windows
+                .iter_mut()
+                .find(|window| window.label == "main")
+                .expect("owned main WebKit window required");
+            window.data_store_identifier = Some(*identifier.as_bytes());
+            // This SDK's config-to-WebviewAttributes conversion omits the
+            // identifier. Build the same window with its public SDK setter.
+            window.create = false;
+        }
+        context
+    };
     let app = menu::configure_builder(builder)
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application");
     app.run(|app, event| {
         if matches!(
