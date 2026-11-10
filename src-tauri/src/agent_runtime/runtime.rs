@@ -1103,11 +1103,34 @@ impl AgentRuntime {
         match stopped {
             Ok(()) => {
                 self.terminal_closed(terminal_id)?;
+                // Remove the input sink immediately, but keep raw capture
+                // alive until the registered worker has finalized its PTY
+                // output and published closure. The admission guard is held by
+                // close_terminal while this non-main-thread wait is pending.
+                let completed = match sessions.close_with_completion(terminal_id) {
+                    Ok(Some(completion)) => tokio::task::spawn_blocking(move || {
+                        completion.recv_timeout(std::time::Duration::from_secs(10))
+                    })
+                    .await
+                    .map_err(|error| {
+                        format!("TERMINAL_CLOSE_OUTPUT_UNCONFIRMED: waiter failed: {error}")
+                    })
+                    .and_then(|result| {
+                        result
+                            .map_err(|error| format!("TERMINAL_CLOSE_OUTPUT_UNCONFIRMED: {error}"))
+                    }),
+                    Ok(None) => Ok(()),
+                    Err(error) => Err(error),
+                };
                 self.close_terminal_broker_transport(
                     terminal_id,
-                    crate::terminal_broker::TerminalGenerationCloseReason::UserClosed,
+                    if completed.is_ok() {
+                        crate::terminal_broker::TerminalGenerationCloseReason::UserClosed
+                    } else {
+                        crate::terminal_broker::TerminalGenerationCloseReason::TransportDisconnected
+                    },
                 )?;
-                sessions.close(terminal_id)
+                completed
             }
             Err(error) if error.starts_with("TERMINAL_INPUT_RECOVERY_REQUIRED:") => {
                 // Ordinary cancellation must retain uncertain native operations.

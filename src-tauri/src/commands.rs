@@ -719,7 +719,7 @@ fn create_local_session_blocking(
     let (output_state_tx, output_state_rx) = bounded::<()>(1);
     let output_ready = Arc::new(AtomicBool::new(false));
     let output_paused = Arc::new(AtomicBool::new(false));
-    if let Err(message) = state.insert(
+    let worker_shutdown = match state.insert_with_shutdown(
         session_id.clone(),
         ManagedSession {
             sender: SessionCommandSender::Event(tx),
@@ -741,18 +741,21 @@ fn create_local_session_blocking(
             },
         },
     ) {
-        error!("Failed to register local session session_id={session_id}: {message}");
-        let cleanup_errors = terminate_failed_local_child(child.as_mut(), move || {
-            drop(writer);
-            drop(master);
-            drop(reader);
-        });
-        return Err(if cleanup_errors.is_empty() {
-            message
-        } else {
-            format!("{message}; cleanup: {}", cleanup_errors.join("; "))
-        });
-    }
+        Ok(sender) => sender,
+        Err(message) => {
+            error!("Failed to register local session session_id={session_id}: {message}");
+            let cleanup_errors = terminate_failed_local_child(child.as_mut(), move || {
+                drop(writer);
+                drop(master);
+                drop(reader);
+            });
+            return Err(if cleanup_errors.is_empty() {
+                message
+            } else {
+                format!("{message}; cleanup: {}", cleanup_errors.join("; "))
+            });
+        }
+    };
 
     let transport_kind = summary.pty_info.transport_kind;
     let broker_attachment = app
@@ -1373,6 +1376,7 @@ fn create_local_session_blocking(
             },
             false,
         );
+        let _ = worker_shutdown.send(());
     });
     info!("Created local session session_id={session_id} shell={shell}");
     #[cfg(unix)]

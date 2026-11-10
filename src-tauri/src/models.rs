@@ -1,4 +1,4 @@
-use crossbeam_channel::Sender as EventSender;
+use crossbeam_channel::{Receiver as EventReceiver, Sender as EventSender};
 use log::warn;
 use serde::{Deserialize, Serialize};
 use ssh2::{Session, Sftp};
@@ -994,6 +994,7 @@ pub(crate) struct SessionTargetState {
 struct SessionRegistry {
     sessions: HashMap<String, ManagedSession>,
     native_inflight: HashMap<String, Arc<std::sync::atomic::AtomicUsize>>,
+    worker_shutdowns: HashMap<String, EventReceiver<()>>,
 }
 
 #[derive(Clone, Default)]
@@ -1780,8 +1781,27 @@ impl SessionManager {
             .registry
             .lock()
             .map_err(|_| "session registry poisoned".to_string())?;
+        guard.worker_shutdowns.remove(&session_id);
         guard.sessions.insert(session_id, managed);
         Ok(())
+    }
+
+    /// A local worker acknowledges only after finalizing its output and
+    /// publishing transport closure. Removing the input registration is separate
+    /// from waiting for that acknowledgement.
+    pub(crate) fn insert_with_shutdown(
+        &self,
+        session_id: String,
+        managed: ManagedSession,
+    ) -> Result<EventSender<()>, String> {
+        let (sender, receiver) = crossbeam_channel::bounded(1);
+        let mut guard = self
+            .registry
+            .lock()
+            .map_err(|_| "session registry poisoned".to_string())?;
+        guard.sessions.insert(session_id.clone(), managed);
+        guard.worker_shutdowns.insert(session_id, receiver);
+        Ok(sender)
     }
 
     /// Raw terminal input sink. Production callers must authorize a typed
@@ -1828,13 +1848,21 @@ impl SessionManager {
     }
 
     pub(crate) fn close(&self, session_id: &str) -> Result<(), String> {
+        self.close_with_completion(session_id).map(|_| ())
+    }
+
+    pub(crate) fn close_with_completion(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<EventReceiver<()>>, String> {
         let mut guard = self
             .registry
             .lock()
             .map_err(|_| "session registry poisoned".to_string())?;
         let Some(managed) = guard.sessions.remove(session_id) else {
-            return Ok(());
+            return Ok(None);
         };
+        let completion = guard.worker_shutdowns.remove(session_id);
         guard.native_inflight.remove(session_id);
         // A disconnected command channel means its worker has already exited.
         // Missing sessions and exited workers both satisfy the close request.
@@ -1843,7 +1871,7 @@ impl SessionManager {
                 waker.wake();
             }
         }
-        Ok(())
+        Ok(completion)
     }
 
     pub(crate) fn status(&self, session_id: &str) -> Result<StatusEvent, String> {
@@ -1975,6 +2003,7 @@ impl SessionManager {
             .map_err(|_| "session registry poisoned".to_string())?;
         guard.sessions.remove(session_id);
         guard.native_inflight.remove(session_id);
+        guard.worker_shutdowns.remove(session_id);
         Ok(())
     }
 
