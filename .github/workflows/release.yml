@@ -136,6 +136,49 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  build-native-macos-editor:
+    name: Build pinned macOS Zsh resources
+    runs-on: xcode-27
+    needs: preflight
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: 1.95.0
+
+      - name: Build pinned Zsh, ZLE and adapter
+        shell: bash
+        env:
+          DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+          SDKROOT: /Library/Developer/CommandLineTools/SDKs/MacOSX27.0.sdk
+        run: |
+          if [[ ! -d "$SDKROOT" ]]; then
+            SDKROOT="$(DEVELOPER_DIR=/Applications/Xcode_27.1.app/Contents/Developer xcrun --sdk macosx27.0 --show-sdk-path)"
+          fi
+          node scripts/native-input-p3/build.mjs --build-scoped-core
+
+      - name: Upload macOS editor resources and source archive
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: native-macos-editor
+          path: |
+            .artifacts/tests/native-input-p2/resources/native-input/editors-macos-arm64.json
+            .artifacts/tests/native-input-p2/resources/native-input/zsh-5.9-zle-5.9-macos-arm64-native/
+            .artifacts/tests/native-input-p3/dependencies/zsh-5.9.tar.xz
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
   build:
     name: Build ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
@@ -143,6 +186,7 @@ jobs:
       - preflight
       - build-frontend
       - build-native-bash
+      - build-native-macos-editor
     # Build concurrently with quality checks; publication still requires both.
     strategy:
       fail-fast: false
@@ -177,6 +221,13 @@ jobs:
         with:
           name: native-linux-bash
           path: .artifacts/tests/native-input-p2/resources/native-input
+
+      - name: Download macOS native editor resources
+        if: runner.os == 'macOS'
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: native-macos-editor
+          path: .artifacts/tests
 
       - name: Setup pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
@@ -215,7 +266,8 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          pnpm native:prepare --target "$RUST_TARGET" --require-ssh
+          python3 -B scripts/native-input-p2/build.py
+          pnpm native:prepare --no-build --target "$RUST_TARGET" --require-ssh
           # 用 tag 推导出的版本号覆盖配置，使测试构建（如 2.0.30-test.1）的包版本与 tag 一致
           # signingIdentity 覆盖为 adhoc：配置文件里的 "ShellSpan Dev" 是开发者本机钥匙串里的
           # 自签名证书，runner 上没有；自签名对 Gatekeeper 本就无效，CI 用 adhoc 签名即可

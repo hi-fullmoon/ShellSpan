@@ -157,6 +157,12 @@ describe('generated artifact layout', () => {
     expect(nativeDownload.with.path).toBe(nativeUpload.with.path);
     expect(nativeUpload.with['include-hidden-files']).toBe(true);
 
+    const editorUpload = workflow.jobs['build-native-macos-editor'].steps.find(step => step.with?.name === 'native-macos-editor');
+    const editorDownload = workflow.jobs.build.steps.find(step => step.with?.name === editorUpload.with.name);
+    expect(editorDownload.with.path).toBe('.artifacts/tests');
+    expect(editorUpload.with.path.trim().split('\n').every(entry => entry.startsWith(`${editorDownload.with.path}/`))).toBe(true);
+    expect(editorUpload.with['include-hidden-files']).toBe(true);
+
     const bundleUpload = workflow.jobs.build.steps.find(step => step.name === 'Upload bundle artifact');
     const bundleDownload = workflow.jobs.release.steps.find(step => step.name === 'Download bundle artifacts');
     expect(bundleUpload.with.path).toMatch(/^\.artifacts\/releases\//);
