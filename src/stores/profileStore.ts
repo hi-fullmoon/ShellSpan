@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import type {
-  AuthMethod,
   ConnectionProfile,
   JumpHostConfig,
   PortForwardKind,
@@ -614,22 +613,3 @@ export const useProfileStore = create<ProfileState>()((set, get) => ({
     }));
   },
 }));
-
-export const DEFAULT_PROFILE_VALUES = {
-  port: 22,
-  authMethod: 'password' as AuthMethod,
-};
-
-export function createJumpHostConfig(
-  values: Partial<JumpHostConfig>,
-): JumpHostConfig {
-  return {
-    host: values.host ?? '',
-    port: values.port ?? 22,
-    username: values.username ?? '',
-    authMethod: values.authMethod ?? 'password',
-    password: values.password,
-    keychainKeyId: values.keychainKeyId,
-    passphrase: values.passphrase,
-  };
-}
