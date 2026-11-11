@@ -292,6 +292,48 @@ export function listenToTerminalAcceptanceRawOutput(callback: EventCallback<Term
   return listen<TerminalAcceptanceRawFrameEvent>('terminal-acceptance-raw-output', callback);
 }
 
+/** Real local reader bytes, independently of Broker generation acceptance. */
+export interface TerminalAcceptanceWireEvent {
+  readonly transportSessionId: string;
+  readonly terminalSessionId: string | null;
+  readonly terminalGeneration: number | null;
+  readonly frame: {
+    readonly protocolVersion: 1;
+    readonly type: 'transportRead';
+    readonly sequence: number;
+    readonly byteOffset: number;
+    readonly bytes: readonly number[];
+  };
+}
+
+/** Debug observation only; never a native command, lease or settlement receipt. */
+export interface TerminalAcceptanceWireFinalized {
+  readonly transportSessionId: string;
+  readonly terminalSessionId: string | null;
+  readonly terminalGeneration: number | null;
+  readonly frameCount: number;
+  readonly byteCount: number;
+  readonly nextSequence: number;
+  readonly deliveryFailed: boolean;
+  readonly authority: 'observation-only';
+  readonly worker: {
+    readonly readerStopped: boolean;
+    readonly childWaiterFinished: boolean;
+    readonly inputStopped: boolean;
+    readonly timedOut: boolean;
+    readonly closedByUser: boolean;
+    readonly controllerDropped: boolean;
+  };
+}
+
+export function listenToTerminalAcceptanceWireOutput(callback: EventCallback<TerminalAcceptanceWireEvent>): Promise<UnlistenFn> {
+  return listen<TerminalAcceptanceWireEvent>('terminal-acceptance-wire-output', callback);
+}
+
+export function listenToTerminalAcceptanceWireFinalized(callback: EventCallback<TerminalAcceptanceWireFinalized>): Promise<UnlistenFn> {
+  return listen<TerminalAcceptanceWireFinalized>('terminal-acceptance-wire-finalized', callback);
+}
+
 export interface TerminalAcceptanceRawPreparation {
   readonly requestId: string;
   readonly invocationOrigin: string;
@@ -314,6 +356,28 @@ export interface TerminalAcceptanceRawPreparation {
 /** Explicit isolated debug entrance to production preparation; never executes. */
 export function invokePrepareTerminalAcceptanceRawCommand(agentSessionId: string, background: boolean): Promise<TerminalAcceptanceRawPreparation> {
   return invokeLogged('prepare_terminal_acceptance_raw_command', { agentSessionId, background });
+}
+
+export type TerminalAcceptanceSourceKind = 'effect' | 'running' | 'syntax-error' | 'unsupported-input' | 'long-input';
+
+export interface TerminalAcceptanceSubmission {
+  readonly invocationOrigin: string;
+  readonly callId: string;
+  readonly sourceKind: TerminalAcceptanceSourceKind;
+  readonly source: string;
+  readonly settlement: 'Completed' | 'Waiting' | 'Cancelled';
+  readonly session: AgentSessionSnapshot;
+  readonly modelAvailability: string | null;
+}
+
+/** Explicit isolated debug entrance; the installed policy and tool pipeline run. */
+export function invokeRunTerminalAcceptanceCommand(agentSessionId: string, callId: string, sourceKind: TerminalAcceptanceSourceKind): Promise<TerminalAcceptanceSubmission> {
+  return invokeLogged('run_terminal_acceptance_command', { agentSessionId, callId, sourceKind });
+}
+
+/** Production approval decision without waking a model driver afterwards. */
+export function invokeDecideTerminalAcceptanceCommand(input: AgentRuntimeToolDecisionInput, approve: boolean): Promise<Pick<TerminalAcceptanceSubmission, 'session' | 'modelAvailability'>> {
+  return invokeLogged('decide_terminal_acceptance_command', { input, approve });
 }
 
 export interface TerminalAcceptanceInputLease {

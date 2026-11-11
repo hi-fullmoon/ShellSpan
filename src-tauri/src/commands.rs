@@ -47,6 +47,96 @@ const LOCAL_SHELL_ENVIRONMENT_VARIABLE: &str = "SHELLSPAN_LOCAL_SHELL";
 /// so its timeout error arrives before the result waiter expires.
 pub(crate) const SSH_CONNECT_RESULT_WAIT: Duration = Duration::from_secs(31);
 
+/// Independent acceptance observation of the real local reader stream. Broker
+/// generation fencing is deliberately not a prerequisite: retired transports
+/// may still drain bytes, but those bytes convey no input or Agent authority.
+#[cfg(all(
+    feature = "native-input-acceptance",
+    debug_assertions,
+    target_os = "macos",
+    target_arch = "aarch64"
+))]
+struct MacAcceptanceWireObserver {
+    enabled: bool,
+    failed: bool,
+    transport_id: String,
+    terminal_id: Option<String>,
+    generation: Option<u64>,
+    sequence: u64,
+    offset: u64,
+}
+
+#[cfg(all(
+    feature = "native-input-acceptance",
+    debug_assertions,
+    target_os = "macos",
+    target_arch = "aarch64"
+))]
+impl MacAcceptanceWireObserver {
+    fn new(transport_id: String, terminal_id: Option<String>, generation: Option<u64>) -> Self {
+        Self {
+            enabled: terminal_acceptance_directory().is_ok(),
+            failed: false,
+            transport_id,
+            terminal_id,
+            generation,
+            sequence: 1,
+            offset: 0,
+        }
+    }
+
+    fn output(&mut self, app: &AppHandle, bytes: &[u8]) {
+        if !self.enabled || bytes.is_empty() {
+            return;
+        }
+        let next = self.sequence.checked_add(1);
+        let end = self.offset.checked_add(bytes.len() as u64);
+        let (Some(next), Some(end)) = (next, end) else {
+            self.failed = true;
+            return;
+        };
+        let event = serde_json::json!({
+            "transportSessionId": self.transport_id,
+            "terminalSessionId": self.terminal_id,
+            "terminalGeneration": self.generation,
+            "frame": {"protocolVersion":1,"type":"transportRead","sequence":self.sequence,"byteOffset":self.offset,"bytes":bytes},
+        });
+        if let Err(error) = app.emit("terminal-acceptance-wire-output", event) {
+            if !self.failed {
+                warn!(
+                    "Acceptance transport observation delivery failed session_id={}: {error}",
+                    self.transport_id
+                );
+            }
+            self.failed = true;
+        }
+        self.sequence = next;
+        self.offset = end;
+    }
+
+    fn finish(&self, app: &AppHandle, worker: serde_json::Value) {
+        if !self.enabled {
+            return;
+        }
+        if let Err(error) = app.emit(
+            "terminal-acceptance-wire-finalized",
+            serde_json::json!({
+                "transportSessionId":self.transport_id,
+                "terminalSessionId":self.terminal_id,
+                "terminalGeneration":self.generation,
+                "frameCount":self.sequence-1,"byteCount":self.offset,"nextSequence":self.sequence,
+                "deliveryFailed":self.failed,"worker":worker,
+                "authority":"observation-only",
+            }),
+        ) {
+            warn!(
+                "Acceptance transport finalization delivery failed session_id={}: {error}",
+                self.transport_id
+            );
+        }
+    }
+}
+
 enum LocalWorkerActivity {
     Command(Result<SessionCommand, crossbeam_channel::RecvError>),
     Output(Result<Vec<u8>, crossbeam_channel::RecvError>),
@@ -953,6 +1043,17 @@ fn create_local_session_blocking(
         port: summary.port,
         username: summary.username.clone(),
     };
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    let mut acceptance_wire = MacAcceptanceWireObserver::new(
+        worker_id.clone(),
+        summary.terminal_session_id.clone(),
+        summary.terminal_generation,
+    );
     thread::spawn(move || {
         let _terminal_integration_control = terminal_integration_control;
         #[cfg(any(unix, windows))]
@@ -1182,12 +1283,26 @@ fn create_local_session_blocking(
                     break;
                 }
                 LocalWorkerActivity::Output(Ok(bytes)) => {
+                    #[cfg(all(
+                        feature = "native-input-acceptance",
+                        debug_assertions,
+                        target_os = "macos",
+                        target_arch = "aarch64"
+                    ))]
+                    acceptance_wire.output(&app, &bytes);
                     observe_terminal_raw_output(&app, &worker_id, &bytes);
                     pending_bytes.extend_from_slice(&bytes);
                     for bytes in output_rx
                         .try_iter()
                         .take(LOCAL_OUTPUT_DRAIN_BUDGET.saturating_sub(1))
                     {
+                        #[cfg(all(
+                            feature = "native-input-acceptance",
+                            debug_assertions,
+                            target_os = "macos",
+                            target_arch = "aarch64"
+                        ))]
+                        acceptance_wire.output(&app, &bytes);
                         observe_terminal_raw_output(&app, &worker_id, &bytes);
                         pending_bytes.extend_from_slice(&bytes);
                     }
@@ -1231,6 +1346,13 @@ fn create_local_session_blocking(
         #[cfg(not(target_os = "macos"))]
         let input_closed = true;
         let shutdown_timeout = after(LOCAL_READER_SHUTDOWN_TIMEOUT);
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let mut shutdown_timed_out = false;
         while !reader_closed || !child_exited || !input_closed {
             let selectable_output = if reader_closed {
                 &never_output
@@ -1254,11 +1376,25 @@ fn create_local_session_blocking(
             let selectable_input = &never_input;
             crossbeam_channel::select_biased! {
                 recv(shutdown_timeout) -> _ => {
+                    #[cfg(all(
+                        feature = "native-input-acceptance",
+                        debug_assertions,
+                        target_os = "macos",
+                        target_arch = "aarch64"
+                    ))]
+                    { shutdown_timed_out = true; }
                     warn!("Local shell shutdown did not complete session_id={worker_id}; detaching remaining waiter");
                     break;
                 },
                 recv(selectable_output) -> output => match output {
                     Ok(bytes) => {
+                        #[cfg(all(
+                            feature = "native-input-acceptance",
+                            debug_assertions,
+                            target_os = "macos",
+                            target_arch = "aarch64"
+                        ))]
+                        acceptance_wire.output(&app, &bytes);
                         observe_terminal_raw_output(&app, &worker_id, &bytes);
                         pending_bytes.extend_from_slice(&bytes);
                     }
@@ -1284,6 +1420,13 @@ fn create_local_session_blocking(
             let _ = child_handle.join();
         }
         while let Ok(bytes) = output_rx.try_recv() {
+            #[cfg(all(
+                feature = "native-input-acceptance",
+                debug_assertions,
+                target_os = "macos",
+                target_arch = "aarch64"
+            ))]
+            acceptance_wire.output(&app, &bytes);
             observe_terminal_raw_output(&app, &worker_id, &bytes);
             pending_bytes.extend_from_slice(&bytes);
         }
@@ -1376,6 +1519,16 @@ fn create_local_session_blocking(
             },
             false,
         );
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        acceptance_wire.finish(&app, serde_json::json!({
+            "readerStopped":reader_closed,"childWaiterFinished":child_exited,"inputStopped":input_closed,
+            "timedOut":shutdown_timed_out,"closedByUser":closed_by_user,"controllerDropped":controller_dropped,
+        }));
         let _ = worker_shutdown.send(());
     });
     info!("Created local session session_id={session_id} shell={shell}");
@@ -1540,6 +1693,78 @@ pub(crate) fn terminal_acceptance_directory() -> Result<std::path::PathBuf, Stri
         return Err("TERMINAL_ACCEPTANCE_DISABLED".into());
     }
     Ok(directory)
+}
+
+#[tauri::command]
+pub(crate) async fn run_terminal_acceptance_command(
+    agent_runtime: State<'_, crate::agent_runtime::AgentRuntime>,
+    agent_session_id: String,
+    call_id: String,
+    source_kind: String,
+) -> Result<serde_json::Value, String> {
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    {
+        let directory = terminal_acceptance_directory()?;
+        if std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION").as_deref() != Ok("1") {
+            return Err("TERMINAL_ACCEPTANCE_DISABLED".into());
+        }
+        agent_runtime
+            .terminal_acceptance_run_command(
+                &agent_session_id,
+                &directory.join("home"),
+                &call_id,
+                &source_kind,
+            )
+            .await
+    }
+    #[cfg(not(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    )))]
+    {
+        let _ = (agent_runtime, agent_session_id, call_id, source_kind);
+        Err("TERMINAL_ACCEPTANCE_DISABLED".into())
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn decide_terminal_acceptance_command(
+    agent_runtime: State<'_, crate::agent_runtime::AgentRuntime>,
+    input: crate::agent_runtime::AgentToolDecisionInput,
+    approve: bool,
+) -> Result<serde_json::Value, String> {
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    {
+        let directory = terminal_acceptance_directory()?;
+        if std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION").as_deref() != Ok("1") {
+            return Err("TERMINAL_ACCEPTANCE_DISABLED".into());
+        }
+        agent_runtime
+            .terminal_acceptance_decide_command(&directory.join("home"), input, approve)
+            .await
+    }
+    #[cfg(not(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    )))]
+    {
+        let _ = (agent_runtime, input, approve);
+        Err("TERMINAL_ACCEPTANCE_DISABLED".into())
+    }
 }
 
 #[tauri::command]

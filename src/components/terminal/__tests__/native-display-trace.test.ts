@@ -52,3 +52,25 @@ it('retains the original public search action instead of reconstructing its sele
  const value=trace.snapshot('');expect(value.events).toEqual([{type:'action',action:{kind:'searchNext',term:'actual historical 中文 e\u0301'},outputSequence:-1,parsedThrough:-1}]);
  expect(value.outputEvents).toBe(0);expect(value.inputOrLifecycleAuthority).toBe(false);
 });
+it('keeps exact public paste data and ordering separate from visible bytes and earlier trace versions',()=>{
+ const trace=new NativeDisplayTrace(initial),original='printf 中文 e\u0301 👩🏽‍💻\nsecond\t  ';
+ trace.parsed(trace.output('actual output\r\n'));trace.action({kind:'paste',data:original});
+ const value=trace.snapshot('actual output\r\n');
+ expect(value.version).toBe(5);expect(value.replayable).toBe(true);expect(value.outputCharacters).toBe(15);
+ expect(value.events[1]).toEqual({type:'action',action:{kind:'paste',data:original},outputSequence:0,parsedThrough:0});
+ expect(value.inputOrLifecycleAuthority).toBe(false);expect(new NativeDisplayTrace(initial).snapshot('').version).toBe(2);
+});
+it('keeps rendering lifecycle observations explicit without granting command authority',()=>{
+ const trace=new NativeDisplayTrace(initial);trace.action({kind:'unicodeVersion',version:'6'});trace.action({kind:'transportClosed'});
+ const value=trace.snapshot('');expect(value.version).toBe(3);expect(value.outputEvents).toBe(0);expect(value.inputOrLifecycleAuthority).toBe(false);
+ expect(value.events.map(event=>event.type==='action'?event.action:null)).toEqual([{kind:'unicodeVersion',version:'6'},{kind:'transportClosed'}]);
+});
+it('retains a real rebind request between old queued output and the captured boundary without inventing a drain',()=>{
+ const trace=new NativeDisplayTrace(initial),ptyInfo={transportKind:'localPty' as const,inputMode:'raw' as const};
+ trace.output('old\u001b[?25h','local');trace.action({kind:'rebindDisplay',ptyInfo});trace.parsed(0);
+ trace.parsed(trace.output('\u001b\\','local'));trace.parsed(trace.output('new','session'));
+ const value=trace.snapshot('old\u001b[?25h\u001b\\new');
+ expect(value.version).toBe(4);expect(value.replayable).toBe(true);expect(value.inputOrLifecycleAuthority).toBe(false);
+ expect(value.events[1]).toEqual({type:'action',action:{kind:'rebindDisplay',ptyInfo},outputSequence:0,parsedThrough:-1});
+ expect(value.events.filter(event=>event.type==='output').map(event=>event.characters)).toEqual([9,2,3]);
+});

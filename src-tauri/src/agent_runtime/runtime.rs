@@ -18,6 +18,15 @@ use super::{
     OrchestrationToolRuntimeSlot, SubAgentManager,
 };
 
+#[cfg(all(
+    feature = "native-input-acceptance",
+    debug_assertions,
+    target_os = "macos",
+    target_arch = "aarch64"
+))]
+#[path = "mac_submission_acceptance.rs"]
+mod mac_submission_acceptance;
+
 #[cfg(test)]
 use super::{
     assistant_content_text, AgentAfterToolHook, AgentBeforeToolHook, AgentPreStepHook,
@@ -837,9 +846,21 @@ impl AgentRuntime {
             return Err("ACCEPTANCE_ISOLATED_BOUND_TARGET_REQUIRED".into());
         }
         let before = self.terminal_broker_snapshot(Some(&target.session_id))?;
-        if before.session.as_ref().map(|session| session.input_mode)
-            != Some(crate::terminal_command::protocol::InputMode::Raw)
-        {
+        let raw = before.session.as_ref().map(|session| session.input_mode)
+            == Some(crate::terminal_command::protocol::InputMode::Raw);
+        let private_eof = std::env::var("SHELLSPAN_ACCEPTANCE_PRIVATE_EOF_PREPARE").as_deref()
+            == Ok("1")
+            && before.session.as_ref().is_some_and(|session| {
+                session.input_mode == crate::terminal_command::protocol::InputMode::NativeInline
+                    && session.transport_kind
+                        == crate::terminal_broker::TerminalTransportKind::LocalPty
+                    && session.integration_state
+                        == crate::terminal_broker::TerminalIntegrationState::Unavailable
+                    && session.integration_reason.as_deref() == Some("nativeControlClosed")
+                    && session.native_peer_profile.is_some()
+                    && session.open
+            });
+        if !raw && !private_eof {
             return Err("ACCEPTANCE_ACTUAL_RAW_TRANSPORT_REQUIRED".into());
         }
         let effect = home.join("phase2-raw-agent-effect");
@@ -864,7 +885,7 @@ impl AgentRuntime {
                 name: "run_terminal_command".into(),
                 arguments: serde_json::json!({
                     "command": source,
-                    "explanation": "Verify actual unsupported raw terminal preparation refusal without execution",
+                    "explanation": "Verify actual unavailable cooperative terminal preparation refusal without execution",
                     "background": background,
                     "timeoutMs": 5000
                 }),
@@ -1470,7 +1491,7 @@ impl AgentRuntime {
             )?;
         }
         if let Some(current) = current.as_mut() {
-            **current = super::AgentModelSelection { provider, adapter };
+            **current = Some(super::AgentModelSelection { provider, adapter });
         }
         self.sessions.snapshot(session_id)
     }
@@ -2108,6 +2129,16 @@ impl AgentRuntime {
         terminate: bool,
     ) -> Result<AgentSessionSnapshot, String> {
         let _stop = self.begin_session_stop(session_id)?;
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        crate::terminal_command::acceptance_trace::record(
+            "session-stop-entered",
+            serde_json::json!({"agentSessionId":session_id,"terminate":terminate}),
+        )?;
         self.models.images.cancel_session(session_id)?;
         self.subagents.cancel_descendants(session_id).await?;
         let handle = self

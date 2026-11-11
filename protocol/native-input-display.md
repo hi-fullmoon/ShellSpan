@@ -69,7 +69,11 @@ owned路径；除上述已验证私有ConPTY组合外，普通默认及exit保�
 
 SIGKILL 无法由死进程补发 off；真实传输 EOF 负责最终显示清理。控制通道 EOF、取消/接管与可处理的退出由原生 provider 自身恢复；提交后缺少私有结果仍是不确定，禁止自动重放。
 
-排空/dispose 不重置 xterm 尚未结束的 OSC 或 UTF-8 解析状态。P2 的真实 registry 验证覆盖 native→native→raw→native、实际 producer 的半个 OSC/UTF-8、后继普通文字与原历史。关闭及重绑先停止旧回调入队，再排空、卸载并发送标准流边界，不调用 terminal.reset、清屏、重放历史或私有 parser。生产 ssh-data 使用后端增量 UTF-8 解码后的字符串；浏览器复验按这一真实传输类型回放原始 PTY 捕获。
+普通显式 `close_session` 先撤除终端输入入口，并在关闭准入锁内等待已注册本地 worker 完成既有输出收尾，再结束 Broker generation。排空期间实际读到的尾部仍须进入原始捕获，不能因先关闭 Broker 而变成 stale 输出。等待不阻塞 Tauri 主线程；超过10秒仍未确认时返回关闭输出未确认并封锁传输。需要恢复的未知提交强制关闭分支仍先执行原有 fence，不凭普通尾输出生成可信结束或改写持久意图。
+
+worker 完成通知不等于所有情况下都取得完整物理 EOF：既有有界收尾仍可能超时分离。验收必须另外核对实际 reader/child waiter/input 停止状态、`timedOut=false`、原始序号和字节边界。macOS arm64 的显式 debug 验收增加独立的 `terminal-acceptance-wire-output` / `terminal-acceptance-wire-finalized` 观察；仅 `native-input-acceptance`、debug构建及已校验的本次证据目录下启用。前者保存 Broker 准入之前实际读取的原字节，后者只报告真实 worker 状态与计数；它们不是 NIP 事件、能力证明、命令结束或用户回执。被替换/退役传输的真实尾字节也可观察，但不能因此改变后继状态或取得输入权。Broker已接受原帧与这一底层观察分别保留、核对，不能相互冒充。
+
+排空/dispose 不重置 xterm 尚未结束的 OSC 或 UTF-8 解析状态。P2 的真实 registry 验证覆盖 native→native→raw→native、实际 producer 的半个 OSC/UTF-8、后继普通文字与原历史。关闭及重绑先停止旧回调入队，再排空、卸载并发送标准流边界，不调用 terminal.reset、清屏、重放历史或私有 parser。生产 ssh-data 使用后端增量 UTF-8 解码后的字符串；浏览器显示复验使用本次实际送入显示的完整 visible 流，包含本地状态行、过滤后的会话字节和控制序列。原始PTY字节和真实解码会话流分别保留，不能用其一替代完整显示；浏览器不得再次执行Shell源码。
 
 Windows 新 ConPTY 的初始光标位置相对于新的可见屏幕。重绑到该传输时，先按旧传输语义排空输出，
 再切换 ConPTY 选项；普通缓冲区通过标准光标定位和换行将旧屏幕 cell 滚入现有 scrollback，
@@ -102,6 +106,10 @@ insert/delete/trim 事件解析其行并限制在可用滚动范围。不能继�
 该锚点。回归使用实际 LIVE 失败捕获，分别检查历史停留与底部跟随，不搜索文字或恢复选区。
 
 ## 可重建验证
+
+显示观察区分controller接受输出和xterm实际完成解析。`subscribeDisplayOutputParsed`只从原公开write/writeln回调通知对应的原data/source，不修改字节、控制序列、输入或生命周期事实；没有监听者时不为本地输出增加回调。该通知不授予原生、Agent或执行能力。
+
+私有EOF验收可显式使用显示trace版本6：保留原输出接收、实际解析完成事件和每次resize时完整公共buffer/光标/viewport/selection状态。回放分别核对事件顺序、每个实际resize状态和原排空检查点；未观察到的部分解析或任何状态差异仍失败。旧版本的排空要求保持，缺失这些事件/状态的旧失败捕获不能事后升级。`node src/components/terminal/__tests__/native-display-parsed.browser.mjs`用真实cat输出及固定Chromium/WebKit/xterm验证排队写入与resize交错、完整状态相等、原始HTTP字节留存及负向拒绝，不执行Shell源码回放，也不提供原生或人工验收回执。
 
 `pnpm test:terminal-native-display` 直接使用仓库内由真实 PTY 导出的冻结包片段；缺失或摘要不符会失败，不依赖旧机器上的忽略目录。
 

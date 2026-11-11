@@ -431,6 +431,8 @@ export interface TerminalController {
   whenOutputReady(): Promise<void>;
   subscribeOutput(listener: TerminalOutputCallback): () => void;
   subscribeDisplayOutput(listener: TerminalDisplayOutputCallback): () => void;
+  /** Read-only notification from the actual public xterm write callback. */
+  subscribeDisplayOutputParsed(listener: TerminalDisplayOutputCallback): () => void;
   subscribeOutputFilter(filter: TerminalOutputFilter): () => void;
   subscribeLifecycle(listener: TerminalLifecycleCallback): () => void;
   write(chunk: string): void;
@@ -502,6 +504,7 @@ class TerminalControllerImpl implements TerminalController {
   private outputResumeRetryAttempts = 0;
   private readonly outputListeners = new Set<TerminalOutputCallback>();
   private readonly displayOutputListeners = new Set<TerminalDisplayOutputCallback>();
+  private readonly displayOutputParsedListeners = new Set<TerminalDisplayOutputCallback>();
   private readonly outputFilters = new Set<TerminalOutputFilter>();
   private readonly lifecycleListeners = new Set<TerminalLifecycleCallback>();
   private listenerSetup: Promise<void>;
@@ -722,7 +725,7 @@ class TerminalControllerImpl implements TerminalController {
   private writeSystemLine(line: string): void {
     if (this.disposed) return;
     this.emitDisplayOutput(line + '\r\n', 'local');
-    this.terminal.writeln(line);
+    this.terminal.writeln(line, this.displayOutputParsedCallback(line + '\r\n', 'local'));
   }
 
   private emitDisplayOutput(data: string, source: TerminalDisplayOutput['source']): void {
@@ -731,6 +734,17 @@ class TerminalControllerImpl implements TerminalController {
       try {listener({source, data});}
       catch (error) {logger.warn(`Terminal display output subscriber failed for session ${this.sessionId}`, error);}
     }
+  }
+
+  private displayOutputParsedCallback(data: string, source: TerminalDisplayOutput['source']): (() => void) | undefined {
+    if (this.disposed || !data || !this.displayOutputParsedListeners.size) return undefined;
+    return () => {
+      if (this.disposed) return;
+      for (const listener of this.displayOutputParsedListeners) {
+        try {listener({source, data});}
+        catch (error) {logger.warn(`Terminal parsed display subscriber failed for session ${this.sessionId}`, error);}
+      }
+    };
   }
 
   private showWriteFailure(): void {
@@ -847,7 +861,7 @@ class TerminalControllerImpl implements TerminalController {
           if (this.disposed || sessionId !== this.sessionId) return;
           // A standard ST closes only the old stream's partial escape.
           this.emitDisplayOutput('\u001b\\', 'local');
-          this.terminal.write('\u001b\\');
+          this.terminal.write('\u001b\\', this.displayOutputParsedCallback('\u001b\\', 'local'));
           showClosed();
         });
       }
@@ -941,7 +955,9 @@ class TerminalControllerImpl implements TerminalController {
       this.setOutputPaused(true);
     }
     this.emitDisplayOutput(chunk, 'session');
+    const parsed = this.displayOutputParsedCallback(chunk, 'session');
     this.terminal.write(chunk, () => {
+      parsed?.();
       if (this.disposed || generation !== this.outputGeneration) return;
       this.pendingOutputCharacters = Math.max(0, this.pendingOutputCharacters - length);
       if (
@@ -1470,6 +1486,12 @@ class TerminalControllerImpl implements TerminalController {
     return () => this.displayOutputListeners.delete(listener);
   }
 
+  subscribeDisplayOutputParsed(listener: TerminalDisplayOutputCallback): () => void {
+    if (this.disposed) return () => {};
+    this.displayOutputParsedListeners.add(listener);
+    return () => this.displayOutputParsedListeners.delete(listener);
+  }
+
   subscribeOutputFilter(filter: TerminalOutputFilter): () => void {
     if (this.disposed) return () => {};
     this.outputFilters.add(filter);
@@ -1500,7 +1522,7 @@ class TerminalControllerImpl implements TerminalController {
 
   write(chunk: string): void {
     this.emitDisplayOutput(chunk, 'local');
-    this.terminal.write(chunk);
+    this.terminal.write(chunk, this.displayOutputParsedCallback(chunk, 'local'));
   }
 
   private failureMessage: string | undefined;
@@ -1509,7 +1531,7 @@ class TerminalControllerImpl implements TerminalController {
     if (this.failureMessage === message) return;
     this.failureMessage = message;
     this.emitDisplayOutput('\r\n\u001b[?25l', 'local');
-    this.terminal.write('\r\n\u001b[?25l');
+    this.terminal.write('\r\n\u001b[?25l', this.displayOutputParsedCallback('\r\n\u001b[?25l', 'local'));
     this.writeSystemLine(formatTerminalStatusLine('error', message));
     this.writeSystemLine(formatTerminalNoticeLine(t('terminal.notice.hintLabel'), t('terminal.notice.connectionFailedHint')));
     this.inputBlockedNoticeRef = true;
@@ -1528,7 +1550,7 @@ class TerminalControllerImpl implements TerminalController {
     if (this.disposed || sessionId === this.sessionId) return;
     this.failureMessage = undefined;
     this.emitDisplayOutput('\u001b[?25h', 'local');
-    this.terminal.write('\u001b[?25h');
+    this.terminal.write('\u001b[?25h', this.displayOutputParsedCallback('\u001b[?25h', 'local'));
     const previousSessionId = this.sessionId;
     terminalInputReadiness.finish(previousSessionId);
     this.emitLifecycle({
@@ -1576,7 +1598,7 @@ class TerminalControllerImpl implements TerminalController {
         ? `\u001b\\\u001b[${this.terminal.rows};1H${'\r\n'.repeat(this.terminal.rows)}\u001b[H`
         : '\u001b\\';
       this.emitDisplayOutput(boundary, 'local');
-      this.terminal.write(boundary);
+      this.terminal.write(boundary, this.displayOutputParsedCallback(boundary, 'local'));
       this.commandDecorations = this.installInputRendering(ptyInfo);
       return this.startListenerSetup(true);
     });
@@ -1668,6 +1690,7 @@ class TerminalControllerImpl implements TerminalController {
     clearTerminalOutput(this.sessionId);
     this.outputListeners.clear();
     this.displayOutputListeners.clear();
+    this.displayOutputParsedListeners.clear();
     this.outputFilters.clear();
     this.userInputSuppressions = 0;
     this.userInputBlockedListeners.clear();

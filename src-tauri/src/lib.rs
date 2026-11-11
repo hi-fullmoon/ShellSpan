@@ -291,6 +291,27 @@ pub fn run() {
                 }
             }
             let home_dir = app.path().home_dir()?;
+            #[cfg(all(
+                feature = "native-input-acceptance",
+                debug_assertions,
+                target_os = "macos",
+                target_arch = "aarch64"
+            ))]
+            if std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION").as_deref() == Ok("1") {
+                let evidence =
+                    commands::terminal_acceptance_directory().map_err(std::io::Error::other)?;
+                assert_eq!(home_dir, evidence.join("home"));
+                let root = evidence.join("app-directories");
+                let data = app.path().app_data_dir()?;
+                let config = app.path().app_config_dir()?;
+                let cache = app.path().app_cache_dir()?;
+                assert!(data == root && config == root && cache == root.join("caches"));
+                terminal_command::acceptance_trace::record(
+                    "isolated-app-paths",
+                    serde_json::json!({"home":home_dir,"data":data,"config":config,"cache":cache}),
+                )
+                .map_err(std::io::Error::other)?;
+            }
             path_utils::configure_data_directory(
                 std::env::var_os("SHELLSPAN_DATA_DIR").map(std::path::PathBuf::from),
             )?;
@@ -470,6 +491,8 @@ pub fn run() {
             commands::get_terminal_broker_snapshot,
             commands::get_terminal_acceptance_raw_output,
             commands::prepare_terminal_acceptance_raw_command,
+            commands::run_terminal_acceptance_command,
+            commands::decide_terminal_acceptance_command,
             commands::control_terminal_acceptance_input_lease,
             commands::get_terminal_submission_recovery,
             commands::close_session,
@@ -585,6 +608,40 @@ pub fn run() {
             );
             let identifier =
                 uuid::Uuid::parse_str(&value).expect("exact WebKit case UUID required");
+            if std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION").as_deref() == Ok("1") {
+                // Keep the compiled acceptance config stable. The same owned
+                // per-case directory still applies before any Tauri setup.
+                let directory = commands::terminal_acceptance_directory()
+                    .expect("owned submission acceptance directories required");
+                assert_eq!(evidence, directory);
+                assert_eq!(
+                    context.config().identifier,
+                    "com.shellspan.validation.native-input-p3"
+                );
+                assert_eq!(
+                    std::env::var_os("HOME"),
+                    Some(directory.join("home").into_os_string())
+                );
+                assert_eq!(
+                    std::fs::canonicalize(&directory).ok().as_ref(),
+                    Some(&directory)
+                );
+                let root = directory.join("app-directories");
+                match std::fs::symlink_metadata(&root) {
+                    Ok(metadata) => {
+                        assert!(metadata.is_dir() && !metadata.file_type().is_symlink())
+                    }
+                    Err(error) => assert_eq!(error.kind(), std::io::ErrorKind::NotFound),
+                }
+                let app = &mut context.config_mut().app;
+                assert!(app.app_directories_override.is_none());
+                app.app_directories_override =
+                    Some(tauri::utils::config::AppDirectoriesOverride::Root(
+                        root.to_str()
+                            .expect("UTF-8 acceptance directory required")
+                            .into(),
+                    ));
+            }
             let window = context
                 .config_mut()
                 .app

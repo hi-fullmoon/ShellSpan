@@ -1,0 +1,17 @@
+{
+  "version": 5,
+  "streamKind": "actual-visible-output",
+  "offsetUnit": "UTF16-code-units",
+  "initial": {"columns":80,"rows":12,"empty":true,"unicodeVersion":"6","options":{"scrollback":10000}},
+  "events": [
+    {"type":"output","sequence":0,"offset":0,"characters":4801,"source":"session"},
+    {"type":"action","action":{"kind":"scrollToLine","row":0},"outputSequence":0,"parsedThrough":0},
+    {"type":"action","action":{"kind":"paste","data":"printf 中文 é 👩🏽‍💻\nsecond\t  "},"outputSequence":0,"parsedThrough":0}
+  ],
+  "outputCharacters":4801,
+  "outputEvents":1,
+  "issues":[],
+  "replayable":true,
+  "inputOrLifecycleAuthority":false,
+  "originalWireBytesClaimed":false
+}

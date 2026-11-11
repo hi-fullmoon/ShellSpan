@@ -39,7 +39,7 @@ pub(crate) struct AgentEntry {
     pub(crate) session_id: String,
     // A new in-memory Agent starts a new series when a persisted session resumes.
     pub(crate) request_series_id: String,
-    pub(crate) model: Mutex<AgentModelSelection>,
+    pub(crate) model: Mutex<Option<AgentModelSelection>>,
     pub(crate) model_registry: Mutex<Option<super::ModelRegistry>>,
     pub(crate) capability_scope: Option<AgentCapabilityScope>,
     pub(crate) subagent: Option<AgentSubagentSession>,
@@ -66,10 +66,26 @@ impl AgentEntry {
         subagent: Option<AgentSubagentSession>,
         initial_phase: AgentLifecyclePhase,
     ) -> Self {
+        Self::new_with_model(
+            session_id,
+            Some(AgentModelSelection { provider, adapter }),
+            capability_scope,
+            subagent,
+            initial_phase,
+        )
+    }
+
+    fn new_with_model(
+        session_id: String,
+        model: Option<AgentModelSelection>,
+        capability_scope: Option<AgentCapabilityScope>,
+        subagent: Option<AgentSubagentSession>,
+        initial_phase: AgentLifecyclePhase,
+    ) -> Self {
         Self {
             session_id,
             request_series_id: format!("series-{}", uuid::Uuid::new_v4().simple()),
-            model: Mutex::new(AgentModelSelection { provider, adapter }),
+            model: Mutex::new(model),
             model_registry: Mutex::new(None),
             capability_scope,
             subagent,
@@ -120,8 +136,9 @@ impl AgentEntry {
     pub(crate) fn model(&self) -> Result<AgentModelSelection, String> {
         self.model
             .lock()
-            .map(|model| model.clone())
-            .map_err(|_| "Agent model selection lock is unavailable".into())
+            .map_err(|_| "Agent model selection lock is unavailable".to_string())?
+            .clone()
+            .ok_or_else(|| "MODEL_SELECTION_REQUIRED".into())
     }
 
     pub(crate) fn phase(&self) -> Result<AgentLifecyclePhase, String> {
@@ -321,6 +338,45 @@ impl AgentRegistry {
             snapshot.header.subagent,
             initial_phase,
         ));
+        self.attach_entry(sessions, session_id, entry)
+    }
+
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    pub(crate) fn attach_without_model(
+        &self,
+        sessions: AgentSessionStore,
+        session_id: String,
+    ) -> Result<AgentHandle, String> {
+        let snapshot = sessions.snapshot(&session_id)?;
+        if snapshot.ended || snapshot.header.model_selection.is_some() {
+            return Err("ACCEPTANCE_LIVE_NO_MODEL_SESSION_REQUIRED".into());
+        }
+        let phase = if snapshot.status == super::AgentSessionStatus::Waiting {
+            AgentLifecyclePhase::Waiting
+        } else {
+            AgentLifecyclePhase::Idle
+        };
+        let entry = Arc::new(AgentEntry::new_with_model(
+            session_id.clone(),
+            None,
+            snapshot.header.capability_scope,
+            snapshot.header.subagent,
+            phase,
+        ));
+        self.attach_entry(sessions, session_id, entry)
+    }
+
+    fn attach_entry(
+        &self,
+        sessions: AgentSessionStore,
+        session_id: String,
+        entry: Arc<AgentEntry>,
+    ) -> Result<AgentHandle, String> {
         let mut entries = self
             .entries
             .lock()
@@ -592,6 +648,32 @@ mod tests {
         );
         assert!(!invoked.load(Ordering::Acquire));
         assert_eq!(entry.phase().unwrap(), AgentLifecyclePhase::Stopping);
+    }
+
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    #[test]
+    fn explicit_acceptance_owner_has_no_model_and_keeps_registry_cancellation() {
+        let (_root, sessions, registry) = setup();
+        let handle = registry
+            .attach_without_model(sessions.clone(), "session-1".into())
+            .unwrap();
+        let entry = handle.entry();
+        assert_eq!(
+            entry.model().err().as_deref(),
+            Some("MODEL_SELECTION_REQUIRED")
+        );
+        assert!(registry
+            .attach_without_model(sessions, "session-1".into())
+            .is_err());
+        let cancellation = entry.cancellation();
+        assert!(!cancellation.is_cancelled());
+        entry.cancel();
+        assert!(cancellation.is_cancelled());
     }
 
     #[test]
