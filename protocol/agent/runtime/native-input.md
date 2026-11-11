@@ -59,7 +59,7 @@ Windows 后台标记的名称冲突检查不得自动导入模块或执行模块
 能力不足的新 Agent 命令在 lease/PTY 写入前返回 `TERMINAL_NATIVE_INPUT_REQUIRED`；
 不自动选择替代 Shell。普通用户输入与 TUI 保留；当前后台作业的输入和管理均走已验证的原生通道。
 生产编辑器清单准入 macOS arm64 本地及 Linux aarch64/glibc 2.36 SSH 的 Zsh 5.9/ZLE 5.9，
-以及 Windows x64 的 Windows PowerShell 5.1 和 PowerShell 7 两个固定版本配置。
+以及 Windows x64 的 PowerShell 7 固定版本配置。Windows 本地原生终端在没有明确指定 Shell 时优先选择与随包摘要匹配的 `pwsh.exe`；准备失败时启动普通 Windows PowerShell 5.1 会话。明确指定的 Shell 仍按配置启动，缺少原生能力时使用普通终端模式。
 macOS 仅在所选 Zsh 匹配受信系统摘要时，启动应用随包提供的已校验私有 Zsh 和 Core。
 GNU Bash 正式包只提供 Bash 5.3 / Readline 8.3.6，沿用独立的来源匹配 catalogue、实际 Shell SHA 和模块校验。Bash 4.1 和 4.4 可显式构建用于兼容性验证。缺少匹配构建的 Bash 会话保留普通终端输入和 TUI。
 各平台实际结果分别留证，统一实机待验项见[验收清单](../../../docs/design/agent-terminal-input-acceptance-checklist.md)。

@@ -4,6 +4,9 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
+pub(crate) const POWERSHELL7_NATIVE_PROFILE: &str =
+    "powershell-7.6.9-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native";
+
 pub(crate) fn mac_zle_pin(field: &str) -> Result<String, String> {
     let pin: serde_json::Value = serde_json::from_str(include_str!(
         "../../../scripts/dependency-builds/zsh/pin.json"
@@ -32,9 +35,7 @@ impl VerifiedNativeProfile {
     pub(crate) fn display_origin_channel(&self) -> bool {
         self.private_conpty
             && self.editor_profile.is_some()
-            && matches!(self.profile_id.as_str(),
-                "powershell-7.6.9-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native"
-                | "windows-powershell-5.1.26100.9818-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native")
+            && self.profile_id == POWERSHELL7_NATIVE_PROFILE
     }
     pub(crate) fn verify_remote(
         profile_id: &str,
@@ -153,15 +154,22 @@ impl VerifiedNativeProfile {
             .as_deref()
             .ok_or("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
         let supported = match (profile.shell, profile.editor) {
-            (ShellFamily::Zsh, EditorFamily::Zle) => profile.shell_version.as_deref() == Some("5.9")
-                && profile.editor_version.as_deref() == Some("5.9") && profile.editor_numeric_version == 509
-                && ["zsh-5.9-zle-5.9-macos-arm64-native", "zsh-5.9-zle-5.9-linux-aarch64-glibc-2.36-native"].contains(&id),
-            (ShellFamily::WindowsPowerShell, EditorFamily::PsReadLine) => profile.shell_version.as_deref() == Some("5.1.26100.9818")
-                && profile.editor_version.as_deref() == Some("2.4.5") && profile.editor_numeric_version == 20405
-                && id == "windows-powershell-5.1.26100.9818-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native",
-            (ShellFamily::PowerShell7, EditorFamily::PsReadLine) => profile.shell_version.as_deref() == Some("7.6.9")
-                && profile.editor_version.as_deref() == Some("2.4.5") && profile.editor_numeric_version == 20405
-                && id == "powershell-7.6.9-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native",
+            (ShellFamily::Zsh, EditorFamily::Zle) => {
+                profile.shell_version.as_deref() == Some("5.9")
+                    && profile.editor_version.as_deref() == Some("5.9")
+                    && profile.editor_numeric_version == 509
+                    && [
+                        "zsh-5.9-zle-5.9-macos-arm64-native",
+                        "zsh-5.9-zle-5.9-linux-aarch64-glibc-2.36-native",
+                    ]
+                    .contains(&id)
+            }
+            (ShellFamily::PowerShell7, EditorFamily::PsReadLine) => {
+                profile.shell_version.as_deref() == Some("7.6.9")
+                    && profile.editor_version.as_deref() == Some("2.4.5")
+                    && profile.editor_numeric_version == 20405
+                    && id == POWERSHELL7_NATIVE_PROFILE
+            }
             _ => false,
         };
         if !supported
@@ -256,7 +264,6 @@ impl VerifiedNativeProfile {
         use crate::terminal_integration::TerminalShellKind as Kind;
         match self.editor_profile.as_ref().map(|p| p.shell) {
             Some(ShellFamily::Zsh) => Kind::Zsh,
-            Some(ShellFamily::WindowsPowerShell) => Kind::WindowsPowerShell,
             Some(ShellFamily::PowerShell7) => Kind::PowerShell7,
             _ => Kind::Bash,
         }
@@ -269,9 +276,10 @@ pub(crate) fn shell_family(
     match shell {
         Kind::Bash => Ok(ShellFamily::Bash),
         Kind::Zsh => Ok(ShellFamily::Zsh),
-        Kind::WindowsPowerShell => Ok(ShellFamily::WindowsPowerShell),
         Kind::PowerShell7 => Ok(ShellFamily::PowerShell7),
-        Kind::Unsupported => Err("TERMINAL_NATIVE_PROFILE_UNSUPPORTED".into()),
+        Kind::WindowsPowerShell | Kind::Unsupported => {
+            Err("TERMINAL_NATIVE_PROFILE_UNSUPPORTED".into())
+        }
     }
 }
 pub(crate) fn file_sha(path: &Path) -> Result<String, String> {

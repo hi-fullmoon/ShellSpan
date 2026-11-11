@@ -28,7 +28,7 @@ import {assertNativeGuiIdle} from './acceptance-gui-readiness.mjs';
 const owner=resolve(import.meta.dirname,'../..'),execute=promisify(execFile);
 const {values}=parseArgs({options:{root:{type:'string'},host:{type:'string',multiple:true},scenario:{type:'string',multiple:true},
   'list-only':{type:'boolean'},'frontend-only':{type:'boolean'},'route-database':{type:'string'},'reuse-package-from':{type:'string'},'controller-root':{type:'string'}}});
-const selected=values.scenario??['ordinary'],hosts=values.host??['powerShell7','windowsPowerShell'];
+const selected=values.scenario??['ordinary'],hosts=values.host??['powerShell7'];
 if(values['list-only']){
   console.log(JSON.stringify({execution:false,cases:packageCases({hosts,selected,artifact:{binding:'new-batch-required'},inputs:{binding:'freeze-before-execution'}}),
     checklist:checklistObligations(await readFile(resolve(owner,'docs/design/agent-terminal-input-acceptance-checklist.md'),'utf8'))},null,2));

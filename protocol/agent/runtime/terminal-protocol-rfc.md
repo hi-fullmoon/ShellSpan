@@ -909,7 +909,7 @@ cleaned with the integration. Close, disconnect, integration loss and generation
 replacement invalidate control authority; incomplete launches retain handles
 and audit without replay. This is cooperative lifecycle, not strong isolation.
 
-Windows PowerShell 5.1/7 use owned console workers assigned to Windows Job
+Native PowerShell 7 sessions use owned console workers assigned to Windows Job
 Objects before source/state transfer. The trusted Rust process freezes the
 module rollout before preparing the shell. It defaults on for supported Windows
 hosts; `SHELLSPAN_NATIVE_POWERSHELL_JOBS=0` disables it for newly prepared shells,

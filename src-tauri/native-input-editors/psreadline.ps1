@@ -38,19 +38,15 @@ $__shellspanNipModule = New-Module -Name ShellSpanTerminalIntegration -ArgumentL
   $script:OriginalPrompt=(Microsoft.PowerShell.Core\Get-Command prompt -CommandType Function).ScriptBlock
   $script:Redraw=$false
   # This ACL belongs only to the newly created private pipe. No user or system
-  # permission is changed. Both supported runtimes use the mature .NET ACL APIs.
-  if($PSVersionTable.PSEdition -ne 'Desktop'){Microsoft.PowerShell.Utility\Add-Type -AssemblyName System.IO.Pipes.AccessControl -ErrorAction Stop}
+  # permission is changed.
+  Microsoft.PowerShell.Utility\Add-Type -AssemblyName System.IO.Pipes.AccessControl -ErrorAction Stop
   $Security=[IO.Pipes.PipeSecurity]::new()
   $Security.SetAccessRuleProtection($true,$false)
   $User=[Security.Principal.WindowsIdentity]::GetCurrent().User
   $Security.SetOwner($User)
   $Security.AddAccessRule([IO.Pipes.PipeAccessRule]::new($User,[IO.Pipes.PipeAccessRights]::FullControl,[Security.AccessControl.AccessControlType]::Allow))
-  if($PSVersionTable.PSEdition -eq 'Desktop'){
-    $PrivatePipe=[IO.Pipes.NamedPipeServerStream]::new($PipeName,[IO.Pipes.PipeDirection]::InOut,1,[IO.Pipes.PipeTransmissionMode]::Byte,[IO.Pipes.PipeOptions]::Asynchronous,131072,131072,$Security)
-  }else{
-    $PrivatePipe=[IO.Pipes.NamedPipeServerStreamAcl]::Create($PipeName,[IO.Pipes.PipeDirection]::InOut,1,[IO.Pipes.PipeTransmissionMode]::Byte,[IO.Pipes.PipeOptions]::Asynchronous,131072,131072,$Security,[IO.HandleInheritability]::None,[IO.Pipes.PipeAccessRights]0)
-  }
-  $ActualSecurity=if($PSVersionTable.PSEdition -eq 'Desktop'){$PrivatePipe.GetAccessControl()}else{[IO.Pipes.PipesAclExtensions]::GetAccessControl($PrivatePipe)}
+  $PrivatePipe=[IO.Pipes.NamedPipeServerStreamAcl]::Create($PipeName,[IO.Pipes.PipeDirection]::InOut,1,[IO.Pipes.PipeTransmissionMode]::Byte,[IO.Pipes.PipeOptions]::Asynchronous,131072,131072,$Security,[IO.HandleInheritability]::None,[IO.Pipes.PipeAccessRights]0)
+  $ActualSecurity=[IO.Pipes.PipesAclExtensions]::GetAccessControl($PrivatePipe)
   $ActualRules=$ActualSecurity.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])
   if(-not $ActualSecurity.AreAccessRulesProtected -or $ActualSecurity.GetOwner([Security.Principal.SecurityIdentifier]).Value -cne $User.Value -or $ActualRules.Count -ne 1 -or $ActualRules[0].IdentityReference.Value -cne $User.Value -or $ActualRules[0].AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or ($ActualRules[0].PipeAccessRights -band [IO.Pipes.PipeAccessRights]::ReadWrite) -ne [IO.Pipes.PipeAccessRights]::ReadWrite){
     $PrivatePipe.Dispose();throw 'TERMINAL_NATIVE_PRIVATE_ENDPOINT_ACCESS_MISMATCH'
@@ -62,12 +58,8 @@ $__shellspanNipModule = New-Module -Name ShellSpanTerminalIntegration -ArgumentL
   $script:DisplayOrigin=$null
   $DisplayType='ShellSpan.Display.OriginPipe' -as [type]
   if($null-ne $DisplayType -and [ShellSpan.Display.OriginPipe]::Supports($Assembly)){
-    if($PSVersionTable.PSEdition -eq 'Desktop'){
-      $DisplayPipe=[IO.Pipes.NamedPipeServerStream]::new(($PipeName+'-display-origin'),[IO.Pipes.PipeDirection]::InOut,1,[IO.Pipes.PipeTransmissionMode]::Byte,[IO.Pipes.PipeOptions]::Asynchronous,131072,131072,$Security)
-    }else{
-      $DisplayPipe=[IO.Pipes.NamedPipeServerStreamAcl]::Create(($PipeName+'-display-origin'),[IO.Pipes.PipeDirection]::InOut,1,[IO.Pipes.PipeTransmissionMode]::Byte,[IO.Pipes.PipeOptions]::Asynchronous,131072,131072,$Security,[IO.HandleInheritability]::None,[IO.Pipes.PipeAccessRights]0)
-    }
-    $DisplaySecurity=if($PSVersionTable.PSEdition -eq 'Desktop'){$DisplayPipe.GetAccessControl()}else{[IO.Pipes.PipesAclExtensions]::GetAccessControl($DisplayPipe)}
+    $DisplayPipe=[IO.Pipes.NamedPipeServerStreamAcl]::Create(($PipeName+'-display-origin'),[IO.Pipes.PipeDirection]::InOut,1,[IO.Pipes.PipeTransmissionMode]::Byte,[IO.Pipes.PipeOptions]::Asynchronous,131072,131072,$Security,[IO.HandleInheritability]::None,[IO.Pipes.PipeAccessRights]0)
+    $DisplaySecurity=[IO.Pipes.PipesAclExtensions]::GetAccessControl($DisplayPipe)
     $DisplayRules=$DisplaySecurity.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])
     if(-not $DisplaySecurity.AreAccessRulesProtected -or $DisplaySecurity.GetOwner([Security.Principal.SecurityIdentifier]).Value -cne $User.Value -or $DisplayRules.Count -ne 1 -or $DisplayRules[0].IdentityReference.Value -cne $User.Value -or $DisplayRules[0].AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or ($DisplayRules[0].PipeAccessRights -band [IO.Pipes.PipeAccessRights]::ReadWrite) -ne [IO.Pipes.PipeAccessRights]::ReadWrite){$DisplayPipe.Dispose();throw 'TERMINAL_NATIVE_PRIVATE_ENDPOINT_ACCESS_MISMATCH'}
     $script:DisplayOrigin=[ShellSpan.Display.OriginPipe]::new($DisplayPipe,$ExpectedClientPid)

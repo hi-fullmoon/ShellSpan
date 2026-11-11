@@ -7,7 +7,7 @@ const owned=path.join(root,'.artifacts/tests/native-input-p2/goal-format-negativ
 it.each([
  ['missing boundary',['--native-input-p3-byte-boundary-goal-format','json'],'requires a byte-boundary case and exact raw/json/json-ascii format'],
  ['unknown format',['--native-input-p3-byte-boundary','8192','--native-input-p3-byte-boundary-goal-format','other'],'requires a byte-boundary case and exact raw/json/json-ascii format'],
- ['no-model execution',['--native-input-p3-byte-boundary','8192','--native-input-p3-byte-boundary-goal-format','json','--native-input-p3','windowsPowerShell','--data-scope','com.shellspan.validation.native-input-p3','--no-model'],'requires one isolated real-model Windows byte-boundary case'],
+ ['no-model execution',['--native-input-p3-byte-boundary','8192','--native-input-p3-byte-boundary-goal-format','json','--native-input-p3','powerShell7','--data-scope','com.shellspan.validation.native-input-p3','--no-model'],'requires one isolated real-model Windows byte-boundary case'],
  ['ASCII request without a boundary',['--native-input-p3-byte-boundary-goal-format','json-ascii'],'requires a byte-boundary case and exact raw/json/json-ascii format'],
  ['different editor',['--native-input-p3-byte-boundary','8192','--native-input-p3-byte-boundary-goal-format','json','--native-input-p3','zsh','--data-scope','com.shellspan.validation.native-input-p3'],'requires one isolated real-model Windows byte-boundary case'],
 ])('rejects %s before any native App/model launch',async(_name,args,message)=>{

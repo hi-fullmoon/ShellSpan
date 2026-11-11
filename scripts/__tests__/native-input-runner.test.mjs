@@ -66,7 +66,7 @@ describe('native input runner argument validation', () => {
   });
   it.each([
     ['--native-input-p3-job-lifecycle','--no-model'],
-    ['--native-input-p3-job-lifecycle','--native-jobs','--native-jobs-powershell','powerShell7','--native-input-p3','windowsPowerShell','--data-scope','com.shellspan.validation.native-input-p3'],
+    ['--native-input-p3-job-lifecycle','--native-jobs','--native-input-p3','powerShell7','--data-scope','com.shellspan.validation.native-input-p3'],
     ['--native-input-p3-job-lifecycle','--native-jobs','--native-jobs-powershell','powerShell7','--native-input-p3','powerShell7','--data-scope','com.shellspan.validation.native-input-p3','--native-jobs-direct'],
   ])('refuses unsafe lifecycle combinations before any App or keyboard action: %j',(...args)=>{
     const evidence=path.join(root,'.artifacts/tests/native-job-scope-test'),result=spawnSync(process.execPath,[path.join(root,'scripts/verify-ai-session-stream.mjs'),...args],{cwd:root,env:{...process.env,SHELLSPAN_ALLOW_FOREGROUND_TESTS:'1',SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR:evidence,SHELLSPAN_DATA_DIR:path.join(evidence,'data'),SHELLSPAN_LOCAL_HOME:path.join(evidence,'home'),SHELLSPAN_LOCAL_SHELL:'D:/Programs/PowerShell/7/pwsh.exe'},encoding:'utf8',timeout:5000});expect(result.status).toBe(1);expect(result.stderr).toContain(process.platform!=='win32'&&args.includes('--native-jobs-powershell')?'--native-jobs-powershell requires native Windows':'--native-input-p3-job-lifecycle requires an isolated real-model native Windows lifecycle case');
@@ -306,9 +306,9 @@ describe('native input runner argument validation', () => {
     expect(() => windowsValidationPaths('relative/evidence')).toThrow('absolute owned evidence directory');
   });
   it('keeps both pinned Windows hosts by default and makes a subset explicit', () => {
-    expect(selectWindowsProfiles(undefined).map(profile => profile.shell)).toEqual(['windowsPowerShell', 'powerShell7']);
+    expect(selectWindowsProfiles(undefined).map(profile => profile.shell)).toEqual(['powerShell7']);
     expect(selectWindowsProfiles(['powerShell7'])).toEqual([{ shell: 'powerShell7', expectedVersion: '7.6.9' }]);
-    expect(selectWindowsProfiles(['windowsPowerShell'])).toEqual([{ shell: 'windowsPowerShell', expectedVersion: '5.1.26100.9818' }]);
+    expect(() => selectWindowsProfiles(['windowsPowerShell'])).toThrow('Unsupported Windows host kind');
   });
   it.each([
     { selection: [], error: 'unique Windows host kinds' },

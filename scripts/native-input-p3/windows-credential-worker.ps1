@@ -52,20 +52,20 @@ try{
  $buildCode=$LASTEXITCODE;$ErrorActionPreference='Stop'
  if($buildCode-ne 0-or -not (Test-Path $cleanupExecutable)){throw 'Actual credential cleanup build failed'}
  if(-not $settings.recoveryOnly){
- $shells=@(@{kind='powerShell7';executable='D:\Programs\PowerShell\7\pwsh.exe'},@{kind='windowsPowerShell';executable=(Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe')})
- if($settings.shellKinds){foreach($kind in $settings.shellKinds){if($kind-notin @('powerShell7','windowsPowerShell')){throw 'Unknown actual shell kind'}};$shells=@($shells|Where-Object {$_.kind-in $settings.shellKinds});if(-not $shells.Count){throw 'At least one actual shell is required'}}
+ $shells=@(@{kind='powerShell7';executable=(Get-Command pwsh.exe -CommandType Application -ErrorAction Stop).Source})
+ if($settings.shellKinds -and ($settings.shellKinds.Count -ne 1 -or $settings.shellKinds[0] -cne 'powerShell7')){throw 'Native Windows acceptance requires PowerShell 7'}
  foreach($shell in $shells){
-  $phase=Join-Path $root ('.artifacts/tests/native-input-p2/'+$(if($shell.kind-eq 'windowsPowerShell'){'w51-'}else{'w7-'})+$runId);New-Item -ItemType Directory -Path $phase|Out-Null
+  $phase=Join-Path $root ('.artifacts/tests/native-input-p2/w7-'+$runId);New-Item -ItemType Directory -Path $phase|Out-Null
   $shell.phase=$phase;$env:SHELLSPAN_LOCAL_SHELL=$shell.executable;$env:SHELLSPAN_DATA_DIR=Join-Path $phase 'data'
   & $shell.executable -NoLogo -NoProfile -NonInteractive -File scripts/fixtures/windows-shell-history-metadata.ps1 -Output (Join-Path $phase 'history-before.json')
   if($LASTEXITCODE-ne 0){throw 'Actual selected shell history discovery failed'}
   $shell.historyCaptured=$true
   Invoke-Native @('scripts/verify-ai-session-stream.mjs','--data-initialize','--no-model','--data-scope','com.shellspan.validation.native-input-p3') 'initialize' $phase
-  $publisherArguments=@(if($shell.kind-eq 'windowsPowerShell'){'--native-input-p3-publisher-run-once'})
-  if($settings.startupDiagnostics){$publisherArguments+=@('--native-input-p3-startup-diagnostic')}
-  if(-not $settings.startupOnly){$publisherArguments+=@('--native-input-p3-require-jobs')}
+  $startupArguments=@()
+  if($settings.startupDiagnostics){$startupArguments+=@('--native-input-p3-startup-diagnostic')}
+  if(-not $settings.startupOnly){$startupArguments+=@('--native-input-p3-require-jobs')}
   if($settings.startupDiagnostics){$env:SHELLSPAN_P3_STARTUP_DIAGNOSTIC='1'}else{Remove-Item Env:SHELLSPAN_P3_STARTUP_DIAGNOSTIC -ErrorAction SilentlyContinue}
-  Invoke-Native (@('scripts/verify-ai-session-stream.mjs','--data-scope','com.shellspan.validation.native-input-p3','--no-model','--native-input-p3-startup',$shell.kind)+$publisherArguments) 'startup' $phase
+  Invoke-Native (@('scripts/verify-ai-session-stream.mjs','--data-scope','com.shellspan.validation.native-input-p3','--no-model','--native-input-p3-startup',$shell.kind)+$startupArguments) 'startup' $phase
  }
  if(-not $settings.startupOnly){
  New-Item -ItemType Directory -Path $provision|Out-Null
@@ -86,8 +86,7 @@ try{
    $env:SHELLSPAN_DATA_DIR=Join-Path $phase 'data'
    & $node scripts/fixtures/windows-desktop-data.mjs (Join-Path $provision 'data/shellspan-main.db') $env:SHELLSPAN_DATA_DIR > (Join-Path $phase 'route-import.json')
    if($LASTEXITCODE-ne 0){throw 'Only owned route reference import failed'}
-   $publisherArguments=@(if($shell.kind-eq 'windowsPowerShell'){'--native-input-p3-publisher-run-once'})
-   Invoke-Native (@('scripts/verify-ai-session-stream.mjs','--data-scope','com.shellspan.validation.native-input-p3','--native-jobs','--native-input-p3',$shell.kind,'--native-jobs-powershell',$shell.kind)+$publisherArguments) 'application' $phase
+   Invoke-Native @('scripts/verify-ai-session-stream.mjs','--data-scope','com.shellspan.validation.native-input-p3','--native-jobs','--native-input-p3',$shell.kind,'--native-jobs-powershell',$shell.kind) 'application' $phase
    $result.applications+=@{kind=$shell.kind;ok=$true}
   }catch{$result.applications+=@{kind=$shell.kind;ok=$false;error=$_.Exception.Message}}
  }

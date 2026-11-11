@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import {isAbsolute,resolve} from 'node:path';
 
 const profiles=Object.freeze([
-  Object.freeze({shell:'windowsPowerShell',expectedVersion:'5.1.26100.9818'}),
   Object.freeze({shell:'powerShell7',expectedVersion:'7.6.9'}),
 ]);
 

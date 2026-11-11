@@ -3,7 +3,6 @@ import {Terminal} from '@xterm/xterm';
 import {terminalRegistry} from '../registry/terminal-registry';
 import {useTerminalStore} from '@/stores/terminalStore';
 import {initI18n} from '@/locales';
-import {acceptP3PublisherOnce} from './native-input-p3-publisher';
 import {isCurrentNativeEditorProfile} from './native-editor-profile';
 import {invokeCreateLocalSession,invokeCloseSession,invokeGetTerminalBrokerSnapshot} from '@/lib/ipc/tauri';
 import '@/styles/base.css';
@@ -30,7 +29,6 @@ async function verify(){
     const command="$p3Reader=Get-Command PSConsoleHostReadLine; $p3Subscriptions=@(Get-EventSubscriber -SourceIdentifier PowerShell.OnIdle); $p3Assembly=[Microsoft.PowerShell.PSConsoleReadLine].Assembly; $p3Diagnostic=@{engine=$PSVersionTable.PSVersion.ToString();host=$Host.Name;modules=@(Get-Module PSReadLine|ForEach-Object {@{version=$_.Version.ToString();path=$_.Path}});assembly=$p3Assembly.Location;assemblySha256=(Get-FileHash $p3Assembly.Location -Algorithm SHA256).Hash;modulePath=$env:PSModulePath;readerModule=$p3Reader.ScriptBlock.Module.Name;readerClosureModule=$p3Reader.ScriptBlock.Module.SessionState.PSVariable.GetValue('NativeModule').Name; subscriptions=@($p3Subscriptions|ForEach-Object {@{id=$_.SubscriptionId; jobState=[string]$_.Action.State; errors=@($_.Action.Error|ForEach-Object {@{id=$_.FullyQualifiedErrorId; message=$_.Exception.Message}})}})}; [IO.File]::WriteAllText((Join-Path $env:SHELLSPAN_DATA_DIR 'native-callbacks.json'),($p3Diagnostic|ConvertTo-Json -Depth 8)); [Console]::WriteLine('P3-CALLBACK-'+'DIAGNOSTIC')\r";
     assert(await controller.writeUserInput(command),'Ordinary user startup diagnostics were blocked');
    }
-   await acceptP3PublisherOnce(controller,parameters);
    assert(Date.now()<deadline,'Actual P3 startup did not reach native editor readiness');
    await new Promise(resolve=>setTimeout(resolve,25));snapshot=await invokeGetTerminalBrokerSnapshot(session.sessionId);
   }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {mkdirSync,readFileSync,writeFileSync,copyFileSync,openSync,closeSync} from 'node:fs';
+import {statSync,mkdirSync,readFileSync,writeFileSync,copyFileSync,openSync,closeSync} from 'node:fs';
 import {resolve,join,dirname,win32} from 'node:path';
 import {parseArgs} from 'node:util';
 import {selectWindowsProfiles} from './windows-profiles.mjs';
@@ -27,22 +27,23 @@ const log=openSync(resolve(directory,'windows-producer-build.log'),'a');
 try{execFileSync('cargo',['build','--locked','--release','--lib','--manifest-path','src-tauri/native-input-editors/Cargo.toml'],{cwd:root,env:{...process.env,RUSTUP_TOOLCHAIN:'1.95.0-x86_64-pc-windows-msvc'},stdio:['ignore',log,log]});}finally{closeSync(log);}
 for(const[path,expected]of Object.entries(sources))assert.equal(sha(resolve(root,path)),expected,'Producer source drifted during build');
 const library=resolve(root,'src-tauri/native-input-editors/target/release/shellspan_native_input_editors.dll');
-const powershell=join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/powershell.exe');
-const pwsh=execFileSync(powershell,['-NoLogo','-NoProfile','-Command','(Get-Command pwsh.exe -ErrorAction Stop).Source'],{encoding:'utf8',windowsHide:true}).trim();
+const candidates=[...(process.env.PATH??'').split(';').map(directory=>join(directory,'pwsh.exe')),
+  ...[process.env.ProgramW6432,process.env.ProgramFiles].filter(Boolean).map(directory=>join(directory,'PowerShell','7','pwsh.exe'))];
+const pwsh=candidates.find(file=>win32.isAbsolute(file)&&statSync(file,{throwIfNoEntry:false})?.isFile());
+assert(pwsh,'PowerShell 7 must be installed on the Windows build host');
 const buildRevision=JSON.parse(readFileSync(resolve(root,'scripts/dependency-builds/psreadline/build.json'),'utf8')).buildRevision;
 assert(/^shellspan[1-9][0-9]*$/.test(buildRevision),'Reviewed provider build revision required');
 const expectedEditor=sha(resolve(root,'src-tauri/resources/powershell/PSReadLine/2.4.5/Microsoft.PowerShell.PSReadLine.dll'));
 const profiles=[];
 for(const{shell,expectedVersion}of selected){
-  const executable=shell==='windowsPowerShell'?powershell:pwsh;
   const environment={...process.env};
-  environment.PSModulePath=[win32.normalize(resolve(root,'src-tauri/resources/powershell')),win32.normalize(join(dirname(executable),'Modules')),environment.PSModulePath??''].filter(Boolean).join(';');
-  const actual=JSON.parse(execFileSync(executable,['-NoLogo','-NoProfile','-Command',"Import-Module PSReadLine -ErrorAction Stop; $m=Get-Module PSReadLine; $a=[Microsoft.PowerShell.PSConsoleReadLine].Assembly; @{engine=$PSVersionTable.PSVersion.ToString();editor=$m.Version.ToString();assembly=$a.Location}|ConvertTo-Json -Compress"],{env:environment,encoding:'utf8',windowsHide:true}).trim());
+  environment.PSModulePath=[win32.normalize(resolve(root,'src-tauri/resources/powershell')),win32.normalize(join(dirname(pwsh),'Modules')),environment.PSModulePath??''].filter(Boolean).join(';');
+  const actual=JSON.parse(execFileSync(pwsh,['-NoLogo','-NoProfile','-Command',"Import-Module PSReadLine -ErrorAction Stop; $m=Get-Module PSReadLine; $a=[Microsoft.PowerShell.PSConsoleReadLine].Assembly; @{engine=$PSVersionTable.PSVersion.ToString();editor=$m.Version.ToString();assembly=$a.Location}|ConvertTo-Json -Compress"],{env:environment,encoding:'utf8',windowsHide:true}).trim());
   assert.equal(actual.engine,expectedVersion);assert.equal(actual.editor,'2.4.5');assert.equal(sha(actual.assembly),expectedEditor,'Loaded provider differs from the reviewed private assembly');
-  const id=`${shell==='windowsPowerShell'?'windows-powershell':'powershell'}-${expectedVersion}-psreadline-2.4.5-${buildRevision}-conpty1.25.260930003-graphemes-windows-x64-native`;
+  const id=`powershell-${expectedVersion}-psreadline-2.4.5-${buildRevision}-conpty1.25.260930003-graphemes-windows-x64-native`;
   const profile={shell,shellVersion:actual.engine,editor:'psReadLine',editorVersion:actual.editor,editorNumericVersion:20405,adapterVersion:'1',verifiedProfileId:id};
   mkdirSync(resolve(resources,id),{recursive:true});copyFileSync(library,resolve(resources,id,'shellspan_native_input_editors.dll'));
-  profiles.push({profile,shellSha256:sha(executable),moduleSha256:sha(library),module:`${id}/shellspan_native_input_editors.dll`,editorSha256:expectedEditor});
+  profiles.push({profile,shellSha256:sha(pwsh),moduleSha256:sha(library),module:`${id}/shellspan_native_input_editors.dll`,editorSha256:expectedEditor});
 }
 writeFileSync(resolve(resources,'editors-windows-x64.json'),JSON.stringify({version:1,profiles,sources},null,2)+'\n');
 console.log(JSON.stringify({target:'windows-x64',fullMatrix:values.shell===undefined,profiles:profiles.map(p=>p.profile.verifiedProfileId)}));

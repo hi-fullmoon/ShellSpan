@@ -2,9 +2,8 @@
 //! Preparation and the bounded pipe worker run off the Tauri main thread.
 use super::{
     editors, protocol as nip,
-    registration::{file_sha, VerifiedNativeProfile},
+    registration::{file_sha, VerifiedNativeProfile, POWERSHELL7_NATIVE_PROFILE},
 };
-use crate::terminal_integration::TerminalShellKind;
 use std::{
     fs::{self, File},
     io::{Read, Write},
@@ -25,6 +24,33 @@ fn module_search_path(path: &Path) -> PathBuf {
     PathBuf::from(crate::path_utils::portable_local_path(path).replace('/', "\\"))
 }
 
+pub(crate) fn powershell7_candidates() -> impl Iterator<Item = PathBuf> {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    std::env::split_paths(&path)
+        .map(|directory| directory.join("pwsh.exe"))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .chain(
+            ["ProgramW6432", "ProgramFiles"]
+                .into_iter()
+                .filter_map(std::env::var_os)
+                .map(|directory| PathBuf::from(directory).join("PowerShell/7/pwsh.exe")),
+        )
+        .filter(|path| path.is_absolute() && path.is_file())
+}
+
+pub(crate) fn matching_powershell7(resources: &Path) -> Result<PathBuf, String> {
+    let artifact = editors::read_catalogue(resources, "windows-x64")?
+        .into_iter()
+        .find(|artifact| {
+            artifact.profile.verified_profile_id.as_deref() == Some(POWERSHELL7_NATIVE_PROFILE)
+        })
+        .ok_or("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
+    powershell7_candidates()
+        .find(|candidate| file_sha(candidate).is_ok_and(|digest| digest == artifact.shell_sha256))
+        .ok_or_else(|| "TERMINAL_NATIVE_PROFILE_UNSUPPORTED".into())
+}
+
 #[cfg(test)]
 mod path_tests {
     use super::*;
@@ -38,6 +64,28 @@ mod path_tests {
         assert_eq!(
             module_search_path(Path::new(r"\\?\D:\private\PSReadLine")),
             PathBuf::from(r"D:\private\PSReadLine")
+        );
+    }
+
+    #[test]
+    #[ignore = "requires the rebuilt Windows PowerShell 7 catalogue and the actual installed shells"]
+    fn installed_powershell7_is_preferred_and_windows_powershell_stays_raw() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let resources = root.join(".artifacts/tests/native-input-p2/resources/native-input");
+        let shell = matching_powershell7(&resources).expect("Reviewed PowerShell 7 was not found");
+        let data = tempfile::tempdir().unwrap();
+        let native = PreparedNativePowerShell::prepare(&shell, &resources, data.path()).unwrap();
+        assert_eq!(
+            native.profile.shell(),
+            crate::terminal_integration::TerminalShellKind::PowerShell7
+        );
+        let desktop = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        assert_eq!(
+            PreparedNativePowerShell::prepare(&desktop, &resources, data.path())
+                .err()
+                .as_deref(),
+            Some("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")
         );
     }
 
@@ -71,38 +119,22 @@ mod path_tests {
         }
         fs::create_dir(&evidence).unwrap();
         let host = std::env::var("SHELLSPAN_ADMISSION_HOST").unwrap();
-        let (shell, mut kind) = match host.as_str() {
-            "powerShell7" => (
-                PathBuf::from("D:/Programs/PowerShell/7/pwsh.exe"),
-                TerminalShellKind::PowerShell7,
-            ),
-            "windowsPowerShell" => (
-                PathBuf::from(std::env::var_os("SystemRoot").unwrap())
-                    .join("System32/WindowsPowerShell/v1.0/powershell.exe"),
-                TerminalShellKind::WindowsPowerShell,
-            ),
-            _ => panic!("Unknown actual admission host"),
-        };
+        assert_eq!(host, "powerShell7");
+        let shell = powershell7_candidates()
+            .next()
+            .expect("Installed PowerShell 7");
         let scenario = std::env::var("SHELLSPAN_ADMISSION_SCENARIO").unwrap();
         let expected_error = match scenario.as_str() {
             "baseline" => None,
             "unknown-source" => Some("TERMINAL_NATIVE_STALE_ARTIFACTS"),
-            "unknown-adapter" | "unknown-profile" | "bad-digest" => {
-                Some("TERMINAL_NATIVE_PROFILE_ARTIFACT_MISMATCH")
-            }
+            "unknown-adapter" | "bad-digest" => Some("TERMINAL_NATIVE_PROFILE_ARTIFACT_MISMATCH"),
+            "unknown-profile" => Some("TERMINAL_NATIVE_PROFILE_UNSUPPORTED"),
             "wrong-platform" => Some("TERMINAL_NATIVE_MANIFEST_INVALID"),
-            "wrong-kind" => {
-                kind = if host == "powerShell7" {
-                    TerminalShellKind::WindowsPowerShell
-                } else {
-                    TerminalShellKind::PowerShell7
-                };
-                Some("TERMINAL_NATIVE_PROFILE_ARTIFACT_MISMATCH")
-            }
+            "wrong-kind" => Some("TERMINAL_NATIVE_PROFILE_ARTIFACT_MISMATCH"),
             _ => panic!("Unknown admission scenario"),
         };
         let data = evidence.join("data");
-        let outcome = PreparedNativePowerShell::prepare(&shell, &resources, &data, kind);
+        let outcome = PreparedNativePowerShell::prepare(&shell, &resources, &data);
         let (prepared, actual_error) = match outcome {
             Ok(value) => {
                 drop(value);
@@ -137,46 +169,35 @@ pub(crate) struct PreparedNativePowerShell {
     root: tempfile::TempDir,
     bootstrap: PathBuf,
     pipe_path: String,
-    modules: Option<PathBuf>,
+    modules: PathBuf,
     host_modules: PathBuf,
     pub profile: VerifiedNativeProfile,
     server_process_id: Option<u32>,
     conpty: PathBuf,
 }
 impl PreparedNativePowerShell {
-    pub fn prepare(
-        shell: &Path,
-        resources: &Path,
-        data: &Path,
-        kind: TerminalShellKind,
-    ) -> Result<Self, String> {
+    pub fn prepare(shell: &Path, resources: &Path, data: &Path) -> Result<Self, String> {
         if !cfg!(target_arch = "x86_64") {
             return Err("TERMINAL_NATIVE_PROFILE_UNSUPPORTED".into());
         }
         let digest = file_sha(shell)?;
         let artifact = editors::read_catalogue(resources, "windows-x64")?
             .into_iter()
-            .find(|p| p.shell_sha256 == digest)
+            .find(|p| {
+                p.shell_sha256 == digest
+                    && p.profile.verified_profile_id.as_deref() == Some(POWERSHELL7_NATIVE_PROFILE)
+            })
             .ok_or("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
         let editor_sha = artifact
             .editor_sha256
             .as_ref()
             .filter(|v| v.len() == 64 && v.bytes().all(|b| b.is_ascii_hexdigit()))
             .ok_or("TERMINAL_NATIVE_MANIFEST_INVALID")?;
-        let expected_shell = match kind {
-            TerminalShellKind::WindowsPowerShell => nip::ShellFamily::WindowsPowerShell,
-            TerminalShellKind::PowerShell7 => nip::ShellFamily::PowerShell7,
-            _ => return Err("TERMINAL_NATIVE_PROFILE_UNSUPPORTED".into()),
-        };
-        if artifact.profile.shell != expected_shell {
+        if artifact.profile.shell != nip::ShellFamily::PowerShell7 {
             return Err("TERMINAL_NATIVE_PROFILE_ARTIFACT_MISMATCH".into());
         }
-        let modules = Some(
-            crate::terminal_integration::prepare_bundled_powershell_module_for_host(
-                data,
-                kind == TerminalShellKind::WindowsPowerShell,
-            )?,
-        );
+        let modules =
+            crate::terminal_integration::prepare_bundled_powershell_module_for_host(data, false)?;
         let conpty = super::windows_conpty::prepare(data)?;
         let host_modules = module_search_path(
             &shell
@@ -242,7 +263,7 @@ impl PreparedNativePowerShell {
                 )?;
             startup.push_str(&crate::terminal_integration::powershell_history_redirect(
                 isolated,
-                &histories.join(format!("{}.txt", kind.protocol_name())),
+                &histories.join("powerShell7.txt"),
             ));
         }
         startup.push_str(&format!(". {} -Library {} -PipeName {} -ProfileJson {} -TransportSource ([IO.File]::ReadAllText({})) -ExpectedClientPid {} -ExpectedEditorHash {} -JobHelpersPath {} -JobHostPath {} -ConsoleSignalPath {} -HostReferencePath {}\n",
@@ -286,21 +307,19 @@ impl PreparedNativePowerShell {
         ))
     }
     pub fn configure(&self, command: &mut portable_pty::CommandBuilder) -> Result<(), String> {
-        if let Some(modules) = &self.modules {
-            // PowerShell detects its default module path by string comparison
-            // before loading profiles. Mixed separators trigger reordering.
-            let mut paths = vec![module_search_path(modules), self.host_modules.clone()];
-            if let Some(previous) = command.get_env("PSModulePath") {
-                paths.extend(std::env::split_paths(previous));
-            }
-            if let Some(system) = std::env::var_os("SystemRoot") {
-                paths.push(PathBuf::from(system).join("System32/WindowsPowerShell/v1.0/Modules"));
-            }
-            command.env(
-                "PSModulePath",
-                std::env::join_paths(paths).map_err(|_| "TERMINAL_NATIVE_PATH_INVALID")?,
-            );
+        // PowerShell detects its default module path by string comparison
+        // before loading profiles. Mixed separators trigger reordering.
+        let mut paths = vec![module_search_path(&self.modules), self.host_modules.clone()];
+        if let Some(previous) = command.get_env("PSModulePath") {
+            paths.extend(std::env::split_paths(previous));
         }
+        if let Some(system) = std::env::var_os("SystemRoot") {
+            paths.push(PathBuf::from(system).join("System32/WindowsPowerShell/v1.0/Modules"));
+        }
+        command.env(
+            "PSModulePath",
+            std::env::join_paths(paths).map_err(|_| "TERMINAL_NATIVE_PATH_INVALID")?,
+        );
         command.args(["-NoExit", "-File"]);
         command.arg(crate::path_utils::portable_local_path(&self.bootstrap));
         Ok(())

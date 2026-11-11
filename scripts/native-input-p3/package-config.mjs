@@ -4,7 +4,7 @@ import {selectWindowsProfiles} from './windows-profiles.mjs';
 
 export function windowsPackageHost(shell='powerShell7'){
   const [profile]=selectWindowsProfiles([shell]);
-  return {...profile,executable:shell==='windowsPowerShell'?'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe':'D:/Programs/PowerShell/7/pwsh.exe'};
+  return {...profile,executable:'D:/Programs/PowerShell/7/pwsh.exe'};
 }
 
 export function windowsPackageScenario(value,validationOnly){

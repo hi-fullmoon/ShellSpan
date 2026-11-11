@@ -1,6 +1,5 @@
 import { createRoot } from 'react-dom/client';
 import { nativeP2Password } from './native-input-p2-credential';
-import {acceptP3PublisherOnce} from './native-input-p3-publisher';
 import {isCurrentNativeEditorProfile} from './native-editor-profile';
 import {matchesNativeJobsApproval,matchesNativeJobsStep,matchesNativeJobsOriginalStep} from './native-jobs-approval';
 import {delegationOriginalCall} from './native-approval-delegation-plan';
@@ -232,7 +231,6 @@ async function verify() {
       flushSync(() => useTerminalStore.getState().addSession(session));
     }
     await eventually(async () => {
-      for(const id of terminals){const current=terminalRegistry.get(id);if(current)await acceptP3PublisherOnce(current,parameters);}
       return terminals.every(id => useTerminalStore.getState().sessions.some(session => session.sessionId === id && session.status === 'connected' && session.promptReady));
     }, 'Native shell integrations did not become ready', 30_000);
     const controller = terminalRegistry.get(terminals[0]);

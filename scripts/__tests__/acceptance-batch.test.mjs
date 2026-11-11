@@ -331,7 +331,7 @@ it('refuses running, unconfirmed or mutated evidence and retains sealed failures
 
 it('takes the complete checklist as obligations, preserves blocked platforms and deferred input, and does not equate a package subset with parent pass',async()=>{
   const text=await readFile(resolve(import.meta.dirname,'../../docs/design/agent-terminal-input-acceptance-checklist.md'),'utf8'),plan=checklistObligations(text);
-  expect(plan.requirements).toHaveLength(35);expect(plan.platforms).toHaveLength(6);expect(plan.obligations.some(item=>item.host.transport==='ConPTY')).toBe(true);
+  expect(plan.requirements).toHaveLength(35);expect(plan.platforms).toHaveLength(5);expect(plan.platforms.filter(host=>host.transport==='ConPTY').map(host=>host.shell)).toEqual(['powerShell7']);
   expect(plan.platforms.filter(host=>host.target).map(host=>host.shell)).toEqual(['bash5.3-readline8.3.6','zsh5.9-zle5.9','bash5.3-readline8.3.6','zsh5.9-zle5.9']);
   expect(plan.obligations.filter(item=>item.host.target).every(item=>item.status==='blocked')).toBe(true);expect(plan.fullAcceptancePassed).toBe(false);
   expect(plan.deferred).toEqual(['Ctrl+Shift+C','manual-copy']);

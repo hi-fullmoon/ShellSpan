@@ -41,7 +41,7 @@ fn open_windows_conpty(_: PathBuf) -> portable_pty::PtyPair {
 fn main() {
     assert!(cfg!(windows), "ConPTY acceptance requires the actual Windows host");
     let args: Vec<_> = std::env::args().collect(); assert!(args.len()==4||args.len()==5&&(history_cases::is_mode(&args[4])||transport_cases::is_mode(&args[4])||matches!(args[4].as_str(),"loader-abi"|"display-capture"|"negative"|"input-boundaries"|"invalid-overlimit"|"invalid-empty"|"invalid-nul"|"invalid-control"|"invalid-utf8"|"invalid-json"|"invalid-version"|"invalid-after-input"|"fault-typing"|"fault-complete"|"fault-armed"|"fault-unowned"|"fault-unicode"|"fault-armed-enter"|"pending-cancel"|"jobs")));
-    assert!(matches!(args[3].as_str(),"7"|"51"),"Unknown frozen Windows host selector");
+    assert_eq!(args[3],"7","Native Windows acceptance requires PowerShell 7");
     assert_eq!(std::env::var("SHELLSPAN_ACCEPTANCE_DISPLAY_BRIDGE").as_deref(),Ok("actual-xterm"),"SDK3 requires the live display bridge, never a legacy renderer fallback");
     assert_eq!(std::env::var("SHELLSPAN_ALLOW_FOREGROUND_TESTS").as_deref(),Ok("1"),"Real native acceptance must be explicitly scheduled");
     let shell=PathBuf::from(&args[1]); let evidence=PathBuf::from(&args[2]);
@@ -55,11 +55,10 @@ fn main() {
     fs::create_dir_all(&evidence).unwrap();
     let root=PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let id=format!("p3-{}",std::process::id());
-    let windows51=args[3]=="51";
-    let mut profile=nip::PeerProfile { shell: if windows51 { nip::ShellFamily::WindowsPowerShell } else { nip::ShellFamily::PowerShell7 },
-        shell_version: Some(if windows51 {"5.1.26100.9818"} else {"7.6.9"}.into()),
+    let mut profile=nip::PeerProfile { shell: nip::ShellFamily::PowerShell7,
+        shell_version: Some("7.6.9".into()),
         editor: nip::EditorFamily::PsReadLine, editor_version: Some("2.4.5".into()), editor_numeric_version: 20405,
-        adapter_version:"1".into(), verified_profile_id:Some(format!("{}-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native",if windows51 {"windows-powershell-5.1.26100.9818"}else{"powershell-7.6.9"})) };
+        adapter_version:"1".into(), verified_profile_id:Some("powershell-7.6.9-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native".into()) };
     let quote=|s: &str| format!("'{}'",s.replace('\'',"''"));
     let bootstrap=evidence.join("bootstrap.ps1");
     let transport_source=evidence.join("transport.cs");
@@ -71,8 +70,7 @@ fn main() {
         assert!(module.is_absolute()&&module.canonicalize().unwrap().starts_with(owned),"Candidate module must be inside owned test artifacts");
         let expected=std::env::var("SHELLSPAN_ACCEPTANCE_PSREADLINE_SHA256").expect("Explicit candidate assembly digest");
         assert_eq!(expected,hex::encode(sha2::Sha256::digest(fs::read(module.parent().unwrap().join("Microsoft.PowerShell.PSReadLine.dll")).unwrap())));
-        // Keep the explicit candidate distinct without exceeding NIP's
-        // existing 128-byte profile identifier bound on the longer P5 host.
+        // Keep the explicit candidate distinct from production resources.
         profile.verified_profile_id.as_mut().unwrap().push_str("-candidate");
         assert!(profile.verified_profile_id.as_ref().unwrap().len() <= 128);
         expected
@@ -150,9 +148,6 @@ foreach($ReadSample in 1..9){{
 }}
 "#,quote(&evidence.to_string_lossy())));
     }
-    // Windows PowerShell decodes BOM-less -File scripts using the ANSI code
-    // page. Keep Unicode fixture paths exact without changing host encoding.
-    if windows51 {script.insert(0,'\u{feff}');}
     fs::write(&bootstrap,script).unwrap();
     let conpty=root.join("../resources/conpty/1.25.260930003/conpty.dll").canonicalize().unwrap();
     let pin:serde_json::Value=serde_json::from_slice(&fs::read(conpty.parent().unwrap().join("pin.json")).unwrap()).unwrap();

@@ -42,6 +42,7 @@ const LOCAL_OUTPUT_DRAIN_BUDGET: usize = 64;
 const LOCAL_OUTPUT_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const LOCAL_STARTUP_OUTPUT_BUFFER_LIMIT_BYTES: usize = 1_000_000;
 const LOCAL_READER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
+#[cfg(windows)]
 const LOCAL_SHELL_ENVIRONMENT_VARIABLE: &str = "SHELLSPAN_LOCAL_SHELL";
 /// The worker owns a 30-second network budget. Allow a bounded cleanup margin
 /// so its timeout error arrives before the result waiter expires.
@@ -239,13 +240,76 @@ fn rollback_local_broker_attachment_failure(
     attachment_failure_message(error, cleanup_errors)
 }
 
-fn local_shell_executable() -> String {
-    if cfg!(target_os = "windows") {
-        std::env::var(LOCAL_SHELL_ENVIRONMENT_VARIABLE)
-            .or_else(|_| std::env::var("SHELL"))
-            .unwrap_or_else(|_| "powershell.exe".to_string())
-    } else {
-        std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
+#[cfg(windows)]
+fn prepare_windows_local_shell(
+    app: &AppHandle,
+    native_requested: bool,
+    session_id: &str,
+) -> (
+    String,
+    Option<crate::terminal_command::windows::PreparedNativePowerShell>,
+) {
+    use crate::terminal_command::{artifacts, windows};
+    use std::path::{Path, PathBuf};
+
+    let configured = std::env::var(LOCAL_SHELL_ENVIRONMENT_VARIABLE)
+        .or_else(|_| std::env::var("SHELL"))
+        .ok();
+    let fallback = || {
+        configured
+            .clone()
+            .unwrap_or_else(|| "powershell.exe".into())
+    };
+    if !native_requested
+        || !cfg!(target_arch = "x86_64")
+        || configured
+            .as_ref()
+            .is_some_and(|shell| TerminalShellKind::detect(shell) != TerminalShellKind::PowerShell7)
+    {
+        return (fallback(), None);
+    }
+
+    let prepared = artifacts::resource_root(app).and_then(|resources| {
+        let shell = match configured.as_deref() {
+            None => windows::matching_powershell7(&resources)?,
+            Some(shell) if Path::new(shell).file_name() == Some(std::ffi::OsStr::new(shell)) => {
+                windows::powershell7_candidates()
+                    .next()
+                    .ok_or("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?
+            }
+            Some(shell) => PathBuf::from(shell),
+        };
+        let executable = shell
+            .to_str()
+            .ok_or("TERMINAL_NATIVE_PATH_INVALID")?
+            .to_owned();
+        let home = app
+            .path()
+            .home_dir()
+            .map_err(|_| "TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
+        let native = windows::PreparedNativePowerShell::prepare(
+            &shell,
+            &resources,
+            &crate::shellspan_data_dir(&home),
+        )?;
+        Ok((executable, native))
+    });
+    match prepared {
+        Ok((executable, native)) => (executable, Some(native)),
+        Err(reason) => {
+            let code = if reason.starts_with("TERMINAL_NATIVE_")
+                && reason.len() <= 128
+                && reason
+                    .bytes()
+                    .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_')
+            {
+                reason.as_str()
+            } else {
+                "TERMINAL_NATIVE_PREPARATION_FAILED"
+            };
+            warn!("Native Windows input preparation rejected session_id={session_id} code={code}");
+            (fallback(), None)
+        }
     }
 }
 
@@ -598,29 +662,6 @@ fn create_local_session_blocking(
     native_input_protocol: Option<String>,
 ) -> Result<SessionSummary, String> {
     let session_id = Uuid::new_v4().to_string();
-    let shell = local_shell_executable();
-    let shell_kind = TerminalShellKind::detect(&shell);
-    let title = std::path::Path::new(&shell)
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or("Local")
-        .to_string();
-    let mut summary = SessionSummary {
-        session_id: session_id.clone(),
-        title,
-        host: "local".to_string(),
-        port: 0,
-        username: std::env::var(if cfg!(target_os = "windows") {
-            "USERNAME"
-        } else {
-            "USER"
-        })
-        .unwrap_or_else(|_| "local".to_string()),
-        terminal_session_id: None,
-        terminal_generation: None,
-        pty_info: crate::models::SessionPtyInfo::local(),
-    };
-
     let terminal_broker_enabled = app
         .try_state::<crate::agent_runtime::AgentRuntime>()
         .ok_or_else(|| "terminal broker runtime is unavailable".to_string())?
@@ -643,6 +684,35 @@ fn create_local_session_blocking(
     let native_family = predecessor_mode.is_some();
     let native_client =
         native_input_protocol.as_deref() == Some(crate::terminal_command::protocol::PROTOCOL);
+    #[cfg(windows)]
+    let (shell, mut prepared_native) = prepare_windows_local_shell(
+        &app,
+        native_client && shell_integration_enabled,
+        &session_id,
+    );
+    #[cfg(not(windows))]
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+    let shell_kind = TerminalShellKind::detect(&shell);
+    let title = std::path::Path::new(&shell)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("Local")
+        .to_string();
+    let mut summary = SessionSummary {
+        session_id: session_id.clone(),
+        title,
+        host: "local".to_string(),
+        port: 0,
+        username: std::env::var(if cfg!(target_os = "windows") {
+            "USERNAME"
+        } else {
+            "USER"
+        })
+        .unwrap_or_else(|_| "local".to_string()),
+        terminal_session_id: None,
+        terminal_generation: None,
+        pty_info: crate::models::SessionPtyInfo::local(),
+    };
     #[cfg(unix)]
     let prepared_native = if native_client
         && shell_integration_enabled
@@ -682,44 +752,6 @@ fn create_local_session_blocking(
                     std::path::Path::new(&shell),
                     &resource_root,
                 )
-            })
-            .ok()
-    } else {
-        None
-    };
-    #[cfg(windows)]
-    let mut prepared_native = if native_client
-        && shell_integration_enabled
-        && matches!(
-            shell_kind,
-            TerminalShellKind::WindowsPowerShell | TerminalShellKind::PowerShell7
-        ) {
-        crate::terminal_command::artifacts::resource_root(&app)
-            .and_then(|resources| {
-                let home = app
-                    .path()
-                    .home_dir()
-                    .map_err(|_| "TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
-                crate::terminal_command::windows::PreparedNativePowerShell::prepare(
-                    std::path::Path::new(&shell),
-                    &resources,
-                    &crate::shellspan_data_dir(&home),
-                    shell_kind,
-                )
-            })
-            .inspect_err(|reason| {
-                let code = if reason.starts_with("TERMINAL_NATIVE_")
-                    && reason.len() <= 128
-                    && reason.bytes().all(|byte| {
-                        byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_'
-                    }) {
-                    reason.as_str()
-                } else {
-                    "TERMINAL_NATIVE_PREPARATION_FAILED"
-                };
-                warn!(
-                    "Native Windows input preparation rejected session_id={session_id} code={code}"
-                );
             })
             .ok()
     } else {

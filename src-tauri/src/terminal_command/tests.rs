@@ -26,15 +26,13 @@ fn windows_editor_binding_requires_the_updated_exact_host_and_artifacts() {
     let module_sha = hex::encode(Sha256::digest(std::fs::read(&module).unwrap()));
     let shell_sha = "1".repeat(64);
     let mut profile = PeerProfile {
-        shell: ShellFamily::WindowsPowerShell,
-        shell_version: Some("5.1.26100.9818".into()),
+        shell: ShellFamily::PowerShell7,
+        shell_version: Some("7.6.9".into()),
         editor: EditorFamily::PsReadLine,
         editor_version: Some("2.4.5".into()),
         editor_numeric_version: 20405,
         adapter_version: "1".into(),
-        verified_profile_id: Some(
-            "windows-powershell-5.1.26100.9818-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native".into(),
-        ),
+        verified_profile_id: Some(super::registration::POWERSHELL7_NATIVE_PROFILE.into()),
     };
     let verify = |profile: &PeerProfile, actual_shell: &str| {
         VerifiedNativeProfile::verify_editor(
@@ -84,18 +82,24 @@ fn windows_editor_binding_requires_the_updated_exact_host_and_artifacts() {
             .is_err());
     }
     assert!(verify(&profile, &"2".repeat(64)).is_err());
-    profile.shell_version = Some("5.1.26100.9711".into());
+    profile.shell_version = Some("7.6.8".into());
     assert!(verify(&profile, &shell_sha).is_err());
-    profile.shell_version = Some("5.1.26100.9818".into());
+    profile.shell_version = Some("7.6.9".into());
     profile.verified_profile_id =
-        Some("windows-powershell-5.1.26100.9818-psreadline-2.4.5-windows-x64-native".into());
+        Some("powershell-7.6.9-psreadline-2.4.5-windows-x64-native".into());
     assert!(verify(&profile, &shell_sha).is_err());
-    profile.verified_profile_id =
-        Some("windows-powershell-5.1.26100.9711-psreadline-2.4.5-windows-x64-native".into());
-    assert!(verify(&profile, &shell_sha).is_err());
-    profile.verified_profile_id = Some(
+    let mut retired = profile.clone();
+    retired.shell = ShellFamily::WindowsPowerShell;
+    retired.shell_version = Some("5.1.26100.9818".into());
+    retired.verified_profile_id = Some(
         "windows-powershell-5.1.26100.9818-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native".into(),
     );
+    assert!(verify(&retired, &shell_sha).is_err());
+    assert!(super::registration::shell_family(
+        crate::terminal_integration::TerminalShellKind::WindowsPowerShell
+    )
+    .is_err());
+    profile.verified_profile_id = Some(super::registration::POWERSHELL7_NATIVE_PROFILE.into());
     std::fs::write(&module, b"modified binding fixture").unwrap();
     assert!(verify(&profile, &shell_sha).is_err());
 }

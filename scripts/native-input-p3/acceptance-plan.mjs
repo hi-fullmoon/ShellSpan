@@ -26,11 +26,12 @@ export function packageCases({hosts,selected,artifact,inputs}){
 export function checklistObligations(text){
   const requirements=[...text.matchAll(/^- \[.\] ([A-E]\d{2}) (.+)$/gm)].map(([,id,description])=>({id,description}));
   assert.equal(requirements.length,35,'Checklist requirements changed; review expansion before scheduling');
-  const windows=['powerShell7','windowsPowerShell'].map(shell=>({platform:'windows-x64',transport:'ConPTY',shell,...windowsPackageHost(shell)}));
+  const windows={platform:'windows-x64',transport:'ConPTY',...windowsPackageHost()};
   const bash=`bash${RELEASE_BASH_VERSION}-readline${BASH_READLINE_VERSIONS[RELEASE_BASH_VERSION]}`;
   const unix=['macos-arm64/local-PTY','linux-aarch64-glibc2.36/SSH-PTY'].flatMap(target=>[bash,'zsh5.9-zle5.9'].map(shell=>({target,shell})));
-  return {checklistSha256:digest(text),requirements,platforms:[...windows,...unix],
-    obligations:requirements.flatMap(requirement=>[...windows,...unix].map(host=>({id:`${requirement.id}/${host.target??host.platform}/${host.shell}`,requirement:requirement.id,host,
+  const platforms=[windows,...unix];
+  return {checklistSha256:digest(text),requirements,platforms,
+    obligations:requirements.flatMap(requirement=>platforms.map(host=>({id:`${requirement.id}/${host.target??host.platform}/${host.shell}`,requirement:requirement.id,host,
       status:host.target?'blocked':'pending',reason:host.target?'Required actual macOS arm64 or controlled Linux SSH environment unavailable':'Detailed required subcases and applicable exclusions must be reviewed; package subset cannot pass parent requirement'}))),
     deferred:['Ctrl+Shift+C','manual-copy'],fullAcceptancePassed:false};
 }

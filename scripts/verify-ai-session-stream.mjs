@@ -90,7 +90,6 @@ const { values } = parseArgs({ options: {
   'native-input-p3-startup-user-edit': { type: 'boolean' },
   'native-input-p3-require-jobs': { type: 'boolean' },
   'native-input-p3-review': { type: 'boolean' },
-  'native-input-p3-publisher-run-once': { type: 'boolean' },
   'native-input-p3-backpressure': { type: 'boolean' },
   'native-input-p3-cancel': { type: 'boolean' },
   'native-input-p3-submit-fault': { type: 'boolean' },
@@ -175,7 +174,7 @@ const displayCursorDiagnostic=values['native-input-p3-display-cursor-diagnostic'
 const displayActiveInput=values['native-input-p3-display-active-input']===true;
 assert(!displayActiveInput||displayAuto&&!displayReflowDiagnostic&&!displayCursorDiagnostic,'Active-input display requires the isolated unmodified display configuration');
 assert(!displayCursorDiagnostic||displayAuto&&!displayReflowDiagnostic,'Cursor sampling requires the isolated default display case without a reflow override');
-assert(!displayAuto||process.platform==='win32'&&process.arch==='x64'&&['powerShell7','windowsPowerShell'].includes(p3Startup)
+assert(!displayAuto||process.platform==='win32'&&process.arch==='x64'&&p3Startup==='powerShell7'
   &&values['no-model']&&values['data-scope']==='com.shellspan.validation.native-input-p3'
   &&process.env.SHELLSPAN_ALLOW_FOREGROUND_TESTS==='1'
   &&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR??'')
@@ -206,7 +205,7 @@ assert(!nativeManual || process.platform==='darwin'&&process.arch==='arm64'&&['b
 assert(!values['native-input-p3-startup-diagnostic']||p3Startup&&p3Startup!=='zsh');
 assert(!values['native-input-p3-startup-user-edit']||p3Startup&&p3Startup!=='zsh','Ordinary startup editing requires an isolated Windows startup case');
 assert(!p3Startup||values['no-model']&&values['data-scope']==='com.shellspan.validation.native-input-p3'&&!values['native-jobs']&&!values['data-initialize']);
-assert(!values['native-input-p3-review']||nativeManual||p3Startup||values['native-input-p3-submit-fault']||values['native-input-p2-lifecycle']&&['powerShell7','windowsPowerShell'].includes(values['native-input-p3']));
+assert(!values['native-input-p3-review']||nativeManual||p3Startup||values['native-input-p3-submit-fault']||values['native-input-p2-lifecycle']&&values['native-input-p3']==='powerShell7');
 const nativeP3=values['native-input-p3']??p3Startup;
 const macLocalLifecycle=isMacLocalLifecycle(values);
 const lifecycleEvidenceClockEnabled=macLifecycleEvidenceClockEnabled(macLocalLifecycle);
@@ -225,10 +224,9 @@ assert(zleAppHistory===undefined||process.platform==='darwin'&&process.arch==='a
 assert(!values['native-input-p3-cancel']||nativeP3==='zsh'&&!values['no-model']);
 assert(!values['native-input-p3-submit-fault']||values['native-input-p3-cancel']&&nativeP3==='zsh');
 assert(!values['native-input-p3-backpressure']||nativeP3&&values['native-jobs']&&!values['no-model']);
-assert(!values['native-input-p3-publisher-run-once']||process.platform==='win32'&&nativeP3==='windowsPowerShell'&&values['data-scope']==='com.shellspan.validation.native-input-p3');
 const p3CredentialMode=values['native-input-p3-credential'];
 assert(!p3CredentialMode||['source','destination','verify-absence'].includes(p3CredentialMode));
-assert(!nativeP3||['zsh','windowsPowerShell','powerShell7'].includes(nativeP3),'P3 requires an exact shell/editor family');
+assert(!nativeP3||['zsh','powerShell7'].includes(nativeP3),'P3 requires an exact shell/editor family');
 const stableNativeEntry = terminalContentionRun || modelPreflightRun || Boolean(values['native-jobs-powershell']) || values['data-initialize'] === true || values['native-input-p2'] === true || Boolean(nativeP3) || Boolean(nativeManual) || Boolean(nativeRecovery) || Boolean(nativeRaw) || Boolean(nativeDaily);
 assert(!values['native-binary'] || terminalContentionRun, '--native-binary requires --terminal-contention and a binary built for the fixed verification entry');
 assert(!terminalContentionRun || (!focusBackgroundRun && !focusRun && !performanceRun && !values['terminal-readiness']), '--terminal-contention is a separate regression');
@@ -254,7 +252,7 @@ const macStorageAdmission=Boolean(storageAdmission&&process.platform==='darwin'&
   &&Object.keys(values).every(key=>['native-input-p3-storage-admission','native-input-p3','native-input-p2','data-scope'].includes(key)));
 const fileChain=values['native-input-p3-file-chain']===true;
 const fileChainEdit=values['native-input-p3-file-chain-edit']===true;
-assert(!fileChainEdit||fileChain&&process.platform==='win32'&&process.arch==='x64'&&['windowsPowerShell','powerShell7'].includes(values['native-input-p3'])&&!values['no-model']&&values['data-scope']==='com.shellspan.validation.native-input-p3'&&process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR&&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR)&&process.env.SHELLSPAN_DATA_DIR===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'data')&&process.env.SHELLSPAN_LOCAL_HOME===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'home')&&Object.keys(values).every(key=>['native-input-p3-file-chain','native-input-p3-file-chain-edit','native-input-p3','data-scope','route','model'].includes(key)),'--native-input-p3-file-chain-edit requires one owned real-model Windows six-call file chain');
+assert(!fileChainEdit||fileChain&&process.platform==='win32'&&process.arch==='x64'&&values['native-input-p3']==='powerShell7'&&!values['no-model']&&values['data-scope']==='com.shellspan.validation.native-input-p3'&&process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR&&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR)&&process.env.SHELLSPAN_DATA_DIR===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'data')&&process.env.SHELLSPAN_LOCAL_HOME===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'home')&&Object.keys(values).every(key=>['native-input-p3-file-chain','native-input-p3-file-chain-edit','native-input-p3','data-scope','route','model'].includes(key)),'--native-input-p3-file-chain-edit requires one owned real-model Windows six-call file chain');
 const semanticVariant=values['native-input-p3-semantics'];
 const semanticGoalFormat=values['native-input-p3-semantics-goal-format'];
 const reducedMotionCase=values['native-input-p3-reduced-motion']===true;
@@ -272,7 +270,7 @@ const fileFault=values['native-input-p3-file-fault'];
 const fileRestart=values['native-input-p3-file-restart'];
 const fileRestartExecute=values['native-input-p3-file-restart-execute']===true;
 assert(!fileRestartExecute||fileRestart!==undefined&&process.platform==='win32'&&process.arch==='x64'
-  &&['windowsPowerShell','powerShell7'].includes(nativeP3)&&!noModel
+  &&nativeP3==='powerShell7'&&!noModel
   &&process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR&&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR)
   &&process.env.SHELLSPAN_DATA_DIR===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'data')
   &&process.env.SHELLSPAN_LOCAL_HOME===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'home'),
@@ -298,13 +296,13 @@ const stopBoundary=values['native-input-p3-stop-boundary'];
 const originDiagnostic=process.env.SHELLSPAN_ACCEPTANCE_ORIGIN_DIAGNOSTIC;
 assert(originDiagnostic===undefined||originDiagnostic==='1'&&stopBoundary,
   'Origin geometry diagnostics require an explicit isolated stop-boundary case');
-assert(stopBoundary===undefined||process.platform==='win32'&&process.arch==='x64'&&!noModel&&['powerShell7','windowsPowerShell'].includes(nativeP3)
+assert(stopBoundary===undefined||process.platform==='win32'&&process.arch==='x64'&&!noModel&&nativeP3==='powerShell7'
   &&/^(durableIntent|armed|beforeAccept|afterAccept)-(cancel|takeover)$/.test(stopBoundary)&&values['data-scope']==='com.shellspan.validation.native-input-p3'
   &&process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR&&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR)
   &&process.env.SHELLSPAN_DATA_DIR===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'data')&&process.env.SHELLSPAN_LOCAL_HOME===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'home')
   &&Object.keys(values).every(key=>['native-input-p3-stop-boundary','native-input-p3','data-scope'].includes(key)),
   '--native-input-p3-stop-boundary requires one isolated actual Windows model cancellation case');
-assert(!captureTail||process.platform==='win32'&&process.arch==='x64'&&!noModel&&['powerShell7','windowsPowerShell'].includes(nativeP3)
+assert(!captureTail||process.platform==='win32'&&process.arch==='x64'&&!noModel&&nativeP3==='powerShell7'
   &&values['data-scope']==='com.shellspan.validation.native-input-p3'&&process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR&&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR)
   &&process.env.SHELLSPAN_DATA_DIR===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'data')&&process.env.SHELLSPAN_LOCAL_HOME===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'home')
   &&process.env.SHELLSPAN_CAPTURE_TAIL_DLL&&/^[a-f0-9]{64}$/.test(process.env.SHELLSPAN_CAPTURE_TAIL_DLL_SHA256??'')
@@ -312,17 +310,17 @@ assert(!captureTail||process.platform==='win32'&&process.arch==='x64'&&!noModel&
   '--native-input-p3-capture-tail requires one isolated real-model Windows capture-tail case');
 const beforeAccept=values['native-input-p3-before-accept']===true;
 assert(!beforeAccept||lateReceipt,'--native-input-p3-before-accept requires the isolated late receipt entry');
-assert(!lateReceipt||process.platform==='win32'&&process.arch==='x64'&&!noModel&&['powerShell7','windowsPowerShell'].includes(nativeP3)
+assert(!lateReceipt||process.platform==='win32'&&process.arch==='x64'&&!noModel&&nativeP3==='powerShell7'
   &&values['data-scope']==='com.shellspan.validation.native-input-p3'&&process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR&&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR)
   &&process.env.SHELLSPAN_DATA_DIR===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'data')&&process.env.SHELLSPAN_LOCAL_HOME===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'home')
   &&Object.keys(values).every(key=>['native-input-p3-late-receipt','native-input-p3-before-accept','native-input-p3','data-scope'].includes(key)),
   '--native-input-p3-late-receipt requires one isolated real-model Windows late receipt case');
-assert(!activeEof||process.platform==='win32'&&process.arch==='x64'&&!noModel&&['powerShell7','windowsPowerShell'].includes(nativeP3)
+assert(!activeEof||process.platform==='win32'&&process.arch==='x64'&&!noModel&&nativeP3==='powerShell7'
   &&values['data-scope']==='com.shellspan.validation.native-input-p3'&&process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR&&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR)
   &&process.env.SHELLSPAN_DATA_DIR===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'data')&&process.env.SHELLSPAN_LOCAL_HOME===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'home')
   &&Object.keys(values).every(key=>['native-input-p3-active-eof','native-input-p3','data-scope'].includes(key)),
   '--native-input-p3-active-eof requires one isolated real-model Windows EOF case');
-assert(!navigationManual||process.platform==='win32'&&process.arch==='x64'&&!noModel&&['powerShell7','windowsPowerShell'].includes(nativeP3)
+assert(!navigationManual||process.platform==='win32'&&process.arch==='x64'&&!noModel&&nativeP3==='powerShell7'
   &&values['data-scope']==='com.shellspan.validation.native-input-p3'&&process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR&&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR)
   &&process.env.SHELLSPAN_DATA_DIR===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'data')&&process.env.SHELLSPAN_LOCAL_HOME===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'home')
   &&Object.keys(values).every(key=>['native-input-p3-navigation-manual','native-input-p3','data-scope'].includes(key)),
@@ -331,21 +329,21 @@ const delegationClose=values['native-input-p3-delegation-close']===true;
 const delegationTakeover=values['native-input-p3-delegation-takeover']===true;
 assert(!delegationTakeover||approvalDelegation&&!delegationClose,'--native-input-p3-delegation-takeover requires exclusive approval-delegation');
 assert(!delegationClose||approvalDelegation,'--native-input-p3-delegation-close requires approval-delegation');
-assert(!approvalDelegation||process.platform==='win32'&&process.arch==='x64'&&!noModel&&['powerShell7','windowsPowerShell'].includes(nativeP3)
+assert(!approvalDelegation||process.platform==='win32'&&process.arch==='x64'&&!noModel&&nativeP3==='powerShell7'
   &&values['data-scope']==='com.shellspan.validation.native-input-p3'&&process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR&&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR)
   &&process.env.SHELLSPAN_DATA_DIR===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'data')&&process.env.SHELLSPAN_LOCAL_HOME===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'home')
   &&Object.keys(values).every(key=>['native-input-p3-approval-delegation','native-input-p3-delegation-close','native-input-p3-delegation-takeover','native-input-p3','data-scope'].includes(key)),
   '--native-input-p3-approval-delegation requires one isolated real-model Windows delegation case');
 assert(!approvalRace||approvalContention,'--native-input-p3-contention-race requires approval-contention');
 assert(!approvalContention||process.platform==='win32'&&process.arch==='x64'&&!noModel
-  &&['powerShell7','windowsPowerShell'].includes(nativeP3)&&values['data-scope']==='com.shellspan.validation.native-input-p3'
+  &&nativeP3==='powerShell7'&&values['data-scope']==='com.shellspan.validation.native-input-p3'
   &&process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR&&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR)
   &&process.env.SHELLSPAN_DATA_DIR===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'data')
   &&process.env.SHELLSPAN_LOCAL_HOME===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'home')
   &&Object.keys(values).every(key=>['native-input-p3-approval-contention','native-input-p3-contention-race','native-input-p3','data-scope'].includes(key)),
   '--native-input-p3-approval-contention requires one isolated real-model Windows approval case');
 assert(windowsLifetime===undefined||process.platform==='win32'&&process.arch==='x64'&&['close','exit','control-eof','control-eof-draft'].includes(windowsLifetime)&&noModel
-  &&['powerShell7','windowsPowerShell'].includes(nativeP3)&&values['data-scope']==='com.shellspan.validation.native-input-p3'
+  &&nativeP3==='powerShell7'&&values['data-scope']==='com.shellspan.validation.native-input-p3'
   &&process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR&&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR)
   &&process.env.SHELLSPAN_DATA_DIR===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'data')
   &&process.env.SHELLSPAN_LOCAL_HOME===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'home')
@@ -358,34 +356,34 @@ const windowsDraftAction=values['native-input-p3-windows-draft-action'];
 assert(windowsDraftAction===undefined||windowsDraftCancel&&['cancel','takeover'].includes(windowsDraftAction),
   '--native-input-p3-windows-draft-action requires one supported draft action');
 assert(!windowsDraftCancel||process.platform==='win32'&&process.arch==='x64'&&!noModel
-  &&['powerShell7','windowsPowerShell'].includes(nativeP3)&&values['data-scope']==='com.shellspan.validation.native-input-p3'
+  &&nativeP3==='powerShell7'&&values['data-scope']==='com.shellspan.validation.native-input-p3'
   &&Object.keys(values).every(key=>['native-input-p3-windows-draft-cancel','native-input-p3-windows-draft-stage','native-input-p3-windows-draft-action','native-input-p3','data-scope'].includes(key)),
   '--native-input-p3-windows-draft-cancel requires one isolated real-model Windows partial-input case');
 assert(windowsStop===undefined||process.platform==='win32'&&process.arch==='x64'
-  &&['cancel','takeover'].includes(windowsStop)&&!noModel&&['powerShell7','windowsPowerShell'].includes(nativeP3)
+  &&['cancel','takeover'].includes(windowsStop)&&!noModel&&nativeP3==='powerShell7'
   &&values['data-scope']==='com.shellspan.validation.native-input-p3'
   &&Object.keys(values).every(key=>['native-input-p3-windows-stop','native-input-p3','data-scope'].includes(key)),
   '--native-input-p3-windows-stop requires one isolated real-model Windows running-stop case');
 assert(!boundaryNoInference||process.platform==='win32'&&process.arch==='x64'&&noModel&&['8192','8193'].includes(byteBoundary)
-  &&['powerShell7','windowsPowerShell'].includes(nativeP3)&&values['data-scope']==='com.shellspan.validation.native-input-p3'
+  &&nativeP3==='powerShell7'&&values['data-scope']==='com.shellspan.validation.native-input-p3'
   &&values.route===undefined&&values.model===undefined&&process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR&&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR)
   &&process.env.SHELLSPAN_DATA_DIR===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'data')&&process.env.SHELLSPAN_LOCAL_HOME===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'home'),
   '--native-input-p3-byte-boundary-no-inference requires one owned isolated Windows no-model boundary fixture without a real route');
 assert(byteBoundary===undefined||process.platform==='win32'&&process.arch==='x64'
-  &&['8192','8193'].includes(byteBoundary)&&(!noModel||boundaryNoInference)&&['powerShell7','windowsPowerShell'].includes(nativeP3)
+  &&['8192','8193'].includes(byteBoundary)&&(!noModel||boundaryNoInference)&&nativeP3==='powerShell7'
   &&values['data-scope']==='com.shellspan.validation.native-input-p3'
   &&Boolean(values.route)===Boolean(values.model)
   &&Object.keys(values).every(key=>['native-input-p3-byte-boundary','native-input-p3-byte-boundary-goal-format','native-input-p3','data-scope','route','model',...(boundaryNoInference?['native-input-p3-byte-boundary-no-inference','no-model']:[])].includes(key)),
   '--native-input-p3-byte-boundary requires one isolated real-model Windows byte-boundary case');
 assert(semanticVariant===undefined||process.platform==='win32'&&process.arch==='x64'&&['headers','validation'].includes(semanticVariant)&&!noModel
-  &&['windowsPowerShell','powerShell7'].includes(nativeP3)&&values['data-scope']==='com.shellspan.validation.native-input-p3'
+  &&nativeP3==='powerShell7'&&values['data-scope']==='com.shellspan.validation.native-input-p3'
   &&process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR&&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR)
   &&process.env.SHELLSPAN_DATA_DIR===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'data')
   &&process.env.SHELLSPAN_LOCAL_HOME===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'home')
   &&Object.keys(values).every(key=>['native-input-p3-semantics','native-input-p3-semantics-goal-format','native-input-p3-reduced-motion','native-input-p3','data-scope','route','model'].includes(key)),
   '--native-input-p3-semantics requires one owned real-model Windows headers/validation case');
 assert(fileRestart===undefined||['prepare','verify'].includes(fileRestart)&&!noModel
-  &&(process.platform==='win32'&&process.arch==='x64'&&['powerShell7','windowsPowerShell'].includes(nativeP3)
+  &&(process.platform==='win32'&&process.arch==='x64'&&nativeP3==='powerShell7'
     &&values['data-scope']==='com.shellspan.validation.native-input-p3'
     &&Object.keys(values).every(key=>['native-input-p3-file-restart',...(fileRestartExecute?['native-input-p3-file-restart-execute']:[]),'native-input-p3','data-scope','route','model'].includes(key))||macFileRestart),
   '--native-input-p3-file-restart requires one isolated real-model native scratch restart phase');
@@ -394,15 +392,15 @@ assert(fileFault!=='foreign-owner'||process.platform==='win32'&&!noModel&&proces
 assert(fileFault!=='background-reference'||process.platform==='win32'&&!noModel&&values['native-jobs']&&values['native-jobs-powershell']===nativeP3&&process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR&&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR)&&process.env.SHELLSPAN_DATA_DIR===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'data')&&process.env.SHELLSPAN_LOCAL_HOME===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'home'),'--native-input-p3-file-fault background-reference requires an owned Windows real-model native job target');
 assert(fileFault!=='direct-comparison'||process.platform==='win32'&&!noModel&&process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR&&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR)&&process.env.SHELLSPAN_DATA_DIR===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'data')&&process.env.SHELLSPAN_LOCAL_HOME===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'home'),'--native-input-p3-file-fault direct-comparison requires an owned Windows real-model independent Direct target');
 assert(fileFault===undefined||['occupied-directory','existing-file','declined-write','foreign-owner','background-reference','direct-comparison'].includes(fileFault)&&!noModel
-  &&(process.platform==='win32'&&process.arch==='x64'&&['powerShell7','windowsPowerShell'].includes(nativeP3)
+  &&(process.platform==='win32'&&process.arch==='x64'&&nativeP3==='powerShell7'
     &&values['data-scope']==='com.shellspan.validation.native-input-p3'
     &&Object.keys(values).every(key=>['native-input-p3-file-fault','native-input-p3','data-scope','route','model',...(fileFault==='background-reference'?['native-jobs','native-jobs-powershell']:[])].includes(key))||macFileFault&&!['declined-write','foreign-owner','background-reference','direct-comparison'].includes(fileFault)),
   '--native-input-p3-file-fault requires one isolated real-model native scratch refusal case');
-assert(!fileChain||!noModel&&(['powerShell7','windowsPowerShell'].includes(nativeP3)&&values['data-scope']==='com.shellspan.validation.native-input-p3'||macFileChain)
+assert(!fileChain||!noModel&&(nativeP3==='powerShell7'&&values['data-scope']==='com.shellspan.validation.native-input-p3'||macFileChain)
   &&!storageAdmission&&!values['data-initialize']&&!values['native-jobs']&&!values['native-input-p3-cancel']&&!terminalContentionRun,
   '--native-input-p3-file-chain requires one isolated real-model native file chain with owned macOS data or a supported Windows host');
 assert(!storageAdmission||['healthy','missing','read-only','unknown-format','invalid-marker','foreign-namespace','missing-directory','directory-junction','corrupt-database','read-denied','crash-after-start','crash-prepare','crash-proof','crash-intent','crash-arm','crash-key'].includes(storageAdmission)&&!noModel
-  &&(['powerShell7','windowsPowerShell'].includes(nativeP3)&&values['data-scope']==='com.shellspan.validation.native-input-p3'||macStorageAdmission)
+  &&(nativeP3==='powerShell7'&&values['data-scope']==='com.shellspan.validation.native-input-p3'||macStorageAdmission)
   &&!values['data-initialize']&&!values['native-jobs']&&!values['native-input-p3-cancel']&&!terminalContentionRun,
   '--native-input-p3-storage-admission requires one isolated real-model native case with an exact supported host, editor and owned data');
 assert(!modelPreflightRun || !noModel && values['data-scope']==='com.shellspan.validation.native-input-p3'
@@ -489,7 +487,7 @@ assert(historyReuseReader===undefined||['0','1'].includes(historyReuseReader)&&h
 const historyStartup = values['native-input-p3-history-startup'] ?? historyLifecycle ?? historyConcurrent;
 assert(historyLifecycle===undefined||values['native-input-p3-history-startup']===undefined,'Choose one isolated Windows history startup or lifecycle case');
 assert(historyConcurrent===undefined||historyLifecycle===undefined&&values['native-input-p3-history-startup']===undefined,'Choose one isolated Windows history concurrent case without startup or lifecycle');
-assert(!windowsShell || process.platform === 'win32' && values['native-jobs'] && ['windowsPowerShell', 'powerShell7'].includes(windowsShell), '--native-jobs-powershell requires native Windows and an exact PowerShell kind');
+assert(!windowsShell || process.platform === 'win32' && values['native-jobs'] && windowsShell === 'powerShell7', '--native-jobs-powershell requires native Windows and an exact PowerShell kind');
 if (windowsShell) {
   assert(process.env.SHELLSPAN_DATA_DIR && isAbsolute(process.env.SHELLSPAN_DATA_DIR)
     && values['data-scope'], 'Windows desktop acceptance requires explicit independent data directory and app identifier');
@@ -502,14 +500,14 @@ assert(!values['native-jobs-ssh'] || values['native-jobs'] && ['bash', 'zsh'].in
 assert(!values['native-jobs-direct'] || values['native-jobs'] && !values['native-jobs-ssh'], '--native-jobs-direct requires local --native-jobs');
 assert(!values['native-jobs-focus'] || values['native-jobs'], '--native-jobs-focus requires --native-jobs');
 assert(!values['native-jobs-narrow'] || values['native-jobs'], '--native-jobs-narrow requires --native-jobs');
-assert(!jobLifecycle || process.platform==='win32'&&['powerShell7','windowsPowerShell'].includes(nativeP3)
+assert(!jobLifecycle || process.platform==='win32'&&nativeP3==='powerShell7'
   &&windowsShell===nativeP3&&values['native-jobs']&&!noModel&&values['data-scope']==='com.shellspan.validation.native-input-p3'
   &&process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR&&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR)
   &&process.env.SHELLSPAN_DATA_DIR===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'data')
   &&process.env.SHELLSPAN_LOCAL_HOME===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'home')
   &&Object.keys(values).every(key=>['native-input-p3-job-lifecycle','native-jobs','native-jobs-powershell','native-input-p3','data-scope','route','model'].includes(key)),
   '--native-input-p3-job-lifecycle requires an isolated real-model native Windows lifecycle case without UI keyboard/navigation or Direct');
-assert(!jobStdin||process.platform==='win32'&&['powerShell7','windowsPowerShell'].includes(nativeP3)
+assert(!jobStdin||process.platform==='win32'&&nativeP3==='powerShell7'
   &&windowsShell===nativeP3&&values['native-jobs']&&!noModel&&values['data-scope']==='com.shellspan.validation.native-input-p3'
   &&process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR&&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR)
   &&process.env.SHELLSPAN_DATA_DIR===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'data')
@@ -517,7 +515,7 @@ assert(!jobStdin||process.platform==='win32'&&['powerShell7','windowsPowerShell'
   &&Object.keys(values).every(key=>['native-input-p3-job-stdin','native-input-p3-job-descendant','native-jobs','native-jobs-powershell','native-input-p3','data-scope','route','model'].includes(key)),
   jobDescendant?'--native-input-p3-job-descendant requires one owned real-model Windows group case without Direct':'--native-input-p3-job-stdin requires one owned real-model Windows rejection/cleanup case without Direct');
 assert(jobCompletion===undefined||['0','7'].includes(jobCompletion)&&process.platform==='win32'
-  &&['powerShell7','windowsPowerShell'].includes(nativeP3)&&windowsShell===nativeP3&&values['native-jobs']&&!noModel
+  &&nativeP3==='powerShell7'&&windowsShell===nativeP3&&values['native-jobs']&&!noModel
   &&values['data-scope']==='com.shellspan.validation.native-input-p3'
   &&process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR&&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR)
   &&process.env.SHELLSPAN_DATA_DIR===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'data')
@@ -525,7 +523,7 @@ assert(jobCompletion===undefined||['0','7'].includes(jobCompletion)&&process.pla
   &&Object.keys(values).every(key=>['native-input-p3-job-completion','native-jobs','native-jobs-powershell','native-input-p3','data-scope','route','model'].includes(key)),
   '--native-input-p3-job-completion requires one isolated real-model Windows natural exit0/7 case without keyboard/navigation or Direct');
 assert(jobOwnership===undefined||['wait','kill'].includes(jobOwnership)&&process.platform==='win32'
-  &&['powerShell7','windowsPowerShell'].includes(nativeP3)&&windowsShell===nativeP3&&values['native-jobs']&&!noModel
+  &&nativeP3==='powerShell7'&&windowsShell===nativeP3&&values['native-jobs']&&!noModel
   &&values['data-scope']==='com.shellspan.validation.native-input-p3'
   &&process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR&&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR)
   &&process.env.SHELLSPAN_DATA_DIR===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'data')
@@ -533,7 +531,7 @@ assert(jobOwnership===undefined||['wait','kill'].includes(jobOwnership)&&process
   &&Object.keys(values).every(key=>['native-input-p3-job-ownership',...(jobOwnershipExactGoal?['native-input-p3-job-ownership-exact-goal']:[]),'native-jobs','native-jobs-powershell','native-input-p3','data-scope','route','model'].includes(key)),
   '--native-input-p3-job-ownership requires one isolated real-model Windows foreign wait/kill case without keyboard/navigation or Direct');
 assert(jobRetired===undefined||['wait','kill'].includes(jobRetired)&&process.platform==='win32'
-  &&['powerShell7','windowsPowerShell'].includes(nativeP3)&&windowsShell===nativeP3&&values['native-jobs']&&!noModel
+  &&nativeP3==='powerShell7'&&windowsShell===nativeP3&&values['native-jobs']&&!noModel
   &&values['data-scope']==='com.shellspan.validation.native-input-p3'
   &&process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR&&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR)
   &&process.env.SHELLSPAN_DATA_DIR===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'data')
@@ -541,7 +539,7 @@ assert(jobRetired===undefined||['wait','kill'].includes(jobRetired)&&process.pla
   &&Object.keys(values).every(key=>['native-input-p3-job-retired','native-jobs','native-jobs-powershell','native-input-p3','data-scope','route','model'].includes(key)),
   '--native-input-p3-job-retired requires one isolated real-model Windows retired wait/kill case without keyboard/navigation or Direct');
 assert(historyStartup===undefined||windowsHistoryModes.includes(historyStartup)&&process.platform==='win32'
-  &&['powerShell7','windowsPowerShell'].includes(nativeP3)&&windowsShell===nativeP3&&values['native-jobs']&&!noModel
+  &&nativeP3==='powerShell7'&&windowsShell===nativeP3&&values['native-jobs']&&!noModel
   &&values['data-scope']==='com.shellspan.validation.native-input-p3'
   &&process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR&&isAbsolute(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR)
   &&process.env.SHELLSPAN_DATA_DIR===resolve(process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'data')
@@ -882,15 +880,6 @@ const attachResult = (vite) => {
     assert(lifecycleEvidenceClock.beginObservation(label),'Lifecycle work deadline already expired');
     return()=>lifecycleEvidenceClock.endObservation(label);
   }:undefined,{visualLabels:macLifecycleVisualCheckpoints,snapshotLabels:macLifecycleSnapshotCheckpoints});
-  if(values['native-input-p3-publisher-run-once'])vite.middlewares.use(`/__native-p3-publisher/${token}`,(request,response)=>{
-    void(async()=>{
-      assert(request.method==='POST'&&ownedEvidenceDirectory);
-      const output=execFileSync('D:/Programs/PowerShell/7/pwsh.exe',['-NoLogo','-NoProfile','-NonInteractive','-File',resolve(repository,'scripts/native-input-p3/windows-publisher.ps1'),'-DataDirectory',process.env.SHELLSPAN_DATA_DIR,'-Workspace',repository],{encoding:'utf8',timeout:10000});
-      const proof=JSON.parse(output);assert(proof.choice==='RunOnceR'&&proof.signatureStatus==='Valid');
-      await writeFile(resolve(ownedEvidenceDirectory,`verified-publisher-${randomUUID()}.json`),JSON.stringify(proof,null,2),{flag:'wx'});
-      response.setHeader('Content-Type','application/json');response.end(JSON.stringify(proof));
-    })().catch(()=>response.writeHead(500).end('Actual approved publisher verification failed'));
-  });
   if(values['native-input-p3-review'])vite.middlewares.use(`/__native-p3-review/${token}`,(request,response)=>{
     void(async()=>{
       assert((request.method==='POST'||request.method==='GET')&&ownedEvidenceDirectory);
@@ -1318,7 +1307,6 @@ try {
   if(values['native-input-p3-startup-diagnostic'])url.searchParams.set('nativeP3StartupDiagnostic','true');
   if(values['native-input-p3-startup-user-edit'])url.searchParams.set('nativeP3StartupUserEdit','true');
   if(values['native-input-p3-require-jobs'])url.searchParams.set('nativeP3RequireJobs','true');
-  if(values['native-input-p3-publisher-run-once'])url.searchParams.set('nativeP3PublisherRunOnce','true');
   if(values['native-input-p3-backpressure'])url.searchParams.set('nativeP3Backpressure','true');
   if(values['native-input-p3-cancel'])url.searchParams.set('nativeP3CancelEffect',`p3-cancel-${token}`);
   if(values['native-input-p3-submit-fault'])url.searchParams.set('nativeP3SubmitFault','true');

@@ -21,7 +21,7 @@ it('requires an explicit validation context for model and manual display package
 
 it('selects reviewed installed-package hosts explicitly without falling back',()=>{
  expect(windowsPackageHost()).toEqual({shell:'powerShell7',expectedVersion:'7.6.9',executable:'D:/Programs/PowerShell/7/pwsh.exe'});
- expect(windowsPackageHost('windowsPowerShell')).toEqual({shell:'windowsPowerShell',expectedVersion:'5.1.26100.9818',executable:'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe'});
+ expect(()=>windowsPackageHost('windowsPowerShell')).toThrow('Unsupported Windows host');
  expect(()=>windowsPackageHost('unreviewed-host')).toThrow('Unsupported Windows host');
 });
 
