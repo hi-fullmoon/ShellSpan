@@ -9,7 +9,13 @@ import {displayModuleJavaScript,installedRuntimeManifest} from '../native-input-
 const root=resolve(import.meta.dirname,'../..');
 const linux=process.argv.includes('--linux');
 const pointer=JSON.parse(await readFile(resolve(root,linux?'.artifacts/tests/native-input-p2/latest-linux-geometry.json':'.artifacts/tests/native-input-p2/latest-geometry.json'),'utf8'));
-const entries=JSON.parse(await readFile(pointer.summary,'utf8'));assert.equal(entries.length,linux?12:24);
+const target=linux?'linux-aarch64-glibc-2.36':'macos-arm64';
+const catalogue=JSON.parse(await readFile(resolve(root,`.artifacts/tests/native-input-p2/resources/native-input/catalogue-${target}.json`),'utf8'));
+const entries=JSON.parse(await readFile(pointer.summary,'utf8'));
+assert(catalogue.profiles.length>0,'No native Bash profiles in the geometry catalogue');
+const sizes=linux?['oversize']:['normal','oversize'];
+const expectedGeometry=catalogue.profiles.flatMap(({bashVersion})=>[32,40,100,180].flatMap(columns=>sizes.map(size=>`${bashVersion}/${columns}/${size}`)));
+assert.deepEqual(entries.map(({version,columns,size})=>`${version}/${columns}/${size}`).sort(),expectedGeometry.sort(),'Geometry evidence must cover the built profiles');
 const expectedCases=entries.length*4;
 const installed=await installedRuntimeManifest();
 const directory=resolve(root,'.artifacts/tests/native-input-p2/browser',randomUUID());await mkdir(directory,{recursive:true,mode:0o700});

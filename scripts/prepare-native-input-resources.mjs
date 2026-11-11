@@ -3,10 +3,11 @@ import {createHash,randomUUID} from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {cp,mkdir,readdir,readFile,writeFile,rm,chmod,stat,rename} from 'node:fs/promises';
 import {captureValidationSources} from './native-input-p2/frozen-validation.mjs';
-import {resolve} from 'node:path';
+import {basename,resolve} from 'node:path';
 import {parseArgs} from 'node:util';
 import {nativeInputReleaseDirectory} from './native-input-p2/resource-paths.mjs';
 import {copyNativeRebuildSources} from './native-input-p2/rebuild-sources.mjs';
+import {bashProfileId,RELEASE_BASH_VERSION} from './native-input-p2/bash-profiles.mjs';
 
 const root=resolve(import.meta.dirname,'..');
 const {values}=parseArgs({options:{'no-build':{type:'boolean'},'with-ssh':{type:'boolean'},'require-ssh':{type:'boolean'},target:{type:'string'},'validation-editor':{type:'string',multiple:true}}});
@@ -131,10 +132,13 @@ if(includeBash){
   const names=(await readdir(sourceRoot)).filter(name=>/^catalogue-(macos-arm64|linux-aarch64-glibc-2\.36)\.json$/.test(name));
   for(const name of names){
     const catalogue=JSON.parse(await readFile(resolve(sourceRoot,name),'utf8'));
-    assert(catalogue.version===1&&Array.isArray(catalogue.profiles)&&catalogue.profiles.length===3);
+    const catalogueTarget=name.slice('catalogue-'.length,-'.json'.length);
+    assert.equal(catalogue.version,1);
+    assert.deepEqual(catalogue.profiles.map(profile=>profile.id),[bashProfileId(RELEASE_BASH_VERSION,catalogueTarget)],`Unexpected release Bash profiles in ${name}`);
     for(const [name,expected] of Object.entries(catalogue.sources))assert.equal(sha(await readFile(resolve(root,name))),expected,`Stale native source: ${name}`);
     for(const profile of catalogue.profiles){
-      assert(/^gnu-bash-(4\.1-readline-6\.0|4\.4-readline-7\.0|5\.3-readline-8\.3\.6)-(macos-arm64|linux-aarch64-glibc-2\.36)-native$/.test(profile.id));
+      assert.equal(profile.target,catalogueTarget);
+      assert.equal(profile.bashVersion,RELEASE_BASH_VERSION);
       assert.equal(profile.module,`${profile.id}/adapter.so`);assert.equal(profile.relay,`${profile.id}/native-input-relay`);
       assert.equal(profile.readlineDisplayAbi,1,'Readline native display ABI missing');
       for(const [path,expected] of [[profile.module,profile.moduleSha256],[profile.relay,profile.relaySha256],[`${profile.id}/bash`,profile.shellSha256]]){
@@ -150,7 +154,10 @@ if(includeBash){
   const allowed=new Set(['sources','README.txt',...targets,...editorAllowed]);
   for(const name of targets.filter(name=>name.startsWith('catalogue-')))for(const profile of JSON.parse(await readFile(resolve(generated,name),'utf8')).profiles)allowed.add(profile.id);
   for(const entry of await readdir(generated))if(!allowed.has(entry))await rm(resolve(generated,entry),{recursive:true});
-  await cp(resolve(sourceRoot,'sources'),resolve(generated,'sources'),{recursive:true});
+  await cp(resolve(sourceRoot,'sources'),resolve(generated,'sources'),{recursive:true,filter:path=>{
+    const name=basename(path);
+    return !/^bash-[\d.]+\.tar\.gz$/.test(name)||name===`bash-${RELEASE_BASH_VERSION}.tar.gz`;
+  }});
   const tree=resolve(generated,'sources/ShellSpan');await mkdir(tree,{recursive:true});
   await copyNativeRebuildSources(root,tree);
   for(const name of ['scripts/dependency-builds/bash-native','scripts/native-input-p0']){

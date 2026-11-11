@@ -43,7 +43,7 @@ Shell、编辑器、Core、模块及 relay 均按实际版本和 SHA-256 绑定�
 | A01–A03、A05–A06 | 每个实际构建目标、资源包及应用包；本机编译不代表跨目标编译 |
 | A04 | 实验与正式资源/能力隔离的实际回归 |
 | B01–B06、C01–C07 | 对应原生 Shell/传输；B04 按 Shell 语法展开 |
-| B07 | GNU 完整本地/SSH 39 项；macOS 本地 18 项只算本地子集；ZLE/PSReadLine 按实际历史选项独立展开 |
+| B07 | Bash 5.3 发布矩阵含本地 6 项与 SSH 7 项；原三版本 39 项作为按需兼容性验证；ZLE/PSReadLine 按实际历史选项独立展开 |
 | B08 | 原生文件工具与脚本路径调用；Direct 对照及远端 SFTP 单列 |
 | D01–D06 | 对应新捕获的 Chromium/WebKit × 默认/WebGL；记录实际默认渲染器，原生 WebView 独立验收 |
 | E01、E02、E03 | 分别对应受控 SSH、ZLE、两个 Windows 宿主；不适用须说明 |
@@ -147,7 +147,7 @@ Shell、编辑器、Core、模块及 relay 均按实际版本和 SHA-256 绑定�
 | 范围 | 入口及限制 |
 | --- | --- |
 | 源码/目录与发现 | [冻结清单](../../scripts/native-input-p2/frozen-validation.mjs)、[快照](../../scripts/native-input-p3/snapshot.mjs)、[目录回归](../../scripts/__tests__/artifact-layout.test.mjs)；只读索引不得改写 |
-| GNU 本地与 SSH | [P2](../../scripts/verify-terminal-input-p2.mjs)、[矩阵](../../scripts/native-input-p2/matrix.mjs)；`--list-cases` 只列清单，`--local-only` 不是完整 39 项 |
+| GNU 本地与 SSH | [P2](../../scripts/verify-terminal-input-p2.mjs)、[矩阵](../../scripts/native-input-p2/matrix.mjs)；`--list-cases` 只列清单，`--local-only` 只选本地，`--include-legacy` 扩展至三个 Bash 版本 |
 | ZLE | [Core 构建](../../scripts/native-input-p3/build-scoped-core.mjs)、[编辑器构建](../../scripts/native-input-p3/build.mjs)、[App](../../scripts/native-input-p3/app.mjs)；Core/Main/模块须同批绑定 |
 | Windows | [资源构建](../../scripts/native-input-p3/build-windows.mjs)、[组件](../../src-tauri/native-input-editors/examples/windows_acceptance.rs)、[App 入口](../../scripts/verify-ai-session-stream.mjs)、[分期计划](agent-terminal-input-windows-acceptance.md)；debug 与 release 制品分开核验 |
 | 资源准入 | [资源核验](../../scripts/native-input-p3/verify-resource-admission.mjs)；错误资源负例与拟验收有效资源分别隔离，不打开生产 profile |

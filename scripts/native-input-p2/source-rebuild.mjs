@@ -16,11 +16,11 @@ for(const name of await readdir(resolve(packaged,'sources')))if(name.endsWith('.
 const log=openSync(resolve(directory,'build.log'),'wx',0o600);
 const child=spawn('python3',['-B','scripts/native-input-p2/build.py'],{cwd:clean,env:{...process.env,CARGO_NET_OFFLINE:'true',PYTHONDONTWRITEBYTECODE:'1'},stdio:['ignore',log,log]});
 const code=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve);});closeSync(log);
-await writeFile(resolve(directory,'result.json'),JSON.stringify({exitCode:code,sourceRoot:clean,scope:'Fresh packaged source tree, packaged GNU archives and cargo vendor, all three host ABIs; no original checkout build tree used'},null,2));
+await writeFile(resolve(directory,'result.json'),JSON.stringify({exitCode:code,sourceRoot:clean,scope:'Fresh packaged source tree, packaged GNU archives and Cargo vendor for the release Bash profile'},null,2));
 assert.equal(code,0,`Packaged-source reconstruction failed; ${directory}`);
 const name=process.platform==='darwin'?'catalogue-macos-arm64.json':'catalogue-linux-aarch64-glibc-2.36.json';
 const expected=JSON.parse(await readFile(resolve(packaged,name),'utf8'));
 const actual=JSON.parse(await readFile(resolve(clean,'.artifacts/tests/native-input-p2/resources/native-input',name),'utf8'));
 assert.deepEqual(actual.sources,expected.sources,'Packaged producer sources differ from the signed resource catalogue');
-assert.equal(actual.profiles.length,3);
+assert.deepEqual(actual.profiles.map(profile=>profile.id),expected.profiles.map(profile=>profile.id));
 console.log(JSON.stringify({directory,result:'PASS',profiles:actual.profiles.map(value=>value.id)}));

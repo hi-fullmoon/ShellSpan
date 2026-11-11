@@ -32,6 +32,7 @@ class NativeGeometry(base.Session):
         self.directory = Path(item['linuxDirectory'])
         self.raw, self.pending, self.events, self.timeline = bytearray(), bytearray(), [], []
         self.start = time.monotonic()
+        self.read_events = []
         self.accept_keys = 0
         self.control = None
         self.socket_dir = contextlib.ExitStack()
@@ -78,7 +79,10 @@ class NativeGeometry(base.Session):
                 if error.errno != errno.EIO:
                     raise
                 data = b''
-            self.raw.extend(data)
+            if data:
+                self.read_events.append({'offset': len(self.raw), 'length': len(data),
+                                         'atMs': int((time.monotonic() - self.start) * 1000)})
+                self.raw.extend(data)
         if self.listener in ready:
             self.control, _ = self.listener.accept()
             self.control.setblocking(False)
@@ -228,7 +232,9 @@ if sys.argv[1] == '--widget':
 
 inputs = Path(sys.argv[1])
 entries, results = json.loads(inputs.read_text()), []
-assert len(entries) == 12
+catalogue = json.loads((ROOT / '.artifacts/tests/native-input-p2/resources/native-input/catalogue-linux-aarch64-glibc-2.36.json').read_text())
+expected = sorted((profile['id'], columns) for profile in catalogue['profiles'] for columns in [32, 40, 100, 180])
+assert expected and sorted((item['profile'], item['columns']) for item in entries) == expected
 for item in entries:
     with contextlib.ExitStack() as cleanup:
         session = NativeGeometry(item)
@@ -247,6 +253,7 @@ for item in entries:
         session.until(lambda: session.raw.endswith(source_bytes[-32:]), 'Real Linux source echo incomplete')
         (session.directory / 'typed-pty.bin').write_bytes(session.raw)
         metadata = {'target': 'linux-aarch64-glibc-2.36', 'version': item['version'], 'profile': item['profile'], 'moduleSha256': item['moduleSha256'], 'shellSha256': item['shellSha256'], 'columns': item['columns'], 'rows': item['rows'], 'size': 'oversize', 'source': item['source'], 'directory': item['hostDirectory'], 'actualResize': True, 'fullInputConfirmed': True, 'prefixBeforeFirstResize': source_bytes[:before].decode(), 'resizeEvents': [{'offset': first_offset, 'columns': changed, 'appliedUtf8Bytes': before}, {'offset': second_offset, 'columns': item['columns'], 'appliedUtf8Bytes': after}], 'actualCompleteProof': proof}
+        metadata['readEvents'] = session.read_events.copy()
         session.send(item['arm'])
         session.wait_frame('commitArmed')
         session.type(b'\x18a')

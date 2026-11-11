@@ -61,7 +61,7 @@ Windows 后台标记的名称冲突检查不得自动导入模块或执行模块
 生产编辑器清单准入 macOS arm64 本地及 Linux aarch64/glibc 2.36 SSH 的 Zsh 5.9/ZLE 5.9，
 以及 Windows x64 的 Windows PowerShell 5.1 和 PowerShell 7 两个固定版本配置。
 macOS 仅在所选 Zsh 匹配受信系统摘要时，启动应用随包提供的已校验私有 Zsh 和 Core。
-GNU Bash 继续使用独立的来源匹配 catalogue、实际 Shell SHA 和模块校验。
+GNU Bash 正式包只提供 Bash 5.3 / Readline 8.3.6，沿用独立的来源匹配 catalogue、实际 Shell SHA 和模块校验。Bash 4.1 和 4.4 可显式构建用于兼容性验证。缺少匹配构建的 Bash 会话保留普通终端输入和 TUI。
 各平台实际结果分别留证，统一实机待验项见[验收清单](../../../docs/design/agent-terminal-input-acceptance-checklist.md)。
 
 初始化使用独立 `connection = {terminalSessionId, terminalGeneration, controlId}`。
@@ -442,8 +442,8 @@ GNU 原生候选的普通粘贴使用 Readline 的标准 bracketed-paste 模式�
 固定 Bash 4.4 / Readline 7.0 上游回移，保留 6.0 ABI、默认关闭及用户自定义键绑定。
 来源、补丁与实际 Readline 源文件摘要随资源构建记录；修改后必须实际重建
 Shell/module/relay，不能仅更新 catalogue。系统 raw Shell 不加载该集成。
-这项修复仍须分别取得四本地组合的真实 PTY、App、Unicode、取消与显示证据；
-其他平台不继承本机结果，生产编辑器列表继续为空。
+历史兼容性验收按四个本地组合分别记录真实 PTY、App、Unicode、取消与显示证据。
+当前发布验收按本节前述配置执行，其他平台独立留证。
 
 macOS GNU 普通编辑的显示宽度由内容核验后的三个本地 profile 显式选择 Unicode 11/session，
 与本机实际 `wcwidth` 测量及目标输入集合对应；raw 查询或远端声明不授予原生 binding 或能力。

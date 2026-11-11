@@ -13,7 +13,7 @@ it('packs an unsupported target twice and rejects a missing catalogue for an adm
   const directory = await mkdtemp(path.join(artifacts, 'run-'));
   try {
     for (const name of ['scripts/prepare-native-input-resources.mjs', 'scripts/native-input-p2/frozen-validation.mjs',
-      'scripts/native-input-p2/resource-paths.mjs','scripts/native-input-p2/rebuild-sources.mjs', 'protocol/agent/runtime/native-editor-admission.json']) {
+      'scripts/native-input-p2/resource-paths.mjs','scripts/native-input-p2/rebuild-sources.mjs', 'scripts/native-input-p2/bash-profiles.mjs', 'protocol/agent/runtime/native-editor-admission.json']) {
       await mkdir(path.dirname(path.join(directory, name)), { recursive: true });
       await copyFile(path.join(root, name), path.join(directory, name));
     }

@@ -1,7 +1,10 @@
 # Native GNU dependency targets
 
-`python3 scripts/native-input-p2/build.py` builds Bash4.1/Readline6.0,
-Bash4.4/Readline7.0 and Bash5.3/Readline8.3.6 on the accepted target platforms.
+`python3 -B scripts/native-input-p2/build.py` builds the release profile,
+Bash 5.3 / Readline 8.3.6, on the accepted target platforms. To build the older
+profiles for compatibility checks, pass `--versions 4.1,4.4` or
+`--versions 4.1,4.4,5.3`. Use `--include-legacy` when listing or running the P2
+application matrix or checking its cumulative evidence.
 The dependency recipe verifies the pinned GNU archives and official Readline
 patches, then applies the explicit post-profile startup and native display patches.
 

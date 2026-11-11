@@ -19,14 +19,13 @@ function run(...args) {
 }
 
 describe('native input matrix transport selection', () => {
-  it('lists all 18 local cases without a foreground grant or SSH fixture', () => {
+  it('lists the six release Bash local cases without a foreground grant or SSH fixture', () => {
     const result = run('--local-only', '--list-cases');
     expect(result.status).toBe(0);
     const listing = JSON.parse(result.stdout);
     expect(listing).toMatchObject({ execution: false, localOnly: true, fullMatrix: false });
-    expect(listing.cases).toHaveLength(18);
     const scenarios = ['history-small', 'history-default', 'history-custom', 'history-empty', 'history-unset', 'jobs'];
-    expect(listing.cases).toEqual(['4.1', '4.4', '5.3'].flatMap(version => scenarios.map(scenario => ({ version, scenario, transport: 'local' }))));
+    expect(listing.cases).toEqual(scenarios.map(scenario => ({ version: '5.3', scenario, transport: 'local' })));
   });
   it('preserves an explicit local subset without claiming complete coverage', () => {
     const result = run('--local-only', '--list-cases', '--case', '5.3/local/jobs');
@@ -35,6 +34,7 @@ describe('native input matrix transport selection', () => {
   });
   it.each([
     ['4.1/ssh/jobs'],
+    ['4.4/local/jobs'],
     ['5.3/local/lifecycle'],
     ['unknown/local/jobs'],
     ['5.3/local/jobs', '5.3/local/jobs'],
@@ -48,19 +48,28 @@ describe('native input matrix transport selection', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('Local-only acceptance does not use an SSH fixture');
   });
-  it('requires an owned SSH fixture for the unchanged full-matrix mode', () => {
+  it('requires an owned SSH fixture to execute the full matrix', () => {
     const result = run();
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('Provide the owned fixture path');
   });
-  it('lists the complete 39-case matrix without opening or fabricating an SSH fixture', () => {
+  it('lists all 13 release cases without an SSH fixture', () => {
     const result = run('--list-cases');
     expect(result.status).toBe(0);
     const listing = JSON.parse(result.stdout);
     expect(listing).toMatchObject({ execution: false, localOnly: false, fullMatrix: true });
+    expect(listing.cases).toHaveLength(13);
+    expect(new Set(listing.cases.map(item => item.version))).toEqual(new Set(['5.3']));
+    expect(listing.cases.filter(item => item.transport === 'local')).toHaveLength(6);
+    expect(listing.cases.filter(item => item.transport === 'ssh')).toHaveLength(7);
+  });
+  it('lists the original 39-case matrix when legacy Bash coverage is requested', () => {
+    const result = run('--include-legacy', '--list-cases');
+    expect(result.status).toBe(0);
+    const listing = JSON.parse(result.stdout);
+    expect(listing).toMatchObject({ execution: false, localOnly: false, fullMatrix: true });
     expect(listing.cases).toHaveLength(39);
-    expect(listing.cases.filter(item => item.transport === 'local')).toHaveLength(18);
-    expect(listing.cases.filter(item => item.transport === 'ssh')).toHaveLength(21);
+    expect(new Set(listing.cases.map(item => item.version))).toEqual(new Set(['4.1', '4.4', '5.3']));
   });
   it('refuses a real local run before creating evidence when no foreground window is scheduled', () => {
     const result = run('--local-only');

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {windowsPackageHost} from './package-config.mjs';
 import {caseContract} from './acceptance-evidence.mjs';
 import {digest} from './acceptance-inputs.mjs';
+import {BASH_READLINE_VERSIONS,RELEASE_BASH_VERSION} from '../native-input-p2/bash-profiles.mjs';
 
 const scenarios={
   ordinary:{requirements:['A03','A06','E03','E04'],stage:'ordinary',expected:{native:true,ordinaryOutputLines:1,agentOperations:0},evidence:['webview-evidence.json','application-ordinary.json','native-window.png']},
@@ -26,7 +27,8 @@ export function checklistObligations(text){
   const requirements=[...text.matchAll(/^- \[.\] ([A-E]\d{2}) (.+)$/gm)].map(([,id,description])=>({id,description}));
   assert.equal(requirements.length,35,'Checklist requirements changed; review expansion before scheduling');
   const windows=['powerShell7','windowsPowerShell'].map(shell=>({platform:'windows-x64',transport:'ConPTY',shell,...windowsPackageHost(shell)}));
-  const unix=['macos-arm64/local-PTY','linux-aarch64-glibc2.36/SSH-PTY'].flatMap(target=>['bash4.1-readline6.0','bash4.4-readline7.0','bash5.3-readline8.3.6','zsh5.9-zle5.9'].map(shell=>({target,shell})));
+  const bash=`bash${RELEASE_BASH_VERSION}-readline${BASH_READLINE_VERSIONS[RELEASE_BASH_VERSION]}`;
+  const unix=['macos-arm64/local-PTY','linux-aarch64-glibc2.36/SSH-PTY'].flatMap(target=>[bash,'zsh5.9-zle5.9'].map(shell=>({target,shell})));
   return {checklistSha256:digest(text),requirements,platforms:[...windows,...unix],
     obligations:requirements.flatMap(requirement=>[...windows,...unix].map(host=>({id:`${requirement.id}/${host.target??host.platform}/${host.shell}`,requirement:requirement.id,host,
       status:host.target?'blocked':'pending',reason:host.target?'Required actual macOS arm64 or controlled Linux SSH environment unavailable':'Detailed required subcases and applicable exclusions must be reviewed; package subset cannot pass parent requirement'}))),

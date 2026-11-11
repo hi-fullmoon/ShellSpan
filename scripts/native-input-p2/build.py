@@ -17,12 +17,16 @@ sys.dont_write_bytecode = True
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / '.artifacts/tests/native-input-p2'
+READLINE_VERSIONS = {'4.1': '6.0', '4.4': '7.0', '5.3': '8.3.6'}
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--versions', default='4.1,4.4,5.3')
+    parser.add_argument('--versions', default='5.3', help='comma-separated Bash versions (default: 5.3)')
     args = parser.parse_args()
+    versions = args.versions.split(',')
+    if len(set(versions)) != len(versions) or any(version not in READLINE_VERSIONS for version in versions):
+        parser.error('--versions requires distinct supported Bash versions: 4.1, 4.4, 5.3')
     if platform.machine() not in ['arm64', 'aarch64']:
         raise RuntimeError('Unaccepted module architecture')
     host = platform.system().lower()
@@ -51,8 +55,8 @@ def main():
     catalogue = OUT / 'resources/native-input'
     catalogue.mkdir(parents=True, exist_ok=True)
     profiles = []
-    for version in args.versions.split(','):
-        readline = {'4.1': '6.0', '4.4': '7.0', '5.3': '8.3.6'}[version]
+    for version in versions:
+        readline = READLINE_VERSIONS[version]
         profile = f'gnu-bash-{version}-readline-{readline}-{target}-native'
         rust = OUT / 'build' / profile
         run(['cargo', 'build', '--release', '--locked', '--manifest-path', source / 'Cargo.toml', '--target-dir', rust],
@@ -99,9 +103,12 @@ def main():
     # Source archives, exact GNU patches and license notices accompany modules.
     notices = catalogue / 'sources'
     notices.mkdir(exist_ok=True)
-    for path in (ROOT / '.artifacts/tests/native-input-p0/upstream').iterdir():
-        if path.is_file() and (path.name.endswith('.tar.gz') or path.name.startswith('readline83-')):
-            shutil.copy2(path, notices / path.name)
+    archives = [f'bash-{version}.tar.gz' for version in versions]
+    if '5.3' in versions:
+        pin = json.loads((ROOT / 'scripts/native-input-p0/readline-sources.json').read_text())
+        archives.extend(['readline-8.3.tar.gz', *(f'readline83-{n:03d}' for n in range(1, len(pin['patches']) + 1))])
+    for name in archives:
+        shutil.copy2(ROOT / '.artifacts/tests/native-input-p0/upstream' / name, notices / name)
     for name in ['COPYING', 'AUTHORS']:
         shutil.copy2(upstream / name, notices / f'bash-{name}')
     for path in (ROOT / 'scripts/dependency-builds/bash-native').iterdir():

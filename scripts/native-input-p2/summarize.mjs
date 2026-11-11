@@ -5,10 +5,11 @@ import {readFileSync,readdirSync,mkdirSync,writeFileSync} from 'node:fs';
 import {resolve,relative} from 'node:path';
 import {parseArgs} from 'node:util';
 import {captureValidationAssets} from './frozen-validation.mjs';
+import {BASH_READLINE_VERSIONS,RELEASE_BASH_VERSION} from './bash-profiles.mjs';
 
 const root=resolve(import.meta.dirname,'../..');
 const owned=resolve(root,'.artifacts/tests/native-input-p2');
-const {values}=parseArgs({options:{matrix:{type:'string',multiple:true},run:{type:'string',multiple:true},'require-frozen':{type:'boolean'},'require-auxiliary':{type:'boolean'},'source-root':{type:'string',multiple:true}}});
+const {values}=parseArgs({options:{matrix:{type:'string',multiple:true},run:{type:'string',multiple:true},'require-frozen':{type:'boolean'},'require-auxiliary':{type:'boolean'},'source-root':{type:'string',multiple:true},'include-legacy':{type:'boolean'}}});
 const validationRoots=values['source-root']?.map(path=>resolve(path))??[root];
 const sourceSnapshots=new Map();
 for(const validationRoot of validationRoots)if(validationRoot!==root){
@@ -120,7 +121,8 @@ for(const {directory,expected} of candidates){
   }catch(error){rejected.push({directory:relative(root,directory),reason:String(error)});}
 }
 const required=[];const lifecycle=[];
-for(const version of['4.1','4.4','5.3']){
+const versions=values['include-legacy']?Object.keys(BASH_READLINE_VERSIONS):[RELEASE_BASH_VERSION];
+for(const version of versions){
   for(const transport of['local','ssh'])for(const scenario of['history-small','history-default','history-custom','history-empty','history-unset','jobs'])required.push(`${version}/${transport}/${scenario}`);
   lifecycle.push(`${version}/ssh/lifecycle`);
 }

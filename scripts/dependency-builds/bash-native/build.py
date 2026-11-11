@@ -21,7 +21,7 @@ OUT = ROOT / '.artifacts/tests/native-input-p2'
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--versions', default='4.1,4.4,5.3')
+    parser.add_argument('--versions', default='5.3', help='comma-separated Bash versions (default: 5.3)')
     args = parser.parse_args()
     host = platform.system().lower()
     OUT.mkdir(parents=True, exist_ok=True)

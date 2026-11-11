@@ -523,6 +523,16 @@ impl NativeShell {
         }
     }
 }
+fn production_bash_profiles(
+    root: &std::path::Path,
+    target: &str,
+) -> Vec<crate::terminal_command::artifacts::NativeArtifact> {
+    let resources = root.join(".artifacts/tests/native-input-p2/resources/native-input");
+    let profiles = crate::terminal_command::artifacts::read_catalogue(&resources, target).unwrap();
+    assert!(!profiles.is_empty(), "No native Bash profiles for {target}");
+    profiles
+}
+
 #[test]
 #[ignore = "build the production modules with python3 scripts/native-input-p2/build.py"]
 fn native_production_private_widget_restores_real_stream_after_signal_and_control_eof() {
@@ -531,8 +541,12 @@ fn native_production_private_widget_restores_real_stream_after_signal_and_contro
         .unwrap()
         .to_path_buf();
     let run = uuid::Uuid::new_v4().to_string();
-    for (version, readline) in [("4.1", "6.0"), ("4.4", "7.0"), ("5.3", "8.3.6")] {
-        let manifest=root.join(format!(".artifacts/tests/native-input-p2/producers/gnu-bash-{version}-readline-{readline}-macos-arm64-native/manifest.json"));
+    for artifact in production_bash_profiles(&root, "macos-arm64") {
+        let version = artifact.bash_version;
+        let manifest = root
+            .join(".artifacts/tests/native-input-p2/producers")
+            .join(&artifact.id)
+            .join("manifest.json");
         for fault in ["normal", "interrupt", "control-eof"] {
             let mut shell = NativeShell::start_with_manifest(
                 &format!("{run}/{version}-widget-{fault}"),
@@ -862,7 +876,7 @@ fn native_production_private_widget_restores_real_stream_after_signal_and_contro
 }
 // The type is private to the Broker module; this alias exposes no new writer.
 #[test]
-#[ignore = "requires the three source-built production profiles"]
+#[ignore = "build the production modules with python3 scripts/native-input-p2/build.py"]
 fn native_production_geometry_unicode_and_real_resize() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -870,8 +884,12 @@ fn native_production_geometry_unicode_and_real_resize() {
         .to_path_buf();
     let run = uuid::Uuid::new_v4().to_string();
     let mut entries = Vec::new();
-    for (version, readline) in [("4.1", "6.0"), ("4.4", "7.0"), ("5.3", "8.3.6")] {
-        let manifest=root.join(format!(".artifacts/tests/native-input-p2/producers/gnu-bash-{version}-readline-{readline}-macos-arm64-native/manifest.json"));
+    for artifact in production_bash_profiles(&root, "macos-arm64") {
+        let version = artifact.bash_version;
+        let manifest = root
+            .join(".artifacts/tests/native-input-p2/producers")
+            .join(&artifact.id)
+            .join("manifest.json");
         for columns in [32, 40, 100, 180] {
             for (size, repeats) in [("normal", 6), ("oversize", 200)] {
                 let case = format!("{run}/{version}-{columns}-{size}");
@@ -1052,10 +1070,7 @@ fn native_linux_geometry_inputs() {
         .parent()
         .unwrap()
         .to_path_buf();
-    let resources = root.join(".artifacts/tests/native-input-p2/resources/native-input");
-    let artifacts =
-        crate::terminal_command::artifacts::read_catalogue(&resources, "linux-aarch64-glibc-2.36")
-            .unwrap();
+    let artifacts = production_bash_profiles(&root, "linux-aarch64-glibc-2.36");
     let run = uuid::Uuid::new_v4().to_string();
     let output = root
         .join(".artifacts/tests/native-input-p2/linux-geometry")
@@ -1274,8 +1289,9 @@ fn native_production_capture_preserves_real_output_and_bounds_osc_across_all_spl
         .to_path_buf();
     let mut summary = Vec::new();
     let run_id = uuid::Uuid::new_v4().to_string();
-    for (version, readline) in [("4.1", "6.0"), ("4.4", "7.0"), ("5.3", "8.3.6")] {
-        let profile = format!("gnu-bash-{version}-readline-{readline}-macos-arm64-native");
+    for artifact in production_bash_profiles(&root, "macos-arm64") {
+        let version = artifact.bash_version;
+        let profile = artifact.id;
         let manifest = root
             .join(".artifacts/tests/native-input-p2/producers")
             .join(&profile)
