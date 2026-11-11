@@ -293,6 +293,17 @@ async fn terminal_close_blocks_admission_and_stops_durable_tasks_on_both_surface
 #[cfg(unix)]
 #[tokio::test]
 async fn explicit_close_waits_for_real_pty_tail_before_retiring_transport() {
+    assert_terminal_close_captures_pty_tail(false).await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn explicit_recovery_close_waits_for_real_pty_tail_before_retiring_transport() {
+    assert_terminal_close_captures_pty_tail(true).await;
+}
+
+#[cfg(unix)]
+async fn assert_terminal_close_captures_pty_tail(recovery_required: bool) {
     use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
     use std::io::{Read, Write};
     use std::time::Duration;
@@ -458,9 +469,20 @@ async fn explicit_close_waits_for_real_pty_tail_before_retiring_transport() {
     let close_runtime = Arc::clone(&runtime);
     let close_sessions = sessions.clone();
     let mut closing = tokio::spawn(async move {
-        close_runtime
-            .close_terminal(&close_sessions, terminal)
-            .await
+        if recovery_required {
+            let _closing = close_runtime.begin_terminal_close(terminal)?;
+            close_runtime
+                .finish_terminal_close(
+                    &close_sessions,
+                    terminal,
+                    Err("TERMINAL_INPUT_RECOVERY_REQUIRED: native stop was not confirmed".into()),
+                )
+                .await
+        } else {
+            close_runtime
+                .close_terminal(&close_sessions, terminal)
+                .await
+        }
     });
     assert!(tokio::task::spawn_blocking(move || {
         observed_rx.recv_timeout(Duration::from_secs(5)).unwrap()

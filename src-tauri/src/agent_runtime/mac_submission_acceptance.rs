@@ -22,8 +22,20 @@ impl AgentRuntime {
             .target
             .as_ref()
             .ok_or("ACCEPTANCE_TARGET_REQUIRED")?;
+        let delegated = std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_SCENARIO").as_deref()
+            == Ok("delegation")
+            && snapshot
+                .header
+                .subagent
+                .as_ref()
+                .is_some_and(|child| child.provider.is_none())
+            && snapshot
+                .header
+                .parent_session_id
+                .as_deref()
+                .is_some_and(|id| id.starts_with("phase3-submission-"));
         if snapshot.ended
-            || !session_id.starts_with("phase3-submission-")
+            || (!session_id.starts_with("phase3-submission-") && !delegated)
             || snapshot.header.model_selection.is_some()
             || snapshot.header.execution_surface != AgentExecutionSurface::BoundTerminal
             || snapshot.header.permission_mode != Some(AgentSessionPermissionMode::RequestApproval)
@@ -50,13 +62,26 @@ impl AgentRuntime {
             return Err("ACCEPTANCE_EXACT_CALL_UUID_REQUIRED".into());
         }
         let effect = format!("printf '%s\\n' '{id}' >> \"$HOME/phase3-effects\"");
+        let scenario =
+            std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_SCENARIO").unwrap_or_default();
         let source = match source_kind {
             "effect" => format!("{effect}; printf '%s\\n' 'PHASE3_DONE_{id}'"),
             "running" => format!("{effect}; printf '%s\\n' 'PHASE3_RUNNING_{id}'; sleep 30"),
+            "manual-running" if scenario == "human-phase3" => {
+                format!("{effect}; printf '%s\\n' 'PHASE3_RUNNING_{id}'; sleep 180")
+            }
             "syntax-error" => format!("{effect}\nif"),
             "unsupported-input" => format!("{effect}; \0"),
             "long-input" => format!("printf '%s' '{}' >/dev/null; {effect}", "x".repeat(4096)),
+            "paced-input" => format!(": '{}'; {effect}", "x".repeat(256)),
+            "transport-read" => format!("{effect}; read -r -t 30 phase3_transport"),
             _ => return Err("ACCEPTANCE_SOURCE_KIND_REQUIRED".into()),
+        };
+        let timeout_ms = match (source_kind, scenario.as_str()) {
+            ("effect", "timeout-unknown-accept" | "late-started-and-matched-settled")
+            | ("transport-read", "transport-disconnect") => 5000,
+            ("manual-running", "human-phase3") => 210000,
+            _ => 60000,
         };
         let entry = match self.agents.get(session_id)? {
             Some(entry) => entry,
@@ -110,6 +135,20 @@ impl AgentRuntime {
             self.sessions
                 .begin_turn_step(session_id, turn.clone(), step.clone())?
                 .ok_or("ACCEPTANCE_INPUT_NOT_CLAIMED")?;
+            if matches!(scenario.as_str(), "delegation" | "human-phase3") {
+                let snapshot = self.sessions.snapshot(session_id)?;
+                let ancestors = super::terminal_turn_ancestors(&self.sessions, &snapshot)?;
+                let target = snapshot
+                    .header
+                    .target
+                    .as_ref()
+                    .ok_or("ACCEPTANCE_TARGET_REQUIRED")?;
+                self.native_engine.begin_delegated_terminal_turn(
+                    &target.session_id,
+                    session_id,
+                    &ancestors,
+                )?;
+            }
             entry.set_scope(Some(AgentActiveScope {
                 turn_id: turn.clone(),
                 step_id: Some(step.clone()),
@@ -132,7 +171,7 @@ impl AgentRuntime {
                         "command": source,
                         "explanation": "Explicit isolated no-model submission acceptance",
                         "background": false,
-                        "timeoutMs": 60000
+                        "timeoutMs": timeout_ms
                     }),
                 }],
             )

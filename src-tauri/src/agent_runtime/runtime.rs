@@ -1124,50 +1124,49 @@ impl AgentRuntime {
         match stopped {
             Ok(()) => {
                 self.terminal_closed(terminal_id)?;
-                // Remove the input sink immediately, but keep raw capture
-                // alive until the registered worker has finalized its PTY
-                // output and published closure. The admission guard is held by
-                // close_terminal while this non-main-thread wait is pending.
-                let completed = match sessions.close_with_completion(terminal_id) {
-                    Ok(Some(completion)) => tokio::task::spawn_blocking(move || {
-                        completion.recv_timeout(std::time::Duration::from_secs(10))
-                    })
+                self.drain_and_close_terminal_transport(sessions, terminal_id)
                     .await
-                    .map_err(|error| {
-                        format!("TERMINAL_CLOSE_OUTPUT_UNCONFIRMED: waiter failed: {error}")
-                    })
-                    .and_then(|result| {
-                        result
-                            .map_err(|error| format!("TERMINAL_CLOSE_OUTPUT_UNCONFIRMED: {error}"))
-                    }),
-                    Ok(None) => Ok(()),
-                    Err(error) => Err(error),
-                };
-                self.close_terminal_broker_transport(
-                    terminal_id,
-                    if completed.is_ok() {
-                        crate::terminal_broker::TerminalGenerationCloseReason::UserClosed
-                    } else {
-                        crate::terminal_broker::TerminalGenerationCloseReason::TransportDisconnected
-                    },
-                )?;
-                completed
             }
             Err(error) if error.starts_with("TERMINAL_INPUT_RECOVERY_REQUIRED:") => {
-                // Ordinary cancellation must retain uncertain native operations.
-                // An explicit close first fences all writes and requests host
-                // teardown, then retires the registration and joins its Agents.
-                // No trusted end is manufactured and the durable intent remains.
-                self.close_terminal_broker_transport(
-                    terminal_id,
-                    crate::terminal_broker::TerminalGenerationCloseReason::UserClosed,
-                )?;
-                sessions.close(terminal_id)?;
+                // The recovery fence stays in place while the worker drains.
+                // Closing retires the registration without settling the intent.
+                let completed = self
+                    .drain_and_close_terminal_transport(sessions, terminal_id)
+                    .await;
                 self.terminal_closed(terminal_id)?;
-                self.stop_terminal_agents(terminal_id).await
+                let agents = self.stop_terminal_agents(terminal_id).await;
+                completed.and(agents)
             }
             Err(error) => Err(error),
         }
+    }
+
+    async fn drain_and_close_terminal_transport(
+        &self,
+        sessions: &crate::models::SessionManager,
+        terminal_id: &str,
+    ) -> Result<(), String> {
+        // Remove the input sink while the close guard still owns admission.
+        // Keep raw capture until the worker finalizes and publishes its output.
+        let completed = match sessions.close_with_completion(terminal_id) {
+            Ok(Some(completion)) => tokio::task::spawn_blocking(move || {
+                completion.recv_timeout(std::time::Duration::from_secs(10))
+            })
+            .await
+            .map_err(|error| format!("TERMINAL_CLOSE_OUTPUT_UNCONFIRMED: waiter failed: {error}"))
+            .and_then(|result| {
+                result.map_err(|error| format!("TERMINAL_CLOSE_OUTPUT_UNCONFIRMED: {error}"))
+            }),
+            Ok(None) => Ok(()),
+            Err(error) => Err(error),
+        };
+        let reason = if completed.is_ok() {
+            crate::terminal_broker::TerminalGenerationCloseReason::UserClosed
+        } else {
+            crate::terminal_broker::TerminalGenerationCloseReason::TransportDisconnected
+        };
+        self.close_terminal_broker_transport(terminal_id, reason)?;
+        completed
     }
 
     pub(crate) fn begin_terminal_close(

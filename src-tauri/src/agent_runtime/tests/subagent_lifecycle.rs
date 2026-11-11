@@ -99,7 +99,7 @@ fn setup_with_budget(
                 capability_scope: scope,
                 target_scope: vec![target],
                 budget,
-                provider: provider_descriptor(&provider),
+                provider: Some(provider_descriptor(&provider)),
             }),
             ..parent_request
         })

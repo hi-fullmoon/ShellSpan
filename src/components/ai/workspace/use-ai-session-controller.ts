@@ -502,7 +502,7 @@ export function useAiSessionController({
     : null;
   const hasProvider = Boolean(
     view?.snapshot.value.header.modelSelection?.modelId.trim()
-    || view?.snapshot.value.header.subagent?.provider.modelId.trim()
+    || view?.snapshot.value.header.subagent?.provider?.modelId.trim()
     || provider?.model.trim(),
   );
 

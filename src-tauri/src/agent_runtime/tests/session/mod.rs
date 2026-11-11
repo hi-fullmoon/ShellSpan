@@ -1311,12 +1311,12 @@ fn child_request() -> (CreateAgentSessionRequest, AgentSessionEventPayload) {
         capability_scope: scope.clone(),
         target_scope: vec![target()],
         budget: budget.clone(),
-        provider: super::super::AgentSubagentModel {
+        provider: Some(super::super::AgentSubagentModel {
             route_id: "provider-1".into(),
             model_id: "test".into(),
             reasoning_effort: None,
             route_revision: Some(1),
-        },
+        }),
     };
     (
         CreateAgentSessionRequest {
@@ -1346,6 +1346,17 @@ fn child_request() -> (CreateAgentSessionRequest, AgentSessionEventPayload) {
             budget,
         },
     )
+}
+
+#[test]
+fn ordinary_subagent_without_frozen_model_is_rejected() {
+    let (_root, store) = configured();
+    let (mut request, _) = child_request();
+    request.subagent.as_mut().unwrap().provider = None;
+    assert_eq!(
+        store.create(request).unwrap_err(),
+        "subagent Session requires a frozen model"
+    );
 }
 
 #[test]

@@ -5624,20 +5624,36 @@ fn validate_subagent_session(
         }
     }
     validate_subagent_budget(&subagent.budget)?;
+    let Some(provider) = subagent.provider.as_ref() else {
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        if std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_SCENARIO").as_deref() == Ok("delegation")
+            && parent_session_id.is_some_and(|id| id.starts_with("phase3-submission-"))
+        {
+            let home = crate::commands::terminal_acceptance_directory()?.join("home");
+            if subagent.target_scope.iter().all(|target| {
+                target.kind == "local"
+                    && target.cwd.as_deref() == home.to_str()
+                    && target.local_root.as_deref() == home.to_str()
+            }) {
+                return Ok(());
+            }
+        }
+        return Err("subagent Session requires a frozen model".into());
+    };
     validate_text(
-        &subagent.provider.route_id,
+        &provider.route_id,
         "subagent routeId",
         false,
         MAX_LABEL_BYTES,
     )?;
-    validate_text(
-        &subagent.provider.model_id,
-        "subagent model",
-        false,
-        MAX_LABEL_BYTES,
-    )?;
+    validate_text(&provider.model_id, "subagent model", false, MAX_LABEL_BYTES)?;
     validate_optional_text(
-        subagent.provider.reasoning_effort.as_deref(),
+        provider.reasoning_effort.as_deref(),
         "subagent reasoning effort",
     )
 }

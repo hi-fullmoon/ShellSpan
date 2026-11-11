@@ -43,7 +43,10 @@ fn append_frames(
 
 fn main() -> Result<()> {
     let arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
-    if arguments.len() != 2 {
+    let expect_invalid_send = arguments.len() == 3
+        && (arguments[2] == "--expect-invalid-startup-send"
+            || arguments[2] == "--expect-invalid-prepare-send");
+    if arguments.len() != 2 && !expect_invalid_send {
         return Err("expected actual trace file and actual journal database".into());
     }
     let trace = PathBuf::from(&arguments[0]);
@@ -61,6 +64,7 @@ fn main() -> Result<()> {
     let mut decoders = HashMap::new();
     let mut sends: HashMap<String, (u64, Vec<u8>)> = HashMap::new();
     let mut frames = Vec::new();
+    let mut sent_decode_errors = Vec::new();
     let mut events = Vec::new();
     let mut pid = None;
     for (expected, line) in (1u64..).zip(BufReader::new(fs::File::open(&trace)?).lines()) {
@@ -106,7 +110,7 @@ fn main() -> Result<()> {
                 if details["ok"] != true || details["partialUnknown"] != false {
                     return Err("actual private write has unknown partial outcome; do not infer non-execution".into());
                 }
-                append_frames(
+                let decoded = append_frames(
                     &mut decoders,
                     &mut frames,
                     control,
@@ -114,7 +118,15 @@ fn main() -> Result<()> {
                     &bytes,
                     attempt,
                     sequence,
-                )?;
+                );
+                if let Err(error) = decoded {
+                    if !expect_invalid_send {
+                        return Err(error);
+                    }
+                    sent_decode_errors.push(json!({
+                        "controlId":control,"stage":"push","sequence":attempt,"error":error.to_string()
+                    }));
+                }
             }
             _ => {}
         }
@@ -123,10 +135,18 @@ fn main() -> Result<()> {
     if !sends.is_empty() {
         return Err("unconfirmed actual private writes remain".into());
     }
-    for decoder in decoders.values() {
-        decoder
-            .finish()
-            .map_err(|error| format!("unfinished production frame: {error:?}"))?;
+    for ((control, direction), decoder) in &decoders {
+        if let Err(error) = decoder.finish() {
+            if !expect_invalid_send || direction != "sent" {
+                return Err(format!("unfinished production frame: {error:?}").into());
+            }
+            sent_decode_errors.push(json!({
+                "controlId":control,"stage":"eof","error":format!("{error:?}")
+            }));
+        }
+    }
+    if expect_invalid_send && sent_decode_errors.is_empty() {
+        return Err("the explicitly malformed outbound bytes decoded without an error".into());
     }
     frames.sort_by_key(|frame| (frame["sequence"].as_u64(), frame["frameIndex"].as_u64()));
     let connection = Connection::open_with_flags(
@@ -160,7 +180,7 @@ fn main() -> Result<()> {
         serde_json::to_string(
             &json!({"pid":pid,"trace":trace,"traceSha256":hex::encode(Sha256::digest(fs::read(&trace)?)),
         "productionDecoder":protocol,"productionDecoderSha256":hex::encode(Sha256::digest(fs::read(&protocol)?)),
-        "frames":frames,"events":events,"journal":journal,"database":database,"databaseSha256":hex::encode(Sha256::digest(before)),"databaseReadOnly":true,"appExecutionClaimed":false})
+        "frames":frames,"events":events,"sentDecodeErrors":sent_decode_errors,"journal":journal,"database":database,"databaseSha256":hex::encode(Sha256::digest(before)),"databaseReadOnly":true,"appExecutionClaimed":false})
         )?
     );
     Ok(())

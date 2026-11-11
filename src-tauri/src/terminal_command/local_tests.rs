@@ -28,6 +28,274 @@ fn wait(
     }
 }
 
+#[cfg(all(
+    feature = "native-input-acceptance",
+    debug_assertions,
+    target_os = "macos",
+    target_arch = "aarch64"
+))]
+#[test]
+#[ignore = "requires the pinned macOS native resources and an isolated trace directory"]
+fn prepared_local_wire_rejects_invalid_sequence() {
+    let evidence = crate::commands::terminal_acceptance_directory().unwrap();
+    assert!(super::acceptance_trace::enabled());
+    let home = evidence.join("home");
+    let resources = PathBuf::from(std::env::var_os("SHELLSPAN_P3_WIRE_RESOURCES").unwrap());
+    let shell = PathBuf::from(std::env::var_os("SHELLSPAN_P3_WIRE_SHELL").unwrap());
+    let case = std::env::var("SHELLSPAN_P3_WIRE_CASE").unwrap();
+    let family = match shell.file_name().and_then(|name| name.to_str()) {
+        Some("bash") => nip::ShellFamily::Bash,
+        Some("zsh") => nip::ShellFamily::Zsh,
+        _ => panic!("Verified Bash or Zsh executable required"),
+    };
+    match family {
+        nip::ShellFamily::Bash => {
+            fs::write(home.join(".bash_profile"), "source \"$HOME/.bashrc\"\n").unwrap();
+            fs::write(home.join(".bashrc"), "PS1='WIRE> '\nPROMPT_COMMAND=\n").unwrap();
+            fs::write(home.join(".inputrc"), "set editing-mode emacs\n").unwrap();
+        }
+        nip::ShellFamily::Zsh => fs::write(home.join(".zshrc"), "PROMPT='WIRE> '\n").unwrap(),
+        _ => unreachable!(),
+    }
+    let journal = super::journal::SubmissionJournal::unconfigured();
+    journal.configure(&evidence.join("data")).unwrap();
+    assert!(journal.unresolved().unwrap().is_empty());
+    let prepared = PreparedNativeBash::prepare(&shell, &resources).unwrap();
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows: 30,
+            cols: 100,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .unwrap();
+    let mut command = CommandBuilder::new(&shell);
+    command.env_clear();
+    command.env("HOME", &home);
+    command.env("ZDOTDIR", &home);
+    command.env("PATH", "/usr/bin:/bin");
+    command.env("TERM", "xterm-256color");
+    command.env("LC_ALL", "en_US.UTF-8");
+    command.cwd(&home);
+    prepared.configure(&mut command).unwrap();
+    let mut child = pair.slave.spawn_command(command).unwrap();
+    drop(pair.slave);
+    let shell_pid = child.process_id().unwrap();
+    let launch = serde_json::json!({"case":case,"shell":shell,"shellPid":shell_pid,"testPid":std::process::id(),"resources":resources,
+        "family":family,"displayBinding":prepared.profile.display_binding(),"home":home});
+    fs::write(
+        evidence.join("shell-launch.json"),
+        serde_json::to_vec_pretty(&launch).unwrap(),
+    )
+    .unwrap();
+    let mut reader = pair.master.try_clone_reader().unwrap();
+    let output = thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = reader.read_to_end(&mut bytes);
+        bytes
+    });
+    let run = uuid::Uuid::new_v4().to_string();
+    let connection = nip::ConnectionIdentity {
+        terminal_session_id: format!("wire-terminal-{run}"),
+        terminal_generation: 2,
+        control_id: format!("wire-control-{run}"),
+    };
+    let mut writer = super::acceptance_trace::PtyWriter::wrap(
+        pair.master.take_writer().unwrap(),
+        connection.terminal_session_id.clone(),
+    );
+    let (tx, rx) = mpsc::channel();
+    let (closed_tx, closed_rx) = mpsc::channel();
+    let control = prepared.start(
+        nip::ConnectionEnvelope {
+            protocol: nip::PROTOCOL.into(),
+            request_id: format!("wire-probe-{run}"),
+            connection: connection.clone(),
+            payload: nip::ConnectionPayload::Probe,
+        },
+        move |message| tx.send(message).map_err(|_| "wire fixture closed".into()),
+        move || {
+            let _ = closed_tx.send(());
+        },
+    );
+    let mut records = Vec::new();
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if case == "eof-partial-frame" {
+            assert_eq!(family, nip::ShellFamily::Bash);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let sent_eof = fs::read_dir(&evidence).unwrap().any(|entry| {
+                    let path = entry.unwrap().path();
+                    if !path
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .starts_with("native-control-trace-")
+                    {
+                        return false;
+                    }
+                    fs::read_to_string(path)
+                        .unwrap()
+                        .split_inclusive('\n')
+                        .filter(|line| line.ends_with('\n'))
+                        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+                        .any(|event| {
+                            event["event"] == "wire-startup-write-eof"
+                                && event["details"]["controlId"] == connection.control_id
+                        })
+                });
+                if sent_eof {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "Actual half-frame shutdown did not occur"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+            // Match the production Readline service wake after private input.
+            writer.write_all(b"\x18\x1e").unwrap();
+            writer.flush().unwrap();
+            closed_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("Readline half frame did not close the real private connection");
+            assert!(
+                child.try_wait().unwrap().is_none(),
+                "Shell exited before the actual private channel closed"
+            );
+            super::acceptance_trace::record(
+                "wire-component-closed-before-cleanup",
+                serde_json::json!({"controlId":connection.control_id,"shellPid":shell_pid}),
+            )
+            .unwrap();
+            assert!(!home.join("wire-effect").exists());
+            assert!(journal.unresolved().unwrap().is_empty());
+            return;
+        }
+        wait(&rx, &mut records, |message| {
+            matches!(message, nip::Message::Connection(message) if message.connection == connection
+                && matches!(&message.payload, nip::ConnectionPayload::Capabilities { native_inline: true, editor_empty: true, .. }))
+        });
+        if family == nip::ShellFamily::Zsh {
+            wait(&rx, &mut records, |message| {
+                matches!(message, nip::Message::Connection(message) if message.connection == connection
+                    && matches!(&message.payload, nip::ConnectionPayload::EditorReady { editor_empty: true, .. }))
+            });
+        }
+        let identity = nip::Identity {
+            terminal_session_id: connection.terminal_session_id.clone(),
+            terminal_generation: connection.terminal_generation,
+            lease_id: format!("wire-lease-{run}"),
+            lease_generation: 2,
+            agent_session_id: format!("wire-agent-{run}"),
+            task_id: format!("wire-task-{run}"),
+            operation_id: format!("wire-operation-{run}"),
+            command_id: format!("wire-command-{run}"),
+            source_revision: 1,
+        };
+        let envelope = |request: &str, payload| nip::Envelope {
+            protocol: nip::PROTOCOL.into(),
+            request_id: format!("wire-{request}-{run}"),
+            identity: identity.clone(),
+            payload,
+        };
+        let source = "printf 'once\\n' > \"$HOME/wire-effect\"";
+        let source_digest = nip::sha(source);
+        let plan = nip::native_foreground_plan(source, family).unwrap();
+        let plan_digest = nip::bound_plan_digest(&source_digest, &plan);
+        let prepare = envelope(
+            "prepare",
+            nip::Payload::PrepareInput {
+                source: source.into(),
+                source_digest: source_digest.clone(),
+                plan,
+                plan_digest: plan_digest.clone(),
+                budget_ms: 5000,
+                reduced_motion: false,
+                job: None,
+            },
+        );
+        let mut send = |message: &nip::Envelope| {
+            control.write(&message.encode().unwrap()).unwrap();
+            if family == nip::ShellFamily::Bash {
+                writer.write_all(b"\x18\x1e").unwrap();
+                writer.flush().unwrap();
+            }
+        };
+        if case != "out-of-order" {
+            send(&prepare);
+            wait(&rx, &mut records, |message| {
+                matches!(message,nip::Message::Operation(reply)
+                if reply.request_id == prepare.request_id && reply.identity == identity
+                    && matches!(&reply.payload,nip::Payload::Prepared{..}))
+            });
+        }
+        let (negative, code) = match case.as_str() {
+            "out-of-order" => (
+                envelope(
+                    "early-commit",
+                    nip::Payload::Commit {
+                        source_digest,
+                        plan_digest,
+                    },
+                ),
+                nip::ErrorCode::State,
+            ),
+            "duplicate" => (prepare.clone(), nip::ErrorCode::DuplicateRequest),
+            "conflicting-identity" => {
+                let mut other = envelope("conflict", nip::Payload::Query);
+                other.identity.command_id = format!("wire-different-command-{run}");
+                (other, nip::ErrorCode::Identity)
+            }
+            "old-generation" => {
+                let mut old = envelope("old", nip::Payload::Query);
+                old.identity.terminal_generation = 1;
+                (old, nip::ErrorCode::Identity)
+            }
+            _ => panic!("Explicit fixed wire case required"),
+        };
+        send(&negative);
+        wait(&rx, &mut records, |message| {
+            matches!(message,nip::Message::Operation(reply)
+            if reply.request_id == negative.request_id && reply.identity == negative.identity
+                && matches!(reply.payload,nip::Payload::Rejected {code: actual} if actual == code))
+        });
+        if case != "out-of-order" {
+            let cancel = envelope("cancel", nip::Payload::CancelDraft);
+            send(&cancel);
+            wait(&rx, &mut records, |message| {
+                matches!(message,nip::Message::Operation(reply)
+                if reply.request_id == cancel.request_id && reply.identity == identity
+                    && matches!(reply.payload,nip::Payload::DraftCleared {editor_empty:true}))
+            });
+        }
+        assert!(!records.iter().any(|message| matches!(message,nip::Message::Operation(reply)
+            if matches!(reply.payload,nip::Payload::CommitArmed | nip::Payload::SubmissionAccepted | nip::Payload::Started | nip::Payload::Settled{..}))));
+        assert!(!home.join("wire-effect").exists());
+        assert!(journal.unresolved().unwrap().is_empty());
+    }));
+    fs::write(evidence.join("shutdown-request.json"), serde_json::to_vec(&serde_json::json!({
+        "shellPid":shell_pid,"operation":"cleanup owned test child","acceptanceOutcome":outcome.is_ok()
+    })).unwrap()).unwrap();
+    let _ = child.kill();
+    let status = child.wait().unwrap();
+    drop(control);
+    drop(writer);
+    drop(pair.master);
+    fs::write(evidence.join("pty.bin"), output.join().unwrap()).unwrap();
+    fs::write(
+        evidence.join("actual-decoded-replies.json"),
+        serde_json::to_vec_pretty(&records).unwrap(),
+    )
+    .unwrap();
+    fs::write(evidence.join("component-result.json"), serde_json::to_vec_pretty(&serde_json::json!({
+        "case":case,"family":family,"shellPid":shell_pid,"ok":outcome.is_ok(),"shellExit":status.to_string(),"appProof":false
+    })).unwrap()).unwrap();
+    if let Err(error) = outcome {
+        std::panic::resume_unwind(error);
+    }
+}
+
 #[test]
 #[ignore = "requires actual rebuilt Bash profiles and full frozen validation source"]
 fn prepared_bash_real_submit_draft_cancel_and_running_interrupt() {

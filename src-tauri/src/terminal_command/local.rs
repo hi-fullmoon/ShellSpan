@@ -272,21 +272,20 @@ impl PreparedNativeBash {
                     target_os = "macos",
                     target_arch = "aarch64"
                 ))]
-                super::acceptance_trace::record(
-                    "control-send-attempt",
-                    serde_json::json!({"controlId":probe.connection.control_id,"hex":hex::encode(&probe_bytes)}),
-                )?;
-                let sent = stream.write_all(&probe_bytes);
-                #[cfg(all(
+                write_acceptance_startup_probe(&mut stream, &probe, &probe_bytes)?;
+                #[cfg(not(all(
                     feature = "native-input-acceptance",
                     debug_assertions,
                     target_os = "macos",
                     target_arch = "aarch64"
-                ))]
-                super::acceptance_trace::record(
-                    "control-send-return",
-                    serde_json::json!({"controlId":probe.connection.control_id,"ok":sent.is_ok(),"partialUnknown":sent.is_err()}),
-                )?;
+                )))]
+                let sent = stream.write_all(&probe_bytes);
+                #[cfg(not(all(
+                    feature = "native-input-acceptance",
+                    debug_assertions,
+                    target_os = "macos",
+                    target_arch = "aarch64"
+                )))]
                 sent.map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?;
                 *writer
                     .lock()
@@ -330,6 +329,69 @@ impl PreparedNativeBash {
                                 .push(&bytes[..count])
                                 .map_err(|_| "TERMINAL_NATIVE_PROTOCOL_INVALID")?
                             {
+                                #[cfg(all(
+                                    feature = "native-input-acceptance",
+                                    debug_assertions,
+                                    target_os = "macos",
+                                    target_arch = "aarch64"
+                                ))]
+                                {
+                                    for wrong in super::acceptance_trace::wrong_arm_bindings(
+                                        &message,
+                                        &probe.connection.control_id,
+                                    )? {
+                                        on_message(wrong)?;
+                                    }
+                                    super::acceptance_trace::hold_original_arm(
+                                        &message,
+                                        &probe.connection.control_id,
+                                    )?;
+                                }
+                                #[cfg(all(
+                                    feature = "native-input-acceptance",
+                                    debug_assertions,
+                                    target_os = "macos",
+                                    target_arch = "aarch64"
+                                ))]
+                                if let Some(wrong) = super::acceptance_trace::mismatched_settlement(
+                                    &message,
+                                    &probe.connection.control_id,
+                                )? {
+                                    on_message(wrong)?;
+                                }
+                                #[cfg(all(
+                                    feature = "native-input-acceptance",
+                                    debug_assertions,
+                                    target_os = "macos",
+                                    target_arch = "aarch64"
+                                ))]
+                                super::acceptance_trace::hold_submission_receipt(
+                                    &message,
+                                    &probe.connection.control_id,
+                                )?;
+                                #[cfg(all(
+                                    feature = "native-input-acceptance",
+                                    debug_assertions,
+                                    target_os = "macos",
+                                    target_arch = "aarch64"
+                                ))]
+                                if super::acceptance_trace::eof_at_acceptance(&message) {
+                                    decoder.finish().map_err(|_| {
+                                        "TERMINAL_ACCEPTANCE_EOF_REQUIRES_FRAME_BOUNDARY"
+                                    })?;
+                                    stream.shutdown(std::net::Shutdown::Read).map_err(|_| {
+                                        "TERMINAL_ACCEPTANCE_CONTROL_READ_SHUTDOWN_FAILED"
+                                    })?;
+                                    super::acceptance_trace::record(
+                                        "control-read-half-shutdown",
+                                        serde_json::json!({
+                                            "controlId":probe.connection.control_id
+                                        }),
+                                    )?;
+                                    // The next real read observes EOF. Do not route a
+                                    // receipt from the faulted side of the connection.
+                                    break;
+                                }
                                 on_message(message)?;
                             }
                         }
@@ -387,6 +449,70 @@ impl PreparedNativeBash {
     }
 }
 
+#[cfg(all(
+    feature = "native-input-acceptance",
+    debug_assertions,
+    target_os = "macos",
+    target_arch = "aarch64"
+))]
+fn write_acceptance_startup_probe(
+    stream: &mut UnixStream,
+    probe: &nip::ConnectionEnvelope,
+    bytes: &[u8],
+) -> Result<(), String> {
+    use super::acceptance_trace::{enabled, record};
+
+    let case = std::env::var("SHELLSPAN_ACCEPTANCE_WIRE_STARTUP").ok();
+    let control_id = &probe.connection.control_id;
+    let mut write = |part: &[u8]| -> Result<(), String> {
+        record(
+            "control-send-attempt",
+            serde_json::json!({"controlId":control_id,"hex":hex::encode(part)}),
+        )?;
+        let sent = stream.write_all(part);
+        record(
+            "control-send-return",
+            serde_json::json!({"controlId":control_id,"ok":sent.is_ok(),"partialUnknown":sent.is_err()}),
+        )?;
+        sent.map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE".into())
+    };
+    let Some(case) = case else {
+        return write(bytes);
+    };
+    if !enabled() || std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION").as_deref() != Ok("1") {
+        return Err("TERMINAL_ACCEPTANCE_DISABLED".into());
+    }
+    record(
+        "wire-startup-selected",
+        serde_json::json!({"case":case,"connection":probe.connection,"requestId":probe.request_id,"originalProbeHex":hex::encode(bytes)}),
+    )?;
+    match case.as_str() {
+        "split-and-coalesced" => {
+            let (first, second) = bytes.split_at(bytes.len() / 2);
+            write(first)?;
+            thread::sleep(Duration::from_millis(80));
+            write(second)
+        }
+        "oversized" => {
+            write(&vec![b' '; nip::MAX_MESSAGE_BYTES - 1])?;
+            write(b" \n")
+        }
+        "invalid-json" => write(b"{\n"),
+        "invalid-utf8" => write(&[0xff, b'\n']),
+        "eof-partial-frame" => {
+            write(&bytes[..bytes.len() / 2])?;
+            stream
+                .shutdown(std::net::Shutdown::Write)
+                .map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?;
+            record(
+                "wire-startup-write-eof",
+                serde_json::json!({"controlId":control_id}),
+            )
+        }
+        _ => Err("ACCEPTANCE_FIXED_WIRE_CASE_REQUIRED".into()),
+    }
+}
+
 pub(crate) struct NativeControlHandle {
     #[cfg(all(
         feature = "native-input-acceptance",
@@ -411,6 +537,20 @@ impl NativeControlHandle {
         let stream = socket
             .as_mut()
             .ok_or("TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?;
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let altered = super::acceptance_trace::mismatched_prepare(bytes, &self.trace_control_id)?;
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let bytes = altered.as_deref().unwrap_or(bytes);
         #[cfg(all(
             feature = "native-input-acceptance",
             debug_assertions,

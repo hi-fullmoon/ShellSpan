@@ -114,7 +114,7 @@ struct Bridge {
     native_sequence: u64,
     native_mode: bool,
     native_result: Option<i32>,
-    socket: UnixStream,
+    socket: Option<UnixStream>,
     input: Vec<u8>,
     output: Vec<u8>,
     seen: HashSet<u64>,
@@ -189,8 +189,11 @@ impl Bridge {
         self.output.push(b'\n');
     }
     fn flush(&mut self) -> bool {
+        let Some(socket) = self.socket.as_mut() else {
+            return false;
+        };
         while !self.output.is_empty() {
-            match self.socket.write(&self.output) {
+            match socket.write(&self.output) {
                 Ok(0) => return false,
                 Ok(count) => {
                     self.output.drain(..count);
@@ -231,7 +234,10 @@ impl Bridge {
         self.output.clear();
         p0_finish_input();
         if self.native_mode {
-            let _ = self.socket.shutdown(std::net::Shutdown::Both);
+            // Darwin can reject shutdown after the peer half-closes. Close the
+            // owned descriptor so the peer observes EOF without waiting for Bash.
+            CONTROL_FD = -1;
+            drop(self.socket.take());
         }
     }
     unsafe fn receive(&mut self, request: Request) {
@@ -415,7 +421,10 @@ impl Bridge {
         }
         let mut chunk = [0; 8192];
         for _ in 0..16 {
-            match self.socket.read(&mut chunk) {
+            let Some(socket) = self.socket.as_mut() else {
+                return;
+            };
+            match socket.read(&mut chunk) {
                 Ok(0) => {
                     self.fail_closed();
                     return;
@@ -902,7 +911,7 @@ pub unsafe extern "C" fn p0_start(path: *const c_char, shell_version: *const c_c
         native_sequence: 0,
         native_mode: true,
         native_result: None,
-        socket,
+        socket: Some(socket),
         input: Vec::new(),
         output: Vec::new(),
         seen: HashSet::new(),

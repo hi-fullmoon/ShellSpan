@@ -4071,7 +4071,7 @@ async fn child_inherits_provider_attempt_budget_and_persisted_descriptor() {
         runtime.await_idle(&child.header.session_id).await.unwrap();
         assert_eq!(adapter.request_count(), limit as usize);
         let descriptor = child.header.subagent.as_ref().unwrap();
-        assert_eq!(descriptor.provider.route_id, "fake");
+        assert_eq!(descriptor.provider.as_ref().unwrap().route_id, "fake");
     }
 }
 

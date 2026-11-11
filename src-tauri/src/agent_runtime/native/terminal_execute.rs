@@ -140,11 +140,83 @@ impl TerminalExecuteRegistry {
                 reduced,
                 |bytes| sessions.write_native_control(session, bytes, true),
             )?;
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        if std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_CUT").as_deref() == Ok("prepare") {
+            let current = coordinator
+                .lock()
+                .map_err(|_| "TERMINAL_NATIVE_COORDINATOR_UNAVAILABLE")?;
+            crate::terminal_command::acceptance_trace::record(
+                "prepare-input-enqueued",
+                serde_json::json!({"identity":current.identity()?}),
+            )?;
+        }
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let observe_partial = std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_CUT").as_deref()
+            == Ok("input-in-progress");
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let mut test_incomplete_proof = observe_partial
+            && std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_SCENARIO").as_deref()
+                == Ok("incomplete-proof");
         loop {
             check(revalidate)?;
             let snapshot = operation.snapshot()?;
             if snapshot.phase == crate::terminal_command::state::CommandPhase::InputConfirmed {
                 break;
+            }
+            #[cfg(all(
+                feature = "native-input-acceptance",
+                debug_assertions,
+                target_os = "macos",
+                target_arch = "aarch64"
+            ))]
+            if observe_partial
+                && snapshot.phase == crate::terminal_command::state::CommandPhase::Typing
+            {
+                let mut current = coordinator
+                    .lock()
+                    .map_err(|_| "TERMINAL_NATIVE_COORDINATOR_UNAVAILABLE")?;
+                if test_incomplete_proof
+                    && operation.snapshot()?.phase
+                        == crate::terminal_command::state::CommandPhase::Typing
+                {
+                    test_incomplete_proof = false;
+                    let arm = current
+                        .arm_commit(|bytes| sessions.write_native_control(session, bytes, false));
+                    let submit = current.submit(
+                        || check(revalidate),
+                        || sessions.write_session_input(session, "\x18a".into()),
+                    );
+                    crate::terminal_command::acceptance_trace::record(
+                        "incomplete-proof-attempt-returned",
+                        serde_json::json!({
+                            "identity":current.identity()?,
+                            "phaseBefore":snapshot.phase,
+                            "phaseAfter":operation.snapshot()?.phase,
+                            "armAccepted":arm.is_ok(),
+                            "armError":arm.err(),
+                            "submitAccepted":submit.is_ok(),
+                            "submitError":submit.err()
+                        }),
+                    )?;
+                }
+                let query = current.query()?;
+                drop(current);
+                sessions.write_native_control(session, &query, false)?;
             }
             operation.wait_until_terminal(
                 WAIT_SLICE.min(limit.saturating_duration_since(Instant::now())),
@@ -323,6 +395,18 @@ impl TerminalExecuteRegistry {
         // Complete envelopes for retired/older operations are observations to
         // reject, never a reason to close a successor's private connection.
         let Some(registration) = registration else {
+            #[cfg(all(
+                feature = "native-input-acceptance",
+                debug_assertions,
+                target_os = "macos",
+                target_arch = "aarch64"
+            ))]
+            if crate::terminal_command::acceptance_trace::observe_arm_binding(&message) {
+                crate::terminal_command::acceptance_trace::record(
+                    "arm-binding-no-current-operation",
+                    serde_json::json!({"identity":message.identity,"requestId":message.request_id,"transport":session}),
+                )?;
+            }
             return Ok(());
         };
         let coordinator = &registration.native;
@@ -1009,6 +1093,16 @@ impl TerminalExecuteRegistry {
             return Err(TerminalLeaseError::OwnerMismatch.to_string());
         }
         registration.operation.fence_takeover()?;
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        crate::terminal_command::acceptance_trace::record(
+            "takeover-runtime-entered",
+            serde_json::json!({"agentSessionId":agent_session_id,"operationId":operation_id,"transportSessionId":session_id,"commandId":registration.operation.command_id()?}),
+        )?;
         #[cfg(all(
             feature = "native-input-acceptance",
             debug_assertions,

@@ -202,7 +202,7 @@ export interface AgentSubagentSession {
   readonly capabilityScope: AgentCapabilityScope;
   readonly targetScope: readonly AgentSessionTarget[];
   readonly budget: AgentSubagentBudget;
-  readonly provider: AgentSubagentModel;
+  readonly provider?: AgentSubagentModel;
 }
 
 export interface AgentSessionRecordedToolCall {

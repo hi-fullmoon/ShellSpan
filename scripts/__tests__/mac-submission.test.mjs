@@ -4,7 +4,7 @@ import {createServer as createViteServer} from 'vite';
 import {mkdir,mkdtemp,writeFile,readFile,symlink} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
-import {attachMacSubmissionWitness,macSubmissionObservationConfiguration} from '../native-input-p3/mac-submission.mjs';
+import {attachMacSubmissionWitness,macSubmissionControlMode,macSubmissionObservationConfiguration} from '../native-input-p3/mac-submission.mjs';
 import {macDailyAcceptance} from '../native-input-p3/mac-daily.mjs';
 
 it('admits only owned no-model submission cases without taking a visual or human receipt',()=>{
@@ -19,6 +19,15 @@ it('admits only owned no-model submission cases without taking a visual or human
   expect(macSubmissionObservationConfiguration(selection).snapshotLabels).toContain('lifecycle-complete');
  }
  expect(macSubmissionObservationConfiguration('full-zsh')).toBeUndefined();
+ expect(macSubmissionControlMode('control-eof')).toEqual({cut:'accept-receipt',scenario:'control-eof'});
+ expect(macSubmissionControlMode('transport-disconnect')).toEqual({cut:'accept-receipt',scenario:'transport-disconnect'});
+ expect(macSubmissionControlMode('late-started-and-matched-settled')).toEqual({cut:'accept-receipt',scenario:'late-started-and-matched-settled'});
+ for(const scenario of ['source-mismatch','plan-mismatch','target-mismatch','unsupported-input-native','permission-mismatch','resource-manifest-mismatch'])expect(macSubmissionControlMode(scenario)).toEqual({cut:undefined,scenario});
+ expect(macSubmissionControlMode('incomplete-proof')).toEqual({cut:'input-in-progress',scenario:'incomplete-proof'});
+ expect(macSubmissionControlMode('readonly-query-does-not-authorize')).toEqual({cut:'input-in-progress',scenario:'readonly-query-does-not-authorize'});
+ for(const scenario of ['identity-mismatch','complete-identity-submatrix','generation-mismatch'])expect(macSubmissionControlMode(scenario)).toEqual({cut:'arm-identity',scenario});
+ expect(macSubmissionControlMode('delegation')).toEqual({cut:undefined,scenario:'delegation'});
+ expect(macSubmissionControlMode('human-phase3')).toEqual({cut:undefined,scenario:'human-phase3'});
 });
 
 it('retains actual filesystem effect observations and refuses writes and symlink effects over real HTTP',async()=>{
@@ -38,16 +47,17 @@ it('retains actual filesystem effect observations and refuses writes and symlink
  }finally{await new Promise(done=>server.close(done));await vite.close();}
 },15000);
 
-it.each([{cut:'intent'},{cut:'input-complete',scenario:'input-complete-stop'},{cut:'armed',scenario:'armed-cancel'}])('releases the observed $cut nonce/PID without writing runtime or recovery state',async(configuration)=>{
+it.each([{cut:'intent'},{cut:'input-complete',scenario:'input-complete-stop'},{cut:'armed',scenario:'armed-cancel'},{cut:'before-accept',scenario:'before-accept-takeover'},{cut:'prepare',scenario:'app-crash-prepare'},{cut:'key',scenario:'app-crash-key'},{cut:'accept-receipt',scenario:'timeout-unknown-accept'},{cut:'accept-receipt',scenario:'timeout-unknown-accept',settlement:true}])('releases the observed $cut nonce/PID without writing runtime or recovery state',async(configuration)=>{
  // These are control-file inputs for the HTTP guard, not native receipts or App proof.
  const base=resolve('.artifacts/tests/mac-submission-cut-control');await mkdir(base,{recursive:true});const directory=await mkdtemp(join(base,'case-')),token=randomUUID();
  const vite=await createViteServer({root:directory,configFile:false,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true},plugins:[{name:'cut-control-files',configureServer(server){attachMacSubmissionWitness(server,token,directory,configuration);}}]});
  const server=createServer(vite.middlewares);await new Promise(done=>server.listen(0,'127.0.0.1',done));
- const url='http://127.0.0.1:'+server.address().port+'/__native-mac-submission-cut/'+token;
+ const {settlement}=configuration,route=settlement?'settled-cut':'cut';
+ const url='http://127.0.0.1:'+server.address().port+'/__native-mac-submission-'+route+'/'+token;
  try{
   expect((await(await fetch(url)).json()).cut).toBeNull();expect((await fetch(url,{method:'POST',body:'{}'})).status).toBe(500);
-  const nonce=randomUUID(),pid=process.pid,marker=join(directory,`submission-cut-${pid}-${nonce}.json`),release=marker.slice(0,-5)+'.release';
-  const fact={version:1,pid,nonce,cut:configuration.cut,identity:{agentSessionId:'filesystem-control-unit'}};
+  const nonce=randomUUID(),pid=process.pid,marker=join(directory,`submission-${route}-${pid}-${nonce}.json`),release=marker.slice(0,-5)+'.release';
+  const fact={version:1,pid,nonce,cut:settlement?'settled-receipt':configuration.cut,identity:{agentSessionId:'filesystem-control-unit'}};
   await writeFile(marker,JSON.stringify({...fact,cut:fact.cut==='intent'?'input-complete':'intent'}),{flag:'wx',mode:0o600});
   expect((await fetch(url)).status).toBe(500);
   expect((await fetch(url,{method:'POST',body:JSON.stringify({nonce,pid})})).status).toBe(500);

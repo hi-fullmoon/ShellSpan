@@ -650,6 +650,34 @@ fn create_local_session_blocking(
     {
         crate::terminal_command::artifacts::resource_root(&app)
             .and_then(|resource_root| {
+                #[cfg(all(
+                    feature = "native-input-acceptance",
+                    debug_assertions,
+                    target_os = "macos",
+                    target_arch = "aarch64"
+                ))]
+                if std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_SCENARIO").as_deref()
+                    == Ok("resource-manifest-mismatch")
+                {
+                    let negative_root = terminal_acceptance_directory()?.join("manifest-negative-resources");
+                    if !crate::terminal_command::acceptance_trace::enabled()
+                        || std::fs::canonicalize(&negative_root).ok().as_ref() != Some(&negative_root)
+                        || !negative_root.is_dir()
+                    {
+                        return Err("TERMINAL_ACCEPTANCE_NEGATIVE_MANIFEST_SCOPE_MISMATCH".into());
+                    }
+                    let result = crate::terminal_command::local::PreparedNativeBash::prepare(
+                        std::path::Path::new(&shell), &negative_root,
+                    );
+                    crate::terminal_command::acceptance_trace::record(
+                        "native-manifest-negative-preflight-result",
+                        serde_json::json!({
+                            "transportSessionId":session_id,"shell":shell,"resourceRoot":resource_root,
+                            "negativeRoot":negative_root,"accepted":result.is_ok(),"error":result.as_ref().err()
+                        }),
+                    )?;
+                    return result;
+                }
                 crate::terminal_command::local::PreparedNativeBash::prepare(
                     std::path::Path::new(&shell),
                     &resource_root,
@@ -795,6 +823,22 @@ fn create_local_session_blocking(
         error!("Failed to start local shell session_id={session_id} shell={shell}: {error}");
         format!("failed to start local shell: {error}")
     })?;
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    if std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_CUT").as_deref() == Ok("input-in-progress")
+        || (std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_CUT").as_deref() == Ok("accept-receipt")
+            && std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_SCENARIO").as_deref()
+                == Ok("transport-disconnect"))
+    {
+        crate::terminal_command::acceptance_trace::record(
+            "owned-native-shell-started",
+            serde_json::json!({"transportSessionId":session_id,"childPid":child.process_id(),"executable":shell}),
+        )?;
+    }
     #[cfg(windows)]
     if let Some(native) = prepared_native.as_mut() {
         native.bind_process(child.process_id());

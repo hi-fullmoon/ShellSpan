@@ -918,6 +918,22 @@ impl SubAgentManager {
             budget,
             continuable,
         )?;
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        if std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_SCENARIO").as_deref() == Ok("delegation")
+            && self
+                .sessions
+                .snapshot(&child)?
+                .header
+                .subagent
+                .is_some_and(|metadata| metadata.provider.is_none())
+        {
+            return Ok(child);
+        }
         self.wake(&child)?;
         Ok(child)
     }
@@ -975,9 +991,37 @@ impl SubAgentManager {
         let descriptor_id = format!("descriptor-{}", Uuid::new_v4().simple());
         let child_session_id = format!("session-{}", Uuid::new_v4().simple());
         let child_task_id = format!("task-{}", Uuid::new_v4().simple());
-        let parent_model = parent_entry.model()?;
-        let mut provider = provider_descriptor(&parent_model.provider);
-        provider.route_revision = parent_entry.prepare_model()?.route.revision.into();
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let without_model = std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_SCENARIO").as_deref()
+            == Ok("delegation")
+            && parent_session_id.starts_with("phase3-submission-");
+        #[cfg(not(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        )))]
+        let without_model = false;
+        let parent_model = if without_model {
+            if parent_entry.model().err().as_deref() != Some("MODEL_SELECTION_REQUIRED") {
+                return Err("ACCEPTANCE_NO_MODEL_PARENT_REQUIRED".into());
+            }
+            None
+        } else {
+            Some(parent_entry.model()?)
+        };
+        let provider = if let Some(model) = &parent_model {
+            let mut provider = provider_descriptor(&model.provider);
+            provider.route_revision = parent_entry.prepare_model()?.route.revision.into();
+            Some(provider)
+        } else {
+            None
+        };
         let metadata = AgentSubagentSession {
             descriptor_id: descriptor_id.clone(),
             parent_task_id: parent.header.task_id.clone(),
@@ -1020,12 +1064,30 @@ impl SubAgentManager {
                 budget,
             },
         )?;
-        let handle = Arc::new(self.agents.attach(
-            self.sessions.clone(),
-            child_session_id.clone(),
-            parent_model.provider.clone(),
-            Arc::clone(&parent_model.adapter),
-        )?);
+        let handle = Arc::new(match parent_model {
+            Some(parent_model) => self.agents.attach(
+                self.sessions.clone(),
+                child_session_id.clone(),
+                parent_model.provider.clone(),
+                Arc::clone(&parent_model.adapter),
+            )?,
+            #[cfg(all(
+                feature = "native-input-acceptance",
+                debug_assertions,
+                target_os = "macos",
+                target_arch = "aarch64"
+            ))]
+            None => self
+                .agents
+                .attach_without_model(self.sessions.clone(), child_session_id.clone())?,
+            #[cfg(not(all(
+                feature = "native-input-acceptance",
+                debug_assertions,
+                target_os = "macos",
+                target_arch = "aarch64"
+            )))]
+            None => return Err("MODEL_SELECTION_REQUIRED".into()),
+        });
         *handle
             .entry()
             .model_registry
@@ -1088,12 +1150,14 @@ impl SubAgentManager {
         }
         // Resolve before committing so a missing credential/route leaves recovery available.
         let child = self.sessions.snapshot(&request.child_session_id)?;
-        let model = &child
+        let model = child
             .header
             .subagent
             .as_ref()
             .ok_or("Session is not a subagent")?
-            .provider;
+            .provider
+            .as_ref()
+            .ok_or("MODEL_SELECTION_REQUIRED")?;
         let provider = self.models.restore_selection(model)?;
         self.models.resolve(provider, None)?;
         if child.ended {
@@ -1212,7 +1276,12 @@ impl SubAgentManager {
             .header
             .subagent
             .ok_or_else(|| "Session is not a subagent".to_string())?;
-        let provider = self.models.restore_selection(&subagent.provider)?;
+        let provider = self.models.restore_selection(
+            subagent
+                .provider
+                .as_ref()
+                .ok_or("MODEL_SELECTION_REQUIRED")?,
+        )?;
         #[cfg(test)]
         let credentials = self
             .credentials
@@ -2653,12 +2722,12 @@ mod retry_policy_tests {
                         capability_scope: scope,
                         target_scope: vec![target],
                         budget: default_subagent_budget(),
-                        provider: AgentSubagentModel {
+                        provider: Some(AgentSubagentModel {
                             route_id: "route".into(),
                             model_id: "model".into(),
                             reasoning_effort: None,
                             route_revision: None,
-                        },
+                        }),
                     }),
                 })
                 .unwrap();

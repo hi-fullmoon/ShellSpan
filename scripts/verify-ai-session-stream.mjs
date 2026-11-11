@@ -162,6 +162,7 @@ assert(!displayAuto||process.platform==='win32'&&process.arch==='x64'&&['powerSh
   '--native-input-p3-display-auto requires an isolated scheduled Windows startup display case without model or other modes');
 const nativeManual=values['native-terminal-manual'];
 const nativeDaily=macDailyAcceptance(values);
+const phase3Human=nativeDaily?.startsWith('submission-')&&process.env.SHELLSPAN_ACCEPTANCE_SUBMISSION_SCENARIO==='human-phase3';
 const nativeHuman=nativeDaily?.startsWith('human-');let humanPhase='waiting',humanStartedAt;
 const nativeManualForm=values['native-terminal-manual-form'];
 assert(nativeManualForm===undefined||nativeManual&&['nfc','nfd'].includes(nativeManualForm),
@@ -501,7 +502,7 @@ assert(!ownedEvidenceDirectory || isAbsolute(ownedEvidenceDirectory)
   && process.env.SHELLSPAN_DATA_DIR && resolve(ownedEvidenceDirectory, 'data') === resolve(process.env.SHELLSPAN_DATA_DIR),
   'Owned evidence directory must be the explicit independent data directory parent');
 const nativeEvidencePath = nativeDaily || nativeRaw || macLocalLifecycle || zleAppHistory!==undefined || nativeManual || nativeRecovery || aiCredentialMode!==undefined || credentialLifecycleRun || values['native-jobs'] || terminalContentionRun || p3Startup || modelPreflightRun || journalRecoveryAgent || storageAdmission || fileChain || fileFault || fileRestart || byteBoundary || windowsStop || windowsDraftCancel || windowsLifetime || approvalContention || approvalDelegation || navigationManual || activeEof || lateReceipt || captureTail || stopBoundary
-  ? ownedEvidenceDirectory ? resolve(ownedEvidenceDirectory, 'native-webview-evidence.json')
+  ? ownedEvidenceDirectory ? resolve(ownedEvidenceDirectory, nativeDaily?.startsWith('submission-')&&process.env.SHELLSPAN_ACCEPTANCE_SUBMISSION_SCENARIO==='app-crash-restart'?'native-webview-restart-evidence.json':'native-webview-evidence.json')
     : resolve(tmpdir(), `shellspan-${terminalContentionRun ? 'terminal-contention' : 'native-jobs'}-${token}.json`) : undefined;
 // Keep the compiled macOS application identity stable between contention runs.
 // The per-run token belongs in an HTTP redirect, not in Tauri's compiled config.
@@ -525,7 +526,7 @@ const pagePath = displayAuto ? 'src/components/terminal/__tests__/native-display
   : modelPreflightRun ? 'src/components/terminal/__tests__/native-model-preflight.native.html'
   : zleAppHistory!==undefined ? 'src/components/terminal/__tests__/native-zle-history.native.html'
   : values['native-input-p3-cancel'] ? 'src/components/terminal/__tests__/native-input-p3-cancel.native.html'
-  : nativeDaily ? nativeHuman?'src/components/terminal/__tests__/mac-human.native.html':nativeDaily.startsWith('submission-')?'src/components/terminal/__tests__/mac-submission.native.html':nativeDaily.startsWith('system-selection-')?'src/components/terminal/__tests__/mac-system-selection.native.html':nativeDaily.startsWith('eof-')?'src/components/terminal/__tests__/mac-eof.native.html':'src/components/terminal/__tests__/mac-daily.native.html'
+  : nativeDaily ? nativeHuman?'src/components/terminal/__tests__/mac-human.native.html':phase3Human?'src/components/terminal/__tests__/mac-submission-human.native.html':nativeDaily.startsWith('submission-')?'src/components/terminal/__tests__/mac-submission.native.html':nativeDaily.startsWith('system-selection-')?'src/components/terminal/__tests__/mac-system-selection.native.html':nativeDaily.startsWith('eof-')?'src/components/terminal/__tests__/mac-eof.native.html':'src/components/terminal/__tests__/mac-daily.native.html'
   : nativeManual ? 'src/components/terminal/__tests__/native-terminal-manual.native.html'
   : nativeRecovery ? 'src/components/terminal/__tests__/native-terminal-recovery.native.html'
   : nativeRaw ? 'src/components/terminal/__tests__/mac-raw-admission.native.html'
@@ -1256,7 +1257,7 @@ try {
       onTransition:transition=>{transitions.push(transition);writeFileSync(resolve(ownedEvidenceDirectory,'lifecycle-evidence-clock.json'),JSON.stringify({token,automationOnly:true,humanReceipt:false,transitions},null,2)+'\n',{mode:0o600});},
     });
     lifecycleEvidenceClock.start();
-  }else{
+  }else if(!phase3Human){
     const runtimeMilliseconds=macDailyRuntimeTimeoutMilliseconds(nativeDaily);
     timer=setTimeout(()=>settle({ok:false,error:`Native stream regression timed out after ${runtimeMilliseconds/60000} minutes`}),runtimeMilliseconds);
   }

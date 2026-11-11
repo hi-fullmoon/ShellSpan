@@ -572,6 +572,35 @@ impl NativeToolRuntime for NativeToolAdapter {
                 let native_tool_name = prepared.call.tool_name.clone();
                 let native_target = prepared.call.target.clone();
                 let grant = runtime.issue_prepared_authorization(&prepared, approved)?;
+                #[cfg(all(
+                    feature = "native-input-acceptance",
+                    debug_assertions,
+                    target_os = "macos",
+                    target_arch = "aarch64"
+                ))]
+                if std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_SCENARIO").as_deref()
+                    == Ok("permission-mismatch")
+                {
+                    crate::commands::terminal_acceptance_directory()?;
+                    let owner = &prepared.context.request.user_session_id;
+                    if !crate::terminal_command::acceptance_trace::enabled()
+                        || stored.public_name != "run_terminal_command"
+                        || !owner.starts_with("phase3-submission-")
+                        || !matches!(prepared.call.target, AgentToolTargetNative::Local { .. })
+                    {
+                        return Err("TERMINAL_ACCEPTANCE_EXACT_PERMISSION_CASE_REQUIRED".into());
+                    }
+                    runtime.revoke_capability(&grant.capability_id)?;
+                    crate::terminal_command::acceptance_trace::record(
+                        "native-capability-revoked-for-case",
+                        serde_json::json!({
+                            "sessionId":owner,
+                            "nativeRequestId":native_request_id,"nativeCallId":native_call_id,
+                            "publicCallId":stored.public_call_id,
+                            "capabilitySha256":crate::terminal_command::protocol::sha(&grant.capability_id)
+                        }),
+                    )?;
+                }
                 if cancellation.is_cancelled() {
                     let _ = runtime.revoke_capability(&grant.capability_id);
                     return Ok(NativeToolResult {

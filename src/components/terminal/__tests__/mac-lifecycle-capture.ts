@@ -10,10 +10,10 @@ function assert(value:unknown,message:string):asserts value{if(!value)throw Erro
 /** Bounded actual observations, installed before any owned transport starts.
  * Retirement intentionally ends controller display, but not independent wire
  * observation. Neither a retired Broker prefix nor visible text is a full PTY. */
-export async function macLifecycleCapture(token:string){
+export async function macLifecycleCapture(token:string,{parsedOutputOrder=false,startupOutputMayPrecedeSubscription=false}={}){
  const wire=await macWireCapture(),sessions=new Map<string,SessionSummary>(),brokerFrames:TerminalAcceptanceRawFrameEvent[]=[],controllerOutput=new Map<string,string>(),retired=new Set<string>();
  const records:Record<string,unknown>[]=[],inputs:Record<string,unknown>[]=[],physical:Record<string,unknown>[]=[],lifecycle:TerminalLifecycleEvent[]=[],issues:string[]=[],stops:(()=>void)[]=[];
- let controller:TerminalController|undefined,trace:NativeDisplayTrace|undefined,renderer:ReturnType<typeof macRenderObserver>|undefined,visible='',brokerBytes=0,finished=false,physicalEventCount=0,inputProtected=false;
+ let controller:TerminalController|undefined,trace:NativeDisplayTrace|undefined,renderer:ReturnType<typeof macRenderObserver>|undefined,visible='',brokerBytes=0,finished=false,physicalEventCount=0,inputProtected=false,parsedSequence=0,pendingDisplayClose=false;
  let original:{write:TerminalController['terminal']['write'];selection:TerminalController['terminal']['getSelection'];select:TerminalController['terminal']['select'];open:TerminalController['terminal']['open']}|undefined;
  const issue=(message:string)=>{if(!issues.includes(message))issues.push(message);};
  const requireCleanInput=()=>assert(physicalEventCount===0,'Unplanned trusted DOM input occurred during an automatic lifecycle case');
@@ -38,19 +38,31 @@ export async function macLifecycleCapture(token:string){
   bind(target:TerminalController){
    assert(!controller&&sessions.has(target.sessionId),'Actual lifecycle controller binding differs');controller=target;const t=target.terminal,b=t.buffer.normal;
    assert(!target.host,'Lifecycle display observation started after attach');original={write:t.write,select:t.select,selection:t.getSelection,open:t.open};renderer=macRenderObserver(target);
-   trace=new NativeDisplayTrace({columns:t.cols,rows:t.rows,empty:b.baseY===0&&b.cursorX===0&&b.cursorY===0&&Array.from({length:b.length},(_,y)=>b.getLine(y)?.translateToString(true)??'').every(line=>line===''),unicodeVersion:t.unicode.activeVersion,nativeDisplayBinding:sessions.get(target.sessionId)?.ptyInfo?.nativeDisplayBinding,options:{windowsPty:t.options.windowsPty,scrollback:t.options.scrollback,fontFamily:t.options.fontFamily,fontSize:t.options.fontSize,lineHeight:t.options.lineHeight,letterSpacing:t.options.letterSpacing,reflowCursorLine:t.options.reflowCursorLine}});
+   trace=new NativeDisplayTrace({columns:t.cols,rows:t.rows,empty:b.baseY===0&&b.cursorX===0&&b.cursorY===0&&Array.from({length:b.length},(_,y)=>b.getLine(y)?.translateToString(true)??'').every(line=>line===''),unicodeVersion:t.unicode.activeVersion,nativeDisplayBinding:sessions.get(target.sessionId)?.ptyInfo?.nativeDisplayBinding,options:{windowsPty:t.options.windowsPty,scrollback:t.options.scrollback,fontFamily:t.options.fontFamily,fontSize:t.options.fontSize,lineHeight:t.options.lineHeight,letterSpacing:t.options.letterSpacing,reflowCursorLine:t.options.reflowCursorLine}},parsedOutputOrder);
    stops.push(target.subscribeOutput(chunk=>{const id=target.sessionId,previous=controllerOutput.get(id)??'';if(previous.length+chunk.length>900000){issue('Controller decoded observation bound exceeded');return;}controllerOutput.set(id,previous+chunk);}));
-   stops.push(target.subscribeDisplayOutput(({source,data})=>{const sequence=trace!.output(data,source);visible+=data;queueMicrotask(()=>t.write('',()=>trace!.parsed(sequence)));}));
+   stops.push(target.subscribeDisplayOutput(({source,data})=>{
+    if(parsedOutputOrder&&pendingDisplayClose&&source==='local'&&data==='\u001b\\'){
+     // The controller emits the local terminator only after its actual render
+     // drain. The earlier transport Closed stays in the lifecycle evidence.
+     pendingDisplayClose=false;trace!.action({kind:'transportClosed'});
+    }
+    const sequence=trace!.output(data,source);visible+=data;
+    if(!parsedOutputOrder)queueMicrotask(()=>t.write('',()=>trace!.parsed(sequence)));
+   }));
+   if(parsedOutputOrder)stops.push(target.subscribeDisplayOutputParsed(output=>trace!.parsed(parsedSequence++,output)));
    stops.push(target.subscribeLifecycle(event=>{
     lifecycle.push(event);
-    if(event.type==='closed')trace!.action({kind:'transportClosed'});
+    if(event.type==='closed'){
+     if(parsedOutputOrder){if(pendingDisplayClose)issue('Repeated transport close before actual display drain');pendingDisplayClose=true;}
+     else trace!.action({kind:'transportClosed'});
+    }
     if(event.type==='rebound'){
      const successor=sessions.get(event.newSessionId);if(!successor){issue('Production rebound to an unobserved actual session');return;}
      retired.add(event.sessionId);trace!.action({kind:'rebindDisplay',ptyInfo:successor.ptyInfo});
     }
     if(event.type==='disposed'&&!finished)issue('Controller disposed before complete capture');
    }));
-   const resize=t.onResize(({cols,rows})=>trace!.resize(cols,rows)),data=t.onData(value=>inputs.push({kind:'actual-terminal-onData',at:Date.now(),characters:value.length,utf8Bytes:new TextEncoder().encode(value).length,dataRetained:false,scope:'Unplanned UI payload metadata only; declared writeUserInput bytes retained separately'}));stops.push(()=>resize.dispose(),()=>data.dispose());
+   const resize=t.onResize(({cols,rows})=>trace!.resize(cols,rows,parsedOutputOrder?nativeDisplayTraceState(t):undefined)),data=t.onData(value=>inputs.push({kind:'actual-terminal-onData',at:Date.now(),characters:value.length,utf8Bytes:new TextEncoder().encode(value).length,dataRetained:false,scope:'Unplanned UI payload metadata only; declared writeUserInput bytes retained separately'}));stops.push(()=>resize.dispose(),()=>data.dispose());
    const nonprinting=new Set(['Shift','Control','Alt','Meta','AltGraph','CapsLock','NumLock','ScrollLock','Fn','Escape','Tab','Enter','Backspace','Delete','Insert','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','PageUp','PageDown','Process','Unidentified',...Array.from({length:24},(_,index)=>'F'+(index+1))]);
    const nonprintingCodes=new Set([...nonprinting,'ShiftLeft','ShiftRight','ControlLeft','ControlRight','AltLeft','AltRight','MetaLeft','MetaRight']);
    const observePhysical=(event:Event)=>{
@@ -95,12 +107,18 @@ export async function macLifecycleCapture(token:string){
    assert(controller&&trace,'Actual lifecycle observer missing');await drain();
    const end=Date.now()+20000;while([...sessions.keys()].some(id=>!wire.isFinalized(id))&&Date.now()<end)await new Promise(done=>setTimeout(done,20));
    await drain();
+   if(pendingDisplayClose)issue('Actual display close drain terminator was not observed');
    // Preserve the complete original observations before judging equality.
    const terminal=controller.terminal,state=nativeDisplayTraceState(terminal);await trace.checkpoint('lifecycle-complete',state);
    records.push({label:'lifecycle-complete',at:Date.now(),state,display:{unicode:terminal.unicode.activeVersion,reflow:terminal.options.reflowCursorLine},renderer:renderer?.snapshot(),nativeInnerSize:await getCurrentWindow().innerSize()});
    const retained=await persist('lifecycle-complete'),transports=[];
    for(const [id,session]of sessions){
-    const actual=wire.snapshot(id,true);assert(actual.wireDecoded===actual.decoded,'Independent full transport/standard decoder differ');
+    const actual=wire.snapshot(id,true);
+    if (startupOutputMayPrecedeSubscription) {
+     assert(actual.wireDecoded.endsWith(actual.decoded), 'Subscribed startup display differs from the actual wire suffix');
+    } else {
+     assert(actual.wireDecoded===actual.decoded,'Independent full transport/standard decoder differ');
+    }
     const prefix=controllerOutput.get(id)??'';assert(actual.decoded.startsWith(prefix),'Production controller output differs from its actual transport prefix');
     const frames=brokerFrames.filter(event=>event.transportSessionId===id),data:number[]=[];let next=1,offset=0;
     for(const event of frames){const frame=event.frame;assert(frame.protocolVersion===1&&frame.type==='rawOutput'&&frame.terminalSessionId===session.terminalSessionId&&frame.terminalGeneration===session.terminalGeneration&&frame.sequence===next++&&frame.byteOffset===offset,'Broker actual identity/sequence/offset differs');data.push(...frame.bytes);offset+=frame.bytes.length;}
@@ -112,7 +130,8 @@ export async function macLifecycleCapture(token:string){
      assert(offset===actual.byteCount&&offset===metadata.value.nextByteOffset&&frames.length===metadata.value.capturedFrameCount,'Current full Broker/actual wire boundary differs');
      assert(prefix===actual.decoded,'Current production controller omitted final decoded bytes');
     }
-    transports.push({sessionId:id,retired:retired.has(id),wireFrames:actual.frameCount,wireBytes:actual.byteCount,brokerPrefixFrames:frames.length,brokerPrefixBytes:offset,controllerPrefixCharacters:prefix.length,wireComplete:true,fullBrokerClaim:!retired.has(id),metadata});
+    transports.push({sessionId:id,retired:retired.has(id),wireFrames:actual.frameCount,wireBytes:actual.byteCount,brokerPrefixFrames:frames.length,brokerPrefixBytes:offset,controllerPrefixCharacters:prefix.length,wireComplete:true,fullBrokerClaim:!retired.has(id),metadata,
+     ...(startupOutputMayPrecedeSubscription ? {legacyDecodedStartCharacter:actual.wireDecoded.length-actual.decoded.length,legacyDisplayComplete:actual.wireDecoded===actual.decoded} : {})});
    }
    assertPublic();assert(trace.snapshot(visible).replayable,'Actual lifecycle display order is not replayable');assert(issues.length===0,issues.join('; '));finished=true;
    return{retained,transports,records:records.map(record=>({label:record.label,at:record.at,display:record.display,renderer:record.renderer,nativeInnerSize:record.nativeInnerSize})),inputs,lifecycle,visibleCharacters:visible.length,publicApisUnmodified:true,humanReceipt:false,physicalInputClaim:false,models:0};

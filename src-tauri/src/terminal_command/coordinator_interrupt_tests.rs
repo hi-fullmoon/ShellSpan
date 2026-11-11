@@ -58,6 +58,13 @@ fn submitted() -> NativeInputCoordinator {
         receipts: HashMap::new(),
         deadline: None,
         interrupt_before_start_deadline: None,
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        readonly_first_partial: None,
     }
 }
 

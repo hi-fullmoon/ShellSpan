@@ -156,12 +156,12 @@
                 max_tokens: Some(16_000),
                 timeout_ms: 60_000,
             },
-            provider: super::super::AgentSubagentModel {
+            provider: Some(super::super::AgentSubagentModel {
                 route_id: "budget-route".into(),
                 model_id: "budget-model".into(),
                 reasoning_effort: None,
                 route_revision: None,
-            },
+            }),
         };
         assert_eq!(config.step_limit_for(Some(&child)), Some(8));
         for (configured, expected) in [(4, 4), (16, 8)] {

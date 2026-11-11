@@ -15,6 +15,13 @@ pub(crate) struct NativeInputCoordinator {
     receipts: HashMap<&'static str, String>,
     deadline: Option<Instant>,
     interrupt_before_start_deadline: Option<Instant>,
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    readonly_first_partial: Option<String>,
 }
 
 impl TerminalSessionBroker {
@@ -327,6 +334,13 @@ impl TerminalSessionBroker {
             receipts: HashMap::new(),
             deadline: None,
             interrupt_before_start_deadline: None,
+            #[cfg(all(
+                feature = "native-input-acceptance",
+                debug_assertions,
+                target_os = "macos",
+                target_arch = "aarch64"
+            ))]
+            readonly_first_partial: None,
         })
     }
 }
@@ -589,6 +603,19 @@ impl NativeInputCoordinator {
                 return Err("TERMINAL_NATIVE_COMMIT_NOT_ARMED".into());
             }
         }
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        if std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_CUT").as_deref() == Ok("before-accept") {
+            crate::terminal_command::acceptance_trace::record(
+                "before-accept-observed",
+                serde_json::json!({"identity":self.identity()?}),
+            )?;
+            self.check_deadline()?;
+        }
         revalidate()?;
         #[cfg(all(
             feature = "native-input-acceptance",
@@ -599,6 +626,16 @@ impl NativeInputCoordinator {
         crate::terminal_command::acceptance_trace::record(
             "executable-preflight-returned",
             serde_json::json!({"identity":self.identity()?}),
+        )?;
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        crate::terminal_command::acceptance_trace::observe_next_accept_key(
+            &self.transport,
+            self.identity()?,
         )?;
         // Broker rechecks proof, durable intent, native arm and the same lease
         // under its final admission lock, before a single real accept-key enqueue.
@@ -783,9 +820,154 @@ impl NativeInputCoordinator {
     pub(crate) fn receive_envelope(&mut self, message: Envelope) -> Result<(), String> {
         self.verify_current(false)?;
         message.validate().map_err(wire_error)?;
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let partial = if std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_CUT").as_deref()
+            == Ok("input-in-progress")
+            && self.requests.get("query") == Some(&message.request_id)
+        {
+            let data = self.operation.lock()?;
+            match &message.payload {
+                Payload::Snapshot {
+                    phase,
+                    may_have_submitted: false,
+                    editor_utf8_valid: true,
+                    cursor_utf8_bytes: Some(cursor),
+                    end_utf8_bytes: Some(end),
+                } if phase == "typing"
+                    && data.lifecycle.phase() == CommandPhase::Typing
+                    && *cursor <= *end
+                    && *end > 0
+                    && *end < data.intent.source().len() =>
+                {
+                    Some(serde_json::json!({
+                        "identity":message.identity,"requestId":message.request_id,
+                        "transportSessionId":self.transport,"cursorUtf8Bytes":cursor,
+                        "endUtf8Bytes":end,"sourceUtf8Bytes":data.intent.source().len()
+                    }))
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let observation = if std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_CUT").as_deref()
+            == Ok("after-accept")
+        {
+            match &message.payload {
+                Payload::SubmissionAccepted => Some("submission-accepted-observed"),
+                Payload::Started => Some("native-started-processed"),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let wrong_request =
+            crate::terminal_command::acceptance_trace::wrong_settlement_request(&message)
+                .then(|| (message.request_id.clone(), message.identity.clone()));
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let arm_candidate =
+            crate::terminal_command::acceptance_trace::observe_arm_binding(&message)
+                .then(|| (message.request_id.clone(), message.identity.clone()));
         let result = self.accept(message);
         if let Err(error) = &result {
             self.quarantine_protocol_error(error);
+        }
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        if let Some((request_id, identity)) = arm_candidate {
+            let data = self.operation.lock()?;
+            crate::terminal_command::acceptance_trace::record(
+                "arm-binding-result",
+                serde_json::json!({
+                    "identity":identity,"requestId":request_id,"error":result.as_ref().err(),
+                    "phase":data.lifecycle.phase(),"armed":data.native_commit_armed
+                }),
+            )?;
+        }
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        if let Some((request_id, identity)) = wrong_request {
+            let snapshot = self.operation.snapshot()?;
+            crate::terminal_command::acceptance_trace::record(
+                "wrong-settlement-result",
+                serde_json::json!({
+                    "identity":identity,
+                    "requestId":request_id,
+                    "error":result.as_ref().err(),
+                    "phase":snapshot.phase,
+                    "executionEvidence":snapshot.command_observation.map(|state| state.execution_evidence)
+                }),
+            )?;
+        }
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        if let Some(event) = observation.filter(|_| result.is_ok()) {
+            crate::terminal_command::acceptance_trace::record(
+                event,
+                serde_json::json!({"identity":self.identity()?,"phase":self.operation.snapshot()?.phase}),
+            )?;
+        }
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        if let Some(details) = partial.filter(|_| result.is_ok()) {
+            if std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_SCENARIO").as_deref()
+                == Ok("readonly-query-does-not-authorize")
+            {
+                let request = details["requestId"]
+                    .as_str()
+                    .ok_or("TERMINAL_ACCEPTANCE_TRACE_UNAVAILABLE")?;
+                match self.readonly_first_partial.as_deref() {
+                    None => {
+                        self.readonly_first_partial = Some(request.into());
+                        crate::terminal_command::acceptance_trace::record(
+                            "readonly-first-partial-observed",
+                            details,
+                        )?;
+                        return result;
+                    }
+                    Some(first) if first == request => return result,
+                    _ => {}
+                }
+            }
+            crate::terminal_command::acceptance_trace::record("input-progress-observed", details)?;
         }
         result
     }

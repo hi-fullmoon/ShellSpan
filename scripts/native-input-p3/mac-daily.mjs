@@ -39,7 +39,7 @@ export async function macDailyAppConfiguration(root,directory,token,{submission=
  const development=JSON.parse(await readFile(resolve(root,'src-tauri/tauri.dev.conf.json'),'utf8'));
  const windows=development.app?.windows??base.app?.windows;
  assert(windows?.length===1&&windows[0].label==='main','One existing native window required');
- return{...(submission?{}:{appDirectoriesOverride:resolve(directory,'app-directories')}),windows:windows.map(window=>({...window}))};
+ return{...(submission?{}:{appDirectoriesOverride:resolve(directory,'app-directories')}),windows:windows.map(window=>({...window,...(submission?{focus:false}:{})}))};
 }
 
 // Automation-only screenshot barrier. It never supplies a human receipt,

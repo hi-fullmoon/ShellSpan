@@ -348,7 +348,8 @@ pub(crate) struct AgentSubagentSession {
     pub(crate) capability_scope: AgentCapabilityScope,
     pub(crate) target_scope: Vec<AgentSessionTarget>,
     pub(crate) budget: AgentSubagentBudget,
-    pub(crate) provider: AgentSubagentModel,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) provider: Option<AgentSubagentModel>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

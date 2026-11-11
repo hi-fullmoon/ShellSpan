@@ -114,6 +114,9 @@ test('retains window options and leaves the WebKit identifier to the runtime SDK
  assert.deepEqual(first.windows.map(({dataStoreIdentifier,...window})=>window),base);
  assert.equal(first.windows[0].dataStoreIdentifier,undefined);
  assert.deepEqual(first.windows,second.windows);
+ const submission=await macDailyAppConfiguration(root,directory,token,{submission:true});
+ assert.equal(submission.appDirectoriesOverride,undefined);
+ assert.deepEqual(submission.windows,first.windows.map(window=>({...window,focus:false})));
  await assert.rejects(()=>macDailyAppConfiguration(root,root,token));
 });
 test('actual human checkpoint HTTP archive preserves bytes once and grants no visual or human receipt',async()=>{
