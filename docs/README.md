@@ -15,7 +15,6 @@
 
 - [终端连接](../protocol/terminal-connection.md)
 - [终端 Session 协议](../protocol/agent/runtime/terminal-protocol-rfc.md)
-- [终端兼容与 rollout](../protocol/agent/runtime/terminal-execution-compatibility.md)
 - [文件与脚本执行、安全边界](../protocol/agent/runtime/file-and-script-execution.md)
 - [项目目录绑定](../protocol/agent/runtime/project-root-binding.md)
 - [任务与回合计划](../protocol/agent/runtime/turn-and-task-plan.md)
@@ -38,14 +37,15 @@
 - [NIP 契约与实现入口](../protocol/agent/runtime/native-input.md)：原生输入、资源和准入边界。
 - [原生输入统一验收标准](design/agent-terminal-input-acceptance-checklist.md)：35条要求、十个平台绑定、证据规则及执行门槛。
 - [Windows 分期验收](design/agent-terminal-input-windows-acceptance.md)：四期范围、当前待办、历史证据索引及最终收口条件。
-- [macOS 六期验收计划](design/agent-terminal-input-macos-plan.md)：本机四组合的分期范围、完成条件、跨机器边界及第1期 Goal Prompt。
+- [macOS 六期验收计划](design/agent-terminal-input-macos-plan.md)：本机四组合的分期范围、完成条件与跨机器边界。
 - [macOS arm64 验收记录](design/agent-terminal-input-macos-acceptance-2026-11-06.md)：本机四组合的历史批次、实际结果及证据索引。
 
 ## 设计与历史证据
 
+- [终端兼容与分阶段上线记录](../protocol/agent/runtime/terminal-execution-compatibility.md)
 - [Agent 执行安全与使用体验](design/agent-execution-safety-and-usability.md)及[沙箱实施计划](design/agent-sandbox-implementation-plan.md)：包含未实施目标，不能视为已交付生产沙箱。
-- [Petdex 动作实施计划](design/petdex-integration-implementation-plan.md)及[验收记录](design/petdex-integration-acceptance.md)
-- [Petdex 消息设计](design/petdex-message-integration-design.md)及[验收记录](design/petdex-message-integration-acceptance.md)
+- [Petdex 动作联动验收记录](design/petdex-integration-acceptance.md)
+- [Petdex 消息气泡验收记录](design/petdex-message-integration-acceptance.md)
 - [in-band 完成帧阶段 0 攻击记录](design/agent-direct-shell-execution-stage-0-gate.md)及[独立实验夹具](../tests/agent-direct-shell-gate/README.md)：保留被否决方案的反例，避免将终端输出当成可信完成信号。
 
 已被当前协议和验收清单覆盖的终端设计、路线图、阶段验收及显示复查，以及已完成的重复实施计划，统一通过 Git 历史查阅。保留文档中的历史文件清单按当时事实记录；历史通过结果不能作为当前源码的运行证明。

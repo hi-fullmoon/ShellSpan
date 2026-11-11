@@ -2,7 +2,7 @@
 
 本批次始于2026-11-06，执行延续至2026-11-07，Asia/Shanghai。范围为本机四个本地 PTY 组合：Zsh 5.9/ZLE 5.9、Bash/Readline 4.1/6.0、4.4/7.0、5.3/8.3.6。依据[统一验收清单](agent-terminal-input-acceptance-checklist.md)，与 Windows 及 Linux SSH 的证据分别记录。本文不是通过证明。
 
-当前执行安排及第1期 Goal Prompt 统一见[macOS 六期验收计划](agent-terminal-input-macos-plan.md)。本记录保留原批次范围、失败及证据，Windows 验收仍由另一台电脑独立推进。
+分期安排见[macOS 六期验收计划](agent-terminal-input-macos-plan.md)。
 
 ## 当前授权与边界
 

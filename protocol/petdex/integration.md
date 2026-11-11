@@ -13,7 +13,7 @@
 
 ## 现有请求契约
 
-消息气泡已实现且默认关闭，见[消息设计](../../docs/design/petdex-message-integration-design.md)、[气泡契约](bubble.md)及[消息验收](../../docs/design/petdex-message-integration-acceptance.md)。AI按会话、SSH/SFTP按后端连接归属，最多三个固定槽，默认模板、另行开启有限详情，关闭只结算已用槽且共享1500ms预算。消息通道调用 `/bubble`，下文描述独立的动作通道；组合、计时和残留限制见消息验收。
+消息气泡默认关闭，使用独立的 `/bubble` 通道。归属、显示和关闭结算见[气泡契约](bubble.md)，实际显示和计时证据见[消息验收](../../docs/design/petdex-message-integration-acceptance.md)。
 
 ShellSpan 的动作发送只向 `http://127.0.0.1:7777/state` 发出 JSON POST，凭证通过 `tokio::fs::read_to_string` 异步读取自 `~/.petdex/runtime/update-token`，使用标记为 sensitive 的 `X-Petdex-Update-Token` 请求头。客户端禁止代理，显式使用 `reqwest::redirect::Policy::none()` 禁止重定向，连接超时 250ms、单次请求超时 750ms。取消覆盖请求锁等待、异步读取和请求；重新读取后再次检查取消。阶段 4 另有用户主动触发的匿名只读 `GET /health`，见下文。
 
@@ -68,6 +68,8 @@ ShellSpan 的动作发送只向 `http://127.0.0.1:7777/state` 发出 JSON POST�
 | 无活动 | idle | 已有 |
 
 现有仲裁为失败 > 等待用户 > 成功 > 执行 > SSH 连接 > 空闲。独立预览优先于普通成功/执行/连接，但低于失败和等待用户；业务短提示在覆盖期间继续按原始发生时间计时，过期不补播。SSH/SFTP/AI 分类已实现；部署来源、分类与生命周期按用户要求延期，不属于本轮实现或验收范围。内部重试、恢复门禁、取消请求和真正终态必须从权威业务出口区分。
+
+后续接入部署时，部署分类默认关闭，结果动作按整次部署的终态发送。通过明确的父子任务关联抑制部署所含 SFTP 操作的重复结果动作。
 
 ## 隐私与错误处理
 
