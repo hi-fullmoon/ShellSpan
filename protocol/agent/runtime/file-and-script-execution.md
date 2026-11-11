@@ -70,6 +70,11 @@ format. On Windows this removes the internal `\\?\` canonical-path prefix and
 uses forward slashes, so the returned path can be passed directly to PowerShell
 script authorization. Canonical paths remain in filesystem validation, I/O and
 checkpoints; remote POSIX paths are returned unchanged.
+Workspace-scope file tools reject access to either managed local tree with
+`AGENT_SCRATCH_SCOPE_DENIED` before approval or dispatch. Storage-policy checks
+resolve local paths and their nearest existing ancestors, so portable Windows
+paths and canonical paths receive the same ownership protection. This does not
+rewrite the proposed arguments or expand the owning session's registered root.
 Intermediate outputs and interpreter caches should be directed into scratch when
 supported. Relative imports may require explicit dependency configuration. Saved
 project source and deliverables still use workspace tools. This is cooperative

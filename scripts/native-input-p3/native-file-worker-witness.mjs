@@ -1,0 +1,9 @@
+import assert from 'node:assert/strict';import {resolve} from 'node:path';import {readOwnedHistoryJson} from './windows-history-witness.mjs';
+async function stable(root,name){try{return await readOwnedHistoryJson(root,name);}catch(error){if(error instanceof SyntaxError||error.code==='ERR_ASSERTION'&&error.message.includes('changed while reading'))return null;throw error;}}
+export async function readNativeFileWorker(evidence,token){
+ assert(/^[a-f0-9-]{36}$/.test(token));const record=await stable(evidence,'home/native-file-worker-'+token+'.json'),observer=await stable(evidence,'native-job-observer.json'),tree=await stable(evidence,'os-identity-run.json');if(!record||!observer||!tree)return{ready:false};
+ assert.equal(record.runId,token);assert.equal(observer.token,token);assert(observer.handleHeld&&observer.inputInjected===false&&observer.terminationRequested===false);assert(tree.readOnly&&tree.inputInjected===false&&tree.terminationRequested===false&&tree.failures.length===0);
+ const app=tree.applications.find(value=>value.pid===observer.appPid),shell=tree.shells.find(value=>value.pid===observer.shellPid&&value.handleCreated===observer.handleCreated);if(!app||!shell)return{ready:false};assert(app.handleHeld&&shell.handleHeld&&shell.parentPid===app.pid);
+ const worker=tree.ownedDescendants.find(value=>value.pid===record.workerPid&&value.handleCreated===record.workerCreated);if(!worker)return{ready:false};assert(worker.handleHeld&&worker.parentPid===shell.pid);assert.equal(resolve(worker.exe).toLowerCase(),resolve(observer.executable).toLowerCase());assert.equal(resolve(worker.exe).toLowerCase(),resolve(record.executable).toLowerCase());assert.equal(worker.exeSha256,observer.sha256);
+ return{ready:true,token,appPid:app.pid,shellPid:shell.pid,parentAlive:app.ended!==true&&shell.ended!==true,worker,workerEnded:worker.ended===true,jobMembershipClaimedByObserver:false,inputInjected:false,terminationRequested:false};
+}

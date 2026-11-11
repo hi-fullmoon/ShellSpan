@@ -53,6 +53,17 @@ use super::{
 pub(crate) const DEFAULT_CAPABILITY_TTL_MS: u64 = 120_000;
 pub(crate) const MAX_CAPABILITY_TTL_MS: u64 = 300_000;
 
+fn resolve_runtime_storage_path(path: &Path) -> PathBuf {
+    // A new file cannot canonicalize yet. Keep its missing suffix while
+    // resolving the nearest existing ancestor, including Windows path prefixes.
+    path.ancestors()
+        .find_map(|ancestor| {
+            let base = std::fs::canonicalize(ancestor).ok()?;
+            Some(base.join(path.strip_prefix(ancestor).ok()?))
+        })
+        .unwrap_or_else(|| path.to_path_buf())
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct NativeExecutionContext {
     pub(crate) request: AgentRequestNative,
@@ -1300,11 +1311,15 @@ impl NativeToolEngine {
                 }
                 let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.clone());
                 let managed = [root.join("agent-runtime/scratch"), root.join("tmp")];
-                if scope
-                    .paths
-                    .iter()
-                    .any(|path| managed.iter().any(|root| Path::new(path).starts_with(root)))
-                {
+                if scope.paths.iter().any(|path| {
+                    let path = Path::new(path);
+                    let resolved = matches!(call.target, AgentToolTargetNative::Local { .. })
+                        .then(|| resolve_runtime_storage_path(path));
+                    managed.iter().any(|root| {
+                        path.starts_with(root)
+                            || resolved.as_ref().is_some_and(|path| path.starts_with(root))
+                    })
+                }) {
                     return Err(
                         "AGENT_SCRATCH_SCOPE_DENIED: use this session's fileScope=scratch target"
                             .into(),
@@ -1364,16 +1379,7 @@ impl NativeToolEngine {
         if let Some(root) = stored.as_ref() {
             let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.clone());
             if paths.iter().any(|path| {
-                let path = PathBuf::from(path);
-                // A new file does not canonicalize yet. Resolve its nearest
-                // existing ancestor so aliases of ShellSpan's data root remain protected.
-                let path = path
-                    .ancestors()
-                    .find_map(|ancestor| {
-                        let base = std::fs::canonicalize(ancestor).ok()?;
-                        Some(base.join(path.strip_prefix(ancestor).ok()?))
-                    })
-                    .unwrap_or(path);
+                let path = resolve_runtime_storage_path(Path::new(path));
                 path.starts_with(&root)
             }) {
                 return Err("AGENT_CRITICAL_OPERATION_DENIED: Agent tools cannot modify ShellSpan application data, approvals or recovery records".into());
@@ -3134,6 +3140,88 @@ mod tests {
         assert!(engine
             .issue_prepared_mcp_authorization(&prepared, true)
             .is_ok());
+    }
+
+    #[test]
+    fn portable_scratch_paths_resolve_missing_descendants_with_directory_boundaries() {
+        let root = tempfile::tempdir().unwrap();
+        let managed = root.path().join("tmp");
+        let sibling = root.path().join("tmp-other");
+        std::fs::create_dir_all(&managed).unwrap();
+        std::fs::create_dir_all(&sibling).unwrap();
+        let canonical = std::fs::canonicalize(&managed).unwrap();
+        for path in [
+            managed.join("future/nested/script.ps1"),
+            managed.join("..").join("tmp/future/script.ps1"),
+        ] {
+            let portable = crate::portable_local_path(&path);
+            assert!(resolve_runtime_storage_path(Path::new(&portable)).starts_with(&canonical));
+        }
+        let portable = crate::portable_local_path(&sibling.join("script.ps1"));
+        assert!(!resolve_runtime_storage_path(Path::new(&portable)).starts_with(&canonical));
+    }
+
+    #[test]
+    fn portable_scratch_paths_are_denied_before_approval() {
+        let engine = NativeToolEngine::default();
+        let root = tempfile::tempdir().unwrap();
+        let data_root = root.path().join("data");
+        let workspace = root.path().join("work");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&data_root).unwrap();
+        engine.configure_checkpoint_root(data_root.clone()).unwrap();
+        let target = AgentToolTargetNative::Local {
+            target_id: "reader-terminal".into(),
+            session_id: "terminal".into(),
+            cwd: Some(crate::portable_local_path(&workspace)),
+        };
+        let context = NativeExecutionContext {
+            request: AgentRequestNative {
+                contract_version: crate::agent_runtime::NATIVE_TOOL_CONTRACT_VERSION,
+                request_id: "request".into(),
+                user_session_id: "scratch-reader".into(),
+                task_id: "scratch-reader".into(),
+                goal: "Read a proposed file".into(),
+                success_criteria: vec![],
+                targets: vec![target.clone()],
+                permission_mode: AgentPermissionModeNative::RequestApproval,
+            },
+            turn_id: "turn".into(),
+            step_id: "step".into(),
+        };
+        for relative in [
+            "tmp/0123456789abcdef/owner.ps1",
+            "agent-runtime/scratch/records/owner.json",
+        ] {
+            let file = data_root.join(relative);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(&file, "owner-only").unwrap();
+            let canonical = std::fs::canonicalize(&file).unwrap();
+            for path in [
+                crate::portable_local_path(&canonical),
+                canonical.to_string_lossy().into_owned(),
+            ] {
+                let call = AgentToolCallNative {
+                    request_id: "request".into(),
+                    call_id: "reader-read".into(),
+                    tool_name: "read_file".into(),
+                    arguments: json!({"path": path, "encoding": "utf8"}),
+                    target: target.clone(),
+                    capability_id: "pending-native-capability".into(),
+                };
+                let effect =
+                    assess_effect_native(&engine.tool("read_file").unwrap().descriptor, &call)
+                        .unwrap();
+                let scope = inspect_call_policy_scope_native(&call).unwrap();
+                let result = engine
+                    .enforce_runtime_storage_policy_for_session(&context, &call, &effect, &scope);
+                assert!(
+                    result.is_err_and(|error| error.starts_with("AGENT_SCRATCH_SCOPE_DENIED")),
+                    "managed scratch path reached approval policy: {path}"
+                );
+                assert_eq!(std::fs::read_to_string(&file).unwrap(), "owner-only");
+            }
+        }
     }
 
     #[test]

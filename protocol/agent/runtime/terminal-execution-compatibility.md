@@ -22,6 +22,8 @@ limits follow [native input](native-input.md). Separate frozen Windows
 native/frontend/model results remain in Git history; they do not establish
 current-code acceptance on Windows, other hosts or architectures.
 
+Bound-terminal source validation rejects oversized input before lifecycle routing or native preparation. Its rejection reports the actual UTF-8 byte count and the unchanged 8192-byte limit. Empty/control-character rejection and all approval, target, cancellation, deadline and recovery gates are unchanged; no source prefix is executed.
+
 ## Compatibility table
 
 | Existing boundary | Current meaning | Migration decision | Compatibility proof / removal gate |

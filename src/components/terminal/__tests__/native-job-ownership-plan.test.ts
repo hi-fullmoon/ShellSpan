@@ -1,5 +1,5 @@
 import {expect,it} from 'vitest';
-import {foreignJobGoal,nativeJobHistorySource,nativeJobOwnershipPlan,matchesNativeJobOwnershipStep,nativeJobOwnershipStepMayFollow,nativeJobForeignModelDeadlineMs,nativeJobOwnershipApprovalUsable} from './native-job-ownership-plan';
+import {foreignJobGoal,nativeJobHistorySource,nativeJobOwnershipPlan,nativeJobOwnershipExactGoal,matchesNativeJobOwnershipStep,nativeJobOwnershipStepMayFollow,nativeJobForeignModelDeadlineMs,nativeJobOwnershipApprovalUsable} from './native-job-ownership-plan';
 const marker='native-jobs-11111111-1111-4111-8111-111111111111',handle='job-'+'a'.repeat(32);
 it.each(['wait_process','kill_process'] as const)('plans foreign %s and idempotent completed-handle observations with read-only history digests',tool=>{
  const plan=nativeJobOwnershipPlan(marker,tool);expect(plan.goal).toContain('exactly EIGHT');expect(plan.goal).toContain('exactly ONE tool call');expect(plan.goal).not.toContain('No Direct, retries, kill_process');expect(plan.exitCode).toBe(tool==='wait_process'?0:7);expect(plan.sources[1]).toContain("real\tTab 'single' \"double\"");expect(plan.sources[3]).toBe(nativeJobHistorySource);expect(nativeJobHistorySource).toContain('GetHistoryItems()');expect(nativeJobHistorySource).toContain('ComputeHash($b)');expect(nativeJobHistorySource).not.toContain('Set-PSReadLine');expect(plan.goal).toContain(nativeJobHistorySource);
@@ -10,3 +10,9 @@ it('allows only the exact old handle controls and original digest-only source',(
 });
 it('requires a distinct serial eighth step and rejects overlap or any ninth call',()=>{expect(nativeJobOwnershipStepMayFollow(7,7,['a','b'],'c')).toBe(true);expect(nativeJobOwnershipStepMayFollow(7,6,['a','b'],'c')).toBe(false);expect(nativeJobOwnershipStepMayFollow(7,7,['a','b'],'b')).toBe(false);expect(nativeJobOwnershipStepMayFollow(8,8,[],'extra')).toBe(false);});
 it('leaves margin inside the existing60second approval without renewing it',()=>{expect(nativeJobForeignModelDeadlineMs).toBeLessThan(55000);expect(nativeJobOwnershipApprovalUsable(1000,1000+nativeJobForeignModelDeadlineMs)).toBe(true);expect(nativeJobOwnershipApprovalUsable(1000,55999)).toBe(true);expect(nativeJobOwnershipApprovalUsable(1000,56000)).toBe(false);expect(nativeJobOwnershipApprovalUsable(1000,999)).toBe(false);expect(nativeJobOwnershipApprovalUsable(NaN,1000)).toBe(false);});
+it('clarifies the original cached-handle options without relaxing the matcher or changing sources',()=>{
+ const plan=nativeJobOwnershipPlan(marker,'wait_process'),original=JSON.stringify(plan),goal=nativeJobOwnershipExactGoal(plan);
+ expect(goal.startsWith(plan.goal)).toBe(true);expect(goal).toContain('Call7 must contain ONLY');expect(goal).toContain('Do not add maxOutputBytes');expect(goal).toContain(plan.sources[3]);expect(JSON.stringify(plan)).toBe(original);
+ expect(matchesNativeJobOwnershipStep(6,{processHandle:handle,timeoutMs:1000,maxOutputBytes:65536},plan.sources,'wait_process',handle)).toBe(false);
+ expect(matchesNativeJobOwnershipStep(6,{processHandle:handle,timeoutMs:1000},plan.sources,'wait_process',handle)).toBe(true);
+});

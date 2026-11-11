@@ -1,3 +1,4 @@
+import {selectNativeBoundaryModel} from './native-byte-boundary-plan';
 import {createRoot} from 'react-dom/client';
 import {getCurrentWindow} from '@tauri-apps/api/window';
 import {TerminalControllerLayer} from '../terminal-controller-layer';
@@ -28,8 +29,9 @@ async function fingerprints(sources: readonly string[]) {
 }
 
 export async function verifyNativeHistoryLifecycle() {
-  const params = new URL(location.href).searchParams, token = params.get('token'), mode = params.get('historyMode');
+  const params = new URL(location.href).searchParams, token = params.get('token'), mode = params.get('historyMode'), reuseReader = params.get('historyReuseReader');
   assert(token && nativeHistoryModes.some(value => value === mode), 'Owned exact history lifecycle case required');
+  assert(reuseReader === null || ['0', '1'].includes(reuseReader), 'Exact isolated history reuse reader required');
   const plan = nativeHistoryLifecyclePlan(token), events: AgentSessionEvent[] = [], observations: TerminalIntegrationStateEvent[] = [], records: Record<string, unknown>[] = [], created = new Set<string>(), dispose: (() => void)[] = [];
   let terminalId: string | undefined, profile: Record<string, unknown> | undefined, observer: Record<string, unknown> | undefined, initial: Record<string, unknown> | undefined, final: Record<string, unknown> | undefined, beforeExitDisk: Record<string, unknown> | undefined, afterExitDisk: Record<string, unknown> | undefined, exitObservation: Record<string, unknown> | undefined, shellClosed: ClosedEvent | undefined, window: unknown, captureFailure: string | undefined, raw = '', normalExitVerified = false;
   const report = (value: unknown) => fetch(`/__agent-stream-result/${token}`, {method: 'POST', body: JSON.stringify(value)});
@@ -50,15 +52,18 @@ export async function verifyNativeHistoryLifecycle() {
     dispose.push(controller.subscribeOutput(value => { assert(raw.length + value.length <= 1048576, 'History lifecycle capture bound exceeded');raw += value; }));
     dispose.push(await listenToTerminalIntegrationState(({payload}) => { if (payload.sessionId === session.sessionId) observations.push(payload); }));
     dispose.push(await listenToSshClosed(session.sessionId, ({payload}) => { shellClosed = payload; }));
-    profile = await get('profile');assert(profile.mode === mode, 'History lifecycle profile mode differs');
-    assert(typeof profile.expectedMaximum === 'number' && typeof profile.expectedStyle === 'string' && typeof profile.expectedNativePath === 'string' && Array.isArray(profile.seedSources) && profile.seedSources.every(x => typeof x === 'string'), 'Actual public startup options incomplete');
-    assert(profile.pathSettingRejected === (mode === 'history-empty' || mode === 'history-null'), 'Empty/null history option rejection differs from actual profile');
-    const maximum = profile.expectedMaximum, style = profile.expectedStyle, historyPath = profile.expectedNativePath, seeds = profile.seedsOnDisk === true ? profile.seedSources as string[] : [];
+    if (reuseReader === null) profile = await get('profile');
     await report({evidence: {kind: 'actual-native-history-lifecycle-ready', token, mode, before, profile, plan}, progress: 'Actual history lifecycle App ready for original OS Shell/module and held-handle exit observation.'});
     await until(async () => { const response = await fetch(`/__native-job-observer/${token}`);assert(response.ok, 'History lifecycle OS observer unavailable');const value = object(await response.json());if (value.ready) { observer = value;return true; }return false; }, 'History lifecycle OS Shell inspection missing', 60000);
+    if (reuseReader !== null) profile = await get('profile');
+    assert(profile?.mode === mode, 'History lifecycle profile mode differs');
+    assert(typeof profile.expectedMaximum === 'number' && typeof profile.expectedStyle === 'string' && typeof profile.expectedNativePath === 'string' && Array.isArray(profile.seedSources) && profile.seedSources.every(x => typeof x === 'string'), 'Actual public startup options incomplete');
+    assert(profile.pathSettingRejected === (mode === 'history-empty' || mode === 'history-null'), 'Empty/null history option rejection differs from actual profile');
+    if (reuseReader !== null) assert(profile.reader === reuseReader && profile.readerPid === observer?.shellPid && profile.readerCreated === observer?.handleCreated && profile.seedApplied === (reuseReader === '0') && Array.isArray(profile.expectedInitialSources) && profile.expectedInitialSources.every(x => typeof x === 'string'), 'Reused history startup did not match the held original reader');
+    const maximum = profile.expectedMaximum, style = profile.expectedStyle, historyPath = profile.expectedNativePath, seeds = reuseReader !== null ? profile.expectedInitialSources as string[] : profile.seedsOnDisk === true ? profile.seedSources as string[] : [];
     await until(async () => { const value = await get('exit');if (!value.ready) return false;const ready = object(value.ready);assert(ready.shellPid === observer?.shellPid && ready.created === observer?.handleCreated && ready.handleHeld === true, 'Held original Shell handle identity differs');return true; }, 'Original Shell exit observer not ready', 60000);
     assert((await effect()).exists === false, 'Cancellation namespace already has effects');
-    const selectedRoute = (await invokeListAiRoutes()).defaultSelection;assert(selectedRoute, 'Supplied history lifecycle model missing');const selection = selectedRoute;
+    const selection = selectNativeBoundaryModel(await invokeListAiRoutes(), params.get('route'), params.get('model'));
     const approvedSources: string[] = [];
     async function promptReady() {
       await until(async () => { const current = (await invokeGetTerminalBrokerSnapshot(session.sessionId)).session;return !!current?.promptReady && !current.inputObservation?.commandInputPending && !current.inputObservation?.nativeRecoveryRequired && await invokeGetAgentTerminalOwner(session.sessionId) === null; }, 'History lifecycle did not release input ownership', 15000);
@@ -122,6 +127,7 @@ export async function verifyNativeHistoryLifecycle() {
     await run(plan.draft.source, 'cancel', true);assert((await effect()).exists === false, 'Cancelled history draft executed an effect');
     final = await parseProbe(await run(plan.finalProbe, 'final'), plan.finalMarker);
     beforeExitDisk = await get('disk');assert(beforeExitDisk.exists === (style !== 'SaveNothing') && matchesHistoryFingerprints(beforeExitDisk.items, await fingerprints(expectedPersistedHistory(seeds, approvedSources, style, false))), 'Native disk history before exit differs from actual save policy');
+    await getCurrentWindow().show();await getCurrentWindow().setFocus();
     const capture = await fetch(`/__native-window-evidence/${token}`, {method: 'POST'});
     if (capture.ok) window = await capture.json();else captureFailure = 'History lifecycle capture refused HTTP ' + capture.status + ': ' + (await capture.text()).slice(0, 4096);
     await promptReady();assert(await controller.writeUserInput('exit\r'), 'Ordinary real PTY exit was blocked after Agent release');
@@ -130,7 +136,7 @@ export async function verifyNativeHistoryLifecycle() {
     normalExitVerified = true;afterExitDisk = await get('disk');assert(afterExitDisk.exists === (style !== 'SaveNothing') && matchesHistoryFingerprints(afterExitDisk.items, await fingerprints(expectedPersistedHistory(seeds, approvedSources, style, true))), 'Native normal-exit disk history lost,duplicated or added sources');assert((await effect()).exists === false, 'Cancelled history effect appeared after normal exit');
     await invokeCloseSession(session.sessionId);
     if (captureFailure) throw Error(captureFailure);
-    await report({evidence: {kind: 'actual-native-history-lifecycle', token, mode, profile, observer, initial, final, records, events, observations, approvedSources, beforeExitDisk, afterExitDisk, exitObservation, shellClosed, normalExitVerified, window, raw, scope: 'One complete Windows history configuration only;remaining required configurations and platforms stay separate.'}, progress: 'Actual native App history accepted/cancelled/normal-exit persistence case completed.'});
+    await report({evidence: {kind: 'actual-native-history-lifecycle', selection, token, mode, reuseReader, profile, observer, initial, final, records, events, observations, approvedSources, beforeExitDisk, afterExitDisk, exitObservation, shellClosed, normalExitVerified, window, raw, scope: 'One complete Windows history configuration and reader only;remaining required configurations, restart pairing, concurrent readers and platforms stay separate.'}, progress: 'Actual native App history accepted/cancelled/normal-exit persistence case completed.'});
   } catch (error) {
     await report({evidence: {kind: 'actual-native-history-lifecycle-failure', failed: true, token, mode, error: String(error), profile, observer, initial, final, records, events, observations, beforeExitDisk, afterExitDisk, exitObservation, shellClosed, normalExitVerified, captureFailure, raw}, progress: 'Actual App history lifecycle failure retained;no replay,source repair or capture waiver.'});throw error;
   } finally {

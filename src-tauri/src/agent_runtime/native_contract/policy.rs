@@ -482,6 +482,12 @@ pub(crate) fn validate_visible_command_input(command: &str) -> Result<(), String
             .chars()
             .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
     {
+        if command.len() > 8192 {
+            return Err(format!(
+                "terminal_execute schema rejected command: {} UTF-8 bytes exceeds the 8192-byte maximum",
+                command.len()
+            ));
+        }
         return Err("invalid terminal_execute arguments".into());
     }
     Ok(())
@@ -922,6 +928,57 @@ fn request_targets_are_coherent(request: &AgentRequestNative) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn visible_source_byte_limit_reports_exact_utf8_size_without_source_disclosure() {
+        let accepted = format!("#{}", "a".repeat(8_191));
+        assert!(super::validate_visible_command_input(&accepted).is_ok());
+        for source in [format!("#{}", "a".repeat(8_192)), "界".repeat(2_731)] {
+            let error = super::validate_visible_command_input(&source).unwrap_err();
+            assert!(error.contains("8193 UTF-8 bytes exceeds the 8192-byte maximum"));
+            assert!(!error.contains(&source));
+        }
+    }
+
+    #[test]
+    fn visible_source_byte_diagnostic_preserves_every_existing_acceptance_condition() {
+        let sources = [
+            "".to_string(),
+            " \t\r\n".to_string(),
+            "中文 e\u{301} 👩🏽‍💻 !\t\r\n".to_string(),
+            "#".repeat(8_192),
+            "#".repeat(8_193),
+            "x\0y".to_string(),
+            "x\u{1b}y".to_string(),
+            "x\u{85}y".to_string(),
+        ];
+        for source in sources {
+            let expected = !source.trim().is_empty()
+                && source.len() <= 8_192
+                && !source
+                    .chars()
+                    .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'));
+            let original = source.clone();
+            assert_eq!(
+                super::validate_visible_command_input(&source).is_ok(),
+                expected
+            );
+            assert_eq!(source, original);
+        }
+    }
+
+    #[test]
+    fn visible_source_forbidden_controls_still_use_the_generic_rejection() {
+        for control in (0_u32..=159)
+            .filter_map(char::from_u32)
+            .filter(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
+        {
+            assert_eq!(
+                super::validate_visible_command_input(&format!("x{control}y")).unwrap_err(),
+                "invalid terminal_execute arguments"
+            );
+        }
+    }
+
     use super::*;
     use serde_json::json;
 

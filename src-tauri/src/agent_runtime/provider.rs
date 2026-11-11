@@ -45,4 +45,22 @@ mod tests {
         provider.profile = "unknown".into();
         assert!(validate(&provider).unwrap_err().contains("Unknown"));
     }
+    #[test]
+    fn deterministic_native_boundary_fixture_uses_supported_ollama_contract() {
+        let mut provider: AiProviderConfig = serde_json::from_str(include_str!(
+            "../../../src/lib/ai/__tests__/native-boundary-no-inference-provider.json"
+        ))
+        .unwrap();
+        assert!(!provider.requires_api_key && provider.api_key.is_none());
+        validate(&provider).unwrap();
+        provider
+            .model_definition
+            .as_mut()
+            .unwrap()
+            .compat
+            .supports_stream_usage = false;
+        assert!(validate(&provider)
+            .unwrap_err()
+            .contains("unsupported Ollama compatibility switch"));
+    }
 }

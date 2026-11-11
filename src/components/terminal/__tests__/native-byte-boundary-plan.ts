@@ -37,3 +37,14 @@ export function selectNativeBoundaryModel(
  if(!found||!(found.models?.[model]??found.modelOverrides?.[model]))throw Error('Boundary model is not configured');
  return {routeId:route,modelId:model};
 }
+
+export function nativeByteBoundaryJsonGoal(source:string,bytes:8192|8193):string{
+ if(new TextEncoder().encode(source).length!==bytes)throw Error('Boundary goal requires the unchanged byte-exact source');
+ const argumentsJson=`{"command":${nativeByteBoundaryJson(source)},"background":false,"timeoutMs":15000,"explanation":"Verify the exact native source byte boundary."}`;
+ return `Call run_terminal_command exactly ONCE using the JSON argument object below. This JSON is the tool argument object, NOT the command value. Preserve the JSON string escapes so the ordinary single tool-argument JSON parse yields the exact original ${bytes}-byte UTF-8 command, with real CR, LF, Tab, decomposed e followed by U+0301, and the complete emoji sequence. Do not put literal backslash escapes in the decoded command, run a decoder, normalize Unicode or line endings, reconstruct padding, shorten the source, change options, use Direct, retry or call other tools. Keep background=false and timeoutMs=15000. Then stop.\nArguments JSON:\n${argumentsJson}`;
+}
+
+export function nativeByteBoundaryAsciiGoal(source:string,bytes:8192|8193):string{
+ const intent=bytes===8193?'This is an intentional negative acceptance case: submit all 8193 bytes once and let the tool reject them before execution. Do not make the request valid.':'This is the exact 8192-byte positive acceptance case.';
+ return intent+String.raw` Copy the supplied argument object directly into the tool-call argument serialization. Keep every non-ASCII character represented by its supplied JSON \uXXXX escape, including the separate U+0301 combining mark and all surrogate pairs in the emoji sequence. Keep the supplied \r, \n and \t escapes. The ordinary argument JSON parse must produce those actual characters; do not double-escape them into literal backslashes in the decoded command. Do not count or regenerate the padding. `+nativeByteBoundaryJsonGoal(source,bytes);
+}

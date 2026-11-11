@@ -201,6 +201,27 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn managed_observation_goals_preserve_run_ids_without_exempting_credentials() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../src/lib/ai/__tests__/native-file-observation-goals.json"
+        ))
+        .unwrap();
+        for key in ["referenceGoal", "directGoal"] {
+            let goal = fixture[key].as_str().unwrap();
+            assert_eq!(redact_sensitive_text(goal), goal);
+            assert_eq!(
+                redact_json_value(&json!({"goal": goal})),
+                json!({"goal": goal})
+            );
+            let credential_shaped = goal.replacen("runId=", "token=", 1);
+            assert_ne!(redact_sensitive_text(&credential_shaped), credential_shaped);
+            assert!(redact_sensitive_text(&credential_shaped).contains(REDACTED_VALUE));
+        }
+        let credential = "token='fixture-credential-value'";
+        assert_eq!(redact_sensitive_text(credential), "token=[REDACTED]");
+    }
+
+    #[test]
     fn recursively_redacts_sensitive_keys_and_nested_string_literals() {
         let value = json!({
             "command": "curl --api-key command-secret https://example.test",

@@ -1,6 +1,7 @@
 param([Parameter(Mandatory=$true)][string]$Executable,[Parameter(Mandatory=$true)][string]$Output)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
+Add-Type -Path (Join-Path $PSScriptRoot 'windows-capture-foreground.cs')
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -15,7 +16,7 @@ $ownName = [IO.Path]::GetFileNameWithoutExtension($Executable)
 $own = @(Get-Process -Name $ownName -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $Executable -and $_.SessionId -eq [Diagnostics.Process]::GetCurrentProcess().SessionId -and $_.MainWindowHandle -ne 0 })
 if ($own.Count -ne 1) { throw 'Expected one owned interactive ShellSpan window' }
 $window = $own[0]
-if ([ShellSpanCapture]::GetForegroundWindow() -ne $window.MainWindowHandle) { throw 'Owned window is not foreground; no other desktop content captured' }
+if (-not [ShellSpanForegroundGate]::Wait($window.MainWindowHandle,1500)) { throw 'Owned window is not foreground; no other desktop content captured' }
 $previousDpi=[ShellSpanCapture]::SetThreadDpiAwarenessContext([IntPtr](-4))
 if($previousDpi-eq [IntPtr]::Zero){throw 'Physical window DPI context unavailable'}
 $rect = New-Object ShellSpanCapture+Rect
@@ -25,7 +26,9 @@ if ($width -lt 100 -or $height -lt 100) { throw 'Invalid owned window size' }
 $bitmap = New-Object Drawing.Bitmap($width,$height)
 $graphics = [Drawing.Graphics]::FromImage($bitmap)
 try {
+    if ([ShellSpanCapture]::GetForegroundWindow() -ne $window.MainWindowHandle) { throw 'Owned window lost foreground before capture; no desktop content captured' }
     $graphics.CopyFromScreen($rect.Left,$rect.Top,0,0,$bitmap.Size)
+    if ([ShellSpanCapture]::GetForegroundWindow() -ne $window.MainWindowHandle) { throw 'Owned window lost foreground during capture; image not saved' }
     $bitmap.Save($Output,[Drawing.Imaging.ImageFormat]::Png)
 } finally { $graphics.Dispose(); $bitmap.Dispose() }
 $stream=[IO.File]::OpenRead($Output)

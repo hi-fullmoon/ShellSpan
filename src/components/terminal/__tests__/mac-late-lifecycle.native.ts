@@ -7,10 +7,10 @@ import {isMacFileChainProfile} from './native-file-chain-posix';
 import {macLifecycleCapture} from './mac-lifecycle-capture';
 import {macLifecycleSurface} from './mac-lifecycle-surface';
 import {macLifecyclePromptResidues} from './mac-lifecycle-prompt';
+import {verifyMacLateOutputFrames,type MacLifecycleFrame as Frame} from './mac-late-lifecycle-frames';
 
 function assert(value:unknown,message:string):asserts value{if(!value)throw Error(message);}
 async function until(test:()=>boolean|Promise<boolean>,message:string){const end=Date.now()+10000;while(!await test()){assert(Date.now()<end,message);await new Promise(resolve=>setTimeout(resolve,10));}}
-type Frame={sessionId:string;capturedAtUnixMs:number;payload:string};
 export async function verifyMacLateLifecycle(parameters:URLSearchParams) {
  assert(parameters.get('nativeLocalLifecycle')==='true','Exact local lifecycle admission missing');
  const token=parameters.get('token');assert(token,'Owned result token missing');
@@ -50,7 +50,7 @@ export async function verifyMacLateLifecycle(parameters:URLSearchParams) {
   const release=await releaseResponse.json() as {released:boolean;releasedAtUnixMs:number};assert(release.released&&release.releasedAtUnixMs>=successorReadyAtUnixMs,'Gate was released before the actual successor was ready');
   await until(()=>raw(first.sessionId).includes('OLD_LATE_OUTPUT')&&raw(first.sessionId).includes('OLD_LATE_CONTROL'),'Real old transport did not deliver its late output');
   await until(async()=>{const response=await fetch(endpoint+'/status');assert(response.ok,'Owned late effect lookup failed');const value=await response.json() as {effect:string|null};return value.effect==='OLD_LATE_EFFECT\n';},'Actual gated old producer did not finish its output');
-  const lateFrames=frames.filter(f=>f.sessionId===first.sessionId&&f.payload.includes('OLD_LATE_OUTPUT'));assert(lateFrames.length>0&&lateFrames.every(f=>f.capturedAtUnixMs>=release.releasedAtUnixMs),'Late bytes lack actual old-transport/time provenance');
+  const lateFrames=verifyMacLateOutputFrames(frames,first.sessionId,release.releasedAtUnixMs);
   assert(raw(first.sessionId).includes('\u001b[6n')&&raw(first.sessionId).includes('\u001b]1337;SetUserVar=ShellSpanNativeInput=MQ==\u0007'),'Actual old display/control output missing');
   assert(!raw(second.sessionId).includes('OLD_LATE_OUTPUT')&&!raw(second.sessionId).includes('OLD_LATE_CONTROL'),'Old data entered the successor transport');
   await new Promise<void>(resolve=>controller!.terminal.write('',resolve));

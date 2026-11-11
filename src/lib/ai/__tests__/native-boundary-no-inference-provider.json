@@ -1,0 +1,31 @@
+{
+  "id": "native-no-inference-contract",
+  "profile": "ollama",
+  "kind": "ollama",
+  "baseUrl": "http://127.0.0.1:12345",
+  "model": "shellspan-native-boundary-no-inference",
+  "requiresApiKey": false,
+  "modelDefinition": {
+    "contextWindow": 131072,
+    "maxOutputTokens": 16384,
+    "toolCalling": "supported",
+    "textInput": "supported",
+    "imageInput": "unsupported",
+    "reasoning": [],
+    "compat": {
+      "protocol": "ollama",
+      "cumulativeStream": false,
+      "supportsStreamUsage": true,
+      "nativeReasoning": false,
+      "splitReasoning": false,
+      "replayReasoningContent": false,
+      "thinkTagFallback": false,
+      "parallelToolCalls": false,
+      "strictSchema": false,
+      "preservesReasoningAcrossTurns": false,
+      "reasoningEncoding": "none",
+      "clearThinking": false,
+      "defaultThinking": false
+    }
+  }
+}

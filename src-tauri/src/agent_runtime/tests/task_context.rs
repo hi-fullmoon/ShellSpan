@@ -143,7 +143,8 @@ fn subsequent_task_ignores_old_acknowledgement_and_preserves_steering_after_rest
         .iter()
         .find(|input| input.contains(&source))
         .unwrap();
-    assert!(assembly
+    assert!(assembly.system_prompt.contains(source_input));
+    assert!(!assembly
         .system_prompt
         .contains(&serde_json::to_string(source_input).unwrap()));
     assert!(assembly.system_prompt.contains("最终报告最多 8 条。"));
@@ -191,6 +192,60 @@ fn subsequent_task_ignores_old_acknowledgement_and_preserves_steering_after_rest
     );
     assert!(request.messages.iter().any(|message| matches!(message,
         ModelMessage::User { content } if content == REVIEW_REQUEST)));
+}
+
+#[test]
+fn current_task_preserves_original_json_paths_controls_and_unicode_after_restart() {
+    let (root, sessions) = request_context_store();
+    let input = "write_file with {\"content\":\"D:\\\\workspace\\\\script.ps1\"}\r\n\t# e\u{301} 👩🏽‍💻 !\nKeep this source unchanged.";
+    request_context_turn(&sessions, "verbatim", input);
+    let header = sessions.snapshot("request-context").unwrap().header;
+    let task = sessions
+        .read_events("request-context", |events| {
+            super::super::prompt::current_task_context(&header, events)
+        })
+        .unwrap();
+    let request = &task.requests[0];
+    let prompt = assembled_task_context(&sessions).system_prompt;
+    assert!(prompt.contains(input));
+    assert!(prompt.contains(request));
+    assert!(!prompt.contains(&serde_json::to_string(request).unwrap()));
+    assert!(prompt.contains(&format!("\"utf8Bytes\":{}", request.len())));
+    let block = prompt.split_once("\nCommitted request 0:\n").unwrap().1;
+    let opening_end = block.find('\n').unwrap();
+    let body = &block[opening_end + 1..];
+    assert_eq!(&body.as_bytes()[..request.len()], request.as_bytes());
+    let reopened = AgentSessionStore::default();
+    reopened.configure(root.path().to_path_buf()).unwrap();
+    assert_eq!(assembled_task_context(&reopened).system_prompt, prompt);
+}
+
+#[test]
+fn committed_request_framing_cannot_be_closed_by_embedded_code_fences() {
+    let (_root, sessions) = request_context_store();
+    let input = "Preserve these nested blocks:\n````json\n{\"path\":\"D:\\\\work\"}\n````\n~~~~~text\nquoted input\n~~~~~";
+    request_context_turn(&sessions, "fences", input);
+    let header = sessions.snapshot("request-context").unwrap().header;
+    let task = sessions
+        .read_events("request-context", |events| {
+            super::super::prompt::current_task_context(&header, events)
+        })
+        .unwrap();
+    let request = &task.requests[0];
+    let assembly = assembled_task_context(&sessions);
+    let block = assembly
+        .system_prompt
+        .split_once("\nCommitted request 0:\n")
+        .unwrap()
+        .1;
+    let opening_end = block.find('\n').unwrap();
+    let fence = block[..opening_end].strip_suffix("text").unwrap();
+    assert!(fence.len() >= 3);
+    assert!(!request.contains(fence));
+    let body = &block[opening_end + 1..];
+    assert_eq!(&body.as_bytes()[..request.len()], request.as_bytes());
+    assert!(body[request.len()..].starts_with(&format!("\n{fence}\n")));
+    assert!(!assembly.context.last().unwrap().content.contains(input));
 }
 
 #[test]

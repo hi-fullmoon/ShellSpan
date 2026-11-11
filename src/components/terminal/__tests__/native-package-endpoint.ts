@@ -1,5 +1,5 @@
 export function nativePackageEndpoint(path: string, href = location.href): string {
-  if (!/^\/(?:__agent-stream-result|__native-file-witness|__package-capture)\/[a-f0-9-]{36}$/.test(path)) throw new Error('Invalid native acceptance endpoint');
+  if (!/^\/(?:__agent-stream-result|__native-file-witness|__native-window-evidence|__package-capture)\/[a-f0-9-]{36}$/.test(path)) throw new Error('Invalid native acceptance endpoint');
   const origin = new URL(href).searchParams.get('reportOrigin');
   if (!origin) return path;
   const parsed = new URL(origin);

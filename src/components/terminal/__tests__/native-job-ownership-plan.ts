@@ -11,6 +11,9 @@ export function nativeJobOwnershipPlan(marker:string,foreignTool:'wait_process'|
  const goal=completion.goal.replace('exactly FIVE','exactly EIGHT').replace('kill_process, extra tools','extra tools').replace('Then reply done. Source exit7',`Call6 kill_process on that same already-exited handle signal=terminate timeoutMs=10000;call7 wait_process on the same already-exited handle timeoutMs=1000;call8 run_terminal_command HISTORY. These two completed-handle observations must not restart anything. Then reply done. Source exit7`)+`\nHISTORY:\n~~~sh\n${sources[3]}\n~~~`;
  return {...completion,sources,goal,foreignTool};
 }
+export function nativeJobOwnershipExactGoal(plan: ReturnType<typeof nativeJobOwnershipPlan>): string {
+ return plan.goal+'\nExact cached-handle arguments: call6 must contain ONLY processHandle (the original returned job handle), signal="terminate", timeoutMs=10000. Call7 must contain ONLY processHandle (that same original handle) and timeoutMs=1000. Do not add maxOutputBytes, explanation, stdin or other fields to calls6/7. These are the original exact caller options; do not change any source, earlier call, handle, approval, timeout or the eighth HISTORY call.';
+}
 export function matchesNativeJobOwnershipStep(step:number,value:unknown,sources:readonly [string,string,string,string],name:string,handle?:string):boolean{
  if(step<5)return matchesNativeJobCompletionStep(step,value,[sources[0],sources[1],sources[2]],name,handle);
  if(!value||typeof value!=='object'||Array.isArray(value))return false;const args=value as Record<string,unknown>;

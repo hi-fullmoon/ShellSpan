@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import p from 'node:path';
 import {createHash} from 'node:crypto';
 import {prepareWindowsHistoryProfile} from '../native-input-p3/windows-history-profile.mjs';
-import {readWindowsHistoryDisk, readWindowsHistoryExit} from '../native-input-p3/windows-history-witness.mjs';
+import {readWindowsHistoryDisk, readWindowsHistoryExit, windowsHistoryReaderArtifacts} from '../native-input-p3/windows-history-witness.mjs';
 
 function fixture() {
   const base = p.resolve(import.meta.dirname, '../../.artifacts/tests/windows-history-witness');
@@ -34,4 +34,16 @@ it('refuses history hardlinks and keeps passive held-handle exit evidence distin
   fs.writeFileSync(p.join(evidence, 'native-history-exit.json.ready.json'), JSON.stringify(identity), {flag: 'wx'});
   fs.writeFileSync(p.join(evidence, 'native-history-exit.json'), JSON.stringify({...identity, ended: true, exitCode: 7}), {flag: 'wx'});
   expect((await readWindowsHistoryExit(evidence)).result.exitCode).toBe(7);
+});
+it('keeps restart reader evidence separate and refuses a cross-reader exit substitution',async()=>{
+ const {evidence}=fixture(),first=windowsHistoryReaderArtifacts('0'),second=windowsHistoryReaderArtifacts('1');
+ const record={shellPid:12345,created:'2026-11-08T01:00:00.1234567Z',handleHeld:true,inputInjected:false,terminationRequested:false};
+ for(const name of [first.exit+'.ready.json',first.exit])fs.writeFileSync(p.join(evidence,name),JSON.stringify({...record,ended:true,exitCode:0}),{flag:'wx'});
+ expect((await readWindowsHistoryExit(evidence,'0')).result.exitCode).toBe(0);expect(await readWindowsHistoryExit(evidence,'1')).toEqual({ready:null,result:null});
+ fs.writeFileSync(p.join(evidence,second.exit+'.ready.json'),JSON.stringify({...record,created:'2026-11-08T01:01:00.1234567Z'}),{flag:'wx'});
+ fs.writeFileSync(p.join(evidence,second.exit),JSON.stringify({...record,ended:true,exitCode:0}),{flag:'wx'});
+ await expect(readWindowsHistoryExit(evidence,'1')).rejects.toThrow('Original held Shell exit');
+ expect(first.evidence).not.toBe(second.evidence);expect(first.observer).not.toBe(second.observer);
+  expect(first.window).not.toBe(second.window);expect(windowsHistoryReaderArtifacts().window).toBe('native-window.png');
+ await expect(readWindowsHistoryExit(evidence,'../../0')).rejects.toThrow('Exact history reader');
 });

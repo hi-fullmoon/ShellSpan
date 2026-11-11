@@ -2,9 +2,25 @@ import { invokeListAiRoutes,invokeStoreProfilePassword,invokeDeleteProfilePasswo
 import { provisionP3Credential } from './native-input-p3-credential';
 import { verifyNativeCredentialLifecycle } from './native-credential-lifecycle.native';
 import { verifyNativeAiCredential } from './native-ai-credential.native';
+import { initializationObserverReady } from './native-initialization-observer';
 
 async function initialize() {
   const parameters=new URL(location.href).searchParams;
+  if(parameters.get('observedInitialize')==='1'){
+    const token=parameters.get('token');if(!token)throw Error('Owned observed initializer token required');
+    const deadline=Date.now()+60000;
+    for(;;){
+      const response=await fetch(`/__native-initialization-observer/${token}`);
+      if(!response.ok)throw Error('Independent initialization observer unavailable');
+      const receipt:unknown=await response.json();
+      if(initializationObserverReady(receipt,token)){
+        await fetch(`/__agent-stream-result/${token}`,{method:'POST',body:JSON.stringify({progress:'Both independent OS observers hold the actual initializer App before completion.',evidence:{kind:'actual-native-initialization-observed',receipt,terminalCreated:false,modelRequests:0}})});
+        break;
+      }
+      if(Date.now()>=deadline)throw Error('Initializer App OS observation did not become ready');
+      await new Promise(resolve=>setTimeout(resolve,20));
+    }
+  }
   if(parameters.get('nativeAiCredentialMode')){await verifyNativeAiCredential();return;}
   if(parameters.get('nativeCredentialLifecycle')==='true'){await verifyNativeCredentialLifecycle();return;}
   const recoveryAgent=parameters.get('journalRecoveryAgent');
