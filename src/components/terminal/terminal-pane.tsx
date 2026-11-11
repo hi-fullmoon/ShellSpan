@@ -428,7 +428,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
           />
         )}
         {searchOpen && (
-          <TerminalSearch terminal={terminal ?? undefined} addon={controller?.searchAddon} onClose={handleCloseSearch} active={isActive && isVisible} />
+          <TerminalSearch addon={controller?.searchAddon} onClose={handleCloseSearch} active={isActive && isVisible} />
         )}
         {showConnectingOverlay && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2" style={terminalSurfaceStyle}>

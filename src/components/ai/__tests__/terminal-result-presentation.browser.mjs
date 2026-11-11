@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdir } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, webkit } from 'playwright';
@@ -10,7 +9,7 @@ import { createServer } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
-const artifacts = join(tmpdir(), 'shellspan-terminal-result-presentation');
+const artifacts = join(root, '.artifacts/tests/terminal-result-presentation/browser');
 await mkdir(artifacts, { recursive: true });
 
 function capture(command) {
@@ -21,7 +20,9 @@ function capture(command) {
     execution: 'completed', exitCode: result.status, stdout: '', stderr: '', combinedOutput: result.stdout + result.stderr } };
 }
 
-const completed = capture('git log -5 --format=fuller');
+const completed = capture('git log -5 --format=fuller --color=always');
+const plainOutput = capture('git log -5 --format=fuller --color=never').output.combinedOutput;
+assert.ok(completed.output.combinedOutput.includes('\u001b['));
 const empty = capture(':');
 const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error', cacheDir: join(artifacts, 'vite-cache'),
@@ -76,7 +77,7 @@ try {
               assert.ok(!text.includes('combinedOutput') && !text.includes('submittedCommandLine'), context);
               if (name === 'completed') {
                 const lines = await output.locator('.ai-block-line').allTextContents();
-                assert.equal(lines.map(line => line === '\u00a0' ? '' : line).join('\n'), result.output.combinedOutput.trimEnd(), context);
+                assert.equal(lines.map(line => line === '\u00a0' ? '' : line).join('\n'), plainOutput.trimEnd(), context);
               } else assert.ok(text.includes(locale === 'zh-CN' ? '无输出' : 'No output'), context);
               const status = page.locator('[data-ai-terminal-execution]');
               assert.equal(await status.evaluate(element => getComputedStyle(element).color),

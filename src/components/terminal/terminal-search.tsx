@@ -1,5 +1,4 @@
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
-import type { Terminal } from '@xterm/xterm';
 import type { SearchAddon, ISearchOptions, ISearchResultChangeEvent } from '@xterm/addon-search';
 import { ChevronDownIcon, ChevronUpIcon, XIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -9,8 +8,7 @@ import { useAppStore } from '@/stores/appStore';
 import { resolveTerminalTheme } from './registry/terminal-registry';
 import { terminalSearchDecorations } from '@/lib/terminal/terminal-colors';
 
-export function TerminalSearch({ terminal, addon, onClose, active = true }: {
-  terminal?: Terminal;
+export function TerminalSearch({ addon, onClose, active = true }: {
   addon?: SearchAddon;
   onClose: () => void;
   active?: boolean;

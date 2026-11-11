@@ -104,7 +104,7 @@ try {
     window.dialogRoot = dialog;
     window.unmountControls = () => controls.render(null);
     window.renderControls = (search = true) => controls.render(React.createElement(React.Fragment, null,
-      search && React.createElement(TerminalSearch, { terminal, addon, onClose: () => { window.renderControls(false); terminal.focus(); } }),
+      search && React.createElement(TerminalSearch, { addon, onClose: () => { window.renderControls(false); terminal.focus(); } }),
       React.createElement(TerminalScrollButton, { terminal })));
     window.renderControls();
   }, { output, identity });

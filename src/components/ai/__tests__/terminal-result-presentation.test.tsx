@@ -109,6 +109,35 @@ describe('terminal result presentation', () => {
     expect(toolOutputForCopy(node)).toBe(result.stdout);
   });
 
+  it.each(['combined', 'separate', 'legacy'] as const)('displays and copies %s output without ANSI sequences', format => {
+    const result = execute(`
+      const { clearLine } = require('node:readline');
+      const { styleText } = require('node:util');
+      clearLine(process.stdout, 1);
+      const name = styleText(['bold', 'red'], process.release.name, { validateStream: false });
+      process.stdout.write(name + '  版本 ' + process.version + '\\r\\n');
+      process.stderr.write(styleText('yellow', process.platform, { validateStream: false }) + '\\n');
+    `);
+    expect(result.stdout).toContain('\u001b[0K');
+    expect(result.stdout).toContain('\u001b[31m');
+    expect(result.stderr).toContain('\u001b[33m');
+
+    const combined = result.stdout + result.stderr;
+    const output = format === 'combined' ? { combinedOutput: combined }
+      : format === 'separate' ? { stdout: result.stdout, stderr: result.stderr } : combined;
+    const node = terminalNode(result.command, output);
+    const { container, rerender } = render(<AiToolExpandedContent node={node} />);
+    const outputLines = () => [...container.querySelectorAll('[data-ai-terminal-output] .ai-block-line')]
+      .map(line => line.textContent);
+
+    const stdoutLine = `${process.release.name}  版本 ${process.version}`;
+    expect(outputLines()).toEqual([stdoutLine, process.platform]);
+    expect(toolOutputForCopy(node)).toBe(`${stdoutLine}\r\n${process.platform}\n`);
+
+    rerender(<AiToolDetails node={node} onBack={() => undefined} />);
+    expect(outputLines()).toEqual([stdoutLine, process.platform]);
+  });
+
   it('shows the exited job status instead of the successful launch status', () => {
     const result = spawnSync(process.execPath, ['-e', 'process.exit(7)'], { encoding: 'utf8' });
     expect(result.status).toBe(7);

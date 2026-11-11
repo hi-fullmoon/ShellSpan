@@ -1,4 +1,4 @@
-import React,{useState} from 'react';
+import { useState } from 'react';
 import {createRoot} from 'react-dom/client';
 import {getCurrentWindow} from '@tauri-apps/api/window';
 import {TerminalControllerLayer} from '../terminal-controller-layer';

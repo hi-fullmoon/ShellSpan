@@ -130,11 +130,6 @@ const OUTPUT_RESUME_LOW_WATERMARK = 128 * 1024;
 const OUTPUT_RESUME_RETRY_BASE_MS = 250;
 const OUTPUT_RESUME_RETRY_MAX_MS = 2000;
 
-// xterm 6 renders its scrollbar in `.xterm-scrollable-element`. The legacy
-// `.xterm-viewport` still has `overflow-y: scroll` in xterm.css, but no longer
-// owns scrolling; exposing it creates a second, stale native scrollbar.
-const VIEWPORT_HIDDEN_CLASS = '[&_.xterm-viewport]:opacity-0';
-
 function trimUrlPunctuation(url: string): string {
   return url.replace(/[),.;!?\]}]+$/g, '');
 }
