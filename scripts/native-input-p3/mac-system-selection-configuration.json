@@ -1,0 +1,12 @@
+{
+  "readyLabel":"system-selection-ready",
+  "finalLabel":"system-selection-final",
+  "steps":[
+    {"id":"ascii-forward","label":"system-selection-ascii-forward","sample":"ascii","direction":"forward","native":false},
+    {"id":"ascii-reverse","label":"system-selection-ascii-reverse","sample":"ascii","direction":"reverse","native":false},
+    {"id":"unicode-default","label":"system-selection-unicode-default","sample":"unicode","direction":"forward","native":false},
+    {"id":"soft-wrap","label":"system-selection-soft-wrap","sample":"soft","direction":"forward","native":false},
+    {"id":"hard-lines","label":"system-selection-hard-lines","sample":"hard","direction":"forward","native":false},
+    {"id":"unicode-native","label":"system-selection-unicode-native","sample":"native","direction":"forward","native":true}
+  ]
+}

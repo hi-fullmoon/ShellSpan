@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
+import { constants } from 'node:fs';
 import { copyFile, mkdir, mkdtemp, readFile, rm,writeFile } from 'node:fs/promises';
 import {createHash,randomUUID} from 'node:crypto';
 import { dirname, join, isAbsolute } from 'node:path';
@@ -84,7 +85,7 @@ async function main() {
     const contents = join(bundle, 'Contents');
     const binary = join(contents, 'MacOS', 'ShellSpan');
     await mkdir(dirname(binary), { recursive: true });
-    await copyFile(executable, binary);
+    await copyFile(executable, binary, isolatedP3 ? constants.COPYFILE_FICLONE : 0);
     const { version } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
     const plist = launch('/usr/bin/plutil', ['-convert', 'xml1', '-o', join(contents, 'Info.plist'), '-'], ['pipe', 'inherit', 'inherit']);
     plist.child.stdin.end(JSON.stringify({

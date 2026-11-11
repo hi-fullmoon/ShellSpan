@@ -10,6 +10,16 @@ export const macDailyExpectedRecords={
  toast:['ready','toast-lease-acquired','toast-visible','toast-lease-released','ordinary-14','transport-end'],
 } as const;
 
+// One new owned controller runs every original daily operation. Only repeated
+// ready/transport cleanup points are shared; the old standalone plans stay intact.
+export const macDailyFullExpectedRecords=[
+ ...macDailyExpectedRecords.native.slice(0,-1),
+ ...macDailyExpectedRecords.editing.slice(1,-1),
+ ...macDailyExpectedRecords.pump.slice(1,-1),
+ ...macDailyExpectedRecords.toast.slice(1,-1),
+ 'transport-end',
+] as const;
+
 export const macDailyEditingVisualCheckpoints=['multiline-before','multiline-edited','completion-expanded','printed-440x320','printed-1100x650','follow-440x320','follow-1100x650','background-440x320','background-ended','pump-cancelled'] as const;
 
 export function macDailyOutputPlan(token:string,value:string,index:number){

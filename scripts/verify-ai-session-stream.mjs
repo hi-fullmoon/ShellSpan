@@ -4,7 +4,7 @@ import { execFile, execFileSync, spawn } from 'node:child_process';
 import { resolve, isAbsolute,sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdtemp, rm, writeFile, readFile, stat, readdir, open, lstat } from 'node:fs/promises';
-import {existsSync,constants} from 'node:fs';
+import {existsSync,constants,writeFileSync} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { parseArgs } from 'node:util';
 import { build, createServer, preview } from 'vite';
@@ -15,8 +15,12 @@ import {attachCredentialChannel} from './native-input-p3/credential-channel.mjs'
 import {attachFocusTraceChannel} from './native-input-p3/focus-trace-channel.mjs';
 import {closeNativeValidationServer} from './native-input-p3/close-validation-server.mjs';
 import {assertNativeGuiAllowed} from './native-input-p2/gui-lock.mjs';
-import {isMacLocalLifecycle} from './native-input-p3/mac-local-lifecycle.mjs';
-import {macDailyAcceptance,attachMacDailyCheckpoints,macDailyAppConfiguration} from './native-input-p3/mac-daily.mjs';
+import {isMacLocalLifecycle,macLifecycleVisualCheckpoints,macLifecycleSnapshotCheckpoints,macLifecycleEvidenceClockEnabled} from './native-input-p3/mac-local-lifecycle.mjs';
+import {macDailyAcceptance,attachMacDailyCheckpoints,macDailyAppConfiguration,macHumanFinalEvidenceWindow,macDailyRuntimeTimeoutMilliseconds,macDailyCaptureConfiguration,macSystemSelectionObservationConfiguration} from './native-input-p3/mac-daily.mjs';
+import {attachDisplayTraceChannel} from './native-input-p3/display-trace-channel.mjs';
+import {createMacEofEvidenceClock} from './native-input-p3/mac-eof-evidence-clock.mjs';
+import {macSubmissionObservationConfiguration,attachMacSubmissionWitness} from './native-input-p3/mac-submission.mjs';
+import {manualWindowTransition} from './native-input-p3/windows-manual-window.mjs';
 import {attachMacLateLifecycle} from './native-input-p3/mac-late-lifecycle.mjs';
 import {macRawAdmission,attachMacRawAdmission} from './native-input-p3/mac-raw-admission.mjs';
 import {windowsValidationPaths} from './native-input-p3/windows-profiles.mjs';
@@ -101,6 +105,7 @@ const { values } = parseArgs({ options: {
   'native-input-p2-history-small': { type: 'boolean' },
   'native-input-p2-lifecycle': { type: 'boolean' },
   'native-input-p2-lifecycle-late': { type: 'boolean' },
+  'native-input-p2-lifecycle-dispose': { type: 'boolean' },
   'native-raw-admission': { type: 'string' },
   'native-input-p2-ssh-fault': { type: 'boolean' },
   'native-input-p2-interactive': { type: 'boolean' },
@@ -157,6 +162,7 @@ assert(!displayAuto||process.platform==='win32'&&process.arch==='x64'&&['powerSh
   '--native-input-p3-display-auto requires an isolated scheduled Windows startup display case without model or other modes');
 const nativeManual=values['native-terminal-manual'];
 const nativeDaily=macDailyAcceptance(values);
+const nativeHuman=nativeDaily?.startsWith('human-');let humanPhase='waiting',humanStartedAt;
 const nativeManualForm=values['native-terminal-manual-form'];
 assert(nativeManualForm===undefined||nativeManual&&['nfc','nfd'].includes(nativeManualForm),
   '--native-terminal-manual-form requires one manual case and exact nfc/nfd input');
@@ -179,8 +185,11 @@ assert(!p3Startup||values['no-model']&&values['data-scope']==='com.shellspan.val
 assert(!values['native-input-p3-review']||nativeManual||p3Startup||values['native-input-p3-submit-fault']||values['native-input-p2-lifecycle']&&['powerShell7','windowsPowerShell'].includes(values['native-input-p3']));
 const nativeP3=values['native-input-p3']??p3Startup;
 const macLocalLifecycle=isMacLocalLifecycle(values);
+const lifecycleEvidenceClockEnabled=macLifecycleEvidenceClockEnabled(macLocalLifecycle);
 const macLateLifecycle=values['native-input-p2-lifecycle-late']===true;
 assert(!macLateLifecycle||macLocalLifecycle,'Late local lifecycle requires the exact owned no-model Mac lifecycle mode');
+const macDisposeLifecycle=values['native-input-p2-lifecycle-dispose']===true;
+assert(!macDisposeLifecycle||macLocalLifecycle&&!macLateLifecycle,'Dispose local lifecycle requires the exact owned no-model Mac lifecycle mode without late mode');
 const zleAppHistory=values['native-input-p3-zle-history'];
 assert(zleAppHistory===undefined||process.platform==='darwin'&&process.arch==='arm64'&&nativeP3==='zsh'
  &&zleAppHistoryModes.includes(zleAppHistory)&&values['data-scope']==='com.shellspan.validation.native-input-p3'
@@ -480,8 +489,10 @@ const windowsOutputMarker = windowsShell ? `native-jobs-${randomUUID()}` : undef
 const windowsCompletionGate = windowsShell ? resolve(ownedEvidenceDirectory ?? tmpdir(), `shellspan-completion-gate-${token}`) : undefined;
 let nativeEnvironment = windowsShell ? { ...process.env, SHELLSPAN_ACCEPTANCE: windowsOutputMarker,
   SHELLSPAN_NATIVE_COMPLETION_GATE: windowsCompletionGate, SHELLSPAN_NATIVE_WORKSPACE:repository } : process.env;
-if(nativeDaily)nativeEnvironment={...nativeEnvironment,SHELLSPAN_ACCEPTANCE_WEBKIT_STORE:token};
+if(nativeDaily||macLocalLifecycle)nativeEnvironment={...nativeEnvironment,SHELLSPAN_ACCEPTANCE_WEBKIT_STORE:token};
 if(nativeDaily?.startsWith('raw-'))nativeEnvironment={...nativeEnvironment,SHELLSPAN_ACCEPTANCE_RAW_PREPARE:'1'};
+if(nativeDaily?.startsWith('submission-'))nativeEnvironment={...nativeEnvironment,SHELLSPAN_ACCEPTANCE_SUBMISSION:'1'};
+if(nativeDaily?.startsWith('eof-private-'))nativeEnvironment={...nativeEnvironment,SHELLSPAN_ACCEPTANCE_RAW_PREPARE:'1',SHELLSPAN_ACCEPTANCE_PRIVATE_EOF_PREPARE:'1'};
 assert(!modelPreflightRun || ownedEvidenceDirectory && isAbsolute(ownedEvidenceDirectory),
   '--model-preflight requires an explicit owned frozen evidence directory');
 const p3BackpressureGate=values['native-input-p3-backpressure']?resolve(ownedEvidenceDirectory,`native-output-gate-${token}`):undefined;
@@ -498,6 +509,10 @@ const contentionEntryPath = '/__native-agent-entry';
 const contentionPort = 1432;
 let contentionEntryUrl;
 let settle;
+let eofEvidenceClock;
+let lifecycleEvidenceClock;
+const eofEvidenceClockEnabled=process.env.SHELLSPAN_ACCEPTANCE_EOF_EVIDENCE_CLOCK!==undefined;
+assert(!eofEvidenceClockEnabled||process.env.SHELLSPAN_ACCEPTANCE_EOF_EVIDENCE_CLOCK==='1'&&process.platform==='darwin'&&process.arch==='arm64'&&nativeDaily?.startsWith('eof-')&&noModel&&ownedEvidenceDirectory,'EOF evidence clock requires an explicit isolated macOS no-model EOF case');
 const result = new Promise((resolveResult) => { settle = resolveResult; });
 const page = performanceRun ? 'agent-panel-performance.native.html' : 'agent-session-stream.native.html';
 const pagePath = displayAuto ? 'src/components/terminal/__tests__/native-display-auto.native.html' : historyStartup!==undefined ? 'src/components/terminal/__tests__/native-history.native.html' : jobRetired!==undefined ? 'src/components/terminal/__tests__/native-job-retired.native.html' : jobOwnership!==undefined ? 'src/components/terminal/__tests__/native-job-ownership.native.html' : jobCompletion!==undefined ? 'src/components/terminal/__tests__/native-job-completion.native.html' : jobLifecycle ? 'src/components/terminal/__tests__/native-job-lifecycle.native.html' : stopBoundary ? 'src/components/terminal/__tests__/native-stop-boundary.native.html' : captureTail ? 'src/components/terminal/__tests__/native-capture-tail.native.html' : lateReceipt ? 'src/components/terminal/__tests__/native-late-receipt.native.html' : windowsLifetime==='control-eof-draft' ? 'src/components/terminal/__tests__/native-user-draft-eof.native.html' : activeEof ? 'src/components/terminal/__tests__/native-active-eof.native.html' : navigationManual ? 'src/components/terminal/__tests__/native-navigation-manual.native.html' : delegationClose || delegationTakeover ? 'src/components/terminal/__tests__/native-approval-delegation-close.native.html' : approvalDelegation ? 'src/components/terminal/__tests__/native-approval-delegation.native.html' : approvalContention ? 'src/components/terminal/__tests__/native-approval-contention.native.html' : windowsLifetime ? 'src/components/terminal/__tests__/native-windows-lifetime.native.html' : windowsDraftCancel ? 'src/components/terminal/__tests__/native-windows-draft.native.html'
@@ -510,7 +525,7 @@ const pagePath = displayAuto ? 'src/components/terminal/__tests__/native-display
   : modelPreflightRun ? 'src/components/terminal/__tests__/native-model-preflight.native.html'
   : zleAppHistory!==undefined ? 'src/components/terminal/__tests__/native-zle-history.native.html'
   : values['native-input-p3-cancel'] ? 'src/components/terminal/__tests__/native-input-p3-cancel.native.html'
-  : nativeDaily ? 'src/components/terminal/__tests__/mac-daily.native.html'
+  : nativeDaily ? nativeHuman?'src/components/terminal/__tests__/mac-human.native.html':nativeDaily.startsWith('submission-')?'src/components/terminal/__tests__/mac-submission.native.html':nativeDaily.startsWith('system-selection-')?'src/components/terminal/__tests__/mac-system-selection.native.html':nativeDaily.startsWith('eof-')?'src/components/terminal/__tests__/mac-eof.native.html':'src/components/terminal/__tests__/mac-daily.native.html'
   : nativeManual ? 'src/components/terminal/__tests__/native-terminal-manual.native.html'
   : nativeRecovery ? 'src/components/terminal/__tests__/native-terminal-recovery.native.html'
   : nativeRaw ? 'src/components/terminal/__tests__/mac-raw-admission.native.html'
@@ -739,7 +754,19 @@ const attachResult = (vite) => {
   }
   if(macLateLifecycle)attachMacLateLifecycle(vite,token,ownedEvidenceDirectory);
   if(nativeRaw)attachMacRawAdmission(vite,token,ownedEvidenceDirectory);
-  if(nativeDaily)attachMacDailyCheckpoints(vite,token,ownedEvidenceDirectory);
+  if(nativeDaily)attachMacDailyCheckpoints(vite,token,ownedEvidenceDirectory,eofEvidenceClockEnabled?label=>{
+    assert(['eof-ready','eof-armed','eof-closed','eof-private-live'].includes(label),'EOF clock cannot pause for another workflow');
+    assert(eofEvidenceClock,'EOF clock must start before an image wait');
+    assert(eofEvidenceClock.beginObservation(label),'EOF work deadline already expired');
+    return()=>eofEvidenceClock.endObservation(label);
+  }:undefined,macDailyCaptureConfiguration(nativeDaily)??macSystemSelectionObservationConfiguration(nativeDaily)??macSubmissionObservationConfiguration(nativeDaily));
+  if(nativeDaily?.startsWith('submission-'))attachMacSubmissionWitness(vite,token,ownedEvidenceDirectory);
+  if(macLocalLifecycle)attachMacDailyCheckpoints(vite,token,ownedEvidenceDirectory,lifecycleEvidenceClockEnabled?label=>{
+    assert(macLifecycleVisualCheckpoints.includes(label),'Lifecycle clock cannot pause for another workflow');
+    assert(lifecycleEvidenceClock,'Lifecycle clock must start before an image wait');
+    assert(lifecycleEvidenceClock.beginObservation(label),'Lifecycle work deadline already expired');
+    return()=>lifecycleEvidenceClock.endObservation(label);
+  }:undefined,{visualLabels:macLifecycleVisualCheckpoints,snapshotLabels:macLifecycleSnapshotCheckpoints});
   if(values['native-input-p3-publisher-run-once'])vite.middlewares.use(`/__native-p3-publisher/${token}`,(request,response)=>{
     void(async()=>{
       assert(request.method==='POST'&&ownedEvidenceDirectory);
@@ -911,16 +938,7 @@ const attachResult = (vite) => {
         const data=Buffer.concat(chunks);new TextDecoder('utf-8',{fatal:true}).decode(data);const file=resolve(ownedEvidenceDirectory,'native-display-visible-output.utf8');await writeFile(file,data,{flag:'wx',mode:0o600});response.setHeader('Content-Type','application/json');response.end(JSON.stringify({file,bytes:data.length,sha256:createHash('sha256').update(data).digest('hex'),scope:'Actual registry visible writes including local bytes and filtered session output;not original wire or lifecycle proof'}));
       }catch(error){response.writeHead(500).end(String(error));}
     });
-    let displayTraceWritten=false;
-    vite.middlewares.use(`/__native-display-trace/${token}`,async(request,response)=>{
-      if(request.method!=='POST'){response.writeHead(405).end();return;}
-      try{
-        assert(ownedEvidenceDirectory&&!displayTraceWritten,'Only one owned display trace is admitted');displayTraceWritten=true;
-        const chunks=[];let length=0;for await(const chunk of request){length+=chunk.length;assert(length<=8*1024*1024,'Owned display trace exceeds bound');chunks.push(chunk);}
-        const data=Buffer.concat(chunks),value=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(data));assert(value.version===2&&value.streamKind==='actual-visible-output'&&Array.isArray(value.events)&&value.events.length<=40000,'Invalid owned display trace');
-        const file=resolve(ownedEvidenceDirectory,'native-display-trace.json');await writeFile(file,data,{flag:'wx',mode:0o600});response.setHeader('Content-Type','application/json');response.end(JSON.stringify({file,bytes:data.length,sha256:createHash('sha256').update(data).digest('hex'),scope:'Observed decoded display order and checkpoints only;no wire,input or lifecycle authority'}));
-      }catch(error){response.writeHead(500).end(String(error));}
-    });
+    attachDisplayTraceChannel(vite,token,ownedEvidenceDirectory,{nativeDaily});
     let displayOutputWritten=false;
     vite.middlewares.use(`/__native-display-output/${token}`,async(request,response)=>{
       if(request.method!=='POST'){response.writeHead(405).end();return;}
@@ -1031,6 +1049,14 @@ const attachResult = (vite) => {
       }
       resultStage = 'parse';
       const value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      if(nativeHuman&&(value.ready===true||value.started===true)){
+        const transition=manualWindowTransition(humanPhase,value);humanPhase=transition.phase;
+        if(transition.startOperatorTimer){assert(Number.isSafeInteger(value.evidence?.operatorStartedAt),'Actual operator start timestamp required');humanStartedAt=value.evidence.operatorStartedAt;}
+        if(timer)clearTimeout(timer);
+        timer=transition.startOperatorTimer?setTimeout(()=>settle({ok:false,error:'HUMAN_OPERATOR_INCOMPLETE_AFTER_15_MINUTES'}),915000):undefined;
+        await writeFile(resolve(ownedEvidenceDirectory,transition.startOperatorTimer?'human-started.json':'human-ready.json'),JSON.stringify({at:new Date().toISOString(),phase:humanPhase,operatorTimerStarted:transition.startOperatorTimer,operatorMilliseconds:900000,evidence:value.evidence},null,2),{flag:'wx',mode:0o600});
+      }
+      if(nativeHuman&&value.operatorCompleted===true){assert.equal(humanPhase,'started');const observationWindow=macHumanFinalEvidenceWindow(humanStartedAt,value);humanPhase=observationWindow.phase;if(timer)clearTimeout(timer);timer=undefined;await writeFile(resolve(ownedEvidenceDirectory,'human-operator-complete.json'),JSON.stringify(value.evidence,null,2),{flag:'wx',mode:0o600});await writeFile(resolve(ownedEvidenceDirectory,'human-final-evidence-window.json'),JSON.stringify({...observationWindow,operatorCompletedAt:value.evidence.operatorCompletedAt,at:new Date().toISOString()},null,2),{flag:'wx',mode:0o600});}
       resultStage = 'retain-evidence';
       if (value.evidence) {
         assert(nativeEvidencePath && typeof value.evidence === 'object', 'Unexpected native evidence payload');
@@ -1043,6 +1069,7 @@ const attachResult = (vite) => {
         await writeFile(nativeEvidencePath, JSON.stringify({ events: contentionEvidence, result: value }, null, 2));
       }
       response.end('ok');
+      if(nativeHuman&&humanPhase==='operator-complete'&&value.evidence?.kind==='mac-human-failure'){settle({ok:false,error:value.evidence.error??'Actual human evidence finalization failed'});return;}
       if (value.progress) { console.log(value.progress); return; }
       settle(value);
     } catch (error) {
@@ -1108,8 +1135,9 @@ try {
   if(fileRestart)url.searchParams.set('fileRestart',fileRestart);
   if(macLocalLifecycle)url.searchParams.set('nativeLocalLifecycle','true');
   if(nativeDaily)url.searchParams.set('macDaily',nativeDaily);
-  if(nativeDaily?.startsWith('raw-')||nativeDaily?.startsWith('toast-'))url.searchParams.set('caseHome',resolve(ownedEvidenceDirectory,'home'));
+  if(nativeDaily?.startsWith('raw-')||nativeDaily?.startsWith('toast-')||nativeDaily?.startsWith('full-')||nativeDaily?.startsWith('submission-'))url.searchParams.set('caseHome',resolve(ownedEvidenceDirectory,'home'));
   if(macLateLifecycle)url.searchParams.set('nativeLocalLifecycleLate','true');
+  if(macDisposeLifecycle)url.searchParams.set('nativeLocalLifecycleDispose','true');
   if(byteBoundary)url.searchParams.set('byteBoundary',byteBoundary);
   if(windowsStop)url.searchParams.set('windowsStop',windowsStop);
   if(approvalRace)url.searchParams.set('approvalRace','true');
@@ -1195,7 +1223,7 @@ try {
     : spawn(process.platform === 'win32' ? process.execPath : 'pnpm', [
       ...(process.platform === 'win32' ? [fileURLToPath(new URL('./tauri.js', import.meta.resolve('@tauri-apps/cli')))] : ['exec','tauri']),
       'dev', '--no-watch',
-      ...(captureTail||nativeDaily?['--features','native-input-acceptance']:[]),
+      ...(captureTail||nativeDaily||macLocalLifecycle?['--features','native-input-acceptance']:[]),
       ...(process.platform === 'darwin' ? ['--runner', resolve(repository, 'scripts/dev-cargo-runner.mjs')] : frozenWindows?['--runner',resolve(repository,'scripts/native-input-p3/windows-cargo-runner.cmd')]:[]),
       '--config', resolve(repository, 'src-tauri/tauri.dev.conf.json'), '--config', JSON.stringify({
     identifier: values['data-scope'] ?? 'com.shellspan-dev', build: { beforeDevCommand: '', devUrl },
@@ -1205,15 +1233,37 @@ try {
       minWidth: navigationManual?960:1200, minHeight: navigationManual?640:760, ...credentialLifecycleWindowOptions(credentialLifecycleRun||aiCredentialMode!==undefined), alwaysOnTop: !frozenNativeRun,
       transparent: true, titleBarStyle: 'Overlay',
       ...(isolatedWindowsPaths?{dataDirectory:isolatedWindowsPaths.dataDirectory}:{}),
-    }] } } : nativeDaily?{app:await macDailyAppConfiguration(repository,ownedEvidenceDirectory,token)}:{}),
+    }] } } : nativeDaily||macLocalLifecycle?{app:await macDailyAppConfiguration(repository,ownedEvidenceDirectory,token,{submission:nativeDaily?.startsWith('submission-')})}:{}),
   })], { cwd: repository, env: frozenNativeRun?{...nativeEnvironment,CARGO_TARGET_DIR:(values['data-scope']==='com.shellspan.validation.native-input-p3'||macLocalLifecycle||nativeRaw)&&process.env.SHELLSPAN_P3_BUILD_CACHE?process.env.SHELLSPAN_P3_BUILD_CACHE:resolve(repository,'.artifacts/tests/native-input-p2/frozen-target'),SHELLSPAN_ACCEPTANCE_FROZEN_MANIFEST:frozenManifestPath,
     ...(frozenWindows?{RUSTUP_TOOLCHAIN:'1.95.0-x86_64-pc-windows-msvc',CARGO_BUILD_TARGET:'x86_64-pc-windows-msvc'}:{})}:nativeEnvironment, stdio: ['ignore', 'ignore', 'inherit'], detached: process.platform !== 'win32' });
   child.once('error', (error) => settle({ ok: false, error: error.message }));
   child.once('exit', (code) => settle({ ok: false, error: `Tauri exited before reporting results (${code})` }));
-  timer = setTimeout(() => settle({ ok: false, error: 'Native stream regression timed out after 10 minutes' }), 600_000);
+  if(eofEvidenceClockEnabled){
+    assert(frozenNativeRun,'EOF evidence clock requires frozen validation');
+    assert(!existsSync(resolve(ownedEvidenceDirectory,'eof-evidence-clock.json')),'EOF clock log already exists');
+    const transitions=[];
+    eofEvidenceClock=createMacEofEvidenceClock({
+      onTimeout:deadline=>settle({ok:false,error:`Native EOF ${deadline.phase} deadline exceeded`,deadline}),
+      onTransition:transition=>{transitions.push(transition);writeFileSync(resolve(ownedEvidenceDirectory,'eof-evidence-clock.json'),JSON.stringify({token,automationOnly:true,humanReceipt:false,transitions},null,2)+'\n',{mode:0o600});},
+    });
+    eofEvidenceClock.start();
+  }else if(lifecycleEvidenceClockEnabled){
+    assert(frozenNativeRun,'Lifecycle evidence clock requires frozen validation');
+    assert(!existsSync(resolve(ownedEvidenceDirectory,'lifecycle-evidence-clock.json')),'Lifecycle clock log already exists');
+    const transitions=[];
+    lifecycleEvidenceClock=createMacEofEvidenceClock({
+      onTimeout:deadline=>settle({ok:false,error:`Native lifecycle ${deadline.phase} deadline exceeded`,deadline}),
+      onTransition:transition=>{transitions.push(transition);writeFileSync(resolve(ownedEvidenceDirectory,'lifecycle-evidence-clock.json'),JSON.stringify({token,automationOnly:true,humanReceipt:false,transitions},null,2)+'\n',{mode:0o600});},
+    });
+    lifecycleEvidenceClock.start();
+  }else{
+    const runtimeMilliseconds=macDailyRuntimeTimeoutMilliseconds(nativeDaily);
+    timer=setTimeout(()=>settle({ok:false,error:`Native stream regression timed out after ${runtimeMilliseconds/60000} minutes`}),runtimeMilliseconds);
+  }
   const outcome = await result;
   if(frozenNativeRun)writeFrozenCheckpoint(resolve(ownedEvidenceDirectory,`frozen-${token}-after-webview-result.json`),verifyFrozenValidation(frozenManifestPath,'after-webview-result'));
   assert.equal(outcome.ok, true, outcome.error);
+  if(macDailyCaptureConfiguration(nativeDaily))assert(outcome.evidence?.captureComplete===true&&outcome.evidence.visualReviewRequired===true&&outcome.evidence.visualReviewComplete===false&&outcome.evidence.acceptancePassed===false,'Automatic capture must leave independent visual acceptance pending');
   if(displayAuto){const evidence=JSON.parse(await readFile(nativeEvidencePath,'utf8'));assert(evidence.kind==='actual-native-display-auto'&&evidence.activeInput===displayActiveInput&&evidence.records?.length===6&&evidence.normalExit&&evidence.exit?.exitCode===0&&evidence.ordinaryInputCalls===(displayActiveInput?14:8)&&evidence.modelCalls===0&&evidence.agentSubmissions===0&&evidence.clipboardReads===0&&evidence.clipboardWrites===0,'Actual live display matrix incomplete');}
   if(navigationManual){const evidence=JSON.parse(await readFile(nativeEvidencePath,'utf8'));assert.equal(evidence.kind,'actual-native-navigation-manual');if(evidence.deferred){assert.equal(evidence.manualCasePassed,false);console.log('Manual navigation deferred;no manual acceptance pass claimed.');}else{assert(evidence.manualCasePassed&&evidence.receipts?.length===5,'Manual navigation requires all five trusted human steps');}}
   if(frozenNativeRun)frozenSucceeded=true;
@@ -1247,6 +1297,8 @@ try {
   }
 } finally {
   clearTimeout(timer);
+  eofEvidenceClock?.dispose();
+  lifecycleEvidenceClock?.dispose();
   let frozenImageStarted=false;
   if(frozenNativeRun&&child?.pid){
     const processes=[];
@@ -1317,4 +1369,4 @@ try {
     }else if(!frozenNativeRun) await rm(output, { recursive: true, force: true });
   } else await server.close();
 }
-if(frozenSucceeded)console.log(`Frozen native verification passed; static assets, complete sources and actual ${frozenWindows?'Windows PE':'signed macOS'} image verified through exit.`);
+if(frozenSucceeded)console.log(macDailyCaptureConfiguration(nativeDaily)?'Frozen daily runtime captured; sources, assets and actual signed image verified through exit; independent visual acceptance remains pending.':`Frozen native verification passed; static assets, complete sources and actual ${frozenWindows?'Windows PE':'signed macOS'} image verified through exit.`);

@@ -5,9 +5,9 @@ import {useAppStore} from '@/stores/appStore';
 import {initI18n} from '@/locales';
 import {invokeCreateLocalSession,invokeCloseSession,invokeGetTerminalBrokerSnapshot,invokeListAiRoutes,invokeGetTerminalAcceptanceRawOutput,invokeCreateAgentRuntimeSession,invokePrepareTerminalAcceptanceRawCommand,listenToTerminalAcceptanceRawOutput,type TerminalAcceptanceRawFrameEvent} from '@/lib/ipc/tauri';
 import {isMacFileChainProfile,quotePosixFileSource} from './native-file-chain-posix';
-import {NativeDisplayTrace,nativeDisplayTraceState} from './native-display-trace';
+import {NativeDisplayTrace,nativeDisplayTraceState,pasteWithNativeDisplayTrace} from './native-display-trace';
 import {nativeDisplayHistoryAnchor} from './native-display-history-plan';
-import {macDailyExpectedRecords,macDailyEditingVisualCheckpoints,macDailyOutputPlan,macDailyPasteValues,macDailyTailEditPlan,macDailyUnicodeEditPlan} from './mac-daily-input-plan';
+import {macDailyExpectedRecords,macDailyFullExpectedRecords,macDailyEditingVisualCheckpoints,macDailyOutputPlan,macDailyPasteValues,macDailyTailEditPlan,macDailyUnicodeEditPlan} from './mac-daily-input-plan';
 import {runMacDailyEditing} from './mac-daily-editing';
 import {runMacDailyPump} from './mac-daily-pump';
 import {runMacDailyToast} from './mac-daily-toast';
@@ -15,6 +15,8 @@ import {createElement} from 'react';
 import {createRoot} from 'react-dom/client';
 import {Toaster} from '@/components/ui/sonner';
 import {compactMacDailyRecords} from './mac-daily-evidence';
+import {macWireCapture} from './mac-wire-capture';
+import {macRenderObserver} from './mac-render-observer';
 import '@/styles/base.css';
 
 function assert(value:unknown,message:string):asserts value{if(!value)throw Error(message);}
@@ -26,9 +28,12 @@ const hex=(value:string)=>Array.from(new TextEncoder().encode(value),b=>b.toStri
 
 async function verify(){
  const params=new URL(location.href).searchParams,token=params.get('token'),selection=params.get('macDaily');
- assert(token&&['bash','zsh','raw-bash','raw-zsh','editing-bash','editing-zsh','pump-bash','pump-zsh','toast-bash','toast-zsh'].includes(selection??''),'Exact owned Mac daily case required');
- const editingMode=selection!.startsWith('editing-'),pumpMode=selection!.startsWith('pump-'),toastMode=selection!.startsWith('toast-'),family=editingMode?selection!.slice(8):pumpMode?selection!.slice(5):toastMode?selection!.slice(6):selection!;
+ assert(token&&['bash','zsh','full-bash','full-zsh','raw-bash','raw-zsh','editing-bash','editing-zsh','pump-bash','pump-zsh','toast-bash','toast-zsh'].includes(selection??''),'Exact owned Mac daily case required');
+ const fullMode=selection!.startsWith('full-'),editingMode=selection!.startsWith('editing-'),pumpMode=selection!.startsWith('pump-'),toastMode=selection!.startsWith('toast-'),family=fullMode?selection!.slice(5):editingMode?selection!.slice(8):pumpMode?selection!.slice(5):toastMode?selection!.slice(6):selection!;
  const rawMode=family!.startsWith('raw-');
+ const captureOnlyMode=fullMode||rawMode;
+ const imageLabels=['ready','tui-enter','tui-edit','tui-exit','draft-440x320','draft-360x580','draft-1100x650','parked-360','follow-new-output','pump-completion-ended','toast-visible',...macDailyEditingVisualCheckpoints];
+ const captures:Record<string,unknown>[]=[];
  const report=async(value:unknown)=>{const response=await fetch(`/__agent-stream-result/${token}`,{method:'POST',body:JSON.stringify(value)});assert(response.ok,'Actual daily evidence retention rejected: HTTP '+response.status);return response;};
  await initI18n('en-US');await getCurrentWindow().show();await getCurrentWindow().setFocus();
  useAppStore.setState({terminalCopyOnSelect:false});
@@ -39,7 +44,8 @@ async function verify(){
  const host=document.createElement('div');host.id='mac-daily-terminal';host.style.cssText='width:1100px;height:650px;margin-top:32px';document.getElementById('root')!.append(host);
  let raw='',visible='',trace:NativeDisplayTrace|undefined,problem:unknown;
  const records:Record<string,unknown>[]=[],input:{data:string;hex:string;at:number;kind:string}[]=[],stops:(()=>void)[]=[],visualFailures:unknown[]=[],publicInput:{data:string;hex:string;at:number}[]=[];
- if(toastMode){const element=document.createElement('div');document.body.append(element);const root=createRoot(element);root.render(createElement(Toaster));stops.push(()=>{root.unmount();element.remove();});}
+ if(toastMode||fullMode){const element=document.createElement('div');document.body.append(element);const root=createRoot(element);root.render(createElement(Toaster));stops.push(()=>{root.unmount();element.remove();});}
+ const transportWire=await macWireCapture();
  const wireEvents:TerminalAcceptanceRawFrameEvent[]=[];let wireBytes=0,wireCaptureError:unknown;
  stops.push(await listenToTerminalAcceptanceRawOutput(event=>{
   wireBytes+=event.payload.frame.bytes.length;
@@ -47,6 +53,8 @@ async function verify(){
   wireEvents.push(event.payload);
  }));
  const session=await invokeCreateLocalSession(100,30);
+ assert(session.terminalSessionId&&session.terminalGeneration!==undefined,'Actual daily logical identity missing');
+ await transportWire.expect(session.sessionId,{terminalSessionId:session.terminalSessionId,terminalGeneration:session.terminalGeneration});
  useTerminalStore.getState().addSession(session);
  stops.push(terminalRegistry.subscribe(()=>{
   const c=terminalRegistry.get(session.sessionId);if(!c||trace)return;
@@ -59,6 +67,7 @@ async function verify(){
   const resize=t.onResize(({cols,rows})=>owned.resize(cols,rows));stops.push(()=>resize.dispose());
  }));
  const c=terminalRegistry.create(session.sessionId,(id,event)=>useTerminalStore.getState().setStatus(id,event),(id,event)=>useTerminalStore.getState().setClosed(id,event),id=>useTerminalStore.getState().sessions.find(x=>x.sessionId===id)?.status??'connecting',()=>{},session.ptyInfo);
+ const renderer=macRenderObserver(c);stops.push(()=>renderer.stop());
  const t=c.terminal,original={selection:t.getSelection,select:t.select,write:t.write,open:t.open,line:t.buffer.normal.getLine};
  const viewportEvents:Record<string,unknown>[]=[],viewportResizes:Record<string,unknown>[]=[];
  let viewportStage:string|undefined;
@@ -67,12 +76,13 @@ async function verify(){
  const viewportScroll=t.onScroll(()=>{if(viewportStage){assert(viewportEvents.length<256,'Viewport observation bound exceeded');viewportEvents.push({kind:'scroll',stage:viewportStage,...observeViewport()});}});
  const viewportResize=t.onResize(()=>{if(viewportStage){assert(viewportEvents.length<256,'Viewport observation bound exceeded');viewportEvents.push({kind:'resize',stage:viewportStage,...observeViewport()});}});
  stops.push(()=>viewportScroll.dispose(),()=>viewportResize.dispose());
- const inputObserver=t.onData(data=>publicInput.push({data,hex:hex(data),at:Date.now()}));stops.push(()=>inputObserver.dispose());
+ let inputProtected=false;
+ const inputObserver=t.onData(data=>{if(!inputProtected)publicInput.push({data,hex:hex(data),at:Date.now()});});stops.push(()=>inputObserver.dispose());
  // onData also contains real parser replies and focus reports requested by
  // TUI programs. Preserve every event; only DOM input can interfere with this
  // programmatic case. Never classify an onData event as a physical key.
  const domInput:{type:string;trusted:boolean;at:number}[]=[];
- const observeDomInput=(event:Event)=>domInput.push({type:event.type,trusted:event.isTrusted,at:Date.now()});
+ const observeDomInput=(event:Event)=>{domInput.push({type:event.type,trusted:event.isTrusted,at:Date.now()});if(event.isTrusted&&!inputProtected){inputProtected=true;stops.push(c.suppressUserInput());}};
  for(const type of ['keydown','beforeinput','paste','compositionstart']){host.addEventListener(type,observeDomInput,true);stops.push(()=>host.removeEventListener(type,observeDomInput,true));}
  const drain=async()=>{await new Promise<void>(done=>t.write('',done));await new Promise<void>(done=>requestAnimationFrame(()=>requestAnimationFrame(()=>done())));await new Promise<void>(done=>t.write('',done));};
  const snapshot=()=>invokeGetTerminalBrokerSnapshot(session.sessionId);
@@ -99,19 +109,29 @@ async function verify(){
  };
  const idle=async()=>{const state=(await snapshot()).session;return !!state&&state.promptReady&&!state.inputObservation?.commandInputPending&&!state.inputObservation?.nativeRecoveryRequired;};
  const send=async(data:string,kind='programmatic ordinary user input')=>{assert(!wireCaptureError,'Actual raw-frame observation failed');assert(domInput.length===0,'Unexpected DOM input interfered with automatic case');input.push({data,hex:hex(data),at:Date.now(),kind});assert(await c.writeUserInput(data),'Ordinary input rejected: '+kind);};
+ const paste=async(data:string)=>{assert(!wireCaptureError,'Actual raw-frame observation failed');assert(domInput.length===0,'Unexpected DOM input before public paste');await drain();assert(trace,'Complete visible observer missing');pasteWithNativeDisplayTrace(t,trace,data);};
  const checkpoint=async(label:string,details:Record<string,unknown>={})=>{
   await drain();assert(trace,'Complete visible observer missing');
   assert(t.getSelection===original.selection&&t.select===original.select&&t.write===original.write&&t.open===original.open&&t.buffer.normal.getLine===original.line,'Public terminal API changed');
   const at=Date.now(),state=nativeDisplayTraceState(t),display={unicode:t.unicode.activeVersion,reflow:t.options.reflowCursorLine};
+  const record:Record<string,unknown>={label,at,state,display,inputProtected,...details};records.push(record);
   await trace.checkpoint(label,state);
-  const broker=await snapshot(),brokerCapturedAt=Date.now();
-  records.push({label,at,state,broker,brokerCapturedAt,display,...details});
+  const broker=await snapshot(),brokerCapturedAt=Date.now(),actualRenderer=renderer.snapshot();
+  Object.assign(record,{broker,brokerCapturedAt,actualRenderer});
+  if(fullMode||rawMode){assert(actualRenderer.kind==='dom'||actualRenderer.kind==='webgl','Actual native renderer implementation is unknown');if(actualRenderer.kind==='webgl')assert(actualRenderer.contextLost===false&&actualRenderer.paint&&!actualRenderer.readError,'Actual native WebGL context or drawing evidence missing');}
   // The server retains each complete checkpoint in an immutable progress file.
   // Do not resend every prior full buffer on each subsequent checkpoint.
   await report({progress:'Mac daily checkpoint: '+label,evidence:{kind:'mac-daily-progress',family,session,recordIndex:records.length-1,records:[records[records.length-1]],input,publicInput,domInput,viewportEvents,viewportResizes,modelCalls:0,humanReceipt:false}});
-  if(['ready','tui-enter','tui-edit','tui-exit','draft-440x320','draft-360x580','draft-1100x650','parked-360','follow-new-output','pump-completion-ended','toast-visible',...macDailyEditingVisualCheckpoints].includes(label)){
-   const response=await fetch(`/__native-mac-daily-checkpoint/${token}/${label}`,{method:'POST'});assert(response.ok,'Automation visual checkpoint was not observed');
-   const observation=await response.json() as {visualPassed:boolean;notes:string};if(!observation.visualPassed)visualFailures.push({label,...observation});
+  if(imageLabels.includes(label)){
+   if(captureOnlyMode){
+    const response=await fetch(`/__native-mac-daily-capture/${token}/${label}`,{method:'POST'});assert(response.ok,'Actual native screenshot capture was not retained');
+    const capture=await response.json() as {label:string;captured:boolean;visualReviewed:boolean;acceptancePassed:boolean;humanReceipt:boolean;authority:string};
+    assert(capture.label===label&&capture.captured===true&&capture.visualReviewed===false&&capture.acceptancePassed===false&&capture.humanReceipt===false&&capture.authority==='image-retention-only','Capture confirmation granted unexpected authority');
+    captures.push(capture);record.capture=capture;
+   }else{
+    const response=await fetch(`/__native-mac-daily-checkpoint/${token}/${label}`,{method:'POST'});assert(response.ok,'Automation visual checkpoint was not observed');
+    const observation=await response.json() as {visualPassed:boolean;notes:string};if(!observation.visualPassed)visualFailures.push({label,...observation});
+   }
   }
  };
  const commandFor=(value:string,index:number)=>macDailyOutputPlan(token,value,index);
@@ -163,11 +183,11 @@ async function verify(){
    await send('exit\r');await until(()=>useTerminalStore.getState().sessions.find(x=>x.sessionId===session.sessionId)?.status==='disconnected','Raw Shell transport did not end');await drain();await checkpoint('transport-end');
   }else if(toastMode){
    const home=params.get('caseHome');assert(home,'Toast acceptance requires its actual isolated HOME');
-   await runMacDailyToast({token,terminal:t,host,send,checkpoint,finishOutput,drain,fit:()=>c.fit(),idle,snapshot,raw:()=>raw,publicInput,action:action=>trace!.action(action),draftState},home);
+   await runMacDailyToast({token,terminal:t,host,send,paste,checkpoint,finishOutput,drain,fit:()=>c.fit(),idle,snapshot,raw:()=>raw,publicInput,action:action=>trace!.action(action),draftState},home);
   }else if(pumpMode){
-   await runMacDailyPump({token,terminal:t,host,send,checkpoint,finishOutput,drain,fit:()=>c.fit(),idle,snapshot,raw:()=>raw,publicInput,action:action=>trace!.action(action),draftState});
+   await runMacDailyPump({token,terminal:t,host,send,paste,checkpoint,finishOutput,drain,fit:()=>c.fit(),idle,snapshot,raw:()=>raw,publicInput,action:action=>trace!.action(action),draftState});
   }else if(editingMode){
-   await runMacDailyEditing({token,terminal:t,host,send,checkpoint,finishOutput,drain,fit:()=>c.fit(),idle,snapshot,raw:()=>raw,publicInput,action:action=>trace!.action(action),draftState});
+   await runMacDailyEditing({token,terminal:t,host,send,paste,checkpoint,finishOutput,drain,fit:()=>c.fit(),idle,snapshot,raw:()=>raw,publicInput,action:action=>trace!.action(action),draftState});
   }else{
   // Byte assertions use the separately printed hex of the edited value, never its echo.
   let offset=raw.length;
@@ -180,14 +200,14 @@ async function verify(){
   for(const [index,value]of macDailyPasteValues(token)){
    if(index===2||index===3){
     offset=raw.length;const plan=macDailyTailEditPlan(token,value,index),before=publicInput.length;
-    assert(domInput.length===0,'Unexpected DOM input before NFC/NFD paste');t.paste(plan.source);await until(()=>publicInput.length>before,'NFC/NFD public paste produced no input');
+    await paste(plan.source);await until(()=>publicInput.length>before,'NFC/NFD public paste produced no input');
     await send('\x1b[D'.repeat(plan.suffixCharacters),'move to original NFC/NFD ASCII tail');await send('\x7f');await send('OK');
     await checkpoint(index===2?'nfc-tail-edit':'nfd-tail-edit',{plan,originalPrefixHex:hex(value),submitted:false});
     assert(!raw.slice(offset).includes(plan.prefix+hex(plan.expectedValue)+':END\r\n'),'NFC/NFD input executed before Enter');
     await send('\x05\r');await finishOutput(plan.expectedValue,index,offset,{plan,originalPrefixHex:hex(value),asciiTailActuallyEdited:true});continue;
    }
    offset=raw.length;const plan=commandFor(value,index);
-   assert(domInput.length===0,'Unexpected DOM input before paste');const before=publicInput.length;t.paste(plan.source);await until(()=>publicInput.length>before,'Public paste produced no actual input');await send('\r');await finishOutput(value,index,offset);
+   const before=publicInput.length;await paste(plan.source);await until(()=>publicInput.length>before,'Public paste produced no actual input');await send('\r');await finishOutput(value,index,offset);
   }
   offset=raw.length;
   await send("printf '%s' CANCELLED > \"$HOME/phase2-cancel-effect\"");await send('\x03');await send('\r');
@@ -255,11 +275,17 @@ async function verify(){
   await send("printf '%s%s\\n' P2_FOLLOW_ NEW_LOGICAL_OUTPUT\r");await until(idle,'Following output prompt missing');await drain();assert(t.buffer.normal.viewportY===t.buffer.normal.baseY,'Bottom did not follow actual new output');await checkpoint('follow-new-output');
   trace.action({kind:'searchNext',term:anchorLine});assert(c.searchAddon.findNext(anchorLine),'Production search addon could not find original historical output');await checkpoint('search-history');
   trace.action({kind:'clearSelection'});t.clearSelection();
+  if(fullMode){
+   const home=params.get('caseHome');assert(home,'Combined daily acceptance requires its actual isolated HOME');
+   const context={token,terminal:t,host,send,paste,checkpoint,finishOutput,drain,fit:()=>c.fit(),idle,snapshot,raw:()=>raw,publicInput,action:(action:Parameters<NativeDisplayTrace['action']>[0])=>trace!.action(action),draftState,deferTransportEnd:true as const};
+   await runMacDailyEditing(context);await runMacDailyPump(context);await runMacDailyToast(context,home);
+  }
   await send('exit\r');await until(()=>useTerminalStore.getState().sessions.find(x=>x.sessionId===session.sessionId)?.status==='disconnected','Shell transport did not end');await drain();await checkpoint('transport-end');
   }
  }catch(error){problem=error;await checkpoint('failure',{reason:String(error)}).catch(()=>{});}
- const expectedRecords=macDailyExpectedRecords[toastMode?'toast':pumpMode?'pump':editingMode?'editing':rawMode?'raw':'native'];
+ const expectedRecords=fullMode?macDailyFullExpectedRecords:macDailyExpectedRecords[toastMode?'toast':pumpMode?'pump':editingMode?'editing':rawMode?'raw':'native'];
  if(!problem&&JSON.stringify(records.map(record=>record.label))!==JSON.stringify(expectedRecords))problem=Error('Actual named operations do not match the predeclared daily sequence');
+ if(!problem&&captureOnlyMode&&JSON.stringify(captures.map(capture=>capture.label))!==JSON.stringify(expectedRecords.filter(label=>imageLabels.includes(label))))problem=Error('Actual screenshot captures omit an original required image');
  let wire:Record<string,unknown>|undefined;
  try{
   const before=await snapshot(),capture=await invokeGetTerminalAcceptanceRawOutput(session.sessionId),after=await snapshot();
@@ -288,11 +314,23 @@ async function verify(){
   try{const response=await fetch(`/__native-display-${name}/${token}`,{method:'POST',body});assert(response.ok,'Evidence retention failed: '+name);uploads[name]=await response.json();}catch(error){problem??=error;}
  }
  stops.reverse().forEach(stop=>stop());terminalRegistry.dispose(session.sessionId);await invokeCloseSession(session.sessionId).catch(error=>{problem??=error;});
+ let preBroker:Record<string,unknown>|undefined;
+ try{
+  try{await until(()=>transportWire.isFinalized(session.sessionId),'Actual daily worker wire finalization missing');}catch(error){problem??=error;}
+  const observations=transportWire.observations(session.sessionId);
+  const response=await fetch(`/__native-mac-human-snapshot/${token}/daily-final`,{method:'POST',body:JSON.stringify({kind:'mac-human-capture-snapshot',token,label:'daily-final',role:'automatic',session,transport:observations,controllerDecodedPrefix:raw,humanReceipt:false,scope:'Complete independent pre-Broker observations after normal close. Controller prefix remains separate on failure; no new input or human authority.'})});
+  assert(response.ok,'Actual daily independent wire archive failed');const retained=await response.json() as {file:string;bytes:number;sha256:string};
+  preBroker={retained,complete:false};
+  const actual=transportWire.snapshot(session.sessionId,true);assert(actual.wireDecoded===actual.decoded,'Actual daily independent wire and standard transport decoder differ');
+  assert(actual.decoded.startsWith(raw),'Actual daily controller output is not its original transport prefix');
+  preBroker={retained,complete:actual.complete,frameCount:actual.frameCount,byteCount:actual.byteCount,finalized:actual.finalized,controllerDecodedEqualsComplete:raw===actual.decoded};
+  if(!problem){assert(raw===actual.decoded,'Successful daily controller omitted actual final output');assert(wire?.capturedByteCount===actual.byteCount&&wire?.capturedFrameCount===actual.frameCount,'Successful daily Broker and independent full wire differ');}
+ }catch(error){problem??=error;}finally{transportWire.stop();}
  if(visualFailures.length)problem??=Error('Required visual observations did not pass');
  if(!trace?.snapshot(visible).replayable)problem??=Error('Actual visible event order was not replayable');
  const uploadedTrace=uploads.trace as {file?:unknown;sha256?:unknown}|undefined;
  const traceFile=typeof uploadedTrace?.file==='string'&&typeof uploadedTrace.sha256==='string'?{file:uploadedTrace.file,sha256:uploadedTrace.sha256}:null;
  const compactRecords=compactMacDailyRecords(records,trace?.snapshot(visible).events.filter(event=>event.type==='checkpoint')??[],traceFile);
- await report({ok:!problem,error:problem?String(problem):undefined,evidence:{kind:'actual-macos-daily',family,selection,session,initial,expectedRecords,records:compactRecords,input,publicInput,domInput,viewportEvents,viewportResizes,visualFailures,wire,uploads,traceReplayable:trace?.snapshot(visible).replayable,modelCalls:0,agentSubmissions:0,humanReceipt:false,physicalInputClaim:false,scope:'Programmatic ordinary input and public paste through real production controller/App/Shell/PTY. Original Broker session capture bytes, decoded session stream and complete visible writes retained separately; bounded replay suffix completeness is recorded independently. Full public checkpoint states are retained verbatim in the uploaded trace and immutable individual progress files; final records reference their exact hashes. Public onData includes TUI parser replies and focus reports, not a physical-input claim. System keyboard, IME, mouse, clipboard and additional mode/lifecycle cases require independent evidence.'}});
+ await report({ok:!problem,error:problem?String(problem):undefined,evidence:{kind:'actual-macos-daily',family,selection,session,initial,expectedRecords,records:compactRecords,input,publicInput,domInput,inputProtected,viewportEvents,viewportResizes,visualFailures,wire,preBroker,uploads,captures,...(captureOnlyMode?{captureComplete:!problem,visualReviewRequired:true,visualReviewComplete:false,acceptancePassed:false}:{}),traceReplayable:trace?.snapshot(visible).replayable,modelCalls:0,agentSubmissions:0,humanReceipt:false,physicalInputClaim:false,scope:'Programmatic ordinary input and public paste through real production controller/App/Shell/PTY. Original independent pre-Broker wire, Broker capture, decoded session stream and complete visible writes retained separately; bounded replay suffix completeness is recorded independently. Full public checkpoint states are retained verbatim in the uploaded trace and immutable individual progress files; final records reference their exact hashes. Automatic full/raw capture confirmations prove retention only: all original images still require independent actual visual review before acceptance. Public onData includes TUI parser replies and focus reports, not a physical-input claim. Unplanned trusted input stops further planned commands and its text is not retained. System keyboard, IME, mouse, clipboard and additional mode/lifecycle cases require independent evidence.'}});
 }
 void verify().catch(error=>fetch(`/__agent-stream-result/${new URL(location.href).searchParams.get('token')}`,{method:'POST',body:JSON.stringify({ok:false,error:String(error)})}));

@@ -6,7 +6,10 @@ import {quotePosixFileSource} from './native-file-chain-posix';
 
 export type EditingContext={
  token:string;terminal:Terminal;host:HTMLElement;
+ /** Only the combined owned case performs the final normal exit itself. */
+ deferTransportEnd?:true;
  send:(data:string,kind?:string)=>Promise<void>;
+ paste:(data:string)=>Promise<void>;
  checkpoint:(label:string,details?:Record<string,unknown>)=>Promise<void>;
  finishOutput:(value:string,index:number,offset:number,details?:Record<string,unknown>)=>Promise<void>;
  drain:()=>Promise<void>;fit:()=>void;idle:()=>Promise<boolean>;
@@ -27,7 +30,7 @@ export async function runMacDailyEditing(x:EditingContext){
  const fit=async(width:number,height:number)=>{await drain();x.host.style.width=width+'px';x.host.style.height=height+'px';x.fit();await drain();await until(async()=>{const g=(await x.snapshot()).session?.geometry;return g?.columns===t.cols&&g.rows===t.rows;},'Actual editing PTY geometry differs from public display');};
  const paste=async(source:string)=>{
   const before=x.publicInput.length,expected='\x1b[200~'+source.replace(/\n/g,'\r')+'\x1b[201~';
-  t.paste(source);await until(()=>x.publicInput.length>before,'Actual public paste did not emit input');
+  await x.paste(source);await until(()=>x.publicInput.length>before,'Actual public paste did not emit input');
   const events=x.publicInput.slice(before);assert(events.some(e=>e.data===expected),'Actual xterm bracketed paste bytes differ, including its LF-to-CR input convention');
   return{source,sourceHex:hex(source),actualPaste:events};
  };
@@ -85,5 +88,5 @@ export async function runMacDailyEditing(x:EditingContext){
  assert(!raw().slice(pumpOffset).includes(longPlan.prefix),'Cancelled long command emitted an independent stdout prefix');
  assert(!raw().slice(pumpOffset).includes(longPlan.prefix+hex(long)+':END\r\n'),'Cancelled long command or a residual draft executed');
  const recovery=macDailySingleOutputPlan(token,'LONG_CANCEL_RECOVERED',13);await send(recovery.source+'\r');await finishOutput('LONG_CANCEL_RECOVERED',13,pumpOffset,{cancelledSourceByteCount:4790,producerRecords:50,cancelledOutputAbsent:true});
- await send('exit\r');await until(async()=>!(await x.snapshot()).session?.open,'Editing Shell transport did not end');await drain();await checkpoint('transport-end');
+ if(!x.deferTransportEnd){await send('exit\r');await until(async()=>!(await x.snapshot()).session?.open,'Editing Shell transport did not end');await drain();await checkpoint('transport-end');}
 }

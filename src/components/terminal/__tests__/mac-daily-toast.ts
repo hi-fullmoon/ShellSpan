@@ -23,7 +23,7 @@ export async function runMacDailyToast(x:EditingContext,home:string){
  const stop=useToastStore.subscribe(state=>toastHistory.push({at:Date.now(),toasts:state.toasts.map(item=>({...item}))}));
  let released=false;
  try{
-  x.terminal.paste('TOAST_PUBLIC_A_'+x.token.slice(0,8));x.terminal.paste('TOAST_PUBLIC_B_'+x.token.slice(0,8));
+  await x.paste('TOAST_PUBLIC_A_'+x.token.slice(0,8));await x.paste('TOAST_PUBLIC_B_'+x.token.slice(0,8));
   const rendered=()=>Array.from(document.querySelectorAll('[data-sonner-toast]')).filter(node=>node.textContent?.includes(message));
   await until(()=>useToastStore.getState().toasts.filter(item=>item.variant==='error'&&item.message===message).length===1&&rendered().length===1,'Real production Toast did not render once');
   const current=useToastStore.getState().toasts;assert(current.length===1&&current[0].duration===3000,'Production Toast count or duration was changed');
@@ -43,6 +43,6 @@ export async function runMacDailyToast(x:EditingContext,home:string){
   await x.send('\r');await until(x.idle,'Enter after actual lease release did not restore an empty native prompt');
   const start=x.raw().length,plan=macDailySingleOutputPlan(x.token,'TOAST_RECOVERED',14);await x.send(plan.source+'\r');await x.finishOutput('TOAST_RECOVERED',14,start,{blockedSourceAbsent:!x.raw().slice(offset).includes('TOAST_PUBLIC_'),agentSessionId:id});
   assert(!x.raw().slice(offset).includes('TOAST_PUBLIC_')&&!x.raw().slice(offset).includes(attempt),'Rejected draft was executed after real release');
-  await x.send('exit\r');await until(async()=>!(await x.snapshot()).session?.open,'Toast acceptance transport did not reach actual EOF');await x.drain();await x.checkpoint('transport-end');
+  if(!x.deferTransportEnd){await x.send('exit\r');await until(async()=>!(await x.snapshot()).session?.open,'Toast acceptance transport did not reach actual EOF');await x.drain();await x.checkpoint('transport-end');}
  }finally{stop();if(!released)await invokeControlTerminalAcceptanceInputLease(id,true);}
 }

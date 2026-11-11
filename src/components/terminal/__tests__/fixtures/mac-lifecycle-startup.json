@@ -1,0 +1,28 @@
+{
+  "source": "R48 actual native macOS Zsh pre-Broker reader frames, case 8510ff49-b010-4796-be29-2c20b910a5c1",
+  "scope": "Exact original startup prefixes through the first actual bracketed-paste enable. Prefix samples only, not full streams or new Shell execution.",
+  "columns": 127,
+  "rows": 37,
+  "samples": [
+    {
+      "name": "fits-current-grid",
+      "transportSessionId": "c0b4abbf-88fb-460f-8c9c-c7e3b88d23bf",
+      "originalWireSha256": "81168fe6e500eaa6c98aae3f88509ded6e1a67d4b7beb1447351fcbfa356ade5",
+      "offset": 0,
+      "bytes": 236,
+      "sha256": "ca9c6f7c815c08598da479daa34546e505fc68ef59d85f0407e6471468f8d4b4",
+      "base64": "G1sxbRtbN20lG1syN20bWzFtG1swbSAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIA0gDRtdMTMzNztTZXRVc2VyVmFyPVNoZWxsU3Bhbk5hdGl2ZUlucHV0PU1BPT0HDRtbMG0bWzI3bRtbMjRtG1tKemhlbmdiaXdlbkB6aGVuZ2Jpd2VuZGVNYWNCb29rLVBybyB+ICUgG1tLG1s/MjAwNGg=",
+      "expectedResidualRows": []
+    },
+    {
+      "name": "wider-than-current-grid",
+      "transportSessionId": "01d929b1-f946-4519-b210-02b4e70ba451",
+      "originalWireSha256": "013f212f39d14efcb59e9bc30f14408b297268cafa13037c598c9d8e9b7939c5",
+      "offset": 0,
+      "bytes": 316,
+      "sha256": "068db6aeb7c1d18fc2d43d69aaa9bbc46da81f0d32d2cdb15d21c2bfc1553973",
+      "base64": "G1sxbRtbN20lG1syN20bWzFtG1swbSAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgDSANG10xMzM3O1NldFVzZXJWYXI9U2hlbGxTcGFuTmF0aXZlSW5wdXQ9TUE9PQcNG1swbRtbMjdtG1syNG0bW0p6aGVuZ2Jpd2VuQHpoZW5nYml3ZW5kZU1hY0Jvb2stUHJvIH4gJSAbW0sbWz8yMDA0aA==",
+      "expectedResidualRows": [0]
+    }
+  ]
+}

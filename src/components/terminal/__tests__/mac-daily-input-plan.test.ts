@@ -1,9 +1,19 @@
 import {expect,it} from 'vitest';
-import {macDailyOutputPlan,macDailySingleOutputPlan,macDailyPasteValues,macDailyTailEditPlan,macDailyUnicodeEditPlan,macDailyCompletionPlan,macDailyPumpCompletionPlan} from './mac-daily-input-plan';
+import {macDailyExpectedRecords,macDailyFullExpectedRecords,macDailyOutputPlan,macDailySingleOutputPlan,macDailyPasteValues,macDailyTailEditPlan,macDailyUnicodeEditPlan,macDailyCompletionPlan,macDailyPumpCompletionPlan} from './mac-daily-input-plan';
 import {mkdirSync,mkdtempSync,readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
 const token='11111111-2222-4333-8444-555555555555';
+it('keeps the predeclared 72 combined checkpoints and both actual history executions',()=>{
+ expect(macDailyFullExpectedRecords).toEqual([
+  'ready','ordinary-0','ordinary-1','nfc-tail-edit','ordinary-2','nfd-tail-edit','ordinary-3','ordinary-4','ordinary-5','ordinary-6','tab-completion','ordinary-7','ordinary-7','history-search','unicode-cursor-before','unicode-cursor-returned','ordinary-8','tui-enter','tui-edit','tui-navigation','ordinary-9','tui-exit','draft-440x320','draft-360x580','draft-1100x320','draft-1100x650','ordinary-10','parked-initial','parked-new-output','parked-440','parked-360','parked-1100','follow-new-output','search-history',
+  'multiline-before','multiline-first-cursor','multiline-first-edited','multiline-last-cursor','multiline-edited','ordinary-11','completion-expanded','completion-output','printed-output','printed-440x320','printed-360x580','printed-1100x320','printed-1100x650','follow-output','follow-440x320','follow-360x580','follow-1100x320','follow-1100x650','background-draft','background-440x320','background-360x580','background-1100x320','background-1100x650','background-ended','ordinary-12','pump-started','pump-pasted','pump-cancelled','ordinary-13',
+  'pump-completion-started','pump-completion-pasted','pump-completion-received','pump-completion-ended','toast-lease-acquired','toast-visible','toast-lease-released','ordinary-14','transport-end',
+ ]);
+ expect(macDailyFullExpectedRecords).toHaveLength(72);
+ expect(Object.values(macDailyExpectedRecords).map(records=>records[records.length-1])).toEqual(['transport-end','transport-end','transport-end','transport-end','transport-end']);
+ expect([macDailyExpectedRecords.native.length,macDailyExpectedRecords.editing.length,macDailyExpectedRecords.pump.length,macDailyExpectedRecords.toast.length]).toEqual([35,31,6,6]);
+});
 it('keeps distinct NFC and NFD original bytes and literal whitespace',()=>{
  const cases=macDailyPasteValues(token),encode=(s:string)=>Array.from(new TextEncoder().encode(s),b=>b.toString(16).padStart(2,'0')).join('');
  expect(encode(cases[1][1])).toBe('e4b8ade6968720636166c3a920c385');
