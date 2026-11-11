@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { SftpBlankContextMenu, type SftpBlankContextMenuAction } from '../sftp-blank-context-menu';
+import { SftpBlankContextMenu } from '../sftp-blank-context-menu';
 import { useSftpStore } from '@/stores/sftpStore';
 
 vi.mock('@/hooks/useI18n', () => ({

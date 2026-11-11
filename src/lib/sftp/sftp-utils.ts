@@ -101,12 +101,3 @@ export function formatGroup(entry: { groupName?: string; groupGid?: number }): s
       ? `G${entry.groupGid}`
       : '--';
 }
-
-export function formatOwnership(entry: {
-  ownerName?: string;
-  ownerUid?: number;
-  groupName?: string;
-  groupGid?: number;
-}): string {
-  return `${formatOwner(entry)}:${formatGroup(entry)}`;
-}

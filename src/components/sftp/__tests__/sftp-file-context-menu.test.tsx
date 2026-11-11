@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { SftpFileContextMenu, type SftpFileContextMenuAction } from '../sftp-file-context-menu';
+import { SftpFileContextMenu } from '../sftp-file-context-menu';
 import { useSftpStore } from '@/stores/sftpStore';
 import type { FileEntry } from '../utils';
 
@@ -49,7 +49,6 @@ describe('SftpFileContextMenu', () => {
         x={100}
         y={100}
         side="remote"
-        currentPath="/home"
         selectedEntries={selectedEntries}
         isBookmarked={false}
         batchMode={false}
@@ -142,7 +141,6 @@ describe('SftpFileContextMenu', () => {
         x={100}
         y={100}
         side="remote"
-        currentPath="/home"
         selectedEntries={[createRemoteFileEntry('second.txt')]}
         isBookmarked={false}
         batchMode={false}

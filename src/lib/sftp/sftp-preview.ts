@@ -71,12 +71,6 @@ const CODE_EXTENSIONS = new Set([
 ]);
 const DATA_EXTENSIONS = new Set(['csv', 'json', 'jsonl', 'ndjson', 'toml', 'tsv']);
 const MARKDOWN_EXTENSIONS = new Set(['md', 'markdown', 'mdown', 'mkd']);
-const TEXT_EXTENSIONS = new Set([
-  ...CODE_EXTENSIONS,
-  ...DATA_EXTENSIONS,
-  'conf', 'config', 'env', 'gitignore', 'ini', 'log', 'md', 'properties',
-  'readme', 'rst', 'text', 'txt',
-]);
 
 export function getFileExtension(name: string): string {
   const normalized = name.trim().toLowerCase();
@@ -122,9 +116,7 @@ export function getSftpPreviewDescriptor(
       const isJson = extension === 'json' || extension === 'jsonl' || extension === 'ndjson';
       return { kind: isJson ? 'text' : 'data', mimeType: 'text/plain;charset=utf-8', extension, icon: isJson ? BracesIcon : Table2Icon };
     }
-    const icon = DATA_EXTENSIONS.has(extension)
-      ? (extension === 'json' || extension === 'jsonl' ? BracesIcon : Table2Icon)
-      : (CODE_EXTENSIONS.has(extension) ? FileCode2Icon : FileTextIcon);
+    const icon = CODE_EXTENSIONS.has(extension) ? FileCode2Icon : FileTextIcon;
     return { kind: 'text', mimeType: 'text/plain;charset=utf-8', extension, icon };
   }
   if (extension === 'docx') {

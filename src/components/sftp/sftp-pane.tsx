@@ -674,7 +674,6 @@ export const SftpPane = React.forwardRef<HTMLDivElement, SftpPaneProps>(
           y={fileContextMenu?.y ?? 0}
           side={side}
           local={isLocal}
-          currentPath={path}
           selectedEntries={selectedEntries}
           isBookmarked={singleSelection ? remoteBookmarks.includes(singleSelection.path) : false}
           batchMode={pane.batchMode}

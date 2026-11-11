@@ -14,7 +14,6 @@ import {
   DownloadIcon,
   Grid3X3Icon,
   CopyIcon,
-  ClipboardPasteIcon,
   TextIcon,
   LinkIcon,
   FolderIcon,
@@ -57,7 +56,6 @@ export interface SftpFileContextMenuProps {
   y: number;
   side: SftpSide;
   local?: boolean;
-  currentPath?: string;
   selectedEntries: FileEntry[];
   isBookmarked: boolean;
   batchMode: boolean;
@@ -96,7 +94,6 @@ export const SftpFileContextMenu: React.FC<SftpFileContextMenuProps> = ({
   y,
   side,
   local,
-  currentPath,
   selectedEntries,
   isBookmarked,
   batchMode,

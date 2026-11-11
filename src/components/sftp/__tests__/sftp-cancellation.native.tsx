@@ -1,4 +1,3 @@
-import React from 'react';
 import Ajv from 'ajv';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
