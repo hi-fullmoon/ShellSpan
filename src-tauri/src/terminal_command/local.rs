@@ -106,8 +106,8 @@ impl PreparedNativeBash {
             return Err("TERMINAL_NATIVE_PROFILE_UNSUPPORTED".into());
         };
         let digest = file_sha(shell)?;
-        let stock_macos_zsh = target == "macos-arm64"
-            && digest == super::registration::mac_zle_pin("mainSha256")?;
+        let stock_macos_zsh =
+            target == "macos-arm64" && digest == super::registration::mac_zle_pin("mainSha256")?;
         let artifact = super::editors::read_catalogue(resources, target)?
             .into_iter()
             .find(|artifact| {
