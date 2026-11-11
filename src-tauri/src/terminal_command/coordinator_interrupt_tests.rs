@@ -53,6 +53,7 @@ fn submitted() -> NativeInputCoordinator {
     NativeInputCoordinator {
         broker,
         transport: "stop-unit".into(),
+        accept_key: b"\x18a",
         operation,
         requests: HashMap::new(),
         receipts: HashMap::new(),

@@ -134,7 +134,7 @@ try:
         assert proof['utf8Bytes'] == proof['cursorUtf8Bytes'] == proof['endUtf8Bytes'] == len(source.encode())
         commit = request(identity, {'kind': 'commit', 'sourceDigest': digest, 'planDigest': plan_digest})
         pump(lambda: receipt(commit, 'commitArmed'))
-        os.write(master, b'\x18a')
+        os.write(master, b'\x18\x1d')
         pump(lambda: receipt(prepare, 'settled'))
         assert receipt(prepare, 'started')
         assert receipt(prepare, 'settled')['payload']['exitCode'] == 0

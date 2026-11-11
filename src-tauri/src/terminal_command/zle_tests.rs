@@ -1,5 +1,5 @@
 //! Actual production startup and ZLE callbacks; no manufactured receipts.
-use super::{local::PreparedNativeBash, protocol as nip};
+use super::{editors::ZLE_ACCEPT_KEY, local::PreparedNativeBash, protocol as nip};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use std::{
     fs,
@@ -164,7 +164,7 @@ fn native_zle_private_namespace_guards_preserve_user_definitions() {
             "alias"=>"alias __shellspan_nip_dispatch=p3_user_snapshot; builtin alias __shellspan_nip_dispatch > $HOME/before-definition",
             "global-alias"=>"alias -g __shellspan_nip_dispatch=p3_user_snapshot; builtin alias -g '__shellspan_nip_dispatch' > $HOME/before-definition",
             "widget"=>"zle -N __shellspan_nip_dispatch p3_user_snapshot; builtin zle -lL __shellspan_nip_dispatch > $HOME/before-definition",
-            "chord"=>"builtin bindkey '^Xa' p3_user_snapshot; builtin bindkey '^Xa' > $HOME/before-definition",
+            "chord"=>"builtin bindkey '^X^]' p3_user_snapshot; builtin bindkey '^X^]' > $HOME/before-definition",
             "scope-previous"=>"typeset -g __shellspan_nip_scope_previous=USER_KEEP; builtin typeset -p __shellspan_nip_scope_previous > $HOME/before-definition",
             "scope-applied"=>"typeset -g __shellspan_nip_scope_applied=USER_KEEP; builtin typeset -p __shellspan_nip_scope_applied > $HOME/before-definition",
             "metadata-lines"=>"typeset -g SS_NIP_DISPLAY_LINES=USER_KEEP; builtin typeset -p SS_NIP_DISPLAY_LINES > $HOME/before-definition",
@@ -265,7 +265,7 @@ fn native_zle_private_namespace_guards_preserve_user_definitions() {
                 "alias" => "builtin alias __shellspan_nip_dispatch",
                 "global-alias" => "builtin alias -g '__shellspan_nip_dispatch'",
                 "widget" => "builtin zle -lL __shellspan_nip_dispatch",
-                "chord" => "builtin bindkey '^Xa'",
+                "chord" => "builtin bindkey '^X^]'",
                 "scope-previous" => "builtin typeset -p __shellspan_nip_scope_previous",
                 "scope-applied" => "builtin typeset -p __shellspan_nip_scope_applied",
                 "metadata-lines" => "builtin typeset -p SS_NIP_DISPLAY_LINES",
@@ -327,6 +327,11 @@ fn native_zle_private_namespace_guards_preserve_user_definitions() {
         drop(pair.master);
         let _ = output.join();
         fs::write(evidence.join("raw.bin"), &*raw.lock().unwrap()).unwrap();
+        assert!(
+            !String::from_utf8_lossy(&raw.lock().unwrap())
+                .contains("TERMINAL_NATIVE_PRIVATE_BINDING_UNAVAILABLE"),
+            "Native refusal leaked an internal error code into the ordinary terminal"
+        );
         let wire: Vec<_> = records
             .into_iter()
             .flat_map(|m| match m {
@@ -640,7 +645,7 @@ fn native_zle_private_eof_preserves_ordinary_input_and_user_hooks() {
                         |m| matches!(m, nip::Message::Operation(e) if matches!(e.payload, nip::Payload::CommitArmed)),
                     );
                     if phase == "returned" || phase == "duplicate-control" {
-                        writer.write_all(b"\x18a").unwrap();
+                        writer.write_all(ZLE_ACCEPT_KEY).unwrap();
                         writer.flush().unwrap();
                         wait(
                             &rx,
@@ -660,11 +665,11 @@ fn native_zle_private_eof_preserves_ordinary_input_and_user_hooks() {
                             &mut records,
                             |m| matches!(m,nip::Message::Operation(e)if e.request_id=="commit"&&matches!(e.payload,nip::Payload::Rejected{code:nip::ErrorCode::DuplicateRequest})),
                         );
-                        writer.write_all(b"\x18a").unwrap();
+                        writer.write_all(ZLE_ACCEPT_KEY).unwrap();
                         writer.flush().unwrap();
                     }
                     if phase == "race-key-before-eof" {
-                        writer.write_all(b"\x18a").unwrap();
+                        writer.write_all(ZLE_ACCEPT_KEY).unwrap();
                         writer.flush().unwrap();
                     }
                     if phase == "accepted-before-parent" {
@@ -677,7 +682,7 @@ fn native_zle_private_eof_preserves_ordinary_input_and_user_hooks() {
                             b"one-use public user line-finish gate",
                         )
                         .unwrap();
-                        writer.write_all(b"\x18a").unwrap();
+                        writer.write_all(ZLE_ACCEPT_KEY).unwrap();
                         writer.flush().unwrap();
                         wait(
                             &rx,
@@ -709,7 +714,7 @@ fn native_zle_private_eof_preserves_ordinary_input_and_user_hooks() {
             }
             if phase == "user-changed" {
                 let before = raw.lock().unwrap().len();
-                writer.write_all(b"__shellspan_nip_precmd() { p3_user_precmd; }; builtin bindkey '^Xa' backward-char\r").unwrap();
+                writer.write_all(b"__shellspan_nip_precmd() { p3_user_precmd; }; builtin bindkey '^X^]' backward-char\r").unwrap();
                 writer.flush().unwrap();
                 let deadline = Instant::now() + Duration::from_secs(3);
                 while !raw.lock().unwrap()[before..]
@@ -789,7 +794,7 @@ fn native_zle_private_eof_preserves_ordinary_input_and_user_hooks() {
                 release.write_all(b"continue\n").unwrap();
             }
             if phase == "race-key-after-eof" {
-                writer.write_all(b"\x18a").unwrap();
+                writer.write_all(ZLE_ACCEPT_KEY).unwrap();
                 writer.flush().unwrap();
             }
             // The private FD's real EOF callback runs before this normal user
@@ -841,7 +846,7 @@ fn native_zle_private_eof_preserves_ordinary_input_and_user_hooks() {
                     thread::sleep(Duration::from_millis(5));
                 }
             }
-            let inspect = "builtin print -r -- ${+functions[__shellspan_nip_preexec]} ${+functions[__shellspan_nip_precmd]} ${widgets[__shellspan_nip_line_init]-missing} ${widgets[__shellspan_nip_line_finish]-missing} ${precmd_functions[(I)p3_user_precmd]} > actual-hooks; builtin bindkey '^Xa' >> actual-hooks; builtin bindkey '^Xg' >> actual-hooks; builtin printf '%s%s\\n' P3-ORDINARY- AFTER-EOF > ordinary-result\r";
+            let inspect = "builtin print -r -- ${+functions[__shellspan_nip_preexec]} ${+functions[__shellspan_nip_precmd]} ${widgets[__shellspan_nip_line_init]-missing} ${widgets[__shellspan_nip_line_finish]-missing} ${precmd_functions[(I)p3_user_precmd]} > actual-hooks; builtin bindkey '^X^]' >> actual-hooks; builtin bindkey '^Xg' >> actual-hooks; builtin printf '%s%s\\n' P3-ORDINARY- AFTER-EOF > ordinary-result\r";
             writer.write_all(inspect.as_bytes()).unwrap();
             writer.flush().unwrap();
             let deadline = Instant::now() + Duration::from_secs(3);
@@ -877,7 +882,7 @@ fn native_zle_private_eof_preserves_ordinary_input_and_user_hooks() {
                 }) && hooks.contains("p3_user_snapshot")
             );
             if phase == "user-map" {
-                writer.write_all(b"builtin bindkey -M emacs '^Xa' > old-map; builtin bindkey -lL main >> old-map; builtin bindkey -M viins '^Xg' >> old-map\r").unwrap();
+                writer.write_all(b"builtin bindkey -M emacs '^X^]' > old-map; builtin bindkey -lL main >> old-map; builtin bindkey -M viins '^Xg' >> old-map\r").unwrap();
                 writer.flush().unwrap();
                 let deadline = Instant::now() + Duration::from_secs(3);
                 while fs::read_to_string(home.join("old-map"))
@@ -984,8 +989,9 @@ fn native_zle_private_eof_preserves_ordinary_input_and_user_hooks() {
     }
 }
 #[test]
-#[ignore = "requires actual macOS ZLE, rebuilt resource and the real Broker/private channel"]
-fn native_editor_default_admission_is_closed() {
+#[ignore = "requires the rebuilt macOS private Zsh and Core"]
+fn native_zle_stock_shell_is_admitted_without_validation() {
+    require_macos_arm64();
     assert!(std::env::var_os("SHELLSPAN_NATIVE_EDITOR_VALIDATION_ROOT").is_none());
     let owner = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
     let resources = owner.join(".artifacts/tests/native-input-p2/resources/native-input");
@@ -993,19 +999,20 @@ fn native_editor_default_admission_is_closed() {
         .join(".artifacts/tests/native-input-p3/editor-admission")
         .join(uuid::Uuid::new_v4().to_string());
     fs::create_dir_all(&evidence).unwrap();
-    let catalogue = super::editors::read_catalogue(&resources, "macos-arm64").err();
+    let catalogue = super::editors::read_catalogue(&resources, "macos-arm64").unwrap();
+    assert_eq!(catalogue.len(), 1);
+    let prepared =
+        PreparedNativeBash::prepare(std::path::Path::new("/bin/zsh"), &resources).unwrap();
+    let executable = prepared
+        .shell_override()
+        .expect("expected packaged private Zsh");
     assert_eq!(
-        catalogue.as_deref(),
-        Some("TERMINAL_NATIVE_PROFILE_NOT_ACCEPTED")
-    );
-    let prepare = PreparedNativeBash::prepare(std::path::Path::new("/bin/zsh"), &resources).err();
-    assert_eq!(
-        prepare.as_deref(),
-        Some("TERMINAL_NATIVE_PROFILE_NOT_ACCEPTED")
+        super::registration::file_sha(executable).unwrap(),
+        catalogue[0].shell_sha256
     );
     publish(
         &evidence.join("result.json"),
-        &serde_json::json!({"ok":true,"realSourceMatchingCatalogueRejectedWithoutValidation":true,"prepareRejectedBeforeArtifactCopy":true,"catalogueError":catalogue,"prepareError":prepare,"noNativeExecutionClaim":true,"nativeAcceptance":false}),
+        &serde_json::json!({"ok":true,"productionCatalogueAdmitted":true,"stockShellSelectedVerifiedPrivateZsh":true,"noNativeExecutionClaim":true,"nativeAcceptance":false}),
     );
 }
 
@@ -1078,7 +1085,15 @@ fn native_zle_private_main_resources_reject_invalid_paths_and_bytes() {
                 "TERMINAL_NATIVE_MANIFEST_INVALID"
             }
             "unselected-valid" => {
-                fs::copy(&source, &destination).unwrap();
+                let unlisted = format!("{id}-unlisted");
+                let artifact = &mut catalogue["profiles"][0];
+                artifact["profile"]["verifiedProfileId"] = unlisted.clone().into();
+                artifact["module"] = format!("{unlisted}/ss_nip.so").into();
+                artifact["core"] = format!("{unlisted}/zle.so").into();
+                artifact["coreLicense"] = format!("{unlisted}/LICENCE.zsh").into();
+                artifact["shell"] = format!("{unlisted}/zsh").into();
+                fs::rename(destination.parent().unwrap(), root.join(&unlisted)).unwrap();
+                fs::copy(&source, root.join(&unlisted).join("zsh")).unwrap();
                 "TERMINAL_NATIVE_PROFILE_NOT_ACCEPTED"
             }
             _ => unreachable!(),
@@ -1186,12 +1201,22 @@ fn native_zle_actual_broker_display_binding() {
     fs::create_dir_all(&evidence).unwrap();
     let home = evidence.join("home");
     fs::create_dir(&home).unwrap();
-    fs::write(home.join(".zshrc"), "PROMPT='P3-BINDING> '\n").unwrap();
+    fs::write(
+        home.join(".zshrc"),
+        "PROMPT='P3-BINDING> '\n\
+         bindkey -e\n\
+         autoload -Uz compinit\n\
+         compinit -D\n\
+         alias p3_alias_completion='print -r -- P3_ALIAS_EXPANDED'\n\
+         p3_completion_snapshot() { builtin print -rn -- \"$BUFFER\" > $HOME/completion-buffer; }\n\
+         zle -N p3_completion_snapshot\n\
+         bindkey '^Xg' p3_completion_snapshot\n",
+    )
+    .unwrap();
     let resources = super::editors::validation_resource_root()
         .unwrap()
         .unwrap_or_else(|| owner.join(".artifacts/tests/native-input-p2/resources/native-input"));
-    let owned_shell = verified_test_shell(&owner);
-    let shell = owned_shell.as_path();
+    let shell = std::path::Path::new("/bin/zsh");
     fs::write(
         evidence.join("actual-resource-root.txt"),
         resources.to_str().unwrap(),
@@ -1229,7 +1254,7 @@ fn native_zle_actual_broker_display_binding() {
             pixel_height: 0,
         })
         .unwrap();
-    let mut command = CommandBuilder::new(shell);
+    let mut command = CommandBuilder::new(prepared.shell_override().expect("expected private Zsh"));
     command.env("HOME", &home);
     command.env("LC_ALL", "en_US.UTF-8");
     command.env("TERM", "xterm-256color");
@@ -1240,6 +1265,7 @@ fn native_zle_actual_broker_display_binding() {
     let pid = child.process_id().unwrap() as i32;
     let group = unsafe { libc::getpgid(pid) };
     assert!(group > 1);
+    let mut writer = pair.master.take_writer().unwrap();
     let mut reader = pair.master.try_clone_reader().unwrap();
     let raw = Arc::new(Mutex::new(Vec::new()));
     let observed = raw.clone();
@@ -1300,6 +1326,18 @@ fn native_zle_actual_broker_display_binding() {
             .unwrap();
         let snapshot = broker.snapshot(Some(transport)).unwrap().session.unwrap();
         assert_eq!(snapshot.native_display_binding, Some(binding.clone()));
+        writer.write_all(b"p3_alias_completion\x18a\x18g").unwrap();
+        writer.flush().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while fs::read(home.join("completion-buffer")).ok().as_deref()
+            != Some(b"print -r -- P3_ALIAS_EXPANDED ")
+        {
+            assert!(
+                Instant::now() < deadline,
+                "compinit's alias shortcut was lost"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
         assert_eq!(binding.owned_reflow_cursor_line, Some(true));
         assert_eq!(
             binding.unicode_version,
@@ -1488,7 +1526,7 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
     }
     fs::write(home.join(".zshenv"), zshenv).unwrap();
     fs::write(home.join(".zprofile"), "P3_STARTUP_ORDER+=:profile\n").unwrap();
-    let mut zshrc="P3_STARTUP_ORDER+=:rc\nPROMPT='%F{blue}P3-NATIVE>%f '\nHISTFILE=$HOME/history\nHISTSIZE=100\nSAVEHIST=100\nsetopt interactivecomments\n".to_string();
+    let mut zshrc="P3_STARTUP_ORDER+=:rc\nPROMPT='%F{blue}P3-NATIVE>%f '\nHISTFILE=$HOME/history\nHISTSIZE=100\nSAVEHIST=100\nsetopt interactivecomments\nautoload -Uz compinit\ncompinit -D\n".to_string();
     let history_mode = std::env::var("SHELLSPAN_P3_HISTORY_MODE").ok();
     let history_path = home.join(if history_mode.as_deref() == Some("custom") {
         "历史 custom/history.txt"
@@ -1945,7 +1983,7 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
                 &mut records,
                 |m| matches!(m,nip::Message::Operation(e)if e.request_id==commit.request_id&&matches!(e.payload,nip::Payload::CommitArmed)),
             );
-            writer.write_all(b"\x18a").unwrap();
+            writer.write_all(ZLE_ACCEPT_KEY).unwrap();
             writer.flush().unwrap();
             if index == 7 {
                 wait(

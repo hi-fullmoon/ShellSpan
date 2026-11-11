@@ -6,7 +6,6 @@ if ! () {
   (( ${+parameters[__shellspan_nip_owned_functions]} || ${+parameters[__shellspan_nip_keymap]} || ${+parameters[__shellspan_nip_scope_previous]} || ${+parameters[__shellspan_nip_scope_applied]} || ${+parameters[SS_NIP_DISPLAY_LINES]} || ${+parameters[SS_NIP_KERNEL_ROWS]} || ${+parameters[SS_NIP_KERNEL_COLS]} )) && return 1
   return 0
 }; then
-  builtin printf '%s\n' 'TERMINAL_NATIVE_PRIVATE_BINDING_UNAVAILABLE' >&2
   builtin ss_nip close
   return 1
 fi
@@ -33,8 +32,10 @@ __shellspan_nip_binding_matches() {
   __shellspan_words=(${(z)"$(builtin bindkey -M "${3:-${KEYMAP:-main}}" "$1" 2>/dev/null)"})
   [[ ${#__shellspan_words} == 2 && ${__shellspan_words[2]} == "$2" ]]
 }
-if ! __shellspan_nip_binding_matches $'\x18a' undefined-key || ! __shellspan_nip_binding_matches $'\x18\x1e' undefined-key; then
-  builtin printf '%s\n' 'TERMINAL_NATIVE_PRIVATE_BINDING_UNAVAILABLE' >&2
+# Ctrl-X a belongs to zsh's compinit (_expand_alias). Match the Broker's
+# ZLE_ACCEPT_KEY and leave user bindings alone when either private key is taken.
+if ! __shellspan_nip_binding_matches $'\x18\x1d' undefined-key || ! __shellspan_nip_binding_matches $'\x18\x1e' undefined-key; then
+  unfunction __shellspan_nip_binding_matches
   builtin ss_nip close
   return 1
 fi
@@ -60,7 +61,7 @@ __shellspan_nip_disable() {
     if [[ ${functions[$name]-} == ${__shellspan_nip_owned_functions[$name]-} ]]; then add-zle-hook-widget -d "$hook" "$name"; fi
   done
   if [[ ${functions[__shellspan_nip_accept]-} == ${__shellspan_nip_owned_functions[__shellspan_nip_accept]-} ]] &&
-    __shellspan_nip_binding_matches $'\x18a' __shellspan_nip_accept "$__shellspan_nip_keymap"; then builtin bindkey -M "$__shellspan_nip_keymap" $'\x18a' undefined-key; fi
+    __shellspan_nip_binding_matches $'\x18\x1d' __shellspan_nip_accept "$__shellspan_nip_keymap"; then builtin bindkey -M "$__shellspan_nip_keymap" $'\x18\x1d' undefined-key; fi
   if [[ ${functions[__shellspan_nip_dispatch]-} == ${__shellspan_nip_owned_functions[__shellspan_nip_dispatch]-} ]] &&
     __shellspan_nip_binding_matches $'\x18\x1e' __shellspan_nip_dispatch "$__shellspan_nip_keymap"; then builtin bindkey -M "$__shellspan_nip_keymap" $'\x18\x1e' undefined-key; fi
   for name in ${(k)__shellspan_nip_owned_functions}; do
@@ -79,7 +80,7 @@ __shellspan_nip_dispatch() {
     __shellspan_nip_disable
     return 0
   fi
-  if ! __shellspan_nip_binding_matches $'\x18a' __shellspan_nip_accept || ! __shellspan_nip_binding_matches $'\x18\x1e' __shellspan_nip_dispatch; then
+  if ! __shellspan_nip_binding_matches $'\x18\x1d' __shellspan_nip_accept || ! __shellspan_nip_binding_matches $'\x18\x1e' __shellspan_nip_dispatch; then
     __shellspan_nip_disable
     return 0
   fi
@@ -234,7 +235,7 @@ if ! { zmodload zsh/zselect && add-zsh-hook preexec __shellspan_nip_preexec &&
   add-zsh-hook precmd __shellspan_nip_precmd &&
   add-zle-hook-widget line-init __shellspan_nip_line_init &&
   add-zle-hook-widget line-finish __shellspan_nip_line_finish &&
-  builtin bindkey '^Xa' __shellspan_nip_accept &&
+  builtin bindkey $'\x18\x1d' __shellspan_nip_accept &&
   builtin bindkey $'\x18\x1e' __shellspan_nip_dispatch &&
   zle -F -w "$SS_NIP_FD" __shellspan_nip_dispatch; }; then
   __shellspan_nip_disable

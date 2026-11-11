@@ -397,9 +397,9 @@ impl NativeShell {
                         Err("native target not ready".into())
                     }
                 },
-                || {
+                |key| {
                     sender
-                        .send(Input::Pty(b"\x18a".to_vec()))
+                        .send(Input::Pty(key.to_vec()))
                         .map_err(|error| error.to_string())
                 },
             )
@@ -1509,7 +1509,7 @@ fn native_protocol_real_bash_commit_and_duplicate_fence() {
     assert!(coordinator
         .submit(
             || panic!("duplicate submission reached final preflight"),
-            || panic!("duplicate executable enqueue")
+            |_| panic!("duplicate executable enqueue")
         )
         .is_err());
     assert!(shell.broker.unresolved_submissions().unwrap().is_empty());
@@ -1587,7 +1587,7 @@ fn native_protocol_real_queries_do_not_exhaust_cancellation() {
     assert!(coordinator
         .submit(
             || panic!("cancelled preflight"),
-            || panic!("cancelled operation submitted")
+            |_| panic!("cancelled operation submitted")
         )
         .is_err());
 }
@@ -1944,7 +1944,7 @@ fn native_protocol_real_preparing_and_typing_cannot_submit() {
     assert!(coordinator
         .submit(
             || panic!("Preparing reached final preflight"),
-            || panic!("Preparing enqueued an accept key")
+            |_| panic!("Preparing enqueued an accept key")
         )
         .is_err());
     let sender = shell.writer.clone();
@@ -1972,7 +1972,7 @@ fn native_protocol_real_preparing_and_typing_cannot_submit() {
     assert!(coordinator
         .submit(
             || panic!("Typing preflight"),
-            || panic!("Typing accept key")
+            |_| panic!("Typing accept key")
         )
         .is_err());
     let sender = shell.writer.clone();
@@ -2245,7 +2245,7 @@ fn native_protocol_real_invalid_utf8_editor_change_never_becomes_replacement_cha
     assert!(coordinator
         .submit(
             || panic!("invalid UTF-8 preflight"),
-            || panic!("invalid UTF-8 accept key")
+            |_| panic!("invalid UTF-8 accept key")
         )
         .is_err());
     shell.control.shutdown(std::net::Shutdown::Both).unwrap();
@@ -2350,7 +2350,7 @@ fn native_protocol_real_takeover_fences_armed_admission_before_clear() {
         coordinator
             .submit(
                 || panic!("takeover reached executable preflight"),
-                || panic!("takeover enqueued an executable key"),
+                |_| panic!("takeover enqueued an executable key"),
             )
             .unwrap_err(),
         "TERMINAL_LEASE_TAKEN_OVER"
@@ -2429,7 +2429,7 @@ fn native_protocol_real_unavailable_journal_never_arms_or_accepts() {
     assert!(coordinator
         .submit(
             || panic!("unavailable journal passed preflight"),
-            || panic!("unavailable journal enqueued accept")
+            |_| panic!("unavailable journal enqueued accept")
         )
         .is_err());
     assert!(!coordinator.operation.snapshot().unwrap().may_have_submitted);

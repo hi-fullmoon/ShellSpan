@@ -58,8 +58,10 @@ Windows 后台标记的名称冲突检查不得自动导入模块或执行模块
 不得在已有草稿或历史上热切换，不得因 native 失败改换执行路径或重放。
 能力不足的新 Agent 命令在 lease/PTY 写入前返回 `TERMINAL_NATIVE_INPUT_REQUIRED`；
 不自动选择替代 Shell。普通用户输入与 TUI 保留；当前后台作业的输入和管理均走已验证的原生通道。
-ZLE/PSReadLine 生产编辑器 profile 仍为空；
-GNU Bash 保留独立的来源匹配 catalogue、实际 Shell SHA/模块校验准入，未被该空列表关闭。
+生产编辑器清单准入 macOS arm64 本地及 Linux aarch64/glibc 2.36 SSH 的 Zsh 5.9/ZLE 5.9，
+以及 Windows x64 的 Windows PowerShell 5.1 和 PowerShell 7 两个固定版本配置。
+macOS 仅在所选 Zsh 匹配受信系统摘要时，启动应用随包提供的已校验私有 Zsh 和 Core。
+GNU Bash 继续使用独立的来源匹配 catalogue、实际 Shell SHA 和模块校验。
 各平台实际结果分别留证，统一实机待验项见[验收清单](../../../docs/design/agent-terminal-input-acceptance-checklist.md)。
 
 初始化使用独立 `connection = {terminalSessionId, terminalGeneration, controlId}`。
@@ -216,7 +218,9 @@ Zsh 使用公开 module/builtin API、ZLE widget、`BUFFER`/`CURSOR`、`zle -F -
 临时 mask 判为不支持或全局解开用户信号。私有连接不被 exec/fork 子进程继承。
 
 加载器恢复原有 `ZDOTDIR` 导出状态，并由同一个绑定 Zsh 正常读取系统/用户启动文件。
-首个 precmd 只安装一次集成。前台源码由 ZLE 直接交给父 Shell 顶层解析，不在 widget
+首个 precmd 只安装一次集成。ZLE 以 `Ctrl-X Ctrl-]` 为私有接受键，保留 `compinit` 的
+`Ctrl-X a` 别名展开绑定。私有键已被占用时关闭原生控制通道，继续显示正常终端提示符。
+前台源码由 ZLE 直接交给父 Shell 顶层解析，不在 widget
 函数中 eval。后台启动继续使用现有原生异步组、作业表及停止逻辑；真实源码完成显示后，
 line-finish 将经过绑定的固定作业计划交给父解析器，隐藏计划期间只临时保留 WINCH 屏蔽位，
 在真实 preexec、precmd 或关闭时恢复。普通用户命令及后台输出仍走同一个真实 PTY。

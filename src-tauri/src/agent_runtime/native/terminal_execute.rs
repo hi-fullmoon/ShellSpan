@@ -199,7 +199,7 @@ impl TerminalExecuteRegistry {
                         .arm_commit(|bytes| sessions.write_native_control(session, bytes, false));
                     let submit = current.submit(
                         || check(revalidate),
-                        || sessions.write_session_input(session, "\x18a".into()),
+                        |key| sessions.write_session_bytes(session, key.to_vec()),
                     );
                     crate::terminal_command::acceptance_trace::record(
                         "incomplete-proof-attempt-returned",
@@ -300,7 +300,7 @@ impl TerminalExecuteRegistry {
             .map_err(|_| "TERMINAL_NATIVE_COORDINATOR_UNAVAILABLE")?
             .submit(
                 || check(revalidate),
-                || sessions.write_session_input(session, "\x18a".into()),
+                |key| sessions.write_session_bytes(session, key.to_vec()),
             )?;
         #[cfg(all(
             feature = "native-input-acceptance",
@@ -315,7 +315,7 @@ impl TerminalExecuteRegistry {
             let identity = current.identity()?;
             let repeated = current.submit(
                 || check(revalidate),
-                || sessions.write_session_input(session, "\x18a".into()),
+                |key| sessions.write_session_bytes(session, key.to_vec()),
             );
             crate::terminal_command::acceptance_trace::record(
                 "duplicate-submit-returned",

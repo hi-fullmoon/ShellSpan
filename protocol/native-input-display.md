@@ -43,7 +43,8 @@ owned exit 只退出输入显示，普通命令输出继续使用相同宽度规
 `reflowCursorLine=true`，避免缩窄时截断尚在当前光标行的提示符；owned enter 仍按显式声明设为
 false，owned exit 回到此空闲配置。关闭或重绑排空后恢复 false 安装基线与原 provider，
 期间外部显式切换仍予以保留。注册 addon 自带的激活先恢复基线，再由 binding 管理作用域。
-系统 ConPTY、旧 profile 与 raw 模式不能仅凭版本名取得这一元数据；生产准入仍关闭。
+系统 ConPTY、旧 profile 与 raw 模式不能仅凭版本名取得这一元数据。生产准入以
+[固定配置清单](agent/runtime/native-editor-admission.json) 为准。
 
 Windows 本地会话另声明只读 `deferredStartup: true`：主线程以挂起状态创建，
 registry 先提交实际渲染尺寸，再发送既有 ready 通知。后端同一工作队列先处理 resize，

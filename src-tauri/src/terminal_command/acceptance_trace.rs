@@ -27,7 +27,7 @@ struct Trace {
     cut_used: AtomicBool,
     settlement_cut_used: AtomicBool,
     active_cut: Mutex<Option<Value>>,
-    expected_key: Mutex<Option<(String, super::protocol::Identity)>>,
+    expected_key: Mutex<Option<(String, super::protocol::Identity, &'static [u8])>>,
 }
 
 struct ActiveCut<'a>(&'a Mutex<Option<Value>>);
@@ -553,6 +553,7 @@ pub(crate) fn mismatched_prepare(
 pub(crate) fn observe_next_accept_key(
     session: &str,
     identity: super::protocol::Identity,
+    key: &'static [u8],
 ) -> Result<(), String> {
     if std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_CUT").as_deref() != Ok("key") {
         return Ok(());
@@ -564,7 +565,7 @@ pub(crate) fn observe_next_accept_key(
             if expected.is_some() {
                 return Err(ERROR.into());
             }
-            *expected = Some((session.into(), identity));
+            *expected = Some((session.into(), identity, key));
             Ok(())
         }
         _ => Err(ERROR.into()),
@@ -572,16 +573,22 @@ pub(crate) fn observe_next_accept_key(
 }
 
 fn actual_accept_key_written(session: &str, bytes: &[u8], written: usize) -> Result<(), String> {
-    if bytes != [0x18, b'a'] || written != 2 {
+    if written != bytes.len() {
         return Ok(());
     }
     let identity = match TRACE.get_or_init(initialize) {
         Ok(Some(trace)) => {
             let mut expected = trace.expected_key.lock().map_err(|_| ERROR)?;
-            if expected.as_ref().is_none_or(|(owner, _)| owner != session) {
+            if expected
+                .as_ref()
+                .is_none_or(|(owner, _, key)| owner != session || bytes != *key)
+            {
                 return Ok(());
             }
-            expected.take().map(|(_, identity)| identity).ok_or(ERROR)?
+            expected
+                .take()
+                .map(|(_, identity, _)| identity)
+                .ok_or(ERROR)?
         }
         Ok(None) => return Ok(()),
         Err(error) => return Err(error.clone()),

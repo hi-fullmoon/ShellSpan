@@ -1,6 +1,7 @@
 //! Protocol adapter onto the existing Broker-owned command. It owns no lifecycle
 //! or lease facts and never writes a PTY implicitly. P2 supplies transport queues.
 use super::*;
+use crate::terminal_command::editors::ZLE_ACCEPT_KEY;
 use nip::{Envelope, Payload};
 
 #[cfg(test)]
@@ -10,6 +11,7 @@ mod interrupt_tests;
 pub(crate) struct NativeInputCoordinator {
     broker: TerminalSessionBroker,
     transport: String,
+    accept_key: &'static [u8],
     pub(crate) operation: Arc<TerminalCommandOperation>,
     requests: HashMap<&'static str, String>,
     receipts: HashMap<&'static str, String>,
@@ -329,6 +331,11 @@ impl TerminalSessionBroker {
         Ok(NativeInputCoordinator {
             broker: self.clone(),
             transport: transport.into(),
+            accept_key: if record.integration_shell == Some(TerminalShellKind::Zsh) {
+                ZLE_ACCEPT_KEY
+            } else {
+                b"\x18a"
+            },
             operation,
             requests: HashMap::new(),
             receipts: HashMap::new(),
@@ -588,7 +595,7 @@ impl NativeInputCoordinator {
     pub(crate) fn submit(
         &self,
         revalidate: impl FnOnce() -> Result<(), String>,
-        enqueue_key: impl FnOnce() -> Result<(), String>,
+        enqueue_key: impl FnOnce(&[u8]) -> Result<(), String>,
     ) -> Result<(), String> {
         let gate = self.operation.submission_gate.clone();
         let _gate = gate.lock().map_err(|_| "TERMINAL_COMMAND_UNAVAILABLE")?;
@@ -636,10 +643,13 @@ impl NativeInputCoordinator {
         crate::terminal_command::acceptance_trace::observe_next_accept_key(
             &self.transport,
             self.identity()?,
+            self.accept_key,
         )?;
         // Broker rechecks proof, durable intent, native arm and the same lease
         // under its final admission lock, before a single real accept-key enqueue.
-        self.admit(TerminalInputKind::Executable, b"\x18a", enqueue_key)
+        self.admit(TerminalInputKind::Executable, self.accept_key, || {
+            enqueue_key(self.accept_key)
+        })
     }
 
     #[cfg(unix)]
