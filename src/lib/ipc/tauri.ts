@@ -59,7 +59,7 @@ import type {
   TransferBatchResult,
   UploadProgressEvent,
 } from '@/types';
-import type { AiProviderConfig, AiProviderConnectionConfig } from '@/types/ai';
+import type { AiProviderConnectionConfig } from '@/types/ai';
 import type {
   AgentArtifactRequest,
   AgentArtifactResponse,
