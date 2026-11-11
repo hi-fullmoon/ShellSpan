@@ -2,16 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { SectionNav } from '../section-nav';
 import { useAppStore } from '@/stores/appStore';
-import type { Platform } from '@/lib/platform';
 import type { Locale } from '@/types';
 
 const mocks = vi.hoisted(() => ({
-  platform: 'windows' as Platform,
   locale: 'zh-CN' as Locale,
 }));
 
 vi.mock('@/hooks/usePlatform', () => ({
-  usePlatform: () => mocks.platform,
+  usePlatform: () => 'windows',
 }));
 
 vi.mock('@/hooks/useI18n', () => ({
@@ -25,7 +23,6 @@ const initialState = useAppStore.getState();
 
 describe('SectionNav', () => {
   beforeEach(() => {
-    mocks.platform = 'windows';
     mocks.locale = 'zh-CN';
     useAppStore.setState(initialState, true);
   });
@@ -69,21 +66,6 @@ describe('SectionNav', () => {
       expect(button).toHaveClass('items-center', 'min-h-7', 'gap-1');
       expect(button.querySelector('span')).not.toHaveClass(/^(relative|-top-px|\[text-box:.*\])$/);
       expect(button.querySelector('span')).toHaveClass('after:font-medium');
-    }
-  });
-
-  it.each<Locale>(['zh-CN', 'en-US'])('preserves macOS %s optical alignment', (locale) => {
-    mocks.platform = 'macos';
-    mocks.locale = locale;
-    render(<SectionNav />);
-
-    for (const button of screen.getAllByRole('button')) {
-      const isChinese = locale === 'zh-CN' && button.textContent !== 'section.sftp';
-      expect(button.querySelector('span')).toHaveClass(
-        isChinese ? '[text-box:trim-both_text_alphabetic]' : '[text-box:trim-both_cap_alphabetic]',
-      );
-      if (isChinese) expect(button.querySelector('span')).toHaveClass('relative', '-top-px');
-      else expect(button.querySelector('span')).not.toHaveClass('-top-px');
     }
   });
 

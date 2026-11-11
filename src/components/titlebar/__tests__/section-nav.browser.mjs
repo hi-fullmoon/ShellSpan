@@ -12,10 +12,12 @@ const browser = await browserType.launch();
 try {
   const page = await browser.newPage({ deviceScaleFactor: scale });
   await page.goto(new URL('/src/components/titlebar/__tests__/section-nav.browser.html', process.env.SHELLSPAN_TEST_URL ?? 'http://localhost:1420').href);
-  const isWindows = await page.evaluate(() => navigator.platform.toLowerCase().includes('win'));
-  if (!isWindows) {
+  const platform = await page.evaluate(() => navigator.platform.toLowerCase());
+  const isMacOS = platform.includes('mac');
+  const usesTextBoxTrim = !isMacOS && !platform.includes('win');
+  if (usesTextBoxTrim) {
     assert.ok(await page.evaluate(() => CSS.supports('text-box', 'trim-both cap alphabetic')),
-      'Navigation alignment requires Chromium/Edge WebView2 133+ or Safari/WKWebView 18.2+');
+      'This platform uses CSS text-box trimming for navigation labels');
   }
   const nav = page.locator('#section-nav-review nav');
   await nav.waitFor();
@@ -43,6 +45,7 @@ try {
     for (const width of [1200, 360]) {
       await page.setViewportSize({ width, height: 200 });
       let initialBounds;
+      const labelCenters = [];
       for (const label of labels) {
         const button = nav.getByRole('button', { name: label, exact: true });
         await button.click();
@@ -89,10 +92,6 @@ try {
         assert.equal(metrics.gap, 4);
         assert.ok(Math.abs(metrics.offset) < 1, `${label}: content must be centered`);
         assert.equal(metrics.verticalOffset, 0, `${label}: icon must be vertically centered`);
-        const expectedTextOffset = !isWindows && locale === 'zh-CN' && label !== 'SFTP' ? -1 : 0;
-        assert.ok(Math.abs(metrics.textVerticalOffset - expectedTextOffset) < 0.1, `${label}: preserve the language-specific optical alignment`);
-        assert.equal(metrics.textBox, isWindows ? 'none' : 'trim-both');
-        assert.equal(metrics.textEdge, isWindows ? 'auto' : locale === 'zh-CN' && label !== 'SFTP' ? 'text alphabetic' : 'cap alphabetic');
         assert.equal(metrics.radius, 6);
         assert.ok(metrics.right <= width);
         assert.equal(metrics.active, 'page');
@@ -105,8 +104,8 @@ try {
         assert.equal(metrics.overflow, false);
         assert.equal(metrics.transform, 'none');
         assert.equal(metrics.translate, 'none');
-        if (isWindows) {
-          // Element boxes can be centered while the actual Windows glyphs sit too high.
+        if (!usesTextBoxTrim) {
+          // A centered element box does not guarantee centered glyphs.
           const image = await loadImage(await button.screenshot({ animations: 'disabled' }));
           const context = createCanvas(image.width, image.height).getContext('2d');
           context.drawImage(image, 0, 0);
@@ -126,9 +125,20 @@ try {
             assert.ok(Number.isFinite(top), `${label}: expected visible text/icon pixels`);
             return (top + bottom + 1) / (2 * scale);
           };
-          const offset = inkCenter(metrics.textBounds) - inkCenter(metrics.iconBounds);
+          const labelCenter = inkCenter(metrics.textBounds);
+          labelCenters.push(labelCenter);
+          const offset = labelCenter - inkCenter(metrics.iconBounds);
           assert.ok(Math.abs(offset) <= 1, `${locale}/${width}/${scale}/${label}: visible text/icon centers differ by ${offset}px`);
         }
+        const isChineseLabel = locale === 'zh-CN' && label !== 'SFTP';
+        const expectedTextOffset = usesTextBoxTrim && isChineseLabel ? -1 : 0;
+        assert.ok(Math.abs(metrics.textVerticalOffset - expectedTextOffset) < 0.1, `${label}: center the label vertically`);
+        assert.equal(metrics.textBox, usesTextBoxTrim ? 'trim-both' : 'none');
+        assert.equal(metrics.textEdge, usesTextBoxTrim ? (isChineseLabel ? 'text alphabetic' : 'cap alphabetic') : 'auto');
+      }
+      if (isMacOS) {
+        const spread = Math.max(...labelCenters) - Math.min(...labelCenters);
+        assert.ok(spread <= 0.5, `${locale}/${width}/${scale}: visible label centers differ by ${spread}px`);
       }
       await nav.getByRole('button', { name: labels[0], exact: true }).click();
       await page.evaluate(async () => { await document.fonts.ready; });
