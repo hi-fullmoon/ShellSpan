@@ -33,6 +33,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useI18n } from '@/hooks/useI18n';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
 import { aiErrorMessage, httpProbeTimeoutKind } from '@/lib/ai/error-message';
+import { stripAnsi } from '@/lib/terminal/terminal-output-buffer';
 import { cn } from '@/lib/utils';
 import type { LocaleKey } from '@/locales';
 import { AiContentTitle } from './ai-content-title';
@@ -385,7 +386,7 @@ function ToolScrollArea({ children, className, contentClassName, scrollable, vie
 function TerminalSurface({ node, showCopyActions, scrollable, showInput }: { node: ToolNode; showCopyActions: boolean; scrollable: boolean; showInput: boolean }) {
   const { t } = useI18n();
   const input = asRecord(node.input);
-  const output = outputText(node);
+  const output = stripAnsi(outputText(node));
   const command = firstString(input, ['command', 'cmd', 'script']) ?? formatToolValue(node.input);
   const displayCommand = command || node.name;
   const outputRecord = asRecord(node.output);
@@ -1013,5 +1014,8 @@ export function ToolStateIcon({ node }: { readonly node: ToolNode }) {
 }
 
 export function toolOutputForCopy(node: ToolNode): string {
-  return failureOnly(node) ?? outputText(node);
+  const diagnostic = failureOnly(node);
+  if (diagnostic) return diagnostic;
+  const output = outputText(node);
+  return classifyAiTool(node.name, node.nativeName) === 'terminal' ? stripAnsi(output) : output;
 }

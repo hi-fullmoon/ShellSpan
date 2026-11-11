@@ -1,6 +1,6 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import type { AiProviderConfig, AiProviderPreset, AiProviderKind, AiReasoningOption } from '@/types/ai';
+import type { AiProviderConfig, AiProviderPreset, AiProviderKind } from '@/types/ai';
 
 // Presentation identities only. All model facts come from ai_resolve_model.
 export const PROVIDER_PROFILE_IDS = ['openai', 'anthropic', 'ollama', 'deepseek', 'minimax', 'qwen', 'glm', 'kimi', 'openrouter', 'generic'] as const;

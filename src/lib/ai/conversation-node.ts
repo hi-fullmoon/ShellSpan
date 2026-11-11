@@ -281,14 +281,6 @@ export type AiConversationNode =
   | AiTurnProcessNode
   | AiTurnTailNode;
 
-export function latestTurnReachedStepBudget(nodes: readonly AiConversationNode[]): boolean {
-  for (let index = nodes.length - 1; index >= 0; index -= 1) {
-    const node = nodes[index];
-    if (node?.kind === 'turnTail') return node.endReason.startsWith('stepBudgetReached:');
-  }
-  return false;
-}
-
 export function latestTurnReachedTokenBudget(nodes: readonly AiConversationNode[]): boolean {
   for (let index = nodes.length - 1; index >= 0; index -= 1) {
     const node = nodes[index];
