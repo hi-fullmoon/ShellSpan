@@ -483,6 +483,9 @@ impl Bridge {
             "Rejected" => Payload::Rejected {
                 code: ErrorCode::State,
             },
+            "SyntaxRejected" => Payload::Rejected {
+                code: ErrorCode::Binding,
+            },
             _ => return,
         };
         self.reply_native(&request, payload);

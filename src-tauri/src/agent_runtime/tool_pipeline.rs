@@ -2841,6 +2841,17 @@ impl AgentToolPipeline {
                 .lock()
                 .map_err(|_| "Question gate unavailable")?;
             entry.cancel();
+            #[cfg(all(
+                feature = "native-input-acceptance",
+                debug_assertions,
+                target_os = "macos",
+                target_arch = "aarch64"
+            ))]
+            crate::terminal_command::acceptance_trace::control_request(
+                &entry.session_id,
+                None,
+                "cancel-token",
+            )?;
             self.cancel_questions(&entry.session_id)?;
         }
         let session_id = &entry.session_id;

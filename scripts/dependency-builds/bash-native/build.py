@@ -44,12 +44,13 @@ def main():
     paste_patch = Path(__file__).with_name('readline-paste-6.0.patch')
     darwin_patch = Path(__file__).with_name('darwin-headers-4.1.patch')
     bind_x_patch = Path(__file__).with_name('bash-bind-x-return-4.1.patch')
+    unload_patch = Path(__file__).with_name('bash-unload-hook-4.1.patch')
     combining_patch = Path(__file__).with_name('readline-combining-wrap.patch')
     setpgid_patches = {version: Path(__file__).with_name('darwin-setpgid.patch' if version == '4.1' else f'darwin-setpgid-{version}.patch') for version in patches}
     setpgid_header = Path(__file__).with_name('darwin-setpgid.h')
     resize_patches = {version: Path(__file__).with_name(f'readline-resize-{readline_versions[version]}.patch') for version in ['4.1', '4.4']}
     sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
-    stamp = hashlib.sha256((''.join(sha(patch) for patch in [*patches.values(), *display_patches.values(), paste_patch, darwin_patch, bind_x_patch, combining_patch, *setpgid_patches.values(), setpgid_header, *resize_patches.values()]) + sha(Path(__file__)) + sha(helper_path) + sha(ROOT / 'scripts/native-input-p0/readline-sources.json')).encode()).hexdigest()[:20]
+    stamp = hashlib.sha256((''.join(sha(patch) for patch in [*patches.values(), *display_patches.values(), paste_patch, darwin_patch, bind_x_patch, unload_patch, combining_patch, *setpgid_patches.values(), setpgid_header, *resize_patches.values()]) + sha(Path(__file__)) + sha(helper_path) + sha(ROOT / 'scripts/native-input-p0/readline-sources.json')).encode()).hexdigest()[:20]
     base = OUT / f'bash-{host}' / stamp
     sources = base / 'source'
     sources.mkdir(parents=True, exist_ok=True)
@@ -122,6 +123,7 @@ def main():
         if host == 'darwin' and version == '4.1':
             apply_display_patch(source, darwin_patch, '.shellspan-darwin-headers')
             apply_display_patch(source, bind_x_patch, '.shellspan-bind-x-return')
+            apply_display_patch(source, unload_patch, '.shellspan-unload-hook')
         if version == '5.3':
             readline, readline_source = build_readline83()
         else:
@@ -157,6 +159,7 @@ def main():
                           'readlineCombiningWrapPatch': {'patch': str(combining_patch.relative_to(ROOT)), 'sha256': sha(combining_patch)} if host == 'darwin' else None,
                           'darwinSetpgidSynchronization': {'patch': str(setpgid_patch.relative_to(ROOT)), 'sha256': sha(setpgid_patch), 'header': str(setpgid_header.relative_to(ROOT)), 'headerSha256': sha(setpgid_header), 'jobsSourceSha256': sha(source / 'jobs.c')} if host == 'darwin' else None,
                           'darwinHeaderPatch': {'patch': str(darwin_patch.relative_to(ROOT)), 'sha256': sha(darwin_patch)} if host == 'darwin' and version == '4.1' else None,
+                          'unloadHookBackport': {'from': 'Bash 4.4', 'patch': str(unload_patch.relative_to(ROOT)), 'sha256': sha(unload_patch), 'enableSourceSha256': sha(source / 'builtins/enable.def'), 'generalHeaderSha256': sha(source / 'general.h')} if host == 'darwin' and version == '4.1' else None,
                           'bindXReturnBackport': {'from': 'Bash 4.4', 'patch': str(bind_x_patch.relative_to(ROOT)), 'sha256': sha(bind_x_patch), 'sourceSha256': sha(source / 'bashline.c'), 'compileGuard': '-Werror=return-type'} if host == 'darwin' and version == '4.1' else None}
     (OUT / f'bash-{host}.json').write_text(json.dumps(builds, indent=2))
     print(f'GNU Bash post-profile targets: {OUT / f"bash-{host}.json"}')

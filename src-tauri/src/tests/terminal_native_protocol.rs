@@ -37,6 +37,7 @@ struct NativeShell {
     master: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
     control_id: Option<String>,
     profile: Option<crate::terminal_command::registration::VerifiedNativeProfile>,
+    expected_profile_id: String,
 }
 impl NativeShell {
     fn start(case: &str) -> Self {
@@ -90,6 +91,19 @@ impl NativeShell {
             .parent()
             .unwrap()
             .to_path_buf();
+        let selected_manifest = manifest_path.map(std::path::Path::to_path_buf).or_else(|| {
+            std::env::var_os("SHELLSPAN_TEST_NATIVE_PROTOCOL_MANIFEST").map(PathBuf::from)
+        });
+        let manifest_path = selected_manifest.as_deref();
+        if let Some(path) = manifest_path {
+            assert!(
+                path.is_absolute(),
+                "Explicit producer manifest must be absolute"
+            );
+            let metadata = fs::symlink_metadata(path).unwrap();
+            assert!(metadata.is_file() && !metadata.file_type().is_symlink());
+            assert!(metadata.len() <= 1_048_576);
+        }
         let manifest: serde_json::Value = serde_json::from_slice(
             &fs::read(
                 manifest_path
@@ -176,8 +190,16 @@ impl NativeShell {
             format!("set -o {}\n{rc}", if emacs { "emacs" } else { "vi" })
         };
         fs::write(home.path().join("rc"), rc).unwrap();
-        let broker = if let Some(root) = &crash_root {
+        let restart_root = explicit_root.or_else(|| {
+            std::env::var_os("SHELLSPAN_P1_NATIVE_CRASH_CUT").and(crash_root.as_deref())
+        });
+        let broker = if let Some(root) = restart_root {
             TerminalSessionBroker::phase3_with_journal_for_test(65536, &root.join("journal"))
+        } else if crash_root.is_some() {
+            // Redirecting ordinary test evidence does not turn independent
+            // fixtures into the same persisted invocation. Only explicit
+            // restart cases above share a journal across processes.
+            TerminalSessionBroker::phase3_with_journal_for_test(65536, &home.path().join("journal"))
         } else {
             TerminalSessionBroker::phase3_enabled_for_test(65536)
         };
@@ -308,6 +330,7 @@ impl NativeShell {
             master,
             control_id: None,
             profile: Some(profile),
+            expected_profile_id: manifest["profile"].as_str().unwrap().to_string(),
         }
     }
     fn send(&self, bytes: &[u8]) {
@@ -1450,7 +1473,7 @@ fn native_protocol_real_bash_commit_and_duplicate_fence() {
     assert_eq!(accepted.shell, nip::ShellFamily::Bash);
     assert_eq!(
         accepted.verified_profile_id.as_deref(),
-        Some("gnu-bash-5.3-readline-8.3.6-macos-arm64-native")
+        Some(shell.expected_profile_id.as_str())
     );
     let sender = shell.writer.clone();
     shell.key(b"\x18\x1e");
@@ -1763,6 +1786,151 @@ fn native_protocol_real_process_crash_recovery_never_reinputs_or_reaccepts() {
 
 #[test]
 #[ignore = "requires the rebuilt native producer"]
+fn native_protocol_real_syntax_refusal_precedes_input_and_user_enter() {
+    for (case, suffix) in [("if", "if"), ("quote", "printf 'unterminated")] {
+        let mut shell = NativeShell::start(&format!("syntax-refusal-{case}"));
+        let source = format!("printf forbidden >> \"$HOME/effect\"\n{suffix}");
+        let mut coordinator = shell.command(&source);
+        let sender = shell.writer.clone();
+        shell.key(b"\x18\x1e");
+        coordinator
+            .prepare(Duration::from_secs(5), true, |bytes| {
+                sender
+                    .send(Input::Private(bytes.to_vec()))
+                    .map_err(|error| error.to_string())
+            })
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !coordinator.editor_ready_confirmed().unwrap() {
+            assert!(
+                Instant::now() < deadline,
+                "{case}: refusal did not return real readiness"
+            );
+            let bytes = shell.read();
+            shell.deliver(&mut coordinator, &bytes);
+        }
+        let view = coordinator.operation.snapshot().unwrap();
+        assert_eq!(
+            view.phase,
+            crate::terminal_command::state::CommandPhase::Failed
+        );
+        assert!(!view.may_have_submitted);
+        assert!(view.input_rejection.unwrap().contains("BINDING"));
+        assert_eq!(shell.accept_keys.load(Ordering::Relaxed), 0);
+        assert!(!shell.home.path().join("effect").exists());
+        let mut decoder = nip::Decoder::default();
+        let messages = decoder.push(&shell.received).unwrap();
+        assert!(messages.iter().any(|message| matches!(message,
+            Message::Operation(message) if matches!(message.payload,
+                Payload::Rejected { code: nip::ErrorCode::Binding }))));
+        assert!(!messages.iter().any(|message| matches!(message,
+            Message::Operation(message) if matches!(message.payload,
+                Payload::InputProgress { .. } | Payload::InputConfirmed { .. }
+                | Payload::CommitArmed | Payload::SubmissionAccepted | Payload::Started))));
+        assert!(coordinator
+            .arm_commit(|_| panic!("syntax refusal armed commit"))
+            .is_err());
+        assert!(shell
+            .broker
+            .release_agent_lease("nip", "native-agent", "native-task", "native-operation")
+            .unwrap());
+        shell.key(b"\r");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            assert!(
+                Instant::now() < deadline,
+                "{case}: Enter did not return an empty editor"
+            );
+            let bytes = shell.read();
+            let messages = shell.decoder.push(&bytes).unwrap();
+            if messages.iter().any(|message| matches!(message,
+                Message::Connection(message) if matches!(message.payload,
+                    ConnectionPayload::EditorReady { editor_empty: true, owned_draft_absent: true, .. }))) {
+                break;
+            }
+        }
+        assert_eq!(shell.accept_keys.load(Ordering::Relaxed), 0);
+        assert!(
+            !shell.home.path().join("effect").exists(),
+            "{case}: Enter executed a rejected prefix"
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires the rebuilt native producer"]
+fn native_protocol_real_parse_only_never_runs_expansions_or_traps() {
+    let mut shell = NativeShell::start("parse-only-effects");
+    shell.bootstrap();
+    shell.key(b"set -T; trap 'printf T >> \"$HOME/trap-effect\"' DEBUG RETURN ERR EXIT\r");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    'ready: loop {
+        assert!(
+            Instant::now() < deadline,
+            "trap setup did not reach the real editor"
+        );
+        let bytes = shell.read();
+        for message in shell.decoder.push(&bytes).unwrap() {
+            if let Message::Connection(message) = message {
+                let ready = matches!(
+                    message.payload,
+                    ConnectionPayload::EditorReady {
+                        editor_empty: true,
+                        owned_draft_absent: true,
+                        ..
+                    }
+                );
+                shell
+                    .broker
+                    .accept_native_readiness("nip", &message)
+                    .unwrap();
+                if ready {
+                    break 'ready;
+                }
+            }
+        }
+    }
+    let before = fs::read(shell.home.path().join("trap-effect")).unwrap();
+    assert!(
+        !before.is_empty(),
+        "the actual Shell did not install the trap"
+    );
+    let source = ": \"$(printf forbidden >> \"$HOME/effect\")\"";
+    let mut coordinator = shell.command(source);
+    let sender = shell.writer.clone();
+    shell.key(b"\x18\x1e");
+    coordinator
+        .prepare(Duration::from_secs(5), true, |bytes| {
+            sender
+                .send(Input::Private(bytes.to_vec()))
+                .map_err(|error| error.to_string())
+        })
+        .unwrap();
+    shell.wait(&mut coordinator, |view| view.full_input_confirmed);
+    assert!(
+        !shell.home.path().join("effect").exists(),
+        "parse-only validation ran a command substitution"
+    );
+    assert_eq!(
+        fs::read(shell.home.path().join("trap-effect")).unwrap(),
+        before,
+        "parse-only validation ran an inherited trap"
+    );
+    assert_eq!(shell.accept_keys.load(Ordering::Relaxed), 0);
+    let sender = shell.writer.clone();
+    coordinator
+        .cancel_draft(|bytes| {
+            sender
+                .send(Input::Private(bytes.to_vec()))
+                .map_err(|error| error.to_string())
+        })
+        .unwrap();
+    shell.wait(&mut coordinator, |view| view.draft_cleared);
+    assert!(!shell.home.path().join("effect").exists());
+}
+
+#[test]
+#[ignore = "requires the rebuilt native producer"]
 fn native_protocol_real_preparing_and_typing_cannot_submit() {
     let mut shell = NativeShell::start("pre-confirmation");
     let source = format!(
@@ -1882,6 +2050,25 @@ fn native_protocol_real_fragmented_late_confirmation_preserves_cancel_and_handof
             .unwrap()
             .full_input_confirmed
     );
+    // Hold a real, complete target-side confirmation before cancellation. The
+    // parser now adds a separate preparation boundary, so Prepared no longer
+    // implies that InputConfirmed has already reached this socket read.
+    let mut proof_decoder = nip::Decoder::default();
+    let has_confirmation = |messages: Vec<Message>| {
+        messages.into_iter().any(|message| {
+            matches!(message, Message::Operation(message) if matches!(message.payload, Payload::InputConfirmed { .. }))
+        })
+    };
+    let mut observed_confirmation = has_confirmation(proof_decoder.push(&shell.received).unwrap());
+    while !observed_confirmation {
+        assert!(
+            Instant::now() < deadline,
+            "target did not produce the confirmation held for cancellation"
+        );
+        let bytes = shell.read();
+        observed_confirmation = has_confirmation(proof_decoder.push(&bytes).unwrap());
+        held.extend_from_slice(&bytes);
+    }
     let sender = shell.writer.clone();
     coordinator
         .cancel_draft(|bytes| {
@@ -2135,6 +2322,82 @@ fn native_protocol_real_post_intent_deadline_and_lease_revocation_fence_the_acce
         assert_eq!(shell.accept_keys.load(Ordering::Relaxed), 0);
         assert!(!shell.home.path().join("effect").exists());
     }
+}
+
+#[test]
+#[ignore = "requires the rebuilt native producer"]
+fn native_protocol_real_takeover_fences_armed_admission_before_clear() {
+    use crate::terminal_broker::{
+        TerminalBrokerInputSource, TerminalCommandRequestedSettlement, TerminalInputKind,
+    };
+
+    let mut shell = NativeShell::start("armed-takeover-fence");
+    let mut coordinator = shell.command("printf forbidden >> \"$HOME/effect\"");
+    let sender = shell.writer.clone();
+    shell.key(b"\x18\x1e");
+    coordinator
+        .prepare(Duration::from_secs(5), true, |bytes| {
+            sender
+                .send(Input::Private(bytes.to_vec()))
+                .map_err(|error| error.to_string())
+        })
+        .unwrap();
+    shell.wait(&mut coordinator, |view| view.full_input_confirmed);
+    shell.arm(&mut coordinator);
+    let identity = coordinator.identity().unwrap();
+    coordinator.operation.fence_takeover().unwrap();
+    assert_eq!(
+        coordinator
+            .submit(
+                || panic!("takeover reached executable preflight"),
+                || panic!("takeover enqueued an executable key"),
+            )
+            .unwrap_err(),
+        "TERMINAL_LEASE_TAKEN_OVER"
+    );
+    assert_eq!(
+        shell
+            .broker
+            .admit_terminal_input(
+                "nip",
+                TerminalBrokerInputSource::Agent {
+                    agent_session_id: identity.agent_session_id.clone(),
+                    task_id: identity.task_id.clone(),
+                    operation_id: identity.operation_id.clone(),
+                },
+                TerminalInputKind::Executable,
+                b"\x18a",
+                || panic!("final admission enqueued a key after takeover"),
+            )
+            .unwrap_err(),
+        "TERMINAL_LEASE_TAKEN_OVER"
+    );
+    assert!(shell
+        .broker
+        .admit_terminal_input(
+            "nip",
+            TerminalBrokerInputSource::User,
+            TerminalInputKind::Text,
+            b"\r",
+            || panic!("takeover returned unconfirmed editing"),
+        )
+        .is_err());
+    let sender = shell.writer.clone();
+    shell.key(b"\x18\x1e");
+    coordinator
+        .cancel_draft_for(TerminalCommandRequestedSettlement::Cancelled, |bytes| {
+            sender
+                .send(Input::Private(bytes.to_vec()))
+                .map_err(|error| error.to_string())
+        })
+        .unwrap();
+    shell.wait(&mut coordinator, |view| view.draft_cleared);
+    let settled = coordinator.operation.snapshot().unwrap();
+    assert_eq!(settled.state, TerminalCommandState::TakenOver);
+    assert!(!settled.may_have_submitted);
+    assert!(shell.broker.unresolved_submissions().unwrap().is_empty());
+    assert_eq!(shell.accept_keys.load(Ordering::Relaxed), 0);
+    assert!(!shell.home.path().join("effect").exists());
 }
 
 #[test]

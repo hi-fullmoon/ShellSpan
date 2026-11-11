@@ -93,6 +93,7 @@ struct Request {
 }
 struct Draft {
     request: Request,
+    validated: bool,
     boundaries: Vec<usize>,
     visible: usize,
     started: Instant,
@@ -335,6 +336,7 @@ impl Bridge {
                 json!({"source_digest":request.source_digest,"plan_digest":request.plan_digest}),
             );
             self.draft = Some(Draft {
+                validated: request.private_control,
                 request,
                 boundaries,
                 visible: 0,
@@ -493,7 +495,7 @@ impl Bridge {
                 self.retired.insert(request.operation.clone());
                 self.draft = None;
                 self.emit(Some(&request), "Expired", json!({"draft_cleared":cleared}));
-            } else if !draft.confirmed && !draft.submitted {
+            } else if draft.validated && !draft.confirmed && !draft.submitted {
                 if !owned_line_matches(&draft.request.source[..draft.visible]) {
                     self.emit(None, "RecoveryRequired", json!("editor-changed"));
                     self.fail_closed();
@@ -602,6 +604,82 @@ pub extern "C" fn p0_tick() -> c_int {
         p0_refresh_input();
     }
     0
+}
+// C runs the target Bash parser only after this call returns, so neither fork
+// nor a Bash non-local exit can cross a borrowed Rust frame. The owned copies
+// remain valid even when cancellation retires the original request.
+#[no_mangle]
+pub unsafe extern "C" fn p0_pending_validation(
+    request: *mut u64,
+    source: *mut *mut c_char,
+    plan: *mut *mut c_char,
+    budget_ms: *mut u64,
+) -> c_int {
+    let Some(bridge) = BRIDGE.as_ref().filter(|bridge| bridge.active) else {
+        return 0;
+    };
+    let Some(draft) = bridge.draft.as_ref().filter(|draft| !draft.validated) else {
+        return 0;
+    };
+    let (Ok(source_copy), Ok(plan_copy)) = (
+        CString::new(draft.request.source.as_str()),
+        CString::new(draft.request.plan.as_str()),
+    ) else {
+        return 0;
+    };
+    *request = draft.request.request;
+    *source = source_copy.into_raw();
+    *plan = plan_copy.into_raw();
+    *budget_ms = draft.request.expires_ms.saturating_sub(now_ms()).min(500);
+    1
+}
+#[no_mangle]
+pub unsafe extern "C" fn p0_validation_text_free(text: *mut c_char) {
+    if !text.is_null() {
+        drop(CString::from_raw(text));
+    }
+}
+#[no_mangle]
+pub unsafe extern "C" fn p0_validation_complete(request_id: u64, valid: c_int) -> c_int {
+    let Some(bridge) = BRIDGE.as_mut().filter(|bridge| bridge.active) else {
+        return 0;
+    };
+    // Drain cancellation, disconnect and expiry before applying the result.
+    // Unvalidated drafts cannot progress through tick's editor path.
+    bridge.tick();
+    let Some(draft) = bridge
+        .draft
+        .as_mut()
+        .filter(|draft| bridge.active && !draft.validated && draft.request.request == request_id)
+    else {
+        return 0;
+    };
+    if !owned_line_matches("") {
+        bridge.emit(
+            None,
+            "RecoveryRequired",
+            json!("editor-changed-during-validation"),
+        );
+        bridge.fail_closed();
+        return 0;
+    }
+    if valid == 1 {
+        draft.validated = true;
+        draft.started = Instant::now();
+        return 0;
+    }
+    let request = draft.request.clone();
+    bridge.retired.insert(request.operation.clone());
+    bridge.draft = None;
+    bridge.emit(
+        Some(&request),
+        "SyntaxRejected",
+        json!("target-parser-refused"),
+    );
+    bridge.flush();
+    // Caller then observes the real editor through p0_editor_ready. This is
+    // neither an input proof nor a synthetic DraftCleared acknowledgement.
+    1
 }
 #[no_mangle]
 pub unsafe extern "C" fn p0_needs_tick() -> c_int {

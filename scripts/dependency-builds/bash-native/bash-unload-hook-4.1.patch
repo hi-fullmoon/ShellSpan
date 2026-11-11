@@ -1,0 +1,50 @@
+--- a/general.h
++++ b/general.h
+@@ -219,6 +219,8 @@
+ typedef int sh_assign_func_t __P((const char *));	/* sh_icpfunc_t */
+ typedef int sh_wassign_func_t __P((WORD_DESC *));
+ 
++typedef void sh_unload_func_t __P((char *));
++
+ typedef int sh_builtin_func_t __P((WORD_LIST *)); /* sh_wlist_func_t */
+ 
+ #endif /* SH_FUNCTION_TYPEDEF */
+--- a/builtins/enable.def
++++ b/builtins/enable.def
+@@ -93,6 +93,8 @@
+ static int local_dlclose __P((void *));
+ #endif
+ 
++#define UNLOAD_SUFFIX	"_builtin_unload"
++
+ static void list_some_builtins __P((int));
+ static int enable_shell_command __P((char *, int));
+ 
+@@ -444,9 +446,11 @@
+ dyn_unload_builtin (name)
+      char *name;
+ {
+   struct builtin *b;
+   void *handle;
+-  int ref, i;
++  char *funcname;
++  sh_unload_func_t *unloadfunc;
++  int ref, i, size;
+ 
+   b = builtin_address_internal (name, 1);
+   if (b == 0)
+@@ -469,3 +473,14 @@
++  /* Call any unload function */
++  size = strlen (name);
++  funcname = xmalloc (size + sizeof (UNLOAD_SUFFIX) + 1);
++  strcpy (funcname, name);
++  strcpy (funcname + size, UNLOAD_SUFFIX);
++
++  unloadfunc = (sh_unload_func_t *)dlsym (handle, funcname);
++  if (unloadfunc)
++    (*unloadfunc) (name);
++  free (funcname);
++
+   /* Don't remove the shared object unless the reference count of builtins
+      using it drops to zero. */
+   if (ref == 1 && local_dlclose (handle) != 0)

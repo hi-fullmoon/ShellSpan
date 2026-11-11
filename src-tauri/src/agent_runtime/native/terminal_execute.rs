@@ -117,8 +117,11 @@ impl TerminalExecuteRegistry {
                 if Instant::now() >= limit {
                     return Err("TERMINAL_NATIVE_DEADLINE_EXPIRED".into());
                 }
-                if operation.snapshot()?.phase.is_terminal() {
-                    return Err("TERMINAL_COMMAND_STOPPED_BEFORE_SUBMISSION".into());
+                let snapshot = operation.snapshot()?;
+                if snapshot.phase.is_terminal() {
+                    return Err(snapshot
+                        .input_rejection
+                        .unwrap_or_else(|| "TERMINAL_COMMAND_STOPPED_BEFORE_SUBMISSION".into()));
                 }
                 Ok(())
             };
@@ -147,6 +150,21 @@ impl TerminalExecuteRegistry {
                 WAIT_SLICE.min(limit.saturating_duration_since(Instant::now())),
             )?;
         }
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        if std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_CUT").as_deref() == Ok("input-complete") {
+            let current = coordinator
+                .lock()
+                .map_err(|_| "TERMINAL_NATIVE_COORDINATOR_UNAVAILABLE")?;
+            crate::terminal_command::acceptance_trace::record(
+                "input-complete-observed",
+                serde_json::json!({"identity":current.identity()?}),
+            )?;
+        }
         check(revalidate)?;
         coordinator
             .lock()
@@ -172,6 +190,39 @@ impl TerminalExecuteRegistry {
                 WAIT_SLICE.min(limit.saturating_duration_since(Instant::now())),
             )?;
         }
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        if std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_CUT").as_deref() == Ok("armed") {
+            let current = coordinator
+                .lock()
+                .map_err(|_| "TERMINAL_NATIVE_COORDINATOR_UNAVAILABLE")?;
+            crate::terminal_command::acceptance_trace::record(
+                "armed-observed",
+                serde_json::json!({"identity":current.identity()?}),
+            )?;
+        }
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        if crate::terminal_command::acceptance_trace::repeat_commit_enabled()? {
+            let mut current = coordinator
+                .lock()
+                .map_err(|_| "TERMINAL_NATIVE_COORDINATOR_UNAVAILABLE")?;
+            let identity = current.identity()?;
+            let repeated =
+                current.arm_commit(|bytes| sessions.write_native_control(session, bytes, false));
+            crate::terminal_command::acceptance_trace::record(
+                "duplicate-arm-returned",
+                serde_json::json!({"identity":identity,"admitted":repeated.is_ok(),"error":repeated.err()}),
+            )?;
+        }
         coordinator
             .lock()
             .map_err(|_| "TERMINAL_NATIVE_COORDINATOR_UNAVAILABLE")?
@@ -179,6 +230,26 @@ impl TerminalExecuteRegistry {
                 || check(revalidate),
                 || sessions.write_session_input(session, "\x18a".into()),
             )?;
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        if crate::terminal_command::acceptance_trace::repeat_commit_enabled()? {
+            let current = coordinator
+                .lock()
+                .map_err(|_| "TERMINAL_NATIVE_COORDINATOR_UNAVAILABLE")?;
+            let identity = current.identity()?;
+            let repeated = current.submit(
+                || check(revalidate),
+                || sessions.write_session_input(session, "\x18a".into()),
+            );
+            crate::terminal_command::acceptance_trace::record(
+                "duplicate-submit-returned",
+                serde_json::json!({"identity":identity,"admitted":repeated.is_ok(),"error":repeated.err()}),
+            )?;
+        }
         Ok(())
     }
 
@@ -928,9 +999,27 @@ impl TerminalExecuteRegistry {
         agent_session_id: &str,
         operation_id: &str,
     ) -> Result<bool, String> {
-        self.leases
-            .validate_control_owner(session_id, agent_session_id, operation_id)?;
+        let lease =
+            self.leases
+                .validate_control_owner(session_id, agent_session_id, operation_id)?;
         let registration = self.registration(session_id, operation_id)?;
+        if registration.agent_session_id != lease.agent_session_id
+            || registration.task_id != lease.task_id
+        {
+            return Err(TerminalLeaseError::OwnerMismatch.to_string());
+        }
+        registration.operation.fence_takeover()?;
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        crate::terminal_command::acceptance_trace::control_request(
+            agent_session_id,
+            Some(operation_id),
+            "takeover-owner-validated",
+        )?;
         let result = self.stop_native(
             sessions,
             session_id,

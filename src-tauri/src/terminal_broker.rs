@@ -633,6 +633,7 @@ struct TerminalCommandData {
         )
     )]
     native_editor_ready_confirmed: bool,
+    native_prepare_rejected: bool,
     native_empty_confirmed: bool,
     native_checkpoint: Option<(String, bool)>,
     native_private_checkpoint: Option<(String, String, bool)>,
@@ -644,6 +645,7 @@ struct TerminalCommandData {
     source_may_be_enqueued: bool,
     integration_id: Option<String>,
     revision: u64,
+    takeover_pending: bool,
     interrupt_sent: bool,
     input_rejection: Option<String>,
     interrupt_uncertain: bool,
@@ -761,6 +763,7 @@ impl TerminalCommandOperation {
                 native_commit_armed: false,
                 native_coordinator_claimed: false,
                 native_editor_ready_confirmed: false,
+                native_prepare_rejected: false,
                 native_empty_confirmed: false,
                 native_checkpoint: None,
                 native_private_checkpoint: None,
@@ -772,6 +775,7 @@ impl TerminalCommandOperation {
                 source_may_be_enqueued: false,
                 integration_id,
                 revision: 1,
+                takeover_pending: false,
                 interrupt_sent: false,
                 input_rejection: None,
                 interrupt_uncertain: false,
@@ -832,7 +836,13 @@ impl TerminalCommandOperation {
     ) -> Result<(), String> {
         let identity = {
             let data = self.lock()?;
-            if !data.lifecycle.can_edit() || data.submission_intent_recorded {
+            if data.takeover_pending {
+                return Err("TERMINAL_LEASE_TAKEN_OVER".into());
+            }
+            if !data.lifecycle.can_edit()
+                || data.submission_intent_recorded
+                || data.native_prepare_rejected
+            {
                 return Err("TERMINAL_SUBMISSION_ALREADY_RECORDED".into());
             }
             if data.requires_complete_proof
@@ -852,6 +862,19 @@ impl TerminalCommandOperation {
             return Err("TERMINAL_COMMAND_EVENT_REJECTED".into());
         }
         data.submission_intent_recorded = true;
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        {
+            drop(data);
+            crate::terminal_command::acceptance_trace::record(
+                "intent-record-returned",
+                serde_json::json!({"identity":identity}),
+            )?;
+        }
         Ok(())
     }
 
@@ -918,6 +941,20 @@ impl TerminalCommandOperation {
         Ok(command_snapshot(&data))
     }
 
+    /// Fence this exact operation before waiting for the native coordinator.
+    /// Final admission checks the same data lock before marking an attempt.
+    /// Only the later control path may claim the clear or interrupt.
+    pub(crate) fn fence_takeover(&self) -> Result<(), String> {
+        let mut data = self.lock()?;
+        if !data.lifecycle.is_terminal()
+            && !data.lifecycle.may_have_submitted()
+            && data.lifecycle.requested_settlement().is_none()
+        {
+            data.takeover_pending = true;
+        }
+        Ok(())
+    }
+
     pub(crate) fn request_settlement(
         &self,
         requested: TerminalCommandRequestedSettlement,
@@ -943,6 +980,11 @@ impl TerminalCommandOperation {
             return Ok(false);
         }
         if data.lifecycle.requested_settlement().is_none() {
+            let requested = if data.takeover_pending {
+                TerminalCommandRequestedSettlement::TakenOver
+            } else {
+                requested
+            };
             if let Some(state) = broker.as_mut() {
                 let Some(record) = state
                     .sessions
@@ -1091,13 +1133,15 @@ impl TerminalCommandOperation {
     pub(crate) fn native_observation_pending(&self) -> Result<bool, String> {
         let data = self.lock()?;
         Ok(data.native_protocol
-            && matches!(
+            && ((matches!(
                 data.lifecycle.phase(),
                 CommandPhase::Uncertain | CommandPhase::RecoveryRequired
-            )
-            && !data.lifecycle.ended()
-            && !data.lifecycle.draft_cleared()
-            && (data.lifecycle.may_have_submitted() || data.source_may_be_enqueued))
+            ) && !data.lifecycle.ended()
+                && !data.lifecycle.draft_cleared()
+                && (data.lifecycle.may_have_submitted() || data.source_may_be_enqueued))
+                || (data.native_prepare_rejected
+                    && !data.native_editor_ready_confirmed
+                    && data.source_may_be_enqueued)))
     }
 
     pub(crate) fn native_capture_complete(&self) -> Result<bool, String> {
@@ -4740,6 +4784,12 @@ impl TerminalSessionBroker {
                     record.last_native_prepared = Some(data.intent.identity.clone());
                 }
                 if input_kind == TerminalInputKind::Executable {
+                    if data.takeover_pending {
+                        return Err("TERMINAL_LEASE_TAKEN_OVER".into());
+                    }
+                    if data.native_prepare_rejected {
+                        return Err("TERMINAL_NATIVE_SOURCE_REJECTED".into());
+                    }
                     if !data.submission_intent_recorded {
                         return Err("TERMINAL_SUBMISSION_INTENT_REQUIRED".into());
                     }

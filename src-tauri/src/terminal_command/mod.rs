@@ -1,5 +1,12 @@
 //! Command facts are owned by the Broker's existing operation mutex.
 //! This module provides values/reducers and durable fencing, never a PTY writer.
+#[cfg(all(
+    feature = "native-input-acceptance",
+    debug_assertions,
+    target_os = "macos",
+    target_arch = "aarch64"
+))]
+pub(crate) mod acceptance_trace;
 pub(crate) mod artifacts;
 pub(crate) mod bash;
 pub(crate) mod capture;

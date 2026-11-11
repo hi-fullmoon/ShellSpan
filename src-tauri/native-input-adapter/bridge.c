@@ -1,9 +1,17 @@
 /* ShellSpan NIP loadable builtin; compile against the verified target headers.
- * No Bash evaluator, parser, or private Readline symbols are used. */
+ * The target Bash parser is used only in a bounded parse-only fork. No user
+ * source is evaluated there, and no private Readline symbols are used. */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1
 #endif
+#include <config.h>
+#include <sys/types.h>
+#include "shell.h"
 #include "builtins.h"
+#include "builtins/common.h"
+#include "bashjmp.h"
+#include "trap.h"
+#include "flags.h"
 #include <stdlib.h>
 #include <errno.h>
 #include <stdio.h>
@@ -16,6 +24,10 @@
 #include <unistd.h>
 #include <langinfo.h>
 #include <signal.h>
+#include <stdint.h>
+#include <fcntl.h>
+#include <sys/wait.h>
+#include <time.h>
 #ifdef __GLIBC__
 #include <gnu/libc-version.h>
 #endif
@@ -30,6 +42,9 @@ extern int ss_native_control_begin(const char *handle, const char *action, const
 extern int ss_native_control_end(int status, const char *cwd);
 extern void ss_native_control_returned(void);
 extern int p0_tick(void);
+extern int p0_pending_validation(uint64_t *, char **, char **, uint64_t *);
+extern void p0_validation_text_free(char *);
+extern int p0_validation_complete(uint64_t, int);
 extern int p0_needs_tick(void);
 extern void p0_editor_ready(int bindings_valid);
 extern int p0_commit_key(int count, int key);
@@ -382,6 +397,80 @@ static int editor_ready(void) {
   p0_editor_ready(p0_bindings_valid());
   return 0;
 }
+static uint64_t validation_clock_ms(void) {
+  struct timespec time;
+  if (clock_gettime(CLOCK_MONOTONIC, &time) != 0) return 0;
+  return (uint64_t)time.tv_sec * 1000 + (uint64_t)time.tv_nsec / 1000000;
+}
+static int parse_only_child(const char *source, const char *plan) {
+  const int flags = SEVAL_NOHIST | SEVAL_RESETLINE | SEVAL_PARSEONLY;
+  char *source_copy, *plan_copy;
+  int sink = open("/dev/null", O_RDWR);
+  if (sink < 0 || dup2(sink, STDIN_FILENO) < 0 ||
+      dup2(sink, STDOUT_FILENO) < 0 || dup2(sink, STDERR_FILENO) < 0) _exit(2);
+  if (sink > STDERR_FILENO) close(sink);
+  /* An inherited DEBUG/ERR/EXIT trap must never run user commands in this
+   * parse-only child, including on a parser error or non-local exit. */
+  function_trace_mode = error_trace_mode = 0;
+  restore_original_signals();
+  initialize_traps();
+  signal(SIGALRM, SIG_DFL);
+  alarm(1);
+  if (setjmp(top_level) != 0) _exit(2);
+  source_copy = strdup(source);
+  plan_copy = strdup(plan);
+  if (!source_copy || !plan_copy) _exit(2);
+  if (parse_and_execute(source_copy, "ShellSpan source validation", flags) != 0) _exit(2);
+  if (parse_and_execute(plan_copy, "ShellSpan plan validation", flags) != 0) _exit(2);
+  _exit(0);
+}
+static void validate_pending_input(void) {
+  uint64_t request, budget, start;
+  char *source = NULL, *plan = NULL;
+  sigset_t blocked, previous;
+  struct sigaction child_action;
+  pid_t child = -1, waited;
+  int status = 0, valid = 0, masked = 0;
+  if (!p0_pending_validation(&request, &source, &plan, &budget)) return;
+  sigemptyset(&blocked);
+  sigaddset(&blocked, SIGCHLD);
+  sigaddset(&blocked, SIGINT);
+  /* Bash must not reap this private child or jump across a Rust completion
+   * frame. Restore the exact parent mask only after all Rust calls return. */
+  if (sigprocmask(SIG_BLOCK, &blocked, &previous) == 0) {
+    masked = 1;
+    start = validation_clock_ms();
+    /* Keep the same interactive grammar as builtin eval. Refuse a child
+     * lifecycle that would auto-reap: its PID must remain owned until wait. */
+    if (budget > 0 && start != 0 && sigaction(SIGCHLD, NULL, &child_action) == 0 &&
+        child_action.sa_handler != SIG_IGN && !(child_action.sa_flags & SA_NOCLDWAIT)) child = fork();
+    if (child == 0) {
+      sigprocmask(SIG_SETMASK, &previous, NULL);
+      parse_only_child(source, plan);
+    }
+    if (child > 0) {
+      for (;;) {
+        waited = waitpid(child, &status, WNOHANG);
+        if (waited == child) {
+          valid = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+          break;
+        }
+        if (waited < 0 && errno != EINTR) break;
+        if (validation_clock_ms() == 0 || validation_clock_ms() - start >= budget) break;
+        struct timespec delay = {0, 1000000};
+        nanosleep(&delay, NULL);
+      }
+      if (waited == 0 || (waited < 0 && errno == EINTR)) {
+        kill(child, SIGKILL);
+        while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
+      }
+    }
+  }
+  p0_validation_text_free(source);
+  p0_validation_text_free(plan);
+  if (p0_validation_complete(request, valid)) p0_editor_ready(p0_bindings_valid());
+  if (masked) sigprocmask(SIG_SETMASK, &previous, NULL);
+}
 static int event_tick(void) {
   int saved_errno = errno;
 #if RL_READLINE_VERSION >= 0x0700
@@ -392,6 +481,7 @@ static int event_tick(void) {
   }
 #endif
   p0_tick();
+  validate_pending_input();
   errno = saved_errno;
   return 0;
 }

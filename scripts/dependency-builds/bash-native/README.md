@@ -39,6 +39,15 @@ No user startup or inputrc file is changed. The actual editor ABI remains 6.0;
 this does not relabel the dependency as Readline 7.0. The affected Readline
 source files and the backport patch are recorded in the build provenance.
 
+The macOS Bash 4.1 target backports Bash 4.4's loadable-builtin unload callback
+lookup and call. Its original `enable -d` removes the builtin without invoking
+`ss_native_input_builtin_unload`, leaving the adapter's private socket and
+Readline bindings active. The backport invokes the existing teardown before
+deleting the builtin, preserving the adapter's required `RTLD_NODELETE` pin for
+registered fork handlers. It adds no acceptance-only close command. The exact
+patch, resulting `builtins/enable.def` and `general.h` hashes accompany the build.
+Other target versions and non-macOS application of this patch are unchanged.
+
 Darwin Bash 4.1 additionally receives the standard `ioctl` and signal headers
 present in the newer GNU sources. The variadic `ioctl` declaration must be
 visible even when Darwin's termios headers already define `TIOCGWINSZ`.

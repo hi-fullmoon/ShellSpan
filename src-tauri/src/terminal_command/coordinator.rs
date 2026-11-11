@@ -147,10 +147,15 @@ impl TerminalSessionBroker {
         {
             return Err("TERMINAL_NATIVE_IDENTITY_MISMATCH".into());
         }
+        let mut ready_operation = None;
         if let Some(command) = &record.active_command {
             let mut data = command.lock()?;
+            let rejected_prepare = data.native_prepare_rejected
+                && !data.lifecycle.may_have_submitted()
+                && !data.native_commit_armed;
             let finished = data.lifecycle.ended()
                 || data.lifecycle.draft_cleared()
+                || rejected_prepare
                 || data.lifecycle.phase() == CommandPhase::Cancelled
                     && !data.source_may_be_enqueued;
             if !finished {
@@ -163,8 +168,14 @@ impl TerminalSessionBroker {
             if !data.source_may_be_enqueued && after_command != &record.last_native_prepared {
                 return Ok(());
             }
+            if rejected_prepare && !data.lifecycle.is_terminal() {
+                // The refusal alone never returns editing. This is the real
+                // editor's empty/owned-draft-absent fact for this exact identity.
+                data.lifecycle.apply(CommandEvent::PreparationFailed)?;
+            }
             data.native_editor_ready_confirmed = true;
             data.revision = next_command_revision(data.revision)?;
+            ready_operation = Some(Arc::clone(command));
         } else if after_command != &record.last_native_prepared {
             return Ok(());
         }
@@ -172,6 +183,10 @@ impl TerminalSessionBroker {
         record.command_input_pending =
             record.native_recovery_required || record.native_clear_pending.is_some();
         advance_integration_state_revision(record)?;
+        drop(state);
+        if let Some(operation) = ready_operation {
+            operation.notify();
+        }
         self.changed.notify_all();
         Ok(())
     }
@@ -395,6 +410,9 @@ impl NativeInputCoordinator {
         {
             return Err("TERMINAL_BROKER_STALE_GENERATION".into());
         }
+        if require_lease && data.takeover_pending {
+            return Err("TERMINAL_LEASE_TAKEN_OVER".into());
+        }
         if require_lease && !record.lease.as_ref().is_some_and(|lease|lease.lease_id == data.intent.identity.lease_id
             && lease.revision == data.intent.identity.lease_generation
             && matches!(&lease.owner, TerminalLeaseOwner::Agent {agent_session_id, task_id, operation_id,..}
@@ -482,7 +500,9 @@ impl NativeInputCoordinator {
     ) -> Result<(), String> {
         {
             let data = self.operation.lock()?;
-            if data.lifecycle.phase() != CommandPhase::InputConfirmed || data.input_proof.is_none()
+            if data.native_prepare_rejected
+                || data.lifecycle.phase() != CommandPhase::InputConfirmed
+                || data.input_proof.is_none()
             {
                 return Err("TERMINAL_INPUT_PROOF_REQUIRED".into());
             }
@@ -516,6 +536,16 @@ impl NativeInputCoordinator {
             .request("commit", payload)?
             .encode()
             .map_err(wire_error)?;
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        crate::terminal_command::acceptance_trace::record(
+            "arm-preflight-returned",
+            serde_json::json!({"identity":self.identity()?}),
+        )?;
         self.admit(TerminalInputKind::NativeControl, &bytes, || enqueue(&bytes))
     }
 
@@ -527,7 +557,10 @@ impl NativeInputCoordinator {
         let result = self
             .operation
             .record_submission_intent(&self.broker.submission_journal);
-        if result.is_err() {
+        if result
+            .as_ref()
+            .is_err_and(|error| error != "TERMINAL_LEASE_TAKEN_OVER")
+        {
             let _ = self.control_closed();
         }
         result?;
@@ -557,6 +590,16 @@ impl NativeInputCoordinator {
             }
         }
         revalidate()?;
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        crate::terminal_command::acceptance_trace::record(
+            "executable-preflight-returned",
+            serde_json::json!({"identity":self.identity()?}),
+        )?;
         // Broker rechecks proof, durable intent, native arm and the same lease
         // under its final admission lock, before a single real accept-key enqueue.
         self.admit(TerminalInputKind::Executable, b"\x18a", enqueue_key)
@@ -590,6 +633,11 @@ impl NativeInputCoordinator {
             return Err("TERMINAL_NATIVE_INTERRUPT_REQUIRED".into());
         }
         if !self.operation.request_settlement(reason)? {
+            return Ok(());
+        }
+        if self.operation.lock()?.native_prepare_rejected {
+            // The peer already refused preparation; an unrelated CancelDraft
+            // cannot replace the pending exact EditorReady observation.
             return Ok(());
         }
         if !self.operation.source_may_have_been_enqueued()? {
@@ -781,6 +829,19 @@ impl NativeInputCoordinator {
             Payload::Settled { .. } => ("prepare", "settled"),
             Payload::DraftCleared { .. } => ("cancel", "cleared"),
             Payload::Snapshot { .. } => ("query", "snapshot"),
+            Payload::Rejected {
+                code: nip::ErrorCode::Binding,
+            } if self.requests.get("prepare") == Some(&message.request_id)
+                && self.receipts.contains_key("prepared")
+                && !data.lifecycle.may_have_submitted()
+                && !data.native_commit_armed
+                && data.input_proof.is_none()
+                && (data.lifecycle.can_edit()
+                    || data.lifecycle.phase() == CommandPhase::CancelRequested
+                    || data.native_prepare_rejected) =>
+            {
+                ("prepare", "rejected")
+            }
             Payload::Rejected { .. } => return Err("TERMINAL_NATIVE_REQUEST_REJECTED".into()),
             _ => return Err("TERMINAL_NATIVE_UNEXPECTED_MESSAGE".into()),
         };
@@ -805,7 +866,8 @@ impl NativeInputCoordinator {
                 {
                     return Err("TERMINAL_INPUT_PROOF_MISMATCH".into());
                 }
-                if !data.lifecycle.can_edit()
+                if data.native_prepare_rejected
+                    || !data.lifecycle.can_edit()
                     || data.lifecycle.phase() == CommandPhase::InputConfirmed
                 {
                     return Ok(());
@@ -815,7 +877,7 @@ impl NativeInputCoordinator {
                 if *applied_utf8_bytes > data.intent.source().len() {
                     return Err("TERMINAL_INPUT_PROOF_MISMATCH".into());
                 }
-                if !data.lifecycle.can_edit() {
+                if data.native_prepare_rejected || !data.lifecycle.can_edit() {
                     return Ok(());
                 }
             }
@@ -835,7 +897,7 @@ impl NativeInputCoordinator {
                     *cursor_utf8_bytes,
                     *end_utf8_bytes,
                 )?;
-                if !data.lifecycle.can_edit() {
+                if data.native_prepare_rejected || !data.lifecycle.can_edit() {
                     return Ok(());
                 }
             }
@@ -863,6 +925,11 @@ impl NativeInputCoordinator {
             self.receipts.insert(receipt, digest);
         }
         match message.payload {
+            Payload::Rejected { code } => {
+                data.native_prepare_rejected = true;
+                data.input_rejection =
+                    Some(format!("TERMINAL_NATIVE_SOURCE_REJECTED: {}", code.code()));
+            }
             Payload::ControlInputConfirmed {
                 plan_digest,
                 editor_empty,
@@ -873,7 +940,7 @@ impl NativeInputCoordinator {
                     &plan_digest,
                     editor_empty,
                 )?;
-                if !data.lifecycle.can_edit() {
+                if data.native_prepare_rejected || !data.lifecycle.can_edit() {
                     return Ok(());
                 }
                 data.input_proof = Some(proof);

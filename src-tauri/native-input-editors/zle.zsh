@@ -106,7 +106,8 @@ __shellspan_nip_dispatch() {
       __shellspan_diagnostic=$("$__shellspan_nip_parser" -f "${__shellspan_parse_options[@]}" -n -c "$SS_NIP_VALIDATION_PLAN" 2>&1) && [[ -z $__shellspan_diagnostic ]]; then
       builtin ss_nip validate 1
     else
-      builtin ss_nip validate 0
+      builtin ss_nip validate 0 || return 1
+      builtin ss_nip ready "$BUFFER" "$CURSOR" "$PWD"
     fi
   elif (( SS_NIP_ACTION )); then
     if (( SS_NIP_ACTION == 1 )); then

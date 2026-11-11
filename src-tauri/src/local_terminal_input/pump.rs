@@ -25,6 +25,17 @@ impl LocalInputPump {
         session_id: String,
         on_control_failure: impl Fn() + Send + 'static,
     ) -> Self {
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_arch = "aarch64"
+        ))]
+        if crate::terminal_command::acceptance_trace::enabled() {
+            writer = Box::new(crate::terminal_command::acceptance_trace::PtyWriter::wrap(
+                writer,
+                session_id.clone(),
+            ));
+        }
         // SessionCommand already enters an unbounded FIFO at SessionManager.
         // Preserve that order, including NativeControlFrame's inflight guard,
         // without blocking the sole consumer of the bounded output queue.

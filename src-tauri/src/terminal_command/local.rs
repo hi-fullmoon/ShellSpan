@@ -229,6 +229,13 @@ impl PreparedNativeBash {
         let writer = socket.clone();
         let stopped = Arc::new(AtomicBool::new(false));
         let done = stopped.clone();
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        let trace_control_id = probe.connection.control_id.clone();
         let thread = thread::spawn(move || {
             let _root = self.root;
             let result = (|| -> Result<(), String> {
@@ -256,13 +263,31 @@ impl PreparedNativeBash {
                 stream
                     .set_write_timeout(Some(Duration::from_secs(1)))
                     .map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?;
-                stream
-                    .write_all(
-                        &probe
-                            .encode()
-                            .map_err(|_| "TERMINAL_NATIVE_PROTOCOL_INVALID")?,
-                    )
-                    .map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?;
+                let probe_bytes = probe
+                    .encode()
+                    .map_err(|_| "TERMINAL_NATIVE_PROTOCOL_INVALID")?;
+                #[cfg(all(
+                    feature = "native-input-acceptance",
+                    debug_assertions,
+                    target_os = "macos",
+                    target_arch = "aarch64"
+                ))]
+                super::acceptance_trace::record(
+                    "control-send-attempt",
+                    serde_json::json!({"controlId":probe.connection.control_id,"hex":hex::encode(&probe_bytes)}),
+                )?;
+                let sent = stream.write_all(&probe_bytes);
+                #[cfg(all(
+                    feature = "native-input-acceptance",
+                    debug_assertions,
+                    target_os = "macos",
+                    target_arch = "aarch64"
+                ))]
+                super::acceptance_trace::record(
+                    "control-send-return",
+                    serde_json::json!({"controlId":probe.connection.control_id,"ok":sent.is_ok(),"partialUnknown":sent.is_err()}),
+                )?;
+                sent.map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?;
                 *writer
                     .lock()
                     .map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE")? = Some(
@@ -275,12 +300,32 @@ impl PreparedNativeBash {
                 while !done.load(Ordering::Acquire) {
                     match stream.read(&mut bytes) {
                         Ok(0) => {
+                            #[cfg(all(
+                                feature = "native-input-acceptance",
+                                debug_assertions,
+                                target_os = "macos",
+                                target_arch = "aarch64"
+                            ))]
+                            super::acceptance_trace::record(
+                                "control-eof",
+                                serde_json::json!({"controlId":probe.connection.control_id}),
+                            )?;
                             decoder
                                 .finish()
                                 .map_err(|_| "TERMINAL_NATIVE_PARTIAL_FRAME_EOF")?;
                             break;
                         }
                         Ok(count) => {
+                            #[cfg(all(
+                                feature = "native-input-acceptance",
+                                debug_assertions,
+                                target_os = "macos",
+                                target_arch = "aarch64"
+                            ))]
+                            super::acceptance_trace::record(
+                                "control-receive",
+                                serde_json::json!({"controlId":probe.connection.control_id,"hex":hex::encode(&bytes[..count])}),
+                            )?;
                             for message in decoder
                                 .push(&bytes[..count])
                                 .map_err(|_| "TERMINAL_NATIVE_PROTOCOL_INVALID")?
@@ -300,6 +345,19 @@ impl PreparedNativeBash {
                 }
                 Ok(())
             })();
+            #[cfg(all(
+                feature = "native-input-acceptance",
+                debug_assertions,
+                target_os = "macos",
+                target_arch = "aarch64"
+            ))]
+            let result = {
+                let captured = super::acceptance_trace::record(
+                    "control-closed",
+                    serde_json::json!({"controlId":probe.connection.control_id,"error":result.as_ref().err()}),
+                );
+                result.and(captured)
+            };
             if let Err(reason) = result {
                 log::warn!(
                     "Native terminal control failed terminal_session_id={}: {reason}",
@@ -318,11 +376,25 @@ impl PreparedNativeBash {
             socket,
             stopped,
             thread: Some(thread),
+            #[cfg(all(
+                feature = "native-input-acceptance",
+                debug_assertions,
+                target_os = "macos",
+                target_arch = "aarch64"
+            ))]
+            trace_control_id,
         }
     }
 }
 
 pub(crate) struct NativeControlHandle {
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    trace_control_id: String,
     socket: Arc<Mutex<Option<UnixStream>>>,
     stopped: Arc<AtomicBool>,
     thread: Option<thread::JoinHandle<()>>,
@@ -332,13 +404,35 @@ impl NativeControlHandle {
         if bytes.len() > nip::MAX_MESSAGE_BYTES || self.stopped.load(Ordering::Acquire) {
             return Err("TERMINAL_NATIVE_CONTROL_UNAVAILABLE".into());
         }
-        self.socket
+        let mut socket = self
+            .socket
             .lock()
-            .map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?
+            .map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?;
+        let stream = socket
             .as_mut()
-            .ok_or("TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?
-            .write_all(bytes)
-            .map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE".into())
+            .ok_or("TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?;
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        super::acceptance_trace::record(
+            "control-send-attempt",
+            serde_json::json!({"controlId":self.trace_control_id,"hex":hex::encode(bytes)}),
+        )?;
+        let result = stream.write_all(bytes);
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        super::acceptance_trace::record(
+            "control-send-return",
+            serde_json::json!({"controlId":self.trace_control_id,"ok":result.is_ok(),"partialUnknown":result.is_err()}),
+        )?;
+        result.map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE".into())
     }
 }
 impl Drop for NativeControlHandle {
