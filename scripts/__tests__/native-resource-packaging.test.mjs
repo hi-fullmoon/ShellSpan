@@ -7,7 +7,7 @@ import {copyNativeRebuildSources} from '../native-input-p2/rebuild-sources.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
 
-it('runs the real default-denial packager twice without changing legacy output or bundling its backup', async () => {
+it('packs an unsupported target twice and rejects a missing catalogue for an admitted target', async () => {
   const artifacts = path.join(root, '.artifacts/tests/native-resource-packaging');
   await mkdir(artifacts, { recursive: true });
   const directory = await mkdtemp(path.join(artifacts, 'run-'));
@@ -20,16 +20,20 @@ it('runs the real default-denial packager twice without changing legacy output o
     const legacy = path.join(directory, 'src-tauri/resources/native-input/generated');
     await mkdir(legacy, { recursive: true });
     await writeFile(path.join(legacy, 'retained.txt'), 'owned prior fixture');
-    const execute = () => spawnSync(process.execPath, ['scripts/prepare-native-input-resources.mjs',
-      '--no-build', '--target', 'x86_64-pc-windows-msvc'], { cwd: directory, windowsHide: true, encoding: 'utf8', timeout: 10_000 });
-    const first = execute();
+    const execute = (target) => spawnSync(process.execPath, ['scripts/prepare-native-input-resources.mjs',
+      '--no-build', '--target', target], { cwd: directory, windowsHide: true, encoding: 'utf8', timeout: 10_000 });
+    const first = execute('unsupported');
     expect(first.status, first.stderr).toBe(0);
     const output = JSON.parse(first.stdout);
     expect(output.directory).toBe(nativeInputReleaseDirectory(directory));
     const manifest = JSON.parse(await readFile(path.join(output.directory, 'resource-manifest.json'), 'utf8'));
     expect(manifest).toMatchObject({ targets: [], unsupportedHost: true, validationOnly: false });
     expect(await readdir(output.directory)).toEqual(['resource-manifest.json']);
-    const second = execute();
+    const missing = execute('x86_64-pc-windows-msvc');
+    expect(missing.status).not.toBe(0);
+    expect(missing.stderr).toContain('Required native editor catalogue missing: editors-windows-x64.json');
+    expect(JSON.parse(await readFile(path.join(output.directory, 'resource-manifest.json'), 'utf8'))).toEqual(manifest);
+    const second = execute('unsupported');
     expect(second.status, second.stderr).toBe(0);
     const repeated = JSON.parse(second.stdout);
     expect(repeated.previousRetained).toContain(path.join(directory, '.artifacts/releases/native-input/resource-build'));

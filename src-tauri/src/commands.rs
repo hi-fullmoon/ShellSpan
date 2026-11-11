@@ -791,7 +791,13 @@ fn create_local_session_blocking(
             error!("Failed to create local terminal session_id={session_id}: {error}");
             format!("failed to create local terminal: {error}")
         })?;
-    let mut command = CommandBuilder::new(&shell);
+    let executable = std::path::Path::new(&shell);
+    #[cfg(unix)]
+    let executable = prepared_native
+        .as_ref()
+        .and_then(|native| native.shell_override())
+        .unwrap_or(executable);
+    let mut command = CommandBuilder::new(executable);
     #[cfg(windows)]
     command.set_start_suspended(true);
     configure_local_terminal_environment(&mut command);
@@ -836,7 +842,7 @@ fn create_local_session_blocking(
     {
         crate::terminal_command::acceptance_trace::record(
             "owned-native-shell-started",
-            serde_json::json!({"transportSessionId":session_id,"childPid":child.process_id(),"executable":shell}),
+            serde_json::json!({"transportSessionId":session_id,"childPid":child.process_id(),"executable":executable}),
         )?;
     }
     #[cfg(windows)]

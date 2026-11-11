@@ -607,7 +607,7 @@ class TerminalControllerImpl implements TerminalController {
     // Every mode renders only PTY bytes. Decorations never receive source text.
     return this.inputMode === 'raw'
       ? { dispose() {}, rebind() {} }
-      : installTerminalCommandDecorations(this.terminal, this.sessionId);
+      : installTerminalCommandDecorations(this.terminal, this.sessionId, ptyInfo?.nativeDisplayBinding);
   }
 
   private async closeInputRendering(): Promise<void> {

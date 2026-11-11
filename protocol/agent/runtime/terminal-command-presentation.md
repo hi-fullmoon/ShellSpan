@@ -9,17 +9,18 @@ same-stream display options remain as documented in
 
 ## Read-only command ranges
 
-Integrated shells emit OSC 133 A before the prompt and C at command start.
-These optional, untrusted PTY markers delimit presentation only. They cannot
-acknowledge frontend readiness, approve input, prove execution, or release a lease.
+Legacy integrated shells emit OSC 133 A before the prompt and C at command start.
+Native editors use their negotiated display enter and exit markers to bound the
+draft, and the following capture marker retains that range before output. These
+untrusted PTY markers delimit presentation only. They cannot acknowledge frontend
+readiness, approve input, prove execution, or release a lease.
 
 `terminal-command-decorations.ts` keeps bounded ordered lease scopes and public
 xterm markers. It uses public buffer coordinates and DOM rectangles only to
 shade command rows. It does not consume `commandDisplay` or
 `commandSubmission`, keep another copy of source, hold rendering, or write text.
-Only a command-execution lease shades input; private job controls consume their
-ordered boundary without shading output. Missing/disposed markers may omit a
-decoration. Alternate screens retain their own display. Release, disposal and
+Only a command-execution lease shades input. Missing or disposed markers may
+omit a decoration. Alternate screens retain their own display. Release, disposal and
 transport rebind remove active presentation resources without clearing history.
 
 `terminal-registry.ts` renders every mode through the original Terminal.
@@ -71,8 +72,8 @@ This does not create a terminal source projection.
   missing captures fail. More than three visible states, over 500ms of progress,
   no disappearing painted source, exact source/copy/search and no extra input
   remain assertions. No legacy capture producer is called.
-- `pnpm test:terminal-command-presentation`: real ordinary-shell boundary
-  captures and read-only shading, followed by the same mandatory native suite.
+- `pnpm test:terminal-command-presentation`: real ordinary-shell and native ZLE
+  boundary captures and read-only shading, followed by the same mandatory native suite.
 - Real cancellation, FULL intent, duplicate/late commit, crash recovery, real
   output and stop semantics live in `terminal_native_protocol.rs`, native
   `local_tests.rs`/`zle_tests.rs` and P2/P3 App entry points.

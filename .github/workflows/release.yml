@@ -112,7 +112,7 @@ jobs:
           retention-days: 1
 
   build-native-bash:
-    name: Build verified Linux Bash resources
+    name: Build verified Linux Shell resources
     runs-on: ubuntu-24.04-arm
     needs: preflight
     steps:
@@ -125,6 +125,8 @@ jobs:
         run: |
           docker build -t shellspan-native-input-p2:local -f scripts/native-input-p2/Dockerfile scripts/native-input-p2
           docker run --rm --user "$(id -u):$(id -g)" -e CARGO_HOME=/tmp/cargo -v "$PWD:/work" shellspan-native-input-p2:local python3 -B scripts/native-input-p2/build.py
+          docker build -t shellspan-native-input-p3:local -f scripts/native-input-p3/Dockerfile scripts/native-input-p3
+          docker run --rm --user "$(id -u):$(id -g)" -e CARGO_HOME=/tmp/cargo -v "$PWD:/work" shellspan-native-input-p3:local sh scripts/native-input-p3/linux-build.sh
       - name: Upload source-verified native resources
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:

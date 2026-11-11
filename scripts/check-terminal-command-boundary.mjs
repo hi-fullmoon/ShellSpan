@@ -161,15 +161,24 @@ export async function checkTerminalCommandBoundary() {
     };
     visit(source);
   }
-  // ZLE/PSReadLine editor admission is closed. GNU Bash's independent artifact
-  // catalogue and exact shell SHA path are not governed by this policy file.
   const admission = JSON.parse(await readFile(resolve(root, 'protocol/agent/runtime/native-editor-admission.json'), 'utf8'));
-  assert.deepEqual(admission.productionProfiles, [], 'Unaccepted editor production profile enabled');
+  assert.equal(admission.version, 1);
+  assert(Array.isArray(admission.productionProfiles));
+  assert.equal(new Set(admission.productionProfiles).size, admission.productionProfiles.length);
+  const supportedProfiles = new Set([
+    'zsh-5.9-zle-5.9-macos-arm64-native',
+    'zsh-5.9-zle-5.9-linux-aarch64-glibc-2.36-native',
+    'windows-powershell-5.1.26100.9818-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native',
+    'powershell-7.6.9-psreadline-2.4.5-shellspan6-conpty1.25.260930003-graphemes-windows-x64-native',
+  ]);
+  for (const profile of admission.productionProfiles) {
+    assert(supportedProfiles.has(profile), `Unsupported production editor profile: ${profile}`);
+  }
   assert.deepEqual(failures, [], `Terminal command boundary violations:\n${failures.join('\n')}`);
   return { files, productionProfiles: admission.productionProfiles };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const result = await checkTerminalCommandBoundary();
-  console.log(`Terminal command boundary: ${result.files.length} files checked; editor production admission closed; GNU catalogue unchanged.`);
+  console.log(`Terminal command boundary: ${result.files.length} files checked; ${result.productionProfiles.length} production editor profiles.`);
 }

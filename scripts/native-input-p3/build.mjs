@@ -12,12 +12,15 @@ const log=openSync(resolve(directory,'build.log'),'a',0o600);
 function run(command,args,cwd=root){execFileSync(command,args,{cwd,stdio:['ignore',log,log]});}
 const archive=resolve(dependencies,'zsh-5.9.tar.xz');
 const sha=path=>createHash('sha256').update(readFileSync(path)).digest('hex');
-const coreProducerPath=process.env.SHELLSPAN_P3_SCOPED_CORE_PRODUCER;
-const coreProducer=coreProducerPath?JSON.parse(readFileSync(coreProducerPath,'utf8')):undefined;
-const boundHistory=target==='macos-arm64'&&coreProducer?.boundHistory===true;
+const buildScopedCore=process.argv.includes('--build-scoped-core');
 try{
   if(!existsSync(archive))run('curl',['--fail','--location','--proto','=https','--tlsv1.2','https://www.zsh.org/pub/old/zsh-5.9.tar.xz','-o',archive]);
   assert.equal(sha(archive),'9b8d1ecedd5b5e81fbf1918e876752a7dd948e05c1a0dba10ab863842d45acd5');
+  const coreProducerPath=buildScopedCore
+    ? resolve(JSON.parse(execFileSync(process.execPath,['scripts/native-input-p3/build-scoped-core.mjs',archive],{cwd:root,encoding:'utf8',stdio:['ignore','pipe',log]})).directory,'producer.json')
+    : process.env.SHELLSPAN_P3_SCOPED_CORE_PRODUCER;
+  const coreProducer=coreProducerPath?JSON.parse(readFileSync(coreProducerPath,'utf8')):undefined;
+  const boundHistory=target==='macos-arm64'&&coreProducer?.boundHistory===true;
   // Each SDK starts from the released archive. Copying a configured tree can
   // reorder mtimes and accidentally require regenerating released autotools.
   const sdk=resolve(directory,'sdk-build',randomUUID());mkdirSync(sdk,{recursive:true});
@@ -34,7 +37,7 @@ try{
   const flags=target==='macos-arm64'?['-bundle','-undefined','dynamic_lookup']:['-shared','-Wl,--exclude-libs,ALL'];
   run(process.env.CC??'cc',['-std=c11','-DMODULE','-fPIC',...(boundHistory?['-DSHELLSPAN_ZLE_BOUND_HISTORY=1']:[]),...flags,'-I',resolve(source,'Src'),
     'src-tauri/native-input-editors/zle.c','src-tauri/native-input-editors/target/release/libshellspan_native_input_editors.a','-lpthread','-ldl','-lm','-o',module]);
-  const shell=process.env.SHELLSPAN_P3_ZSH??coreProducer?.shell??'/bin/zsh';
+  const shell=(buildScopedCore?coreProducer?.shell:process.env.SHELLSPAN_P3_ZSH??coreProducer?.shell)??'/bin/zsh';
   assert.equal(execFileSync(shell,['-f','-c','print -rn -- $ZSH_VERSION'],{encoding:'utf8'}),'5.9');
   const id=`zsh-5.9-zle-5.9-${target}-native`;
   const profile={shell:'zsh',shellVersion:'5.9',editor:'zle',editorVersion:'5.9',editorNumericVersion:509,adapterVersion:'1',verifiedProfileId:id};

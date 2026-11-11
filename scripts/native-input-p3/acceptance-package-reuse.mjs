@@ -54,7 +54,6 @@ export async function readReusablePackage(owner,directory,root,dependencies,tool
     assert.equal(input.target,plan.target,'Retained stage target changed');const actual=captured[input.stage];
     const decision=reuseDecision(input,actual);assert(decision.reuse,`Retained ${input.stage} inputs changed: ${JSON.stringify(decision)}`);
   }
-  assert.deepEqual(read(resolve(root,'protocol/agent/runtime/native-editor-admission.json')).productionProfiles,[]);
   const resources=resolve(root,'.artifacts/tests/native-input-p2/resources/native-input');
   const catalogue=read(resolve(resources,'editors-windows-x64.json'));
   for(const profile of catalogue.profiles){

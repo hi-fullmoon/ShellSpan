@@ -203,13 +203,13 @@ function SessionRow({
             <DropdownMenuGroup>
               {canRename && (
                 <DropdownMenuItem onClick={onRename}>
-                  <PencilIcon />
+                  <PencilIcon className="scale-90 opacity-65" />
                   {t('ai.workspace.sessions.rename')}
                 </DropdownMenuItem>
               )}
               {canArchive && (
                 <DropdownMenuItem onClick={onArchive}>
-                  <ArchiveIcon />
+                  <ArchiveIcon className="scale-90 opacity-65" />
                   {t('ai.workspace.sessions.archive')}
                 </DropdownMenuItem>
               )}

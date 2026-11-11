@@ -1,5 +1,5 @@
 // Actual NSIS package/install/run/uninstall in an owned sealed source case.
-// Production editor admission stays closed; this checks its default raw policy.
+// Use an empty resource bundle for the raw editing control.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {mkdir,readFile,writeFile,appendFile,readdir,realpath,cp} from 'node:fs/promises';
@@ -40,7 +40,6 @@ const resourceAdmission=process.argv[5]==='resource-admission';
 const modelValidation=process.argv[5]==='model-validation';
 const modelSemantics=process.argv[5]==='model-semantics'||modelValidation;
 assert.equal(sha(await readFile(fileURLToPath(import.meta.url))),before['scripts/native-input-p3/windows-package-smoke.mjs'],'Controller differs from sealed source');
-const policy=JSON.parse(await readFile(resolve(root,'protocol/agent/runtime/native-editor-admission.json'),'utf8'));assert.deepEqual(policy.productionProfiles,[]);
 const id=randomUUID(),short=id.slice(0,8),directory=resolve(root,'.artifacts/tests/pk',short),install=resolve(directory,'i');
 assert(!fs.existsSync(directory));await mkdir(directory,{recursive:true});
 for(const name of ['home','data','webview'])await mkdir(resolve(directory,name));
@@ -114,7 +113,7 @@ let app,appDone,timer,releaseGui,observer,observerDone,installed=false,failure,i
 const observation=resolve(directory,'foreground.jsonl');
 const cleanup=[];
 try{
- await run('prepare',process.execPath,[resolve(root,'scripts/prepare-native-input-resources.mjs'),'--no-build','--target','x86_64-pc-windows-msvc']);
+ await run('prepare-raw-control',process.execPath,[resolve(root,'scripts/prepare-native-input-resources.mjs'),'--no-build','--target','unsupported']);
  let nativeModuleSha;
  if(nativeResources){
   await run('prepare-validation',process.execPath,[resolve(root,'scripts/prepare-native-input-resources.mjs'),'--no-build','--target','x86_64-pc-windows-msvc','--validation-editor','windows-x64']);

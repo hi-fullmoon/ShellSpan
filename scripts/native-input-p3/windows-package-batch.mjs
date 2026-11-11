@@ -58,7 +58,6 @@ async function main(){
   // The controller and all helper modules must belong to this exact snapshot.
   const controllerPaths=Object.keys(controllerSources).filter(path=>path.startsWith('scripts/native-input-p3/')||['scripts/native-input-p2/frozen-validation.mjs','scripts/native-input-p2/resource-paths.mjs','scripts/native-input-p2/gui-lock.mjs'].includes(path));
   for(const path of controllerPaths)assert.equal(await hashFile(resolve(owner,path)),controllerSources[path],`Controller differs from sealed source: ${path}`);
-  assert.deepEqual((await read(resolve(root,'protocol/agent/runtime/native-editor-admission.json'))).productionProfiles,[]);
   const runId=randomUUID(),directory=resolve(root,'.artifacts/tests/pk',runId.slice(0,8));let id=runId,short=id.slice(0,8),install=resolve(directory,'i');
   await mkdir(resolve(directory,'..'),{recursive:true});await mkdir(directory,{recursive:false});const write=(path,value)=>writeFile(path,JSON.stringify(value,null,2),{flag:'wx'});
   const phases=[],audits=backgroundQueue(2),abort=new AbortController(),cancelRequest=resolve(directory,'cancel.request.json');
@@ -125,7 +124,6 @@ async function main(){
     signal?.throwIfAborted();
     assert.deepEqual(captureValidationSources(root),sources,'Full source/index freeze drift');
     assert.deepEqual(captureValidationSources(controllerRoot),controllerSources,'Controller source/index freeze drift');
-    assert.deepEqual((await read(resolve(root,'protocol/agent/runtime/native-editor-admission.json'))).productionProfiles,[]);
     if(assetHashes)assert.deepEqual(captureValidationAssets(frontendDirectory),assetHashes,'Built frontend drift');
     if(resourceHashes)assert.deepEqual(captureValidationAssets(nativeInputReleaseDirectory(root)),resourceHashes,'Frozen package resource drift');
     if(inputRecords)assert.equal((await dependencyInventory(resolve(root,'node_modules'),{signal})).sha256,dependencies.sha256,'Installed dependency bytes or links changed');

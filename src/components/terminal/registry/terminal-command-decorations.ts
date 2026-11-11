@@ -1,10 +1,11 @@
 import type { IDisposable, IMarker, Terminal } from '@xterm/xterm';
+import type { NativeInputDisplayBinding } from '@/lib/terminal/native-input-display';
 import { agentTerminalLeaseState } from '../agent-terminal-lease-state';
 
 interface CommandRange {
   operationId: string;
   start: IMarker;
-  end?: IMarker;
+  end?: { marker: IMarker; exclusive: boolean };
   element?: HTMLDivElement;
 }
 
@@ -17,9 +18,14 @@ interface PendingCommand {
 }
 
 const MAX_PENDING_COMMANDS = 256;
+const NATIVE_CAPTURE_MARKER = /^ShellSpanCapture=[0-9a-f]{64}$/;
 
 /** Presentation only. OSC markers never acknowledge execution or release input. */
-export function installTerminalCommandDecorations(terminal: Terminal, sessionId: string): IDisposable & { rebind(): void } {
+export function installTerminalCommandDecorations(
+  terminal: Terminal,
+  sessionId: string,
+  nativeDisplay?: NativeInputDisplayBinding,
+): IDisposable & { rebind(): void } {
   const ranges = new Set<CommandRange>();
   const pendingCommands: PendingCommand[] = [];
   const submittedOperations = new Set<string>();
@@ -34,7 +40,7 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
     const lease = agentTerminalLeaseState.get(sessionId);
     if (!pending?.visible || !pending.range || lease?.takeoverRequested || lease?.takeoverFailed) return undefined;
     const typing = lease?.operationId === pending.operationId && lease.terminalOwned && lease.commandPhase === 'typing';
-    if (!pending.submitted && !typing) return undefined;
+    if (!typing && (nativeDisplay || !pending.submitted)) return undefined;
     if (pending.range.start.isDisposed) return undefined;
     return { operationId: pending.operationId, start: pending.range.start.line };
   };
@@ -43,7 +49,7 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
     ranges.delete(range);
     range.element?.remove();
     range.start.dispose();
-    range.end?.dispose();
+    range.end?.marker.dispose();
     if (!disposed) {
       terminal.refresh(0, terminal.rows - 1);
     }
@@ -60,6 +66,19 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
       ranges.add(pending.range);
     }
   };
+  const markEnd = (range: CommandRange) => {
+    range.end?.marker.dispose();
+    const marker = terminal.registerMarker(0);
+    // On shell handoff the cursor is usually at the start of the output row.
+    // Keep that row's marker so reflow moves the exclusive boundary with it.
+    range.end = marker ? { marker, exclusive: terminal.buffer.active.cursorX === 0 } : undefined;
+  };
+  const finishPendingCommand = (range: CommandRange) => {
+    const end = range.end;
+    if (!end || range.start.isDisposed || end.marker.line - Number(end.exclusive) < range.start.line) {
+      remove(range);
+    }
+  };
   const render = () => {
     frame = undefined;
     const buffer = terminal.buffer.active;
@@ -68,12 +87,14 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
     const rowHeight = screen.clientHeight / terminal.rows;
     const scope = displayScope();
     for (const range of ranges) {
-      if (range.start.isDisposed || range.end?.isDisposed) {
+      if (range.start.isDisposed || range.end?.marker.isDisposed) {
         remove(range);
         continue;
       }
       const typing = scope?.operationId === range.operationId;
-      const end = range.end?.line ?? buffer.baseY + buffer.cursorY;
+      const end = range.end
+        ? range.end.marker.line - Number(range.end.exclusive)
+        : buffer.baseY + buffer.cursorY;
       const first = Math.max(0, range.start.line - buffer.viewportY);
       const last = Math.min(terminal.rows - 1, end - buffer.viewportY);
       if (buffer.type !== 'normal' || first > last || !rowHeight || (!range.end && !typing)) {
@@ -97,7 +118,8 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
   };
   const syncLease = () => {
     const lease = agentTerminalLeaseState.get(sessionId);
-    const next = lease?.terminalOwned && typeof lease.commandExecution === 'boolean' ? lease.operationId : undefined;
+    const next = lease?.terminalOwned && typeof lease.commandExecution === 'boolean'
+      && (!nativeDisplay || lease.commandExecution) ? lease.operationId : undefined;
     const visible = lease?.commandExecution === true;
     if (next && lease?.commandPhase === 'running') {
       submittedOperations.add(next);
@@ -113,8 +135,8 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
     terminal.write('', () => {
       if (disposed) return;
       if (released) {
-        // Running is published under the submission fence before release. A
-        // request aborted before submission has no C (or new prompt) to consume.
+        // Running is published under the submission fence before release. An
+        // aborted draft has no command start boundary to consume.
         if (!submittedOperations.has(released)) {
           const index = pendingCommands.findIndex(pending => pending.operationId === released);
           if (index >= 0) {
@@ -126,7 +148,7 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
       }
       // Submitted scopes survive release until their ordered PTY boundary.
       if (!next) {
-        startPendingCommand();
+        if (!nativeDisplay) startPendingCommand();
         schedule();
         return;
       }
@@ -137,12 +159,34 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
         if (expired?.range) remove(expired.range);
       }
       pendingCommands.push({ operationId: next, visible, anchored: false, submitted: submittedOperations.has(next) });
-      startPendingCommand();
+      if (!nativeDisplay) startPendingCommand();
       schedule();
     });
   };
-  const subscriptions = [
-    terminal.parser.registerOscHandler(133, (data) => {
+  const boundaryHandler = nativeDisplay
+    ? terminal.parser.registerOscHandler(nativeDisplay.oscIdentifier, data => {
+      if (terminal.buffer.active.type !== 'normal') return false;
+      if (data === nativeDisplay.enterPayload) {
+        startPendingCommand();
+        const range = pendingCommands[0]?.range;
+        // Readline can briefly leave display mode to process a resize.
+        range?.end?.marker.dispose();
+        if (range) range.end = undefined;
+      } else if (data === nativeDisplay.exitPayload) {
+        const range = pendingCommands[0]?.range;
+        if (range && !range.end) markEnd(range);
+      } else if (NATIVE_CAPTURE_MARKER.test(data) && pendingCommands[0]?.range) {
+        // The first capture boundary after editor handoff is before output.
+        // Keep the editor's end marker, even if the cursor has since moved.
+        const pending = pendingCommands.shift();
+        if (pending?.range) finishPendingCommand(pending.range);
+      } else {
+        return false;
+      }
+      schedule();
+      return false;
+    })
+    : terminal.parser.registerOscHandler(133, data => {
       if (data === 'A' && terminal.buffer.active.type === 'normal') {
         const pending = pendingCommands[0];
         if (pending?.anchored) {
@@ -166,17 +210,14 @@ export function installTerminalCommandDecorations(terminal: Terminal, sessionId:
       promptReady = false;
       const pending = pendingCommands.shift();
       if (pending?.range) {
-        const end = terminal.registerMarker(terminal.buffer.active.cursorX === 0 ? -1 : 0);
-        if (end && !pending.range.start.isDisposed && end.line >= pending.range.start.line) {
-          pending.range.end = end;
-        } else {
-          end?.dispose();
-          remove(pending.range);
-        }
+        markEnd(pending.range);
+        finishPendingCommand(pending.range);
       }
       schedule();
       return false;
-    }),
+    });
+  const subscriptions = [
+    boundaryHandler,
     terminal.onRender(schedule),
     terminal.onScroll(schedule),
     terminal.onResize(schedule),

@@ -55,8 +55,84 @@ try {
     const { installTerminalCommandDecorations } = await import('/src/components/terminal/registry/terminal-command-decorations.ts');
     const { agentTerminalLeaseState } = await import('/src/components/terminal/agent-terminal-lease-state.ts');
     const { resolveTerminalTheme } = await import('/src/components/terminal/registry/terminal-registry.ts');
-    window.runtime = { Terminal, installTerminalCommandDecorations, agentTerminalLeaseState, resolveTerminalTheme };
+    const { attachNativeInputDisplay, NATIVE_INPUT_DISPLAY } = await import('/src/lib/terminal/native-input-display.ts');
+    window.runtime = { Terminal, installTerminalCommandDecorations, agentTerminalLeaseState, resolveTerminalTheme,
+      attachNativeInputDisplay, NATIVE_INPUT_DISPLAY };
   });
+  const nativeTrace = JSON.parse(readFileSync(join(root, 'src/tests/fixtures/terminal-command-native-zle.json'), 'utf8'));
+  const nativeRanges = await page.evaluate(async trace => {
+    const { Terminal, installTerminalCommandDecorations, agentTerminalLeaseState: leases, resolveTerminalTheme,
+      attachNativeInputDisplay, NATIVE_INPUT_DISPLAY } = window.runtime;
+    const terminal = new Terminal({ cols: trace.columns, rows: trace.rows, scrollback: 100,
+      allowProposedApi: true, reflowCursorLine: false, theme: resolveTerminalTheme('app') });
+    terminal.open(document.getElementById('terminal'));
+    const display = attachNativeInputDisplay(terminal, NATIVE_INPUT_DISPLAY);
+    const decorations = installTerminalCommandDecorations(terminal, 'native-zle', NATIVE_INPUT_DISPLAY);
+    const write = value => new Promise(resolve => terminal.write(value, resolve));
+    const writeCapture = async base64 => {
+      const bytes = Uint8Array.from(atob(base64), byte => byte.charCodeAt(0));
+      for (let offset = 0; offset < bytes.length; offset += 17) terminal.write(bytes.subarray(offset, offset + 17));
+      await write('');
+    };
+    const inspect = async () => {
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const buffer = terminal.buffer.normal;
+      const rowHeight = terminal.element.querySelector('.xterm-screen').clientHeight / terminal.rows;
+      const rows = Array.from({ length: buffer.length }, (_, index) => buffer.getLine(index).translateToString(true));
+      return {
+        ranges: [...document.querySelectorAll('.terminal-agent-command')].map(element => {
+          const first = buffer.viewportY + Math.round(parseFloat(element.style.top) / rowHeight);
+          return [first, first + Math.round(parseFloat(element.style.height) / rowHeight)];
+        }),
+        outputRows: trace.executions.map(({ firstOutput }) => rows.findIndex(row => row.startsWith(firstOutput))),
+      };
+    };
+    window.closeNativePresentation = () => {
+      decorations.dispose();
+      display.dispose();
+      terminal.dispose();
+    };
+    try {
+      await writeCapture(trace.startup);
+      const typing = [];
+      for (const [index, execution] of trace.executions.entries()) {
+        const operationId = `native-${index}`;
+        leases.set({ sessionId: 'native-zle', agentSessionId: 'agent', taskId: 'task', operationId,
+          acquiredAtUnixMs: Date.now(), state: 'acquired', commandExecution: true, commandPhase: 'typing',
+          terminalOwned: true, inputBlocked: false, takeoverRequested: false, takeoverFailed: false, requestTakeover() {} });
+        await writeCapture(execution.input);
+        typing.push((await inspect()).ranges.length);
+        leases.update('native-zle', operationId, current => ({ ...current, commandPhase: 'running' }));
+        // As in the native frontend, a lease event can precede delayed PTY bytes.
+        leases.clear('native-zle', operationId);
+        await writeCapture(execution.output);
+      }
+      const initial = await inspect();
+      terminal.resize(32, trace.rows);
+      terminal.scrollToTop();
+      const narrower = await inspect();
+      terminal.resize(100, trace.rows);
+      terminal.scrollToTop();
+      const wider = await inspect();
+      terminal.resize(trace.columns, trace.rows);
+      return { typing, initial, narrower, wider };
+    } catch (error) {
+      window.closeNativePresentation();
+      throw error;
+    }
+  }, nativeTrace);
+  assert.deepEqual(nativeRanges.typing, [1, 2], 'Native ZLE highlights the draft as it is typed');
+  for (const geometry of [nativeRanges.initial, nativeRanges.narrower, nativeRanges.wider]) {
+    assert.equal(geometry.ranges.length, 2, 'Both native commands retain their own highlight');
+    assert.ok(geometry.outputRows.every(row => row >= 0), 'Both real native command outputs must be present');
+    assert.deepEqual(geometry.ranges.map(([, end]) => end), geometry.outputRows,
+      'Each command highlight ends before its first output row, including after resize');
+  }
+  assert.ok(nativeRanges.initial.ranges.some(([start, end]) => end - start > 1), 'Native wrapped input stays highlighted');
+  if (suppliedDirectory) {
+    await page.locator('.xterm-screen').screenshot({ path: join(directory, 'native-zle-command-ranges.png') });
+  }
+  await page.evaluate(() => window.closeNativePresentation());
   for (const shell of process.platform === 'darwin' ? ['bash', 'zsh'] : ['bash']) {
     for (const [width, columns] of [[1280, 100], [420, 40]]) {
       const trace = JSON.parse(readFileSync(`${directory}/${shell}-${columns}.json`, 'utf8'));

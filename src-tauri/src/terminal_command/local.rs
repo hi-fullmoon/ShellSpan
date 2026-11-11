@@ -27,6 +27,7 @@ pub(crate) struct PreparedNativeBash {
     bootstrap: PathBuf,
     pub profile: VerifiedNativeProfile,
     zle: bool,
+    shell_override: Option<PathBuf>,
 }
 impl PreparedNativeBash {
     pub fn prepare(shell: &Path, resources: &Path) -> Result<Self, String> {
@@ -89,6 +90,7 @@ impl PreparedNativeBash {
             bootstrap,
             profile,
             zle: false,
+            shell_override: None,
         })
     }
     fn prepare_zle(shell: &Path, resources: &Path) -> Result<Self, String> {
@@ -104,9 +106,13 @@ impl PreparedNativeBash {
             return Err("TERMINAL_NATIVE_PROFILE_UNSUPPORTED".into());
         };
         let digest = file_sha(shell)?;
+        let stock_macos_zsh = target == "macos-arm64"
+            && digest == super::registration::mac_zle_pin("mainSha256")?;
         let artifact = super::editors::read_catalogue(resources, target)?
             .into_iter()
-            .find(|a| a.shell_sha256 == digest)
+            .find(|artifact| {
+                artifact.shell_sha256 == digest || stock_macos_zsh && artifact.shell.is_some()
+            })
             .ok_or("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
         if artifact.shell.is_some()
             && file_sha(Path::new("/bin/zsh"))? != super::registration::mac_zle_pin("mainSha256")?
@@ -119,12 +125,27 @@ impl PreparedNativeBash {
             .map_err(|_| "TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
         fs::set_permissions(root.path(), fs::Permissions::from_mode(0o700))
             .map_err(|_| "TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
+        let shell_override = if stock_macos_zsh {
+            let source = artifact
+                .shell
+                .as_ref()
+                .ok_or("TERMINAL_NATIVE_PROFILE_UNSUPPORTED")?;
+            let executable = root.path().join("zsh");
+            fs::copy(resources.join(source), &executable)
+                .map_err(|_| "TERMINAL_NATIVE_ARTIFACTS_UNAVAILABLE")?;
+            fs::set_permissions(&executable, fs::Permissions::from_mode(0o500))
+                .map_err(|_| "TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
+            Some(executable)
+        } else {
+            None
+        };
+        let executable = shell_override.as_deref().unwrap_or(shell);
         let module = root.path().join("ss_nip.so");
         fs::copy(resources.join(&artifact.module), &module)
             .map_err(|_| "TERMINAL_NATIVE_ARTIFACTS_UNAVAILABLE")?;
         fs::set_permissions(&module, fs::Permissions::from_mode(0o500))
             .map_err(|_| "TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
-        let profile = super::editors::verify(&artifact, shell, &module)?;
+        let profile = super::editors::verify(&artifact, executable, &module)?;
         // Bind the public Core API to the exact reviewed binary. Production
         // admission remains an independent resource policy decision.
         let core_source = resources.join(
@@ -167,7 +188,7 @@ impl PreparedNativeBash {
         let bootstrap = root.path().join("native-init");
         fs::write(
             &bootstrap,
-            super::editors::zle_bootstrap(&module, &socket, shell, &artifact.profile)?,
+            super::editors::zle_bootstrap(&module, &socket, executable, &artifact.profile)?,
         )
         .map_err(|_| "TERMINAL_NATIVE_STARTUP_UNAVAILABLE")?;
         Ok(Self {
@@ -176,7 +197,11 @@ impl PreparedNativeBash {
             bootstrap,
             profile,
             zle: true,
+            shell_override,
         })
+    }
+    pub(crate) fn shell_override(&self) -> Option<&Path> {
+        self.shell_override.as_deref()
     }
     pub fn configure(&self, command: &mut portable_pty::CommandBuilder) -> Result<(), String> {
         if self.zle {
