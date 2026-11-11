@@ -175,7 +175,6 @@ export default {
   'ai.workspace.addMenu.emptyChat': '此聊天暂无可引用的正文。',
   'ai.workspace.skills.root': "项目目录",
   'ai.workspace.skills.rootHint': "输入当前终端目标上的项目绝对路径。本对话将固定使用该目录。",
-  'ai.workspace.skills.load': "读取技能",
   'ai.workspace.skills.absoluteRoot': "请输入项目目录的绝对路径。",
   'ai.workspace.skills.title': '技能',
   'ai.workspace.skills.hint': '↑↓ 选择 · Enter 或 Tab 插入 · Esc 关闭',

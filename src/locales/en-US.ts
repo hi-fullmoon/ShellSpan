@@ -175,7 +175,6 @@ export default {
   'ai.workspace.addMenu.emptyChat': 'This conversation has no text to attach yet.',
   'ai.workspace.skills.root': "Project directory",
   'ai.workspace.skills.rootHint': "Enter the absolute project path on this terminal’s target. It stays fixed for this conversation.",
-  'ai.workspace.skills.load': "Load skills",
   'ai.workspace.skills.absoluteRoot': "Enter an absolute project directory.",
   'ai.workspace.skills.title': 'Skills',
   'ai.workspace.skills.hint': '↑↓ to choose · Enter or Tab to insert · Esc to close',
