@@ -19,16 +19,6 @@ export function formatDate(timestamp: number | undefined): string {
   return new Date(timestamp * 1000).toLocaleString();
 }
 
-export function formatPermissions(mode: number | undefined): string {
-  if (mode === undefined) return '-';
-  const perms = (mode & 0o777).toString(8).padStart(3, '0');
-  return perms;
-}
-
-export function getInitials(name: string): string {
-  return name.slice(0, 2).toUpperCase();
-}
-
 export function generateId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 }
