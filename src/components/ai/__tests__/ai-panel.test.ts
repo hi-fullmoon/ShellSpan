@@ -34,7 +34,7 @@ describe('AI panel shell divider contract', () => {
   it('uses half-strength shell borders in light mode and full-strength borders in dark mode', () => {
     const baseCss = readFileSync('src/styles/base.css', 'utf8');
     const dividers = [...baseCss.matchAll(/--app-resize-divider:\s*([^;]+);/g)]
-      .map(([match, value]) => value.trim());
+      .map(([, value]) => value.trim());
 
     expect(dividers).toEqual([
       'color-mix(in srgb, var(--app-border) 50%, transparent)',

@@ -33,7 +33,7 @@ function Preview({ kind, entry, directory }: {
     </ContextMenuContent>
   </ContextMenu>;
   if (kind === 'file') return <SftpFileContextMenu open={open} x={16} y={16}
-    side="local" currentPath={directory} selectedEntries={[entry]}
+    side="local" selectedEntries={[entry]}
     isBookmarked={false} batchMode={false} onClose={close} onAction={close} />;
   if (kind === 'blank') return <SftpBlankContextMenu open={open} x={16} y={16}
     side="local" currentPath={directory} hasClipboard={false}

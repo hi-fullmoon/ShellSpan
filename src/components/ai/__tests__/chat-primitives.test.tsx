@@ -494,7 +494,7 @@ describe('MessageScroller', () => {
       top, bottom: top + 100, height: 100, left: 0, right: 320, width: 320,
       x: 0, y: top, toJSON: () => ({}),
     });
-    const PositionedRow = ({ id, index, scrollAnchor = false }: {
+    const PositionedRow = ({ id, index }: {
       id: string;
       index: number;
       scrollAnchor?: boolean;
@@ -562,7 +562,7 @@ describe('MessageScroller', () => {
       top, bottom: top + 100, height: 100, left: 0, right: 320, width: 320,
       x: 0, y: top, toJSON: () => ({}),
     });
-    const PositionedRow = ({ id, index, scrollAnchor = false }: {
+    const PositionedRow = ({ id, index }: {
       id: string;
       index: number;
       scrollAnchor?: boolean;

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { SftpFileList } from '../sftp-file-list';
 import type { FileEntry } from '../utils';

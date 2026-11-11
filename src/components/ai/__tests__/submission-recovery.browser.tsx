@@ -1,4 +1,4 @@
-import React, { createRef, useImperativeHandle } from 'react';
+import { createRef, useImperativeHandle } from 'react';
 import { createRoot } from 'react-dom/client';
 import { initI18n } from '@/locales';
 import { useImageDraft } from '../workspace/use-image-draft';

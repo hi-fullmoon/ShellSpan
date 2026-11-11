@@ -21,7 +21,6 @@ import { useTheme } from '@/hooks/useTheme';
 import { useI18n } from '@/hooks/useI18n';
 import { usePlatform } from '@/hooks/usePlatform';
 import { findShortcutConflict, getShortcutKeys, isLeaderShortcutAction, shortcutFromBareKeyEvent, shortcutFromKeyboardEvent } from '@/lib/shortcuts';
-import { cn } from '@/lib/utils';
 import { DEFAULT_SHORTCUTS, useAppStore } from '@/stores/appStore';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
