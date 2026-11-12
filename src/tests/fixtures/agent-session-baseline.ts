@@ -627,12 +627,3 @@ export const agentSessionBaselineScenarios: Readonly<Record<
 export const agentSessionBaselineScenarioIds = Object.freeze(
   Object.keys(agentSessionBaselineScenarios) as AgentSessionBaselineScenarioId[],
 );
-
-export function agentSessionBaselineScenario(
-  id: string | null | undefined,
-): AgentSessionBaselineScenario {
-  if (id && id in agentSessionBaselineScenarios) {
-    return agentSessionBaselineScenarios[id as AgentSessionBaselineScenarioId];
-  }
-  return agentSessionBaselineScenarios.hello;
-}

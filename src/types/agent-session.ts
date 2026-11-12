@@ -808,18 +808,6 @@ export interface AgentArtifactResponse {
   readonly truncated: boolean;
 }
 
-export type AgentRecoveryReconcileOutcome =
-  | 'probe'
-  | 'confirmedApplied'
-  | 'confirmedNotApplied'
-  | 'unknown';
-
-export interface AgentRecoveryReconcileInput {
-  readonly sessionId: string;
-  readonly outcome: AgentRecoveryReconcileOutcome;
-  readonly evidence: string;
-}
-
 export interface AgentSessionMessageInput {
   readonly paused?: boolean;
   readonly targetTurnId?: string;
@@ -853,10 +841,6 @@ export interface AgentSessionRenameInput {
   readonly expectedRevision: number;
   readonly clientOperationId: string;
   readonly title: string;
-}
-
-export interface AgentRuntimeInjectionInput extends AgentSessionMessageInput {
-  readonly label: string;
 }
 
 export interface AgentRuntimeStartInput {
@@ -897,45 +881,6 @@ export interface AgentChildInputRequest {
 export interface AgentChildRequest {
   readonly parentSessionId: string;
   readonly childSessionId: string;
-}
-
-export interface AgentChildInspection {
-  readonly snapshot: AgentSessionSnapshot;
-  readonly resident: boolean;
-  readonly descendantSessionIds: readonly string[];
-  readonly toolCalls: number;
-  readonly totalTokens: number;
-  readonly lastSummary?: string;
-}
-
-export interface AgentFleetTargetRequest {
-  readonly targetId: string;
-  readonly goal: string;
-}
-
-export interface AgentFleetPlanRequest {
-  readonly parentSessionId: string;
-  readonly targets: readonly AgentFleetTargetRequest[];
-  readonly canarySize: number;
-  readonly waveSize: number;
-  readonly failureThreshold: number;
-  readonly budget?: AgentSubagentBudget;
-}
-
-export interface AgentFleetControlRequest {
-  readonly parentSessionId: string;
-  readonly fleetId: string;
-}
-
-export interface AgentFleetReconcileRequest extends AgentFleetControlRequest {
-  readonly targetId: string;
-  readonly evidence: string;
-}
-
-export interface AgentFleetInspection {
-  readonly fleet: AgentSessionFleetState;
-  readonly failureThreshold: number;
-  readonly failures: number;
 }
 
 export interface AgentActivityRequest {

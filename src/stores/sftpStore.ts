@@ -89,12 +89,6 @@ export interface PendingSftpConnection {
   connection: RemoteConnectionRequest;
 }
 
-export interface SftpDirectoryListing {
-  path: string;
-  parentPath?: string;
-  entries: (LocalFileEntry | RemoteFileEntry)[];
-}
-
 function createDefaultPaneState(): SftpPaneState {
   return {
     pathInput: '',

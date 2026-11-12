@@ -257,33 +257,6 @@ export interface TerminalBrokerSubscriberSnapshot {
   observedBytes: number;
 }
 
-/** Cooperative observation; all output remains in the shared terminal stream. */
-export interface NativeShellJobObservation {
-  processHandle: `job-${string}`;
-  ownerTargetId: string;
-  agentSessionId: string;
-  taskId: string;
-  transportSessionId: string;
-  terminalSessionId: string;
-  terminalGeneration: number;
-  shell: 'bash' | 'zsh' | 'windowsPowerShell' | 'powerShell7';
-  operationId: string;
-  commandLine: string;
-  submittedCommandLine: string;
-  acceptedCommandLine: string | null;
-  controlLost: boolean;
-  nativeActive: boolean | null;
-  state: 'starting' | 'queued' | 'running' | 'stopped' | 'stopRequested' | 'exited' | 'rejected' | 'uncertain';
-  exitCode: number | null;
-  captureStartSequence: number;
-  observedOutputSequence: number;
-  observedAtUnixMs: number;
-  observationRevision: number;
-  stopRequested: boolean;
-  launchConfirmed: boolean;
-  cleanupReason: string | null;
-}
-
 /** Read-only cooperative evidence. Unknown never proves that input was not submitted. */
 export interface TerminalCommandObservation {
   submissionIntentDurable: boolean;

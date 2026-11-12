@@ -17,7 +17,6 @@ import type {
   KeychainKeyKind,
   CreateRemoteEntryRequest,
   CreateSessionError,
-  DownloadProgressEvent,
   HostKeyCheckResult,
   JumpHostConfig,
   KnownHostEntry,
@@ -57,24 +56,16 @@ import type {
   RemoteHealthSnapshotRequest,
   RemoteHealthSnapshotResult,
   TransferBatchResult,
-  UploadProgressEvent,
 } from '@/types';
 import type { AiProviderConnectionConfig } from '@/types/ai';
 import type {
   AgentArtifactRequest,
   AgentArtifactResponse,
   AgentChildInputRequest,
-  AgentChildInspection,
   AgentChildRequest,
   AgentCommittedEventsRequest,
-  AgentFleetControlRequest,
-  AgentFleetInspection,
-  AgentFleetPlanRequest,
-  AgentFleetReconcileRequest,
   AgentInboxMutationInput,
   AgentRecoveryCheckpoint,
-  AgentRecoveryReconcileInput,
-  AgentRuntimeInjectionInput,
   AgentRuntimeStartInput,
   AgentRuntimeToolDecisionInput,
   AgentSessionEvent,
@@ -580,52 +571,10 @@ export async function invokeSendAgentRuntimeChildInput(
   return invokeLogged<AgentSessionSnapshot>('agent_runtime_send_child_input', { request });
 }
 
-export async function invokeInspectAgentRuntimeChild(
-  request: AgentChildRequest,
-): Promise<AgentChildInspection> {
-  return invokeLogged<AgentChildInspection>('agent_runtime_inspect_child_agent', { request });
-}
-
 export async function invokeCancelAgentRuntimeChild(
   request: AgentChildRequest,
 ): Promise<AgentSessionSnapshot> {
   return invokeLogged<AgentSessionSnapshot>('agent_runtime_cancel_child_agent', { request });
-}
-
-export async function invokePlanAgentRuntimeFleet(
-  request: AgentFleetPlanRequest,
-): Promise<AgentFleetInspection> {
-  return invokeLogged<AgentFleetInspection>('agent_runtime_fleet_plan', { request });
-}
-
-export async function invokeStartAgentRuntimeFleet(
-  request: AgentFleetControlRequest,
-): Promise<AgentFleetInspection> {
-  return invokeLogged<AgentFleetInspection>('agent_runtime_fleet_start', { request });
-}
-
-export async function invokePauseAgentRuntimeFleet(
-  request: AgentFleetControlRequest,
-): Promise<AgentFleetInspection> {
-  return invokeLogged<AgentFleetInspection>('agent_runtime_fleet_pause', { request });
-}
-
-export async function invokeResumeAgentRuntimeFleet(
-  request: AgentFleetControlRequest,
-): Promise<AgentFleetInspection> {
-  return invokeLogged<AgentFleetInspection>('agent_runtime_fleet_resume', { request });
-}
-
-export async function invokeAbortAgentRuntimeFleet(
-  request: AgentFleetControlRequest,
-): Promise<AgentFleetInspection> {
-  return invokeLogged<AgentFleetInspection>('agent_runtime_fleet_abort', { request });
-}
-
-export async function invokeReconcileAgentRuntimeFleet(
-  request: AgentFleetReconcileRequest,
-): Promise<AgentFleetInspection> {
-  return invokeLogged<AgentFleetInspection>('agent_runtime_fleet_reconcile', { request });
 }
 
 export async function invokeAgentRuntimeFollowup(
@@ -665,12 +614,6 @@ export async function invokeRenameAgentRuntimeSession(
   input: AgentSessionRenameInput,
 ): Promise<AgentSessionSnapshot> {
   return invokeLogged<AgentSessionSnapshot>('agent_runtime_rename_session', { input });
-}
-
-export async function invokeAgentRuntimeInject(
-  input: AgentRuntimeInjectionInput,
-): Promise<AgentSessionSnapshot> {
-  return invokeLogged<AgentSessionSnapshot>('agent_runtime_inject', { input });
 }
 
 export async function invokeCancelAgentRuntime(
@@ -777,18 +720,6 @@ export async function invokeResumeAgentRuntimeRecovery(
   input: AgentSessionIdInput,
 ): Promise<AgentSessionSnapshot> {
   return invokeLogged<AgentSessionSnapshot>('agent_runtime_resume_recovery', { input });
-}
-
-export async function invokeReconcileAgentRuntimeRecovery(
-  input: AgentRecoveryReconcileInput,
-): Promise<AgentSessionSnapshot> {
-  return invokeLogged<AgentSessionSnapshot>('agent_runtime_reconcile_recovery', { input });
-}
-
-export async function invokeAbortAgentRuntimeRecovery(
-  input: AgentSessionIdInput,
-): Promise<AgentSessionSnapshot> {
-  return invokeLogged<AgentSessionSnapshot>('agent_runtime_abort_recovery', { input });
 }
 
 export async function invokeOpenUrl(url: string): Promise<void> {
@@ -1234,28 +1165,6 @@ export async function listenToTerminalIntegrationState(
 ): Promise<UnlistenFn> {
   return listen<TerminalIntegrationStateEvent>('terminal-integration-state', (event) => {
     callback(event);
-  });
-}
-
-export async function listenToUploadProgress(
-  operationId: string,
-  callback: EventCallback<UploadProgressEvent>,
-): Promise<UnlistenFn> {
-  return listen<UploadProgressEvent>('upload-progress', (event) => {
-    if (event.payload.operationId === operationId) {
-      callback(event);
-    }
-  });
-}
-
-export async function listenToDownloadProgress(
-  operationId: string,
-  callback: EventCallback<DownloadProgressEvent>,
-): Promise<UnlistenFn> {
-  return listen<DownloadProgressEvent>('download-progress', (event) => {
-    if (event.payload.operationId === operationId) {
-      callback(event);
-    }
   });
 }
 
