@@ -72,17 +72,33 @@ try{
               if(!position||position.end.y<=position.start.y||!Array.from({length:position.end.y-position.start.y},(_,index)=>term.buffer.normal.getLine(position.start.y+index+1)?.isWrapped).some(Boolean))throw new Error('Oversize resize preceded actual wrapped source rows');
               wrappedBeforeResize=position;
             }
-            if(event.columns)term.resize(event.columns,entry.rows);
+            if(event.columns)term.resize(event.columns,event.rows??entry.rows);
           }
           if(new Set(progress.map(frame=>frame.text)).size<=3)throw new Error('The real xterm buffer must visibly advance before submission');
           if(progress.at(-1).atMs-progress[0].atMs<=500)throw new Error('Native typing must remain visible over time');
           if(term.options.reflowCursorLine!==true)throw new Error('Actual producer did not enter the formal display mode');
-          const inspect=()=>{term.selectAll();const all=term.getSelection();term.clearSelection();const found=search.findNext(entry.source);const selected=term.getSelection();term.clearSelection();return{all,found,selected,cursorX:term.buffer.normal.cursorX,cursorY:term.buffer.normal.cursorY,baseY:term.buffer.normal.baseY};};
+          const inspect=()=>{
+            const {cursorX,cursorY,baseY}=term.buffer.normal;
+            term.selectAll();const all=term.getSelection();term.clearSelection();
+            if(entry.background){
+              term.select(0,0,(baseY+cursorY)*term.cols+cursorX);
+              const throughCursor=term.getSelection();const end=term.getSelectionPosition()?.end;term.clearSelection();
+              const start=throughCursor.lastIndexOf(entry.source.slice(0,24));
+              const interleaved=start<0?[]:throughCursor.slice(start).split(entry.background.line+'\n');
+              return{all,found:interleaved.length===2,selected:interleaved.join(''),end,cursorX,cursorY,baseY,throughCursor};
+            }
+            const found=search.findNext(entry.source);const selected=term.getSelection();const end=term.getSelectionPosition()?.end;term.clearSelection();
+            return{all,found,selected,end,cursorX,cursorY,baseY};
+          };
           const before=inspect();
-          if(!before.found||before.selected!==entry.source||!before.all.includes(entry.source))return {failure:'Actual Unicode source is not exactly searchable and copyable',before,expected:entry.source,lines:Array.from({length:term.buffer.normal.length},(_,index)=>({text:term.buffer.normal.getLine(index).translateToString(true),wrapped:term.buffer.normal.getLine(index).isWrapped}))};
-          term.resize(entry.columns===32?40:32,entry.rows);term.resize(entry.columns,entry.rows);
+          if(!before.found||before.selected!==entry.source||!entry.background&&!before.all.includes(entry.source))return {failure:'Actual Unicode source is not exactly copyable through the expected PTY output',before,expected:entry.source,lines:Array.from({length:term.buffer.normal.length},(_,index)=>({text:term.buffer.normal.getLine(index).translateToString(true),wrapped:term.buffer.normal.getLine(index).isWrapped}))};
+          const heightChanged=entry.resizeEvents.some(event=>event.rows!==undefined&&event.rows!==entry.rows);
+          term.resize(entry.columns===32?40:32,heightChanged?Math.max(8,entry.rows-4):entry.rows);term.resize(entry.columns,entry.rows);
           const after=inspect();
           if(!after.found||after.selected!==entry.source||after.all!==before.all)throw new Error('Resize changed real source/history selection');
+          if(heightChanged)for(const state of [before,after]){
+            if(state.end?.x!==state.cursorX||state.end?.y!==state.baseY+state.cursorY)throw new Error('The native cursor moved away from the end of the actual source');
+          }
           if(term.getSelection!==originals.selection||term.buffer.normal.getLine!==originals.line||term.open!==originals.open)throw new Error('Public xterm API was overridden');
           if(input.length||after.all.includes('ss_native_input_begin'))throw new Error('Display created input or exposed the execution plan');
           await display.closeAfterPendingOutput();if(term.options.reflowCursorLine!==false)throw new Error('Display cleanup did not restore the option');

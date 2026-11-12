@@ -28,6 +28,7 @@ it('admits only owned no-model submission cases without taking a visual or human
  for(const scenario of ['identity-mismatch','complete-identity-submatrix','generation-mismatch'])expect(macSubmissionControlMode(scenario)).toEqual({cut:'arm-identity',scenario});
  expect(macSubmissionControlMode('delegation')).toEqual({cut:undefined,scenario:'delegation'});
  expect(macSubmissionControlMode('human-phase3')).toEqual({cut:undefined,scenario:'human-phase3'});
+ expect(macSubmissionControlMode('reduced-motion')).toEqual({cut:'before-accept',scenario:'reduced-motion'});
 });
 
 it('retains actual filesystem effect observations and refuses writes and symlink effects over real HTTP',async()=>{

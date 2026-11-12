@@ -902,18 +902,58 @@ fn native_production_geometry_unicode_and_real_resize() {
                     columns,
                     12,
                 );
-                let resize = |shell: &NativeShell, cols| {
-                    shell
-                        .master
-                        .lock()
-                        .unwrap()
+                let background = size == "oversize"
+                    && std::env::var_os("SHELLSPAN_P2_GEOMETRY_BACKGROUND").is_some();
+                let background_line = "P2-RESIZE-BG:中文 é 👩‍💻";
+                if background {
+                    shell.bootstrap();
+                    let command = concat!(
+                        "( : > \"$HOME/geometry-bg-ready\"; ",
+                        "for ((i=0;i<300;i++)); do [[ -f $HOME/geometry-bg-print ]] && break; sleep 0.02; done; ",
+                        "if [[ -f $HOME/geometry-bg-print ]]; then printf '%s%s\\n' 'P2-RESIZE-' 'BG:中文 é 👩‍💻'; fi; ",
+                        "for ((i=0;i<300;i++)); do [[ -f $HOME/geometry-bg-stop ]] && break; sleep 0.02; done; ",
+                        ": > \"$HOME/geometry-bg-stopped\" ) &\r"
+                    );
+                    shell.key(command.as_bytes());
+                    let deadline = Instant::now() + Duration::from_secs(3);
+                    while !shell.home.path().join("geometry-bg-ready").exists() {
+                        assert!(
+                            Instant::now() < deadline,
+                            "actual background process did not start"
+                        );
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                }
+                let history_end = (columns == 100
+                    && size == "oversize"
+                    && std::env::var_os("SHELLSPAN_P2_GEOMETRY_HISTORY").is_some())
+                .then(|| {
+                    shell.bootstrap();
+                    shell.key(b"for ((n=1;n<=80;n++)); do printf '%s%02d %s\\n' BASH_HISTORY_ \"$n\" 'retained output'; done\r");
+                    let marker = b"BASH_HISTORY_80 retained output\r\n";
+                    let deadline = Instant::now() + Duration::from_secs(3);
+                    loop {
+                        let raw = shell.raw.lock().unwrap();
+                        if let Some(start) = raw.windows(marker.len()).position(|bytes| bytes == marker) {
+                            break start + marker.len();
+                        }
+                        drop(raw);
+                        assert!(Instant::now() < deadline, "actual Bash history did not arrive");
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                });
+                let resize = |shell: &NativeShell, cols, rows| {
+                    let master = shell.master.lock().unwrap();
+                    master
                         .resize(PtySize {
-                            rows: 12,
+                            rows,
                             cols,
                             pixel_width: 0,
                             pixel_height: 0,
                         })
-                        .unwrap()
+                        .unwrap();
+                    let observed = master.get_size().unwrap();
+                    assert_eq!((observed.cols, observed.rows), (cols, rows));
                 };
                 let source = format!("printf '%s\\n' '{}'", "中文 é 👩‍💻 width ".repeat(repeats));
                 let mut coordinator = shell.command(&source);
@@ -962,13 +1002,47 @@ fn native_production_geometry_unicode_and_real_resize() {
                 };
                 let (before, first_offset) = wait_progress(&mut shell, &mut coordinator, threshold);
                 let narrow = if columns == 32 { 40 } else { 32 };
-                resize(&shell, narrow);
-                let (after, second_offset) = wait_progress(&mut shell, &mut coordinator, before);
+                resize(&shell, narrow, 8);
+                let (after, mut second_offset) =
+                    wait_progress(&mut shell, &mut coordinator, before);
                 assert!(
                     after > before && second_offset > first_offset,
                     "input did not advance at the changed PTY size"
                 );
-                resize(&shell, columns);
+                let mut background_offset = None;
+                if background {
+                    let packet = format!("{background_line}\r\n");
+                    fs::write(shell.home.path().join("geometry-bg-print"), []).unwrap();
+                    let deadline = Instant::now() + Duration::from_secs(2);
+                    loop {
+                        let raw = shell.raw.lock().unwrap();
+                        if let Some(offset) = raw[second_offset..]
+                            .windows(packet.len())
+                            .position(|bytes| bytes == packet.as_bytes())
+                        {
+                            background_offset = Some(second_offset + offset);
+                            second_offset = raw.len();
+                            break;
+                        }
+                        drop(raw);
+                        assert!(
+                            Instant::now() < deadline,
+                            "actual background output did not arrive during resize"
+                        );
+                        let bytes = shell.read();
+                        shell.deliver(&mut coordinator, &bytes);
+                        let session = shell.broker.snapshot(Some("nip")).unwrap().session.unwrap();
+                        assert!(
+                            !session
+                                .input_observation
+                                .active_command
+                                .unwrap()
+                                .full_input_confirmed,
+                            "input finished before the actual background output"
+                        );
+                    }
+                }
+                resize(&shell, columns, 12);
                 shell.wait(&mut coordinator, |view| view.full_input_confirmed);
                 let deadline = Instant::now() + Duration::from_secs(3);
                 loop {
@@ -991,7 +1065,7 @@ fn native_production_geometry_unicode_and_real_resize() {
                     &*shell.raw.lock().unwrap(),
                 )
                 .unwrap();
-                let metadata = serde_json::json!({"version":version,"columns":columns,"rows":12,"size":size,"source":source,"directory":shell.evidence,"actualResize":true,"fullInputConfirmed":true,"prefixBeforeFirstResize":&source[..before],"readEvents":shell.reads.lock().unwrap().clone(),"resizeEvents":[{"offset":first_offset,"columns":narrow,"appliedUtf8Bytes":before},{"offset":second_offset,"columns":columns,"appliedUtf8Bytes":after}]});
+                let metadata = serde_json::json!({"version":version,"columns":columns,"rows":12,"size":size,"source":source,"directory":shell.evidence,"actualResize":true,"fullInputConfirmed":true,"prefixBeforeFirstResize":&source[..before],"background":background_offset.map(|offset| serde_json::json!({"offset":offset,"line":background_line})),"historyEnd":history_end,"readEvents":shell.reads.lock().unwrap().clone(),"resizeEvents":[{"offset":first_offset,"columns":narrow,"rows":8,"appliedUtf8Bytes":before},{"offset":second_offset,"columns":columns,"rows":12,"appliedUtf8Bytes":after}]});
                 fs::write(
                     shell.evidence.join("geometry.json"),
                     serde_json::to_vec_pretty(&metadata).unwrap(),
@@ -1012,6 +1086,17 @@ fn native_production_geometry_unicode_and_real_resize() {
                     format!("{}\r\n", "中文 é 👩‍💻 width ".repeat(repeats))
                 );
                 assert_eq!(shell.accept_keys.load(Ordering::Relaxed), 1);
+                if background {
+                    fs::write(shell.home.path().join("geometry-bg-stop"), []).unwrap();
+                    let deadline = Instant::now() + Duration::from_secs(2);
+                    while !shell.home.path().join("geometry-bg-stopped").exists() {
+                        assert!(
+                            Instant::now() < deadline,
+                            "actual background process did not terminate"
+                        );
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                }
             }
         }
         let mut shell = NativeShell::start_with_manifest(
@@ -1021,8 +1106,13 @@ fn native_production_geometry_unicode_and_real_resize() {
             true,
             Some(&manifest),
         );
-        let source =
-            "printf '%s\\n' 'tab\tcarriage\rbang! \"quote\" 中é👩‍💻'\nprintf '%s\\n' SECOND_LINE";
+        let source = concat!(
+            "printf '%s\\n' 'tab\tcarriage\rbang! \"quote\" 中é👩‍💻'\n",
+            "printf '%s\\n' SECOND_LINE\n",
+            "/bin/cat <<'SHELLSPAN_HERE'\n",
+            "BASH-HERE:$HOME ! 中é👩‍💻\n",
+            "SHELLSPAN_HERE"
+        );
         let mut coordinator = shell.command(source);
         let sender = shell.writer.clone();
         shell.key(b"\x18\x1e");
@@ -1045,7 +1135,7 @@ fn native_production_geometry_unicode_and_real_resize() {
             .unwrap());
         assert_eq!(
             coordinator.operation.snapshot().unwrap().combined_output,
-            "tab\tcarriage\rbang! \"quote\" 中é👩‍💻\r\nSECOND_LINE\r\n"
+            "tab\tcarriage\rbang! \"quote\" 中é👩‍💻\r\nSECOND_LINE\r\nBASH-HERE:$HOME ! 中é👩‍💻\r\n"
         );
     }
     let summary = root
@@ -2615,9 +2705,18 @@ fn native_protocol_real_stdout_signals_and_partial_display_eof_have_no_execution
 fn native_protocol_real_connection_profile_and_missing_capability_do_not_invent_operation_identity()
 {
     let mut shell = NativeShell::start_with_options("missing-capability", None, false);
+    let prototype = shell.profile.take().unwrap();
+    assert!(
+        !prototype.capture_fence(),
+        "P1 prototype enabled formal output capture"
+    );
+    assert!(
+        !prototype.supports_jobs(),
+        "P1 prototype enabled native background jobs"
+    );
     let request = shell
         .broker
-        .register_native_channel("nip", shell.profile.take().unwrap())
+        .register_native_channel("nip", prototype)
         .unwrap();
     let encoded = serde_json::to_value(&request).unwrap();
     assert!(encoded.get("identity").is_none());

@@ -20,6 +20,33 @@ OUT = ROOT / '.artifacts/tests/native-input-p2'
 READLINE_VERSIONS = {'4.1': '6.0', '4.4': '7.0', '5.3': '8.3.6'}
 
 
+def macos_rust_environment(manifest):
+    metadata = json.loads(subprocess.check_output(
+        ['cargo', 'metadata', '--locked', '--format-version', '1',
+         '--filter-platform', 'aarch64-apple-darwin', '--manifest-path', str(manifest)],
+        cwd=ROOT,
+    ))
+    registry_roots = sorted({
+        Path(package['manifest_path']).parent.parent
+        for package in metadata['packages']
+        if (package.get('source') or '').startswith('registry+')
+    })
+    sysroot = subprocess.check_output(
+        [os.environ.get('RUSTC', 'rustc'), '--print', 'sysroot'], cwd=ROOT, text=True,
+    ).strip()
+    inherited = os.environ.get('CARGO_ENCODED_RUSTFLAGS')
+    if inherited is None:
+        inherited = '\x1f'.join(os.environ.get('RUSTFLAGS', '').split())
+    # A versioned vendor tree can be inside ROOT. Its more specific mapping
+    # must come last to match the crate path used with the Cargo registry.
+    remaps = [
+        f'--remap-path-prefix={ROOT}=/shellspan/source',
+        f'--remap-path-prefix={sysroot}=/shellspan/rust',
+        *(f'--remap-path-prefix={path}=/shellspan/crates' for path in registry_roots),
+    ]
+    return {**os.environ, 'CARGO_ENCODED_RUSTFLAGS': '\x1f'.join(filter(None, [inherited, *remaps]))}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--versions', default='5.3', help='comma-separated Bash versions (default: 5.3)')
@@ -45,6 +72,8 @@ def main():
 
     run(['python3', '-B', 'scripts/dependency-builds/bash-native/build.py', '--versions', args.versions])
     source = ROOT / 'src-tauri/native-input-adapter'
+    manifest = source / 'Cargo.toml'
+    rust_environment = macos_rust_environment(manifest) if host == 'darwin' else os.environ
     inputs = [p for p in source.rglob('*') if p.is_file() and 'target' not in p.parts]
     inputs += [ROOT / 'src-tauri/src/terminal_command/protocol.rs', Path(__file__).resolve(),
         ROOT / 'scripts/native-input-p0/build.py', ROOT / 'scripts/native-input-p0/readline-sources.json',
@@ -59,8 +88,8 @@ def main():
         readline = READLINE_VERSIONS[version]
         profile = f'gnu-bash-{version}-readline-{readline}-{target}-native'
         rust = OUT / 'build' / profile
-        run(['cargo', 'build', '--release', '--locked', '--manifest-path', source / 'Cargo.toml', '--target-dir', rust],
-            {**os.environ, 'SHELLSPAN_NIP_VERIFIED_PROFILE': profile})
+        run(['cargo', 'build', '--release', '--locked', '--manifest-path', manifest, '--target-dir', rust],
+            {**rust_environment, 'SHELLSPAN_NIP_VERIFIED_PROFILE': profile})
         shell = Path(builds[version]['shell'])
         if builds[version].get('readlineDisplayAbi') != 1:
             raise RuntimeError('Readline native display ABI missing')
@@ -68,7 +97,8 @@ def main():
         includes=list(map(Path,builds[version]['includes']))
         destination = catalogue / profile
         destination.mkdir(exist_ok=True)
-        linker = ['-bundle', '-undefined', 'dynamic_lookup'] if host == 'darwin' else ['-shared', '-fPIC']
+        # Darwin's debug map otherwise embeds the absolute Rust archive path.
+        linker = ['-bundle', '-undefined', 'dynamic_lookup', '-Wl,-S'] if host == 'darwin' else ['-shared', '-fPIC']
         module = destination / 'adapter.so'
         candidate = destination / 'adapter.candidate.so'
         run(['cc', *linker, '-O2', *[f'-I{p}' for p in includes], *[f'-I{p / "lib"}' for p in includes],

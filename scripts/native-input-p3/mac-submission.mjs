@@ -8,6 +8,7 @@ const cuts=['intent','input-in-progress','input-complete','armed','before-accept
 const actions=['stop','cancel','takeover'];
 export function macSubmissionControlMode(mode){
  if(mode===undefined||mode==='intent')return {cut:mode,scenario:undefined};
+ if(mode==='reduced-motion')return {cut:'before-accept',scenario:mode};
  if(['approval-mismatch','expired-or-revoked','source-mismatch','plan-mismatch','target-mismatch','unsupported-input-native','permission-mismatch','resource-manifest-mismatch','byte-boundary','raw-admission'].includes(mode))return {cut:undefined,scenario:mode};
  if(['incomplete-proof','readonly-query-does-not-authorize'].includes(mode))return {cut:'input-in-progress',scenario:mode};
  if(['identity-mismatch','complete-identity-submatrix','generation-mismatch'].includes(mode))return {cut:'arm-identity',scenario:mode};
@@ -30,7 +31,23 @@ export function macSubmissionObservationConfiguration(selection){
   visualLabels:[],snapshotLabels:[],
   captureLabels:['phase3-manual-ready','phase3-manual-contention','phase3-manual-other','phase3-manual-task-switch'],
  };
- return{visualLabels:[],snapshotLabels:['submission-ready','submission-crash-restart-ready','submission-prepared','submission-settled','submission-duplicates','submission-rejected','submission-failure','lifecycle-failure','lifecycle-complete']};
+ return{visualLabels:[],snapshotLabels:['submission-ready','submission-crash-restart-ready','submission-prepared','submission-reduced-motion','submission-settled','submission-duplicates','submission-rejected','submission-failure','lifecycle-failure','lifecycle-complete']};
+}
+
+export function macSubmissionPrepareWrite(events, identity) {
+ const writes=[];
+ for (const [index,event] of events.entries()) {
+  if (event.event!=='control-send-attempt') continue;
+  const {payload,identity:actual,requestId}=JSON.parse(Buffer.from(event.details.hex,'hex').toString('utf8'));
+  if (payload.kind!=='prepareInput'||!isDeepStrictEqual(actual,identity)) continue;
+  const returned=events.slice(index+1).find(next=>next.event==='control-send-return'&&next.details.controlId===event.details.controlId);
+  assert(returned?.details.ok===true&&returned.details.partialUnknown===false,'Actual PrepareInput write did not complete');
+  assert.equal(payload.sourceDigest,createHash('sha256').update(payload.source).digest('hex'));
+  writes.push({requestId,sequence:event.sequence,returnSequence:returned.sequence,reducedMotion:payload.reducedMotion,
+   utf8Bytes:Buffer.byteLength(payload.source),sourceDigest:payload.sourceDigest});
+ }
+ assert.equal(writes.length,1,'Expected one complete private PrepareInput write for the held identity');
+ return writes[0];
 }
 
 /** Reads actual isolated effects only. It never creates a result or receipt. */
@@ -116,14 +133,15 @@ export function attachMacSubmissionWitness(server,token,directory,{cut=process.e
      const path=resolve(directory,`submission-request-${fact.nonce}-${kind}.json`);
      try{const info=await lstat(path);assert(info.isFile()&&!info.isSymbolicLink()&&info.size<=16384);const request=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(await readFile(path)));assert(request.nonce===fact.nonce&&request.pid===fact.pid&&request.requestKind===kind);requests.push(request);}catch(error){if(error.code!=='ENOENT')throw error;}
     }
-    let cancelWritten=null;
-    if(fact?.cut==='arm-identity'){
+    let cancelWritten=null,prepareWritten=null;
+    if(fact&&(fact.cut==='arm-identity'||scenario==='reduced-motion')){
      assert(fact.trace.startsWith(directory+'/native-control-trace-'+fact.pid+'-'));
      const info=await lstat(fact.trace);
      assert(info.isFile()&&!info.isSymbolicLink()&&(info.mode&0o777)===0o600&&info.size<=64*1024*1024);
      const text=await readFile(fact.trace,'utf8');
      const complete=text.slice(0,text.lastIndexOf('\n')).split('\n').map(line=>JSON.parse(line));
-     for(const [index,event] of complete.entries()){
+     if(scenario==='reduced-motion')prepareWritten=macSubmissionPrepareWrite(complete,fact.identity);
+     else for(const [index,event] of complete.entries()){
       if(event.event!=='control-send-attempt')continue;
       const message=JSON.parse(Buffer.from(event.details.hex,'hex').toString('utf8'));
       if(message.payload.kind!=='cancelDraft'||!isDeepStrictEqual(message.identity,fact.identity))continue;
@@ -133,7 +151,7 @@ export function attachMacSubmissionWitness(server,token,directory,{cut=process.e
       }
      }
     }
-    response.setHeader('Content-Type','application/json');response.end(JSON.stringify({enabled:true,cut:fact??null,scenario:scenario??null,requests,cancelWritten,authority:'test-barrier-only'}));return;
+    response.setHeader('Content-Type','application/json');response.end(JSON.stringify({enabled:true,cut:fact??null,scenario:scenario??null,requests,cancelWritten,prepareWritten,authority:'test-barrier-only'}));return;
    }
    assert(request.method==='POST'&&fact&&file,'A real observed cut is required before release');
    const chunks=[];let length=0;for await(const chunk of request){const bytes=Buffer.from(chunk);length+=bytes.length;assert(length<=4096);chunks.push(bytes);}

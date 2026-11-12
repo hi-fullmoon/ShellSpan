@@ -2,14 +2,14 @@ import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash,randomUUID} from 'node:crypto';
 import {mkdirSync,readFileSync,writeFileSync,existsSync,copyFileSync,openSync,closeSync,chmodSync} from 'node:fs';
-import {resolve} from 'node:path';
+import {dirname,resolve} from 'node:path';
 const root=resolve(import.meta.dirname,'../..');
 const target=process.platform==='darwin'&&process.arch==='arm64'?'macos-arm64':process.platform==='linux'&&process.arch==='arm64'?'linux-aarch64-glibc-2.36':null;
 assert(target,'Build and verify this provider on its real target');
 const directory=resolve(root,'.artifacts/tests/native-input-p3');const dependencies=resolve(directory,'dependencies');
 mkdirSync(dependencies,{recursive:true,mode:0o700});
 const log=openSync(resolve(directory,'build.log'),'a',0o600);
-function run(command,args,cwd=root){execFileSync(command,args,{cwd,stdio:['ignore',log,log]});}
+function run(command,args,cwd=root,env=process.env){execFileSync(command,args,{cwd,env,stdio:['ignore',log,log]});}
 const archive=resolve(dependencies,'zsh-5.9.tar.xz');
 const sha=path=>createHash('sha256').update(readFileSync(path)).digest('hex');
 const buildScopedCore=process.argv.includes('--build-scoped-core');
@@ -32,11 +32,34 @@ try{
   run(process.env.CC??'cc',['-std=c11','-I',source,'scripts/native-input-p3/zsh-build-check.c','-o',resolve(directory,'zsh-build-check')]);
   run('make',['-j4'],source);
   execFileSync(resolve(source,'Src/zsh'),['-f','-c','value=$(/usr/bin/printf %s P3_CONFIG); [[ $value == P3_CONFIG ]]'],{timeout:5000,stdio:['ignore',log,log]});
-  run('cargo',['build','--locked','--release','--manifest-path','src-tauri/native-input-editors/Cargo.toml','--lib']);
+  const manifest='src-tauri/native-input-editors/Cargo.toml';
+  let rustEnvironment=process.env;
+  let rustTarget=resolve(root,dirname(manifest),'target');
+  if(target==='macos-arm64'){
+    const metadata=JSON.parse(execFileSync('cargo',['metadata','--locked','--format-version','1',
+      '--filter-platform','aarch64-apple-darwin','--manifest-path',manifest],{cwd:root,encoding:'utf8',stdio:['ignore','pipe',log]}));
+    rustTarget=metadata.target_directory;
+    // Cargo's registry cache and versioned vendor tree contain the same
+    // crates under different roots. Map the more specific root last so
+    // the same crate path is embedded even when vendor is inside the tree.
+    const registryRoots=new Set(metadata.packages.filter(pkg=>pkg.source?.startsWith('registry+'))
+      .map(pkg=>dirname(dirname(pkg.manifest_path))));
+    const sysroot=execFileSync(process.env.RUSTC??'rustc',['--print','sysroot'],{cwd:root,encoding:'utf8',stdio:['ignore','pipe',log]}).trim();
+    const inheritedFlags=process.env.CARGO_ENCODED_RUSTFLAGS
+      ?? (process.env.RUSTFLAGS??'').trim().split(/\s+/).filter(Boolean).join('\x1f');
+    const remaps=[
+      `--remap-path-prefix=${root}=/shellspan/source`,
+      `--remap-path-prefix=${sysroot}=/shellspan/rust`,
+      ...[...registryRoots].map(path=>`--remap-path-prefix=${path}=/shellspan/crates`),
+    ];
+    rustEnvironment={...process.env,CARGO_ENCODED_RUSTFLAGS:[inheritedFlags,...remaps].filter(Boolean).join('\x1f')};
+  }
+  run('cargo',['build','--locked','--release','--manifest-path',manifest,'--lib'],root,rustEnvironment);
   const module=resolve(directory,'ss_nip.so');
-  const flags=target==='macos-arm64'?['-bundle','-undefined','dynamic_lookup']:['-shared','-Wl,--exclude-libs,ALL'];
+  // Darwin's debug map otherwise embeds absolute static archive paths.
+  const flags=target==='macos-arm64'?['-bundle','-undefined','dynamic_lookup','-Wl,-S']:['-shared','-Wl,--exclude-libs,ALL'];
   run(process.env.CC??'cc',['-std=c11','-DMODULE','-fPIC',...(boundHistory?['-DSHELLSPAN_ZLE_BOUND_HISTORY=1']:[]),...flags,'-I',resolve(source,'Src'),
-    'src-tauri/native-input-editors/zle.c','src-tauri/native-input-editors/target/release/libshellspan_native_input_editors.a','-lpthread','-ldl','-lm','-o',module]);
+    'src-tauri/native-input-editors/zle.c',resolve(rustTarget,'release/libshellspan_native_input_editors.a'),'-lpthread','-ldl','-lm','-o',module]);
   const shell=(buildScopedCore?coreProducer?.shell:process.env.SHELLSPAN_P3_ZSH??coreProducer?.shell)??'/bin/zsh';
   assert.equal(execFileSync(shell,['-f','-c','print -rn -- $ZSH_VERSION'],{encoding:'utf8'}),'5.9');
   const id=`zsh-5.9-zle-5.9-${target}-native`;

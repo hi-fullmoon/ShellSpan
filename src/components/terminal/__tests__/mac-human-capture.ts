@@ -10,7 +10,15 @@ export async function macHumanCapture(token:string,role:'human'|'automatic'='hum
  const frames:TerminalAcceptanceRawFrameEvent[]=[],physical:Record<string,unknown>[]=[],input:Record<string,unknown>[]=[],records:Record<string,unknown>[]=[],lifecycle:TerminalLifecycleEvent[]=[],stops:(()=>void)[]=[];
  const visualFailures:{label:string;notes:string}[]=[];
  let raw='',visible='',controller:TerminalController|undefined,trace:NativeDisplayTrace|undefined,renderer:ReturnType<typeof macRenderObserver>|undefined,expectedId:string|undefined,binding:SessionPtyInfo['nativeDisplayBinding'],releaseInitial:(()=>void)|undefined,original:{write:TerminalController['terminal']['write'];select:TerminalController['terminal']['select'];selection:TerminalController['terminal']['getSelection']}|undefined;
+ let displayClose:'open'|'draining'|'closed'='open';
+ const observedDisplayClose=()=>!options.parsedOutputOrder||displayClose==='closed';
  const post=async(value:unknown)=>{const r=await fetch('/__agent-stream-result/'+token,{method:'POST',body:JSON.stringify(value)});if(!r.ok)throw Error('Human evidence retention rejected');};
+ const drain=async()=>{
+  if(!controller||!trace)throw Error('Actual human controller missing');
+  const t=controller.terminal;
+  if(t.write!==original?.write||t.select!==original.select||t.getSelection!==original.selection)throw Error('Public human terminal methods were replaced');
+  await new Promise<void>(done=>t.write('',done));await new Promise<void>(done=>requestAnimationFrame(()=>requestAnimationFrame(()=>done())));await new Promise<void>(done=>t.write('',done));
+ };
  const diagnose=async(sessionId:string)=>{
   if(diagnosed)return;diagnosed=true;
   let metadata:unknown;try{metadata=await invokeGetTerminalAcceptanceRawOutput(sessionId);}catch(error){metadata={error:String(error)};}
@@ -37,18 +45,31 @@ export async function macHumanCapture(token:string,role:'human'|'automatic'='hum
  renderer=macRenderObserver(c);stops.push(()=>renderer?.stop());
  original={write:t.write,select:t.select,selection:t.getSelection};trace=new NativeDisplayTrace({columns:t.cols,rows:t.rows,empty:b.baseY===0&&b.cursorX===0&&b.cursorY===0&&Array.from({length:b.length},(_,y)=>b.getLine(y)?.translateToString(true)??'').every(line=>line===''),unicodeVersion:t.unicode.activeVersion,nativeDisplayBinding:binding,options:{windowsPty:t.options.windowsPty,scrollback:t.options.scrollback,fontFamily:t.options.fontFamily,fontSize:t.options.fontSize,lineHeight:t.options.lineHeight,letterSpacing:t.options.letterSpacing,reflowCursorLine:t.options.reflowCursorLine}},options.parsedOutputOrder===true);
  stops.push(c.subscribeOutput(chunk=>{if(raw.length+chunk.length>900000)throw Error('Human raw output bound');raw+=chunk;}));
- stops.push(c.subscribeLifecycle(event=>{lifecycle.push(event);if(event.type==='closed')trace!.action({kind:'transportClosed'});}));
- stops.push(c.subscribeDisplayOutput(({source,data})=>{const sequence=trace!.output(data,source);visible+=data;if(!options.parsedOutputOrder)queueMicrotask(()=>t.write('',()=>trace!.parsed(sequence)));}));
+ stops.push(c.subscribeLifecycle(event=>{
+  lifecycle.push(event);
+  if(event.type!=='closed')return;
+  if(options.parsedOutputOrder)displayClose='draining';
+  else trace!.action({kind:'transportClosed'});
+ }));
+ stops.push(c.subscribeDisplayOutput(({source,data})=>{
+  // The controller emits ST only after its pending display writes have drained.
+  if(displayClose==='draining'&&source==='local'&&data==='\u001b\\'){
+   displayClose='closed';
+   trace!.action({kind:'transportClosed'});
+  }
+  const sequence=trace!.output(data,source);visible+=data;
+  if(!options.parsedOutputOrder)queueMicrotask(()=>t.write('',()=>trace!.parsed(sequence)));
+ }));
  if(options.parsedOutputOrder){let sequence=0;stops.push(c.subscribeDisplayOutputParsed(output=>trace!.parsed(sequence++,output)));}
  const data=t.onData(data=>input.push({at:Date.now(),data})),resize=t.onResize(({cols,rows})=>trace!.resize(cols,rows,options.parsedOutputOrder?nativeDisplayTraceState(t):undefined));stops.push(()=>data.dispose(),()=>resize.dispose());
  }));
- return{post,diagnose,physical,input,records,lifecycle,async expect(id:string,pty:SessionPtyInfo|undefined,identity?:{terminalSessionId:string;terminalGeneration:number}){expectedId=id;binding=pty?.nativeDisplayBinding;await transport.expect(id,identity);},releaseInitial(){releaseInitial?.();releaseInitial=undefined;},get raw(){return raw;},get controller(){return controller;},get closedObserved(){return lifecycle.some(event=>event.type==='closed'&&event.sessionId===expectedId);},get wireFinalized(){return !!expectedId&&transport.isFinalized(expectedId);},
+ return{post,diagnose,drain,physical,input,records,lifecycle,async expect(id:string,pty:SessionPtyInfo|undefined,identity?:{terminalSessionId:string;terminalGeneration:number}){expectedId=id;binding=pty?.nativeDisplayBinding;await transport.expect(id,identity);},releaseInitial(){releaseInitial?.();releaseInitial=undefined;},get raw(){return raw;},get controller(){return controller;},get closedObserved(){return lifecycle.some(event=>event.type==='closed'&&event.sessionId===expectedId);},get wireFinalized(){return !!expectedId&&transport.isFinalized(expectedId);},
   observeSelection(){if(!controller||!trace)throw Error('Human selection observer missing');const t=controller.terminal,p=t.getSelectionPosition();if(!p)throw Error('Actual human selection missing');trace.action({kind:'select',column:p.start.x,row:p.start.y,length:(p.end.y-p.start.y)*t.cols+p.end.x-p.start.x});trace.action({kind:'scrollToLine',row:t.buffer.normal.viewportY});},
+  observeViewport(){if(!controller||!trace)throw Error('Human viewport observer missing');trace.action({kind:'scrollToLine',row:controller.terminal.buffer.normal.viewportY});},
   observeUnicodeVersion(register?:'graphemes'){if(!controller||!trace)throw Error('Actual public provider observer missing');trace.action({kind:'unicodeVersion',version:controller.terminal.unicode.activeVersion,...(register?{register}: {})});},
   async checkpoint(label:string,details:Record<string,unknown>,image=false){
    if(!controller||!trace)throw Error('Actual human controller missing');const t=controller.terminal;
-   if(t.write!==original?.write||t.select!==original.select||t.getSelection!==original.selection)throw Error('Public human terminal methods were replaced');
-   await new Promise<void>(done=>t.write('',done));await new Promise<void>(done=>requestAnimationFrame(()=>requestAnimationFrame(()=>done())));await new Promise<void>(done=>t.write('',done));
+   await drain();
    const state=nativeDisplayTraceState(t);await trace.checkpoint(label,state);const record={label,at:Date.now(),state,renderer:renderer?.snapshot(),display:{unicode:t.unicode.activeVersion,reflow:t.options.reflowCursorLine},...details};records.push(record);
    if(image||label==='human-deferred')await persistCheckpoint(label);
    await post({progress:(role==='human'?'Human':'Automatic')+' checkpoint: '+label,evidence:{kind:role==='human'?'mac-human-progress':'mac-auto-progress',records:[record],physical,input}});
@@ -70,8 +91,15 @@ export async function macHumanCapture(token:string,role:'human'|'automatic'='hum
   },
   async finish(sessionId:string,details:Record<string,unknown>,ok=true,error?:string){
    if(!trace)throw Error('Actual capture trace missing');
-   const end=Date.now()+20000;while(!transport.isFinalized(sessionId)&&Date.now()<end)await new Promise(done=>setTimeout(done,20));
+   const end=Date.now()+20000;
+   while((!transport.isFinalized(sessionId)||!observedDisplayClose())&&Date.now()<end)await new Promise(done=>setTimeout(done,20));
+   if(options.parsedOutputOrder&&observedDisplayClose()){
+    const terminal=controller?.terminal;
+    if(!terminal||terminal.write!==original?.write)throw Error('Actual display close parser unavailable');
+    await new Promise<void>(done=>terminal.write('',done));
+   }
    await diagnose(sessionId);
+   if(!observedDisplayClose())throw Error('Actual display close drain terminator was not observed');
    const capture=await invokeGetTerminalAcceptanceRawOutput(sessionId),wireState=transport.snapshot(sessionId,true),data:number[]=[];
    if(capture.dataStoreIdentifier?.map(v=>v.toString(16).padStart(2,'0')).join('')!==token.replace(/-/g,''))throw Error('Capture WebView identity mismatch');
    let next=1,offset=0;

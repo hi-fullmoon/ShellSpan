@@ -35,7 +35,8 @@ async function verify(){
  const imageLabels=['ready','tui-enter','tui-edit','tui-exit','draft-440x320','draft-360x580','draft-1100x650','parked-360','follow-new-output','pump-completion-ended','toast-visible',...macDailyEditingVisualCheckpoints];
  const captures:Record<string,unknown>[]=[];
  const report=async(value:unknown)=>{const response=await fetch(`/__agent-stream-result/${token}`,{method:'POST',body:JSON.stringify(value)});assert(response.ok,'Actual daily evidence retention rejected: HTTP '+response.status);return response;};
- await initI18n('en-US');await getCurrentWindow().show();await getCurrentWindow().setFocus();
+ await initI18n('en-US');await getCurrentWindow().show();
+ if(!rawMode)await getCurrentWindow().setFocus();
  useAppStore.setState({terminalCopyOnSelect:false});
  const routes=await invokeListAiRoutes();assert(!routes.routes.length&&!routes.defaultSelection,'No-model case must start with an empty route store');
  const storageKey='shellspan.phase2.isolated-webview',previousStorage=localStorage.getItem(storageKey);
@@ -81,8 +82,37 @@ async function verify(){
  // onData also contains real parser replies and focus reports requested by
  // TUI programs. Preserve every event; only DOM input can interfere with this
  // programmatic case. Never classify an onData event as a physical key.
- const domInput:{type:string;trusted:boolean;at:number}[]=[];
- const observeDomInput=(event:Event)=>{domInput.push({type:event.type,trusted:event.isTrusted,at:Date.now()});if(event.isTrusted&&!inputProtected){inputProtected=true;stops.push(c.suppressUserInput());}};
+ const domInput:{type:string;trusted:boolean;at:number;focused:boolean;visibility:DocumentVisibilityState;modifierOnly:boolean;emittedTerminalData?:boolean}[]=[];
+ const modifierObservations=new Set<Promise<void>>();
+ const settleModifierObservations=async()=>{
+  while(modifierObservations.size)await Promise.all(modifierObservations);
+ };
+ const protectInput=()=>{
+  if(inputProtected)return;
+  inputProtected=true;
+  stops.push(c.suppressUserInput());
+ };
+ const unexpectedDomInput=()=>domInput.some(event=>!rawMode||!event.modifierOnly||event.emittedTerminalData!==false);
+ const observeDomInput=(event:Event)=>{
+  const modifierOnly=event instanceof KeyboardEvent&&['Shift','Control','Alt','Meta'].includes(event.key);
+  const observation:typeof domInput[number]={type:event.type,trusted:event.isTrusted,at:Date.now(),focused:document.hasFocus(),visibility:document.visibilityState,modifierOnly};
+  domInput.push(observation);
+  if(rawMode&&event.isTrusted&&modifierOnly&&!inputProtected){
+   // Check xterm's public data events through the actual key dispatch. Keep
+   // the production input boundary closed until that observation is complete.
+   const before=publicInput.length,release=c.suppressUserInput();
+   const completed=new Promise<void>(done=>{
+    window.setTimeout(()=>{
+     observation.emittedTerminalData=publicInput.length!==before;
+     if(observation.emittedTerminalData)protectInput();
+     release();
+     done();
+    },0);
+   });
+   modifierObservations.add(completed);
+   void completed.then(()=>modifierObservations.delete(completed));
+  }else if(event.isTrusted)protectInput();
+ };
  for(const type of ['keydown','beforeinput','paste','compositionstart']){host.addEventListener(type,observeDomInput,true);stops.push(()=>host.removeEventListener(type,observeDomInput,true));}
  const drain=async()=>{await new Promise<void>(done=>t.write('',done));await new Promise<void>(done=>requestAnimationFrame(()=>requestAnimationFrame(()=>done())));await new Promise<void>(done=>t.write('',done));};
  const snapshot=()=>invokeGetTerminalBrokerSnapshot(session.sessionId);
@@ -108,10 +138,10 @@ async function verify(){
   return{position,viewportY:b.viewportY,baseY:b.baseY,anchorOffset:position.start.y-b.viewportY,selection:t.getSelection()};
  };
  const idle=async()=>{const state=(await snapshot()).session;return !!state&&state.promptReady&&!state.inputObservation?.commandInputPending&&!state.inputObservation?.nativeRecoveryRequired;};
- const send=async(data:string,kind='programmatic ordinary user input')=>{assert(!wireCaptureError,'Actual raw-frame observation failed');assert(domInput.length===0,'Unexpected DOM input interfered with automatic case');input.push({data,hex:hex(data),at:Date.now(),kind});assert(await c.writeUserInput(data),'Ordinary input rejected: '+kind);};
- const paste=async(data:string)=>{assert(!wireCaptureError,'Actual raw-frame observation failed');assert(domInput.length===0,'Unexpected DOM input before public paste');await drain();assert(trace,'Complete visible observer missing');pasteWithNativeDisplayTrace(t,trace,data);};
+ const send=async(data:string,kind='programmatic ordinary user input')=>{await settleModifierObservations();assert(!wireCaptureError,'Actual raw-frame observation failed');assert(!unexpectedDomInput(),'Unexpected DOM input interfered with automatic case');input.push({data,hex:hex(data),at:Date.now(),kind});assert(await c.writeUserInput(data),'Ordinary input rejected: '+kind);};
+ const paste=async(data:string)=>{await settleModifierObservations();assert(!wireCaptureError,'Actual raw-frame observation failed');assert(!unexpectedDomInput(),'Unexpected DOM input before public paste');await drain();assert(trace,'Complete visible observer missing');pasteWithNativeDisplayTrace(t,trace,data);};
  const checkpoint=async(label:string,details:Record<string,unknown>={})=>{
-  await drain();assert(trace,'Complete visible observer missing');
+  await drain();await settleModifierObservations();assert(trace,'Complete visible observer missing');
   assert(t.getSelection===original.selection&&t.select===original.select&&t.write===original.write&&t.open===original.open&&t.buffer.normal.getLine===original.line,'Public terminal API changed');
   const at=Date.now(),state=nativeDisplayTraceState(t),display={unicode:t.unicode.activeVersion,reflow:t.options.reflowCursorLine};
   const record:Record<string,unknown>={label,at,state,display,inputProtected,...details};records.push(record);
@@ -284,6 +314,8 @@ async function verify(){
   }
  }catch(error){problem=error;await checkpoint('failure',{reason:String(error)}).catch(()=>{});}
  const expectedRecords=fullMode?macDailyFullExpectedRecords:macDailyExpectedRecords[toastMode?'toast':pumpMode?'pump':editingMode?'editing':rawMode?'raw':'native'];
+ await settleModifierObservations();
+ if(rawMode&&!problem&&unexpectedDomInput())problem=Error('Unexpected DOM input observed in the completed raw case');
  if(!problem&&JSON.stringify(records.map(record=>record.label))!==JSON.stringify(expectedRecords))problem=Error('Actual named operations do not match the predeclared daily sequence');
  if(!problem&&captureOnlyMode&&JSON.stringify(captures.map(capture=>capture.label))!==JSON.stringify(expectedRecords.filter(label=>imageLabels.includes(label))))problem=Error('Actual screenshot captures omit an original required image');
  let wire:Record<string,unknown>|undefined;

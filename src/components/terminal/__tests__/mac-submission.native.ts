@@ -42,7 +42,10 @@ async function verify(){
  const permissionMismatch = observationConfiguration.scenario === 'permission-mismatch';
  const manifestMismatch = observationConfiguration.scenario === 'resource-manifest-mismatch';
  const rawAdmission = observationConfiguration.scenario === 'raw-admission';
- const useParsedOutput = ['close-running-terminal', 'timeout-unknown-accept', 'control-eof', 'late-started-and-matched-settled', 'target-mismatch','delegation'].includes(observationConfiguration.scenario ?? '') || observationConfiguration.scenario?.startsWith('wire-') === true || observationConfiguration.scenario?.startsWith('after-accept-') === true || inputInProgress || bindingNegative || transportLoss || armIdentity || permissionMismatch;
+ const reducedMotionCase = observationConfiguration.scenario === 'reduced-motion';
+ const reducedMotion = reducedMotionCase ? window.matchMedia('(prefers-reduced-motion: reduce)') : undefined;
+ if(reducedMotionCase)assert(reducedMotion?.matches,'WKWebView reduced motion is disabled for this scheduled case');
+ const useParsedOutput = ['before-accept-stop', 'close-running-terminal', 'timeout-unknown-accept', 'control-eof', 'late-started-and-matched-settled', 'target-mismatch','delegation'].includes(observationConfiguration.scenario ?? '') || observationConfiguration.scenario?.startsWith('wire-') === true || observationConfiguration.scenario?.startsWith('after-accept-') === true || inputInProgress || bindingNegative || transportLoss || armIdentity || permissionMismatch || reducedMotionCase;
  const wireFault = observationConfiguration.scenario?.startsWith('wire-') === true && observationConfiguration.scenario !== 'wire-split-and-coalesced';
  const capture=await macLifecycleCapture(token,{parsedOutputOrder:useParsedOutput||manifestMismatch||rawAdmission,startupOutputMayPrecedeSubscription:wireFault||manifestMismatch||rawAdmission}),session=await invokeCreateLocalSession(100,30);await capture.expect(session);
  useTerminalStore.getState().addSession(session);useTerminalStore.getState().setActiveSession(session.sessionId);useAppStore.getState().setActiveSection('terminal');
@@ -61,8 +64,9 @@ async function verify(){
  type IsolationScenario='runtime-multi-agent'|'close-running-terminal'|'target-mismatch'|'delegation';
  type ControlRequest={requestKind:'cancel-token'|'takeover-owner-validated';nonce:string;pid:number;identity:Cut['identity']};
  type CancelWrite={requestId:string;sequence:number;returnSequence:number};
+ type PrepareWrite=CancelWrite&{reducedMotion:boolean;utf8Bytes:number;sourceDigest:string};
  const cutRoute=(settlement=false)=>'/__native-mac-submission-'+(settlement?'settled-cut':'cut')+'/'+token;
- const cutState=async(settlement=false)=>{const response=await fetch(cutRoute(settlement));assert(response.ok,'Actual cut observation failed');const value=await response.json() as {enabled:boolean;cut:Cut|null;scenario?:ControlScenario|RunningScenario|IsolationScenario|'approval-mismatch'|'expired-or-revoked'|'timeout-unknown-accept'|'control-eof'|'late-started-and-matched-settled'|'incomplete-proof'|'readonly-query-does-not-authorize'|'identity-mismatch'|'complete-identity-submatrix'|'generation-mismatch'|'permission-mismatch'|`app-crash-${'intent'|'prepare'|'proof'|'arm'|'key'|'restart'}`|null;requests?:ControlRequest[];cancelWritten?:CancelWrite|null;authority:string};assert(value.authority==='test-barrier-only','Cut control was presented as execution authority');return value;};
+ const cutState=async(settlement=false)=>{const response=await fetch(cutRoute(settlement));assert(response.ok,'Actual cut observation failed');const value=await response.json() as {enabled:boolean;cut:Cut|null;scenario?:ControlScenario|RunningScenario|IsolationScenario|'approval-mismatch'|'expired-or-revoked'|'timeout-unknown-accept'|'control-eof'|'late-started-and-matched-settled'|'incomplete-proof'|'readonly-query-does-not-authorize'|'identity-mismatch'|'complete-identity-submatrix'|'generation-mismatch'|'permission-mismatch'|'reduced-motion'|`app-crash-${'intent'|'prepare'|'proof'|'arm'|'key'|'restart'}`|null;requests?:ControlRequest[];cancelWritten?:CancelWrite|null;prepareWritten?:PrepareWrite|null;authority:string};assert(value.authority==='test-barrier-only','Cut control was presented as execution authority');return value;};
  const cutConfiguration=await cutState();
  const events=async(id:string)=>(await invokeGetAgentRuntimeEvents({sessionId:id,limit:500})).events;
  function pendingApproval(page:readonly AgentSessionEvent[],callId:string){
@@ -83,7 +87,7 @@ async function verify(){
   const before=await events(id);Object.assign(partial,{prepared,before});let decision:unknown;
   if(prepared.settlement==='Waiting'&&!deferApproval){
    const approval=pendingApproval(before,callId);
-   if((kind==='effect'||kind==='paced-input'&&inputInProgress)&&cutConfiguration.enabled){
+   if((kind==='effect'||kind==='paced-input'&&(inputInProgress||reducedMotionCase))&&cutConfiguration.enabled){
     const decisionRequest=invokeDecideTerminalAcceptanceCommand(approval,true);void decisionRequest.catch(()=>{});
     let cut:Cut|undefined;
     await until(async()=>{const state=await cutState();if(state.cut){cut=state.cut;return true;}return false;},'Actual submission cut was not observed');
@@ -109,7 +113,35 @@ async function verify(){
     }
     const recoveryAtCut=await invokeGetTerminalSubmissionRecovery(id);assert(recoveryAtCut.length===(durable?1:0),'Actual recovery records did not match the expected intent state');
     assert(controller,'Actual controller missing at submission cut');const competingEnter=await controller.writeUserInput('\r');capture.recordInput('\r',competingEnter,'Competing Enter at actual '+observedCut.cut+' cut');assert(!competingEnter,'Competing user Enter crossed the command owner');
-    if(cutConfiguration.scenario){
+    if(reducedMotionCase){
+     assert(observedCut.cut==='before-accept'&&reducedMotion?.matches,'WKWebView reduced-motion cut differs');
+     const observed = await cutState();
+     const prepareWritten = observed.prepareWritten;
+     const sourceBytes = new TextEncoder().encode(prepared.source);
+     const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',sourceBytes)),byte=>byte.toString(16).padStart(2,'0')).join('');
+     assert(observed.cut?.nonce===observedCut.nonce&&prepareWritten?.reducedMotion&&prepareWritten.sourceDigest===digest
+      &&prepareWritten.utf8Bytes===sourceBytes.length&&prepareWritten.returnSequence>prepareWritten.sequence,'The actual private PrepareInput did not carry the WKWebView preference and source');
+     await capture.drain();
+     const terminal=controller.terminal,buffer=terminal.buffer.active,endRow=buffer.baseY+buffer.cursorY;
+     let startRow=endRow;
+     while(startRow>0&&buffer.getLine(startRow)?.isWrapped)startRow--;
+     const line=Array.from({length:endRow-startRow+1},(_,index)=>{
+      const row=startRow+index;
+      const line=buffer.getLine(row);
+      assert(line,'Actual native editor display row is missing');
+      return line.translateToString(false,0,row===endRow?buffer.cursorX:terminal.cols);
+     }).join('');
+     assert(buffer.type==='normal'&&terminal.options.reflowCursorLine===true&&line.endsWith(prepared.source)
+      &&line.indexOf(prepared.source)===line.lastIndexOf(prepared.source),'The actual native inline display did not retain one complete source at the cursor');
+     const effectsBeforeAccept=await witness();assert(!effectsBeforeAccept.exists,'Reduced-motion source ran before the acceptance key');
+     const motion={media:reducedMotion.media,matches:reducedMotion.matches,prepareWritten,observedCut,cutBroker,recoveryAtCut,competingEnter,
+      display:{startRow,endRow,cursorX:buffer.cursorX,line},effectsBeforeAccept};
+     Object.assign(partial,{motion});
+     await capture.checkpoint('submission-reduced-motion',{motion});
+     const release=await fetch(cutRoute(),{method:'POST',body:JSON.stringify({nonce:observedCut.nonce,pid:observedCut.pid})});
+     assert(release.ok,'Owned reduced-motion cut could not be released');
+     decision=await decisionRequest;
+    }else if(cutConfiguration.scenario){
      const action=armIdentity?'arm-identity-cancel':incompleteProof||readonlyQuery?'input-in-progress-cancel':cutConfiguration.scenario;
      assert(action.startsWith(observedCut.cut+'-'),'Actual cut differs from requested control scenario');
      const takeover=action.endsWith('-takeover');
@@ -807,7 +839,21 @@ async function verify(){
    assert(response.ok,'Actual byte-boundary evidence was not retained');
    return;
   }
-  const effect=await run(inputInProgress?'paced-input':'effect');
+  const effect=await run(inputInProgress||reducedMotionCase?'paced-input':'effect');
+  if(reducedMotionCase){
+   assert(reducedMotion?.matches,'WKWebView reduced motion changed before settlement');
+   assert(effect.after.some(event=>event.type==='tool/result'&&event.data.callId===effect.callId&&event.data.status==='completed'),
+    'Actual reduced-motion execution did not complete');
+   assert(effect.effects.text===effect.callId+'\n'&&effect.recovery.length===0,'Reduced-motion execution did not settle with one file effect');
+   await invokeCancelAgentRuntime({sessionId:effect.id});
+   await until(idle,'Reduced-motion case did not return to the original prompt');
+   await capture.checkpoint('submission-settled',{effect});
+   await invokeCloseSession(session.sessionId);closed=true;
+   const retained=await capture.finish();
+   const response=await fetch('/__agent-stream-result/'+token,{method:'POST',body:JSON.stringify({ok:true,evidence:{kind:'actual-macos-submission-reduced-motion',family,session,records,retained,routes,humanReceipt:false,phase3Complete:false}})});
+   assert(response.ok,'Actual reduced-motion evidence was not retained');
+   return;
+  }
   if(cutConfiguration.scenario){
    assert(!effect.after.some(event=>event.type==='tool/result'&&event.data.callId===effect.callId&&event.data.status==='completed'),'Preaccept control allowed a completed execution');assert(!effect.effects.exists,'Preaccept control executed the effect');
    await until(async()=>!agentTerminalLeaseState.get(session.sessionId)&&!terminalInputReadiness.isPreparing(session.sessionId)&&await idle(),'Actual control did not confirm clearance and release the terminal view');

@@ -17,7 +17,7 @@ import {closeNativeValidationServer} from './native-input-p3/close-validation-se
 import {assertNativeGuiAllowed} from './native-input-p2/gui-lock.mjs';
 import {isFinalNativeResult} from './native-input-p2/result-message.mjs';
 import {isMacLocalLifecycle,macLifecycleVisualCheckpoints,macLifecycleSnapshotCheckpoints,macLifecycleEvidenceClockEnabled} from './native-input-p3/mac-local-lifecycle.mjs';
-import {macDailyAcceptance,attachMacDailyCheckpoints,macDailyAppConfiguration,macHumanFinalEvidenceWindow,macDailyRuntimeTimeoutMilliseconds,macDailyCaptureConfiguration,macSystemSelectionObservationConfiguration} from './native-input-p3/mac-daily.mjs';
+import {macDailyAcceptance,attachMacDailyCheckpoints,macDailyAppConfiguration,macHumanFinalEvidenceWindow,macDailyRuntimeTimeoutMilliseconds,macDailyCaptureConfiguration,macSystemSelectionObservationConfiguration,macHumanViewportObservationConfiguration} from './native-input-p3/mac-daily.mjs';
 import {attachDisplayTraceChannel} from './native-input-p3/display-trace-channel.mjs';
 import {createMacEofEvidenceClock} from './native-input-p3/mac-eof-evidence-clock.mjs';
 import {macSubmissionObservationConfiguration,attachMacSubmissionWitness} from './native-input-p3/mac-submission.mjs';
@@ -872,7 +872,7 @@ const attachResult = (vite) => {
     assert(eofEvidenceClock,'EOF clock must start before an image wait');
     assert(eofEvidenceClock.beginObservation(label),'EOF work deadline already expired');
     return()=>eofEvidenceClock.endObservation(label);
-  }:undefined,macDailyCaptureConfiguration(nativeDaily)??macSystemSelectionObservationConfiguration(nativeDaily)??macSubmissionObservationConfiguration(nativeDaily));
+  }:undefined,macDailyCaptureConfiguration(nativeDaily)??macSystemSelectionObservationConfiguration(nativeDaily)??macHumanViewportObservationConfiguration(nativeDaily)??macSubmissionObservationConfiguration(nativeDaily));
   if(nativeDaily?.startsWith('submission-'))attachMacSubmissionWitness(vite,token,ownedEvidenceDirectory);
   if(macLocalLifecycle)attachMacDailyCheckpoints(vite,token,ownedEvidenceDirectory,lifecycleEvidenceClockEnabled?label=>{
     assert(macLifecycleVisualCheckpoints.includes(label),'Lifecycle clock cannot pause for another workflow');
@@ -1365,7 +1365,9 @@ try {
       minWidth: navigationManual?960:1200, minHeight: navigationManual?640:760, ...credentialLifecycleWindowOptions(credentialLifecycleRun||aiCredentialMode!==undefined), alwaysOnTop: !frozenNativeRun,
       transparent: true, titleBarStyle: 'Overlay',
       ...(isolatedWindowsPaths?{dataDirectory:isolatedWindowsPaths.dataDirectory}:{}),
-    }] } } : nativeDaily||macLocalLifecycle?{app:await macDailyAppConfiguration(repository,ownedEvidenceDirectory,token,{submission:nativeDaily?.startsWith('submission-')})}:{}),
+    }] } } : nativeDaily||macLocalLifecycle?{app:await macDailyAppConfiguration(repository,ownedEvidenceDirectory,token,{
+      submission:nativeDaily?.startsWith('submission-'),passiveWindow:nativeDaily?.startsWith('raw-'),
+    })}:{}),
   })], { cwd: repository, env: frozenNativeRun?{...nativeEnvironment,CARGO_TARGET_DIR:(values['data-scope']==='com.shellspan.validation.native-input-p3'||macLocalLifecycle||nativeRaw)&&process.env.SHELLSPAN_P3_BUILD_CACHE?process.env.SHELLSPAN_P3_BUILD_CACHE:resolve(repository,'.artifacts/tests/native-input-p2/frozen-target'),SHELLSPAN_ACCEPTANCE_FROZEN_MANIFEST:frozenManifestPath,
     ...(frozenWindows?{RUSTUP_TOOLCHAIN:'1.95.0-x86_64-pc-windows-msvc',CARGO_BUILD_TARGET:'x86_64-pc-windows-msvc'}:{})}:nativeEnvironment, stdio: ['ignore', 'ignore', 'inherit'], detached: process.platform !== 'win32' });
   child.once('error', (error) => settle({ ok: false, error: error.message }));

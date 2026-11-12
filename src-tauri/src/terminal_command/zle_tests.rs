@@ -1829,7 +1829,13 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
             (interrupt_source,None),
             ("[[ $P3_PARENT == '父Shell-é-👩🏽‍💻' ]] && printf '%s%s\\n' P3-AFTER- INTERRUPT".into(),None),
             ("false".into(),None),
-            ("[[ $? == 1 ]] && typeset -g P3_MULTI=$'first\nsecond'; [[ $P3_MULTI == $'first\nsecond' ]] && printf '%s%s\\n' P3-MULTILINE- STATUS".into(),None),
+            (concat!(
+                "[[ $? == 1 ]] && typeset -g P3_MULTI=$'first\nsecond'; ",
+                "[[ $P3_MULTI == $'first\nsecond' ]] && /bin/cat > \"$HOME/heredoc-value\" <<'SHELLSPAN_HERE'\n",
+                "ZLE-HERE:$HOME ! 中é👩‍💻\n",
+                "SHELLSPAN_HERE\n",
+                "printf '%s%s\\n' P3-MULTILINE- STATUS"
+            ).into(),None),
             ("typeset -g P3_TABS=$'A\tB'; [[ $P3_TABS == $'A\tB' ]] && printf '%s%s\\n' P3-REDUCED- TABS".into(),None),
             ("typeset -g P3_CR=$'C\rD'; [[ $P3_CR == $'C\rD' ]] && typeset -g P3_BANG=\"literal!!\"; [[ $P3_BANG == 'literal!!' ]] && printf '%s%s\\n' P3-LITERAL- CR".into(),None)];
         if trace_schedule {
@@ -1960,17 +1966,29 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
                         |m| matches!(m,nip::Message::Operation(e)if e.request_id==query.request_id&&matches!(&e.payload,nip::Payload::Snapshot{phase,..}if phase=="typing")),
                     );
                 }
-                for cols in [32, 180, 40, 100, 32, 180, 40] {
+                let dynamic_rows = std::env::var_os("SHELLSPAN_P3_GEOMETRY_DYNAMIC_ROWS").is_some();
+                for (cols, short_rows) in [
+                    (32, 18),
+                    (180, 38),
+                    (40, 24),
+                    (100, 36),
+                    (32, 16),
+                    (180, 42),
+                    (40, 30),
+                ] {
+                    let rows = if dynamic_rows { short_rows } else { 30 };
                     let bytes = raw.lock().unwrap();
                     pair.master
                         .resize(PtySize {
-                            rows: 30,
+                            rows,
                             cols,
                             pixel_width: 0,
                             pixel_height: 0,
                         })
                         .unwrap();
-                    resize_events.push(serde_json::json!({"offset":bytes.len(),"columns":cols,"elapsedMicros":trace_clock.elapsed().as_micros()}));
+                    let observed = pair.master.get_size().unwrap();
+                    assert_eq!((observed.cols, observed.rows), (cols, rows));
+                    resize_events.push(serde_json::json!({"offset":bytes.len(),"columns":cols,"rows":rows,"elapsedMicros":trace_clock.elapsed().as_micros()}));
                     publish(
                         &evidence.join("geometry-events.json"),
                         &serde_json::json!(resize_events),
@@ -2137,6 +2155,10 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
         assert!(stream.contains("P3-LONG-COMPLETE"));
         assert!(stream.contains("P3-AFTER-INTERRUPT"));
         assert!(stream.contains("P3-MULTILINE-STATUS"));
+        assert_eq!(
+            fs::read_to_string(home.join("heredoc-value")).unwrap(),
+            "ZLE-HERE:$HOME ! 中é👩‍💻\n"
+        );
         assert!(stream.contains("P3-REDUCED-TABS"));
         assert!(stream.contains("P3-LITERAL-CR"));
         assert!(records.iter().any(|m|matches!(m,nip::Message::Connection(e)if matches!(&e.payload,nip::ConnectionPayload::JobObservation{handle:h,state,..}if h==handle&&state=="running"))));

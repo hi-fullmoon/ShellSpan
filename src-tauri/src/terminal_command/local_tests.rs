@@ -89,10 +89,21 @@ fn prepared_local_wire_rejects_invalid_sequence() {
     )
     .unwrap();
     let mut reader = pair.master.try_clone_reader().unwrap();
+    let pty_output = Arc::new(Mutex::new(Vec::new()));
+    let observed_output = Arc::clone(&pty_output);
     let output = thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let _ = reader.read_to_end(&mut bytes);
-        bytes
+        let mut bytes = [0; 4096];
+        loop {
+            match reader.read(&mut bytes) {
+                Ok(0) => break,
+                Ok(count) => observed_output
+                    .lock()
+                    .unwrap()
+                    .extend_from_slice(&bytes[..count]),
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => break,
+            }
+        }
     });
     let run = uuid::Uuid::new_v4().to_string();
     let connection = nip::ConnectionIdentity {
@@ -199,10 +210,22 @@ fn prepared_local_wire_rejects_invalid_sequence() {
             identity: identity.clone(),
             payload,
         };
-        let source = "printf 'once\\n' > \"$HOME/wire-effect\"";
+        let reduced_inline = case == "reduced-inline";
+        let effect = if reduced_inline {
+            "减弱动态 é 👩‍💻\n"
+        } else {
+            "once\n"
+        };
+        let source = if reduced_inline {
+            "printf '%s\\n' '减弱动态 é 👩‍💻' >> \"$HOME/wire-effect\""
+        } else {
+            "printf 'once\\n' > \"$HOME/wire-effect\""
+        };
         let source_digest = nip::sha(source);
         let plan = nip::native_foreground_plan(source, family).unwrap();
         let plan_digest = nip::bound_plan_digest(&source_digest, &plan);
+        let query_deadline = case == "query-deadline";
+        let budget_ms = if query_deadline { 2000 } else { 5000 };
         let prepare = envelope(
             "prepare",
             nip::Payload::PrepareInput {
@@ -210,8 +233,8 @@ fn prepared_local_wire_rejects_invalid_sequence() {
                 source_digest: source_digest.clone(),
                 plan,
                 plan_digest: plan_digest.clone(),
-                budget_ms: 5000,
-                reduced_motion: false,
+                budget_ms,
+                reduced_motion: query_deadline || reduced_inline,
                 job: None,
             },
         );
@@ -222,6 +245,7 @@ fn prepared_local_wire_rejects_invalid_sequence() {
                 writer.flush().unwrap();
             }
         };
+        let prepare_sent = Instant::now();
         if case != "out-of-order" {
             send(&prepare);
             wait(&rx, &mut records, |message| {
@@ -230,7 +254,179 @@ fn prepared_local_wire_rejects_invalid_sequence() {
                     && matches!(&reply.payload,nip::Payload::Prepared{..}))
             });
         }
+        let prepared_observed = Instant::now();
+        if reduced_inline {
+            fs::write(
+                evidence.join("prepare-sent.json"),
+                prepare.encode().unwrap(),
+            )
+            .unwrap();
+            wait(&rx, &mut records, |message| {
+                matches!(message, nip::Message::Operation(reply)
+                    if reply.request_id == prepare.request_id && reply.identity == identity
+                        && matches!(&reply.payload, nip::Payload::InputConfirmed{
+                            source_digest: actual_source,plan_digest: actual_plan,utf8_bytes,cursor_utf8_bytes,end_utf8_bytes,
+                        } if actual_source == &source_digest && actual_plan == &plan_digest
+                            && *utf8_bytes == source.len() && *cursor_utf8_bytes == source.len() && *end_utf8_bytes == source.len()))
+            });
+            let query = envelope("reduced-draft", nip::Payload::Query);
+            send(&query);
+            wait(&rx, &mut records, |message| {
+                matches!(message, nip::Message::Operation(reply)
+                    if reply.request_id == query.request_id && reply.identity == identity
+                        && matches!(reply.payload, nip::Payload::Snapshot{editor_utf8_valid:true,may_have_submitted:false,
+                            cursor_utf8_bytes:Some(cursor),end_utf8_bytes:Some(end),..}
+                            if cursor == source.len() && end == source.len()))
+            });
+            assert!(!home.join("wire-effect").exists());
+            let commit = envelope(
+                "reduced-commit",
+                nip::Payload::Commit {
+                    source_digest,
+                    plan_digest,
+                },
+            );
+            control.write(&commit.encode().unwrap()).unwrap();
+            wait(&rx, &mut records, |message| {
+                matches!(message, nip::Message::Operation(reply)
+                    if reply.request_id == commit.request_id && reply.identity == identity
+                        && matches!(reply.payload, nip::Payload::CommitArmed))
+            });
+            assert!(!home.join("wire-effect").exists());
+            let enter = format!("\x1b]{};{}\x07", nip::DISPLAY_OSC, nip::DISPLAY_ENTER);
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let before_accept = loop {
+                let raw = pty_output.lock().unwrap();
+                if let Some(start) = raw
+                    .windows(enter.len())
+                    .position(|bytes| bytes == enter.as_bytes())
+                {
+                    let inline = &raw[start + enter.len()..];
+                    if inline.len() >= source.len() {
+                        assert!(
+                            inline.starts_with(source.as_bytes()),
+                            "actual reduced inline PTY bytes differ"
+                        );
+                        assert_eq!(
+                            inline
+                                .windows(source.len())
+                                .filter(|bytes| *bytes == source.as_bytes())
+                                .count(),
+                            1
+                        );
+                        break raw.clone();
+                    }
+                }
+                drop(raw);
+                assert!(
+                    Instant::now() < deadline,
+                    "actual reduced inline PTY bytes missing"
+                );
+                thread::sleep(Duration::from_millis(5));
+            };
+            fs::write(evidence.join("before-accept.pty.bin"), before_accept).unwrap();
+            records.extend(rx.try_iter());
+            assert!(!records.iter().any(|message| matches!(message, nip::Message::Operation(reply)
+                if matches!(reply.payload, nip::Payload::SubmissionAccepted | nip::Payload::Started | nip::Payload::Settled { .. }))));
+            let accept_key = if family == nip::ShellFamily::Bash {
+                b"\x18a"
+            } else {
+                super::editors::ZLE_ACCEPT_KEY
+            };
+            let written = writer.write(accept_key).unwrap();
+            assert_eq!(written, accept_key.len());
+            writer.flush().unwrap();
+            fs::write(
+                evidence.join("accept-write.json"),
+                serde_json::to_vec_pretty(&serde_json::json!({
+                    "identity":identity, "bytes":accept_key, "written":written,
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+            for (request, expected) in [
+                (&commit.request_id, nip::Payload::SubmissionAccepted),
+                (&prepare.request_id, nip::Payload::Started),
+                (&prepare.request_id, nip::Payload::Settled { exit_code: 0 }),
+            ] {
+                wait(&rx, &mut records, |message| {
+                    matches!(message, nip::Message::Operation(reply)
+                        if &reply.request_id == request && reply.identity == identity && reply.payload == expected)
+                });
+            }
+            records.extend(rx.try_iter());
+            assert_eq!(
+                records
+                    .iter()
+                    .filter(|message| matches!(message, nip::Message::Operation(reply)
+                if matches!(reply.payload, nip::Payload::SubmissionAccepted)))
+                    .count(),
+                1
+            );
+            assert_eq!(
+                fs::read(home.join("wire-effect")).unwrap(),
+                effect.as_bytes()
+            );
+            assert!(journal.unresolved().unwrap().is_empty());
+            return;
+        }
         let (negative, code) = match case.as_str() {
+            "query-deadline" => {
+                wait(&rx, &mut records, |message| {
+                    matches!(message,nip::Message::Operation(reply)
+                    if reply.request_id == prepare.request_id && reply.identity == identity
+                        && matches!(&reply.payload,nip::Payload::InputConfirmed{source_digest: digest,utf8_bytes,..}
+                            if digest == &source_digest && *utf8_bytes == source.len()))
+                });
+                let mut query_elapsed_ms = Vec::new();
+                for offset_ms in [400, 900, 1500] {
+                    let scheduled = prepare_sent + Duration::from_millis(offset_ms);
+                    thread::sleep(scheduled.saturating_duration_since(Instant::now()));
+                    let query =
+                        envelope(&format!("deadline-query-{offset_ms}"), nip::Payload::Query);
+                    send(&query);
+                    wait(&rx, &mut records, |message| {
+                        matches!(message,nip::Message::Operation(reply)
+                        if reply.request_id == query.request_id && reply.identity == identity
+                            && matches!(&reply.payload,nip::Payload::Snapshot{
+                                editor_utf8_valid:true,may_have_submitted:false,
+                                cursor_utf8_bytes:Some(cursor),end_utf8_bytes:Some(end),..
+                            } if *cursor == source.len() && *end == source.len()))
+                    });
+                    let elapsed = prepare_sent.elapsed().as_millis();
+                    assert!(
+                        elapsed < u128::from(budget_ms),
+                        "Query did not observe the live draft"
+                    );
+                    query_elapsed_ms.push(elapsed);
+                }
+                // The producer started its budget no later than its Prepared
+                // reply. Cross that deadline while still inside a budget that
+                // would have been restarted by the final Query.
+                let expired = prepared_observed + Duration::from_millis(u64::from(budget_ms) + 80);
+                thread::sleep(expired.saturating_duration_since(Instant::now()));
+                let commit_elapsed_ms = prepare_sent.elapsed().as_millis();
+                assert!(commit_elapsed_ms < query_elapsed_ms[0] + u128::from(budget_ms));
+                fs::write(
+                    evidence.join("deadline-observation.json"),
+                    serde_json::to_vec_pretty(&serde_json::json!({
+                        "budgetMs":budget_ms,"queryReplyElapsedMs":query_elapsed_ms,
+                        "commitElapsedMs":commit_elapsed_ms
+                    }))
+                    .unwrap(),
+                )
+                .unwrap();
+                (
+                    envelope(
+                        "expired-commit",
+                        nip::Payload::Commit {
+                            source_digest,
+                            plan_digest,
+                        },
+                    ),
+                    nip::ErrorCode::Expired,
+                )
+            }
             "out-of-order" => (
                 envelope(
                     "early-commit",
@@ -260,7 +456,18 @@ fn prepared_local_wire_rejects_invalid_sequence() {
             if reply.request_id == negative.request_id && reply.identity == negative.identity
                 && matches!(reply.payload,nip::Payload::Rejected {code: actual} if actual == code))
         });
-        if case != "out-of-order" {
+        if query_deadline && family == nip::ShellFamily::Bash {
+            let query = envelope("expired-draft", nip::Payload::Query);
+            send(&query);
+            wait(&rx, &mut records, |message| {
+                matches!(message,nip::Message::Operation(reply)
+                if reply.request_id == query.request_id && reply.identity == identity
+                    && matches!(&reply.payload,nip::Payload::Snapshot{
+                        editor_utf8_valid:true,may_have_submitted:false,
+                        cursor_utf8_bytes:Some(0),end_utf8_bytes:Some(0),..
+                    }))
+            });
+        } else if case != "out-of-order" {
             let cancel = envelope("cancel", nip::Payload::CancelDraft);
             send(&cancel);
             wait(&rx, &mut records, |message| {
@@ -282,7 +489,8 @@ fn prepared_local_wire_rejects_invalid_sequence() {
     drop(control);
     drop(writer);
     drop(pair.master);
-    fs::write(evidence.join("pty.bin"), output.join().unwrap()).unwrap();
+    output.join().unwrap();
+    fs::write(evidence.join("pty.bin"), &*pty_output.lock().unwrap()).unwrap();
     fs::write(
         evidence.join("actual-decoded-replies.json"),
         serde_json::to_vec_pretty(&records).unwrap(),
@@ -498,7 +706,7 @@ fn prepared_bash_real_submit_draft_cancel_and_running_interrupt() {
             wait(
                 &rx,
                 &mut records,
-                |m| matches!(m,nip::Message::Operation(e)if e.request_id==prepare.request_id&&matches!(&e.payload,nip::Payload::InputConfirmed{source_digest,utf8_bytes,cursor_utf8_bytes,end_utf8_bytes,..}if source_digest==&digest&&*utf8_bytes as usize==source_bytes&&cursor_utf8_bytes==end_utf8_bytes)),
+                |m| matches!(m,nip::Message::Operation(e)if e.request_id==prepare.request_id&&matches!(&e.payload,nip::Payload::InputConfirmed{source_digest,utf8_bytes,cursor_utf8_bytes,end_utf8_bytes,..}if source_digest==&digest&&*utf8_bytes==source_bytes&&cursor_utf8_bytes==end_utf8_bytes)),
             );
             let commit = nip::Envelope {
                 protocol: nip::PROTOCOL.into(),

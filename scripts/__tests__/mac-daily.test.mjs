@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {it as test} from 'vitest';
-import {macDailyAcceptance,macDailyAppConfiguration,attachMacDailyCheckpoints,macHumanFinalEvidenceWindow,macDailyRuntimeTimeoutMilliseconds,macDailyCaptureConfiguration,macSystemSelectionObservationConfiguration,macHumanVisualCheckpoints,macDailyVisualCheckpoints} from '../native-input-p3/mac-daily.mjs';
+import {macDailyAcceptance,macDailyAppConfiguration,attachMacDailyCheckpoints,macHumanFinalEvidenceWindow,macDailyRuntimeTimeoutMilliseconds,macDailyCaptureConfiguration,macSystemSelectionObservationConfiguration,macHumanViewportObservationConfiguration,macHumanVisualCheckpoints,macDailyVisualCheckpoints} from '../native-input-p3/mac-daily.mjs';
 import {resolve} from 'node:path';
 import {readFileSync} from 'node:fs';
 const values={'native-mac-daily':'zsh','no-model':true,'data-scope':'com.shellspan.validation.native-input-p3'};
@@ -20,6 +20,19 @@ test('system mouse/clipboard observations stay isolated from human receipts and 
   for(const invalid of [{...values,'native-mac-daily':selection,'no-model':false},{...values,'native-mac-daily':selection,'native-input-p2-lifecycle':true}])assert.throws(()=>macDailyAcceptance(invalid,environment));
  }
  for(const selection of [undefined,'human-zsh','full-bash','raw-zsh','system-selection-powerShell7'])assert.equal(macSystemSelectionObservationConfiguration(selection),undefined);
+});
+test('both human history viewports use the existing manual window and isolated evidence labels',()=>{
+ const labels=['human-ready','human-viewport-parked','human-viewport-narrowed','human-final'];
+ for(const family of ['zsh','bash']){
+  const selection='human-viewport-'+family;
+  const options=macHumanViewportObservationConfiguration(selection);
+  assert.deepEqual(options,{visualLabels:labels,snapshotLabels:[...labels,'human-deferred','eof-diagnostic']});
+  assert.equal(macDailyCaptureConfiguration(selection),undefined);
+  const selected={...values,'native-mac-daily':selection};
+  if(process.platform==='darwin'&&process.arch==='arm64')assert.equal(macDailyAcceptance(selected,environment),selection);
+  assert.throws(()=>macDailyAcceptance({...selected,'no-model':false},environment));
+ }
+ assert.equal(macHumanViewportObservationConfiguration('human-zsh'),undefined);
 });
 test('only fixed automatic full/raw cases separate capture from visual acceptance',()=>{
  const full=macDailyCaptureConfiguration('full-zsh');assert.deepEqual(macDailyCaptureConfiguration('full-bash'),full);
@@ -117,6 +130,9 @@ test('retains window options and leaves the WebKit identifier to the runtime SDK
  const submission=await macDailyAppConfiguration(root,directory,token,{submission:true});
  assert.equal(submission.appDirectoriesOverride,undefined);
  assert.deepEqual(submission.windows,first.windows.map(window=>({...window,focus:false})));
+ const passive=await macDailyAppConfiguration(root,directory,token,{passiveWindow:true});
+ assert.equal(passive.appDirectoriesOverride,first.appDirectoriesOverride);
+ assert.deepEqual(passive.windows,submission.windows);
  await assert.rejects(()=>macDailyAppConfiguration(root,root,token));
 });
 test('actual human checkpoint HTTP archive preserves bytes once and grants no visual or human receipt',async()=>{

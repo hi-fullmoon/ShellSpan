@@ -16,7 +16,8 @@ import {auditEditorResources} from './editor-resources.mjs';
 const root=resolve(import.meta.dirname,'../..');assert(process.platform==='darwin'&&process.env.CARGO_TARGET_DIR);
 const {values}=parseArgs({options:{theme:{type:'string'},columns:{type:'string'},engine:{type:'string'},renderer:{type:'string'},scenario:{type:'string'},transport:{type:'string'}}});
 const transport=values.transport??'local';assert(['local','ssh'].includes(transport));
-const scenario=values.scenario??'input';assert(['input','background'].includes(scenario));
+const scenario=values.scenario??'input';assert(['input','background','background-resize'].includes(scenario));
+assert(scenario!=='background-resize'||transport==='local');
 const themes=values.theme?[values.theme]:(transport==='ssh'?['plain']:['walters','adam1']);assert(themes.every(x=>(transport==='ssh'?['plain']:['walters','adam1']).includes(x)));
 const widths=values.columns?values.columns.split(',').map(Number):[32,40,100,180];assert(widths.length&&widths.every(x=>[32,40,100,180].includes(x)));
 const engine=values.engine??'chromium',renderer=values.renderer??'dom';assert(['chromium','webkit'].includes(engine)&&['dom','webgl'].includes(renderer));
@@ -73,7 +74,7 @@ try{for(const theme of themes)for(const columns of widths){
     terminal.loadAddon(new Unicode11Addon.Unicode11Addon());const search=new SearchAddon.SearchAddon();terminal.loadAddon(search);
     const s=window.live={terminal,search,role,offset:0,eventIndex:0,frames:[],failure:undefined,stopped:false,allowResize:false,completedDecodedUtf8Bytes:0,offeredRawThrough:0};
     s.original={selection:terminal.getSelection,line:terminal.buffer.normal.getLine,open:terminal.open};
-    if(role==='follow'&&scenario==='background'){
+     if(role==='follow'&&scenario!=='input'){
      const host=document.createElement('div');host.style.cssText='position:fixed;left:-10000px';document.body.append(host);
      s.reference=new Terminal({cols:columns,rows:30,scrollback:20000,reflowCursorLine:false,allowProposedApi:true});s.reference.open(host);s.reference.loadAddon(new Unicode11Addon.Unicode11Addon());
     }
@@ -91,7 +92,14 @@ try{for(const theme of themes)for(const columns of widths){
      const response=await fetch('/stream',{cache:'no-store'});if(response.status===204){await new Promise(resolve=>setTimeout(resolve,5));continue;}if(!response.ok)throw Error(await response.text());const packet=await response.json();
      if(!s.binding){if(packet.binding.ownedReflowCursorLine!==true||packet.binding.unicodeVersion!=='11')throw Error('Actual verified native-append binding was not received before PTY output');s.binding=packet.binding;s.display=attachNativeInputDisplay(terminal,packet.binding,{unicodeVersion:packet.binding.unicodeVersion,unicodeScope:packet.binding.unicodeScope});if(s.reference)s.referenceDisplay=attachNativeInputDisplay(s.reference,packet.binding,{unicodeVersion:packet.binding.unicodeVersion,unicodeScope:packet.binding.unicodeScope});}
      const bytes=Uint8Array.from(atob(packet.bytes),x=>x.charCodeAt(0));
-     for(const event of packet.events.slice(s.eventIndex)){if(event.offset>bytes.length)break;if(event.offset<s.offset)throw Error('Actual resize arrived after its following PTY bytes');await write(bytes.slice(s.offset,event.offset));s.offset=event.offset;terminal.resize(event.columns,30);s.eventIndex++;}
+     for(const event of packet.events.slice(s.eventIndex)){
+      if(event.offset>bytes.length)break;
+      if(event.offset<s.offset)throw Error('Actual resize arrived after its following PTY bytes');
+      await write(bytes.slice(s.offset,event.offset));s.offset=event.offset;
+      terminal.resize(event.columns,event.rows??30);
+      if(s.reference&&scenario==='background-resize')s.reference.resize(event.columns,event.rows);
+      s.eventIndex++;
+     }
      await write(bytes.slice(s.offset));s.offset=bytes.length;if(packet.entry)s.entry=packet.entry;
      if(scenario==='input'&&role==='follow'&&packet.entry&&!s.wrapped&&search.findNext(packet.entry.prefixBeforeFirstResize)){
       const selected=terminal.getSelection(),position=terminal.getSelectionPosition();terminal.clearSelection();
@@ -107,7 +115,7 @@ try{for(const theme of themes)for(const columns of widths){
       }
       terminal.clearSelection();
      }
-     if(scenario==='background'&&role==='follow'&&packet.hold&&!s.fullSource){
+     if(scenario!=='input'&&role==='follow'&&packet.hold&&!s.fullSource){
       await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
       const held=await(await fetch('/hold',{cache:'no-store'})).json();
       if(held.active){
@@ -120,7 +128,8 @@ try{for(const theme of themes)for(const columns of widths){
    },{columns,renderer,role,scenario,marker});
   }
   const production=resolve(root,transport==='ssh'?'.artifacts/tests/native-input-p3/production-ssh-zle':'.artifacts/tests/native-input-p3/production-zle');await mkdir(production,{recursive:true});const before=new Set(await readdir(production));const log=await open(resolve(directory,`${theme}-${columns}.log`),'wx');
-  const environment={...process.env,...validation,SHELLSPAN_P3_TEST_PROMPT_THEME:theme,SHELLSPAN_P3_TEST_COLUMNS:String(columns),SHELLSPAN_P3_TRACE_SCHEDULE:'1',SHELLSPAN_P3_GEOMETRY_BACKGROUND_OUTPUT:scenario==='background'?'1':'0',SHELLSPAN_P3_HISTORY_PREFILL:'1',SHELLSPAN_P3_OBSERVE_FULL_INPUT:'1',SHELLSPAN_P3_INTERRUPT_STAGE:'running'};
+  const environment={...process.env,...validation,SHELLSPAN_P3_TEST_PROMPT_THEME:theme,SHELLSPAN_P3_TEST_COLUMNS:String(columns),SHELLSPAN_P3_TRACE_SCHEDULE:'1',SHELLSPAN_P3_GEOMETRY_BACKGROUND_OUTPUT:scenario==='input'?'0':'1',SHELLSPAN_P3_HISTORY_PREFILL:'1',SHELLSPAN_P3_OBSERVE_FULL_INPUT:'1',SHELLSPAN_P3_INTERRUPT_STAGE:'running'};
+  if(scenario==='background-resize')environment.SHELLSPAN_P3_GEOMETRY_DYNAMIC_ROWS='1';else delete environment.SHELLSPAN_P3_GEOMETRY_DYNAMIC_ROWS;
   if(scenario==='input'||transport==='ssh')environment.SHELLSPAN_P3_LIVE_GEOMETRY='1';else delete environment.SHELLSPAN_P3_LIVE_GEOMETRY;
   if(transport==='ssh'){
    fixturePath=execFileSync(process.execPath,[resolve(root,'scripts/native-input-p3/linux-peer.mjs'),root],{cwd:root,encoding:'utf8'}).trim();
@@ -156,6 +165,7 @@ try{for(const theme of themes)for(const columns of widths){
   if(transport==='local'){
    const confirmed=control.find(value=>value.message.requestId==='prepare-3'&&value.message.payload.kind==='inputConfirmed');
    assert(confirmed&&geometry.resizeEvents.length===7&&geometry.resizeEvents.every(value=>value.elapsedMicros<confirmed.elapsedMicros),'The seven actual resizes did not precede native full-input confirmation');
+   if(scenario==='background-resize')assert(new Set(geometry.resizeEvents.map(value=>value.rows)).size>2,'The real PTY did not change height');
   }else{
    assert.equal(geometry.resizeEvents.length,7);
    assert(control.some(value=>value.requestId==='wrap-query-3'&&value.payload.kind==='snapshot'&&value.payload.phase==='typing'&&value.payload.mayHaveSubmitted===false),'Actual SSH typing query proof missing');
@@ -169,7 +179,7 @@ try{for(const theme of themes)for(const columns of widths){
   assert(follow.fullSource?.inActualUnsubmittedHold&&follow.fullSource.markers.startup&&follow.fullSource.markers.parent&&follow.fullSource.markers.prefill.length===60,'The live input frame did not retain actual prior output');
   if(scenario==='input'){assert(follow.fullSource.exactSource);assert.deepEqual(follow.fullSource.cursor,follow.fullSource.position.end,'Actual native input cursor did not match full source end');}
   else{
-   assert.equal(follow.fullSource.combinedCopy,follow.fullSource.referenceCopy,'Owned combined output differs from actual fixed-size reference');
+   assert.equal(follow.fullSource.combinedCopy,follow.fullSource.referenceCopy,'Owned combined output differs from the real reference stream');
    const prefix=(await readFile(resolve(active,'raw.bin'))).subarray(0,follow.fullSource.offeredRawUpperBound).toString('utf8');
    const completed=actualPrintedIds.filter(id=>prefix.includes(`${marker.background}${id}:父Shell-é-👩🏽‍💻`));
    assert(completed.length>0);assert(completed.every(id=>follow.fullSource.combinedCopy.includes(`${marker.background}${id}:父Shell-é-👩🏽‍💻`)),'A complete real background payload disappeared before arm');

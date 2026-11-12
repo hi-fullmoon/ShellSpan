@@ -140,4 +140,13 @@ async function start(){
  await capture.checkpoint('human-ready',{broker:initial,initial,routes,session,family},true);await capture.post({progress:'Manual window ready; waiting for user start',ready:true,evidence:{kind:'manual-native-display-ready',family,session,initial,operatorActions:0,humanReceipt:false}});ready=true;message=t('terminal.human.ready');refresh();
  void renderObserver;
 }
-void start().catch(error=>{const token=new URL(location.href).searchParams.get('token');void fetch('/__agent-stream-result/'+token,{method:'POST',body:JSON.stringify({ok:false,error:String(error),evidence:{kind:'mac-human-preparation-failure',humanReceipt:false}})});});
+const parameters = new URL(location.href).searchParams;
+const selection = parameters.get('macDaily');
+const run = async () => {
+ if (selection !== 'human-viewport-zsh' && selection !== 'human-viewport-bash') return start();
+ const token = parameters.get('token');
+ assert(token, 'Exact owned viewport token required');
+ const {startMacHumanViewport} = await import('./mac-human-viewport.native');
+ return startMacHumanViewport(token, selection === 'human-viewport-zsh' ? 'zsh' : 'bash');
+};
+void run().catch(error=>{const token=parameters.get('token');void fetch('/__agent-stream-result/'+token,{method:'POST',body:JSON.stringify({ok:false,error:String(error),evidence:{kind:'mac-human-preparation-failure',humanReceipt:false}})});});

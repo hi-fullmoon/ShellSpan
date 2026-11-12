@@ -14,6 +14,12 @@ export function macSystemSelectionObservationConfiguration(selection){
  return{visualLabels:labels,snapshotLabels:[...labels,'eof-diagnostic']};
 }
 
+export function macHumanViewportObservationConfiguration(selection){
+ if(selection!=='human-viewport-zsh'&&selection!=='human-viewport-bash')return undefined;
+ const visualLabels=['human-ready','human-viewport-parked','human-viewport-narrowed','human-final'];
+ return{visualLabels,snapshotLabels:[...visualLabels,'human-deferred','eof-diagnostic']};
+}
+
 export function macDailyCaptureConfiguration(selection){
  if(selection==='full-zsh'||selection==='full-bash')return{captureLabels:macDailyVisualCheckpoints.slice(0,21),liveAuditLabels:['ready','tui-enter','tui-exit']};
  if(selection==='raw-zsh'||selection==='raw-bash')return{captureLabels:['ready','tui-enter','tui-edit','tui-exit'],liveAuditLabels:['ready','tui-enter','tui-exit']};
@@ -32,14 +38,14 @@ export function macHumanFinalEvidenceWindow(startedAt,value){
  return{phase:'operator-complete',operatorTimerStarted:false,evidenceTimerStarted:false,scope:'Operator actions ended within their original budget. Keep the actual window for independently observed final evidence; no further operator actions are admitted.'};
 }
 
-export async function macDailyAppConfiguration(root,directory,token,{submission=false}={}){
+export async function macDailyAppConfiguration(root,directory,token,{submission=false,passiveWindow=false}={}){
  assert(/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(token)&&isAbsolute(root)&&isAbsolute(directory),'Exact native case identity required');
  assert(relative(root,directory).startsWith(['.artifacts','tests','native-input-p2',''].join(sep)),'Window data must stay in the owned frozen case');
  const base=JSON.parse(await readFile(resolve(root,'src-tauri/tauri.conf.json'),'utf8'));
  const development=JSON.parse(await readFile(resolve(root,'src-tauri/tauri.dev.conf.json'),'utf8'));
  const windows=development.app?.windows??base.app?.windows;
  assert(windows?.length===1&&windows[0].label==='main','One existing native window required');
- return{...(submission?{}:{appDirectoriesOverride:resolve(directory,'app-directories')}),windows:windows.map(window=>({...window,...(submission?{focus:false}:{})}))};
+ return{...(submission?{}:{appDirectoriesOverride:resolve(directory,'app-directories')}),windows:windows.map(window=>({...window,...(submission||passiveWindow?{focus:false}:{})}))};
 }
 
 // Automation-only screenshot barrier. It never supplies a human receipt,
@@ -188,7 +194,7 @@ export function attachMacDailyCheckpoints(server,token,directory,startObservatio
 // A no-model, process-scoped entrance into the existing signed/frozen runner.
 export function macDailyAcceptance(values,environment=process.env){
  const family=values['native-mac-daily'];if(family===undefined)return undefined;
- assert(process.platform==='darwin'&&process.arch==='arm64'&&['zsh','bash','full-zsh','full-bash','raw-zsh','raw-bash','editing-zsh','editing-bash','pump-zsh','pump-bash','toast-zsh','toast-bash','submission-zsh','submission-bash','system-selection-zsh','system-selection-bash','human-zsh','human-bash','human-copy-zsh','human-copy-bash','human-selection-zsh','eof-zsh','eof-bash','eof-natural-zsh','eof-natural-bash','eof-private-zsh','eof-private-bash','eof-owned-zsh','eof-owned-bash'].includes(family)
+ assert(process.platform==='darwin'&&process.arch==='arm64'&&['zsh','bash','full-zsh','full-bash','raw-zsh','raw-bash','editing-zsh','editing-bash','pump-zsh','pump-bash','toast-zsh','toast-bash','submission-zsh','submission-bash','system-selection-zsh','system-selection-bash','human-zsh','human-bash','human-copy-zsh','human-copy-bash','human-selection-zsh','human-viewport-zsh','human-viewport-bash','eof-zsh','eof-bash','eof-natural-zsh','eof-natural-bash','eof-private-zsh','eof-private-bash','eof-owned-zsh','eof-owned-bash'].includes(family)
   &&values['no-model']===true&&values['data-scope']==='com.shellspan.validation.native-input-p3'
   &&isAbsolute(environment.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR??'')
   &&environment.SHELLSPAN_DATA_DIR===resolve(environment.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR,'data')

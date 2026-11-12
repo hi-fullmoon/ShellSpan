@@ -874,16 +874,23 @@ async fn real_child_terminal_takeover_blocks_the_entire_delegation_until_turn_en
         .unwrap();
     let user_file = scenario.root.path().join("work/user-cwd.txt");
     let deadline = Instant::now() + Duration::from_secs(5);
-    while !user_file.exists() {
+    // Shell redirection creates the file before pwd writes the directory.
+    let user_cwd = loop {
+        match std::fs::read_to_string(&user_file) {
+            Ok(value) if value.ends_with('\n') => break value,
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!("could not read the real user command output: {error}"),
+        }
         assert!(
             Instant::now() < deadline,
             "takeover did not restore real user input"
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    };
     scenario.wait_prompt();
     assert_eq!(
-        std::fs::read_to_string(user_file).unwrap().trim(),
+        user_cwd.trim_end(),
         scenario
             .root
             .path()

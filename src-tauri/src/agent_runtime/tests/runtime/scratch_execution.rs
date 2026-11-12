@@ -27,19 +27,26 @@ fn result(scenario: &Scenario, session: &str, id: &str) -> serde_json::Value {
 
 #[tokio::test]
 async fn scratch_scripts_execute_outside_project_with_original_cwd_on_both_surfaces() {
-    for surface in [
-        AgentExecutionSurface::Direct,
-        AgentExecutionSurface::BoundTerminal,
-    ] {
-        let scenario = Scenario::with_native_input(
+    for (session, shell, surface) in [
+        (
+            "scratch-direct",
             TerminalShellKind::Bash,
-            surface == AgentExecutionSurface::BoundTerminal,
-        );
-        let session = if surface == AgentExecutionSurface::Direct {
-            "scratch-direct"
-        } else {
-            "scratch-bound"
-        };
+            AgentExecutionSurface::Direct,
+        ),
+        (
+            "scratch-bash",
+            TerminalShellKind::Bash,
+            AgentExecutionSurface::BoundTerminal,
+        ),
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        (
+            "scratch-zle",
+            TerminalShellKind::Zsh,
+            AgentExecutionSurface::BoundTerminal,
+        ),
+    ] {
+        let bound = surface == AgentExecutionSurface::BoundTerminal;
+        let scenario = Scenario::with_native_input(shell, bound);
         let entry = scenario.root(session, surface, AgentSessionPermissionMode::Operator);
         scenario.start(&entry, "scratch-turn", "scratch-step");
         let run = |calls| {
@@ -73,49 +80,43 @@ async fn scratch_scripts_execute_outside_project_with_original_cwd_on_both_surfa
         assert!(saved["verified"].as_bool().unwrap());
         let path = std::path::Path::new(root).join("cwd.sh");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "pwd\n");
+        let record: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(
+                scenario
+                    .root
+                    .path()
+                    .join("state/agent-runtime/scratch/records")
+                    .join(format!("{key}.json")),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(record["key"], key);
+        assert_eq!(record["sessionId"], session);
+        assert_eq!(
+            record["target"],
+            serde_json::to_value(header.target.as_ref().unwrap()).unwrap()
+        );
         let project = scenario.root.path().join("work");
         assert_eq!(std::fs::read_dir(&project).unwrap().count(), 0);
         assert!(!path.starts_with(&project));
 
+        let replacement = if bound {
+            "pwd -P; scratch_parent_check"
+        } else {
+            "pwd -P"
+        };
         run(vec![file_call(
             "edit_file",
             "edit-script",
             json!({
-                "path":"cwd.sh", "oldString":"pwd", "newString":"pwd -P",
+                "path":"cwd.sh", "oldString":"pwd", "newString":replacement,
                 "precondition":{"sha256":saved["afterSha256"]}, "fileScope":"scratch"
             }),
         )])
         .await
         .unwrap();
         result(&scenario, session, "edit-script");
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "pwd -P\n");
-        run(vec![file_call(
-            "run_terminal_command",
-            "run-script",
-            json!({
-                "command":format!("/bin/sh {}", shlex::try_quote(path.to_str().unwrap()).unwrap()),
-                "explanation":"Run the saved working-directory check", "timeoutMs":10000
-            }),
-        )])
-        .await
-        .unwrap();
-        if surface == AgentExecutionSurface::BoundTerminal {
-            scenario.wait_prompt();
-        }
-        let execution = result(&scenario, session, "run-script");
-        let output = execution[if surface == AgentExecutionSurface::Direct {
-            "stdout"
-        } else {
-            "combinedOutput"
-        }]
-        .as_str()
-        .unwrap();
-        assert!(
-            output.contains(project.canonicalize().unwrap().to_str().unwrap()),
-            "{execution}"
-        );
-        assert_eq!(std::fs::read_dir(&project).unwrap().count(), 0);
-
         run(vec![file_call(
             "read_file",
             "read-script",
@@ -123,10 +124,52 @@ async fn scratch_scripts_execute_outside_project_with_original_cwd_on_both_surfa
         )])
         .await
         .unwrap();
+        let read = result(&scenario, session, "read-script");
+        assert_eq!(read["content"], format!("{replacement}\n"));
         assert_eq!(
-            result(&scenario, session, "read-script")["content"],
-            "pwd -P\n"
+            std::fs::read_to_string(&path).unwrap(),
+            read["content"].as_str().unwrap()
         );
+        let actual_path = read["path"].as_str().unwrap();
+        assert_eq!(std::path::Path::new(actual_path), path);
+        if bound {
+            run(vec![file_call("run_terminal_command", "setup-parent", json!({
+                "command":"scratch_parent_value=parent-only; scratch_parent_check() { builtin printf '%s\\n' \"$scratch_parent_value\"; }",
+                "explanation":"Set a non-exported variable and function in the bound shell", "timeoutMs":10000
+            }))]).await.unwrap();
+            scenario.wait_prompt();
+            result(&scenario, session, "setup-parent");
+        }
+        let interpreter = if bound { "." } else { "/bin/sh" };
+        let command = format!("{interpreter} {}", shlex::try_quote(actual_path).unwrap());
+        run(vec![file_call(
+            "run_terminal_command",
+            "run-script",
+            json!({
+                "command":command,
+                "explanation":"Run the saved working-directory check", "timeoutMs":10000
+            }),
+        )])
+        .await
+        .unwrap();
+        if bound {
+            scenario.wait_prompt();
+        }
+        let execution = result(&scenario, session, "run-script");
+        let output = execution[if bound { "combinedOutput" } else { "stdout" }]
+            .as_str()
+            .unwrap();
+        assert!(
+            output.contains(project.canonicalize().unwrap().to_str().unwrap()),
+            "{execution}"
+        );
+        if bound {
+            assert!(
+                output.lines().any(|line| line.trim_end() == "parent-only"),
+                "{execution}"
+            );
+        }
+        assert_eq!(std::fs::read_dir(&project).unwrap().count(), 0);
         run(vec![file_call("write_file", "escape", json!({
             "path":"../../outside.sh", "content":"pwd\n", "fileScope":"scratch", "precondition":{"mustNotExist":true}
         }))]).await.unwrap();

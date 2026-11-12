@@ -620,60 +620,6 @@ fn posix_same_uid_reopen_is_documented_out_of_scope_tampering() {
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-#[track_caller]
-fn wait_for_prompt(broker: &crate::terminal_broker::TerminalSessionBroker, transport_id: &str) {
-    wait_for_prompt_with_timeout(broker, transport_id, Duration::from_secs(5));
-}
-
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-#[track_caller]
-fn wait_for_prompt_with_timeout(
-    broker: &crate::terminal_broker::TerminalSessionBroker,
-    transport_id: &str,
-    timeout: Duration,
-) {
-    use std::time::Instant;
-    let deadline = Instant::now() + timeout;
-    loop {
-        let snapshot = broker.snapshot(Some(transport_id)).unwrap();
-        if snapshot.session.as_ref().is_some_and(|session| {
-            session.integration_state == crate::terminal_broker::TerminalIntegrationState::Ready
-                && session.prompt_ready
-        }) {
-            return;
-        }
-        if Instant::now() >= deadline {
-            let frames = snapshot.session.as_ref().and_then(|session| {
-                broker
-                    .replay_output(
-                        &session.terminal_session_id,
-                        session.terminal_generation,
-                        session.replay_first_sequence.unwrap_or(1),
-                        512,
-                        4096,
-                    )
-                    .ok()
-            });
-            let raw = frames
-                .map(|batch| {
-                    batch
-                        .frames
-                        .into_iter()
-                        .flat_map(|frame| frame.bytes)
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            let tail = crate::redaction::redact_sensitive_text(&String::from_utf8_lossy(&raw));
-            panic!(
-                "prompt not ready at {}: {snapshot:?}; shared PTY tail={tail:?}",
-                std::panic::Location::caller()
-            );
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
-}
-
-#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn wait_until(timeout: Duration, mut predicate: impl FnMut() -> bool) {
     use std::time::Instant;
     let deadline = Instant::now() + timeout;
