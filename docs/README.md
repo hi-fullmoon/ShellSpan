@@ -35,10 +35,9 @@
 ## 终端实施与验收
 
 - [NIP 契约与实现入口](../protocol/agent/runtime/native-input.md)：原生输入、资源和准入边界。
-- [原生输入统一验收标准](design/agent-terminal-input-acceptance-checklist.md)：35条要求、十个平台绑定、证据规则及执行门槛。
-- [Windows 分期验收](design/agent-terminal-input-windows-acceptance.md)：四期范围、当前待办、历史证据索引及最终收口条件。
-- [macOS 六期验收计划](design/agent-terminal-input-macos-plan.md)：本机四组合的分期范围、完成条件与跨机器边界。
-- [macOS arm64 验收记录](design/agent-terminal-input-macos-acceptance-2026-11-06.md)：本机四组合的历史批次、实际结果及证据索引。
+- [原生终端后续实施计划](design/agent-terminal-input-implementation-plan.md)记录当前进度、各平台剩余工作和交付顺序。
+- [原生输入统一验收标准](design/agent-terminal-input-acceptance-checklist.md)规定 35 条要求、五个发布绑定和证据规则。
+- [macOS arm64 验收记录](design/agent-terminal-input-macos-acceptance-2026-11-06.md)和 [Windows 验收记录](design/agent-terminal-input-windows-acceptance.md)保留历史实机结果及证据索引。
 
 ## 设计与历史证据
 

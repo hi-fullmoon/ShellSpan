@@ -220,9 +220,9 @@ public sealed class ShellSpanNativeEditor : IDisposable {
             UIntPtr size; IntPtr pointer;
             while((pointer=ss_editor_output(context,out size))!=IntPtr.Zero && size.ToUInt64()!=0) {
                 int length=checked((int)size.ToUInt64()); var bytes=new byte[length]; Marshal.Copy(pointer,bytes,0,length);
-                var written=pipe.BeginWrite(bytes,0,length,null,null);
-                if(!written.AsyncWaitHandle.WaitOne(1000)) throw new TimeoutException("Native control backpressure");
-                pipe.EndWrite(written);
+                // The pipe owns its asynchronous I/O handles. Wait for the
+                // task so fast completions cannot race a borrowed wait handle.
+                if(!pipe.WriteAsync(bytes,0,length).Wait(1000)) throw new TimeoutException("Native control backpressure");
             }
             pipe.Flush();
         } catch {

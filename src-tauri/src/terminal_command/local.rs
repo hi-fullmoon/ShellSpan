@@ -288,6 +288,13 @@ impl PreparedNativeBash {
                 stream
                     .set_write_timeout(Some(Duration::from_secs(1)))
                     .map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?;
+                // Readline drains the private socket after the ordered PTY
+                // wake. Darwin's default send buffer cannot hold a large
+                // PrepareInput frame containing both the source and its plan.
+                #[cfg(target_os = "macos")]
+                socket2::SockRef::from(&stream)
+                    .set_send_buffer_size(nip::MAX_MESSAGE_BYTES)
+                    .map_err(|_| "TERMINAL_NATIVE_CONTROL_UNAVAILABLE")?;
                 let probe_bytes = probe
                     .encode()
                     .map_err(|_| "TERMINAL_NATIVE_PROTOCOL_INVALID")?;

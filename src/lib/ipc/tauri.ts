@@ -358,7 +358,8 @@ export function invokePrepareTerminalAcceptanceRawCommand(agentSessionId: string
   return invokeLogged('prepare_terminal_acceptance_raw_command', { agentSessionId, background });
 }
 
-export type TerminalAcceptanceSourceKind = 'effect' | 'running' | 'manual-running' | 'syntax-error' | 'unsupported-input' | 'long-input' | 'paced-input' | 'transport-read';
+export type TerminalAcceptanceSourceKind = 'effect' | 'running' | 'manual-running' | 'syntax-error' | 'unsupported-input'
+  | 'exact-byte-boundary' | 'oversized-byte-boundary' | 'long-input' | 'paced-input' | 'transport-read';
 
 export interface TerminalAcceptanceSubmission {
   readonly invocationOrigin: string;

@@ -22,7 +22,7 @@ it('admits only owned no-model submission cases without taking a visual or human
  expect(macSubmissionControlMode('control-eof')).toEqual({cut:'accept-receipt',scenario:'control-eof'});
  expect(macSubmissionControlMode('transport-disconnect')).toEqual({cut:'accept-receipt',scenario:'transport-disconnect'});
  expect(macSubmissionControlMode('late-started-and-matched-settled')).toEqual({cut:'accept-receipt',scenario:'late-started-and-matched-settled'});
- for(const scenario of ['source-mismatch','plan-mismatch','target-mismatch','unsupported-input-native','permission-mismatch','resource-manifest-mismatch'])expect(macSubmissionControlMode(scenario)).toEqual({cut:undefined,scenario});
+ for(const scenario of ['source-mismatch','plan-mismatch','target-mismatch','unsupported-input-native','permission-mismatch','resource-manifest-mismatch','byte-boundary','raw-admission'])expect(macSubmissionControlMode(scenario)).toEqual({cut:undefined,scenario});
  expect(macSubmissionControlMode('incomplete-proof')).toEqual({cut:'input-in-progress',scenario:'incomplete-proof'});
  expect(macSubmissionControlMode('readonly-query-does-not-authorize')).toEqual({cut:'input-in-progress',scenario:'readonly-query-does-not-authorize'});
  for(const scenario of ['identity-mismatch','complete-identity-submatrix','generation-mismatch'])expect(macSubmissionControlMode(scenario)).toEqual({cut:'arm-identity',scenario});

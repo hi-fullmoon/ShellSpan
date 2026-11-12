@@ -34,9 +34,11 @@ try {
     assert.deepEqual(target.prepare('SELECT version FROM schema_version').all().map(value=>value.version),[1]);
     const existing=target.prepare('SELECT value FROM preferences WHERE key=?').get('llm.routes.v1');
     assert(existing && JSON.parse(existing.value).routes.length===0,'Independent native route store must be empty');
+    const otherPreferences = target.prepare('SELECT key,value FROM preferences WHERE key<>? ORDER BY key');
+    const before = JSON.stringify(otherPreferences.all('llm.routes.v1'));
     assert.equal(target.prepare('UPDATE preferences SET value=? WHERE key=? AND value=?').run(row.value,'llm.routes.v1',existing.value).changes,1);
+    assert(JSON.stringify(otherPreferences.all('llm.routes.v1')) === before, 'Import changed unrelated preferences');
     target.exec('COMMIT');
-    assert.equal(target.prepare('SELECT count(*) AS count FROM preferences').get().count, 1);
   } finally { target.close(); }
   console.log(JSON.stringify({ destination, routeCount: document.routes.length,
     defaultSelection: document.defaultSelection, secretsRead: false, userSettingsCopied: false }));

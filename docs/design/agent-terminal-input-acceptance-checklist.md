@@ -1,10 +1,8 @@
 # Agent 原生终端输入验收标准
 
-更新：2026-11-07。本文只定义验收要求与证据规则，不承担逐批运行流水或当前代码通过证明。
+更新：2026-11-11。本文定义验收要求与证据规则。执行顺序和当前进度见[后续实施计划](agent-terminal-input-implementation-plan.md)。
 
-- Windows 执行与四期安排见[Windows 分期验收](agent-terminal-input-windows-acceptance.md)。
-- macOS 本机四组合的执行安排见[六期验收计划](agent-terminal-input-macos-plan.md)，与 Windows 分别记录结果；各平台标准仍以本文为准。
-- macOS 独立批次见[macOS arm64 验收记录](agent-terminal-input-macos-acceptance-2026-11-06.md)。
+- 历史批次见 [macOS arm64 验收记录](agent-terminal-input-macos-acceptance-2026-11-06.md)和 [Windows 验收记录](agent-terminal-input-windows-acceptance.md)。
 - 实现与边界见[NIP 契约与实现入口](../../protocol/agent/runtime/native-input.md)、[显示契约](../../protocol/native-input-display.md)及[临时脚本契约](../../protocol/agent/runtime/file-and-script-execution.md)。
 
 ## 验收范围
@@ -56,7 +54,7 @@ Shell、编辑器、Core、模块及 relay 均按实际版本和 SHA-256 绑定�
 
 ## 必需检查项目
 
-以下 35 条描述保留原文；复核的是逐平台子案记录，不通过勾选本文代替实际结果。自动化工具继续读取本文件中的编号和要求。
+以下 35 条用于逐平台复核子案。自动化工具读取本文中的编号和要求，实际结果登记在批次台账中。
 
 ### 源码与制品
 
@@ -144,7 +142,7 @@ Shell、编辑器、Core、模块及 relay 均按实际版本和 SHA-256 绑定�
 | 源码/目录与发现 | [冻结清单](../../scripts/native-input-p2/frozen-validation.mjs)、[快照](../../scripts/native-input-p3/snapshot.mjs)、[目录回归](../../scripts/__tests__/artifact-layout.test.mjs)；只读索引不得改写 |
 | GNU 本地与 SSH | [P2](../../scripts/verify-terminal-input-p2.mjs)、[矩阵](../../scripts/native-input-p2/matrix.mjs)；`--list-cases` 只列清单，`--local-only` 只选本地，`--include-legacy` 扩展至三个 Bash 版本 |
 | ZLE | [Core 构建](../../scripts/native-input-p3/build-scoped-core.mjs)、[编辑器构建](../../scripts/native-input-p3/build.mjs)、[App](../../scripts/native-input-p3/app.mjs)；Core/Main/模块须同批绑定 |
-| Windows | [资源构建](../../scripts/native-input-p3/build-windows.mjs)、[组件](../../src-tauri/native-input-editors/examples/windows_acceptance.rs)、[App 入口](../../scripts/verify-ai-session-stream.mjs)、[分期计划](agent-terminal-input-windows-acceptance.md)；debug 与 release 制品分开核验 |
+| Windows | [资源构建](../../scripts/native-input-p3/build-windows.mjs)、[组件](../../src-tauri/native-input-editors/examples/windows_acceptance.rs)、[App 入口](../../scripts/verify-ai-session-stream.mjs)；debug 与 release 制品分开核验 |
 | 资源准入 | [资源核验](../../scripts/native-input-p3/verify-resource-admission.mjs)；错误资源负例与拟验收有效资源分别隔离，不打开生产 profile |
 | 包批次与留存 | [包执行器](../../scripts/native-input-p3/windows-package-batch.mjs)、[输入核验](../../scripts/native-input-p3/acceptance-inputs.mjs)、[证据契约](../../scripts/native-input-p3/acceptance-evidence.mjs)；普通/模型/封存/卸载分别记录，子集不关闭父项 |
 | 浏览器与选择 | [binding](../../src/lib/terminal/__tests__/native-input-display-binding.browser.mjs)、[显示](../../src/lib/terminal/__tests__/native-input-display.browser.mjs)、[选择](../../src/lib/terminal/__tests__/native-selection-reflow.browser.mjs)；历史样本仅证明其范围 |

@@ -2362,6 +2362,10 @@ fn native_protocol_real_takeover_fences_armed_admission_before_clear() {
     shell.arm(&mut coordinator);
     let identity = coordinator.identity().unwrap();
     coordinator.operation.fence_takeover().unwrap();
+    assert!(!coordinator
+        .operation
+        .takeover_settled_before_submission()
+        .unwrap());
     assert_eq!(
         coordinator
             .submit(
@@ -2407,10 +2411,18 @@ fn native_protocol_real_takeover_fences_armed_admission_before_clear() {
                 .map_err(|error| error.to_string())
         })
         .unwrap();
+    assert!(!coordinator
+        .operation
+        .takeover_settled_before_submission()
+        .unwrap());
     shell.wait(&mut coordinator, |view| view.draft_cleared);
     let settled = coordinator.operation.snapshot().unwrap();
     assert_eq!(settled.state, TerminalCommandState::TakenOver);
     assert!(!settled.may_have_submitted);
+    assert!(coordinator
+        .operation
+        .takeover_settled_before_submission()
+        .unwrap());
     assert!(shell.broker.unresolved_submissions().unwrap().is_empty());
     assert_eq!(shell.accept_keys.load(Ordering::Relaxed), 0);
     assert!(!shell.home.path().join("effect").exists());
@@ -2630,7 +2642,7 @@ fn native_protocol_real_connection_profile_and_missing_capability_do_not_invent_
             assert!(!inband_display);
             assert_eq!(
                 profile.verified_profile_id.as_deref(),
-                Some(nip::VERIFIED_PROFILE)
+                Some(shell.expected_profile_id.as_str())
             );
             assert_eq!(profile.editor_numeric_version, 0x0803);
             assert!(profile.shell_version.as_ref().unwrap().starts_with("5.3."));
@@ -2658,7 +2670,11 @@ fn native_protocol_real_connection_profile_and_missing_capability_do_not_invent_
 #[ignore = "requires the rebuilt native producer"]
 fn native_protocol_real_second_operation_keeps_parent_environment_and_connection_framing() {
     let mut shell = NativeShell::start("successive-operations");
-    let mut first = shell.command_as("export P1_PARENT_VALUE='parent-value'", "native-first");
+    fs::create_dir(shell.home.path().join("parent-directory")).unwrap();
+    let mut first = shell.command_as(
+        "cd \"$HOME/parent-directory\"; export P1_PARENT_VALUE='parent-value'; p1_parent_value() { printf '%s' \"$P1_PARENT_VALUE\"; }; (exit 7)",
+        "native-first",
+    );
     let sender = shell.writer.clone();
     shell.key(b"\x18\x1e");
     first
@@ -2700,7 +2716,7 @@ fn native_protocol_real_second_operation_keeps_parent_environment_and_connection
         .retire_command("nip", &first.operation.command_id().unwrap())
         .unwrap();
     let mut second = shell.command_as(
-        "printf '%s' \"$P1_PARENT_VALUE\" > \"$HOME/second\"",
+        "[[ $? == 7 && $PWD == \"$HOME/parent-directory\" ]] && p1_parent_value > \"$HOME/second\"",
         "native-second",
     );
     for message in shell
@@ -2784,7 +2800,7 @@ fn native_protocol_real_unverified_vi_mode_does_not_negotiate_from_versions_alon
             };
             assert_eq!(
                 profile.verified_profile_id.as_deref(),
-                Some(nip::VERIFIED_PROFILE)
+                Some(shell.expected_profile_id.as_str())
             );
             assert!(
                 !native_inline,

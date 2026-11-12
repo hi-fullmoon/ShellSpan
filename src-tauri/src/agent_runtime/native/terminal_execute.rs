@@ -755,6 +755,13 @@ impl TerminalExecuteRegistry {
                 .native_input_coordinator(session_id, operation_id)?,
         ));
         operation.require_complete_input_proof()?;
+        let registration = TerminalExecuteRegistration {
+            native: native_coordinator.clone(),
+            agent_session_id: agent_session_id.to_string(),
+            task_id: task_id.to_string(),
+            operation_id: operation_id.to_string(),
+            operation: Arc::clone(&operation),
+        };
         {
             let mut operations = match self.operations.lock() {
                 Ok(operations) => operations,
@@ -785,16 +792,7 @@ impl TerminalExecuteRegistry {
                 );
                 return Err(TerminalLeaseError::Busy.to_string());
             }
-            operations.insert(
-                session_id.to_string(),
-                TerminalExecuteRegistration {
-                    native: native_coordinator.clone(),
-                    agent_session_id: agent_session_id.to_string(),
-                    task_id: task_id.to_string(),
-                    operation_id: operation_id.to_string(),
-                    operation: Arc::clone(&operation),
-                },
-            );
+            operations.insert(session_id.to_string(), registration.clone());
         }
         let mut pending_registration = TerminalStartGuard {
             registry: self.clone(),
@@ -908,9 +906,8 @@ impl TerminalExecuteRegistry {
                     .lock()
                     .map_err(|_| "TERMINAL_NATIVE_COORDINATOR_UNAVAILABLE")?
                     .control_closed();
-            } else {
-                let registration = self.registration(session_id, operation_id)?;
-                if self
+            } else if !operation.takeover_settled_before_submission()?
+                && self
                     .stop_native(
                         sessions,
                         session_id,
@@ -918,19 +915,34 @@ impl TerminalExecuteRegistry {
                         TerminalCommandRequestedSettlement::Cancelled,
                     )
                     .is_err()
-                {
-                    let _ = self
-                        .broker
-                        .require_native_input_recovery(session_id, operation_id);
-                }
+            {
+                let _ = self
+                    .broker
+                    .require_native_input_recovery(session_id, operation_id);
             }
+            // Takeover revokes the lease before the editor replies. Report the
+            // exact operation's settlement after clearing its draft, even if
+            // revalidation first returned a lease or lifecycle error.
+            let taken_over = operation.takeover_settled_before_submission()?;
             let _ = self.finish_registration(
                 session_id,
                 agent_session_id,
                 task_id,
                 operation_id,
-                TerminalLeaseReleaseReason::Failed,
+                if taken_over {
+                    TerminalLeaseReleaseReason::TakenOver
+                } else {
+                    TerminalLeaseReleaseReason::Failed
+                },
             );
+            if taken_over {
+                return Err(if job_submission.is_some() {
+                    "TERMINAL_JOB_LAUNCH_CANCELLED"
+                } else {
+                    "TERMINAL_SUBMISSION_CANCELLED"
+                }
+                .into());
+            }
             return Err(error);
         }
         pending_registration.armed = false;

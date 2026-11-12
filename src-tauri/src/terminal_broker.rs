@@ -801,6 +801,15 @@ impl TerminalCommandOperation {
     pub(crate) fn submission_may_have_occurred(&self) -> Result<bool, String> {
         Ok(self.lock()?.lifecycle.may_have_submitted())
     }
+
+    pub(crate) fn takeover_settled_before_submission(&self) -> Result<bool, String> {
+        let data = self.lock()?;
+        Ok(data.lifecycle.phase() == CommandPhase::Cancelled
+            && !data.lifecycle.may_have_submitted()
+            && data.lifecycle.requested_settlement()
+                == Some(TerminalCommandRequestedSettlement::TakenOver))
+    }
+
     pub(crate) fn source_may_have_been_enqueued(&self) -> Result<bool, String> {
         Ok(self.lock()?.source_may_be_enqueued)
     }

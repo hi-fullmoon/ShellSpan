@@ -90,6 +90,8 @@ Shell与Readline必须按构建配方的对应关系配对，实际运行范围�
 尚未提交的 `cancelDraft` 必须在有序私有写入后唤醒非执行的原生服务键。武装会使
 编辑器停止输入轮询，不能假定它仍会自行读取后续取消报文。服务唤醒不是接受键，
 不授予执行或编辑权限；后端仍须等待匹配的真实清稿回执，未确认前保留输入门禁。
+macOS 本地私有控制 socket 在发送探测前按协议报文上限设置发送缓冲。Readline 可以在
+完整的 `prepareInput` 已排队后再由服务键唤醒，即使报文同时携带 8192 字节源码及其计划。
 P3 实现了按完整源文件及实际制品摘要绑定的 ZLE/PSReadLine provider；独立平台验收仍在进行，
 不能将组件回执或 P2 Bash 结果视为 P3 完成。当前证据及未完成项见
 [统一验收清单](../../../docs/design/agent-terminal-input-acceptance-checklist.md)。

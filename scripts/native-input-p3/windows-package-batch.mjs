@@ -13,6 +13,7 @@ import {captureValidationSources,captureValidationAssets} from '../native-input-
 import {nativeInputReleaseDirectory} from '../native-input-p2/resource-paths.mjs';
 import {acquireNativeGui,assertNativeGuiAllowed} from '../native-input-p2/gui-lock.mjs';
 import {verifyNsisInstalledImage} from './windows-package-image.mjs';
+import {selectWindowsProfiles} from './windows-profiles.mjs';
 import {packageFrontendDirectory,validationPackageMarker,packageResourceMapping,assertPackageResourcePaths} from './package-config.mjs';
 import {windowsPackageFileWitness} from './windows-package-witness.mjs';
 import {windowsBootstrapWitness} from './windows-bootstrap-witness.mjs';
@@ -91,7 +92,9 @@ async function main(){
       dependencyInventoryMigration:'Declared Vite cacheDir outputs are excluded from production build inputs; all installed package bytes and links match',oldResultsReplayed:false});
   }
   const resources=resolve(root,'.artifacts/tests/native-input-p2/resources/native-input'),catalogue=await read(resolve(resources,'editors-windows-x64.json'));
-  assert.equal(catalogue.profiles.length,2);for(const [path,sha]of Object.entries(catalogue.sources))assert.equal(await hashFile(resolve(root,path)),sha,'Native source changed');
+  const catalogueHosts = catalogue.profiles.map(({ profile }) => ({ shell: profile.shell, expectedVersion: profile.shellVersion }));
+  assert.deepEqual(catalogueHosts, selectWindowsProfiles(), 'Windows native catalogue differs from the supported hosts');
+  for(const [path,sha]of Object.entries(catalogue.sources))assert.equal(await hashFile(resolve(root,path)),sha,'Native source changed');
   for(const profile of catalogue.profiles)assert.equal(await hashFile(inside(resources,resolve(resources,profile.module))),profile.moduleSha256,'Native artifact changed');
   const coreSha=catalogue.profiles[0].moduleSha256;assert(catalogue.profiles.every(item=>item.moduleSha256===coreSha));
   const binaryName=reusable?.plan.binaryName??`ShellSpanBatch${short}`,productName=reusable?.plan.productName??`ShellSpan Package Batch ${short}`,application=resolve(install,binaryName+'.exe');

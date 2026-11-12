@@ -72,6 +72,15 @@ impl AgentRuntime {
             }
             "syntax-error" => format!("{effect}\nif"),
             "unsupported-input" => format!("{effect}; \0"),
+            "exact-byte-boundary" | "oversized-byte-boundary" if scenario == "byte-boundary" => {
+                let bytes = if source_kind == "exact-byte-boundary" {
+                    8192
+                } else {
+                    8193
+                };
+                let prefix = format!("{effect}; : '");
+                format!("{prefix}{}'", "x".repeat(bytes - prefix.len() - 1))
+            }
             "long-input" => format!("printf '%s' '{}' >/dev/null; {effect}", "x".repeat(4096)),
             "paced-input" => format!(": '{}'; {effect}", "x".repeat(256)),
             "transport-read" => format!("{effect}; read -r -t 30 phase3_transport"),

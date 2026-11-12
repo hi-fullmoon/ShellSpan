@@ -18,6 +18,7 @@ import type {AgentSessionEvent} from '@/types/agent-session';
 import {macLifecycleCapture} from './mac-lifecycle-capture';
 import {macWireCapture} from './mac-wire-capture';
 import {isMacFileChainProfile} from './native-file-chain-posix';
+import {readNativeAcceptanceResult} from './native-result-artifact';
 import '@/styles/base.css';
 
 function assert(value:unknown,message:string):asserts value{if(!value)throw Error(message);}
@@ -40,9 +41,10 @@ async function verify(){
  const armIdentity = ['identity-mismatch','complete-identity-submatrix','generation-mismatch'].includes(observationConfiguration.scenario ?? '');
  const permissionMismatch = observationConfiguration.scenario === 'permission-mismatch';
  const manifestMismatch = observationConfiguration.scenario === 'resource-manifest-mismatch';
+ const rawAdmission = observationConfiguration.scenario === 'raw-admission';
  const useParsedOutput = ['close-running-terminal', 'timeout-unknown-accept', 'control-eof', 'late-started-and-matched-settled', 'target-mismatch','delegation'].includes(observationConfiguration.scenario ?? '') || observationConfiguration.scenario?.startsWith('wire-') === true || observationConfiguration.scenario?.startsWith('after-accept-') === true || inputInProgress || bindingNegative || transportLoss || armIdentity || permissionMismatch;
  const wireFault = observationConfiguration.scenario?.startsWith('wire-') === true && observationConfiguration.scenario !== 'wire-split-and-coalesced';
- const capture=await macLifecycleCapture(token,{parsedOutputOrder:useParsedOutput||manifestMismatch,startupOutputMayPrecedeSubscription:wireFault||manifestMismatch}),session=await invokeCreateLocalSession(100,30);await capture.expect(session);
+ const capture=await macLifecycleCapture(token,{parsedOutputOrder:useParsedOutput||manifestMismatch||rawAdmission,startupOutputMayPrecedeSubscription:wireFault||manifestMismatch||rawAdmission}),session=await invokeCreateLocalSession(100,30);await capture.expect(session);
  useTerminalStore.getState().addSession(session);useTerminalStore.getState().setActiveSession(session.sessionId);useAppStore.getState().setActiveSection('terminal');
  const binding:{controller?:TerminalController}={};
  const stopBinding=terminalRegistry.subscribe(()=>{const current=terminalRegistry.get(session.sessionId);if(current&&!binding.controller){capture.bind(current);binding.controller=current;}});
@@ -142,25 +144,25 @@ async function verify(){
  let problem:unknown,closed=false,secondWire:Awaited<ReturnType<typeof macWireCapture>>|undefined;
  try{
   const wireScenario = observationConfiguration.scenario;
-  if(manifestMismatch){
+  if(manifestMismatch||rawAdmission){
    const before=await snapshot();
    assert(before.session?.open&&before.session.inputMode==='raw'&&!before.session.nativePeerProfile,
-    'The actual terminal admitted the resource manifest mismatch');
+    'The unsupported terminal was admitted to native input');
    const refusal=await run('effect',true),after=await snapshot(),effect=await witness();
    assert(refusal.prepared.settlement!=='Waiting'
     &&!refusal.after.some(event=>event.type==='tool/execution')
     &&!refusal.effects.exists&&!effect.exists&&refusal.recovery.length===0
     &&before.session.nextInputSequence===after.session?.nextInputSequence,
-   'Wrong resource manifest reached an actual approval, input or effect');
+   'An unsupported terminal reached an actual approval, input or effect');
    await invokeCancelAgentRuntime({sessionId:refusal.id});
    await invokeCloseSession(session.sessionId);
    closed=true;
    const retained=await capture.finish();
    const response=await fetch('/__agent-stream-result/'+token,{method:'POST',body:JSON.stringify({
-    ok:true,evidence:{kind:'actual-macos-resource-manifest-mismatch',scenario:wireScenario,session,before,after,refusal,effect,retained,routes,
+    ok:true,evidence:{kind:rawAdmission?'actual-macos-raw-admission':'actual-macos-resource-manifest-mismatch',scenario:wireScenario,session,before,after,refusal,effect,retained,routes,
      humanReceipt:false,phase3Complete:false},
    })});
-   assert(response.ok,'Actual resource mismatch evidence was not retained');
+   assert(response.ok,'Actual raw admission evidence was not retained');
    return;
   }
   if (wireScenario?.startsWith('wire-')) {
@@ -774,6 +776,36 @@ async function verify(){
    await invokeCancelAgentRuntime({sessionId:prepared.id});await invokeCloseSession(session.sessionId);closed=true;
    const retained=await capture.finish();
    const response=await fetch('/__agent-stream-result/'+token,{method:'POST',body:JSON.stringify({ok:true,evidence:{kind:'actual-macos-running-control',scenario,family,session,prepared,approval,runningRecord,settledEvents,recoveryAfter,beforeEnter,postEnterAccepted:accepted,effect,retained,routes,humanReceipt:false,physicalInputClaim:false,phase3Complete:false}})});assert(response.ok,'Actual running control evidence was not retained');return;
+  }
+  if(wireScenario==='byte-boundary'){
+   const accepted=await run('exact-byte-boundary');
+   const acceptedSource=accepted.prepared.source;
+   assert(new TextEncoder().encode(acceptedSource).length===8192,'Exact boundary source has the wrong byte length');
+   const result=accepted.after.find((event):event is Extract<AgentSessionEvent,{type:'tool/result'}>=>event.type==='tool/result'&&event.data.callId===accepted.callId);
+   assert(result?.data.status==='completed','8192-byte source did not complete through the native terminal');
+   const resolved=await readNativeAcceptanceResult(accepted.id,result.data.data);
+   assert(resolved.data.channel==='terminal'&&resolved.data.execution==='completed'
+    &&resolved.data.commandLine===acceptedSource&&resolved.data.exitCode===0,
+   '8192-byte source did not complete through the native terminal');
+   assert(accepted.effects.text===accepted.callId+'\n'&&accepted.recovery.length===0,'The boundary command did not settle with exactly one effect');
+   await invokeCancelAgentRuntime({sessionId:accepted.id});
+   await until(idle,'Boundary execution did not return to the original prompt');
+   const refused=await run('oversized-byte-boundary',true);
+   assert(new TextEncoder().encode(refused.prepared.source).length===8193,'Oversized source has the wrong byte length');
+   assert(refused.prepared.settlement!=='Waiting'&&refused.after.some(event=>event.type==='tool/result'
+    &&event.data.callId===refused.callId&&event.data.status==='rejected'&&event.data.summary.includes('8193 UTF-8 bytes')),
+   '8193-byte source was not rejected before approval');
+   assert(!refused.after.some(event=>event.type==='tool/execution')&&refused.recovery.length===0
+    &&refused.brokerBefore.session?.nextInputSequence===refused.brokerAfter.session?.nextInputSequence
+    &&refused.effects.text===accepted.effects.text,'Oversized source affected terminal input, recovery or the filesystem');
+   await invokeCancelAgentRuntime({sessionId:refused.id});
+   await invokeCloseSession(session.sessionId);closed=true;
+   const retained=await capture.finish();
+   const response=await fetch('/__agent-stream-result/'+token,{method:'POST',body:JSON.stringify({
+    ok:true,evidence:{kind:'actual-macos-native-byte-boundary',family,accepted,refused,resultArtifact:resolved.artifact,retained,humanReceipt:false},
+   })});
+   assert(response.ok,'Actual byte-boundary evidence was not retained');
+   return;
   }
   const effect=await run(inputInProgress?'paced-input':'effect');
   if(cutConfiguration.scenario){

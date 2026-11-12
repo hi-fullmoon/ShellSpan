@@ -117,6 +117,35 @@ fn public_zle_history_snapshot(
     read_public_zle_history(&directory)
 }
 
+fn read_zle_disk_history(
+    shell: &std::path::Path,
+    observer: &std::path::Path,
+    history: &std::path::Path,
+    home: &std::path::Path,
+    directory: &std::path::Path,
+) -> (u32, serde_json::Value) {
+    fs::create_dir(directory).unwrap();
+    let reader = std::process::Command::new(shell)
+        .args(["-f", "-c", "HISTSIZE=1000; zmodload zsh/parameter; source \"$1\"; fc -R \"$2\" || exit; print -s -- OWNED_READER_CURRENT_EVENT; p3_history_export \"$3\"", "owned-history-reader"])
+        .arg(observer)
+        .arg(history)
+        .arg(directory)
+        .env("HOME", home)
+        .env("ZDOTDIR", home)
+        .env("LC_ALL", "en_US.UTF-8")
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let pid = reader.id();
+    let output = reader.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "Actual Zsh history reader failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    (pid, read_public_zle_history(directory))
+}
+
 fn wait(
     messages: &mpsc::Receiver<nip::Message>,
     records: &mut Vec<nip::Message>,
@@ -175,7 +204,7 @@ fn native_zle_private_namespace_guards_preserve_user_definitions() {
         };
         fs::write(home.join(".zshrc"),format!("PROMPT='P3-GUARD> '\np3_user_snapshot() {{ builtin printf '%s' USER_WIDGET > $HOME/user-widget; }}\nzle -N p3_user_snapshot\nbindkey '^Xg' p3_user_snapshot\n{definition}\n")).unwrap();
         if kind == "early-core" {
-            fs::write(home.join(".zshenv"),"P3_ENV_COUNT=$(( ${P3_ENV_COUNT:-0}+1 ))\nbuiltin printf '%s' \"$P3_ENV_COUNT\" > $HOME/env-count\ntypeset -g P3_EARLY_DATA=USER_KEEP\nzmodload zsh/zle\np3_early_widget() { builtin printf '%s' EARLY_WIDGET > $HOME/early-widget; }\nzle -N p3_early_widget\nbindkey '^Xy' p3_early_widget\n").unwrap();
+            fs::write(home.join(".zshenv"),"P3_ENV_COUNT=$(( ${P3_ENV_COUNT:-0}+1 ))\nbuiltin printf '%s' \"$P3_ENV_COUNT\" > $HOME/env-count\ntypeset -g P3_EARLY_DATA=USER_KEEP\nzmodload zsh/zle\np3_early_widget() { builtin printf '%s' EARLY_WIDGET > $HOME/early-widget.pending && /bin/mv $HOME/early-widget.pending $HOME/early-widget; }\nzle -N p3_early_widget\nbindkey '^Xy' p3_early_widget\n").unwrap();
             fs::write(
                 home.join(".zprofile"),
                 "builtin printf 1 > $HOME/profile-loaded\n",
@@ -274,7 +303,7 @@ fn native_zle_private_namespace_guards_preserve_user_definitions() {
                 "early-core" => "builtin typeset -p P3_EARLY_DATA",
                 _ => unreachable!(),
             };
-            writer.write_all(format!("{inspect} > $HOME/after-definition; builtin printf '%s%s' USER_ PARSER > $HOME/user-parser\r").as_bytes()).unwrap();
+            writer.write_all(format!("{inspect} > $HOME/after-definition; builtin printf '%s%s' USER_ PARSER > $HOME/user-parser.pending && /bin/mv $HOME/user-parser.pending $HOME/user-parser\r").as_bytes()).unwrap();
             writer.flush().unwrap();
             let deadline = Instant::now() + Duration::from_secs(3);
             while !home.join("user-parser").exists() {
@@ -378,7 +407,7 @@ fn native_zle_private_eof_preserves_ordinary_input_and_user_hooks() {
         fs::create_dir_all(&evidence).unwrap();
         let home = evidence.join("home");
         fs::create_dir(&home).unwrap();
-        fs::write(home.join(".zshrc"), "PROMPT='P3-EOF> '\nHISTFILE=$HOME/history\nHISTSIZE=100\nSAVEHIST=100\np3_user_precmd() { :; }\nprecmd_functions+=(p3_user_precmd)\np3_user_snapshot() { builtin print -rn -- \"$BUFFER\" > $HOME/actual-draft; if builtin ss_nip pending-handoff; then builtin printf 1 > $HOME/pending-handoff; else builtin printf 0 > $HOME/pending-handoff; fi; }\nzle -N p3_user_snapshot\nbindkey '^Xg' p3_user_snapshot\n").unwrap();
+        fs::write(home.join(".zshrc"), "PROMPT='P3-EOF> '\nHISTFILE=$HOME/history\nHISTSIZE=100\nSAVEHIST=100\np3_user_precmd() { :; }\nprecmd_functions+=(p3_user_precmd)\np3_user_snapshot() {\n builtin print -rn -- \"$BUFFER\" > $HOME/actual-draft.pending || return\n if builtin ss_nip pending-handoff; then builtin printf 1 > $HOME/pending-handoff; else builtin printf 0 > $HOME/pending-handoff; fi\n /bin/mv $HOME/actual-draft.pending $HOME/actual-draft\n}\nzle -N p3_user_snapshot\nbindkey '^Xg' p3_user_snapshot\n").unwrap();
         let mut startup = fs::OpenOptions::new()
             .append(true)
             .open(home.join(".zshrc"))
@@ -846,7 +875,7 @@ fn native_zle_private_eof_preserves_ordinary_input_and_user_hooks() {
                     thread::sleep(Duration::from_millis(5));
                 }
             }
-            let inspect = "builtin print -r -- ${+functions[__shellspan_nip_preexec]} ${+functions[__shellspan_nip_precmd]} ${widgets[__shellspan_nip_line_init]-missing} ${widgets[__shellspan_nip_line_finish]-missing} ${precmd_functions[(I)p3_user_precmd]} > actual-hooks; builtin bindkey '^X^]' >> actual-hooks; builtin bindkey '^Xg' >> actual-hooks; builtin printf '%s%s\\n' P3-ORDINARY- AFTER-EOF > ordinary-result\r";
+            let inspect = "builtin print -r -- ${+functions[__shellspan_nip_preexec]} ${+functions[__shellspan_nip_precmd]} ${widgets[__shellspan_nip_line_init]-missing} ${widgets[__shellspan_nip_line_finish]-missing} ${precmd_functions[(I)p3_user_precmd]} > actual-hooks; builtin bindkey '^X^]' >> actual-hooks; builtin bindkey '^Xg' >> actual-hooks; builtin printf '%s%s\\n' P3-ORDINARY- AFTER-EOF > ordinary-result.pending && /bin/mv ordinary-result.pending ordinary-result\r";
             writer.write_all(inspect.as_bytes()).unwrap();
             writer.flush().unwrap();
             let deadline = Instant::now() + Duration::from_secs(3);
@@ -1429,6 +1458,7 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
     fs::create_dir_all(&evidence).unwrap();
     let home = evidence.join("home");
     fs::create_dir(&home).unwrap();
+    fs::create_dir(home.join("parent-directory")).unwrap();
     let handoff_interrupt =
         std::env::var("SHELLSPAN_P3_INTERRUPT_STAGE").is_ok_and(|value| value == "handoff");
     let gated_handoff = std::env::var_os("SHELLSPAN_P3_HANDOFF_GATE").is_some();
@@ -1782,7 +1812,7 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
             ""
         };
         let mut startup_source =
-            "printf 'P3-STARTUP:%s\\n' \"$P3_STARTUP_ORDER\"; typeset P3_PARENT='父Shell-é-👩🏽‍💻'"
+            "printf 'P3-STARTUP:%s\\n' \"$P3_STARTUP_ORDER\"; typeset P3_PARENT='父Shell-é-👩🏽‍💻'; cd \"$HOME/parent-directory\"; p3_parent_value() { printf '%s' \"$P3_PARENT\"; }"
                 .to_string();
         if std::env::var_os("SHELLSPAN_P3_HISTORY_PREFILL").is_some() {
             startup_source.push_str(
@@ -1790,7 +1820,7 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
             );
         }
         let sources=[(startup_source,None),
-            ("[[ $P3_PARENT == '父Shell-é-👩🏽‍💻' ]] && printf '%s%s\\n' P3-PARENT: \"$P3_PARENT\"".into(),None),
+            ("[[ $PWD -ef \"$HOME/parent-directory\" && $(p3_parent_value) == '父Shell-é-👩🏽‍💻' ]] && printf '%s%s\\n' P3-PARENT: \"$P3_PARENT\"".into(),None),
             (format!("zmodload zsh/system; builtin printf '%s' \"$sysparams[pid]\" > {}; {}{}",shlex::try_quote(job_pid_file.to_str().unwrap()).unwrap(),child_options,background_body),Some(nip::JobExecution::Launch{handle:handle.into()})),
             (format!("typeset P3_LONG='{}'; [[ ${{#P3_LONG}} == {} ]] && printf '%s%s\\n' P3-LONG- COMPLETE",long_value,long_value.chars().count()),None),
             (format!("__shellspan_job_control {handle} poll"),Some(nip::JobExecution::Control{handle:handle.into(),stop:false,nonce:"0123456789abcdef0123456789abcdef".into()})),
@@ -2181,6 +2211,26 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
                     differences.push(serde_json::json!({"stage":"memory","operation":index,"expected":expected,"actual":history_snapshots[index+1]["entries"]}));
                 }
             }
+            if mode == "shared" {
+                let writer_pid = child.process_id().unwrap();
+                assert!(child.try_wait().unwrap().is_none());
+                let (reader_pid, shared) = read_zle_disk_history(
+                    shell,
+                    &observer,
+                    &history_path,
+                    &home,
+                    &evidence.join("history-live-reader"),
+                );
+                assert_ne!(writer_pid, reader_pid);
+                assert!(child.try_wait().unwrap().is_none());
+                publish(
+                    &evidence.join("history-live-reader.json"),
+                    &serde_json::json!({"writerPid":writer_pid,"readerPid":reader_pid,"reader":shared,"writerStillRunning":true}),
+                );
+                if shared["entries"] != serde_json::json!(expected) {
+                    differences.push(serde_json::json!({"stage":"live-reader","expected":expected,"actual":shared["entries"]}));
+                }
+            }
             writer.write_all(b"exit\r").unwrap();
             writer.flush().unwrap();
             let deadline = Instant::now() + Duration::from_secs(8);
@@ -2198,19 +2248,13 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
                 status.success(),
                 "History Shell normal exit failed: {status:?}"
             );
-            let disk = evidence.join("history-disk-read");
-            fs::create_dir(&disk).unwrap();
-            let parsed = std::process::Command::new(shell)
-                .args(["-f", "-c", "HISTSIZE=1000; zmodload zsh/parameter; source \"$1\"; fc -R \"$2\" || exit; print -s -- OWNED_READER_CURRENT_EVENT; p3_history_export \"$3\"", "owned-history-reader"])
-                .arg(&observer).arg(&history_path).arg(&disk)
-                .env("HOME", &home).env("ZDOTDIR", &home).env("LC_ALL", "en_US.UTF-8")
-                .output().unwrap();
-            assert!(
-                parsed.status.success(),
-                "Actual Zsh history reader failed: {}",
-                String::from_utf8_lossy(&parsed.stderr)
+            let (_, saved) = read_zle_disk_history(
+                shell,
+                &observer,
+                &history_path,
+                &home,
+                &evidence.join("history-disk-read"),
             );
-            let saved = read_public_zle_history(&disk);
             publish(&evidence.join("history-disk.json"), &saved);
             if persistent {
                 expected.push("exit".into());
@@ -2238,7 +2282,7 @@ fn native_zle_production_startup_parent_parser_and_jobs() {
             );
             publish(
                 &evidence.join("history-result.json"),
-                &serde_json::json!({"mode":mode,"ok":differences.is_empty(),"normalExit":true,"observations":history_snapshots.len(),"privateJobControlsExcluded":private_controls_excluded,"configurationPreserved":configuration_preserved,"diskReadByActualZsh":true,"scope":"Actual native module and PTY, not an App/model or multi-process shared-history proof"}),
+                &serde_json::json!({"mode":mode,"ok":differences.is_empty(),"normalExit":true,"observations":history_snapshots.len(),"privateJobControlsExcluded":private_controls_excluded,"configurationPreserved":configuration_preserved,"diskReadByActualZsh":true,"concurrentSecondReader":mode=="shared","scope":"Actual native module and PTY with separate history reader processes"}),
             );
             assert!(
                 differences.is_empty(),

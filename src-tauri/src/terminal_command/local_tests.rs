@@ -308,7 +308,14 @@ fn prepared_bash_real_submit_draft_cancel_and_running_interrupt() {
     fs::create_dir_all(&evidence).unwrap();
     let home = evidence.join("home");
     fs::create_dir(&home).unwrap();
-    fs::write(home.join(".bash_profile"), "source \"$HOME/.bashrc\"\n").unwrap();
+    let empty_history =
+        std::env::var("SHELLSPAN_P3_TEST_BASH_HISTORY_MODE").as_deref() == Ok("empty");
+    let startup = if empty_history {
+        "source \"$HOME/.bashrc\"\nHISTFILE=\n"
+    } else {
+        "source \"$HOME/.bashrc\"\n"
+    };
+    fs::write(home.join(".bash_profile"), startup).unwrap();
     fs::write(
         home.join(".bashrc"),
         "PS1='\\[\\e[34m\\]P3-NATIVE> \\[\\e[0m\\]'\nPROMPT_COMMAND=\n",
@@ -340,17 +347,26 @@ fn prepared_bash_real_submit_draft_cancel_and_running_interrupt() {
     let profile = format!("gnu-bash-{version}-readline-{readline}-{target}-native");
     let shell = resources.join(&profile).join("bash");
     let prepared = PreparedNativeBash::prepare(&shell, &resources).unwrap();
+    let binding = prepared.profile.display_binding();
     fs::write(
         evidence.join("verified-display-binding.json"),
-        serde_json::to_vec_pretty(&prepared.profile.display_binding()).unwrap(),
+        serde_json::to_vec_pretty(&binding).unwrap(),
     )
     .unwrap();
-    assert!(prepared.profile.display_binding().unicode_version.is_none());
-    assert!(prepared
-        .profile
-        .display_binding()
-        .owned_reflow_cursor_line
-        .is_none());
+    if target == "macos-arm64" {
+        assert_eq!(
+            binding.unicode_version,
+            Some(nip::DisplayUnicodeVersion::Unicode11)
+        );
+        assert_eq!(
+            binding.unicode_scope,
+            Some(nip::DisplayUnicodeScope::Session)
+        );
+    } else {
+        assert_eq!(binding.unicode_version, None);
+        assert_eq!(binding.unicode_scope, None);
+    }
+    assert_eq!(binding.owned_reflow_cursor_line, None);
     let pair = native_pty_system()
         .openpty(PtySize {
             rows: 30,
@@ -410,7 +426,19 @@ fn prepared_bash_real_submit_draft_cancel_and_running_interrupt() {
         // EditorReady packet is a ZLE-specific startup requirement.
         let tab_source="P3_TABS=$'01234567890A\tB'; [[ $P3_TABS == $'01234567890A\tB' ]] && P3_BASH_PARENT='父Shell'; printf '%s%s\\n' P3-BASH- SUBMITTED".to_string();
         fs::write(evidence.join("tab-boundary.json"),serde_json::to_vec_pretty(&serde_json::json!({"source":tab_source,"sourceSha256":nip::sha(&tab_source),"columns":40,"rows":30,"prompt":"P3-NATIVE> ","prefix":"P3_TABS=$'01234567890A","tail":"B';"})).unwrap()).unwrap();
-        let sources=[tab_source,format!("printf X > \"$HOME/must-not-execute\" #{}","x".repeat(3000)),"sleep 30".into(),"[[ $P3_BASH_PARENT == '父Shell' && ! -e $HOME/must-not-execute ]] && printf '%s%s\\n' P3-BASH- RESTORED".into()];
+        let boundary_prefix = ": '";
+        let boundary_suffix = "'; printf X >> \"$HOME/boundary-effect\"";
+        let boundary_source = format!(
+            "{boundary_prefix}{}{boundary_suffix}",
+            "x".repeat(8192 - boundary_prefix.len() - boundary_suffix.len())
+        );
+        let sources = [
+            tab_source,
+            format!("printf X > \"$HOME/must-not-execute\" #{}", "x".repeat(3000)),
+            "sleep 30".into(),
+            "[[ $P3_BASH_PARENT == '父Shell' && ! -e $HOME/must-not-execute ]] && printf '%s%s\\n' P3-BASH- RESTORED".into(),
+            boundary_source.clone(),
+        ];
         for (index, source) in sources.into_iter().enumerate() {
             let id = nip::Identity {
                 terminal_session_id: session_id.clone(),
@@ -424,6 +452,7 @@ fn prepared_bash_real_submit_draft_cancel_and_running_interrupt() {
                 source_revision: 1,
             };
             let digest = nip::sha(&source);
+            let source_bytes = source.len();
             let plan = nip::native_bash_plan(&source).unwrap();
             let bound = nip::bound_plan_digest(&digest, &plan);
             let prepare = nip::Envelope {
@@ -469,7 +498,7 @@ fn prepared_bash_real_submit_draft_cancel_and_running_interrupt() {
             wait(
                 &rx,
                 &mut records,
-                |m| matches!(m,nip::Message::Operation(e)if e.request_id==prepare.request_id&&matches!(e.payload,nip::Payload::InputConfirmed{..})),
+                |m| matches!(m,nip::Message::Operation(e)if e.request_id==prepare.request_id&&matches!(&e.payload,nip::Payload::InputConfirmed{source_digest,utf8_bytes,cursor_utf8_bytes,end_utf8_bytes,..}if source_digest==&digest&&*utf8_bytes as usize==source_bytes&&cursor_utf8_bytes==end_utf8_bytes)),
             );
             let commit = nip::Envelope {
                 protocol: nip::PROTOCOL.into(),
@@ -523,8 +552,84 @@ fn prepared_bash_real_submit_draft_cancel_and_running_interrupt() {
             Some(libc::ESRCH)
         );
         assert!(!home.join("must-not-execute").exists());
+        assert_eq!(fs::read(home.join("boundary-effect")).unwrap(), b"X");
+        let history_check = if empty_history {
+            "[[ ${HISTFILE+x} == x && -z $HISTFILE ]] && "
+        } else {
+            ""
+        };
+        writer.write_all(format!("{history_check}builtin history -a && printf 1 > \"$HOME/history-flushed.pending\" && /bin/mv \"$HOME/history-flushed.pending\" \"$HOME/history-flushed\"\r").as_bytes()).unwrap();
+        writer.flush().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !home.join("history-flushed").is_file() {
+            assert!(
+                Instant::now() < deadline,
+                "The running Bash did not save its history"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        let history_file = home.join(".bash_history");
+        if empty_history {
+            assert!(!history_file.exists());
+            writer.write_all(b"exit\r").unwrap();
+            writer.flush().unwrap();
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    assert!(status.success());
+                    break;
+                }
+                assert!(Instant::now() < deadline, "Bash history case did not exit");
+                thread::sleep(Duration::from_millis(5));
+            }
+            assert!(!history_file.exists());
+            fs::write(evidence.join("history-empty-verified"), b"1\n").unwrap();
+            return;
+        }
+        let history_read = evidence.join("history-live-reader.txt");
+        let reader = std::process::Command::new(&shell)
+            .args([
+                "--noprofile",
+                "--norc",
+                "-c",
+                "builtin history -r \"$1\" && builtin history -w \"$2\"",
+                "owned-history-reader",
+            ])
+            .arg(&history_file)
+            .arg(&history_read)
+            .env("HOME", &home)
+            .env_remove("HISTFILE")
+            .spawn()
+            .unwrap();
+        let reader_pid = reader.id();
+        assert_ne!(shell_pid, reader_pid);
+        assert!(reader.wait_with_output().unwrap().status.success());
+        assert!(child.try_wait().unwrap().is_none());
+        let history = fs::read_to_string(history_read).unwrap();
+        assert_eq!(history, fs::read_to_string(history_file).unwrap());
+        let boundary_plan = nip::native_bash_plan(&boundary_source).unwrap();
+        assert_eq!(
+            history
+                .lines()
+                .filter(|entry| *entry == boundary_source || *entry == boundary_plan)
+                .count(),
+            1
+        );
+        fs::write(
+            evidence.join("history-live-reader.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "writerPid": shell_pid, "readerPid": reader_pid, "writerStillRunning": true,
+                "sourceSha256": nip::sha(&boundary_source),
+                "historyContainsOriginalSource": history.lines().any(|entry| entry == boundary_source),
+                "historyContainsExecutionPlan": history.lines().any(|entry| entry == boundary_plan)
+            }))
+            .unwrap(),
+        )
+        .unwrap();
     }));
-    child.kill().unwrap();
+    if child.try_wait().unwrap().is_none() {
+        child.kill().unwrap();
+    }
     child.wait().unwrap();
     drop(control);
     output.join().unwrap();

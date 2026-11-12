@@ -29,6 +29,8 @@ mod transport_cases;
 mod loader_abi;
 #[path="support/windows_display_origin.rs"]
 mod display_origin;
+#[path="support/windows_live_terminal.rs"]
+mod live_terminal;
 #[cfg(windows)]
 fn open_windows_conpty(conpty: PathBuf) -> portable_pty::PtyPair {
     portable_pty::win::conpty::ConPtySystem::with_grapheme_host(conpty)
@@ -47,12 +49,9 @@ fn main() {
     let shell=PathBuf::from(&args[1]); let evidence=PathBuf::from(&args[2]);
     let loader_mode=args.get(4).is_some_and(|mode|mode=="loader-abi");
     let display_mode=args.get(4).is_some_and(|mode|mode=="display-capture");
-    if display_mode {
-        assert_eq!(std::env::var("SHELLSPAN_ALLOW_FOREGROUND_TESTS").as_deref(),Ok("1"),"Display capture requires scheduled native acceptance");
-        assert!(!evidence.exists(),"Display capture evidence must be fresh");
-    }
-    if loader_mode {assert!(!evidence.exists(),"Loader evidence must be fresh");}
-    fs::create_dir_all(&evidence).unwrap();
+    fs::create_dir_all(evidence.parent().unwrap()).unwrap();
+    fs::create_dir(&evidence).expect("Acceptance evidence must be fresh");
+    let timeline=Arc::new(Mutex::new(live_terminal::timeline(&evidence)));
     let root=PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let id=format!("p3-{}",std::process::id());
     let mut profile=nip::PeerProfile { shell: nip::ShellFamily::PowerShell7,
@@ -173,6 +172,8 @@ foreach($ReadSample in 1..9){{
     let mut child=pair.slave.spawn_command(command).unwrap();drop(pair.slave);
     let display_worker=display_origin::start(&id,child.process_id().unwrap(),evidence.clone());
     let writer=Arc::new(Mutex::new(pair.master.take_writer().unwrap()));
+    let replies=live_terminal::Replies::start(evidence.clone(),writer.clone());
+    let output_timeline=timeline.clone();
     let mut reader=pair.master.try_clone_reader().unwrap();
     let raw=Arc::new(Mutex::new(Vec::new()));let capture=raw.clone();
     let capture_epoch=Instant::now();
@@ -180,23 +181,17 @@ foreach($ReadSample in 1..9){{
     let read_capture=read_events.clone();
     let mut resize_events=Vec::new();
     let terminal=Arc::new(Mutex::new(vt100::Parser::new(30,100,10000)));
-    let terminal_reader=terminal.clone();let responses=writer.clone();
+    let terminal_reader=terminal.clone();
     let output=thread::spawn(move|| {
-        let mut queries=vte::Parser::new();let mut query=TerminalQueries::default();let mut bytes=[0;8192];
+        let mut bytes=[0;8192];
         while let Ok(count)=reader.read(&mut bytes) {if count==0 {break;}
             {
                 let mut capture=capture.lock().unwrap();
                 let offset=capture.len();
                 capture.extend_from_slice(&bytes[..count]);
+                terminal_reader.lock().unwrap().process(&bytes[..count]);
+                live_terminal::record(&output_timeline,live_terminal::Event::Data{offset,bytes:&bytes[..count]});
                 read_capture.lock().unwrap().push(serde_json::json!({"offset":offset,"length":count,"atMs":capture_epoch.elapsed().as_millis()}));
-            }
-            for byte in &bytes[..count] {
-                let mut terminal=terminal_reader.lock().unwrap(); terminal.process(&[*byte]);
-                queries.advance(&mut query,&[*byte]);
-                if query.cursor {
-                    let (row,col)=terminal.screen().cursor_position(); query.cursor=false;
-                    let mut writer=responses.lock().unwrap();writer.write_all(format!("\x1b[{};{}R",row+1,col+1).as_bytes()).unwrap();writer.flush().unwrap();
-                }
             }
         }
     });
@@ -248,6 +243,7 @@ foreach($ReadSample in 1..9){{
                 let captured=raw.lock().unwrap();
                 pair.master.resize(PtySize{rows:30,cols,pixel_width:0,pixel_height:0}).unwrap();
                 terminal.lock().unwrap().screen_mut().set_size(30,cols);
+                live_terminal::record(&timeline,live_terminal::Event::Resize{offset:captured.len(),cols,rows:30});
                 resize_events.push(serde_json::json!({"offset":captured.len(),"columns":cols,"rows":30,"atMs":capture_epoch.elapsed().as_millis()}));
             }
             let source=if index==4 {"cmd.exe /d /c exit 7".to_string()}
@@ -295,7 +291,7 @@ foreach($ReadSample in 1..9){{
             thread::sleep(Duration::from_millis(10));
         }
     }
-    let _=child.kill();let _=child.wait();drop(display_worker);drop(writer);drop(pair.master);let _=output.join();
+    let _=child.kill();let _=child.wait();drop(replies);drop(display_worker);drop(writer);drop(pair.master);output.join().expect("Terminal capture worker failed");
     fs::write(evidence.join("raw.bin"),&*raw.lock().unwrap_or_else(|e|e.into_inner())).unwrap();
     fs::write(evidence.join("read-events.json"),serde_json::to_vec_pretty(&*read_events.lock().unwrap_or_else(|e|e.into_inner())).unwrap()).unwrap();
     fs::write(evidence.join("resize-events.json"),serde_json::to_vec_pretty(&resize_events).unwrap()).unwrap();
@@ -313,13 +309,6 @@ fn available(file:&fs::File)->Option<u32>{
 }
 #[cfg(not(windows))]
 fn available(_file:&fs::File)->Option<u32>{None}
-#[derive(Default)]
-struct TerminalQueries { cursor:bool }
-impl vte::Perform for TerminalQueries {
-    fn csi_dispatch(&mut self,params:&vte::Params,intermediates:&[u8],ignore:bool,action:char) {
-        if !ignore && intermediates.is_empty() && action=='n' && params.iter().collect::<Vec<_>>()==vec![&[6][..]] {self.cursor=true;}
-    }
-}
 fn wait(mut predicate:impl FnMut()->bool,raw:&Arc<Mutex<Vec<u8>>>) {
     let deadline=Instant::now()+Duration::from_secs(10);
     while Instant::now()<deadline {if predicate(){return;}thread::sleep(Duration::from_millis(10));}
