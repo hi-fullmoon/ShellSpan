@@ -149,7 +149,7 @@ describe('release publication gates', () => {
     expect(release.jobs.build.needs).toEqual(['preflight', 'build-frontend', 'build-native-bash', 'build-native-macos-editor']);
     expect(release.jobs['build-native-bash'].needs).toBe('preflight');
     expect(release.jobs['build-native-macos-editor'].needs).toBe('preflight');
-    expect(release.jobs.quality.needs).toEqual(['preflight', 'build-frontend']);
+    expect(release.jobs.quality.needs).toEqual(['preflight', 'build-frontend', 'build-native-macos-editor']);
     expect(release.jobs.release.needs).toContain('build');
     expect(release.jobs.release.needs).toContain('quality');
     expect(release.jobs.release.if).toBeUndefined();
@@ -168,21 +168,56 @@ describe('release publication gates', () => {
     expect(scripts.changelog).toBe('node scripts/release-notes.mjs sync');
   });
 
-  it('reuses only the tested frontend artifact from the current release run', async () => {
+  it('builds the frontend once in either entry point and runs platform tests with the current run artifact', async () => {
     const release = parse(await readFile(path.join(root, '.github/workflows/release.yml'), 'utf8'));
     const quality = parse(await readFile(path.join(root, '.github/workflows/quality-gate.yml'), 'utf8'));
-    const frontend = release.jobs['build-frontend'].steps;
-    const uploadIndex = frontend.findIndex(step => step.uses?.startsWith('actions/upload-artifact@'));
-    expect(frontend.slice(0, uploadIndex).map(step => step.run)).toEqual(expect.arrayContaining(['pnpm test', 'pnpm run build']));
-    expect(frontend[uploadIndex].with.name).toBe(release.jobs.quality.with['frontend-artifact']);
+    const artifact = release.jobs.quality.with['frontend-artifact'];
+    for (const producer of [quality.jobs.frontend, release.jobs['build-frontend']]) {
+      expect(producer['runs-on']).toBe('ubuntu-24.04');
+      const uploadIndex = producer.steps.findIndex(step => step.uses?.startsWith('actions/upload-artifact@'));
+      expect(producer.steps.slice(0, uploadIndex).map(step => step.run)).toEqual(
+        expect.arrayContaining(['pnpm check:ci:static', 'pnpm test', 'pnpm build']),
+      );
+      expect(producer.steps[uploadIndex].with).toMatchObject({ name: artifact, path: 'dist', 'if-no-files-found': 'error' });
+    }
     expect(quality.on.workflow_call.inputs['frontend-artifact'].default).toBe('');
     expect(quality.jobs.frontend.if).toBe('${{ !inputs.frontend-artifact }}');
-    for (const name of ['Run frontend tests', 'Build frontend']) {
-      expect(quality.jobs.rust.steps.find(step => step.name === name).if).toBe('${{ !inputs.frontend-artifact }}');
-    }
-    const download = quality.jobs.rust.steps.find(step => step.name === 'Download tested frontend dist');
-    expect(download.if).toBe("${{ inputs.frontend-artifact != '' }}");
-    expect(download.with).toEqual({ name: '${{ inputs.frontend-artifact }}', path: 'dist' });
+    const rust = quality.jobs.rust;
+    expect(rust.needs).toBe('frontend');
+    expect(rust.if.replace(/\s+/g, ' ')).toBe(
+      "${{ !cancelled() && (needs.frontend.result == 'success' || (inputs.frontend-artifact != '' && needs.frontend.result == 'skipped')) }}",
+    );
+    expect(rust.steps.find(step => step.run === 'pnpm test').if).toBeUndefined();
+    expect(rust.steps.map(step => step.run)).not.toContain('pnpm build');
+    const download = rust.steps.find(step => step.uses?.startsWith('actions/download-artifact@'));
+    expect(download.if).toBeUndefined();
+    expect(download.with).toEqual({ name: `\${{ inputs.frontend-artifact || '${artifact}' }}`, path: 'dist' });
     expect(download['continue-on-error']).toBeUndefined();
+    const packageDownload = release.jobs.build.steps.find(step => step.uses?.startsWith('actions/download-artifact@'));
+    expect(packageDownload.with).toEqual({ name: artifact, path: 'dist' });
+    const publishDownload = release.jobs.release.steps.find(step => step.uses?.startsWith('actions/download-artifact@'));
+    expect(publishDownload.with).toEqual({ pattern: 'bundle-*', path: '.artifacts/releases/inputs' });
+  });
+
+  it('prepares the macOS shell fixtures before Rust tests and reuses the release ZLE build', async () => {
+    const release = parse(await readFile(path.join(root, '.github/workflows/release.yml'), 'utf8'));
+    const quality = parse(await readFile(path.join(root, '.github/workflows/quality-gate.yml'), 'utf8'));
+    const { strategy, steps } = quality.jobs.rust;
+    expect(strategy.matrix.include).toContainEqual({ platform: 'macos', runner: 'xcode-27' });
+    expect(quality.on.workflow_call.inputs['macos-editor-artifact'].default).toBe('');
+    const preparation = steps.slice(0, steps.findIndex(step => step.name === 'Run Agent terminal contract tests'));
+    expect(preparation.find(step => step.run === 'python3 -B scripts/native-input-p2/build.py --versions 5.3').if).toBe("runner.os == 'macOS'");
+    const build = preparation.find(step => step.name === 'Build pinned Zsh and ZLE test resources');
+    const download = preparation.find(step => step.name === 'Download pinned Zsh and ZLE test resources');
+    const restore = preparation.find(step => step.name === 'Restore executable permission on downloaded Zsh');
+    expect(build.if).toBe("runner.os == 'macOS' && !inputs.macos-editor-artifact");
+    expect(download.if).toBe("runner.os == 'macOS' && inputs.macos-editor-artifact");
+    expect(download.with).toEqual({ name: '${{ inputs.macos-editor-artifact }}', path: '.artifacts/tests' });
+    expect(preparation.indexOf(restore)).toBeGreaterThan(preparation.indexOf(download));
+    expect(restore.if).toBe(download.if);
+    const producer = release.jobs['build-native-macos-editor'];
+    expect(producer.steps.map(step => step.run)).toContain(build.run);
+    const upload = producer.steps.find(step => step.uses?.startsWith('actions/upload-artifact@'));
+    expect(release.jobs.quality.with['macos-editor-artifact']).toBe(upload.with.name);
   });
 });

@@ -9,7 +9,12 @@ on:
         required: true
         type: string
       frontend-artifact:
-        description: Frontend dist already tested and built at ref in this workflow run
+        description: Frontend dist built at ref after frontend tests and static checks in this workflow run
+        required: false
+        default: ''
+        type: string
+      macos-editor-artifact:
+        description: macOS Zsh and ZLE resources built at ref in this workflow run
         required: false
         default: ''
         type: string
@@ -55,11 +60,27 @@ jobs:
       - name: Install ripgrep
         run: sudo apt-get update && sudo apt-get install -y ripgrep
 
-      - name: Run frontend review gate
-        run: pnpm review:frontend
+      - name: Run static checks
+        run: pnpm check:ci:static
+      - name: Run frontend tests
+        run: pnpm test
+      - name: Build frontend
+        run: pnpm build
+      - name: Upload frontend dist
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: frontend-dist
+          path: dist
+          if-no-files-found: error
+          retention-days: 1
 
   rust:
     name: Rust (${{ matrix.platform }})
+    needs: frontend
+    # Release supplies a tested dist and intentionally skips the local producer.
+    if: >-
+      ${{ !cancelled() && (needs.frontend.result == 'success' ||
+        (inputs.frontend-artifact != '' && needs.frontend.result == 'skipped')) }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -68,7 +89,8 @@ jobs:
           - platform: windows
             runner: windows-2025
           - platform: macos
-            runner: macos-15
+            # The pinned private Zsh main/Core require macOS 27.
+            runner: xcode-27
     steps:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -95,34 +117,34 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install ripgrep --yes --no-progress
       - name: Run frontend tests
-        if: ${{ !inputs.frontend-artifact }}
         run: pnpm test
-      - name: Check terminal command display boundary
-        run: pnpm check:terminal:boundary
-      - name: Build frontend
-        if: ${{ !inputs.frontend-artifact }}
-        run: pnpm build
       - name: Download tested frontend dist
-        if: ${{ inputs.frontend-artifact != '' }}
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
-          name: ${{ inputs.frontend-artifact }}
+          name: ${{ inputs.frontend-artifact || 'frontend-dist' }}
           path: dist
       - name: Cache Rust
         uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: src-tauri -> target
           cache-on-failure: true
-      - name: Check formatting
-        run: |
-          cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-          pnpm check:rust:includes
-      - name: Check LLM catalog
-        run: pnpm check:llm:catalog
+      - name: Build pinned Bash and Readline test resources
+        if: runner.os == 'macOS'
+        run: python3 -B scripts/native-input-p2/build.py --versions 5.3
+      - name: Build pinned Zsh and ZLE test resources
+        if: runner.os == 'macOS' && !inputs.macos-editor-artifact
+        run: bash scripts/native-input-p3/build-macos-editor.sh
+      - name: Download pinned Zsh and ZLE test resources
+        if: runner.os == 'macOS' && inputs.macos-editor-artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: ${{ inputs.macos-editor-artifact }}
+          path: .artifacts/tests
+      - name: Restore executable permission on downloaded Zsh
+        if: runner.os == 'macOS' && inputs.macos-editor-artifact
+        run: chmod 500 .artifacts/tests/native-input-p2/resources/native-input/zsh-5.9-zle-5.9-macos-arm64-native/zsh
       - name: Run Agent terminal contract tests
         run: node scripts/verify-agent-terminal-contracts.mjs
-      - name: Run Petdex Phase 0 contract probe
-        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --test petdex_contract_probe -- --test-threads=1
       - name: Run Clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features --locked -- -D warnings
       - name: Run Rust tests

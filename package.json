@@ -62,6 +62,7 @@
     "release:validate": "node scripts/release-quality.mjs request",
     "release:check": "node scripts/release-notes.mjs check",
     "changelog": "node scripts/release-notes.mjs sync",
+    "check:ci:static": "pnpm check:terminal:boundary && cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check && pnpm check:rust:includes && pnpm check:llm:catalog",
     "check:rust:includes": "node scripts/check-rust-includes.mjs",
     "check:terminal:boundary": "node scripts/check-terminal-command-boundary.mjs",
     "check:ai-styles": "node scripts/check-ai-panel-styles.mjs",

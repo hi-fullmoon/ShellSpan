@@ -59,11 +59,12 @@ jobs:
 
   quality:
     name: Release Quality Gate
-    needs: [preflight, build-frontend]
+    needs: [preflight, build-frontend, build-native-macos-editor]
     uses: ./.github/workflows/quality-gate.yml
     with:
       ref: ${{ needs.preflight.outputs.sha }}
       frontend-artifact: frontend-dist
+      macos-editor-artifact: native-macos-editor
 
   build-frontend:
     name: Test and Build Frontend
@@ -97,11 +98,14 @@ jobs:
       - name: Install ripgrep
         run: sudo apt-get update && sudo apt-get install -y ripgrep
 
+      - name: Run static checks
+        run: pnpm check:ci:static
+
       - name: Run tests
         run: pnpm test
 
       - name: Build frontend
-        run: pnpm run build
+        run: pnpm build
 
       - name: Upload frontend dist
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -157,15 +161,7 @@ jobs:
           toolchain: 1.95.0
 
       - name: Build pinned Zsh, ZLE and adapter
-        shell: bash
-        env:
-          DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
-          SDKROOT: /Library/Developer/CommandLineTools/SDKs/MacOSX27.0.sdk
-        run: |
-          if [[ ! -d "$SDKROOT" ]]; then
-            SDKROOT="$(DEVELOPER_DIR=/Applications/Xcode_27.1.app/Contents/Developer xcrun --sdk macosx27.0 --show-sdk-path)"
-          fi
-          node scripts/native-input-p3/build.mjs --build-scoped-core
+        run: bash scripts/native-input-p3/build-macos-editor.sh
 
       - name: Upload macOS editor resources and source archive
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -422,6 +418,7 @@ jobs:
       - name: Download bundle artifacts
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
+          pattern: bundle-*
           path: .artifacts/releases/inputs
 
       - name: Install dependencies

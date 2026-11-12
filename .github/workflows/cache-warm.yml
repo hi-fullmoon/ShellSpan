@@ -11,8 +11,6 @@ on:
       - main
     paths:
       - src-tauri/**
-  schedule:
-    - cron: '23 3 * * *'
   workflow_dispatch:
 
 permissions:
