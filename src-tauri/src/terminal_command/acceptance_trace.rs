@@ -354,6 +354,7 @@ pub(crate) fn ssh_recovery_enabled() -> bool {
             | "positive-source-boundaries"
             | "positive-parent-shell"
             | "positive-jobs"
+            | "positive-job-completion"
             | "positive-file-chain"
             | "display-geometry"
             | "ordinary-input"

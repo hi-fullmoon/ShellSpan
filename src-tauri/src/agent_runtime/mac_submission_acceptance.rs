@@ -139,6 +139,7 @@ impl AgentRuntime {
                 ),
                 "positive-parent-shell" => matches!(source_kind, "parent-shell" | "effect"),
                 "positive-jobs" => matches!(source_kind, "job-launch" | "job-wait" | "job-stop"),
+                "positive-job-completion" => matches!(source_kind, "job-launch" | "job-wait"),
                 "positive-file-chain" => {
                     matches!(source_kind, "file-write" | "file-read" | "file-run")
                 }
@@ -204,11 +205,14 @@ impl AgentRuntime {
             "long-input" => format!("printf '%s' '{}' >/dev/null; {effect}", "x".repeat(4096)),
             "paced-input" => format!(": '{}'; {effect}", "x".repeat(256)),
             "transport-read" => format!("{effect}; read -r -t 30 phase3_transport"),
+            "job-launch" if ssh && scenario == "positive-job-completion" => format!(
+                "{effect}; printf '%s%s\\n' SSH_NATIVE_JOB_ LIVE; for attempt in {{1..120}}; do [[ -e $HOME/phase3-ssh-tail-release ]] && break; /bin/sleep .1; done; [[ -e $HOME/phase3-ssh-tail-release ]] || exit 99; printf '%s%s\\n' SSH_NATIVE_TAIL_ BEGIN; /bin/sleep .2; printf '%s%s\\n' SSH_NATIVE_TAIL_ END; exit 7"
+            ),
             "job-launch" if (ssh && scenario == "positive-jobs") || (!ssh && scenario == "local-jobs") => {
                 let prefix = if ssh { "SSH_NATIVE_JOB_" } else { "NATIVE_JOB_" };
                 format!("{effect}; printf '%s%s\\n' {prefix} LIVE; /bin/sleep 30")
             }
-            "job-wait" | "job-stop" if (ssh && scenario == "positive-jobs") || (!ssh && scenario == "local-jobs") => {
+            "job-wait" | "job-stop" if (ssh && matches!(scenario.as_str(), "positive-jobs" | "positive-job-completion")) || (!ssh && scenario == "local-jobs") => {
                 if !tool_argument.is_some_and(crate::terminal_command::protocol::valid_job_handle) {
                     return Err("ACCEPTANCE_NATIVE_JOB_HANDLE_REQUIRED".into());
                 }

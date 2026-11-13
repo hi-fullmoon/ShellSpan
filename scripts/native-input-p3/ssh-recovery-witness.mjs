@@ -126,7 +126,7 @@ export function attachSshRecoveryWitness(vite, { token, directory, id, fixture, 
           const controlOnly = route === '/control-eof';
           value = { ...(controlOnly ? terminateOwnedSshRelay(fixture) : getForwarder().disconnect()), cut };
           await save(controlOnly ? 'ssh-private-relay-terminated' : 'ssh-sockets-severed', value);
-        } else if (route === '/release-tail' && (id === 'reconnect-tail' || id === 'display-geometry')) {
+        } else if (route === '/release-tail' && ['reconnect-tail', 'display-geometry', 'positive-job-completion'].includes(id)) {
           completed.add(route);
           releaseOldSshTail(fixture);
           value = { at: Date.now(), released: true };

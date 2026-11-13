@@ -29,6 +29,7 @@ export const sshPositiveCases = Object.freeze({
   'positive-source-boundaries': Object.freeze({ cut: null, disconnect: false }),
   'positive-parent-shell': Object.freeze({ cut: null, disconnect: false }),
   'positive-jobs': Object.freeze({ cut: null, disconnect: false }),
+  'positive-job-completion': Object.freeze({ cut: null, disconnect: false }),
   'positive-file-chain': Object.freeze({ cut: null, disconnect: false }),
   'display-geometry': Object.freeze({ cut: null, disconnect: false }),
   'ordinary-input': Object.freeze({ cut: null, disconnect: false }),

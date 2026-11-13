@@ -1,5 +1,4 @@
-/* Only Zsh's documented module/builtin API and ZLE special parameters are used.
- * The editor remains single-threaded, including its public zselect waits. */
+/* The editor remains single-threaded, including its public zselect waits. */
 #define IMPORTING_MODULE_zshQsmain 1
 #include "zsh.mdh"
 #include <sys/socket.h>
@@ -41,13 +40,17 @@ static int endpoint = -1;
 static int fork_registered;
 static sigset_t handoff_mask;
 static int handoff_masked;
+#if defined(SHELLSPAN_ZLE_BOUND_HISTORY) || defined(__linux__)
+static pid_t history_parent;
+static int history_job;
+#endif
 #ifdef SHELLSPAN_ZLE_BOUND_HISTORY
 typedef int (*NativeHistoryBind)(const char *, const char *);
 typedef void (*NativeHistoryChild)(pid_t);
 static NativeHistoryBind history_bind;
 static NativeHistoryChild history_child;
-static pid_t history_parent;
-static int history_job;
+#elif defined(__linux__)
+static int *history_no_save;
 #endif
 static void restore_handoff(void) {
     if(handoff_masked) {
@@ -56,13 +59,17 @@ static void restore_handoff(void) {
     }
 }
 static void child_closed(void) {
-#ifdef SHELLSPAN_ZLE_BOUND_HISTORY
     /* Parent-owned native history must not be flushed by the asynchronous
-     * child's normal/TERM exit. The validated callback only sets a main flag;
-     * no allocation, lookup, shell callback or Rust state is used after fork. */
+     * child's normal/TERM exit. Only the child copy of the Main flag changes. */
+#ifdef SHELLSPAN_ZLE_BOUND_HISTORY
     if(history_job&&history_child) history_child(history_parent);
-    history_job=0;
     history_child=NULL;
+#elif defined(__linux__)
+    if(history_job&&history_no_save&&getpid()!=history_parent) *history_no_save=1;
+    history_no_save=NULL;
+#endif
+#if defined(SHELLSPAN_ZLE_BOUND_HISTORY) || defined(__linux__)
+    history_job=0;
 #endif
     restore_handoff();
     if (endpoint >= 0) close(endpoint);
@@ -140,6 +147,20 @@ static int bin_ssnip(char *name, char **args, Options opts, int func) {
             !realpath(history_info.dli_fname,actual)||strcmp(expected,actual)) {
             history_bind=NULL;history_child=NULL;zwarnnam(name,"TERMINAL_NATIVE_HISTORY_API_UNAVAILABLE");return 1;
         }
+#elif defined(__linux__)
+        /* Linux runs the pinned distribution Main with the private Core.
+         * Resolve the history flag from that Main before installing atfork. */
+        Dl_info history_info;
+        int *no_save=dlsym(RTLD_DEFAULT,"nohistsave");
+        char executable[PATH_MAX];
+        if(!no_save||!dladdr(no_save,&history_info)||!history_info.dli_fname||
+            !realpath("/proc/self/exe",executable)||
+            !realpath(history_info.dli_fname,actual)||strcmp(executable,actual)) {
+            zwarnnam(name,"TERMINAL_NATIVE_HISTORY_API_UNAVAILABLE");return 1;
+        }
+        history_no_save=no_save;
+#endif
+#if defined(SHELLSPAN_ZLE_BOUND_HISTORY) || defined(__linux__)
         history_parent=getpid();history_job=0;
 #endif
         const char *codeset=nl_langinfo(CODESET);
@@ -195,7 +216,7 @@ static int bin_ssnip(char *name, char **args, Options opts, int func) {
     if(count == 1 && !strcmp(args[0],"idle")) return ss_editor_event(editor,9,0,NULL) != 0;
     if(count == 1 && !strcmp(args[0],"typing")) return !ss_editor_event(editor,7,0,NULL);
     if(count == 1 && !strcmp(args[0],"close")) {
-#ifdef SHELLSPAN_ZLE_BOUND_HISTORY
+#if defined(SHELLSPAN_ZLE_BOUND_HISTORY) || defined(__linux__)
         history_job=0;
 #endif
         restore_handoff();
@@ -252,7 +273,7 @@ static int bin_ssnip(char *name, char **args, Options opts, int func) {
         if(!ss_editor_event(editor,15,0,NULL)) return 2;
         char *source=plain(args[1]);
         if(!source) return 1;
-#ifdef SHELLSPAN_ZLE_BOUND_HISTORY
+#if defined(SHELLSPAN_ZLE_BOUND_HISTORY) || defined(__linux__)
         /* Rust string exports share one borrowed CString slot. Read job kind
          * before obtaining the plan; no later export may invalidate plan. */
         const char *history_kind=ss_editor_job(editor,0);
@@ -271,6 +292,8 @@ static int bin_ssnip(char *name, char **args, Options opts, int func) {
         int history_result=history_bind(history_source,history_plan);
         zsfree(history_source);zsfree(history_plan);
         if(history_result) {zsfree(source);return 1;}
+#endif
+#if defined(SHELLSPAN_ZLE_BOUND_HISTORY) || defined(__linux__)
         history_job=history_launch;
 #endif
         zsfree(source);
@@ -281,7 +304,7 @@ static int bin_ssnip(char *name, char **args, Options opts, int func) {
         return flush_output() || !result;
     }
     if(count == 2 && !strcmp(args[0],"settle")) {
-#ifdef SHELLSPAN_ZLE_BOUND_HISTORY
+#if defined(SHELLSPAN_ZLE_BOUND_HISTORY) || defined(__linux__)
         history_job=0;
 #endif
         restore_handoff();

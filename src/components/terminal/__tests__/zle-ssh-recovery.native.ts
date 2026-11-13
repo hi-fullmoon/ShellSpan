@@ -441,9 +441,10 @@ async function verify() {
     const term = controller!.terminal;
     const publicApis = { select: term.getSelection, open: term.open, line: term.buffer.normal.getLine };
     const soft = `SSH_SOFT_${'7'.padStart(140, '0')}_END`, hard = 'SSH_HARD_A\nSSH_HARD_B';
-    async function resize(width: number, label: string) {
+    const wideText = `SSH_WIDE_${'界'.repeat(27)}_END`;
+    async function resize(width: number, height: number, label: string) {
       host.style.width = `${width}px`;
-      host.style.height = '520px';
+      host.style.height = `${height}px`;
       controller!.fit();
       const sessionId = controller!.sessionId, cols = term.cols, rows = term.rows;
       await waitFor(async () => {
@@ -459,15 +460,17 @@ async function verify() {
       term.selectAll();
       const copied = term.getSelection().replace(/\r\n/g, '\n');
       term.clearSelection();
-      assert(copied.includes(soft) && copied.includes(hard), `Soft/hard line copy diverged in ${label}`);
+      assert(copied.includes(soft) && copied.includes(hard) && copied.includes(wideText), `Soft/hard or wide-character line copy diverged in ${label}`);
       const found = controller!.searchAddon.findNext(soft);
       assert(found && term.getSelection() === soft, `Search did not select the exact logical soft line in ${label}`);
       term.clearSelection();
       return { label, softCopy: true, hardCopy: true, exactSearch: found };
     }
-    const narrow = await resize(390, 'narrow');
+    const narrow = await resize(390, 420, 'narrow');
     const background = "(for attempt in {1..400}; do [[ -e $HOME/phase3-ssh-tail-release ]] && break; sleep .1; done; [[ -e $HOME/phase3-ssh-tail-release ]] && printf '%s%s\\n' SSH_BACKGROUND_ END) &";
-    await send("printf '%s%0140d%s\\n' SSH_SOFT_ 7 _END; printf '%s%s\\n' SSH_HARD_ A SSH_HARD_ B; for i in {1..65}; do printf 'SSH_HISTORY_%03d\\n' \"$i\"; done; " + background + '\r');
+    await send("printf '%s%0140d%s\\n' SSH_SOFT_ 7 _END; printf '%s%s\\n' SSH_HARD_ A SSH_HARD_ B; "
+      + `printf '%s%s\\n' SSH_WIDE_ '${wideText.slice('SSH_WIDE_'.length)}'; `
+      + "for i in {1..65}; do printf 'SSH_HISTORY_%03d\\n' \"$i\"; done; " + background + '\r');
     await waitFor(() => screen().includes('SSH_HISTORY_065'), 'Real SSH display and history sample missing');
     const selection = [await ordinarySelection('narrow')];
     assert(term.buffer.normal.baseY > 0 && narrow.cols < 60, 'Narrow sample did not create a historical viewport');
@@ -479,8 +482,9 @@ async function verify() {
     assert(parkedBefore.selection && parkedBefore.viewportY < parkedBefore.baseY,
       'The real SSH history selection did not park the viewport');
     timeline.push({ stage: 'history-selection-parked', at: Date.now() });
-    const wide = await resize(1080, 'wide-parked');
-    assert(wide.cols > narrow.cols && term.buffer.normal.viewportY < term.buffer.normal.baseY, 'Wide reflow lost the parked history viewport');
+    const wide = await resize(1080, 620, 'wide-parked');
+    assert(wide.cols > narrow.cols && wide.rows > narrow.rows && term.buffer.normal.viewportY < term.buffer.normal.baseY,
+      'Width and height reflow lost the parked history viewport');
     assert(term.getSelection() === soft, 'Wide reflow changed the selected SSH logical line');
     const parkedWide = { viewportY: term.buffer.normal.viewportY, baseY: term.buffer.normal.baseY,
       selection: term.getSelectionPosition() };
@@ -563,7 +567,8 @@ async function verify() {
     assert(term.getSelection === publicApis.select && term.open === publicApis.open && term.buffer.normal.getLine === publicApis.line
       && !(await snapshot(successor.sessionId))?.inputObservation?.activeCommand && (await effect()).text === null,
     'Display case changed the public API or created execution authority');
-    Object.assign(records, { narrow, wide, soft, hard, selection, parkedBefore, parkedWide, parkedAfterOutput, finalEffect: await effect(), finalScreen: screen(),
+    assert(wire(await trace(), first).includes(asHex(wideText)), 'Actual SSH PTY bytes did not retain the wide-character sample');
+    Object.assign(records, { narrow, wide, soft, hard, wideText, selection, parkedBefore, parkedWide, parkedAfterOutput, finalEffect: await effect(), finalScreen: screen(),
       focus: { documentHasFocus: document.hasFocus(), terminalHasFocus: term.element?.contains(document.activeElement) ?? false,
         programmaticInput: true, humanReceipt: false } });
   }
@@ -611,7 +616,8 @@ async function verify() {
   }
 
   async function verifyJobs(first: SessionSummary) {
-    const id = await createOwnedAgent(first, ['run_terminal_command', 'wait_process', 'kill_process']);
+    const naturalExit = scenario === 'positive-job-completion';
+    const id = await createOwnedAgent(first, ['run_terminal_command', 'wait_process', ...(naturalExit ? [] : ['kill_process'])]);
     assert((await effect()).text === null, 'Fresh job fixture already has a remote effect');
     const launch = await requestTool(id, 'job-launch');
     assert(launch.approval && (await effect()).text === null, 'Background launch bypassed normal approval');
@@ -640,13 +646,32 @@ async function verify() {
         && JSON.stringify(binding(item.job)) === JSON.stringify(original), 'Actual wait changed the job identity or invented isolated output');
     }
     await waitFor(() => screen().includes('SSH_NATIVE_JOB_LIVE'), 'Actual background output did not reach the shared PTY');
-    const stopped = await finishTool(await requestTool(id, 'job-stop', handle));
+    if (naturalExit) await witness('release-tail', 'POST');
+    const stopped = naturalExit ? await waitFor(async () => {
+      const observation = await finishTool(await requestTool(id, 'job-wait', handle));
+      watches.push(observation);
+      const item = observation.resolved.data;
+      assert(observation.result.data.status === 'completed' && item.outputScope === 'sharedTerminal'
+        && item.stdout === '' && item.stderr === '' && JSON.stringify(binding(item.job)) === JSON.stringify(original),
+      'Natural exit observation changed the job identity or output scope');
+      return item.state === 'exited' ? observation : undefined;
+    }, 'Actual job did not report natural exit') : await finishTool(await requestTool(id, 'job-stop', handle));
     records.stopped = stopped;
     const ending = stopped.resolved.data;
     const job = ending.job as { nativeActive?: boolean; controlLost?: boolean } | undefined;
-    assert(stopped.result.data.status === 'completed' && ending.stopRequested === true
+    assert(stopped.result.data.status === 'completed' && ending.stopRequested === !naturalExit
       && job?.nativeActive === false && job.controlLost === false && JSON.stringify(binding(job)) === JSON.stringify(original),
-    'Actual stop did not confirm termination on the original job');
+    'Actual job did not confirm termination on the original handle');
+    if (naturalExit) {
+      assert(ending.exitCode === 7, 'Actual natural exit status did not match the background command');
+      await waitFor(() => screen().includes('SSH_NATIVE_TAIL_BEGIN') && screen().includes('SSH_NATIVE_TAIL_END'),
+        'Actual fragmented job tail did not reach the shared terminal');
+      const raw = wire(await trace(), first);
+      const begin = raw.indexOf(asHex('SSH_NATIVE_TAIL_BEGIN'));
+      assert(begin >= 0 && raw.indexOf(asHex('SSH_NATIVE_TAIL_END'), begin + 1) > begin,
+        'Actual SSH PTY bytes did not retain both ordered job tail fragments');
+      records.naturalTail = { exitCode: ending.exitCode, fragments: ['SSH_NATIVE_TAIL_BEGIN', 'SSH_NATIVE_TAIL_END'], rawConfirmed: true };
+    }
     await invokeCancelAgentRuntime({ sessionId: id });
     const finalEffect = await effect();
     const actual = await trace();
@@ -655,6 +680,18 @@ async function verify() {
     assert(launchReceipts.length === 1 && finalEffect.text === `${launch.callId}\n` && (await invokeGetTerminalSubmissionRecovery(id)).length === 0,
       'Native job launch was repeated or its durable intent was not resolved');
     Object.assign(records, { id, started, watches, stopped, finalEffect, launchReceipts });
+    await send('\x18h');
+    const history = await waitFor(() => decoded[first.sessionId]?.match(/(?:^|\n)SSH_HISTORY_BEGIN\r?\n([\s\S]*?)\r?\nSSH_HISTORY_END(?:\r?\n|$)/)?.[1],
+      'Actual SSH history widget did not observe background job history');
+    const historyBody = history.split(/\r?\n/).slice(1).join('\n');
+    const launchEntry = bash ? started.request.source : `( ${handle};\n${started.request.source}\n) &`;
+    const entry = historyBody.replace(/^[ \t]*\d+\*?[ \t]+/, '');
+    const entries = [entry];
+    records.jobHistory = { entries, history, launchSource: started.request.source, launchEntry };
+    assert(entry === launchEntry,
+      'Actual in-memory history retained private job management or changed the launch entry');
+    await send('exit\r');
+    await waitFor(() => closed.has(first.sessionId), 'Actual job Shell did not exit and flush history');
   }
 
   async function verifyFileChain(first: SessionSummary) {
@@ -1220,7 +1257,7 @@ async function verify() {
     else if (scenario === 'display-geometry') await verifyDisplay(first);
     else if (scenario === 'crash-restart') await verifyRestart(first);
     else if (scenario === 'ordinary-input' || rawAdmission) await verifyOrdinary(first);
-    else if (scenario === 'positive-jobs') await verifyJobs(first);
+    else if (scenario === 'positive-jobs' || scenario === 'positive-job-completion') await verifyJobs(first);
     else if (scenario === 'positive-file-chain') await verifyFileChain(first);
     else if (scenario?.startsWith('positive-') || scenario?.startsWith('history-')) await verifyPositive(first);
     else if (scenario.startsWith('running-')) await verifyRunningControl(first, scenario.slice('running-'.length));

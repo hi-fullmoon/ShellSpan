@@ -124,6 +124,7 @@ async function runCase(root, id, fixture, mountedEvidence = false) {
   let applicationEnvironment = environment;
   const crash = id === 'crash-before-key' || id === 'crash-after-key';
   const history = id.startsWith('history-') ? id.slice('history-'.length) : undefined;
+  const jobHistory = ['positive-jobs', 'positive-job-completion'].includes(id);
   const appArgs = scenario => [...base, ...(bash ? ['--native-input-p2'] : ['--native-input-p3', 'zsh']),
     '--native-input-p3-ssh-recovery', scenario, '--native-input-p3-ssh-recovery-fixture', fixture.file];
   const read = name => JSON.parse(readFileSync(resolve(directory, `${name}.json`), 'utf8'));
@@ -157,7 +158,7 @@ async function runCase(root, id, fixture, mountedEvidence = false) {
         changedSha256: sha(readFileSync(changed)), declaredModuleSha256: profile.moduleSha256, copies });
       applicationEnvironment = { ...environment, ...await editorValidationEnvironment(root, negative, targets) };
     }
-    if (history) configureSshHistory(fixture, directory, history);
+    if (history || jobHistory) configureSshHistory(fixture, directory, history ?? 'default');
     const password = randomBytes(36).toString('base64url');
     provisionZlePeerPassword(fixture, password);
     provisioningAttempted = true;
@@ -186,6 +187,14 @@ async function runCase(root, id, fixture, mountedEvidence = false) {
         if (history === 'custom') assert.equal(audit.history.split('\n').filter(line => line.includes('SSH_HIST_ DUP')).length, 1);
       }
     }
+    if (jobHistory) {
+      const audit = inspectSshHistory(fixture, 'default');
+      save('job-history-verification', audit);
+      const { launchEntry } = applicationEvidence.records.jobHistory;
+      const persisted = fixture.shell === 'bash' ? launchEntry : launchEntry.replaceAll('\n', '\\\n');
+      const entries = audit.history.split('\n').filter(line => line && !/^#\d+$/.test(line)).join('\n');
+      assert.equal(entries, `${persisted}\nexit`, 'Actual disk history retained private job management or duplicated/changed the launch entry');
+    }
   } catch (error) { failures.push(error); }
   if (history && !applicationEvidence && existsSync(resolve(directory, 'native-webview-evidence.json'))) try {
     save('history-disk-after-failure', inspectSshHistory(fixture, history));
@@ -203,7 +212,7 @@ async function runCase(root, id, fixture, mountedEvidence = false) {
     if (applicationEvidence) {
       if (['reconnect-tail', 'display-geometry', 'ordinary-input', 'raw-no-sftp', 'raw-unapproved-shell', 'raw-resource-mismatch'].includes(id)
         || /^input-(in-progress|complete)-(cancel|stop|takeover)$/.test(id)) assert.equal(rows.length, 0, 'An operation without durable intent created a ledger row');
-      else if (id === 'positive-jobs' || id === 'positive-file-chain') {
+      else if (['positive-jobs', 'positive-job-completion', 'positive-file-chain'].includes(id)) {
         const intents = applicationEvidence.trace.filter(event => event.event === 'intent-record-returned');
         assert(rows.length > 0 && rows.length === intents.length, 'Actual native tool intents missing or duplicated');
         for (const row of rows) {

@@ -28,6 +28,10 @@ const wire = evidence.trace.filter(row => row.event === 'ssh-pty-read');
 assert(wire.length && new Set(wire.map(row => row.details.sessionId)).size === 2);
 const wireBytes = Buffer.concat(wire.map(row => Buffer.from(row.details.hex, 'hex')));
 assert(wireBytes.includes(Buffer.from('SSH_BACKGROUND_END')) && wireBytes.includes(Buffer.from('SSH_DISPLAY_SUCCESSOR')));
+if (evidence.records.wideText !== undefined) {
+  assert(evidence.records.wide.rows > evidence.records.narrow.rows);
+  assert(wireBytes.includes(Buffer.from(evidence.records.wideText)));
+}
 const retainedSelection = evidence.records.parkedAfterOutput !== undefined;
 if (retainedSelection) assert.deepEqual(events.filter(row => historyStages.includes(row.stage)).map(row => row.stage), historyStages);
 const runtime = await installedRuntimeManifest();
@@ -140,6 +144,7 @@ try {
             window.sshReplayTerminal = terminal;
             const facts = { canvases, geometry, wrapped, parked, found, restored, preservedApis, emitted: emitted.length, target,
               backgroundStayedParked, followedBottom, softCopy: final.includes(records.soft), hardCopy: final.includes(records.hard),
+              wideCopy: records.wideText === undefined ? null : final.includes(records.wideText),
               background: final.includes('SSH_BACKGROUND_END'), successor: final.includes('SSH_DISPLAY_SUCCESSOR') };
             display.dispose();
             return facts;
@@ -157,6 +162,7 @@ try {
           observed.pointerSelection = { forward: selections[0], reverse: selections[1], expected };
           const ok = observed.wrapped && observed.parked && observed.found && observed.restored && observed.preservedApis
             && observed.softCopy && observed.hardCopy && observed.background && observed.successor && observed.emitted === 0
+            && (evidence.records.wideText === undefined || observed.wideCopy)
             && (!retainedSelection || observed.backgroundStayedParked && observed.followedBottom)
             && selections.every(text => text === expected);
           await page.screenshot({ path: resolve(output, `${engine}-${renderer}.png`) });

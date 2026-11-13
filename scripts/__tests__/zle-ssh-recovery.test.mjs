@@ -27,6 +27,7 @@ describe('ZLE SSH recovery offline discovery and admission', () => {
       { id: 'positive-source-boundaries', cut: null, disconnect: false },
       { id: 'positive-parent-shell', cut: null, disconnect: false },
       { id: 'positive-jobs', cut: null, disconnect: false },
+      { id: 'positive-job-completion', cut: null, disconnect: false },
       { id: 'positive-file-chain', cut: null, disconnect: false },
       { id: 'display-geometry', cut: null, disconnect: false },
       { id: 'ordinary-input', cut: null, disconnect: false },

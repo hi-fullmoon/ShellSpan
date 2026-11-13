@@ -36,7 +36,11 @@ B02 实际 WKWebView 减弱动态效果 2/2。C06 签名 App 控制通道启动 
 
 2026-11-13 本机续验从 `2e76d274` 加工作区开始。最终重建资源的 Bash `5.3/ssh/lifecycle`、双 Shell 前后切点的独立 relay EOF、真实 App 崩溃及同数据根重启均通过。十种历史配置、普通输入与 TUI、无 SFTP、未知 Main、后台作业及真实文件链分别留有签名 App 原始回执。首次失败与新身份复验分别留存。 [本批报告](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/REPORT.md) · [余项清单](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/CHECKLIST.md)
 
-在 `2dafc497` 复核候选 42 时，两种 Shell 的回环 SSH 签名 App 用例各 48 项，最新结果共 96/96。最后一批接受前后断线及超时、接受前取消和历史配置复验 20/20。两种正式打包资源均通过独立签名 App 冒烟。现场减弱动态、系统剪贴板、前后台焦点和人工接管的操作与取证条件另见交接。 [当前续验报告](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/REPORT.md) · [逐案覆盖审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/ssh-case-coverage.json) · [人工交接](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/MANUAL-HANDOFF.md)
+候选 42 的双 Shell 回环 SSH 矩阵为 96/96，候选 62 补齐自然退出与共享尾部输出后为 98/98。两种正式打包资源均通过独立签名 App 冒烟。`0430fe7b` 本机 Clippy、完整 Rust 回归、前端回归及隔离 SSH/SFTP 通过。人工焦点和接管按现场交接留证。 [当前续验报告](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/REPORT.md) · [逐案覆盖审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/ssh-case-coverage.json) · [人工交接](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/MANUAL-HANDOFF.md)
+
+候选 63 双 Shell 真实 SSH 宽高与跨行宽字符复验通过，签名 WKWebView 2/2、浏览器 8/8。 [条款证据索引](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/COVERAGE-INDEX.md)
+
+B06、B07 的 SSH 作业历史复验确认轮询和停止不入历史 4/4。磁盘历史严格核对 Bash 2/2，Linux ZLE 0/2。Linux ZLE 内存各有一个带句柄的启动计划，退出后磁盘各有两份。需要核对 Linux 构建的历史绑定及异步子进程保存边界，再以唯一启动条目复验。 [作业历史逐案审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/ssh-job-history-audit.json)
 
 ZLE 的初始 `ZDOTDIR` 已修正并在两种实际 OpenSSH 环境、五种签名 App 历史配置中复验。候选 17 使用归属明确的临时 RAM 卷完成签名与链接，复验新采显示流、本地真实 PTY 和协议、前端与全功能 Rust。R04 本地 63 项继续保留原候选范围。当前候选的本地定向证据、剩余人工、模型和发布条件均单列。 [本机质量与差异审计](../../.artifacts/tests/agent-terminal-input/20261113-ram-signing-preflight/REPORT.md)
 

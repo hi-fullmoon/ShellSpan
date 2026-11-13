@@ -14,6 +14,7 @@ const on=decode('enter'),off=decode('exit');
 const output=path.resolve(process.env.SHELLSPAN_P0_OUTPUT_ROOT??'.artifacts/tests/native-input-p0/formal-validation/display-controller');await mkdir(output,{recursive:true});
 const assets={'/xterm.js':['node_modules/@xterm/xterm/lib/xterm.js','application/javascript'],
   '/webgl.js':['node_modules/@xterm/addon-webgl/lib/addon-webgl.js','application/javascript'],
+  '/unicode11.mjs':['node_modules/@xterm/addon-unicode11/lib/addon-unicode11.mjs','application/javascript'],
   '/xterm.css':['node_modules/@xterm/xterm/css/xterm.css','text/css']};
 const server=createServer(async(req,res)=>{
   if(req.url==='/display.js'){res.setHeader('Content-Type','application/javascript');res.end(await displayModuleJavaScript());return;}
@@ -30,6 +31,7 @@ try{
         await page.goto(`http://127.0.0.1:${server.address().port}`);
         const result=await page.evaluate(async({on,off,renderer})=>{
           const{attachNativeInputDisplay}=await import('/display.js');
+          const{Unicode11Addon}=await import('/unicode11.mjs');
           const binding={inputMode:'native-inline',oscIdentifier:1337,
             enterPayload:'SetUserVar=ShellSpanP0ReflowCursorLine=MQ==',exitPayload:'SetUserVar=ShellSpanP0ReflowCursorLine=MA=='};
           let assertions=0;const check=(condition,message)=>{assertions++;if(!condition)throw Error(message);};
@@ -47,6 +49,7 @@ try{
           check(duplicate,'Duplicate attachment accepted');
           await write(on.slice(0,-1));check(term.options.reflowCursorLine===false,'Partial OSC changed display');
           await write(on.slice(-1));check(term.options.reflowCursorLine===true,'Complete native OSC did not enter');
+          await write(on);check(term.options.reflowCursorLine===true,'Repeated native enter changed the owned mode');
           await write(off);check(term.options.reflowCursorLine===false,'Native exit did not restore default');
           await write(on);controller.resetAfterTransportClosed();check(term.options.reflowCursorLine===false,'Transport end did not reset');
           await write(on);check(term.options.reflowCursorLine===false,'Late bytes reopened a closed controller');
@@ -61,6 +64,17 @@ try{
           check(invalidReflow,'Invalid reflow capability was accepted');
           term.options.reflowCursorLine=true;let custom=false;try{attachNativeInputDisplay(term,binding);}catch{custom=true;}
           check(custom&&term.options.reflowCursorLine===true,'Attachment overwrote preexisting user option');
+          term.options.reflowCursorLine=false;
+          const baseline=term.unicode.activeVersion;
+          term.loadAddon(new Unicode11Addon());
+          const scoped=attachNativeInputDisplay(term,binding,{unicodeVersion:'11',unicodeScope:'session'});
+          check(term.unicode.activeVersion==='11','Verified session did not select Unicode 11');
+          await write(on);
+          term.unicode.activeVersion=baseline;
+          await write(off);
+          check(term.unicode.activeVersion===baseline&&!term.options.reflowCursorLine,'Native exit overwrote the external provider');
+          await scoped.closeAfterPendingOutput();
+          check(term.unicode.activeVersion===baseline,'Transport close overwrote the external provider');
           check(inputs.length===0,'Display OSC emitted executable terminal input');
           term.dispose();return assertions;
         },{on:[...on],off:[...off],renderer});
