@@ -9,7 +9,7 @@ import { agentTerminalLeaseState } from '../agent-terminal-lease-state';
 import { terminalInputReadiness } from '../terminal-input-readiness';
 import { useTerminalStore } from '@/stores/terminalStore';
 import { useAppStore } from '@/stores/appStore';
-import { initI18n } from '@/locales';
+import { initI18n, t } from '@/locales';
 import { nativeP2Password } from './native-input-p2-credential';
 import { readNativeAcceptanceResult } from './native-result-artifact';
 import {
@@ -89,7 +89,7 @@ async function verify() {
   const manualFocus = parameters.get('manualSshFocus') === 'true';
   const manualTakeover = parameters.get('manualSshTakeover') === 'true';
   const takeoverSystemInput = parameters.get('sshTakeoverSystemInput') === 'true';
-  await initI18n('en-US');
+  await initI18n(manualTakeover || manualFocus ? 'zh-CN' : 'en-US');
   await getCurrentWindow().show();
   const routes = await invokeListAiRoutes();
   assert(!routes.defaultSelection && routes.routes.length === 0, 'Isolated route store must be empty');
@@ -114,7 +114,7 @@ async function verify() {
   const pendingDisplay: { sessionId: string; source: string; data: string }[] = [];
   let controller: TerminalController | undefined;
   let originalFailure: unknown;
-  let manualInstruction: HTMLSpanElement | undefined;
+  let manualInstruction: HTMLParagraphElement | undefined;
 
   function OwnedPane() {
     const active = useTerminalStore(state => state.sessions.find(item => item.sessionId === state.activeSessionId) ?? null);
@@ -253,17 +253,28 @@ async function verify() {
     await waitFor(() => screen().includes(name), `Actual successor output ${name} missing`);
   }
 
-  async function withManualTakeover(sessionId: string, run: () => Promise<void>) {
+  function manualPanel(title: string, message: string) {
     const panel = document.createElement('aside');
-    panel.style.cssText = 'position:fixed;right:0;bottom:0;max-width:390px;padding:12px;background:Canvas;color:CanvasText;z-index:20';
-    const instruction = document.createElement('span');
-    manualInstruction = instruction;
-    instruction.textContent = 'Click Start when you are ready to press Enter in the terminal and click Take over.';
+    panel.className = 'fixed bottom-4 right-4 z-20 grid w-[28rem] max-w-[calc(100vw-2rem)] gap-3 rounded-lg border border-app-border bg-app-surface p-4 text-app-text shadow-xl';
+    const heading = document.createElement('h2');
+    heading.className = 'text-lg font-semibold';
+    heading.textContent = title;
+    const instruction = document.createElement('p');
+    instruction.className = 'text-base leading-relaxed';
+    instruction.setAttribute('aria-live', 'polite');
+    instruction.textContent = message;
     const start = document.createElement('button');
     start.type = 'button';
-    start.textContent = 'Start';
-    panel.append(instruction, ' ', start);
+    start.className = 'justify-self-end rounded-md bg-primary px-4 py-2 font-semibold text-primary-foreground';
+    start.textContent = t('terminal.acceptance.start');
+    panel.append(heading, instruction, start);
     document.body.append(panel);
+    return { panel, instruction, start };
+  }
+
+  async function withManualTakeover(sessionId: string, run: () => Promise<void>) {
+    const { panel, instruction, start } = manualPanel(t('terminal.acceptance.takeoverTitle'), t('terminal.acceptance.takeoverReady'));
+    manualInstruction = instruction;
     let started = false;
     start.onclick = event => { if (event.isTrusted) started = true; };
     await report({ progress: 'Actual SSH takeover is ready for the operator', evidence: { sessions, sessionId,
@@ -271,7 +282,7 @@ async function verify() {
     try {
       await waitFor(() => started, 'The operator did not start SSH takeover', 120000);
       start.remove();
-      instruction.textContent = 'As soon as Take over appears, click the terminal, press Enter once, then click Take over.';
+      instruction.textContent = t('terminal.acceptance.takeoverWaiting');
       await run();
     } finally { manualInstruction = undefined; panel.remove(); }
   }
@@ -296,7 +307,7 @@ async function verify() {
     };
     document.addEventListener('keydown', key, true);
     try {
-      manualInstruction.textContent = 'Input has been returned. Click the terminal and press Enter once more.';
+      manualInstruction.textContent = t('terminal.acceptance.takeoverReturn');
       if (takeoverSystemInput) {
         const screen = controller?.terminal.element?.querySelector('.xterm-screen');
         assert(screen, 'Actual SSH terminal screen is missing');
@@ -315,6 +326,13 @@ async function verify() {
     const before = await snapshot(sessionId);
     assert(before && before.inputObservation?.activeCommand?.operationId === identity.operationId,
       'Original SSH lease is missing before the physical takeover');
+    const bar = Array.from(document.querySelectorAll('[data-testid="agent-terminal-lease-bar"]'))
+      .find(element => element.getAttribute('data-operation-id') === identity.operationId);
+    const button = bar?.querySelector<HTMLButtonElement>('.agent-terminal-takeover');
+    const screen = controller?.terminal.element?.querySelector('.xterm-screen');
+    assert(button && screen && manualInstruction, 'Original production takeover controls were not ready');
+    const instruction = manualInstruction;
+    instruction.textContent = t('terminal.acceptance.takeoverEnter');
     let enterAt = 0, clickAt = 0, enterSnapshot: Promise<TerminalBrokerSessionSnapshot | undefined> | undefined;
     const observation = { enterAt, clickAt, operationId: identity.operationId,
       beforeInputSequence: before.nextInputSequence, humanReceipt: false };
@@ -324,6 +342,8 @@ async function verify() {
         || !controller?.terminal.element?.contains(event.target)) return;
       if (!enterAt) {
         observation.enterAt = enterAt = Date.now();
+        instruction.textContent = t('terminal.acceptance.takeoverClick');
+        button.classList.add('ring-2', 'ring-primary', 'ring-offset-2');
         // Read the Broker while the lease is held, before takeover can write its interrupt.
         enterSnapshot = new Promise(done => setTimeout(done, 35)).then(() => snapshot(sessionId));
       }
@@ -338,17 +358,11 @@ async function verify() {
     document.addEventListener('click', click, true);
     try {
       controller?.focus();
-      if (takeoverSystemInput) {
-        const bar = Array.from(document.querySelectorAll('[data-testid="agent-terminal-lease-bar"]'))
-          .find(element => element.getAttribute('data-operation-id') === identity.operationId);
-        const button = bar?.querySelector('.agent-terminal-takeover');
-        const screen = controller?.terminal.element?.querySelector('.xterm-screen');
-        assert(button && screen && controller?.terminal.textarea === document.activeElement,
-          'Original production takeover controls or focused terminal input were not ready');
-        await report({ progress: 'Actual SSH lease is ready for system input', evidence: {
+      assert(controller?.terminal.textarea === document.activeElement, 'Original terminal input was not focused');
+      await report({ progress: 'Actual SSH lease is ready for system input', evidence: {
           systemInputTarget: systemInputTarget('competing', screen), takeoverButton: systemInputTarget('takeover', button),
-        } });
-      }
+          instruction: instruction.textContent, buttonLabel: button.textContent?.trim(),
+      } });
       await waitFor(() => clickAt, 'The operator did not click the real SSH takeover button', 12000);
       const afterEnter = await enterSnapshot;
       assert(enterAt > 0 && enterAt <= clickAt && afterEnter?.inputObservation?.activeCommand?.operationId === identity.operationId
@@ -358,6 +372,7 @@ async function verify() {
         beforeInputSequence: before.nextInputSequence, afterInputSequence: afterEnter.nextInputSequence,
         humanReceipt: !takeoverSystemInput, systemInputAutomation: takeoverSystemInput };
     } finally {
+      button.classList.remove('ring-2', 'ring-primary', 'ring-offset-2');
       document.removeEventListener('keydown', key, true);
       document.removeEventListener('click', click, true);
     }
@@ -502,12 +517,13 @@ async function verify() {
       const window = getCurrentWindow();
       const focusEvents: { focused: boolean; at: number }[] = [];
       const focusState = () => ({ viewportY: term.buffer.normal.viewportY, baseY: term.buffer.normal.baseY,
-        selection: term.getSelectionPosition(), exactSelection: term.getSelection() === soft });
+        selection: term.getSelectionPosition(), exactSelection: term.getSelection() === soft,
+        terminalFocused: term.textarea === document.activeElement, cols: term.cols, rows: term.rows });
       const focusEvidence: { stage: string; at: number; state: ReturnType<typeof focusState> }[] = [];
       const observeFocusState = (stage: string) => focusEvidence.push({ stage, at: Date.now(), state: focusState() });
-      const observeTerminalPointer = (event: MouseEvent) => {
+      const observeTerminalEvent = (event: Event) => {
         if (event.isTrusted && event.target instanceof Node && term.element?.contains(event.target)) {
-          observeFocusState('terminal-mousedown');
+          observeFocusState(`terminal-${event.type}`);
         }
       };
       const stopFocus = await window.onFocusChanged(({ payload }) => {
@@ -515,24 +531,24 @@ async function verify() {
         observeFocusState(payload ? 'window-focus' : 'window-blur');
       });
       const selectionChange = term.onSelectionChange(() => observeFocusState('selection-change'));
-      document.addEventListener('mousedown', observeTerminalPointer, true);
-      const instructions = document.createElement('aside');
-      instructions.style.cssText = 'position:fixed;top:0;right:0;max-width:390px;padding:12px;background:Canvas;color:CanvasText;z-index:20';
-      instructions.textContent = 'Click Start, use the app switcher to switch away and return, then wait for the terminal input instructions.';
-      const start = document.createElement('button');
-      start.type = 'button';
-      start.textContent = 'Start';
-      instructions.append(' ', start);
-      document.body.append(instructions);
+      const scrollChange = term.onScroll(() => observeFocusState('viewport-scroll'));
+      const resizeChange = term.onResize(() => observeFocusState('terminal-resize'));
+      const terminalInput = term.onData(() => observeFocusState('terminal-data'));
+      const observedEvents = ['mousedown', 'keydown', 'focusin', 'focusout'] as const;
+      for (const name of observedEvents) document.addEventListener(name, observeTerminalEvent, true);
+      const { panel: instructions, instruction, start } = manualPanel(t('terminal.acceptance.focusTitle'), t('terminal.acceptance.focusReady'));
       try {
         let startedAt = 0;
+        const setup = { focusEvents, focusEvidence, parkedAfterOutput, startButton: systemInputTarget('start', start) };
+        records.manualFocusSetup = setup;
         start.onclick = event => {
           if (!event.isTrusted || startedAt) return;
           startedAt = Date.now();
           observeFocusState('start');
-          start.disabled = true;
+          start.remove();
+          instruction.textContent = t('terminal.acceptance.focusSwitch');
         };
-        await report({ progress: 'Actual SSH history is ready for the operator', evidence: { sessions, parkedWide, parkedAfterOutput } });
+        await report({ progress: 'Actual SSH history is ready for the operator', evidence: { sessions, parkedWide, ...setup } });
         await waitFor(() => startedAt, 'The operator did not start the SSH focus case', 120000);
         const transition = await waitFor(() => {
           const lost = focusEvents.find(event => !event.focused && event.at >= startedAt);
@@ -545,7 +561,7 @@ async function verify() {
         assert(term.buffer.normal.viewportY === parkedAfterOutput.viewportY && term.getSelection() === soft
           && JSON.stringify(term.getSelectionPosition()) === JSON.stringify(parkedAfterOutput.selection),
         'Actual foreground switch changed the parked history viewport or selection');
-        instructions.textContent = 'Focus the terminal, then type the following line and press Enter. ';
+        instruction.textContent = t('terminal.acceptance.focusEnter');
         const command = document.createElement('code');
         command.textContent = "printf '%s%s\\n' SSH_MANUAL_ FOCUS_OK";
         instructions.append(command);
@@ -567,7 +583,10 @@ async function verify() {
             trustedEnter: true, enterAt, marker: 'SSH_MANUAL_FOCUS_OK', humanReceipt: true };
         } finally { document.removeEventListener('keydown', observe, true); }
       } finally {
-        document.removeEventListener('mousedown', observeTerminalPointer, true);
+        for (const name of observedEvents) document.removeEventListener(name, observeTerminalEvent, true);
+        terminalInput.dispose();
+        resizeChange.dispose();
+        scrollChange.dispose();
         selectionChange.dispose();
         instructions.remove();
         stopFocus();

@@ -10,6 +10,8 @@ import { installedRuntimeManifest, displayModuleJavaScript } from '../native-inp
 import { artifactWorkspace } from '../artifact-paths.mjs';
 
 const input = resolve(process.argv[2]);
+const focusComparison = process.argv[3] === '--focus-comparison';
+assert(process.argv.length === (focusComparison ? 4 : 3));
 const root = artifactWorkspace(input);
 assert.equal(resolve(process.cwd()), root, 'Replay must use the capture’s frozen work directory');
 assert(input.startsWith(`${root}/.artifacts/tests/native-input-p2/ssh-recovery/`), 'Use this sealed root’s actual App evidence');
@@ -67,7 +69,7 @@ try {
         const page = await browser.newPage({ viewport: { width: 1400, height: 750 } });
         try {
           await page.goto(`http://127.0.0.1:${server.address().port}`);
-          const observed = await page.evaluate(async ({ events, renderer, records, retainedSelection }) => {
+          const observed = await page.evaluate(async ({ events, renderer, records, retainedSelection, focusComparison }) => {
             const { attachNativeInputDisplay, NATIVE_INPUT_DISPLAY } = await import('/display.js');
             const terminal = new Terminal({ cols: 100, rows: 30, scrollback: 2000, reflowCursorLine: false });
             terminal.open(document.querySelector('#surface'));
@@ -142,13 +144,23 @@ try {
             }
             if (!target) throw new Error('Actual successor line is not visible for pointer selection');
             window.sshReplayTerminal = terminal;
+            if (focusComparison) {
+              window.parkSshFocusComparison = () => {
+                terminal.scrollToTop();
+                if (!search.findNext(records.soft) || terminal.getSelection() !== records.soft) throw new Error('Retained SSH line missing');
+                terminal.focus();
+              };
+              window.readSshFocusComparison = () => ({ selection: terminal.getSelectionPosition(), text: terminal.getSelection(),
+                viewportY: terminal.buffer.normal.viewportY, baseY: terminal.buffer.normal.baseY,
+                focused: document.activeElement === terminal.textarea, emitted: emitted.length });
+            }
             const facts = { canvases, geometry, wrapped, parked, found, restored, preservedApis, emitted: emitted.length, target,
               backgroundStayedParked, followedBottom, softCopy: final.includes(records.soft), hardCopy: final.includes(records.hard),
               wideCopy: records.wideText === undefined ? null : final.includes(records.wideText),
               background: final.includes('SSH_BACKGROUND_END'), successor: final.includes('SSH_DISPLAY_SUCCESSOR') };
             display.dispose();
             return facts;
-          }, { events, renderer, records: evidence.records, retainedSelection });
+          }, { events, renderer, records: evidence.records, retainedSelection, focusComparison });
           const { start, end, y, expected } = observed.target;
           const selections = [];
           for (const [from, to] of [[start, end], [end, start]]) {
@@ -160,6 +172,31 @@ try {
             selections.push(await page.evaluate(() => window.sshReplayTerminal.getSelection()));
           }
           observed.pointerSelection = { forward: selections[0], reverse: selections[1], expected };
+          if (focusComparison) {
+            const before = await page.evaluate(() => {
+              const button = document.createElement('button');
+              button.textContent = 'Outside terminal';
+              document.body.prepend(button);
+              window.parkSshFocusComparison();
+              return window.readSshFocusComparison();
+            });
+            await page.getByRole('button', { name: 'Outside terminal' }).click();
+            const blurred = await page.evaluate(() => window.readSshFocusComparison());
+            const refocused = await page.evaluate(() => {
+              window.sshReplayTerminal.focus();
+              return window.readSshFocusComparison();
+            });
+            const point = await page.locator('.xterm-screen').boundingBox();
+            assert(point && point.width > 8 && point.height > 8);
+            await page.mouse.click(point.x + 8, point.y + 8);
+            const afterTerminalClick = await page.evaluate(() => window.readSshFocusComparison());
+            observed.focusComparison = { before, blurred, refocused, afterTerminalClick };
+            assert(before.focused && before.viewportY < before.baseY && before.selection && before.emitted === 0);
+            assert.deepEqual(blurred, { ...before, focused: false });
+            assert.deepEqual(refocused, before);
+            assert(afterTerminalClick.focused && afterTerminalClick.text === '' && afterTerminalClick.viewportY === before.viewportY
+              && afterTerminalClick.emitted === 0);
+          }
           const ok = observed.wrapped && observed.parked && observed.found && observed.restored && observed.preservedApis
             && observed.softCopy && observed.hardCopy && observed.background && observed.successor && observed.emitted === 0
             && (evidence.records.wideText === undefined || observed.wideCopy)

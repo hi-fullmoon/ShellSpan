@@ -14,7 +14,7 @@ export function macSubmissionControlMode(mode){
  if(/^local-storage-(healthy|missing|read-only|unknown-format|invalid-marker|foreign-namespace|missing-directory|directory-symlink|corrupt-database)$/.test(mode))return {cut:undefined,scenario:mode};
  if(mode==='local-jobs'||/^local-history-(default|small|custom|empty|unset)$/.test(mode))return {cut:undefined,scenario:mode};
  if(['local-file-ownership','local-file-restart-prepare','local-file-restart-verify'].includes(mode))return {cut:undefined,scenario:mode};
- if(['approval-mismatch','expired-or-revoked','source-mismatch','plan-mismatch','target-mismatch','unsupported-input-native','permission-mismatch','resource-manifest-mismatch','byte-boundary','raw-admission','local-file-chain'].includes(mode))return {cut:undefined,scenario:mode};
+ if(['approval-mismatch','expired-or-revoked','source-mismatch','plan-mismatch','target-mismatch','unsupported-input-native','permission-mismatch','resource-manifest-mismatch','experimental-profile','byte-boundary','raw-admission','local-file-chain'].includes(mode))return {cut:undefined,scenario:mode};
  if(['incomplete-proof','readonly-query-does-not-authorize'].includes(mode))return {cut:'input-in-progress',scenario:mode};
  if(['identity-mismatch','complete-identity-submatrix','generation-mismatch'].includes(mode))return {cut:'arm-identity',scenario:mode};
  if(['timeout-unknown-accept','control-eof','transport-disconnect','late-started-and-matched-settled'].includes(mode))return {cut:'accept-receipt',scenario:mode};

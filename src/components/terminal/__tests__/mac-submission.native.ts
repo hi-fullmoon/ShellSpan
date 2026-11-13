@@ -41,6 +41,7 @@ async function verify(){
  const armIdentity = ['identity-mismatch','complete-identity-submatrix','generation-mismatch'].includes(observationConfiguration.scenario ?? '');
  const permissionMismatch = observationConfiguration.scenario === 'permission-mismatch';
  const manifestMismatch = observationConfiguration.scenario === 'resource-manifest-mismatch';
+ const experimentalProfile = observationConfiguration.scenario === 'experimental-profile';
  const rawAdmission = observationConfiguration.scenario === 'raw-admission';
  const storageAdmission = observationConfiguration.scenario?.startsWith('local-storage-') === true;
  const reducedMotionCase = observationConfiguration.scenario === 'reduced-motion';
@@ -50,7 +51,7 @@ async function verify(){
  const fileRestart = observationConfiguration.scenario === 'local-file-restart-prepare' || observationConfiguration.scenario === 'local-file-restart-verify';
  const useParsedOutput = ['close-running-terminal', 'timeout-unknown-accept', 'control-eof', 'late-started-and-matched-settled', 'target-mismatch','delegation','local-file-chain','local-file-ownership','local-jobs'].includes(observationConfiguration.scenario ?? '') || fileRestart || observationConfiguration.scenario?.startsWith('wire-') === true || observationConfiguration.scenario?.startsWith('local-history-') === true || submissionControl || inputInProgress || bindingNegative || transportLoss || armIdentity || permissionMismatch || reducedMotionCase;
  const wireFault = observationConfiguration.scenario?.startsWith('wire-') === true && observationConfiguration.scenario !== 'wire-split-and-coalesced';
- const capture=await macLifecycleCapture(token,{parsedOutputOrder:useParsedOutput||manifestMismatch||rawAdmission||storageAdmission,startupOutputMayPrecedeSubscription:wireFault||manifestMismatch||rawAdmission}),session=await invokeCreateLocalSession(100,30);await capture.expect(session);
+ const capture=await macLifecycleCapture(token,{parsedOutputOrder:useParsedOutput||manifestMismatch||experimentalProfile||rawAdmission||storageAdmission,startupOutputMayPrecedeSubscription:wireFault||manifestMismatch||experimentalProfile||rawAdmission}),session=await invokeCreateLocalSession(100,30);await capture.expect(session);
  useTerminalStore.getState().addSession(session);useTerminalStore.getState().setActiveSession(session.sessionId);useAppStore.getState().setActiveSection('terminal');
  const binding:{controller?:TerminalController}={};
  const stopBinding=terminalRegistry.subscribe(()=>{const current=terminalRegistry.get(session.sessionId);if(current&&!binding.controller){capture.bind(current);binding.controller=current;}});
@@ -455,7 +456,7 @@ async function verify(){
     kind:'actual-macos-local-file-chain',scenario:wireScenario,family,session,initial,final,declined,rejected,saved,read,state,executed,effect,retained,routes,humanReceipt:false,
    }})});assert(response.ok,'The actual local file-chain evidence was not retained');return;
   }
-  if(manifestMismatch||rawAdmission){
+  if(manifestMismatch||experimentalProfile||rawAdmission){
    const before=await snapshot();
    assert(before.session?.open&&before.session.inputMode==='raw'&&!before.session.nativePeerProfile,
     'The unsupported terminal was admitted to native input');
@@ -465,12 +466,20 @@ async function verify(){
     &&!refusal.effects.exists&&!effect.exists&&refusal.recovery.length===0
     &&before.session.nextInputSequence===after.session?.nextInputSequence,
    'An unsupported terminal reached an actual approval, input or effect');
+   const background = experimentalProfile ? await run('job-launch', true) : undefined;
+   if(background){
+    assert(background.prepared.settlement!=='Waiting' && !background.after.some(event=>event.type==='tool/execution')
+     && !background.effects.exists && background.recovery.length===0
+     && before.session.nextInputSequence===background.brokerAfter.session?.nextInputSequence,
+    'The experimental profile acquired native background execution');
+    await invokeCancelAgentRuntime({sessionId:background.id});
+   }
    await invokeCancelAgentRuntime({sessionId:refusal.id});
    await invokeCloseSession(session.sessionId);
    closed=true;
    const retained=await capture.finish();
    const response=await fetch('/__agent-stream-result/'+token,{method:'POST',body:JSON.stringify({
-    ok:true,evidence:{kind:rawAdmission?'actual-macos-raw-admission':'actual-macos-resource-manifest-mismatch',scenario:wireScenario,session,before,after,refusal,effect,retained,routes,
+    ok:true,evidence:{kind:experimentalProfile?'actual-macos-experimental-profile-rejection':rawAdmission?'actual-macos-raw-admission':'actual-macos-resource-manifest-mismatch',scenario:wireScenario,session,before,after,refusal,background,effect,retained,routes,
      humanReceipt:false,phase3Complete:false},
    })});
    assert(response.ok,'Actual raw admission evidence was not retained');

@@ -726,8 +726,10 @@ fn create_local_session_blocking(
                     target_os = "macos",
                     target_arch = "aarch64"
                 ))]
-                if std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_SCENARIO").as_deref()
-                    == Ok("resource-manifest-mismatch")
+                if matches!(
+                    std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_SCENARIO").as_deref(),
+                    Ok("resource-manifest-mismatch" | "experimental-profile")
+                )
                 {
                     let negative_root = terminal_acceptance_directory()?.join("manifest-negative-resources");
                     if !crate::terminal_command::acceptance_trace::enabled()

@@ -208,7 +208,7 @@ impl AgentRuntime {
             "job-launch" if ssh && scenario == "positive-job-completion" => format!(
                 "{effect}; printf '%s%s\\n' SSH_NATIVE_JOB_ LIVE; for attempt in {{1..120}}; do [[ -e $HOME/phase3-ssh-tail-release ]] && break; /bin/sleep .1; done; [[ -e $HOME/phase3-ssh-tail-release ]] || exit 99; printf '%s%s\\n' SSH_NATIVE_TAIL_ BEGIN; /bin/sleep .2; printf '%s%s\\n' SSH_NATIVE_TAIL_ END; exit 7"
             ),
-            "job-launch" if (ssh && scenario == "positive-jobs") || (!ssh && scenario == "local-jobs") => {
+            "job-launch" if (ssh && scenario == "positive-jobs") || (!ssh && matches!(scenario.as_str(), "local-jobs" | "experimental-profile")) => {
                 let prefix = if ssh { "SSH_NATIVE_JOB_" } else { "NATIVE_JOB_" };
                 format!("{effect}; printf '%s%s\\n' {prefix} LIVE; /bin/sleep 30")
             }
