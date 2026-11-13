@@ -36,6 +36,7 @@ extern "C" {
     fn p0_begin_append_display() -> c_int;
     fn p0_paint_line();
     fn p0_accept_line();
+    fn p0_native_history(wrapper: *const c_char, source: *const c_char);
     static mut rl_line_buffer: *mut c_char;
     static mut rl_point: c_int;
     static mut rl_end: c_int;
@@ -107,6 +108,7 @@ struct Bridge {
     outgoing_since: Option<Instant>,
     native_connection: Option<nip::ConnectionEnvelope>,
     native_last_prepared: Option<nip::Identity>,
+    native_expired_clear: Option<nip::Identity>,
     native_shell_version: Option<String>,
     native_decoder: nip::Decoder,
     native_guard: Option<nip::RequestGuard>,
@@ -503,7 +505,15 @@ impl Bridge {
                 let cleared = self.clear_owned();
                 self.retired.insert(request.operation.clone());
                 self.draft = None;
-                self.emit(Some(&request), "Expired", json!({"draft_cleared":cleared}));
+                if let Some(envelope) = request.native.as_ref().filter(|_| cleared) {
+                    // Local expiry can clear the draft before the broker's
+                    // one-shot CancelDraft arrives. Keep the real result for
+                    // that request; a prepare-slot rejection would quarantine
+                    // the private channel before it could prove the clear.
+                    self.native_expired_clear = Some(envelope.identity.clone());
+                } else {
+                    self.emit(Some(&request), "Expired", json!({"draft_cleared":cleared}));
+                }
             } else if draft.validated && !draft.confirmed && !draft.submitted {
                 if !owned_line_matches(&draft.request.source[..draft.visible]) {
                     self.emit(None, "RecoveryRequired", json!("editor-changed"));
@@ -792,6 +802,11 @@ pub extern "C" fn p0_commit_key(_: c_int, _: c_int) -> c_int {
         let private_control = draft.request.private_control;
         if !private_control {
             p0_accept_line();
+            let wrapper =
+                CString::new(draft.request.plan.as_str()).expect("validated NUL-free plan");
+            let source =
+                CString::new(draft.request.source.as_str()).expect("validated NUL-free source");
+            p0_native_history(wrapper.as_ptr(), source.as_ptr());
             replace(&draft.request.plan);
             rl_done = 1;
         }
@@ -897,6 +912,7 @@ pub unsafe extern "C" fn p0_start(path: *const c_char, shell_version: *const c_c
         outgoing_since: None,
         native_connection: None,
         native_last_prepared: None,
+        native_expired_clear: None,
         native_shell_version: if shell_version.is_null() {
             None
         } else {

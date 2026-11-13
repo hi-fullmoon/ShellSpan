@@ -1,7 +1,7 @@
 //! Protocol adapter onto the existing Broker-owned command. It owns no lifecycle
 //! or lease facts and never writes a PTY implicitly. P2 supplies transport queues.
 use super::*;
-use crate::terminal_command::editors::ZLE_ACCEPT_KEY;
+use crate::terminal_command::editors::{BASH_ACCEPT_KEY, ZLE_ACCEPT_KEY};
 use nip::{Envelope, Payload};
 
 #[cfg(test)]
@@ -334,7 +334,7 @@ impl TerminalSessionBroker {
             accept_key: if record.integration_shell == Some(TerminalShellKind::Zsh) {
                 ZLE_ACCEPT_KEY
             } else {
-                b"\x18a"
+                BASH_ACCEPT_KEY
             },
             operation,
             requests: HashMap::new(),
@@ -616,7 +616,10 @@ impl NativeInputCoordinator {
             target_os = "macos",
             target_arch = "aarch64"
         ))]
-        if std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_CUT").as_deref() == Ok("before-accept") {
+        if !crate::terminal_command::acceptance_trace::ssh_recovery_enabled()
+            && std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_CUT").as_deref()
+                == Ok("before-accept")
+        {
             crate::terminal_command::acceptance_trace::record(
                 "before-accept-observed",
                 serde_json::json!({"identity":self.identity()?}),

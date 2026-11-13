@@ -261,6 +261,11 @@ int p0_begin_append_display(void) {
   return 0;
 }
 void p0_paint_line(void) { (*rl_redisplay_function)(); }
+void p0_native_history(const char *wrapper, const char *source) {
+  typedef void (*history_handoff)(const char *, const char *);
+  history_handoff save = (history_handoff)dlsym(RTLD_DEFAULT, "bash_shellspan_native_history");
+  if (save) save(wrapper, source);
+}
 void p0_accept_line(void) {
   if (append_display_active) {
     /* rl_done is the documented accept/return API. The default final redisplay

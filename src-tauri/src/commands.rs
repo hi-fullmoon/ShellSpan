@@ -1783,6 +1783,7 @@ pub(crate) async fn run_terminal_acceptance_command(
     agent_session_id: String,
     call_id: String,
     source_kind: String,
+    tool_argument: Option<String>,
 ) -> Result<serde_json::Value, String> {
     #[cfg(all(
         feature = "native-input-acceptance",
@@ -1801,6 +1802,7 @@ pub(crate) async fn run_terminal_acceptance_command(
                 &directory.join("home"),
                 &call_id,
                 &source_kind,
+                tool_argument.as_deref(),
             )
             .await
     }
@@ -1811,7 +1813,13 @@ pub(crate) async fn run_terminal_acceptance_command(
         target_arch = "aarch64"
     )))]
     {
-        let _ = (agent_runtime, agent_session_id, call_id, source_kind);
+        let _ = (
+            agent_runtime,
+            agent_session_id,
+            call_id,
+            source_kind,
+            tool_argument,
+        );
         Err("TERMINAL_ACCEPTANCE_DISABLED".into())
     }
 }

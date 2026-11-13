@@ -1,11 +1,6 @@
 use super::*;
-use crate::agent_runtime::{
-    TerminalExecuteRegistry, TerminalLeaseEventState, TerminalLeaseManager,
-};
-use crate::models::{
-    ManagedSession, SessionCommandSender, SessionIdentity, SessionManager, SessionStatus,
-    SessionTerminalKind, StatusEvent,
-};
+use crate::agent_runtime::{TerminalExecuteRegistry, TerminalLeaseManager};
+use crate::models::SessionManager;
 use crate::terminal_broker::{
     TerminalCommandState, TerminalGenerationCloseReason, TerminalSessionBroker,
 };
@@ -43,222 +38,153 @@ impl Endpoint {
     }
 }
 
-struct InputFault {
-    kind: Fault,
-    descriptor_expected: bool,
-    payload_expected: bool,
-    ready: bool,
-    held: Vec<u8>,
-}
+const FAULT_OPERATION: &str = "fault-command";
 
-impl InputFault {
-    fn forward(&mut self, input: &str) -> Vec<u8> {
-        if input == "\u{18}\u{2}" {
-            self.descriptor_expected = true;
-        } else if self.descriptor_expected {
-            self.descriptor_expected = false;
-            self.payload_expected = true;
-            assert_eq!(
-                input.len(),
-                65,
-                "the production registry must send the frame descriptor next"
-            );
-            if self.kind == Fault::DescriptorTimeout {
-                self.held.extend_from_slice(&input.as_bytes()[9..]);
-                return input.as_bytes()[..9].to_vec();
-            }
-        } else if self.payload_expected {
-            self.payload_expected = false;
-            self.ready = true;
-            let sent = if self.kind == Fault::PartialPayloadTimeout {
-                input.len() / 2
-            } else {
-                0
-            };
-            self.held.extend_from_slice(&input.as_bytes()[sent..]);
-            return input.as_bytes()[..sent].to_vec();
-        }
-        input.as_bytes().to_vec()
-    }
-}
+fn send_ordinary_frame(
+    terminal: &mut RemoteFixtureTerminal,
+    operation_id: &str,
+    source: &str,
+    fault: Option<Fault>,
+) -> (
+    Arc<crate::terminal_broker::TerminalCommandOperation>,
+    Vec<u8>,
+) {
+    use crate::terminal_broker::{TerminalBrokerInputSource, TerminalInputKind};
 
-struct CommandRuntime {
-    registry: TerminalExecuteRegistry,
-    leases: TerminalLeaseManager,
-    sessions: SessionManager,
-    receiver: crossbeam_channel::Receiver<SessionCommand>,
-    dequeued_frames: usize,
-}
+    let shell = terminal
+        .broker
+        .command_shell(&terminal.transport_id)
+        .unwrap();
+    let submission = (shell == TerminalShellKind::Bash)
+        .then(|| crate::terminal_integration::bash_native_submission(source).unwrap());
+    let chunks = native_editor_chunks(submission.as_deref().unwrap_or(source), shell);
+    let [(payload, expected)] = chunks.as_slice() else {
+        panic!("the ordinary SSH frame fixture requires a single frame");
+    };
+    let nonce = Uuid::new_v4().simple().to_string();
+    let descriptor = if shell == TerminalShellKind::Bash {
+        let original_bytes = crate::terminal_integration::bash_native_eval_source(expected)
+            .unwrap()
+            .len()
+            * 4;
+        format!(
+            "b{:05x}{:04x}001e0064{nonce:0>47}",
+            payload.len(),
+            original_bytes
+        )
+    } else {
+        format!("e{:04x}{nonce:0>60}", payload.len())
+    };
+    assert_eq!(descriptor.len(), 65);
 
-impl CommandRuntime {
-    fn new(terminal: &RemoteFixtureTerminal) -> Self {
-        Self::with_reduced_motion(terminal, true)
-    }
-
-    fn with_reduced_motion(terminal: &RemoteFixtureTerminal, reduced_motion: bool) -> Self {
-        let leases = TerminalLeaseManager::new(terminal.broker.clone());
-        let acknowledger = leases.clone();
-        leases
-            .set_publisher(Arc::new(move |event| {
-                if event.state == TerminalLeaseEventState::Acquired {
-                    acknowledger
-                        .set_reduced_motion(
-                            &event.session_id,
-                            &event.agent_session_id,
-                            &event.operation_id,
-                            reduced_motion,
-                        )
-                        .unwrap();
-                    acknowledger
-                        .acknowledge_frontend_ready(
-                            &event.session_id,
-                            &event.agent_session_id,
-                            &event.operation_id,
-                            true,
-                            true,
-                            false,
-                            false,
-                            false,
-                        )
-                        .unwrap();
-                }
-            }))
-            .unwrap();
-        let registry = TerminalExecuteRegistry::new(leases.clone(), terminal.broker.clone());
-        let (_, receiver) = crossbeam_channel::unbounded();
-        let mut runtime = Self {
-            registry,
-            leases,
-            sessions: SessionManager::default(),
-            receiver,
-            dequeued_frames: 0,
-        };
-        runtime.attach(terminal);
-        runtime
-    }
-
-    fn attach(&mut self, terminal: &RemoteFixtureTerminal) {
-        let (sender, receiver) = crossbeam_channel::unbounded();
-        let peer = terminal.socket.peer_addr().unwrap();
-        self.sessions
-            .insert(
-                terminal.transport_id.clone(),
-                ManagedSession {
-                    sender: SessionCommandSender::Event(sender),
-                    waker: None,
-                    output_state_sender: None,
-                    status: StatusEvent {
-                        session_id: terminal.transport_id.clone(),
-                        status: SessionStatus::Connected,
-                        message: None,
-                    },
-                    output_ready: Arc::new(AtomicBool::new(true)),
-                    output_paused: Arc::new(AtomicBool::new(false)),
-                    terminal_kind: SessionTerminalKind::Remote,
-                    identity: SessionIdentity {
-                        title: "SSH input recovery acceptance".into(),
-                        host: peer.ip().to_string(),
-                        port: peer.port(),
-                        username: terminal.username.clone(),
-                    },
+    let broker = terminal.broker.clone();
+    let id = terminal.transport_id.clone();
+    let agent = terminal.agent_session_id.clone();
+    broker
+        .acquire_agent_lease(&id, &agent, "fixture-task", operation_id)
+        .unwrap()
+        .unwrap();
+    let operation = broker
+        .begin_command_with_submission(&id, operation_id, source, submission.as_deref())
+        .unwrap();
+    operation.expect_native_checkpoint("").unwrap();
+    let send = |terminal: &mut RemoteFixtureTerminal, bytes: &[u8]| {
+        broker
+            .admit_terminal_input(
+                &id,
+                TerminalBrokerInputSource::Agent {
+                    agent_session_id: agent.clone(),
+                    task_id: "fixture-task".into(),
+                    operation_id: operation_id.into(),
                 },
+                TerminalInputKind::Text,
+                bytes,
+                || write_all_nonblocking(&terminal.session, &mut terminal.shell_channel, bytes),
             )
             .unwrap();
-        self.receiver = receiver;
-    }
+    };
+    send(terminal, b"\x18\x02");
+    terminal.pump_until(Duration::from_secs(3), |_| {
+        operation.wait_native_checkpoint(Duration::ZERO).unwrap()
+    });
+    operation
+        .expect_native_data_checkpoint(&descriptor, expected)
+        .unwrap();
 
-    fn pump(&mut self, terminal: &mut RemoteFixtureTerminal, fault: Option<&mut InputFault>) {
-        let mut fault = fault;
-        for command in self.receiver.try_iter() {
-            let SessionCommand::Write(input) = command else {
-                panic!("unexpected transport command in SSH acceptance");
-            };
-            self.dequeued_frames += 1;
-            let bytes = match fault.as_mut() {
-                Some(fault) => fault.forward(&input),
-                None => input.into_bytes(),
-            };
-            if !bytes.is_empty() {
-                write_all_nonblocking(&terminal.session, &mut terminal.shell_channel, &bytes)
-                    .unwrap();
-            }
-        }
-        terminal.pump_once();
-    }
-
-    fn disconnect(&self, terminal: &mut RemoteFixtureTerminal) -> String {
-        terminal.socket.shutdown(std::net::Shutdown::Both).unwrap();
-        let outcome = match terminal.shell_channel.read(&mut [0; 16]) {
-            Ok(0) => "eof".to_string(),
-            Err(error) => format!("{:?}", error.kind()),
-            Ok(_) => "bufferedOutputBeforeClose".into(),
-        };
-        self.registry
-            .terminal_closed(&terminal.transport_id)
-            .unwrap();
-        terminal
-            .broker
-            .close_transport(
-                &terminal.transport_id,
-                TerminalGenerationCloseReason::TransportDisconnected,
-            )
-            .unwrap();
-        self.sessions.remove(&terminal.transport_id).unwrap();
-        outcome
-    }
-
-    fn execute(
-        &mut self,
-        terminal: &mut RemoteFixtureTerminal,
-        source: &str,
-    ) -> crate::terminal_broker::TerminalCommandSnapshot {
-        let registry = self.registry.clone();
-        let sessions = self.sessions.clone();
-        let id = terminal.transport_id.clone();
-        let shell = terminal.broker.command_shell(&id).unwrap();
-        let operation = thread::scope(|scope| {
-            let typing = scope.spawn(|| {
-                registry.start(
-                    &sessions,
-                    &id,
-                    "ssh-recovery-agent",
-                    "ssh-recovery-task",
-                    "new-command",
-                    source,
-                    shell.enter(),
-                )
-            });
-            let deadline = Instant::now() + Duration::from_secs(12);
-            while !typing.is_finished() {
-                self.pump(terminal, None);
-                assert!(
-                    Instant::now() < deadline,
-                    "new SSH command input did not settle"
-                );
-                thread::sleep(Duration::from_millis(2));
-            }
-            typing.join().unwrap().unwrap()
+    let Some(fault) = fault else {
+        send(terminal, descriptor.as_bytes());
+        send(terminal, payload.as_bytes());
+        terminal.pump_until(Duration::from_secs(5), |_| {
+            operation
+                .wait_native_private_checkpoint(Duration::ZERO)
+                .unwrap()
         });
-        let deadline = Instant::now() + Duration::from_secs(8);
-        while !operation.snapshot().unwrap().state.is_terminal() {
-            self.pump(terminal, None);
-            assert!(
-                Instant::now() < deadline,
-                "new SSH command did not complete"
-            );
-            thread::sleep(Duration::from_millis(2));
-        }
-        let result = self
-            .registry
-            .wait(&self.sessions, &id, &operation, Duration::from_secs(5))
-            .unwrap();
-        assert_eq!(result.state, TerminalCommandState::Completed);
-        assert_eq!(result.exit_code, Some(0));
-        self.leases.release_turn("ssh-recovery-agent").unwrap();
-        result
+        send(terminal, b"\x18\x05");
+        return (operation, Vec::new());
+    };
+
+    let mut held = Vec::new();
+    let expected_rejection = if fault == Fault::DescriptorTimeout {
+        send(terminal, &descriptor.as_bytes()[..9]);
+        held.extend_from_slice(&descriptor.as_bytes()[9..]);
+        ""
+    } else {
+        send(terminal, descriptor.as_bytes());
+        descriptor.as_str()
+    };
+    let sent = if fault == Fault::PartialPayloadTimeout {
+        payload.len() / 2
+    } else {
+        0
+    };
+    if sent != 0 {
+        send(terminal, &payload.as_bytes()[..sent]);
     }
+    held.extend_from_slice(&payload.as_bytes()[sent..]);
+    if fault == Fault::InputDisconnect {
+        return (operation, held);
+    }
+
+    // Observe the receiver's actual quarantine message. A timed-out or partial
+    // descriptor cannot supply a matching input proof, even when bytes arrive late.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut rejected = false;
+    while !rejected {
+        terminal.pump_once_with_control(|event| {
+            rejected |= matches!(event, crate::terminal_integration::TerminalIntegrationControlEvent::NativePrivateCheckpoint { descriptor, buffer }
+                if descriptor == expected_rejection && buffer.is_empty());
+        });
+        assert!(
+            Instant::now() < deadline,
+            "SSH receiver did not quarantine the {fault:?} frame"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert!(!operation
+        .wait_native_private_checkpoint(Duration::ZERO)
+        .unwrap());
+    broker
+        .require_native_input_recovery(&id, operation_id)
+        .unwrap();
+    (operation, held)
 }
 
+fn disconnect_transport(terminal: &mut RemoteFixtureTerminal) -> String {
+    terminal.socket.shutdown(std::net::Shutdown::Both).unwrap();
+    let outcome = match terminal.shell_channel.read(&mut [0; 16]) {
+        Ok(0) => "eof".to_string(),
+        Err(error) => format!("{:?}", error.kind()),
+        Ok(_) => "bufferedOutputBeforeClose".into(),
+    };
+    terminal
+        .broker
+        .close_transport(
+            &terminal.transport_id,
+            TerminalGenerationCloseReason::TransportDisconnected,
+        )
+        .unwrap();
+    outcome
+}
 #[test]
 #[ignore = "requires the isolated tests/ssh-e2e Docker service"]
 fn isolated_ssh_buffered_editor_receipt_does_not_wait_for_more_network_input() {
@@ -324,7 +250,6 @@ fn isolated_ssh_long_source_frames_receive_exact_acknowledgements() {
         let broker = TerminalSessionBroker::phase4_enabled_for_test(65_536);
         let transport = format!("long-frame-{username}");
         let mut terminal = RemoteFixtureTerminal::connect(username, &transport, None, broker);
-        let mut runtime = CommandRuntime::with_reduced_motion(&terminal, false);
         let ledger = format!("/tmp/.shellspan-source-frame-{}", Uuid::new_v4());
         let mut expected = Vec::new();
         for count in [64, 128, 256] {
@@ -335,12 +260,21 @@ fn isolated_ssh_long_source_frames_receive_exact_acknowledgements() {
                 shlex::try_quote(&text).unwrap()
             );
             assert!(source.len() <= 8192);
-            let result = runtime.execute(&mut terminal, &source);
+            let id = format!("long-frame-{count}");
+            let (operation, _) = send_ordinary_frame(&mut terminal, &id, &source, None);
+            let result = terminal.finish_command(&id, &operation);
             assert_eq!(result.command_line, source);
+            assert_eq!(result.state, TerminalCommandState::Completed);
+            assert_eq!(result.exit_code, Some(0));
             expected.push(marker);
             assert_eq!(read_ledger(&mut terminal, &ledger), expected);
         }
-        runtime.execute(&mut terminal, &format!("rm -- {ledger}"));
+        assert_eq!(
+            terminal
+                .execute("long-frame-cleanup", &format!("rm -- {ledger}"))
+                .exit_code,
+            Some(0)
+        );
     }
 }
 
@@ -417,124 +351,86 @@ fn verify_recovery(endpoint: Endpoint, fault: Fault) {
     let ledger = format!("{directory}/effects");
     let running = format!("running-{run}");
     let source = format!("printf 'started\\n' >> {ledger}\nprintf '{running}\\n'\nsleep 2\nprintf 'finished\\n' >> {ledger}");
-    let mut runtime = CommandRuntime::new(&old);
-    let mut injection = InputFault {
-        kind: fault,
-        descriptor_expected: false,
-        payload_expected: false,
-        ready: false,
-        held: Vec::new(),
-    };
     let display_start = old.display.len();
-    let registry = runtime.registry.clone();
-    let sessions = runtime.sessions.clone();
-    let mut transport_failure = None;
-    let started = thread::scope(|scope| {
-        let typing = scope.spawn(|| {
-            registry.start(
+    let leases = TerminalLeaseManager::new(broker.clone());
+    let registry = TerminalExecuteRegistry::new(leases, broker.clone());
+    let sessions = SessionManager::default();
+    let probe = |command: &str| {
+        registry
+            .start(
                 &sessions,
                 &old_id,
                 "ssh-recovery-agent",
                 "ssh-recovery-task",
-                "fault-command",
-                &source,
+                "rejected-retry",
+                command,
                 shell.enter(),
             )
-        });
-        let deadline = Instant::now() + Duration::from_secs(12);
-        while !typing.is_finished() {
-            if transport_failure.is_none() {
-                runtime.pump(
-                    &mut old,
-                    (fault != Fault::RunningDisconnect).then_some(&mut injection),
-                );
-                if injection.ready && fault == Fault::InputDisconnect {
-                    transport_failure = Some(runtime.disconnect(&mut old));
-                }
-            }
-            assert!(
-                Instant::now() < deadline,
-                "SSH fault did not settle: {fault:?}"
-            );
-            thread::sleep(Duration::from_millis(2));
-        }
-        typing.join().unwrap()
-    });
+            .unwrap_err()
+    };
     let mut rejected_probes = 0;
-    if fault == Fault::RunningDisconnect {
-        let operation = started.unwrap();
+    let operation = if fault == Fault::RunningDisconnect {
+        let (operation, _) = send_ordinary_frame(&mut old, FAULT_OPERATION, &source, None);
         let deadline = Instant::now() + Duration::from_secs(5);
         while !String::from_utf8_lossy(&old.display[display_start..]).contains(&running)
             || operation.snapshot().unwrap().state != TerminalCommandState::Running
         {
-            runtime.pump(&mut old, None);
+            old.pump_once();
             assert!(
                 Instant::now() < deadline,
                 "remote command did not start before disconnect"
             );
             thread::sleep(Duration::from_millis(2));
         }
-        transport_failure = Some(runtime.disconnect(&mut old));
-        assert_eq!(
-            operation.snapshot().unwrap().state,
-            TerminalCommandState::Uncertain
-        );
-    } else if fault == Fault::InputDisconnect {
-        assert!(
-            started.is_err()
-                || started.unwrap().snapshot().unwrap().state != TerminalCommandState::Completed
-        );
+        operation
     } else {
-        assert!(crate::agent_runtime::terminal_execution_needs_user_action(
-            &started.unwrap_err()
-        ));
-        assert!(
-            broker
-                .execution_capabilities(&old_id)
-                .unwrap()
-                .input_recovery_required
-        );
-        let sequence = broker
-            .snapshot(Some(&old_id))
-            .unwrap()
-            .session
-            .unwrap()
-            .next_input_sequence;
-        for command in ["echo alive; date", "printf one\nprintf two", "pwd"] {
-            let error = runtime
-                .registry
-                .start(
-                    &runtime.sessions,
-                    &old_id,
-                    "ssh-recovery-agent",
-                    "ssh-recovery-task",
-                    "rejected-retry",
-                    command,
-                    shell.enter(),
-                )
-                .unwrap_err();
-            assert!(crate::agent_runtime::terminal_execution_needs_user_action(
-                &error
-            ));
-            rejected_probes += 1;
-        }
-        assert_eq!(
-            broker
+        let (operation, mut held) =
+            send_ordinary_frame(&mut old, FAULT_OPERATION, &source, Some(fault));
+        if fault != Fault::InputDisconnect {
+            assert!(
+                broker
+                    .execution_capabilities(&old_id)
+                    .unwrap()
+                    .input_recovery_required
+            );
+            let sequence = broker
                 .snapshot(Some(&old_id))
                 .unwrap()
                 .session
                 .unwrap()
-                .next_input_sequence,
-            sequence,
-            "a recovery rejection enqueued new input"
-        );
-        assert!(runtime.receiver.is_empty());
-        write_all_nonblocking(&old.session, &mut old.shell_channel, b"\x03").unwrap();
-        pump_for(&mut old, Duration::from_millis(200));
-        injection.held.push(b'\r');
-        write_all_nonblocking(&old.session, &mut old.shell_channel, &injection.held).unwrap();
-        pump_for(&mut old, Duration::from_millis(500));
-        transport_failure = Some(runtime.disconnect(&mut old));
+                .next_input_sequence;
+            for command in ["echo alive; date", "printf one\nprintf two", "pwd"] {
+                let error = probe(command);
+                assert!(
+                    crate::agent_runtime::terminal_execution_needs_user_action(&error),
+                    "{error}"
+                );
+                rejected_probes += 1;
+            }
+            assert_eq!(
+                broker
+                    .snapshot(Some(&old_id))
+                    .unwrap()
+                    .session
+                    .unwrap()
+                    .next_input_sequence,
+                sequence,
+                "a recovery rejection enqueued new input"
+            );
+            write_all_nonblocking(&old.session, &mut old.shell_channel, b"\x03").unwrap();
+            pump_for(&mut old, Duration::from_millis(200));
+            held.push(b'\r');
+            write_all_nonblocking(&old.session, &mut old.shell_channel, &held).unwrap();
+            pump_for(&mut old, Duration::from_millis(500));
+        }
+        operation
+    };
+    let transport_failure = disconnect_transport(&mut old);
+    let fault_state = operation.snapshot().unwrap().state;
+    if fault == Fault::RunningDisconnect {
+        assert_eq!(fault_state, TerminalCommandState::Uncertain);
+    } else {
+        assert_ne!(fault_state, TerminalCommandState::Completed);
     }
     let old_output = old.display[display_start..].to_vec();
     assert!(
@@ -579,18 +475,7 @@ fn verify_recovery(endpoint: Endpoint, fault: Fault) {
             .count()
             <= expected_started
     );
-    assert!(runtime
-        .registry
-        .start(
-            &runtime.sessions,
-            &old_id,
-            "ssh-recovery-agent",
-            "ssh-recovery-task",
-            "stale-retry",
-            &source,
-            shell.enter()
-        )
-        .is_err());
+    let stale_error = probe(&source);
     assert_eq!(
         broker
             .snapshot(Some(&fresh_id))
@@ -601,11 +486,15 @@ fn verify_recovery(endpoint: Endpoint, fault: Fault) {
         1,
         "reconnect automatically submitted input"
     );
-    runtime.attach(&fresh);
-    runtime.execute(
+    let (fresh_command, _) = send_ordinary_frame(
         &mut fresh,
+        "reconnected-command",
         &format!("printf 'reconnected\\n' >> {ledger}\nprintf 'new-generation-ok\\n'"),
+        None,
     );
+    let reconnected = fresh.finish_command("reconnected-command", &fresh_command);
+    assert_eq!(reconnected.state, TerminalCommandState::Completed);
+    assert_eq!(reconnected.exit_code, Some(0));
     let effects = read_ledger(&mut fresh, &ledger);
     assert_eq!(
         effects
@@ -623,13 +512,12 @@ fn verify_recovery(endpoint: Endpoint, fault: Fault) {
     );
     let evidence = serde_json::json!({
         "status": "passed", "cleanup": "completed",
-        "fault": format!("{fault:?}"), "peer": peer.to_string(), "shell": shell,
+        "fault": format!("{fault:?}"), "peer": peer.to_string(), "shell": shell, "username": old.username,
         "terminalGenerationBefore": before.terminal_generation, "terminalGenerationAfter": after.terminal_generation,
-        "rejectedRetryProbes": rejected_probes, "closedInputSequence": closed_sequence,
-        "transportFailure": transport_failure, "encodedOutputLeaks": 0, "effects": effects,
+        "rejectedRetryProbes": rejected_probes, "closedInputSequence": closed_sequence, "staleError": stale_error,
+        "transportFailure": transport_failure, "faultState": fault_state, "encodedOutputLeaks": 0, "effects": effects,
         "rawOutputSha256": hex::encode(Sha256::digest(&old_output)),
-        "realModelRequests": 0, "executionPath": "production SSH2 + shell integration + terminal broker + execute registry",
-        "registryInputFramesDequeued": runtime.dequeued_frames,
+        "realModelRequests": 0, "executionPath": "SSH2 + ordinary shell integration + broker; native-only registry rejects retries",
     });
     fresh.session.set_blocking(true);
     let sftp = fresh.session.sftp().unwrap();
@@ -655,6 +543,36 @@ fn verify_all_faults(endpoint: Endpoint) {
 fn isolated_ssh_input_timeout_disconnect_and_reconnect_do_not_replay() {
     for username in ["shellspan", "shellspan-zsh"] {
         verify_all_faults(Endpoint::Fixture(username));
+    }
+}
+
+#[test]
+#[ignore = "requires the isolated tests/ssh-e2e Docker SSH server"]
+fn isolated_ssh_stop_restores_manual_input_on_fresh_connections() {
+    use crate::terminal_broker::TerminalCommandRequestedSettlement;
+
+    for username in ["shellspan", "shellspan-zsh"] {
+        let broker = TerminalSessionBroker::phase4_enabled_for_test(65_536);
+        let transport = format!("stop-{username}");
+        let mut terminal =
+            RemoteFixtureTerminal::connect(username, &transport, None, broker.clone());
+        let operation = terminal.begin("ssh-stop", "sleep 30");
+        let stopped = terminal.interrupt(&operation, TerminalCommandRequestedSettlement::Cancelled);
+        assert_eq!(stopped.state, TerminalCommandState::Cancelled);
+        broker
+            .retire_command(&transport, &stopped.command_id)
+            .unwrap();
+        broker
+            .release_agent_lease(
+                &transport,
+                &terminal.agent_session_id,
+                "fixture-task",
+                "ssh-stop",
+            )
+            .unwrap();
+        assert!(terminal
+            .execute_user_command("printf '%s%s\\n' SSH_MANUAL_ OK")
+            .contains("SSH_MANUAL_OK"));
     }
 }
 

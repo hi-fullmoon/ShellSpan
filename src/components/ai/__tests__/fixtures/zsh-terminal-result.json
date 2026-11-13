@@ -1,0 +1,15 @@
+{
+  "source": "macOS /bin/zsh 5.9 -f, xterm-256color, 40 columns. Recorded between preexec and precmd markers in a real PTY.",
+  "withNewline": {
+    "command": "printf '%s\\n' '100%' '%'",
+    "output": "100%\r\n%\r\n\u001b[1m\u001b[7m%\u001b[27m\u001b[1m\u001b[0m                                       \r \r"
+  },
+  "withoutNewline": {
+    "command": "printf '%s' '%'",
+    "output": "%\u001b[1m\u001b[7m%\u001b[27m\u001b[1m\u001b[0m                                       \r \r"
+  },
+  "empty": {
+    "command": ":",
+    "output": "\u001b[1m\u001b[7m%\u001b[27m\u001b[1m\u001b[0m                                       \r \r"
+  }
+}

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, webkit } from 'playwright';
@@ -24,6 +24,9 @@ const completed = capture('git log -5 --format=fuller --color=always');
 const plainOutput = capture('git log -5 --format=fuller --color=never').output.combinedOutput;
 assert.ok(completed.output.combinedOutput.includes('\u001b['));
 const empty = capture(':');
+const { withNewline } = JSON.parse(await readFile(new URL('./fixtures/zsh-terminal-result.json', import.meta.url), 'utf8'));
+const zsh = { command: withNewline.command, output: { execution: 'completed', exitCode: 0, combinedOutput: withNewline.output } };
+const expectedOutput = { completed: plainOutput.trimEnd(), zsh: '100%\n%' };
 const server = await createServer({
   configFile: false, root, appType: 'custom', logLevel: 'error', cacheDir: join(artifacts, 'vite-cache'),
   resolve: { alias: { '@': `${root}src` } }, esbuild: { jsx: 'automatic' },
@@ -47,7 +50,7 @@ try {
     try {
       for (const width of [380, 720]) {
         for (const locale of ['zh-CN', 'en-US']) {
-          for (const [name, result] of Object.entries({ completed, empty, running })) {
+          for (const [name, result] of Object.entries({ completed, empty, running, zsh })) {
             for (const surface of ['inline', 'details']) {
               const page = await browser.newPage({ viewport: { width, height: 900 } });
               const errors = [];
@@ -75,9 +78,9 @@ try {
               const context = `${engine.name()}/${width}/${locale}/${name}/${surface}`;
               const text = await output.textContent();
               assert.ok(!text.includes('combinedOutput') && !text.includes('submittedCommandLine'), context);
-              if (name === 'completed') {
+              if (name in expectedOutput) {
                 const lines = await output.locator('.ai-block-line').allTextContents();
-                assert.equal(lines.map(line => line === '\u00a0' ? '' : line).join('\n'), plainOutput.trimEnd(), context);
+                assert.equal(lines.map(line => line === '\u00a0' ? '' : line).join('\n'), expectedOutput[name], context);
               } else assert.ok(text.includes(locale === 'zh-CN' ? '无输出' : 'No output'), context);
               const status = page.locator('[data-ai-terminal-execution]');
               assert.equal(await status.evaluate(element => getComputedStyle(element).color),

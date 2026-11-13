@@ -625,6 +625,25 @@ pub(crate) fn run_ssh_session<
     } else {
         (None, None)
     };
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    if crate::terminal_command::acceptance_trace::ssh_recovery_enabled() {
+        if let Some(
+            reason @ ("TERMINAL_NATIVE_PROFILE_UNSUPPORTED"
+            | "TERMINAL_NATIVE_SFTP_UNAVAILABLE"
+            | "TERMINAL_NATIVE_PROFILE_ARTIFACT_MISMATCH"),
+        ) = native_failure.as_deref()
+        {
+            let _ = crate::terminal_command::acceptance_trace::record(
+                "ssh-native-admission-refused",
+                serde_json::json!({"sessionId": session_id, "reason": reason}),
+            );
+        }
+    }
     let native_selected = native_integration.is_some() || native_failure.is_some();
     let input_mode = if native_integration.is_some() {
         crate::terminal_command::protocol::InputMode::NativeInline
@@ -812,6 +831,7 @@ pub(crate) fn run_ssh_session<
                                     })
                                 }
                                 Ok(count) if count > 0 => {
+                                    ssh_recovery_read(session_id, &bytes[..count]);
                                     observe_terminal_raw_output(app, session_id, &bytes[..count]);
                                     initial_output.extend_from_slice(&bytes[..count]);
                                 }
@@ -1118,6 +1138,19 @@ fn session_loop(
     );
     // Emit whatever decoded output remains so the final screen state is not
     // lost when the session ends.
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    if crate::terminal_command::acceptance_trace::ssh_recovery_enabled() {
+        let _ = crate::terminal_command::acceptance_trace::record(
+            "ssh-decoder-drain",
+            serde_json::json!({"sessionId":session_id,"incompleteHex":hex::encode(&pending_bytes),
+                "decodedBeforeFlush":pending_output,"endedWithError":result.is_err()}),
+        );
+    }
     flush_pending_output(app, session_id, &mut pending_bytes, &mut pending_output);
     result
 }
@@ -1202,7 +1235,42 @@ fn session_loop_inner(
                     made_progress = true;
                 }
                 SessionCommand::WriteBytes(bytes) => {
+                    #[cfg(all(
+                        feature = "native-input-acceptance",
+                        debug_assertions,
+                        target_os = "macos",
+                        target_arch = "aarch64"
+                    ))]
+                    let observe_key =
+                        crate::terminal_command::acceptance_trace::ssh_recovery_enabled()
+                            && (bytes == crate::terminal_command::editors::ZLE_ACCEPT_KEY
+                                || bytes == crate::terminal_command::editors::BASH_ACCEPT_KEY);
+                    #[cfg(all(
+                        feature = "native-input-acceptance",
+                        debug_assertions,
+                        target_os = "macos",
+                        target_arch = "aarch64"
+                    ))]
+                    if observe_key {
+                        crate::terminal_command::acceptance_trace::record(
+                            "ssh-accept-key-write-attempt",
+                            serde_json::json!({"sessionId":session_id,"bytes":bytes.len()}),
+                        )?;
+                    }
                     write_all_nonblocking(session, channel, &bytes)?;
+                    #[cfg(all(
+                        feature = "native-input-acceptance",
+                        debug_assertions,
+                        target_os = "macos",
+                        target_arch = "aarch64"
+                    ))]
+                    if observe_key {
+                        crate::terminal_command::acceptance_trace::actual_accept_key_written(
+                            session_id,
+                            &bytes,
+                            bytes.len(),
+                        )?;
+                    }
                     made_progress = true;
                 }
                 SessionCommand::NativeControl(frame) => {
@@ -1242,6 +1310,7 @@ fn session_loop_inner(
                     }
                 }
                 Ok(read) => {
+                    ssh_recovery_read(session_id, &buffer[..read]);
                     observe_terminal_raw_output(app, session_id, &buffer[..read]);
                     pending_bytes.extend_from_slice(&buffer[..read]);
                     drain_decoded_output(pending_bytes, pending_output);
@@ -1309,6 +1378,21 @@ fn session_loop_inner(
             wake,
             keepalive_due_in,
         )?;
+    }
+}
+
+fn ssh_recovery_read(_session_id: &str, _bytes: &[u8]) {
+    #[cfg(all(
+        feature = "native-input-acceptance",
+        debug_assertions,
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    if crate::terminal_command::acceptance_trace::ssh_recovery_enabled() {
+        let _ = crate::terminal_command::acceptance_trace::record(
+            "ssh-pty-read",
+            serde_json::json!({"sessionId":_session_id,"hex":hex::encode(_bytes)}),
+        );
     }
 }
 

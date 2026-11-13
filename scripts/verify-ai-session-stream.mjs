@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID,createHash } from 'node:crypto';
 import { execFile, execFileSync, spawn } from 'node:child_process';
-import { resolve, isAbsolute,sep } from 'node:path';
+import { resolve, relative, isAbsolute,sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdtemp, rm, writeFile, readFile, stat, readdir, open, lstat } from 'node:fs/promises';
 import {existsSync,constants,writeFileSync} from 'node:fs';
@@ -46,6 +46,9 @@ import {readNativeJobGroup} from './native-input-p3/native-job-group-witness.mjs
 import {createCredentialLifecycleWitness,credentialLifecycleWindowOptions} from './native-input-p3/credential-lifecycle.mjs';
 import {attachAiCredentialLifecycle} from './native-input-p3/ai-credential-lifecycle.mjs';
 import {zleAppHistoryModes,attachZleAppHistory} from './native-input-p3/zle-app-history.mjs';
+import {readOwnedSshFixture,requireSshRecoveryRunner,sshNativeCases} from './native-input-p3/ssh-recovery-cases.mjs';
+import {inspectSshPeer} from './native-input-p3/ssh-recovery-fixture.mjs';
+import {attachSshRecoveryWitness,openSshRecoveryForwarder} from './native-input-p3/ssh-recovery-witness.mjs';
 
 // Requires a native desktop and Rust/Tauri. The default regression creates one
 // idle session without provider calls. --performance also reads stored journals
@@ -129,6 +132,8 @@ const { values } = parseArgs({ options: {
   'native-input-p2-lifecycle-dispose': { type: 'boolean' },
   'native-raw-admission': { type: 'string' },
   'native-input-p2-ssh-fault': { type: 'boolean' },
+  'native-input-p3-ssh-recovery': { type: 'string' },
+  'native-input-p3-ssh-recovery-fixture': { type: 'string' },
   'native-input-p2-interactive': { type: 'boolean' },
   'native-input-p2-interactive-fresh': { type: 'boolean' },
   'native-input-p2-credential': { type: 'string' },
@@ -207,6 +212,12 @@ assert(!values['native-input-p3-startup-user-edit']||p3Startup&&p3Startup!=='zsh
 assert(!p3Startup||values['no-model']&&values['data-scope']==='com.shellspan.validation.native-input-p3'&&!values['native-jobs']&&!values['data-initialize']);
 assert(!values['native-input-p3-review']||nativeManual||p3Startup||values['native-input-p3-submit-fault']||values['native-input-p2-lifecycle']&&values['native-input-p3']==='powerShell7');
 const nativeP3=values['native-input-p3']??p3Startup;
+const sshRecovery=requireSshRecoveryRunner(values);
+assert(!values['native-input-p3-ssh-recovery-fixture']||sshRecovery,'Select one native SSH case');
+assert(!sshRecovery||process.platform==='darwin'&&process.arch==='arm64','Native SSH acceptance requires actual macOS arm64');
+const bashSsh=Boolean(sshRecovery&&values['native-input-p2']);
+const sshRecoveryFixture=sshRecovery?readOwnedSshFixture(repository,values['native-input-p3-ssh-recovery-fixture'],bashSsh):undefined;
+let sshRecoveryForwarder;
 const macLocalLifecycle=isMacLocalLifecycle(values);
 const lifecycleEvidenceClockEnabled=macLifecycleEvidenceClockEnabled(macLocalLifecycle);
 const macLateLifecycle=values['native-input-p2-lifecycle-late']===true;
@@ -564,6 +575,8 @@ const token = randomUUID();
 const boundaryFixtureModule=boundaryNoInference?await import('./native-input-p3/native-no-inference-boundary.mjs'):null;
 const boundaryFixture=boundaryFixtureModule?.createNativeBoundaryFixture(token,Number(byteBoundary));
 const ownedEvidenceDirectory = process.env.SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR;
+const sshCredentialInitialization = Boolean(initializationRun && credentialMode && values['data-scope']==='com.shellspan.validation.native-input-p3'
+  && ownedEvidenceDirectory && /^\.artifacts\/tests\/native-input-p2\/ssh-recovery\/[a-f0-9-]{36}$/.test(relative(repository, ownedEvidenceDirectory)));
 assert(!observedInitialization||ownedEvidenceDirectory&&isAbsolute(ownedEvidenceDirectory),'Observed initialization requires an owned absolute evidence directory');
 const windowsOutputMarker = windowsShell ? `native-jobs-${randomUUID()}` : undefined;
 const windowsCompletionGate = windowsShell ? resolve(ownedEvidenceDirectory ?? tmpdir(), `shellspan-completion-gate-${token}`) : undefined;
@@ -572,6 +585,11 @@ let nativeEnvironment = windowsShell ? { ...process.env, SHELLSPAN_ACCEPTANCE: w
 if(nativeDaily||macLocalLifecycle)nativeEnvironment={...nativeEnvironment,SHELLSPAN_ACCEPTANCE_WEBKIT_STORE:token};
 if(nativeDaily?.startsWith('raw-'))nativeEnvironment={...nativeEnvironment,SHELLSPAN_ACCEPTANCE_RAW_PREPARE:'1'};
 if(nativeDaily?.startsWith('submission-'))nativeEnvironment={...nativeEnvironment,SHELLSPAN_ACCEPTANCE_SUBMISSION:'1'};
+if(sshRecovery)nativeEnvironment={...nativeEnvironment,SHELLSPAN_ACCEPTANCE_WEBKIT_STORE:token,
+  SHELLSPAN_ACCEPTANCE_RAW_PTY:'1',SHELLSPAN_ACCEPTANCE_SUBMISSION:'1',SHELLSPAN_ACCEPTANCE_CONTROL_TRACE:'1',
+  SHELLSPAN_ACCEPTANCE_SSH_RECOVERY:sshRecovery,SHELLSPAN_ACCEPTANCE_SUBMISSION_SCENARIO:sshRecovery,
+  SHELLSPAN_ACCEPTANCE_SSH_SHELL:bashSsh?'bash':'zsh',
+  ...(sshNativeCases[sshRecovery].cut?{SHELLSPAN_ACCEPTANCE_SUBMISSION_CUT:sshNativeCases[sshRecovery].cut}:{})};
 if(nativeDaily?.startsWith('eof-private-'))nativeEnvironment={...nativeEnvironment,SHELLSPAN_ACCEPTANCE_RAW_PREPARE:'1',SHELLSPAN_ACCEPTANCE_PRIVATE_EOF_PREPARE:'1'};
 assert(!modelPreflightRun || ownedEvidenceDirectory && isAbsolute(ownedEvidenceDirectory),
   '--model-preflight requires an explicit owned frozen evidence directory');
@@ -583,8 +601,8 @@ assert(!ownedEvidenceDirectory || isAbsolute(ownedEvidenceDirectory)
 const submissionRestartEvidence = nativeDaily?.startsWith('submission-')
   && process.env.SHELLSPAN_ACCEPTANCE_SUBMISSION_SCENARIO === 'app-crash-restart';
 const nativeEvidenceFile = historyReuseReader !== undefined ? windowsHistoryReaderArtifacts(historyReuseReader).evidence
-  : submissionRestartEvidence ? 'native-webview-restart-evidence.json' : 'native-webview-evidence.json';
-const nativeEvidencePath = nativeDaily || observedInitialization || nativeRaw || macLocalLifecycle || zleAppHistory!==undefined || nativeManual || nativeRecovery || aiCredentialMode!==undefined || credentialLifecycleRun || values['native-jobs'] || terminalContentionRun || p3Startup || modelPreflightRun || journalRecoveryAgent || storageAdmission || semanticVariant!==undefined || fileChain || fileFault || fileRestart || byteBoundary || windowsStop || windowsDraftCancel || windowsLifetime || approvalContention || approvalDelegation || navigationManual || activeEof || lateReceipt || captureTail || stopBoundary
+  : submissionRestartEvidence || sshRecovery==='crash-restart' ? 'native-webview-restart-evidence.json' : 'native-webview-evidence.json';
+const nativeEvidencePath = sshRecovery || nativeDaily || observedInitialization || nativeRaw || macLocalLifecycle || zleAppHistory!==undefined || nativeManual || nativeRecovery || aiCredentialMode!==undefined || credentialLifecycleRun || values['native-jobs'] || terminalContentionRun || p3Startup || modelPreflightRun || journalRecoveryAgent || storageAdmission || semanticVariant!==undefined || fileChain || fileFault || fileRestart || byteBoundary || windowsStop || windowsDraftCancel || windowsLifetime || approvalContention || approvalDelegation || navigationManual || activeEof || lateReceipt || captureTail || stopBoundary
   ? ownedEvidenceDirectory ? resolve(ownedEvidenceDirectory, nativeEvidenceFile)
     : resolve(tmpdir(), `shellspan-${terminalContentionRun ? 'terminal-contention' : 'native-jobs'}-${token}.json`) : undefined;
 // Keep the compiled macOS application identity stable between contention runs.
@@ -619,6 +637,7 @@ const pagePath = displayAuto ? 'src/components/terminal/__tests__/native-display
   : values['native-input-p2-interactive-fresh'] ? 'src/components/terminal/__tests__/native-input-p2-interactive-fresh.native.html'
   : values['native-input-p2-interactive'] ? 'src/components/terminal/__tests__/native-input-p2-interactive.native.html'
   : values['native-input-p2-ssh-fault'] ? 'src/components/terminal/__tests__/native-input-p2-ssh-fault.native.html'
+  : sshRecovery ? 'src/components/terminal/__tests__/zle-ssh-recovery.native.html'
   : values['native-input-p2-lifecycle'] ? 'src/components/terminal/__tests__/native-input-p2-lifecycle.native.html'
   : values['native-input-p2-history'] ? 'src/components/terminal/__tests__/native-input-p2-history.native.html'
   : values['native-jobs'] ? 'src/components/terminal/__tests__/native-jobs.native.html'
@@ -630,7 +649,7 @@ const pagePath = displayAuto ? 'src/components/terminal/__tests__/native-display
   : focusRun ? 'src/components/focus/__tests__/focus.native.html' : `src/lib/ai/__tests__/${page}`;
 const frozenNativeRun=Boolean(ownedEvidenceDirectory&&(
   values['data-scope']==='com.shellspan.validation.native-input-p2'&&(values['native-input-p2']||initializationRun||nativeManual||nativeRecovery||nativeRaw)
-  || values['data-scope']==='com.shellspan.validation.native-input-p3'&&(nativeP3||initializationRun||modelPreflightRun||nativeManual||nativeRecovery||nativeRaw||nativeDaily)));
+  || values['data-scope']==='com.shellspan.validation.native-input-p3'&&(nativeP3||sshRecovery||initializationRun||modelPreflightRun||nativeManual||nativeRecovery||nativeRaw||nativeDaily)));
 assert(!frozenNativeRun||process.platform==='darwin'&&process.arch==='arm64'||process.platform==='win32'&&process.arch==='x64'&&values['data-scope']==='com.shellspan.validation.native-input-p3','Frozen native verification requires an explicitly supported actual host');
 const frozenWindows=frozenNativeRun&&process.platform==='win32';
 assert(!boundaryNoInference||frozenWindows,'No-inference native boundary execution requires a frozen isolated Windows checkout');
@@ -874,6 +893,7 @@ const attachResult = (vite) => {
     return()=>eofEvidenceClock.endObservation(label);
   }:undefined,macDailyCaptureConfiguration(nativeDaily)??macSystemSelectionObservationConfiguration(nativeDaily)??macHumanViewportObservationConfiguration(nativeDaily)??macSubmissionObservationConfiguration(nativeDaily));
   if(nativeDaily?.startsWith('submission-'))attachMacSubmissionWitness(vite,token,ownedEvidenceDirectory);
+  if(sshRecovery)attachSshRecoveryWitness(vite,{token,directory:ownedEvidenceDirectory,id:sshRecovery,fixture:sshRecoveryFixture,getForwarder:()=>sshRecoveryForwarder,manifest:frozenManifestPath});
   if(macLocalLifecycle)attachMacDailyCheckpoints(vite,token,ownedEvidenceDirectory,lifecycleEvidenceClockEnabled?label=>{
     assert(macLifecycleVisualCheckpoints.includes(label),'Lifecycle clock cannot pause for another workflow');
     assert(lifecycleEvidenceClock,'Lifecycle clock must start before an image wait');
@@ -1247,6 +1267,16 @@ try {
   assert(address && typeof address !== 'string');
   if(boundaryFixture){const receipt=boundaryFixtureModule.installNativeBoundaryFixtureRoute(ownedEvidenceDirectory,boundaryFixture,`http://127.0.0.1:${address.port}`);await writeFile(resolve(ownedEvidenceDirectory,`native-no-inference-route-${token}.json`),JSON.stringify(receipt,null,2),{flag:'wx',mode:0o600});}
   const url = new URL(`http://127.0.0.1:${address.port}/${pagePath}`);
+  if(sshRecovery){
+    inspectSshPeer(sshRecoveryFixture);
+    sshRecoveryForwarder=await openSshRecoveryForwarder(sshRecoveryFixture);
+    const fingerprint=Buffer.from(sshRecoveryFixture.hostKeySha256,'hex').toString('base64').replace(/=+$/,'');
+    url.searchParams.set('zleSshRecovery',sshRecovery);
+    if(bashSsh)url.searchParams.set('bashSsh','true');
+    url.searchParams.set('nativeP2SshPort',String(sshRecoveryForwarder.port));
+    url.searchParams.set('hostFingerprint',`ED25519 SHA256:${fingerprint}`);
+    nativeEnvironment={...nativeEnvironment,SHELLSPAN_ACCEPTANCE_SSH_PORT:String(sshRecoveryForwarder.port)};
+  }
   url.searchParams.set('token', token);
   url.searchParams.set('baseline', String(baseline));
   url.searchParams.set('noModel', String(noModel));
@@ -1355,7 +1385,7 @@ try {
     : spawn(process.platform === 'win32' ? process.execPath : 'pnpm', [
       ...(process.platform === 'win32' ? [fileURLToPath(new URL('./tauri.js', import.meta.resolve('@tauri-apps/cli')))] : ['exec','tauri']),
       'dev', '--no-watch',
-      ...(captureTail||nativeDaily||macLocalLifecycle?['--features','native-input-acceptance']:[]),
+      ...(captureTail||nativeDaily||macLocalLifecycle||sshRecovery||sshCredentialInitialization?['--features','native-input-acceptance']:[]),
       ...(process.platform === 'darwin' ? ['--runner', resolve(repository, 'scripts/dev-cargo-runner.mjs')] : frozenWindows?['--runner',resolve(repository,'scripts/native-input-p3/windows-cargo-runner.cmd')]:[]),
       '--config', resolve(repository, 'src-tauri/tauri.dev.conf.json'), '--config', JSON.stringify({
     identifier: values['data-scope'] ?? 'com.shellspan-dev', build: { beforeDevCommand: '', devUrl },
@@ -1397,6 +1427,7 @@ try {
   const outcome = await result;
   if(frozenNativeRun)writeFrozenCheckpoint(resolve(ownedEvidenceDirectory,`frozen-${token}-after-webview-result.json`),verifyFrozenValidation(frozenManifestPath,'after-webview-result'));
   assert.equal(outcome.ok, true, outcome.error);
+  if(sshRecovery)assert(outcome.evidence?.kind===(bashSsh?(sshRecovery==='reconnect-tail'?'actual-bash-ssh-lifecycle':'actual-bash-ssh-recovery'):'actual-zle-ssh-recovery')&&outcome.evidence.case===sshRecovery&&outcome.evidence.modelCalls===0,'Actual SSH evidence is incomplete');
   if(macDailyCaptureConfiguration(nativeDaily))assert(outcome.evidence?.captureComplete===true&&outcome.evidence.visualReviewRequired===true&&outcome.evidence.visualReviewComplete===false&&outcome.evidence.acceptancePassed===false,'Automatic capture must leave independent visual acceptance pending');
   if(displayAuto){const evidence=JSON.parse(await readFile(nativeEvidencePath,'utf8'));assert(evidence.kind==='actual-native-display-auto'&&evidence.activeInput===displayActiveInput&&evidence.records?.length===6&&evidence.normalExit&&evidence.exit?.exitCode===0&&evidence.ordinaryInputCalls===(displayActiveInput?14:8)&&evidence.modelCalls===0&&evidence.agentSubmissions===0&&evidence.clipboardReads===0&&evidence.clipboardWrites===0,'Actual live display matrix incomplete');}
   if(navigationManual){const evidence=JSON.parse(await readFile(nativeEvidencePath,'utf8'));assert.equal(evidence.kind,'actual-native-navigation-manual');if(evidence.deferred){assert.equal(evidence.manualCasePassed,false);console.log('Manual navigation deferred;no manual acceptance pass claimed.');}else{assert(evidence.manualCasePassed&&evidence.receipts?.length===5,'Manual navigation requires all five trusted human steps');}}
@@ -1435,6 +1466,7 @@ try {
   clearTimeout(timer);
   eofEvidenceClock?.dispose();
   lifecycleEvidenceClock?.dispose();
+  await sshRecoveryForwarder?.close();
   let frozenImageStarted=false;
   if(frozenNativeRun&&child?.pid){
     const processes=[];

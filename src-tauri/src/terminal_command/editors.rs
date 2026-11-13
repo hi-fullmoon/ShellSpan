@@ -8,6 +8,7 @@ use serde::Deserialize;
 use std::{collections::HashMap, fs, path::Path};
 
 pub(crate) const ZLE_ACCEPT_KEY: &[u8] = b"\x18\x1d";
+pub(crate) const BASH_ACCEPT_KEY: &[u8] = b"\x18a";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

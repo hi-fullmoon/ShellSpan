@@ -169,6 +169,23 @@ export function stripAnsi(value: string): string {
     .replace(/\u001b[@-_]/g, '');
 }
 
+// On xterm, zsh's default PROMPT_SP redraw ends with a bold, reversed mark,
+// column padding and a carriage-return erase. On an unterminated output line
+// the padding wraps, so replaying that erase on the same line would eat text.
+const ZSH_DEFAULT_EOL_REDRAW = /\u001b\[1m\u001b\[7m[%#]\u001b\[27m\u001b\[1m\u001b\[0m +\r \r$/u;
+
+export function renderTerminalTranscript(value: string): string {
+  const text = stripAnsi(value.replace(ZSH_DEFAULT_EOL_REDRAW, ''));
+  if (!/\r(?!\n)/u.test(text) && !text.includes('\b')) return text;
+
+  // Keep the recorded separators and whitespace on lines without edits.
+  return text.split(/(\r?\n)/u).map((line, index) => (
+    index % 2 === 0 && (line.includes('\r') || line.includes('\b'))
+      ? renderTerminalText(line)
+      : line
+  )).join('');
+}
+
 export function renderTerminalText(value: string): string {
   return renderTerminalLines(value).join('\n');
 }

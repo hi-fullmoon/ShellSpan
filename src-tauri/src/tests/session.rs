@@ -747,6 +747,13 @@
         }
 
         fn pump_once(&mut self) -> bool {
+            self.pump_once_with_control(|_| {})
+        }
+
+        fn pump_once_with_control(
+            &mut self,
+            mut observe: impl FnMut(&crate::terminal_integration::TerminalIntegrationControlEvent),
+        ) -> bool {
             let mut progress = false;
             let mut output = [0_u8; 8192];
             loop {
@@ -775,6 +782,7 @@
                                 .push(&control[..read])
                                 .expect("decode isolated SSH control bytes")
                             {
+                                observe(&event);
                                 if let Err(error) = self.broker.accept_integration_event(
                                     &self.transport_id,
                                     &self.integration_id,
@@ -975,6 +983,14 @@
             submitted: Option<&str>,
         ) -> crate::terminal_broker::TerminalCommandSnapshot {
             let operation = self.begin_with_submission(operation_id, command, true, submitted);
+            self.finish_command(operation_id, &operation)
+        }
+
+        fn finish_command(
+            &mut self,
+            operation_id: &str,
+            operation: &crate::terminal_broker::TerminalCommandOperation,
+        ) -> crate::terminal_broker::TerminalCommandSnapshot {
             self.pump_until(Duration::from_secs(8), |_| {
                 operation
                     .snapshot()

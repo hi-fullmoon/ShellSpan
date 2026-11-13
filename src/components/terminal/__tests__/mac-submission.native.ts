@@ -45,7 +45,8 @@ async function verify(){
  const reducedMotionCase = observationConfiguration.scenario === 'reduced-motion';
  const reducedMotion = reducedMotionCase ? window.matchMedia('(prefers-reduced-motion: reduce)') : undefined;
  if(reducedMotionCase)assert(reducedMotion?.matches,'WKWebView reduced motion is disabled for this scheduled case');
- const useParsedOutput = ['before-accept-stop', 'close-running-terminal', 'timeout-unknown-accept', 'control-eof', 'late-started-and-matched-settled', 'target-mismatch','delegation'].includes(observationConfiguration.scenario ?? '') || observationConfiguration.scenario?.startsWith('wire-') === true || observationConfiguration.scenario?.startsWith('after-accept-') === true || inputInProgress || bindingNegative || transportLoss || armIdentity || permissionMismatch || reducedMotionCase;
+ const submissionControl = /^(input-in-progress|input-complete|intent|armed|before-accept|after-accept|running)-(stop|cancel|takeover)$/.test(observationConfiguration.scenario ?? '');
+ const useParsedOutput = ['close-running-terminal', 'timeout-unknown-accept', 'control-eof', 'late-started-and-matched-settled', 'target-mismatch','delegation','local-file-chain'].includes(observationConfiguration.scenario ?? '') || observationConfiguration.scenario?.startsWith('wire-') === true || submissionControl || inputInProgress || bindingNegative || transportLoss || armIdentity || permissionMismatch || reducedMotionCase;
  const wireFault = observationConfiguration.scenario?.startsWith('wire-') === true && observationConfiguration.scenario !== 'wire-split-and-coalesced';
  const capture=await macLifecycleCapture(token,{parsedOutputOrder:useParsedOutput||manifestMismatch||rawAdmission,startupOutputMayPrecedeSubscription:wireFault||manifestMismatch||rawAdmission}),session=await invokeCreateLocalSession(100,30);await capture.expect(session);
  useTerminalStore.getState().addSession(session);useTerminalStore.getState().setActiveSession(session.sessionId);useAppStore.getState().setActiveSection('terminal');
@@ -176,6 +177,60 @@ async function verify(){
  let problem:unknown,closed=false,secondWire:Awaited<ReturnType<typeof macWireCapture>>|undefined;
  try{
   const wireScenario = observationConfiguration.scenario;
+  if(wireScenario==='local-file-chain'){
+   await until(idle,'The native file-chain prompt did not become ready');
+   const initial=await snapshot();
+   assert(initial.session?.currentDirectory===home&&isMacFileChainProfile(initial.session.nativePeerProfile,family),'Pinned native parent Shell is missing');
+   assert(await controller.writeUserInput("PHASE3_PARENT=parent-env; phase3_parent_fn() { printf '%s' parent-function; }\r"),'Parent Shell setup input was blocked');
+   await until(idle,'Parent Shell setup did not return to a prompt');
+   const id='phase3-submission-'+crypto.randomUUID();agentIds.push(id);
+   const target={kind:'local' as const,targetId:'terminal-'+session.sessionId,sessionId:session.sessionId,cwd:home,localRoot:home};
+   const agent=await invokeCreateAgentRuntimeSession({sessionId:id,taskId:id,goal:'Verify an isolated local scratch path without a model',target,
+    permissionMode:'requestApproval',executionSurface:'boundTerminal',capabilityScope:{toolNames:['write_file','read_file','run_terminal_command'],
+     effects:['stateChange','readOnly','sensitiveRead'],targetIds:[target.targetId]}});
+   assert(!agent.header.modelSelection,'Local file chain selected a model');
+   const disk=async()=>{
+    const response=await fetch('/__native-mac-scratch/'+token);assert(response.ok,'Scratch witness could not read owned files');
+    const state=await response.json() as {readOnly:boolean;files:{path:string;content:string;length:number;sha256:string}[];
+     records:{file:string;sha256:string;record:{key:string;sessionId:string;target:typeof target;remoteRoot:null;uses:Record<string,unknown>}}[]};
+    assert(state.readOnly,'Scratch witness granted write authority');return state;
+   };
+   const request=async(kind:'file-write'|'file-read'|'file-run',path?:string)=>{
+    const callId=crypto.randomUUID();const prepared=await invokeRunTerminalAcceptanceCommand(id,callId,kind,path);
+    assert(prepared.modelAvailability==='MODEL_SELECTION_REQUIRED','The file request acquired a model');
+    return {callId,prepared,approval:prepared.settlement==='Waiting'?pendingApproval(await events(id),callId):null};
+   };
+   const complete=async(requested:Awaited<ReturnType<typeof request>>)=>{
+    if(requested.approval)await invokeDecideTerminalAcceptanceCommand(requested.approval,true);
+    const result=(await events(id)).find(event=>event.type==='tool/result'&&event.data.callId===requested.callId);
+    assert(result?.type==='tool/result'&&result.data.status==='completed','Actual scratch tool did not complete');
+    return {requested,result,resolved:await readNativeAcceptanceResult(id,result.data.data)};
+   };
+   const declined=await request('file-write');assert(declined.approval&&(await disk()).files.length===0,'A pending scratch write reached disk');
+   await invokeDecideTerminalAcceptanceCommand(declined.approval,false);
+   const rejected=await events(id);assert(!rejected.some(event=>event.type==='tool/execution'&&event.data.callId===declined.callId)
+    &&(await disk()).files.length===0,'A denied scratch write reached disk');
+   const write=await request('file-write');assert(write.approval&&(await disk()).files.length===0,'The approved-path test wrote before the decision');
+   const saved=await complete(write),read=await complete(await request('file-read'));
+   const state=await disk();assert(state.files.length===1&&state.records.length===1,'Expected one actual scratch script and owner record');
+   const [file]=state.files,[owner]=state.records;
+   assert(/\/tmp\/[a-f0-9]{16}\/phase3-scratch\.sh$/.test(file.path)&&file.path.includes(`/tmp/${owner.record.key.slice(0,16)}/`)
+    &&owner.file.endsWith(`/${owner.record.key}.json`)&&owner.record.sessionId===id&&owner.record.target.targetId===target.targetId
+    &&owner.record.target.sessionId===session.sessionId&&owner.record.target.cwd===home&&owner.record.remoteRoot===null
+    &&saved.resolved.data.afterSha256===file.sha256&&read.resolved.data.content===file.content&&read.resolved.data.path===file.path,
+   'The actual scratch path, readback or frozen owner differs');
+   const invocation=await request('file-run',file.path);
+   assert(invocation.approval&&invocation.prepared.source.includes(file.path)&&!(await witness()).exists,'Returned path skipped native approval');
+   const executed=await complete(invocation),effect=await witness(),final=await snapshot();
+   assert(executed.resolved.data.channel==='terminal'&&executed.resolved.data.commandLine===invocation.prepared.source
+    &&executed.resolved.data.exitCode===0&&effect.text==='FILE_ONCE\n'&&final.session?.currentDirectory===home
+    &&(await invokeGetTerminalSubmissionRecovery(id)).length===0,'Native path invocation did not settle once in the original parent Shell');
+   await invokeCancelAgentRuntime({sessionId:id});await invokeCloseSession(session.sessionId);closed=true;
+   const retained=await capture.finish();
+   const response=await fetch('/__agent-stream-result/'+token,{method:'POST',body:JSON.stringify({ok:true,evidence:{
+    kind:'actual-macos-local-file-chain',scenario:wireScenario,family,session,initial,final,declined,rejected,saved,read,state,executed,effect,retained,routes,humanReceipt:false,
+   }})});assert(response.ok,'The actual local file-chain evidence was not retained');return;
+  }
   if(manifestMismatch||rawAdmission){
    const before=await snapshot();
    assert(before.session?.open&&before.session.inputMode==='raw'&&!before.session.nativePeerProfile,

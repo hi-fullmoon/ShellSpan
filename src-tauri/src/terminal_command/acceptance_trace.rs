@@ -195,7 +195,7 @@ impl Trace {
             .and_then(|file| file.sync_all())
             .map_err(|_| ERROR)?;
         // Bound the observation barrier independently of all production deadlines.
-        let maximum_hold = if cut == "accept-receipt" {
+        let maximum_hold = if ssh_recovery_enabled() || cut == "accept-receipt" {
             Duration::from_secs(16)
         } else {
             Duration::from_secs(2)
@@ -280,7 +280,9 @@ fn initialize() -> Result<Option<Trace>, String> {
     for path in [&directory, &directory.join("home"), &directory.join("data")] {
         private_directory(path)?;
     }
-    if std::env::var_os("HOME") != Some(directory.join("home").into_os_string()) {
+    if !ssh_recovery_enabled()
+        && std::env::var_os("HOME") != Some(directory.join("home").into_os_string())
+    {
         return Err(ERROR.into());
     }
     let manifest = std::env::var_os("SHELLSPAN_ACCEPTANCE_FROZEN_MANIFEST").ok_or(ERROR)?;
@@ -305,6 +307,87 @@ fn initialize() -> Result<Option<Trace>, String> {
 
 pub(crate) fn enabled() -> bool {
     std::env::var("SHELLSPAN_ACCEPTANCE_CONTROL_TRACE").as_deref() == Ok("1")
+}
+
+pub(crate) fn ssh_recovery_enabled() -> bool {
+    matches!(
+        std::env::var("SHELLSPAN_ACCEPTANCE_SSH_RECOVERY").as_deref(),
+        Ok("before-key-disconnect"
+            | "before-key-timeout"
+            | "before-key-cancel"
+            | "before-key-stop"
+            | "before-key-takeover"
+            | "running-stop"
+            | "running-cancel"
+            | "running-takeover"
+            | "runtime-multi-agent"
+            | "close-running-terminal"
+            | "delegation"
+            | "input-in-progress-stop"
+            | "input-in-progress-cancel"
+            | "input-in-progress-takeover"
+            | "input-complete-stop"
+            | "input-complete-cancel"
+            | "input-complete-takeover"
+            | "intent-stop"
+            | "intent-cancel"
+            | "intent-takeover"
+            | "armed-stop"
+            | "armed-cancel"
+            | "armed-takeover"
+            | "after-accept-stop"
+            | "after-accept-cancel"
+            | "after-accept-takeover"
+            | "after-key-disconnect"
+            | "after-key-timeout"
+            | "before-key-control-eof"
+            | "after-key-control-eof"
+            | "crash-before-key"
+            | "crash-after-key"
+            | "crash-restart"
+            | "history-default"
+            | "history-small"
+            | "history-custom"
+            | "history-empty"
+            | "history-unset"
+            | "positive-byte-boundary"
+            | "positive-source-boundaries"
+            | "positive-parent-shell"
+            | "positive-jobs"
+            | "positive-file-chain"
+            | "display-geometry"
+            | "ordinary-input"
+            | "raw-no-sftp"
+            | "raw-unapproved-shell"
+            | "raw-resource-mismatch"
+            | "reconnect-tail")
+    ) && enabled()
+}
+
+pub(crate) fn observe_ssh_receipt(
+    message: &super::protocol::Message,
+    transport: &str,
+) -> Result<(), String> {
+    if !ssh_recovery_enabled() {
+        return Ok(());
+    }
+    use super::protocol::{Message, Payload};
+    let Message::Operation(envelope) = message else {
+        return Ok(());
+    };
+    let kind = match envelope.payload {
+        Payload::SubmissionAccepted => "submissionAccepted",
+        Payload::Started => "started",
+        Payload::Settled { .. } => "settled",
+        Payload::DraftCleared { .. } => "draftCleared",
+        _ => return Ok(()),
+    };
+    record(
+        "ssh-receipt-read",
+        json!({"sessionId":transport,"kind":kind,
+        "identity":envelope.identity,"requestId":envelope.request_id}),
+    )?;
+    hold_submission_receipt(message, transport)
 }
 
 pub(crate) fn repeat_commit_enabled() -> Result<bool, String> {
@@ -555,7 +638,9 @@ pub(crate) fn observe_next_accept_key(
     identity: super::protocol::Identity,
     key: &'static [u8],
 ) -> Result<(), String> {
-    if std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_CUT").as_deref() != Ok("key") {
+    if !ssh_recovery_enabled()
+        && std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_CUT").as_deref() != Ok("key")
+    {
         return Ok(());
     }
     identity.validate().map_err(|_| ERROR)?;
@@ -563,6 +648,9 @@ pub(crate) fn observe_next_accept_key(
         Ok(Some(trace)) => {
             let mut expected = trace.expected_key.lock().map_err(|_| ERROR)?;
             if expected.is_some() {
+                if ssh_recovery_enabled() {
+                    return Ok(()); // The independent SSH write trace still counts every attempt.
+                }
                 return Err(ERROR.into());
             }
             *expected = Some((session.into(), identity, key));
@@ -572,7 +660,11 @@ pub(crate) fn observe_next_accept_key(
     }
 }
 
-fn actual_accept_key_written(session: &str, bytes: &[u8], written: usize) -> Result<(), String> {
+pub(crate) fn actual_accept_key_written(
+    session: &str,
+    bytes: &[u8],
+    written: usize,
+) -> Result<(), String> {
     if written != bytes.len() {
         return Ok(());
     }

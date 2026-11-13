@@ -1,13 +1,13 @@
 # 原生终端后续实施计划
 
-2026-11-12 更新。本轮 macOS arm64 本地 PTY 双 Shell 验收已收口，交付 R04 内测包。E08 完整远端 Quality Gate 延期至正式发布前补验。五个发布绑定继续按 [统一验收标准](agent-terminal-input-acceptance-checklist.md) 管理。Linux SSH 和 Windows 验收按原约定暂停，等待明确恢复。Bash 4.1／4.4 保留按需兼容验证。编辑器的生产配置见 [NIP 契约](../../protocol/agent/runtime/native-input.md) 和 [准入清单](../../protocol/agent/runtime/native-editor-admission.json)。
+2026-11-13 更新。macOS arm64 本地 PTY 已交付 R04 内测包。新候选的双 Shell 受控 SSH、原生显示与本机质量回归已有实际结果。Windows 验收继续暂停，完整远端 E08 延期至正式发布前。五个发布绑定继续按 [统一验收标准](agent-terminal-input-acceptance-checklist.md) 管理。Bash 4.1／4.4 保留按需兼容验证。编辑器的生产配置见 [NIP 契约](../../protocol/agent/runtime/native-input.md) 和 [准入清单](../../protocol/agent/runtime/native-editor-admission.json)。
 
 ## 当前进度
 
 | 范围 | 已有结果 | 仍需验证 |
 | --- | --- | --- |
 | macOS arm64 本地 PTY | R04 已通过实际 App 崩溃恢复、系统交互、安装启动、实际加载资源及离线重建核对。Zsh 5.9 / ZLE 5.9 与 Bash 5.3 / Readline 8.3.6 的本轮适用条款合计 63/63 通过。[本地验收报告](../../.artifacts/tests/agent-terminal-input/20261112-macos-r02-followup/REPORT.md) | E08 留到正式发布前补验。严格 Unicode 模型子项继续延期。第 2 期 144 项和第 3 期 225 项保留各自原批次范围。 |
-| Linux arm64，glibc 2.36，受控 SSH | `2aaaaf75` 核对了 Bash 5.3 的 Linux 资源、受控 SSH 夹具的 Shell 绑定、真实 Linux PTY 和浏览器显示。 | 暂停。恢复后按 [Linux SSH/SFTP 实施方案](#linux-sshsftp-实施方案) 补齐双 Shell 的实际 App、传输、显示和恢复证据。 |
+| Linux arm64，glibc 2.36，受控 SSH | 当前封存重跑隔离传输 17/17，签名 App 已验双 Shell 历史、字节、父 Shell、真实文件、作业、降级及故障恢复。两个真实 WKWebView、八个真实浏览器组合通过。原 ZLE 五案继续按原切点引用。 [本批实机报告](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/REPORT.md) | 双 Shell 剩余控制切点、资源负例、实际人工及模型子案按 [续验清单](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/CHECKLIST.md) 继续。 |
 | Windows x64，ConPTY | `wt5c1` 已在 D 盘实际安装、启动并通过三种 Shell、接管清稿、运行中关闭、进程重启、WebView2 实际交互、异常资源和标准卸载。真实临时脚本及 PowerShell 无模型验证均已留证。[内测包与逐项验收](../../.artifacts/tests/agent-terminal-input/windows-wt5c1/REPORT.md) | 更广的统一发布子案按逐项状态补验，包括多代次重绑、选区锚点及完整 Quality Gate。 |
 | 当前源码与交付 | `2aaaaf75` 的 Bash 5.3 收敛和 `e63021ea` 的 PowerShell 7 收敛均已推送至 `origin/main`。两平台 Bash 5.3 资源和包内清单已核对，macOS 随包源码离线重建、前端全量测试及生产构建已通过。 | 以各平台最新候选提交继续实机验收。正式发布仍待完成。 |
 
@@ -28,6 +28,20 @@ R04 已收口。Zsh 5.9／ZLE 5.9 与 Bash 5.3／Readline 8.3.6 本轮适用条�
 
 本节在用户明确恢复 Linux SSH/SFTP 验收后执行。目标是 macOS arm64 客户端的实际 ShellSpan App 连接受控 Linux aarch64／glibc 2.36 主机。分别验收 Bash 5.3／Readline 8.3.6 和私有 Zsh 5.9／ZLE 5.9。`2aaaaf75` 的资源、真实 PTY 和浏览器证据保留原范围。恢复后选定最新候选并核对源码、依赖和资源差异，再确定可引用的旧证据与需要重跑的条款。
 
+2026-11-13 本机续验从 `2e76d274` 加工作区开始。最终重建资源的 Bash `5.3/ssh/lifecycle`、双 Shell 前后切点的独立 relay EOF、真实 App 崩溃及同数据根重启均通过。十种历史配置、普通输入与 TUI、无 SFTP、未知 Main、后台作业及真实文件链分别留有签名 App 原始回执。首次失败与新身份复验分别留存。 [本批报告](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/REPORT.md) · [余项清单](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/CHECKLIST.md)
+
+ZLE 的初始 `ZDOTDIR` 已修正并在两种实际 OpenSSH 环境、五种签名 App 历史配置中复验。候选 17 使用归属明确的临时 RAM 卷完成签名与链接，复验新采显示流、本地真实 PTY 和协议、前端与全功能 Rust。R04 本地 63 项继续保留原候选范围。当前候选的本地定向证据、剩余人工、模型和发布条件均单列。 [本机质量与差异审计](../../.artifacts/tests/agent-terminal-input/20261113-ram-signing-preflight/REPORT.md)
+
+候选 19 已通过并归档四十九项本地签名 App 续验，包含双 Shell 接受键前、后的实际 App 崩溃和同数据目录重启、8192 字节原生接受与 8193 字节拒绝，以及多个提交切点的停止、取消和接管。两项显示回放失败按实际解析回调复验，后续控制切点继续串行取证。SSH 余项等待本机 Docker API 恢复后使用新夹具。 [候选 19 本地复验](../../.artifacts/tests/agent-terminal-input/20261113-candidate19-local-continuation/REPORT.md)
+
+候选 20 的 ZLE 完整输入后接管和 Bash 持久意图后停止均已在签名 App 复验并归档，实际显示回放、同身份清稿及普通 Enter 均通过。 [ZLE 回执](../../.artifacts/tests/agent-terminal-input/20261113-ram-signing-preflight/candidate20-ram-c02-replay-retest/zle-input-complete-takeover-runtime-audit.json) · [Bash 回执](../../.artifacts/tests/agent-terminal-input/20261113-ram-signing-preflight/candidate20-ram-c02-bash-intent-short-tmp/audited-results.json)
+
+候选 20 的 Bash 接受键前取消已在签名 App 通过并归档。ZLE 同项首次在 Cargo 构建阶段因磁盘空间不足退出，18 个原始文件已归档至原路径并核对内容、权限及扩展属性，三个 Cargo 依赖清单已恢复。TypeScript、CI 静态检查、AI 样式检查和 `git diff --check` 退出 0。前端全量测试需复验。 [续验报告](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/REPORT.md)
+
+磁盘和 Docker 恢复后，前端全量与生产构建通过。候选 21 在匹配资源的封存目录通过 Rust 库 1,402 项及隔离传输 17/17，候选 22 主程序锁定检查、全功能 Clippy、集成 5/5 通过。候选 20 和 22 新增双 Shell 的 SSH 显式取消、复杂源码、错误资源摘要拒绝各 2/2，旧夹具已核对停止且端口已释放。 [本机续验报告](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/REPORT.md) · [逐案台账](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/attempts.json)
+
+候选 25 的无模型本地文件链 2/2、真实 PTY 历史复验 7/7。候选 27 双 Shell 通过回环 SSH 接受前接管，实际 WKWebView 2/2，真实 PTY 的浏览器回放 8/8。候选 28 双 Shell 回环 SSH 运行中停止、取消及接管共 6/6，均观察一次实际接受、同身份开始和结算、退出 130 与单次文件效果。其余 SSH 控制切点、争用、委派和关闭按统一清单继续执行。 [SSH 运行中审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/candidate28-controls-audit.json) · [统一余项](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/CHECKLIST.md)
+
 | 顺序 | 工作 | 完成条件 |
 | --- | --- | --- |
 | 1. 冻结候选与夹具（A01–A06） | 冻结客户端源码和制品，核对构建工具链、Linux 架构与 glibc、镜像摘要、SSH 主机指纹和回环端口。用仓库构建入口重建两个 Shell 的 Linux 资源。为本批使用独立容器、账号、HOME、远端工作目录和 App 数据目录。 | 随包资源、远端读回、实际加载的 Shell、模块、relay 及适用的 ZLE Main/Core 摘要一致。列出必测用例，记录选中、执行、通过、失败和跳过数量。错误摘要、缺符号、实验资源和不支持的目标保留普通终端并拒绝 Agent 原生执行。 |
@@ -36,7 +50,7 @@ R04 已收口。Zsh 5.9／ZLE 5.9 与 Bash 5.3／Readline 8.3.6 本轮适用条�
 | 4. 补齐显示、人工交互与模型链（D01–D06、E05、E06） | 从本批真实 SSH PTY 采集窄宽切换、后台交错和重绑数据，覆盖 Chromium/WebKit 的 DOM/WebGL；实际 App 单独检查选择、复制、搜索、历史视口、被动焦点与接管。最后按授权时段运行双 Shell 真实模型的批准、后台作业和远端脚本文件链。 | 浏览器回放和原生 App 分别留证。模型案核对真实文件工具、批准后写入、SFTP 读回、返回的绝对路径和原父 Shell 执行。Direct 对照单列。严格 Unicode 模型子项继续延期。 |
 | 5. 归档与清理（A05、E07、E08） | 独立核对 SSH/SFTP 回归及历史 scoped loopback HTTP/SSH 转发的半关闭、取消和超时。按 Shell 汇总条款，记录候选、命令及退出码、原始流、界面证据、远端效果和清理回执。 | 只清理确认归本批且已终止的进程、容器、目录和 CredentialRef。运行中或结果不明的操作保留引用。未覆盖或失败项注明恢复条件。正式发布前另核验最终 `main` 的完整远端 E08。 |
 
-恢复后先用 `node scripts/native-input-p2/matrix.mjs --list-cases` 核对用例清单，执行时显式选择七个 `5.3/ssh/*` 对应项。隔离传输回归使用 `pnpm test:terminal-visible:ssh`，运行前核对其 Compose 资源归属。资源构建沿用 [Linux Bash 构建器](../../scripts/native-input-p2/build.py) 和 [Linux ZLE 构建入口](../../scripts/native-input-p3/linux-build.sh)。实际 App 沿用 [P2 SSH 夹具](../../scripts/native-input-p2/ssh.mjs)、[Bash App 入口](../../scripts/native-input-p2/app.mjs) 与 [ZLE App 入口](../../scripts/native-input-p3/app.mjs)。ZLE App 入口当前仅接收 `jobs` 的 SSH 夹具，若故障或恢复用例缺少适用入口，先补隔离验收入口并验证，产品的准入与恢复规则照常执行。
+恢复后先用 `node scripts/native-input-p2/matrix.mjs --list-cases` 核对用例清单，执行时显式选择七个 `5.3/ssh/*` 对应项。隔离传输回归使用 `pnpm test:terminal-visible:ssh`，运行前核对其 Compose 资源归属。资源构建沿用 [Linux Bash 构建器](../../scripts/native-input-p2/build.py) 和 [Linux ZLE 构建入口](../../scripts/native-input-p3/linux-build.sh)。实际 App 沿用 [P2 SSH 夹具](../../scripts/native-input-p2/ssh.mjs)、[Bash App 入口](../../scripts/native-input-p2/app.mjs) 与 [ZLE jobs 入口](../../scripts/native-input-p3/app.mjs)。ZLE 的四个故障切点与旧 PTY 尾包独立执行，使用 `node scripts/native-input-p3/ssh-recovery.mjs --list-cases` 发现。实机状态、命令、证据和清理见 [ZLE SSH 故障恢复交接清单](agent-terminal-input-zle-ssh-recovery.md)。
 
 ## Windows x64 研发计划
 
@@ -73,7 +87,7 @@ R04 已收口。Zsh 5.9／ZLE 5.9 与 Bash 5.3／Readline 8.3.6 本轮适用条�
 ## 实施顺序
 
 1. **macOS 本地验收已完成，交付 R04 内测包。** 本轮范围及证据见 [macOS 本地验收](#macos-arm64-本地验收)与 [本地验收报告](../../.artifacts/tests/agent-terminal-input/20261112-macos-r02-followup/REPORT.md)。
-2. **Linux SSH 和 Windows 实机暂停。** 用户明确恢复后，按各自候选与环境继续。
+2. **Linux SSH/SFTP 本批传输和 ZLE 无模型故障已通过，Windows 实机继续暂停。** 其余场景按各自候选、环境与授权继续。
 
    | 平台 | 先做 | 完成条件 |
    | --- | --- | --- |

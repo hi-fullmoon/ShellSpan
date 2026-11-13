@@ -145,6 +145,7 @@ impl Bridge {
                 {
                     self.native_guard = None;
                     self.native_result = None;
+                    self.native_expired_clear = None;
                 }
             }
             if self.retired.len() >= MAX_RETIRED_OPERATIONS {
@@ -179,6 +180,37 @@ impl Bridge {
             return;
         }
         self.native_request = Some(envelope.clone());
+        if matches!(envelope.payload, Payload::CancelDraft)
+            && self.native_expired_clear.as_ref() == Some(&envelope.identity)
+        {
+            self.native_expired_clear = None;
+            let editor_empty = self.draft.is_none()
+                && p0_bindings_valid() == 1
+                && rl_point == 0
+                && rl_end == 0
+                && CStr::from_ptr(rl_line_buffer).to_bytes().is_empty();
+            if !editor_empty {
+                self.reply_native(
+                    &envelope,
+                    Payload::Rejected {
+                        code: ErrorCode::RecoveryRequired,
+                    },
+                );
+                return;
+            }
+            self.reply_native(&envelope, Payload::DraftCleared { editor_empty });
+            if let Some(probe) = self.native_connection.clone() {
+                self.reply_connection(
+                    &probe,
+                    nip::ConnectionPayload::EditorReady {
+                        editor_empty,
+                        owned_draft_absent: self.draft.is_none(),
+                        after_command: self.native_last_prepared.clone(),
+                    },
+                );
+            }
+            return;
+        }
         if matches!(envelope.payload, Payload::Query) {
             let payload = self.native_snapshot(&envelope);
             self.reply_native(&envelope, payload);

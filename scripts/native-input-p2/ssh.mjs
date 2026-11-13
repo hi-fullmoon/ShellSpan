@@ -34,12 +34,15 @@ function bindBuiltShells(container,profiles){
 }
 if(process.argv[2]==='--from-resources'){
   const image=process.argv[3];assert(/^sha256:[a-f0-9]{64}$/.test(image),'An immutable owned fixture image is required');
+  const noSftp=process.argv[4]==='--no-sftp',unknownMain=process.argv[4]==='--unknown-main';
+  assert(process.argv.length===(noSftp||unknownMain?5:4),'Unknown owned fixture option');
   const profiles=readProfiles();
   const id=randomUUID(),directory=resolve(root,'.artifacts/tests/native-input-p2/ssh',id),container=`shellspan-nip-p2-${id}`;
   mkdirSync(directory,{recursive:true,mode:0o700});
-  writeFileSync(resolve(directory,'owner.json'),JSON.stringify({id,container,image,root,directory},null,2),{mode:0o600});
-  execFileSync('docker',['run','-d','--name',container,'--label',`shellspan.native-input-p2=${id}`,
-    '-p','127.0.0.1::22229','-v',`${root}:/work`,image,'sleep','infinity'],{stdio:'pipe'});
+  const owner={id,container,image,imageId:image,root,directory,...(unknownMain?{mainVariant:'unknown'}:{})};
+  writeFileSync(resolve(directory,'owner.json'),JSON.stringify(owner,null,2),{mode:0o600});
+  execFileSync('docker',['run','-d','--pull=never','--platform=linux/arm64','--name',container,'--label',`shellspan.native-input-p2=${id}`,
+    '-p','127.0.0.1::22229','-v',`${root}:/work:ro`,image,'sleep','infinity'],{stdio:'pipe'});
   execFileSync('docker',['exec',container,'mkdir','-p','/opt/shellspan-native-gnu','/tmp/nip-sshd']);
   const shells={};
   for(const profile of profiles){
@@ -52,14 +55,18 @@ if(process.argv[2]==='--from-resources'){
     execFileSync('docker',['exec',container,'usermod','-s',path,user]);
     shells[profile.bashVersion]={path,sha256:profile.shellSha256,user};
   }
-  writeFileSync(resolve(directory,'sshd_config'),configuration,{mode:0o600});
+  if(unknownMain)execFileSync('docker',['exec',container,'usermod','-s','/bin/bash','native53']);
+  writeFileSync(resolve(directory,'sshd_config'),noSftp?configuration.replace('Subsystem sftp internal-sftp\n',''):configuration,{mode:0o600});
   execFileSync('docker',['exec',container,'ssh-keygen','-q','-t','ed25519','-N','','-f','/tmp/nip-sshd/host_key']);
   execFileSync('docker',['cp',resolve(directory,'sshd_config'),`${container}:/tmp/nip-sshd/sshd_config`]);
   execFileSync('docker',['cp',resolve(import.meta.dirname,'system-profile-audit.sh'),`${container}:/etc/profile.d/shellspan-p2-audit.sh`]);
   execFileSync('docker',['exec',container,'/usr/sbin/sshd','-D','-e','-t','-f','/tmp/nip-sshd/sshd_config']);
   execFileSync('docker',['exec','-d',container,'/usr/sbin/sshd','-D','-e','-f','/tmp/nip-sshd/sshd_config']);
   const ports=JSON.parse(execFileSync('docker',['inspect','--format','{{json .NetworkSettings.Ports}}',container],{encoding:'utf8'}));
-  const fixture={container,port:Number(ports['22229/tcp'][0].HostPort),host:'127.0.0.1',users:Object.values(shells).map(shell=>shell.user),image,directory,shells,
+  const key=execFileSync('docker',['exec',container,'cat','/tmp/nip-sshd/host_key.pub'],{encoding:'utf8'}).trim().split(/\s+/);
+  assert(key[0]==='ssh-ed25519'&&key[1]);
+  const hostKeySha256=createHash('sha256').update(Buffer.from(key[1],'base64')).digest('hex');
+  const fixture={...owner,shell:'bash',username:'native53',hostKeySha256,sftpEnabled:!noSftp,port:Number(ports['22229/tcp'][0].HostPort),host:'127.0.0.1',users:Object.values(shells).map(shell=>shell.user),shells,
     scope:'New loopback fixture from source-matching verified GNU resources; no rebuild or acceptance claim'};
   writeFileSync(resolve(directory,'fixture.json'),JSON.stringify(fixture,null,2),{mode:0o600});
   console.log(resolve(directory,'fixture.json'));

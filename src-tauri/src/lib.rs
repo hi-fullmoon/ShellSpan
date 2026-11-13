@@ -300,7 +300,9 @@ pub fn run() {
             if std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION").as_deref() == Ok("1") {
                 let evidence =
                     commands::terminal_acceptance_directory().map_err(std::io::Error::other)?;
-                assert_eq!(home_dir, evidence.join("home"));
+                if !terminal_command::acceptance_trace::ssh_recovery_enabled() {
+                    assert_eq!(home_dir, evidence.join("home"));
+                }
                 let root = evidence.join("app-directories");
                 let data = app.path().app_data_dir()?;
                 let config = app.path().app_config_dir()?;
@@ -308,7 +310,7 @@ pub fn run() {
                 assert!(data == root && config == root && cache == root.join("caches"));
                 terminal_command::acceptance_trace::record(
                     "isolated-app-paths",
-                    serde_json::json!({"home":home_dir,"data":data,"config":config,"cache":cache}),
+                    serde_json::json!({"home":home_dir,"shellHome":evidence.join("home"),"data":data,"config":config,"cache":cache}),
                 )
                 .map_err(std::io::Error::other)?;
             }
@@ -618,10 +620,12 @@ pub fn run() {
                     context.config().identifier,
                     "com.shellspan.validation.native-input-p3"
                 );
-                assert_eq!(
-                    std::env::var_os("HOME"),
-                    Some(directory.join("home").into_os_string())
-                );
+                if !terminal_command::acceptance_trace::ssh_recovery_enabled() {
+                    assert_eq!(
+                        std::env::var_os("HOME"),
+                        Some(directory.join("home").into_os_string())
+                    );
+                }
                 assert_eq!(
                     std::fs::canonicalize(&directory).ok().as_ref(),
                     Some(&directory)

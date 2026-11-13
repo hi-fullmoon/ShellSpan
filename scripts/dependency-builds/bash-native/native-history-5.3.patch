@@ -1,0 +1,59 @@
+--- a/bashhist.c
++++ b/bashhist.c
+@@ -551,6 +551,28 @@
+   return 0;
+ }
+ 
++/* The accepted private wrapper still goes to the real parser. Only the
++   history insertion policy sees the exact source shown in Readline. */
++static char *shellspan_history_wrapper;
++static char *shellspan_history_source;
++static const char *shellspan_history_next;
++
++void
++bash_shellspan_native_history (const char *wrapper, const char *source)
++{
++  free (shellspan_history_wrapper);
++  free (shellspan_history_source);
++  shellspan_history_wrapper = 0;
++  shellspan_history_source = 0;
++  shellspan_history_next = 0;
++  if (remember_on_history && wrapper && source)
++    {
++      shellspan_history_wrapper = savestring (wrapper);
++      shellspan_history_source = savestring (source);
++      shellspan_history_next = shellspan_history_wrapper;
++    }
++}
++
+ /* Do pre-processing on LINE.  If PRINT_CHANGES is non-zero, then
+    print the results of expanding the line if there were any changes.
+    If there is an error, return NULL, otherwise the expanded line is
+@@ -565,6 +587,27 @@
+   char *return_value;
+   int expanded;
+ 
++  if (shellspan_history_next)
++    {
++      const char *expected = shellspan_history_next;
++      size_t len = strlen (line);
++      /* parse.y does not preprocess empty physical lines. */
++      while (*expected == '\n')
++        expected++;
++      if (strncmp (line, expected, len) == 0 && (expected[len] == '\n' || expected[len] == 0))
++        {
++          if (expected == shellspan_history_wrapper && addit && remember_on_history && *shellspan_history_source)
++            maybe_add_history (shellspan_history_source);
++          if (expected[len] == '\n')
++            shellspan_history_next = expected + len + 1;
++          else
++            bash_shellspan_native_history (0, 0);
++          return (line);
++        }
++      /* A different next line must never consume a previous handoff. */
++      bash_shellspan_native_history (0, 0);
++    }
++
+   return_value = line;
+   expanded = 0;
+ 

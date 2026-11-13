@@ -349,8 +349,9 @@ export function invokePrepareTerminalAcceptanceRawCommand(agentSessionId: string
   return invokeLogged('prepare_terminal_acceptance_raw_command', { agentSessionId, background });
 }
 
-export type TerminalAcceptanceSourceKind = 'effect' | 'running' | 'manual-running' | 'syntax-error' | 'unsupported-input'
-  | 'exact-byte-boundary' | 'oversized-byte-boundary' | 'long-input' | 'paced-input' | 'transport-read';
+export type TerminalAcceptanceSourceKind = 'effect' | 'running' | 'manual-running' | 'syntax-error' | 'unsupported-input' | 'parent-shell' | 'complex-source'
+  | 'exact-byte-boundary' | 'oversized-byte-boundary' | 'long-input' | 'paced-input' | 'transport-read'
+  | 'job-launch' | 'job-wait' | 'job-stop' | 'file-write' | 'file-read' | 'file-run';
 
 export interface TerminalAcceptanceSubmission {
   readonly invocationOrigin: string;
@@ -363,8 +364,8 @@ export interface TerminalAcceptanceSubmission {
 }
 
 /** Explicit isolated debug entrance; the installed policy and tool pipeline run. */
-export function invokeRunTerminalAcceptanceCommand(agentSessionId: string, callId: string, sourceKind: TerminalAcceptanceSourceKind): Promise<TerminalAcceptanceSubmission> {
-  return invokeLogged('run_terminal_acceptance_command', { agentSessionId, callId, sourceKind });
+export function invokeRunTerminalAcceptanceCommand(agentSessionId: string, callId: string, sourceKind: TerminalAcceptanceSourceKind, toolArgument?: string): Promise<TerminalAcceptanceSubmission> {
+  return invokeLogged('run_terminal_acceptance_command', { agentSessionId, callId, sourceKind, toolArgument });
 }
 
 /** Production approval decision without waking a model driver afterwards. */

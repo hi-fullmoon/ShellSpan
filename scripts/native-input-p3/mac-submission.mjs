@@ -3,13 +3,15 @@ import {lstat,readFile,readdir,open,link} from 'node:fs/promises';
 import {resolve,isAbsolute} from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
+import {sshNativeCases} from './ssh-recovery-cases.mjs';
 
 const cuts=['intent','input-in-progress','input-complete','armed','before-accept','after-accept'];
 const actions=['stop','cancel','takeover'];
 export function macSubmissionControlMode(mode){
+ if(Object.hasOwn(sshNativeCases,mode))return {cut:sshNativeCases[mode].cut??undefined,scenario:mode};
  if(mode===undefined||mode==='intent')return {cut:mode,scenario:undefined};
  if(mode==='reduced-motion')return {cut:'before-accept',scenario:mode};
- if(['approval-mismatch','expired-or-revoked','source-mismatch','plan-mismatch','target-mismatch','unsupported-input-native','permission-mismatch','resource-manifest-mismatch','byte-boundary','raw-admission'].includes(mode))return {cut:undefined,scenario:mode};
+ if(['approval-mismatch','expired-or-revoked','source-mismatch','plan-mismatch','target-mismatch','unsupported-input-native','permission-mismatch','resource-manifest-mismatch','byte-boundary','raw-admission','local-file-chain'].includes(mode))return {cut:undefined,scenario:mode};
  if(['incomplete-proof','readonly-query-does-not-authorize'].includes(mode))return {cut:'input-in-progress',scenario:mode};
  if(['identity-mismatch','complete-identity-submatrix','generation-mismatch'].includes(mode))return {cut:'arm-identity',scenario:mode};
  if(['timeout-unknown-accept','control-eof','transport-disconnect','late-started-and-matched-settled'].includes(mode))return {cut:'accept-receipt',scenario:mode};
@@ -104,6 +106,23 @@ export function attachMacSubmissionWitness(server,token,directory,{cut=process.e
    const outcome=JSON.parse(await readOwned(resolve(directory,'actual-crash-storage-outcome.json')));
    assert(outcome.pid===requested.pid&&outcome.cut===requested.cut);
    response.setHeader('Content-Type','application/json');response.end(JSON.stringify({original:armed,identity:requested.identity,cut:requested.cut,afterCrashEffect:outcome.effect,previousAppPid:requested.pid,authority:'crash-observation-only'}));
+  })().catch(error=>response.writeHead(500).end(String(error)));
+ });
+ if(scenario==='local-file-chain')server.middlewares.use(`/__native-mac-scratch/${token}`,(request,response)=>{
+  void(async()=>{
+   assert(request.method==='GET'&&(!request.url||request.url==='/'),'Scratch observation is read only');
+   const list=async path=>{try{return await readdir(path,{withFileTypes:true});}catch(error){if(error.code==='ENOENT')return [];throw error;}};
+   const read=async file=>{const info=await lstat(file);assert(info.isFile()&&info.size<=1024*1024);const bytes=await readFile(file);return {path:file,content:bytes.toString('utf8'),length:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')};};
+   const temporary=resolve(directory,'data/tmp'), ownership=resolve(directory,'data/agent-runtime/scratch/records');
+   const files=[];
+   for(const entry of await list(temporary))if(entry.isDirectory()&&/^[a-f0-9]{16}$/.test(entry.name)){
+    try{files.push(await read(resolve(temporary,entry.name,'phase3-scratch.sh')));}catch(error){if(error.code!=='ENOENT')throw error;}
+   }
+   const records=[];
+   for(const entry of await list(ownership))if(entry.isFile()&&/^[a-f0-9]{64}\.json$/.test(entry.name)){
+    const value=await read(resolve(ownership,entry.name));records.push({file:value.path,sha256:value.sha256,record:JSON.parse(value.content)});
+   }
+   response.setHeader('Content-Type','application/json');response.end(JSON.stringify({files,records,readOnly:true}));
   })().catch(error=>response.writeHead(500).end(String(error)));
  });
  server.middlewares.use(`/__native-mac-submission-witness/${token}`,(request,response)=>{

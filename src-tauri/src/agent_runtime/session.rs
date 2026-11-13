@@ -5635,10 +5635,28 @@ fn validate_subagent_session(
             && parent_session_id.is_some_and(|id| id.starts_with("phase3-submission-"))
         {
             let home = crate::commands::terminal_acceptance_directory()?.join("home");
+            let ssh = crate::terminal_command::acceptance_trace::ssh_recovery_enabled();
+            let port = std::env::var("SHELLSPAN_ACCEPTANCE_SSH_PORT")
+                .ok()
+                .and_then(|value| value.parse::<u16>().ok())
+                .filter(|value| *value > 1024);
+            let user = if std::env::var("SHELLSPAN_ACCEPTANCE_SSH_SHELL").as_deref() == Ok("bash") {
+                "native53"
+            } else {
+                "nativeZle"
+            };
             if subagent.target_scope.iter().all(|target| {
-                target.kind == "local"
-                    && target.cwd.as_deref() == home.to_str()
-                    && target.local_root.as_deref() == home.to_str()
+                if ssh {
+                    target.kind == "remote"
+                        && target.host.as_deref() == Some("127.0.0.1")
+                        && port.is_some()
+                        && target.port == port
+                        && target.username.as_deref() == Some(user)
+                } else {
+                    target.kind == "local"
+                        && target.cwd.as_deref() == home.to_str()
+                        && target.local_root.as_deref() == home.to_str()
+                }
             }) {
                 return Ok(());
             }

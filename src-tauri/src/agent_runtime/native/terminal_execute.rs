@@ -295,6 +295,27 @@ impl TerminalExecuteRegistry {
                 serde_json::json!({"identity":identity,"admitted":repeated.is_ok(),"error":repeated.err()}),
             )?;
         }
+        // The SSH worker must be free to close its coordinator while the
+        // before-key barrier is held. submit() still rechecks every gate.
+        #[cfg(all(
+            feature = "native-input-acceptance",
+            debug_assertions,
+            target_os = "macos",
+            target_arch = "aarch64"
+        ))]
+        if crate::terminal_command::acceptance_trace::ssh_recovery_enabled()
+            && std::env::var("SHELLSPAN_ACCEPTANCE_SUBMISSION_CUT").as_deref()
+                == Ok("before-accept")
+        {
+            let identity = coordinator
+                .lock()
+                .map_err(|_| "TERMINAL_NATIVE_COORDINATOR_UNAVAILABLE")?
+                .identity()?;
+            crate::terminal_command::acceptance_trace::record(
+                "before-accept-observed",
+                serde_json::json!({"identity":identity}),
+            )?;
+        }
         coordinator
             .lock()
             .map_err(|_| "TERMINAL_NATIVE_COORDINATOR_UNAVAILABLE")?

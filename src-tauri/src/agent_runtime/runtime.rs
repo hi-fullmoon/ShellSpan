@@ -2638,12 +2638,14 @@ impl AgentRuntime {
         session_id: &str,
     ) -> Result<AgentSessionSnapshot, String> {
         let checkpoint = self.sessions.snapshot(session_id)?.recovery;
-        let entry = self
-            .agents
-            .get(session_id)?
-            .ok_or_else(|| "start the Agent Session before resuming recovery".to_string())?;
+        let attached_entry = || {
+            self.agents
+                .get(session_id)?
+                .ok_or_else(|| "start the Agent Session before resuming recovery".to_string())
+        };
         match checkpoint.kind {
             super::AgentRecoveryCheckpointKind::AuthorizedBeforeExecute => {
+                let entry = attached_entry()?;
                 if !self.tools.resume_authorized(&entry).await? {
                     return Err("authorized recovery boundary is not prepared".into());
                 }
@@ -2651,6 +2653,7 @@ impl AgentRuntime {
             }
             super::AgentRecoveryCheckpointKind::OpenModelRequest
             | super::AgentRecoveryCheckpointKind::ToolResultCommitted => {
+                let entry = attached_entry()?;
                 let scope = entry
                     .scope()?
                     .ok_or_else(|| "recovery boundary lost its active Turn".to_string())?;

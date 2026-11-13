@@ -26,13 +26,16 @@ function run(command, args, options = {}) {
     ...options,
   });
   if (result.error) throw result.error;
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
   if (result.status !== 0) {
     throw new Error(`${rendered} exited with status ${result.status ?? 'unknown'}`);
   }
+  return result.stdout;
 }
 
 function cargoTest(filter, testArgs = []) {
-  run(cargo, [
+  const output = run(cargo, [
     'test',
     '--locked',
     '--manifest-path',
@@ -43,7 +46,10 @@ function cargoTest(filter, testArgs = []) {
     ...testArgs,
     '--nocapture',
     '--test-threads=1',
-  ], { env: fixtureEnvironment });
+  ], { env: fixtureEnvironment, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' });
+  if (!/^test result: ok\. 1 passed; 0 failed; 0 ignored;/m.test(output)) {
+    throw new Error(`Expected exactly one passing SSH regression for ${filter}`);
+  }
 }
 
 let fixtureStarted = false;
@@ -73,7 +79,7 @@ try {
   );
   cargoTest('session::tests::remote_bound_terminal_bash_reuses_source_shell_acceptance', ['--ignored', '--exact']);
   cargoTest('session::tests::remote_bound_terminal_zsh_reuses_source_shell_smoke', ['--ignored', '--exact']);
-  cargoTest('session::tests::terminal_stop_tests::remote_native_stop_restores_manual_input_on_fresh_connections', ['--ignored', '--exact']);
+  cargoTest('session::tests::terminal_recovery_tests::isolated_ssh_stop_restores_manual_input_on_fresh_connections', ['--ignored', '--exact']);
   cargoTest('session::tests::terminal_recovery_tests::isolated_ssh_input_timeout_disconnect_and_reconnect_do_not_replay', ['--ignored', '--exact']);
   cargoTest('session::tests::terminal_recovery_tests::isolated_ssh_buffered_editor_receipt_does_not_wait_for_more_network_input', ['--ignored', '--exact']);
   cargoTest('session::tests::terminal_recovery_tests::isolated_ssh_long_source_frames_receive_exact_acknowledgements', ['--ignored', '--exact']);

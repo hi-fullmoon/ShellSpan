@@ -10,6 +10,14 @@ import {recordAcceptanceInputs} from './provenance.mjs';
 const root=resolve(import.meta.dirname,'../..');
 await acquireNativeGui();
 const version=process.argv[2]??'5.3';
+const fixturePath=process.argv[3]&&process.argv[3]!=='-'?resolve(process.argv[3]):undefined;
+const scenario=process.argv[4]??'jobs';
+if(version==='5.3'&&fixturePath&&scenario==='lifecycle'){
+  const run=spawn(process.execPath,[resolve(root,'scripts/native-input-p3/ssh-recovery.mjs'),'--bash','--case','reconnect-tail','--fixture',fixturePath],{cwd:root,stdio:'inherit'});
+  for(const signal of ['SIGINT','SIGTERM'])process.once(signal,()=>run.kill(signal));
+  const code=await new Promise((resolve,reject)=>{run.once('error',reject);run.once('close',code=>resolve(code??1));});
+  process.exit(code);
+}
 const prepared=spawnSync(process.execPath,[resolve(import.meta.dirname,'prepare-app.mjs'),version],{encoding:'utf8',cwd:root});
 if(prepared.status!==0){process.stderr.write(prepared.stderr||'P2 preparation failed before native application startup\n');process.exit(78);}
 const preparation=JSON.parse(prepared.stdout);
@@ -17,8 +25,6 @@ const {destination,selection}=preparation;
 assert(selection?.routeId&&selection?.modelId,'A real default model selection is required');
 const environment=JSON.parse(readFileSync(resolve(destination,'environment.json'),'utf8'));
 const originalHome=process.env.HOME;
-const fixturePath=process.argv[3]&&process.argv[3]!=='-'?resolve(process.argv[3]):undefined;
-const scenario=process.argv[4]??'jobs';
 recordAcceptanceInputs(root,destination,selection,version,scenario);
 const historyScenario=scenario.startsWith('history-');
 const variant=historyScenario?scenario.slice('history-'.length):'default';

@@ -4,7 +4,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { constants } from 'node:fs';
 import { copyFile, mkdir, mkdtemp, readFile, rm,writeFile } from 'node:fs/promises';
 import {createHash,randomUUID} from 'node:crypto';
-import { dirname, join, isAbsolute } from 'node:path';
+import { dirname, join, isAbsolute, relative } from 'node:path';
 import { createInterface } from 'node:readline';
 import {verifyFrozenValidation,writeFrozenCheckpoint} from './native-input-p2/frozen-validation.mjs';
 
@@ -72,13 +72,16 @@ async function main() {
   const keychain = process.env.SHELLSPAN_DEV_SIGNING_KEYCHAIN;
   assert(!keychain || isAbsolute(keychain), 'Development signing keychain must be an absolute path');
   const keychainArguments = keychain ? ['--keychain', keychain] : [];
-  const signed = await launch('/usr/bin/codesign', ['--force', '--sign', identity,
-    ...keychainArguments, '--identifier', config.identifier, '--timestamp=none', executable]).done;
-  if (signed !== 0) return signed;
-  // Cargo releases its artifact lock before running. Other builds can replace
-  // target/debug/ShellSpan while it is alive, invalidating Keychain checks.
-  // Give each normal development process its own signed application image.
-  const isolatedP3=frozenManifest&&JSON.parse(await readFile(frozenManifest,'utf8')).root.includes('.artifacts/tests/native-input-p3/acceptance-source/');
+  const frozen = frozenManifest ? JSON.parse(await readFile(frozenManifest, 'utf8')) : undefined;
+  const isolatedP3=frozen?.root.includes('.artifacts/tests/native-input-p3/acceptance-source/');
+  const freshSshWindow = isolatedP3 && /^\.artifacts\/tests\/native-input-p2\/ssh-recovery\/[a-f0-9-]{36}$/.test(relative(frozen.root, evidenceDirectory));
+  if (!isolatedP3) {
+    const signed = await launch('/usr/bin/codesign', ['--force', '--sign', identity,
+      ...keychainArguments, '--identifier', config.identifier, '--timestamp=none', executable]).done;
+    if (signed !== 0) return signed;
+  }
+  // A frozen P3 run signs its private bundle on the evidence volume. Its
+  // shared Cargo executable remains available as a read-only build input.
   const image = await mkdtemp(join(isolatedP3?evidenceDirectory:dirname(executable), '.shellspan-dev-'));
   try {
     const bundle = join(image, 'ShellSpan Dev.app');
@@ -117,7 +120,7 @@ async function main() {
     }
     console.log(`Development signing verified: ${signing.join(' ')}`);
     if (interrupted) return interrupted === 'SIGINT' ? 130 : 143;
-    const application=launch(binary,appArgs);
+    const application=launch(binary,freshSshWindow?['-ApplePersistenceIgnoreState','YES',...appArgs]:appArgs);
     if(frozenManifest)writeFrozenCheckpoint(join(evidenceDirectory,`native-image-${recordId}-process.json`),{frozenManifest,runnerPid:process.pid,appPid:application.child.pid,executable:binary});
     const exitCode=await application.done;
     if(frozenManifest){

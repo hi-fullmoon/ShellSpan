@@ -182,6 +182,9 @@ serde_json 编码 `[sourceDigest, plan]` 的 SHA-256。两者只在后端和私�
 
 prepare 的 budgetMs 为 1–5000 毫秒。目标端第一次准备时建立单调期限，
 resize/query/重复请求不能重置；后端还保留现有总期限、帧期限及权限/目标检查。
+Readline 在期限先于 `CancelDraft` 到达时可以清除仍完全匹配的原草稿。它为该身份保留这次实际清稿的结果；只有收到原身份的一次性取消请求，并再次确认编辑缓冲为空、绑定仍有效，才返回 `DraftCleared` 和 `editorReady`。过期请求仍不能接受，清稿无法确认时继续保留恢复门禁。
+
+固定 Bash 5.3 仍把完整包装交给原解析器执行。仅当下一个解析输入与已经接受的包装逐行匹配时，历史入口改用可见源码交给 Bash 自己的 `HISTCONTROL`、`HISTIGNORE` 和长度策略；不会将内部捕获包装写入用户历史。匹配完成或不匹配时丢弃这次临时关联。
 控制读写、停止及现有前端 ready 各保留调用方的有界等待。
 Query 不占永久去重槽；prepare/commit/cancel/interrupt 各有固定一次性槽。
 目标端退休操作上限 4096，达到后拒绝新准备，不驱逐旧提交墓碑，也不阻止 query/stop。
@@ -220,6 +223,7 @@ Zsh 使用公开 module/builtin API、ZLE widget、`BUFFER`/`CURSOR`、`zle -F -
 临时 mask 判为不支持或全局解开用户信号。私有连接不被 exec/fork 子进程继承。
 
 加载器恢复原有 `ZDOTDIR` 导出状态，并由同一个绑定 Zsh 正常读取系统/用户启动文件。
+Linux SSH 启动时先从 OpenSSH 启动的非交互 Zsh 进程初始环境读取 `ZDOTDIR`。这样该进程的 `.zshenv` 即使改变了 `ZDOTDIR`，随后启动的交互 Shell 也会从原始目录读取自己的 `.zshenv`。宿主未开放进程初始环境时沿用导出值交接。
 首个 precmd 只安装一次集成。ZLE 以 `Ctrl-X Ctrl-]` 为私有接受键，保留 `compinit` 的
 `Ctrl-X a` 别名展开绑定。私有键已被占用时关闭原生控制通道，继续显示正常终端提示符。
 前台源码由 ZLE 直接交给父 Shell 顶层解析，不在 widget
@@ -332,6 +336,7 @@ Runtime configure 只登记固定绝对路径，不执行文件/SQLite I/O；首
 代次、取消、总/帧期限和能力 → 武装/确认 → 最终 Broker 准入 → mayHaveSubmitted → 单次入队。
 文件 I/O 不持有 Broker/operation 锁；共享 submission_gate 串行化执行器、协议协调器与停止。
 即使存储成功后期限已过，也保留记录且拒绝提交，等待明确恢复。
+App 重启后尚未挂载 Agent 驱动时，恢复接口仍先按持久状态拒绝结果不明的执行恢复；启动或附加驱动不能替代对原调用的核对，也不能使原调用重放。
 
 只有可信结束、受信源码拒绝或本操作未提交草稿的真实清理证明可以结算意图；
 释放 lease、删活动对象、输出文字、前端排空、普通 prompt 或仅取消请求都不能结算。

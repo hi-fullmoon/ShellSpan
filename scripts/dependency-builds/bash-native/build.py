@@ -46,11 +46,12 @@ def main():
     bind_x_patch = Path(__file__).with_name('bash-bind-x-return-4.1.patch')
     unload_patch = Path(__file__).with_name('bash-unload-hook-4.1.patch')
     combining_patch = Path(__file__).with_name('readline-combining-wrap.patch')
+    native_history_patch = Path(__file__).with_name('native-history-5.3.patch')
     setpgid_patches = {version: Path(__file__).with_name('darwin-setpgid.patch' if version == '4.1' else f'darwin-setpgid-{version}.patch') for version in patches}
     setpgid_header = Path(__file__).with_name('darwin-setpgid.h')
     resize_patches = {version: Path(__file__).with_name(f'readline-resize-{readline_versions[version]}.patch') for version in ['4.1', '4.4']}
     sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
-    stamp = hashlib.sha256((''.join(sha(patch) for patch in [*patches.values(), *display_patches.values(), paste_patch, darwin_patch, bind_x_patch, unload_patch, combining_patch, *setpgid_patches.values(), setpgid_header, *resize_patches.values()]) + sha(Path(__file__)) + sha(helper_path) + sha(ROOT / 'scripts/native-input-p0/readline-sources.json')).encode()).hexdigest()[:20]
+    stamp = hashlib.sha256((''.join(sha(patch) for patch in [*patches.values(), *display_patches.values(), paste_patch, darwin_patch, bind_x_patch, unload_patch, combining_patch, native_history_patch, *setpgid_patches.values(), setpgid_header, *resize_patches.values()]) + sha(Path(__file__)) + sha(helper_path) + sha(ROOT / 'scripts/native-input-p0/readline-sources.json')).encode()).hexdigest()[:20]
     base = OUT / f'bash-{host}' / stamp
     sources = base / 'source'
     sources.mkdir(parents=True, exist_ok=True)
@@ -112,6 +113,8 @@ def main():
                     shutil.copy2(Path('/usr/share/misc') / name, source / 'support' / name)
         if (source / '.shellspan-startup-init').read_text() != sha(patch):
             raise RuntimeError('Stale GNU source patch')
+        if version == '5.3':
+            apply_display_patch(source, native_history_patch, '.shellspan-native-history')
         if host == 'darwin':
             setpgid_patch = setpgid_patches[version]
             apply_display_patch(source, setpgid_patch, '.shellspan-darwin-setpgid')

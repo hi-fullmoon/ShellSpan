@@ -8,8 +8,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AiToolDetails } from '@/components/ai/workspace/ai-tool-details';
 import { AiToolExpandedContent, toolOutputForCopy } from '@/components/ai/workspace/ai-tool-presentation';
 import type { AiConversationNodeOf } from '@/lib/ai/conversation-node';
+import { stripAnsi } from '@/lib/terminal/terminal-output-buffer';
 import { initI18n } from '@/locales';
 import { useAppStore } from '@/stores/appStore';
+import zshCapture from './fixtures/zsh-terminal-result.json';
 
 function execute(script: string) {
   const result = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8' });
@@ -156,6 +158,34 @@ describe('terminal result presentation', () => {
     expect(container.querySelector('.ai-block-line')?.textContent).toBe(result.stdout.slice(0, -1));
     expect(toolOutputForCopy(node)).toBe(result.stdout);
     expect(screen.queryByText('No output')).toBeNull();
+  });
+
+  it.each([
+    [zshCapture.withNewline, '100%\r\n%\r\n', ['100%', '%']],
+    [zshCapture.withoutNewline, '%', ['%']],
+    [zshCapture.empty, '', []],
+  ] as const)('keeps only the command text in a recorded zsh PTY capture (%#)', ({ command, output }, expected, lines) => {
+    const node = terminalNode(command, { combinedOutput: output, exitCode: 0 });
+    const { container } = render(<AiToolExpandedContent node={node} />);
+    expect([...container.querySelectorAll('[data-ai-terminal-output] .ai-block-line')].map(line => line.textContent)).toEqual(lines);
+    expect(toolOutputForCopy(node)).toBe(expected);
+    if (!expected) expect(screen.getByText('No output')).toBeInTheDocument();
+  });
+
+  it('applies carriage-return overwrites even when the capture has already lost its ANSI styling', () => {
+    const { command, output } = zshCapture.withNewline;
+    const node = terminalNode(command, { combinedOutput: stripAnsi(output) });
+    const { container } = render(<AiToolExpandedContent node={node} />);
+    expect([...container.querySelectorAll('[data-ai-terminal-output] .ai-block-line')].map(line => line.textContent)).toEqual(['100%', '%']);
+    expect(toolOutputForCopy(node)).toBe('100%\r\n%\r\n');
+  });
+
+  it('shows and copies the final state of a command that redraws a progress line', () => {
+    const result = execute('process.stdout.write("Progress 10%\\rProgress 100%\\n")');
+    const node = terminalNode(result.command, result);
+    const { container } = render(<AiToolExpandedContent node={node} />);
+    expect(container.querySelector('[data-ai-terminal-output] .ai-block-line')?.textContent).toBe('Progress 100%');
+    expect(toolOutputForCopy(node)).toBe('Progress 100%\n');
   });
 
   it('distinguishes a successful launch from a process that is still running', async () => {
