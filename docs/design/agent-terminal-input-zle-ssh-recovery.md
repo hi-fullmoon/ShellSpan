@@ -4,7 +4,7 @@
 
 本机续验通过接受键前后独立控制 EOF 4/4、真实 App 崩溃及同数据根重启 4/4。固定 ZLE Main/Core、模块、relay 的 SFTP 及进程映射均有实载证据。`ssh-recovery.mjs --list-cases` 列出无模型子案。Bash 5.3 使用独立 GNU 夹具和 `--bash`，ZLE 使用固定 Debian Main。各案单独创建夹具和数据目录，同一崩溃案使用原数据目录重启。 [双 Shell 本批报告](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/REPORT.md) · [逐案回执](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/attempts.json) · [余项清单](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/CHECKLIST.md)
 
-ZLE 启动读取 OpenSSH 执行父进程的初始 `ZDOTDIR`。未设置和显式指定均从真实 PTY 验证了 `.zshenv`、`.zprofile`、`.zshrc` 顺序。签名 App 的五项 ZLE 历史、无 SFTP、未知 Main、后台作业和真实文件链均通过。人工系统复制、焦点、实际接管和 E06 继续独立取证。 [启动对照](../../.artifacts/tests/agent-terminal-input/20261113-zle-ssh-startup-transport/REPORT.md) · [候选 17 的显示和质量](../../.artifacts/tests/agent-terminal-input/20261113-ram-signing-preflight/REPORT.md)
+ZLE 启动读取 OpenSSH 执行父进程的初始 `ZDOTDIR`。未设置和显式指定均从真实 PTY 验证了 `.zshenv`、`.zprofile`、`.zshrc` 顺序。签名 App 的五项 ZLE 历史、无 SFTP、未知 Main、后台作业和真实文件链均通过。双 Shell 人工前后台焦点 2/2，实际接管 4/4。系统复制和 E06 模型链有独立记录，E06 留待另行授权。 [启动对照](../../.artifacts/tests/agent-terminal-input/20261113-zle-ssh-startup-transport/REPORT.md) · [人工逐案回执](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/manual-closeout-audit.json) · [系统复制](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/system-selection-audit.json)
 
 候选 37 因重新构建后 Linux 模块摘要变化，用新夹具复验了实际 Zsh Main、Core、模块与 relay，四代重绑、接受前后控制 EOF、实际 App 崩溃及同数据根重启、WKWebView 与错误资源拒绝均通过。每次运行记录实际加载对象和 SFTP 回执。候选 39 隔离 SSH/SFTP 回归 17/17。 [当前回执](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/REPORT.md) · [逐案台账](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/attempts.json)
 

@@ -13,6 +13,8 @@
 
 ## macOS arm64 本地验收
 
+候选 78 已完成本轮 macOS arm64 与受控 Debian 回环的无模型验收。回环 SSH 自动用例 98/98，实际操作者接管 4/4、焦点切换 2/2。真实模型、Windows 实机和正式发布前远端 E08 分别按各自条件恢复。 [本机收口报告](../../.artifacts/tests/agent-terminal-input/20261113-candidate78-closeout/REPORT.md)
+
 R04 已收口。Zsh 5.9／ZLE 5.9 与 Bash 5.3／Readline 8.3.6 本轮适用条款 63/63 通过，涵盖实际 App 崩溃重启、重绑与旧 PTY 输出、系统输入和显示、真实模型链路，以及安装后资源加载。严格 Unicode 模型子项继续延期，E08 留到正式发布前。旧 Bash 4.1／4.4 仍可普通编辑和运行 TUI，原生执行兼容性按需验证。
 
 | 批次 | 制品与记录 |
@@ -28,7 +30,7 @@ R04 已收口。Zsh 5.9／ZLE 5.9 与 Bash 5.3／Readline 8.3.6 本轮适用条�
 
 B08 的本地签名 App 补验通过目录占用、符号链接拒绝 4/4，以及同数据目录重启 2/2。重启后真实文件工具读回原路径与字节，恢复原所有权，重新审批并在新 PTY 各接受一次，账本均匹配结算。 [文件链逐案审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/local-scratch-audit.json)
 
-B02 实际 WKWebView 减弱动态效果 2/2。C06 签名 App 控制通道启动 10/10、真实 Shell 私有通道合包和顺序回归 12/12。D03 本地签名 App 系统拖选和复制 12/12，另通过系统剪贴板超时恢复。E05 的 ZLE 真实 SSH 窗口前后台焦点切换已通过，Bash 仍需同轮 App 与独立系统观察器回执，物理接管仍待现场。 [控制通道与减弱动态审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/local-wire-motion-audit.json) · [合包审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/candidate51-wire-coalesced/audit.json) · [系统复制审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/system-selection-audit.json)
+B02 实际 WKWebView 减弱动态效果 2/2。C06 签名 App 控制通道启动 10/10、真实 Shell 私有通道合包和顺序回归 12/12。D03 本地签名 App 系统拖选和复制 12/12，另通过系统剪贴板超时恢复。E05 双 Shell 前后台焦点 2/2，接受前及运行中操作者接管 4/4。 [控制通道与减弱动态审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/local-wire-motion-audit.json) · [合包审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/candidate51-wire-coalesced/audit.json) · [系统复制审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/system-selection-audit.json) · [人工逐案审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/manual-closeout-audit.json)
 
 ## Linux SSH/SFTP 实施方案
 
@@ -42,15 +44,15 @@ B02 实际 WKWebView 减弱动态效果 2/2。C06 签名 App 控制通道启动 
 
 B06、B07 的 SSH 作业历史复验确认轮询和停止不入历史 4/4。候选 67 的 Linux ZLE 停止和自然退出两案在磁盘各保存两份启动计划。候选 69 在 Linux 模块绑定已准入的 Zsh Main 的历史保存标志，仅在原生后台启动的 fork 子进程抑制自动保存。两案严格复验通过，磁盘各保留一条启动计划和正常退出命令。Bash 两案原证据继续适用。两套 ZLE 模块重建、打包及资源读回通过，受影响的恢复和本地 PTY 单列复验。 [作业历史逐案审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/ssh-job-history-audit-candidate69.json) · [原失败](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/ssh-job-history-audit.json) · [候选构建记录](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/candidate69-resource-stage/)
 
-Bash 的接受前人工接管已通过。回执包含实际 Enter、正式按钮点击、输入归还和零文件效果。Bash 运行中与 ZLE 的两个切点仍需操作者回执。 [Bash 接管审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/manual-ssh-takeover-bash-before-key-takeover-candidate60-manualtakeover-operator2/audit.json)
+Bash 和 ZLE 的接受前、运行中人工接管通过。回执包含实际 Enter、正式按钮点击、输入归还及零次或一次文件效果。Bash 焦点用中文分步提示在候选 78 取得同轮窗口与 App 证据。 [人工逐案审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/manual-closeout-audit.json)
 
 模块重建后原 ZLE 恢复五案、独立控制 EOF 两案、签名 App 崩溃及同数据目录重启两案均通过。macOS 本地实际 PTY 与回环 SSH 的 ZLE 历史设置各 5/5。候选 70 的工作区源差异经类型、静态、生产构建、前端回归和全目标全特性 Clippy 核对。候选 73 仅调整 Bash 焦点验收页的按钮位置和取证记录，资源逐项匹配，类型检查通过。 [恢复复验](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/candidate69-zle-recovery-retest/) · [本地 PTY](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/candidate69-zle-local-pty/) · [SSH 历史复验](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/candidate70-zle-history-cache-retest/) · [质量记录](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/candidate70-quality/)
 
 候选 73 的签名包已从自带源码及依赖在 macOS arm64 和受控 Debian aarch64 上重建四个资源绑定，14 项文件摘要及长度一致。Linux 两个模块需要原生产者的容器内依赖路径。macOS 两套原生 Rust 库锁定全目标检查通过。 [包内重建与质量记录](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/REPORT.md)
 
-候选 75 按 Bash 5.3 发布矩阵逐项核对无模型证据，本地 6/6、SSH 7/7。本地六案重新取得签名 App、原生接受及 SQLite 结算。SSH 四代生命周期用新夹具复验，三个原生代次的 SFTP 读回与实际加载匹配。Bash 焦点验收已增补对滚动、选区、尺寸和终端事件的被动记录，等待现场复验。 [Bash 矩阵](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/candidate75-bash-matrix-audit.json) · [现场交接](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/MANUAL-HANDOFF.md)
+候选 75 按 Bash 5.3 发布矩阵逐项核对无模型证据，本地 6/6、SSH 7/7。本地六案重新取得签名 App、原生接受及 SQLite 结算。SSH 四代生命周期用新夹具复验，三个原生代次的 SFTP 读回与实际加载匹配。 [Bash 矩阵](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/candidate75-bash-matrix-audit.json)
 
-候选 75 的 macOS 系统 Bash、Zsh 普通 PTY 编辑器恢复及交互 6/6。四种浏览器与渲染组合的选区和视口复验 64/64。两份实际 SSH 流的浏览器 DOM 焦点对照 8/8。现场 Bash 焦点仍需完成 `Start`、前后台切换和输入标记，最新尝试等候超时。 [普通 PTY](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/candidate75-raw-pty/) · [浏览器焦点对照](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/candidate75-browser-focus-comparison/) · [现场回执](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/manual-ssh-focus-bash-candidate75-manualfocus-operator7/)
+候选 75 的 macOS 系统 Bash、Zsh 普通 PTY 编辑器恢复及交互 6/6。四种浏览器与渲染组合的选区和视口复验 64/64。两份实际 SSH 流的浏览器 DOM 焦点对照 8/8。 [普通 PTY](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/candidate75-raw-pty/) · [浏览器焦点对照](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/candidate75-browser-focus-comparison-retest/)
 
 候选 76 补齐 A04。签名 macOS App 用实际 Bash 原型模块触发正式加载器的清单拒绝，前台和后台工具请求均被实际运行时拒绝，零输入和文件效果。Bash、ZLE 错误摘要原用例复验 2/2。资源 manifest 与候选 75 一致，类型、静态和生产构建退出 0。 [原型隔离](../../.artifacts/tests/agent-terminal-input/20261113-ram-signing-preflight/candidate76-experimental-profile/audit-strict.json) · [错误摘要复验](../../.artifacts/tests/agent-terminal-input/20261113-ram-signing-preflight/candidate76-manifest-regression/audited-results.json) · [本机门禁](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/candidate76-local-gates/)
 
