@@ -446,7 +446,8 @@ try {
   const closeTarget = targetTab.locator('button[aria-label="close"]');
   const targetIcon = closeTarget.locator('[data-slot="focus-tab-target"]');
   const closeIcon = closeTarget.locator('svg.lucide-x');
-  for (const width of [400, 1280]) {
+  for (const { theme, width } of appearances) {
+    await page.evaluate((theme) => document.documentElement.setAttribute('data-theme', theme), theme);
     await page.setViewportSize({ width, height: 720 });
     for (const active of [true, false]) {
       await page.evaluate(async (active) => {
@@ -456,6 +457,10 @@ try {
       await targetTab.scrollIntoViewIfNeeded();
       await page.mouse.click(width - 10, 300);
       await targetIcon.waitFor({ state: 'visible' });
+      assert.equal(await targetIcon.getAttribute('aria-label'), 'Agent 目标');
+      const { width: iconWidth, height: iconHeight } = await targetIcon.locator('svg').boundingBox();
+      assert.equal(iconWidth, 12, 'Target icon must fit the compact tab');
+      assert.equal(iconHeight, 12);
       assert.equal(await targetIcon.evaluate(el => {
         const reference = document.createElement('span');
         reference.style.color = 'var(--app-success)';
@@ -464,7 +469,9 @@ try {
         reference.remove();
         return matches;
       }), true, 'Target icon uses the theme success color');
-      await page.screenshot({ path: `/tmp/shellspan-target-icon-${width}-${active}.png` });
+      if (process.env.TAB_SCREENSHOT_DIR) {
+        await page.locator('[data-terminal-tab-bar]').screenshot({ path: `${process.env.TAB_SCREENSHOT_DIR}/terminal-target-${theme}-${width}-${active}.png` });
+      }
       assert.equal(await closeIcon.isVisible(), false);
       assert.equal(await targetTab.locator('[data-slot="focus-tab-target"]').count(), 1);
       const before = await closeTarget.boundingBox();
@@ -480,6 +487,12 @@ try {
       assert.equal(await targetIcon.isVisible(), false);
     }
   }
+  await page.evaluate(async () => {
+    const { useAppStore } = await import('/tab-runtime.js');
+    useAppStore.getState().setLocale('en-US');
+  });
+  await page.mouse.click(300, 300);
+  await closeTarget.getByRole('img', { name: 'Agent target', exact: true }).waitFor({ state: 'visible' });
   await closeTarget.click();
   await page.getByRole('alertdialog').waitFor();
   console.log('Terminal and SFTP appearance, keyboard actions, pinning, target icon hover, tab colors and terminal surfaces verified.');

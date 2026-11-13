@@ -501,10 +501,24 @@ async function verify() {
     if (manualFocus) {
       const window = getCurrentWindow();
       const focusEvents: { focused: boolean; at: number }[] = [];
-      const stopFocus = await window.onFocusChanged(({ payload }) => focusEvents.push({ focused: payload, at: Date.now() }));
+      const focusState = () => ({ viewportY: term.buffer.normal.viewportY, baseY: term.buffer.normal.baseY,
+        selection: term.getSelectionPosition(), exactSelection: term.getSelection() === soft });
+      const focusEvidence: { stage: string; at: number; state: ReturnType<typeof focusState> }[] = [];
+      const observeFocusState = (stage: string) => focusEvidence.push({ stage, at: Date.now(), state: focusState() });
+      const observeTerminalPointer = (event: MouseEvent) => {
+        if (event.isTrusted && event.target instanceof Node && term.element?.contains(event.target)) {
+          observeFocusState('terminal-mousedown');
+        }
+      };
+      const stopFocus = await window.onFocusChanged(({ payload }) => {
+        focusEvents.push({ focused: payload, at: Date.now() });
+        observeFocusState(payload ? 'window-focus' : 'window-blur');
+      });
+      const selectionChange = term.onSelectionChange(() => observeFocusState('selection-change'));
+      document.addEventListener('mousedown', observeTerminalPointer, true);
       const instructions = document.createElement('aside');
       instructions.style.cssText = 'position:fixed;top:0;right:0;max-width:390px;padding:12px;background:Canvas;color:CanvasText;z-index:20';
-      instructions.textContent = 'Click Start, switch to another app, then return to this window.';
+      instructions.textContent = 'Click Start, use the app switcher to switch away and return, then wait for the terminal input instructions.';
       const start = document.createElement('button');
       start.type = 'button';
       start.textContent = 'Start';
@@ -515,6 +529,7 @@ async function verify() {
         start.onclick = event => {
           if (!event.isTrusted || startedAt) return;
           startedAt = Date.now();
+          observeFocusState('start');
           start.disabled = true;
         };
         await report({ progress: 'Actual SSH history is ready for the operator', evidence: { sessions, parkedWide, parkedAfterOutput } });
@@ -525,7 +540,8 @@ async function verify() {
           return lost && returned ? { lost, returned } : undefined;
         }, 'The operator did not switch away and return', 120000);
         await drain();
-        records.manualFocusTransition = { startedAt, transition, focusEvents };
+        observeFocusState('after-focus');
+        records.manualFocusTransition = { startedAt, transition, focusEvents, focusEvidence, parkedAfterOutput };
         assert(term.buffer.normal.viewportY === parkedAfterOutput.viewportY && term.getSelection() === soft
           && JSON.stringify(term.getSelectionPosition()) === JSON.stringify(parkedAfterOutput.selection),
         'Actual foreground switch changed the parked history viewport or selection');
@@ -550,7 +566,12 @@ async function verify() {
           records.manualFocus = { startedAt, transition, focusEvents, beforeInput, afterInput,
             trustedEnter: true, enterAt, marker: 'SSH_MANUAL_FOCUS_OK', humanReceipt: true };
         } finally { document.removeEventListener('keydown', observe, true); }
-      } finally { instructions.remove(); stopFocus(); }
+      } finally {
+        document.removeEventListener('mousedown', observeTerminalPointer, true);
+        selectionChange.dispose();
+        instructions.remove();
+        stopFocus();
+      }
     }
     term.clearSelection();
     selection.push(await ordinarySelection('wide'));

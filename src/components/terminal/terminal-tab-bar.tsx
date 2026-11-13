@@ -19,7 +19,7 @@ import { useI18n } from '@/hooks/useI18n';
 import { useAppStore } from '@/stores/appStore';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner } from '@/components/ui/spinner';
-import { PinIcon, TargetIcon, XIcon } from 'lucide-react';
+import { Link2Icon, PinIcon, XIcon } from 'lucide-react';
 import { useCloseTerminal } from '@/hooks/useCloseTerminal';
 import { TrackpadSafePointerSensor } from '@/lib/trackpad-safe-pointer-sensor';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
@@ -160,7 +160,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
         )}
         <span className={cn('block flex-1 truncate text-left text-xs leading-none font-medium')}>{session.title}</span>
         {agentTarget && (session.pinned || session.pendingConnection) && <span data-slot="focus-tab-target" role="img" aria-label={t('focus.agentTarget')} title={t('focus.agentTarget')} className="flex size-4 shrink-0 items-center justify-center text-app-success">
-          <TargetIcon aria-hidden="true" className="size-3" />
+          <Link2Icon aria-hidden="true" className="size-3" />
         </span>}
       </div>
       {!session.pendingConnection &&
@@ -193,7 +193,7 @@ const SessionTab: React.FC<SessionTabProps> = ({
             )}
           >
             {agentTarget && <span data-slot="focus-tab-target" role="img" aria-label={t('focus.agentTarget')} className="flex size-4 items-center justify-center text-app-success group-hover:hidden group-focus-visible/close:hidden">
-              <TargetIcon aria-hidden="true" className="size-3" />
+              <Link2Icon aria-hidden="true" className="size-3" />
             </span>}
             <XIcon aria-hidden="true" className={cn('size-3', agentTarget && 'hidden group-hover:block group-focus-visible/close:block')} strokeWidth={1.5} />
           </button>

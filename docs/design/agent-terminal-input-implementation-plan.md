@@ -40,7 +40,9 @@ B02 实际 WKWebView 减弱动态效果 2/2。C06 签名 App 控制通道启动 
 
 候选 63 双 Shell 真实 SSH 宽高与跨行宽字符复验通过，签名 WKWebView 2/2、浏览器 8/8。 [条款证据索引](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/COVERAGE-INDEX.md)
 
-B06、B07 的 SSH 作业历史复验确认轮询和停止不入历史 4/4。磁盘历史严格核对 Bash 2/2，Linux ZLE 0/2。Linux ZLE 内存各有一个带句柄的启动计划，退出后磁盘各有两份。需要核对 Linux 构建的历史绑定及异步子进程保存边界，再以唯一启动条目复验。 [作业历史逐案审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/ssh-job-history-audit.json)
+B06、B07 的 SSH 作业历史复验确认轮询和停止不入历史 4/4。磁盘历史严格核对 Bash 2/2，Linux ZLE 0/2。Linux ZLE 内存各有一个带句柄的启动计划，退出后磁盘各有两份。候选 69 在 Linux 模块绑定已准入的 Zsh Main 的历史保存标志，仅在原生后台启动的 fork 子进程抑制自动保存。按原有唯一条目断言复验停止和自然退出，再复验受模块变化影响的恢复和本地 PTY。 [作业历史逐案审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/ssh-job-history-audit.json) · [候选构建记录](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/candidate69-resource-stage/)
+
+Bash 的接受前人工接管已通过。回执包含实际 Enter、正式按钮点击、输入归还和零文件效果。Bash 运行中与 ZLE 的两个切点仍需操作者回执。 [Bash 接管审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/manual-ssh-takeover-bash-before-key-takeover-candidate60-manualtakeover-operator2/audit.json)
 
 ZLE 的初始 `ZDOTDIR` 已修正并在两种实际 OpenSSH 环境、五种签名 App 历史配置中复验。候选 17 使用归属明确的临时 RAM 卷完成签名与链接，复验新采显示流、本地真实 PTY 和协议、前端与全功能 Rust。R04 本地 63 项继续保留原候选范围。当前候选的本地定向证据、剩余人工、模型和发布条件均单列。 [本机质量与差异审计](../../.artifacts/tests/agent-terminal-input/20261113-ram-signing-preflight/REPORT.md)
 
