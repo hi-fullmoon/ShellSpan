@@ -238,13 +238,14 @@ fn prepared_local_wire_rejects_invalid_sequence() {
                 job: None,
             },
         );
-        let mut send = |message: &nip::Envelope| {
-            control.write(&message.encode().unwrap()).unwrap();
+        let mut send_frames = |bytes: &[u8]| {
+            control.write(bytes).unwrap();
             if family == nip::ShellFamily::Bash {
                 writer.write_all(b"\x18\x1e").unwrap();
                 writer.flush().unwrap();
             }
         };
+        let mut send = |message: &nip::Envelope| send_frames(&message.encode().unwrap());
         let prepare_sent = Instant::now();
         if case != "out-of-order" {
             send(&prepare);
@@ -255,6 +256,37 @@ fn prepared_local_wire_rejects_invalid_sequence() {
             });
         }
         let prepared_observed = Instant::now();
+        if case == "coalesced-query-cancel" {
+            wait(&rx, &mut records, |message| {
+                matches!(message, nip::Message::Operation(reply)
+                    if reply.request_id == prepare.request_id && reply.identity == identity
+                        && matches!(&reply.payload, nip::Payload::InputConfirmed { source_digest: digest, utf8_bytes, .. }
+                            if digest == &source_digest && *utf8_bytes == source.len()))
+            });
+            let query = envelope("coalesced-query", nip::Payload::Query);
+            let cancel = envelope("coalesced-cancel", nip::Payload::CancelDraft);
+            let frames = [query.encode().unwrap(), cancel.encode().unwrap()].concat();
+            send_frames(&frames);
+            wait(&rx, &mut records, |message| {
+                matches!(message, nip::Message::Operation(reply)
+                    if reply.request_id == query.request_id && reply.identity == identity
+                        && matches!(&reply.payload, nip::Payload::Snapshot {
+                            editor_utf8_valid: true, may_have_submitted: false,
+                            cursor_utf8_bytes: Some(cursor), end_utf8_bytes: Some(end), ..
+                        } if *cursor == source.len() && *end == source.len()))
+            });
+            wait(&rx, &mut records, |message| {
+                matches!(message, nip::Message::Operation(reply)
+                    if reply.request_id == cancel.request_id && reply.identity == identity
+                        && matches!(reply.payload, nip::Payload::DraftCleared { editor_empty: true }))
+            });
+            records.extend(rx.try_iter());
+            assert!(!records.iter().any(|message| matches!(message, nip::Message::Operation(reply)
+                if matches!(reply.payload, nip::Payload::CommitArmed | nip::Payload::SubmissionAccepted | nip::Payload::Started | nip::Payload::Settled { .. }))));
+            assert!(!home.join("wire-effect").exists());
+            assert!(journal.unresolved().unwrap().is_empty());
+            return;
+        }
         if reduced_inline {
             fs::write(
                 evidence.join("prepare-sent.json"),

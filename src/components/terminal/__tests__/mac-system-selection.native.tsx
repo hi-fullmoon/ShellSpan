@@ -22,6 +22,7 @@ const hex=(text:string)=>Array.from(new TextEncoder().encode(text),byte=>byte.to
 async function start(){
  const params=new URL(location.href).searchParams,token=params.get('token'),mode=params.get('macDaily');
  assert(token&&(mode==='system-selection-zsh'||mode==='system-selection-bash'),'Exact automatic system-selection case required');
+ const timeoutProbe=params.get('macSelectionTimeoutProbe')==='true';
  const family=mode.endsWith('zsh')?'zsh':'bash',plan=macSystemSelectionPlan(token),capture=await macHumanCapture(token,'automatic');
  await initI18n('en-US');await getCurrentWindow().show();await getCurrentWindow().setFocus();
  const routes=await invokeListAiRoutes();assert(routes.routes.length===0&&!routes.defaultSelection,'System selection must use an empty model route store');
@@ -69,7 +70,7 @@ async function start(){
   assert(isManualSelection(current.expected,actual.selection,gesture,current.direction),'Actual OS mouse selection or direction differs');
   assert(actual.position&&actual.position.start.y>=0&&actual.position.end.y<t.buffer.normal.length&&actual.position.start.x>=0&&actual.position.end.x<=t.cols,'Actual selection endpoints invalid');
   assert(current.native?t.options.reflowCursorLine===true:t.options.reflowCursorLine===false,'Actual default/native display mode differs');
-  const unicode=t.unicode.activeVersion;assert(unicode===(current.native?'11':'6'),'Actual display provider differs');
+  const unicode=t.unicode.activeVersion;assert(unicode==='11','Actual session-wide display provider differs');
   let clipboard:string|undefined;
   await until(async()=>{try{const value=await readClipboardText();if(value===current.expected){clipboard=value;return true;}}catch(error){clipboardIssues.push({phase:current.id,error:String(error),at:Date.now()});}return false;},'Actual macOS clipboard does not equal the exact selected text');
   assert(clipboard===current.expected,'Exact clipboard text missing');lastKnownClipboard=clipboard;
@@ -106,25 +107,39 @@ async function start(){
  try{
   await until(()=>!!capture.controller?.host,'Actual production pane did not mount');await controller().whenOutputReady();await until(idle,'Actual selected native prompt not ready');
   const initial=await snapshot();assert(isMacFileChainProfile(initial.session?.nativePeerProfile,family),'Exact native profile missing');
+  const binding=session.ptyInfo?.nativeDisplayBinding;
+  assert(binding?.unicodeScope==='session'&&binding.unicodeVersion==='11','Exact macOS session-wide Unicode binding missing');
   update('System selection ready; automation only; no human timer');await capture.checkpoint(plan.readyLabel,{initial,broker:initial,session,routes,automationOnly:true,humanReceipt:false},true);
-  try{clipboardOriginal=await readClipboardText();}catch(error){clipboardIssues.push({phase:'original-text',error:String(error),at:Date.now()});}
+  clipboardOriginal=await readClipboardText();
   await produce(plan.initialSource,plan.initialMarker);
+  // Leave time for restoration and PTY closure before the outer runner ends the App.
+  const inputDeadline=Date.now()+(timeoutProbe?5_000:5*60_000);
   for(const[index,current]of plan.phases.entries()){
    assert(!problem,'Earlier system input failed');phase=undefined;
    if(current.native)await produce(plan.nativeSource,plan.nativeMarker);
    const sentinel=`SYSTEM_COPY_SENTINEL_${token}_${index}`;await writeClipboardText(sentinel);assert(await readClipboardText()===sentinel,'Actual clipboard sentinel did not read back');lastKnownClipboard=sentinel;preparations.push({phase:current.id,sentinelHex:hex(sentinel),at:Date.now(),acceptanceStepPassed:false});
    phaseIndex=index;gesture=undefined;copyKey=undefined;busy=false;
+   const remaining=inputDeadline-Date.now();
+   assert(remaining>0,'System selection input deadline expired');
    const receipt=new Promise<Record<string,unknown>>((done,reject)=>{resolveCopy=done;rejectCopy=reject;});phase=current;controller().focus();update(`System automation: ${current.id}; waiting OS mouse and Cmd+C`);
    await capture.post({progress:'System selection awaiting OS action',evidence:{kind:'mac-system-selection-wait',phase:current.id,index,expectedHex:hex(current.expected),direction:current.direction,native:current.native,automationOnly:true,humanReceipt:false}});
-   const actual=await receipt;receipts.push(actual);update(`Waiting original screenshot: ${current.id}`);
-   await capture.checkpoint(current.label,{receipt:actual,broker:await snapshot(),automationOnly:true,humanReceipt:false},true);phase=undefined;assert(!problem&&unexpected.length===0,'Unplanned input interrupted system checkpoint');
+   const waitForInput=window.setTimeout(()=>{
+    if(busy)return; // A received copy has its own bounded clipboard read.
+    const error=Error(`No system selection and copy received for ${current.id}`);
+    problem??=error;rejectCopy?.(error);
+   },remaining);
+   const actual=await receipt.finally(()=>window.clearTimeout(waitForInput));
+   receipts.push(actual);update(`Waiting original screenshot: ${current.id}`);
+   await capture.checkpoint(current.label,{receipt:actual,broker:await snapshot(),automationOnly:true,humanReceipt:false},true,AbortSignal.timeout(45_000));phase=undefined;assert(!problem&&unexpected.length===0,'Unplanned input interrupted system checkpoint');
   }
-  await produce(plan.exitModeSource,plan.exitModeMarker);assert(controller().terminal.unicode.activeVersion==='6'&&controller().terminal.options.reflowCursorLine===false,'Actual native display baseline did not restore');
-  update('System selections complete; no human receipt');await capture.checkpoint(plan.finalLabel,{receipts,broker:await snapshot(),automationOnly:true,humanReceipt:false},true);
+  await produce(plan.exitModeSource,plan.exitModeMarker);
+  assert(controller().terminal.unicode.activeVersion==='11'&&controller().terminal.options.reflowCursorLine===false,'OSC exit did not restore the live session display baseline');
+  update('System selections complete; no human receipt');await capture.checkpoint(plan.finalLabel,{receipts,broker:await snapshot(),automationOnly:true,humanReceipt:false},true,AbortSignal.timeout(45_000));
  }catch(error){problem??=error;}
  phase=undefined;releaseCopy?.();releaseCopy=undefined;capture.releaseInitial();let clipboard:Record<string,unknown>;
  try{clipboard=await restoreClipboard();}catch(error){problem??=error;clipboard={restored:false,error:String(error)};}
- try{if(!problem){assert(await controller().writeUserInput('exit\r'),'Actual normal Shell exit rejected');await until(()=>capture.closedObserved,'Actual natural transport EOF missing');}await invokeCloseSession(session.sessionId);await until(()=>capture.wireFinalized,'Actual transport wire finalization missing');}
+ try{if(!problem){assert(await controller().writeUserInput('exit\r'),'Actual normal Shell exit rejected');await until(()=>capture.closedObserved,'Actual natural transport EOF missing');}await invokeCloseSession(session.sessionId);await until(()=>capture.wireFinalized,'Actual transport wire finalization missing');
+  if(!problem)await until(()=>controller().terminal.unicode.activeVersion==='6'&&controller().terminal.options.reflowCursorLine===false,'Actual transport EOF did not restore the original display baseline');}
  catch(error){problem??=error;}
  try{await capture.checkpoint('system-selection-transport-end',{broker:await snapshot(),closedObserved:capture.closedObserved,wireFinalized:capture.wireFinalized,automationOnly:true,humanReceipt:false},false);}
  catch(error){problem??=error;}

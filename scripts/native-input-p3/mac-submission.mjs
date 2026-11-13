@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {lstat,readFile,readdir,open,link} from 'node:fs/promises';
+import {lstat,readFile,readdir,open,link,mkdir,symlink,readlink,writeFile} from 'node:fs/promises';
 import {resolve,isAbsolute} from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
@@ -13,6 +13,7 @@ export function macSubmissionControlMode(mode){
  if(mode==='reduced-motion')return {cut:'before-accept',scenario:mode};
  if(/^local-storage-(healthy|missing|read-only|unknown-format|invalid-marker|foreign-namespace|missing-directory|directory-symlink|corrupt-database)$/.test(mode))return {cut:undefined,scenario:mode};
  if(mode==='local-jobs'||/^local-history-(default|small|custom|empty|unset)$/.test(mode))return {cut:undefined,scenario:mode};
+ if(['local-file-ownership','local-file-restart-prepare','local-file-restart-verify'].includes(mode))return {cut:undefined,scenario:mode};
  if(['approval-mismatch','expired-or-revoked','source-mismatch','plan-mismatch','target-mismatch','unsupported-input-native','permission-mismatch','resource-manifest-mismatch','byte-boundary','raw-admission','local-file-chain'].includes(mode))return {cut:undefined,scenario:mode};
  if(['incomplete-proof','readonly-query-does-not-authorize'].includes(mode))return {cut:'input-in-progress',scenario:mode};
  if(['identity-mismatch','complete-identity-submatrix','generation-mismatch'].includes(mode))return {cut:'arm-identity',scenario:mode};
@@ -35,7 +36,8 @@ export function macSubmissionObservationConfiguration(selection){
   visualLabels:[],snapshotLabels:[],
   captureLabels:['phase3-manual-ready','phase3-manual-contention','phase3-manual-other','phase3-manual-task-switch'],
  };
- return{visualLabels:[],snapshotLabels:['submission-ready','submission-crash-restart-ready','submission-prepared','submission-reduced-motion','submission-settled','submission-duplicates','submission-rejected','submission-failure','lifecycle-failure','lifecycle-complete']};
+ const snapshotPrefix=process.env.SHELLSPAN_ACCEPTANCE_SUBMISSION_SCENARIO==='local-file-restart-verify'?'scratch-after-restart-snapshot-':undefined;
+ return{visualLabels:[],snapshotPrefix,snapshotLabels:['submission-ready','submission-crash-restart-ready','submission-prepared','submission-reduced-motion','submission-settled','submission-duplicates','submission-rejected','submission-failure','lifecycle-failure','lifecycle-complete']};
 }
 
 export function macSubmissionPrepareWrite(events, identity) {
@@ -110,7 +112,51 @@ export function attachMacSubmissionWitness(server,token,directory,{cut=process.e
    response.setHeader('Content-Type','application/json');response.end(JSON.stringify({original:armed,identity:requested.identity,cut:requested.cut,afterCrashEffect:outcome.effect,previousAppPid:requested.pid,authority:'crash-observation-only'}));
   })().catch(error=>response.writeHead(500).end(String(error)));
  });
- if(scenario==='local-file-chain')server.middlewares.use(`/__native-mac-scratch/${token}`,(request,response)=>{
+ if(scenario==='local-file-ownership'){
+  const fixtures=new Map();
+  server.middlewares.use(`/__native-mac-scratch-fixture/${token}`,(request,response)=>{
+   void(async()=>{
+    assert(request.method==='POST'&&(!request.url||request.url==='/'),'Exact owned scratch fixture endpoint required');
+    const chunks=[];let length=0;
+    for await(const chunk of request){length+=chunk.length;assert(length<=8192);chunks.push(chunk);}
+    const {action,mode,id,target}=JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    assert(['stage','observe'].includes(action)&&['occupied','symlink'].includes(mode));
+    assert(/^phase3-submission-[a-f0-9-]{36}$/.test(id)&&/^[a-f0-9-]{36}$/.test(target?.sessionId));
+    const home=resolve(directory,'home');
+    const owner={kind:'local',targetId:`terminal-${target.sessionId}`,sessionId:target.sessionId,cwd:home,localRoot:home};
+    assert(isDeepStrictEqual(target,owner));
+    const key=createHash('sha256').update(JSON.stringify([id,owner])).digest('hex');
+    const temporary=resolve(directory,'data/tmp');
+    assert((await lstat(temporary)).isDirectory());
+    const root=resolve(temporary,key.slice(0,16)),outside=resolve(directory,`scratch-fixture-${mode}`);
+    if(action==='stage'){
+     assert(!fixtures.has(mode));
+     await mkdir(mode==='occupied'?root:outside,{mode:0o700});
+     if(mode==='symlink')await symlink(outside,root);
+     await writeFile(resolve(mode==='occupied'?root:outside,'phase3-scratch.sh'),`owned ${mode} fixture\n`,{flag:'wx',mode:0o600});
+     fixtures.set(mode,key);
+    }
+    assert.equal(fixtures.get(mode),key);
+    const info=await lstat(root);
+    assert(mode==='occupied'?info.isDirectory():info.isSymbolicLink()&&await readlink(root)===outside);
+    const path=resolve(mode==='occupied'?root:outside,'phase3-scratch.sh');
+    const file=await open(path,'r');let digest;
+    try{const stat=await file.stat();assert(stat.isFile()&&stat.size<4096);digest={length:stat.size,mode:stat.mode&0o777,sha256:createHash('sha256').update(await file.readFile()).digest('hex')};}finally{await file.close();}
+    const records=await readdir(resolve(directory,'data/agent-runtime/scratch/records'));
+    response.setHeader('Content-Type','application/json');response.end(JSON.stringify({key,root,mode,path,digest,entries:await readdir(mode==='occupied'?root:outside),records}));
+   })().catch(error=>response.writeHead(500).end(String(error)));
+  });
+ }
+ if(scenario==='local-file-restart-verify')server.middlewares.use(`/__native-mac-scratch-restart/${token}`,(request,response)=>{
+  void(async()=>{
+   assert(request.method==='GET'&&(!request.url||request.url==='/'),'Restart evidence is read only');
+   const file=await open(resolve(directory,'scratch-before-restart.json'),'r');let evidence;
+   try{const stat=await file.stat();assert(stat.isFile()&&stat.size<1024*1024);evidence=JSON.parse(await file.readFile('utf8'));}finally{await file.close();}
+   assert(evidence.kind==='actual-macos-local-file-restart-prepare'&&evidence.humanReceipt===false);
+   response.setHeader('Content-Type','application/json');response.end(JSON.stringify(evidence));
+  })().catch(error=>response.writeHead(500).end(String(error)));
+ });
+ if(['local-file-chain','local-file-restart-prepare','local-file-restart-verify'].includes(scenario))server.middlewares.use(`/__native-mac-scratch/${token}`,(request,response)=>{
   void(async()=>{
    assert(request.method==='GET'&&(!request.url||request.url==='/'),'Scratch observation is read only');
    const list=async path=>{try{return await readdir(path,{withFileTypes:true});}catch(error){if(error.code==='ENOENT')return [];throw error;}};

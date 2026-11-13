@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import { terminalRegistry, type TerminalController } from '../registry/terminal-registry';
 import { TerminalControllerLayer } from '../terminal-controller-layer';
+import { TerminalPane } from '../terminal-pane';
 import { agentTerminalLeaseState } from '../agent-terminal-lease-state';
 import { terminalInputReadiness } from '../terminal-input-readiness';
 import { useTerminalStore } from '@/stores/terminalStore';
@@ -85,6 +86,9 @@ async function verify() {
   const unapprovedShell = scenario === 'raw-unapproved-shell';
   const resourceMismatch = scenario === 'raw-resource-mismatch';
   const rawAdmission = scenario === 'raw-no-sftp' || unapprovedShell || resourceMismatch;
+  const manualFocus = parameters.get('manualSshFocus') === 'true';
+  const manualTakeover = parameters.get('manualSshTakeover') === 'true';
+  const takeoverSystemInput = parameters.get('sshTakeoverSystemInput') === 'true';
   await initI18n('en-US');
   await getCurrentWindow().show();
   const routes = await invokeListAiRoutes();
@@ -99,6 +103,7 @@ async function verify() {
   const layerHost = document.createElement('div');
   document.body.append(layerHost);
   const layer = createRoot(layerHost);
+  const terminalPane = manualTakeover ? createRoot(host) : undefined;
   useAppStore.setState({ activeSection: 'terminal', restoreWorkspace: false, terminalAutoReconnect: false });
   flushSync(() => layer.render(createElement(TerminalControllerLayer)));
   const records: Record<string, unknown> = { case: scenario, fingerprint };
@@ -109,6 +114,18 @@ async function verify() {
   const pendingDisplay: { sessionId: string; source: string; data: string }[] = [];
   let controller: TerminalController | undefined;
   let originalFailure: unknown;
+  let manualInstruction: HTMLSpanElement | undefined;
+
+  function OwnedPane() {
+    const active = useTerminalStore(state => state.sessions.find(item => item.sessionId === state.activeSessionId) ?? null);
+    return createElement(TerminalPane, { activeSession: active });
+  }
+  if (terminalPane) {
+    useAppStore.setState({ terminalCopyOnSelect: false });
+    // Leave the native overlay title bar above the production pane controls.
+    host.style.cssText += ';padding-top:36px;box-sizing:border-box';
+    flushSync(() => terminalPane.render(createElement(OwnedPane)));
+  }
 
   async function open(previous?: SessionSummary, raw = false, independent = false) {
     const session = await invokeCreateSession({ name: bash ? 'Bash SSH lifecycle' : 'ZLE SSH recovery', host: '127.0.0.1', port,
@@ -141,12 +158,13 @@ async function verify() {
         timeline.push({ stage: 'parsed', sessionId: written?.sessionId, at: Date.now(),
           matchesWrite: written?.source === output.source && written.data === output.data, ...output });
       }));
-      controller.attach(host);
+      if (!terminalPane) controller.attach(host);
     } else {
       terminalRegistry.rebindSession(previous.sessionId, session.sessionId, session.ptyInfo);
       useTerminalStore.getState().reconnectSession(previous.sessionId, session);
     }
     if (!independent) {
+      if (terminalPane) useTerminalStore.getState().setActiveSession(session.sessionId);
       assert(controller?.sessionId === session.sessionId, 'Actual production controller did not rebind');
       await controller.whenOutputReady();
     }
@@ -233,6 +251,116 @@ async function verify() {
     const split = name.lastIndexOf('_') + 1;
     await send(`printf '%s%s\\n' ${name.slice(0, split)} ${name.slice(split)}\r`);
     await waitFor(() => screen().includes(name), `Actual successor output ${name} missing`);
+  }
+
+  async function withManualTakeover(sessionId: string, run: () => Promise<void>) {
+    const panel = document.createElement('aside');
+    panel.style.cssText = 'position:fixed;right:0;bottom:0;max-width:390px;padding:12px;background:Canvas;color:CanvasText;z-index:20';
+    const instruction = document.createElement('span');
+    manualInstruction = instruction;
+    instruction.textContent = 'Click Start when you are ready to press Enter in the terminal and click Take over.';
+    const start = document.createElement('button');
+    start.type = 'button';
+    start.textContent = 'Start';
+    panel.append(instruction, ' ', start);
+    document.body.append(panel);
+    let started = false;
+    start.onclick = event => { if (event.isTrusted) started = true; };
+    await report({ progress: 'Actual SSH takeover is ready for the operator', evidence: { sessions, sessionId,
+      ...(takeoverSystemInput ? { systemInputTarget: systemInputTarget('start', start) } : {}) } });
+    try {
+      await waitFor(() => started, 'The operator did not start SSH takeover', 120000);
+      start.remove();
+      instruction.textContent = 'As soon as Take over appears, click the terminal, press Enter once, then click Take over.';
+      await run();
+    } finally { manualInstruction = undefined; panel.remove(); }
+  }
+
+  function systemInputTarget(stage: string, element: Element) {
+    const bounds = element.getBoundingClientRect();
+    assert(bounds.width > 0 && bounds.height > 0, 'Actual SSH input target is not visible');
+    return { stage, x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2,
+      viewportWidth: window.innerWidth, viewportHeight: window.innerHeight };
+  }
+
+  async function enterAfterControl(sessionId: string, expectedEffect: string | null) {
+    if (!manualTakeover) return send('\r');
+    assert(manualInstruction, 'Physical SSH takeover instructions are missing');
+    const before = await snapshot(sessionId);
+    assert(before && before.promptReady && !before.inputObservation?.commandInputPending,
+      'Original SSH prompt did not return after takeover');
+    let enterAt = 0;
+    const key = (event: KeyboardEvent) => {
+      if (event.isTrusted && event.key === 'Enter' && event.target instanceof Node
+        && controller?.terminal.element?.contains(event.target)) enterAt = Date.now();
+    };
+    document.addEventListener('keydown', key, true);
+    try {
+      manualInstruction.textContent = 'Input has been returned. Click the terminal and press Enter once more.';
+      if (takeoverSystemInput) {
+        const screen = controller?.terminal.element?.querySelector('.xterm-screen');
+        assert(screen, 'Actual SSH terminal screen is missing');
+        await report({ progress: 'Actual SSH terminal input restored', evidence: { systemInputTarget: systemInputTarget('after', screen) } });
+      }
+      const after = await waitFor(async () => {
+        const current = await snapshot(sessionId);
+        return enterAt && current?.promptReady && current.nextInputSequence > before.nextInputSequence ? current : undefined;
+      }, 'The operator did not send Enter after SSH takeover', 120000);
+      assert((await effect()).text === expectedEffect, 'Physical Enter after takeover changed the remote effect');
+      records.manualEnterAfterTakeover = { enterAt, beforeInputSequence: before.nextInputSequence, afterInputSequence: after.nextInputSequence };
+    } finally { document.removeEventListener('keydown', key, true); }
+  }
+
+  async function observePhysicalTakeover(sessionId: string, identity: Identity, expectedEffect: string | null) {
+    const before = await snapshot(sessionId);
+    assert(before && before.inputObservation?.activeCommand?.operationId === identity.operationId,
+      'Original SSH lease is missing before the physical takeover');
+    let enterAt = 0, clickAt = 0, enterSnapshot: Promise<TerminalBrokerSessionSnapshot | undefined> | undefined;
+    const observation = { enterAt, clickAt, operationId: identity.operationId,
+      beforeInputSequence: before.nextInputSequence, humanReceipt: false };
+    records.manualTakeoverObservation = observation;
+    const key = (event: KeyboardEvent) => {
+      if (!event.isTrusted || event.key !== 'Enter' || !(event.target instanceof Node)
+        || !controller?.terminal.element?.contains(event.target)) return;
+      if (!enterAt) {
+        observation.enterAt = enterAt = Date.now();
+        // Read the Broker while the lease is held, before takeover can write its interrupt.
+        enterSnapshot = new Promise(done => setTimeout(done, 35)).then(() => snapshot(sessionId));
+      }
+    };
+    const click = (event: MouseEvent) => {
+      if (!event.isTrusted || !(event.target instanceof Element)) return;
+      const button = event.target.closest('.agent-terminal-takeover');
+      const lease = button?.closest('[data-testid="agent-terminal-lease-bar"]');
+      if (lease?.getAttribute('data-operation-id') === identity.operationId) observation.clickAt = clickAt = Date.now();
+    };
+    document.addEventListener('keydown', key, true);
+    document.addEventListener('click', click, true);
+    try {
+      controller?.focus();
+      if (takeoverSystemInput) {
+        const bar = Array.from(document.querySelectorAll('[data-testid="agent-terminal-lease-bar"]'))
+          .find(element => element.getAttribute('data-operation-id') === identity.operationId);
+        const button = bar?.querySelector('.agent-terminal-takeover');
+        const screen = controller?.terminal.element?.querySelector('.xterm-screen');
+        assert(button && screen && controller?.terminal.textarea === document.activeElement,
+          'Original production takeover controls or focused terminal input were not ready');
+        await report({ progress: 'Actual SSH lease is ready for system input', evidence: {
+          systemInputTarget: systemInputTarget('competing', screen), takeoverButton: systemInputTarget('takeover', button),
+        } });
+      }
+      await waitFor(() => clickAt, 'The operator did not click the real SSH takeover button', 12000);
+      const afterEnter = await enterSnapshot;
+      assert(enterAt > 0 && enterAt <= clickAt && afterEnter?.inputObservation?.activeCommand?.operationId === identity.operationId
+        && afterEnter.nextInputSequence === before.nextInputSequence
+        && (await effect()).text === expectedEffect, 'Physical Enter crossed the original SSH lease or did not precede takeover');
+      records.manualTakeover = { enterAt, clickAt, operationId: identity.operationId,
+        beforeInputSequence: before.nextInputSequence, afterInputSequence: afterEnter.nextInputSequence,
+        humanReceipt: !takeoverSystemInput, systemInputAutomation: takeoverSystemInput };
+    } finally {
+      document.removeEventListener('keydown', key, true);
+      document.removeEventListener('click', click, true);
+    }
   }
   async function staleWrite(old: SessionSummary) {
     const refused = await invokeWriteSession(old.sessionId, "printf '%s%s\\n' SSH_STALE_ INPUT\r").then(() => false, () => true);
@@ -344,14 +472,89 @@ async function verify() {
     const selection = [await ordinarySelection('narrow')];
     assert(term.buffer.normal.baseY > 0 && narrow.cols < 60, 'Narrow sample did not create a historical viewport');
     term.scrollToTop();
+    assert(controller!.searchAddon.findNext(soft) && term.getSelection() === soft,
+      'Exact SSH history selection was not established before reflow');
+    const parkedBefore = { viewportY: term.buffer.normal.viewportY, baseY: term.buffer.normal.baseY,
+      selection: term.getSelectionPosition() };
+    assert(parkedBefore.selection && parkedBefore.viewportY < parkedBefore.baseY,
+      'The real SSH history selection did not park the viewport');
+    timeline.push({ stage: 'history-selection-parked', at: Date.now() });
     const wide = await resize(1080, 'wide-parked');
     assert(wide.cols > narrow.cols && term.buffer.normal.viewportY < term.buffer.normal.baseY, 'Wide reflow lost the parked history viewport');
-    selection.push(await ordinarySelection('wide'));
-    term.scrollToBottom();
+    assert(term.getSelection() === soft, 'Wide reflow changed the selected SSH logical line');
+    const parkedWide = { viewportY: term.buffer.normal.viewportY, baseY: term.buffer.normal.baseY,
+      selection: term.getSelectionPosition() };
+    assert(parkedWide.selection, 'Wide reflow dropped the SSH selection anchors');
     await witness('release-tail', 'POST');
     await waitFor(() => screen().includes('SSH_BACKGROUND_END'), 'Real background PTY output missing');
     await drain();
+    const parkedAfterOutput = { viewportY: term.buffer.normal.viewportY, baseY: term.buffer.normal.baseY,
+      selection: term.getSelectionPosition() };
+    assert(parkedAfterOutput.viewportY === parkedWide.viewportY && parkedAfterOutput.viewportY < parkedAfterOutput.baseY
+      && term.getSelection() === soft && JSON.stringify(parkedAfterOutput.selection) === JSON.stringify(parkedWide.selection),
+    'Actual SSH background output moved the parked history viewport or its selection');
+    timeline.push({ stage: 'history-background-checked', at: Date.now() });
+    if (manualFocus) {
+      const window = getCurrentWindow();
+      const focusEvents: { focused: boolean; at: number }[] = [];
+      const stopFocus = await window.onFocusChanged(({ payload }) => focusEvents.push({ focused: payload, at: Date.now() }));
+      const instructions = document.createElement('aside');
+      instructions.style.cssText = 'position:fixed;top:0;right:0;max-width:390px;padding:12px;background:Canvas;color:CanvasText;z-index:20';
+      instructions.textContent = 'Click Start, switch to another app, then return to this window.';
+      const start = document.createElement('button');
+      start.type = 'button';
+      start.textContent = 'Start';
+      instructions.append(' ', start);
+      document.body.append(instructions);
+      try {
+        let startedAt = 0;
+        start.onclick = event => {
+          if (!event.isTrusted || startedAt) return;
+          startedAt = Date.now();
+          start.disabled = true;
+        };
+        await report({ progress: 'Actual SSH history is ready for the operator', evidence: { sessions, parkedWide, parkedAfterOutput } });
+        await waitFor(() => startedAt, 'The operator did not start the SSH focus case', 120000);
+        const transition = await waitFor(() => {
+          const lost = focusEvents.find(event => !event.focused && event.at >= startedAt);
+          const returned = lost && focusEvents.find(event => event.focused && event.at > lost.at);
+          return lost && returned ? { lost, returned } : undefined;
+        }, 'The operator did not switch away and return', 120000);
+        await drain();
+        records.manualFocusTransition = { startedAt, transition, focusEvents };
+        assert(term.buffer.normal.viewportY === parkedAfterOutput.viewportY && term.getSelection() === soft
+          && JSON.stringify(term.getSelectionPosition()) === JSON.stringify(parkedAfterOutput.selection),
+        'Actual foreground switch changed the parked history viewport or selection');
+        instructions.textContent = 'Focus the terminal, then type the following line and press Enter. ';
+        const command = document.createElement('code');
+        command.textContent = "printf '%s%s\\n' SSH_MANUAL_ FOCUS_OK";
+        instructions.append(command);
+        let enterAt = 0;
+        const observe = (event: KeyboardEvent) => {
+          if (event.key === 'Enter' && event.isTrusted && event.target instanceof Node && term.element?.contains(event.target)) {
+            enterAt = Date.now();
+          }
+        };
+        document.addEventListener('keydown', observe, true);
+        try {
+          const beforeInput = (await snapshot(first.sessionId))?.nextInputSequence;
+          await waitFor(() => enterAt && screen().includes('SSH_MANUAL_FOCUS_OK'),
+            'Actual SSH terminal did not receive the operator marker', 120000);
+          const afterInput = (await snapshot(first.sessionId))?.nextInputSequence;
+          assert(beforeInput !== undefined && afterInput !== undefined && afterInput > beforeInput,
+            'The operator marker did not advance the original SSH input sequence');
+          records.manualFocus = { startedAt, transition, focusEvents, beforeInput, afterInput,
+            trustedEnter: true, enterAt, marker: 'SSH_MANUAL_FOCUS_OK', humanReceipt: true };
+        } finally { document.removeEventListener('keydown', observe, true); }
+      } finally { instructions.remove(); stopFocus(); }
+    }
+    term.clearSelection();
+    selection.push(await ordinarySelection('wide'));
+    term.scrollToBottom();
+    await marker('SSH_BOTTOM_FOLLOW');
+    await drain();
     assert(term.buffer.normal.viewportY === term.buffer.normal.baseY, 'Actual background output lost bottom-following viewport');
+    timeline.push({ stage: 'history-bottom-checked', at: Date.now() });
     await invokeCloseSession(first.sessionId);
     await waitFor(() => closed.has(first.sessionId), 'Actual display PTY close missing');
     const successor = await open(first);
@@ -360,7 +563,7 @@ async function verify() {
     assert(term.getSelection === publicApis.select && term.open === publicApis.open && term.buffer.normal.getLine === publicApis.line
       && !(await snapshot(successor.sessionId))?.inputObservation?.activeCommand && (await effect()).text === null,
     'Display case changed the public API or created execution authority');
-    Object.assign(records, { narrow, wide, soft, hard, selection, finalEffect: await effect(), finalScreen: screen(),
+    Object.assign(records, { narrow, wide, soft, hard, selection, parkedBefore, parkedWide, parkedAfterOutput, finalEffect: await effect(), finalScreen: screen(),
       focus: { documentHasFocus: document.hasFocus(), terminalHasFocus: term.element?.contains(document.activeElement) ?? false,
         programmaticInput: true, humanReceipt: false } });
   }
@@ -674,7 +877,8 @@ async function verify() {
           const lease = agentTerminalLeaseState.get(old.sessionId);
           assert(lease?.agentSessionId === id && lease.operationId === cut.identity.operationId,
             'The production SSH takeover view does not match the held operation');
-          lease.requestTakeover();
+          if (manualTakeover) await observePhysicalTakeover(old.sessionId, cut.identity, null);
+          else lease.requestTakeover();
           await waitFor(async () => !agentTerminalLeaseState.get(old.sessionId)
             && (await events()).some(event => event.type === 'turn/end' && event.turnId === approval.turnId),
           'The production takeover did not release the SSH lease and end its turn');
@@ -684,6 +888,9 @@ async function verify() {
           ? invokeInterruptAgentRuntime({ sessionId: id }) : invokeCancelAgentRuntime({ sessionId: id }))
           .then(value => ({ value }), error => ({ error: String(error) }));
         const requestKind = explicitControl === 'takeover' ? 'takeover-owner-validated' : 'cancel-token';
+        if (manualTakeover) {
+          await waitFor(() => records.manualTakeover, 'Physical takeover receipt missing');
+        }
         records.controlRequest = await waitFor(async () => {
           const state = await json<{ requests?: { requestKind: string; identity: Identity }[] }>(cutUrl());
           return state.requests?.find(request => request.requestKind === requestKind && sameIdentity(request.identity, cut.identity));
@@ -722,7 +929,7 @@ async function verify() {
         assert(clear.length === 1 && sameIdentity(clear[0].details.identity, cut.identity), 'Actual matching DraftCleared was not observed');
         if (!explicitControl) await invokeCancelAgentRuntime({ sessionId: id });
         await waitFor(() => !agentTerminalLeaseState.get(old.sessionId), 'Cleared operation still owns the terminal');
-        await send('\r');
+        await enterAfterControl(old.sessionId, null);
         await marker('SSH_EMPTY_ENTER_OK');
       }
     } else {
@@ -840,8 +1047,9 @@ async function verify() {
       if (action === 'takeover') {
         const lease = agentTerminalLeaseState.get(first.sessionId);
         assert(lease?.agentSessionId === id && lease.operationId === identity.operationId, 'Actual SSH lease view has a different owner');
-        lease.requestTakeover();
-        records.takeoverOrigin = 'production-terminal-lease-view';
+        if (manualTakeover) await observePhysicalTakeover(first.sessionId, identity, `${callId}\n`);
+        else lease.requestTakeover();
+        records.takeoverOrigin = manualTakeover ? 'physical-terminal-button' : 'production-terminal-lease-view';
       } else if (action === 'stop') {
         records.controlled = await invokeInterruptAgentRuntime({ sessionId: id });
       } else {
@@ -882,12 +1090,12 @@ async function verify() {
     const agentEvents = await events();
     assert(recovery.length === 0 && agentEvents.some(event => event.type === 'turn/end' && event.turnId === approval.turnId),
       'Matching SSH settlement did not finish the original Agent turn');
-    await send('\r');
+    await enterAfterControl(first.sessionId, beforeKey ? null : `${callId}\n`);
     await marker('SSH_RUNNING_CONTROL_ENTER_OK');
     const finalEffect = await effect();
     assert(beforeKey ? finalEffect.text === null : finalEffect.text === `${callId}\n` || afterAccept && finalEffect.text === null,
       'SSH control or later Enter repeated the original file effect');
-    Object.assign(records, { competingEnter, keys, accepted, started, settled, cleared, identity, recovery, finalEffect, agentEvents });
+    Object.assign(records, { callId, competingEnter, keys, accepted, started, settled, cleared, identity, recovery, finalEffect, agentEvents });
   }
 
   async function verifyAgentIsolation(first: SessionSummary) {
@@ -1006,7 +1214,9 @@ async function verify() {
 
   try {
     const first = await open(undefined, rawAdmission);
-    if (scenario === 'reconnect-tail') await verifyTail(first);
+    if (manualTakeover) await withManualTakeover(first.sessionId, () => scenario === 'running-takeover'
+      ? verifyRunningControl(first, 'takeover') : verifySubmission(first));
+    else if (scenario === 'reconnect-tail') await verifyTail(first);
     else if (scenario === 'display-geometry') await verifyDisplay(first);
     else if (scenario === 'crash-restart') await verifyRestart(first);
     else if (scenario === 'ordinary-input' || rawAdmission) await verifyOrdinary(first);
@@ -1029,6 +1239,7 @@ async function verify() {
     } catch (error) { cleanupErrors.push(String(error)); }
     stops.forEach(stop => stop());
     if (controller) terminalRegistry.dispose(controller.sessionId);
+    terminalPane?.unmount();
     layer.unmount();
     layerHost.remove();
     if (cleanupErrors.length) {

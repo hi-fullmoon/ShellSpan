@@ -67,14 +67,14 @@ export async function macHumanCapture(token:string,role:'human'|'automatic'='hum
   observeSelection(){if(!controller||!trace)throw Error('Human selection observer missing');const t=controller.terminal,p=t.getSelectionPosition();if(!p)throw Error('Actual human selection missing');trace.action({kind:'select',column:p.start.x,row:p.start.y,length:(p.end.y-p.start.y)*t.cols+p.end.x-p.start.x});trace.action({kind:'scrollToLine',row:t.buffer.normal.viewportY});},
   observeViewport(){if(!controller||!trace)throw Error('Human viewport observer missing');trace.action({kind:'scrollToLine',row:controller.terminal.buffer.normal.viewportY});},
   observeUnicodeVersion(register?:'graphemes'){if(!controller||!trace)throw Error('Actual public provider observer missing');trace.action({kind:'unicodeVersion',version:controller.terminal.unicode.activeVersion,...(register?{register}: {})});},
-  async checkpoint(label:string,details:Record<string,unknown>,image=false){
+  async checkpoint(label:string,details:Record<string,unknown>,image=false,signal?:AbortSignal){
    if(!controller||!trace)throw Error('Actual human controller missing');const t=controller.terminal;
    await drain();
    const state=nativeDisplayTraceState(t);await trace.checkpoint(label,state);const record={label,at:Date.now(),state,renderer:renderer?.snapshot(),display:{unicode:t.unicode.activeVersion,reflow:t.options.reflowCursorLine},...details};records.push(record);
    if(image||label==='human-deferred')await persistCheckpoint(label);
    await post({progress:(role==='human'?'Human':'Automatic')+' checkpoint: '+label,evidence:{kind:role==='human'?'mac-human-progress':'mac-auto-progress',records:[record],physical,input}});
    if(image){
-    const r=await fetch('/__native-mac-daily-checkpoint/'+token+'/'+label,{method:'POST'});
+    const r=await fetch('/__native-mac-daily-checkpoint/'+token+'/'+label,{method:'POST',signal});
     if(role==='human'){if(!r.ok||!(await r.json()).visualPassed)throw Error('Required native image was not observed');}
     else{
      if(!r.ok)throw Error('Required native image observation could not be retained');

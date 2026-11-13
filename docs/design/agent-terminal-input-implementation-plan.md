@@ -6,7 +6,7 @@
 
 | 范围 | 已有结果 | 仍需验证 |
 | --- | --- | --- |
-| macOS arm64 本地 PTY | R04 已通过实际 App 崩溃恢复、系统交互、安装启动、实际加载资源及离线重建核对。Zsh 5.9 / ZLE 5.9 与 Bash 5.3 / Readline 8.3.6 的本轮适用条款合计 63/63 通过。[本地验收报告](../../.artifacts/tests/agent-terminal-input/20261112-macos-r02-followup/REPORT.md) | E08 留到正式发布前补验。严格 Unicode 模型子项继续延期。第 2 期 144 项和第 3 期 225 项保留各自原批次范围。 |
+| macOS arm64 本地 PTY | R04 历史结论为 Zsh 5.9 / ZLE 5.9 与 Bash 5.3 / Readline 8.3.6 适用条款 63/63。原件缺失状态及当前候选结果见 [本机续验报告](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/REPORT.md)。 | E08 留到正式发布前补验。严格 Unicode 模型子项继续延期。第 2 期 144 项和第 3 期 225 项保留各自原批次范围。 |
 | Linux arm64，glibc 2.36，受控 SSH | 当前封存重跑隔离传输 17/17，签名 App 已验双 Shell 历史、字节、父 Shell、真实文件、作业、降级及故障恢复。两个真实 WKWebView、八个真实浏览器组合通过。原 ZLE 五案继续按原切点引用。 [本批实机报告](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/REPORT.md) | 双 Shell 剩余控制切点、资源负例、实际人工及模型子案按 [续验清单](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/CHECKLIST.md) 继续。 |
 | Windows x64，ConPTY | `wt5c1` 已在 D 盘实际安装、启动并通过三种 Shell、接管清稿、运行中关闭、进程重启、WebView2 实际交互、异常资源和标准卸载。真实临时脚本及 PowerShell 无模型验证均已留证。[内测包与逐项验收](../../.artifacts/tests/agent-terminal-input/windows-wt5c1/REPORT.md) | 更广的统一发布子案按逐项状态补验，包括多代次重绑、选区锚点及完整 Quality Gate。 |
 | 当前源码与交付 | `2aaaaf75` 的 Bash 5.3 收敛和 `e63021ea` 的 PowerShell 7 收敛均已推送至 `origin/main`。两平台 Bash 5.3 资源和包内清单已核对，macOS 随包源码离线重建、前端全量测试及生产构建已通过。 | 以各平台最新候选提交继续实机验收。正式发布仍待完成。 |
@@ -20,15 +20,23 @@ R04 已收口。Zsh 5.9／ZLE 5.9 与 Bash 5.3／Readline 8.3.6 本轮适用条�
 | R01 | [DMG](../../.artifacts/tests/agent-terminal-input/20261111-macos-internal-r01/ShellSpan_2.5.0_arm64_internal_r01.dmg) · [双 Shell 基线报告](../../.artifacts/tests/agent-terminal-input/20261111-macos-internal-r01/REPORT.md) |
 | R02 | [DMG](../../.artifacts/tests/agent-terminal-input/20261111-macos-internal-r02/ShellSpan_2.5.0_arm64_internal_r02.dmg) · [SHA256SUMS](../../.artifacts/tests/agent-terminal-input/20261111-macos-internal-r02/SHA256SUMS) · [双 Shell 验收与修复](../../.artifacts/tests/agent-terminal-input/20261111-macos-internal-r02/REPORT.md) |
 | R03 | [DMG](../../.artifacts/tests/agent-terminal-input/20261111-macos-internal-r03/ShellSpan_2.5.0_arm64_internal_r03.dmg) · [SHA256SUMS](../../.artifacts/tests/agent-terminal-input/20261111-macos-internal-r03/SHA256SUMS) · [离线重建差异和实机复验](../../.artifacts/tests/agent-terminal-input/20261112-macos-r02-followup/REPORT.md) |
-| R04（当前内测交付） | [DMG](../../.artifacts/tests/agent-terminal-input/20261112-macos-internal-r04/ShellSpan_2.5.0_arm64_internal_r04.dmg) · [SHA256SUMS](../../.artifacts/tests/agent-terminal-input/20261112-macos-internal-r04/SHA256SUMS) · [逐项结论、原失败及复验](../../.artifacts/tests/agent-terminal-input/20261112-macos-r02-followup/REPORT.md) · [源码与制品核对](../../.artifacts/tests/agent-terminal-input/20261112-macos-r02-followup/r04-current-source-package-audit.json) |
+| R04（历史内测交付） | 原报告、DMG 及逐案原件缺失。 [现存差异审计](../../.artifacts/tests/agent-terminal-input/20261113-ram-signing-preflight/sealed-inputs-audit-20.json) · [缺失路径登记](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/source-path-loss-and-restage.json) |
 
 需要复验时，用 `pnpm native:prepare --acceptance` 准备资源，用 `node scripts/native-input-p2/matrix.mjs --local-only --list-cases` 核对 Bash 本地六项。真实 PTY 回归使用 Rust `native_production_` 测试组，实际 App 用例使用[现有实机入口](../../scripts/verify-ai-session-stream.mjs)。完整要求与取证规则见[统一验收标准](agent-terminal-input-acceptance-checklist.md)。
+
+候选 42 的本地签名 App 实测 Bash 与 ZLE 四代重绑、旧传输迟到输出隔离和待解析输出时销毁控制器，共 6/6。逐案保留窗口原图、源码与签名摘要、实际 PTY 及正常退出记录。 [本地重绑与销毁审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/candidate42-local-lifecycle-audit.json)
+
+B08 的本地签名 App 补验通过目录占用、符号链接拒绝 4/4，以及同数据目录重启 2/2。重启后真实文件工具读回原路径与字节，恢复原所有权，重新审批并在新 PTY 各接受一次，账本均匹配结算。 [文件链逐案审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/local-scratch-audit.json)
+
+B02 实际 WKWebView 减弱动态效果 2/2。C06 签名 App 控制通道启动 10/10、真实 Shell 私有通道合包和顺序回归 12/12。D03 本地签名 App 系统拖选和复制 12/12，另通过系统剪贴板超时恢复。E05 的 ZLE 真实 SSH 窗口前后台焦点切换已通过，Bash 仍需同轮 App 与独立系统观察器回执，物理接管仍待现场。 [控制通道与减弱动态审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/local-wire-motion-audit.json) · [合包审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/candidate51-wire-coalesced/audit.json) · [系统复制审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/system-selection-audit.json)
 
 ## Linux SSH/SFTP 实施方案
 
 本节在用户明确恢复 Linux SSH/SFTP 验收后执行。目标是 macOS arm64 客户端的实际 ShellSpan App 连接受控 Linux aarch64／glibc 2.36 主机。分别验收 Bash 5.3／Readline 8.3.6 和私有 Zsh 5.9／ZLE 5.9。`2aaaaf75` 的资源、真实 PTY 和浏览器证据保留原范围。恢复后选定最新候选并核对源码、依赖和资源差异，再确定可引用的旧证据与需要重跑的条款。
 
 2026-11-13 本机续验从 `2e76d274` 加工作区开始。最终重建资源的 Bash `5.3/ssh/lifecycle`、双 Shell 前后切点的独立 relay EOF、真实 App 崩溃及同数据根重启均通过。十种历史配置、普通输入与 TUI、无 SFTP、未知 Main、后台作业及真实文件链分别留有签名 App 原始回执。首次失败与新身份复验分别留存。 [本批报告](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/REPORT.md) · [余项清单](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/CHECKLIST.md)
+
+在 `2dafc497` 复核候选 42 时，两种 Shell 的回环 SSH 签名 App 用例各 48 项，最新结果共 96/96。最后一批接受前后断线及超时、接受前取消和历史配置复验 20/20。两种正式打包资源均通过独立签名 App 冒烟。现场减弱动态、系统剪贴板、前后台焦点和人工接管的操作与取证条件另见交接。 [当前续验报告](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/REPORT.md) · [逐案覆盖审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/ssh-case-coverage.json) · [人工交接](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/MANUAL-HANDOFF.md)
 
 ZLE 的初始 `ZDOTDIR` 已修正并在两种实际 OpenSSH 环境、五种签名 App 历史配置中复验。候选 17 使用归属明确的临时 RAM 卷完成签名与链接，复验新采显示流、本地真实 PTY 和协议、前端与全功能 Rust。R04 本地 63 项继续保留原候选范围。当前候选的本地定向证据、剩余人工、模型和发布条件均单列。 [本机质量与差异审计](../../.artifacts/tests/agent-terminal-input/20261113-ram-signing-preflight/REPORT.md)
 
@@ -42,7 +50,7 @@ ZLE 的初始 `ZDOTDIR` 已修正并在两种实际 OpenSSH 环境、五种签�
 
 候选 25 的无模型本地文件链 2/2、真实 PTY 历史复验 7/7。候选 27 双 Shell 通过回环 SSH 接受前接管，实际 WKWebView 2/2，真实 PTY 的浏览器回放 8/8。候选 28 双 Shell 回环 SSH 运行中停止、取消及接管共 6/6，均观察一次实际接受、同身份开始和结算、退出 130 与单次文件效果。其余 SSH 控制切点、争用、委派和关闭按统一清单继续执行。 [SSH 运行中审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/candidate28-controls-audit.json) · [统一余项](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/CHECKLIST.md)
 
-候选 30 已完成双 Shell 五个 SSH 控制切点 30/30，候选 32 争用、关闭运行终端、委派 6/6，候选 33 本地签名历史和作业 12/12。当前资源目录布局下，候选 37 四套资源重建和打包、双 Shell SSH 重点复验 14/14、真实 WKWebView 与浏览器回放均已通过。候选 39 修正隔离 SSH 测试驱动等待真实提示符，复验 17/17。R04 原报告、制品目录和部分旧回执仍需从备份恢复。现场系统操作及其他余项按统一清单执行。 [本机续验报告](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/REPORT.md)
+候选 30 已完成双 Shell 五个 SSH 控制切点 30/30，候选 32 争用、关闭运行终端、委派 6/6，候选 33 本地签名历史和作业 12/12。当前资源目录布局下，候选 37 四套资源重建和打包、双 Shell SSH 重点复验 14/14、真实 WKWebView 与浏览器回放均已通过。候选 39 修正隔离 SSH 测试驱动等待真实提示符，复验 17/17。R04 原报告、制品及部分旧封存和账本已不存在，历史结论按现存审计引用。现场系统操作及其他余项按统一清单执行。 [本机续验报告](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/REPORT.md)
 
 | 顺序 | 工作 | 完成条件 |
 | --- | --- | --- |
@@ -88,7 +96,7 @@ ZLE 的初始 `ZDOTDIR` 已修正并在两种实际 OpenSSH 环境、五种签�
 
 ## 实施顺序
 
-1. **macOS 本地验收已完成，交付 R04 内测包。** 本轮范围及证据见 [macOS 本地验收](#macos-arm64-本地验收)与 [本地验收报告](../../.artifacts/tests/agent-terminal-input/20261112-macos-r02-followup/REPORT.md)。
+1. **R04 内测包已交付。** 历史范围见 [macOS 本地验收](#macos-arm64-本地验收)，当前候选的复验结果见 [本机续验报告](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/REPORT.md)。
 2. **Linux SSH/SFTP 本批传输和 ZLE 无模型故障已通过，Windows 实机继续暂停。** 其余场景按各自候选、环境与授权继续。
 
    | 平台 | 先做 | 完成条件 |

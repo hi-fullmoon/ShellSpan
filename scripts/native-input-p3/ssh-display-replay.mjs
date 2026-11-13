@@ -20,13 +20,16 @@ const hash = value => createHash('sha256').update(value).digest('hex');
 const evidence = JSON.parse(bytes);
 assert(evidence.case === 'display-geometry' && evidence.modelCalls === 0 && evidence.sessions.length === 2);
 assert(evidence.records.selection.length === 3 && evidence.records.narrow.cols < evidence.records.wide.cols);
-const events = evidence.timeline.filter(row => ['parsed', 'render-resize', 'rebound', 'transport-closed'].includes(row.stage));
+const historyStages = ['history-selection-parked', 'history-background-checked', 'history-bottom-checked'];
+const events = evidence.timeline.filter(row => ['parsed', 'render-resize', 'rebound', 'transport-closed', ...historyStages].includes(row.stage));
 assert(events.some(row => row.stage === 'rebound') && events.filter(row => row.stage === 'render-resize').length === 2);
 assert(events.filter(row => row.stage === 'parsed').every(row => row.matchesWrite && typeof row.data === 'string'));
 const wire = evidence.trace.filter(row => row.event === 'ssh-pty-read');
 assert(wire.length && new Set(wire.map(row => row.details.sessionId)).size === 2);
 const wireBytes = Buffer.concat(wire.map(row => Buffer.from(row.details.hex, 'hex')));
 assert(wireBytes.includes(Buffer.from('SSH_BACKGROUND_END')) && wireBytes.includes(Buffer.from('SSH_DISPLAY_SUCCESSOR')));
+const retainedSelection = evidence.records.parkedAfterOutput !== undefined;
+if (retainedSelection) assert.deepEqual(events.filter(row => historyStages.includes(row.stage)).map(row => row.stage), historyStages);
 const runtime = await installedRuntimeManifest();
 const output = resolve(root, '.artifacts/tests/native-input-p3/ssh-display-replay', randomUUID());
 await mkdir(output, { recursive: true, mode: 0o700 });
@@ -60,7 +63,7 @@ try {
         const page = await browser.newPage({ viewport: { width: 1400, height: 750 } });
         try {
           await page.goto(`http://127.0.0.1:${server.address().port}`);
-          const observed = await page.evaluate(async ({ events, renderer, records }) => {
+          const observed = await page.evaluate(async ({ events, renderer, records, retainedSelection }) => {
             const { attachNativeInputDisplay, NATIVE_INPUT_DISPLAY } = await import('/display.js');
             const terminal = new Terminal({ cols: 100, rows: 30, scrollback: 2000, reflowCursorLine: false });
             terminal.open(document.querySelector('#surface'));
@@ -73,23 +76,45 @@ try {
             const emitted = [], geometry = [];
             terminal.onData(value => emitted.push(value));
             let display = attachNativeInputDisplay(terminal, NATIVE_INPUT_DISPLAY);
-            let parked = false, wrapped = false;
+            let parked = false, wrapped = false, parkedWide, backgroundStayedParked = false, followedBottom = false;
             const copy = () => { terminal.selectAll(); const value = terminal.getSelection().replaceAll('\r\n', '\n'); terminal.clearSelection(); return value; };
             for (const row of events) {
               if (row.stage === 'parsed') await new Promise(done => terminal.write(row.data, done));
               else if (row.stage === 'rebound') { display.dispose(); display = attachNativeInputDisplay(terminal, NATIVE_INPUT_DISPLAY); }
               else if (row.stage === 'transport-closed') await display.closeAfterPendingOutput();
-              else if (row.stage === 'render-resize') {
+              else if (row.stage === 'history-selection-parked') {
+                const buffer = terminal.buffer.normal;
+                wrapped = Array.from({ length: buffer.length }, (_, i) => buffer.getLine(i)).some(line => line?.isWrapped);
+                terminal.scrollToTop();
+                if (!search.findNext(records.soft) || terminal.getSelection() !== records.soft || buffer.viewportY >= buffer.baseY) {
+                  throw new Error('Actual SSH capture did not establish the parked selection in the browser');
+                }
+              } else if (row.stage === 'history-background-checked') {
+                const buffer = terminal.buffer.normal;
+                backgroundStayedParked = buffer.viewportY === parkedWide?.viewportY && buffer.viewportY < buffer.baseY
+                  && terminal.getSelection() === records.soft
+                  && JSON.stringify(terminal.getSelectionPosition()) === parkedWide?.selection;
+                terminal.clearSelection();
+                terminal.scrollToBottom();
+              } else if (row.stage === 'history-bottom-checked') {
+                followedBottom = terminal.buffer.normal.viewportY === terminal.buffer.normal.baseY;
+              } else if (row.stage === 'render-resize') {
                 if (row.label === 'wide-parked') {
-                  const buffer = terminal.buffer.normal;
-                  wrapped = Array.from({ length: buffer.length }, (_, i) => buffer.getLine(i)).some(line => line?.isWrapped);
-                  if (!copy().includes(records.soft)) throw new Error('Actual SSH narrow soft line did not copy as one logical line');
-                  terminal.scrollToTop();
+                  if (!retainedSelection) {
+                    const buffer = terminal.buffer.normal;
+                    wrapped = Array.from({ length: buffer.length }, (_, i) => buffer.getLine(i)).some(line => line?.isWrapped);
+                    if (!copy().includes(records.soft)) throw new Error('Actual SSH narrow soft line did not copy as one logical line');
+                    terminal.scrollToTop();
+                  }
                 }
                 terminal.resize(row.cols, row.rows);
                 if (row.label === 'wide-parked') {
                   parked = terminal.buffer.normal.viewportY < terminal.buffer.normal.baseY;
-                  terminal.scrollToBottom();
+                  if (retainedSelection) {
+                    const anchors = terminal.getSelectionPosition();
+                    if (!anchors || terminal.getSelection() !== records.soft) throw new Error('Browser reflow changed the selected SSH logical line');
+                    parkedWide = { viewportY: terminal.buffer.normal.viewportY, selection: JSON.stringify(anchors) };
+                  } else terminal.scrollToBottom();
                 }
                 geometry.push([terminal.cols, terminal.rows]);
               }
@@ -114,11 +139,11 @@ try {
             if (!target) throw new Error('Actual successor line is not visible for pointer selection');
             window.sshReplayTerminal = terminal;
             const facts = { canvases, geometry, wrapped, parked, found, restored, preservedApis, emitted: emitted.length, target,
-              softCopy: final.includes(records.soft), hardCopy: final.includes(records.hard),
+              backgroundStayedParked, followedBottom, softCopy: final.includes(records.soft), hardCopy: final.includes(records.hard),
               background: final.includes('SSH_BACKGROUND_END'), successor: final.includes('SSH_DISPLAY_SUCCESSOR') };
             display.dispose();
             return facts;
-          }, { events, renderer, records: evidence.records });
+          }, { events, renderer, records: evidence.records, retainedSelection });
           const { start, end, y, expected } = observed.target;
           const selections = [];
           for (const [from, to] of [[start, end], [end, start]]) {
@@ -132,6 +157,7 @@ try {
           observed.pointerSelection = { forward: selections[0], reverse: selections[1], expected };
           const ok = observed.wrapped && observed.parked && observed.found && observed.restored && observed.preservedApis
             && observed.softCopy && observed.hardCopy && observed.background && observed.successor && observed.emitted === 0
+            && (!retainedSelection || observed.backgroundStayedParked && observed.followedBottom)
             && selections.every(text => text === expected);
           await page.screenshot({ path: resolve(output, `${engine}-${renderer}.png`) });
           results.push({ engine, renderer, browserVersion: browser.version(), status: ok ? 'pass' : 'fail', observed });

@@ -158,8 +158,14 @@ impl AgentRuntime {
             return Err("ACCEPTANCE_EXACT_TOOL_ARGUMENT_REQUIRED".into());
         }
         const FILE_NAME: &str = "phase3-scratch.sh";
-        let file_chain =
-            (ssh && scenario == "positive-file-chain") || (!ssh && scenario == "local-file-chain");
+        let file_chain = (ssh && scenario == "positive-file-chain")
+            || (!ssh
+                && matches!(
+                    scenario.as_str(),
+                    "local-file-chain" | "local-file-restart-prepare" | "local-file-restart-verify"
+                ));
+        let ownership_write =
+            !ssh && scenario == "local-file-ownership" && source_kind == "file-write";
         let file_content = if ssh {
             "[[ $PWD == \"$HOME/phase3-parent\" && $PHASE3_PARENT == parent-env && $(phase3_parent_fn) == parent-function ]] || return 31\nprintf '%s\\n' FILE_ONCE >> \"$HOME/phase3-ssh-effects\"\n"
         } else {
@@ -208,7 +214,7 @@ impl AgentRuntime {
                 }
                 String::new()
             }
-            "file-write" | "file-read" if file_chain => String::new(),
+            "file-write" | "file-read" if file_chain || ownership_write => String::new(),
             "file-run" if file_chain => {
                 let path = tool_argument.ok_or("ACCEPTANCE_ACTUAL_READBACK_PATH_REQUIRED")?;
                 let from_readback = self.sessions.all_events(session_id)?.iter().any(|event| {

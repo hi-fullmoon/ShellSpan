@@ -189,6 +189,9 @@ assert(!displayAuto||process.platform==='win32'&&process.arch==='x64'&&p3Startup
   '--native-input-p3-display-auto requires an isolated scheduled Windows startup display case without model or other modes');
 const nativeManual=values['native-terminal-manual'];
 const nativeDaily=macDailyAcceptance(values);
+const macSelectionTimeoutProbe=process.env.SHELLSPAN_ACCEPTANCE_SYSTEM_SELECTION_TIMEOUT_PROBE;
+assert(macSelectionTimeoutProbe===undefined||macSelectionTimeoutProbe==='1'&&nativeDaily?.startsWith('system-selection-'),
+ 'Clipboard timeout probe requires an isolated macOS system selection run');
 const phase3Human=nativeDaily?.startsWith('submission-')&&process.env.SHELLSPAN_ACCEPTANCE_SUBMISSION_SCENARIO==='human-phase3';
 const nativeHuman=nativeDaily?.startsWith('human-');let humanPhase='waiting',humanStartedAt;
 const nativeManualForm=values['native-terminal-manual-form'];
@@ -213,6 +216,12 @@ assert(!p3Startup||values['no-model']&&values['data-scope']==='com.shellspan.val
 assert(!values['native-input-p3-review']||nativeManual||p3Startup||values['native-input-p3-submit-fault']||values['native-input-p2-lifecycle']&&values['native-input-p3']==='powerShell7');
 const nativeP3=values['native-input-p3']??p3Startup;
 const sshRecovery=requireSshRecoveryRunner(values);
+const manualSshFocus=process.env.SHELLSPAN_ACCEPTANCE_MANUAL_SSH_FOCUS;
+const manualSshTakeover=process.env.SHELLSPAN_ACCEPTANCE_MANUAL_SSH_TAKEOVER;
+assert(manualSshFocus===undefined||manualSshFocus==='1'&&sshRecovery==='display-geometry',
+ 'Manual SSH focus requires the isolated display-geometry case');
+assert(manualSshTakeover===undefined||['1','system-input'].includes(manualSshTakeover)&&['before-key-takeover','running-takeover'].includes(sshRecovery),
+ 'Manual SSH takeover requires the isolated takeover case');
 assert(!values['native-input-p3-ssh-recovery-fixture']||sshRecovery,'Select one native SSH case');
 assert(!sshRecovery||process.platform==='darwin'&&process.arch==='arm64','Native SSH acceptance requires actual macOS arm64');
 const bashSsh=Boolean(sshRecovery&&values['native-input-p2']);
@@ -1272,6 +1281,9 @@ try {
     sshRecoveryForwarder=await openSshRecoveryForwarder(sshRecoveryFixture);
     const fingerprint=Buffer.from(sshRecoveryFixture.hostKeySha256,'hex').toString('base64').replace(/=+$/,'');
     url.searchParams.set('zleSshRecovery',sshRecovery);
+    if(manualSshFocus)url.searchParams.set('manualSshFocus','true');
+    if(manualSshTakeover)url.searchParams.set('manualSshTakeover','true');
+    if(manualSshTakeover==='system-input')url.searchParams.set('sshTakeoverSystemInput','true');
     if(bashSsh)url.searchParams.set('bashSsh','true');
     url.searchParams.set('nativeP2SshPort',String(sshRecoveryForwarder.port));
     url.searchParams.set('hostFingerprint',`ED25519 SHA256:${fingerprint}`);
@@ -1291,6 +1303,7 @@ try {
   if(fileRestartExecute)url.searchParams.set('fileRestartExecute','true');
   if(macLocalLifecycle)url.searchParams.set('nativeLocalLifecycle','true');
   if(nativeDaily)url.searchParams.set('macDaily',nativeDaily);
+  if(macSelectionTimeoutProbe)url.searchParams.set('macSelectionTimeoutProbe','true');
   if(nativeDaily?.startsWith('raw-')||nativeDaily?.startsWith('toast-')||nativeDaily?.startsWith('full-')||nativeDaily?.startsWith('submission-'))url.searchParams.set('caseHome',resolve(ownedEvidenceDirectory,'home'));
   if(macLateLifecycle)url.searchParams.set('nativeLocalLifecycleLate','true');
   if(macDisposeLifecycle)url.searchParams.set('nativeLocalLifecycleDispose','true');

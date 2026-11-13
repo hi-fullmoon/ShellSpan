@@ -82,6 +82,19 @@ async function runCase(root, id, fixture, mountedEvidence = false) {
     SHELLSPAN_ACCEPTANCE_EVIDENCE_DIR: directory, SHELLSPAN_P2_CREDENTIAL_REFERENCE: reference,
     SHELLSPAN_DEV_SIGNING_KEYCHAIN: resolve(process.env.HOME, 'Library/Keychains/login.keychain-db'),
   };
+  const manualModes = {
+    SHELLSPAN_ACCEPTANCE_MANUAL_SSH_FOCUS: ['display-geometry'],
+    SHELLSPAN_ACCEPTANCE_MANUAL_SSH_TAKEOVER: ['before-key-takeover', 'running-takeover'],
+  };
+  const manualEnvironment = {};
+  for (const [key, cases] of Object.entries(manualModes)) {
+    if (process.env[key] !== undefined) {
+      const mode = process.env[key];
+      assert(cases.includes(id) && (mode === '1' || key === 'SHELLSPAN_ACCEPTANCE_MANUAL_SSH_TAKEOVER' && mode === 'system-input'));
+      manualEnvironment[key] = mode;
+    }
+    delete environment[key];
+  }
   for (const key of Object.keys(environment)) {
     if (key.startsWith('SHELLSPAN_ACCEPTANCE_SUBMISSION') || ['SHELLSPAN_ACCEPTANCE_CONTROL_TRACE', 'SHELLSPAN_ACCEPTANCE_REPEAT_COMMIT', 'SHELLSPAN_ACCEPTANCE_RAW_PTY', 'SHELLSPAN_ACCEPTANCE_SSH_RECOVERY'].includes(key)) delete environment[key];
   }
@@ -149,7 +162,7 @@ async function runCase(root, id, fixture, mountedEvidence = false) {
     provisionZlePeerPassword(fixture, password);
     provisioningAttempted = true;
     await run('initialize', [...initialization, 'provision'], { reference, password });
-    await run('application', appArgs(id), undefined, crash ? 1 : 0, applicationEnvironment);
+    await run('application', appArgs(id), undefined, crash ? 1 : 0, { ...applicationEnvironment, ...manualEnvironment });
     if (crash) {
       const signal = read('ssh-crash-signal'), original = read('native-webview-evidence');
       assert(signal.syscallAccepted && signal.signal === 'SIGKILL' && signal.pid === original.records.cut.pid);

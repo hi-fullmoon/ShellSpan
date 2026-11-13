@@ -119,7 +119,11 @@ export async function macLifecycleCapture(token:string,{parsedOutputOrder=false,
     } else {
      assert(actual.wireDecoded===actual.decoded,'Independent full transport/standard decoder differ');
     }
-    const prefix=controllerOutput.get(id)??'';assert(actual.decoded.startsWith(prefix),'Production controller output differs from its actual transport prefix');
+    const controllerBytes=controllerOutput.get(id)??'';
+    const current=!retired.has(id);
+    const lateStartup=startupOutputMayPrecedeSubscription&&current;
+    if(lateStartup)assert(controllerBytes.length>0&&actual.decoded.endsWith(controllerBytes),'Subscribed controller output differs from the actual transport suffix');
+    else assert(actual.decoded.startsWith(controllerBytes),'Production controller output differs from its actual transport prefix');
     const frames=brokerFrames.filter(event=>event.transportSessionId===id),data:number[]=[];let next=1,offset=0;
     for(const event of frames){const frame=event.frame;assert(frame.protocolVersion===1&&frame.type==='rawOutput'&&frame.terminalSessionId===session.terminalSessionId&&frame.terminalGeneration===session.terminalGeneration&&frame.sequence===next++&&frame.byteOffset===offset,'Broker actual identity/sequence/offset differs');data.push(...frame.bytes);offset+=frame.bytes.length;}
     assert(data.length<=actual.bytes.length&&data.every((byte,index)=>byte===actual.bytes[index]),'Broker capture is not the exact actual pre-Broker wire prefix');
@@ -128,9 +132,10 @@ export async function macLifecycleCapture(token:string,{parsedOutputOrder=false,
      assert(metadata.available&&!metadata.value.open&&!metadata.value.captureTruncated,'Current actual Broker capture is not complete');
      assert(metadata.value.dataStoreIdentifier?.map(value=>value.toString(16).padStart(2,'0')).join('')===token.replace(/-/g,''),'Actual lifecycle WebKit store identity differs');
      assert(offset===actual.byteCount&&offset===metadata.value.nextByteOffset&&frames.length===metadata.value.capturedFrameCount,'Current full Broker/actual wire boundary differs');
-     assert(prefix===actual.decoded,'Current production controller omitted final decoded bytes');
+     if(!lateStartup)assert(controllerBytes===actual.decoded,'Current production controller omitted final decoded bytes');
     }
-    transports.push({sessionId:id,retired:retired.has(id),wireFrames:actual.frameCount,wireBytes:actual.byteCount,brokerPrefixFrames:frames.length,brokerPrefixBytes:offset,controllerPrefixCharacters:prefix.length,wireComplete:true,fullBrokerClaim:!retired.has(id),metadata,
+    transports.push({sessionId:id,retired:retired.has(id),wireFrames:actual.frameCount,wireBytes:actual.byteCount,brokerPrefixFrames:frames.length,brokerPrefixBytes:offset,controllerPrefixCharacters:controllerBytes.length,wireComplete:true,fullBrokerClaim:current,metadata,
+     ...(lateStartup?{controllerDecodedStartCharacter:actual.wireDecoded.length-controllerBytes.length,controllerDisplayComplete:actual.wireDecoded===controllerBytes}:{}),
      ...(startupOutputMayPrecedeSubscription ? {legacyDecodedStartCharacter:actual.wireDecoded.length-actual.decoded.length,legacyDisplayComplete:actual.wireDecoded===actual.decoded} : {})});
    }
    assertPublic();assert(trace.snapshot(visible).replayable,'Actual lifecycle display order is not replayable');assert(issues.length===0,issues.join('; '));finished=true;

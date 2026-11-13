@@ -116,7 +116,8 @@ export function attachMacDailyCheckpoints(server,token,directory,startObservatio
    const chunks=[];let length=0;for await(const chunk of request){length+=chunk.length;assert(length<=8*1024*1024,'Human snapshot exceeds bound');chunks.push(chunk);}
    const bytes=Buffer.concat(chunks),value=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));
    assert(value.kind==='mac-human-capture-snapshot'&&value.token===token&&value.label===label,'Mismatched human snapshot identity');
-   const file=resolve(directory,'human-snapshot-'+label+'.json');await writeFile(file,bytes,{flag:'wx',mode:0o600});archived.add(label);
+   const prefix=options.snapshotPrefix??'human-snapshot-';
+   const file=resolve(directory,prefix+label+'.json');await writeFile(file,bytes,{flag:'wx',mode:0o600});archived.add(label);
    response.setHeader('Content-Type','application/json');response.end(JSON.stringify({file,bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex'),humanReceipt:false,scope:'Retained client checkpoint bytes only. Capture identity, sequence, completeness and visual evidence require separate verification; this endpoint grants no completion authority.'}));
   })().catch(error=>response.writeHead(500).end(String(error)));
  });
