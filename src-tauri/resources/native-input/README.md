@@ -1,7 +1,7 @@
 # Native Bash resources
 
 `pnpm native:prepare` builds the host's Bash 5.3 / Readline 8.3.6 release profile and stages
-verified resources in `.artifacts/releases/native-input/generated/` at the repository
+verified resources in `src-tauri/target/native-input/generated/` at the repository
 root. Preparation logs, staging and retained prior output are in the sibling
 `resource-build/` directory and are not bundled. `--with-ssh` also builds the Linux aarch64
 glibc 2.36 targets in the pinned Docker environment. CI imports that target's

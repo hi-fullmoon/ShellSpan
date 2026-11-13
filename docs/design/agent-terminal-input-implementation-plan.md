@@ -17,12 +17,12 @@ R04 已收口。Zsh 5.9／ZLE 5.9 与 Bash 5.3／Readline 8.3.6 本轮适用条�
 
 | 批次 | 制品与记录 |
 | --- | --- |
-| R01 | [DMG](../../.artifacts/releases/macos-native-input/20261111-r01/ShellSpan_2.5.0_arm64_internal_r01.dmg) · [双 Shell 基线报告](../../.artifacts/tests/agent-terminal-input/20261111-macos-internal-r01/REPORT.md) |
-| R02 | [DMG](../../.artifacts/releases/macos-native-input/20261111-r02/ShellSpan_2.5.0_arm64_internal_r02.dmg) · [SHA256SUMS](../../.artifacts/releases/macos-native-input/20261111-r02/SHA256SUMS) · [双 Shell 验收与修复](../../.artifacts/tests/agent-terminal-input/20261111-macos-internal-r02/REPORT.md) |
-| R03 | [DMG](../../.artifacts/releases/macos-native-input/20261112-r03/ShellSpan_2.5.0_arm64_internal_r03.dmg) · [SHA256SUMS](../../.artifacts/releases/macos-native-input/20261112-r03/SHA256SUMS) · [离线重建差异和实机复验](../../.artifacts/tests/agent-terminal-input/20261112-macos-r02-followup/REPORT.md) |
-| R04（当前内测交付） | [DMG](../../.artifacts/releases/macos-native-input/20261112-r04/ShellSpan_2.5.0_arm64_internal_r04.dmg) · [SHA256SUMS](../../.artifacts/releases/macos-native-input/20261112-r04/SHA256SUMS) · [逐项结论、原失败及复验](../../.artifacts/tests/agent-terminal-input/20261112-macos-r02-followup/REPORT.md) · [源码与制品核对](../../.artifacts/tests/agent-terminal-input/20261112-macos-r02-followup/r04-current-source-package-audit.json) |
+| R01 | [DMG](../../.artifacts/tests/agent-terminal-input/20261111-macos-internal-r01/ShellSpan_2.5.0_arm64_internal_r01.dmg) · [双 Shell 基线报告](../../.artifacts/tests/agent-terminal-input/20261111-macos-internal-r01/REPORT.md) |
+| R02 | [DMG](../../.artifacts/tests/agent-terminal-input/20261111-macos-internal-r02/ShellSpan_2.5.0_arm64_internal_r02.dmg) · [SHA256SUMS](../../.artifacts/tests/agent-terminal-input/20261111-macos-internal-r02/SHA256SUMS) · [双 Shell 验收与修复](../../.artifacts/tests/agent-terminal-input/20261111-macos-internal-r02/REPORT.md) |
+| R03 | [DMG](../../.artifacts/tests/agent-terminal-input/20261111-macos-internal-r03/ShellSpan_2.5.0_arm64_internal_r03.dmg) · [SHA256SUMS](../../.artifacts/tests/agent-terminal-input/20261111-macos-internal-r03/SHA256SUMS) · [离线重建差异和实机复验](../../.artifacts/tests/agent-terminal-input/20261112-macos-r02-followup/REPORT.md) |
+| R04（当前内测交付） | [DMG](../../.artifacts/tests/agent-terminal-input/20261112-macos-internal-r04/ShellSpan_2.5.0_arm64_internal_r04.dmg) · [SHA256SUMS](../../.artifacts/tests/agent-terminal-input/20261112-macos-internal-r04/SHA256SUMS) · [逐项结论、原失败及复验](../../.artifacts/tests/agent-terminal-input/20261112-macos-r02-followup/REPORT.md) · [源码与制品核对](../../.artifacts/tests/agent-terminal-input/20261112-macos-r02-followup/r04-current-source-package-audit.json) |
 
-需要复验时，用 `pnpm native:prepare` 准备资源，用 `node scripts/native-input-p2/matrix.mjs --local-only --list-cases` 核对 Bash 本地六项。真实 PTY 回归使用 Rust `native_production_` 测试组，实际 App 用例使用[现有实机入口](../../scripts/verify-ai-session-stream.mjs)。完整要求与取证规则见[统一验收标准](agent-terminal-input-acceptance-checklist.md)。
+需要复验时，用 `pnpm native:prepare --acceptance` 准备资源，用 `node scripts/native-input-p2/matrix.mjs --local-only --list-cases` 核对 Bash 本地六项。真实 PTY 回归使用 Rust `native_production_` 测试组，实际 App 用例使用[现有实机入口](../../scripts/verify-ai-session-stream.mjs)。完整要求与取证规则见[统一验收标准](agent-terminal-input-acceptance-checklist.md)。
 
 ## Linux SSH/SFTP 实施方案
 
@@ -41,6 +41,8 @@ ZLE 的初始 `ZDOTDIR` 已修正并在两种实际 OpenSSH 环境、五种签�
 磁盘和 Docker 恢复后，前端全量与生产构建通过。候选 21 在匹配资源的封存目录通过 Rust 库 1,402 项及隔离传输 17/17，候选 22 主程序锁定检查、全功能 Clippy、集成 5/5 通过。候选 20 和 22 新增双 Shell 的 SSH 显式取消、复杂源码、错误资源摘要拒绝各 2/2，旧夹具已核对停止且端口已释放。 [本机续验报告](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/REPORT.md) · [逐案台账](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/attempts.json)
 
 候选 25 的无模型本地文件链 2/2、真实 PTY 历史复验 7/7。候选 27 双 Shell 通过回环 SSH 接受前接管，实际 WKWebView 2/2，真实 PTY 的浏览器回放 8/8。候选 28 双 Shell 回环 SSH 运行中停止、取消及接管共 6/6，均观察一次实际接受、同身份开始和结算、退出 130 与单次文件效果。其余 SSH 控制切点、争用、委派和关闭按统一清单继续执行。 [SSH 运行中审计](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/candidate28-controls-audit.json) · [统一余项](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/CHECKLIST.md)
+
+候选 30 已完成双 Shell 五个 SSH 控制切点 30/30，候选 32 争用、关闭运行终端、委派 6/6，候选 33 本地签名历史和作业 12/12。当前资源目录布局下，候选 37 四套资源重建和打包、双 Shell SSH 重点复验 14/14、真实 WKWebView 与浏览器回放均已通过。候选 39 修正隔离 SSH 测试驱动等待真实提示符，复验 17/17。R04 原报告、制品目录和部分旧回执仍需从备份恢复。现场系统操作及其他余项按统一清单执行。 [本机续验报告](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/REPORT.md)
 
 | 顺序 | 工作 | 完成条件 |
 | --- | --- | --- |
@@ -80,7 +82,7 @@ ZLE 的初始 `ZDOTDIR` 已修正并在两种实际 OpenSSH 环境、五种签�
 
 ### 2026-11-12 Windows 内测 R02
 
-独立批次 `wt5c1` 以 `e63021ea` 加两项修复重建原生资源和 NSIS，并在实际交互会话安装至 D 盘批次目录。三种 Shell 和真实模型单次执行通过。接管返回 `cancelled/notStarted`，随后 Enter 未执行清除的草稿，用户可以重新输入。运行中关闭与崩溃重启复验通过，7 项无模型 ConPTY 验证使用重建模块。[安装包](<../../.artifacts/releases/windows-wt5c1/ShellSpan Windows Internal wt5c1_2.5.0_x64-setup.exe>) · [SHA256SUMS](../../.artifacts/releases/windows-wt5c1/SHA256SUMS)
+独立批次 `wt5c1` 以 `e63021ea` 加两项修复重建原生资源和 NSIS，并在实际交互会话安装至 D 盘批次目录。三种 Shell 和真实模型单次执行通过。接管返回 `cancelled/notStarted`，随后 Enter 未执行清除的草稿，用户可以重新输入。运行中关闭与崩溃重启复验通过，7 项无模型 ConPTY 验证使用重建模块。[安装包](<../../.artifacts/tests/agent-terminal-input/windows-wt5c1/ShellSpan Windows Internal wt5c1_2.5.0_x64-setup.exe>) · [SHA256SUMS](../../.artifacts/tests/agent-terminal-input/windows-wt5c1/SHA256SUMS)
 
 实际 WebView2 完成宽窄切换、历史视口、正反向选择、组合换行复制、搜索和焦点验证。错误摘要、未知配置、未封存验证目录均拒绝原生能力，仍可在普通终端使用 Neovim。两批标准卸载和清理完成，保留未结算恢复账本及交付证据。完整统一清单的发布余项单独留档。[修复清单与 35 项验收记录](../../.artifacts/tests/agent-terminal-input/windows-wt5c1/REPORT.md)
 

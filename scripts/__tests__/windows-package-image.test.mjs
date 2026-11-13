@@ -36,8 +36,8 @@ it('keeps both native profile paths within NSIS limits without changing their id
  expect(()=>assertPackageResourcePaths(path.join(root,'long'.repeat(80)),install,profiles)).toThrow('MAX_PATH');
  expect(()=>assertPackageResourcePaths(root,install,['../escape'])).toThrow('Relative resource');
  const mapping=packageResourceMapping(root);
- expect(mapping['../.artifacts/releases/native-input/generated/']).toBeNull();
- expect(mapping[path.resolve(root,'.artifacts/releases/native-input/generated')+'/']).toBe('native-input/generated/');
+ expect(mapping['target/native-input/generated/']).toBeNull();
+ expect(mapping[path.resolve(root,'src-tauri/target/native-input/generated')+'/']).toBe('native-input/generated/');
 });
 
 it('binds explicit validation package markers only to owned source-context installations',()=>{

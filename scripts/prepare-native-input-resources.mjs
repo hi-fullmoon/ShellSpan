@@ -5,12 +5,12 @@ import {cp,mkdir,readdir,readFile,writeFile,rm,chmod,stat,rename} from 'node:fs/
 import {captureValidationSources} from './native-input-p2/frozen-validation.mjs';
 import {basename,resolve} from 'node:path';
 import {parseArgs} from 'node:util';
-import {nativeInputReleaseDirectory} from './native-input-p2/resource-paths.mjs';
+import {nativeInputBuildPath,nativeInputReleaseDirectory} from './native-input-p2/resource-paths.mjs';
 import {copyNativeRebuildSources} from './native-input-p2/rebuild-sources.mjs';
 import {bashProfileId,RELEASE_BASH_VERSION} from './native-input-p2/bash-profiles.mjs';
 
 const root=resolve(import.meta.dirname,'..');
-const {values}=parseArgs({options:{'no-build':{type:'boolean'},'with-ssh':{type:'boolean'},'require-ssh':{type:'boolean'},target:{type:'string'},'validation-editor':{type:'string',multiple:true}}});
+const {values}=parseArgs({options:{'no-build':{type:'boolean'},'with-ssh':{type:'boolean'},'require-ssh':{type:'boolean'},acceptance:{type:'boolean'},target:{type:'string'},'validation-editor':{type:'string',multiple:true}}});
 const target=values.target??(process.platform==='darwin'&&process.arch==='arm64'?'aarch64-apple-darwin':process.platform==='linux'&&process.arch==='arm64'?'aarch64-unknown-linux-gnu':process.platform==='win32'&&process.arch==='x64'?'x86_64-pc-windows-msvc':'unsupported');
 const editorTargetsByBuildTarget=new Map([
   ['aarch64-apple-darwin','macos-arm64'],
@@ -19,9 +19,10 @@ const editorTargetsByBuildTarget=new Map([
 ]);
 const editorTarget=editorTargetsByBuildTarget.get(target);
 const linuxEditorTarget=editorTargetsByBuildTarget.get('aarch64-unknown-linux-gnu');
-const sourceRoot=resolve(root,'.artifacts/tests/native-input-p2/resources/native-input');
 const validationTargets=values['validation-editor']??[];const validationOnly=validationTargets.length>0;
-const logDirectory=resolve(root,validationOnly?'.artifacts/tests/native-input-p3/resource-build':'.artifacts/releases/native-input/resource-build');await mkdir(logDirectory,{recursive:true,mode:0o700});
+const buildRoot=validationOnly||values.acceptance?'.artifacts/tests':nativeInputBuildPath;
+const sourceRoot=resolve(root,buildRoot,'native-input-p2/resources/native-input');
+const logDirectory=validationOnly?resolve(root,buildRoot,'native-input-p3/resource-build'):resolve(root,nativeInputBuildPath,'resource-build');await mkdir(logDirectory,{recursive:true,mode:0o700});
 assert(validationTargets.every(value=>[...editorTargetsByBuildTarget.values()].includes(value)));
 const policy=JSON.parse(await readFile(resolve(root,'protocol/agent/runtime/native-editor-admission.json'),'utf8'));assert.equal(policy.version,1);assert(Array.isArray(policy.productionProfiles));
 const productionProfilesFor=editor=>policy.productionProfiles.filter(id=>id.endsWith(`-${editor}-native`));
@@ -34,7 +35,7 @@ const runId=randomUUID(),generated=resolve(logDirectory,`staging-${runId}`);
 const destination=validationOnly?resolve(root,'.artifacts/tests/native-input-p3/validation-resources',runId,'native-input'):nativeInputReleaseDirectory(root);
 async function run(command,args,cwd=root){
   const log=await import('node:fs').then(fs=>fs.openSync(resolve(logDirectory,'prepare.log'),'a',0o600));
-  const child=spawn(command,args,{cwd,env:{...process.env,PYTHONDONTWRITEBYTECODE:'1'},stdio:['ignore',log,log]});
+  const child=spawn(command,args,{cwd,env:{...process.env,SHELLSPAN_NATIVE_BUILD_ROOT:buildRoot,PYTHONDONTWRITEBYTECODE:'1'},stdio:['ignore',log,log]});
   const code=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve);});
   (await import('node:fs')).closeSync(log);
   assert.equal(code,0,`${command} failed; see ${logDirectory}`);
@@ -50,7 +51,7 @@ if(!values['no-build']&&editorTarget&&(validationOnly?validationTargets.includes
 if(values['with-ssh']){
   assert(process.arch==='arm64','The accepted Linux dependency build requires an arm64 Docker host');
   await run('docker',['build','-t','shellspan-native-input-p2:local','-f','scripts/native-input-p2/Dockerfile','scripts/native-input-p2']);
-  const args=['run','--rm','-v',`${root}:/work`];
+  const args=['run','--rm','-e','SHELLSPAN_NATIVE_BUILD_ROOT','-v',`${root}:/work`];
   if(process.getuid)args.push('--user',`${process.getuid()}:${process.getgid()}`,'-e','CARGO_HOME=/tmp/cargo');
   await run('docker',[...args,'shellspan-native-input-p2:local','python3','-B','scripts/native-input-p2/build.py']);
   if(!validationOnly&&productionProfilesFor(linuxEditorTarget).length>0){
@@ -122,7 +123,7 @@ for(const name of editorNames){
     editorAllowed.push(id);
     if(profile.core){
       const pin=JSON.parse(await readFile(resolve(root,'scripts/dependency-builds/zsh/pin.json'),'utf8'));
-      const archive=resolve(root,`.artifacts/tests/native-input-p3/dependencies/zsh-${pin.version}.tar.xz`);assert.equal(sha(await readFile(archive)),pin.archiveSha256);
+      const archive=resolve(root,buildRoot,`native-input-p3/dependencies/zsh-${pin.version}.tar.xz`);assert.equal(sha(await readFile(archive)),pin.archiveSha256);
       await mkdir(resolve(generated,'sources/dependencies'),{recursive:true});await cp(archive,resolve(generated,`sources/dependencies/zsh-${pin.version}.tar.xz`));
     }
   }

@@ -196,7 +196,8 @@ describe('release publication gates', () => {
     const packageDownload = release.jobs.build.steps.find(step => step.uses?.startsWith('actions/download-artifact@'));
     expect(packageDownload.with).toEqual({ name: artifact, path: 'dist' });
     const publishDownload = release.jobs.release.steps.find(step => step.uses?.startsWith('actions/download-artifact@'));
-    expect(publishDownload.with).toEqual({ pattern: 'bundle-*', path: '.artifacts/releases/inputs' });
+    expect(publishDownload.with).toEqual({ pattern: 'bundle-*', path: 'src-tauri/target/releases/inputs' });
+    expect(JSON.stringify(release.jobs)).not.toContain('.artifacts/');
   });
 
   it('prepares the macOS shell fixtures before Rust tests and reuses the release ZLE build', async () => {
@@ -206,11 +207,14 @@ describe('release publication gates', () => {
     expect(strategy.matrix.include).toContainEqual({ platform: 'macos', runner: 'xcode-27' });
     expect(quality.on.workflow_call.inputs['macos-editor-artifact'].default).toBe('');
     const preparation = steps.slice(0, steps.findIndex(step => step.name === 'Run Agent terminal contract tests'));
-    expect(preparation.find(step => step.run === 'python3 -B scripts/native-input-p2/build.py --versions 5.3').if).toBe("runner.os == 'macOS'");
+    const buildBash = preparation.find(step => step.name === 'Build pinned Bash and Readline test resources');
+    expect(buildBash.if).toBe("runner.os == 'macOS'");
+    expect(buildBash.env.SHELLSPAN_NATIVE_BUILD_ROOT).toBe('.artifacts/tests');
     const build = preparation.find(step => step.name === 'Build pinned Zsh and ZLE test resources');
     const download = preparation.find(step => step.name === 'Download pinned Zsh and ZLE test resources');
     const restore = preparation.find(step => step.name === 'Restore executable permission on downloaded Zsh');
     expect(build.if).toBe("runner.os == 'macOS' && !inputs.macos-editor-artifact");
+    expect(build.env.SHELLSPAN_NATIVE_BUILD_ROOT).toBe('.artifacts/tests');
     expect(download.if).toBe("runner.os == 'macOS' && inputs.macos-editor-artifact");
     expect(download.with).toEqual({ name: '${{ inputs.macos-editor-artifact }}', path: '.artifacts/tests' });
     expect(preparation.indexOf(restore)).toBeGreaterThan(preparation.indexOf(download));
@@ -219,5 +223,10 @@ describe('release publication gates', () => {
     expect(producer.steps.map(step => step.run)).toContain(build.run);
     const upload = producer.steps.find(step => step.uses?.startsWith('actions/upload-artifact@'));
     expect(release.jobs.quality.with['macos-editor-artifact']).toBe(upload.with.name);
+    const buildRoot = 'src-tauri/target/native-input';
+    expect(producer.steps.find(step => step.run === build.run).env.SHELLSPAN_NATIVE_BUILD_ROOT).toBe(buildRoot);
+    expect(upload.with.path.trim().split('\n').every(path => path.startsWith(buildRoot + '/'))).toBe(true);
+    const releaseDownload = release.jobs.build.steps.find(step => step.with?.name === upload.with.name);
+    expect(releaseDownload.with.path).toBe(buildRoot);
   });
 });

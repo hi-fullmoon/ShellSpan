@@ -19,7 +19,7 @@ fn native_resource_mapping_preserves_release_layout_without_stale_sources_or_bui
     let directory = tempfile::tempdir_in(evidence).unwrap();
     let workspace = directory.path().join("workspace");
     let tauri = workspace.join("src-tauri");
-    let generated = workspace.join(".artifacts/releases/native-input/generated");
+    let generated = tauri.join("target/native-input/generated");
     fs::create_dir_all(tauri.join("resources/native-input/generated")).unwrap();
     fs::create_dir_all(&generated).unwrap();
     fs::write(tauri.join("resources/native-input/README.md"), b"notice").unwrap();
@@ -33,7 +33,7 @@ fn native_resource_mapping_preserves_release_layout_without_stale_sources_or_bui
     let configured: HashMap<String, String> =
         serde_json::from_value(config["bundle"]["resources"].clone()).unwrap();
     assert_eq!(
-        configured["../.artifacts/releases/native-input/generated/"],
+        configured["target/native-input/generated/"],
         format!("{BUNDLE_RESOURCE_DIRECTORY}/")
     );
     let resources: HashMap<String, String> = configured

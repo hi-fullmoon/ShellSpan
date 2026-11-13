@@ -14,7 +14,7 @@ const clean=resolve(directory,'ShellSpan');await cp(resolve(packaged,'sources/Sh
 const cache=resolve(clean,'.artifacts/tests/native-input-p0/upstream');await mkdir(cache,{recursive:true});
 for(const name of await readdir(resolve(packaged,'sources')))if(name.endsWith('.tar.gz')||/^readline83-\d+$/.test(name))await cp(resolve(packaged,'sources',name),resolve(cache,name));
 const log=openSync(resolve(directory,'build.log'),'wx',0o600);
-const child=spawn('python3',['-B','scripts/native-input-p2/build.py'],{cwd:clean,env:{...process.env,CARGO_NET_OFFLINE:'true',PYTHONDONTWRITEBYTECODE:'1'},stdio:['ignore',log,log]});
+const child=spawn('python3',['-B','scripts/native-input-p2/build.py'],{cwd:clean,env:{...process.env,SHELLSPAN_NATIVE_BUILD_ROOT:'.artifacts/tests',CARGO_NET_OFFLINE:'true',PYTHONDONTWRITEBYTECODE:'1'},stdio:['ignore',log,log]});
 const code=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve);});closeSync(log);
 await writeFile(resolve(directory,'result.json'),JSON.stringify({exitCode:code,sourceRoot:clean,scope:'Fresh packaged source tree, packaged GNU archives and Cargo vendor for the release Bash profile'},null,2));
 assert.equal(code,0,`Packaged-source reconstruction failed; ${directory}`);

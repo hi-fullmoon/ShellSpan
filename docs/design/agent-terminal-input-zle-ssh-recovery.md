@@ -6,6 +6,8 @@
 
 ZLE 启动读取 OpenSSH 执行父进程的初始 `ZDOTDIR`。未设置和显式指定均从真实 PTY 验证了 `.zshenv`、`.zprofile`、`.zshrc` 顺序。签名 App 的五项 ZLE 历史、无 SFTP、未知 Main、后台作业和真实文件链均通过。人工系统复制、焦点、实际接管和 E06 继续独立取证。 [启动对照](../../.artifacts/tests/agent-terminal-input/20261113-zle-ssh-startup-transport/REPORT.md) · [候选 17 的显示和质量](../../.artifacts/tests/agent-terminal-input/20261113-ram-signing-preflight/REPORT.md)
 
+候选 37 因重新构建后 Linux 模块摘要变化，用新夹具复验了实际 Zsh Main、Core、模块与 relay，四代重绑、接受前后控制 EOF、实际 App 崩溃及同数据根重启、WKWebView 与错误资源拒绝均通过。每次运行记录实际加载对象和 SFTP 回执。候选 39 隔离 SSH/SFTP 回归 17/17。 [当前回执](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/REPORT.md) · [逐案台账](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/attempts.json)
+
 候选 19 已完成 ZLE 本地正常提交及双 Shell 本地接受键前、后的实际 App 崩溃和同数据目录重启。Docker 恢复后已核验旧 Bash 夹具停止和 `61644` 释放。新回环夹具通过双 Shell 的接受键前显式取消、复杂源码及错误资源摘要拒绝，隔离传输再次通过 17/17。 [签名 App 和逐案回执](../../.artifacts/tests/agent-terminal-input/20261112-local-ssh-closeout/REPORT.md) · [本机续验](../../.artifacts/tests/agent-terminal-input/20261113-candidate20-local-resumption/REPORT.md)
 
 ## 源码和 Linux 资源

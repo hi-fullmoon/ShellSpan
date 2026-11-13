@@ -35,7 +35,7 @@
   "bundle": {
     "resources": {
       "resources/native-input/README.md": "native-input/README.md",
-      "../.artifacts/releases/native-input/generated/": "native-input/generated/"
+      "target/native-input/generated/": "native-input/generated/"
     },
     "active": true,
     "targets": "all",

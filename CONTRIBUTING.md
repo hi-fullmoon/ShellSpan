@@ -27,16 +27,16 @@ pnpm test
 
 ## Generated Artifacts
 
-Keep project-generated files under the ignored repository-root `.artifacts/`:
+- `.artifacts/tests/` holds test and acceptance output, including screenshots,
+  logs, isolated snapshots and acceptance installers.
+- `src-tauri/target/native-input/` holds generated native resources.
+- `src-tauri/target/dependencies/` holds dependency rebuild output.
+- `src-tauri/target/releases/` holds release inputs, Tauri overrides, staged
+  bundles and publication output.
 
-- `tests/`: test logs, screenshots, native resources and acceptance snapshots.
-- `releases/`: downloaded inputs, staged bundles and publication output.
-- `config/`: generated build configuration, including CI Tauri overrides.
-
-Vitest excludes the entire directory so archived source trees cannot be
-rediscovered as tests. Keep tool-managed `node_modules`, `dist` and Cargo `target`
-directories in their standard locations. Committed regression captures remain
-beside their tests; their historical provenance and raw bytes are unchanged.
+Git and Vitest exclude `.artifacts/` and `src-tauri/target/`. Keep tool-managed `node_modules`,
+`dist` and Cargo `target` in their standard locations. Committed regression
+captures remain beside their tests.
 
 ## Commit Guidelines
 

@@ -96,6 +96,7 @@ describe('generated artifact layout', () => {
   });
   it('ignores real copied test sources in Git, frozen inventories and Vitest discovery', async () => {
     expect(frontend.test.exclude).toContain('**/.artifacts/**');
+    expect(frontend.test.exclude).toContain('**/src-tauri/target/**');
     await withArtifactDirectory(async directory => {
       const before = captureValidationSources(root);
       const copiedTest = path.join(directory, 'copied-source.test.mjs');
@@ -129,9 +130,11 @@ describe('generated artifact layout', () => {
 
       const before = captureValidationSources(snapshot);
       expect(Object.keys(before)).toEqual(['.gitignore', source]);
-      const generated = '.artifacts/tests/copied-source.test.mjs';
-      await copyFile(path.join(root, 'scripts/__tests__/native-input-runner.test.mjs'), path.join(snapshot, generated));
-      expect(readValidationGit(snapshot, ['check-ignore', '--no-index', generated]).toString().trim()).toBe(generated);
+      for (const generated of ['.artifacts/tests/copied-source.test.mjs', 'src-tauri/target/native-input/copied-source.test.mjs']) {
+        await mkdir(path.dirname(path.join(snapshot, generated)), { recursive: true });
+        await copyFile(path.join(root, 'scripts/__tests__/native-input-runner.test.mjs'), path.join(snapshot, generated));
+        expect(readValidationGit(snapshot, ['check-ignore', '--no-index', generated]).toString().trim()).toBe(generated);
+      }
       expect(captureValidationSources(snapshot)).toEqual(before);
       expect(createHash('sha256').update(await readFile(index)).digest('hex')).toBe(indexSha256);
       expect(() => readValidationGit(snapshot, ['add', '.'])).toThrow('Only read-only validation Git commands are allowed');
@@ -149,24 +152,29 @@ describe('generated artifact layout', () => {
     });
   });
 
-  it('keeps CI resource transfers and release staging inside the shared artifact directory', async () => {
+  it('keeps CI resource transfers and release staging in the build directory', async () => {
     const workflow = parse(await readFile(path.join(root, '.github/workflows/release.yml'), 'utf8'));
     const nativeUpload = workflow.jobs['build-native-bash'].steps.find(step => step.with?.name === 'native-linux-bash');
     const nativeDownload = workflow.jobs.build.steps.find(step => step.with?.name === 'native-linux-bash');
-    expect(nativeUpload.with.path).toMatch(/^\.artifacts\/tests\//);
+    expect(nativeUpload.with.path).toBe('src-tauri/target/native-input/native-input-p2/resources/native-input');
     expect(nativeDownload.with.path).toBe(nativeUpload.with.path);
     expect(nativeUpload.with['include-hidden-files']).toBe(true);
 
     const editorUpload = workflow.jobs['build-native-macos-editor'].steps.find(step => step.with?.name === 'native-macos-editor');
     const editorDownload = workflow.jobs.build.steps.find(step => step.with?.name === editorUpload.with.name);
-    expect(editorDownload.with.path).toBe('.artifacts/tests');
+    expect(editorDownload.with.path).toBe('src-tauri/target/native-input');
     expect(editorUpload.with.path.trim().split('\n').every(entry => entry.startsWith(`${editorDownload.with.path}/`))).toBe(true);
     expect(editorUpload.with['include-hidden-files']).toBe(true);
+    const buildSteps = workflow.jobs.build.steps;
+    const cacheIndex = buildSteps.findIndex(step => step.name === 'Cache Rust build');
+    expect(cacheIndex).toBeGreaterThanOrEqual(0);
+    expect(buildSteps.indexOf(nativeDownload)).toBeGreaterThan(cacheIndex);
+    expect(buildSteps.indexOf(editorDownload)).toBeGreaterThan(cacheIndex);
 
     const bundleUpload = workflow.jobs.build.steps.find(step => step.name === 'Upload bundle artifact');
     const bundleDownload = workflow.jobs.release.steps.find(step => step.name === 'Download bundle artifacts');
-    expect(bundleUpload.with.path).toMatch(/^\.artifacts\/releases\//);
+    expect(bundleUpload.with.path).toBe('src-tauri/target/releases/staging');
     expect(bundleUpload.with['include-hidden-files']).toBe(true);
-    expect(bundleDownload.with.path).toMatch(/^\.artifacts\/releases\//);
+    expect(bundleDownload.with.path).toBe('src-tauri/target/releases/inputs');
   });
 });

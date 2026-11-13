@@ -98,7 +98,7 @@ impl Scenario {
                 "linux-aarch64-glibc-2.36"
             };
             let profile = crate::terminal_command::artifacts::read_catalogue(&resources, target)
-                .expect("build verified native Bash resources with scripts/native-input-p2/build.py --versions 5.3")
+                .expect("set SHELLSPAN_NATIVE_BUILD_ROOT=.artifacts/tests and run scripts/native-input-p2/build.py --versions 5.3")
                 .into_iter()
                 .find(|profile| profile.bash_version == "5.3")
                 .expect("verified GNU Bash 5.3 test profile");

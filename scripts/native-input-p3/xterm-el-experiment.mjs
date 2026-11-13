@@ -19,7 +19,7 @@ if(action==='prepare'){
  run('tar',['-xzf',archive,'--strip-components=1','-C',source],owner,resolve(directory,'extract.log'));
  for(const[path,expected]of Object.entries(pin.patches)){assert.equal(hash(resolve(owner,path)),expected);run('patch',['--batch','--fuzz=0','-p1','-i',resolve(owner,path)],source,resolve(directory,`${path.split('/').at(-1)}.log`));}
  assert.equal(hash(resolve(source,'package-lock.json')),pin.upstreamLockSha256);
- const tools=resolve(owner,'.artifacts/tests/native-input-p0/xterm-build-tools'),require=createRequire(resolve(tools,'package.json'));
+ const tools=resolve(owner,'src-tauri/target/dependencies/xterm/tools'),require=createRequire(resolve(tools,'package.json'));
  const npmPackage=require.resolve('npm/package.json'),npm=JSON.parse(readFileSync(npmPackage));assert.equal(npm.version,pin.npm);
  const npmCli=resolve(dirname(npmPackage),npm.bin.npm);
  run(process.execPath,[npmCli,'ci','--ignore-scripts','--no-audit','--no-fund'],source,resolve(directory,'upstream-install.log'));
@@ -30,7 +30,7 @@ if(action==='prepare'){
  assert(source.startsWith(join(tmpdir(),'shellspan-p3-xterm-el-'))&&directory.startsWith(resolve(owner,'.artifacts/tests/native-input-p3/xterm-el-experiment')+'/'));
  const require=createRequire(resolve(source,'package.json'));
  for(const name of['typescript','webpack','esbuild'])assert.equal(require(`${name}/package.json`).version,pin[name]);
- const tools=createRequire(resolve(owner,'.artifacts/tests/native-input-p0/xterm-build-tools/package.json'));
+ const tools=createRequire(resolve(owner,'src-tauri/target/dependencies/xterm/tools/package.json'));
  const esbuildPackage=tools.resolve('esbuild/package.json'),esbuildRequire=createRequire(esbuildPackage);
  const binary=esbuildRequire.resolve(`@esbuild/${process.platform}-${process.arch}/bin/esbuild`);
  const environment={ESBUILD_BINARY_PATH:binary};

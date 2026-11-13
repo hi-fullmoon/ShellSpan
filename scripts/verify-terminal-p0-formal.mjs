@@ -22,7 +22,7 @@ const hashes=()=>Object.fromEntries(owners.map(name=>[name,createHash('sha256').
 const before=hashes(),results=[];writeFileSync(path.join(output,'sources-before.json'),JSON.stringify(before,null,2));
 const original=path.join(output,'original-package');
 function run(name,command,parameters,env={}){
-  const result=spawnSync(command,parameters,{cwd:root,env:{...process.env,SHELLSPAN_P0_FORMAL_XTERM:'1',
+  const result=spawnSync(command,parameters,{cwd:root,env:{...process.env,SHELLSPAN_NATIVE_BUILD_ROOT:'.artifacts/tests',SHELLSPAN_P0_FORMAL_XTERM:'1',
     SHELLSPAN_P0_ORIGINAL_PACKAGE:original,SHELLSPAN_P0_ORIGINAL_XTERM:path.join(original,'lib/xterm.js'),...env},
     encoding:'utf8',maxBuffer:64*1024*1024});
   writeFileSync(path.join(output,`${name}.log`),`${result.stdout??''}${result.stderr??''}\nexit=${result.status}\n`);

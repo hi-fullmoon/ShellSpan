@@ -867,6 +867,12 @@
                 None
             };
 
+            // The command result can precede the next real SSH prompt,
+            // especially after an interrupt. Keep pumping both channels
+            // before asking the broker to admit the next operation.
+            self.pump_until(Duration::from_secs(5), |snapshot| {
+                snapshot.prompt_ready && snapshot.input_observation.active_command.is_none()
+            });
             self.broker
                 .acquire_agent_lease(
                     &self.transport_id,

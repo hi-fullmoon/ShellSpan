@@ -12,11 +12,13 @@ assert platform.system() == 'Linux' and platform.machine() == 'aarch64'
 assert os.confstr('CS_GNU_LIBC_VERSION') == 'glibc 2.36'
 assert subprocess.check_output(['/bin/zsh', '-f', '-c', 'print -rn -- $ZSH_VERSION']) == b'5.9'
 identifier = 'zsh-5.9-zle-5.9-linux-aarch64-glibc-2.36-native'
-resources = root / '.artifacts/tests/native-input-p2/resources/native-input'
+build_root = root / os.environ.get('SHELLSPAN_NATIVE_BUILD_ROOT', 'src-tauri/target/native-input')
+build_dir = build_root / 'native-input-p3'
+resources = build_root / 'native-input-p2/resources/native-input'
 destination = resources / identifier
 destination.mkdir(parents=True, exist_ok=True)
 sha = lambda path: hashlib.sha256(Path(path).read_bytes()).hexdigest()
-record = json.loads((root / '.artifacts/tests/native-input-p3/linux-core-build.json').read_text())
+record = json.loads((build_dir / 'linux-core-build.json').read_text())
 producer = json.loads((Path(record['directory']) / 'producer.json').read_text())
 pin_path = root / 'scripts/dependency-builds/zsh/pin.json'
 pin = json.loads(pin_path.read_text())
@@ -28,8 +30,8 @@ assert producer['mainSha256'] == sha('/bin/zsh') == pin['targets'][producer['tar
 assert producer['unicode9Default'] is False and producer['nativeAcceptance'] is False
 for name, digest in pin['sourceHashes'].items():
     assert sha(Path(producer['source']) / 'Src/Zle' / name) == digest
-for source, name in [(root / '.artifacts/tests/native-input-p3/ss_nip-linux.so', 'ss_nip.so'),
-                     (root / '.artifacts/tests/native-input-p3/linux-target/release/native-input-relay', 'native-input-relay'),
+for source, name in [(build_dir / 'ss_nip-linux.so', 'ss_nip.so'),
+                     (build_dir / 'linux-target/release/native-input-relay', 'native-input-relay'),
                      (Path(producer['editor']), 'zle.so'),
                      (Path(producer['directory']) / 'LICENCE.zsh', 'LICENCE.zsh')]:
     artifact = destination / name
@@ -56,7 +58,7 @@ document = {'version': 1, 'profiles': [{'profile': profile, 'shellSha256': sha('
     'relay': identifier + '/native-input-relay', 'relaySha256': sha(destination / 'native-input-relay')}],
     'sources': {path: sha(root / path) for path in paths}}
 (resources / 'editors-linux-aarch64-glibc-2.36.json').write_text(json.dumps(document, indent=2) + '\n')
-(root / '.artifacts/tests/native-input-p3/scoped-linux-producer.json').write_text(json.dumps({'canonicalProducer': producer,
+(build_dir / 'scoped-linux-producer.json').write_text(json.dumps({'canonicalProducer': producer,
     'coreSha256': producer['editorSha256'], 'mainSha256': producer['mainSha256'], 'unicode9Default': False,
     'nativeAcceptance': False, 'mainProcessReplaced': False}, indent=2))
 print(json.dumps({'target': 'linux-aarch64-glibc-2.36', 'profile': document['profiles'][0]}))

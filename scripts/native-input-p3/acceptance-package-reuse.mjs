@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {resolve} from 'node:path';
 import {captureValidationSources} from '../native-input-p2/frozen-validation.mjs';
+import {nativeInputReleaseDirectory} from '../native-input-p2/resource-paths.mjs';
 import {inside,hashFile,inventory,fingerprints,reuseDecision,verifyRetainedArtifacts,dependencyInputProjection} from './acceptance-inputs.mjs';
 
 const normalized=files=>Object.fromEntries(Object.entries(files).map(([path,sha256])=>[path.replaceAll('\\','/'),sha256]));
@@ -41,13 +42,18 @@ export async function readReusablePackage(owner,directory,root,dependencies,tool
   const links=Object.keys({...expected.links,...actual.links}).filter(path=>JSON.stringify(expected.links[path])!==JSON.stringify(actual.links[path]));
   assert.equal(changed.length+links.length,0,`Actual dependency drift: ${JSON.stringify({changedFiles:changed.slice(0,20),changedLinks:links.slice(0,20),total:changed.length+links.length})}`);
   for(const key of ['node','rustc','cargo','lockSha256','cargoLockSha256'])assert.equal(toolchain[key],plan.toolchain[key],`Toolchain changed: ${key}`);
-  const installer=read(resolve(directory,'installer.json'));assert.equal(installer.configFile,resolve(root,'.artifacts/config',`native-batch-${batchId}.json`));
+  const installer=read(resolve(directory,'installer.json'));
+  // Retained batches bind their paths and bytes to the original frozen source.
+  const legacyConfig=resolve(root,'.artifacts/config',`native-batch-${batchId}.json`);
+  const legacy=installer.configFile===legacyConfig;
+  assert(legacy||installer.configFile===resolve(directory,'tauri-config.json'),'Retained package configuration path changed');
+  const packageResources=legacy?resolve(root,'.artifacts/releases/native-input/generated'):nativeInputReleaseDirectory(root);
   assert.deepEqual(installer.artifacts.map(item=>item.role).sort(),['compiled-unbundled','installer']);
   for(const artifact of installer.artifacts){inside(directory,artifact.path);assert.equal(fs.realpathSync(artifact.path).toLowerCase(),resolve(artifact.path).toLowerCase(),'Linked artifact input rejected');}
   assert.equal(await hashFile(installer.configFile),installer.configSha256,'Retained package configuration drift');
   await verifyRetainedArtifacts(installer.artifacts);
   await requireTree(resolve(directory,'frontend'),read(resolve(directory,'frontend-assets.json')));
-  await requireTree(resolve(root,'.artifacts/releases/native-input/generated'),read(resolve(directory,'resource-inputs.json')));
+  await requireTree(packageResources,read(resolve(directory,'resource-inputs.json')));
   const inputs=read(resolve(directory,'build-inputs.json'));
   const captured=await fingerprints(root,Object.values(inputs));
   for(const input of Object.values(inputs)){
@@ -62,5 +68,5 @@ export async function readReusablePackage(owner,directory,root,dependencies,tool
   const config=read(installer.configFile),origin=config.app.security.csp.match(/connect-src[^;]* (http:\/\/127\.0\.0\.1:\d+);/)?.[1];assert(origin,'Exact original report origin missing');
   assert.equal(config.identifier,`com.shellspan.validation.batch.${batchId}`);assert.equal(config.mainBinaryName,plan.binaryName);
   assert(!fs.existsSync(plan.install),'Retained installation must be absent; never overwrite or adopt it');
-  return {directory,plan,config,configFile:installer.configFile,configSha256:installer.configSha256,origin,batchId,artifacts:installer.artifacts,inputs};
+  return {directory,plan,config,configFile:installer.configFile,configSha256:installer.configSha256,origin,batchId,artifacts:installer.artifacts,inputs,packageResources};
 }

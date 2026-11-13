@@ -130,9 +130,13 @@ jobs:
           cache-on-failure: true
       - name: Build pinned Bash and Readline test resources
         if: runner.os == 'macOS'
+        env:
+          SHELLSPAN_NATIVE_BUILD_ROOT: .artifacts/tests
         run: python3 -B scripts/native-input-p2/build.py --versions 5.3
       - name: Build pinned Zsh and ZLE test resources
         if: runner.os == 'macOS' && !inputs.macos-editor-artifact
+        env:
+          SHELLSPAN_NATIVE_BUILD_ROOT: .artifacts/tests
         run: bash scripts/native-input-p3/build-macos-editor.sh
       - name: Download pinned Zsh and ZLE test resources
         if: runner.os == 'macOS' && inputs.macos-editor-artifact

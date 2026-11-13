@@ -198,10 +198,11 @@ impl AgentRuntime {
             "long-input" => format!("printf '%s' '{}' >/dev/null; {effect}", "x".repeat(4096)),
             "paced-input" => format!(": '{}'; {effect}", "x".repeat(256)),
             "transport-read" => format!("{effect}; read -r -t 30 phase3_transport"),
-            "job-launch" if ssh && scenario == "positive-jobs" => {
-                format!("{effect}; printf '%s%s\\n' SSH_NATIVE_JOB_ LIVE; /bin/sleep 30")
+            "job-launch" if (ssh && scenario == "positive-jobs") || (!ssh && scenario == "local-jobs") => {
+                let prefix = if ssh { "SSH_NATIVE_JOB_" } else { "NATIVE_JOB_" };
+                format!("{effect}; printf '%s%s\\n' {prefix} LIVE; /bin/sleep 30")
             }
-            "job-wait" | "job-stop" if ssh && scenario == "positive-jobs" => {
+            "job-wait" | "job-stop" if (ssh && scenario == "positive-jobs") || (!ssh && scenario == "local-jobs") => {
                 if !tool_argument.is_some_and(crate::terminal_command::protocol::valid_job_handle) {
                     return Err("ACCEPTANCE_NATIVE_JOB_HANDLE_REQUIRED".into());
                 }

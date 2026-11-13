@@ -20,7 +20,10 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const output = path.join(root, '.artifacts/tests/native-input-p0');
 mkdirSync(output, { recursive: true });
 function run(command, parameters, logName) {
-  const result = spawnSync(command, parameters, { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+  const result = spawnSync(command, parameters, {
+    cwd: root, env: { ...process.env, SHELLSPAN_NATIVE_BUILD_ROOT: '.artifacts/tests' },
+    encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,
+  });
   if (logName) writeFileSync(path.join(output, logName), `${result.stdout ?? ''}${result.stderr ?? ''}\nexit=${result.status}\n`);
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);

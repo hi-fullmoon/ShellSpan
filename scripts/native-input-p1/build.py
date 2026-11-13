@@ -26,7 +26,8 @@ def main():
             subprocess.run(list(map(str, arguments)), cwd=cwd, env=env, stdout=output, stderr=subprocess.STDOUT, check=True)
     # The P0 builder owns pinned GNU archive/Readline patch verification. It is
     # invoked from source; no timestamped capture/build directory is required.
-    run(['python3', 'scripts/native-input-p0/build.py', '--upstream', '--versions', '5.3'])
+    run(['python3', 'scripts/native-input-p0/build.py', '--upstream', '--versions', '5.3'],
+        env={**os.environ, 'SHELLSPAN_NATIVE_BUILD_ROOT': '.artifacts/tests'})
     profile='gnu-bash-5.3-readline-8.3.6-macos-arm64-prototype'
     run(['cargo', 'build', '--locked', '--manifest-path', 'scripts/native-input-p0/Cargo.toml', '--target-dir', OUT / 'rust'],env={**os.environ,'SHELLSPAN_NIP_VERIFIED_PROFILE':profile})
     source = OUT / 'bridge.c'

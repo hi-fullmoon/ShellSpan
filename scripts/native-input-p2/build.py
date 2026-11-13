@@ -16,7 +16,8 @@ import sys
 sys.dont_write_bytecode = True
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / '.artifacts/tests/native-input-p2'
+BUILD_ROOT = ROOT / os.environ.get('SHELLSPAN_NATIVE_BUILD_ROOT', 'src-tauri/target/native-input')
+OUT = BUILD_ROOT / 'native-input-p2'
 READLINE_VERSIONS = {'4.1': '6.0', '4.4': '7.0', '5.3': '8.3.6'}
 
 
@@ -138,7 +139,7 @@ def main():
         pin = json.loads((ROOT / 'scripts/native-input-p0/readline-sources.json').read_text())
         archives.extend(['readline-8.3.tar.gz', *(f'readline83-{n:03d}' for n in range(1, len(pin['patches']) + 1))])
     for name in archives:
-        shutil.copy2(ROOT / '.artifacts/tests/native-input-p0/upstream' / name, notices / name)
+        shutil.copy2(BUILD_ROOT / 'native-input-p0/upstream' / name, notices / name)
     for name in ['COPYING', 'AUTHORS']:
         shutil.copy2(upstream / name, notices / f'bash-{name}')
     for path in (ROOT / 'scripts/dependency-builds/bash-native').iterdir():

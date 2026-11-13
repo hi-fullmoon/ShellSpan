@@ -101,8 +101,8 @@ describe('reviewed release boundary', () => {
     expect(checkNotes(version, directory).notes).toBe(notes);
     commit();
     expect(checkNotes(version, directory).notes).toBe(notes);
-    await mkdir(path.join(directory, '.artifacts/releases/inputs'), { recursive: true });
-    await copyFile(path.join(root, 'src/lib/update.ts'), path.join(directory, '.artifacts/releases/inputs/update.ts'));
+    await mkdir(path.join(directory, 'src-tauri/target/releases/inputs'), { recursive: true });
+    await copyFile(path.join(root, 'src/lib/update.ts'), path.join(directory, 'src-tauri/target/releases/inputs/update.ts'));
     expect(checkNotes(version, directory).notes).toBe(notes);
   });
 

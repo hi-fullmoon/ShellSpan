@@ -919,13 +919,20 @@ async function verify() {
     assert(pending.length === 1 && pending[0].noAutoReplay && identity?.operationId === running.inputObservation?.activeCommand?.operationId
       && identity.agentSessionId === owner.id, 'Actual SSH owner did not retain one matching intent');
     const contender = parent ?? await invocation(first, 'effect');
-    assert(contender.approval, 'The competing SSH request did not reach production approval');
     Object.assign(records, { id: owner.id, identity, running, pending, parent, child, owner: owner.prepared,
       observer: observer.prepared, observerBefore, observerEvents, contender: contender.prepared });
     if (parent) assert(await invokeGetAgentTerminalOwner(first.sessionId) === parent.id, 'Delegated SSH turn lost its parent owner');
-    const contention = await invokeDecideTerminalAcceptanceCommand(contender.approval, true)
-      .then(value => ({ value }), error => ({ error: String(error) }));
+    const contention = contender.approval
+      ? await invokeDecideTerminalAcceptanceCommand(contender.approval, true)
+        .then(value => ({ value }), error => ({ error: String(error) }))
+      : { preparation: contender.prepared.settlement };
     const contenderEvents = await contender.events(), afterContention = await snapshot(first.sessionId);
+    const refusal = contenderEvents.find(event => event.type === 'tool/result' && event.data.callId === contender.callId);
+    assert(refusal?.type === 'tool/result' && refusal.data.status !== 'completed'
+      && /(?:TERMINAL_LEASE_BUSY|terminal already has an Agent owner|TERMINAL_VISIBLE_COMMAND_UNAVAILABLE)/.test(refusal.data.summary),
+    'The actual competing tool did not record a terminal-ownership refusal');
+    if (!contender.approval) assert(!contenderEvents.some(event => event.type === 'tool/execution' && event.data.callId === contender.callId),
+      'The competing request executed after its pre-approval refusal');
     assert(afterContention?.inputObservation?.activeCommand?.operationId === identity.operationId
       && !contenderEvents.some(event => event.type === 'tool/result' && event.data.callId === contender.callId && event.data.status === 'completed')
       && (await effect()).text === `${owner.callId}\n`, 'Competing SSH request displaced or executed beside the original owner');

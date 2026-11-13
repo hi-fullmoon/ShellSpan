@@ -104,7 +104,7 @@ if(process.argv[2]==='--from-resources'){
     '-p',`127.0.0.1:${port}:22229`,'-v',`${root}:/work`,'-v',`${resolve(root,'.artifacts/tests/native-input-p2/cargo-registry')}:/usr/local/cargo/registry`,
     'shellspan-native-input-p2:local','sleep','infinity'],{stdio:'pipe'});
   const log=openSync(resolve(directory,'build.log'),'wx',0o600);
-  const build=spawn('docker',['exec',container,'python3','scripts/native-input-p2/build.py'],{stdio:['ignore',log,log]});
+  const build=spawn('docker',['exec','-e','SHELLSPAN_NATIVE_BUILD_ROOT=.artifacts/tests',container,'python3','scripts/native-input-p2/build.py'],{stdio:['ignore',log,log]});
   const code=await new Promise((resolve,reject)=>{build.once('error',reject);build.once('exit',resolve);});
   closeSync(log);
   writeFileSync(resolve(directory,'build-result.json'),JSON.stringify({exitCode:code}));

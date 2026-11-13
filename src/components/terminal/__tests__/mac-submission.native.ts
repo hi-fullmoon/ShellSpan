@@ -42,13 +42,14 @@ async function verify(){
  const permissionMismatch = observationConfiguration.scenario === 'permission-mismatch';
  const manifestMismatch = observationConfiguration.scenario === 'resource-manifest-mismatch';
  const rawAdmission = observationConfiguration.scenario === 'raw-admission';
+ const storageAdmission = observationConfiguration.scenario?.startsWith('local-storage-') === true;
  const reducedMotionCase = observationConfiguration.scenario === 'reduced-motion';
  const reducedMotion = reducedMotionCase ? window.matchMedia('(prefers-reduced-motion: reduce)') : undefined;
  if(reducedMotionCase)assert(reducedMotion?.matches,'WKWebView reduced motion is disabled for this scheduled case');
  const submissionControl = /^(input-in-progress|input-complete|intent|armed|before-accept|after-accept|running)-(stop|cancel|takeover)$/.test(observationConfiguration.scenario ?? '');
- const useParsedOutput = ['close-running-terminal', 'timeout-unknown-accept', 'control-eof', 'late-started-and-matched-settled', 'target-mismatch','delegation','local-file-chain'].includes(observationConfiguration.scenario ?? '') || observationConfiguration.scenario?.startsWith('wire-') === true || submissionControl || inputInProgress || bindingNegative || transportLoss || armIdentity || permissionMismatch || reducedMotionCase;
+ const useParsedOutput = ['close-running-terminal', 'timeout-unknown-accept', 'control-eof', 'late-started-and-matched-settled', 'target-mismatch','delegation','local-file-chain','local-jobs'].includes(observationConfiguration.scenario ?? '') || observationConfiguration.scenario?.startsWith('wire-') === true || observationConfiguration.scenario?.startsWith('local-history-') === true || submissionControl || inputInProgress || bindingNegative || transportLoss || armIdentity || permissionMismatch || reducedMotionCase;
  const wireFault = observationConfiguration.scenario?.startsWith('wire-') === true && observationConfiguration.scenario !== 'wire-split-and-coalesced';
- const capture=await macLifecycleCapture(token,{parsedOutputOrder:useParsedOutput||manifestMismatch||rawAdmission,startupOutputMayPrecedeSubscription:wireFault||manifestMismatch||rawAdmission}),session=await invokeCreateLocalSession(100,30);await capture.expect(session);
+ const capture=await macLifecycleCapture(token,{parsedOutputOrder:useParsedOutput||manifestMismatch||rawAdmission||storageAdmission,startupOutputMayPrecedeSubscription:wireFault||manifestMismatch||rawAdmission}),session=await invokeCreateLocalSession(100,30);await capture.expect(session);
  useTerminalStore.getState().addSession(session);useTerminalStore.getState().setActiveSession(session.sessionId);useAppStore.getState().setActiveSection('terminal');
  const binding:{controller?:TerminalController}={};
  const stopBinding=terminalRegistry.subscribe(()=>{const current=terminalRegistry.get(session.sessionId);if(current&&!binding.controller){capture.bind(current);binding.controller=current;}});
@@ -77,7 +78,7 @@ async function verify(){
   assert(approval?.data.approvalId&&approval.turnId&&approval.stepId,'Actual production approval identity missing');
   return {sessionId:approval.sessionId,turnId:approval.turnId,stepId:approval.stepId,requestId:approval.data.requestId,callId:approval.data.callId,approvalId:approval.data.approvalId};
  }
- async function run(kind:TerminalAcceptanceSourceKind,deferApproval=false,targetSession=session){
+ async function prepare(kind:TerminalAcceptanceSourceKind,targetSession=session){
   const id='phase3-submission-'+crypto.randomUUID(),callId=crypto.randomUUID();agentIds.push(id);
   const target={kind:'local' as const,targetId:'terminal-'+targetSession.sessionId,sessionId:targetSession.sessionId,cwd:home!,localRoot:home!};
   const created=await invokeCreateAgentRuntimeSession({sessionId:id,taskId:id,goal:'Execute only the explicitly authorized isolated submission safety request without a model',target,permissionMode:'requestApproval',executionSurface:'boundTerminal',capabilityScope:{toolNames:['run_terminal_command'],effects:kind==='syntax-error'?['stateChange','readOnly','externalSideEffect']:['stateChange','readOnly'],targetIds:[target.targetId]}});
@@ -85,7 +86,12 @@ async function verify(){
   const brokerBefore=await invokeGetTerminalBrokerSnapshot(targetSession.sessionId);
   const partial:Record<string,unknown>={id,callId,kind,created,brokerBefore};records.push(partial);
   const prepared=await invokeRunTerminalAcceptanceCommand(id,callId,kind);assert(prepared.modelAvailability==='MODEL_SELECTION_REQUIRED','A model was registered in the no-model entrance');
-  const before=await events(id);Object.assign(partial,{prepared,before});let decision:unknown;
+  const before=await events(id);Object.assign(partial,{prepared,before});
+  return {id,callId,kind,created,brokerBefore,prepared,before,partial};
+ }
+ async function run(kind:TerminalAcceptanceSourceKind,deferApproval=false,targetSession=session){
+  const {id,callId,created,brokerBefore,prepared,before,partial}=await prepare(kind,targetSession);
+  let decision:unknown;
   if(prepared.settlement==='Waiting'&&!deferApproval){
    const approval=pendingApproval(before,callId);
    if((kind==='effect'||kind==='paced-input'&&(inputInProgress||reducedMotionCase))&&cutConfiguration.enabled){
@@ -177,6 +183,143 @@ async function verify(){
  let problem:unknown,closed=false,secondWire:Awaited<ReturnType<typeof macWireCapture>>|undefined;
  try{
   const wireScenario = observationConfiguration.scenario;
+  if(storageAdmission){
+   const mode=wireScenario!.slice('local-storage-'.length);
+   const expected: Record<string,string> = {
+    missing:'TERMINAL_SUBMISSION_JOURNAL_UNAVAILABLE', 'read-only':'TERMINAL_SUBMISSION_JOURNAL_UNAVAILABLE',
+    'unknown-format':'TERMINAL_SUBMISSION_JOURNAL_INVALID', 'invalid-marker':'TERMINAL_SUBMISSION_JOURNAL_INVALID',
+    'foreign-namespace':'TERMINAL_SUBMISSION_JOURNAL_MIGRATION_REQUIRED', 'missing-directory':'TERMINAL_SUBMISSION_JOURNAL_UNAVAILABLE',
+    'directory-symlink':'TERMINAL_SUBMISSION_JOURNAL_INVALID', 'corrupt-database':'TERMINAL_SUBMISSION_JOURNAL_UNAVAILABLE',
+   };
+   assert(mode==='healthy'||Object.prototype.hasOwnProperty.call(expected,mode),'Exact isolated storage mode required');
+   await until(idle,'Local storage case did not reach the native prompt');
+   const initial=await snapshot();
+   assert(isMacFileChainProfile(initial.session?.nativePeerProfile,family),'Exact storage case profile missing');
+   const {partial: _partial, ...invocation}=await prepare('effect');
+   const approval=invocation.prepared.settlement==='Waiting'?pendingApproval(invocation.before,invocation.callId):null;
+   const decision=approval?await invokeDecideTerminalAcceptanceCommand(approval,true).then(value=>({value}),error=>({error:String(error)})):null;
+   const after=await events(invocation.id);
+   const result=after.find(event=>event.type==='tool/result'&&event.data.callId===invocation.callId);
+   const broker=await snapshot(),effect=await witness();
+   records.push({mode,initial,invocation,approval,decision,after,result,broker,effect});
+   assert(result?.type==='tool/result','Actual storage admission did not yield a tool result');
+   if(mode==='healthy'){
+    assert(approval&&result.data.status==='completed'&&effect.text===invocation.callId+'\n','Healthy storage did not execute the approved source once');
+   }else{
+    assert(result.data.status!=='completed'&&result.data.summary.includes(expected[mode]),'Actual tool refusal did not match the selected storage fault');
+    const recovery=await invokeGetTerminalSubmissionRecovery(invocation.id).then(value=>({value}),error=>({error:String(error)}));
+    records.push({storageRecoveryQuery:recovery});
+    assert('error' in recovery&&recovery.error?.includes(expected[mode]),'The recovery query did not report the selected storage fault');
+    assert(!effect.exists&&broker.session?.nextInputSequence===initial.session?.nextInputSequence
+     &&!broker.session?.inputObservation?.activeCommand,'Storage refusal admitted native input or execution');
+   }
+   await invokeCancelAgentRuntime({sessionId:invocation.id});await invokeCloseSession(session.sessionId);closed=true;
+   const retained=await capture.finish();
+   const response=await fetch('/__agent-stream-result/'+token,{method:'POST',body:JSON.stringify({ok:true,evidence:{
+    kind:'actual-macos-local-storage',scenario:wireScenario,family,session,records,retained,routes,humanReceipt:false,
+   }})});assert(response.ok,'Actual storage evidence was not retained');return;
+  }
+  if(wireScenario?.startsWith('local-history-')){
+   await until(idle,'Local history prompt did not become ready');
+   const mode=wireScenario.slice('local-history-'.length),initial=await snapshot();
+   assert(isMacFileChainProfile(initial.session?.nativePeerProfile,family),'Exact native history profile missing');
+   let output='';
+   const stop=controller.subscribeOutput(value=>{output+=value;});
+   const send=async(source:string)=>{const accepted=await controller.writeUserInput(source);capture.recordInput(source,accepted,'Local history input');assert(accepted,'Actual local history input was blocked');};
+   try{
+    const marker=async(suffix:string)=>{
+     const name='LOCAL_HIST_'+suffix,offset=output.length;
+     await send("printf '%s%s\\n' LOCAL_HIST_ "+suffix+'\r');
+     await until(()=>output.slice(offset).includes(name),'Actual local history fixture command did not execute');
+     await until(idle,'Local history command did not return to its prompt');
+    };
+    await marker('A');
+    if(mode==='custom'){await marker('DUP');await marker('DUP');}
+    await marker('B');
+    const executed=await run('effect');
+    assert(executed.after.some(event=>event.type==='tool/result'&&event.data.callId===executed.callId&&event.data.status==='completed')
+     &&executed.effects.text===executed.callId+'\n'&&executed.recovery.length===0,'Native history command did not settle once');
+    await invokeCancelAgentRuntime({sessionId:executed.id});
+    await until(async()=>!agentTerminalLeaseState.get(session.sessionId)&&await idle(),'Native history operation did not return editing');
+    await send('\x18h');
+    let observation='';
+    await until(()=>{observation=output.match(/LOCAL_HIST_BEGIN\r?\n([\s\S]*?)LOCAL_HIST_END/)?.[1]??'';return Boolean(observation);},'Actual local editor history observation missing');
+    const file=mode==='custom'?'custom-history':family==='bash'?'.bash_history':'history';
+    const expected=mode==='unset'?'LOCAL_HISTFILE::':mode==='empty'?'LOCAL_HISTFILE:x:':'LOCAL_HISTFILE:x:'+home+'/'+file;
+    assert(observation.split(/\r?\n/).includes(expected)&&observation.includes('LOCAL_HIST_ B')&&observation.includes(executed.prepared.source)
+     &&!/(__shellspan|ss_native_input_begin)/.test(observation),'Actual editor history changed its configuration or exact source');
+    if(mode==='small')assert(!observation.includes('LOCAL_HIST_ A'),'Bounded editor history retained its oldest input');
+    if(mode==='custom')assert(observation.split('\n').filter(line=>line.includes('LOCAL_HIST_ DUP')).length===1,'Duplicate history option was lost');
+    await send('exit\r');
+    await until(async()=>!(await snapshot()).session?.open,'Actual Shell exit did not finish disk history');
+    await invokeCloseSession(session.sessionId);closed=true;
+    const diskResponse=await fetch('/__native-mac-history/'+token);assert(diskResponse.ok,'Actual disk history witness failed');
+    const disk=await diskResponse.json() as {startup:string;readOnly:boolean;standard:string|null;custom:string|null};
+    assert(disk.readOnly&&disk.startup==='startup\n','Actual startup duplicated or observation scope differs');
+    if(mode==='empty'||mode==='unset')assert(disk.standard===null&&disk.custom===null,'Disabled history wrote a file');
+    else {
+     const persisted=mode==='custom'?disk.custom:disk.standard;
+     assert(persisted&&persisted.includes(executed.prepared.source)&&!/(__shellspan|ss_native_input_begin)/.test(persisted),'Actual disk history lost native input or kept private controls');
+     if(mode==='custom')assert(disk.standard===null&&persisted.split('\n').filter(line=>line.includes('LOCAL_HIST_ DUP')).length===1,'Actual custom history duplicated input or wrote the default file');
+    }
+    const retained=await capture.finish();
+    const response=await fetch('/__agent-stream-result/'+token,{method:'POST',body:JSON.stringify({ok:true,evidence:{
+     kind:'actual-macos-local-history',scenario:wireScenario,family,session,initial,mode,observation,disk,executed,retained,routes,humanReceipt:false,
+    }})});assert(response.ok,'Actual local history evidence was not retained');return;
+   }finally{stop();}
+  }
+  if(wireScenario==='local-jobs'){
+   assert(home,'Exact local job HOME is required');
+   await until(idle,'Actual native jobs prompt did not become ready');
+   const initial=await snapshot();
+   assert(isMacFileChainProfile(initial.session?.nativePeerProfile,family),'Exact native jobs profile missing');
+   const id='phase3-submission-'+crypto.randomUUID();agentIds.push(id);
+   const target={kind:'local' as const,targetId:'terminal-'+session.sessionId,sessionId:session.sessionId,cwd:home,localRoot:home};
+   const owner=await invokeCreateAgentRuntimeSession({sessionId:id,taskId:id,goal:'Verify one native background job without a model',target,
+    permissionMode:'requestApproval',executionSurface:'boundTerminal',capabilityScope:{toolNames:['run_terminal_command','wait_process','kill_process'],
+     effects:['stateChange','readOnly','externalSideEffect'],targetIds:[target.targetId]}});
+   assert(!owner.header.modelSelection,'Native job acceptance selected a model');
+   const tool=async(kind:'job-launch'|'job-wait'|'job-stop',handle?:string)=>{
+    const callId=crypto.randomUUID(),prepared=await invokeRunTerminalAcceptanceCommand(id,callId,kind,handle);
+    assert(prepared.modelAvailability==='MODEL_SELECTION_REQUIRED','Native job tool acquired a model');
+    const approval=prepared.settlement==='Waiting'?pendingApproval(await events(id),callId):null;
+    if(kind==='job-launch')assert(approval&&!(await witness()).exists,'Native job started before approval');
+    if(approval)await invokeDecideTerminalAcceptanceCommand(approval,true);
+    const result=(await events(id)).find(event=>event.type==='tool/result'&&event.data.callId===callId);
+    assert(result?.type==='tool/result'&&result.data.status==='completed','Actual native job tool did not complete');
+    return {callId,prepared,approval,result,resolved:await readNativeAcceptanceResult(id,result.data.data)};
+   };
+   const started=await tool('job-launch'),data=started.resolved.data,handle=data.processHandle;
+   assert(typeof handle==='string'&&/^job-[a-f0-9]{32}$/.test(handle)&&data.outputScope==='sharedTerminal'
+    &&data.terminalSessionId===session.terminalSessionId&&data.terminalGeneration===session.terminalGeneration,'Native job handle or binding differs');
+   const binding=(value:unknown)=>{
+    assert(value&&typeof value==='object','Native job binding missing');
+    const job=value as Record<string,unknown>;
+    return ['processHandle','terminalSessionId','terminalGeneration','transportSessionId','ownerTargetId','agentSessionId','taskId','operationId']
+     .map(key=>{assert(key in job,'Incomplete actual native job binding');return job[key];});
+   };
+   const watches=[];
+   for(let i=0;i<3;i++){
+    const current=await tool('job-wait',handle);watches.push(current);
+    const item=current.resolved.data;
+    assert(item.outputScope==='sharedTerminal'&&item.stdout===''&&item.stderr===''
+     &&JSON.stringify(binding(item.job))===JSON.stringify(binding(data.job)),'Actual native job wait changed identity or invented output');
+   }
+   await until(()=>controller.terminal.buffer.normal.getLine(controller.terminal.buffer.normal.baseY)?.translateToString().includes('NATIVE_JOB_LIVE')
+    || Array.from({length:controller.terminal.buffer.normal.length},(_,row)=>controller.terminal.buffer.normal.getLine(row)?.translateToString()).some(line=>line?.includes('NATIVE_JOB_LIVE')),
+   'Actual job output did not reach the shared PTY');
+   const stopped=await tool('job-stop',handle),ending=stopped.resolved.data;
+   const job=ending.job as {nativeActive?:boolean;controlLost?:boolean}|undefined;
+   assert(ending.stopRequested===true&&job?.nativeActive===false&&job.controlLost===false
+    &&JSON.stringify(binding(job))===JSON.stringify(binding(data.job)),'Actual job stop did not settle its original handle');
+   const effect=await witness();
+   assert(effect.text===started.callId+'\n'&&(await invokeGetTerminalSubmissionRecovery(id)).length===0,'Native job repeated or retained an unresolved intent');
+   await invokeCancelAgentRuntime({sessionId:id});await invokeCloseSession(session.sessionId);closed=true;
+   const retained=await capture.finish();
+   const response=await fetch('/__agent-stream-result/'+token,{method:'POST',body:JSON.stringify({ok:true,evidence:{
+    kind:'actual-macos-local-jobs',scenario:wireScenario,family,session,initial,started,watches,stopped,effect,retained,routes,humanReceipt:false,
+   }})});assert(response.ok,'Actual native job evidence was not retained');return;
+  }
   if(wireScenario==='local-file-chain'){
    await until(idle,'The native file-chain prompt did not become ready');
    const initial=await snapshot();

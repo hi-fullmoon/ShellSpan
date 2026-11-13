@@ -4,6 +4,7 @@
 @import '@fontsource-variable/geist';
 
 @source not '../../.artifacts';
+@source not '../../src-tauri/target';
 
 @custom-variant dark (&:is([data-theme="dark"] *));
 

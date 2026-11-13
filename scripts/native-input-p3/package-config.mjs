@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import {resolve,relative,isAbsolute,sep} from 'node:path';
+import {resolve,relative,isAbsolute,sep,posix} from 'node:path';
 import {selectWindowsProfiles} from './windows-profiles.mjs';
+import {nativeInputGeneratedPath,nativeInputReleaseDirectory} from '../native-input-p2/resource-paths.mjs';
 
 export function windowsPackageHost(shell='powerShell7'){
   const [profile]=selectWindowsProfiles([shell]);
@@ -29,16 +30,16 @@ export function validationPackageMarker(root,installedResources,sourceManifestSh
 }
 
 export function packageResourceMapping(root){
-  // JSON Merge Patch removes the inherited relative key. Its redundant
-  // src-tauri/../ prefix can exceed NSIS MAX_PATH even for an existing file.
-  return {'../.artifacts/releases/native-input/generated/':null,
-    [resolve(root,'.artifacts/releases/native-input/generated')+'/']:'native-input/generated/'};
+  // Use the normalized absolute path for the Windows installer inputs.
+  const configuredPath=posix.relative('src-tauri',nativeInputGeneratedPath);
+  return {[`${configuredPath}/`]:null,
+    [nativeInputReleaseDirectory(root)+'/']:'native-input/generated/'};
 }
 
 export function assertPackageResourcePaths(root,install,files){
   for(const file of files){
     assert(file&&!isAbsolute(file)&&!file.split(/[\\/]/).includes('..'),'Relative resource required');
-    for(const absolute of [resolve(root,'.artifacts/releases/native-input/generated',file),resolve(install,'native-input/generated',file)])
+    for(const absolute of [resolve(nativeInputReleaseDirectory(root),file),resolve(install,'native-input/generated',file)])
       assert(absolute.length<260,`NSIS resource path exceeds MAX_PATH (${absolute.length}): ${absolute}`);
   }
 }

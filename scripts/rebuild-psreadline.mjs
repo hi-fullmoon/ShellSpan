@@ -24,7 +24,7 @@ if(values['verify-only']){
   process.exit(0);
 }
 assert.equal(execFileSync('dotnet',['--version'],{encoding:'utf8',windowsHide:true}).trim(),pin.sdkVersion,'Use the reviewed .NET SDK');
-const directory=resolve(root,'.artifacts/tests/dependency-builds/psreadline',randomUUID());
+const directory=resolve(root,'src-tauri/target/dependencies/psreadline',randomUUID());
 mkdirSync(directory,{recursive:true});
 let archive;
 if(values.archive)archive=readFileSync(resolve(values.archive));

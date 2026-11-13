@@ -6,7 +6,8 @@ import {dirname,resolve} from 'node:path';
 const root=resolve(import.meta.dirname,'../..');
 const target=process.platform==='darwin'&&process.arch==='arm64'?'macos-arm64':process.platform==='linux'&&process.arch==='arm64'?'linux-aarch64-glibc-2.36':null;
 assert(target,'Build and verify this provider on its real target');
-const directory=resolve(root,'.artifacts/tests/native-input-p3');const dependencies=resolve(directory,'dependencies');
+const buildRoot=resolve(root,process.env.SHELLSPAN_NATIVE_BUILD_ROOT??'src-tauri/target/native-input');
+const directory=resolve(buildRoot,'native-input-p3');const dependencies=resolve(directory,'dependencies');
 mkdirSync(dependencies,{recursive:true,mode:0o700});
 const log=openSync(resolve(directory,'build.log'),'a',0o600);
 function run(command,args,cwd=root,env=process.env){execFileSync(command,args,{cwd,env,stdio:['ignore',log,log]});}
@@ -87,7 +88,7 @@ try{
     sourcePaths.push('scripts/dependency-builds/zsh/pin.json','scripts/dependency-builds/zsh/native-display.patch','scripts/native-input-p3/build-scoped-core.mjs');
   }
   const sources=Object.fromEntries(sourcePaths.map(path=>[path,sha(resolve(root,path))]));
-  const resources=resolve(root,'.artifacts/tests/native-input-p2/resources/native-input');
+  const resources=resolve(buildRoot,'native-input-p2/resources/native-input');
   mkdirSync(resolve(resources,id),{recursive:true});const destination=resolve(resources,id,'ss_nip.so');if(existsSync(destination))chmodSync(destination,0o600);copyFileSync(module,destination);chmodSync(destination,0o500);
   const editor={profile,shellSha256:sha(shell),moduleSha256:sha(module),module:`${id}/ss_nip.so`};
   if(coreProducer){

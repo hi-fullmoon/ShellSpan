@@ -54,7 +54,7 @@ if(reusedResources){
 }
 if(values['rebuild-windows-editors']){
   const rebuildLog=resolve(meta,'windows-resource-rebuild.log');
-  const output=execFileSync(process.execPath,[resolve(root,'scripts/native-input-p3/build-windows.mjs')],{cwd:root,env:{...process.env,RUSTUP_TOOLCHAIN:'1.95.0-x86_64-pc-windows-msvc',CARGO_TARGET_DIR:resolve(root,'src-tauri/native-input-editors/target'),CARGO_BUILD_JOBS:'4'},windowsHide:true,encoding:'utf8',maxBuffer:1024*1024});
+  const output=execFileSync(process.execPath,[resolve(root,'scripts/native-input-p3/build-windows.mjs')],{cwd:root,env:{...process.env,SHELLSPAN_NATIVE_BUILD_ROOT:'.artifacts/tests',RUSTUP_TOOLCHAIN:'1.95.0-x86_64-pc-windows-msvc',CARGO_TARGET_DIR:resolve(root,'src-tauri/native-input-editors/target'),CARGO_BUILD_JOBS:'4'},windowsHide:true,encoding:'utf8',maxBuffer:1024*1024});
   writeFileSync(rebuildLog,output);
   assert.deepEqual(captureValidationSources(root),sources,'Source changed during isolated Windows editor reconstruction');
   assert.deepEqual(captureValidationSources(owner),sources,'Owner changed during isolated Windows editor reconstruction');

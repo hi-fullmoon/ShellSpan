@@ -37,7 +37,11 @@ writeFileSync(resolve(meta,'import.json'),JSON.stringify({id,head:parent.head,so
   generatedByActualWindowsCompiler:generated,explicitFixtureChanges:actualChanges,sourceCount:Object.keys(sources).length,sourceArchiveSha256:hash(resolve(meta,'source.tar.gz'))},null,2));
 execFileSync('cmd.exe',['/d','/c','mklink','/J',resolve(root,'node_modules'),resolve(base,'node_modules')],{stdio:'pipe'});
 cpSync(resolve(base,'.artifacts/tests/native-input-p2/resources'),resolve(root,'.artifacts/tests/native-input-p2/resources'),{recursive:true});
-const packagedResources='.artifacts/releases/native-input/generated';
-if(existsSync(resolve(base,packagedResources))){mkdirSync(dirname(resolve(root,packagedResources)),{recursive:true});cpSync(resolve(base,packagedResources),resolve(root,packagedResources),{recursive:true});}
+const bundleResources=JSON.parse(readFileSync(resolve(base,'src-tauri/tauri.conf.json'),'utf8')).bundle.resources;
+const packagedResources=Object.keys(bundleResources).find(path=>bundleResources[path]==='native-input/generated/');
+if(packagedResources&&existsSync(resolve(base,'src-tauri',packagedResources))){
+  const destination=resolve(root,'src-tauri',packagedResources);
+  mkdirSync(dirname(destination),{recursive:true});cpSync(resolve(base,'src-tauri',packagedResources),destination,{recursive:true});
+}
 assert.deepEqual(captureValidationSources(root),sources);
 console.log(JSON.stringify({root,id,sourceCount:Object.keys(sources).length,sourceParent:base,generatedByActualWindowsCompiler:generated,fixtureChanges:actualChanges,nativeAcceptance:false}));

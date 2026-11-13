@@ -1,7 +1,9 @@
 # Native GNU dependency targets
 
 `python3 -B scripts/native-input-p2/build.py` builds the release profile,
-Bash 5.3 / Readline 8.3.6, on the accepted target platforms. To build the older
+Bash 5.3 / Readline 8.3.6, under `src-tauri/target/native-input/`. Set
+`SHELLSPAN_NATIVE_BUILD_ROOT=.artifacts/tests` when preparing inputs for local
+acceptance tests. To build the older
 profiles for compatibility checks, pass `--versions 4.1,4.4` or
 `--versions 4.1,4.4,5.3`. Use `--include-legacy` when listing or running the P2
 application matrix or checking its cumulative evidence.

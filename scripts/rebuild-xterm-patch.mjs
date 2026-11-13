@@ -11,7 +11,7 @@ import {spawnSync} from 'node:child_process';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const args=process.argv.slice(2),record=args.includes('--record');
 const pin=JSON.parse(readFileSync(path.join(root,'scripts/dependency-builds/xterm/build.json'),'utf8'));
-const base=path.join(root,'.artifacts/tests/native-input-p0/xterm-package-builds',new Date().toISOString().replaceAll(':','-'));
+const base=path.join(root,'src-tauri/target/dependencies/xterm/builds',new Date().toISOString().replaceAll(':','-'));
 mkdirSync(base,{recursive:true});
 const sha=file=>createHash('sha256').update(readFileSync(file)).digest('hex');
 const run=(command,parameters,cwd,log,env={})=>{
@@ -26,7 +26,7 @@ const run=(command,parameters,cwd,log,env={})=>{
   if(result.status!==0)throw new Error(`${command} failed; see ${path.join(base,log)}`);
 };
 for(const[file,digest]of Object.entries(pin.patches))assert.equal(sha(path.join(root,file)),digest,`Approved source patch changed: ${file}`);
-const toolsDir=path.join(root,'.artifacts/tests/native-input-p0/xterm-build-tools');mkdirSync(toolsDir,{recursive:true});
+const toolsDir=path.join(root,'src-tauri/target/dependencies/xterm/tools');mkdirSync(toolsDir,{recursive:true});
 for(const file of ['package.json','pnpm-lock.yaml'])copyFileSync(path.join(root,'scripts/dependency-builds/xterm',file),path.join(toolsDir,file));
 run('pnpm',['install','--dir',toolsDir,'--frozen-lockfile','--ignore-workspace','--ignore-scripts'],root,'tools-install.log');
 const toolsRequire=createRequire(path.join(toolsDir,'package.json'));

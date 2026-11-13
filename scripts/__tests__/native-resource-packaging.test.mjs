@@ -26,6 +26,8 @@ it('packs an unsupported target twice and rejects a missing catalogue for an adm
     expect(first.status, first.stderr).toBe(0);
     const output = JSON.parse(first.stdout);
     expect(output.directory).toBe(nativeInputReleaseDirectory(directory));
+    expect(output.directory).toBe(path.join(directory, 'src-tauri/target/native-input/generated'));
+    await expect(readdir(path.join(directory, '.artifacts'))).rejects.toMatchObject({ code: 'ENOENT' });
     const manifest = JSON.parse(await readFile(path.join(output.directory, 'resource-manifest.json'), 'utf8'));
     expect(manifest).toMatchObject({ targets: [], unsupportedHost: true, validationOnly: false });
     expect(await readdir(output.directory)).toEqual(['resource-manifest.json']);
@@ -36,7 +38,7 @@ it('packs an unsupported target twice and rejects a missing catalogue for an adm
     const second = execute('unsupported');
     expect(second.status, second.stderr).toBe(0);
     const repeated = JSON.parse(second.stdout);
-    expect(repeated.previousRetained).toContain(path.join(directory, '.artifacts/releases/native-input/resource-build'));
+    expect(repeated.previousRetained).toContain(path.join(directory, 'src-tauri/target/native-input/resource-build'));
     expect(JSON.parse(await readFile(path.join(repeated.previousRetained, 'resource-manifest.json'), 'utf8'))).toEqual(manifest);
     expect(await readFile(path.join(legacy, 'retained.txt'), 'utf8')).toBe('owned prior fixture');
     expect(await readdir(output.directory)).toEqual(['resource-manifest.json']);

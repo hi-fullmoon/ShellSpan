@@ -10,7 +10,7 @@ import {spawn,execFile} from 'node:child_process';
 import {promisify,parseArgs} from 'node:util';
 import {createServer} from 'node:http';
 import {captureValidationSources,captureValidationAssets} from '../native-input-p2/frozen-validation.mjs';
-import {nativeInputReleaseDirectory} from '../native-input-p2/resource-paths.mjs';
+import {nativeInputGeneratedPath,nativeInputReleaseDirectory} from '../native-input-p2/resource-paths.mjs';
 import {acquireNativeGui,assertNativeGuiAllowed} from '../native-input-p2/gui-lock.mjs';
 import {verifyNsisInstalledImage} from './windows-package-image.mjs';
 import {selectWindowsProfiles} from './windows-profiles.mjs';
@@ -98,6 +98,7 @@ async function main(){
   for(const profile of catalogue.profiles)assert.equal(await hashFile(inside(resources,resolve(resources,profile.module))),profile.moduleSha256,'Native artifact changed');
   const coreSha=catalogue.profiles[0].moduleSha256;assert(catalogue.profiles.every(item=>item.moduleSha256===coreSha));
   const binaryName=reusable?.plan.binaryName??`ShellSpanBatch${short}`,productName=reusable?.plan.productName??`ShellSpan Package Batch ${short}`,application=resolve(install,binaryName+'.exe');
+  const packageResources=reusable?.packageResources??nativeInputReleaseDirectory(root);
   let active,app,appDone,observer,observerDone,releaseGui,server,proof,manifestSha,assetHashes,resourceHashes,inputRecords,artifactRecords=[],outcome;
   async function phase(name,work){const startedAt=new Date().toISOString(),start=performance.now();let failure;
     try{return await work();}catch(error){failure=String(error);throw error;}finally{phases.push({name,startedAt,finishedAt:new Date().toISOString(),durationMs:performance.now()-start,...(failure?{failure}:{})});await writeFile(resolve(directory,'phases.json'),JSON.stringify(phases,null,2));}}
@@ -128,7 +129,7 @@ async function main(){
     assert.deepEqual(captureValidationSources(root),sources,'Full source/index freeze drift');
     assert.deepEqual(captureValidationSources(controllerRoot),controllerSources,'Controller source/index freeze drift');
     if(assetHashes)assert.deepEqual(captureValidationAssets(frontendDirectory),assetHashes,'Built frontend drift');
-    if(resourceHashes)assert.deepEqual(captureValidationAssets(nativeInputReleaseDirectory(root)),resourceHashes,'Frozen package resource drift');
+    if(resourceHashes)assert.deepEqual(captureValidationAssets(packageResources),resourceHashes,'Frozen package resource drift');
     if(inputRecords)assert.equal((await dependencyInventory(resolve(root,'node_modules'),{signal})).sha256,dependencies.sha256,'Installed dependency bytes or links changed');
     if(artifactRecords.length)await verifyRetainedArtifacts(artifactRecords);
     if(inputRecords){
@@ -162,7 +163,7 @@ async function main(){
         await phase('reuse-bundle',async()=>{
           const readOriginal=name=>read(resolve(reusable.directory,name));
           assetHashes=await readOriginal('frontend-assets.json');resourceHashes=await readOriginal('resource-inputs.json');inputRecords=reusable.inputs;
-          manifestSha=await hashFile(resolve(nativeInputReleaseDirectory(root),'resource-manifest.json'));
+          manifestSha=await hashFile(resolve(packageResources,'resource-manifest.json'));
           await mkdir(resolve(directory,'retained-binaries'));
           for(const item of reusable.artifacts){const path=resolve(directory,'retained-binaries',item.role+'.exe');await copyFile(item.path,path,fs.constants.COPYFILE_EXCL);assert.equal(await hashFile(path),item.sha256);artifactRecords.push({...item,original:item.path,path});}
           await write(resolve(directory,'installer.json'),{artifacts:artifactRecords,configFile:reusable.configFile,configSha256:reusable.configSha256,qualification:'Exact independently hashed retained package reused; no recompilation'});
@@ -172,10 +173,10 @@ async function main(){
       await phase('prepare-resources',async()=>{
         await run('prepare',process.execPath,[resolve(root,'scripts/prepare-native-input-resources.mjs'),'--no-build','--target',fixed.target,'--validation-editor','windows-x64']);
         const prepared=JSON.parse((await readFile(resolve(directory,'prepare.log'),'utf8')).trim());assert(prepared.validationOnly);
-        fs.cpSync(prepared.directory,nativeInputReleaseDirectory(root),{recursive:true});
-        await writeFile(resolve(nativeInputReleaseDirectory(root),'editor-validation.json'),JSON.stringify(validationPackageMarker(root,resolve(install,'native-input/generated'),await hashFile(resolve(stage.directory,'sources.json'))),null,2));
-        manifestSha=await hashFile(resolve(nativeInputReleaseDirectory(root),'resource-manifest.json'));
-        resourceHashes=captureValidationAssets(nativeInputReleaseDirectory(root));assertPackageResourcePaths(root,install,Object.keys(resourceHashes));
+        fs.cpSync(prepared.directory,packageResources,{recursive:true});
+        await writeFile(resolve(packageResources,'editor-validation.json'),JSON.stringify(validationPackageMarker(root,resolve(install,'native-input/generated'),await hashFile(resolve(stage.directory,'sources.json'))),null,2));
+        manifestSha=await hashFile(resolve(packageResources,'resource-manifest.json'));
+        resourceHashes=captureValidationAssets(packageResources);assertPackageResourcePaths(root,install,Object.keys(resourceHashes));
         await write(resolve(directory,'resource-inputs.json'),resourceHashes);
       });
       }
@@ -215,9 +216,9 @@ async function main(){
         app:{appDirectoriesOverride:resolve(directory,'tauri'),windows:[{label:'main',title:productName,url:relative(root,entry).replaceAll('\\','/'),width:1480,height:920,visible:true,focus:true,alwaysOnTop:false}],
           security:{csp:`default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost ${origin}; font-src 'self' data:`}},
         bundle:{createUpdaterArtifacts:false,resources:packageResourceMapping(root),windows:{webviewInstallMode:{type:'skip'},nsis:{installMode:'currentUser',startMenuFolder:productName,displayLanguageSelector:false}}}};
-      const configFile=resolve(root,'.artifacts/config',`native-batch-${id}.json`);await mkdir(resolve(configFile,'..'),{recursive:true});await write(configFile,config);
+      const configFile=resolve(directory,'tauri-config.json');await write(configFile,config);
       inputRecords=Object.fromEntries(await Promise.all(['native','frontend','package'].map(async kind=>[kind,await fingerprint(root,kind,{toolchain:toolchains[kind],target:fixed.target,
-        extraPaths:kind==='package'?['.artifacts/releases/native-input/generated']:kind==='frontend'?['scripts/native-input-p3/package-frontend.mjs','scripts/native-input-p3/package-launch.mjs']:[],
+        extraPaths:kind==='package'?[nativeInputGeneratedPath]:kind==='frontend'?['scripts/native-input-p3/package-frontend.mjs','scripts/native-input-p3/package-launch.mjs']:[],
         configuration:kind==='package'?config:kind==='native'?{catalogueSha256:await hashFile(resolve(resources,'editors-windows-x64.json')),producer:'build-windows.mjs'}:{entrySha256:await hashFile(entry),loaderSha256:await hashFile(loader),define}})])));
       await write(resolve(directory,'build-inputs.json'),inputRecords);
       if(values['frontend-only'])return;

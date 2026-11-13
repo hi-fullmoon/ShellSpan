@@ -6,6 +6,7 @@ import {execFileSync,spawnSync} from 'node:child_process';
 import {mkdirSync,readFileSync,writeFileSync,cpSync,readdirSync,existsSync} from 'node:fs';
 import {resolve,relative} from 'node:path';
 import {captureValidationSources} from './frozen-validation.mjs';
+import {nativeInputGeneratedPath} from './resource-paths.mjs';
 
 const owner=resolve(import.meta.dirname,'../..');
 const baseline=resolve(process.argv[2]);const currentMode=process.argv[3]==='--current';const reference=currentMode?undefined:resolve(process.argv[3]);
@@ -50,8 +51,13 @@ assert.deepEqual(captureValidationSources(owner),before,'Owner source changed wh
 for(const path of['.artifacts/tests/native-input-p2/resources/native-input','.artifacts/tests/native-input-p2/producers','src-tauri/resources/native-input']){
   mkdirSync(resolve(sourceRoot,path,'..'),{recursive:true});cpSync(resolve(owner,path),resolve(sourceRoot,path),{recursive:true});
 }
-const packagedResources='.artifacts/releases/native-input/generated';
-if(existsSync(resolve(owner,packagedResources))){mkdirSync(resolve(sourceRoot,packagedResources,'..'),{recursive:true});cpSync(resolve(owner,packagedResources),resolve(sourceRoot,packagedResources),{recursive:true});}
+// A reconstructed baseline still uses the resource mapping in its archived config.
+const bundleResources=JSON.parse(readFileSync(resolve(sourceRoot,'src-tauri/tauri.conf.json'),'utf8')).bundle.resources;
+const packagedResources=Object.keys(bundleResources).find(path=>bundleResources[path]==='native-input/generated/');
+if(packagedResources&&existsSync(resolve(owner,nativeInputGeneratedPath))){
+  const destination=resolve(sourceRoot,'src-tauri',packagedResources);
+  mkdirSync(resolve(destination,'..'),{recursive:true});cpSync(resolve(owner,nativeInputGeneratedPath),destination,{recursive:true});
+}
 const fixture='87e1754d-ca4c-4689-95ea-27faea5c8f27';
 mkdirSync(resolve(sourceRoot,'.artifacts/tests/native-input-p2/ssh',fixture),{recursive:true});
 cpSync(resolve(owner,'.artifacts/tests/native-input-p2/ssh',fixture,'fixture.json'),resolve(sourceRoot,'.artifacts/tests/native-input-p2/ssh',fixture,'fixture.json'));

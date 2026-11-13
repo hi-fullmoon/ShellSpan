@@ -85,7 +85,7 @@ node scripts/rebuild-psreadline.mjs --install
 node scripts/rebuild-psreadline.mjs --verify-only
 ```
 
-Builds use unique `.artifacts/tests/dependency-builds/psreadline/` directories.
+Builds use unique directories under `src-tauri/target/dependencies/psreadline/`.
 `--install` copies only verified generated assemblies and their provenance into
 the bundled module. It does not install or change the user's PowerShell/module,
 alter execution policy or trust, enable production profiles, or package a release.

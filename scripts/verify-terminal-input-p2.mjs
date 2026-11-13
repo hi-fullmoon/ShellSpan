@@ -25,7 +25,7 @@ async function run(name,command,args,environment={}){
 try{
   await run('freeze',process.execPath,['scripts/native-input-p2/freeze.mjs']);
   await run('frozen-assets',process.execPath,['scripts/native-input-p2/verify-frozen-validation.mjs','--page','history']);
-  await run('producer-host','python3',['-B','scripts/native-input-p2/build.py']);
+  await run('producer-host','python3',['-B','scripts/native-input-p2/build.py'],{SHELLSPAN_NATIVE_BUILD_ROOT:'.artifacts/tests'});
   if(!values['components-only']){
     if(values.fixture)fixture=resolve(values.fixture);
     else{
@@ -34,7 +34,7 @@ try{
     }
     assert(fixture.startsWith(resolve(root,'.artifacts/tests/native-input-p2/ssh')+'/'));
     const owned=JSON.parse(await readFile(fixture,'utf8'));
-    await run('producer-ssh','docker',['exec',owned.container,'python3','-B','scripts/native-input-p2/build.py']);
+    await run('producer-ssh','docker',['exec','-e','SHELLSPAN_NATIVE_BUILD_ROOT=.artifacts/tests',owned.container,'python3','-B','scripts/native-input-p2/build.py']);
     await run('fixture-refresh',process.execPath,['scripts/native-input-p2/ssh.mjs','--refresh',fixture]);
   }
   const cargo=['test','--locked','--manifest-path','src-tauri/Cargo.toml','--lib'];
@@ -55,7 +55,7 @@ try{
   }
   await run('frontend','pnpm',['exec','vitest','run','src/components/terminal/__tests__/terminal-registry.test.ts','src/components/terminal/__tests__/terminal-controller-layer.test.tsx','src/components/terminal/__tests__/terminal-pane.test.tsx','src/components/terminal/__tests__/agent-terminal-command-feedback.test.ts','src/lib/ipc/__tests__/tauri-core.test.ts','scripts/__tests__/terminal-protocol-contract.test.mjs','scripts/__tests__/release-pipeline.test.mjs']);
   if(!values['components-only']){
-    await run('resources',process.execPath,['scripts/prepare-native-input-resources.mjs','--no-build','--require-ssh']);
+    await run('resources',process.execPath,['scripts/prepare-native-input-resources.mjs','--acceptance','--no-build','--require-ssh']);
     await run('source-reconstruction',process.execPath,['scripts/native-input-p2/source-rebuild.mjs']);
     await run('release-resources',process.execPath,['scripts/native-input-p2/release-smoke.mjs']);
     await run('actual-app-matrix',process.execPath,['scripts/native-input-p2/matrix.mjs',fixture]);

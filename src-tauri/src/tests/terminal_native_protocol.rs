@@ -534,7 +534,7 @@ fn production_bash_profiles(
 }
 
 #[test]
-#[ignore = "build the production modules with python3 scripts/native-input-p2/build.py"]
+#[ignore = "set SHELLSPAN_NATIVE_BUILD_ROOT=.artifacts/tests and run python3 scripts/native-input-p2/build.py"]
 fn native_production_private_widget_restores_real_stream_after_signal_and_control_eof() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -876,7 +876,7 @@ fn native_production_private_widget_restores_real_stream_after_signal_and_contro
 }
 // The type is private to the Broker module; this alias exposes no new writer.
 #[test]
-#[ignore = "build the production modules with python3 scripts/native-input-p2/build.py"]
+#[ignore = "set SHELLSPAN_NATIVE_BUILD_ROOT=.artifacts/tests and run python3 scripts/native-input-p2/build.py"]
 fn native_production_geometry_unicode_and_real_resize() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -1370,7 +1370,7 @@ fn native_linux_geometry_inputs() {
 }
 
 #[test]
-#[ignore = "build production modules with python3 scripts/native-input-p2/build.py"]
+#[ignore = "set SHELLSPAN_NATIVE_BUILD_ROOT=.artifacts/tests and run python3 scripts/native-input-p2/build.py"]
 fn native_production_capture_preserves_real_output_and_bounds_osc_across_all_splits() {
     use crate::terminal_command::capture::CaptureFence;
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

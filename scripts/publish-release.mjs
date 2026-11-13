@@ -10,6 +10,7 @@ import { walkFiles, buildUpdaterManifest } from './build-updater-json.mjs';
 import { command, checkNotes, readVersions, latestStable, assertBaseline, assertRemoteTag, REPOSITORY } from './release-notes.mjs';
 
 export const PLATFORMS = ['darwin-aarch64', 'windows-x86_64'];
+const releaseDirectory = 'src-tauri/target/releases';
 const assetSuffixes = ['.dmg', '.exe', '.app.tar.gz', '.nsis.zip', '.app.tar.gz.sig', '.nsis.zip.sig'];
 
 export function assertDraft(release) {
@@ -103,8 +104,9 @@ async function publish() {
   let release = findReleaseByTag(tag);
   assertDraft(release);
   const tauri = JSON.parse(await readFile('src-tauri/tauri.conf.json', 'utf8'));
-  const assets = await stageAssets({ artifactsRootDir: '.artifacts/releases/inputs', outputDir: '.artifacts/releases/output/assets', tag, notes, publicKey: tauri.plugins.updater.pubkey });
-  const notesFile = '.artifacts/releases/output/release-notes.md';
+  const assetDirectory = path.join(releaseDirectory, 'output/assets');
+  const assets = await stageAssets({ artifactsRootDir: path.join(releaseDirectory, 'inputs'), outputDir: assetDirectory, tag, notes, publicKey: tauri.plugins.updater.pubkey });
+  const notesFile = path.join(releaseDirectory, 'output/release-notes.md');
   await writeFile(notesFile, notes + '\n');
   const gh = args => command('gh', [...args, '--repo', REPOSITORY]);
   if (!release) {
@@ -137,7 +139,7 @@ async function publish() {
   const endpoint = `https://github.com/${REPOSITORY}/releases/download/${tag}/latest.json`;
   const publicManifest = await fetchPublished(endpoint);
   const remote = await publicManifest.json();
-  const local = JSON.parse(await readFile('.artifacts/releases/output/assets/latest.json', 'utf8'));
+  const local = JSON.parse(await readFile(path.join(assetDirectory, 'latest.json'), 'utf8'));
   if (JSON.stringify(remote) !== JSON.stringify(local)) throw new Error('Public updater manifest differs from verified assets');
   for (const update of Object.values(remote.platforms)) {
     await fetchPublished(update.url, 'HEAD');

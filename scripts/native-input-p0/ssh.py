@@ -10,7 +10,8 @@ import time
 import uuid
 
 sys.dont_write_bytecode = True
-from build import ROOT, OUT
+ROOT = Path(__file__).resolve().parents[2]
+OUT = ROOT / '.artifacts/tests/native-input-p0'
 
 
 def run(command, log):
@@ -70,7 +71,8 @@ LogLevel VERBOSE
              '-v',f'{ROOT}:/work','-v',f'{OUT / "cargo-registry"}:/usr/local/cargo/registry',
              '-w','/work','shellspan-native-input-p0:local',
              'sleep','infinity'],log)
-        run(['docker','exec',container,'python3','scripts/native-input-p0/build.py','--upstream','--versions',args.versions],log)
+        run(['docker','exec','-e','SHELLSPAN_NATIVE_BUILD_ROOT=.artifacts/tests',container,
+             'python3','scripts/native-input-p0/build.py','--upstream','--versions',args.versions],log)
         run(['docker','exec','-d',container,'/usr/sbin/sshd','-D','-e','-f','/work/.artifacts/tests/native-input-p0/ssh/sshd_config'],log)
         for _ in range(100):
             try:

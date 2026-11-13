@@ -12,7 +12,7 @@ stdout、OSC、前端 ready 和显示完成都不是控制报文。
 | 控制协议与 schema | `protocol/agent/runtime/native-input.md`、`native-input.schema.json` |
 | 协调、状态、账本、资源加载 | `src-tauri/src/terminal_command/` |
 | Shell 适配扩展 | `src-tauri/native-input-adapter/`、`src-tauri/native-input-editors/` |
-| 正式资源暂存及包内路径 | `.artifacts/releases/native-input/generated/`、`native-input/generated/` |
+| 正式资源暂存及包内路径 | `src-tauri/target/native-input/generated/`、`native-input/generated/` |
 | 原生显示与只读装饰 | `src/lib/terminal/native-input-display.ts`、`NATIVE_INPUT_DISPLAY`、terminal registry、`terminal-command-decorations.ts` |
 | Bash 内置命令及只读列接口 | `ss_native_input` 及同前缀私有操作、`rl_native_prompt_columns` |
 | 静态边界检查 | `scripts/check-terminal-command-boundary.mjs` |

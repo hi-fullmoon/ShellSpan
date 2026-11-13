@@ -19,7 +19,7 @@ execFileSync('docker',['run','-d','--name',container,'--label',`shellspan.native
 writeFileSync(resolve(directory,'owner.json'),JSON.stringify({id,container,root,image,imageId},null,2));
 writeFileSync(resolve(owner,'.artifacts/tests/native-input-p3/latest-ssh-fixture-owner.json'),JSON.stringify({id,container,root,directory},null,2));
 const log=openSync(resolve(directory,'build.log'),'wx');
-const child=spawn('docker',['exec',container,'sh','scripts/native-input-p3/linux-build.sh'],{stdio:['ignore',log,log]});
+const child=spawn('docker',['exec','-e','SHELLSPAN_NATIVE_BUILD_ROOT=.artifacts/tests',container,'sh','scripts/native-input-p3/linux-build.sh'],{stdio:['ignore',log,log]});
 const code=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve);});closeSync(log);
 writeFileSync(resolve(directory,'build-result.json'),JSON.stringify({exitCode:code}));assert.equal(code,0);
 assert.deepEqual(captureValidationSources(root),sources,'Complete Linux producer source set changed during build');

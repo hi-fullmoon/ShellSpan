@@ -11,6 +11,8 @@ export function macSubmissionControlMode(mode){
  if(Object.hasOwn(sshNativeCases,mode))return {cut:sshNativeCases[mode].cut??undefined,scenario:mode};
  if(mode===undefined||mode==='intent')return {cut:mode,scenario:undefined};
  if(mode==='reduced-motion')return {cut:'before-accept',scenario:mode};
+ if(/^local-storage-(healthy|missing|read-only|unknown-format|invalid-marker|foreign-namespace|missing-directory|directory-symlink|corrupt-database)$/.test(mode))return {cut:undefined,scenario:mode};
+ if(mode==='local-jobs'||/^local-history-(default|small|custom|empty|unset)$/.test(mode))return {cut:undefined,scenario:mode};
  if(['approval-mismatch','expired-or-revoked','source-mismatch','plan-mismatch','target-mismatch','unsupported-input-native','permission-mismatch','resource-manifest-mismatch','byte-boundary','raw-admission','local-file-chain'].includes(mode))return {cut:undefined,scenario:mode};
  if(['incomplete-proof','readonly-query-does-not-authorize'].includes(mode))return {cut:'input-in-progress',scenario:mode};
  if(['identity-mismatch','complete-identity-submatrix','generation-mismatch'].includes(mode))return {cut:'arm-identity',scenario:mode};
@@ -123,6 +125,21 @@ export function attachMacSubmissionWitness(server,token,directory,{cut=process.e
     const value=await read(resolve(ownership,entry.name));records.push({file:value.path,sha256:value.sha256,record:JSON.parse(value.content)});
    }
    response.setHeader('Content-Type','application/json');response.end(JSON.stringify({files,records,readOnly:true}));
+  })().catch(error=>response.writeHead(500).end(String(error)));
+ });
+ if(/^local-history-(default|small|custom|empty|unset)$/.test(scenario??''))server.middlewares.use(`/__native-mac-history/${token}`,(request,response)=>{
+  void(async()=>{
+   assert(request.method==='GET'&&(!request.url||request.url==='/'),'History observation is read only');
+   const home=resolve(directory,'home'),plan=JSON.parse(await readFile(resolve(directory,'local-history-plan.json'),'utf8'));
+   assert(plan.mode===scenario.slice('local-history-'.length)&&['.bash_history','history'].includes(plan.standard));
+   const read=async name=>{
+    try{
+     const file=resolve(home,name),info=await lstat(file);assert(info.isFile()&&info.size<=1024*1024);
+     return await readFile(file,'utf8');
+    }catch(error){if(error.code==='ENOENT')return null;throw error;}
+   };
+   const custom=await read('custom-history'),standard=await read(plan.standard),startup=await read('history-startup');
+   response.setHeader('Content-Type','application/json');response.end(JSON.stringify({plan,custom,standard,startup,readOnly:true}));
   })().catch(error=>response.writeHead(500).end(String(error)));
  });
  server.middlewares.use(`/__native-mac-submission-witness/${token}`,(request,response)=>{
