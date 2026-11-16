@@ -1923,13 +1923,14 @@ export function useAiSessionController({
       await adapter.answerQuestion(input);
     },
     refreshQuestionAnswer: async (input) => {
-      const previous = useAgentQuestionStore.getState().drafts[questionKey(input.identity)]?.issue;
+      const key = questionKey(input.identity) + (input.action ? ':action' : '');
+      const previous = useAgentQuestionStore.getState().drafts[key]?.issue;
       let refreshed: AiSessionView;
       try { refreshed = await adapter.refresh(input.identity.sessionId); }
       catch (error) { throw new QuestionSubmissionError(questionSubmissionIssue(error, 'confirm')); }
       // A still-pending question does not invalidate an explicit answer rejection.
       // State changes and failed synchronization still take precedence.
-      const issue = reconcileQuestionSubmission(input, refreshed, previous?.reason === 'invalid' ? previous : undefined);
+      const issue = reconcileQuestionSubmission(input, refreshed, previous?.editable ? previous : undefined);
       if (issue) throw new QuestionSubmissionError(issue);
     },
     pendingNodes,

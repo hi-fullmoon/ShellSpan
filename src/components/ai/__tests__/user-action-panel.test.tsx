@@ -37,7 +37,7 @@ describe('user operation within the existing question card', () => {
     expect(container.querySelector('.ai-question-panel-header [data-slot="card-action"]')).toBeInTheDocument();
     expect(container.querySelector('.ai-question-panel-content')).toHaveClass('min-h-0', 'overflow-y-auto');
     expect(container.querySelector('.ai-question-panel-footer')).toHaveClass('shrink-0');
-    const complete = screen.getByRole('button', { name: locale === 'en-US' ? 'I have completed it' : '我已完成操作' });
+    const complete = screen.getByRole('button', { name: locale === 'en-US' ? 'Continue verification' : '继续验证' });
     fireEvent.click(complete);
     expect(screen.getByRole('button', { name: locale === 'en-US' ? 'Saving answers…' : '正在保存答案…' })).toBe(complete);
     expect(complete.querySelector('[data-slot="spinner"]')).toBeVisible();
@@ -63,7 +63,7 @@ describe('user operation within the existing question card', () => {
     render(<AiQuestionPanel question={{ ...question, answers: [], questions: [
       { id: 'manual', question: action.instructions, multi_select: false, user_action: action },
     ] }} onAnswer={async input => { submissions.push(input); }} />);
-    await userEvent.setup().click(screen.getByRole('button', { name: 'I have completed it' }));
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Continue verification' }));
     expect(submissions[0].answers).toEqual([]);
     expect(submissions[0].action).toBe('completed');
   });

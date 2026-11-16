@@ -76,14 +76,12 @@ const AgentTerminalLeaseBar: React.FC<{
     showError(t('terminal.agentLease.takeoverFailed'));
   }, [lease.operationId, lease.takeoverFailed, showError, t]);
   const feedback = agentTerminalCommandFeedback(lease);
-  const interactionHint = !lease.terminalOwned
-    ? t('terminal.agentLease.turnRunning')
-    : lease.inputBlocked
-      ? t('terminal.agentLease.inputBlockedAccessibleHint')
-      : t(feedback.hint);
   const activityLabel = lease.terminalOwned
     ? t(feedback.label)
-    : t('terminal.agentLease.turnRunning');
+    : t(lease.waitingForUserAction ? 'terminal.agentLease.waitingForUserAction' : 'terminal.agentLease.turnRunning');
+  const interactionHint = !lease.terminalOwned
+    ? activityLabel
+    : lease.inputBlocked ? t('terminal.agentLease.inputBlockedAccessibleHint') : t(feedback.hint);
 
   return (
     <div
@@ -127,7 +125,7 @@ const AgentTerminalLeaseBar: React.FC<{
         {!taskVisible && <Button variant="ghost" size="xs" className="shrink-0" onClick={() => {
           if (!openTerminalTask(lease)) showError(t('terminal.occupancy.navigationBlocked'));
         }}>{t('terminal.occupancy.viewTask')}</Button>}
-        <Button
+        {!lease.waitingForUserAction && <Button
           type="button"
           variant="outline"
           size="xs"
@@ -145,7 +143,7 @@ const AgentTerminalLeaseBar: React.FC<{
             <SquareIcon data-icon="inline-start" />
           )}
           {t('terminal.agentLease.takeover')}
-        </Button>
+        </Button>}
       </div>
       <span className="sr-only">{activityLabel} {interactionHint}</span>
     </div>
@@ -278,7 +276,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
     if (currentSessionIdRef.current !== activeSessionId || session?.status !== 'connected'
       || terminalRegistry.get(activeSessionId)?.terminal !== terminal
       || terminalInputReadiness.isPreparing(activeSessionId)
-      || agentTerminalLeaseState.get(activeSessionId)) {
+      || agentTerminalLeaseState.blocksUserInput(activeSessionId)) {
       showError(t('terminal.feedback.pasteUnavailable'));
       return;
     }
@@ -357,7 +355,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       }
 
       if (event.key === 'Escape') {
-        if (activeLease) {
+        if (activeLease && !activeLease.waitingForUserAction) {
           event.preventDefault();
           event.stopPropagation();
           activeLease.requestTakeover();
@@ -420,7 +418,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
         <AgentTerminalLeaseBar lease={activeLease} />
       )}
       <div className="relative min-h-0 flex-1" style={{ backgroundColor: terminalSurfaceStyle.backgroundColor }}>
-        {activeLease && (
+        {activeLease && !activeLease.waitingForUserAction && (
           <div
             className="agent-visible-terminal-aura pointer-events-none absolute inset-0 z-10"
             data-testid="agent-visible-terminal-aura"
@@ -471,7 +469,7 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
             const targetSession = useTerminalStore.getState().sessions.find((session) => session.sessionId === pendingPaste.sessionId);
             if (!target || targetSession?.status !== 'connected'
               || terminalInputReadiness.isPreparing(pendingPaste.sessionId)
-              || agentTerminalLeaseState.get(pendingPaste.sessionId)) {
+              || agentTerminalLeaseState.blocksUserInput(pendingPaste.sessionId)) {
               showError(t('terminal.feedback.pasteUnavailable'));
             } else {
               target.terminal.paste(pendingPaste.text);

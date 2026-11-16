@@ -16,7 +16,7 @@ pub(crate) const MODEL_INSTRUCTIONS: &str = concat!(
 pub(crate) const WORKFLOW_INSTRUCTIONS: &str = concat!(
     "Never solicit passwords, private keys, API keys, tokens or recovery codes in questions, options, free text or chat, or embed secrets in commands/scripts. For remote sudo select a configured sudoOperationId when supplied by run_terminal_command; ShellSpan handles credentials separately. Otherwise hand sensitive work to the user. Never ask the user to edit sudoers or grant passwordless sudo. ",
     "A selected option is a decision, not missing text or proof of completion. Reuse decision_key and decision_context while target/account/prerequisites remain unchanged. ",
-    "Options requiring user work must attach user_action with instructions and a non-interactive verification_command, in one single-select question. Use request_user_action for standalone work only when supplied. Selection pauses until explicit completion, cancellation or change of plan. Do not re-ask the plan for completion or poll while waiting. ",
+    "Options requiring user work must attach user_action with instructions and a non-interactive verification_command, in one single-select question. Use request_user_action for standalone work only when supplied. Selection pauses until explicit completion, cancellation or change of plan. For work on the bound terminal, ShellSpan hands input to the user during the pause; ask them to finish at the shell prompt before choosing Continue verification. Do not re-ask the plan for completion or poll while waiting. ",
     "After completion, run the exact verification_command alone in foreground run_terminal_command; require confirmed exitCode=0 before dependent work. On failure, explain it and request fresh user action, keeping the chosen plan. Never request broader privileges or unrestricted passwordless sudo."
 );
 pub(crate) const TOOL_INSTRUCTIONS: &str = "When clarification or a decision is necessary, you must call ask_user_question and wait for its answer. It displays a question card and pauses the task. Do not substitute a question in ordinary chat. Do not continue dependent actions. Ask only when necessary; do not ask again when the task supplies the answer. Answers never grant native tool permissions. Non-sensitive inputs only; never request credentials.";
@@ -83,6 +83,25 @@ pub(crate) struct QuestionIdentity {
     pub(crate) request_id: String,
     pub(crate) call_id: String,
     pub(crate) question_request_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TerminalManualHandoff {
+    pub(crate) session_id: String,
+    pub(crate) agent_session_id: String,
+    pub(crate) task_id: String,
+    pub(crate) turn_id: String,
+    pub(crate) through_seq: u64,
+    pub(crate) acquired_at_unix_ms: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LiveTerminalManualHandoff {
+    pub(crate) handoff: TerminalManualHandoff,
+    pub(crate) terminal: crate::models::SessionSummary,
+    pub(crate) profile_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -598,6 +617,185 @@ pub(crate) fn validate_transition(
 }
 
 impl super::AgentToolPipeline {
+    pub(crate) fn terminal_manual_handoffs(
+        &self,
+        terminals: &crate::models::SessionManager,
+    ) -> Result<Vec<LiveTerminalManualHandoff>, String> {
+        use crate::models::{SessionPtyInfo, SessionStatus, SessionSummary};
+
+        let mut handoffs = Vec::new();
+        for session_id in self.native_engine.terminal_leases.manual_input_sessions()? {
+            let Ok(state) = terminals.target_state(&session_id) else {
+                continue;
+            };
+            if state.status != SessionStatus::Connected {
+                continue;
+            }
+            let Some(binding) = self
+                .native_engine
+                .terminal_broker_snapshot(Some(&session_id))?
+                .session
+                .filter(|session| session.open)
+            else {
+                continue;
+            };
+            let Some(handoff) = self.terminal_manual_handoff(&session_id)? else {
+                continue;
+            };
+            let profile_id = self
+                .sessions
+                .snapshot(&handoff.agent_session_id)?
+                .header
+                .target
+                .and_then(|target| target.profile_id);
+            let mut pty_info = match binding.transport_kind {
+                crate::terminal_broker::TerminalTransportKind::SshPty => SessionPtyInfo::ssh(),
+                _ => SessionPtyInfo::local(),
+            };
+            pty_info.deferred_startup = None;
+            pty_info.input_mode = Some(binding.input_mode);
+            pty_info.native_display_binding = binding.native_display_binding;
+            let terminal = SessionSummary {
+                session_id,
+                title: state.identity.title,
+                host: state.identity.host,
+                port: state.identity.port,
+                username: state.identity.username,
+                terminal_session_id: Some(binding.terminal_session_id),
+                terminal_generation: Some(binding.terminal_generation),
+                pty_info,
+            };
+            handoffs.push(LiveTerminalManualHandoff {
+                handoff,
+                terminal,
+                profile_id,
+            });
+        }
+        handoffs.sort_by_key(|entry| entry.handoff.acquired_at_unix_ms);
+        Ok(handoffs)
+    }
+
+    pub(crate) fn terminal_manual_handoff(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<TerminalManualHandoff>, String> {
+        let Some(owner) = self
+            .native_engine
+            .terminal_leases
+            .manual_input_owner(session_id)?
+        else {
+            return Ok(None);
+        };
+        let gate = self.question_gate(&owner)?;
+        let _gate = gate.lock().map_err(|_| "question gate unavailable")?;
+        if self
+            .native_engine
+            .terminal_leases
+            .manual_input_owner(session_id)?
+            .as_deref()
+            != Some(owner.as_str())
+        {
+            return Ok(None);
+        }
+        let snapshot = self.sessions.snapshot(&owner)?;
+        if snapshot.ended
+            || snapshot.header.execution_surface != super::AgentExecutionSurface::BoundTerminal
+            || snapshot
+                .header
+                .target
+                .as_ref()
+                .is_none_or(|target| target.session_id != session_id)
+        {
+            return Ok(None);
+        }
+        self.sessions.read_events(&owner, |events| {
+            let (turn_id, step_id, _) = question_queue(events)?;
+            records(events).into_iter().rev().find(|record| {
+                record.identity.step_id == step_id
+                    && record.waiting()
+                    && record.user_action().is_some()
+            })?;
+            let last = events.last()?;
+            Some(TerminalManualHandoff {
+                session_id: session_id.into(),
+                agent_session_id: owner.clone(),
+                task_id: snapshot.header.task_id,
+                turn_id,
+                through_seq: last.seq,
+                acquired_at_unix_ms: last.time_unix_ms,
+            })
+        })
+    }
+
+    fn commit_question_events(
+        &self,
+        session_id: &str,
+        mut payloads: Vec<super::AgentScopedPayload>,
+        manual_input: Option<bool>,
+    ) -> Result<(), String> {
+        if let Some(waiting) = manual_input {
+            payloads.push(super::AgentScopedPayload {
+                turn_id: None,
+                step_id: None,
+                payload: AgentSessionEventPayload::AgentStatus {
+                    status: if waiting {
+                        super::AgentSessionStatus::Waiting
+                    } else {
+                        super::AgentSessionStatus::Running
+                    },
+                    reason: Some(
+                        if waiting {
+                            "waitingForUserAction"
+                        } else {
+                            "userActionSubmitted"
+                        }
+                        .into(),
+                    ),
+                },
+            });
+            let header = self.sessions.snapshot(session_id)?.header;
+            if let Some(target) = header
+                .target
+                .filter(|_| header.execution_surface == super::AgentExecutionSurface::BoundTerminal)
+            {
+                let publish = self.native_engine.with_terminal_manual_input(
+                    &target.session_id,
+                    session_id,
+                    &header.task_id,
+                    waiting,
+                    || self.sessions.append_batch_deferred(session_id, payloads),
+                )?;
+                publish();
+                return Ok(());
+            }
+        }
+        self.sessions.append_batch(session_id, payloads)?;
+        Ok(())
+    }
+
+    fn fail_question_call(
+        &self,
+        identity: &QuestionIdentity,
+        name: String,
+        mut payloads: Vec<super::AgentScopedPayload>,
+        reason: String,
+    ) -> Result<super::ToolPipelineSettlement, String> {
+        payloads.push(scoped(
+            identity,
+            AgentSessionEventPayload::ToolResult {
+                call_id: identity.call_id.clone(),
+                name,
+                status: super::AgentToolResultStatus::Failed,
+                summary: reason,
+                data: None,
+                duration_ms: None,
+                evidence_refs: Vec::new(),
+            },
+        ));
+        self.sessions.append_batch(&identity.session_id, payloads)?;
+        Ok(super::ToolPipelineSettlement::Completed)
+    }
+
     pub(crate) fn request_question(
         &self,
         entry: &std::sync::Arc<super::AgentEntry>,
@@ -606,10 +804,8 @@ impl super::AgentToolPipeline {
         request: &str,
         call: super::ModelToolCall,
     ) -> Result<super::ToolPipelineSettlement, String> {
-        let _gate = self
-            .question_gate
-            .lock()
-            .map_err(|_| "question gate unavailable")?;
+        let gate = self.question_gate(&entry.session_id)?;
+        let _gate = gate.lock().map_err(|_| "question gate unavailable")?;
         if entry.cancellation().is_cancelled() {
             return Ok(super::ToolPipelineSettlement::Cancelled);
         }
@@ -671,6 +867,8 @@ impl super::AgentToolPipeline {
         }
         match parsed {
             Ok(arguments) => {
+                let manual = tool_name == ACTION_TOOL_NAME;
+                let rejected_payloads = manual.then(|| payloads.clone());
                 let previous = records(&self.sessions.all_events(&entry.session_id)?);
                 let target = self.sessions.snapshot(&entry.session_id)?.header.target;
                 let reused = workflow::reusable(&previous, turn, &arguments, target.as_ref())
@@ -685,14 +883,16 @@ impl super::AgentToolPipeline {
                         provider: super::subagent::provider_descriptor(&entry.model()?.provider),
                     },
                 ));
-                payloads.push(super::AgentScopedPayload {
-                    turn_id: None,
-                    step_id: None,
-                    payload: AgentSessionEventPayload::AgentStatus {
-                        status: super::AgentSessionStatus::Waiting,
-                        reason: Some("waitingForUserQuestion".into()),
-                    },
-                });
+                if !manual {
+                    payloads.push(super::AgentScopedPayload {
+                        turn_id: None,
+                        step_id: None,
+                        payload: AgentSessionEventPayload::AgentStatus {
+                            status: super::AgentSessionStatus::Waiting,
+                            reason: Some("waitingForUserQuestion".into()),
+                        },
+                    });
+                }
                 if let Some(answers) = reused {
                     let submission = AnswerQuestionInput {
                         identity: identity.clone(),
@@ -711,7 +911,16 @@ impl super::AgentToolPipeline {
                         },
                     ));
                 }
-                self.sessions.append_batch(&entry.session_id, payloads)?;
+                if let Err(reason) =
+                    self.commit_question_events(&entry.session_id, payloads, manual.then_some(true))
+                {
+                    if let Some(payloads) =
+                        rejected_payloads.filter(|_| reason == super::TERMINAL_MANUAL_HANDOFF_BUSY)
+                    {
+                        return self.fail_question_call(&identity, tool_name, payloads, reason);
+                    }
+                    return Err(reason);
+                }
                 if is_reused {
                     let record = records(&self.sessions.all_events(&entry.session_id)?)
                         .into_iter()
@@ -733,22 +942,7 @@ impl super::AgentToolPipeline {
                 entry.set_phase(super::AgentLifecyclePhase::Waiting)?;
                 Ok(super::ToolPipelineSettlement::Waiting)
             }
-            Err(reason) => {
-                payloads.push(scoped(
-                    &identity,
-                    AgentSessionEventPayload::ToolResult {
-                        call_id: identity.call_id.clone(),
-                        name: tool_name,
-                        status: super::AgentToolResultStatus::Failed,
-                        summary: reason,
-                        data: None,
-                        duration_ms: None,
-                        evidence_refs: Vec::new(),
-                    },
-                ));
-                self.sessions.append_batch(&entry.session_id, payloads)?;
-                Ok(super::ToolPipelineSettlement::Completed)
-            }
+            Err(reason) => self.fail_question_call(&identity, tool_name, payloads, reason),
         }
     }
 
@@ -761,10 +955,8 @@ impl super::AgentToolPipeline {
         let fingerprint = hex::encode(Sha256::digest(
             serde_json::to_vec(&input).map_err(|e| e.to_string())?,
         ));
-        let _gate = self
-            .question_gate
-            .lock()
-            .map_err(|_| "question gate unavailable")?;
+        let gate = self.question_gate(&entry.session_id)?;
+        let _gate = gate.lock().map_err(|_| "question gate unavailable")?;
         self.agents.require_live_root(entry)?;
         let events = self.sessions.all_events(&entry.session_id)?;
         let records = records(&events);
@@ -813,7 +1005,17 @@ impl super::AgentToolPipeline {
         {
             return Err("question was cancelled or Session ended".into());
         }
-        self.sessions.append_batch(
+        let waiting = input.action.is_none()
+            && record
+                .arguments
+                .selected_user_action(&input.answers)
+                .is_some();
+        let manual_input = if waiting {
+            Some(true)
+        } else {
+            input.action.map(|_| false)
+        };
+        self.commit_question_events(
             &entry.session_id,
             vec![scoped(
                 &input.identity,
@@ -829,22 +1031,8 @@ impl super::AgentToolPipeline {
                     }
                 },
             )],
+            manual_input,
         )?;
-        let waiting = input.action.is_none()
-            && input.answers.iter().any(|answer| {
-                record
-                    .arguments
-                    .questions
-                    .iter()
-                    .find(|q| q.id == answer.id)
-                    .and_then(|q| q.options.as_ref())
-                    .is_some_and(|options| {
-                        answer.custom.is_none()
-                            && options.iter().any(|o| {
-                                answer.selected.contains(&o.label) && o.user_action.is_some()
-                            })
-                    })
-            });
         entry.set_phase(if waiting {
             super::AgentLifecyclePhase::Waiting
         } else {
@@ -879,6 +1067,10 @@ impl super::AgentToolPipeline {
         &self,
         entry: &std::sync::Arc<super::AgentEntry>,
     ) -> Result<(), String> {
+        // Keep the journal, terminal reservation and in-memory phase in the
+        // same order as a concurrent answer or cancellation.
+        let gate = self.question_gate(&entry.session_id)?;
+        let _gate = gate.lock().map_err(|_| "question gate unavailable")?;
         // Cancellation recovery belongs to the current run. An explicit resume
         // or a fully settled interruption leaves cancelled questions in history;
         // those records must never cancel a fresh Entry attached to this Session.
@@ -894,10 +1086,6 @@ impl super::AgentToolPipeline {
             })
             .any(|event| matches!(event.payload, AgentSessionEventPayload::QuestionCancelled { .. }))
         {
-            let _gate = self
-                .question_gate
-                .lock()
-                .map_err(|_| "question gate unavailable")?;
             entry.cancel();
             self.cancel_questions(&entry.session_id)?;
             super::driver::close_open_scope(&self.sessions, entry, "cancelled")?;
@@ -906,59 +1094,40 @@ impl super::AgentToolPipeline {
         }
         // A crash may leave a reusable request committed before its auto-answer.
         // Repair it from the earlier durable decision rather than asking again.
-        let needs_reuse = {
-            let records = records(&events);
-            records.iter().any(|pending| {
-                pending.waiting()
-                    && pending.answer.is_none()
-                    && workflow::reusable(
-                        &records,
-                        &pending.identity.turn_id,
-                        &pending.arguments,
-                        pending.target.as_ref(),
-                    )
-                    .is_some()
-            })
-        };
-        if needs_reuse {
-            let _gate = self
-                .question_gate
-                .lock()
-                .map_err(|_| "question gate unavailable")?;
-            let records = records(&self.sessions.all_events(&entry.session_id)?);
-            if let Some(pending) = records.iter().find(|r| r.waiting() && r.answer.is_none()) {
-                if let Some(previous) = workflow::reusable(
-                    &records,
-                    &pending.identity.turn_id,
-                    &pending.arguments,
-                    pending.target.as_ref(),
-                ) {
-                    let submission = AnswerQuestionInput {
-                        identity: pending.identity.clone(),
-                        client_operation_id: format!(
-                            "reused-{}",
-                            pending.identity.question_request_id
-                        ),
-                        answers: workflow::reused_answers(previous, &pending.arguments)?,
-                        action: None,
-                    };
-                    let fingerprint = hex::encode(Sha256::digest(
-                        serde_json::to_vec(&submission).map_err(|e| e.to_string())?,
-                    ));
-                    self.sessions.append_batch(
-                        &entry.session_id,
-                        vec![scoped(
-                            &submission.identity,
-                            AgentSessionEventPayload::QuestionAnswered {
-                                submission: submission.clone(),
-                                fingerprint,
-                            },
-                        )],
-                    )?;
-                }
+        let stored_questions = records(&events);
+        if let Some(pending) = stored_questions
+            .iter()
+            .find(|r| r.waiting() && r.answer.is_none())
+        {
+            if let Some(previous) = workflow::reusable(
+                &stored_questions,
+                &pending.identity.turn_id,
+                &pending.arguments,
+                pending.target.as_ref(),
+            ) {
+                let submission = AnswerQuestionInput {
+                    identity: pending.identity.clone(),
+                    client_operation_id: format!("reused-{}", pending.identity.question_request_id),
+                    answers: workflow::reused_answers(previous, &pending.arguments)?,
+                    action: None,
+                };
+                let fingerprint = hex::encode(Sha256::digest(
+                    serde_json::to_vec(&submission).map_err(|e| e.to_string())?,
+                ));
+                self.sessions.append_batch(
+                    &entry.session_id,
+                    vec![scoped(
+                        &submission.identity,
+                        AgentSessionEventPayload::QuestionAnswered {
+                            submission: submission.clone(),
+                            fingerprint,
+                        },
+                    )],
+                )?;
             }
         }
-        let checkpoint = self.sessions.snapshot(&entry.session_id)?.recovery;
+        let snapshot = self.sessions.snapshot(&entry.session_id)?;
+        let checkpoint = snapshot.recovery;
         if matches!(
             checkpoint.kind,
             super::AgentRecoveryCheckpointKind::WaitingQuestion
@@ -966,6 +1135,23 @@ impl super::AgentToolPipeline {
         ) {
             let events = self.sessions.all_events(&entry.session_id)?;
             if let Some((turn_id, step_id, _)) = question_queue(&events) {
+                if snapshot.header.execution_surface == super::AgentExecutionSurface::BoundTerminal
+                {
+                    if let Some(target) = snapshot.header.target {
+                        if let Some(record) = records(&events).into_iter().rev().find(|record| {
+                            record.identity.step_id == step_id
+                                && !record.cancelled
+                                && record.user_action().is_some()
+                        }) {
+                            self.native_engine.terminal_leases.with_manual_input(
+                                &target.session_id,
+                                &entry.session_id,
+                                record.waiting(),
+                                || Ok(()),
+                            )?;
+                        }
+                    }
+                }
                 let finished = events.iter().any(|e| e.step_id.as_ref() == Some(&step_id) && matches!(&e.payload, AgentSessionEventPayload::StepEnd { reason } if reason == "toolsCompleted"));
                 entry.set_scope(Some(super::AgentActiveScope {
                     turn_id,
@@ -1006,10 +1192,8 @@ impl super::AgentToolPipeline {
             return Ok(None);
         }
         if let Some(record) = record {
-            let _gate = self
-                .question_gate
-                .lock()
-                .map_err(|_| "question gate unavailable")?;
+            let gate = self.question_gate(&entry.session_id)?;
+            let _gate = gate.lock().map_err(|_| "question gate unavailable")?;
             // Re-read after taking the gate: an answer may have arrived during projection.
             let record = records(&self.sessions.all_events(&entry.session_id)?)
                 .into_iter()

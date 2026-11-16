@@ -48,6 +48,7 @@ it.each([
   ['waitingForNetwork', 'Waiting for network recovery', '等待网络恢复'],
   ['toolApprovalPending', 'Waiting for your approval', '等待你批准操作'],
   ['waitingForUserQuestion', 'Waiting for your answer', '等待你回答问题'],
+  ['waitingForUserAction', 'Waiting for you to complete the action', '等待你完成操作'],
   ['waitingForTool', 'Waiting for the tool result', '等待工具执行结果'],
   ['toolSchedulerRecoveryRequired', 'Waiting for tool execution recovery', '等待工具执行恢复'],
   ['terminalExecutionRecoveryRequired', 'Execution paused: terminal recovery required', '执行已暂停，需要恢复终端'],

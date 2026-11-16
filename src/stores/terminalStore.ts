@@ -16,6 +16,7 @@ import { formatTabTitle, resolveTabTitleValues } from '@/lib/terminal/tab-title'
 
 export interface TerminalSession {
   sessionId: string;
+  restoreDisplay?: true;
   /** Ephemeral broker identity; deliberately excluded from TerminalWorkspaceSession. */
   terminalSessionId?: string;
   terminalGeneration?: number;

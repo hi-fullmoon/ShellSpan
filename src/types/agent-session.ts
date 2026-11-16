@@ -87,6 +87,38 @@ export type AgentTerminalLeaseReleaseReason =
   | 'terminalClosed'
   | 'shutdown';
 
+export interface TerminalManualHandoff {
+  readonly sessionId: string;
+  readonly agentSessionId: string;
+  readonly taskId: string;
+  readonly turnId: string;
+  readonly throughSeq: number;
+  readonly acquiredAtUnixMs: number;
+}
+
+export interface TerminalDisplayBinding {
+  readonly terminalSessionId: string;
+  readonly terminalGeneration: number;
+}
+
+export interface TerminalDisplayFrame extends TerminalDisplayBinding {
+  readonly sequence: number;
+  readonly text: string;
+}
+
+export interface TerminalDisplaySnapshot {
+  readonly throughSequence: number;
+  readonly rows: number;
+  readonly columns: number;
+  readonly contents: string;
+}
+
+export interface LiveTerminalManualHandoff {
+  readonly handoff: TerminalManualHandoff;
+  readonly terminal: import('@/types').SessionSummary;
+  readonly profileId: string | null;
+}
+
 export interface AgentTerminalLeaseEvent {
   sessionId: string;
   agentSessionId: string;

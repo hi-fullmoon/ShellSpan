@@ -35,6 +35,7 @@ describe('question submission recovery', () => {
     ['question answer conflicts with its committed answer', 'conflict', false, false],
     ['unknown or duplicate selected option', 'invalid', false, true],
     ['question payload exceeds 32768 bytes', 'invalid', false, true],
+    ['TERMINAL_MANUAL_HANDOFF_BUSY: the terminal still has an active operation; settle it or choose another plan before handing off input', 'terminalBusy', false, true],
     ['UNKNOWN_ROUTE: deepseek', 'model', true, false],
     ['UNKNOWN_MODEL', 'model', true, false],
     ['question continuation requires provider credentials', 'model', true, false],

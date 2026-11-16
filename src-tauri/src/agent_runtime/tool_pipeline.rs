@@ -684,7 +684,8 @@ pub(crate) struct AgentToolPipeline {
     #[cfg(test)]
     pub(super) question_lease_pause: QuestionLeasePause,
     pub(super) agents: super::AgentRegistry,
-    pub(super) question_gate: Arc<Mutex<()>>,
+    question_gates: Arc<Mutex<HashMap<String, Weak<Mutex<()>>>>>,
+    pub(super) native_engine: Arc<super::NativeToolEngine>,
     pub(super) sessions: AgentSessionStore,
     hooks: AgentHookBus,
     native: Arc<dyn NativeToolRuntime>,
@@ -706,13 +707,15 @@ impl AgentToolPipeline {
         native: Arc<dyn NativeToolRuntime>,
         artifacts: AgentArtifactStore,
         orchestration: OrchestrationToolRuntimeSlot,
+        native_engine: Arc<super::NativeToolEngine>,
     ) -> Self {
         Self {
             skills: super::skill_runtime::SkillRuntime::new(sessions.clone(), native.clone()),
             #[cfg(test)]
             question_lease_pause: Arc::new(Mutex::new(None)),
             agents,
-            question_gate: Arc::new(Mutex::new(())),
+            question_gates: Default::default(),
+            native_engine,
             sessions,
             hooks,
             native,
@@ -729,6 +732,20 @@ impl AgentToolPipeline {
             #[cfg(test)]
             failure_observed: Arc::new(Notify::new()),
         }
+    }
+
+    pub(super) fn question_gate(&self, session_id: &str) -> Result<Arc<Mutex<()>>, String> {
+        let mut gates = self
+            .question_gates
+            .lock()
+            .map_err(|_| "question gate unavailable")?;
+        if let Some(gate) = gates.get(session_id).and_then(Weak::upgrade) {
+            return Ok(gate);
+        }
+        gates.retain(|_, gate| gate.strong_count() != 0);
+        let gate = Arc::new(Mutex::new(()));
+        gates.insert(session_id.into(), Arc::downgrade(&gate));
+        Ok(gate)
     }
 
     #[cfg(test)]
@@ -2912,10 +2929,8 @@ impl AgentToolPipeline {
 
     pub(crate) fn cancel_session(&self, entry: &Arc<AgentEntry>) -> Result<(), String> {
         {
-            let _gate = self
-                .question_gate
-                .lock()
-                .map_err(|_| "Question gate unavailable")?;
+            let gate = self.question_gate(&entry.session_id)?;
+            let _gate = gate.lock().map_err(|_| "question gate unavailable")?;
             entry.cancel();
             #[cfg(all(
                 feature = "native-input-acceptance",
@@ -3707,6 +3722,7 @@ mod ephemeral_terminal_result_tests {
             sessions.clone(),
             Default::default(),
             Arc::new(NativeToolRuntimeSlot::default()),
+            Default::default(),
             Default::default(),
             Default::default(),
         );

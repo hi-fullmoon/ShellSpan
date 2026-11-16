@@ -15,6 +15,7 @@ import { terminalInputReadiness } from '../terminal-input-readiness';
 import { useToastStore } from '@/stores/toastStore';
 import {
   invokeGetSessionStatus,
+  invokeGetTerminalDisplaySnapshot,
   invokeMarkSessionReady,
   invokeSetSessionOutputPaused,
   invokeResizeSession,
@@ -24,6 +25,7 @@ import {
   listenToSshClosed,
   listenToSshData,
   listenToSshStatus,
+  listenToTerminalDisplay,
   listenToTerminalPromptOrigin,
   invokeRespondTerminalPromptOrigin,
   type TerminalPromptOriginRequest,
@@ -48,6 +50,8 @@ import type {
 } from '@/types';
 import type { IBuffer, IBufferCellPosition, IDisposable, ILink } from '@xterm/xterm';
 import { useTerminalStore } from '@/stores/terminalStore';
+import type { TerminalDisplayBinding } from '@/types/agent-session';
+import { restoreTerminalDisplay } from '@/lib/terminal/terminal-display-restore';
 import { applyTerminalColorOverrides, type TerminalColorOverrides } from '@/lib/terminal/terminal-colors';
 
 const logger = createLogger('terminal');
@@ -419,6 +423,7 @@ export interface TerminalController {
   writeUserInput(data: string): Promise<boolean>;
   writeInput(data: string): Promise<void>;
   whenOutputReady(): Promise<void>;
+  restoreDisplay(binding: TerminalDisplayBinding): void;
   subscribeOutput(listener: TerminalOutputCallback): () => void;
   subscribeDisplayOutput(listener: TerminalDisplayOutputCallback): () => void;
   /** Read-only notification from the actual public xterm write callback. */
@@ -468,6 +473,7 @@ class TerminalControllerImpl implements TerminalController {
   private recentOutputTail = '';
   private reconnectRequestedRef = false;
   private listenerGeneration = 0;
+  private restoringDisplay = false;
   private preferences: TerminalDisplayPreferences;
   private linkProviderDisposable?: IDisposable;
   private resizeHandler?: ReturnType<typeof createTerminalResizeHandler>;
@@ -563,12 +569,19 @@ class TerminalControllerImpl implements TerminalController {
     );
   }
 
-  private startListenerSetup(resizeBeforeReady = false): Promise<void> {
-    const setup = this.setupListeners(resizeBeforeReady);
+  private startListenerSetup(resizeBeforeReady = false, restore?: TerminalDisplayBinding): Promise<void> {
+    const setup = this.setupListeners(resizeBeforeReady, restore);
     void setup.catch((error) => {
       logger.warn(`Failed to install terminal listeners for session ${this.sessionId}`, error);
     });
     return setup;
+  }
+
+  restoreDisplay(binding: TerminalDisplayBinding): void {
+    if (this.disposed) return;
+    this.restoringDisplay = true;
+    this.clearListeners();
+    this.listenerSetup = this.startListenerSetup(false, binding);
   }
 
   private installInputRendering(ptyInfo?: SessionPtyInfo): ReturnType<typeof installTerminalCommandDecorations> {
@@ -787,25 +800,62 @@ class TerminalControllerImpl implements TerminalController {
     return this.listenerGeneration;
   }
 
-  private async setupListeners(resizeBeforeReady = false): Promise<void> {
+  private async setupListeners(resizeBeforeReady = false, restore?: TerminalDisplayBinding): Promise<void> {
     const generation = this.listenerGeneration;
     const sessionId = this.sessionId;
-    const dataUnlisten = await listenToSshData(sessionId, (event) => {
-      if (this.disposed || generation !== this.listenerGeneration || sessionId !== this.sessionId) return;
-      if (event.payload) {
+    const isCurrent = () => !this.disposed && generation === this.listenerGeneration && sessionId === this.sessionId;
+    const writeOutput = (text: string) => {
+      if (!isCurrent()) return;
+      if (text) {
         this.unverifiedUserSubmission = false;
-        this.recentOutputTail = `${this.recentOutputTail}${event.payload}`.slice(-4096);
+        this.recentOutputTail = `${this.recentOutputTail}${text}`.slice(-4096);
       }
-      const displayPayload = this.filterSessionOutput(event.payload);
+      const displayPayload = this.filterSessionOutput(text);
       for (const listener of this.outputListeners) {
         try {
-          listener(event.payload);
+          listener(text);
         } catch (error) {
           logger.warn(`Terminal output subscriber failed for session ${sessionId}`, error);
         }
       }
       this.writeVisibleSessionOutput(displayPayload);
+    };
+    let snapshotNeeded = false;
+    let recovery: Promise<void> | undefined;
+    const replay = restore && restoreTerminalDisplay(restore, writeOutput, () => {
+      snapshotNeeded = true;
+      if (!this.restoringDisplay) void recoverDisplay().catch(error => markRestoreFailure(error));
     });
+    const markRestoreFailure = (error: unknown): void => {
+      if (!isCurrent()) return;
+      logger.warn(`Terminal display recovery failed for ${sessionId}`, error);
+      this.setStatus(sessionId, { sessionId, status: 'disconnected' });
+    };
+    const recoverDisplay = (): Promise<void> => {
+      if (recovery) return recovery;
+      recovery = (async () => {
+        if (!restore || !replay) return;
+        this.restoringDisplay = true;
+        do {
+          snapshotNeeded = false;
+          const snapshot = await invokeGetTerminalDisplaySnapshot(sessionId, restore);
+          if (!isCurrent()) return;
+          await new Promise<void>((resolve) => this.terminal.write('', resolve));
+          if (!isCurrent()) return;
+          this.terminal.resize(snapshot.columns, snapshot.rows);
+          this.terminal.reset();
+          clearTerminalOutput(sessionId);
+          this.recentOutputTail = '';
+          replay.apply(snapshot);
+          await new Promise<void>((resolve) => this.terminal.write('', resolve));
+        } while (isCurrent() && snapshotNeeded);
+        if (isCurrent() && replay.ready()) this.restoringDisplay = false;
+      })().finally(() => { recovery = undefined; });
+      return recovery;
+    };
+    const dataUnlisten = await (replay
+      ? listenToTerminalDisplay(sessionId, ({ payload }) => { if (isCurrent()) replay.receive(payload); })
+      : listenToSshData(sessionId, ({ payload }) => writeOutput(payload)));
     if (this.disposed || generation !== this.listenerGeneration) {
       dataUnlisten();
       return;
@@ -816,6 +866,7 @@ class TerminalControllerImpl implements TerminalController {
       if (this.disposed || generation !== this.listenerGeneration || sessionId !== this.sessionId) return;
       logger.info(`Session ${sessionId} status: ${event.payload.status}`);
       this.emitLifecycle({ type: 'status', sessionId, payload: event.payload });
+      if (this.restoringDisplay && event.payload.status === 'connected') return;
       this.setStatus(sessionId, event.payload);
       if (event.payload.status === 'error' && event.payload.message) {
         this.writeConnectionFailure(event.payload.message);
@@ -883,6 +934,7 @@ class TerminalControllerImpl implements TerminalController {
     }
 
     try {
+      if (restore) await recoverDisplay();
       const snapshot = await invokeGetSessionStatus(sessionId);
       if (!this.disposed && generation === this.listenerGeneration && this.getStatus(sessionId) === 'connecting') {
         logger.info(`Session ${sessionId} reconciled status: ${snapshot.status}`);
@@ -890,7 +942,7 @@ class TerminalControllerImpl implements TerminalController {
         this.setStatus(sessionId, snapshot);
         if (snapshot.status === 'error' && snapshot.message) {
           this.writeConnectionFailure(snapshot.message);
-        } else {
+        } else if (!restore || snapshot.status !== 'connected') {
           this.writeSystemLine(formatTerminalStatusLine(snapshot.status, snapshot.message));
         }
         if (snapshot.status === 'connected') {
@@ -898,6 +950,10 @@ class TerminalControllerImpl implements TerminalController {
         }
       }
     } catch (error) {
+      if (restore) {
+        markRestoreFailure(error);
+        throw error;
+      }
       if (!this.disposed && generation === this.listenerGeneration) {
         logger.warn(`Failed to reconcile session ${sessionId} status`, error);
       }
@@ -928,6 +984,10 @@ class TerminalControllerImpl implements TerminalController {
     // All listeners are attached; tell the backend it may release any
     // output it buffered while we were subscribing. On Windows this also
     // delivers ConPTY's startup cursor query so the shell can proceed.
+    if (restore) {
+      if (isCurrent() && this.getStatus(sessionId) === 'connected') this.setOutputPaused(false, true);
+      return;
+    }
     void invokeMarkSessionReady(sessionId).catch((error) => {
       logger.warn(`Failed to mark session ${sessionId} ready`, error);
     });
@@ -1376,7 +1436,7 @@ class TerminalControllerImpl implements TerminalController {
       }
       return false;
     }
-    if (terminalInputReadiness.isPreparing(this.sessionId)) {
+    if (this.restoringDisplay || terminalInputReadiness.isPreparing(this.sessionId)) {
       return false;
     }
     return true;
@@ -1537,6 +1597,7 @@ class TerminalControllerImpl implements TerminalController {
 
   rebindSession(sessionId: string, ptyInfo?: SessionPtyInfo): void {
     if (this.disposed || sessionId === this.sessionId) return;
+    this.restoringDisplay = false;
     this.failureMessage = undefined;
     this.emitDisplayOutput('\u001b[?25h', 'local');
     this.terminal.write('\u001b[?25h', this.displayOutputParsedCallback('\u001b[?25h', 'local'));

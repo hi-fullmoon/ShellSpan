@@ -112,20 +112,15 @@ pub(crate) fn parse_call(name: &str, arguments: Value) -> Result<QuestionArgumen
 
 impl QuestionRecord {
     pub(crate) fn user_action(&self) -> Option<&UserAction> {
-        let q = self.arguments.questions.first()?;
-        q.user_action.as_ref().or_else(|| {
-            let answer = self.answer.as_ref()?.answers.first()?;
-            // A custom answer replaces the selected plan and never inherits its action.
-            if answer.custom.is_some() {
-                return None;
-            }
-            q.options
-                .as_ref()?
-                .iter()
-                .find(|option| answer.selected.contains(&option.label))?
-                .user_action
-                .as_ref()
-        })
+        self.arguments
+            .questions
+            .first()?
+            .user_action
+            .as_ref()
+            .or_else(|| {
+                self.arguments
+                    .selected_user_action(&self.answer.as_ref()?.answers)
+            })
     }
 
     pub(crate) fn action_response(&self) -> Option<UserActionResponse> {
@@ -167,6 +162,24 @@ impl QuestionRecord {
         } else {
             self.arguments.normalize_answers(&input.answers)
         }
+    }
+}
+
+impl QuestionArguments {
+    pub(super) fn selected_user_action(&self, answers: &[QuestionAnswer]) -> Option<&UserAction> {
+        let question = self.questions.first()?;
+        let answer = answers.first()?;
+        // A custom answer replaces the selected plan and never inherits its action.
+        if answer.id != question.id || answer.custom.is_some() {
+            return None;
+        }
+        question
+            .options
+            .as_ref()?
+            .iter()
+            .find(|option| answer.selected.contains(&option.label))?
+            .user_action
+            .as_ref()
     }
 }
 

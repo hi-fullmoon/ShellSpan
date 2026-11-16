@@ -204,6 +204,7 @@ impl TerminalInteractiveRegistry {
         session_id: &str,
         agent_session_id: &str,
         task_id: &str,
+        require_fresh_prompt: bool,
     ) -> Result<(), String> {
         let mut state = self
             .state
@@ -227,12 +228,13 @@ impl TerminalInteractiveRegistry {
         {
             return Err("TERMINAL_INTERACTIVE_NOT_AT_SHELL_BOUNDARY".into());
         }
-        self.leases.release(
+        self.leases.release_checked(
             session_id,
             agent_session_id,
             task_id,
             &registration.operation_id,
             TerminalLeaseReleaseReason::Completed,
+            require_fresh_prompt,
         )?;
         state.active.remove(session_id);
         Ok(())

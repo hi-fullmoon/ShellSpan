@@ -1,0 +1,39 @@
+{
+  "live": [
+    {
+      "handoff": {
+        "acquiredAtUnixMs": 1794830499894,
+        "agentSessionId": "session-1",
+        "sessionId": "bound-local-terminal",
+        "taskId": "task-1",
+        "throughSeq": 10,
+        "turnId": "turn-1"
+      },
+      "profileId": null,
+      "terminal": {
+        "host": "local",
+        "port": 0,
+        "ptyInfo": {
+          "inputMode": "raw",
+          "transportKind": "localPty"
+        },
+        "sessionId": "bound-local-terminal",
+        "terminalGeneration": 1,
+        "terminalSessionId": "terminal-1fe8d2bc-95f7-4726-ad34-eea7ea351ef1",
+        "title": "Local",
+        "username": "tester"
+      }
+    }
+  ],
+  "resumed": {
+    "data": {
+      "reason": "userActionSubmitted",
+      "status": "running"
+    },
+    "seq": 12,
+    "sessionId": "session-1",
+    "timeUnixMs": 1794830499904,
+    "type": "agent/status",
+    "version": 5
+  }
+}

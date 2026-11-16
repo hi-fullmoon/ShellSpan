@@ -142,6 +142,7 @@ impl AgentRuntimeBuilder {
             Arc::clone(&self.native_tools),
             self.artifacts.clone(),
             self.orchestration_slot.clone(),
+            Arc::clone(&self.native_engine),
         );
         let compactions =
             AgentCompactionManager::new(self.sessions.clone(), self.artifacts.clone());
@@ -699,11 +700,6 @@ impl AgentRuntime {
         password: Option<zeroize::Zeroizing<String>>,
     ) -> Result<(), String> {
         self.native_engine.sudo_prompts.respond(prompt_id, password)
-    }
-
-    pub(crate) fn observe_terminal_output(&self, session_id: &str, chunk: &str) -> String {
-        let _ = session_id;
-        chunk.to_string()
     }
 
     pub(crate) fn observe_terminal_raw_output(
@@ -1701,7 +1697,10 @@ impl AgentRuntime {
             self.agents.detach(session_id)?;
             return Err(error);
         }
-        self.tools.restore_question_phase(&entry)?;
+        if let Err(error) = self.tools.restore_question_phase(&entry) {
+            self.agents.detach(session_id)?;
+            return Err(error);
+        }
         if let Err(error) = self.tools.recover_waiting(&entry) {
             self.agents.detach(session_id)?;
             return Err(error);
@@ -1859,6 +1858,13 @@ impl AgentRuntime {
 
     pub(crate) fn terminal_turn_owner(&self, session_id: &str) -> Result<Option<String>, String> {
         self.native_engine.terminal_turn_owner(session_id)
+    }
+
+    pub(crate) fn terminal_manual_handoffs(
+        &self,
+        terminals: &crate::models::SessionManager,
+    ) -> Result<Vec<super::user_questions::LiveTerminalManualHandoff>, String> {
+        self.tools.terminal_manual_handoffs(terminals)
     }
 
     fn reserve_terminal_submission(
@@ -2193,11 +2199,8 @@ impl AgentRuntime {
             if self.agents.get(session_id)?.is_some() {
                 return Err("Agent Session is already stopping".into());
             }
-            let _gate = self
-                .tools
-                .question_gate
-                .lock()
-                .map_err(|_| "question gate unavailable")?;
+            let gate = self.tools.question_gate(session_id)?;
+            let _gate = gate.lock().map_err(|_| "question gate unavailable")?;
             self.tools.cancel_questions(session_id)?;
             if self.sessions.snapshot(session_id)?.ended {
                 self.sessions.snapshot(session_id)?
@@ -2928,7 +2931,15 @@ impl AgentRuntime {
     }
 
     fn wake(&self, session_id: &str) -> Result<(), String> {
-        let Some(entry) = self.agents.get(session_id)? else {
+        // An attached entry accepts question answers while it is being
+        // restored. Only the registered handle may start its driver.
+        let entry = self
+            .handles
+            .lock()
+            .map_err(|_| "Agent handle registry is unavailable")?
+            .get(session_id)
+            .map(|handle| handle.entry());
+        let Some(entry) = entry else {
             return Ok(());
         };
         if entry.scope()?.is_none() && !self.sessions.has_ready_input(session_id)? {
@@ -2967,7 +2978,10 @@ impl AgentRuntime {
                     // publish idle while holding the same gate used by answer/cancel,
                     // so no accepted answer can fall into a release/reacquire gap.
                     let resume = {
-                        let Ok(_gate) = tools.question_gate.lock() else {
+                        let Ok(gate) = tools.question_gate(&entry.session_id) else {
+                            break;
+                        };
+                        let Ok(_gate) = gate.lock() else {
                             break;
                         };
                         if entry.phase().ok() == Some(super::AgentLifecyclePhase::Running)

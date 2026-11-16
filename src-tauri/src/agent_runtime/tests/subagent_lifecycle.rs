@@ -126,6 +126,7 @@ fn setup_with_budget(
         Arc::new(NativeToolRuntimeSlot::default()),
         artifacts.clone(),
         OrchestrationToolRuntimeSlot::default(),
+        Default::default(),
     );
     let manager = SubAgentManager::new(
         sessions.clone(),

@@ -1,4 +1,154 @@
 use super::*;
+
+#[test]
+fn prompt_markers_do_not_acknowledge_unconsumed_interactive_input() {
+    let broker = TerminalSessionBroker::phase5_enabled_for_test(4096);
+    broker
+        .attach_transport(
+            "handoff",
+            None,
+            TerminalTransportKind::LocalPty,
+            TerminalGeometry::new(80, 24),
+        )
+        .unwrap();
+    broker
+        .register_integration_channel("handoff", "integration", TerminalShellKind::Bash)
+        .unwrap();
+    let observe = |event| {
+        broker
+            .accept_integration_event("handoff", "integration", event)
+            .unwrap()
+    };
+    let start_prompt =
+        || observe(TerminalIntegrationControlEvent::PromptStart { cwd: "/tmp".into() });
+    let end_prompt = || observe(TerminalIntegrationControlEvent::PromptEnd);
+    observe(TerminalIntegrationControlEvent::Ready {
+        shell: TerminalShellKind::Bash,
+    });
+    start_prompt();
+    end_prompt();
+    broker
+        .acquire_agent_interactive_lease("handoff", "agent", "task", "interactive")
+        .unwrap();
+    let send = |kind, bytes: &[u8]| {
+        broker
+            .admit_terminal_input(
+                "handoff",
+                TerminalBrokerInputSource::Agent {
+                    agent_session_id: "agent".into(),
+                    task_id: "task".into(),
+                    operation_id: "interactive".into(),
+                },
+                kind,
+                bytes,
+                || Ok(()),
+            )
+            .unwrap()
+    };
+    let acknowledged = || {
+        let state = broker.snapshot(Some("handoff")).unwrap().session.unwrap();
+        assert!(state.prompt_ready);
+        state.prompt_next_input_sequence == state.next_input_sequence
+    };
+    send(TerminalInputKind::Text, b"pwd");
+    send(TerminalInputKind::Key, b"\r");
+    // Both frames from an earlier prompt can arrive after queuing Enter.
+    start_prompt();
+    end_prompt();
+    assert!(!acknowledged());
+    observe(TerminalIntegrationControlEvent::CommandStart {
+        command_line: "pwd".into(),
+        cwd: "/tmp".into(),
+    });
+    observe(TerminalIntegrationControlEvent::CommandEnd {
+        exit_code: 0,
+        cwd: "/tmp".into(),
+    });
+    start_prompt();
+    end_prompt();
+    assert!(acknowledged());
+    start_prompt();
+    send(TerminalInputKind::Text, b"pwd");
+    end_prompt();
+    assert!(!acknowledged());
+}
+
+#[test]
+fn display_snapshot_uses_visible_output_and_preserves_the_alternate_screen() {
+    let broker = TerminalSessionBroker::enabled_for_test(8, 4096, 4096);
+    let transport = "bound-local-terminal";
+    let binding = broker
+        .attach_transport(
+            transport,
+            None,
+            TerminalTransportKind::LocalPty,
+            TerminalGeometry::new(40, 8),
+        )
+        .unwrap()
+        .unwrap();
+    let read = || {
+        broker.terminal_display_snapshot(
+            transport,
+            &binding.terminal_session_id,
+            binding.terminal_generation,
+        )
+    };
+    broker
+        .observe_raw_output(transport, b"raw-only control channel")
+        .unwrap();
+    let covered = broker
+        .observe_display_output(transport, "\x1b[32mReady\x1b[0m\r\n$ ")
+        .unwrap()
+        .unwrap();
+    broker
+        .observe_display_output(transport, "\x1b[?1049hManual editor\x1b[3;4H")
+        .unwrap();
+    let snapshot = read().unwrap();
+    let mut restored = vt100::Parser::new(snapshot.rows as u16, snapshot.columns as u16, 0);
+    restored.process(snapshot.contents.as_bytes());
+    assert!(restored.screen().alternate_screen());
+    assert!(restored.screen().contents().contains("Manual editor"));
+    assert_eq!(restored.screen().cursor_position(), (2, 3));
+    assert!(!snapshot.contents.contains("raw-only"));
+    assert_eq!(snapshot.through_sequence, 2);
+    let tail = broker
+        .observe_display_output(transport, "\x1b[?1049lcontinued")
+        .unwrap()
+        .unwrap();
+    restored.process(tail.text.as_bytes());
+    assert!(!restored.screen().alternate_screen());
+    assert!(restored.screen().contents().contains("Ready"));
+    assert_eq!(tail.sequence, snapshot.through_sequence + 1);
+    broker
+        .close_transport(
+            transport,
+            TerminalGenerationCloseReason::TransportDisconnected,
+        )
+        .unwrap();
+    assert!(read().is_err());
+    if let Ok(destination) = std::env::var("SHELLSPAN_TERMINAL_DISPLAY_TEST_OUT") {
+        let file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(destination)
+            .unwrap();
+        let closed = crate::models::ClosedEvent {
+            session_id: transport.into(),
+            identity: None,
+            reason: Some("transport disconnected".into()),
+            reason_kind: crate::models::ClosedReasonKind::TransportDisconnect,
+            retryable: true,
+        };
+        serde_json::to_writer_pretty(
+            file,
+            &serde_json::json!({"binding": {
+                "terminalSessionId": binding.terminal_session_id,
+                "terminalGeneration": binding.terminal_generation,
+            }, "snapshot": snapshot, "covered": covered, "tail": tail, "closed": closed}),
+        )
+        .unwrap();
+    }
+}
 use crate::terminal_screen::TerminalScreenBuffer;
 
 #[test]

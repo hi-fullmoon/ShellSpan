@@ -6,6 +6,7 @@ export interface AgentTerminalLeaseView extends AgentTerminalLeaseEvent {
   readonly state: 'acquired';
   /** False while the same Agent turn continues between commands; input stays locked. */
   readonly terminalOwned: boolean;
+  readonly waitingForUserAction?: boolean;
   readonly inputBlocked: boolean;
   readonly takeoverRequested: boolean;
   readonly takeoverFailed: boolean;
@@ -32,6 +33,11 @@ export const agentTerminalLeaseState = {
 
   get(sessionId: string | null): AgentTerminalLeaseView | undefined {
     return sessionId === null ? undefined : leases.get(sessionId);
+  },
+
+  blocksUserInput(sessionId: string): boolean {
+    const lease = leases.get(sessionId);
+    return !!lease && !lease.waitingForUserAction;
   },
 
   set(lease: AgentTerminalLeaseView): void {

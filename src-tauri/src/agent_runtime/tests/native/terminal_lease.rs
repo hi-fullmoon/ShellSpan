@@ -251,6 +251,97 @@
     }
 
     #[test]
+    fn manual_action_hands_user_input_back_without_releasing_the_turn() {
+        let broker = TerminalSessionBroker::enabled_for_test(8, 1024, 64);
+        broker
+            .attach_transport(
+                "terminal-1",
+                None,
+                TerminalTransportKind::LocalPty,
+                TerminalGeometry::new(80, 24),
+            )
+            .unwrap();
+        let manager = TerminalLeaseManager::new(broker);
+        let (sessions, receiver) = sessions();
+        manager.begin_turn("terminal-1", "agent-1").unwrap();
+        manager
+            .begin_delegated_turn("terminal-1", "child-1", &["agent-1".into()])
+            .unwrap();
+        acquire(&manager);
+        assert!(manager
+            .with_manual_input("terminal-1", "agent-1", true, || Ok(()))
+            .unwrap_err()
+            .starts_with("TERMINAL_LEASE_BUSY:"));
+        manager
+            .release(
+                "terminal-1",
+                "agent-1",
+                "task-1",
+                "operation-1",
+                TerminalLeaseReleaseReason::Completed,
+            )
+            .unwrap();
+        manager
+            .with_manual_input("terminal-1", "agent-1", true, || Ok(()))
+            .unwrap();
+        assert_eq!(
+            manager.turn_owner("terminal-1").unwrap().as_deref(),
+            Some("agent-1")
+        );
+        assert!(manager.begin_turn("terminal-1", "agent-2").is_err());
+        for owner in ["agent-1", "child-1"] {
+            assert!(manager
+                .acquire("terminal-1", owner, "task-1", "verify", None)
+                .unwrap_err()
+                .starts_with("TERMINAL_LEASE_BUSY:"));
+        }
+        let fail_to_commit = || Err("commit failed".into());
+        assert!(manager
+            .with_manual_input::<()>("terminal-1", "agent-1", false, fail_to_commit)
+            .is_err());
+        let command = "pwd\r";
+        manager
+            .write(
+                &sessions,
+                "terminal-1",
+                command.into(),
+                TerminalInputSource::User,
+            )
+            .unwrap();
+        assert!(
+            matches!(receiver.try_recv().unwrap(), SessionCommand::Write(text) if text == command)
+        );
+        let interrupt = vec![0x03];
+        manager
+            .write_binary(
+                &sessions,
+                "terminal-1",
+                interrupt.clone(),
+                TerminalInputSource::User,
+            )
+            .unwrap();
+        assert!(
+            matches!(receiver.try_recv().unwrap(), SessionCommand::WriteBytes(bytes) if bytes == interrupt)
+        );
+
+        manager
+            .with_manual_input("terminal-1", "agent-1", false, || Ok(()))
+            .unwrap();
+        assert!(manager
+            .write(
+                &sessions,
+                "terminal-1",
+                command.into(),
+                TerminalInputSource::User,
+            )
+            .unwrap_err()
+            .starts_with("TERMINAL_INPUT_BLOCKED_BY_AGENT:"));
+        manager
+            .acquire("terminal-1", "agent-1", "task-1", "verify", None)
+            .unwrap();
+    }
+
+    #[test]
     fn takeover_restores_user_input_and_fences_late_agent_input_until_turn_end() {
         let manager = disabled_broker_manager();
         let (sessions, receiver) = sessions();

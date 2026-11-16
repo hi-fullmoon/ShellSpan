@@ -1,0 +1,31 @@
+{
+  "binding": {
+    "terminalGeneration": 1,
+    "terminalSessionId": "terminal-445b146f-99a4-40ad-be4d-4984d80ff02f"
+  },
+  "closed": {
+    "identity": null,
+    "reason": "transport disconnected",
+    "reasonKind": "transport_disconnect",
+    "retryable": true,
+    "sessionId": "bound-local-terminal"
+  },
+  "covered": {
+    "sequence": 1,
+    "terminalGeneration": 1,
+    "terminalSessionId": "terminal-445b146f-99a4-40ad-be4d-4984d80ff02f",
+    "text": "\u001b[32mReady\u001b[0m\r\n$ "
+  },
+  "snapshot": {
+    "columns": 40,
+    "contents": "\u001b[?25h\u001b[m\u001b[H\u001b[J\u001b[32mReady\r\n\u001b[m$ \u001b[?1049h\u001b[?25h\u001b[m\u001b[H\u001b[JManual editor\u001b[3;4H\u001b>\u001b[?1l\u001b[?2004l",
+    "rows": 8,
+    "throughSequence": 2
+  },
+  "tail": {
+    "sequence": 3,
+    "terminalGeneration": 1,
+    "terminalSessionId": "terminal-445b146f-99a4-40ad-be4d-4984d80ff02f",
+    "text": "\u001b[?1049lcontinued"
+  }
+}

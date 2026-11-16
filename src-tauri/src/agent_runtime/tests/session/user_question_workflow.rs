@@ -4,9 +4,33 @@ fn user_operation_journal_keeps_the_execution_barrier_across_restart() {
         self, AnswerQuestionInput, QuestionAnswer, QuestionArguments, QuestionIdentity,
         UserActionResponse,
     };
+    use crate::agent_runtime::{
+        AgentLifecyclePhase, AgentRegistry, AgentToolPipeline, NativeToolEngine,
+        NativeToolRuntimeSlot,
+    };
+    use crate::llm::{adapter::ModelAdapterFactory, registry::HttpModelAdapterFactory};
+    use crate::models::{
+        ManagedSession, SessionCommandSender, SessionIdentity, SessionManager, SessionStatus,
+        SessionTerminalKind, StatusEvent,
+    };
+    use crate::terminal_broker::{TerminalGeometry, TerminalSessionBroker, TerminalTransportKind};
     use sha2::{Digest, Sha256};
+    use std::sync::mpsc::{sync_channel, RecvTimeoutError};
+    use std::time::Duration;
     let (root, store) = configured();
-    create(&store);
+    const TERMINAL_ID: &str = "bound-local-terminal";
+    store
+        .create(
+            serde_json::from_value(serde_json::json!({
+                "sessionId": "session-1",
+                "taskId": "task-1",
+                "goal": "Verify the local terminal after a manual operation",
+                "executionSurface": "boundTerminal",
+                "target": {"kind": "local", "targetId": TERMINAL_ID, "sessionId": TERMINAL_ID}
+            }))
+            .unwrap(),
+        )
+        .unwrap();
     let snapshot = begin_prepared_request(&store);
     let args = serde_json::json!({"questions":[{
         "id":"access", "question":"Choose access method", "decision_key":"service-access",
@@ -96,14 +120,109 @@ fn user_operation_journal_keeps_the_execution_barrier_across_restart() {
     let fingerprint = |input: &AnswerQuestionInput| {
         hex::encode(Sha256::digest(serde_json::to_vec(input).unwrap()))
     };
-    append(
-        &store,
-        AgentSessionEventPayload::QuestionAnswered {
-            fingerprint: fingerprint(&selection),
-            submission: selection.clone(),
-        },
-    )
-    .unwrap();
+    let pipeline = |store: &AgentSessionStore, engine: Arc<NativeToolEngine>| {
+        AgentToolPipeline::new(
+            AgentRegistry::default(),
+            store.clone(),
+            Default::default(),
+            Arc::new(NativeToolRuntimeSlot::default()),
+            Default::default(),
+            Default::default(),
+            engine,
+        )
+    };
+    let attach = |pipeline: &AgentToolPipeline| {
+        let provider: crate::ai::AiProviderConfig = serde_json::from_value(serde_json::json!({
+            "profile": "ollama", "id": "ollama", "kind": "ollama",
+            "baseUrl": "http://127.0.0.1:11434", "model": "qwen3", "requiresApiKey": false,
+        }))
+        .unwrap();
+        let adapter = HttpModelAdapterFactory
+            .create(provider.clone(), None)
+            .unwrap();
+        pipeline
+            .agents
+            .attach(
+                pipeline.sessions.clone(),
+                "session-1".into(),
+                provider,
+                adapter,
+            )
+            .unwrap()
+    };
+    let broker = TerminalSessionBroker::enabled_for_test(8, 1024, 64);
+    broker
+        .attach_transport(
+            TERMINAL_ID,
+            None,
+            TerminalTransportKind::LocalPty,
+            TerminalGeometry::new(80, 24),
+        )
+        .unwrap();
+    let live_terminals = SessionManager::default();
+    let (sender, _input) = crossbeam_channel::unbounded();
+    live_terminals
+        .insert(
+            TERMINAL_ID.into(),
+            ManagedSession {
+                sender: SessionCommandSender::Event(sender),
+                waker: None,
+                output_state_sender: None,
+                status: StatusEvent {
+                    session_id: TERMINAL_ID.into(),
+                    status: SessionStatus::Connected,
+                    message: None,
+                },
+                output_ready: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+                output_paused: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                terminal_kind: SessionTerminalKind::Local,
+                identity: SessionIdentity {
+                    title: "Local".into(),
+                    host: "local".into(),
+                    port: 0,
+                    username: "tester".into(),
+                },
+            },
+        )
+        .unwrap();
+    let engine = Arc::new(NativeToolEngine::with_terminal_broker(broker.clone()));
+    let initial = pipeline(&store, engine.clone());
+    let handle = attach(&initial);
+    let leases = &engine.terminal_leases;
+    leases.begin_turn(TERMINAL_ID, "session-1").unwrap();
+    let command = leases
+        .acquire(TERMINAL_ID, "session-1", "task-1", "operation-1", None)
+        .unwrap();
+    assert_eq!(
+        initial
+            .submit_question_answer(&handle.entry(), selection.clone())
+            .unwrap_err(),
+        crate::agent_runtime::TERMINAL_MANUAL_HANDOFF_BUSY
+    );
+    assert!(
+        user_questions::records(&store.all_events("session-1").unwrap())
+            .last()
+            .unwrap()
+            .answer
+            .is_none()
+    );
+    leases
+        .release(
+            TERMINAL_ID,
+            "session-1",
+            "task-1",
+            &command.operation_id,
+            crate::agent_runtime::TerminalLeaseReleaseReason::Completed,
+        )
+        .unwrap();
+    initial
+        .submit_question_answer(&handle.entry(), selection.clone())
+        .unwrap();
+    assert_eq!(
+        leases.turn_owner(TERMINAL_ID).unwrap().as_deref(),
+        Some("session-1")
+    );
+    assert!(leases.begin_turn(TERMINAL_ID, "session-1").is_err());
     assert_eq!(
         store.snapshot("session-1").unwrap().recovery.kind,
         crate::agent_runtime::AgentRecoveryCheckpointKind::WaitingQuestion
@@ -126,6 +245,8 @@ fn user_operation_journal_keeps_the_execution_barrier_across_restart() {
             })
             .unwrap();
     }
+    drop(handle);
+    drop(initial);
     drop(store);
     let restored = AgentSessionStore::default();
     restored.configure(root.path().to_path_buf()).unwrap();
@@ -140,9 +261,92 @@ fn user_operation_journal_keeps_the_execution_barrier_across_restart() {
     };
     let payload = AgentSessionEventPayload::QuestionActionAnswered {
         fingerprint: fingerprint(&completed),
-        submission: completed,
+        submission: completed.clone(),
     };
-    append(&restored, payload.clone()).unwrap();
+    let engine = Arc::new(NativeToolEngine::with_terminal_broker(broker));
+    let restored_pipeline = pipeline(&restored, engine.clone());
+    let handle = attach(&restored_pipeline);
+    let entry = handle.entry();
+    restored_pipeline.restore_question_phase(&entry).unwrap();
+    let live = restored_pipeline
+        .terminal_manual_handoffs(&live_terminals)
+        .unwrap();
+    let [waiting] = live.as_slice() else {
+        panic!("expected one attached manual handoff")
+    };
+    assert_eq!(waiting.handoff.turn_id, identity.turn_id);
+    assert_eq!(waiting.handoff.task_id, "task-1");
+    assert_eq!(waiting.terminal.session_id, TERMINAL_ID);
+
+    // Hold the actual answer publisher while the restore path is entered on
+    // another thread. Its projection must wait for the answer transaction.
+    let (publish_started, publishing) = sync_channel(0);
+    let (release_publish, publish_release) = sync_channel(0);
+    let publish_release = Mutex::new(publish_release);
+    restored
+        .set_publisher(Arc::new(move |event| {
+            if matches!(
+                event.payload,
+                AgentSessionEventPayload::QuestionActionAnswered { .. }
+            ) {
+                publish_started.send(()).unwrap();
+                publish_release
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap();
+            }
+        }))
+        .unwrap();
+    std::thread::scope(|scope| {
+        let submission =
+            scope.spawn(|| restored_pipeline.submit_question_answer(&entry, completed));
+        publishing.recv_timeout(Duration::from_secs(5)).unwrap();
+        let (start_restore, restore_started) = sync_channel(0);
+        let (finish_restore, restored_result) = sync_channel(1);
+        let pipeline = &restored_pipeline;
+        let restored_entry = &entry;
+        let recovery = scope.spawn(move || {
+            start_restore.send(()).unwrap();
+            finish_restore
+                .send(pipeline.restore_question_phase(restored_entry))
+                .unwrap();
+        });
+        restore_started
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap();
+        let early_result = restored_result.recv_timeout(Duration::from_millis(150));
+        release_publish.send(()).unwrap();
+        submission.join().unwrap().unwrap();
+        recovery.join().unwrap();
+        assert_eq!(early_result, Err(RecvTimeoutError::Timeout));
+        restored_result
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+    });
+    assert_eq!(entry.phase().unwrap(), AgentLifecyclePhase::Running);
+    assert!(restored_pipeline
+        .terminal_manual_handoffs(&live_terminals)
+        .unwrap()
+        .is_empty());
+    engine
+        .terminal_leases
+        .begin_turn(TERMINAL_ID, "session-1")
+        .unwrap();
+    if let Ok(destination) = std::env::var("SHELLSPAN_TERMINAL_HANDOFF_TEST_OUT") {
+        let resumed = restored.all_events("session-1").unwrap().pop().unwrap();
+        let mut file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(destination)
+            .unwrap();
+        serde_json::to_writer_pretty(
+            &mut file,
+            &serde_json::json!({"live": live, "resumed": resumed}),
+        )
+        .unwrap();
+    }
     assert!(
         append(&restored, payload).is_err(),
         "duplicate completion cannot commit twice"

@@ -5,7 +5,7 @@ import type { AiSessionView } from './session-adapter';
 import type { AiConversationNode } from './conversation-node';
 
 export type QuestionSubmissionReason = 'unconfirmed' | 'confirmation' | 'pending' | 'offline'
-  | 'recovery' | 'cancelled' | 'ended' | 'inactive' | 'conflict' | 'model' | 'invalid';
+  | 'recovery' | 'cancelled' | 'ended' | 'inactive' | 'conflict' | 'model' | 'invalid' | 'terminalBusy';
 
 export interface QuestionSubmissionIssue {
   readonly reason: QuestionSubmissionReason;
@@ -50,7 +50,7 @@ export function questionIssue(reason: QuestionSubmissionReason, detail = ''): Qu
   return {
     reason, detail: diagnostic(detail),
     retry: ['unconfirmed', 'confirmation', 'pending', 'offline', 'model'].includes(reason),
-    editable: reason === 'invalid',
+    editable: reason === 'invalid' || reason === 'terminalBusy',
   };
 }
 
@@ -59,6 +59,7 @@ export function questionSubmissionIssue(error: unknown, phase: 'submit' | 'confi
   if (error instanceof QuestionSubmissionError) return error.issue;
   const detail = diagnostic(error);
   if (phase === 'confirm') return questionIssue('confirmation', detail);
+  if (detail.startsWith('TERMINAL_MANUAL_HANDOFF_BUSY:')) return questionIssue('terminalBusy', detail);
   if (invalidAnswers.has(detail)) return questionIssue('invalid', detail);
   if (detail === 'question cannot bypass required recovery reconciliation') return questionIssue('recovery', detail);
   if (detail === 'question was cancelled') return questionIssue('cancelled', detail);

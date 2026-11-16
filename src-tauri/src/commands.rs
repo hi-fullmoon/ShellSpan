@@ -1735,6 +1735,20 @@ pub(crate) fn get_session_status(
 }
 
 #[tauri::command]
+pub(crate) async fn get_terminal_display_snapshot(
+    runtime: State<'_, crate::agent_runtime::AgentRuntime>,
+    session_id: String,
+    terminal_session_id: String,
+    terminal_generation: u64,
+) -> Result<crate::terminal_broker::TerminalDisplaySnapshot, String> {
+    runtime.terminal_broker().terminal_display_snapshot(
+        &session_id,
+        &terminal_session_id,
+        terminal_generation,
+    )
+}
+
+#[tauri::command]
 pub(crate) fn mark_session_ready(
     app: AppHandle,
     state: State<'_, SessionManager>,

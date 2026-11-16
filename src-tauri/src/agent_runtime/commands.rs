@@ -47,6 +47,14 @@ pub(crate) fn agent_runtime_terminal_owner(
 }
 
 #[tauri::command]
+pub(crate) async fn agent_runtime_terminal_manual_handoffs(
+    runtime: State<'_, AgentRuntime>,
+    terminals: State<'_, crate::models::SessionManager>,
+) -> Result<Vec<super::user_questions::LiveTerminalManualHandoff>, String> {
+    runtime.terminal_manual_handoffs(&terminals)
+}
+
+#[tauri::command]
 pub(crate) fn agent_runtime_terminal_lease_ready(
     app: AppHandle,
     runtime: State<'_, AgentRuntime>,

@@ -9,6 +9,8 @@ use crate::models::SessionManager;
 use crate::terminal_broker::{TerminalBrokerInputSource, TerminalInputKind, TerminalSessionBroker};
 
 pub(crate) const AGENT_TERMINAL_LEASE_EVENT: &str = "agent-terminal-lease";
+pub(crate) const TERMINAL_MANUAL_HANDOFF_BUSY: &str =
+    "TERMINAL_MANUAL_HANDOFF_BUSY: the terminal still has an active operation; settle it or choose another plan before handing off input";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -148,6 +150,7 @@ type LeasePublisher = Arc<dyn Fn(&AgentTerminalLeaseEvent) + Send + Sync>;
 struct TerminalTurnGuard {
     owner: String,
     delegates: HashSet<String>,
+    manual_input: bool,
 }
 
 impl TerminalTurnGuard {
@@ -155,6 +158,7 @@ impl TerminalTurnGuard {
         Self {
             owner: owner.into(),
             delegates: HashSet::new(),
+            manual_input: false,
         }
     }
 
@@ -203,6 +207,27 @@ impl TerminalLeaseManager {
             .map(|guard| guard.owner.clone()))
     }
 
+    pub(crate) fn manual_input_owner(&self, session_id: &str) -> Result<Option<String>, String> {
+        Ok(self
+            .turn_guards
+            .lock()
+            .map_err(|_| TerminalLeaseError::Unavailable.to_string())?
+            .get(session_id)
+            .filter(|guard| guard.manual_input)
+            .map(|guard| guard.owner.clone()))
+    }
+
+    pub(crate) fn manual_input_sessions(&self) -> Result<Vec<String>, String> {
+        Ok(self
+            .turn_guards
+            .lock()
+            .map_err(|_| TerminalLeaseError::Unavailable.to_string())?
+            .iter()
+            .filter(|(_, guard)| guard.manual_input)
+            .map(|(session_id, _)| session_id.clone())
+            .collect())
+    }
+
     pub(crate) fn was_taken_over(
         &self,
         session_id: &str,
@@ -247,6 +272,9 @@ impl TerminalLeaseManager {
             .lock()
             .map_err(|_| TerminalLeaseError::Unavailable.to_string())?;
         if let Some(guard) = turn_guards.get_mut(session_id) {
+            if guard.manual_input {
+                return Err(TerminalLeaseError::Busy.to_string());
+            }
             if guard.admits(agent_session_id) {
                 return Ok(());
             }
@@ -271,6 +299,45 @@ impl TerminalLeaseManager {
             TerminalTurnGuard::new(agent_session_id),
         );
         Ok(())
+    }
+
+    /// Preserve the root turn reservation while allowing ordinary terminal input.
+    /// The committed question transition and transport admission share the guard.
+    pub(crate) fn with_manual_input<T>(
+        &self,
+        session_id: &str,
+        agent_session_id: &str,
+        manual_input: bool,
+        commit: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        let taken_over = self
+            .taken_over
+            .lock()
+            .map_err(|_| TerminalLeaseError::Unavailable.to_string())?;
+        if taken_over.contains(&(session_id.into(), agent_session_id.into())) {
+            return Err(TerminalLeaseError::TakenOver.to_string());
+        }
+        let mut turn_guards = self
+            .turn_guards
+            .lock()
+            .map_err(|_| TerminalLeaseError::Unavailable.to_string())?;
+        if turn_guards
+            .get(session_id)
+            .is_some_and(|guard| guard.owner != agent_session_id)
+            || self
+                .leases
+                .lock()
+                .map_err(|_| TerminalLeaseError::Unavailable.to_string())?
+                .contains_key(session_id)
+        {
+            return Err(TerminalLeaseError::Busy.to_string());
+        }
+        let committed = commit()?;
+        turn_guards
+            .entry(session_id.into())
+            .or_insert_with(|| TerminalTurnGuard::new(agent_session_id))
+            .manual_input = manual_input;
+        Ok(committed)
     }
 
     pub(crate) fn set_publisher(&self, publisher: LeasePublisher) -> Result<(), String> {
@@ -379,7 +446,7 @@ impl TerminalLeaseManager {
                 .map_err(|_| TerminalLeaseError::Unavailable.to_string())?;
             if turn_guards
                 .get(session_id)
-                .is_some_and(|guard| !guard.admits(agent_session_id))
+                .is_some_and(|guard| guard.manual_input || !guard.admits(agent_session_id))
             {
                 return Err(TerminalLeaseError::Busy.to_string());
             }
@@ -451,6 +518,25 @@ impl TerminalLeaseManager {
         operation_id: &str,
         reason: TerminalLeaseReleaseReason,
     ) -> Result<bool, String> {
+        self.release_checked(
+            session_id,
+            agent_session_id,
+            task_id,
+            operation_id,
+            reason,
+            false,
+        )
+    }
+
+    pub(crate) fn release_checked(
+        &self,
+        session_id: &str,
+        agent_session_id: &str,
+        task_id: &str,
+        operation_id: &str,
+        reason: TerminalLeaseReleaseReason,
+        require_confirmed_prompt: bool,
+    ) -> Result<bool, String> {
         let lease = {
             let mut leases = self
                 .leases
@@ -460,8 +546,13 @@ impl TerminalLeaseManager {
                 return Ok(false);
             };
             validate_owner(&record.lease, agent_session_id, Some(task_id), operation_id)?;
-            self.broker
-                .release_agent_lease(session_id, agent_session_id, task_id, operation_id)?;
+            self.broker.release_agent_lease_checked(
+                session_id,
+                agent_session_id,
+                task_id,
+                operation_id,
+                require_confirmed_prompt,
+            )?;
             leases.remove(session_id).map(|record| record.lease)
         };
         if let Some(lease) = lease {
@@ -891,7 +982,11 @@ impl TerminalLeaseManager {
             .turn_guards
             .lock()
             .map_err(|_| TerminalLeaseError::Unavailable.to_string())?;
-        if matches!(source, TerminalInputSource::User) && turn_guards.contains_key(session_id) {
+        if matches!(source, TerminalInputSource::User)
+            && turn_guards
+                .get(session_id)
+                .is_some_and(|guard| !guard.manual_input)
+        {
             return Err(TerminalLeaseError::UserInputBlocked.to_string());
         }
         let leases = self

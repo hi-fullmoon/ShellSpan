@@ -162,6 +162,30 @@ impl TerminalScreenModel {
         Ok(())
     }
 
+    pub(crate) fn observe_display(&mut self, sequence: u64, text: &str) {
+        self.parser.process(text.as_bytes());
+        self.through_output_sequence = sequence;
+    }
+
+    pub(crate) fn format_display(&self) -> (u64, String) {
+        let screen = self.parser.screen();
+        let mut bytes = Vec::new();
+        if screen.alternate_screen() {
+            // Seed the primary grid before entering the alternate grid in xterm.
+            let (rows, columns) = screen.size();
+            let mut primary = vt100::Parser::new(rows, columns, 0);
+            *primary.screen_mut() = screen.clone();
+            primary.process(b"\x1b[?47l");
+            bytes.extend(primary.screen().contents_formatted());
+            bytes.extend_from_slice(b"\x1b[?1049h");
+        }
+        bytes.extend(screen.state_formatted());
+        (
+            self.through_output_sequence,
+            String::from_utf8_lossy(&bytes).into_owned(),
+        )
+    }
+
     pub(crate) fn resize(&mut self, geometry: TerminalGeometry) -> Result<bool, String> {
         let rows = geometry.rows.min(u16::MAX as u32) as u16;
         let columns = geometry.columns.min(u16::MAX as u32) as u16;

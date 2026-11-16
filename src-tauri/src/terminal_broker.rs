@@ -244,6 +244,24 @@ pub(crate) struct TerminalRawOutputFrame {
     pub(crate) bytes: Vec<u8>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TerminalDisplayFrame {
+    pub(crate) terminal_session_id: String,
+    pub(crate) terminal_generation: u64,
+    pub(crate) sequence: u64,
+    pub(crate) text: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TerminalDisplaySnapshot {
+    pub(crate) through_sequence: u64,
+    pub(crate) rows: u32,
+    pub(crate) columns: u32,
+    pub(crate) contents: String,
+}
+
 #[cfg(any(
     test,
     all(
@@ -357,6 +375,10 @@ pub(crate) struct TerminalBrokerSessionSnapshot {
     pub(crate) integration_state_revision: u64,
     pub(crate) integration_capabilities: Vec<&'static str>,
     pub(crate) prompt_ready: bool,
+    /// Next admissible input when the integration most recently confirmed a prompt.
+    #[cfg(test)]
+    #[serde(skip)]
+    pub(crate) prompt_next_input_sequence: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) current_directory: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1659,6 +1681,9 @@ struct SessionRecord {
     integration_state_revision: u64,
     prompt_started: bool,
     prompt_ready: bool,
+    prompt_start_input_sequence: u64,
+    prompt_next_input_sequence: u64,
+    interactive_input: Option<InteractiveInput>,
     native_input: bool,
     native_checkpoints: bool,
     native_typing: bool,
@@ -1676,6 +1701,8 @@ struct SessionRecord {
     // the edit buffer was submitted or cleared. Never cleared by raw output.
     command_input_pending: bool,
     screen_model: Option<TerminalScreenModel>,
+    display_screen: Option<TerminalScreenModel>,
+    display_sequence: u64,
     last_output_at: Instant,
     lease: Option<TerminalLeaseSnapshot>,
     next_input_sequence: u64,
@@ -1688,6 +1715,16 @@ struct SessionRecord {
     capture: Vec<u8>,
     capture_truncated: bool,
     subscribers: SubscriberSet,
+}
+
+/// Only an exact shell command start followed by its end can acknowledge
+/// a submitted interactive line. A prompt alone cannot acknowledge PTY input.
+#[derive(Debug)]
+enum InteractiveInput {
+    Draft(String),
+    Submitted { line: String, through: u64 },
+    Running { through: u64 },
+    Unconfirmed,
 }
 
 impl SessionRecord {
@@ -1723,6 +1760,9 @@ impl SessionRecord {
             integration_state_revision: 0,
             prompt_started: false,
             prompt_ready: false,
+            prompt_start_input_sequence: 0,
+            prompt_next_input_sequence: 0,
+            interactive_input: None,
             native_input: false,
             native_checkpoints: false,
             native_typing: false,
@@ -1746,6 +1786,8 @@ impl SessionRecord {
             open: true,
             close_reason: None,
             replay: VecDeque::new(),
+            display_screen: None,
+            display_sequence: 0,
             replay_bytes: 0,
             capture: Vec::new(),
             capture_truncated: false,
@@ -1786,6 +1828,7 @@ impl SessionRecord {
         self.capture.fill(0);
         self.capture.clear();
         self.screen_model = None;
+        self.display_screen = None;
         advance_integration_state_revision(self)?;
         Ok(())
     }
@@ -1856,6 +1899,8 @@ impl SessionRecord {
                 Vec::new()
             },
             prompt_ready: self.prompt_ready,
+            #[cfg(test)]
+            prompt_next_input_sequence: self.prompt_next_input_sequence,
             current_directory: self.current_directory.clone(),
             active_command_id: command_observation
                 .as_ref()
@@ -2547,8 +2592,66 @@ impl TerminalSessionBroker {
         if let Some(screen) = &mut record.screen_model {
             screen.resize(geometry)?;
         }
+        if let Some(screen) = &mut record.display_screen {
+            screen.resize(geometry)?;
+        }
         self.changed.notify_all();
         Ok(())
+    }
+
+    pub(crate) fn observe_display_output(
+        &self,
+        transport_session_id: &str,
+        text: &str,
+    ) -> Result<Option<TerminalDisplayFrame>, String> {
+        let mut state = self.lock()?;
+        if !state.rollout.enabled || !state.transports.contains_key(transport_session_id) {
+            return Ok(None);
+        }
+        let attachment = current_attachment(&state, transport_session_id)?.clone();
+        let record = current_record_mut(&mut state, transport_session_id, &attachment)?;
+        let sequence = record
+            .display_sequence
+            .checked_add(1)
+            .ok_or_else(counter_exhausted)?;
+        record
+            .display_screen
+            .get_or_insert_with(|| TerminalScreenModel::new(record.geometry))
+            .observe_display(sequence, text);
+        record.display_sequence = sequence;
+        Ok(Some(TerminalDisplayFrame {
+            terminal_session_id: record.terminal_session_id.clone(),
+            terminal_generation: record.terminal_generation,
+            sequence,
+            text: text.into(),
+        }))
+    }
+
+    pub(crate) fn terminal_display_snapshot(
+        &self,
+        transport_session_id: &str,
+        terminal_session_id: &str,
+        terminal_generation: u64,
+    ) -> Result<TerminalDisplaySnapshot, String> {
+        let mut state = self.lock()?;
+        let attachment = current_attachment(&state, transport_session_id)?.clone();
+        let record = current_record_mut(&mut state, transport_session_id, &attachment)?;
+        if record.terminal_session_id != terminal_session_id
+            || record.terminal_generation != terminal_generation
+        {
+            return Err("TERMINAL_BROKER_STALE_GENERATION".into());
+        }
+        let (through_sequence, contents) = record
+            .display_screen
+            .as_ref()
+            .map(TerminalScreenModel::format_display)
+            .unwrap_or_default();
+        Ok(TerminalDisplaySnapshot {
+            through_sequence,
+            rows: record.geometry.rows,
+            columns: record.geometry.columns,
+            contents,
+        })
     }
 
     pub(crate) fn mark_output_ready(&self, transport_session_id: &str) -> Result<(), String> {
@@ -3311,6 +3414,11 @@ impl TerminalSessionBroker {
                 record.current_directory = Some(cwd);
                 record.prompt_started = true;
                 record.prompt_ready = false;
+                record.prompt_start_input_sequence = if record.interactive_input.is_none() {
+                    record.next_input_sequence
+                } else {
+                    record.prompt_next_input_sequence
+                };
                 record.native_input = false;
                 record.native_checkpoints = false;
                 record.native_typing = false;
@@ -3393,6 +3501,7 @@ impl TerminalSessionBroker {
                 }
                 record.prompt_started = false;
                 record.prompt_ready = true;
+                record.prompt_next_input_sequence = record.prompt_start_input_sequence;
                 record.command_input_pending =
                     record.native_recovery_required || record.native_clear_pending.is_some();
                 if let Some(command) = &record.active_command {
@@ -3420,6 +3529,14 @@ impl TerminalSessionBroker {
                 record.prompt_ready = false;
                 record.prompt_started = false;
                 record.current_directory = Some(cwd.clone());
+                if let Some(input) = record.interactive_input.take() {
+                    record.interactive_input = Some(match input {
+                        InteractiveInput::Submitted { line, through } if line == command_line => {
+                            InteractiveInput::Running { through }
+                        }
+                        _ => InteractiveInput::Unconfirmed,
+                    });
+                }
                 if let Some(command) = &record.active_command {
                     let mut data = command.lock()?;
                     if data.native_protocol
@@ -3464,6 +3581,10 @@ impl TerminalSessionBroker {
                 record.prompt_ready = false;
                 record.prompt_started = false;
                 record.current_directory = Some(cwd.clone());
+                if matches!(record.interactive_input, Some(InteractiveInput::Running { through }) if through == record.next_input_sequence)
+                {
+                    record.interactive_input = None;
+                }
                 if let Some(command) = &record.active_command {
                     settle_command_from_integration(
                         command,
@@ -4567,12 +4688,40 @@ impl TerminalSessionBroker {
         task_id: &str,
         operation_id: &str,
     ) -> Result<bool, String> {
+        self.release_agent_lease_checked(
+            transport_session_id,
+            agent_session_id,
+            task_id,
+            operation_id,
+            false,
+        )
+    }
+
+    pub(crate) fn release_agent_lease_checked(
+        &self,
+        transport_session_id: &str,
+        agent_session_id: &str,
+        task_id: &str,
+        operation_id: &str,
+        require_confirmed_prompt: bool,
+    ) -> Result<bool, String> {
         let mut state = self.lock()?;
         if !state.rollout.enabled {
             return Ok(false);
         }
         let attachment = current_attachment(&state, transport_session_id)?.clone();
         let record = current_record_mut(&mut state, transport_session_id, &attachment)?;
+        // Use the same critical section as input admission. A check on a
+        // detached snapshot would permit another admission before release.
+        if require_confirmed_prompt
+            && (record.integration_state != TerminalIntegrationState::Ready
+                || !record.prompt_ready
+                || record.active_command.is_some()
+                || record.prompt_next_input_sequence != record.next_input_sequence
+                || record.command_input_pending)
+        {
+            return Err("TERMINAL_INTERACTIVE_NOT_AT_SHELL_BOUNDARY".into());
+        }
         let lease = record
             .lease
             .as_ref()
@@ -4837,6 +4986,37 @@ impl TerminalSessionBroker {
             }
         }
         write()?;
+        if record.active_command.is_none()
+            && matches!(request.source, TerminalBrokerInputSource::Agent { .. })
+        {
+            let previous = record.interactive_input.take();
+            let text = std::str::from_utf8(bytes).ok().filter(|text| {
+                input_kind == TerminalInputKind::Text && !text.chars().any(char::is_control)
+            });
+            record.interactive_input = Some(match (previous, text) {
+                (None, Some(text))
+                    if record.prompt_ready
+                        && record.prompt_next_input_sequence == record.next_input_sequence =>
+                {
+                    InteractiveInput::Draft(text.into())
+                }
+                (Some(InteractiveInput::Draft(mut draft)), Some(text))
+                    if draft.len().saturating_add(text.len()) <= MAX_FRAME_BYTES =>
+                {
+                    draft.push_str(text);
+                    InteractiveInput::Draft(draft)
+                }
+                (Some(InteractiveInput::Draft(line)), None)
+                    if input_kind == TerminalInputKind::Key && bytes == b"\r" =>
+                {
+                    InteractiveInput::Submitted {
+                        line,
+                        through: next_input_sequence,
+                    }
+                }
+                _ => InteractiveInput::Unconfirmed,
+            });
+        }
         if input_kind == TerminalInputKind::Interrupt
             && bytes == [3]
             && matches!(request.source, TerminalBrokerInputSource::System { .. })

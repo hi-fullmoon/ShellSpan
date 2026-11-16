@@ -222,6 +222,7 @@ pub(crate) struct AgentSessionEventPage {
     pub(crate) next_cursor: Option<u64>,
 }
 
+#[derive(Clone)]
 pub(crate) struct AgentScopedPayload {
     pub(crate) turn_id: Option<String>,
     pub(crate) step_id: Option<String>,
@@ -1117,6 +1118,16 @@ impl AgentSessionStore {
         session_id: &str,
         payloads: Vec<AgentScopedPayload>,
     ) -> Result<Vec<AgentSessionEvent>, String> {
+        Ok(self.append_batch_deferred(session_id, payloads)?())
+    }
+
+    // Some native transitions must keep input admission locked through the
+    // durable write, then release it before invoking event subscribers.
+    pub(super) fn append_batch_deferred(
+        &self,
+        session_id: &str,
+        payloads: Vec<AgentScopedPayload>,
+    ) -> Result<impl FnOnce() -> Vec<AgentSessionEvent> + use<>, String> {
         let mut inner = self.lock_configured()?;
         let payloads = payloads
             .into_iter()
@@ -1124,8 +1135,10 @@ impl AgentSessionStore {
             .collect();
         let (events, publisher) = append_payloads_locked(&mut inner, session_id, payloads)?;
         drop(inner);
-        publish_events(publisher, &events);
-        Ok(events)
+        Ok(move || {
+            publish_events(publisher, &events);
+            events
+        })
     }
 
     pub(crate) fn execution_observation_only(&self, session_id: &str) -> Result<bool, String> {

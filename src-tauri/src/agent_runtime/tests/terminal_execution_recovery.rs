@@ -76,6 +76,7 @@ fn recovery_pipeline() -> (tempfile::TempDir, AgentToolPipeline, NativeToolReque
         Arc::new(NativeToolRuntimeSlot::default()),
         Default::default(),
         Default::default(),
+        Default::default(),
     );
     let request = NativeToolRequest {
         session_id: "agent".into(),

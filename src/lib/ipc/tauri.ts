@@ -83,6 +83,10 @@ import type {
   AgentTerminalLeaseControlInput,
   AgentTerminalLeaseEvent,
   CreateAgentSessionRequest,
+  LiveTerminalManualHandoff,
+  TerminalDisplayBinding,
+  TerminalDisplayFrame,
+  TerminalDisplaySnapshot,
 } from '@/types/agent-session';
 
 const logger = createLogger('ipc');
@@ -436,6 +440,10 @@ export async function invokeGetSessionStatus(sessionId: string): Promise<StatusE
   return invokeLogged<StatusEvent>('get_session_status', { sessionId });
 }
 
+export function invokeGetTerminalDisplaySnapshot(sessionId: string, binding: TerminalDisplayBinding): Promise<TerminalDisplaySnapshot> {
+  return invokeLogged('get_terminal_display_snapshot', { sessionId, ...binding });
+}
+
 export async function invokeMarkSessionReady(sessionId: string): Promise<void> {
   return invokeLogged('mark_session_ready', { sessionId });
 }
@@ -699,6 +707,10 @@ export async function invokeArchiveAgentRuntimeSession(
 
 export async function invokeGetAgentTerminalOwner(sessionId: string): Promise<string | null> {
   return invokeLogged<string | null>('agent_runtime_terminal_owner', { sessionId });
+}
+
+export async function invokeGetTerminalManualHandoffs(): Promise<readonly LiveTerminalManualHandoff[]> {
+  return invokeLogged('agent_runtime_terminal_manual_handoffs');
 }
 
 export async function invokeAgentTerminalLeaseReady(
@@ -1121,6 +1133,14 @@ export async function listenToSshData(
   return listen<string>(`ssh-data:${sessionId}`, (event) => {
     callback(event);
   });
+}
+
+export function listenToTerminalDisplay(sessionId: string, callback: EventCallback<TerminalDisplayFrame>): Promise<UnlistenFn> {
+  return listen(`terminal-display:${sessionId}`, callback);
+}
+
+export function listenToTerminalClosures(callback: EventCallback<ClosedEvent>): Promise<UnlistenFn> {
+  return listen('ssh-closed', callback);
 }
 
 export async function listenToSshStatus(

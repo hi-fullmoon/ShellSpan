@@ -32,7 +32,7 @@ export async function clearTerminalScreen(terminal: Terminal, sessionId: string)
   const session = useTerminalStore.getState().sessions.find(item => item.sessionId === sessionId);
   const controller = terminalRegistry.get(sessionId);
   if (terminal.buffer.active.type !== 'normal' || controller?.terminal !== terminal || session?.status !== 'connected'
-    || terminalInputReadiness.isPreparing(sessionId) || agentTerminalLeaseState.get(sessionId)) return 'blocked';
+    || terminalInputReadiness.isPreparing(sessionId) || agentTerminalLeaseState.blocksUserInput(sessionId)) return 'blocked';
   // Terminal cells do not identify an editing region. Guessing from isWrapped
   // loses hard newlines; restoring CUP also destroys the pending-wrap state.
   // Leave the entire emulator untouched when a shell cannot redraw safely.
@@ -107,7 +107,7 @@ export function TerminalContentMenu({ session, terminal, onPaste, onSearch, chil
   const connected = session?.status === 'connected';
   const preparing = useSyncExternalStore(terminalInputReadiness.subscribe, () => terminalInputReadiness.isPreparing(sessionId ?? null));
   const lease = useSyncExternalStore(agentTerminalLeaseState.subscribe, () => agentTerminalLeaseState.get(sessionId ?? null));
-  const canPaste = connected && !preparing && !lease;
+  const canPaste = connected && !preparing && (!lease || lease.waitingForUserAction);
   const shortcuts = useAppStore(state => state.shortcuts);
   const mac = getPlatform() === 'macos';
   const hint = (value: string): React.ReactNode => <span className="ml-auto pl-4 text-muted-foreground">{value}</span>;

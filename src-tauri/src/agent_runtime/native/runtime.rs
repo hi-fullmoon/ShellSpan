@@ -141,7 +141,7 @@ pub(crate) struct NativeToolEngine {
     processes: ProcessRegistryNative,
     terminal_execute: TerminalExecuteRegistry,
     terminal_interactive: TerminalInteractiveRegistry,
-    terminal_leases: TerminalLeaseManager,
+    pub(crate) terminal_leases: TerminalLeaseManager,
     terminal_broker: TerminalSessionBroker,
     checkpoints: CheckpointStoreNative,
     file_operations: FileOperationRegistryNative,
@@ -536,6 +536,36 @@ impl NativeToolEngine {
 
     pub(crate) fn terminal_turn_owner(&self, session_id: &str) -> Result<Option<String>, String> {
         self.terminal_leases.turn_owner(session_id)
+    }
+
+    pub(crate) fn with_terminal_manual_input<T>(
+        &self,
+        session_id: &str,
+        agent_session_id: &str,
+        task_id: &str,
+        waiting: bool,
+        commit: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        let busy = || super::TERMINAL_MANUAL_HANDOFF_BUSY.to_string();
+        if waiting {
+            self.terminal_interactive
+                .release_at_prompt(session_id, agent_session_id, task_id, true)
+                .map_err(|error| match error.as_str() {
+                    "TERMINAL_INTERACTIVE_BUSY" | "TERMINAL_INTERACTIVE_NOT_AT_SHELL_BOUNDARY" => {
+                        busy()
+                    }
+                    _ => error,
+                })?;
+        }
+        self.terminal_leases
+            .with_manual_input(session_id, agent_session_id, waiting, commit)
+            .map_err(|error| {
+                if error.starts_with("TERMINAL_LEASE_BUSY:") {
+                    busy()
+                } else {
+                    error
+                }
+            })
     }
 
     pub(crate) fn terminal_turn_was_taken_over(
@@ -1916,6 +1946,7 @@ impl NativeToolEngine {
             &session_id,
             &context.request.user_session_id,
             &context.request.task_id,
+            false,
         )?;
         let broker_snapshot = self
             .terminal_broker
@@ -3113,6 +3144,7 @@ fn truncate_utf8(value: &str, limit: usize) -> (String, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent_runtime::{TerminalInteractiveInputKindNative, TerminalKeyNative};
     use crate::models::{
         ManagedSession, SessionCommand, SessionCommandSender, SessionIdentity, StatusEvent,
     };
@@ -3161,6 +3193,149 @@ mod tests {
             checkpoint_root: Arc::new(Mutex::new(None)),
             sudo_prompts: Arc::default(),
         }
+    }
+
+    #[test]
+    fn manual_handoff_releases_only_the_same_agents_settled_interactive_lease() {
+        const TERMINAL: &str = "manual-handoff-pty";
+        const INTEGRATION: &str = "manual-handoff-integration";
+        const AGENT: &str = "manual-handoff-agent";
+        const TASK: &str = "manual-handoff-task";
+        let broker = TerminalSessionBroker::phase5_enabled_for_test(4096);
+        broker
+            .attach_transport(
+                TERMINAL,
+                None,
+                TerminalTransportKind::LocalPty,
+                TerminalGeometry::new(80, 24),
+            )
+            .unwrap();
+        broker
+            .register_integration_channel(TERMINAL, INTEGRATION, TerminalShellKind::Bash)
+            .unwrap();
+        let observe = |event| {
+            broker
+                .accept_integration_event(TERMINAL, INTEGRATION, event)
+                .unwrap()
+        };
+        let cwd = std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        observe(TerminalIntegrationControlEvent::Ready {
+            shell: TerminalShellKind::Bash,
+        });
+        observe(TerminalIntegrationControlEvent::PromptStart { cwd: cwd.clone() });
+        observe(TerminalIntegrationControlEvent::PromptEnd);
+
+        let engine = engine_with_terminal_broker_for_test(broker.clone());
+        let sessions = SessionManager::default();
+        let (sender, receiver) = unbounded();
+        sessions
+            .insert(
+                TERMINAL.into(),
+                ManagedSession {
+                    sender: SessionCommandSender::Event(sender),
+                    waker: None,
+                    output_state_sender: None,
+                    status: StatusEvent {
+                        session_id: TERMINAL.into(),
+                        status: SessionStatus::Connected,
+                        message: None,
+                    },
+                    output_ready: Arc::new(AtomicBool::new(true)),
+                    output_paused: Arc::new(AtomicBool::new(false)),
+                    terminal_kind: SessionTerminalKind::Local,
+                    identity: SessionIdentity {
+                        title: "bash".into(),
+                        host: "local".into(),
+                        port: 0,
+                        username: "tester".into(),
+                    },
+                },
+            )
+            .unwrap();
+        engine.begin_terminal_turn(TERMINAL, AGENT).unwrap();
+        engine
+            .terminal_interactive
+            .write(
+                &sessions,
+                TERMINAL,
+                AGENT,
+                TASK,
+                TerminalInteractiveInputKindNative::Text,
+                Some("pwd"),
+                None,
+            )
+            .unwrap();
+        engine
+            .terminal_interactive
+            .write(
+                &sessions,
+                TERMINAL,
+                AGENT,
+                TASK,
+                TerminalInteractiveInputKindNative::Key,
+                None,
+                Some(TerminalKeyNative::Enter),
+            )
+            .unwrap();
+        assert!(
+            matches!(receiver.try_recv().unwrap(), SessionCommand::Write(input) if input == "pwd")
+        );
+        assert!(
+            matches!(receiver.try_recv().unwrap(), SessionCommand::Write(input) if input == "\r")
+        );
+        assert_eq!(
+            engine
+                .with_terminal_manual_input::<()>(TERMINAL, AGENT, TASK, true, || {
+                    panic!("the prompt predates the last interactive input")
+                })
+                .unwrap_err(),
+            super::super::TERMINAL_MANUAL_HANDOFF_BUSY
+        );
+        observe(TerminalIntegrationControlEvent::CommandStart {
+            command_line: "pwd".into(),
+            cwd: cwd.clone(),
+        });
+        assert_eq!(
+            engine
+                .with_terminal_manual_input::<()>(TERMINAL, AGENT, TASK, true, || {
+                    panic!("a foreground command still owns the terminal")
+                })
+                .unwrap_err(),
+            super::super::TERMINAL_MANUAL_HANDOFF_BUSY
+        );
+        observe(TerminalIntegrationControlEvent::CommandEnd {
+            exit_code: 0,
+            cwd: cwd.clone(),
+        });
+        observe(TerminalIntegrationControlEvent::PromptStart { cwd });
+        observe(TerminalIntegrationControlEvent::PromptEnd);
+        assert_eq!(
+            engine
+                .with_terminal_manual_input::<()>(TERMINAL, "other-agent", TASK, true, || {
+                    panic!("another Agent cannot release this lease")
+                })
+                .unwrap_err(),
+            super::super::TERMINAL_MANUAL_HANDOFF_BUSY
+        );
+        assert!(engine.terminal_interactive.has_operation(TERMINAL).unwrap());
+
+        engine
+            .with_terminal_manual_input(TERMINAL, AGENT, TASK, true, || Ok(()))
+            .unwrap();
+        assert!(!engine.terminal_interactive.has_operation(TERMINAL).unwrap());
+        assert_eq!(
+            engine.terminal_turn_owner(TERMINAL).unwrap().as_deref(),
+            Some(AGENT)
+        );
+        engine
+            .write_user_terminal_input(&sessions, TERMINAL, "pwd\r".into())
+            .unwrap();
+        assert!(
+            matches!(receiver.try_recv().unwrap(), SessionCommand::Write(input) if input == "pwd\r")
+        );
     }
 
     #[test]

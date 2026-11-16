@@ -45,6 +45,80 @@ async fn idle(runtime: &AgentRuntime, session: &str) {
     .unwrap();
 }
 
+#[test]
+fn question_completion_waits_until_the_restored_handle_is_registered() {
+    use crate::agent_runtime::user_questions::UserActionResponse;
+
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("agent-runtime/sessions");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("session-1.jsonl"),
+        include_str!("../../../../../src/tests/fixtures/manual-terminal-handoff-ledger.jsonl"),
+    )
+    .unwrap();
+    let runtime = AgentRuntimeBuilder::new().build();
+    runtime.configure(root.path().to_path_buf()).unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let provider = AiProviderConfig {
+        base_url: format!("http://{}", listener.local_addr().unwrap()),
+        id: "ollama".into(),
+        model: "qwen3".into(),
+        model_definition: None,
+        ..provider()
+    };
+    let adapter = runtime.models.resolve(provider.clone(), None).unwrap();
+    let handle = runtime
+        .agents
+        .attach(
+            runtime.sessions.clone(),
+            "session-1".into(),
+            provider,
+            adapter,
+        )
+        .unwrap();
+    let entry = handle.entry();
+    crate::agent_runtime::driver::recover_open_scope(&runtime.sessions, &entry).unwrap();
+    let pending = user_questions::records(&all_events(&runtime, "session-1"))
+        .pop()
+        .unwrap();
+    assert!(pending.waiting() && pending.user_action().is_some());
+    runtime
+        .answer_question(
+            AnswerQuestionInput {
+                identity: pending.identity,
+                client_operation_id: "completion-during-startup".into(),
+                answers: pending.answer.unwrap().answers,
+                action: Some(UserActionResponse::Completed),
+            },
+            None,
+        )
+        .unwrap();
+    assert!(!entry.is_driver_active());
+    let events = all_events(&runtime, "session-1");
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(
+                event.payload,
+                AgentSessionEventPayload::QuestionActionAnswered { .. }
+            ))
+            .count(),
+        1
+    );
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event.payload, AgentSessionEventPayload::ToolResult { .. })));
+    runtime.tools.restore_question_phase(&entry).unwrap();
+    assert_eq!(entry.phase().unwrap(), AgentLifecyclePhase::Running);
+    assert!(runtime
+        .handles
+        .lock()
+        .unwrap()
+        .insert("session-1".into(), handle)
+        .is_none());
+}
+
 #[tokio::test]
 async fn question_single_answer_entry_reattaches_original_turn_and_next_request() {
     let initial = FakeAdapter::new(vec![tool_response(vec![question_call("question-1")])]);
@@ -954,7 +1028,12 @@ async fn question_answer_racing_wait_publication_cannot_be_overwritten_or_lost()
         .await
         .unwrap()
         .unwrap();
-    assert!(runtime.tools.question_gate.try_lock().is_err());
+    assert!(runtime
+        .tools
+        .question_gate("publish")
+        .unwrap()
+        .try_lock()
+        .is_err());
     let submitter = runtime.clone();
     let submitting = tokio::task::spawn_blocking(move || {
         submitter.answer_question(

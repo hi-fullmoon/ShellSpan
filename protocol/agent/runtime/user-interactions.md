@@ -83,6 +83,27 @@ and localized completion, change-plan and cancel controls. It has no text field.
 and `verification_command`. It uses the same durable question barrier and
 recovery path; its normalized question has `user_action` and no options.
 
+For a bound terminal, requesting a standalone action or selecting an option
+with `user_action` returns keyboard and paste input to the user on that
+terminal. The original turn and its plan stay open. ShellSpan keeps the turn's
+reservation, so another Agent or a delegate cannot acquire the same terminal
+during the handoff. ShellSpan can release the same Agent's interactive lease
+at a verified prompt once the shell has confirmed the submitted line and its
+completion. Keystrokes and prompts without a matching command receipt leave the
+handoff blocked, with the task available to choose another plan. Ordinary
+questions and unselected options keep the existing input ownership.
+
+After finishing, the user chooses Continue verification. ShellSpan reclaims
+input as part of committing the action response, before the driver can
+continue. Existing terminal readiness checks still apply to verification.
+Opening the terminal view again restores the pending handoff and current
+formatted screen from the same live transport generation. The renderer
+subscribes before reading the display snapshot, applies live output after the
+snapshot cursor, and waits for the terminal to parse the result before
+accepting input. Completion, stop, and transport-close events invalidate a
+handoff snapshot still in transit. The display snapshot is in memory and is
+provided to the terminal renderer only.
+
 An answer submission may include `action`, one of `completed`, `change_plan`
 or `cancelled`. For a selected option, this second submission must preserve the
 committed question answers exactly and emits `question/action_answered`. A

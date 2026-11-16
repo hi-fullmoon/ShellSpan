@@ -109,14 +109,20 @@ pub(crate) fn emit_status(
 }
 
 pub(crate) fn emit_data(app: &AppHandle, session_id: &str, chunk: String) -> Result<(), String> {
-    let display = app
-        .try_state::<agent_runtime::AgentRuntime>()
-        .map(|runtime| runtime.observe_terminal_output(session_id, &chunk))
-        .unwrap_or(chunk);
-    if display.is_empty() {
+    if chunk.is_empty() {
         return Ok(());
     }
-    app.emit(&format!("{SSH_DATA_EVENT_PREFIX}{session_id}"), display)
+    if let Some(runtime) = app.try_state::<agent_runtime::AgentRuntime>() {
+        if let Ok(Some(frame)) = runtime
+            .terminal_broker()
+            .observe_display_output(session_id, &chunk)
+        {
+            if let Err(error) = app.emit(&format!("terminal-display:{session_id}"), frame) {
+                log::warn!("Failed to emit sequenced terminal display output session_id={session_id}: {error}");
+            }
+        }
+    }
+    app.emit(&format!("{SSH_DATA_EVENT_PREFIX}{session_id}"), chunk)
         .map_err(|error| format!("failed to emit data event: {error}"))
 }
 
@@ -457,6 +463,7 @@ pub fn run() {
             agent_runtime::agent_runtime_cancel,
             agent_runtime::agent_runtime_terminal_lease_ready,
             agent_runtime::agent_runtime_terminal_owner,
+            agent_runtime::agent_runtime_terminal_manual_handoffs,
             agent_runtime::agent_runtime_takeover_terminal,
             agent_runtime::agent_runtime_interrupt,
             agent_runtime::agent_runtime_resume,
@@ -489,6 +496,7 @@ pub fn run() {
             commands::write_session,
             commands::respond_terminal_prompt_origin,
             commands::get_session_status,
+            commands::get_terminal_display_snapshot,
             commands::mark_session_ready,
             commands::set_session_output_paused,
             commands::resize_session,
