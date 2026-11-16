@@ -8,6 +8,9 @@ use crate::terminal_command::{
 use sha2::{Digest, Sha256};
 
 const UNSUPPORTED_PROFILE: &str = "TERMINAL_NATIVE_PROFILE_UNSUPPORTED";
+// libssh2 pipelines SFTP packets within one read or write. Keep enough bytes
+// outstanding for remote SSH links while retaining the connection deadline.
+const NATIVE_SFTP_TRANSFER_WINDOW: usize = 1024 * 1024;
 
 #[cfg(all(test, target_os = "macos"))]
 #[path = "remote_tests.rs"]
@@ -601,7 +604,7 @@ fn upload(sftp: &ssh2::Sftp, path: &str, bytes: &[u8], mode: u32) -> Result<(), 
     let mut file = sftp
         .create(Path::new(path))
         .map_err(|_| "TERMINAL_NATIVE_UPLOAD_FAILED")?;
-    for chunk in bytes.chunks(65536) {
+    for chunk in bytes.chunks(NATIVE_SFTP_TRANSFER_WINDOW) {
         if let Some(error) = crate::connection::terminal_deadline::failure_reason() {
             return Err(error);
         }
@@ -633,12 +636,13 @@ fn remote_sha_and_length(sftp: &ssh2::Sftp, path: &str) -> Result<(String, u64),
     let before = file
         .stat()
         .map_err(|_| "TERMINAL_NATIVE_ARTIFACTS_UNAVAILABLE")?;
-    if before.size.is_none_or(|size| size > 32 * 1024 * 1024) {
-        return Err("TERMINAL_NATIVE_ARTIFACT_LIMIT".into());
-    }
+    let expected_size = before
+        .size
+        .filter(|size| *size <= 32 * 1024 * 1024)
+        .ok_or("TERMINAL_NATIVE_ARTIFACT_LIMIT")?;
     let mut digest = Sha256::new();
     let mut total = 0_u64;
-    let mut bytes = [0; 65536];
+    let mut bytes = vec![0; (expected_size as usize + 1).min(NATIVE_SFTP_TRANSFER_WINDOW)];
     loop {
         if let Some(error) = crate::connection::terminal_deadline::failure_reason() {
             return Err(error);
