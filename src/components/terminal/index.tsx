@@ -21,7 +21,6 @@ import { TerminalControllerLayer } from './terminal-controller-layer';
 import { TerminalTabBar } from './terminal-tab-bar';
 import { TerminalTabSwitcher } from './terminal-tab-switcher';
 import { TerminalPane } from './terminal-pane';
-import { TerminalCarousel } from './terminal-carousel';
 import { NewSessionDialog } from './new-session-dialog';
 import { TerminalContextMenu } from './terminal-context-menu';
 import {
@@ -53,7 +52,6 @@ type DropPreview =
   | { kind: 'tab-bar'; slot: TerminalGroupSlot; insertIndex: number };
 
 const TERMINAL_MIN_PANE_SIZE = 120;
-const SINGLE_TERMINAL_CAROUSEL_KEY = 'single';
 
 const Terminal: React.FC = () => {
   const { t } = useI18n();
@@ -497,11 +495,13 @@ const Terminal: React.FC = () => {
     return true;
   }, [activeSessionId, canCreateSplitAt, createGroupId, focusGroup, sessions, split]);
 
-  const activateGroupTab = useCallback((slot: TerminalGroupSlot, sessionId: string): void => {
-    focusGroup(slot);
-    setSplit((current) => current
-      ? updateTerminalGroup(current, slot, (group) => ({ ...group, activeSessionId: sessionId })) as TerminalSplitState
-      : current);
+  const activateTab = useCallback((slot: TerminalGroupSlot | null, sessionId: string): void => {
+    if (slot !== null) {
+      focusGroup(slot);
+      setSplit((current) => current
+        ? updateTerminalGroup(current, slot, (group) => ({ ...group, activeSessionId: sessionId })) as TerminalSplitState
+        : current);
+    }
     useTerminalStore.getState().setActiveSession(sessionId);
     focusSession(sessionId);
   }, [focusGroup, focusSession]);
@@ -510,28 +510,8 @@ const Terminal: React.FC = () => {
     const group = split
       ? getTerminalGroups(split).find((candidate) => candidate.sessionIds.includes(sessionId))
       : null;
-    if (group) {
-      activateGroupTab(group.id, sessionId);
-      return;
-    }
-    useTerminalStore.getState().setActiveSession(sessionId);
-    focusSession(sessionId);
-  }, [activateGroupTab, focusSession, split]);
-
-  const activateCarouselTab = useCallback((
-    key: string,
-    sessionId: string,
-  ): void => {
-    if (key === SINGLE_TERMINAL_CAROUSEL_KEY) {
-      useTerminalStore.getState().setActiveSession(sessionId);
-      return;
-    }
-    focusGroup(key);
-    setSplit((current) => current
-      ? updateTerminalGroup(current, key, (group) => ({ ...group, activeSessionId: sessionId })) as TerminalSplitState
-      : current);
-    useTerminalStore.getState().setActiveSession(sessionId);
-  }, [focusGroup]);
+    activateTab(group?.id ?? null, sessionId);
+  }, [activateTab, split]);
 
   // Leader-key pane navigation, dispatched from the xterm key handler in
   // TerminalPane (which already consumed the key, so nothing reaches the pty).
@@ -553,11 +533,11 @@ const Terminal: React.FC = () => {
         (id) => rects.get(id) ?? null,
       );
       if (!target) return;
-      activateGroupTab(target.id, target.activeSessionId);
+      activateTab(target.id, target.activeSessionId);
     };
     document.addEventListener('shellspan:navigate-terminal-pane', handlePaneNavigate);
     return () => document.removeEventListener('shellspan:navigate-terminal-pane', handlePaneNavigate);
-  }, [split, activateGroupTab]);
+  }, [split, activateTab]);
 
   const reorderGroupTabs = useCallback((slot: TerminalGroupSlot, sessionId: string, insertIndex: number): void => {
     setSplit((current) => {
@@ -698,6 +678,7 @@ const Terminal: React.FC = () => {
 
   const renderTerminalPane = (session: TerminalSession | null, isActive: boolean): React.ReactNode => (
     <TerminalPane
+      key={session?.sessionId}
       activeSession={session}
       isActive={isActive}
       isVisible={terminalVisible}
@@ -740,7 +721,7 @@ const Terminal: React.FC = () => {
         }}
         onPointerDown={(e) => {
           // Tab presses activate on pointerdown too and already focus the
-          // group via activateGroupTab. Handling them here as well would
+          // group via activateTab. Handling them here as well would
           // re-activate the render-time groupActiveSession, clobbering a
           // same-press tab switch with the stale session.
           if ((e.target as HTMLElement).closest('[data-session-tab]')) return;
@@ -761,7 +742,7 @@ const Terminal: React.FC = () => {
             setNewSessionDialogOpen(true);
           }}
           onTabContextMenu={(session, x, y) => setContextMenu({ session, x, y, slot })}
-          onTabActivate={(sessionId) => activateGroupTab(slot, sessionId)}
+          onTabActivate={(sessionId) => activateTab(slot, sessionId)}
           onTabReorder={(sessionId, index) => reorderGroupTabs(slot, sessionId, index)}
           onTabDragMove={(sessionId, x, y) => handleTabDragMove(sessionId, slot, x, y)}
           onTabDragEnd={(sessionId, x, y) => handleTabDragEnd(sessionId, slot, x, y)}
@@ -771,16 +752,7 @@ const Terminal: React.FC = () => {
             : null}
         />
         <div data-terminal-content className="relative min-h-0 flex-1">
-          {groupSessions.length > 1 ? (
-            <TerminalCarousel
-              sessions={groupSessions}
-              activeSessionId={groupActiveSession?.sessionId ?? null}
-              isActive={focused && groupActiveSession?.sessionId === activeSessionId}
-              isVisible={terminalVisible}
-              onActivate={(sessionId) => activateCarouselTab(slot, sessionId)}
-              onSettle={focusSession}
-            />
-          ) : renderTerminalPane(
+          {renderTerminalPane(
             groupActiveSession,
             focused && groupActiveSession?.sessionId === activeSessionId,
           )}
@@ -842,10 +814,7 @@ const Terminal: React.FC = () => {
         <TerminalTabBar
           onNewTabClick={() => setNewSessionDialogOpen(true)}
           onTabContextMenu={(session, x, y) => setContextMenu({ session, x, y, slot: null })}
-          onTabActivate={(sessionId) => {
-            useTerminalStore.getState().setActiveSession(sessionId);
-            focusSession(sessionId);
-          }}
+          onTabActivate={(sessionId) => activateTab(null, sessionId)}
           onTabDragMove={(sessionId, x, y) => handleTabDragMove(sessionId, null, x, y)}
           onTabDragEnd={(sessionId, x, y) => handleTabDragEnd(sessionId, null, x, y)}
           onTabDragCancel={() => setDropPreview(null)}
@@ -869,19 +838,7 @@ const Terminal: React.FC = () => {
           renderLayout(split)
         ) : (
           <div data-terminal-content className="relative h-full w-full">
-            {sessions.length > 1 ? (
-              <TerminalCarousel
-                sessions={sessions}
-                activeSessionId={activeSessionId}
-                isActive
-                isVisible={terminalVisible}
-                onActivate={(sessionId) => activateCarouselTab(
-                  SINGLE_TERMINAL_CAROUSEL_KEY,
-                  sessionId,
-                )}
-                onSettle={focusSession}
-              />
-            ) : renderTerminalPane(activeSession, true)}
+            {renderTerminalPane(activeSession, true)}
           </div>
         )}
         {dropPreview?.kind === 'split' && dropPreview.slot === null && (

@@ -36,7 +36,6 @@ const server = await createServer({
         export { TerminalCloseDetails } from '/src/components/terminal/terminal-close-details.tsx';
         export { TerminalPane } from '/src/components/terminal/terminal-pane.tsx';
         export { TerminalResizeIndicator } from '/src/components/terminal/terminal-resize-indicator.tsx';
-        export { TerminalCarousel } from '/src/components/terminal/terminal-carousel.tsx';
         export { default as TerminalWorkspace } from '/src/components/terminal/index.tsx';
         export { agentTerminalLeaseState } from '/src/components/terminal/agent-terminal-lease-state.ts';
         export { useTerminalTaskNavigation } from '/src/components/terminal/agent-terminal-task-navigation.ts';
@@ -81,6 +80,10 @@ try {
   await page.evaluate(async ({ output, identity }) => {
     const runtime = await import('/experience-runtime.js');
     window.runtime = runtime;
+    window.observeReboundOutput = (controller) => controller.whenOutputReady().catch((error) => {
+      // A browser can exercise the renderer rebind, while IPC listeners require Tauri.
+      if (!(error instanceof TypeError) || !error.message.includes('__TAURI_INTERNALS__')) throw error;
+    });
     const { React, createRoot, Terminal, SearchAddon, FitAddon, resolveTerminalTheme, TERMINAL_CONTAINER_CLASS, TerminalSearch, useAppStore, initI18n } = runtime;
     useAppStore.setState({ locale: 'zh-CN' });
     await initI18n('zh-CN');
@@ -695,6 +698,7 @@ try {
         controller.terminal.buffer.active.getLine(index).translateToString(true)).join('');
       const cursorVisible = !controller.terminal._core.coreService.isCursorHidden;
       controller.rebindSession(`${id}-retry`);
+      await window.observeReboundOutput(controller);
       await new Promise((resolve) => controller.terminal.write('', resolve));
       await new Promise(requestAnimationFrame);
       const cursorRestored = !controller.terminal._core.coreService.isCursorHidden;
@@ -713,7 +717,7 @@ try {
   for (const width of [1200, 400]) {
     await page.setViewportSize({ width, height: 700 });
     const focusResult = await page.evaluate(async (terminalOutput) => {
-      const { React, createRoot, flushSync, TerminalCarousel, terminalRegistry, useTerminalStore,
+      const { React, createRoot, flushSync, TerminalPane, terminalRegistry, useTerminalStore,
         useAppStore, useFocusStore, agentTerminalLeaseState, createAgentTerminalLeaseCoordinator } = window.runtime;
       const store = useTerminalStore.getState();
       const id = store.beginConnectionAttempt(window.identity);
@@ -738,13 +742,10 @@ try {
       window.dialogRoot.render(null);
       const Surface = () => {
         const section = useAppStore((state) => state.activeSection);
-        const activeId = useTerminalStore((state) => state.activeSessionId);
-        const sessions = useTerminalStore((state) => state.sessions);
-        return React.createElement(TerminalCarousel, {
-          sessions: sessions.filter((session) => session.sessionId === id || session.sessionId === otherId),
-          activeSessionId: activeId,
+        const activeSession = useTerminalStore((state) => state.sessions.find((session) => session.sessionId === state.activeSessionId) ?? null);
+        return React.createElement(TerminalPane, {
+          key: activeSession?.sessionId, activeSession,
           isActive: section === 'terminal', isVisible: section === 'terminal',
-          onActivate: store.setActiveSession, onSettle: () => {},
         });
       };
       useAppStore.getState().setActiveSection('terminal');
@@ -769,6 +770,7 @@ try {
         await coordinator.handle(lease);
         await coordinator.handle({ ...lease, operationId: crypto.randomUUID(), state: 'activity', commandPhase: 'typing' });
         const duplicatePreservedFocus = document.activeElement === input;
+        coordinator.handleSession({ type: 'turn/end', sessionId: lease.agentSessionId });
         flushSync(() => store.setActiveSession(otherId));
         otherController.focus();
         await coordinator.handle({ ...lease, operationId: crypto.randomUUID() });
@@ -821,7 +823,9 @@ try {
         // then exercise the real reconnect/rebind lifecycle before it resumes.
         await Promise.resolve();
         terminalRegistry.rebindSession(id, reboundId);
+        const reboundOutput = window.observeReboundOutput(controller);
         await pending;
+        await reboundOutput;
         return { ...result, rebindPreservedFocus: document.activeElement === input };
       } finally {
         coordinator.dispose();
@@ -892,10 +896,10 @@ try {
           && useTerminalStore.getState().sessions[0].sessionId === ids[1]
           && surface.querySelectorAll('[data-terminal-group]').length === 0;
         const controllersRetained = terminalRegistry.get(ids[0]) === first && terminalRegistry.get(ids[1]) === second;
-        const activePage = surface.querySelector(`[data-terminal-carousel-page="${ids[1]}"]`);
-        const carousel = surface.querySelector('[data-terminal-carousel]');
-        const activePageAligned = activePage && carousel
-          && Math.abs(activePage.getBoundingClientRect().left - carousel.getBoundingClientRect().left) <= 1;
+        const activePane = surface.querySelector(`[data-terminal-pane-session="${ids[1]}"]`);
+        const content = surface.querySelector('[data-terminal-content]');
+        const activePaneAligned = activePane && content
+          && Math.abs(activePane.getBoundingClientRect().left - content.getBoundingClientRect().left) <= 1;
         flushSync(() => {
           useFocusStore.getState().enter();
           useFocusStore.getState().leave();
@@ -933,6 +937,7 @@ try {
           && document.activeElement === input && focusedIds.length === 0;
         await coordinator.handle({ ...terminalLease, state: 'released' });
         const releasePreservedFocus = document.activeElement === input;
+        coordinator.handleSession({ type: 'turn/end', sessionId: terminalLease.agentSessionId });
         flushSync(() => useFocusStore.getState().leave());
         await coordinator.handle({
           ...terminalLease, operationId: crypto.randomUUID(),
@@ -940,7 +945,7 @@ try {
         await new Promise(requestAnimationFrame);
         await new Promise(requestAnimationFrame);
         return {
-          workspaceIsolation: Boolean(focusStartsUnsplit && terminalRestored && focusRestored && controllersRetained && activePageAligned),
+          workspaceIsolation: Boolean(focusStartsUnsplit && terminalRestored && focusRestored && controllersRetained && activePaneAligned),
           commandWorkspaceRouting: focusCommandRouted && focusSelectionPreserved
             && !useFocusStore.getState().enabled && useTerminalStore.getState().workspace === 'terminal'
             && useTerminalStore.getState().workspaceViews.focus.activeSessionId === ids[0],
@@ -970,62 +975,76 @@ try {
       targetFocusObserved: true, targetGroupSelected: true,
     });
   }
-  const carouselResize = await page.evaluate(async ({ output, identity }) => {
-    const { React, createRoot, TerminalCarousel, terminalRegistry, useTerminalStore } = window.runtime;
+  const workspaceResize = await page.evaluate(async ({ output, identity }) => {
+    const { React, createRoot, flushSync, TerminalWorkspace, terminalRegistry, useAppStore, useTerminalStore } = window.runtime;
     const store = useTerminalStore.getState();
-    const ids = Array.from({ length: 3 }, () => {
+    const ids = Array.from({ length: 2 }, () => {
       const sessionId = crypto.randomUUID();
       store.addSession({ ...identity, sessionId });
+      store.setStatus(sessionId, { sessionId, status: 'disconnected' });
       return sessionId;
     });
-    for (const id of ids) {
-      store.setStatus(id, { sessionId: id, status: 'disconnected' });
-      terminalRegistry.create(id, store.setStatus, store.setClosed,
-        () => useTerminalStore.getState().sessions.find((session) => session.sessionId === id).status,
-        () => {});
-    }
-    const sessions = useTerminalStore.getState().sessions.filter((session) => ids.includes(session.sessionId));
+    useAppStore.setState({ activeSection: 'terminal', restoreWorkspace: false });
     const host = document.createElement('div');
     host.style.cssText = 'position:fixed;left:0;top:0;width:700px;height:500px;background:white';
+    host.dataset.terminalWheelCheck = '';
     document.body.appendChild(host);
     const root = createRoot(host);
-    const activations = [];
-    const settlements = [];
-    root.render(React.createElement(TerminalCarousel, {
-      sessions, activeSessionId: ids[1], isActive: false, isVisible: true,
-      onActivate: (id) => activations.push(id), onSettle: (id) => settlements.push(id),
-    }));
-    const frame = () => new Promise(requestAnimationFrame);
-    try {
-      for (let i = 0; i < 10; i++) await frame();
-      await new Promise((resolve) => terminalRegistry.get(ids[1]).terminal.write(output, resolve));
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      activations.length = 0;
-      settlements.length = 0;
-      let terminalMounts = 0;
-      const observer = new MutationObserver((records) => {
-        for (const record of records) for (const node of record.addedNodes) {
-          if (node instanceof Element) terminalMounts += Number(node.matches('.xterm')) + node.querySelectorAll('.xterm').length;
-        }
-      });
-      observer.observe(host, { childList: true, subtree: true });
-      for (const width of [680, 600, 480, 350, 420, 560, 700]) {
-        host.style.width = `${width}px`;
-        for (let i = 0; i < 12; i++) await frame();
-      }
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      observer.disconnect();
-      const viewport = host.querySelector('[data-terminal-carousel]');
-      const activePage = host.querySelector(`[data-terminal-carousel-page="${ids[1]}"]`);
-      const aligned = Math.abs(activePage.getBoundingClientRect().left - viewport.getBoundingClientRect().left) < 1;
-      return { activations, settlements, terminalMounts, aligned };
-    } finally {
+    window.disposeWheelCheck = () => {
       root.unmount();
       for (const id of ids) { terminalRegistry.dispose(id); store.removeSession(id); }
       host.remove();
+    };
+    flushSync(() => root.render(React.createElement(TerminalWorkspace)));
+    const frame = () => new Promise(requestAnimationFrame);
+    for (let i = 0; i < 10; i++) await frame();
+    await new Promise((resolve) => terminalRegistry.get(ids[1]).terminal.write(output.replace(/\n/g, '\r\n'), resolve));
+    let terminalMounts = 0;
+    const observer = new MutationObserver((records) => {
+      for (const record of records) for (const node of record.addedNodes) {
+        if (node instanceof Element) terminalMounts += Number(node.matches('.xterm')) + node.querySelectorAll('.xterm').length;
+      }
+    });
+    observer.observe(host, { childList: true, subtree: true });
+    for (const width of [680, 600, 480, 350, 420, 560, 700]) {
+      host.style.width = `${width}px`;
+      for (let i = 0; i < 12; i++) await frame();
     }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    observer.disconnect();
+    const content = host.querySelector('[data-terminal-content]');
+    const activePane = content.querySelector(`[data-terminal-pane-session="${ids[1]}"]`);
+    const aligned = Math.abs(activePane.getBoundingClientRect().left - content.getBoundingClientRect().left) < 1;
+    return { ids, activeId: useTerminalStore.getState().activeSessionId, terminalMounts, aligned };
   }, { output, identity });
-  assert.deepEqual(carouselResize, { activations: [], settlements: [], terminalMounts: 0, aligned: true });
+  try {
+    const [neighbor, active] = workspaceResize.ids;
+    assert.equal(workspaceResize.activeId, active);
+    assert.equal(workspaceResize.terminalMounts, 0);
+    assert.equal(workspaceResize.aligned, true);
+    const host = page.locator('[data-terminal-wheel-check]');
+    const terminal = host.locator(`[data-terminal-pane-session="${active}"] .xterm-screen`);
+    for (const width of [1200, 400]) {
+      await page.setViewportSize({ width, height: 700 });
+      await host.evaluate((element, width) => { element.style.width = `${width}px`; }, width);
+      await terminal.hover();
+      await page.mouse.wheel(-1200, 0);
+      const content = host.locator('[data-terminal-content]');
+      assert.equal(await content.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), true);
+      assert.equal(await host.locator(`[data-session-tab="${active}"]`).getAttribute('aria-selected'), 'true');
+      assert.equal(await content.locator('[data-terminal-pane-session]').count(), 1);
+      await page.evaluate((id) => window.runtime.terminalRegistry.get(id).terminal.scrollToBottom(), active);
+      await page.mouse.wheel(0, -480);
+      await page.waitForFunction((id) => {
+        const buffer = window.runtime.terminalRegistry.get(id).terminal.buffer.active;
+        return buffer.viewportY < buffer.baseY;
+      }, active);
+    }
+    await host.locator(`[data-session-tab="${neighbor}"]`).click();
+    await host.locator(`[data-terminal-pane-session="${neighbor}"] .xterm-helper-textarea:focus`).waitFor({ state: 'attached' });
+  } finally {
+    await page.evaluate(() => window.disposeWheelCheck());
+  }
   assert.deepEqual(errors, []);
   process.stdout.write('Terminal experience regressions passed with real xterm and WebKit at wide and narrow sizes.\n');
 } finally {

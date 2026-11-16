@@ -9,7 +9,7 @@ import { flushSync } from 'react-dom';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Terminal } from '@xterm/xterm';
 import { TerminalControllerLayer } from '../terminal-controller-layer';
-import { TerminalCarousel } from '../terminal-carousel';
+import { TerminalPane } from '../terminal-pane';
 import { FocusLayout } from '@/components/focus/focus-layout';
 import { AppShell, MainContent } from '@/components/layout/app-shell';
 import { AiPanel } from '@/components/ai/ai-panel';
@@ -75,16 +75,15 @@ async function eventually(check: () => boolean | Promise<boolean>, message: stri
   }
 }
 function NativeTerminals() {
-  const sessions = useTerminalStore(state => state.sessions);
-  const active = useTerminalStore(state => state.activeSessionId);
+  const active = useTerminalStore(state => state.sessions.find(session => session.sessionId === state.activeSessionId) ?? null);
   const section = useAppStore(state => state.activeSection);
   const focusEnabled = useFocusStore(state => state.enabled);
   const terminalOpen = useFocusStore(state => state.terminalOpen);
   const visible = section === 'terminal' && (!focusEnabled || terminalOpen);
   return <><TerminalControllerLayer />
-    <div className="relative min-h-0 flex-1"><TerminalCarousel sessions={sessions} activeSessionId={active}
-      isActive isVisible={visible} onActivate={id => useTerminalStore.getState().setActiveSession(id)}
-      onSettle={id => { if (useAppStore.getState().activeSection === 'terminal') terminalRegistry.get(id)?.focus(); }} /></div></>;
+    <div className="relative min-h-0 flex-1">
+      <TerminalPane key={active?.sessionId} activeSession={active} isVisible={visible} />
+    </div></>;
 }
 
 // Real model + production IPC/facade/runtime/lease/broker/current Shell + xterm.

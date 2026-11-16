@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import { TerminalControllerLayer } from '../terminal-controller-layer';
-import { TerminalCarousel } from '../terminal-carousel';
+import { TerminalPane } from '../terminal-pane';
 import { TerminalTabBar } from '../terminal-tab-bar';
 import { FocusLayout } from '@/components/focus/focus-layout';
 import { terminalRegistry } from '../registry/terminal-registry';
@@ -30,14 +30,13 @@ async function eventually(check: () => boolean, message: string, timeout = 30_00
 
 // Keep production terminal rendering without mounting workspace persistence.
 function NativeTerminals() {
-  const sessions = useTerminalStore(state => state.sessions);
-  const active = useTerminalStore(state => state.activeSessionId);
+  const active = useTerminalStore(state => state.sessions.find(session => session.sessionId === state.activeSessionId) ?? null);
   return <div className="flex min-h-0 min-w-0 flex-1 flex-col">
     <TerminalControllerLayer />
     <TerminalTabBar onTabActivate={id => useTerminalStore.getState().setActiveSession(id)} />
-    <div className="relative min-h-0 flex-1"><TerminalCarousel sessions={sessions} activeSessionId={active}
-      isActive isVisible onActivate={id => useTerminalStore.getState().setActiveSession(id)}
-      onSettle={id => terminalRegistry.get(id)?.focus()} /></div>
+    <div className="relative min-h-0 flex-1">
+      <TerminalPane key={active?.sessionId} activeSession={active} />
+    </div>
   </div>;
 }
 

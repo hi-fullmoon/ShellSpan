@@ -1349,22 +1349,6 @@ export function useAiSessionController({
   useEffect(() => () => { if (focusMode) useFocusStore.getState().setBusy(false); }, [focusMode]);
   const selectedExecutionSurface = focusMode ? 'boundTerminal' : canContinueHistoricalView ? terminalCreationSurface
     : visibleView?.snapshot.value.header.executionSurface ?? terminalCreationSurface;
-  const directFallbackAttempt = useRef<string | null>(null);
-  useEffect(() => {
-    const setExecutionSurface = adapter.setExecutionSurface;
-    if (!needsDirectFallback || terminalSessionRestoring || !view || !setExecutionSurface
-      || readOnlySession || view.summary.archived || view.snapshot.value.archived
-      || settingsBusy || settingsPending.current
-      || view.status === 'running' || view.status === 'waiting' || view.pendingApproval || view.pendingQuestion
-      || view.snapshot.value.uncertainNativeEffects || composer.pendingSubmissions.length > 0
-      || composer.phase === 'submitting' || composer.phase === 'stopping') return;
-    const key = JSON.stringify([activeTerminal?.sessionId, view.summary.id]);
-    if (directFallbackAttempt.current === key) return;
-    directFallbackAttempt.current = key;
-    // Only switch the idle conversation. Any already submitted work keeps its original surface.
-    void changeSettings(sessionId => setExecutionSurface(sessionId, 'direct'));
-  }, [activeTerminal?.sessionId, adapter, changeSettings, composer.pendingSubmissions.length,
-    composer.phase, needsDirectFallback, readOnlySession, settingsBusy, terminalSessionRestoring, view]);
   const terminalConflict = !terminalSessionRestoring && !isSubagent && scope === 'terminal' && selectedExecutionSurface === 'boundTerminal'
     && Boolean(terminalOccupancy && terminalOccupancy.agentSessionId !== (visibleView?.summary.id ?? composer.sessionId));
   const agentUnavailableReason = terminalSessionRestoring ? null

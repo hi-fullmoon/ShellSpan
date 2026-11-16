@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { TerminalContextMenu } from '@/components/terminal/terminal-context-menu';
 import { TerminalControllerLayer } from '@/components/terminal/terminal-controller-layer';
 import { TerminalTabBar } from '@/components/terminal/terminal-tab-bar';
-import { TerminalCarousel } from '@/components/terminal/terminal-carousel';
+import { TerminalPane } from '@/components/terminal/terminal-pane';
 import { terminalRegistry } from '@/components/terminal/registry/terminal-registry';
 import { useFocusStore } from '@/stores/focusStore';
 import { useTerminalStore, type TerminalSession } from '@/stores/terminalStore';
@@ -31,17 +31,16 @@ async function eventually(check: () => boolean, message: string): Promise<void> 
 // Real production terminal primitives attached to native PTYs. No transport,
 // model, terminal controller, session event or connection response is replaced.
 function NativeTerminals() {
-  const sessions = useTerminalStore(s => s.sessions);
-  const active = useTerminalStore(s => s.activeSessionId);
+  const active = useTerminalStore(s => s.sessions.find(session => session.sessionId === s.activeSessionId) ?? null);
   const [context, setContext] = useState<{ session: TerminalSession; x: number; y: number } | null>(null);
   return <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col" data-native-terminal-root>
     <TerminalControllerLayer />
     <TerminalTabBar onTabActivate={id => useTerminalStore.getState().setActiveSession(id)}
       onTabContextMenu={(session, x, y) => setContext({ session, x, y })} />
     <TerminalContextMenu open={Boolean(context)} session={context?.session ?? null} x={context?.x ?? 0} y={context?.y ?? 0} onClose={() => setContext(null)} />
-    <div className="relative min-h-0 flex-1"><TerminalCarousel sessions={sessions} activeSessionId={active} isActive isVisible
-      onActivate={id => useTerminalStore.getState().setActiveSession(id)}
-      onSettle={id => terminalRegistry.get(id)?.focus()} /></div>
+    <div data-terminal-content className="relative min-h-0 flex-1">
+      <TerminalPane key={active?.sessionId} activeSession={active} />
+    </div>
   </div>;
 }
 
@@ -141,10 +140,10 @@ async function verify() {
         const dimensions = { cols: controller.terminal.cols, rows: controller.terminal.rows };
         await new Promise(requestAnimationFrame);
         await new Promise(requestAnimationFrame);
-        const carousel = host.querySelector<HTMLElement>('[data-terminal-carousel]')!;
-        const activePage = carousel.querySelector<HTMLElement>(`[data-terminal-carousel-page="${controller.sessionId}"]`)!;
-        assert(Math.abs(activePage.getBoundingClientRect().left - carousel.getBoundingClientRect().left) <= 1,
-          'Workspace switch displaced the active carousel page');
+        const content = host.querySelector<HTMLElement>('[data-terminal-content]')!;
+        const activePane = content.querySelector<HTMLElement>(`[data-terminal-pane-session="${controller.sessionId}"]`)!;
+        assert(Math.abs(activePane.getBoundingClientRect().left - content.getBoundingClientRect().left) <= 1,
+          'Workspace switch displaced the active terminal');
         await new Promise(r => setTimeout(r, 160));
         assert(controller.terminal.cols === dimensions.cols && controller.terminal.rows === dimensions.rows,
           'Workspace switch resized the terminal again after painting');

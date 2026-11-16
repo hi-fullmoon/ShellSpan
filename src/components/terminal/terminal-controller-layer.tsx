@@ -700,9 +700,8 @@ export const TerminalControllerLayer: React.FC = () => {
           controller.writeDisconnectedHint();
         }
       }
-      // The visible carousel may have created the controller first. Native
-      // startup can also finish before addSession, so reconcile every newly
-      // observed identity independently of who created its renderer.
+      // Native startup can finish before addSession, so reconcile every newly
+      // observed runtime identity even when its controller already exists.
       if (!knownRef.current.has(session.sessionId) && session.terminalSessionId) {
         void refreshTerminalIntegrationState(session.sessionId);
       }
