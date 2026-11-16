@@ -646,6 +646,7 @@ export default {
   'workbench.logs.level': '级别',
   'workbench.logs.copied': '已复制日志',
   'workbench.logs.copyFailed': '日志复制失败',
+  'workbench.logs.actions': '更多操作',
   'workbench.logs.export': '导出',
   'workbench.logs.exported': '日志已导出到 {path}',
   'workbench.logs.exportFailed': '日志导出失败',

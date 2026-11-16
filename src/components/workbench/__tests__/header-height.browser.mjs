@@ -13,6 +13,59 @@ const tabs = [
   ['logs', 'Log explorer', '日志中心'],
 ];
 
+async function checkLogActions(page, header, locale, width, context) {
+  const [moreLabel, exportLabel, diagnosticLabel, refreshLabel] = locale === 'en-US'
+    ? ['More actions', 'Export', 'Diagnostic bundle', 'Refresh']
+    : ['更多操作', '导出', '诊断包', '刷新'];
+  const trigger = header.getByRole('button', { name: moreLabel, exact: true });
+  const refresh = header.getByRole('button', { name: refreshLabel, exact: true });
+  const menu = page.getByRole('menu');
+  assert.equal(await menu.count(), 0, `${context}: actions start collapsed`);
+  for (const name of [exportLabel, diagnosticLabel]) {
+    assert.equal(await header.getByRole('button', { name, exact: true }).count(), 0, `${context}: ${name} is in the menu`);
+  }
+  assert.equal((await trigger.boundingBox()).height, (await refresh.boundingBox()).height,
+    `${context}: more actions and refresh have the same height`);
+  const mutedColor = await header.locator('[data-slot="workbench-page-header-copy"] p')
+    .evaluate((description) => getComputedStyle(description).color);
+
+  if (width === 320) await trigger.press('ArrowDown');
+  else await trigger.click();
+  const exportItem = menu.getByRole('menuitem', { name: exportLabel, exact: true });
+  const diagnosticItem = menu.getByRole('menuitem', { name: diagnosticLabel, exact: true });
+  await exportItem.waitFor();
+  await diagnosticItem.waitFor();
+  assert.ok(await exportItem.isDisabled(), `${context}: no log is available to export`);
+  assert.ok(await diagnosticItem.isEnabled(), `${context}: diagnostic bundle is available without a log`);
+  await diagnosticItem.focus();
+  await menu.screenshot({
+    animations: 'disabled',
+    path: `${screenshotDirectory}/log-actions-${page.context().browser().browserType().name()}-${locale}-${width}.png`,
+  });
+  for (const action of [exportItem, diagnosticItem]) {
+    const { centerOffset, ...iconStyle } = await action.evaluate((item) => {
+      const icon = item.querySelector('svg');
+      const iconRect = icon.getBoundingClientRect();
+      const label = item.querySelector('[data-slot="menu-item-label"]').getBoundingClientRect();
+      return {
+        width: iconRect.width,
+        height: iconRect.height,
+        gap: label.left - iconRect.right,
+        stroke: getComputedStyle(icon).stroke,
+        centerOffset: iconRect.top + iconRect.height / 2 - (label.top + label.height / 2),
+      };
+    });
+    assert.deepEqual(iconStyle, { width: 14, height: 14, gap: 4, stroke: mutedColor },
+      `${context}: compact muted icons with 4px label spacing`);
+    assert.ok(Math.abs(centerOffset) < 0.5,
+      `${context}: menu icon and label vertical centers differ by ${centerOffset}px`);
+  }
+
+  await page.keyboard.press('Escape');
+  await menu.waitFor({ state: 'hidden' });
+  await trigger.and(page.locator(':focus')).waitFor();
+}
+
 for (const browserType of [chromium, webkit]) {
   const browser = await browserType.launch();
   try {
@@ -82,6 +135,7 @@ for (const browserType of [chromium, webkit]) {
           }
           if (width === 767 || width === 320) {
             await header.screenshot({ path: `${screenshotDirectory}/header-${tab}-${browserType.name()}-${locale}-${width}.png` });
+            if (tab === 'logs') await checkLogActions(page, header, locale, width, context);
           }
         }
       }
@@ -92,4 +146,4 @@ for (const browserType of [chromium, webkit]) {
   }
 }
 
-console.log('All workbench headers passed alignment, row placement and scroll clearance in Chromium and WebKit for both locales.');
+console.log('Workbench header layout and log menu checks passed in Chromium and WebKit for both locales.');

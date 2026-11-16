@@ -646,6 +646,7 @@ export default {
   'workbench.logs.level': 'Level',
   'workbench.logs.copied': 'Log copied',
   'workbench.logs.copyFailed': 'Failed to copy log entry',
+  'workbench.logs.actions': 'More actions',
   'workbench.logs.export': 'Export',
   'workbench.logs.exported': 'Log exported to {path}',
   'workbench.logs.exportFailed': 'Failed to export log',

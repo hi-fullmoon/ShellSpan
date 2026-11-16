@@ -13,6 +13,7 @@ import {
   ChevronRightIcon,
   CircleAlertIcon,
   CopyIcon,
+  EllipsisIcon,
   FileSearchIcon,
   FileTextIcon,
   Layers3Icon,
@@ -27,6 +28,13 @@ import { createLogParser, type ParsedLogLine } from '@/lib/logs/parser';
 import type { LogSource } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { EmptyState, PanelLoadingState } from '@/components/ui/empty-state';
 import {
   Tooltip,
@@ -75,6 +83,7 @@ type DateFilterOption = (typeof DATE_FILTER_OPTIONS)[number]['key'];
 
 const LOG_LEVELS = ['INFO', 'WARN', 'ERROR', 'DEBUG'] as const;
 type LogLevel = (typeof LOG_LEVELS)[number];
+const LOG_ACTION_ITEM_CLASS = "[&_svg:not([class*='size-'])]:size-3.5 [&>svg]:translate-y-px [&>svg]:stroke-muted-foreground";
 
 function getDaysDifference(dateString: string, today: Date): number {
   const [year, month, day] = dateString.split('-').map(Number);
@@ -658,14 +667,30 @@ export const LogPanel: React.FC = () => {
                 <RefreshCwIcon data-icon="inline-start" />
                 {t('common.refresh')}
               </Button>
-              <Button variant="outline" size="sm" onClick={handleExport} disabled={!content}>
-                <ArrowDownToLineIcon data-icon="inline-start" />
-                {t('workbench.logs.export')}
-              </Button>
-              <Button variant="secondary" size="sm" onClick={handleDiagnosticBundle}>
-                <BugIcon data-icon="inline-start" />
-                {t('workbench.logs.diagnostic')}
-              </Button>
+              <DropdownMenu>
+                <Tooltip>
+                  <TooltipTrigger render={
+                    <DropdownMenuTrigger render={
+                      <Button variant="secondary" size="icon-sm" aria-label={t('workbench.logs.actions')} />
+                    } />
+                  }>
+                    <EllipsisIcon aria-hidden data-icon="inline-start" />
+                  </TooltipTrigger>
+                  <TooltipContent>{t('workbench.logs.actions')}</TooltipContent>
+                </Tooltip>
+                <DropdownMenuContent align="end" className="w-max">
+                  <DropdownMenuGroup>
+                    <DropdownMenuItem className={LOG_ACTION_ITEM_CLASS} disabled={!content} onClick={handleExport}>
+                      <ArrowDownToLineIcon aria-hidden />
+                      {t('workbench.logs.export')}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className={LOG_ACTION_ITEM_CLASS} onClick={handleDiagnosticBundle}>
+                      <BugIcon aria-hidden />
+                      {t('workbench.logs.diagnostic')}
+                    </DropdownMenuItem>
+                  </DropdownMenuGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </>
           )}
         />

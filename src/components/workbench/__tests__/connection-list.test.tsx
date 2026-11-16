@@ -695,7 +695,7 @@ describe('ConnectionList', () => {
 
     for (const name of menuActionNames) {
       const item = screen.getByRole('menuitem', { name });
-      expect(item).toHaveClass('items-center', 'gap-1', '[&>svg]:size-4', '[&>svg]:self-center', '[&>svg]:translate-y-px');
+      expect(item).toHaveClass('items-center', 'gap-1', "[&_svg:not([class*='size-'])]:size-3.5", '[&>svg]:self-center', '[&>svg]:translate-y-px');
       expect(item.querySelectorAll(':scope > svg')).toHaveLength(1);
       expect(item.querySelector(':scope > span')).toHaveClass('relative', 'top-px');
     }
